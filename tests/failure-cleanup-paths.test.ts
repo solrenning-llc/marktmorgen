@@ -79,7 +79,9 @@ async function main(): Promise<void> {
   is("no such product: refused", await result(await productImage(post("/api/store/image", session, { action: "attach", id: "nope", path: big, width: 1200, height: 800, small: { path: small, width: 400 } }))), [404, "unknown"]);
   is("and product A's picture and smaller copy are still there", [files.has(big), files.has(small)], [true, true]);
   const own = picture("c");
-  files.set(own, { bytes: JPEG, contentType: "image/jpeg" });
+  // Let in through the door, as a new picture must be since 4 November 2026 (tests/picture-owner-paths.test.ts).
+  await door(post("/api/store/image/upload", session, { type: "blob.generate-presigned-url", payload: { pathname: own, clientPayload: JSON.stringify({ productId: b.product.id }), multipart: false } }));
+  files.set(own, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() + 1 });
   is("product B's own picture, with A's smaller copy said to be as wide: put on without the copy", await result(await productImage(post("/api/store/image", session, { action: "attach", id: b.product.id, path: own, width: 1200, height: 800, small: { path: small, width: 5000 } }))), [200, "ok"]);
   is("and product A's smaller copy is still there", files.has(small), true);
 
@@ -88,7 +90,7 @@ async function main(): Promise<void> {
   const audio = `${fileFolder(await storeFolder(OWNER), a.product.id)}${"e".repeat(20)}.mp3`;
   files.set(audio, { bytes: MP3, contentType: "audio/mpeg" });
   is("an episode put out", await result(await podcast(post("/api/store/podcast", session, { action: "add", id: a.product.id, pathname: audio, title: "Episode one", notes: "" }))), [200, "ok"]);
-  is("the same audio again with no title: refused", await result(await podcast(post("/api/store/podcast", session, { action: "add", id: a.product.id, pathname: audio, title: "", notes: "" }))), [400, "title"]);
+  is("the same audio again with no title: refused (another episode's audio)", await result(await podcast(post("/api/store/podcast", session, { action: "add", id: a.product.id, pathname: audio, title: "", notes: "" }))), [400, "in_use"]);
   is("and the episode's audio is still there", files.has(audio), true);
 
   part("A fresh upload refused is still cleaned, and only while fresh");
@@ -173,24 +175,28 @@ async function main(): Promise<void> {
     "page del(gone)": "pictures this page held in the page-picture registry, released after the page was written",
     "file/attach del(result.removed.pathname)": "the file the record held, after the record that replaced it was written",
     "site-page del(gone)": "pictures this site page held in the page-picture registry, released after the page was written",
-    "podcast del(result.removed.pathname)": "the audio of the episode the record removed, after it was written",
+    "podcast del(gone.pathname)": "the audio of the episode the record removed, unless the product's file or another episode still uses it, after it was written",
     "image dropFresh([path, smallPath])": "only the paths this request took from the picture door",
     "image dropFresh([smallPath])": "only the paths this request took from the picture door",
     "image dropFresh(imagePaths(image))": "only the paths this request took from the picture door",
-    "image del(imagePaths(result.removed))": "the picture the record held, after the record that replaced it was written",
+    // A record held the name the browser sent, so these are safe only because attach puts a name on a product or a
+    // link only when this request took it fresh from the door or the record shows it already (since 4 November 2026,
+    // tests/picture-owner-paths.test.ts): no second record can hold it. A name put on two records before that rule
+    // is not found here, and deleting it from one still takes it from the other.
+    "image del(replaced)": "the product's own picture and copy that the new one does not use, after the record that replaced it was written; attach admits only a fresh or own name",
     "product del(file.pathname)": "files of a removed product, read from its own records",
     "product del(linked.removed.pathname)": "the file the record held, after the link that replaced it was written",
     "option del(file.pathname)": "files of a removed option, read from its own record",
-    "links del(result.removed.path)": "the picture the removed link held, after it was written",
+    "links del(result.removed.path)": "the removed link's own picture, after it was written; link-image attach admits only a fresh or own name",
     "link-image dropFresh(path)": "only a path this request took from the picture door",
     "link-image dropFresh(image.path)": "only a path this request took from the picture door",
-    "link-image del(result.removed.path)": "the picture the record held, after the record that replaced it was written",
+    "link-image del(result.removed.path)": "the link's own picture the new one replaced, after the record that replaced it was written; attach admits only a fresh or own name",
     "course del(files)": "handed-in work of a removed assignment, read from its own records",
     "course del(file.pathname)": "lesson files the course no longer holds, after it was written",
     "course/task deleteFile(path)": "a student's upload taken once through the door (takeTaskUpload)",
     "course/task deleteFile(file.path)": "the same taken upload, when the work could not be kept",
     "course/task deleteFile(done.replaced.path)": "the file the handed-in work held, after it was replaced",
-    "lib/takedown.ts del(done.removed.path)": "the picture of the link the takedown removed, read from the record it wrote",
+    "lib/takedown.ts del(done.removed.path)": "the own picture of the link the takedown removed, read from the record it wrote; link-image attach admits only a fresh or own name",
     "lib/review-photo.ts del(photo.path)": "a review's photo, read from the review record, or the one this request stored under a fresh name",
   };
   const unexplained = [...new Set(found)].filter((entry) => !Object.hasOwn(REASONS, entry));
@@ -198,18 +204,26 @@ async function main(): Promise<void> {
   const gone = Object.keys(REASONS).filter((entry) => !found.includes(entry));
   is("and every reason here still names a deletion", gone, []);
   const takers = routes.filter((file) => /ownsImagePath\(/.test(readFileSync(file, "utf8")) && !/\/ai\/|\/upload\//.test(file));
-  is("every route that puts a picture from the door on a record takes it from the door", takers.filter((file) => !/takePictureDoor\(/.test(readFileSync(file, "utf8"))), []);
+  // A page takes its new pictures from the door inside claimNewPictures (lib/sales-page-store.ts).
+  is("every route that puts a picture from the door on a record takes it from the door", takers.filter((file) => !/takePictureDoor\(|claimNewPictures\(/.test(readFileSync(file, "utf8"))), []);
   // In order: taken before any cleanup that deletes, and a page's taken before the page is written.
   const order = takers.filter((file) => {
     const source = readFileSync(file, "utf8");
     const take = source.indexOf("takePictureDoor(");
     const drops = [...source.matchAll(/\bdropFresh\(/g)].map((m) => m.index ?? 0).filter((at) => !/const dropFresh = $/.test(source.slice(Math.max(0, at - 20), at)));
-    // A page: the next write after the pictures are claimed comes after they are taken.
-    const claim = source.indexOf("claimPictures(");
+    // A page: its new pictures are taken and claimed together (claimNewPictures) before the page is written.
+    const claim = source.indexOf("claimNewPictures(");
     const write = claim === -1 ? -1 : source.indexOf("writePage(", claim);
-    return drops.some((at) => at < take) || (claim !== -1 && (take < claim || write < take)) || (drops.length > 0 && !/const dropFresh = \([^)]*\) => dropTakenPictures\(fresh,/.test(source));
+    return drops.some((at) => at < take) || (claim !== -1 && (write === -1 || source.indexOf("claimPictures(") !== -1)) || (drops.length > 0 && !/const dropFresh = \([^)]*\) => dropTakenPictures\(fresh,/.test(source));
   });
   is("each takes before it deletes or writes, and deletes only through what it took", order, []);
+  // A take that cannot be confirmed throws and the route refuses before writing (lib/picture-door.ts): never
+  // swallowed, or a picture goes on a record with its note left for a refused request to delete it by.
+  const doorSource = readFileSync("lib/picture-door.ts", "utf8");
+  const takeBody = doorSource.slice(doorSource.indexOf("export async function takePictureDoor("), doorSource.indexOf("export async function dropTakenPictures("));
+  is("a take from the door that cannot be confirmed is not swallowed there", /\bcatch\b/.test(takeBody), false);
+  const swallowed = [...takers, "lib/sales-page-store.ts"].filter((file) => /(takePictureDoor|claimNewPictures)\([^;]*?\)\s*\.catch\(/.test(readFileSync(file, "utf8")));
+  is("nor by a route or a page that takes from it", swallowed, []);
   is("and the door writes each one down", /notePictureDoor\(pathname\)/.test(readFileSync("app/api/store/image/upload/route.ts", "utf8")), true);
   done();
 }

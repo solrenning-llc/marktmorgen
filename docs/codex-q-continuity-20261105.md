@@ -858,3 +858,13 @@ Main exato `6e01c123b31d890bb5a7100d0bce8ef498988b20` integrado uma vez nos quat
 - #2535 `993dc83e`, #2709 `7add83c5`, #2729 `b96252c5` e #2731 `4a350f69`: cada head tem exatamente 1 SUCCESS, 7 IN_PROGRESS e 1 QUEUED; zero falha. Nenhum pendente conta como verde.
 - Revisor 2 ainda não publicou qualificação formal exata do #2535. Nenhum retry, cancelamento, head move ou merge.
 - Ponto exato publicado no canal no commit `c0c55fbf94b99718984faf17d50748db04ff2906`, blob `5200c384362dc0ec2f45353069dd4af557e3585f`. Próximo gatilho causal: retorno R2 ou estado terminal/achado dos nove novos; AV12 sem vigia por tempo.
+
+
+## CX-127 aplicada — 06/11/2026, retomada após 16h36 Fortaleza
+
+- CX-127 foi lida integralmente no canal e prevalece sobre as notas AV12 anteriores que proibiam vigia: canal somente a cada 2 minutos, estados próprios no máximo a cada 5 minutos, blocos de até 10 minutos repetidos, sem rerun/retry/ação paga. Ponto de parada continua obrigatório, mas não encerra a execução.
+- C4-2620/C4-2630 já cumpridas: GET fresco confirma #2790 MERGED no mesmo head `a1c93ee4bda2872826adb9e07c3a4cdd822692c1`, merge `0c2d621c0d70e9928b733ae84291f0e9457de9bb`, revisão Q `5805390991` preservada. O anúncio original `5e4d5560` precedeu o diff; não há revisão repetida nem novo head a revisar.
+- Vigia efetivamente iniciada pelo conector: primeiro ciclo aguardou >=120 segundos, leu o blob FULL `482ae79e5ffa1d0fd2cdfffd73dbd6184213f444` (1.431.264 caracteres) e publicou confirmação no commit `9166a53b04a5634e323d1f1f4ec4a75b1fefbfed`, blob `1b5e519fa6264b025e83b27d148039d99a6be03e`: "CX-127 lida: Codex Q, vigia ativo". Execução local respondeu "fatal library error, lookup self"; não foi alegado fetch/shell ativo. A leitura do canal funciona pelo conector GitHub FULL.
+- Cinco heads próprios preservados: #2438 `6da1a247`, #2535 `993dc83e`, #2709 `7add83c5`, #2729 `b96252c5`, #2731 `4a350f69`. GET metadata mostrou OPEN/mergeable=false após avanço do main. Nenhum movimento, retry, cancelamento ou merge nesta retomada; estados de CI ainda não relidos antes do intervalo de5min.
+- M informou #2648 main-only `e71bb48f`, com três blobs próprios byte-idênticos ao head do parecer Q5789086413; não pediu novo retorno e não se duplica a revisão.
+- Coordenação somente Claude 4; Claude 1 está desligado/não destinatário. Próximo: vigia2min, estado próprio>=5min, agir em retorno/achado/terminal permitido, preservando o limite de cinco produtos.

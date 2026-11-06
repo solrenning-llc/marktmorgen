@@ -269,3 +269,45 @@ test("control: a pending order settled by the sweep is handed over once", async 
   assert.deepEqual(calls, [order]);
   assert.deepEqual(await marks(order), SETTLED);
 });
+
+// ------------------------------------------------------------------ 3. one order's hand-over that keeps failing (review of #2895)
+
+// Review proof (#2895, scratchpad rev2871/2895-poison-order.test.ts), kept with credit: the oldest pending order's
+// hand-over always throws. It must stay pending without holding back the store's other paid orders or the refund
+// watch that runs after the pending ones, pass after pass; the sweep counts it as stuck.
+for (const written of [false, true]) {
+  test(`a hand-over that keeps failing for one order (${written ? "its record written" : "not yet written"}) never holds back another buyer's order or the refund watch`, async () => {
+    redis.clear();
+    const stuck = nextOrder();
+    const other = nextOrder();
+    for (const order of [stuck, other]) await putOpened(order);
+    if (written) {
+      await ask(["SET", `nl:ppsell:paid:${stuck}`, JSON.stringify({ store: sid, order: stuck, capture: captureId(stuck), email: BUYER, product: "p1", cents: 1500, currency: "usd", at: now(), handle: "firstshop" }), "NX", "EX", 86_400]);
+    }
+    await ask(["ZADD", `nl:ppsell:pending:${sid}`, String(now() - 60), stuck]);
+    await ask(["ZADD", `nl:ppsell:pending:${sid}`, String(now()), other]);
+    // A paid order due for its refund check: PayPal's stand-in does not know its capture, so it is looked at again in an hour.
+    const watched = nextOrder();
+    await ask(["SET", `nl:ppsell:paid:${watched}`, JSON.stringify({ store: sid, order: watched, capture: captureId(watched), email: BUYER, product: "p1", cents: 1500, currency: "usd", at: now() - 7200, handle: "firstshop" }), "NX", "EX", 86_400]);
+    await ask(["ZADD", `nl:ppsell:watch:${sid}`, String(now() - 10), watched]);
+    const handed: string[] = [];
+    const results: unknown[] = [];
+    const sweep = () =>
+      watchPayPal(shop, Date.now() + 60_000, {
+        handOver: async (paid) => {
+          if (paid.order === stuck) throw new Error("this order's hand-over keeps failing (say, its product cannot be read)");
+          handed.push(paid.order);
+        },
+        dropStart: async () => undefined,
+      }).then((result) => void results.push(result), () => void results.push("threw"));
+    for (let pass = 0; pass < 3; pass += 1) await sweep();
+    assert.deepEqual(handed, [other], "the other buyer, who paid, is handed over once");
+    assert.equal((await marks(stuck)).pending, true, "the stuck order stays pending, asked again next pass");
+    assert.ok(Number(await ask(["ZSCORE", `nl:ppsell:watch:${sid}`, watched])) > now() + 3000, "the refund watch after the pending orders ran");
+    assert.deepEqual(results, [
+      { cleared: 1, revoked: 0, stuck: 1 },
+      { cleared: 0, revoked: 0, stuck: 1 },
+      { cleared: 0, revoked: 0, stuck: 1 },
+    ]);
+  });
+}

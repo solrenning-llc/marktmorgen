@@ -453,8 +453,16 @@ async function afterPaid(store: Store, session: string, target: Listing, pi: Rec
   await noteOfferSale(store, target, pi).catch((error) => console.error("telling about an offer's sale failed", error));
 }
 
-/** Pages of the customer's payments read before "not there" is no longer known. */
-const OFFER_PAGES = 5;
+/**
+ * Pages of a hundred of the customer's payments read before "not there" is no longer known, per offer still waiting
+ * (Claude 4's cost note on #2759, rule MR). On the buyer's own page (settleUpsells, at most the first offer and 20 more
+ * that readAnswers keeps, 21 a visit) one page, as many requests as before this lot; in the five-minute job (settlePendingOffers, at most
+ * 50 offers a run, stopped earlier by its deadline) up to five. An offer not found within its pages stays waiting for
+ * the job, never closed: the worst case is OFFER_PAGES_ON_PAGE × 21 = 21 requests a visit and OFFER_PAGES_IN_JOB × 50
+ * = 250 a run, all reads on the creator's own Stripe account, none of them a charge.
+ */
+export const OFFER_PAGES_ON_PAGE = 1;
+export const OFFER_PAGES_IN_JOB = 5;
 
 /**
  * One offer's charge for this order, found among the customer's payments, each page read in its exact shape
@@ -467,10 +475,11 @@ export async function findOfferCharge(
   session: string,
   slot: string,
   customer: string,
+  pages: number = OFFER_PAGES_IN_JOB,
 ): Promise<Record<string, unknown> | null> {
   let after = "";
   let unreadable = 0;
-  for (let page = 0; page < OFFER_PAGES; page += 1) {
+  for (let page = 0; page < pages; page += 1) {
     const query = new URLSearchParams({ customer, limit: "100" });
     if (after) query.set("starting_after", after);
     const read = readStripePage(
@@ -499,14 +508,14 @@ export async function findOfferCharge(
 }
 
 /** Settles one offer still waiting on an answer. Nothing is ever charged here. */
-async function settleOne(store: Store, session: string, slot: string, record: UpsellRecord): Promise<void> {
+async function settleOne(store: Store, session: string, slot: string, record: UpsellRecord, pages: number): Promise<void> {
   if (record.state !== "pending" || !store.stripeAccountId) return;
   try {
     let pi: Record<string, unknown> | null;
     if (record.pi) {
       pi = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(record.pi)}`);
     } else if (record.customer) {
-      pi = await findOfferCharge(store, session, slot, record.customer);
+      pi = await findOfferCharge(store, session, slot, record.customer, pages);
       if (!pi) {
         // Not there after long enough: the request never reached Stripe.
         if (Date.now() - record.at > LOST_ANSWER_MS) {
@@ -549,7 +558,7 @@ async function settleOne(store: Store, session: string, slot: string, record: Up
 export async function settleUpsells(store: Store, session: string): Promise<void> {
   const records = await readAnswers(session);
   for (const [slot, record] of records) {
-    if (record.state === "pending") await settleOne(store, session, slot, record);
+    if (record.state === "pending") await settleOne(store, session, slot, record, OFFER_PAGES_ON_PAGE);
   }
 }
 
@@ -591,7 +600,7 @@ export async function settlePendingOffers(
         if (Date.now() - record.at > PENDING_WATCH_MS) await drop();
         continue;
       }
-      await settleOne(store, session, slot, record);
+      await settleOne(store, session, slot, record, OFFER_PAGES_IN_JOB);
       const after = await readUpsell(session, slot);
       if (!after || after.state !== "pending") {
         counts.settled += 1;

@@ -20,7 +20,7 @@
 import { syncPlanDisputes } from "@/lib/plan-disputes";
 import { refundPlanPayment } from "@/lib/plan-refund-write";
 import { syncAssistant } from "@/lib/assistant-billing";
-import { findOfferCharge } from "@/lib/upsell";
+import { OFFER_PAGES_IN_JOB, OFFER_PAGES_ON_PAGE, findOfferCharge, readUpsell, settlePendingOffers, settleUpsells } from "@/lib/upsell";
 import { runningSubscriptions } from "@/lib/payment-methods";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
 import { STRIPE_VERSION } from "@/lib/stripe-connect";
@@ -207,6 +207,33 @@ async function offers(): Promise<void> {
   pages = [{ object: "list", data: [other(1)], has_more: false }];
   is("read whole and readable, not among them: not there", await findOfferCharge(store, "cs_test_lotoneparent01", "", "cus_LotOneOffer1"), null);
   is("each read pinned to the lot's version", sent.filter((s) => s.path === "/payment_intents").every((s) => s.version === STRIPE_LIST_VERSION), true);
+
+  // Claude 4's cost note on #2759: one page a waiting offer on the buyer's own page, up to five in the job.
+  is("one page on the buyer's page, five in the job", [OFFER_PAGES_ON_PAGE, OFFER_PAGES_IN_JOB], [1, 5]);
+  const many = Array.from({ length: 8 }, (_, n) => ({ object: "list", data: [other(n)], has_more: n < 7 }));
+  const reads = () => sent.filter((s) => s.method === "GET" && s.path === "/payment_intents").length;
+  pages = many;
+  let before = reads();
+  let thrown = false;
+  try {
+    await findOfferCharge(store, "cs_test_lotoneparent01", "", "cus_LotOneOffer1", OFFER_PAGES_ON_PAGE);
+  } catch (error) {
+    thrown = error instanceof StripeListUnreadable;
+  }
+  is("one page read and more to come: not known, never 'not there'", [reads() - before, thrown], [1, true]);
+  const waiting = { state: "pending", product: "lotoneupsell", customer: "cus_LotOneOffer1", at: Date.now() - 60 * 60 * 1000 };
+  await redis.pipeline([["SET", "nl:upsell:cs_test_lotoneparent02", JSON.stringify(waiting)]]);
+  before = reads();
+  await settleUpsells(store, "cs_test_lotoneparent02");
+  is("the buyer's page reads one page for a waiting offer", reads() - before, OFFER_PAGES_ON_PAGE);
+  is("and the offer an hour old stays waiting, never closed as lost", (await readUpsell("cs_test_lotoneparent02"))?.state, "pending");
+  await redis.pipeline([["ZADD", "nl:upsell:pending", 0, "lotoneoffer|cs_test_lotoneparent02|"]]);
+  before = reads();
+  await settlePendingOffers(async () => store, Date.now() + 60_000);
+  is("the five-minute job reads up to five pages for it", reads() - before, OFFER_PAGES_IN_JOB);
+  is("and it still waits, the list not read to its end", (await readUpsell("cs_test_lotoneparent02"))?.state, "pending");
+  pages = [many[0], { object: "list", data: [ours], has_more: false }];
+  is("in the job's pages, its charge on page two is found", (await findOfferCharge(store, "cs_test_lotoneparent01", "", "cus_LotOneOffer1", OFFER_PAGES_IN_JOB))?.id, ours.id);
 }
 
 async function memberships(): Promise<void> {

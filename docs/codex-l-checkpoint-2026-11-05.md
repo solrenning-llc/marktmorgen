@@ -453,3 +453,23 @@ RED local reproduzido nos cinco arquivos presentes na cópia de trabalho: os qua
 3. Publicar novo head do mesmo #2794 somente após GREEN ligado e verificações proporcionais.
 4. Exigir duas revisões aplicáveis (Revisor 1 e Revisor 2) no novo head, sem grave/médio.
 5. Exigir nove agregadores novos `completed/success`, head e mergeabilidade frescos, e incorporar apenas com expected head.
+
+
+---
+
+## Retomada 06/11/2026 09h11 Fortaleza — sem exceção nominal; head preservado
+
+- Checkpoint `681f5e223111c88cae27766ee059b262dc93582d` lido primeiro; blob `e4a4233ec9415b45deaadd24ecf529f510ec2e44`.
+- Fontes main relidas: `CLAUDE.md` `8e8545b0387889495232774b0c9d6b3bb4804e67`; `AGENTS.md` `472c4251f571744ab013f61abdf93452f8f2e02c`; índice `33627443418f4bc924217cb5e862688d2735eac2`; reservas Claude1/2/3/4/Codex `2a440d6e5a64a287855b09a5ed988c9636f254cb` / `5fbc517e5c4c4d60d07958f1c60385c6db1d64ca` / `1dab1d78e585a0dca7e6d996305a6e76a18f29fe` / `ec5f303e7ead3d8b71ebdd27344af104b7c5269e` / `16d3928754520718f09d8a1b7531fbc220eeaa64`; caixa `d98930427fa564e9e2614327e02ad0747a31d4f6`.
+- A reserva A3 de `lib/learn.ts` continua vigente. O #2791 também continua aberto e recebeu correções ativas nesse arquivo; sua exceção existente é outra fronteira.
+- Canal lido uma vez sob AV12. A primeira fotografia teve blob Base64 declarado/calculado `7a6be0997f10f4db8e3b4c8b74152fc374112065`, 528019 bytes. Não houve mensagem da Claude 4 autorizando L a tocar `courseLedger`, nem retorno limpo R1/R2 aplicável a um corretivo de L.
+- Antes do ponto de parada, o canal foi relido e verificado novamente sobre bytes Base64: blob declarado/calculado `49c2106d4d046ae195440094dc001abea0cf25f7`. Append `L-20261106-0911-2794-2`: commit `4506f9483535b598143e9e21e80df1de66ec8e3f`, blob resultante `5036265799f33fc3b2b2fa1c31b5ad77086b32ce`.
+- #2794 permanece no head exato `eb360c3611f8b324a9206781b5fb9570356552c8`, com os blobs `7329e24fd7a9aa266b084753788510369ad3b2b9` e `0ce9901a2d704fc8f524f7f4160772d4bc0dac4b` preservados.
+- Estado conhecido continua 7 agregadores success e 2 failures já classificados: verify próprio ligado e Firefox AAA. Nenhum polling novo de CI, rerun, cancelamento, head move, merge ou alteração de código.
+- A causa e o RED permanecem exatamente os do checkpoint anterior. Não se aceita `importedFrom(undefined)` como vazio; isso esconderia uma resposta truncada real.
+- #2576 e todos os produtos, ramos, CI e reservas alheios permaneceram intocados.
+- Claude 4 é a única coordenadora. Claude 1 continua desligado e não é destinatário.
+
+### Próximo passo obrigatório
+
+Aguardar uma ordem nominal da Claude 4. Somente após a exceção/coordenação: anunciar RESERVA antes do código, aplicar a guarda causal em `courseLedger` com o RED preservado, produzir novo head no mesmo #2794, obter R1 e R2 limpos e nove agregadores novos antes de qualquer incorporação.

@@ -71,6 +71,7 @@ const coupons: URLSearchParams[] = [];
 let sessionReads = 0;
 /** What GET /checkout/sessions answers, by the address asked for; "fail" answers 500, "garbage" a list in another shape. */
 let sessionsByEmail: Record<string, unknown[] | "fail" | "garbage"> = {};
+let hasMore = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const path = url.pathname.replace(/^\/v1/, "");
@@ -86,7 +87,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const rows = sessionsByEmail[asked] ?? [];
     if (rows === "fail") return answer({ error: { message: "down" } }, 500);
     if (rows === "garbage") return answer({ object: "list", data: "nope", has_more: false });
-    return answer({ object: "list", data: rows, has_more: false });
+    return answer({ object: "list", data: rows, has_more: hasMore });
   }
   if (path === "/coupons" && method === "POST") {
     const body = new URLSearchParams(String(init?.body));
@@ -224,6 +225,12 @@ async function main(): Promise<void> {
     held([oneOff("club")]),
     held([joined("guide", "active")]),
   ], [[], []]);
+  is("a booking's deposit, a package of calls, a tip or an offer after paying: not the product bought", [
+    held([oneOff("guide", {}, { kind: "call" })]),
+    held([oneOff("guide", {}, { kind: "package" })]),
+    held([oneOff("guide", {}, { kind: "tip" })]),
+    held([oneOff("guide", {}, { kind: "upsell" })]),
+  ], [[], [], [], []]);
   is("rows in another shape prove nothing and do not stop the others", held([null, 7, { id: 3 }, oneOff("guide")]), ["guide"]);
 
   part("On the server");
@@ -281,6 +288,14 @@ async function main(): Promise<void> {
   const memberSession = jar({ [SESSION_COOKIE]: await openSession(MEMBER) });
   is("a member signed in to Marktmorgen with that address: proved", await check(memberSession), { state: "member", percent: 20, email: MEMBER });
 
+  const ownerLink = jar({ [passCookieName(store)]: await mintPass(store, OWNER, "all") });
+  is("the creator by a link to their own address, not signed in: never a member of their own store", await check(ownerLink), { state: "none" });
+  sessionsByEmail = { [MEMBER]: [joined(club.product.id, "active")] };
+  hasMore = true;
+  is("a smaller rule proved but more rows than read: a larger one may rest on them, so unknown", await check(), { state: "unknown" });
+  sessionsByEmail = { [MEMBER]: [joined(club.product.id, "active"), oneOff(guide.product.id)] };
+  is("the largest rule proved on the rows read stands whatever is past them", await check(), { state: "member", percent: 30, email: MEMBER });
+  hasMore = false;
   sessionsByEmail = { [MEMBER]: "fail" };
   is("Stripe failing: unknown, never a discount", await check(), { state: "unknown" });
   sessionsByEmail = { [MEMBER]: "garbage" };
@@ -324,36 +339,38 @@ async function main(): Promise<void> {
     await createCheckout(s, (await readProduct(s, planner.product.id))!, "https://marktmorgen.com", "", { ...more, digitalConsent: TEST_CONSENT });
     return checkouts[0];
   };
-  let sent = await open({ member: 20 });
+  let sent = await open({ member: { percent: 20, email: MEMBER } });
   is("the member price comes off with the creator's own coupon, written on the order", [sent.get("discounts[0][coupon]"), sent.get("metadata[member]"), sent.get("allow_promotion_codes")], ["mm_member_20", "20", null]);
   is("made on their account once, named for the buyer", [coupons.length, coupons[0]?.get("id"), coupons[0]?.get("percent_off"), coupons[0]?.get("duration"), coupons[0]?.get("name")], [1, "mm_member_20", "20", "once", "Member price"]);
-  await open({ member: 20 });
+  await open({ member: { percent: 20, email: MEMBER } });
   is("the second checkout at that level makes no other", coupons.length, 1);
   sent = await open({});
   is("no member price proved: none", [sent.get("metadata[member]"), sent.get("discounts[0][coupon]")], [null, null]);
-  sent = await open({ member: 23 });
+  sent = await open({ member: { percent: 23, email: MEMBER } });
   is("a percentage off the list is never sent", sent.get("metadata[member]"), null);
   const now = Math.floor(Date.now() / 1000);
   await setStoreSale(OWNER, { name: "Spring", coupon: "spring40", percent: 40, starts: now - 60, ends: now + 3600, all: true, products: [] });
-  sent = await open({ member: 20 });
+  sent = await open({ member: { percent: 20, email: MEMBER } });
   const saleCoupon = (await current()).sale.coupon;
   is("a larger store sale wins, never both", [sent.get("metadata[member]"), sent.get("metadata[sale]"), sent.get("discounts[0][coupon]")], [null, "40", saleCoupon]);
   await setStoreSale(OWNER, { name: "Spring", coupon: "spring10", percent: 10, starts: now - 60, ends: now + 3600, all: true, products: [] });
-  sent = await open({ member: 20 });
+  sent = await open({ member: { percent: 20, email: MEMBER } });
   is("a larger member price wins over a smaller sale, never both", [sent.get("metadata[member]"), sent.get("metadata[sale]"), sent.get("discounts[0][coupon]")], ["20", null, "mm_member_20"]);
-  sent = await open({ member: 20, coupon: "winback_coupon" });
+  sent = await open({ member: { percent: 20, email: MEMBER }, coupon: "winback_coupon" });
   is("a come-back offer replaces it", [sent.get("metadata[member]"), sent.get("discounts[0][coupon]")], [null, "winback_coupon"]);
-  sent = await open({ member: 20, gift: "gift_test_0001" });
+  sent = await open({ member: { percent: 20, email: MEMBER }, gift: "gift_test_0001" });
   is("a gift hands nothing to the member: no member price", sent.get("metadata[member]"), null);
-  sent = await open({ member: 20, preorder: true });
+  sent = await open({ member: { percent: 20, email: MEMBER }, preorder: true });
   is("a pre-order: none", sent?.get("metadata[member]") ?? null, null);
-  sent = await open({ member: 20, email: MEMBER });
-  is("with the proved address, the checkout opens with it fixed", [sent.get("metadata[member]"), sent.get("customer_email")], ["20", MEMBER]);
+  sent = await open({ member: { percent: 20, email: MEMBER } });
+  is("the checkout opens with the proved address fixed", [sent.get("metadata[member]"), sent.get("customer_email")], ["20", MEMBER]);
   const charge_ = readFileSync(join(process.cwd(), "lib/store-checkout.ts"), "utf8");
   is("never with a box ticked: a coupon comes off every line, and a ticked product may be one no rule covers", charge_.includes("const memberAlone = added.length === 0 && !extras.gift && !extras.group && !extras.preorder;"), true);
   const route = readFileSync(join(process.cwd(), "app/api/store/checkout/route.ts"), "utf8");
-  is("the route refuses a claim on anything but the member's own purchase alone, before proving it", /if \(memberAsked\) \{\s*if \(inPlan \|\| bumps\.length > 0 \|\| gift \|\| group \|\| preorder\) return away\(/.test(route), true);
-  is("the route opens the checkout with the proved address and the proved percentage only", [route.includes("member: member?.percent,"), route.includes("email: member?.email,")], [true, true]);
+  const alone = route.indexOf("if (memberAsked && (plan || bumps.length > 0 || giftTo.trim() || people.trim() || wantsPreorder)) return away(");
+  is("the route refuses a claim on anything but the member's own purchase alone, before a gift or a group is written down", alone > 0 && alone < route.indexOf("startGift(") && alone < route.indexOf("startGroup("), true);
+  is("the route passes only what memberClaim proved", route.includes("member = { percent: claim.member, email: claim.email };"), true);
+  is("a member price never opens the closed single-file category", charge_.includes('!(body.has("discounts[0][coupon]") && !body.has("metadata[member]"))'), true);
 
   part("What it reads, held to an existing line");
   is("counted as the next product after a purchase is, from the plan's public requests", MEMBER_PRICE_REQUEST_UNITS, NEXT_OFFER_REQUEST_UNITS);

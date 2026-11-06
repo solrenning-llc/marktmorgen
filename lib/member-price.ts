@@ -95,7 +95,8 @@ export function heldFromSessions(rows: readonly unknown[], handles: ReadonlySet<
   for (const row of rows) {
     if (!plainObject(row) || row.status !== "complete" || !plainObject(row.metadata)) continue;
     const meta = row.metadata as Record<string, string>;
-    if (meta.kind === "plan") continue;
+    // A product sold as itself: never a payment plan, a booking's deposit, a package of calls, a tip, a request or an offer after paying.
+    if (meta.kind !== undefined) continue;
     if (row.mode === "subscription") {
       // Paid now is Stripe's "active": a free trial, a retry or a pause is not.
       if (row.payment_status !== "paid" && row.payment_status !== "no_payment_required") continue;
@@ -119,38 +120,46 @@ export function heldFromSessions(rows: readonly unknown[], handles: ReadonlySet<
 }
 
 /** The qualifying products this address holds here, or null when that could not be read. */
-async function heldHere(store: Store, email: string, kinds: ReadonlyMap<string, QualifyingKind>): Promise<Set<string> | null> {
+async function heldHere(store: Store, email: string, kinds: ReadonlyMap<string, QualifyingKind>): Promise<{ held: Set<string>; complete: boolean } | null> {
   const account = store.stripeAccountId;
   if (!account) return null;
   const handles = saleHandles(store);
   const held = new Set<string>();
+  let complete = true;
+  // Stripe keeps the address as it was typed at checkout; both reads and the purchases brought over go at once.
+  const variants = [...new Set([email.trim(), normaliseEmail(email)])].slice(0, MEMBER_PRICE_STRIPE_CALLS);
+  const read = [...kinds.values()].some((kind) => !kind.recurring) && isRedisConfigured() ? importedRead(store, email) : null;
   try {
-    // Stripe keeps the address as it was typed at checkout.
-    for (const variant of [...new Set([email.trim(), normaliseEmail(email)])].slice(0, MEMBER_PRICE_STRIPE_CALLS)) {
-      const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
-      query.append("expand[]", "data.subscription");
-      query.append("expand[]", "data.payment_intent.latest_charge");
-      // A "yes" stands from any readable row; a page in another shape throws (lib/stripe-list.ts).
-      const page = readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, STRIPE_LIST_VERSION), plainObject, SESSION_ROW);
+    const [pages, imported] = await Promise.all([
+      Promise.all(
+        variants.map(async (variant) => {
+          const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
+          query.append("expand[]", "data.subscription");
+          query.append("expand[]", "data.payment_intent.latest_charge");
+          // A "yes" stands from any readable row; a page in another shape throws (lib/stripe-list.ts).
+          return readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, STRIPE_LIST_VERSION), plainObject, SESSION_ROW);
+        }),
+      ),
+      read ? redisPipeline([read]).then(([raw]) => raw) : Promise.resolve(null),
+    ]);
+    for (const page of pages) {
       for (const id of heldFromSessions(page.rows, handles, kinds)) held.add(id);
+      // Only the newest hundred are read: past them, or past a row in another shape, a "no" is not known.
+      if (page.hasMore || page.unreadable > 0) complete = false;
     }
-    const read = importedRead(store, email);
-    if (read && isRedisConfigured() && [...kinds.values()].some((kind) => !kind.recurring)) {
-      const [raw] = await redisPipeline([read]);
-      for (const purchase of importedFrom(raw)) {
-        if (!BOUGHT_JOB.test(purchase.job)) continue;
-        for (const id of [purchase.productId, ...(purchase.items ?? [])]) {
-          const kind = kinds.get(id);
-          // Nothing paid through Stripe keeps a membership running: only a one-off counts.
-          if (kind && !kind.recurring) held.add(id);
-        }
+    for (const purchase of importedFrom(imported)) {
+      if (!BOUGHT_JOB.test(purchase.job)) continue;
+      for (const id of [purchase.productId, ...(purchase.items ?? [])]) {
+        const kind = kinds.get(id);
+        // Nothing paid through Stripe keeps a membership running: only a one-off counts.
+        if (kind && !kind.recurring) held.add(id);
       }
     }
   } catch (error) {
     console.error("reading who holds a membership failed", error);
     return null;
   }
-  return held;
+  return { held, complete };
 }
 
 /**
@@ -170,8 +179,8 @@ export async function memberPriceFor(store: Store, product: Listing, cookies: Co
     () => undefined,
   );
   if (learner === undefined) return UNKNOWN;
-  // Only an inbox proved (a link's pass, or signed in) and never the creator (above).
-  if (!learner || learner.owner || learner.scope !== "all") return NONE;
+  // Only an inbox proved (a link's pass, or signed in), and never the creator, signed in or by a link to their own address.
+  if (!learner || learner.owner || learner.scope !== "all" || normaliseEmail(learner.email) === normaliseEmail(store.email)) return NONE;
   let listings: Listing[];
   try {
     listings = await readListings(store, qualifying);
@@ -182,9 +191,12 @@ export async function memberPriceFor(store: Store, product: Listing, cookies: Co
   const kinds = new Map<string, QualifyingKind>();
   for (const listing of listings) kinds.set(listing.id, { recurring: listing.recurring !== null });
   if (kinds.size === 0) return NONE;
-  const held = await heldHere(store, learner.email, kinds);
-  if (held === null) return UNKNOWN;
-  const percent = memberOffFrom(store.memberPrices, product, held);
+  const found = await heldHere(store, learner.email, kinds);
+  if (found === null) return UNKNOWN;
+  const percent = memberOffFrom(store.memberPrices, product, found.held);
+  // A larger rule may rest on a purchase not read: said as unknown, never as no.
+  const most = memberOffFrom(store.memberPrices, product, new Set(kinds.keys()));
+  if (percent < most && !found.complete) return UNKNOWN;
   return percent > 0 ? { state: "member", percent, email: learner.email } : NONE;
 }
 

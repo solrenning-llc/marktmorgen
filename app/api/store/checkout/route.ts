@@ -193,6 +193,12 @@ export async function POST(request: NextRequest) {
   if (noKeys === null) return away(`/@${store.handle}?status=error`);
   if (noKeys) return away(`/@${store.handle}?status=soldout`);
 
+  // A member price is for the member's own purchase of this product alone
+  // (lib/member-price.ts): a claim with a payment plan, a box ticked, a gift,
+  // places for others or a pre-order goes back to the page before anything
+  // is written down or charged.
+  if (memberAsked && (plan || bumps.length > 0 || giftTo.trim() || people.trim() || wantsPreorder)) return away(`/@${store.handle}/p/${product.id}?member=alone#buy`);
+
   // Asked before a gift or a group is written down, so a refused yes leaves
   // nothing behind; the charge itself checks again, with what was added.
   const consentBack = from
@@ -273,7 +279,6 @@ export async function POST(request: NextRequest) {
     // the proved address fixed, so it is the member's purchase.
     let member: { percent: number; email: string } | undefined;
     if (memberAsked) {
-      if (inPlan || bumps.length > 0 || gift || group || preorder) return away(`/@${store.handle}/p/${product.id}?member=alone#buy`);
       const claim = await memberClaim(store, product, memberAsked, request.cookies);
       if (!claim.ok) return away(`/@${store.handle}/p/${product.id}?member=changed#buy`);
       member = { percent: claim.member, email: claim.email };
@@ -315,8 +320,7 @@ export async function POST(request: NextRequest) {
         // Where the buyer's connection is, for a fair price for that country
         // (lib/fair-price.ts), the same header the page read to show it.
         country: readCountry(request.headers.get("x-vercel-ip-country")),
-        member: member?.percent,
-        email: member?.email,
+        member,
         // A funnel of pages this product is a step of, read off the page the
         // button was pressed on like the tags above (lib/page-funnel.ts).
         funnel: funnel ?? undefined,

@@ -81,6 +81,33 @@ async function main(): Promise<void> {
   }
   is("the write that lists it failed, after the record was kept", [failed, redis.run(["EXISTS", creditKey("in_BeaFirst01")])], [true, 1]);
 
+  part("An unreadable stored credit is unknown, never a complete successful settlement");
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await real(commands);
+    return replies.map((reply, index) => commands[index]?.[0] === "GET" && commands[index]?.[1] === creditKey("in_BeaFirst01") ? "{broken" : reply);
+  }) as typeof redis.pipeline;
+  let unknown;
+  try {
+    unknown = await settleInvites(Date.now() + 60_000, NOW);
+  } finally {
+    redis.pipeline = real;
+  }
+  is("unknown credit is reported for retry and remains unpaid", [unknown.failed, unknown.complete, balance.get("cus_Ana0001") ?? []], [1, false, []]);
+
+  part("A relisting write answered oddly, without landing, is unknown too (Codex N on #2722)");
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // The relisting write, answered oddly without landing.
+    if (commands[0]?.[0] === "ZADD" && commands.some((c) => c[0] === "SADD" && c[2] === "in_BeaFirst01")) return commands.map(() => "QUEUED");
+    return real(commands);
+  }) as typeof redis.pipeline;
+  let oddWrite;
+  try {
+    oddWrite = await settleInvites(Date.now() + 60_000, NOW);
+  } finally {
+    redis.pipeline = real;
+  }
+  is("an odd relisting reply is reported for retry and pays nothing", [oddWrite.failed >= 1, oddWrite.complete, balance.get("cus_Ana0001") ?? []], [true, false, []]);
+
   part("Later runs still pay it, once");
   await settleInvites(Date.now() + 60_000, NOW);
   await settleInvites(Date.now() + 60_000, NOW);

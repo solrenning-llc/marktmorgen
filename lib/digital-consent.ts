@@ -80,15 +80,16 @@ import { shipProblem } from "@/lib/shipping";
  * The version of the sentence the buyer checks, in every language. Bumped
  * whenever the words change in any language, with CONSENT_WORDS_FINGERPRINT
  * (tests/digital-consent.test.ts fails when the words change and it does not).
+ * Typed as a string: it is compared with what forms and orders carry.
  */
-export const EU_WITHDRAWAL_CONSENT_VERSION = "2026-10-30.2";
+export const EU_WITHDRAWAL_CONSENT_VERSION: string = "2026-11-06.1";
 
 /**
  * The SHA-256, in hex, of every language's two sentences (digital, then
  * membership) joined by "\n" in the order en, es, fr, de, it, nl, pt. Not read at run time: it is what ties the
  * version to the exact words, held by tests/digital-consent.test.ts.
  */
-export const CONSENT_WORDS_FINGERPRINT = "44168ca087aa8dcbdd0418727253054f29c67c020c2e2f6e5db4981dd1e7804d";
+export const CONSENT_WORDS_FINGERPRINT = "e8ed5e7c838cdec5e2061111f0e507e8c4133c337aba2d354ff215e681db4a59";
 
 /** The checkbox's name and value, and the hidden field with the version the page showed. */
 export const CONSENT_FIELD = "dc";

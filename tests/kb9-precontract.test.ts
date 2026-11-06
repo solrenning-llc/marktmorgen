@@ -31,6 +31,7 @@
 import { DIGITAL_CONSENT_WORDS } from "@/lib/buyer-words/digital-consent";
 import { WITHDRAWAL_WORDS, withdrawalWords } from "@/lib/buyer-words/withdrawal";
 import { EU_WITHDRAWAL_CONSENT_VERSION } from "@/lib/digital-consent";
+import { consentEmailLines } from "@/lib/digital-consent-email";
 import { WITHDRAW_FROM_CONTRACT } from "@/lib/withdrawal-rules";
 import { done, is, part } from "./check";
 
@@ -62,6 +63,17 @@ function main(): void {
     LANGUAGES.map((lang) => [lang, true]),
   );
   is("the sentence changed, so its version moved past the one buyers saw before", EU_WITHDRAWAL_CONSENT_VERSION !== "2026-10-30.2", true);
+
+  part("An order kept with the words before still quotes those words");
+  const quoted = (dc: string) => consentEmailLines({ language: "en", currency: "usd" }, { dc }).join("\n");
+  const before = quoted("yes:2026-10-30.2:d:1790000000");
+  is(
+    "2026-10-30.2: the sentence that buyer checked, with its version, and not today's",
+    [before.includes("“Start my access before the 14-day cancellation period ends, as soon as it is available. I understand that once access starts, I lose my right to cancel.” (wording 2026-10-30.2)"), before.includes(WITHDRAWAL_WORDS.en.withdrawLink)],
+    [true, false],
+  );
+  const today = quoted(`yes:${EU_WITHDRAWAL_CONSENT_VERSION}:m:1790000000`);
+  is("today's version: today's sentence, with the label", [today.includes(`“${DIGITAL_CONSENT_WORDS.en.box.membership}” (wording ${EU_WITHDRAWAL_CONSENT_VERSION})`), today.includes(WITHDRAWAL_WORDS.en.withdrawLink)], [true, true]);
 
   done();
 }

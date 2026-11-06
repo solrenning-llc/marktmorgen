@@ -109,9 +109,12 @@ const PASS_SECONDS = 7 * 86_400;
  * tried again first on every run, so one of them never holds back the refunds after it (Claude 4 on #2781).
  */
 const retryKey = (sid: string) => `nl:grp:${sid}:refunds:retry`;
-/** At most this many waiting; with the list full, the pass stops on the page it could not hand over. */
+/**
+ * At most this many waiting; with the list full, the pass stops on the page it could not hand over. The list has no
+ * expiry (Claude 4 on #2781): a refund waiting on it is let go only once handled, never in silence; it is bounded by
+ * this cap, and the store's nl:grp: keys go with the store.
+ */
 const RETRY_CAP = 100;
-const RETRY_SECONDS = 30 * 86_400;
 const REFUND_ID = /^re_[A-Za-z0-9]{3,252}$/;
 const PAYMENT_ID = /^pi_[A-Za-z0-9]{3,252}$/;
 const now = () => Math.floor(Date.now() / 1000);
@@ -619,8 +622,7 @@ export async function revokeRefundedGroups(
     if (typeof pi !== "string" || !REFUND_ID.test(id) || !PAYMENT_ID.test(pi)) return false;
     const counted = countOf(repliesFor(await redisPipeline([["HLEN", retryKey(sid)]]), 1)?.[0]);
     if (counted === null || counted >= RETRY_CAP) return false;
-    const kept = repliesFor(await redisPipeline([["HSET", retryKey(sid), id, pi], ["EXPIRE", retryKey(sid), RETRY_SECONDS]]), 2);
-    return oneWrite(kept?.[0]) && kept?.[1] === 1;
+    return oneWrite(repliesFor(await redisPipeline([["HSET", retryKey(sid), id, pi]]), 1)?.[0]);
   };
 
   // Those left unknown before, first: each tried again, and let go once handled.

@@ -13,6 +13,9 @@
  *     its purchase lost, marks nothing, and a later run takes the purchase back (Codex G on #2781, M2);
  *   - a purchase already closed whose places were not all taken back (a run that stopped halfway) has them taken back
  *     now (Claude 4 on #2781, M3);
+ *   - a refund whose purchase record does not read never holds back the refunds after it: it is kept on a short
+ *     list tried first on every run, and let go once handled; with that list full, the pass stays on its page;
+ *     an anchor in another shape starts no pass (Claude 4 on #2781, C4-20261106-0645-C5-25);
  *   - every read is pinned to the lot's version.
  */
 import { TEST_CONSENT } from "./digital-consent-fixture";
@@ -170,9 +173,12 @@ async function main(): Promise<void> {
     } finally {
       redis.pipeline = real;
     }
-    const after = [hit > 0, await anchor()];
-    if (mode === "the reply marking it handled is lost") is(`${mode}: the purchase is taken back, the pass stays on that page`, [...after, (await openGroup(store, group)) === null], [true, null, true]);
-    else is(`${mode}: nothing marked handled, the purchase still open, the anchor stays`, [...after, await seen(refundId), (await openGroup(store, group)) !== null], [true, null, 0, true]);
+    // Left unknown: kept on the list tried first on every run (Claude 4 on #2781), so the pass reaches its end.
+    const waits = (await redis.pipeline([["HGET", `${anchorKey}:retry`, refundId]]))[0];
+    if (mode === "the reply marking it handled is lost") is(`${mode}: the purchase is taken back, the refund waits to be marked`, [hit > 0, (await openGroup(store, group)) === null, waits], [true, true, pi]);
+    // A write that throws stops the run itself: the pass stays on the page, and the next run does it again.
+    else if (mode === "the close fails before it is written") is(`${mode}: nothing marked handled, the purchase still open, the run stopped on that page`, [hit > 0, await seen(refundId), (await openGroup(store, group)) !== null, waits, await anchor()], [true, 0, true, null, null]);
+    else is(`${mode}: nothing marked handled, the purchase still open, the refund waits to be tried again`, [hit > 0, await seen(refundId), (await openGroup(store, group)) !== null, waits], [true, 0, true, pi]);
     await run();
     is(`${mode}: the next run takes it back and marks it handled`, [(await openGroup(store, group)) === null, await seen(refundId)], [true, 1]);
   }
@@ -193,6 +199,41 @@ async function main(): Promise<void> {
   const back = await revokeRefundedGroups(holder, Date.now() + 30_000, async (email) => void dropped.push(email));
   is("the place still held is taken back", [back, (await importedFor((await storeForEmail("lotthree@example.com"))!, "ana@example.com")).length, dropped], [1, 0, ["ana@example.com"]]);
   is("and the refund is marked handled", await seen("re_GHalfway0001"), 1);
+
+  part("group-buy.ts: one record that does not read never holds back the others (Claude 4 on #2781, proof d6f33d99)");
+  await redis.pipeline([["DEL", anchorKey], ["DEL", `${anchorKey}:pass`]]);
+  const retryKey = `${anchorKey}:retry`;
+  const stuck = await paidGroup("pi_C4Stuck000001", 1);
+  const behind = await paidGroup("pi_C4Behind00001", 2);
+  // Our own record of the first purchase is there but does not read (a write cut short, a bad deploy).
+  const stuckRecord = (await redis.pipeline([["GET", `nl:grp:${stuck}`]]))[0];
+  await redis.pipeline([["SET", `nl:grp:${stuck}`, "{not json"]]);
+  pages = [list([refund("re_C4Stuck000001", "pi_C4Stuck000001")], true), list([refund("re_C4Behind00001", "pi_C4Behind00001", now - 20)])];
+  for (let n = 0; n < 3; n += 1) await run();
+  is("the refunded purchase on the next page is taken back after three healthy runs", (await openGroup(store, behind)) === null, true);
+  is("the unreadable one is not marked handled", await seen("re_C4Stuck000001"), 0);
+  is("it waits on the list to be tried again, and the pass ended", [(await redis.pipeline([["HGET", retryKey, "re_C4Stuck000001"]]))[0], await anchor()], ["pi_C4Stuck000001", String(now)]);
+  await redis.pipeline([["SET", `nl:grp:${stuck}`, String(stuckRecord)]]);
+  pages = [list([])];
+  await run();
+  is("once its record reads, the next run takes it back first, marks it and lets it go", [(await openGroup(store, stuck)) === null, await seen("re_C4Stuck000001"), (await redis.pipeline([["HEXISTS", retryKey, "re_C4Stuck000001"]]))[0]], [true, 1, 0]);
+
+  part("group-buy.ts: with the list full, the pass stays on the page it could not hand over");
+  await redis.pipeline([["DEL", anchorKey], ["DEL", `${anchorKey}:pass`], ["DEL", retryKey]]);
+  const full2 = await paidGroup("pi_C4Full000001", 3);
+  await redis.pipeline([["SET", `nl:grp:${full2}`, "{not json"]]);
+  // A hundred waiting, each paid for a purchase whose record does not read either: none can be let go.
+  await redis.pipeline(Array.from({ length: 100 }, (_, i) => ["HSET", retryKey, `re_Full${String(i).padStart(6, "0")}`, `pi_Full${String(i).padStart(6, "0")}`]));
+  await redis.pipeline(Array.from({ length: 100 }, (_, i) => ["SET", `nl:grp:pi:pi_Full${String(i).padStart(6, "0")}`, full2]));
+  pages = [list([refund("re_C4Full000001", "pi_C4Full000001")])];
+  await run();
+  is("not kept, not marked, and the anchor stays", [(await redis.pipeline([["HEXISTS", retryKey, "re_C4Full000001"]]))[0], (await redis.pipeline([["HLEN", retryKey]]))[0], await seen("re_C4Full000001"), await anchor()], [0, 100, 0, null]);
+
+  part("group-buy.ts: an anchor in another shape starts no pass");
+  await redis.pipeline([["DEL", retryKey], ["SET", anchorKey, "not a time"]]);
+  reads.length = 0;
+  await run();
+  is("nothing is read from a week back", [reads.length, await anchor()], [0, "not a time"]);
   done();
 }
 

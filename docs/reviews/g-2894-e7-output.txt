@@ -1,0 +1,674 @@
+
+===== g2894-guard-old.log =====
+✖ done() sets the exit code and lets the process end by itself (2.181561ms)
+✖ done() never calls process.exit() directly; only a timer that does not hold the process may (1.512935ms)
+✖ the runner ends by its exit code too, never process.exit() after a failure (0.407933ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 0
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10.428642
+
+✖ failing tests:
+
+test at proof.cjs:9:27
+✖ done() sets the exit code and lets the process end by itself (2.181561ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /process\.exitCode = failures === 0 \? 0 : 1;/. Input:
+  
+  'export function done(): void {\n' +
+    '  console.log(\n' +
+    '    failures === 0\n' +
+    '      ? `\\n${checks} checks, all passing.`\n' +
+    '      : `\\n${checks} checks, ${failures} failing.`,\n' +
+    '  );\n' +
+    '  process.exit(failures === 0 ? 0 : 1);'
+  
+      at TestContext.<anonymous> (/dev/shm/g2894-yVukca/proof.cjs:10:29)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'export function done(): void {\n  console.log(\n    failures === 0\n      ? `\\n${checks} checks, all passing.`\n      : `\\n${checks} checks, ${failures} failing.`,\n  );\n  process.exit(failures === 0 ? 0 : 1);',
+    expected: /process\.exitCode = failures === 0 \? 0 : 1;/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at proof.cjs:12:27
+✖ done() never calls process.exit() directly; only a timer that does not hold the process may (1.512935ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   '  process.exit(failures === 0 ? 0 : 1);'
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (/dev/shm/g2894-yVukca/proof.cjs:15:29)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at proof.cjs:18:27
+✖ the runner ends by its exit code too, never process.exit() after a failure (0.407933ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /process\.exitCode = 1;/. Input:
+  
+  'failed += clientBundles.failed;\n' +
+    '\n' +
+    'if (failed) {\n' +
+    '  console.log(`\\n${failed} test file(s) failed.`);\n' +
+    '  process.exit(1);\n' +
+    '}\n' +
+    'console.log("\\nEverything passing.");\n'
+  
+      at TestContext.<anonymous> (/dev/shm/g2894-yVukca/proof.cjs:21:29)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'failed += clientBundles.failed;\n\nif (failed) {\n  console.log(`\\n${failed} test file(s) failed.`);\n  process.exit(1);\n}\nconsole.log("\\nEverything passing.");\n',
+    expected: /process\.exitCode = 1;/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+
+===== g2894-guard-head.log =====
+✔ done() sets the exit code and lets the process end by itself (0.964801ms)
+✔ done() never calls process.exit() directly; only a timer that does not hold the process may (0.650157ms)
+✔ the runner ends by its exit code too, never process.exit() after a failure (0.275074ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9.271542
+
+
+===== g2894-stress-red.log =====
+
+A test file that has printed its result also ends (no deadlock inside process.exit)
+  FAIL  all 16 children that allocate hard and call done() end within 15 s
+        expected 0
+        got      1
+
+1 checks, 1 failing.
+
+
+===== g2894-stress-head-1.log =====
+
+A test file that has printed its result also ends (no deadlock inside process.exit)
+  ok    all 16 children that allocate hard and call done() end within 15 s
+
+1 checks, all passing.
+
+
+===== g2894-stress-head-2.log =====
+
+A test file that has printed its result also ends (no deadlock inside process.exit)
+  ok    all 16 children that allocate hard and call done() end within 15 s
+
+1 checks, all passing.
+
+
+===== g2894-stress-head-3.log =====
+
+A test file that has printed its result also ends (no deadlock inside process.exit)
+  ok    all 16 children that allocate hard and call done() end within 15 s
+
+1 checks, all passing.
+
+
+===== g2894-controls.log =====
+pass exit 0 elapsed 516 ms
+failure exit 1 elapsed 218 ms
+open-handle-pass exit 0 elapsed 2125 ms
+open-handle-failure exit 1 elapsed 2169 ms
+late-throw exit 1 elapsed 393 ms
+23 independent checks, all passing; local child processes only.
+
+
+===== g2894-backup-run-final.log =====
+
+Off three ways today, and nothing is sent while off
+  ok    no reviewed cost ceiling exists yet
+  ok    no review: off, nothing sent
+  ok    no store: off, nothing sent
+  ok    no key: off, nothing sent
+  ok    the key: none without the setting
+  ok    the key: not 32 bytes, none
+  ok    the key: 32 bytes from base64
+  ok    the default run, with a key but no review or bucket, is off and sends nothing
+  ok    the default store: none without the bucket settings
+
+A review counts only with its date, its source, a retention and a storage ceiling the copies cannot pass
+  ok    the synthetic review is whole
+  ok    a cap behind a getter: refused, off, nothing sent, the getter never run
+  ok    a review inherited from another object: refused, nothing sent
+  ok    a field added to Object.prototype is never read into the copy
+  ok    a retention of 3 days is admitted
+  ok    a revoked proxy: refused as a result, never an exception
+  ok    no date: refused, off, nothing sent
+  ok    a date that is not one: refused, off, nothing sent
+  ok    no source: refused, off, nothing sent
+  ok    no retention: refused, off, nothing sent
+  ok    a retention of 1 day: refused, off, nothing sent
+  ok    a retention of 2 days: refused, off, nothing sent
+  ok    a storage ceiling the kept copies could pass: refused, off, nothing sent
+  ok    a storage ceiling one byte short of retention + 2 sets: refused, off, nothing sent
+  ok    no room for the run's own commands: refused, off, nothing sent
+  ok    a cap that is not a count: refused, off, nothing sent
+  ok    more parts than a set may have: refused, off, nothing sent
+  ok    parts whose stored weight the ceiling cannot hold: refused, off, nothing sent
+
+With all three, a copy is made, written once and read back the same
+  ok    done, with the keys copied (its own day count and lock among them), one part and its manifest
+  ok    a second run the same day is refused before anything is written
+  ok    the good copy's time and its manifest are kept, and survive that refusal
+  ok    the last good copy's mark is kept for good: it names the copy never deleted to make room
+
+Failures say which step, and keep the last good copy's time
+  ok    a copy that does not read back the same is a failure
+  ok    its reason is kept, with its time
+  ok    a failure's note expires by itself
+  ok    one failed day after a good one: a good copy is still under 48 hours old
+  ok    a cap reached is a failure that says which
+  ok    the reason kept is the latest
+  ok    no good copy for over 48 hours: seen
+  ok    the database failing during the export: a result, not an exception
+  ok    and its reason is kept
+  ok    a refused day mark: the run stops before copying, as a result
+  ok    a good copy whose outcome could not be written is still reported done
+  ok    with nothing ever kept, the report says there is no good copy
+
+At most one run a day and one new try after a failure, counted before any cost (inbox C4-49)
+  ok    the day's first run fails
+  ok    one new try the same day runs, and is done
+  ok    a third call that day: refused at the day's count, four commands (the lock; the count; the lock let go only if it is its own, in one script), nothing listed or written
+  ok    a day whose first run is done
+  ok    no new try after a good run: refused, four commands, nothing written
+  ok    two failures in a day: the second was the new try
+  ok    and nothing more that day
+  ok    the count of the day expires by itself
+
+A walk past its pages is a failure that says so, never a partial copy (inbox C4-46)
+  ok    refused at the walk's page cap, nothing written
+  ok    and the owner's report says so
+
+Write first, then delete past the retention; under the ceiling a failed delete never costs the day's copy (inbox C4-53)
+  ok    the normal case: written, then the copy older than 30 days deleted, the one of exactly 30 days and the younger kept
+  ok    a delete that fails under the ceiling: the day's copy is still written, done
+  ok    and the owner's report says the deletion failed
+  ok    the good copy's time is the new one
+  ok    the next run deletes what was left past the retention
+
+At the ceiling, the oldest go first, never the last verified copy; a failed delete there writes nothing (inbox C4-53)
+  ok    at the ceiling, a delete that fails: nothing written, said so
+  ok    the day's new try makes room from the oldest, keeps the last verified copy, and writes
+  ok    and the bucket stays within the review's ceiling
+
+The last verified copy is known for sure before any copy is deleted to make room (Codex G on e95705e66)
+  ok    an empty answer from the database: no copy deleted to make room, nothing written, said so
+  ok    two answers for one command: no copy deleted to make room, nothing written, said so
+  ok    a value that is not text: no copy deleted to make room, nothing written, said so
+  ok    a value that is not the kept shape: no copy deleted to make room, nothing written, said so
+  ok    an old mark with a time and no manifest: no copy deleted to make room, nothing written, said so
+  ok    no mark at all, with copies in the bucket: no copy deleted to make room, nothing written, said so
+
+The bucket's rule outlives the retention, and a last good copy lost to it never stops the backup (Reviewer 1 on e81007570)
+  ok    the bucket's lifecycle rule to set: 60 days, longer than the 30-day retention
+  ok    30 days more than the retention
+  ok    the last good copy was taken by the bucket's rule
+  ok    the first good run after it writes again
+  ok    and the report says the last good copy was lost
+  ok    the run's own note: last good copy lost
+  ok    only objects with no valid manifest were deleted to make room
+
+A failed day deletes nothing after it: the last good copy stays past the retention while new ones fail (Codex G on e95705e66)
+  ok    day 4, the first write refused: a failure, nothing deleted, the good copy of day 0 whole
+  ok    the next good copy is written, and only then is the old one, past the retention, deleted
+
+When even deleting every other copy leaves no room, nothing is written
+  ok    the others deleted, the last verified copy kept, and still no room: room_error, nothing written
+
+A listing longer than the ceiling allows: nothing written, said so
+  ok    more than its 1 page: refused as room_pages after one page, nothing written or deleted
+
+Two calls at once: one runs, the other is refused before anything costly (inbox C4-53)
+  ok    one is done, the other refused as busy; one set written
+  ok    the busy call left the day's new try untouched
+
+The lock: only its own run lets it go, it outlives the run's cutoff, and a busy call is reported
+  ok    the lock lives longer than the cutoff and the admission's two requests, with a minute to spare
+  ok    held, while writing, for at least the cutoff
+  ok    a lock taken by another run since is never let go by this one
+  ok    a call that finds the lock: busy, and the owner's report says so
+
+What the code proves: never past the review's ceiling in objects, and the last verified copy always kept
+  ok    never more than the review's 36199424 bytes (seen 21663)
+  ok    objects are what limits here: 64 reached, never passed, one listing page of 1
+  ok    the last verified copy is never deleted
+  ok    after each run whose deletion finished, none of its own copies older than 30 days
+  ok    the ceiling in sets: retention + 2 = 32
+
+The same 90 days with copies that weigh more than half a set each: bytes are what limits
+  ok    never more than the review's 36199424 bytes as listed (seen 35633871)
+  ok    and fewer objects than the 64 the count allows (seen 63)
+  ok    the last verified copy is never deleted
+
+A run that passes its cutoff stops before its manifest (independent review of #2175)
+  ok    the run's cutoff: 800 s, under a day (the retention's proof needs it)
+  ok    past the cutoff: refused as such, its part left unreferenced, no manifest written
+
+With the shortest retention, the report says no good copy before the last one can be deleted
+  ok    two failed days: the good copy is still there, and the report already says no good copy for 48 hours
+
+Nothing schedules it
+  ok    vercel.json names no backup route
+
+96 checks, all passing.
+
+
+===== g2894-stream.test.log =====
+
+The path a lesson keeps for such a video
+  ok    it reads back as the folder, the lesson and the id it was made from
+  ok    a file in the file store is not one
+  ok    nor is a path with a folder inside it
+  ok    nor one that climbs out
+  ok    nor one whose id is not an id
+  ok    the store it belongs to is read from it, for the month's delivery
+
+What the service's own numbers mean
+  ok    made, with no file yet
+  ok    the file arrived
+  ok    being turned into its sizes, none done
+  ok    one size done, the rest still coming: it can be played
+  ok    finished
+  ok    could not be read
+  ok    the upload failed
+
+What one viewing is counted as
+  ok    ten minutes at 1080p
+  ok    a 4K file is counted at the tallest size kept, not at its own
+  ok    a small one at its own size
+  ok    never more than the file as it was uploaded
+  ok    a video whose length is not known yet is counted as the whole file
+
+The shape the player takes
+  ok    a video filmed wide
+  ok    one filmed upright and stored turned a quarter
+  ok    one the service has not measured yet
+
+Nothing runs until the service is set up
+  ok    it is off
+  ok    no door is opened
+  ok    the service was not asked anything
+  ok    nor with a library and no token key: a library without one plays to anybody
+  ok    with them it is on
+
+The studio asks for a door
+  ok    it is given one
+  ok    for a video made in the store's own collection
+  ok    named after the store and the lesson, not the creator
+  ok    good for a day
+  ok    signed the way the service's own page says: library, key, the second it ends, the video
+  ok    and the path to tell the lesson is that store's, that lesson's
+  ok    written down as an upload still to come
+  ok    a second video of the store goes in the same collection
+
+The lesson is told its video
+  ok    not a video whose door was opened for another store
+  ok    not for another lesson
+  ok    not a path nothing is known about
+  ok    not a file in the file store
+  ok    the one that was opened for it, yes: the file is there and no size is ready
+  ok    what it is called and how big come from what was written down, not from the browser
+
+An unconfirmed peek claim never asks the video provider
+  ok    unconfirmed claim [] keeps preparation without provider request or retry
+  ok    unconfirmed claim ["OK","extra"] keeps preparation without provider request or retry
+  ok    unconfirmed claim [null] keeps preparation without provider request or retry
+  ok    unconfirmed claim [false] keeps preparation without provider request or retry
+  ok    unconfirmed claim [0] keeps preparation without provider request or retry
+  ok    unconfirmed claim [1] keeps preparation without provider request or retry
+  ok    unconfirmed claim [true] keeps preparation without provider request or retry
+  ok    unconfirmed claim ["ok"] keeps preparation without provider request or retry
+  ok    unconfirmed claim [{}] keeps preparation without provider request or retry
+  ok    unconfirmed claim "OK" keeps preparation without provider request or retry
+  ok    unconfirmed claim null keeps preparation without provider request or retry
+
+A student opens the lesson while it is being prepared
+  ok    there is nothing to play yet, and the page says so
+  ok    a second student seconds later does not ask the service again
+
+The service says a size is ready
+  ok    an announcement signed with another key is not believed
+  ok    nor one whose body was changed after it was signed
+  ok    nor one that names another way of signing
+  ok    the video is still being prepared, as far as anybody is told
+  ok    the service's own is taken
+  ok    and the video is ready: there is a size to play
+  ok    its length and shape are not known yet, and nobody pretends they are
+  ok    an announcement about a video that is not ours is let go
+  ok    and one from another library
+
+A video that plays before the service has finished with it
+  ok    it plays meanwhile, in the usual shape
+  ok    and a viewing is counted as the whole file, at the tallest size, not at a shape that is only a guess
+  ok    a student seconds later does not ask the service again
+  ok    the next one, once the service has measured it, sees it in its own shape: filmed upright, it is upright
+  ok    its length is written down, and it is still being asked about: the larger sizes are coming
+  ok    a student's page no longer asks: what it needed, it has
+  ok    the five-minute job does, and the video goes on playing
+  ok    when the service says it has finished, what it weighs is the whole of it
+  ok    and it is not asked about again
+
+The player a student is shown
+  ok    it is the service's own, for that video
+  ok    good for a few hours
+  ok    with a token made the way the service's own page says: token key, video, the second it ends
+  ok    it does not start by itself, and goes on from where the student stopped
+  ok    the studio is told it is ready
+  ok    a store page may frame that player
+  ok    the studio, which shows no lesson, may not
+  ok    and the studio may send a video's pieces to the service
+
+How much a store keeps there is the service's own count
+  ok    every size of every video
+  ok    a store with nothing there keeps nothing
+  ok    invalid collection reference is unknown, not empty
+  ok    and a count that cannot be read is said to be unknown, not zero
+
+A door nothing came through
+  ok    is left alone for two days: an upload cut off may still go on
+  ok    then what was made for it is taken away at the service
+  ok    and here, whatever the service had made of it: no lesson has it
+  ok    the video a lesson has is not touched
+
+The service is busy, or not there
+  ok    a lesson told its video while the service cannot be reached still has it
+  ok    the five-minute job asks, learns nothing, and changes nothing
+  ok    when the service is back and says the file could not be read, the video has failed
+  ok    what could not be made into a video is not kept there, or paid for
+  ok    a student is told it could not be prepared, and shown nothing
+
+A file the service never finishes
+  ok    is waited for, for a week
+  ok    and then given up on, so the creator is told to upload it again
+
+A file far larger than the studio lets through
+  ok    is not kept, whatever the service made of it
+
+A video that plays, and what the service says of it afterward
+  ok    Lesson six.mp4: told to the lesson with one size made, it plays
+  ok    a later size that could not be made does not take away a video that plays
+  ok    and it is left alone from then on
+  ok    Lesson seven.mp4: told to the lesson with one size made, it plays
+  ok    the service not answering changes nothing about it
+  ok    one that is no longer at the service is said to have failed, not shown as a player with nothing in it
+  ok    Lesson eight.mp4: told to the lesson with one size made, it plays
+  ok    one that grows past what may be kept, as its larger sizes are made, is not kept either
+  ok    Lesson nine.mp4: told to the lesson with one size made, it plays
+  ok    one the service never says it has finished is asked about for a week, and then left as it is: playing
+
+Captions a creator uploads
+  ok    a subtitle file is taken, and the video has captions in that language
+  ok    what the service was sent is WebVTT made here, not the file as it came
+  ok    a second language sits beside the first, in the order the names are read in
+  ok    a second file in a language takes the place of the first
+  ok    the studio is told which videos have captions, and only those
+  ok    a file that is not captions is refused, and nothing is sent
+  ok    so is one over the size a captions file may be
+  ok    and a language that is not on the list
+  ok    a video that could not be made has none
+  ok    nor has a path nothing is known about
+  ok    with the service not there, the language is not listed: the player would not offer it
+  ok    and one that cannot be taken away there stays listed here
+  ok    a video holds captions in 12 languages and no more
+  ok    though one of those it has can still be replaced
+  ok    taken away, a language is gone from the service and from the list
+
+A creator removes the video
+  ok    a file in the file store is not this file's to delete
+  ok    the video is taken away
+  ok    at the service
+  ok    and here
+  ok    with the list of its captions
+  ok    a student who still has the page is shown nothing
+  ok    removed while the service cannot be reached, it is gone here at once
+  ok    and still there
+  ok    until the five-minute job tries again, so nothing is kept, and paid for, because of one bad minute
+
+Deletion failures retain durable cleanup intent
+  ok    an abandoned upload is detached locally
+  ok    both failed deletions remain queued
+  ok    both still exist at the provider
+  ok    a repeated outage retains both cleanup entries
+  ok    the job deletes both after provider recovery
+  ok    neither remains stored
+  ok    confirmed deletion clears the queue
+
+Unconfirmed cleanup persistence cannot discard a video
+  ok    unconfirmed queue persistence refuses cleanup
+  ok    the video remains discoverable locally
+  ok    no provider deletion was attempted
+
+A new upload needs confirmed tracking before receiving its signature
+  ok    missing tracking acknowledgement never publishes an upload signature
+  ok    the empty provider video is removed
+
+A new manual caption is bound to its funded owner before provider work
+  ok    the owner wrapper still adds captions on an unmarked period
+  ok    a new manual caption needs financial approval
+  ok    a foreign video's folder is refused
+  ok    no provider request or caption replacement
+  ok    the existing caption can still be removed
+  ok    the existing language is gone after provider cleanup
+
+The announcements' address does not exist without the key they are signed with
+  ok    not found
+
+148 checks, all passing.
+
+
+===== g2894-vault.test.log =====
+
+The path a sold file is kept under
+  ok    the name is made plain, so its address never needs escaping
+  ok    it reads back as the store, what it hangs on, and its name
+  ok    a name with nothing plain in it is still a name
+  ok    it is this store's, on this product
+  ok    not another store's
+  ok    nor another product's
+  ok    the check every upload passes takes it as it takes a file in the host's store
+  ok    a file in the host's store is not one of these
+  ok    nor is a path that climbs out
+  ok    a buyer's stamped copy, kept in a folder beside the files, is
+  ok    the store it belongs to is read from it, for the month's delivery
+
+How an upload is cut into pieces
+  ok    a small file goes whole
+  ok    one byte more and it is two
+  ok    every piece is full but the last
+  ok    and there is no piece before the first or after the last
+  ok    the largest file here is 320 pieces, far under the store's ten thousand
+
+Nothing runs until the store is set up
+  ok    it is off
+  ok    no upload is opened
+  ok    no address is made
+  ok    and the store was not asked anything
+  ok    with its four settings it is on
+
+A large file goes up in pieces
+  ok    it is opened at the store, as what it is
+  ok    under a path in the store's own folder that nobody chose
+  ok    a second file of the same name gets a path of its own
+  ok    each piece gets an address at the store, for that piece of that upload
+  ok    good for an hour, and signed with the size the piece has to be
+  ok    the secret is nowhere in it
+  ok    there is no address for a piece the file does not have
+  ok    nor for an upload nobody opened
+  ok    closing it with a piece missing from the list is refused
+  ok    and with something that is not what the store answered
+  ok    with every piece, it is joined and measured by the store itself
+  ok    the store holds the file exactly
+  ok    and the upload cannot be closed, or added to, a second time
+
+A small file goes up whole
+  ok    to one address, with no upload opened at the store
+  ok    signed with its size and with what it is
+  ok    closed, it is the file the store measured
+
+A negotiated small file uses a revocable session
+  ok    one part is signed against an upload ID, never the bare object
+  ok    one part cannot complete without its ETag
+  ok    completion joins and verifies the small file
+  ok    an old part URL cannot resurrect the completed then deleted file
+  ok    the completed file stays deleted
+  ok    an unreachable provider does not falsely confirm cancellation
+  ok    a failed cancellation keeps the session available to retry
+  ok    a retry confirms cancellation at the provider
+  ok    a part URL from an aborted session cannot create a file
+  ok    the canceled file does not exist
+
+A file of text, which the store squeezes on its way out
+  ok    is measured as it is kept, because we ask for it as it is kept
+  ok    in one question
+  ok    and is kept
+  ok    squeezed all the same, its size is read from its first byte
+  ok    which is asked for after the store stated no length
+  ok    a file that is not text is still measured in one question
+  ok    an empty one is empty, not out of reach
+
+The studio says one size and sends another
+  ok    the file is refused
+  ok    and not kept
+
+An upload that is given up
+  ok    its pieces are thrown away at the store
+  ok    and it is forgotten here
+
+A file in the store
+  ok    is measured by the store
+  ok    one that is not there is said not to be
+  ok    through the one door every server file uses, too
+  ok    a store that cannot be reached is not mistaken for a missing file
+  ok    and a delete that did not happen is not reported as done
+
+The address a buyer is handed
+  ok    is the file's own, at the store, for five minutes
+  ok    and saves under the name the creator gave it, any character surviving
+  ok    a lesson's video is played, not saved: no name is forced on it
+  ok    fetched with that address, it is the file
+  ok    there is no address for a path that is not one of these
+
+A buyer's stamped copy, written and read by us
+  ok    it is kept as what it is
+  ok    and read back whole
+  ok    a file over the size we will hold in memory is not read
+  ok    the copies of one file are found by their folder
+
+What a store keeps here
+  ok    is every file in its folder, page after page
+  ok    a listing gives a page at a time
+  ok    a store with nothing here keeps nothing
+  ok    and a count that cannot be read is said to be unknown, not zero
+
+Incomplete storage listings never authorize new storage
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    repeated cursor is incomplete
+  ok    duplicate file is not a complete measurement
+  ok    page cap is not a completed listing
+  ok    final page at page cap is complete
+  ok    a full requested thousand-key page remains complete
+  ok    an oversized S3 page cannot be exposed as a complete listing
+  ok    an oversized zero-byte final page is unknown, never empty
+  ok    an oversized later S3 page never returns the valid partial prefix
+  ok    twenty full requested S3 pages remain measurable
+  ok    explicit consistent empty listing remains zero
+  ok    consistent declared counts and the standard default namespace remain usable
+  ok    the full declared requested page remains measurable
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+
+A creator removes a file
+  ok    it is gone from the store
+  ok    deleting what is already gone is not a failure
+
+138 checks, all passing.
+
+
+===== g2894-static.log =====
+TYPES 0
+LINT 0
+SCANNER7 []
+DIFF 0
+

@@ -33,7 +33,7 @@ import { QUIZ_USAGE_POLICY } from "@/lib/quiz-usage-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { SET_AND_VALUES_TAKE } from "@/lib/redis-take";
-import { UnknownReply, exactReplies } from "@/lib/redis-exact";
+import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Course, ITEM_ID_PATTERN, lessonsInOrder, newItemId } from "@/lib/course";
 
@@ -585,12 +585,15 @@ export async function forgetQuizPerson(courses: { courseId: string; lessonIds: s
   courses.forEach((c, i) => {
     // Exactly {the passes, one value per lesson key, how many keys went}; any
     // other shape leaves this course's deletion unknown, and its room kept.
-    const reply = replies[i];
-    const [passed, values, gone] = Array.isArray(reply) && reply.length === 3 ? (reply as unknown[]) : [];
+    // Every level read as a plain list (lib/redis-exact.ts plainList): no hole, no getter, read once (Codex G on #2576).
+    const outer = plainList(replies[i]);
+    const [passedRaw, valuesRaw, gone] = outer && outer.length === 3 ? outer : [];
+    const passed = plainList(passedRaw);
+    const values = plainList(valuesRaw);
     if (
-      !Array.isArray(passed) ||
+      !passed ||
       !passed.every((lessonId) => typeof lessonId === "string") ||
-      !Array.isArray(values) ||
+      !values ||
       values.length !== c.lessonIds.length * 2 ||
       !values.every((raw) => raw === null || typeof raw === "string" || typeof raw === "number") ||
       typeof gone !== "number" ||

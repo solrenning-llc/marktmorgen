@@ -33,6 +33,7 @@ import { MAX_LETTER_PRODUCTS, membersOnly, parseLetter } from "@/lib/letter-rule
 import { letterIdFor, listLetters, publishLetter, publishedLetters, readLetter } from "@/lib/letters";
 import { letterReader } from "@/lib/letter-access";
 import { holdsProducts, holdsProductsOrThrow, paidForAny } from "@/lib/community-access";
+import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import { mintPass, passCookieName } from "@/lib/learn";
 import LetterPage, { generateMetadata } from "@/app/[handle]/letters/[letter]/page";
 import LettersPage from "@/app/[handle]/letters/page";
@@ -603,6 +604,27 @@ async function main(): Promise<void> {
       [gone.includes("The products this email was for are no longer for sale"), gone.includes("<ul"), gone.includes("products below"), gone.includes("/api/store/letters/link"), gone.includes("This address has none of these products")],
       [true, false, false, false, false],
     );
+  }
+
+  part("Revisor 1 on #2464: one unreadable entry does not take away a purchase another entry proves; reads pin Stripe's version");
+  {
+    forgetAnswers();
+    const answer = globalThis.fetch;
+    const versions: (string | null)[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input instanceof Request ? input.url : input));
+      if (url.hostname !== "api.stripe.com") return answer(input, init);
+      if (url.pathname.endsWith("/checkout/sessions") || url.pathname.endsWith("/payment_intents")) versions.push(new Headers(init?.headers).get("Stripe-Version"));
+      if (url.pathname.endsWith("/checkout/sessions")) return new Response(JSON.stringify({ object: "list", data: [{ ...paid("cs_test_oddstate0001", club), status: "a_state_stripe_adds_later" }, paid("cs_test_goodstate001", club)], has_more: false }), { status: 200 });
+      return answer(input, init);
+    }) as typeof fetch;
+    try {
+      is("a paid session beside an entry in a state not known here: the holder is let in", (await letterReader(store, letter, jar({ [cookieName]: anaPass }))).state, "in");
+      is("every list read pins Stripe's version", versions.length > 0 && versions.every((v) => v === STRIPE_VERSION), true);
+    } finally {
+      globalThis.fetch = answer;
+      forgetAnswers();
+    }
   }
   done();
 }

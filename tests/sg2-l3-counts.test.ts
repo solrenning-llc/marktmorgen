@@ -12,6 +12,9 @@
  *   - the sign-in route (app/api/auth/request) said "a lot of tries, wait an
  *     hour" when the count was unknown; it now says something went wrong on
  *     our side, try again in a moment (Claude 4, second review of #2717).
+ *   - the address move (app/api/store/address) said "wait an hour" the same
+ *     way; it now says it could not be sent, try again (Claude 4, return of
+ *     the second review of #2717).
  *   - isFreshSession (lib/auth.ts) took EXISTS answered as text "1" as a fresh
  *     login. Only the whole 1 is now.
  *   - noteSignIn (lib/auth.ts) read an unknown SISMEMBER or SCARD as "a new
@@ -52,7 +55,8 @@
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { NextRequest } from "next/server";
 import { POST as signInPost } from "@/app/api/auth/request/route";
-import { isFreshSession, noteSignIn, withinAddressLimit, withinRateLimit } from "@/lib/auth";
+import { POST as addressPost } from "@/app/api/store/address/route";
+import { SESSION_COOKIE, isFreshSession, noteSignIn, openSession, withinAddressLimit, withinRateLimit } from "@/lib/auth";
 import { forgetLearnerPerson, lastSeenMany, openCourseLink, requestCourseLink, studentDates, studentPage } from "@/lib/learn";
 import { addRows, finishUpload, readJob, runImport, startImport } from "@/lib/imports";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -167,6 +171,23 @@ void (async () => {
     rule = { when: counter(prefix), reply: ["OK", 99] };
     is(`sign-in route, ${label} over the limit: rate_limited`, await answer(await ask("someone@sg2-l3.example")), [429, "rate_limited"]);
   }
+  rule = null;
+
+  part("The address move: an unknown count is said as an error, never as too many tries");
+  await claimHandle("mover@sg2-l3.example", "sg2-l3-mover", "Mover", "");
+  const moverSession = await openSession("mover@sg2-l3.example");
+  const move = async () => {
+    const res = await addressPost(new NextRequest("https://marktmorgen.com/api/store/address", {
+      method: "POST",
+      headers: { Host: "marktmorgen.com", Origin: "https://marktmorgen.com", "content-type": "application/x-www-form-urlencoded", cookie: `${SESSION_COOKIE}=${moverSession}` },
+      body: new URLSearchParams({ email: "new-home@sg2-l3.example" }),
+    }));
+    return new URL(res.headers.get("location") ?? "https://x/").searchParams.get("address");
+  };
+  rule = { when: counter("nl:rl:address:"), reply: ["OK", null] };
+  is("address move, the address's count unknown: error, not limited", await move(), "error");
+  rule = { when: counter("nl:rl:address:"), reply: ["OK", 99] };
+  is("address move, past the limit: limited", await move(), "limited");
   rule = null;
 
   part("isFreshSession: only EXISTS's whole 1 is a fresh login");

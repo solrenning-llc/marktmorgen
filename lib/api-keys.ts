@@ -51,7 +51,7 @@
  */
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { deriveKey, deriveLegacyKey } from "@/lib/secret-box";
 import { type Member, parseTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
@@ -225,13 +225,17 @@ export async function makeKey(sid: string, rawName: unknown, now = Date.now(), w
 /** Takes a key away. The next request with it is refused. */
 export async function revokeKey(sid: string, id: string): Promise<boolean> {
   if (!SID_PATTERN.test(sid) || !ID_PATTERN.test(id) || !isRedisConfigured()) return false;
-  const [raw] = await redisPipeline([["HGET", listKey(sid), id]]);
+  const read = repliesFor(await redisPipeline([["HGET", listKey(sid), id]]), 1);
+  if (!read || (read[0] !== null && typeof read[0] !== "string")) return false;
+  const [raw] = read;
   const stored = parseStored(raw);
-  if (!stored) return false;
+  if (!stored || stored.id !== id) return false;
   // The lookup first: from this moment the key opens nothing, whatever
   // happens to the second write.
-  await redisPipeline([["DEL", lookupKey(stored.hash)], ["HDEL", listKey(sid), id], ["HDEL", holdKey(sid), id], ["HDEL", usedKey(sid), id]]);
-  return true;
+  const deleted = repliesFor(await redisPipeline([["DEL", lookupKey(stored.hash)], ["HDEL", listKey(sid), id], ["HDEL", holdKey(sid), id], ["HDEL", usedKey(sid), id]]), 4);
+  // Each command targets one key/field. An uncertain receipt is retryable,
+  // never proof that the key has stopped opening the store. Do not replay it.
+  return deleted !== null && deleted.every((reply) => reply === 0 || reply === 1);
 }
 
 /**
@@ -455,22 +459,45 @@ const TOUCH_SECONDS = 60;
 export async function resolveKey(presented: string, now = Date.now()): Promise<{ sid: string; id: string; write: boolean; agent: AgentScope; paused: boolean; why?: PauseWhy } | null> {
   if (!KEY_PATTERN.test(presented) || !isRedisConfigured()) return null;
   const hash = hashOf(presented);
-  const [raw] = await redisPipeline([["GET", lookupKey(hash)]]);
-  if (typeof raw !== "string") return null;
+  const lookup = repliesFor(await redisPipeline([["GET", lookupKey(hash)]]), 1);
+  if (!lookup || (lookup[0] !== null && typeof lookup[0] !== "string")) throw new UnknownReplyError("an API key lookup");
+  const [raw] = lookup;
+  if (raw === null) return null;
   let found: { sid?: unknown; id?: unknown };
   try {
-    found = JSON.parse(raw) as { sid?: unknown; id?: unknown };
+    found = JSON.parse(raw as string) as { sid?: unknown; id?: unknown };
+    if (!found || typeof found !== "object" || Array.isArray(found)) throw new Error("Invalid key lookup");
   } catch {
-    return null;
+    throw new UnknownReplyError("an API key lookup");
   }
   const sid = typeof found.sid === "string" && SID_PATTERN.test(found.sid) ? found.sid : "";
   const id = typeof found.id === "string" && ID_PATTERN.test(found.id) ? found.id : "";
-  if (!sid || !id) return null;
+  if (!sid || !id) throw new UnknownReplyError("an API key lookup");
   // The team is read in the same trip, one command more (within an API request's own price, UNIT_COST.api in
   // tests/plan-cost-registry.ts): a teammate's key is refused once its maker is not on the team.
-  const [listed, hold, used, team] = await redisPipeline([["HGET", listKey(sid), id], ["HGET", holdKey(sid), id], ["HGET", usedKey(sid), id], ["GET", teamRecordKey(sid)]]);
+  const evidence = repliesFor(await redisPipeline([["HGET", listKey(sid), id], ["HGET", holdKey(sid), id], ["HGET", usedKey(sid), id], ["GET", teamRecordKey(sid)]]), 4);
+  if (!evidence || evidence.some((reply) => reply !== null && typeof reply !== "string")) throw new UnknownReplyError("an API key's access evidence");
+  const [listed, hold, used, team] = evidence as (string | null)[];
+  if (hold !== null && !HOLDS.includes(hold)) throw new UnknownReplyError("an API key hold");
+  if (used !== null && (!/^\d+$/.test(used) || countOf(Number(used)) === null)) throw new UnknownReplyError("an API key's last use");
+  if (team !== null) {
+    let value: unknown;
+    try { value = JSON.parse(team); } catch { throw new UnknownReplyError("an API key's team"); }
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new UnknownReplyError("an API key's team");
+    const fields = value as Record<string, unknown>;
+    if ((fields.members !== undefined && !Array.isArray(fields.members)) ||
+        (fields.invites !== undefined && !Array.isArray(fields.invites)) ||
+        (fields.requireTwoStep !== undefined && typeof fields.requireTwoStep !== "boolean")) throw new UnknownReplyError("an API key's team");
+    // parseTeam filters unsupported members, but a null entry would throw
+    // and make it return an empty team with the two-step rule switched off.
+    for (const entries of [fields.members, fields.invites]) {
+      if (Array.isArray(entries) && entries.some((entry) => !entry || typeof entry !== "object" || Array.isArray(entry))) throw new UnknownReplyError("an API key's team");
+    }
+  }
+  if (listed === null) return null;
   const stored = parseStored(listed);
-  if (!stored || stored.hash !== hash) return null;
+  if (!stored || stored.id !== id) throw new UnknownReplyError("an API key record");
+  if (stored.hash !== hash) return null;
   // Paused by the team's two-step rule, its maker's role, or its maker leaving (lib/api-key-pause.ts):
   // known, refused, and not counted as used. A maker who left refuses it even with no hold written.
   const holdNow = typeof hold === "string" && HOLDS.includes(hold) ? (hold as Hold) : null;

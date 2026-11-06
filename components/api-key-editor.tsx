@@ -12,6 +12,7 @@ const MESSAGES: Record<string, string> = {
   name: "Give the key a name, so you can tell later what uses it.",
   full: `A store can have ${MAX_KEYS} keys. Revoke one you no longer use first.`,
   unknown: "That key is already gone. Reload the page.",
+  revoke_unconfirmed: "We could not confirm that this key was revoked. Try again, then check the list before relying on it being off.",
   unavailable: "Keys cannot be made right now. Nothing was changed.",
   signed_out: "Your session ended. Log in again.",
   role: "Only the store's owner and Admins can make a key that writes.",

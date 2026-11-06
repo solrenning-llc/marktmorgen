@@ -5,6 +5,7 @@ import { afterMake, makerFor, revokeChecked, shownKeys, turnKeyOn } from "@/lib/
 import { SESSION_COOKIE } from "@/lib/auth";
 import { hasSecondStep, liveSecondStep } from "@/lib/second-step-gate";
 import { can } from "@/lib/team-roles";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /**
  * Making and revoking the keys a creator's own tools read the store with.
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
     if (action === "revoke") {
       // The webhook endpoints the key added stop with it (owner C3-100); a key whose maker left the team is the owner's to revoke.
       const gone = await revokeChecked(store, role, text(body.id, 20));
-      if (gone !== "ok") return Response.json({ ok: false, error: gone }, { status: gone === "unknown" ? 404 : 403 });
+      if (gone !== "ok") return Response.json({ ok: false, error: gone }, { status: gone === "revoke_unconfirmed" ? 503 : gone === "unknown" ? 404 : 403 });
       return Response.json({ ok: true, keys: await keys() }, { headers: { "Cache-Control": "no-store" } });
     }
     if (action === "turn_on") {
@@ -76,6 +77,7 @@ export async function POST(request: NextRequest) {
     }
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {
+    if (action === "revoke" && error instanceof UnknownReplyError) return Response.json({ ok: false, error: "revoke_unconfirmed" }, { status: 503 });
     console.error("changing an API key failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

@@ -126,6 +126,34 @@ const fromKey = (id: string) => `nl:mail:health:${id}:from`;
 export const MAIL_HEALTH_DAY_SECONDS = (HEALTH_WINDOW_DAYS + 3) * 86_400;
 const MAIL_HEALTH_SEEN_SECONDS = (HEALTH_WINDOW_DAYS + 3) * 86_400;
 
+/**
+ * Counts an outcome and leaves a recoverable checkpoint in one Redis turn.
+ * A lost answer is safe: redelivery sees `pending`, re-evaluates the pause,
+ * and never increments the same address twice.
+ */
+export const BEGIN_MAIL_HEALTH_OUTCOME = `-- marktmorgen:mail-health-outcome:v1
+local state = redis.call('GET', KEYS[1])
+if state == 'done' or state == '1' then return 0 end
+if state == 'pending' then return 2 end
+if state then return -1 end
+redis.call('HINCRBY', KEYS[2], ARGV[1], 1)
+redis.call('EXPIRE', KEYS[2], ARGV[2])
+redis.call('SET', KEYS[1], 'pending', 'EX', ARGV[3])
+return 1`;
+
+function exactRedisReply(value: unknown, length: number): unknown[] | null {
+  if (!Array.isArray(value)) return null;
+  const size = Object.getOwnPropertyDescriptor(value, "length");
+  if (!size || !Object.hasOwn(size, "value") || size.value !== length) return null;
+  const out: unknown[] = [];
+  for (let i = 0; i < length; i += 1) {
+    const item = Object.getOwnPropertyDescriptor(value, String(i));
+    if (!item || !Object.hasOwn(item, "value")) return null;
+    out.push(item.value);
+  }
+  return out;
+}
+
 async function add(id: string, field: "s" | "b" | "c", n: number, now: number): Promise<void> {
   const key = mailHealthDayKey(id, now);
   await redisPipeline([
@@ -147,11 +175,11 @@ export async function listHealth(id: string, now = Date.now()): Promise<Health> 
   const exact = (value: unknown, length: number): unknown[] | null => {
     if (!Array.isArray(value)) return null;
     const size = Object.getOwnPropertyDescriptor(value, "length");
-    if (!size || !("value" in size) || size.value !== length) return null;
+    if (!size || !Object.hasOwn(size, "value") || size.value !== length) return null;
     const out: unknown[] = [];
     for (let i = 0; i < length; i += 1) {
       const item = Object.getOwnPropertyDescriptor(value, String(i));
-      if (!item || !("value" in item)) return null;
+      if (!item || !Object.hasOwn(item, "value")) return null;
       out.push(item.value);
     }
     return out;
@@ -401,10 +429,18 @@ export async function heardFromSender(notice: SenderNotice, now = Date.now()): P
   // Off the list first, and every time: this is the part that must not be
   // skipped because a count had already been made.
   if (HEALTH_ID.test(notice.list)) await stopWriting(notice.list, email, notice.kind);
-  const [first] = await redisPipeline([["SET", seenKey(notice.store, email), "1", "NX", "EX", MAIL_HEALTH_SEEN_SECONDS]]);
-  if (first === null) return "ignored";
-  await add(notice.store, notice.kind === "complained" ? "c" : "b", 1, now);
-  return (await pauseIfOver(notice.store, now)) ? "paused" : "counted";
+  const seen = seenKey(notice.store, email);
+  const field = notice.kind === "complained" ? "c" : "b";
+  const begun = exactRedisReply(await redisPipeline([[
+    "EVAL", BEGIN_MAIL_HEALTH_OUTCOME, 2, seen, mailHealthDayKey(notice.store, now),
+    field, MAIL_HEALTH_DAY_SECONDS, MAIL_HEALTH_SEEN_SECONDS,
+  ]]), 1)?.[0];
+  if (begun === 0) return "ignored";
+  if (begun !== 1 && begun !== 2) throw new Error("The mail health outcome is unconfirmed");
+  const paused = await pauseIfOver(notice.store, now);
+  const finished = exactRedisReply(await redisPipeline([["SET", seen, "done", "XX", "EX", MAIL_HEALTH_SEEN_SECONDS]]), 1)?.[0];
+  if (finished !== "OK") throw new Error("The mail health outcome is unconfirmed");
+  return paused ? "paused" : "counted";
 }
 
 const n = (x: number) => x.toLocaleString("en-US");

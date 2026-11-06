@@ -61,7 +61,41 @@ async function main(): Promise<void> {
   is("the bounce was counted once before that read", (await listHealth(ID, NOW)).bounced, 25);
   await heardFromSender(notice, NOW);
   is("the redelivery re-evaluates and establishes the threshold pause", (await pausedFor(ID, NOW))?.reason, "bounces");
-  is("recovery never counts the same address twice", (await listHealth(ID, NOW)).bounced, 25);
+  const [rawBounces] = await redis.pipeline([["HGET", DAY, "b"]]);
+  is("recovery never counts the same address twice", rawBounces, "25");
+  part("A lost checkpoint answer is recovered without another count");
+  redis.clear();
+  await redis.pipeline([["HSET", DAY, "s", "1000", "b", "0", "c", "0"]]);
+  let loseBegin = true;
+  redis.pipeline = async commands => {
+    const reply = await original.call(redis, commands);
+    if (loseBegin && commands.some(command => command[0] === "EVAL")) {
+      loseBegin = false;
+      throw new Error("synthetic lost begin acknowledgement");
+    }
+    return reply;
+  };
+  const lostNotice = { ...notice, to: "lost-begin@example.test" };
+  try { await heardFromSender(lostNotice, NOW); } catch { /* provider redelivers */ }
+  redis.pipeline = original;
+  is("the redelivery completes the counted event", await heardFromSender(lostNotice, NOW), "counted");
+  const [afterLostBegin] = await redis.pipeline([["HGET", DAY, "b"]]);
+  is("the lost begin acknowledgement still counts once", afterLostBegin, "1");
+  let loseFinish = true;
+  redis.pipeline = async commands => {
+    const reply = await original.call(redis, commands);
+    if (loseFinish && commands.some(command => command[0] === "SET" && command[2] === "done")) {
+      loseFinish = false;
+      throw new Error("synthetic lost finish acknowledgement");
+    }
+    return reply;
+  };
+  const finishedNotice = { ...notice, to: "lost-finish@example.test" };
+  try { await heardFromSender(finishedNotice, NOW); } catch { /* provider redelivers */ }
+  redis.pipeline = original;
+  is("the redelivery recognizes the completed event", await heardFromSender(finishedNotice, NOW), "ignored");
+  const [afterLostFinish] = await redis.pipeline([["HGET", DAY, "b"]]);
+  is("the lost finish acknowledgement still counts once", afterLostFinish, "2");
   part("An accessor cannot borrow confirmed evidence from a descriptor prototype");
   let visits = 0;
   const outer = [null, ...Array.from({ length: 7 }, emptyDay)];

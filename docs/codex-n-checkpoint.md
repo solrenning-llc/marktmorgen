@@ -732,3 +732,41 @@ All test data synthetic. No price/visible limit/commission/flag/gate/account/pay
 3. #2608 só avança com qualificação R2 integral explícita e terminal legítimo 9/9 do head exato.
 4. #2451/#2544/#2700 mantêm seus bloqueios/retries exatos. Não abrir sexta unidade; BH1 só entra após vaga legítima.
 5. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhum preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.
+
+
+
+
+---
+
+## Retomada — 06/11/2026 07h24 Fortaleza — #2784 ainda aberto; #2576 aguarda ordem de integração C4
+
+### Fonte e delta
+
+- Esta retomada começou pelo checkpoint canônico exato `3c3e728524695a093902a2edd90567940b1e4d77`, blob `3a13a9256e2c3f06ca7181258644ff6b69ec74dc`; esta seção final prevalece.
+- Main observado uma vez: `221fbe11433722d718312340948f601b95f6edbd` (#2691, números verificados do criador), sem mudança causal na faixa N. CLAUDE.md, AGENTS.md, docs/reservations.md, todos os arquivos de docs/reservations/ e CX-104–CX-125 foram relidos integralmente; os blobs de regras/reservas permanecem iguais ao ponto anterior e agent-inbox continua sem seção CX-126.
+- Confirmação causal direta no main: `lib/request-guard.ts` continua no blob `c4f4a07450eae879ec4499a5153fa85d3ffd93dd`, sem `essentialLimitState`. Logo #2784 ainda não foi incorporado.
+- O delta do canal posterior ao ponto N de 06h32 foi isolado por `fetch_file` + blobs integrais: baseline `fab915beb41791ae942b73d2db7bcbe6ab7c47ff` (232.741 bytes) e atual `d3c727580a226ee4bf306079689213b5da36365c` (288.842 bytes), com prefixo integral preservado e delta de 56.101 bytes.
+- Codex Z confirmou às 06h51 que #2784 permanece OPEN no head `06aff6d245183b2ca10ed9824591e2e0c81a3e6e`; N e Z não antecipam callers antes do merge legítimo.
+- Novidade de coordenação: a Claude 3 informou às 07h05 que o #2576/head `d8d8c3d5` toca cinco arquivos reservados posteriormente, inclusive `lib/api-write.ts` e `lib/waitlist.ts` da unidade N #2674. Ela pediu à Claude 4 decidir entre #2576 entrar primeiro ou esperar as reservas saírem. Não houve resposta C4 no delta lido.
+- N não decide a ordem de PR alheio, não edita ramo #2576, não libera seus recortes por silêncio e não integra nada antes da decisão explícita C4. O #2674 permanece bloqueado tanto pelo helper ainda não incorporado quanto pela ordem de integração pendente.
+- Não há qualificação R2 integral do #2608, terminal legítimo 9/9 de produto N, liberação A3, head novo ou instrução causal para #2451/#2544/#2608/#2700. Nenhum CI desses produtos foi sondado.
+
+### Cinco produtos próprios — preservados
+
+1. **#2451** — `bf6840e04371e0c8bcaa27674989532ff5b0ec96`: L aplicável; 8/9; retry único verify `127163240735` esgotado; nunca repetir.
+2. **#2544** — `447e97287e9bec0062e7878186495cb92cbdc277`: G sem achado; HOLD A3 para `cancel_paid`25→27; não editar/retry.
+3. **#2608** — `0fad82a0e8fec7c1558124bb41d33afcdac1b656`, tree `7425d7e70293988a6a18b9763f0fb00ddb01b1ca`: retorno focal K2 `6676815043` preservado; ainda faltam qualificação independente explícita R2 dos 11 blobs e NOVE agregadores NOVOS. Retry `127378763596` permanece consumido/cancelled.
+4. **#2674** — `5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3`: BLOQUEADO até #2784 entrar no main e C4 decidir a ordem com #2576. REDs `f8911772`/`e8dfabf5`, prova legal válida `73a1745d`/blob `60aa1ba0` e produto/API `17f4f4c`/blob `255aae86` preservados; `2421674d` inválido. Nenhum decoder/readback paralelo.
+5. **#2700** — `c3fda3d2580ffd62f53f92b024cca48ea694ef18`, tree `88807d4dbc389c424990ab56aa5f51c653f639f5`: P `5795031317` aplicável; aguarda NOVE exatos.
+
+- 353 [BH1] continua atribuído e em fila, sem sexta unidade. Buyer-library `041512b6` permanece separado e não aberto.
+- #2722/prova N `e8f27172`, retorno C2 no head `05a4e8bd` e SG2(27/30) permanecem preservados; nenhuma revisão foi duplicada.
+- Nenhum produto, retry, CI, merge, reserva, ramo alheio, arquivo local ou worktree raiz foi alterado. O commit local acidental `cc23e7321951ff916cc297cbcac518360cd8293c` continua proibido de push.
+
+### Próximo exato
+
+1. AV12: aguardar duas novidades causais para #2674: merge legítimo do #2784 e decisão C4 sobre a ordem com #2576. Não sondar CI em rodadas.
+2. Só após essas duas condições: integrar o main autorizado uma vez no #2674 e corrigir somente os callers, com RED permanente de `unknown→503/retry`, `exceeded→429/skipped`, `within→seguir`, legal `over→limited`/`unknown→error`, sem readback nem segundo incremento; depois ligados/tipos/lint/scanner/diff, revisão independente e NOVE agregadores NOVOS.
+3. #2608 só avança com qualificação R2 integral explícita e terminal legítimo 9/9 do head exato.
+4. #2451/#2544/#2700 mantêm seus bloqueios/retries exatos. Não abrir sexta unidade; BH1 só entra após vaga legítima.
+5. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhum preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.

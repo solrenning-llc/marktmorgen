@@ -104,7 +104,11 @@ function parse(raw: unknown): ChatMessage | null {
 
 export type SaidResult =
   | { ok: true; message: ChatMessage }
-  | { ok: false; reason: "off" | "empty" | "links" | "slow" | "creatorOnly"; wait?: number };
+  | { ok: false; reason: "off" | "empty" | "links" | "slow" | "creatorOnly" | "unknown"; wait?: number };
+
+function singleReply(reply: unknown): unknown {
+  return Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+}
 
 /**
  * Says something in the room.
@@ -127,26 +131,37 @@ export async function say(
   if (!text) return { ok: false, reason: "empty" };
   if (!setting.links && !owner && linkCount(text) > 0) return { ok: false, reason: "links" };
 
-  if (setting.slow > 0 && !owner) {
-    // SET NX with an expiry is the cooldown itself: it either takes, or it
-    // tells how long is left. No clock is read and no row is written to be
-    // cleaned up later.
-    const [got] = await redisPipeline([["SET", spokeKey(id, who), "1", "NX", "EX", setting.slow]]);
-    if (got === null) {
-      const [left] = await redisPipeline([["TTL", spokeKey(id, who)]]);
-      return { ok: false, reason: "slow", wait: Math.max(1, Number(left) || setting.slow) };
+  try {
+    if (setting.slow > 0 && !owner) {
+      // SET NX with an expiry is the cooldown itself: it either takes, or it
+      // tells how long is left. No clock is read and no row is written to be
+      // cleaned up later.
+      const got = singleReply(await redisPipeline([["SET", spokeKey(id, who), "1", "NX", "EX", setting.slow]]));
+      if (got === null) {
+        const left = singleReply(await redisPipeline([["TTL", spokeKey(id, who)]]));
+        if (typeof left !== "number" || !Number.isInteger(left) || left < 0 || left > MAX_SLOW) return { ok: false, reason: "unknown" };
+        return { ok: false, reason: "slow", wait: Math.max(1, left) };
+      }
+      if (got !== "OK") return { ok: false, reason: "unknown" };
     }
-  }
 
-  const [n] = await redisPipeline([["INCR", countKey(id)]]);
-  const said = cleanText(name, 80);
-  const message: ChatMessage = { i: Number(n), a: who, text, at: now(), ...(said ? { n: said } : {}) };
-  await redisPipeline([
-    ["ZADD", roomKey(id), message.i, JSON.stringify(message)],
-    // The room keeps its last MAX_CHAT_KEPT and forgets the rest.
-    ["ZREMRANGEBYRANK", roomKey(id), 0, -(MAX_CHAT_KEPT + 1)],
-  ]);
-  return { ok: true, message };
+    const n = singleReply(await redisPipeline([["INCR", countKey(id)]]));
+    if (typeof n !== "number" || !Number.isSafeInteger(n) || n <= 0) return { ok: false, reason: "unknown" };
+    const said = cleanText(name, 80);
+    const message: ChatMessage = { i: n, a: who, text, at: now(), ...(said ? { n: said } : {}) };
+    const written = await redisPipeline([
+      ["ZADD", roomKey(id), message.i, JSON.stringify(message)],
+      // The room keeps its last MAX_CHAT_KEPT and forgets the rest.
+      ["ZREMRANGEBYRANK", roomKey(id), 0, -(MAX_CHAT_KEPT + 1)],
+    ]);
+    if (!Array.isArray(written) || written.length !== 2 || written[0] !== 1
+      || typeof written[1] !== "number" || !Number.isSafeInteger(written[1]) || written[1] < 0) return { ok: false, reason: "unknown" };
+    return { ok: true, message };
+  } catch {
+    // A transport failure can happen after Redis applies the write. The
+    // caller must keep that uncertainty instead of claiming it did not send.
+    return { ok: false, reason: "unknown" };
+  }
 }
 
 export type ChatPage = {
@@ -241,7 +256,7 @@ export function refusalWords(reason: ChatRefusal, slow: number, wait?: number): 
     case "resting":
       return "This store is resting for now, so nothing can be written here until it opens again.";
     case "unknown":
-      return "That did not send. Try again in a moment.";
+      return "We could not confirm this message. Check the room before sending it again.";
   }
 }
 

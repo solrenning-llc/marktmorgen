@@ -274,7 +274,7 @@ export function FunnelEditor({
                 <button
                   type="button"
                   onClick={() => remove(index)}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-danger-soft hover:text-danger"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-danger-soft hover:text-danger"
                   aria-label={`Remove offer ${index + 1}`}
                 >
                   <Icon name="trash" size={18} />

@@ -37,8 +37,9 @@ const ORGANIZATION = {
   name: "Marktmorgen",
   url: SITE_URL,
   logo: `${SITE_URL}/icons/icon-512.png`,
-  description:
-    "A link-in-bio store for creators who sell files, courses, memberships and calls. Buyers pay into the creator's own Stripe account and " + feeWords().takesOfCreator,
+  description: PLANS_ON_SALE
+    ? "A link-in-bio store for creators who sell files, courses, memberships and calls. Buyers pay into the creator's own Stripe account and " + feeWords().takesOfCreator
+    : PREVIEW_LINE,
 };
 
 /** The company and the site itself, on every page. */
@@ -124,7 +125,6 @@ export function ArticleData({ post }: { post: BlogPost }) {
         headline: post.title,
         description: post.excerpt,
         datePublished: post.date,
-        dateModified: post.date,
         articleSection: post.category,
         image: `${SITE_URL}/blog/${post.slug}/opengraph-image`,
         author: { "@type": "Organization", name: "Marktmorgen" },

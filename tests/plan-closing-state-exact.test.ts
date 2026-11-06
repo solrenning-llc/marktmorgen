@@ -94,7 +94,7 @@ async function main(): Promise<void> {
     restore();
   }
 
-  for (const [name, reply] of [["not a number", "not-a-score"], ["a number's text cut short", "17e"], ["an empty text", ""], ["a list", ["1"]], ["a missing reply (undefined)", undefined]] as [string, unknown][]) {
+  for (const [name, reply] of [["not a number", "not-a-score"], ["a number's text cut short", "17e"], ["an empty text", ""], ["a list", ["1"]], ["a missing reply (undefined)", undefined], ["zero", 0], ["a negative number", -1], ["zero's text", "0"]] as [string, unknown][]) {
     part(`closingOf: the final line's score is ${name}`);
     await redisPipeline([["DEL", key]]);
     answers(zscore, reply);
@@ -149,6 +149,19 @@ async function main(): Promise<void> {
   is("refused as unknown, never taken for a store not in its closing day", running, { ok: false, error: "UnknownReplyError" });
   is("its closing record is not deleted, nor its place in the final line", [await raw(key), (await pipe([["ZSCORE", FINAL_INDEX, ref]]))[0]], [kept, String(plan)]);
   await redisPipeline([["ZREM", FINAL_INDEX, ref]]);
+
+  // A plan end time is a positive number: 0 or a negative score is unknown (the rule of closingScore, lib/closing-holds.ts).
+  for (const [name, reply] of [["zero", 0], ["a negative number", -1], ["zero's text", "0"]] as [string, unknown][]) {
+    part(`closeOne: the final line's score is ${name}`);
+    await redisPipeline([["SET", key, kept], ["ZADD", FINAL_INDEX, plan, ref]]);
+    calls = 0;
+    answers(zscore, reply);
+    const r = await settled(look(now));
+    restore();
+    is("refused as unknown, its closing day never gone through on it", r, { ok: false, error: "UnknownReplyError" });
+    is("nothing asked of Stripe, nothing shut, written or deleted", [calls, await raw(key), await raw(shutKey(shop.handle)), (await pipe([["ZSCORE", FINAL_INDEX, ref]]))[0]], [0, kept, null, String(plan)]);
+    await redisPipeline([["ZREM", FINAL_INDEX, ref]]);
+  }
 
   part("finishClosed, controls");
   const entry = { ref } as Batched;

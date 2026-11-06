@@ -185,11 +185,16 @@ function readState(raw: unknown): State {
   return parseState(raw);
 }
 
-/** A store's score in the final line (ZSCORE): null when it is not in it, the day its plan ended (ms), or UnknownReplyError. */
+/**
+ * A store's score in the final line (ZSCORE): null when it is not in it, the
+ * day its plan ended (ms), or UnknownReplyError. A plan end time is a positive
+ * number, so 0 or a negative score is unknown too, the same rule as
+ * closingScore (lib/closing-holds.ts).
+ */
 function finalScoreOf(raw: unknown): number | null {
   if (raw === null) return null;
   const value = typeof raw === "number" ? raw : typeof raw === "string" && /^-?(0|[1-9][0-9]*)(\.[0-9]+)?(e[+-]?[0-9]+)?$/i.test(raw) ? Number(raw) : Number.NaN;
-  if (!Number.isFinite(value)) throw new UnknownReplyError("a store's place in the final closing line");
+  if (!Number.isFinite(value) || value <= 0) throw new UnknownReplyError("a store's place in the final closing line");
   return value;
 }
 

@@ -173,12 +173,19 @@ export function ProductFacts({
   product,
   linkCourse = true,
   bundleItems = null,
+  videoLine = null,
 }: {
   store: Store;
   product: Listing;
   linkCourse?: boolean;
   /** For a bundle: what it hands over now (lib/bundles.ts, offeredItems). */
   bundleItems?: Listing[] | null;
+  /**
+   * For a course: how long its video runs, worked out by the code
+   * (lib/course-facts.ts, 292 [SQ3]); only the page that read it passes it,
+   * and null when any video's length is unknown.
+   */
+  videoLine?: string | null;
 }) {
   const pwyw = activePwyw(product);
   const options = sellableOptions(product);
@@ -227,6 +234,7 @@ export function ProductFacts({
       {course ? (
         <p className="mt-1 text-sm font-semibold">
           <span className="st-muted">{w.course(course.lessons)}</span>
+          {videoLine ? <span className="st-muted">{` · ${videoLine}`}</span> : null}
           {linkCourse ? (
             <>
               <span className="st-muted">{" · "}</span>

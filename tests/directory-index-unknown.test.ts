@@ -147,6 +147,43 @@ async function main(): Promise<void> {
   is("but that page is not kept", await kept(), null);
   is("the next read has the numbers again", (await readDirectory())[0]?.numbers !== null, true);
 
+  // Codex T on #2921 (LEVE): SSCAN may return a member more than once, within a page or across pages, by design.
+  // Every exact page was taken as is, so the same program was written twice into the directory and kept.
+  part("A member SSCAN returns twice is one program in the directory (RED)");
+  redis.clear();
+  await selling("baker@example.com", "breadhouse", "Bread House");
+  await selling("yoga@example.com", "yogaroom", "Yoga Room");
+  const [listed] = (await original([["SMEMBERS", "nl:dir:listed"]])) as [string[]];
+  const [first, second] = [...listed].sort();
+  await original([["DEL", DIRECTORY_CACHE]]);
+  let walk = 0;
+  redis.pipeline = (async (commands: Commands) => {
+    if (commands[0]?.[0] === "SSCAN") return ++walk === 1 ? [["5", [first, first, second]]] : [["0", [second, first]]];
+    return original(commands);
+  }) as typeof redis.pipeline;
+  const once = await readDirectory();
+  redis.pipeline = original;
+  is("each program is one row", once.map((row) => row.handle).sort(), ["breadhouse", "yogaroom"]);
+  is("and the page kept has each once", (JSON.parse(String(await kept())) as { handle: string }[]).map((row) => row.handle).sort(), ["breadhouse", "yogaroom"]);
+
+  // Codex T on #2921 (LEVE): a cursor of the right type but not a cursor (not a string of digits) was taken as one,
+  // so ["", []] or ["abc", []] ended or misled the walk and an empty directory was written. It is unknown.
+  part("A cursor that is not a string of digits is unknown (RED)");
+  for (const [label, cursor] of [["empty", ""], ["letters", "abc"], ["negative", "-1"], ["a fraction", "1.5"], ["a space before", " 0"], ["a newline after", "0\n"]] as const) {
+    answering("SSCAN", [cursor, []]);
+    is(`SSCAN with a cursor ${label} throws`, await failure(() => listedStores()), "UnknownReplyError");
+    await original([["DEL", DIRECTORY_CACHE]]);
+    // The bad cursor once, then an exact last page, so a walk that took it as a cursor ends instead of looping here.
+    let scan = 0;
+    redis.pipeline = (async (commands: Commands) => {
+      if (commands[0]?.[0] === "SSCAN") return ++scan === 1 ? [[cursor, []]] : [["0", []]];
+      return original(commands);
+    }) as typeof redis.pipeline;
+    is(`and readDirectory with a cursor ${label} throws, keeping nothing`, [await failure(() => readDirectory()), await kept()], ["UnknownReplyError", null]);
+    redis.pipeline = original;
+  }
+  is("a cursor of digits is still a page", (await listedStores("0")).next, "0");
+
   done();
 }
 

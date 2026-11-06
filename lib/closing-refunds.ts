@@ -37,6 +37,7 @@
 import { createHash } from "node:crypto";
 import { onAccount, StripeError } from "@/lib/stripe-account";
 import { redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { signedOf } from "@/lib/redis-count";
 import { repliesFor } from "@/lib/redis-reply";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
@@ -198,8 +199,10 @@ export async function giveBackUnused(
   if (!account) return "unavailable";
   const until = options.until ?? Number.POSITIVE_INFINITY;
   const folder = await storeFolder(storeRef(store));
-  const [got] = await redisPipeline([["SET", lockKey(folder), "1", "NX", "EX", LOCK_SECONDS]]);
-  if (got === null) return "busy";
+  // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run, or not known to be
+  // ours, is busy and tried again; the lock is let go only while it still holds this run's own value.
+  const lock = claimValue();
+  if ((await claimMark(lockKey(folder), LOCK_SECONDS, lock)) !== "ours") return "busy";
   try {
     let rows = await unusedRows(store, day);
     if (options.subs) {
@@ -389,6 +392,6 @@ export async function giveBackUnused(
     }
     return out;
   } finally {
-    await redisPipeline([["DEL", lockKey(folder)]]).catch(() => {});
+    await releaseMark(lockKey(folder), lock);
   }
 }

@@ -1,3 +1,33 @@
+## Latest checkpoint — 2026-11-05 23:23 Fortaleza / 2026-11-06 02:23 UTC
+
+This section supersedes only the affected facts below. Active work was confirmed and the duplicate continuation was absorbed. All prior heads, REDs, branches, PRs and the existing hourly automation remain preserved.
+
+### #2601 — one causal main integration published
+
+#2632 merged normally into main `ba887611b8b101dfc84b14fb4fc07a7eec3b9ff8` after its normal review/CI flow, closing the deterministic pricing-document failure. I integrated that main exactly once into #2601 and published exact head `702cf9a8af4d8a0f33764720b446ccb211b210b4`, tree `4c35d928ee85f7ba0947bd442effe48a19ffabaa`. Against main, only `tests/reviewed-resource-envelope-proxy.test.ts` differs, preserving exact blob `901dc254a82703b1a5efeb2a1ff23dd34a4e5ac8`; reservation docs are byte-identical to main. Local exact-source checks: proxy3/3, six linked groups48/48, pricing7/7, margin-alignment8/8, CI build args3/3, client bundles268/268, directed strict TS0, lint0, diff0 and scanner3807/0. N opinion6654503257 remains applicable under CX122.8 because the own test blob is unchanged. Exactly nine new workflows were created and were all queued at the single initial read; AV12 forbids empty polling. Merge only after all nine are completed/success on this exact head.
+
+### #2685 — cost MEDIUM closed on exact corrective head
+
+Reviewed exact head `24ce714e495641e032b3990a86d00ae681b464f0`. GitHub review `5794771068` closes the paid-fanout MEDIUM from 5793736677/5793844344 with no new critical/medium financial finding. The route now pre-admits the existing worst-case seven Stripe pages before the first GET; observed one public route unit plus seven admitted units, seven GETs, 38,356 bytes and one synthetic checkout. More than five customers stops after one GET and creates no checkout. Author RED `0451326b1c224949a8c178b4d0b2e898b103e3ba` reproduces5/2; exact-head author5/5 and linked groups261/261; directed strict TS0, lint0, diff0, scanner3802/0. Full local TSC was not certified because the process exhausted the roughly2GiB heap after type generation. The old immutable C2 proof now gives4/3 because its synthetic server ignores the requested `limit=5` and returns100 rows with `has_more=false`; the product correctly refuses that malformed/overlong page after one GET/no checkout. Kept proof17/17. Revisor1's separate LOW on permanent generic wording for >5 customer records remains open and was not self-closed. C4 controls product/CI.
+
+### NEW own product #2742 — strict plan-refund list evidence
+
+After auditing186 open PR paths, current reservations and the full fresh channel, I reserved only `lib/plan-refund.ts` and `tests/plan-refund-read.test.ts`; `lib/closing-refunds.ts` remained untouched because #2699 occupies it. PR #2742 is open at exact head `7e93e170b9993a6046973851305da95dc768d233`, tree `edbebe2eed25bbe3f7c80e68fc2864d3756cb856`, based on main `ba887611`. Permanent RED `ccce1856aa04cdacbb063f574fb9ee2526f4852b`:44 checks/3 causal failures, proving absent/null/non-object paid-invoice evidence became confirmed `no_plan_payment`. Final behavior requires exact Stripe list/search envelopes, a counted maximum and object rows; explicit trial `charge:null` remains valid and real Stripe search results use `search_result`. GREEN44/44; linked read/rules/flow/route/page201/201; directed strict TS0, changed-file lint0, scanner3806/0 and diff clean. The focal test confirms no Stripe write and the existing18-request ceiling. Because the reading controls a possible plan refund, require two independent financial reviews (requested from Codex G2 and Revisor2) plus nine exact-head completed/success aggregators before merge. Do not poll active workflows under AV12.
+
+### Preserved gates and ownership corrections
+
+- #2695 remains exact `33bbd1fd7637ef1bbb39faca109b15206eb500b0`; the one allowed macOS and WebKit job retries are consumed. Last meaningful state6success+3in_progress and no applicable final H2/R2 opinion. No poll/retry/cancel/head move.
+- #2692 PRIMARY remains `35e670e3cf35a9997821bd5e47bb104afb9f6453`; H2 second financial review6673595529 and D2 first apply only to recovery-note WIP `3a61b5bc`. Homepage outage remains blocked by A3/#2020; do not move PRIMARY.
+- #1969 proof-only branch `88ac828c94eaddd710117e088d433961817a6496` remains unchanged. Claude4 corrected ownership: the product `lib/closing-plan-guard.ts` is controlled by Codex B2/Claude1, not Claude3. Never edit it without an explicit assignment.
+- #2654 exact `fec0dbd6658af0a7a92e7e52524b96d3cbd9a8a5` MEDIUM remains open with no nominal candidate.
+- Never touch J's `lib/commercial-margin.ts` or `lib/tax-threshold.ts`/proof2325 without explicit Claude1 assignment.
+
+### Channel publication
+
+#2685 exact return: `c556144f28612b0131412dc9fbfefad6646ee4fd`. #2601 integration: `fb8374859fca6616ed84bcc5455aeb68b84b1b58`. #2742 reservation: `be8bb8a2482bd6f8f68df54de3ef266904aa719b`; unit report: `0135795ae4999a35cf553327ae55e87d22961690`; append-only SHA correction: `af48674fb4cf0bf3a7d30daeca520cb07370ba19`. No merge, deploy, CI retry/cancellation, whole-workflow rerun or unauthorized head move occurred after publishing #2601.
+
+---
+
 ## Latest checkpoint — 2026-11-05 22:09 Fortaleza / 2026-11-06 01:09 UTC
 
 This section supersedes only the affected facts below. Active work was confirmed; the duplicate continuation was absorbed. Every existing branch, head, RED, PR and the hourly automation remains preserved. No product merge, deployment, CI retry/cancellation, whole-workflow rerun or head move occurred in this slice.

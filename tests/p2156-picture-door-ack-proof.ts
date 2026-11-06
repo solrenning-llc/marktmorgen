@@ -6,13 +6,12 @@ import { notePictureDoor, takePictureDoor } from "@/lib/picture-door";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
-type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
 const PATH = `images/${"a".repeat(24)}/${"b".repeat(32)}.jpg`;
 const NOW = 1_800_000_000_000;
 
 async function withReply<T>(reply: unknown, run: () => Promise<T>): Promise<T> {
-  redis.pipeline = (async (_commands: Command[]) => reply) as typeof redis.pipeline;
+  redis.pipeline = (async () => reply) as typeof redis.pipeline;
   try {
     return await run();
   } finally {

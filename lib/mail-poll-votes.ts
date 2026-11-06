@@ -1,7 +1,8 @@
 /**
  * The answers to a poll in a one-off email (125 [F2-EMAIL-POLLS], unit 1;
- * added 6 November 2026). The poll is written in the email
- * (lib/mail-poll.ts); this is what its answers keep and who may give one.
+ * added 6 November 2026) or in a sequence's email (unit 2, the same day).
+ * The poll is written in the email (lib/mail-poll.ts); this is what its
+ * answers keep and who may give one.
  *
  *   - Each reader's copy carries their own links: a key for the reader made
  *     from the list and their address with a secret (it cannot be turned
@@ -16,12 +17,23 @@
  *     while the poll is open.
  *   - Open POLL_OPEN_DAYS from the first send, then closed; everything it
  *     keeps is gone by itself POLL_KEEP_DAYS later.
+ *   - A sequence's email goes out day after day, so its poll is counted in
+ *     rounds of SEQUENCE_POLL_ROUND_DAYS (sequencePollId): each round is a
+ *     poll of its own, open until POLL_OPEN_DAYS after the round's last day
+ *     (every reader has at least that long) and gone whole
+ *     SEQUENCE_POLL_KEEP_DAYS after it closed, never more than 90 days after
+ *     its first email, as a one-off email's. Its id is made from the step,
+ *     the round and the words, so a poll edited in the step is a new poll
+ *     and no answer is ever counted against other words. Once a round is
+ *     written down, each later email of it reads only whether it is there
+ *     (openSequencePoll): one EXISTS.
  *   - The creator sees the totals only (pollResults), never who picked what.
  *   - Each page and each answer is one of the store's public requests
  *     (lib/traffic.ts, takePublicRequest), taken before anything is read or
  *     written; a refused one records nothing.
  *
- *   nl:mpoll:<list>:<poll>     the poll: store, question, answers, when (JSON)
+ *   nl:mpoll:<list>:<poll>     the poll: store, question, answers, when, and
+ *                              for a sequence's round its step and end (JSON)
  *   nl:mpoll:v:<list>:<poll>   reader's key -> the place of their answer
  *   nl:mpoll:ix:<list>         the list's polls, by when they were first sent,
  *                              at most MAX_POLLS_KEPT; the oldest goes whole
@@ -29,7 +41,7 @@
  * Deleted with the person (forgetPollPerson, lib/person-erasure.ts) and with
  * the store: every key is named by its list (lib/data-families.ts, CLOSING).
  */
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { deriveKey } from "@/lib/secret-box";
@@ -42,9 +54,16 @@ export const POLL_OPEN_DAYS = 30;
 export const POLL_KEEP_DAYS = 60;
 /** The polls a list keeps at once; a new one beyond them deletes the oldest whole. */
 export const MAX_POLLS_KEPT = 20;
-/** What one poll's record weighs at the most: its key, the store's handle, its question, its answers and two times, as JSON. */
-export const POLL_RECORD_BYTES = 64 + 64 + MAX_POLL_QUESTION * 4 + MAX_POLL_ANSWERS * (MAX_POLL_ANSWER * 4 + 8) + 64;
+/** A sequence's poll is one a round of this many days (sequencePollId). */
+export const SEQUENCE_POLL_ROUND_DAYS = 30;
+/** How long a sequence's round keeps its totals once it closed: the round, its open days and these are POLL_OPEN_DAYS + POLL_KEEP_DAYS at the most. */
+export const SEQUENCE_POLL_KEEP_DAYS = POLL_OPEN_DAYS + POLL_KEEP_DAYS - SEQUENCE_POLL_ROUND_DAYS - POLL_OPEN_DAYS;
+/** What one poll's record weighs at the most: its key, the store's handle, its question, its answers, three times and a sequence's step, as JSON. */
+export const POLL_RECORD_BYTES = 64 + 64 + MAX_POLL_QUESTION * 4 + MAX_POLL_ANSWERS * (MAX_POLL_ANSWER * 4 + 8) + 64 + 64;
 const POLL_SECONDS = (POLL_OPEN_DAYS + POLL_KEEP_DAYS) * 86_400;
+const ROUND_SECONDS = SEQUENCE_POLL_ROUND_DAYS * 86_400;
+/** A sequence's email's campaign (lib/mail-links.ts, stepCampaign): its workflow and its step. */
+const SEQUENCE_CAMPAIGN = /^s-[0-9a-f]{16}-[0-9a-f]{16}$/;
 
 export const POLL_ID = /^[0-9a-f]{24}$/;
 export const POLL_LIST = /^[0-9a-f]{32}$/;
@@ -97,8 +116,8 @@ export function readBallot(query: { [key: string]: string | string[] | undefined
   return { listId, pollId, voter, signature, answer };
 }
 
-/** A poll as it is kept. */
-export type PollRecord = MailPoll & { handle: string; at: number; closes: number };
+/** A poll as it is kept: `until` is when all of it is gone; `campaign` is a sequence's step, for a round of its poll. */
+export type PollRecord = MailPoll & { handle: string; at: number; closes: number; until: number; campaign?: string };
 
 function parseRecord(raw: unknown): PollRecord | null | "bad" {
   if (raw === null || raw === undefined) return null;
@@ -106,7 +125,10 @@ function parseRecord(raw: unknown): PollRecord | null | "bad" {
     const value = JSON.parse(String(raw)) as Record<string, unknown>;
     const answers = Array.isArray(value.a) ? value.a.filter((a): a is string => typeof a === "string") : [];
     if (typeof value.h !== "string" || typeof value.q !== "string" || answers.length < 2 || answers.length !== (value.a as unknown[]).length || !Number.isSafeInteger(value.at) || !Number.isSafeInteger(value.closes)) return "bad";
-    return { handle: value.h, question: value.q, answers, at: value.at as number, closes: value.closes as number };
+    if (value.u !== undefined && !Number.isSafeInteger(value.u)) return "bad";
+    if (value.c !== undefined && (typeof value.c !== "string" || !SEQUENCE_CAMPAIGN.test(value.c))) return "bad";
+    const at = value.at as number;
+    return { handle: value.h, question: value.q, answers, at, closes: value.closes as number, until: value.u === undefined ? at + POLL_SECONDS : (value.u as number), ...(typeof value.c === "string" ? { campaign: value.c } : {}) };
   } catch {
     return "bad";
   }
@@ -116,14 +138,16 @@ function parseRecord(raw: unknown): PollRecord | null | "bad" {
  * Writes the poll down before its email goes, once (a later batch finds it
  * there), and keeps its place in the list's polls, deleting the oldest past
  * MAX_POLLS_KEPT. Says whether the poll as it is now kept is this one; when
- * it cannot say, the email does not go.
+ * it cannot say, the email does not go. `round` is a sequence's round
+ * (openSequencePoll): its step, when it closes and when it is gone.
  */
-export async function openPoll(listId: string, handle: string, pollId: string, poll: MailPoll, now = Math.floor(Date.now() / 1000)): Promise<boolean> {
+export async function openPoll(listId: string, handle: string, pollId: string, poll: MailPoll, now = Math.floor(Date.now() / 1000), round?: { campaign: string; closes: number; until: number }): Promise<boolean> {
   if (!POLL_LIST.test(listId) || !POLL_ID.test(pollId) || !isRedisConfigured() || !deriveKey("mail-poll")) return false;
+  if (round && (!SEQUENCE_CAMPAIGN.test(round.campaign) || round.closes <= now || round.until <= round.closes || round.until - now > POLL_SECONDS)) return false;
   try {
-    const record = JSON.stringify({ h: handle, q: poll.question, a: poll.answers, at: now, closes: now + POLL_OPEN_DAYS * 86_400 });
+    const record = JSON.stringify(round ? { h: handle, q: poll.question, a: poll.answers, at: now, closes: round.closes, u: round.until, c: round.campaign } : { h: handle, q: poll.question, a: poll.answers, at: now, closes: now + POLL_OPEN_DAYS * 86_400 });
     const [, kept] = await redisPipeline([
-      ["SET", recordKey(listId, pollId), record, "NX", "EX", POLL_SECONDS],
+      ["SET", recordKey(listId, pollId), record, "NX", "EX", round ? round.until - now : POLL_SECONDS],
       ["GET", recordKey(listId, pollId)],
       ["ZADD", indexKey(listId), "NX", now, pollId],
       ["EXPIRE", indexKey(listId), POLL_SECONDS],
@@ -146,6 +170,44 @@ export async function openPoll(listId: string, handle: string, pollId: string, p
   } catch {
     return false;
   }
+}
+
+/** The round a sequence's email sent at `now` belongs to: when its poll closes and when all of it is gone. */
+export function sequenceRound(now: number): { round: number; closes: number; until: number } {
+  const round = Math.floor(now / ROUND_SECONDS);
+  const closes = (round + 1) * ROUND_SECONDS + POLL_OPEN_DAYS * 86_400;
+  return { round, closes, until: closes + SEQUENCE_POLL_KEEP_DAYS * 86_400 };
+}
+
+/**
+ * The id of a sequence's poll for the round an email sent at `now` is in:
+ * made from the list, the step (its campaign, lib/mail-links.ts), the round
+ * and the poll's words. Null for anything but a sequence's email.
+ */
+export function sequencePollId(listId: string, campaign: string, poll: MailPoll, now: number): string | null {
+  if (!POLL_LIST.test(listId) || !SEQUENCE_CAMPAIGN.test(campaign)) return null;
+  const { round } = sequenceRound(now);
+  return createHash("sha256").update(JSON.stringify(["mail-poll-round", listId, campaign, round, poll.question, poll.answers])).digest("hex").slice(0, 24);
+}
+
+/**
+ * Before a sequence's email with a poll goes: the round's poll is there, or
+ * written down now (openPoll). Its id names its step, round and words, so
+ * one already there is this one: a later email of the round reads only that
+ * (one EXISTS). False when it cannot say: then the email does not go.
+ */
+export async function openSequencePoll(listId: string, handle: string, campaign: string, poll: MailPoll, now = Math.floor(Date.now() / 1000)): Promise<boolean> {
+  const pollId = sequencePollId(listId, campaign, poll, now);
+  if (!pollId || !isRedisConfigured() || !deriveKey("mail-poll")) return false;
+  try {
+    const [there] = await redisPipeline([["EXISTS", recordKey(listId, pollId)]]);
+    if (there === 1 || there === "1") return true;
+    if (!(there === 0 || there === "0")) return false;
+  } catch {
+    return false;
+  }
+  const { closes, until } = sequenceRound(now);
+  return openPoll(listId, handle, pollId, poll, now, { campaign, closes, until });
 }
 
 /** The poll a ballot is for: null when it is gone (closed and kept no more), "failed" when it could not be read. */
@@ -182,7 +244,7 @@ export async function castVote(ballot: Ballot, record: PollRecord, now = Math.fl
   try {
     const [set] = await redisPipeline([
       ["HSETNX", votesKey(ballot.listId, ballot.pollId), ballot.voter, ballot.answer],
-      ["EXPIREAT", votesKey(ballot.listId, ballot.pollId), record.at + POLL_SECONDS],
+      ["EXPIREAT", votesKey(ballot.listId, ballot.pollId), record.until],
     ]);
     if (Number(set) === 1 && set !== null) return "recorded";
     if (Number(set) === 0 && set !== null) return "already";
@@ -206,7 +268,7 @@ export async function withdrawVote(ballot: Ballot, record: PollRecord, now = Mat
 }
 
 /** One poll's totals, as the studio shows them: never who picked what. */
-export type PollResult = { id: string; question: string; answers: { text: string; count: number }[]; total: number; at: number; closes: number; closed: boolean };
+export type PollResult = { id: string; question: string; answers: { text: string; count: number }[]; total: number; at: number; closes: number; closed: boolean; campaign?: string };
 
 /** The list's polls, newest first, with their totals; null when they could not be read whole. */
 export async function pollResults(listId: string | null): Promise<PollResult[] | null> {
@@ -226,7 +288,7 @@ export async function pollResults(listId: string | null): Promise<PollResult[] |
         const answer = Number(raw);
         if (Number.isSafeInteger(answer) && answer >= 0 && answer < counts.length) counts[answer] += 1;
       }
-      out.push({ id, question: record.question, answers: record.answers.map((text, k) => ({ text, count: counts[k] })), total: counts.reduce((a, b) => a + b, 0), at: record.at, closes: record.closes, closed: pollClosed(record) });
+      out.push({ id, question: record.question, answers: record.answers.map((text, k) => ({ text, count: counts[k] })), total: counts.reduce((a, b) => a + b, 0), at: record.at, closes: record.closes, closed: pollClosed(record), ...(record.campaign ? { campaign: record.campaign } : {}) });
     }
     return out;
   } catch {

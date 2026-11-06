@@ -30,6 +30,7 @@ import { HEALTH_NOTE, healthAdvice, healthLevels, healthLine } from "@/lib/mail-
 import { PRO_MONTHLY_EMAILS, PRO_ON_SALE, hasPro, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";
 import { EmailStudio } from "@/components/email-studio";
 import { MailPollResults } from "@/components/mail-poll-results";
+import { stepCampaign } from "@/lib/mail-links";
 import { emailEquivalence } from "@/lib/email-equivalence";
 import { readForms } from "@/lib/form-store";
 import { readFields, readPipelines } from "@/lib/crm";
@@ -316,8 +317,8 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             }}
             assignees={can(role, "send") ? [store.email.toLowerCase(), ...(await readTeam(store.sid).catch(() => ({ members: [] as { email: string; role: Parameters<typeof can>[0] }[] }))).members.filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())] : []}
           />
-          {/* The totals of the polls in its one-off emails, never who picked what (lib/mail-poll-votes.ts). */}
-          <MailPollResults listId={store.listId} subjects={new Map(broadcasts.map((b) => [b.id, b.subject]))} />
+          {/* The totals of the polls in its one-off emails and sequences, never who picked what (lib/mail-poll-votes.ts). */}
+          <MailPollResults listId={store.listId} subjects={new Map([...broadcasts.map((b) => [b.id, b.subject] as const), ...flows.flatMap((f) => f.steps.filter((st) => !st.action).map((st) => [stepCampaign(f.id, st.id), st.subject] as const))])} />
           </>
         )}
       </main>

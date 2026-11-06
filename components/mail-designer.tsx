@@ -65,7 +65,7 @@ export function MailBodyEditor({
   rows?: number;
   /** The text box, for "Add a picture" to put the picture where the cursor is. */
   boxRef?: (el: HTMLTextAreaElement | null) => void;
-  /** Whether this email may hold a poll (lib/mail-poll.ts): a one-off email may, a sequence's not yet. */
+  /** Whether this email may hold a poll (lib/mail-poll.ts): a one-off email's and a sequence's may; a test or a preview draws it with links that record nothing. */
   polls?: boolean;
 }) {
   const accent = useContext(MailAccent);

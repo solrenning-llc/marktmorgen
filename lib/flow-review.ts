@@ -2,7 +2,7 @@ import { goalClash, MAX_FLOW_WAIT_HOURS, readsEmailBefore } from "@/lib/flow-rul
 import { MAX_STEPS } from "@/lib/flow-limits";
 import { END, checkRoutes } from "@/lib/flow-paths";
 import { hasPlaceholder } from "@/lib/mail-body";
-import { hasPoll } from "@/lib/mail-poll";
+import { pollProblem } from "@/lib/mail-poll";
 import { fieldValue, isFieldType } from "@/lib/crm-rules";
 import type { Flow } from "@/lib/flows";
 
@@ -41,7 +41,8 @@ export function flowConfigurationIssues(flow: Flow, context: FlowReviewContext):
     if (readsEmailBefore(step.when) && (index === 0 || flow.steps[index - 1].action)) issues.push(prefix + "This click condition needs an email immediately before it. Move it after an email or choose another condition.");
     if (!Number.isInteger(step.delayHours) || step.delayHours < 0 || step.delayHours > MAX_FLOW_WAIT_HOURS) issues.push(prefix + "Choose a valid wait from zero to 365 days, in whole hours.");
     if (hasPlaceholder(JSON.stringify(step))) issues.push(prefix + "Replace the template placeholders in this step before saving or activating.");
-    if (!step.action && hasPoll(step.body)) issues.push(prefix + "A poll can go in a one-off email, not in a sequence yet. Take the poll out of this step.");
+    const poll = step.action ? null : pollProblem(step.body);
+    if (poll) issues.push(prefix + poll);
     if (!step.action && (!step.subject.trim() || !step.body.trim())) issues.push(prefix + "Complete the email subject and content before activating.");
     if (step.when && "productId" in step.when) {
       const course = ["started", "unstarted", "finished", "unfinished"].includes(step.when.if);

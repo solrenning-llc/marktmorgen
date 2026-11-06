@@ -71,7 +71,7 @@ const MESSAGES: Record<string, string> = {
   route: "A branch must go forward: choose a later step of this workflow, or the end.",
   active_limit: "Your plan has as many workflows switched on as it allows. Pause one first, or save this one paused.",
   email: "Type an email address.",
-  step: "Every email needs a subject, some text, and a wait of up to a year. A condition needs its product, or its label, and one on the email before needs an email right before it. A label needs its words, and another sequence has to still be there. A field needs a value it keeps, a deal a stage, a note its words, and a next action its words (up to 200 characters), due in 0 to 365 days.",
+  step: "Every email needs a subject, some text, and a wait of up to a year. A condition needs its product, or its label, and one on the email before needs an email right before it. A label needs its words, and another sequence has to still be there. A field needs a value it keeps, a deal a stage, a note its words, and a next action its words (up to 200 characters), due in 0 to 365 days. A poll needs one question after @poll, then 2 to 5 different answers, one a line starting with \"- \".",
   tag: "Write the label that starts the sequence.",
   form: "Choose one of your forms that asks for an email address.",
   stage: "Choose one of your pipelines' stages.",
@@ -2855,6 +2855,7 @@ function Flows({
                   <MailBodyEditor
                     body={s.body}
                     rows={6}
+                    polls
                     onChange={(next) => setStep(s.editorKey, { body: next })}
                     boxRef={(el) => {
                       stepBoxes.current[i] = el;

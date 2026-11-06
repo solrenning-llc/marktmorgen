@@ -30,7 +30,7 @@ import { creatorAddress } from "@/lib/mail-from";
 import { type MailTag, taggedLink } from "@/lib/mail-links";
 import { rememberLinkKeys } from "@/lib/mail-clicks";
 import { hasPoll, pollProblem, readPoll, withPollLinks } from "@/lib/mail-poll";
-import { openPoll, voteLinks } from "@/lib/mail-poll-votes";
+import { openPoll, openSequencePoll, sequencePollId, voteLinks } from "@/lib/mail-poll-votes";
 import { pollWords } from "@/lib/buyer-words/mail-poll";
 import { type Pause, healthId, healthTags, noteSent, pauseForSending, rampBack, rampRoom } from "@/lib/mail-health";
 import { affiliatesWords } from "@/lib/buyer-words/affiliates";
@@ -516,14 +516,18 @@ export async function sendTo(
   keyBase: string,
   /** Which email this is, so a sale from one of its links can be counted for it (lib/mail-links.ts). */
   tag?: MailTag,
-  /** The poll's id when the email holds one (lib/mail-poll.ts): a one-off email's own id. */
+  /** The poll's id when the email holds one (lib/mail-poll.ts): a one-off email's own id. A sequence's is its step's round's (below). */
   pollId?: string,
 ): Promise<SendOutcome> {
   const done: string[] = [];
   // A poll goes only as it can be answered: written down first, each reader's links signed (lib/mail-poll-votes.ts).
   // One that cannot be is never sent as raw text: nothing goes.
   const poll = hasPoll(body) ? readPoll(body) : null;
-  if (hasPoll(body) && (!poll || pollProblem(body) !== null || !pollId || !store.listId)) return { done, rest: emails, stopped: "refused" };
+  // A sequence's email has no id of its own: its poll is its step's, one a round, read at this one moment.
+  const sentAt = Math.floor(Date.now() / 1000);
+  const sequence = !pollId && poll && tag?.medium === "sequence" && store.listId ? tag.campaign : null;
+  const ballotPoll = pollId ?? (sequence ? sequencePollId(store.listId as string, sequence, poll as NonNullable<typeof poll>, sentAt) : null);
+  if (hasPoll(body) && (!poll || pollProblem(body) !== null || !ballotPoll || !store.listId)) return { done, rest: emails, stopped: "refused" };
   // A store whose addresses turned out to be bad ones waits its week out
   // (lib/mail-health.ts). Nothing is taken from its month for it.
   const watched = healthId(store);
@@ -532,7 +536,7 @@ export async function sendTo(
   if (pause === undefined) return { done, rest: emails, stopped: "retry" };
   if (pause) return { done, rest: emails, stopped: "paused", pause };
   const tags = healthTags(store, true, tag?.campaign);
-  if (poll && !(await openPoll(store.listId as string, store.handle, pollId as string, poll))) return { done, rest: emails, stopped: "retry" };
+  if (poll && !(await (sequence ? openSequencePoll(store.listId as string, store.handle, sequence, poll, sentAt) : openPoll(store.listId as string, store.handle, ballotPoll as string, poll)))) return { done, rest: emails, stopped: "retry" };
   const pollNote = poll ? pollWords(store.language).emailNote(store.mail?.fromName || store.name) : "";
   for (let i = 0; i < emails.length; ) {
     const room = await dailyRoom();
@@ -555,7 +559,7 @@ export async function sendTo(
     const links = new Map<string, string[]>();
     if (poll) {
       for (const email of chunk) {
-        const own = voteLinks(store.listId as string, pollId as string, email, poll.answers.length);
+        const own = voteLinks(store.listId as string, ballotPoll as string, email, poll.answers.length);
         if (!own) {
           await release(store, chunk.length);
           await rampBack(watched, chunk.length);

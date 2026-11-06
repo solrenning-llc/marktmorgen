@@ -63,6 +63,15 @@ export async function listedAlready(sessionIds: string[]): Promise<(boolean | nu
  * on its own. Never throws.
  */
 export async function listOrder(store: Store, order: ListedOrder): Promise<"done" | "already" | "skip"> {
+  const outcome = await putOnList(store, order);
+  return outcome === "failed" ? "skip" : outcome;
+}
+
+/**
+ * listOrder, saying apart what it could not do (Codex G on #2719): "failed" when the claim or a write was not known
+ * to land, so a run counts it; "skip" only when there is nothing to do here. The checkout sweep reads this one.
+ */
+export async function putOnList(store: Store, order: ListedOrder): Promise<"done" | "already" | "skip" | "failed"> {
   if (!store.listId || !order.email || !order.products.length || !isRedisConfigured()) return "skip";
   const key = listedKey(order.sessionId);
   // This run's own claim (lib/claim-mark.ts): OK, or answered in another shape with our value read back. Taken by
@@ -70,7 +79,8 @@ export async function listOrder(store: Store, order: ListedOrder): Promise<"done
   const value = claimValue();
   const claimed = await claimMark(key, WORKING_SECONDS, value);
   if (claimed === "taken") return "already";
-  if (claimed === "unknown") return "skip";
+  // Not known whether the claim landed (Codex G on #2719): "failed", not "skip", so a run counts it.
+  if (claimed === "unknown") return "failed";
   const products = order.products.filter((p, i) => order.products.findIndex((q) => q.id === p.id) === i);
   try {
     if (order.news) {
@@ -106,6 +116,6 @@ export async function listOrder(store: Store, order: ListedOrder): Promise<"done
     console.error("putting an order on the list failed", error);
     // Only our own claim is let go (Revisor 1 on #2719): one that ran out and was taken by another run stays its.
     await releaseMark(key, value);
-    return "skip";
+    return "failed";
   }
 }

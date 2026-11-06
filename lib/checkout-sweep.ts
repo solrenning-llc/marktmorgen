@@ -61,7 +61,7 @@ import { affiliateForCodes, codeOwners } from "@/lib/affiliate-codes";
 import { revokeRefunded, storeHasKeys } from "@/lib/licence-keys";
 import { markRefundedReviews, storeHasReviews } from "@/lib/review-proof";
 import { listensToSales, noteSales } from "@/lib/sale-events";
-import { listOrder, listedAlready } from "@/lib/buyer-list";
+import { putOnList, listedAlready } from "@/lib/buyer-list";
 import { rememberBuyers } from "@/lib/buyer-library";
 import { isHouseStore } from "@/lib/house-store";
 import { deliveredIds } from "@/lib/bundle-rules";
@@ -522,14 +522,17 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
         const email = typeof row.customer_details?.email === "string" ? row.customer_details.email : typeof row.customer_email === "string" ? row.customer_email : "";
         if (!email) continue;
         const products = await listingsNamed(store, row.metadata);
-        if ((await listOrder(store, {
+        const outcome = await putOnList(store, {
           sessionId: row.id as string,
           email,
           news: row.metadata?.news === "yes",
           clicks: row.metadata?.news === "yes" && row.metadata?.clicks === "yes",
           created: typeof row.created === "number" ? row.created : Math.floor(Date.now() / 1000),
           products: products.map((p) => ({ id: p.id, title: p.title })),
-        })) === "done") counts.listed += 1;
+        });
+        if (outcome === "done") counts.listed += 1;
+        // A claim or a write not known to have landed is said as failed (Codex G on #2719); a no-op or another run's work is not.
+        else if (outcome === "failed") counts.failed += 1;
       }
     }
 

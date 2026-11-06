@@ -31,6 +31,7 @@
  * script is written out whole, its sizes as numbers, so that test can run it
  * as it is; tests/order-data.test.ts holds them to the constants below.
  */
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, dataKey, giveData } from "@/lib/store-data";
 import { DATA_STEP_BYTES } from "@/lib/store-data-rules";
@@ -198,13 +199,38 @@ function scriptOf(room: string, commands: Command[]): (string | number)[] {
   return ["EVAL", ORDER_WRITE, keys.length, ...keys, ...argv];
 }
 
-/** What one script answered: what it charged, and each command's reply. Throws for a malformed call or a refused command, as redisPipeline does. */
-function readScript(reply: unknown, count: number): { charged: number; replies: unknown[] } {
-  if (!Array.isArray(reply) || reply.length !== count + 1 || !Number.isFinite(Number(reply[0])) || Number(reply[0]) < 0) throw new Error("an order's records could not be written");
+/**
+ * Whether one command's reply is in the exact shape that command answers when it ran (Codex G on #2719): a whole
+ * count for the counting writes, "OK" for SET (or nothing only when it was asked NX or XX), a number for ZINCRBY.
+ * Anything else, a null included, is not a write that landed.
+ */
+function replyFits(command: Command, reply: unknown): boolean {
+  const name = String(command[0]).toUpperCase();
+  const count = typeof reply === "number" && Number.isSafeInteger(reply);
+  const numeric = count || (typeof reply === "string" && reply.trim() !== "" && Number.isFinite(Number(reply)));
+  if (name === "SET") {
+    const conditional = command.slice(3).some((a) => ["NX", "XX"].includes(String(a).toUpperCase()));
+    return reply === "OK" || (conditional && (reply === null || reply === false));
+  }
+  if (name === "ZINCRBY") return numeric;
+  if (name === "ZADD" && command.slice(3).some((a) => String(a).toUpperCase() === "INCR")) return numeric || reply === null;
+  return count;
+}
+
+/**
+ * What one script answered: what it charged, and each command's reply. Throws for a malformed call, a refused
+ * command, or a reply not in its exact shape (Codex G on #2719: a charge that is not a whole count, or a command
+ * answered null, is not a write that landed, so no caller may take it as done).
+ */
+function readScript(reply: unknown, commands: Command[]): { charged: number; replies: unknown[] } {
+  if (!Array.isArray(reply) || reply.length !== commands.length + 1) throw new Error("an order's records could not be written");
+  const charged = reply[0];
+  if (typeof charged !== "number" || !Number.isSafeInteger(charged) || charged < 0) throw new UnknownReplyError("an order's write: what it charged");
   const replies = reply.slice(1);
   const failed = replies.find((r) => typeof r === "string" && r.startsWith(ORDER_WRITE_ERROR));
   if (failed) throw new Error(`Redis error: ${String(failed).slice(ORDER_WRITE_ERROR.length)}`);
-  return { charged: Number(reply[0]), replies: replies.map((r) => (r === false ? null : r)) };
+  if (replies.some((r, i) => !replyFits(commands[i], r))) throw new UnknownReplyError("an order's write: a command's reply");
+  return { charged, replies: replies.map((r) => (r === false ? null : r)) };
 }
 
 /**
@@ -224,7 +250,7 @@ export async function orderWriteCharged(owner: DataOwner, commands: Command[]): 
   for (let at = 0; at < commands.length; at += ORDER_WRITE_MAX) {
     const some = commands.slice(at, at + ORDER_WRITE_MAX);
     const [reply] = await redisPipeline([scriptOf(room, some)]);
-    const read = readScript(reply, some.length);
+    const read = readScript(reply, some);
     charged += read.charged;
     replies.push(...read.replies);
   }

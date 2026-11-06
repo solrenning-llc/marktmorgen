@@ -88,7 +88,7 @@ export function EmailCodeForm({ request }: { request: string }) {
           {problem}
         </p>
       </div>
-      <button type="submit" disabled={sending} className="btn btn-primary min-h-11 w-full">
+      <button type="submit" disabled={sending} className="btn btn-primary inline-flex min-h-11 w-full items-center justify-center">
         {sending ? "Checking the code…" : "Log in with the code"}
       </button>
     </form>

@@ -17,7 +17,7 @@
  *   - the tries are counted before the comparison and read in their exact
  *     shape: unknown refuses and opens nothing;
  *   - the code is kept only as a hash;
- *   - the field is labelled, takes the phone's one-time code, and says what
+ *   - the field is labeled, takes the phone's one-time code, and says what
  *     went wrong in a live region.
  */
 import { createElement } from "react";
@@ -174,7 +174,7 @@ async function main(): Promise<void> {
 
   part("The field");
   const html = renderToStaticMarkup(createElement(EmailCodeForm, { request: "a".repeat(64) }));
-  is("labelled \"Enter the 6-digit code\"", /<label[^>]*for="([^"]+)"[^>]*>Enter the 6-digit code<\/label>/.test(html), true);
+  is("labeled \"Enter the 6-digit code\"", /<label[^>]*for="([^"]+)"[^>]*>Enter the 6-digit code<\/label>/.test(html), true);
   const id = /<label[^>]*for="([^"]+)"/.exec(html)?.[1] ?? "";
   is("the label names the field", html.includes(`id="${id}"`), true);
   is("the phone's one-time code, a number pad, pasting allowed", [/autoComplete="one-time-code"|autocomplete="one-time-code"/.test(html), /inputMode="numeric"|inputmode="numeric"/.test(html), /onpaste|readonly/i.test(html)], [true, true, false]);

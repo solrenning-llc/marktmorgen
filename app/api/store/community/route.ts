@@ -53,6 +53,7 @@ import { alertCreator } from "@/lib/phone-alerts";
 import { award, levelOf, pointsOf } from "@/lib/community-points";
 import { restingAway, takeBuyerAction } from "@/lib/buyer-actions";
 import { DataRoomError } from "@/lib/store-data";
+import { memberLinksFromForm } from "@/lib/member-links";
 
 /** The most a form here may weigh: a full post with its picture's details. */
 const MAX_FORM_BYTES = 40_000;
@@ -135,14 +136,20 @@ export async function POST(request: NextRequest) {
     if (action === "profile") {
       if (!viewer.member) return back(`${home}/you`, "full");
       const name = cleanLine(form.get("name"), MAX_DISPLAY_NAME);
+      // Links to their profiles elsewhere (lib/member-links.ts), only from the
+      // page that draws the boxes and says so: a form without them (an older
+      // page still open) leaves the ones kept as they are.
+      const sentLinks = form.get("links") === "1" ? memberLinksFromForm(form.getAll("link")) : null;
       await setProfile(id, viewer.member, {
         name,
         dir: form.get("dir") === "1",
         mail: form.get("mail") === "1",
         // The creator's questions, when there are any (the page sends one field per question).
         ...(config.questions.length ? { answers: form.getAll("answer").map(String), questions: config.questions } : {}),
+        ...(sentLinks ? { links: sentLinks.links } : {}),
       }, store);
-      return back(`${home}/you`, "saved");
+      // The rest is saved; a link turned away is said, never dropped quietly.
+      return back(`${home}/you`, sentLinks && sentLinks.refused ? "savedlinkoff" : "saved");
     }
 
     if (!viewer.canWrite) return back(fromPage, viewer.member?.muted ? "muted" : "full");

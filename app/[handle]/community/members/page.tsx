@@ -12,6 +12,7 @@ import { CommunityBar, CreatorBadge, Face, LevelBadge } from "@/components/commu
 import { levelOf, pointsOf } from "@/lib/community-points";
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
+import { MEMBER_LINK_REL, memberLinkLabels, shownLinks } from "@/lib/member-links";
 
 type Params = { params: Promise<{ handle: string }>; searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
@@ -28,8 +29,10 @@ function joined(seconds: number, locale: string): string {
 
 /**
  * Who is here: the creator, then every member who chose to be listed, by the
- * name they chose, newest first. Never an address: the directory has none to
- * show, because a member's record is read for their name and nothing else.
+ * name they chose, newest first, with the links to their profiles elsewhere
+ * they added (lib/member-links.ts). Never an address: the directory has none
+ * to show, because a member's record is read for their name and their links
+ * and nothing else.
  */
 export default async function CommunityMembersPage({ params, searchParams }: Params) {
   const { handle: raw } = await params;
@@ -62,6 +65,33 @@ export default async function CommunityMembersPage({ params, searchParams }: Par
           {w.messageLink}
         </Link>
       </p>
+    );
+  };
+
+  // A member's links to their profiles elsewhere, only while they may be
+  // shown. Each is named by whose profile it is and where, and opens in this
+  // tab, telling the other site nothing about where the reader came from.
+  const profileLinks = (m: (typeof page.members)[number]) => {
+    const links = shownLinks(m);
+    if (!links.length) return null;
+    const labels = memberLinkLabels(links);
+    return (
+      // Eight pixels apart across and twenty down, so the 44px each press gets
+      // (globals.css, .cm-mini) never overlaps a neighbor's, even wrapped at 320px.
+      <ul aria-label={w.linksOf(m.n)} className="mt-1 flex flex-wrap gap-x-2 gap-y-5">
+        {links.map((link, i) => (
+          <li key={link.url}>
+            <a
+              href={link.url}
+              rel={MEMBER_LINK_REL}
+              aria-label={w.linkOn(m.n, labels[i])}
+              className="cm-quiet-link cm-mini text-xs font-semibold underline underline-offset-4"
+            >
+              {labels[i]}
+            </a>
+          </li>
+        ))}
+      </ul>
     );
   };
 
@@ -105,6 +135,7 @@ export default async function CommunityMembersPage({ params, searchParams }: Par
                   <LevelBadge level={levelOf(points.get(m.k) ?? 0)} store={store} />
                 </p>
                 <p className="st-muted text-sm">{w.joined(joined(m.at, locale))}</p>
+                {profileLinks(m)}
                 {writeTo(m.k)}
               </div>
             </li>

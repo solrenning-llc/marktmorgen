@@ -16,7 +16,7 @@ export async function redisPipeline(commands: (string | number)[][]): Promise<un
 }
 export const members = ["a", "b"].map((letter, i): Member => ({
   k: letter.repeat(32), e: `member${i}@example.com`, n: "Synthetic member", h: "", dir: false,
-  mail: true, at: 1, seen: 0, muted: false, removed: false, t: letter.repeat(40), q: [], qq: [], qa: 0,
+  mail: true, at: 1, seen: 0, muted: false, removed: false, t: letter.repeat(40), q: [], qq: [], qa: 0, s: [],
 }));
 export const config = { name: "Synthetic community", access: [] } as unknown as CommunityConfig;
 export const event = { id: "c".repeat(12), title: "Synthetic event", start: Date.now() + 86_400_000,

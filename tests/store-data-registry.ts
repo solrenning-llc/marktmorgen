@@ -226,6 +226,10 @@ export const FAMILIES: Record<string, Family> = {
   "nl:stream:lock@app/api/cron/stream/route.ts": lock("The video job"),
   "nl:stripe-check:last@app/api/cron/stripe-check/route.ts": company("When the Stripe check last ran", "One key, the company's job."),
   "nl:stripe-check:lock@app/api/cron/stripe-check/route.ts": lock("The Stripe check"),
+  // 247 [SP4] unit 2: the public status page's history of the two daily checks (lib/status-page.ts).
+  "nl:mail-check:runs@lib/status-page.ts": company("The mail check's last runs, for the public status page (247 [SP4])", "One list, the company's job: a time and a pass or fail per run, nothing else, cut to STATUS_RUNS_KEPT (60) entries of under 64 bytes and kept 70 days after the last run."),
+  "nl:status:views:@lib/status-page.ts": company("The public status page's requests in an hour (247 [SP4])", "One key an hour, the company's: a count and nothing else, kept two hours, so at most three at once."),
+  "nl:stripe-check:runs@lib/status-page.ts": company("The Stripe check's last runs, for the public status page (247 [SP4])", "One list, the company's job: a time and a pass or fail per run, nothing else, cut to STATUS_RUNS_KEPT (60) entries of under 64 bytes and kept 70 days after the last run."),
   "nl:usage-watch:told@app/api/cron/usage/route.ts": company("What the usage watch told the owner", "One key, the company's job."),
   "nl:weekly:lock@app/api/cron/weekly/route.ts": lock("The weekly job"),
   "nl:meet:zoomseen:@app/api/integrations/zoom/deauthorize/route.ts": company("Zoom's notices already handled", "Zoom's own notices, kept a day: the company's."),

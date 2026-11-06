@@ -942,6 +942,12 @@
       "parameters": []
     },
     {
+      "source": "app/status/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/status",
+      "parameters": []
+    },
+    {
       "source": "app/studio/add/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/add",
@@ -975,6 +981,12 @@
       "source": "app/studio/calendar/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/calendar",
+      "parameters": []
+    },
+    {
+      "source": "app/studio/card/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/card",
       "parameters": []
     },
     {
@@ -1316,6 +1328,7 @@
     "components/course-toggle.tsx",
     "components/course-work-studio.tsx",
     "components/cover-maker.tsx",
+    "components/creator-card-editor.tsx",
     "components/creator-card-view.tsx",
     "components/creator-research-form.tsx",
     "components/creator-showcase.tsx",
@@ -2021,6 +2034,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 137
+    "pageTemplates": 139
   }
 }

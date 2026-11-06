@@ -3,6 +3,7 @@
  * exact Redis acknowledgements the door requested.
  */
 import { notePictureDoor, takePictureDoor } from "@/lib/picture-door";
+import { claimNewPictures } from "@/lib/sales-page-store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -35,6 +36,14 @@ async function main(): Promise<void> {
   part("Taking a picture needs an exact removal acknowledgement");
   is("a numeric-looking removal string is unknown", await take([String(NOW), "1"]), "unknown");
   is("the canonical score and numeric removal acknowledge the picture", await take([String(NOW), 1]), [PATH]);
+  part("A page's pictures not read exactly are ours to say, never \"add it again\" (Claude 4 on #2156)");
+  let claimed: boolean | "unknown";
+  try {
+    claimed = await withReply([["only one"]], () => claimNewPictures("a".repeat(24), "page1", [PATH, `${PATH}x`]));
+  } catch {
+    claimed = "unknown";
+  }
+  is("an HMGET answer of the wrong length throws, so the route answers server_error", claimed, "unknown");
   done();
 }
 

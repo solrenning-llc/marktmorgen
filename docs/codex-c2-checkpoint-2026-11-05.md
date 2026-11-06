@@ -1,3 +1,14 @@
+## Newer channel event — 2026-11-05 21:45 Fortaleza / 2026-11-06 00:45 UTC
+
+This section supersedes only the affected facts in the 21:42 checkpoint immediately below.
+
+- #2632 was legitimately updated by Claude3 after #2725 removed the stale V reservation from main. New exact head is `cda3dda927ac145887b56d2ce3d0014065f9cb06`; reservation-check, pricing-optimization and margin-alignment pass locally and nine NEW workflows are running. Claude3 controls CI/merge. Do not poll, edit, retry or integrate #2601 until #2632 merges normally.
+- H2 nominally accepted the SECOND financial review of #2692 recovery-note WIP exact `3a61b5bc8a8ebbeae37746be07024e3ef999225d`; D2 retains the first. This is review in progress, not clearance and not a primary-head approval. The separate display outage MEDIUM remains open.
+- #2685 exact `04df109342ed2f9da0aa1f4a829016feaf84781a` is the Claude2 A5 corrective head. It is newer than C2 review5793844344 on ancestor8e9; await a nominal C2 causal return before judging the current delta.
+- #2695 individual retries remain the only consumed CX122 retries for the exact head33bb. Do not repeat them or poll without a new event.
+
+---
+
 ## Latest checkpoint — 2026-11-05 21:42 Fortaleza / 2026-11-06 00:42 UTC
 
 NEWER than all history below. Active work was confirmed and the duplicate continuation was absorbed. Preserve every branch/head/RED/PR and the existing hourly automation. No merge, deploy, workflow cancellation, whole-CI rerun or head churn occurred.

@@ -1,0 +1,144 @@
+
+LOG g2719-initial-red.log SHA256 03732a98e5a228bc87fc426ab86f1cac9e422efec3e5a7928b4539c2e264c947
+11 checks, 7 failing.
+
+LOG g2719-final-red-c6.log SHA256 c0dc43f5cfce73fb6146fb15a5dd792137c24042140a3fe3aa95591a6ab7753b
+12 checks, 8 failing.
+
+LOG g2719-final-red-575.log SHA256 a10f2e4159ec1e2743a8b0204afefe33fbb9d8b1f691384d9827a8f0ec704079
+12 checks, 1 failing.
+
+LOG g2719-final-green.log SHA256 cc359b6d57b4d5bc8264b50bf0a19a830d4b6833d410385a3ecdee9280fd5ac4
+12 checks, all passing.
+
+LOG g2719-extra-head.log SHA256 874cc959b19cfd70cdffa609e6bcd154c8d4a95bc7b0ef98f6cdd8f06c17b406
+26 checks, 5 failing.
+
+LOG g2719-extra-c6.log SHA256 3937d99351cec79ca2b99ba504dc242839b0e04ecc4b60cf5f2c1b562083ef35
+26 checks, 15 failing.
+
+LOG g2719-extra-575.log SHA256 b722994cc8688ac010d760b39c0225b154030430b220fdc0d2ece56277d27256
+26 checks, 6 failing.
+
+LOG g2719-expanded-head.log SHA256 2f0a7ef16fac96f5882b0e7fe2f6361d6b6833c01c392806b881bbd82a32c7e4
+33 checks, 9 failing.
+
+Already on the list? Only an exact 0 or 1 says
+  ok    an exact reading
+  ok    a reply missing for one: that one is unknown
+  ok    a count as text: unknown
+  ok    more replies than were asked: all unknown
+
+Is this run the one putting it on the list? Only OK, or our own value read back
+  ok    a claim answered oddly that did not land: nothing done this time
+  ok    the next try does it
+  ok    a claim answered oddly that did land with our own value: ours, and done
+  ok    and never twice
+
+A run that fails lets go only of its own claim (Revisor 1 on #2719)
+  ok    the failing run says skip, and the other run's claim is left alone
+
+The sweep: a mark it cannot read is not 'not listed', and the run says it failed
+  ok    unknown: not put on the list this run, and counted as failed
+  ok    the next whole reading puts it on the list, once
+  ok    and not again
+
+G independent: an unknown own claim is included in the sweep's failure count
+  ok    G unknown-claim transport boundary reached
+  ok    G unknown claim performs no contact write
+  FAIL  G unknown claim is said failed by the real sweep
+        expected true
+        got      false
+  ok    G healthy claim retry lists exactly once
+  ok    G healthy claim retry really records the product
+
+G independent: unreadable contact write receipt cannot certify a completed order
+  ok    G unknown-record transport boundary reached
+  FAIL  G unknown record cannot claim done
+        expected "skip"
+        got      "done"
+  FAIL  G unknown record cannot leave permanent done
+        expected false
+        got      true
+  ok    G injected unknown did not write the real contact
+  FAIL  G healthy record retry can finish instead of being deduplicated forever
+        expected "done"
+        got      "already"
+  FAIL  G healthy retry really retains the product
+        expected true
+        got      undefined
+  ok    G confirmed record is processed only once
+  ok    G complete real record write still finishes
+  ok    G complete real write actually retains the product
+
+G independent: numeric zero charge cannot make unreadable mutation replies confirmed
+  ok    G numeric-charge/unknown-record transport boundary reached
+  FAIL  G numeric-charge/unknown record cannot claim done
+        expected "skip"
+        got      "done"
+  FAIL  G numeric-charge/unknown record cannot leave permanent done
+        expected false
+        got      true
+  ok    G numeric-charge injected unknown did not write the real contact
+  FAIL  G numeric-charge healthy record retry can finish instead of being deduplicated forever
+        expected "done"
+        got      "already"
+  FAIL  G numeric-charge healthy retry really retains the product
+        expected true
+        got      undefined
+  ok    G numeric-charge confirmed record is processed only once
+
+33 checks, 9 failing.
+
+
+LOG g2719-expanded-c6.log SHA256 c1b7c3617e7a5f513690efba6f3eca0749088c20169954d3f213408dcec3e8fa
+33 checks, 19 failing.
+
+LOG g2719-expanded-575.log SHA256 bbb741e7fc92fec10fc13803b6d767122eca72f69cd0919cca3179bab006bf09
+33 checks, 10 failing.
+
+LOG g2719-linked.log SHA256 f4fe17833f1c080b752ad5daec4da499546713a511ba903f999537a0e3fb725c
+6 checks, all passing.
+5 checks, all passing.
+5 checks, all passing.
+32 checks, all passing.
+ℹ tests 27
+ℹ pass 27
+ℹ fail 0
+ℹ skipped 0
+ℹ tests 4
+ℹ pass 4
+ℹ fail 0
+ℹ skipped 0
+ℹ tests 26
+ℹ pass 26
+ℹ fail 0
+ℹ skipped 0
+ℹ tests 6
+ℹ pass 6
+ℹ fail 0
+ℹ skipped 0
+15 checks, all passing.
+This combined command exits1 ONLY after the nine preceding files completed successfully, because contacts.test.ts does not exist; contacts-room is executed separately below.
+
+LOG g2719-contacts-room.log SHA256 f854397cf2600eabbc2abda28ed0d1484e735547a2cdd93f7552dd2f285a5cbb
+11 checks, all passing.
+
+LOG g2719-types.log SHA256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+EMPTY: True
+
+LOG g2719-types-expanded.log SHA256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+EMPTY: True
+
+LOG g2719-lint.log SHA256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+EMPTY: True
+
+LOG g2719-lint-expanded.log SHA256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+EMPTY: True
+
+LOG g2719-scan.log SHA256 90ad198bd3cb73c02d1f51ecb616574a451b24e858b80f3653b7f5a1fa65366b
+Public data check: 3810 tracked files; 0 file(s) require correction.

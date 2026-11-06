@@ -693,7 +693,10 @@ async function readMemberships(
     query.append("expand[]", "data.customer");
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", store.stripeAccountId, `/subscriptions?${query}`);
-    const rows = (Array.isArray(listed.data) ? listed.data : []) as Raw[];
+    // CX-123 rule 24 (Claude 4, C4-2890): a page without its list, or that does not say whether more follow, is unknown,
+    // never "no members": it throws, so no number is computed from it and nothing is kept.
+    if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") throw new Error("a page of subscriptions did not read");
+    const rows = listed.data as Raw[];
     for (const raw of rows) {
       const sub = readSub(raw, handles);
       if (sub) subs.push(sub);
@@ -717,7 +720,9 @@ async function readMemberships(
       const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
       if (page) query.set("starting_after", page);
       const listed = await onAccount("GET", store.stripeAccountId, `/invoices?${query}`);
-      const rows = (Array.isArray(listed.data) ? listed.data : []) as (Invoice & { id?: unknown })[];
+      // The same for invoices: an unknown page leaves the movements out (caught below), never moves computed from none.
+      if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") throw new Error("a page of invoices did not read");
+      const rows = listed.data as (Invoice & { id?: unknown })[];
       invoices.push(...rows);
       const last = rows[rows.length - 1];
       if (listed.has_more !== true || !last || typeof last.id !== "string") break;

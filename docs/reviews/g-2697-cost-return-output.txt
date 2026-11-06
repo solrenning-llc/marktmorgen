@@ -1,0 +1,20 @@
+
+A first-use minute window crosses UTC midnight
+  ok    old window still enforces its six admitted calls
+  ok    real route admitted exactly five residual plus 1,440 full windows
+  ok    one previous-day call is excluded from the day count
+{"withinDay":8645,"proposedAttemptCeiling":8640,"proposedExtraCommandCeiling":43200,"admittedTimesFive":43225,"scope":"route admission only; no provider or real startPitch work"}
+  FAIL  AI minute limiter alone proves at most 8,640 UTC-day draft admissions
+        expected true
+        got      false
+
+4 checks, 1 failing.
+13 checks, all passing.
+38 checks, all passing.
+13 checks, all passing.
+42 checks, all passing.
+7 checks, all passing.
+145 checks, all passing.
+25 passed; 0 failed
+42 checks, all passing.
+Public data check: 3921 tracked files; 0 file(s) require correction.

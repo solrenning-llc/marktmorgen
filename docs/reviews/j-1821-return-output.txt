@@ -1,0 +1,755 @@
+
+=== original ===
+
+=== j-1821-paid-read.proof.ts ===
+  ok    real page control has one block
+  ok    real versions control has one version
+  ok    page missing envelope is actually injected
+  ok    page missing envelope cannot certify empty or complete content
+  ok    page boolean slot is actually injected
+  ok    page boolean slot cannot certify empty or complete content
+  ok    page extra envelope is actually injected
+  ok    page extra envelope cannot certify empty or complete content
+  ok    versions missing envelope is actually injected
+  ok    versions missing envelope cannot certify empty or complete content
+  ok    versions boolean slot is actually injected
+  ok    versions boolean slot cannot certify empty or complete content
+  ok    versions partial row is actually injected
+  ok    versions partial row cannot certify empty or complete content
+  ok    sections unreadable row is actually injected
+  ok    sections unreadable row cannot certify empty or complete content
+{"race":{"written":40,"returned":40,"readBytes":1480953,"sentBytes":1662736,"taken":17,"due":7,"zeroEnvelope":{"commands":2,"bytes":32,"sent":2048,"stripePages":0,"roundTrips":2}}}
+  ok    concurrent real writers succeeded
+  ok    a stale count never permits a reading larger than its prepaid share
+  ok    stable sections control is read and charged for its complete size
+  ok    agent-store feature status does not advertise the two deferred number tools
+
+20 checks, all passing.
+
+=== unknown-durable ===
+
+=== j-1821-unknown-settlement.proof.ts ===
+  ok    real page control has one block
+  ok    real versions control has one version
+  ok    page missing envelope is actually injected
+  ok    page missing envelope cannot certify empty or complete content
+  ok    page boolean slot is actually injected
+  ok    page boolean slot cannot certify empty or complete content
+  ok    page extra envelope is actually injected
+  ok    page extra envelope cannot certify empty or complete content
+  ok    versions missing envelope is actually injected
+  ok    versions missing envelope cannot certify empty or complete content
+  ok    versions boolean slot is actually injected
+  ok    versions boolean slot cannot certify empty or complete content
+  ok    versions partial row is actually injected
+  ok    versions partial row cannot certify empty or complete content
+  ok    sections unreadable row is actually injected
+  ok    sections unreadable row cannot certify empty or complete content
+{"race":{"written":40,"returned":40,"readBytes":1480953,"sentBytes":1662736,"taken":17,"due":7,"zeroEnvelope":{"commands":2,"bytes":32,"sent":2048,"stripePages":0,"roundTrips":2}}}
+  ok    concurrent real writers succeeded
+  ok    a stale count never permits a reading larger than its prepaid share
+  ok    stable sections control is read and charged for its complete size
+  ok    agent-store feature status does not advertise the two deferred number tools
+{"unknownSettlement":{"written":40,"readBytes":1480953,"sent":105,"taken":2,"dueAtLeast":4}}
+  ok    unknown race still runs forty real writes
+  ok    a malformed content reply is unavailable
+  FAIL  unknown content cannot refund prepaid work that was already read
+        expected true
+        got      false
+  ok    page JSON null was injected after a healthy count
+  FAIL  page JSON null cannot certify a valid empty page
+        expected true
+        got      false
+  ok    page JSON array was injected after a healthy count
+  FAIL  page JSON array cannot certify a valid empty page
+        expected true
+        got      false
+  ok    version JSON null was injected after a healthy count
+  FAIL  version JSON null cannot certify a valid empty page
+        expected true
+        got      false
+
+29 checks, 4 failing.
+
+=== unknown-baseline ===
+
+=== j-1821-unknown-settlement.proof.ts ===
+  ok    real page control has one block
+  ok    real versions control has one version
+  ok    page missing envelope is actually injected
+  FAIL  page missing envelope cannot certify empty or complete content
+        expected true
+        got      false
+  ok    page boolean slot is actually injected
+  FAIL  page boolean slot cannot certify empty or complete content
+        expected true
+        got      false
+  ok    page extra envelope is actually injected
+  FAIL  page extra envelope cannot certify empty or complete content
+        expected true
+        got      false
+  ok    versions missing envelope is actually injected
+  FAIL  versions missing envelope cannot certify empty or complete content
+        expected true
+        got      false
+  ok    versions boolean slot is actually injected
+  FAIL  versions boolean slot cannot certify empty or complete content
+        expected true
+        got      false
+  ok    versions partial row is actually injected
+  FAIL  versions partial row cannot certify empty or complete content
+        expected true
+        got      false
+  ok    sections unreadable row is actually injected
+  FAIL  sections unreadable row cannot certify empty or complete content
+        expected true
+        got      false
+{"race":{"written":40,"returned":40,"readBytes":1480953,"sentBytes":1662736,"taken":2,"due":7,"zeroEnvelope":{"commands":2,"bytes":32,"sent":2048,"stripePages":0,"roundTrips":2}}}
+  ok    concurrent real writers succeeded
+  FAIL  a stale count never permits a reading larger than its prepaid share
+        expected true
+        got      false
+  ok    stable sections control is read and charged for its complete size
+  FAIL  agent-store feature status does not advertise the two deferred number tools
+        expected false
+        got      true
+{"unknownSettlement":{"written":40,"readBytes":1480953,"sent":1662736,"taken":2,"dueAtLeast":7}}
+  ok    unknown race still runs forty real writes
+  FAIL  a malformed content reply is unavailable
+        expected true
+        got      false
+  FAIL  unknown content cannot refund prepaid work that was already read
+        expected true
+        got      false
+  ok    page JSON null was injected after a healthy count
+  FAIL  page JSON null cannot certify a valid empty page
+        expected true
+        got      false
+  ok    page JSON array was injected after a healthy count
+  FAIL  page JSON array cannot certify a valid empty page
+        expected true
+        got      false
+  ok    version JSON null was injected after a healthy count
+  FAIL  version JSON null cannot certify a valid empty page
+        expected true
+        got      false
+
+29 checks, 14 failing.
+
+=== permanent-red ===
+
+=== mcp-paid-read-exact.test.ts ===
+  ok    real page control has one block
+  ok    real versions control has one version
+  ok    page missing envelope is actually injected
+  FAIL  page missing envelope cannot certify empty or complete content
+        expected true
+        got      false
+  ok    page boolean slot is actually injected
+  FAIL  page boolean slot cannot certify empty or complete content
+        expected true
+        got      false
+  ok    page extra envelope is actually injected
+  FAIL  page extra envelope cannot certify empty or complete content
+        expected true
+        got      false
+  ok    versions missing envelope is actually injected
+  FAIL  versions missing envelope cannot certify empty or complete content
+        expected true
+        got      false
+  ok    versions boolean slot is actually injected
+  FAIL  versions boolean slot cannot certify empty or complete content
+        expected true
+        got      false
+  ok    versions partial row is actually injected
+  FAIL  versions partial row cannot certify empty or complete content
+        expected true
+        got      false
+  ok    sections unreadable row is actually injected
+  FAIL  sections unreadable row cannot certify empty or complete content
+        expected true
+        got      false
+{"race":{"written":40,"returned":40,"readBytes":1480953,"sentBytes":1662736,"taken":2,"due":7,"zeroEnvelope":{"commands":2,"bytes":32,"sent":2048,"stripePages":0,"roundTrips":2}}}
+  ok    concurrent real writers succeeded
+  FAIL  a stale count never permits a reading larger than its prepaid share
+        expected true
+        got      false
+  ok    stable sections control is read and charged for its complete size
+  FAIL  agent-store feature status does not advertise the two deferred number tools
+        expected false
+        got      true
+
+20 checks, 9 failing.
+
+=== linked ===
+
+=== mcp-paid-read-exact.test.ts ===
+  ok    real page control has one block
+  ok    real versions control has one version
+  ok    page missing envelope is actually injected
+  ok    page missing envelope cannot certify empty or complete content
+  ok    page boolean slot is actually injected
+  ok    page boolean slot cannot certify empty or complete content
+  ok    page extra envelope is actually injected
+  ok    page extra envelope cannot certify empty or complete content
+  ok    versions missing envelope is actually injected
+  ok    versions missing envelope cannot certify empty or complete content
+  ok    versions boolean slot is actually injected
+  ok    versions boolean slot cannot certify empty or complete content
+  ok    versions partial row is actually injected
+  ok    versions partial row cannot certify empty or complete content
+  ok    sections unreadable row is actually injected
+  ok    sections unreadable row cannot certify empty or complete content
+{"race":{"written":40,"returned":40,"readBytes":1480953,"sentBytes":1662736,"taken":17,"due":7,"zeroEnvelope":{"commands":2,"bytes":32,"sent":2048,"stripePages":0,"roundTrips":2}}}
+  ok    concurrent real writers succeeded
+  ok    a stale count never permits a reading larger than its prepaid share
+  ok    stable sections control is read and charged for its complete size
+  ok    agent-store feature status does not advertise the two deferred number tools
+
+20 checks, all passing.
+
+=== mcp-store-pages-cost.test.ts ===
+
+Each call takes the door's request and exactly what its envelope comes to
+  ok    get_product_description: answered, and took 1 + 1
+  ok    get_sales_page: answered, and took 1 + 2
+  ok    get_course_outline: answered, and took 1 + 3
+  ok    get_lesson: answered, and took 1 + 2
+  ok    get_page_test: answered, and took 1 + 1
+  ok    get_page_reading: answered, and took 1 + 1
+  ok    get_page_versions: answered, and took 1 + 1
+  ok    get_page_versions (one version): answered, and took 1 + 2
+  ok    list_saved_blocks: answered, and took 1 + 1
+
+At every size up to each record's ceiling, what is read and sent stays inside the envelope
+  ok    as small as they come, get_product_description: 1 record commands and 4 bytes read, 70 sent, within 1 commands, 15000 bytes and 17048 sent
+  ok    as small as they come, get_sales_page: 1 record commands and 4 bytes read, 309 sent, within 1 commands, 360000 bytes and 362048 sent
+  ok    as small as they come, get_course_outline: 1 record commands and 325 bytes read, 613 sent, within 1 commands, 512000 bytes and 514048 sent
+  ok    as small as they come, get_lesson: 4 record commands and 355 bytes read, 175 sent, within 4 commands, 683080 bytes and 173128 sent
+  ok    as small as they come, get_page_test: 1 record commands and 4 bytes read, 59 sent, within 2 commands, 361024 bytes and 10240 sent
+  ok    as small as they come, get_page_reading: 2 record commands and 6 bytes read, 365 sent, within 2 commands, 371744 bytes and 21472 sent
+  ok    as small as they come, get_page_versions: 2 record commands and 3 bytes read, 171 sent, within 2 commands, 32 bytes and 2048 sent
+  ok    as small as they come, get_page_versions (one version): 2 record commands and 3 bytes read, 80 sent, within 2 commands, 32 bytes and 362048 sent
+  ok    as small as they come, list_saved_blocks: 2 record commands and 3 bytes read, 184 sent, within 2 commands, 32 bytes and 2048 sent
+  ok    each record at its ceiling, get_product_description: 1 record commands and 14978 bytes read, 15046 sent, within 1 commands, 15000 bytes and 17048 sent
+  ok    each record at its ceiling, get_sales_page: 1 record commands and 359978 bytes read, 82 sent, within 1 commands, 360000 bytes and 362048 sent
+  ok    each record at its ceiling, get_course_outline: 1 record commands and 511976 bytes read, 94 sent, within 1 commands, 512000 bytes and 514048 sent
+  ok    each record at its ceiling, get_lesson: 1 record commands and 511976 bytes read, 101 sent, within 4 commands, 683080 bytes and 173128 sent
+  ok    each record at its ceiling, get_page_test: 1 record commands and 359978 bytes read, 76 sent, within 2 commands, 361024 bytes and 10240 sent
+  ok    each record at its ceiling, get_page_reading: 2 record commands and 359980 bytes read, 76 sent, within 2 commands, 371744 bytes and 21472 sent
+  ok    each record at its ceiling, get_page_versions: 2 record commands and 1800047 bytes read, 87 sent, within 2 commands, 1800192 bytes and 3328 sent
+  ok    each record at its ceiling, get_page_versions (one version): 2 record commands and 1800047 bytes read, 87 sent, within 2 commands, 1800192 bytes and 362048 sent
+  ok    each record at its ceiling, list_saved_blocks: 2 record commands and 6046353 bytes read, 105 sent, within 2 commands, 6047432 bytes and 6049448 sent
+  ok    the envelope's commands stay in one request's share
+
+With too few requests left, refused with the door's sentence, and no record is read
+  ok    get_product_description: refused, nothing read but the count
+  ok    get_sales_page: refused, nothing read but the count
+  ok    get_course_outline: refused, nothing read but the count
+  ok    get_lesson: refused, nothing read but the count
+  ok    get_page_test: refused, nothing read but the count
+  ok    get_page_reading: refused, nothing read but the count
+  ok    get_page_versions: refused, nothing read but the count
+  ok    get_page_versions (one version): refused, nothing read but the count
+  ok    list_saved_blocks: refused, nothing read but the count
+
+37 checks, all passing.
+
+=== mcp-course-tools.test.ts ===
+
+The outline
+  ok    answers with the lessons in order
+  ok    files by name
+  ok    never where they are kept
+
+A lesson
+  ok    its text, as written
+  ok    no quiz or task yet reads as none
+
+Only this store's courses; unknown ids say so
+  ok    another store's course is not read
+  ok    nor its lessons
+  ok    a lesson of another course under this product is not read
+  ok    a product that is not a course
+  ok    nothing reached outside
+
+10 checks, all passing.
+
+=== mcp-page-tools.test.ts ===
+
+The description, as written
+  ok    answers with the product and its title
+  ok    no description written yet reads as empty
+
+The sales page
+  ok    a product with no page of its own: no blocks
+
+Only this store's products
+  ok    another store's product is not read
+  ok    nor its description
+  ok    an unknown id is said so
+  ok    no id is said so
+
+Testimonials are counted, never quoted
+  ok    the quotes block keeps its heading and a count
+  ok    no buyer's words or name anywhere
+  ok    the creator's own blocks are there as saved
+  ok    the search title is there
+  ok    nothing reached outside
+
+12 checks, all passing.
+
+=== mcp-page-test-tools.test.ts ===
+
+Through the route
+  ok    no test running is said so
+  ok    an unknown product is said so
+  ok    a page nobody read yet: no blocks, nobody measured
+  ok    an unknown product's reading is said so
+
+The state is the studio's own rule
+  ok    too few views: no winner
+  ok    each version's counts
+  ok    the headline tested
+  ok    a clear difference: won, as the studio says
+  ok    and that is b
+  ok    nothing reached outside
+
+10 checks, all passing.
+
+=== mcp-page-versions.test.ts ===
+
+No earlier version yet
+  ok    an empty list
+
+After two saves, the first is an earlier version
+  ok    the list, newest first, with its headline
+  ok    one version, block by block
+  ok    testimonials counted, not quoted
+
+Refusals in words
+  ok    a version that is not there
+  ok    a version that is not a whole number
+  ok    an unknown product
+  ok    nothing reached outside
+
+8 checks, all passing.
+
+=== mcp-saved-blocks.test.ts ===
+
+None saved yet
+  ok    an empty list
+
+Saved sections, newest change first, testimonials counted
+  ok    both saved
+  ok    newest change first
+  ok    the testimonial is a count
+  ok    no buyer's words or link anywhere
+  ok    the creator's own blocks as saved
+  ok    nothing reached outside
+
+7 checks, all passing.
+
+=== mcp-tools.test.ts ===
+  ok    the window asked for, or 30 days
+
+Memberships
+  ok    MRR, members and the membership by name
+  ok    why members left, counted and never quoted
+
+Affiliates
+  ok    each by their code, with their clicks
+  ok    and never their address
+
+5 checks, all passing.
+
+=== mcp-dispatch.test.ts ===
+
+Only advertised MCP tools can be dispatched
+  ok    the nineteen advertised tools remain
+  ok    advertised names stay unique
+  ok    prototype properties are not advertised
+  ok    unknown tool is an explicit error: constructor
+  ok    unknown tool takes the same refusal path: constructor
+  ok    no raw statistics returned: constructor
+  ok    unknown tool is an explicit error: toString
+  ok    unknown tool takes the same refusal path: toString
+  ok    no raw statistics returned: toString
+  ok    unknown tool is an explicit error: valueOf
+  ok    unknown tool takes the same refusal path: valueOf
+  ok    no raw statistics returned: valueOf
+  ok    unknown tool is an explicit error: hasOwnProperty
+  ok    unknown tool takes the same refusal path: hasOwnProperty
+  ok    no raw statistics returned: hasOwnProperty
+  ok    unknown tool is an explicit error: __proto__
+  ok    unknown tool takes the same refusal path: __proto__
+  ok    no raw statistics returned: __proto__
+  ok    unknown tool is an explicit error: not_a_tool
+  ok    unknown tool takes the same refusal path: not_a_tool
+  ok    no raw statistics returned: not_a_tool
+
+Real API authentication and advertised dispatch remain
+  ok    known tool succeeds
+  ok    known tool stays in its own store
+  ok    authentication still precedes dispatch
+  ok    revoked key cannot list tools
+  ok    no external request was attempted
+
+26 checks, all passing.
+
+=== numbers-three.test.ts ===
+
+A link for one post
+  ok    a name made fit for a link
+  ok    where it went and which post
+  ok    an address with a query keeps it
+  ok    a place not on the list is 'other'
+  ok    every place offered is a plain word
+
+What each post brought
+  ok    visits and money on one row, money first
+  ok    without sales, the visits alone
+
+Who is here now
+  ok    a view says how many views the day has
+  ok    each person once, under where they last came from
+  ok    anybody older than half an hour is let go
+
+An address left in a sign-up box
+  ok    counted under its channel, untagged as direct, never a robot
+  ok    and it is not a checkout
+
+A busy day
+  ok    three times a usual day, past the floor and past the best day
+  ok    under the floor is never busy
+  ok    a store that is always this busy is not
+  ok    not past the best day of the fortnight
+  ok    a new store's first busy day
+  ok    a store with no plan is not written to
+  ok    only at 64, 128, 256…
+  ok    never after the creator stopped the emails
+  ok    written to once the day is busy
+  ok    to the creator, saying where they came from and how to stop it
+  ok    and once a day, however busy it gets
+
+The MCP server
+  ok    it says what it is without a key
+  ok    and nothing more without one
+  ok    a wrong key reads nothing either
+  ok    a notification is taken without an answer
+  ok    a batch is refused
+  ok    broken JSON is a parse error
+  ok    GET is not offered
+  ok    with the key: nineteen tools, all reading
+  ok    each answers, and none of them hands out anybody's address
+  ok    revenue by channel for the days asked for
+  ok    the funnel, with the days before
+  ok    it reads its own store
+  ok    and its numbers, as the API answers them
+  ok    a tool that is not there says so
+
+37 checks, all passing.
+
+=== llms-txt.test.ts ===
+
+Served as Markdown on this site
+  ok    200
+  ok    Markdown, UTF-8
+  ok    the same text the generator makes
+  ok    it starts with the site's name as the title
+
+Every served tool, and only those, with its words and inputs
+  ok    tool names are unique
+  ok    every tool is listed with its description
+  ok    nothing is listed that the server does not serve
+  ok    inputs are listed under their tool
+  ok    it says every tool reads only, because every one does
+
+The MCP server answers from the same list
+  ok    initialize still names the server and its instructions
+
+Figures come from the code
+  ok    the rate
+  ok    the keys
+  ok    the server's address
+  ok    it points to the developers page for the endpoints
+
+A creator's own domain is the creator's store, not Marktmorgen
+  ok    404 there
+
+/developers counts the same tools
+  ok    the developers page says how many tools there are, and it is right
+  ok    nothing reached outside
+
+17 checks, all passing.
+
+=== agent-coverage.test.ts ===
+
+Every studio action is in the table, and nothing else
+  ok    the scan finds the studio's routes (not an empty or broken scan)
+  ok    studio actions with no row (add one to lib/agent-coverage.ts)
+  ok    rows for actions that are gone
+
+Each row is complete
+  ok    every row has a known area
+  ok    every refusal says why
+  ok    every note says something
+
+Tools named here are served by the MCP server
+  ok    at least one tool is named
+  ok    tools that the MCP server does not serve (lib/mcp-catalog.ts)
+
+Money is never moved by the agent (631 (c))
+  ok    money routes are found
+  ok    money routes that are not "never"
+  ok    money routes are filed under money
+
+The measure
+  ok    counts add up to the table
+  ok    the scanner reads both declaration styles
+  188 studio actions: 8 tool, 17 read, 103 draft, 15 execute, 45 never
+
+13 checks, all passing.
+
+=== accessibility-statement.test.ts ===
+
+Every test the page names runs in the CI, as the page says
+  ok    Public pages: its workflow and its script exist
+  ok    Public pages: the workflow runs that script
+  ok    Public pages: it runs on each proposed change and every day
+  ok    Public pages: no step may fail quietly
+  ok    Public pages: it is skipped only for a change to documentation alone
+  ok    Public pages: the workflow or its script has browser: [chromium, firefox, webkit]
+  ok    Public pages: the workflow or its script has "wcag2aaa"
+  ok    Public pages: the workflow or its script has "color-contrast-enhanced"
+  ok    Public pages: the workflow or its script has ["/","/pricing","/signin"]
+  ok    Public pages: the workflow or its script has [320,390,768,1280,1920]
+  ok    Public pages: the workflow or its script has "text-spacing","reduced-motion","forced-colors","reflow-320"
+  ok    Signing up: its workflow and its script exist
+  ok    Signing up: the workflow runs that script
+  ok    Signing up: it runs on each proposed change and every day
+  ok    Signing up: no step may fail quietly
+  ok    Signing up: it is skipped only for a change to documentation alone
+  ok    Signing up: the workflow or its script has browser: [chromium, firefox, webkit]
+  ok    Signing up: the workflow or its script has "color-contrast-enhanced"
+  ok    Signing up: the workflow or its script has Real local request/captured fake email/explicit confirmation/new empty studio
+  ok    The studio: its workflow and its script exist
+  ok    The studio: the workflow runs that script
+  ok    The studio: it runs on each proposed change and every day
+  ok    The studio: no step may fail quietly
+  ok    The studio: it is skipped only for a change to documentation alone
+  ok    The studio: the workflow or its script has browser: [chromium, firefox, webkit]
+  ok    The studio: the workflow or its script has "wcag2aaa"
+  ok    The studio: the workflow or its script has "color-contrast-enhanced"
+  ok    The studio: the workflow or its script has Two authenticated read-only studio/editor surfaces only
+  ok    Products: its workflow and its script exist
+  ok    Products: the workflow runs that script
+  ok    Products: it runs on each proposed change and every day
+  ok    Products: no step may fail quietly
+  ok    Products: it is skipped only for a change to documentation alone
+  ok    Products: the workflow or its script has browser: [chromium, firefox, webkit]
+  ok    Products: the workflow or its script has "wcag2aaa"
+  ok    Products: the workflow or its script has "color-contrast-enhanced"
+  ok    Products: the workflow or its script has Product form and actual disposable local creation/reload/manual visibility/storefront proof only
+  ok    Buying: its workflow and its script exist
+  ok    Buying: the workflow runs that script
+  ok    Buying: it runs on each proposed change and every day
+  ok    Buying: no step may fail quietly
+  ok    Buying: it is skipped only for a change to documentation alone
+  ok    Buying: the workflow or its script has browser: [chromium, firefox, webkit]
+  ok    Buying: the workflow or its script has "color-contrast-enhanced"
+  ok    Buying: the workflow or its script has Real local app checkout against fake Stripe paid return; local captured inbox/library/orders
+  ok    A real screen reader: its workflow and its script exist
+  ok    A real screen reader: the workflow runs that script
+  ok    A real screen reader: it runs on each proposed change and every day
+  ok    A real screen reader: no step may fail quietly
+  ok    A real screen reader: it is skipped only for a change to documentation alone
+  ok    A real screen reader: the workflow or its script has os: [windows-latest, macos-latest]
+  ok    A real screen reader: the workflow or its script has process.platform==="win32"?"nvda":process.platform==="darwin"?"voiceover"
+  ok    A real screen reader: the workflow or its script has {path:"/signin",heading:"Start your store"}
+  ok    A real screen reader: the workflow or its script has {path:"/signin?to=login",heading:"Log in to your store"}
+  ok    the enhanced contrast rule is named wherever the page says the enhanced level is checked
+
+What is open and what is reviewed come from the inventory, in its own public words
+  ok    every open item has public words in the inventory
+  ok    the public words are plain: no internal delivery numbers, no commas without a space, no slashes
+  ok    the screen reader gap matches the trial the page describes
+  ok    testing with people who have disabilities is listed as not done
+  ok    a reviewed page needs the exact finished status, which no template has today
+
+The date of the last review follows the records
+  ok    the records the page shows were reviewed on the date it gives
+  ok    the date is a real date
+
+What the page says, and what it never says
+  ok    the goal is said as a goal, not as conformity
+  ok    no claim of conformity, certification, a seal or being best
+  ok    every gap is on the page, in its public words
+  ok    no internal area names or statuses on the page
+  ok    no unverifiable promise to read every message
+  ok    an alternative is offered where something stops a person
+  ok    not shown as terms with an effective date
+  ok    the glossary expands the screen readers and engines it names
+  ok    how many pages still wait for a full review is said
+  ok    no widget or overlay, said plainly
+  ok    how to report a problem, without a promised reply time
+  ok    a glossary for the terms it uses
+  ok    creators' stores: what the studio checks, and that their content is theirs
+
+Where it is found
+  ok    in the footer's legal links, which the slim footer uses too
+  ok    in the sitemap
+
+77 checks, all passing.
+
+=== api-read-units-more.test.ts ===
+
+The numbers: read anew, ninety days of counts and every page of sales at their most, taken first, and a copy kept an hour
+  ok    they cost far more than one request
+  ok    answered
+  ok    one request and what the numbers and their keeping cost
+  ok    it says when they were read, ISO 8601
+  ok    read again within the hour: from the copy, Stripe not asked, the same numbers as of the same time
+  ok    and it takes only what reading the copy and the answer cost
+  ok    settled at what it read and sent
+  /api/v1/stats: read anew 40 requests, from the copy 2
+  ok    get_numbers answers from the same copy, with asOf
+  ok    and takes as little
+  ok    get_funnel answers, with asOf
+  ok    a tool about a stretch of days, read anew, takes the numbers, their keeping and the listings it names
+  ok    again: from its own copy
+  ok    taking little
+
+A kept copy whose fields do not match is not used: another store, variant, Stripe account or currency, or past its hour
+  ok    its own copy opens
+  ok    another store's copy does not open for this one
+  ok    nor as the other variant
+  ok    a copy whose first line names another store does not open
+  ok    nor one in another currency
+  ok    nor one without its first line
+  ok    an hour later it does not open
+  ok    under another Stripe account it does not open
+  ok    the other store reads its own numbers anew
+  ok    and pays what was read: the copy set aside and given back but its read, then the numbers
+
+The memberships: whether they are kept looked up first, then all they take in one go
+  ok    get_memberships answers
+  ok    not kept: one request and, in one go, the cards, the answer and the pages of Stripe
+  ok    kept: one request and what the copy holds, Stripe not asked
+
+The emails: measured first, then taken, then read
+  ok    get_emails answers
+  ok    it takes more than its request
+
+The recent events: the deliveries measured first, set aside at their size and settled at what was read and sent
+  ok    answered
+  ok    one request and what an empty log costs
+
+A page of products: its listings counted first
+  ok    answered, every product
+  ok    one request and what its listings cost
+  ok    list_products answers
+  ok    list_products takes the same
+
+A page of the list: what the scan read and what is sent, taken before it is sent
+  ok    answered
+  ok    a full page of long rows costs more than its request
+  ok    settled at what it read and sent, below what was set aside at its most
+
+Set aside, then settled: what was not needed comes back; more than was set aside is taken, or refused with the whole count
+  ok    set aside
+  ok    settled at two
+  ok    only two stay counted
+  ok    settled past it: the rest taken
+  ok    five counted
+  ok    past what is left: refused with the whole count, nothing shown, what was taken counted
+  ok    a first step refused says nothing was read
+
+Refused before the scan: a page of the members set aside first reads nothing when it is not left
+  ok    the refusal, and no scan
+
+A tool about a stretch of days whose listings are not covered keeps its numbers, without the products' names
+  ok    the numbers, not the refusal, and no listing read
+  ok    get_product_numbers without what buyers bought next, said
+  ok    named by their ids when their listings are not covered, and said
+  ok    no listing read for them
+  ok    what was set aside settled at what was read and sent
+  ok    with them covered, named
+
+With one request left: each refused with nothing past the door read
+  ok    the month is taken down to one
+  ok    stats: refused with its sentence
+  ok    stats: neither Stripe nor its records read
+  ok    stats: only the door's request kept
+  ok    the month is taken down to one
+  ok    get_numbers: refused with its sentence
+  ok    get_numbers: neither Stripe nor its records read
+  ok    get_numbers: only the door's request kept
+  ok    the month is taken down to one
+  ok    get_buyers: refused with its sentence
+  ok    get_buyers: neither Stripe nor its records read
+  ok    get_buyers: only the door's request kept
+  ok    the month is taken down to one
+  ok    get_memberships: refused with its sentence
+  ok    get_memberships: neither Stripe nor its records read
+  ok    get_memberships: only the door's request kept
+  ok    the month is taken down to one
+  ok    get_emails: refused with its sentence
+  ok    get_emails: neither Stripe nor its records read
+  ok    get_emails: only the door's request kept
+  ok    the month is taken down to one
+  ok    events: refused with its sentence
+  ok    events: neither Stripe nor its records read
+  ok    events: only the door's request kept
+  ok    the month is taken down to one
+  ok    products: refused with its sentence
+  ok    products: neither Stripe nor its records read
+  ok    products: only the door's request kept
+  ok    the month is taken down to one
+  ok    leads: refused with its sentence
+  ok    leads: neither Stripe nor its records read
+  ok    leads: only the door's request kept
+
+Making a code and switching one off take their calls to Stripe before Stripe is asked
+  ok    the month is taken down to one
+  ok    POST: refused with nothing asked of Stripe
+creating a discount code failed Error: no coupon id
+    at createCode (/tmp/j-renewal-sRtlHb/api-read-units-more.test.ts.cjs:49990:44)
+    at async POST (/tmp/j-renewal-sRtlHb/api-read-units-more.test.ts.cjs:62968:18)
+    at async main (/tmp/j-renewal-sRtlHb/api-read-units-more.test.ts.cjs:63585:7)
+  ok    POST: with them left, the door's request and its calls taken, then Stripe asked
+  ok    the month is taken down to one
+  ok    DELETE: refused with nothing asked of Stripe
+  ok    DELETE: with them left, the door's request and its calls taken, then Stripe asked
+
+89 checks, all passing.
+
+=== e5-currency-defects.test.ts ===
+
+A paid call's currency
+  ok    read from the checkout session, lowercased, empty when it says none
+  ok    the phone alert says the amount in it
+  ok    the bookings API says it
+  ok    every place a booking is confirmed (the thanks page, a move, the reminders) passes it on
+  ok    no other caller
+  ok    nothing labels a paid call with the store's currency alone any more
+
+A payment request's own currency (unit 2c)
+  ok    the studio list says each request, what was paid and what was refunded in the request's own currency
+
+An agreement's older version in another currency (unit 2c)
+  ok    the read says its version's currency; the editor reads the amounts in it, then leaves them empty and says why
+
+Email revenue and subject tests (unit 2d)
+  ok    each email and sequence says its sales in another currency, and that their amounts are not in the total
+  ok    a subject test by sales counts a sale in any currency
+  ok    the MCP emails tool says them apart
+
+11 checks, all passing.
+
+=== types-final ===
+
+=== lint-final ===
+
+=== scanner ===
+Public data check: 3948 tracked files; 0 file(s) require correction.

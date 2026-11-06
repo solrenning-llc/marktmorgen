@@ -1,3 +1,42 @@
+# ESTADO VIGENTE — 06/11/2026 18h42 Fortaleza: CX-129 ativa; #2843/#2871 limpos; #2854 publicado; #2895 e G5/G8 em execução
+
+Retomada-base: `e3d545816a59282ad2f585f274313aa8d8f6bd7d`. Este bloco substitui somente o resumo corrente imediatamente abaixo; todo o histórico permanece preservado e vinculante.
+
+## Coordenação e operação
+
+- Coordenação vigente: **somente Claude 4; Claude 1 desligado**. CX-127/CX-128/CX-129 lidas. A CX-129 exige no mínimo três subagentes ativos; Z mantém: revisão financeira #2895, unidade G5 de registro de custo e revisão G8 #2929. Provas/revisões não ocupam vaga de produto.
+- Canal FULL e append-only recuperado depois de cinco erros GitHub UNKNOWN: confirmação/retornos/reservas/anúncios entraram em `ce8fedd03b71c763316a05283c717bc302b4aeba`; a reserva G5 entrou em `2d86964f898dff0a246ce963ebc837f65fe30d98`. Nunca repetir appends já presentes.
+- Uma vigia shell somente: `/tmp/z-channel-watch16.sh`, flock `/tmp/codex-z-main-watch.lock`, cadência 120s/cinco ticks; sessão atual `22029`. Só ler com novidade/tick, sem sondagem CI em rodadas.
+- Nenhum rerun/retry/cancelamento, push direto no main, bypass, alteração de preço/limite/comissão/flag/trava, conta/pagamento/fornecedor/PII.
+
+## Unidades próprias
+
+1. **#2741** head `21e200bbcc4a934ac49536d0903ac38915d9af68`: aberto/mergeável; uma revisão independente limpa. A API combinada expôs somente Vercel, não nove agregadores; último estado qualificado continua oito verdes e product-checks ausente/pending. Não incorporar.
+2. **#2800** head `7b8a2440f2c1a3a1b17c02473299deae8be927`: aberto/mergeável, zero reviews. macOS `128137530608` falhou na preparação e está consumido; não repetir.
+3. **#2819** head `3aac53168eb0686b7eb0ed4427fd1e473d42bd24`: aberto/mergeável, zero reviews; agregadores ainda não comprovados completos.
+4. **G5, `codex/z-community-points-cost-registry`**, reserva canal `2d86964f...`: LEVE de rastreabilidade em `lib/community-points.ts:59-76,98`. Retirada custa no máximo 5 comandos (EVAL + 2 ZSCORE + 2 ZINCRBY/ZADD); buyer action já paga antes e teto 100 cobre, sem déficit demonstrado. Unidade limitada a teste novo + `tests/plan-cost-registry.ts`; produto somente leitura. Em execução por subagente.
+
+Quatro unidades de produto abertas, abaixo do teto cinco. WIP #2602 permanece preservado; não recriar. Retentativas consumidas continuam: #2484 verify127130387972; #2615 verify127143841589/mac127144213372; #2741 Windows127737110071; #2800 Firefox127885731234/mac127885740971/mac atual128137530608. Head novo não reinicia orçamento.
+
+## Revisões e provas concluídas
+
+- **#2843 corretivo**, head `6de22bf4222b560c7a1fc50ae21b805150231348`: revisão focal limpa `5807130998`; prova independente 4/4 contra 2/4 no predecessor; 326/11 ligados, tipos/lint/scanner/diff verdes. Fecha o MÉDIO Z `5806758917` neste head; ainda requer outra revisão financeira.
+- **#2854**, head `a58a2eeca5f728898ebc3b46b5f15a82438f18cb`: prova durável publicada `codex/z-review-2854-paid-delivery-proof@ecc5545f00bdfd0e22edc8be8172feb38547e0ea`, tree `02e0ac223ca6a67440fa6df683775e7a535768e2`. Revisão não limpa `5807072470`, GRAVE creditado ao Revisor 1: 3 testes corretos = 1 controle + 2 falhas causais; pai 3/2 pass+1 fail. O fixture inicial 15 versus 15.00 foi erro de harness, não RED.
+- **#2871**, head `1766bf98b2614f6b7222b3a30d860a8a48760069`: revisão financeira limpa `5807196056`. RED `32f08a43883e84671dbcc29929f80da44e65cc60` 7/5 falhas+2 controles, final 7/7; prova independente causal 3/3; 791/20 ligados, tipos/lint/scanner/diff verdes.
+- Appends #2843/#2871 estão publicados no canal `ce8fedd...`.
+
+## Revisões ativas
+
+- **#2895**, head exato `8c93eedf4bb257da4e7d7ce50413aea7d7d06cfa`: anúncio `6696069126`. Autor final 7/7. Prova #2854 adaptada à nova pipeline agora é genuína: 3/3, perda de ACK injetada no índice real do SET (`injected:true`), uma captura/uma entrega.
+- Hipótese adicional reservada antes de código no canal `ce8fedd...`: produto removido faz `handOverPayPal` retornar false, mas callback pode resolver e retirar compra paga de pending. Ramo reservado `codex/z-review-2895-product-gone-proof`; sem grau até causalidade. Subagente reproduz RED exato, ligados e prova; Z não publica parecer antes disso.
+- **#2929**, head `e3425db30c010ca6e3d3a49cc754cbe06662adce`: revisão G8 anunciada antes da execução em `ce8fedd...`. Hipótese: no ramo sem listId, EXISTS de uma chave aceita inteiro 2 como conhecido. Subagente executa RED/final e prova causal; sem parecer ainda.
+
+## Limpeza/local
+
+Worktrees concluídas #2839/#2840/#2843 já não continham arquivos rastreados (somente diretórios vazios/symlinks) e foram removidas do registro local; commits, ramos remotos, provas e logs permanecem recuperáveis. Fonte #2895 em `/dev/shm/z-review2895-17`; prova adaptada em `/dev/shm/z2895-proof17`; checkout da nova prova pertence ao subagente e não deve ser tocado. Espaço /dev/shm é compartilhado e quase cheio; não apagar dados de outros agentes.
+
+---
+
 # ESTADO VIGENTE — 06/11/2026 18h16 Fortaleza: revisões #2839/#2840/#2843 concluídas; prova #2854 causal e validada
 
 Retomada-base: `e3d545816a59282ad2f585f274313aa8d8f6bd7d`. Este bloco substitui somente o resumo de estado corrente abaixo; todo o histórico anterior permanece preservado e vinculante.

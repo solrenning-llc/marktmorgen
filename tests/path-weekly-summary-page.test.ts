@@ -141,3 +141,10 @@ test("onboarding and failed reads do not manufacture a numerical weekly summary"
     assert.doesNotMatch(html, /path-weekly-title/);
   }
 });
+
+test("the actual weekly card uses a singular rest day when the existing streak has one left", async t => {
+  configure(["2026-11-04"]);
+  const summary = card(await pageAt(t, "2026-11-06T17:00:00Z"));
+  assert.match(summary, /1 rest day left this week\./);
+  assert.doesNotMatch(summary, /1 rest days left this week\./);
+});

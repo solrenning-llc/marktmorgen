@@ -20,11 +20,11 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { addOption, addProduct, claimHandle, ensureStatsId, setProductImage, setProductLegal, setProductShipping, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addOption, addProduct, claimHandle, ensureStatsId, setProductFields, setProductImage, setProductLegal, setProductShipping, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { catalogRecord, listingOf, parseCatalog, parseProduct, readListing, readProduct, readProductLegal } from "@/lib/catalog";
 import { parseShipping } from "@/lib/shipping";
 import { GPSR_AREA, unitWords } from "@/lib/physical-legal";
-import type { PhysicalLegal } from "@/lib/physical-legal-record";
+import { LEGAL_RECORD_MAX_BYTES, type PhysicalLegal } from "@/lib/physical-legal-record";
 import { shippingNow, shipsNowhere } from "@/lib/physical-legal-ship";
 import { cartItemOf, cartShipping } from "@/lib/cart-shipping";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
@@ -111,6 +111,29 @@ async function main(): Promise<void> {
   is("with the picture added: marked", (await readListing(store, id))?.safetyFilled, true);
   is("the legal record of one product, from its own record", await readProductLegal(store, id), legal);
   is("a product without one: null", await readProductLegal(store, "nope"), null);
+
+  // The page's read of it (rule MR: a public view's reads are priced; tests/traffic.test.ts holds the
+  // page's commands and this read's bytes inside a later page): one command, and only the legal record's
+  // bytes, never the checkout questions or the funnel kept beside it, whatever their size.
+  const heavyFields = [0, 1, 2].map((n) => ({ label: `Question ${n}`, type: "dropdown" as const, optional: true, options: Array.from({ length: 200 }, (_, i) => `${n}-${i}-${"q".repeat(90)}`) }));
+  is("the product given the largest checkout questions", (await setProductFields(OWNER, id, heavyFields)).ok, true);
+  store = (await storeForEmail(OWNER))!;
+  const original = redis.pipeline.bind(redis);
+  let legalCommands = 0;
+  let legalBytes = 0;
+  (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (list: (string | number)[][]) => {
+    legalCommands += list.length;
+    const answers = await original(list);
+    for (const answer of answers) legalBytes += typeof answer === "string" ? Buffer.byteLength(answer) : 0;
+    return answers;
+  }) as typeof redis.pipeline;
+  const readForPage = await readProductLegal(store, id);
+  (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = original;
+  is("read for the page: the same record", readForPage, legal);
+  is("in one command, moving only the legal record's bytes, inside its ceiling", [legalCommands, legalBytes <= Buffer.byteLength(JSON.stringify(legal)) + 64, LEGAL_RECORD_MAX_BYTES >= legalBytes], [1, true, true]);
+  is("the questions are still the product's", (await readProduct(store, id))?.fields.length, 3);
+  await setProductFields(OWNER, id, []);
+  store = (await storeForEmail(OWNER))!;
   const catalog = store.catalog.id!;
   const extrasKey = `nl:catalog:${catalog}:x:${id}`;
   const listingKey = `nl:catalog:${catalog}:l:${id}`;

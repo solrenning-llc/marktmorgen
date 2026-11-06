@@ -44,6 +44,17 @@ export type PhysicalLegal = {
 export const MAX_QUANTITIES = MAX_OPTIONS + 1;
 const MAX_PRICE_ID = 40;
 
+/**
+ * The most one stored legal record can weigh, as JSON in UTF-8: every text at
+ * its longest, each character at six bytes (a lone surrogate written as
+ * \uXXXX, more than any UTF-8 character), every price with a quantity, and a
+ * kilobyte for names and punctuation. The product page reads it on every view
+ * of a shipped product (lib/catalog.ts, readProductLegal), so its cost is held
+ * at this size inside a later page (tests/traffic.test.ts).
+ */
+export const LEGAL_RECORD_MAX_BYTES =
+  6 * (2 * (MAX_NAME + MAX_POSTAL + MAX_ELECTRONIC + 2) + MAX_TYPE + MAX_IDENTIFIER + MAX_WARNINGS + MAX_PROP65) + MAX_QUANTITIES * (6 * MAX_PRICE_ID + 96) + 1_024;
+
 export type LegalProblem = "shape" | "long" | "control" | "address" | "country" | "both" | "signal" | "site" | "amount" | "price";
 export type LegalFieldProblem = { field: string; problem: LegalProblem };
 

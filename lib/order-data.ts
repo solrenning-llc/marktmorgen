@@ -32,6 +32,7 @@
  * as it is; tests/order-data.test.ts holds them to the constants below.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { type DataStore, dataKey, giveData } from "@/lib/store-data";
 import { DATA_STEP_BYTES } from "@/lib/store-data-rules";
 
@@ -231,7 +232,10 @@ export async function orderWriteCharged(owner: DataOwner, commands: Command[]): 
   const replies: unknown[] = [];
   for (let at = 0; at < commands.length; at += ORDER_WRITE_MAX) {
     const some = commands.slice(at, at + ORDER_WRITE_MAX);
-    const [reply] = await redisPipeline([scriptOf(room, some)]);
+    // Exactly one reply for the one script sent (Codex G on #2809): an answer of another length is unknown, never its first item.
+    const outer = repliesFor(await redisPipeline([scriptOf(room, some)]), 1);
+    if (!outer) throw new Error("an order's records could not be written");
+    const [reply] = outer;
     const read = readScript(reply, some);
     charged += read.charged;
     replies.push(...read.replies);

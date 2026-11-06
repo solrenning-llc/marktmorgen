@@ -161,10 +161,14 @@ async function main(): Promise<void> {
   is("the terms are as they were: 30% today, nothing pending, the notice not skipped", [now.percent, now.pending ?? null], [30, null]);
 
   part("3. Answering an invitation while the inviting store's id read is lost or fails");
+  // A product of its own: the first one already promises more than the 90% cap after the commission was raised to
+  // 30% above, and an acceptance is checked against the cap again (tests/affiliate-partner-accept-cap.test.ts).
+  const other = await addProduct(owner, "Pan Sauces", "", "40");
+  const spare = other.ok ? other.product.id : "";
   const invited = "guest@example.com";
   const b = await shop(invited, "guestshop");
   const offer = async (sid = store.sid) => {
-    const o = await offerPartnership(invited, { sid, storeName: store.name, handle: store.handle, share: { percent: 5, products: [product] }, titles: ["Knife Skills"] });
+    const o = await offerPartnership(invited, { sid, storeName: store.name, handle: store.handle, share: { percent: 5, products: [spare] }, titles: ["Pan Sauces"] });
     if (!o.ok) throw new Error("no offer");
     return o.id;
   };

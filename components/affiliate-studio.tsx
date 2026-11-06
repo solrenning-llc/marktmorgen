@@ -31,6 +31,7 @@ import {
 import {
   MAX_COMMITTED_SHARE,
   MAX_PARTNER_SHARE,
+  MAX_PARTNERS_PER_PRODUCT,
   MIN_PARTNER_SHARE,
   SHARE_PROBLEMS,
   creatorKeeps,
@@ -58,6 +59,8 @@ const MESSAGES: Record<string, string> = {
   share_committed: SHARE_PROBLEMS.committed,
   invite_email: "Type the email address to send the invitation to.",
   gone: "That offer is no longer there. The store may have withdrawn it.",
+  offer_committed: `That store has promised other partners too much of these products since it made this offer: partners and the affiliate commission together cannot pass ${MAX_COMMITTED_SHARE}% of a sale. Nothing was saved and the offer is kept. Ask the store to lower a share, then accept again.`,
+  offer_crowded: `One of these products already has ${MAX_PARTNERS_PER_PRODUCT} partners, as many as a product may have. Nothing was saved and the offer is kept. Ask the store to free a place, then accept again.`,
   owner: "That is your own address. A partner is somebody else.",
   full: "This program is full. Remove somebody before inviting another partner.",
   promo: "That discount code is no longer on your Stripe account. Reload the page.",
@@ -1903,8 +1906,9 @@ export function PartnerOffers({ offers }: { offers: { id: string; words: string;
       });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!data.ok) {
-        // Could not be done just now (503) or went wrong on our side: the offer is still there, so it stays listed.
-        if (response.status >= 500) {
+        // Could not be done just now (503), went wrong on our side, or no longer fits the store's cap (409): the offer
+        // is still there, so it stays listed.
+        if (response.status >= 500 || response.status === 409) {
           toast(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
           return;
         }

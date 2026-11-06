@@ -3,8 +3,9 @@ import { StoreFullError, setAffiliateSetting, storeForEmail, storeForId, storeId
 import { readMoney } from "@/lib/money";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { MAX_COMMISSION, MIN_COMMISSION, commissionRate, parseAffiliateSetting, readBonuses } from "@/lib/affiliate-setting";
-import { parsePartnerShare, shareProblem } from "@/lib/partner-share";
+import { MAX_COMMISSION, MIN_COMMISSION, parseAffiliateSetting, readBonuses } from "@/lib/affiliate-setting";
+import { parsePartnerShare } from "@/lib/partner-share";
+import { LockBusyError, holdLock } from "@/lib/redis-lock";
 import { readListings } from "@/lib/catalog";
 import { answerInvite, waitingOne } from "@/lib/partner-invites";
 import {
@@ -19,12 +20,13 @@ import {
   undoMany,
   undoRates,
   invitePartner,
-  listPartners,
+  partnerShareProblem,
   readAffiliate,
   releaseHold,
   removePayout,
   setAffiliateRate,
   setPartnerShare,
+  withPartnerLock,
 } from "@/lib/affiliates";
 import { PROMO_ID_PATTERN, giveCode, takeCodeBack } from "@/lib/affiliate-codes";
 import { leadProblem } from "@/lib/affiliate-lead-rules";
@@ -230,7 +232,10 @@ export async function POST(request: NextRequest) {
         await answerInvite(guarded.email, invite.id);
         return fail("gone");
       }
+      // The cap is checked again at acceptance (lib/affiliates.ts recordFromLink): over it, refused with the offer kept,
+      // so it can be accepted once the store lowers a share. An unknown read or a busy lock throws: 503, offer kept.
       const made = await acceptPartnership(from, guarded.email, invite.share);
+      if (!made.ok && (made.reason === "committed" || made.reason === "crowded")) return fail(`offer_${made.reason}`, 409);
       if (!made.ok) return fail(made.reason === "full" ? "full" : "unavailable");
       await answerInvite(guarded.email, invite.id);
       return Response.json({ ok: true, accepted: true });
@@ -241,14 +246,8 @@ export async function POST(request: NextRequest) {
       // as any other share, before the email goes out.
       const share = parsePartnerShare({ percent: body.percent, products: body.products });
       if (!share) return fail(Array.isArray(body.products) && body.products.length ? "share_percent" : "share_products");
-      const others: Record<string, number[]> = {};
-      for (const other of await listPartners(store)) {
-        if (other.status !== "approved" || !other.share) continue;
-        for (const product of other.share.products) (others[product] ??= []).push(other.share.percent);
-      }
-      const affiliatePercent: Record<string, number> = {};
-      for (const product of share.products) affiliatePercent[product] = commissionRate(store.affiliates, product);
-      const problem = shareProblem({ percent: share.percent, products: share.products, others, affiliatePercent });
+      // Checked again, under the partner lock, when the invitation is accepted.
+      const problem = await partnerShareProblem(store, share, null);
       if (problem) return fail(`share_${problem}`);
 
       // Only the products being shared in, never the whole catalogue: a store
@@ -279,20 +278,15 @@ export async function POST(request: NextRequest) {
 
       // The cap counts everything promised on each of these products at once:
       // the other partners' shares and the affiliate commission, which rides
-      // on the same sale (lib/partner-share.ts).
-      const others: Record<string, number[]> = {};
-      for (const other of await listPartners(store)) {
-        if (other.id === id || other.status !== "approved" || !other.share) continue;
-        for (const product of other.share.products) {
-          (others[product] ??= []).push(other.share.percent);
-        }
-      }
-      const affiliatePercent: Record<string, number> = {};
-      for (const product of share.products) affiliatePercent[product] = commissionRate(store.affiliates, product);
-
-      const problem = shareProblem({ percent: share.percent, products: share.products, others, affiliatePercent });
-      if (problem) return fail(`share_${problem}`);
-      return (await setPartnerShare(store, id, share)) ? Response.json({ ok: true }) : fail("unknown");
+      // on the same sale (lib/partner-share.ts). Checked and written under the
+      // program's partner lock, the same one an accepted partnership takes.
+      // Awaited here, so a busy lock or an unknown read reaches the catch below (503), not the framework.
+      return await withPartnerLock(store, async (held) => {
+        const problem = await partnerShareProblem(store, share, id);
+        if (problem) return fail(`share_${problem}`);
+        if (!(await holdLock(held))) return fail("unavailable", 503);
+        return (await setPartnerShare(store, id, share)) ? Response.json({ ok: true }) : fail("unknown");
+      });
     }
     if (action === "code") {
       const promo = text(body.promo, 90);
@@ -316,6 +310,8 @@ export async function POST(request: NextRequest) {
       console.error("changing the affiliate programme stopped on an unknown reply", error);
       return fail("unavailable", 503);
     }
+    // The partner lock stayed taken, or was lost before a share was written: nothing was saved, an offer is kept.
+    if (error instanceof LockBusyError) return fail("unavailable", 503);
     console.error("changing the affiliate programme failed", error);
     return fail("server_error", 500);
   }

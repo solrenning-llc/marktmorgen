@@ -144,6 +144,38 @@ async function main(): Promise<void> {
     .reduce((sum, p) => sum + (p.share?.products.includes(product2) ? p.share.percent : 0), 0);
   is("only one of the two is made", both.filter((r) => r.ok).length, 1);
   is("the product promises at most 90% (partners 80% + 5% commission)", total <= 85, true);
+
+  part("6. A share set from the studio and an acceptance at the same instant: the same lock");
+  const small = (await listAffiliates(await store())).find((p) => p.share?.products.includes(product2));
+  if (!small) throw new Error("no partner");
+  await post2({ action: "share", id: small.id, percent: 1, products: [product2] });
+  const raced = await Promise.all([
+    post2({ action: "share", id: small.id, percent: 80, products: [product2] }),
+    acceptPartnership(await store(), "nine@example.com", { percent: 80, products: [product2] }),
+  ]);
+  const after = (await listAffiliates(await store()))
+    .filter((p) => p.status === "approved")
+    .reduce((sum, p) => sum + (p.share?.products.includes(product2) ? p.share.percent : 0), 0);
+  is("only one of the two lands", [raced[0].body.ok === true, raced[1].ok].filter(Boolean).length, 1);
+  is("partners hold at most 85% (90% with the commission)", after <= 85, true);
+
+  part("7. The partner lock held by somebody else past the wait: refused, offer kept, nothing written");
+  const ten = await shop("ten@example.com", "tenshop");
+  const parked = await offerPartnership("ten@example.com", { sid: (await store()).sid, storeName: "makershop store", handle: "makershop", share: { percent: 1, products: [product2] }, titles: ["Bread Basics"] });
+  if (!parked.ok) throw new Error("no offer");
+  await post2({ action: "share", id: small.id, percent: 1, products: [product2] });
+  const lockKey = `nl:aff:${(await store()).statsId}:partners:lock`;
+  await redis.pipeline([["SET", lockKey, "somebody-else", "EX", 60]]);
+  const busy = await ten({ action: "answer", invite: parked.id, accept: true });
+  const busyShare = await post2({ action: "share", id: small.id, percent: 2, products: [product2] });
+  await redis.pipeline([["DEL", lockKey]]);
+  is("the acceptance is refused as unavailable", [busy.status, busy.body.error], [503, "unavailable"]);
+  is("the offer is kept", (await waitingFor("ten@example.com")).map((w) => w.id), [parked.id]);
+  is("no partner record was made", (await listAffiliates(await store())).some((p) => p.email === "ten@example.com"), false);
+  is("a share from the studio is refused as unavailable too", [busyShare.status, busyShare.body.error], [503, "unavailable"]);
+  is("and the partner keeps 1%", (await listAffiliates(await store())).find((p) => p.id === small.id)?.share?.percent, 1);
+  const free = await ten({ action: "answer", invite: parked.id, accept: true });
+  is("once the lock is free, the acceptance is made", [free.status, free.body.accepted], [200, true]);
   done();
 }
 main();

@@ -104,7 +104,8 @@ import {
 import { productIds, readListings } from "@/lib/catalog";
 import type { BookSizes } from "@/lib/api-read-rules";
 import { affiliateForCodes, codeOwners } from "@/lib/affiliate-codes";
-import { type PartnerShare, parsePartnerShare, shareOn } from "@/lib/partner-share";
+import { type PartnerShare, type ShareProblem, parsePartnerShare, shareOn, shareProblem } from "@/lib/partner-share";
+import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { bondFor, rememberBuyer } from "@/lib/affiliate-bond";
 import { offerPartnership } from "@/lib/partner-invites";
 import type { Store } from "@/lib/store";
@@ -399,6 +400,38 @@ export async function setPartnerShare(store: Store, id: string, share: PartnerSh
 /** Everybody in this programme who holds a standing share of something. */
 export async function listPartners(store: Store): Promise<Affiliate[]> {
   return (await listAffiliates(store)).filter((a) => a.share !== null);
+}
+
+/** The program's partner lock: every write of a standing share takes it, so the cap is checked against what is there. */
+const partnerLockKey = (statsId: string) => `nl:aff:${statsId}:partners:lock`;
+const PARTNER_LOCK_SECONDS = 15;
+const PARTNER_LOCK_WAIT_MS = 3_000;
+
+/**
+ * Runs `work` holding this program's partner lock (lib/redis-lock.ts). A share set from the studio and a partnership
+ * accepted (an invitation's emailed link or the invitee's studio) each check the cap and write under it, so two of
+ * them at the same instant cannot each read the other's room and both pass (#2995 review). Throws LockBusyError when
+ * the lock stays taken, or its receipt is unknown: nothing is written then.
+ */
+export async function withPartnerLock<T>(store: Store, work: (held: Held) => Promise<T>): Promise<T> {
+  return withLock(partnerLockKey(store.statsId as string), PARTNER_LOCK_SECONDS, PARTNER_LOCK_WAIT_MS, work);
+}
+
+/**
+ * Whether `share` may be held by the affiliate `self` (null for somebody not yet in the program), against the
+ * program's other approved partners as read exactly now and the affiliate commission on each product
+ * (lib/partner-share.ts shareProblem). `self`'s own current share is replaced, not added. Throws UnknownReplyError
+ * when the people could not be read exactly: never "nobody".
+ */
+export async function partnerShareProblem(store: Store, share: PartnerShare, self: string | null): Promise<ShareProblem | null> {
+  const others: Record<string, number[]> = {};
+  for (const other of await listPartners(store)) {
+    if (other.id === self || other.status !== "approved" || !other.share) continue;
+    for (const product of other.share.products) (others[product] ??= []).push(other.share.percent);
+  }
+  const affiliatePercent: Record<string, number> = {};
+  for (const product of share.products) affiliatePercent[product] = commissionRate(store.affiliates, product);
+  return shareProblem({ percent: share.percent, products: share.products, others, affiliatePercent });
 }
 
 /**
@@ -889,29 +922,34 @@ async function claimCode(store: Store, email: string, id: string): Promise<strin
 
 export type OpenResult =
   | { ok: true; session: string; affiliate: Affiliate; created: boolean }
-  | { ok: false; reason: "expired" | "full" | "unavailable" };
+  /** "committed" and "crowded": an accepted share no longer fits the cap (lib/partner-share.ts); the link or offer is kept. */
+  | { ok: false; reason: "expired" | "full" | "unavailable" | "committed" | "crowded" };
+
+type Recorded = { ok: true; affiliate: Affiliate; created: boolean } | { ok: false; reason: "expired" | "full" | "committed" | "crowded" };
 
 /**
- * The button on the page an emailed link opens. The first time for an
- * address, it makes the application; every time, it signs this browser in.
+ * The record an opened link (or an accepted studio offer) makes or approves. With `fence`, the grant carries a share:
+ * it runs under the program's partner lock, re-checks the cap against the partners read exactly now (this person's
+ * own current share replaced, not added) and confirms the lock is still held before the first write. Over the cap,
+ * nothing is written. UnknownReplyError and LockBusyError are thrown before any write.
  */
-export async function openAffiliateLink(store: Store, token: string): Promise<OpenResult> {
-  if (!affiliatesOn(store)) return { ok: false, reason: "unavailable" };
-  if (!AFFILIATE_TOKEN_PATTERN.test(token)) return { ok: false, reason: "expired" };
+async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: PartnerShare; held: Held } | null): Promise<Recorded> {
   const statsId = store.statsId as string;
-  const [raw] = await redisPipeline([["GET", linkKey(token)]]);
-  const grant = parseGrant(raw);
-  if (!grant || grant.s !== statsId) return { ok: false, reason: "expired" };
-
   let affiliate: Affiliate | null = null;
   let created = false;
   const [knownId] = await redisPipeline([["HGET", emailsKey(statsId), grant.e]]);
   if (typeof knownId === "string") affiliate = await readAffiliate(store, knownId);
+  if (fence) {
+    const problem = await partnerShareProblem(store, fence.share, affiliate?.id ?? null);
+    if (problem) return { ok: false, reason: problem === "crowded" ? "crowded" : "committed" };
+    if (!(await holdLock(fence.held))) throw new LockBusyError("the partner lock was lost before the share was written");
+  }
   // An invitation the creator sent (grant.k) arrives already decided: opening
   // it approves them and attaches the share the email stated. Somebody the
   // creator had declined or removed is let back in by it, because inviting
   // them is the creator changing their mind, in their own words.
   if (affiliate && grant.k === 1) {
+
     affiliate = { ...affiliate, status: "approved", decidedAt: Date.now(), share: grant.p ?? affiliate.share };
     await writeAffiliate(store, affiliate);
   }
@@ -953,6 +991,33 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
       created = true;
     }
   }
+
+  return { ok: true, affiliate, created };
+}
+
+/**
+ * The button on the page an emailed link opens. The first time for an
+ * address, it makes the application; every time, it signs this browser in.
+ */
+export async function openAffiliateLink(store: Store, token: string): Promise<OpenResult> {
+  if (!affiliatesOn(store)) return { ok: false, reason: "unavailable" };
+  if (!AFFILIATE_TOKEN_PATTERN.test(token)) return { ok: false, reason: "expired" };
+  const statsId = store.statsId as string;
+  const [raw] = await redisPipeline([["GET", linkKey(token)]]);
+  const grant = parseGrant(raw);
+  if (!grant || grant.s !== statsId) return { ok: false, reason: "expired" };
+
+  // A share carried by an invitation is checked again now, against the partners there are now, under the program's
+  // partner lock (#2995 review): each invitation was inside the cap alone when sent, and two accepted could promise
+  // 160% of a sale. Over the cap: refused, nothing written, the link (or the studio offer) kept. The people read
+  // unknown (UnknownReplyError) or the lock not held (LockBusyError): thrown before any write, the link kept.
+  const share = grant.k === 1 ? grant.p : undefined;
+  const made = share
+    ? await withPartnerLock(store, (held) => recordFromLink(store, grant, { share, held }))
+    : await recordFromLink(store, grant, null);
+  if (!made.ok) return made;
+  let { affiliate } = made;
+  const { created } = made;
 
   // Somebody who joined before their page across every store existed is found from their next sign-in.
   await rememberAffiliate(store.sid, affiliate.email);

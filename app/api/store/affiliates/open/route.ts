@@ -45,7 +45,9 @@ export async function POST(request: NextRequest) {
     return { ok: false as const, reason: "error" as const };
   });
   if (!result.ok) {
-    return new Response(null, { status: 303, headers: { Location: `${page}?status=${result.reason}`, "Cache-Control": "no-store" } });
+    // An invitation whose share no longer fits the cap (lib/affiliates.ts): the page's "not taking affiliates right now".
+    const status = result.reason === "committed" || result.reason === "crowded" ? "unavailable" : result.reason;
+    return new Response(null, { status: 303, headers: { Location: `${page}?status=${status}`, "Cache-Control": "no-store" } });
   }
   const secure = origin.startsWith("https://") ? "; Secure" : "";
   return new Response(null, {

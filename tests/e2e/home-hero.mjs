@@ -133,7 +133,9 @@ export async function checkHomeHeroLayout({page,width,is}){
 /** Observe the notice line contract; shared by the canonical journey and controls. */
 export function noticeLineGeometry(node){
  const height=node.getBoundingClientRect().height;
- return {height,text:node.textContent,lines:height===44?1:0};
+ const range=document.createRange();range.selectNodeContents(node);
+ const fragments=[...range.getClientRects()].filter(rect=>rect.width>0&&rect.height>0);
+ return {height,text:node.textContent,lines:new Set(fragments.map(rect=>rect.top)).size,fragments:fragments.map(rect=>({top:rect.top,height:rect.height,width:rect.width}))};
 }
 
 /** A taller single line and a wrapped 44px box distinguish lines from box height. */

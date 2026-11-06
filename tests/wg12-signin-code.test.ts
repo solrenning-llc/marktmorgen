@@ -25,7 +25,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { NextRequest } from "next/server";
 import { POST as requestRoute } from "@/app/api/auth/request/route";
 import { POST as codeRoute } from "@/app/api/auth/email-code/route";
-import { EMAIL_CODE_TRIES, EMAIL_CODE_TRIES_PER_ADDRESS_HOUR, emailForSession, takeSignInLink } from "@/lib/auth";
+import { EMAIL_CODE_TRIES, EMAIL_CODE_TRIES_PER_ADDRESS_DAY, EMAIL_CODE_TRIES_PER_ADDRESS_HOUR, EMAIL_CODE_TRIES_PER_IP_HOUR, emailForSession, takeSignInLink } from "@/lib/auth";
 import { EmailCodeForm } from "@/components/email-code-form";
 import { HOUSE_OWNER } from "@/lib/house-store";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
@@ -58,10 +58,10 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
 
 let net = 1;
 const ORIGIN = "https://marktmorgen.com";
-const json = (path: string, body: unknown, cookie = "") =>
+const json = (path: string, body: unknown, cookie = "", ip = `192.0.2.${net++ % 250}`) =>
   new NextRequest(`${ORIGIN}${path}`, {
     method: "POST",
-    headers: { Host: "marktmorgen.com", Origin: ORIGIN, "Content-Type": "application/json", "x-forwarded-for": `192.0.2.${net++ % 250}`, ...(cookie ? { cookie } : {}) },
+    headers: { Host: "marktmorgen.com", Origin: ORIGIN, "Content-Type": "application/json", "x-forwarded-for": ip, ...(cookie ? { cookie } : {}) },
     body: JSON.stringify(body),
   });
 
@@ -77,8 +77,8 @@ async function ask(email: string): Promise<{ request: string; token: string; cod
     code: /\n(\d{6})\n/.exec(mail?.text ?? "")?.[1] ?? "",
   };
 }
-const send = async (request: string, code: string) => {
-  const res = await codeRoute(json("/api/auth/email-code", { request, code }));
+const send = async (request: string, code: string, ip?: string) => {
+  const res = await codeRoute(json("/api/auth/email-code", { request, code }, "", ip));
   const data = (await res.json()) as { ok?: boolean; next?: string; error?: string; left?: number };
   const session = (res.headers.get("set-cookie") ?? "").match(/nl_session=([0-9a-f]{64})/)?.[1] ?? "";
   return { status: res.status, ...data, session };
@@ -93,6 +93,8 @@ async function main(): Promise<void> {
   is("the answer carries the request's id", /^[0-9a-f]{64}$/.test(ana.request), true);
   is("the email holds a link and a six-digit code", [ana.token.length, ana.code.length], [64, 6]);
   is("one email, no more", mails.filter((m) => m.to === "ana@wg12.example").length, 1);
+  // The code opens only with the id this page holds (Claude 3 on #2736): the email says so.
+  is("the email says the code is typed on the page that asked, without reloading it", (mails.filter((m) => m.to === "ana@wg12.example")[0]?.text ?? "").includes("without reloading"), true);
   const before = mails.length;
   const house = await requestRoute(json("/api/auth/request", { email: HOUSE_OWNER }));
   const houseData = (await house.json()) as { ok?: boolean; request?: string };
@@ -152,13 +154,79 @@ async function main(): Promise<void> {
 
   part("An unknown count of tries refuses and opens nothing");
   const gus = await ask("gus@wg12.example");
-  for (const [label, reply] of [["null", ["OK", null, 1, null]], ["text", ["OK", "1", 1, null]], ["negative", ["OK", 1, -1, null]], ["a short reply", ["OK", 1]], ["not a list", { result: 1 }]] as [string, unknown][]) {
-    rule = { when: (c) => c.length === 4 && c[1]?.[0] === "INCR" && c[2]?.[0] === "HINCRBY", reply };
+  // The pipeline that counts a try: the hour's and the day's counts for the address, the request's, the record's time, the newest code.
+  for (const [label, reply] of [
+    ["the hour's count null", ["OK", null, "OK", 1, 1, 900, null]],
+    ["the hour's count text", ["OK", "1", "OK", 1, 1, 900, null]],
+    ["the day's count null", ["OK", 1, "OK", null, 1, 900, null]],
+    ["the day's count negative", ["OK", 1, "OK", -1, 1, 900, null]],
+    ["the request's count negative", ["OK", 1, "OK", 1, -1, 900, null]],
+    ["the record's time text", ["OK", 1, "OK", 1, 1, "900", null]],
+    ["a short reply", ["OK", 1]],
+    ["not a list", { result: 1 }],
+  ] as [string, unknown][]) {
+    rule = { when: (c) => c.length === 7 && c[1]?.[0] === "INCR" && c[4]?.[0] === "HINCRBY", reply };
     const refused = await send(gus.request, gus.code);
     rule = null;
     is(`the tries answered as ${label}: server_error, no session`, [refused.status, refused.error, refused.session], [503, "server_error", ""]);
   }
   is("with exact replies the same code still opens", (await send(gus.request, gus.code)).ok, true);
+
+  part(`At most ${EMAIL_CODE_TRIES_PER_ADDRESS_DAY} code tries a day for one address (Claude 3 on #2736): past them, only the link`);
+  let tried = 0;
+  while (tried < EMAIL_CODE_TRIES_PER_ADDRESS_DAY) {
+    let gil = await ask("gil@wg12.example");
+    for (let i = 0; i < EMAIL_CODE_TRIES_PER_ADDRESS_HOUR && tried < EMAIL_CODE_TRIES_PER_ADDRESS_DAY; i += 1) {
+      if (i > 0 && i % EMAIL_CODE_TRIES === 0) gil = await ask("gil@wg12.example");
+      await send(gil.request, other(gil.code));
+      tried += 1;
+    }
+    advance(60 * 60 * 1000 + 1000);
+  }
+  const gilLate = await ask("gil@wg12.example");
+  const dayCapped = await send(gilLate.request, gilLate.code);
+  is("a fresh hour, the right code: still refused, no session", [dayCapped.error, dayCapped.session], ["code_address_blocked", ""]);
+  is("and the link of that same email still opens", await takeSignInLink(gilLate.token), "gil@wg12.example");
+  advance(24 * 60 * 60 * 1000);
+  const gilNext = await ask("gil@wg12.example");
+  is("a day later, a fresh code opens", (await send(gilNext.request, gilNext.code)).ok, true);
+
+  part(`At most ${EMAIL_CODE_TRIES_PER_IP_HOUR} code tries an hour from one machine, before anything is read (Claude 3 on #2736)`);
+  const machine = "198.51.100.7";
+  const fromMachine: (string | undefined)[] = [];
+  for (let i = 0; i < EMAIL_CODE_TRIES_PER_IP_HOUR; i += 1) fromMachine.push((await send(i.toString(16).padStart(64, "0"), "123456", machine)).error);
+  is("each made-up request inside the limit: expired", fromMachine.every((error) => error === "code_expired"), true);
+  const ivy = await ask("ivy@wg12.example");
+  const overMachine = await send(ivy.request, ivy.code, machine);
+  is("past it, even the right code: refused, no session", [overMachine.status, overMachine.error, overMachine.session], [429, "code_rate_limited", ""]);
+  is("from another machine, the same code opens", (await send(ivy.request, ivy.code)).ok, true);
+
+  part("A record gone between the read and the count is not left behind without a time (Claude 3 on #2736)");
+  const joy = await ask("joy@wg12.example");
+  let recreated = "";
+  rule = {
+    when: (c) => {
+      const counting = c.length === 7 && c[4]?.[0] === "HINCRBY";
+      if (counting && !recreated) recreated = String(c[4]?.[1]);
+      return false;
+    },
+    reply: null,
+  };
+  const realPipeline = redis.pipeline;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // The record runs out just before the count; real Redis then recreates it from HINCRBY alone, with no time. The
+    // stand-in keeps a deleted key's old time (lib/redis-memory.ts DEL), so that state is set up here as Redis leaves it.
+    if (commands.length === 7 && commands[4]?.[0] === "HINCRBY") {
+      const gone = String(commands[4][1]);
+      await pipeline([["DEL", gone], ["HSET", gone, "n", 0], ["PERSIST", gone]]);
+    }
+    return realPipeline(commands);
+  }) as typeof redis.pipeline;
+  const raced = await send(joy.request, other(joy.code));
+  redis.pipeline = realPipeline;
+  rule = null;
+  is("the try answers expired", raced.error, "code_expired");
+  is("and the record is not kept forever", recreated !== "" && (await pipeline([["TTL", recreated]]))[0] !== -1, true);
 
   part("With two-step login on, the code leads to the second step, as the link does");
   const SESSION = "a".repeat(64);
@@ -180,6 +248,7 @@ async function main(): Promise<void> {
   is("the phone's one-time code, a number pad, pasting allowed", [/autoComplete="one-time-code"|autocomplete="one-time-code"/.test(html), /inputMode="numeric"|inputmode="numeric"/.test(html), /onpaste|readonly/i.test(html)], [true, true, false]);
   is("what went wrong is said in a live region", /role="alert"/.test(html), true);
   is("the hint says where the code is", html.includes("It is in the same email as the link."), true);
+  is("and that it works on this page without reloading it", html.includes("without reloading"), true);
 
   mail.restore();
   done();

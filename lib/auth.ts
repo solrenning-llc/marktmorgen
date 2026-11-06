@@ -492,6 +492,10 @@ export async function withinAddressLimit(email: string): Promise<boolean> {
 export const EMAIL_CODE_TRIES = 5;
 /** Code tries one address may take in the hour, all its requests together (Claude 4 on 652 [WG12]). */
 export const EMAIL_CODE_TRIES_PER_ADDRESS_HOUR = 10;
+/** Code tries one address may take in a day from its first, all its requests together; past them, only the link opens (Claude 3 on #2736). */
+export const EMAIL_CODE_TRIES_PER_ADDRESS_DAY = 20;
+/** Code tries one machine may take in the hour, counted before any record is read (Claude 3 on #2736). */
+export const EMAIL_CODE_TRIES_PER_IP_HOUR = 30;
 
 /** A request's id that opens nothing, for an answer that must look like every other (the form's honeypot). */
 export function unusedSignInRequest(): string {

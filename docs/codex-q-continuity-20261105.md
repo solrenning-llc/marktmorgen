@@ -540,3 +540,27 @@ Merge-tree nativo foi calculado antes de publicar; os quatro merges foram criado
 - Cinco produtos ocupados, nenhuma sexta unidade: #2438 `6da1a24763a718e88e157703542c24957bfc6123` coordenado/dirty e intocado; mais os quatro heads novos acima.
 - Nenhum produto Q foi incorporado. Os estados pós-publicação não foram consultados novamente; nenhum check antigo será contado.
 - Próxima ação somente por novidade causal AV12: retorno R2 de #2535, retorno Z de #2709, achado ou conclusão terminal dos nove novos. Merge próprio apenas OPEN + revisão aplicável + 9/9 SUCCESS exact-head + raw true/clean. Sem main-chase durante executores.
+
+
+## Retomada — 06/11/2026 03h47 Fortaleza
+
+### Novidades e fotografia terminal
+
+- Checkpoint anterior blob `55e3055ac5ccf035040fddc478f8ed72873db45d` lido primeiro; main/CLAUDE/AGENTS/reservas/caixa/canal relidos frescos.
+- Codex Z concluiu o retorno nominal de #2709 no head `86ee74a569e7170a1493618893955b79c60eed4f`, parecer `5796340546`, sem novo achado; relatório durável `e995be079052c1f5dde7fb423158c8411d171ee6`. A revisão permanece aplicável a merges de main com os três blobs idênticos.
+- Uma única fotografia encontrou #2535, #2709, #2729 e #2731 OPEN, cada um com 9/9 SUCCESS no head anterior, mas raw mergeable=false após o main avançar. #2535 ainda sem parecer formal/aplicável do Revisor2. Nenhum retry/cancelamento.
+
+### Nova integração terminal do main
+
+Main exato `6e01c123b31d890bb5a7100d0bce8ef498988b20` integrado uma vez nos quatro heads. Merge-trees nativos foram comparados às árvores GitData; publicação com `expected_sha` e `force=false`; 12 blobs próprios byte-idênticos.
+
+- #2535: `82908fe18a7771d48c9385ffe74a9cfc4bb8e5fd`, tree `8f7ede8748c8b58c019a7d8a61194075d36209ee`, comentário `6678996827`. Ainda exige R2 formal e nove novos.
+- #2709: `895c59c180b4bffc736855a9ae533277fef79e91`, tree `6c4ca4d9a57a6d7a59dea0bed4cea21f5dc68b62`, comentário `6678997307`. Parecer Z `5796340546` aplicável; nove novos.
+- #2729: `d533fe8d6030ed47cfcd0ad598d85883a03635d1`, tree `719f8a07473e534fc2e6ae9cdbada6481a498258`, comentário `6678997081`. S/R2 aplicáveis; nove novos.
+- #2731: `518c5a635bc724959d68a3f9c4a21af2f961c5b6`, tree `f9ff95bf27e1b18adc7438c1836e50fa65e299cf`, comentário `6678996585`. K2/R2 aplicáveis; nove novos.
+
+### Ponto exato
+
+- Cinco produtos ocupados: #2438 `6da1a24763a718e88e157703542c24957bfc6123` coordenado/dirty e intocado, mais os quatro heads acima. Nenhuma sexta unidade.
+- Nenhum produto Q incorporado. Não houve fotografia pós-publicação; nenhum check antigo será contado.
+- Próxima ação apenas por novidade causal AV12. Incorporar apenas OPEN + review aplicável + 9/9 SUCCESS exact-head + raw true/clean. #2535 nunca entra antes do parecer formal R2.

@@ -3,50 +3,108 @@
 import { useState } from "react";
 import { ALWAYS_ON_ROWS, OPTIONAL_ROWS, type OptionalEvent } from "@/lib/notify-prefs-rules";
 
-/**
- * The studio's alert email choices (app/studio/notifications, lib/notify-prefs.ts):
- * one labeled box per optional alert and one Save; the notices that cannot be
- * switched off are listed as text with their reason, not as boxes that do nothing.
- */
 const UNCONFIRMED = "We could not confirm the save. Reload this page to see what is saved, then try again.";
 
-/** What to tell the person, from the route's error: what happened, and what to do next. */
-function refusal(error: string | undefined): string {
-  if (error === "signed_out") return "Your sign-in has ended, so nothing was changed. Sign in again, then save.";
-  if (error === "forbidden") return "Only the store's owner or an Admin can change these, so nothing was changed.";
-  if (error === "server_error" || error === undefined) return UNCONFIRMED;
-  return "Nothing was changed. Try again in a moment.";
+type Answer = { ok?: boolean; off?: OptionalEvent[]; restarted?: boolean; error?: string; message?: string };
+
+/** What to tell the owner, from the route's error: what happened, and what to do next. */
+function refusal(data: Answer): string {
+  switch (data.error) {
+    case "signed_out":
+      return "Your sign-in has ended, so nothing was changed. Sign in again, then save.";
+    case "role":
+    case "owner_only":
+    case "forbidden":
+      return "Only the store's owner can change these, so nothing was changed.";
+    case "studio_used":
+    case "locked":
+      return data.message ? `Nothing was changed. ${data.message}` : "Nothing was changed. Try again later.";
+    case "two_step_required":
+      return "Nothing was changed. Log in again with your second step, then save.";
+    case "store_gone":
+      return "Nothing was changed: this store is closed.";
+    case "invalid":
+    case "always_on":
+    case "none":
+      return "Nothing was changed. Reload this page, then try again.";
+    default:
+      return UNCONFIRMED;
+  }
 }
 
-export function NotifyPrefsPanel({ off: initial }: { off: OptionalEvent[] }) {
+/**
+ * The studio's alert email choices (app/studio/notifications; alertEmailsOff
+ * in the store record, lib/notify-prefs-rules.ts): one labeled box per
+ * optional alert and one Save; the notices that cannot be switched off are
+ * listed as text with their reason, not as boxes that do nothing. While the
+ * weekly email's stop link holds, that is said first, with a way to undo it.
+ * Nothing is disabled while saving, so focus stays where the person left it.
+ */
+export function NotifyPrefsPanel({ off: initial, stopped: initiallyStopped }: { off: OptionalEvent[]; stopped: boolean }) {
   const [saved, setSaved] = useState<OptionalEvent[]>(initial);
   const [off, setOff] = useState<OptionalEvent[]>(initial);
+  const [stopped, setStopped] = useState(initiallyStopped);
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<{ ok: boolean; text: string } | null>(null);
   const changed = off.length !== saved.length || off.some((event) => !saved.includes(event));
 
+  async function post(body: Record<string, unknown>): Promise<Answer | null> {
+    try {
+      const response = await fetch("/api/store/notify-prefs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      return (await response.json().catch(() => ({}))) as Answer;
+    } catch {
+      return null;
+    }
+  }
+
   async function save() {
+    if (busy) return;
+    if (!changed) {
+      setSaid({ ok: true, text: "Nothing to save: these are already your choices." });
+      return;
+    }
     setBusy(true);
     setSaid(null);
-    try {
-      const response = await fetch("/api/store/notify-prefs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ off }) });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; off?: OptionalEvent[]; error?: string };
-      if (data.ok && Array.isArray(data.off)) {
-        setSaved(data.off);
-        setOff(data.off);
-        setSaid({ ok: true, text: "Saved. Your alert emails follow these choices from now on." });
-      } else {
-        setSaid({ ok: false, text: refusal(data.error) });
-      }
-    } catch {
-      setSaid({ ok: false, text: UNCONFIRMED });
-    } finally {
-      setBusy(false);
-    }
+    const data = await post({ off });
+    setBusy(false);
+    if (data?.ok && Array.isArray(data.off)) {
+      setSaved(data.off);
+      setOff(data.off);
+      setSaid({
+        ok: true,
+        text: stopped
+          ? "Saved. These emails stay stopped by the weekly email's link until you start them again above."
+          : "Saved. Your alert emails follow these choices from now on.",
+      });
+    } else setSaid({ ok: false, text: data ? refusal(data) : UNCONFIRMED });
+  }
+
+  async function restart() {
+    if (busy) return;
+    setBusy(true);
+    setSaid(null);
+    const data = await post({ restart: true });
+    setBusy(false);
+    if (data?.ok && data.restarted) {
+      setStopped(false);
+      setSaid({ ok: true, text: "Started again. The alerts you chose, and the weekly, monthly and busy-day emails, come again." });
+    } else setSaid({ ok: false, text: data ? refusal(data) : UNCONFIRMED });
   }
 
   return (
     <div className="mt-8 max-w-2xl">
+      {stopped ? (
+        <div className="notice mb-8">
+          <p>
+            All of these alert emails are stopped, because the stop link in a weekly email was used. The weekly, monthly and busy-day emails are
+            stopped too. Your choices below apply once they start again.
+          </p>
+          <button type="button" className="btn btn-secondary mt-3 min-h-11" aria-busy={busy} onClick={() => void restart()}>
+            Start these emails again
+          </button>
+        </div>
+      ) : null}
+
       <section aria-labelledby="notify-choose">
         <h2 id="notify-choose" className="t-h3">
           Alerts you choose
@@ -61,7 +119,7 @@ export function NotifyPrefsPanel({ off: initial }: { off: OptionalEvent[] }) {
             void save();
           }}
         >
-          <fieldset disabled={busy}>
+          <fieldset>
             <legend className="sr-only">Email me about</legend>
             <ul className="space-y-3">
               {OPTIONAL_ROWS.map((row) => (
@@ -85,7 +143,7 @@ export function NotifyPrefsPanel({ off: initial }: { off: OptionalEvent[] }) {
                 </li>
               ))}
             </ul>
-            <button type="submit" className="btn btn-primary mt-5 min-h-11" disabled={!changed || busy}>
+            <button type="submit" className="btn btn-primary mt-5 min-h-11" aria-busy={busy}>
               {busy ? "Saving…" : "Save choices"}
             </button>
           </fieldset>

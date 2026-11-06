@@ -13,9 +13,13 @@
  *     as before; switched on again, it is emailed, with where to choose;
  *   - the quiet-sales email switched off costs no Stripe reading and uses
  *     nothing up;
- *   - the route saves only for a signed-in owner or Admin, refuses an
- *     always-on or unknown event with its own error and changes nothing then;
- *   - the studio page names what is always on and why.
+ *   - the route saves only for the signed-in owner (the emails are the
+ *     owner's, and some are how an owner would notice a teammate), refuses an
+ *     always-on or unknown event with its own error and changes nothing then,
+ *     and can undo the weekly email's stop link, which stops all of these;
+ *   - the studio page names what is always on and why, says when the stop
+ *     link or a store not taking payments makes the choices do nothing yet,
+ *     and never disables the focused button.
  *
  * Rule 23: this replaces the red test of 2b5cd9642, written for a separate
  * Redis key (nl:notify:off:) read at send time. Review found that design
@@ -33,6 +37,7 @@ import { setChatAddress } from "@/lib/chat-summary";
 import { setSalesGoal } from "@/lib/sales-goal";
 import { claimHandle, ensureStatsId, ensureStoreId, setAlertEmailsOff, setChatSales, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { setWeeklyOff, weeklyOff } from "@/lib/stats-report";
 import { POST as prefsRoute } from "@/app/api/store/notify-prefs/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -170,7 +175,7 @@ async function main(): Promise<void> {
   is("switched on: sent once", [await checkQuiet(store, quietNow), emails.length, redis.run(["EXISTS", stretch])], ["sent", 1, 1]);
   is("with where to choose", emails[0]?.text.includes(`/studio/notifications?store=${store.sid}`), true);
 
-  part("The route: a signed-in owner or Admin, optional events only");
+  part("The route: the signed-in owner, optional events only");
   const session = await openSession(OWNER);
   const post = async (body: unknown, cookie = `${SESSION_COOKIE}=${session}`) => {
     const response = await prefsRoute(new NextRequest("https://marktmorgen.com/api/store/notify-prefs", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify(body) }));
@@ -183,17 +188,25 @@ async function main(): Promise<void> {
   is("an always-on one refused", [always.status, always.body, always.cache], [400, { ok: false, error: "always_on" }, "no-store"]);
   is("an unknown one refused", (await post({ off: ["nope"] })).body, { ok: false, error: "invalid" });
   is("nothing changed by the refusals", (await storeForEmail(OWNER))!.alertEmailsOff, ["traffic", "refunds"]);
+  is("owner only, past the settings permission", readFileSync("app/api/store/notify-prefs/route.ts", "utf8").includes('if (guarded.role !== "owner") return Response.json({ ok: false, error: "owner_only" }'), true);
+  await setWeeklyOff("notifyharbor", true);
+  const restarted = await post({ restart: true });
+  is("the weekly stop link undone from the page", [restarted.body, await weeklyOff("notifyharbor")], [{ ok: true, restarted: true }, false]);
 
   part("The studio page");
   const page = readFileSync("app/studio/notifications/page.tsx", "utf8");
   const panel = readFileSync("components/notify-prefs-panel.tsx", "utf8");
-  is("the page is a setting, for the owner and an Admin, and shows the store's own choice", page.includes('"settings")') && page.includes("store.alertEmailsOff"), true);
+  is("the page is the owner's, and shows the store's own choice", page.includes('if (access.role !== "owner") redirect(') && page.includes("store.alertEmailsOff"), true);
+  is("it says when the stop link holds, with a way to undo it", page.includes("weeklyOff(store.handle)") && panel.includes("Start these emails again"), true);
+  is("it says when the store does not take payments yet", page.includes("These alerts start once your store takes payments"), true);
+  is("a breadcrumb says where the owner is", page.includes('aria-label="Breadcrumb"') && page.includes('aria-current="page"'), true);
+  is("nothing is disabled while saving, so focus stays", !panel.includes("disabled=") && panel.includes("aria-busy={busy}"), true);
   is("the always-on rows with their reasons, as text, not a disabled box", panel.includes("Always on") && panel.includes("row.reason") && !panel.includes("disabled={true}"), true);
   is("one labeled box per optional alert and one save", panel.includes("htmlFor={`notify-${row.id}`}") && panel.includes("Save choices"), true);
   is("the result is said in a status region", panel.includes('role="status"'), true);
-  is("a lapsed sign-in is told to sign in again", panel.includes("Sign in again, then save."), true);
+  is("a lapsed sign-in is told to sign in again; a role refusal says who can", panel.includes("Sign in again, then save.") && panel.includes('case "role":'), true);
   is("the weekly stop link's reach is said with the alerts it stops, not under the always-on list", panel.indexOf("stop link") < panel.indexOf("Always sent"), true);
-  is("the studio links to it for those who may change settings", /may\("settings"\)\s*\?\s*\[\{ href: studioPath\(store, "", "notifications"\)/.test(readFileSync("app/studio/page.tsx", "utf8")), true);
+  is("the studio links to it for the owner", /role === "owner"\s*\?\s*\[\{ href: studioPath\(store, "", "notifications"\)/.test(readFileSync("app/studio/page.tsx", "utf8")), true);
 
   done();
 }

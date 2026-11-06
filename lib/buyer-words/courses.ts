@@ -52,6 +52,13 @@ const en = {
   outline: (lessons: number, count: number) =>
     `${lessons} ${plural(lessons, "lesson", "lessons")} in ${count} ${plural(count, "module", "modules")}`,
   withCertificate: "certificate of completion",
+  /**
+   * How long the course's video runs, summed from what the video service
+   * measured (lib/course-facts.ts, 292 [SQ3]); a part that is zero is left out.
+   */
+  videoTotal: (hours: number, minutes: number) =>
+    `${[hours ? `${hours} ${plural(hours, "hour", "hours")}` : "", minutes ? `${minutes} ${plural(minutes, "minute", "minutes")}` : ""].filter(Boolean).join(" ")} of video`,
+  videoUnderMinute: "under 1 minute of video",
   ownTitle: "This is your own course",
   ownBody: "You see every lesson, as a student sees an open one. Nothing you do here is counted as progress.",
   seeSample: "See the certificate students get",
@@ -369,6 +376,9 @@ const es: CoursesWords = {
   courseLabel: "Curso",
   outline: (lessons, count) => `${lessons} ${plural(lessons, "lección", "lecciones")} en ${count} ${plural(count, "módulo", "módulos")}`,
   withCertificate: "certificado de finalización",
+  videoTotal: (hours, minutes) =>
+    `${[hours ? `${hours} ${plural(hours, "hora", "horas")}` : "", minutes ? `${minutes} ${plural(minutes, "minuto", "minutos")}` : ""].filter(Boolean).join(" ")} de vídeo`,
+  videoUnderMinute: "menos de 1 minuto de vídeo",
   ownTitle: "Este es tu propio curso",
   ownBody: "Ves todas las lecciones, como un estudiante ve una que ya está abierta. Nada de lo que hagas aquí cuenta como progreso.",
   seeSample: "Ver el certificado que reciben los estudiantes",
@@ -664,6 +674,9 @@ const fr: CoursesWords = {
   courseLabel: "Formation",
   outline: (lessons, count) => `${lessons}${S}${frPlural(lessons, "leçon", "leçons")} en ${count}${S}${frPlural(count, "module", "modules")}`,
   withCertificate: "certificat de fin de formation",
+  videoTotal: (hours, minutes) =>
+    `${[hours ? `${hours}${S}${frPlural(hours, "heure", "heures")}` : "", minutes ? `${minutes}${S}${frPlural(minutes, "minute", "minutes")}` : ""].filter(Boolean).join(" ")} de vidéo`,
+  videoUnderMinute: "moins d’une minute de vidéo",
   ownTitle: "C'est votre propre formation",
   ownBody: "Vous voyez toutes les leçons, comme un participant voit une leçon ouverte. Rien de ce que vous faites ici n'est compté comme progression.",
   seeSample: "Voir le certificat que reçoivent les participants",
@@ -953,6 +966,9 @@ const de: CoursesWords = {
   courseLabel: "Kurs",
   outline: (lessons, count) => `${lessons} ${plural(lessons, "Lektion", "Lektionen")} in ${count} ${plural(count, "Modul", "Modulen")}`,
   withCertificate: "Abschlusszertifikat",
+  videoTotal: (hours, minutes) =>
+    `${[hours ? `${hours} ${plural(hours, "Stunde", "Stunden")}` : "", minutes ? `${minutes} ${plural(minutes, "Minute", "Minuten")}` : ""].filter(Boolean).join(" ")} Video`,
+  videoUnderMinute: "weniger als 1 Minute Video",
   ownTitle: "Das ist Ihr eigener Kurs",
   ownBody: "Sie sehen jede Lektion so, wie Teilnehmende eine freigeschaltete sehen. Nichts, was Sie hier tun, zählt als Fortschritt.",
   seeSample: "Das Zertifikat ansehen, das Teilnehmende erhalten",
@@ -1247,6 +1263,9 @@ const it: CoursesWords = {
   courseLabel: "Corso",
   outline: (lessons, count) => `${lessons} ${plural(lessons, "lezione", "lezioni")} in ${count} ${plural(count, "modulo", "moduli")}`,
   withCertificate: "attestato di completamento",
+  videoTotal: (hours, minutes) =>
+    `${[hours ? `${hours} ${plural(hours, "ora", "ore")}` : "", minutes ? `${minutes} ${plural(minutes, "minuto", "minuti")}` : ""].filter(Boolean).join(" ")} di video`,
+  videoUnderMinute: "meno di 1 minuto di video",
   ownTitle: "Questo è il tuo corso",
   ownBody: "Vedi ogni lezione come uno studente vede una lezione aperta. Niente di ciò che fai qui viene contato come progresso.",
   seeSample: "Vedi l'attestato che ricevono gli studenti",
@@ -1539,6 +1558,9 @@ const nl: CoursesWords = {
   courseLabel: "Cursus",
   outline: (lessons, count) => `${lessons} ${plural(lessons, "les", "lessen")} in ${count} ${plural(count, "module", "modules")}`,
   withCertificate: "certificaat van voltooiing",
+  videoTotal: (hours, minutes) =>
+    `${[hours ? `${hours} uur` : "", minutes ? `${minutes} ${plural(minutes, "minuut", "minuten")}` : ""].filter(Boolean).join(" ")} video`,
+  videoUnderMinute: "minder dan 1 minuut video",
   ownTitle: "Dit is je eigen cursus",
   ownBody: "Je ziet elke les zoals een cursist een geopende les ziet. Niets wat je hier doet, telt als voortgang.",
   seeSample: "Bekijk het certificaat dat cursisten krijgen",
@@ -1832,6 +1854,9 @@ const pt: CoursesWords = {
   courseLabel: "Curso",
   outline: (lessons, count) => `${lessons} ${plural(lessons, "aula", "aulas")} em ${count} ${plural(count, "módulo", "módulos")}`,
   withCertificate: "certificado de conclusão",
+  videoTotal: (hours, minutes) =>
+    `${[hours ? `${hours} ${plural(hours, "hora", "horas")}` : "", minutes ? `${minutes} ${plural(minutes, "minuto", "minutos")}` : ""].filter(Boolean).join(" ")} de vídeo`,
+  videoUnderMinute: "menos de 1 minuto de vídeo",
   ownTitle: "Este é o seu próprio curso",
   ownBody: "Vê todas as aulas, tal como um aluno vê uma aula aberta. Nada do que fizer aqui conta como progresso.",
   seeSample: "Ver o certificado que os alunos recebem",

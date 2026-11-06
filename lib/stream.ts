@@ -220,6 +220,30 @@ export async function streamStates(pathnames: string[]): Promise<Record<string, 
   return out;
 }
 
+/**
+ * How long each of these videos runs, in seconds, by its path: only a video
+ * the service has made ready and measured (292 [SQ3], lib/course-facts.ts).
+ * Every record in one MGET, so a course of any size is one command; a path
+ * that is not a video's, or one nothing is known about, is left out. Null
+ * with no database: nothing is known.
+ */
+export async function streamLengths(pathnames: string[]): Promise<Map<string, number> | null> {
+  const wanted = pathnames.flatMap((path) => {
+    const parts = readStreamPath(path);
+    return parts ? [{ path, id: parts.id }] : [];
+  });
+  if (!isRedisConfigured()) return null;
+  const out = new Map<string, number>();
+  if (!wanted.length) return out;
+  const [rows] = await redisPipeline([["MGET", ...wanted.map(({ id }) => recordKey(id))]]);
+  if (!Array.isArray(rows)) return null;
+  wanted.forEach(({ path }, i) => {
+    const record = parseRecord(rows[i]);
+    if (record && record.path === path && record.state === "ready" && record.seconds > 0) out.set(path, record.seconds);
+  });
+  return out;
+}
+
 type Answer = { status: number; data: unknown };
 
 /** One question to the service. A status of 0 is a service that could not be reached. */

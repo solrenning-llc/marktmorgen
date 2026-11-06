@@ -23,7 +23,7 @@ O caminho de repetição da rota exige produto de6–40caracteres a-z0-9. O help
 - aa0: **12/12**; inválidos agora são recusados na gravação, sem registro/slot, e normal-id continua4/4.
 Esse RED é funcional e inalterado; não uso a ausência da exportação LandingIdInvalid no pai como se fosse reprodução causal. O teste novo do autor passa13/13, mas sozinho não compilava no pai. Minha prova não exige uma arquitetura específica: basta recusar a escrita ou não confirmar limpeza/ausência de conteúdo aceito ainda retido.
 
-**Limite do LEVE:** chamadas diretas de funções com IDs que os geradores reais não produzem; não demonstrei criação desses IDs por rota real. Não reclassifico como invasão remota/financeira nem alego legado de produção sob esses nomes. A escrita no main anterior não tinha esse recurso público implantado por este PR. O ponto de uso atual foi fechado sem exigir migração de registros hipotéticos.
+**Limite do LEVE:** chamadas diretas de funções com IDs que os geradores reais não produzem; não demonstrei criação desses IDs por rota real. Não reclassifico como invasão remota/financeira nem alego legado de produção sob esses nomes. O ponto de uso atual foi fechado sem exigir migração de registros hipotéticos.
 
 **MÉDIO mais antigo de cleanupPending** permanece fechado: prova15763ba2 SHA25655f3e73cffa28ebc76e5aa2a1a6c1a1e8481396ed59f6035ad25a4a0e25b6ca4 BYTE-ID, **8/8 cada em unapplied/healthy/lost** no aa0, executados. Prova originalG2ad5734a5 **5/5**. Créditos G2 e R2 preservados.
 

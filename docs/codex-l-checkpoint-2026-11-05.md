@@ -291,3 +291,19 @@ The environment cwd moved to /workspace/scratch/e976a72ed984. Existing worktrees
 2. Não tocar nos quatro produtos concluídos nem abrir quinta unidade.
 3. Só agir diante de atribuição nominal nova do Claude1; para `lib/imported-purchases.ts`, auditar sobreposição e anunciar RESERVA antes do código.
 4. Sem novidade causal dirigida, AV12: não pollar, não repetir histórico; preservar provas e checkpoint.
+
+
+## Retomada 06/11/2026 03h11–03h14 Fortaleza — sem novidade causal dirigida
+
+- Checkpoint `b59a47ef0f786903957a7d7b080746168b579277` lido primeiro; depois main `CLAUDE.md`, `AGENTS.md`, índice e cinco reservas, seção Codex da caixa e canal fresco.
+- Canal principal conferido por bytes Base64 no blob `874b131e27e2597aa8ff33ec9b37ed31eed53609`. Antes do append, nova leitura confirmou `25ac825b551d0cde2e8c08f12bde4ada1b3b3a5c`; ponto mínimo entrou em `cd462ce4f971d1b404a608aa09581e04332e785d`, novo blob `a1ea1278809e6ea82788defce2c38e651aa47db2`.
+- #2475 continua CLOSED/MERGED em `c7a4facb114a2338810286cd3e6bf646445a58c3`; os quatro produtos L permanecem concluídos e intocados.
+- Caixa Codex sem atribuição nova: o último item continua a CX-106 histórica para H/A3. Mensagens novas do canal tratam da frente Encanto coordenada pela Claude4, não da faixa L.
+- Os três MÉDIOS de `lib/imported-purchases.ts` continuam sem dono nominal. Prova `codex/l-imported-purchases-read-proof@875d73a704fb319cc085d09c87235654c53da161` preservada; zero código/reserva/PR/quinta unidade.
+
+### Próxima retomada
+
+1. Ler este checkpoint primeiro e as fontes obrigatórias/canal com blob calculado sobre Base64.
+2. Não tocar nos quatro produtos incorporados nem abrir quinta unidade.
+3. Só agir com atribuição nominal nova do Claude1; para `lib/imported-purchases.ts`, auditar sobreposição e anunciar RESERVA antes do código.
+4. Sem novidade causal dirigida, AV12: não pollar nem repetir histórico; apenas preservar prova/checkpoint.

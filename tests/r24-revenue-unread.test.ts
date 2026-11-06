@@ -17,7 +17,7 @@
  * Synthetic data and a stand-in for Stripe only.
  */
 import { keptIn, type Entry, type Readings } from "@/lib/retained-revenue";
-import { movementsFrom, pricesFrom, type Invoice } from "@/lib/mrr-movements";
+import { movementsFrom, pricesFrom, UnreadInvoiceError, type Invoice } from "@/lib/mrr-movements";
 import type { Sub } from "@/lib/membership-numbers";
 import { readSales } from "@/lib/stats";
 import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
@@ -129,6 +129,60 @@ for (const [label, bad] of unreadJulys) {
     moves = "refused";
   }
   is(`July's invoice, ${label}: refused, never a month Ana paid nothing`, moves === "refused" ? "refused" : [july(moves).canceled, aug(moves).reactivated, moves.months.map((m) => m.end)], "refused");
+}
+
+part("Recurring revenue: a subscription reference that could not be read stops the movements, never a line of nobody's");
+// Bea moves from $20 to $30 in July. Stripe gives a line's subscription as its
+// id, as the expanded object with that id, or null on a line of no membership.
+const bea = [{ ...sub("sub_bea", at(2026, 6, 5), 3000), customer: "cus_bea" }];
+const beaById = new Map(bea.map((s) => [s.id, s]));
+const beaLine = (start: number, unit: number, over: Record<string, unknown> = {}) => ({ ...line(start), subscription: "sub_bea", amount: unit, price: { unit_amount: unit, recurring: { interval: "month", interval_count: 1 } }, ...over });
+const beaInvoices = (julyLine: Record<string, unknown>, invoice: Record<string, unknown> = {}): Invoice[] => [
+  { created: at(2026, 6, 5), lines: { data: [beaLine(at(2026, 6, 5), 2000)] } },
+  { created: at(2026, 7, 5), ...invoice, lines: { data: [julyLine] } } as Invoice,
+  { created: at(2026, 8, 5), lines: { data: [beaLine(at(2026, 8, 5), 3000)] } },
+];
+const beaMoves = (invoices: Invoice[]) => {
+  try {
+    const m = movementsFrom(bea, pricesFrom(invoices, beaById), "usd", NOW_S);
+    return { julyExpansion: july(m).expansion, julyEnd: july(m).end, augExpansion: aug(m).expansion };
+  } catch (error) {
+    return error instanceof UnreadInvoiceError ? "refused" : `threw ${String(error)}`;
+  }
+};
+const moved = { julyExpansion: 1000, julyEnd: 3000, augExpansion: 0 };
+is("healthy: the line's id, July shows the $10 expansion", beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000))), moved);
+is("healthy: the expanded subscription with its id reads as its id", beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { subscription: { id: "sub_bea", object: "subscription" } }))), moved);
+is(
+  "healthy: no reference on the line (null), the invoice's own subscription reads",
+  beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { subscription: null, parent: null }), { subscription: "sub_bea" })),
+  moved,
+);
+is(
+  "healthy: the newer shape, the invoice's parent holding the expanded subscription",
+  beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { subscription: undefined }), { parent: { subscription_details: { subscription: { id: "sub_bea" } } } })),
+  moved,
+);
+is(
+  "healthy: a line of no membership (null everywhere) is not Bea's and moves nothing",
+  beaMoves([...beaInvoices(beaLine(at(2026, 7, 5), 3000)), { created: at(2026, 7, 9), subscription: null, lines: { data: [{ subscription: null, amount: 500, period: { start: at(2026, 7, 9) } }] } }]),
+  moved,
+);
+const unreadRefs: [string, Record<string, unknown>, Record<string, unknown>?][] = [
+  ["the line's subscription an object with no id", { subscription: { object: "subscription" } }],
+  ["the line's subscription an object whose id is a number", { subscription: { id: 42 } }],
+  ["the line's subscription a number", { subscription: 42 }],
+  ["the line's subscription true", { subscription: true }],
+  ["the line's subscription a list", { subscription: ["sub_bea"] }],
+  ["the line's subscription empty text", { subscription: "" }],
+  ["the line's parent subscription an object with no id", { subscription: undefined, parent: { subscription_item_details: { subscription: { object: "subscription" } } } }],
+  ["the line's parent subscription a number", { subscription: undefined, parent: { subscription_item_details: { subscription: 7 } } }],
+  ["the invoice's subscription an object with no id", { subscription: undefined }, { subscription: { object: "subscription" } }],
+  ["the invoice's subscription a number", { subscription: undefined }, { subscription: 42 }],
+  ["the invoice's parent subscription an object with no id", { subscription: undefined }, { parent: { subscription_details: { subscription: {} } } }],
+];
+for (const [label, over, invoice] of unreadRefs) {
+  is(`July's line, ${label}: refused, never skipped as no membership`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, over), invoice)), "refused");
 }
 
 process.env.STRIPE_SECRET_KEY = "sk_test_r24_revenue_stand_in";

@@ -41,6 +41,17 @@ test("creator grant returns only validated routing data", () => {
     storeGrant,
   );
 });
+for (const field of ["s", "h", "p", "e", "k"] as const) {
+  test(`creator grant rejects conflicting duplicate ${field}`, () => {
+    const first = field === "k" ? "leave" : "different";
+    const raw = `{${JSON.stringify(field)}:${JSON.stringify(first)},${JSON.stringify(storeGrant).slice(1)}`;
+    assert.equal(parseStoreWaitlistGrant(raw), null);
+  });
+}
+test("creator grant rejects an escaped duplicate routing member", () => {
+  const raw = '{"\\u0065":"other@example.invalid",' + JSON.stringify(storeGrant).slice(1);
+  assert.equal(parseStoreWaitlistGrant(raw), null);
+});
 test("fresh opaque tokens do not carry an email or a reversible Redis key", () => {
   const first = newWaitlistToken(), second = newWaitlistToken();
   assert.match(first, WAIT_TOKEN);
@@ -79,4 +90,15 @@ test("platform grants return only routing data and never imply consent or consum
   const parsed = parsePlatformWaitlistGrant(JSON.stringify(nextGeneration), "confirm", now);
   assert.equal(parsed?.generation, nextGeneration.generation);
   assert.notEqual(parsed?.generation, platform.generation);
+});
+for (const field of ["scope", "version", "entryId", "generation", "k", "issuedAt", "expiresAt"] as const) {
+  test(`platform grant rejects conflicting duplicate ${field}`, () => {
+    const first = typeof platform[field] === "number" ? 0 : "different";
+    const raw = `{${JSON.stringify(field)}:${JSON.stringify(first)},${JSON.stringify(platform).slice(1)}`;
+    assert.equal(parsePlatformWaitlistGrant(raw, "confirm", now), null);
+  });
+}
+test("platform grant rejects an escaped duplicate routing member", () => {
+  const raw = '{"\\u0065ntryId":"' + "c".repeat(64) + '",' + JSON.stringify(platform).slice(1);
+  assert.equal(parsePlatformWaitlistGrant(raw, "confirm", now), null);
 });

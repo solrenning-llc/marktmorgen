@@ -9,11 +9,15 @@
  * start. If that cannot be confirmed after ACTIVATION_TRIES tries, the code
  * stays off and the studio says so, in words, beside the code.
  *
+ * When it fails, the creator is emailed once (unit 2), from the store's own
+ * email figure, taken before the email goes.
+ *
  * What it costs: each try is one call to the creator's Stripe account (which
  * bills no API call) and a few database commands, inside one studio request;
- * SCHEDULE_UNITS of the store's studio requests are taken when the code is
- * scheduled, before anything is asked of Stripe, so every try is paid for
- * ahead and no try is ever made unpaid. No countdown, no scarcity: nothing
+ * so is each try of the email that it failed. SCHEDULE_UNITS of the store's
+ * studio requests are taken when the code is scheduled, before anything is
+ * asked of Stripe, so every try is paid for ahead and no try is ever made
+ * unpaid. No countdown, no scarcity: nothing
  * of the kind is added here.
  */
 
@@ -23,8 +27,21 @@ export const MAX_SCHEDULED_CODES = 10;
 export const ACTIVATION_TRIES = 3;
 /** Seconds between tries: the next five-minute run. */
 export const RETRY_SECONDS = 300;
-/** Studio requests taken when a code is scheduled, one for each try the job may make. */
-export const SCHEDULE_UNITS = ACTIVATION_TRIES;
+/**
+ * Times the email that a code failed is tried (lib/discount-schedule-notice.ts):
+ * one send at the failure, and again after NOTICE_RETRY_SECONDS if it did not
+ * go, then never. A send that went is never made again.
+ */
+export const NOTICE_TRIES = 3;
+/** Seconds between tries of that email: an hour, so a short outage passes. */
+export const NOTICE_RETRY_SECONDS = 3600;
+/**
+ * Studio requests taken when a code is scheduled: one for each try the job
+ * may make to switch it on, and one for each try of the email that it failed
+ * (its few database commands; the email itself comes from the store's own
+ * email figure as it is sent).
+ */
+export const SCHEDULE_UNITS = ACTIVATION_TRIES + NOTICE_TRIES;
 /**
  * How long past its start a code may still read as starting: every try's
  * run and an hour more. Past it, a code the job has not switched on reads as
@@ -122,4 +139,14 @@ export function readScheduleConfirmation(raw: unknown): ScheduleEntry[] | null {
     out.push({ id, code, start, end, tries, failed });
   }
   return out;
+}
+
+/**
+ * Whether Stripe holds more codes than the studio was sent (lib/discount.ts,
+ * readCodePage), read exactly, or null: an unreadable answer leaves the list
+ * unconfirmed, never read as complete.
+ */
+export function readMoreConfirmation(raw: unknown): boolean | null {
+  if (!plain(raw) || !Object.hasOwn(raw, "more") || typeof raw.more !== "boolean") return null;
+  return raw.more;
 }

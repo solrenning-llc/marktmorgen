@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { setHasDiscounts, storeForEmail } from "@/lib/store";
 import { canSell } from "@/lib/store-checkout";
-import { createCode, listCodes, stopCode } from "@/lib/discount";
+import { createCode, readCodePage, stopCode } from "@/lib/discount";
 import { readCodeAsked } from "@/lib/discount-input";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { countStudio } from "@/lib/studio-route";
@@ -116,19 +116,20 @@ export async function POST(request: NextRequest) {
     }
 
     // Listed last on every path, so the answer the creator gets back is what
-    // Stripe says now rather than what we believe we just did.
-    const list = await listCodes(account);
+    // Stripe says now rather than what we believe we just did. One page of
+    // MAX_CODES, and whether Stripe holds more, for the studio to say so (unit 2).
+    const list = await readCodePage(account);
     // The schedules beside them, read exactly: a code waiting for its start is never shown as simply off.
     const kept = await readSchedules(store.statsId);
     if (list.state !== "ok" || !kept.ok) {
       return Response.json({ ok: false, error: "stripe" }, { status: 502 });
     }
-    await setHasDiscounts(
-      ref,
-      list.codes.some((entry) => entry.active),
-    );
+    // A live code on this page proves the box is needed; none here proves nothing
+    // while Stripe holds more, so the box is then left as it is.
+    const anyLive = list.codes.some((entry) => entry.active);
+    if (anyLive || !list.more) await setHasDiscounts(ref, anyLive);
 
-    return Response.json({ ok: true, codes: list.codes, schedules: kept.schedules });
+    return Response.json({ ok: true, codes: list.codes, more: list.more, schedules: kept.schedules });
   } catch (error) {
     console.error("changing a discount code failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

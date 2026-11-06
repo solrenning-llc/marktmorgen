@@ -1830,8 +1830,8 @@ export function ProductEditor({
   newComments?: Record<string, number>;
   /** Per product with a waitlist, where it stands (lib/waitlist.ts). */
   waitlists?: Record<string, WaitlistView>;
-  /** Each product's pre-orders, when it takes or took any (lib/preorders.ts). */
-  preorders?: Record<string, PreorderView>;
+  /** Each product's pre-orders, when it takes or took any (lib/preorders.ts); null when they could not be read. */
+  preorders?: Record<string, PreorderView> | null;
   /** The store's postal address for email, offered for a launch email's foot. */
   mailAddress?: string;
   /** The store's color, letters, name and language, for the cover maker (components/cover-maker.tsx). */
@@ -2496,7 +2496,8 @@ export function ProductEditor({
                     productId={product.id}
                     initial={waitlists[product.id] ?? null}
                     suggestedAddress={mailAddress}
-                    preorders={preorders[product.id] ?? null}
+                    preorders={preorders?.[product.id] ?? null}
+                    preordersUnread={preorders === null}
                     preorderBlocked={preorderProblem(product)}
                     hasContent={hasContent(product)}
                     price={formatMoney(product.priceCents, currency)}

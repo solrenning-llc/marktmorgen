@@ -3,6 +3,7 @@ import { guardStoreWrite } from "@/lib/store-request";
 import { readListing } from "@/lib/catalog";
 import { preorderViews, setExpectedDay, soonOne } from "@/lib/preorders";
 import { preorderProblem, readExpectedDay } from "@/lib/preorder-rules";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /**
  * The studio's pre-order switch (lib/preorders.ts), for a product marked
@@ -14,6 +15,9 @@ import { preorderProblem, readExpectedDay } from "@/lib/preorder-rules";
  * the product's page then tells buyers. `{ id, day: null }` stops taking them;
  * those already paid still wait for the product and are handed over when it
  * goes on sale.
+ *
+ * The change saved, its pre-orders read in an unknown shape answer 503
+ * "preorders_unread": the counts are not invented as 0 (sweep APP3).
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "products", 2_000);
@@ -39,6 +43,10 @@ export async function POST(request: NextRequest) {
     const views = await preorderViews(store, [product.id]);
     return Response.json({ ok: true, view: views[product.id] ?? { day: null, waiting: 0, given: 0, refunded: 0 } });
   } catch (error) {
+    if (error instanceof UnknownReplyError) {
+      console.error("a pre-order change was saved, but its pre-orders could not be read", error);
+      return Response.json({ ok: false, error: "preorders_unread" }, { status: 503 });
+    }
     console.error("changing a pre-order failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

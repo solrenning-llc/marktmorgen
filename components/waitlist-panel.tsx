@@ -18,6 +18,7 @@ const MESSAGES: Record<string, string> = {
   soon: "Mark it coming soon first: pre-orders are taken instead of a buy button.",
   day: `Choose a day from tomorrow to ${MAX_PREORDER_DAYS} days ahead.`,
   agree: "Check the box that says you refund every pre-order in full if it does not come out: buyers are told so.",
+  preorders_unread: "Saved. Its pre-orders could not be read just now, so they are not shown. Reload the page in a minute to see them.",
 };
 
 async function postPreorder(payload: Record<string, unknown>): Promise<{ ok: boolean; error?: string; view?: PreorderView }> {
@@ -60,6 +61,7 @@ export function WaitlistPanel({
   initial,
   suggestedAddress,
   preorders = null,
+  preordersUnread = false,
   preorderBlocked = null,
   hasContent = true,
   price,
@@ -69,6 +71,8 @@ export function WaitlistPanel({
   suggestedAddress: string;
   /** Its pre-orders, when it takes or took any (lib/preorders.ts). */
   preorders?: PreorderView | null;
+  /** Its pre-orders could not be read (lib/preorders.ts threw): said so, never shown as none. */
+  preordersUnread?: boolean;
   /** Why it cannot take pre-orders, when it cannot (lib/preorder-rules.ts). */
   preorderBlocked?: PreorderProblem | null;
   /** Whether it has its file, its link or a lesson: what pre-orders get when it goes on sale. */
@@ -79,6 +83,7 @@ export function WaitlistPanel({
   const [view, setView] = useState<WaitlistView>(initial ?? { soon: false, confirmed: 0, waiting: 0, launch: null });
   const [pre, setPre] = useState<PreorderView>(preorders ?? { day: null, waiting: 0, given: 0, refunded: 0 });
   const [day, setDay] = useState(preorders?.day ?? "");
+  const [unread, setUnread] = useState(preordersUnread);
   const [agree, setAgree] = useState(false);
   const [editingDay, setEditingDay] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -109,8 +114,15 @@ export function WaitlistPanel({
     setBusy(false);
     if (answer.ok && answer.view) {
       setPre(answer.view);
+      setUnread(false);
       setEditingDay(false);
       setAgree(false);
+    } else if (answer.error === "preorders_unread") {
+      // Saved, but what it shows now could not be read: said so, never the old counts or none.
+      setUnread(true);
+      setEditingDay(false);
+      setAgree(false);
+      setError(MESSAGES.preorders_unread);
     } else setError(MESSAGES[answer.error ?? ""] ?? MESSAGES.server_error ?? "Something went wrong. Try again.");
   }
 
@@ -175,6 +187,10 @@ export function WaitlistPanel({
           <p className="text-sm font-semibold text-ink">Pre-orders</p>
           {preorderBlocked ? (
             <p className="text-sm text-ink-soft">{PREORDER_PROBLEMS[preorderBlocked]}</p>
+          ) : unread ? (
+            <p className="text-sm text-ink" role="status">
+              Pre-orders could not be read just now, so they are not shown here. Reload the page in a minute to see them and to change them.
+            </p>
           ) : taking && !editingDay ? (
             <>
               <p className="text-sm text-ink">
@@ -199,7 +215,7 @@ export function WaitlistPanel({
               {dayForm}
             </>
           )}
-          {pre.waiting || pre.given || pre.refunded ? (
+          {!unread && (pre.waiting || pre.given || pre.refunded) ? (
             <p className="text-sm text-ink">
               <strong>{pre.waiting.toLocaleString("en-US")}</strong>
               {` pre-ordered and waiting`}
@@ -212,7 +228,9 @@ export function WaitlistPanel({
       {view.soon ? (
         <div className="mt-4 space-y-3 border-t border-line pt-4">
           <p className="text-sm font-semibold text-ink">Put it on sale and tell the waitlist</p>
-          {pre.waiting ? (
+          {unread ? (
+            <p className="text-sm text-ink">Any pre-orders are handed over the moment it goes on sale, and each buyer is emailed the way to open it.</p>
+          ) : pre.waiting ? (
             <p className="text-sm text-ink">
               {hasContent
                 ? `Each of the ${pre.waiting.toLocaleString("en-US")} pre-orders is handed over at the same moment, and its buyer is emailed the way to open it.`

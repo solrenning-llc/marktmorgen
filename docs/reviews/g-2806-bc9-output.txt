@@ -1,0 +1,352 @@
+===== /tmp/g2806-bc9-return.log =====
+G_LOCK_ENVELOPE {"mode":"extra","evals":3,"kept":false,"wrote":false,"gone":false,"getters":0,"owner":"legitimate-successor","target":"before"}
+  ok    extra: exactly three actual script boundaries reached
+  ok    extra: unknown receipt cannot confirm lease held by successor
+  ok    extra: unknown receipt cannot confirm unwritten record
+  ok    extra: unknown receipt cannot confirm unapplied deletion
+  ok    extra: no getter invoked
+  ok    extra: actual successor and record unchanged
+G_LOCK_ENVELOPE {"mode":"accessor","evals":3,"kept":false,"wrote":false,"gone":false,"getters":0,"owner":"legitimate-successor","target":"before"}
+  ok    accessor: exactly three actual script boundaries reached
+  ok    accessor: unknown receipt cannot confirm lease held by successor
+  ok    accessor: unknown receipt cannot confirm unwritten record
+  ok    accessor: unknown receipt cannot confirm unapplied deletion
+  ok    accessor: no getter invoked
+  ok    accessor: actual successor and record unchanged
+G_LOCK_ENVELOPE {"mode":"inherited","evals":3,"kept":false,"wrote":false,"gone":false,"getters":0,"owner":"legitimate-successor","target":"before"}
+  ok    inherited: exactly three actual script boundaries reached
+  ok    inherited: unknown receipt cannot confirm lease held by successor
+  ok    inherited: unknown receipt cannot confirm unwritten record
+  ok    inherited: unknown receipt cannot confirm unapplied deletion
+  ok    inherited: no getter invoked
+  ok    inherited: actual successor and record unchanged
+
+18 checks, all passing.
+DESCRIPTOR_PROTOTYPE {"parsed":null,"renewed":false,"written":false,"deleted":false,"calls":0,"owner":"next","record":"before"}
+  ok    accessor descriptor cannot inherit data value from Object.prototype
+  ok    unknown polluted receipt does not confirm renew
+  ok    unknown polluted receipt does not confirm write
+  ok    unknown polluted receipt does not confirm delete
+  ok    getter stays uncalled
+  ok    actual successor and record survive
+
+6 checks, all passing.
+  ok    plain copy keeps first snapshot
+  ok    copy identity separate
+  ok    unknown shape stays unknown
+  ok    unknown shape stays unknown
+  ok    unknown shape stays unknown
+  ok    unknown shape stays unknown
+  ok    unknown shape stays unknown
+  ok    throwing getter refused unread
+  ok    getter never called
+  ok    unreadable proxy cannot confirm hold
+  ok    unreadable proxy cannot confirm write
+  ok    unreadable proxy cannot confirm delete
+  ok    unreadable proxy cannot confirm hold
+  ok    unreadable proxy cannot confirm write
+  ok    unreadable proxy cannot confirm delete
+  ok    all four script boundaries for both proxies
+  ok    no separate fallback command
+  ok    actual held key retained
+
+18 checks, all passing.
+
+Codex G's proof: a script receipt not in its exact shape confirms nothing
+  ok    extra: three script boundaries reached
+  ok    extra: a hold on the successor's lock is not confirmed
+  ok    extra: an unwritten record is not confirmed
+  ok    extra: an unapplied deletion is not confirmed
+  ok    extra: no getter called
+  ok    extra: the successor's lock and the record are unchanged
+  ok    accessor: three script boundaries reached
+  ok    accessor: a hold on the successor's lock is not confirmed
+  ok    accessor: an unwritten record is not confirmed
+  ok    accessor: an unapplied deletion is not confirmed
+  ok    accessor: no getter called
+  ok    accessor: the successor's lock and the record are unchanged
+  ok    inherited: three script boundaries reached
+  ok    inherited: a hold on the successor's lock is not confirmed
+  ok    inherited: an unwritten record is not confirmed
+  ok    inherited: an unapplied deletion is not confirmed
+  ok    inherited: no getter called
+  ok    inherited: the successor's lock and the record are unchanged
+  ok    hole: three script boundaries reached
+  ok    hole: a hold on the successor's lock is not confirmed
+  ok    hole: an unwritten record is not confirmed
+  ok    hole: an unapplied deletion is not confirmed
+  ok    hole: no getter called
+  ok    hole: the successor's lock and the record are unchanged
+
+The acquisition receipt too: only its exact shape takes a lock
+  ok    extra: not taken, said busy
+  ok    extra: no getter called
+  ok    accessor: not taken, said busy
+  ok    accessor: no getter called
+  ok    inherited: not taken, said busy
+  ok    inherited: no getter called
+  ok    hole: not taken, said busy
+  ok    hole: no getter called
+
+Codex G's return (a586f20d): a getter slot stays unknown even when Object.prototype carries a value
+  ok    the reply is unknown
+  ok    no hold, write or delete confirmed
+  ok    no getter called
+  ok    the successor's lock and the record are unchanged
+
+The exact shapes still work
+  ok    a hold on our own lock
+  ok    a fenced write while ours
+  ok    a fenced delete while ours
+
+39 checks, all passing.
+
+Codex G's proof: a release whose script fails never deletes the successor's mark
+  ok    courses: the release's script was tried once
+  ok    courses: no read-then-delete after it
+  ok    courses: the successor's mark is kept
+  ok    reminders: the release's script was tried once
+  ok    reminders: no read-then-delete after it
+  ok    reminders: the successor's mark is kept
+  ok    discord: the release's script was tried once
+  ok    discord: no read-then-delete after it
+  ok    discord: the successor's mark is kept
+  ok    quiet: the release's script was tried once
+  ok    quiet: no read-then-delete after it
+  ok    quiet: the successor's mark is kept
+
+Codex G's exact race: the old fallback read our mark, then the successor took it, then the DEL landed on it
+  ok    courses: after the failed script, no DEL is sent
+  ok    courses: the successor's mark, taken once ours ran out, survives
+  ok    reminders: after the failed script, no DEL is sent
+  ok    reminders: the successor's mark, taken once ours ran out, survives
+  ok    discord: after the failed script, no DEL is sent
+  ok    discord: the successor's mark, taken once ours ran out, survives
+  ok    quiet: after the failed script, no DEL is sent
+  ok    quiet: the successor's mark, taken once ours ran out, survives
+
+A hold whose script fails says the lock is not held, and extends nothing
+  ok    not held, so the caller does not write
+  ok    and no separate GET or EXPIRE was sent
+
+A fenced write whose script fails writes nothing
+  ok    not written
+  ok    and no separate GET, EXISTS or SET was sent
+
+On a healthy Redis each is one script, and does what it says
+  ok    a hold on our own lock: held
+  ok    a fenced write while ours: written
+  ok    a fenced write of something new, already there: not written
+  ok    our release deletes our lock
+  ok    a release never deletes another holder's lock
+  ok    a hold on another's lock: not held
+  ok    a fenced write under another's lock: not written
+
+31 checks, all passing.
+
+Off three ways today, and nothing is sent while off
+  ok    no reviewed cost ceiling exists yet
+  ok    no review: off, nothing sent
+  ok    no store: off, nothing sent
+  ok    no key: off, nothing sent
+  ok    the key: none without the setting
+  ok    the key: not 32 bytes, none
+  ok    the key: 32 bytes from base64
+  ok    the default run, with a key but no review or bucket, is off and sends nothing
+  ok    the default store: none without the bucket settings
+
+A review counts only with its date, its source, a retention and a storage ceiling the copies cannot pass
+  ok    the synthetic review is whole
+  ok    a cap behind a getter: refused, off, nothing sent, the getter never run
+  ok    a review inherited from another object: refused, nothing sent
+  ok    a field added to Object.prototype is never read into the copy
+  ok    a retention of 3 days is admitted
+  ok    a revoked proxy: refused as a result, never an exception
+  ok    no date: refused, off, nothing sent
+  ok    a date that is not one: refused, off, nothing sent
+  ok    no source: refused, off, nothing sent
+  ok    no retention: refused, off, nothing sent
+  ok    a retention of 1 day: refused, off, nothing sent
+  ok    a retention of 2 days: refused, off, nothing sent
+  ok    a storage ceiling the kept copies could pass: refused, off, nothing sent
+  ok    a storage ceiling one byte short of retention + 2 sets: refused, off, nothing sent
+  ok    no room for the run's own commands: refused, off, nothing sent
+  ok    a cap that is not a count: refused, off, nothing sent
+  ok    more parts than a set may have: refused, off, nothing sent
+  ok    parts whose stored weight the ceiling cannot hold: refused, off, nothing sent
+
+With all three, a copy is made, written once and read back the same
+  ok    done, with the keys copied (its own day count and lock among them), one part and its manifest
+  ok    a second run the same day is refused before anything is written
+  ok    the good copy's time and its manifest are kept, and survive that refusal
+  ok    the last good copy's mark is kept for good: it names the copy never deleted to make room
+
+Failures say which step, and keep the last good copy's time
+  ok    a copy that does not read back the same is a failure
+  ok    its reason is kept, with its time
+  ok    a failure's note expires by itself
+  ok    one failed day after a good one: a good copy is still under 48 hours old
+  ok    a cap reached is a failure that says which
+  ok    the reason kept is the latest
+  ok    no good copy for over 48 hours: seen
+  ok    the database failing during the export: a result, not an exception
+  ok    and its reason is kept
+  ok    a refused day mark: the run stops before copying, as a result
+  ok    a good copy whose outcome could not be written is still reported done
+  ok    with nothing ever kept, the report says there is no good copy
+
+At most one run a day and one new try after a failure, counted before any cost (inbox C4-49)
+  ok    the day's first run fails
+  ok    one new try the same day runs, and is done
+  ok    a third call that day: refused at the day's count, four commands (the lock; the count; the lock let go only if it is its own, in one script), nothing listed or written
+  ok    a day whose first run is done
+  ok    no new try after a good run: refused, four commands, nothing written
+  ok    two failures in a day: the second was the new try
+  ok    and nothing more that day
+  ok    the count of the day expires by itself
+
+A walk past its pages is a failure that says so, never a partial copy (inbox C4-46)
+  ok    refused at the walk's page cap, nothing written
+  ok    and the owner's report says so
+
+Write first, then delete past the retention; under the ceiling a failed delete never costs the day's copy (inbox C4-53)
+  ok    the normal case: written, then the copy older than 30 days deleted, the one of exactly 30 days and the younger kept
+  ok    a delete that fails under the ceiling: the day's copy is still written, done
+  ok    and the owner's report says the deletion failed
+  ok    the good copy's time is the new one
+  ok    the next run deletes what was left past the retention
+
+At the ceiling, the oldest go first, never the last verified copy; a failed delete there writes nothing (inbox C4-53)
+  ok    at the ceiling, a delete that fails: nothing written, said so
+  ok    the day's new try makes room from the oldest, keeps the last verified copy, and writes
+  ok    and the bucket stays within the review's ceiling
+
+The last verified copy is known for sure before any copy is deleted to make room (Codex G on e95705e66)
+  ok    an empty answer from the database: no copy deleted to make room, nothing written, said so
+  ok    two answers for one command: no copy deleted to make room, nothing written, said so
+  ok    a value that is not text: no copy deleted to make room, nothing written, said so
+  ok    a value that is not the kept shape: no copy deleted to make room, nothing written, said so
+  ok    an old mark with a time and no manifest: no copy deleted to make room, nothing written, said so
+  ok    no mark at all, with copies in the bucket: no copy deleted to make room, nothing written, said so
+
+The bucket's rule outlives the retention, and a last good copy lost to it never stops the backup (Reviewer 1 on e81007570)
+  ok    the bucket's lifecycle rule to set: 60 days, longer than the 30-day retention
+  ok    30 days more than the retention
+  ok    the last good copy was taken by the bucket's rule
+  ok    the first good run after it writes again
+  ok    and the report says the last good copy was lost
+  ok    the run's own note: last good copy lost
+  ok    only objects with no valid manifest were deleted to make room
+
+A failed day deletes nothing after it: the last good copy stays past the retention while new ones fail (Codex G on e95705e66)
+  ok    day 4, the first write refused: a failure, nothing deleted, the good copy of day 0 whole
+  ok    the next good copy is written, and only then is the old one, past the retention, deleted
+
+When even deleting every other copy leaves no room, nothing is written
+  ok    the others deleted, the last verified copy kept, and still no room: room_error, nothing written
+
+A listing longer than the ceiling allows: nothing written, said so
+  ok    more than its 1 page: refused as room_pages after one page, nothing written or deleted
+
+Two calls at once: one runs, the other is refused before anything costly (inbox C4-53)
+  ok    one is done, the other refused as busy; one set written
+  ok    the busy call left the day's new try untouched
+
+The lock: only its own run lets it go, it outlives the run's cutoff, and a busy call is reported
+  ok    the lock lives longer than the cutoff and the admission's two requests, with a minute to spare
+  ok    held, while writing, for at least the cutoff
+  ok    a lock taken by another run since is never let go by this one
+  ok    a call that finds the lock: busy, and the owner's report says so
+
+What the code proves: never past the review's ceiling in objects, and the last verified copy always kept
+  ok    never more than the review's 36199424 bytes (seen 21645)
+  ok    objects are what limits here: 64 reached, never passed, one listing page of 1
+  ok    the last verified copy is never deleted
+  ok    after each run whose deletion finished, none of its own copies older than 30 days
+  ok    the ceiling in sets: retention + 2 = 32
+
+The same 90 days with copies that weigh more than half a set each: bytes are what limits
+  ok    never more than the review's 36199424 bytes as listed (seen 35633871)
+  ok    and fewer objects than the 64 the count allows (seen 63)
+  ok    the last verified copy is never deleted
+
+A run that passes its cutoff stops before its manifest (independent review of #2175)
+  ok    the run's cutoff: 800 s, under a day (the retention's proof needs it)
+  ok    past the cutoff: refused as such, its part left unreferenced, no manifest written
+
+With the shortest retention, the report says no good copy before the last one can be deleted
+  ok    two failed days: the good copy is still there, and the report already says no good copy for 48 hours
+
+Nothing schedules it
+  ok    vercel.json names no backup route
+
+96 checks, all passing.
+✔ unknown script acknowledgments never confirm a lease or fenced write (1.239474ms)
+✔ when the script cannot run, no renewal or fenced write is confirmed and no separate command is sent (0.563628ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 8.386401
+✔ lock admission requires explicit OK and never grants ownership on unknown storage response (6.623349ms)
+✔ unknown stock lock acknowledgment cannot open checkout (43.55993ms)
+✔ malformed lock receipt never grants ownership or retries an uncertain acquisition (1.350501ms)
+✔ strict fenced CAS never downgrades an ambiguous EVAL to separate reads or writes (1.137401ms)
+✔ strict fenced CAS refuses unsafe or over-budget inputs before any IO (0.493241ms)
+✔ strict release cannot turn an ambiguous EVAL into a GET/DEL race (1.382709ms)
+✔ strict release rejects unknown ownership without reading executable fields (3.110567ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 68.857379
+
+Taken and let go by the same run
+  ok    taken
+  ok    taken again by another: not ours
+  ok    let go by its own run
+
+A mark that ran out and was taken by another run is not ours to let go
+  ok    the second run takes it
+  ok    the first run failing later leaves the second run's mark alone
+
+5 checks, all passing.
+
+deliverGift: the giving mark is read exactly
+  ok    a giving mark answered as true, not held after: unknown, nothing given
+  ok    a giving mark answered as a number, not held after: unknown, nothing given
+  ok    a giving mark answered as an empty reply, not held after: unknown, nothing given
+  ok    a giving mark answered as not a list, not held after: unknown, nothing given
+  ok    a giving mark answered as text, read back as another value: somebody else's, so not done here and not said as done
+  ok    a mark another run holds, the gift not given yet: thrown, nothing given, so the next run tries again
+  ok    the gift given by another run
+  ok    a mark another run holds, the gift given already: already
+  ok    the mark free: given
+  ok    and let go after
+  ok    a mark taken over meanwhile is not deleted by this run
+
+handOverPreorder: the giving mark is read exactly
+  ok    a pre-order's mark answered as true, not held after: unknown, nothing handed over
+  ok    a pre-order's mark answered as a number, not held after: unknown, nothing handed over
+  ok    a pre-order's mark answered as an empty reply, not held after: unknown, nothing handed over
+  ok    a pre-order's mark answered as not a list, not held after: unknown, nothing handed over
+  ok    a pre-order's mark answered as text, read back as another value: somebody else's, thrown, nothing handed over
+  ok    a mark another run holds, not given yet: thrown, nothing handed over
+  ok    and the other run's mark is left alone
+  ok    the mark free: given
+  ok    and let go after
+  ok    a mark taken over meanwhile is not deleted by this run
+
+21 checks, all passing.
+
+
+===== /tmp/g2806-bc9-tsc.log =====
+
+
+===== /tmp/g2806-bc9-lint.log =====

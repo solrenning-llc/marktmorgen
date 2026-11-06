@@ -94,6 +94,8 @@ export type Note = { s: string; at: number; t: number; m: 0 | 1; p?: NotedPart[]
 /** A charge the refund was about to give back, and how much (written before any money moves). */
 export type NotedPart = { c: string; a: number };
 
+const INVALID_NOTED_PARTS = Symbol("invalid noted plan-refund parts");
+
 export type PlanRefundFlow =
   /** Given back; `ended` false: the plan is ended by the daily job. `earlier`: given back by an earlier request. */
   | { ok: true; cents: number; currency: string; refundId: string; status: "succeeded" | "pending"; ended: boolean; earlier: boolean }
@@ -103,13 +105,18 @@ export type PlanRefundFlow =
 type Row = Record<string, unknown>;
 const rows = (page: Row): Row[] => (Array.isArray(page.data) ? (page.data as unknown[]).filter((r): r is Row => Boolean(r) && typeof r === "object") : []);
 
-function readNote(raw: unknown): Note | null {
+function readNote(raw: unknown): Note | typeof INVALID_NOTED_PARTS | null {
   if (typeof raw !== "string") return null;
   try {
     const v = JSON.parse(raw) as Partial<Note>;
     if (typeof v.s !== "string" || !SUBSCRIPTION_PATTERN.test(v.s) || typeof v.at !== "number" || !Number.isSafeInteger(v.at) || v.at <= 0) return null;
     const t = typeof v.t === "number" && Number.isSafeInteger(v.t) && v.t >= v.at ? v.t : v.at;
+    const hasParts = Object.hasOwn(v, "p");
     const p = Array.isArray(v.p) && v.p.length && v.p.every((x) => x && typeof x.c === "string" && /^(ch|py)_[A-Za-z0-9]{6,128}$/.test(x.c) && Number.isSafeInteger(x.a) && x.a > 0) ? v.p : undefined;
+    // A legacy note may have no debt list. Once `p` is present, however, every entry is durable evidence of what
+    // remains owed. Treating a damaged present list as absent would fall back to a store-wide search and could
+    // mistake one refund for the whole multi-charge debt.
+    if (hasParts && !p) return INVALID_NOTED_PARTS;
     return { s: v.s, at: v.at, t, m: v.m === 1 ? 1 : 0, ...(p ? { p } : {}) };
   } catch {
     return null;
@@ -145,7 +152,7 @@ const noteOf = async (sid: string): Promise<Note | null> => {
   const raw = await oneNoteReply(["HGET", ENDING_KEY, sid], "the plan-refund recovery note");
   if (raw === null) return null;
   const note = readNote(raw);
-  if (!note) throw new UnknownReplyError("the plan-refund recovery note");
+  if (!note || note === INVALID_NOTED_PARTS) throw new UnknownReplyError("the plan-refund recovery note");
   return note;
 };
 
@@ -521,6 +528,11 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
     }
     try {
       const note = readNote(value);
+      if (note === INVALID_NOTED_PARTS) {
+        console.error(`plan-refund: store ${sid}'s recovery note has unknown debt evidence; it is retained`);
+        counts.left += 1;
+        continue;
+      }
       const store = note ? await storeForId(sid) : null;
       if (!note || !store) {
         if (!note) console.error(`plan-refund: an unreadable note for store ${sid} is dropped`);

@@ -887,3 +887,15 @@ Main exato `6e01c123b31d890bb5a7100d0bce8ef498988b20` integrado uma vez nos quat
 - #2709 `7add83c51b4eac73e555670f78a610abf0e67439` também concluiu9/9. REST ainda null/unknown após os dois merges; aguardo true/clean. União nativa com maina79e tree `1fbafed332a212578ad559cc7ad0de7a92ceaf3b`, trêsblobs BYTE-ID (eee54791/d3174401/0abf6b8a), client269/269/diff0. Z5796340546 relido no GitHub e aplicável. Não é necessário movimentar o head apenas para atualizar main.
 - Tentativa de anúncio do merge2731 recebeu409 e NÃO escreveu. Recuperação deve aguardar>=2min desde409, ler FULL/SHAfresco e acrescentar sobre histórico atual, preservando a mensagem.
 - Próximo gate2709:rawtrue/clean nointervalo>=5min; então merge NORMAL expectedSHA. #2535 segue9/9 mas semformalR2. #2438 congelado;3produtos própriosOPEN.
+
+
+## #2709 incorporado; ponto durável após os três merges
+
+- #2709 foi incorporado normalmente pelo Q com expected_head_sha `7add83c51b4eac73e555670f78a610abf0e67439`; GitHub retornou merged=true/merge `dadf0972101d0c4afc3ba89ec96c886349e583fd`. NOVE workflows distintos completed/SUCCESS; parecer Z5796340546 relido e aplicável; REST bruto true/clean depois das leituras de recomputação null/unknown.
+- União nativa com main fresco `a5f566b8bd399cc67b04dd4c037e1575ade6855a`, tree `5cec2367e18f62ce8b46f878089ccc510b3d4453`; client270/270/diff0. Sourceeee54791 e teste0abf6b8a BYTE-ID; registro compartilhado preserva main integral e acrescenta SOMENTE a mesma attribution STORE_FORGET_MONTH_READ_COMMANDS. O blob completo do registry difere por adições legítimas do main; não foi restaurado snapshot antigo. Nenhum head novo/retry/rerun/cancel.
+- Três produtos incorporados nesta execução: #2729=`0ce2ecb074e11325d4f2d51e7e581a7c387c86f0`; #2731=`a79e8a5fc9fb6f0dd2f63bc70c4a75fa5d2a1517`; #2709=`dadf0972101d0c4afc3ba89ec96c886349e583fd`. Heads antigos intocados; nenhum produto alheio incorporado.
+- Anúncio recuperado do merge2731 após409/espera>=2min/FULLfresco: canal `77e90a2daa5899acb68932432f208a488d76ff01`. Anúncio do merge2709/dois restantes: canal `1a4bf6703ee594f423da7127a958610c4ceaba36`.
+- #2535 `993dc83e9417dd534a9f1727f0575a02d0ad5840`:9/9 SUCCESS, formalR2 ainda pendente; pedido atualizado em comentário `6694107039`. Não incorporar sem esse requisito.
+- #2438 `6da1a24763a718e88e157703542c24957bfc6123`:congelado até #2576/coordenação. Nenhum contato/suppression/ramo/CI/reserva alheio alterado.
+- #2790 já concluído no mesmoa1c93ee4/reviewQ5805390991/merge0c2d;não repetir. CX-127 lida e reconhecida por C4-2780; canal continua>=2min/estado próprio>=5min, blocos de<=10min. Ponto não encerra a execução.
+- Dois produtos própriosOPEN; próxima unidade segurança/privacidade precisa inventário e RESERVA frescos, respeitando Y/SG2 e arquivos ocupados. Provas anteriores e histórico integral deste arquivo preservados.

@@ -7,6 +7,8 @@
  */
 import { renderToStaticMarkup } from "react-dom/server";
 import NumbersLinkPage from "@/app/numbers/[id]/page";
+import { NextRequest } from "next/server";
+import { POST as passwordForm } from "@/app/api/numbers-link/route";
 import { OPENS_PER_DAY, countOpen, indexLink, linkStore, makeLink } from "@/lib/numbers-links";
 import { addNumbersLink, claimHandle, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -84,6 +86,26 @@ async function main(): Promise<void> {
   is("an unknown reply: not ended, said as not read just now", [String(odd).includes(ENDED), String(odd).includes(UNREAD)], [false, true]);
   const gone = await page("z".repeat(id.length));
   is("a link nobody made: ended", [gone.includes(ENDED), gone.includes(UNREAD)], [true, false]);
+
+  part("The password form says it could not check, never sends to an ended link or crashes");
+  const tryPassword = async (linkId: string, password: string) => {
+    try {
+      const response = await passwordForm(
+        new NextRequest("https://marktmorgen.com/api/numbers-link", {
+          method: "POST",
+          headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com", "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": "203.0.113.7" },
+          body: new URLSearchParams({ id: linkId, password }),
+        }),
+      );
+      return { status: response.status, cookie: response.headers.has("set-cookie"), body: response.status === 303 ? "" : await response.text() };
+    } catch (error) {
+      return { status: "crashed", cookie: false, body: String(error) };
+    }
+  };
+  is("healthy: the right password opens it", await tryPassword(id, "harbor-2026"), { status: 303, cookie: true, body: "" });
+  is("a link nobody made: back to the page that says it ended", await tryPassword("z".repeat(id.length), "harbor-2026"), { status: 303, cookie: false, body: "" });
+  const formOdd = await answering("GET", "nl:nlink:", () => [7], () => tryPassword(id, "harbor-2026"));
+  is("an unknown reply: not checked just now, and no cookie", [formOdd.status, formOdd.cookie, formOdd.body.includes("could not be checked just now")], [503, false, true]);
   done();
 }
 

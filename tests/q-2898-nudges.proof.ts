@@ -108,6 +108,11 @@ async function appliedUnknownObservation(){
  eq(mark,'1','applied claim is present');
  eq(second.sent,1,'second nudge remains available on its due day');
  console.log('APPLIED_UNKNOWN_OBSERVATION '+JSON.stringify({creator:f.email,first,initialEmails,mark,retry,afterRetry,second,totalEmails:mail.length}));
+ // The same desired delivery assertions run on parent and fix; only the new-case mode changes.
+ eq([first.sent,first.failed,initialEmails],[1,0,1],'an applied fresh claim must not lose the first creator nudge');
+ eq([retry.sent,retry.failed,afterRetry],[0,0,1],'the next pass must not duplicate the first creator nudge');
+ eq([second.sent,second.failed,mail.length],[1,0,2],'the second nudge remains one separate email');
+ console.log(`PASS ${checks} desired applied-claim assertions.`);
 }
 const selected=process.env.Q_2898_CASE==='applied-claim'?appliedUnknownObservation:main;
 selected().catch(e=>{override=null;console.error(e);process.exitCode=1});

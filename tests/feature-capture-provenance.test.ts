@@ -33,8 +33,8 @@ test("only the two matching resource pages receive dated actual-interface captur
 test("published pixels have a bounded verified image payload, never a remote optimizer or generated illustration", () => {
   assert.equal(captures.length, 2);
   for (const capture of captures) {
-    assert.ok(capture.src.startsWith("data:image/webp;base64,"));
-    const pixels = Buffer.from(capture.src.slice("data:image/webp;base64,".length), "base64");
+    assert.equal(capture.src, `/feature-captures/${capture.slug}.webp`, "C4-1150: pixels are separately cacheable static assets, not duplicated inline payload");
+    const pixels = readFileSync(`public${capture.src}`);
     assert.equal(pixels.subarray(0, 4).toString(), "RIFF");
     assert.equal(pixels.subarray(8, 12).toString(), "WEBP");
     assert.ok(pixels.length > 1000 && pixels.length <= 100_000, "one static capture is capped before publishing");

@@ -6,12 +6,22 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import { startServices } from "../../tests/e2e/services.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const require = createRequire(join(root, "package.json"));
 const { build } = require("esbuild");
 const temporary = mkdtempSync(join(root, ".git-feature-capture-"));
+if (process.argv.includes("--measure-route-bundle")) {
+  try {
+    const result = await build({entryPoints:[join(root,"app/platform/[slug]/page.tsx")],absWorkingDir:root,bundle:true,platform:"node",format:"cjs",packages:"external",write:false,metafile:true,alias:{"@":root},loader:{".css":"empty"},logLevel:"error",plugins:[{name:"synthetic-font-only",setup(plugin){plugin.onLoad({filter:/\/components\/morning-fonts\.tsx?$/},()=>({contents:'export const MORNING_FONTS="";',loader:"ts"}));}}]});
+    const output = Buffer.concat(result.outputFiles.map(file=>Buffer.from(file.contents)));
+    const captureBytes = Object.values(result.metafile.outputs).reduce((sum,file)=>sum+(file.inputs["lib/feature-captures.ts"]?.bytesInOutput??0),0);
+    console.log(JSON.stringify({scope:"esbuild actual platform dynamic route server dependency graph; packages external, font substituted; not Next production or hydration",bytes:output.length,gzipBytes:gzipSync(output).length,captureModuleBytes:captureBytes}));
+  } finally { rmSync(temporary,{recursive:true,force:true}); }
+  process.exit(0);
+}
 if (process.argv.includes("--verify-component")) {
   const pageSlug = process.env.T_VERIFY_PAGE;
   if (pageSlug && !["store-page", "sales-pages"].includes(pageSlug)) throw Error("Unsupported resource page");
@@ -35,10 +45,17 @@ if (process.argv.includes("--verify-component")) {
     for (const width of [390, 1440]) {
       const context = await previewBrowser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
       try {
-        let refused = 0;
-        await context.route("**/*", route => { refused++; return route.abort(); });
+        let refused = 0, localAssetRequests = 0;
+        await context.route("**/*", route => {
+          const url = new URL(route.request().url());
+          if(url.origin==="http://127.0.0.1:3217" && /^\/feature-captures\/(store-page|sales-pages)\.webp$/.test(url.pathname) && route.request().method()==="GET"){
+            localAssetRequests++;
+            return route.fulfill({contentType:"image/webp",body:readFileSync(join(root,"public",url.pathname))});
+          }
+          refused++; return route.abort();
+        });
         const page = await context.newPage();
-        await page.setContent('<!doctype html><html lang="en"><head><style>' + css + '</style></head><body>' + fixture.html + '</body></html>');
+        await page.setContent('<!doctype html><html lang="en"><head><base href="http://127.0.0.1:3217/"><style>' + css + '</style></head><body>' + fixture.html + '</body></html>');
         const figures = page.locator("figure[data-feature-capture]");
         assert.equal(await figures.count(), pageSlug ? 1 : 2);
         for (const figure of await figures.all()) {
@@ -62,7 +79,7 @@ if (process.argv.includes("--verify-component")) {
         assert.deepEqual(audit.violations, []);
         assert.equal(refused, 0);
         if (pageSlug && process.env.T_CAPTURE_DIRECTORY) { mkdirSync(process.env.T_CAPTURE_DIRECTORY,{recursive:true}); await figures.first().screenshot({path:join(process.env.T_CAPTURE_DIRECTORY,pageSlug+"-"+width+".png")}); }
-        console.log(JSON.stringify({ scope: pageSlug ? "actual TopicPageView SSR and actual CSS; capture figure axe scope; no Next hydration or global AAA" : "isolated real capture component, actual CSS, system font; not shared hero integration or global AAA", pageSlug, width, decodedCaptures: pageSlug ? 1 : 2, unknownSlug: "empty", refused, ...audit }));
+        console.log(JSON.stringify({ scope: pageSlug ? "actual TopicPageView SSR and actual CSS; capture figure axe scope; no Next hydration or global AAA" : "isolated real capture component, actual CSS, system font; not shared hero integration or global AAA", pageSlug, width, htmlBytes:Buffer.byteLength(fixture.html), decodedCaptures: pageSlug ? 1 : 2, unknownSlug: "empty", localAssetRequests, refused, ...audit }));
       } finally { await context.close(); }
     }
   } finally { await previewBrowser?.close(); rmSync(temporary, { recursive: true, force: true }); }
@@ -148,7 +165,7 @@ try {
       const capturedAt = new Date().toISOString();
       const sha256 = createHash("sha256").update(pixels).digest("hex");
       writeFileSync(join(captureDirectory, spec.slug + ".webp"), pixels);
-      captures.push({ ...spec, sourceCommit, capturedAt, width: 1280, height: 820, sha256, src: "data:image/webp;base64," + pixels.toString("base64") });
+      captures.push({ ...spec, sourceCommit, capturedAt, width: 1280, height: 820, sha256, src: "/feature-captures/" + spec.slug + ".webp" });
       console.log(JSON.stringify({ slug: spec.slug, sourceCommit, capturedAt, bytes: pixels.length, sha256, refusedExternal, refusedWrites, refusedWriteRequests, browser: browser.version(), scope: "actual Next development SSR; JavaScript disabled to prevent analytics; local synthetic services and substitute font; no hydration/provider/account/payment" }));
       assert.equal(refusedWrites, 0, "capture makes no browser mutation");
     } finally { await context.close(); }

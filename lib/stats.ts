@@ -2142,6 +2142,15 @@ export function postRows(
   return [...rows.values()].sort((a, b) => b.cents - a.cents || b.sales - a.sales || b.visits - a.visits || a.campaign.localeCompare(b.campaign));
 }
 
+/** The short links' results (components/short-links.tsx): each campaign tag's visits, sales and money over the 90 days, added up across channels. */
+export function resultsByCampaign(posts: { campaign: string; visits: number; sales: number; cents: number }[]): Record<string, { visits: number; sales: number; cents: number }> {
+  return posts.reduce<Record<string, { visits: number; sales: number; cents: number }>>((all, row) => {
+    const sum = all[row.campaign] ?? { visits: 0, sales: 0, cents: 0 };
+    all[row.campaign] = { visits: sum.visits + row.visits, sales: sum.sales + row.sales, cents: sum.cents + row.cents };
+    return all;
+  }, {});
+}
+
 /**
  * First sales and the renewals they went on to bring, by channel: what each
  * channel is worth over the 90 days, not only what it sold on the day. A

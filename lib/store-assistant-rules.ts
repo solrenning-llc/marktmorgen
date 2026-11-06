@@ -225,18 +225,79 @@ export const HANDOFF_WORDS =
  * before it (\p{L}+) is the German or Dutch compound ("Frühlingsrabatt").
  * Singular and plural share one term, so the store's "Discounts" allows "a
  * discount"; another form ("discounted") is its own term.
+ *
+ * Words that only share letters with a deal word are left out (review of
+ * #2084): "promote" and the Portuguese and Spanish "promover" ("promovemos",
+ * "promoveu"), not "promo", "promoção" or "promocional"; the Dutch
+ * "afkorting" (abbreviation), "verkorting" and "inkorting" (shortening), not
+ * "zomerkorting" or "kortingscode"; a verb to guarantee that only says how
+ * access works and the French "remise" as handing over (GUARANTEE_WORDS,
+ * REMISE_AS_DISCOUNT).
  */
+/**
+ * The guarantee stem shared by Spanish, Portuguese, French, German and
+ * Italian, every form, as in English: a noun ("garantía", "Garantie"), a
+ * participle ("garantizado", "garanti") and a verb that promises
+ * ("Garantizamos que vas a duplicar tus ventas", "Garantimos resultados",
+ * "Nous garantissons des résultats", "Wir garantieren Ergebnisse",
+ * "Garantiamo risultati"). Only the phrases that say how access works pass:
+ * the word followed by access ("garantizar el acceso", "garantir o acesso",
+ * "garantit l'accès", "garantire l'accesso", "garantieren den Zugang") or
+ * after it ("den Zugang zu garantieren"); "l'" may be joined, as the
+ * deal-word check reads a split word joined. The access, with at most one
+ * complement of access (ACCESS_COMPLEMENT: "de por vida", "al curso", "zum
+ * Kurs"), must end the clause (CLAUSE_END): a conjunction or a comma and
+ * another object ("el acceso y resultados", "el acceso, resultados y
+ * éxito", "l'accès et des résultats") is a promise and is refused (C3-109,
+ * C3-111). In doubt it is refused; a store that wrote the
+ * same word allows it, as with any term (C3-107).
+ */
+const ACCESS_COMPLEMENT =
+  "(?: (?:de por vida|al curso|a los cursos|al contenido|ao curso|aos cursos|ao conte[uú]do|vital[ií]cio|para sempre|au cours|aux cours|au contenu|[aà] vie|zum kurs|zu den kursen|zum inhalt|al corso|ai corsi|al contenuto|a vita|tot de cursus(?:sen)?|tot de inhoud))?";
+/** The end of a clause: a full stop, a semicolon, an exclamation or question mark, or the end of the text; never a comma, which may start a list (C3-111). */
+const CLAUSE_END = "(?:\\s*[.;!?]|\\s*$)";
+const GUARANTEE_WORDS =
+  `(?:(?<!zugang (?:zu )?)garant\\p{L}*|garant\\p{L}*(?!${CLAUSE_END}))(?! (?:el |o |l'?|den )?(?:acceso|acesso|acc[eè]s|accesso|zugang)${ACCESS_COMPLEMENT}${CLAUSE_END})`;
+/** The Dutch verb ("Wij garanderen resultaten"), read the same way for access ("garanderen de toegang tot de cursus.", "de toegang te garanderen."). */
+const GUARANTEE_WORDS_NL =
+  `(?:(?<!toegang (?:te )?)garande\\p{L}*|garande\\p{L}*(?!${CLAUSE_END}))(?! (?:de |het )?toegang${ACCESS_COMPLEMENT}${CLAUSE_END})`;
+/**
+ * The French "remise" is a discount ("la remise exclusive", "une remise de
+ * 20 %", "la remise de la boutique", "la remise du prix", "la remise des
+ * droits"), but for the phrases of handing over, which pass: "remise en
+ * main(s) propre(s)", "remise en forme", "date de remise", and "remise"
+ * followed by "du", "de la", "de l'", "des" or "de", an optional possessive
+ * and a thing that is handed over (a certificate, a diploma, a key, an order,
+ * a file...). A determiner alone is not enough (C3-107; Codex H on #2220).
+ */
+const HANDED_OVER =
+  "(?:certificats?|dipl[oô]mes?|attestations?|cl[eé]s?|clefs?|colis|commandes?|livrables?|documents?|badges?|fichiers?|travaux|copies?|devoirs?)";
+/**
+ * "remise" as a discount, unless a handing over follows. The elision before
+ * the thing handed over is the written one (an apostrophe, straight or curly,
+ * then at most a space): "de lcertificat" or "de l certificat" is not one
+ * (Codex H2 on #2220). The joined reading (joinedText) takes the apostrophe
+ * out of "de l'attestation", so there, and only there, "de l" may be followed
+ * at once by the thing handed over; the folded reading, which keeps the
+ * apostrophe, still finds the malformed forms.
+ */
+const remiseAsDiscount = (elision: string) =>
+  "(?<!dates? de )remises?(?! (?:en mains? propres?|en forme|(?:du |de la |" + elision + "|des |de )(?:(?:votre|vos|ton|ta|tes|son|sa|ses|leur|leurs|notre|nos) )?" +
+  HANDED_OVER +
+  ")(?!\\p{L}))";
+const REMISE_AS_DISCOUNT = remiseAsDiscount("de l['’](?: )?");
+const REMISE_AS_DISCOUNT_JOINED = remiseAsDiscount("de l(?:['’](?: )?)?");
 const DEAL_TERMS = [
   // English
-  "discounts?", "discounted", "coupons?", "promo(?!(?:t(?:e|es|ed|er|ers|ing)|uv\\p{L}*)(?!\\p{L}))\\p{L}*", "promo[- ]?codes?", "vouchers?", "codes?",
+  "discounts?", "discounted", "coupons?", "promo(?!(?:t(?:e|es|ed|er|ers|ing)|u?v\\p{L}*)(?!\\p{L}))\\p{L}*", "promo[- ]?codes?", "vouchers?", "codes?",
   "per[- ]?cent off", "on sale", "sale prices?", "free shipping", "limited[- ]time", "only \\d+ left", "hurry", "selling fast", "last chance",
   "ends (?:today|tonight|soon)", "act now", "today only", "exclusive offers?", "guarant\\p{L}*", "best[- ]?sell(?:ing|ers?)", "testimonials?",
   "five[- ]stars?", "5[- ]stars?",
   // Spanish
   "descuentos?", "cup[oó]n(?:es)?", "c[oó]digos? promociona(?:l|les|is)", "rebaj\\p{L}*", "env[ií]o gratis", "ofertas? limitadas?", "[uú]ltima oportunidad",
-  "date prisa", "s[oó]lo hoy", "garant\\p{L}*", "testimonios?", "cinco estrellas", "m[aá]s vendid[oa]s?",
+  "date prisa", "s[oó]lo hoy", GUARANTEE_WORDS, "testimonios?", "cinco estrellas", "m[aá]s vendid[oa]s?",
   // French
-  "r[ée]ductions?", "remises?", "codes? promo", "offres? limit[ée]es?", "derni[eè]re chance", "d[ée]p[eê]chez[- ]vous", "aujourd['’]hui seulement",
+  "r[ée]ductions?", REMISE_AS_DISCOUNT, "codes? promo", "offres? limit[ée]es?", "derni[eè]re chance", "d[ée]p[eê]chez[- ]vous", "aujourd['’]hui seulement",
   "livraison gratuite", "soldes", "t[ée]moignages?", "cinq [ée]toiles", "meilleures? ventes?",
   // German
   "rabatt\\p{L}*", "\\p{L}+rabatt\\p{L}*", "gutschein\\p{L}*", "\\p{L}+gutschein\\p{L}*", "kostenlos\\p{L}* versand", "\\p{L}*(?:gratis|kostenlos)versand\\p{L}*",
@@ -246,8 +307,8 @@ const DEAL_TERMS = [
   "scont[oi]", "scontat[aeio]", "spedizione gratuita", "codic[ei] promozional[ei]", "offert[ae] limitat[ae]", "ultima occasione", "affrettati", "solo oggi",
   "garanz\\p{L}*", "saldi", "testimonianz[ae]", "cinque stelle", "pi[uù] vendut[oi]",
   // Dutch
-  "korting\\p{L}*", "\\p{L}+korting\\p{L}*", "gratis verzending", "tijdelijke aanbieding(?:en)?", "laatste kans", "wees er snel bij", "alleen vandaag",
-  "gegarandeerd\\p{L}*", "\\p{L}*uitverkoop\\p{L}*", "vijf sterren",
+  "korting\\p{L}*", "\\p{L}+(?<!(?<!\\p{L})(?:af|ver|in))korting\\p{L}*", "gratis verzending", "tijdelijke aanbieding(?:en)?", "laatste kans", "wees er snel bij", "alleen vandaag",
+  "gegarandeerd\\p{L}*", GUARANTEE_WORDS_NL, "\\p{L}*uitverkoop\\p{L}*", "vijf sterren",
   // Portuguese
   "descontos?", "cup(?:om|ons)", "cup(?:[aã]o|[oõ]es)", "ofertas? limitadas?", "[uú]ltima oportunidade", "s[oó] hoje", "frete gr[aá]tis", "depoimentos?",
   "testemunhos?", "cinco estrelas", "mais vendid[oa]s?",
@@ -284,10 +345,13 @@ function anchorOf(term: string): string {
  * a term with no anchor is always checked, so the shortcut can only cost
  * time, never let a deal word pass).
  */
-type DealTerm = { find: RegExp; open: boolean; compound: boolean; anchor: string | RegExp };
+type DealTerm = { find: RegExp; open: boolean; compound: boolean; anchor: string | RegExp; joinedFind?: RegExp };
+const termFind = (term: string) => new RegExp(`${WORD_EDGE_BEFORE}(?:${termSource(term)})${WORD_EDGE_AFTER}`, "gu");
 const DEAL_TERM_RULES: DealTerm[] = [
   ...DEAL_TERMS.map((term) => ({
-    find: new RegExp(`${WORD_EDGE_BEFORE}(?:${termSource(term)})${WORD_EDGE_AFTER}`, "gu"),
+    find: termFind(term),
+    // Read in the joined readings, where an elision's apostrophe is gone (REMISE_AS_DISCOUNT_JOINED).
+    ...(term === REMISE_AS_DISCOUNT ? { joinedFind: termFind(REMISE_AS_DISCOUNT_JOINED) } : {}),
     open: /\\p\{L\}[*+]/.test(term),
     compound: term.startsWith("\\p{L}") || COMPOUND_STEMS.has(term),
     anchor: anchorOf(term).length >= 2 ? anchorOf(term) : /[^]/,
@@ -459,12 +523,12 @@ class Readings {
 const STROKES = ["l", "i"] as const;
 /** How often a term is found in each reading: a compound stem with its visible hyphens joined. */
 const visibleCount = (term: DealTerm, r: Readings) => countIn(term.find, term.compound ? r.plainH : r.plain);
-const foundCount = (term: DealTerm, r: Readings) => Math.max(countIn(term.find, term.compound ? r.foldedH : r.folded), countIn(term.find, r.joined));
+const foundCount = (term: DealTerm, r: Readings) => Math.max(countIn(term.find, term.compound ? r.foldedH : r.folded), countIn(term.joinedFind ?? term.find, r.joined));
 const lookalikeCount = (term: DealTerm, r: Readings) =>
-  Math.max(...STROKES.map((s) => Math.max(countIn(term.find, term.compound ? r.skeletonH(s) : r.skeleton(s)), countIn(term.find, r.skeletonJoined(s)))));
+  Math.max(...STROKES.map((s) => Math.max(countIn(term.find, term.compound ? r.skeletonH(s) : r.skeleton(s)), countIn(term.joinedFind ?? term.find, r.skeletonJoined(s)))));
 /** The words a term matched in the folded readings, each as one form. */
 function wordsOf(term: DealTerm, r: Readings): Set<string> {
-  return new Set([...((term.compound ? r.foldedH : r.folded).match(term.find) ?? []), ...(r.joined.match(term.find) ?? [])].map(oneSpace));
+  return new Set([...((term.compound ? r.foldedH : r.folded).match(term.find) ?? []), ...(r.joined.match(term.joinedFind ?? term.find) ?? [])].map(oneSpace));
 }
 
 /** Whether the deal words of a reply are held to the facts: "held", "refused", or "hidden" (found only once a split, a mark or a look-alike is undone). */

@@ -143,7 +143,8 @@ for (const [path, table, key] of LOOKUPS) {
     // A lookup, with or without a cast on the key; not one inside a longer name.
     const raw = (text.match(new RegExp(`(?<![\\w.])${escape(table)}\\[${escape(key)}(?: as [^\\]]+)?\\]`, "g")) ?? []).length;
     const guarded = (text.match(new RegExp(`Object\\.hasOwn\\(${escape(table)}, ${escape(key)}\\)`, "g")) ?? []).length;
-    assert.ok(raw >= 1, `${table}[${key}] is no longer looked up here: update this list`);
+    // thanks only asks whether ?review= is one of the keys, so its guard may stand alone.
+    assert.ok(raw + guarded >= 1, `${table}[${key}] is no longer looked up here: update this list`);
     assert.ok(guarded >= 1 && raw <= guarded, `${raw} lookups, ${guarded} guarded`);
   });
 }

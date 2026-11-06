@@ -172,7 +172,8 @@ export function LessonComments({
   const locale = LANGUAGES[parseLanguage(language)].locale;
   const creator = reader === CREATOR_AUTHOR;
   const count = countShown(threads);
-  const flash = w.commentNotices[notice];
+  // ?c= is typed into the link: a name every object inherits (constructor, __proto__) is no notice.
+  const flash = Object.hasOwn(w.commentNotices, notice) ? w.commentNotices[notice] : undefined;
   const warn = WARNINGS.has(notice);
   return (
     <section id="comments" aria-labelledby="comments-title" className="st-card p-5 sm:p-8">

@@ -63,8 +63,11 @@ export default async function ManagePage({ params, searchParams }: Params) {
   const notice =
     token && !live
       ? m.manageNotices.expired
-      : m.manageNotices[status] ??
-        (pauseNotice[status] ? m.pauseNotices[pauseNotice[status]] : status === "offer-expired" ? m.switchProblems.yearlyExpired : null);
+      : Object.hasOwn(m.manageNotices, status)
+        ? m.manageNotices[status]
+        : Object.hasOwn(pauseNotice, status)
+          ? m.pauseNotices[pauseNotice[status]]
+          : status === "offer-expired" ? m.switchProblems.yearlyExpired : null;
   const nowSeconds = secondsNow();
   const hours = Math.round(MANAGE_LINK_SECONDS / 3600);
   // Out loud, the way a member thinks about what they pay: "$29 a month".

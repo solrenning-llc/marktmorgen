@@ -54,8 +54,9 @@ export function ReviewForm({
   const g = GIVING_WORDS[code];
   const w = wordsIn(code);
   const base = `rv-${product.id}`;
-  const known = notice ? REVIEW_NOTICES[notice] ?? null : null;
-  const said = known && notice ? { text: g.reviewNotices[notice] ?? known.text, alert: known.alert } : null;
+  // A name every object inherits (constructor, toString) is not one of the notices.
+  const known = notice && Object.hasOwn(REVIEW_NOTICES, notice) ? REVIEW_NOTICES[notice] : null;
+  const said = known && notice ? { text: (Object.hasOwn(g.reviewNotices, notice) ? g.reviewNotices[notice] : undefined) ?? known.text, alert: known.alert } : null;
   const hidden = (
     <>
       <input type="hidden" name="handle" value={handle} />

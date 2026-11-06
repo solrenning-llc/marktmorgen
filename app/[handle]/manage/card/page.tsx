@@ -41,7 +41,7 @@ export default async function CardPage({ params, searchParams }: Params) {
   const view = grant ? await cardView(store, grant) : null;
   const say = speech(store);
   const m = membershipWords(store.language);
-  const notice = m.cardNotices[status] ?? (!view ? m.cardNotices.expired : null);
+  const notice = Object.hasOwn(m.cardNotices, status) ? m.cardNotices[status] : !view ? m.cardNotices.expired : null;
   const done = status === "updated" || status === "paid";
 
   return (

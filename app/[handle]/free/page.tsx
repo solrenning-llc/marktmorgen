@@ -120,9 +120,9 @@ export default async function FreePage({ params, searchParams }: Params) {
   // The welcome offer, with a deadline of the person's own, begun when they asked (lib/welcome-offer.ts).
   const welcome = full && stillFree && full.h === store.handle ? await welcomeFor(store, full).catch(() => null) : null;
   const ww = welcomeWords(store.language);
-  const welcomeNotice = typeof query.welcome === "string" ? ww.notices[query.welcome as keyof typeof ww.notices] : undefined;
+  const welcomeNotice = typeof query.welcome === "string" && Object.hasOwn(ww.notices, query.welcome) ? ww.notices[query.welcome as keyof typeof ww.notices] : undefined;
   const endedOn = welcome ? new Date(welcome.until * 1000).toLocaleString(said.lang.locale, { month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" }) : "";
-  const notice = g.freeNotices[status] ?? g.freeNotices.error;
+  const notice = Object.hasOwn(g.freeNotices, status) ? g.freeNotices[status] : g.freeNotices.error;
 
   return (
     <div

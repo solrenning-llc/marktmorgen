@@ -62,6 +62,8 @@ export default async function LeftPage({ params, searchParams }: Params) {
   const { w } = say;
   const m = membershipWords(store.language);
   const notices = m.leftNotices;
+  // ?status= is typed into the link: a name every object inherits (constructor, toString) is no notice.
+  const notice = status && Object.hasOwn(notices, status) ? notices[status] : null;
 
   let body: React.ReactNode;
   if (status === "asked") {
@@ -75,11 +77,11 @@ export default async function LeftPage({ params, searchParams }: Params) {
         <p className="st-muted mt-4 text-sm">{m.onlyEmail}</p>
       </>
     );
-  } else if (status && notices[status]) {
+  } else if (notice) {
     body = (
       <>
-        <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{notices[status].title}</h1>
-        <p className="st-muted mt-4 text-lg">{notices[status].body}</p>
+        <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{notice.title}</h1>
+        <p className="st-muted mt-4 text-lg">{notice.body}</p>
       </>
     );
   } else {
@@ -148,6 +150,8 @@ function leftCart(store: Store, items: Listing[], status: string) {
   const m = membershipWords(store.language);
   const c = cartWords(store.language);
   const notices = m.leftNotices;
+  // ?status= is typed into the link: a name every object inherits (constructor, toString) is no notice.
+  const notice = status && Object.hasOwn(notices, status) ? notices[status] : null;
   const ids = items.map((p) => p.id).join(",");
   let body: React.ReactNode;
   if (status === "asked") {
@@ -159,11 +163,11 @@ function leftCart(store: Store, items: Listing[], status: string) {
         <p className="st-muted mt-4 text-sm">{m.onlyEmail}</p>
       </>
     );
-  } else if (status && notices[status]) {
+  } else if (notice) {
     body = (
       <>
-        <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{notices[status].title}</h1>
-        <p className="st-muted mt-4 text-lg">{notices[status].body}</p>
+        <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{notice.title}</h1>
+        <p className="st-muted mt-4 text-lg">{notice.body}</p>
       </>
     );
   } else {

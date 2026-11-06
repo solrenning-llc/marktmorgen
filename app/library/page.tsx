@@ -33,7 +33,7 @@ const STATUS: Record<string, { tone: "ok" | "error"; text: string }> = {
 export default async function LibraryPage({ searchParams }: Params) {
   const query = await searchParams;
   const token = typeof query.token === "string" ? query.token.slice(0, 80) : "";
-  const status = typeof query.status === "string" ? STATUS[query.status] : undefined;
+  const status = typeof query.status === "string" && Object.hasOwn(STATUS, query.status) ? STATUS[query.status] : undefined;
   const email = token ? await libraryOwner(token) : null;
 
   // Each store's own list, opened by a link made for this address now (lib/buyer-orders.ts).

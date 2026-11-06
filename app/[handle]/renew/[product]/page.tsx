@@ -77,7 +77,7 @@ export default async function RenewPage({ params, searchParams }: Params) {
   // An offer for an option kept with nothing to hand over: the general answer, as the button would give.
   const kept = Boolean(grant && selling && !priceGone && !offer);
   // "price" in the address says nothing by itself: only the product does.
-  const said = status === "price" ? undefined : notices[status];
+  const said = status === "price" || !Object.hasOwn(notices, status) ? undefined : notices[status];
   // Where the prices offered today are: the product's own page, while buyers can see it.
   const pricesLink = priceGone && product && !product.hidden ? product : null;
 

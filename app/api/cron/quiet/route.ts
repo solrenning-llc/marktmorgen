@@ -50,17 +50,19 @@ export async function GET(request: NextRequest) {
       return Response.json({ ok: false, error: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
     }
     while (at < folders.length && Date.now() - started <= TIME_BUDGET_MS) {
-      // A store that cannot be read is tried again at once; if it still cannot be, the walk stops on it, so the next
-      // run starts from it. It is never passed over as "no store".
-      const store = await storeOf(folders[at]).catch(() => storeOf(folders[at])).catch((error: unknown) => {
-        console.error("quiet: a store could not be read; the walk stops on it until the next run", error);
+      // A store that cannot be read is tried again at once. If it still cannot be, it is counted as failed and said
+      // in the log, never passed over as "no store"; the walk goes on to the stores after it, so one store never
+      // holds back the rest, and the next day's walk tries it again.
+      const folder = folders[at];
+      at += 1;
+      const store = await storeOf(folder).catch(() => storeOf(folder)).catch((error: unknown) => {
+        console.error(`quiet: the store of folder ${folder} could not be read twice; counted as failed, tried again on the next day's walk`, error);
         return undefined;
       });
       if (store === undefined) {
         out.failed += 1;
-        break;
+        continue;
       }
-      at += 1;
       if (!store) continue;
       const result = await checkQuiet(store).catch((error) => {
         console.error("checking a store's sales failed", error);

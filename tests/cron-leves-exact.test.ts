@@ -5,8 +5,9 @@
  *    stores goes on from is read exactly. Nil is the start; a whole number is
  *    the place; anything else is unknown, and the pass reads nothing on it
  *    and leaves the place as it was. A store that cannot be read is tried
- *    again at once, and if it still cannot be, the pass stops on it, so the
- *    next run starts from it: it is never passed over as "no store".
+ *    again at once; if it still cannot be, it is counted as failed and said in
+ *    the log, never passed over as "no store", and the stores after it are
+ *    still looked at in the same pass. The next day's walk tries it again.
  * 2. The sweep of community pictures never put in a post
  *    (lib/community-files.ts): a ZREM answered in another shape than 0 or 1
  *    may have taken the picture off the list; it is put back, so a later
@@ -73,17 +74,18 @@ async function quietPass(): Promise<void> {
     // A store looked at is one whose record was read.
     const looked = stores.map((s, i) => (seen.some((c) => c[0] === "GET" && c[1] === s.ownerKey) ? i : -1)).filter((i) => i >= 0);
     const [place] = await pipeline([["GET", at]]);
-    return { status: response?.status ?? -1, looked, place };
+    const body = response ? ((await response.json()) as { failed?: number }) : {};
+    return { status: response?.status ?? -1, looked, place, failed: body.failed ?? null };
   };
 
   part("Quiet pass: where the walk goes on from, read exactly");
-  is("nothing kept yet (nil): every store looked at, the place kept at the end", await run(), { status: 200, looked: [0, 1, 2], place: "3" });
+  is("nothing kept yet (nil): every store looked at, the place kept at the end", await run(), { status: 200, looked: [0, 1, 2], place: "3", failed: 0 });
   await pipeline([["SET", at, "1"]]);
-  is("a place kept (1): goes on from there", await run(), { status: 200, looked: [1, 2], place: "3" });
+  is("a place kept (1): goes on from there", await run(), { status: 200, looked: [1, 2], place: "3", failed: 0 });
   for (const [label, reply] of [...MALFORMED, ["not a number", () => ["abc"]], ["1e9", () => ["1e9"]], ["-1", () => ["-1"]], ["1.5", () => ["1.5"]]] as [string, () => unknown[]][]) {
     await pipeline([["SET", at, "1"]]);
     inject = (commands) => (commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === at ? Promise.resolve(reply()) : null);
-    is(`the place answered ${label}: nothing read, the place left as it was`, await run(), { status: 503, looked: [], place: "1" });
+    is(`the place answered ${label}: nothing read, the place left as it was`, await run(), { status: 503, looked: [], place: "1", failed: null });
     inject = null;
   }
 
@@ -99,12 +101,18 @@ async function quietPass(): Promise<void> {
   };
   await pipeline([["DEL", at]]);
   failures = 1;
-  is("it fails once: tried again at once, and every store looked at", await run(), { status: 200, looked: [0, 1, 2], place: "3" });
+  is("it fails once: tried again at once, and every store looked at", await run(), { status: 200, looked: [0, 1, 2], place: "3", failed: 0 });
   await pipeline([["DEL", at]]);
-  failures = 2;
-  is("it fails twice: the pass stops on it, the store after it waits, the place kept on it", await run(), { status: 200, looked: [0], place: "1" });
+  failures = Infinity;
+  const errors: string[] = [];
+  const log = console.error;
+  console.error = (...args: unknown[]) => { errors.push(args.map(String).join(" ")); };
+  const failing = await run().finally(() => { console.error = log; });
+  is("it cannot be read at all: tried twice, counted as failed, the stores after it still looked at", failing, { status: 200, looked: [0, 2], place: "3", failed: 1 });
+  is("and it is said in the log, by its folder", errors.some((e) => e.includes(stores[1].folder)), true);
   failures = 0;
-  is("the next run starts from it", await run(), { status: 200, looked: [1, 2], place: "3" });
+  await pipeline([["DEL", at]]);
+  is("the next day's walk reads it again", await run(), { status: 200, looked: [0, 1, 2], place: "3", failed: 0 });
   inject = null;
 }
 

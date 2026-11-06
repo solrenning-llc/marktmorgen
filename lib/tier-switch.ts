@@ -313,7 +313,17 @@ export async function switchTier(store: Store, token: string, subscription: stri
       const body = switchBody(found.itemId, price, at);
       const kept = digital && validConsent(consent) ? consentMetaValue(consent, consentKind(found.to)) : "";
       if (digital && validConsent(consent)) keepConsentOn(body, consent, consentKind(found.to));
-      const updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body, SWITCH_STRIPE_VERSION);
+      let updated: Record<string, unknown>;
+      try {
+        updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body, SWITCH_STRIPE_VERSION);
+      } catch (error) {
+        // Stripe answered a refusal (below 500): nothing was applied, said as before. No answer at all, or Stripe's own
+        // failure, after the update was sent: it may have been applied, so it is "unconfirmed", never "nothing changed"
+        // (Codex CX1 on #2764). Nothing is sent again.
+        if (error instanceof StripeError && error.status < 500) throw error;
+        console.error("a tier switch's charging update had no answer that can be read", error);
+        return { ok: false, reason: "unconfirmed" };
+      }
       const answered = switchReply(updated, subscription, price, kept);
       if (answered === "unknown") {
         // Not known to be made: nothing more is written or sent, and the member is told it did not go through.

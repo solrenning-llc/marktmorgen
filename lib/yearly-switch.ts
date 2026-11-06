@@ -220,7 +220,17 @@ export async function switchYearly(store: Store, token: string, subscription: st
       const body = switchBody(found.itemId, price, at);
       const kept = digital && validConsent(consent) ? consentMetaValue(consent, consentKind(found.product)) : "";
       if (digital && validConsent(consent)) keepConsentOn(body, consent, consentKind(found.product));
-      const updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body, SWITCH_STRIPE_VERSION);
+      let updated: Record<string, unknown>;
+      try {
+        updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body, SWITCH_STRIPE_VERSION);
+      } catch (error) {
+        // Stripe answered a refusal (below 500): nothing was applied, said as before. No answer at all, or Stripe's own
+        // failure, after the update was sent: it may have been applied, so it is "unconfirmed", never "nothing changed"
+        // (Codex CX1 on #2764). Nothing is sent again.
+        if (error instanceof StripeError && error.status < 500) throw error;
+        console.error("a move to yearly's charging update had no answer that can be read", error);
+        return { ok: false, reason: "unconfirmed" };
+      }
       // Read exactly, as a switch between tiers reads it (lib/tier-switch.ts, switchReply; Codex CX1 on #2764).
       const answered = switchReply(updated, subscription, price, kept);
       if (answered === "unknown") {

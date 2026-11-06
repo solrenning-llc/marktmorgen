@@ -6,6 +6,7 @@ import { speech } from "@/lib/buyer-words";
 import { communityWords, pollWhenIn, whenIn } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { CREATOR, type CommunityConfig, type Member, type Post } from "@/lib/community";
+import { aboutWords } from "@/lib/community-about";
 import { communityImageFile } from "@/lib/community-image";
 import { initialOf, segments } from "@/lib/community-text";
 import { MAX_QUERY_LENGTH } from "@/lib/community-search";
@@ -637,6 +638,12 @@ export function Gate({
       <p className="st-label">{w.pageTitle}</p>
       <h1 className="font-display mt-1 text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-3xl">{config.name}</h1>
       {config.about ? <PostText text={config.about} className="st-muted mt-3 leading-relaxed" /> : null}
+      {/* The public About page (233 [SK1]), only while the creator has it on; its words name the community (WCAG 2.4.9). */}
+      {state !== "removed" && config.page.on ? (
+        <p className="mt-3 text-sm">
+          <Link href={`/@${store.handle}/community/about`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">{aboutWords(store.language).link(config.name)}</Link>
+        </p>
+      ) : null}
 
       {link ? (
         <div className="st-note mt-6" role="status">

@@ -96,6 +96,7 @@ import { AFFILIATE_ROW_CAP, type AffiliateLoadSize, type AffiliatePageSize, type
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { SEARCH_PAGE } from "@/lib/community-search";
 import { MAX_CHAT_KEPT } from "@/lib/community-chat-rules";
+import { MAX_QUESTIONS, MAX_SPACES, MAX_WELCOME } from "@/lib/community-text";
 import { SEARCH_MESSAGES } from "@/lib/community-dm";
 import { MAX_FORMS } from "@/lib/forms";
 import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib/store-export";
@@ -436,16 +437,26 @@ export function publicListingsRead(listings: number): number {
   return listings * PUBLIC_LISTING_BYTES * DB_BYTE + perMegabyte(listings * PUBLIC_LISTING_BYTES);
 }
 /**
+ * The most a community's settings weigh as the map reads them to know whether
+ * its About page is on (lib/community-about.ts, aboutListed; 233 [SK1]): every
+ * space with its words and the 50 products it may be kept for, the 200
+ * products that open it, its questions and welcome, and 8 KB for its name,
+ * description and switches; every id at 48 bytes as JSON writes it.
+ */
+export const SITEMAP_SETTINGS_BYTES = MAX_SPACES * (1_024 + 50 * 48) + 200 * 48 + MAX_QUESTIONS * 1_024 + MAX_WELCOME * 3 + 8 * 1_024;
+/**
  * What one drawing of a store's map costs at the most (lib/store-sitemap.ts):
  * the request, the store's counts and the listings it reads, every page of
- * posts paid for (three commands each), working through all of it, and the
- * answer as it leaves, a line for each product, post, collection and page.
+ * posts paid for (three commands each), the community's settings (one
+ * command, SITEMAP_SETTINGS_BYTES), working through all of it, and the answer
+ * as it leaves, a line for each product, post, collection and page and the
+ * community's About page.
  */
 export function sitemapRead(size: SitemapSize): number {
   const posts = size.postPages * POSTS_PER_PAGE;
-  const bytes = size.listings * PUBLIC_LISTING_BYTES + posts * POST_META_BYTES;
-  const lines = size.listings + size.carried + posts + 2 + 12 + 10;
-  return request("heavy", 4 + TAKE_COMMANDS + 3 * size.postPages, bytes) + perMegabyte(bytes) + lines * SITEMAP_LINE_BYTES * ORIGIN_PER_BYTE;
+  const bytes = size.listings * PUBLIC_LISTING_BYTES + posts * POST_META_BYTES + SITEMAP_SETTINGS_BYTES;
+  const lines = size.listings + size.carried + posts + 2 + 12 + 10 + 1;
+  return request("heavy", 4 + TAKE_COMMANDS + 3 * size.postPages + 1, bytes) + perMegabyte(bytes) + lines * SITEMAP_LINE_BYTES * ORIGIN_PER_BYTE;
 }
 /**
  * The most one agreement's version may be as it is kept (lib/agreement-store.ts,
@@ -1130,7 +1141,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/affiliate-page-admission.ts", names: ["bookSize(store)", "codeOwnerCount(store)", "takePublicRequest(store, \"buyer\", now, affiliateLoadUnits(", "takePublicRequest(store, \"buyer\", now, units, { shared: true })", "isResting(store, now)", "claimRefresh(store)"] },
       { file: "lib/affiliate-book-snapshot.ts", names: ["BOOK_FRESH_SECONDS", "BOOK_KEEP_SECONDS", "BOOK_SNAPSHOT_MAX_BYTES", "BOOK_LOCK_SECONDS", "BOOK_READ_SECONDS", "AFFILIATE_PAGE_MAX_SECONDS"] },
       { file: "app/[handle]/affiliates/page.tsx", names: ["admitAffiliatePage(store, affiliate)"] },
-      { file: "lib/store-sitemap.ts", names: ["sitemapSize(store)", "takePublicRequest(store, \"public\", now, sitemapUnits(size))"] },
+      { file: "lib/store-sitemap.ts", names: ["sitemapSize(store)", "takePublicRequest(store, \"public\", now, sitemapUnits(size))", "await aboutListed(store)"] },
       // A community's public About page (233 [SK1], 6 November 2026): counted as a page, its products paid before they are read, and its
       // counts worked out at most every ABOUT_FRESH_SECONDS for ABOUT_REFRESH_UNITS, held against their cost in tests/sk1-community-about.test.ts.
       { file: "lib/community-about.ts", names: ["isResting(store, now)", "takePublicRequest(store, \"public\", now, listingUnits(config.access.length))", "takePublicRequest(store, \"public\", now, ABOUT_REFRESH_UNITS)", "ABOUT_FRESH_SECONDS", "ABOUT_POSTS_READ"] },

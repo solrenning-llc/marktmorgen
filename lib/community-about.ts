@@ -34,7 +34,7 @@ import type { Store } from "@/lib/store";
 import { isFree } from "@/lib/store";
 import { type Listing, readListings } from "@/lib/catalog";
 import { canSellProduct, fromPriceCents } from "@/lib/store-checkout";
-import { type CommunityConfig, readConfig } from "@/lib/community";
+import { type CommunityConfig, readConfig, readConfigExact } from "@/lib/community";
 import { seesSpace } from "@/lib/community-gate";
 import { isResting, takePublicRequest } from "@/lib/traffic";
 import { listingUnits } from "@/lib/public-read-rules";
@@ -132,6 +132,25 @@ export async function aboutPage(store: Store, now = Date.now()): Promise<AboutAn
   return { state: "shown", page: { name: config.name, about: config.about, ways, spaces: config.spaces.length, counts } };
 }
 
+/**
+ * Whether the store's map for search engines lists the About page
+ * (lib/store-sitemap.ts): only while the community is on, the store is not
+ * switched off and the creator's setting reads exactly on. A setting that
+ * cannot be read (a lost reply, one that does not parse, no setup yet)
+ * leaves it out, as the page itself answers not found then. One command,
+ * read after the map is paid for and counted in its cost line
+ * (tests/plan-cost-registry.ts, sitemapRead).
+ */
+export async function aboutListed(store: Store): Promise<boolean> {
+  const id = store.community?.id;
+  if (!id || !store.community?.on || store.suspended) return false;
+  try {
+    return (await readConfigExact(id))?.page.on === true;
+  } catch {
+    return false;
+  }
+}
+
 type Kept = { at: number; joined: number; posts: number; more: boolean };
 
 function readKept(raw: unknown): Kept | null {
@@ -226,6 +245,8 @@ export type AboutWords = {
   noneNow: string;
   membersOnly: string;
   open: string;
+  /** The link to the About page on the community's door, naming the community (WCAG 2.4.9). */
+  link: (name: string) => string;
 };
 
 const en: AboutWords = {
@@ -242,6 +263,7 @@ const en: AboutWords = {
   noneNow: "No way in is on sale right now.",
   membersOnly: "Posts, lessons, events and members are seen only inside the community.",
   open: "Open the community",
+  link: (n) => `About ${n}`,
 };
 
 const es: AboutWords = {
@@ -258,6 +280,7 @@ const es: AboutWords = {
   noneNow: "Ahora mismo no hay ningún acceso a la venta.",
   membersOnly: "Las publicaciones, las lecciones, los eventos y los miembros solo se ven dentro de la comunidad.",
   open: "Abrir la comunidad",
+  link: (n) => `Sobre ${n}`,
 };
 
 const fr: AboutWords = {
@@ -274,6 +297,7 @@ const fr: AboutWords = {
   noneNow: "Aucun accès n’est en vente pour le moment.",
   membersOnly: "Les publications, les leçons, les événements et les membres ne se voient qu’à l’intérieur de la communauté.",
   open: "Ouvrir la communauté",
+  link: (n) => `À propos de ${n}`,
 };
 
 const de: AboutWords = {
@@ -290,6 +314,7 @@ const de: AboutWords = {
   noneNow: "Derzeit ist kein Zugang zu kaufen.",
   membersOnly: "Beiträge, Lektionen, Veranstaltungen und Mitglieder sind nur in der Community zu sehen.",
   open: "Community öffnen",
+  link: (n) => `Über ${n}`,
 };
 
 const it: AboutWords = {
@@ -306,6 +331,7 @@ const it: AboutWords = {
   noneNow: "Al momento non c’è un accesso in vendita.",
   membersOnly: "Post, lezioni, eventi e membri si vedono solo all’interno della community.",
   open: "Apri la community",
+  link: (n) => `Informazioni su ${n}`,
 };
 
 const nl: AboutWords = {
@@ -322,6 +348,7 @@ const nl: AboutWords = {
   noneNow: "Er is op dit moment geen toegang te koop.",
   membersOnly: "Berichten, lessen, evenementen en leden zijn alleen binnen de community te zien.",
   open: "Open de community",
+  link: (n) => `Over ${n}`,
 };
 
 const pt: AboutWords = {
@@ -338,6 +365,7 @@ const pt: AboutWords = {
   noneNow: "De momento, não há nenhum acesso à venda.",
   membersOnly: "As publicações, as lições, os eventos e os membros só se veem dentro da comunidade.",
   open: "Abrir a comunidade",
+  link: (n) => `Sobre ${n}`,
 };
 
 const WORDS: Record<LanguageCode, AboutWords> = { en, es, fr, de, it, nl, pt };

@@ -40,6 +40,7 @@ import { BillingError, type StartedSubscription, isBillingConfigured, onPlatform
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, saleHandles, storeRef } from "@/lib/store";
 import { closingScore } from "@/lib/closing-holds";
@@ -496,8 +497,10 @@ async function tell(id: string, entry: Undo, returned: number, disputed: number,
 /** The closing job: every subscription still in line, tried again until `deadline` (ms). */
 export async function retryPlanUndos(deadline: number): Promise<{ settled: number; left: number }> {
   if (!isRedisConfigured()) return { settled: 0, left: 0 };
-  const [fields] = await redisPipeline([["HKEYS", UNDO_KEY]]);
-  const ids = Array.isArray(fields) ? (fields as unknown[]).map(String) : [];
+  // Only a confirmed empty line is "none left" (CX-123 rule 24); any other reply throws, and the closing job says so.
+  const replies = repliesFor(await redisPipeline([["HKEYS", UNDO_KEY]]), 1);
+  const ids = replies ? stringList(replies[0]) : null;
+  if (!ids) throw new UnknownReplyError("the plans paid for closing stores (HKEYS)");
   let settled = 0;
   let left = 0;
   for (const id of ids) {

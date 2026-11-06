@@ -45,6 +45,7 @@
  */
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { stringList } from "@/lib/redis-reply";
 import { signedOf } from "@/lib/redis-count";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type Store, saleHandles, storeFolder, storeForEmail, storeRef } from "@/lib/store";
@@ -220,6 +221,25 @@ async function holdOne(account: string, folder: string, sub: Row, endedAt: numbe
 /** What a member with no address on Stripe is marked with: it cannot be told, and is counted. */
 const NO_ADDRESS = "-";
 
+/**
+ * One command's reply as the list of strings Redis's REST answers (HGETALL, HKEYS, ZRANGEBYSCORE), exactly one
+ * reply for the one command sent; `pairs` asks for an even length (fields and values, members and scores). Only a
+ * confirmed empty list means nothing is there (CX-123 rule 24): any other shape throws UnknownReplyError, so no
+ * refund, notice, release or deletion is decided on "nothing written down" read from a reply that said nothing.
+ */
+async function stringsOf(command: (string | number)[], what: string, pairs = false): Promise<string[]> {
+  const replies = repliesFor(await redisPipeline([command]), 1);
+  const list = replies ? stringList(replies[0]) : null;
+  if (!list || (pairs && list.length % 2 !== 0)) throw new UnknownReplyError(what);
+  return list;
+}
+
+/** A sorted set's score, as Redis's text of it (or a number, from a client that parses it), when it is a positive number; null for anything else. */
+function positiveScore(score: unknown): number | null {
+  const value = typeof score === "number" ? score : typeof score === "string" && /^-?(0|[1-9][0-9]*)(\.[0-9]+)?(e[+-]?[0-9]+)?$/i.test(score) ? Number(score) : Number.NaN;
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
 /** The addresses of every member of this ending (held, past the budget or not held yet), payment plans included. */
 export async function memberAddresses(folder: string): Promise<string[]> {
   return (await membersOf(folder)).emails;
@@ -228,8 +248,7 @@ export async function memberAddresses(folder: string): Promise<string[]> {
 /** Every member of this ending: the addresses, and the members with none (by subscription). */
 export async function membersOf(folder: string): Promise<{ emails: string[]; missing: string[]; unpaused: string[] }> {
   if (!isRedisConfigured()) return { emails: [], missing: [], unpaused: [] };
-  const [raw] = await redisPipeline([["HGETALL", workKey(folder)]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  const flat = await stringsOf(["HGETALL", workKey(folder)], "a closing's members (HGETALL)", true);
   const fields = new Map<string, string>();
   for (let i = 0; i + 1 < flat.length; i += 2) fields.set(flat[i], flat[i + 1]);
   const out = { emails: [] as string[], missing: [] as string[], unpaused: [] as string[] };
@@ -259,8 +278,8 @@ export async function closingScore(ref: string): Promise<number | null> {
   if (!replies) throw new UnknownReplyError("the closing day's line (ZSCORE)");
   const [score] = replies;
   if (score === null) return null;
-  const value = typeof score === "number" ? score : typeof score === "string" && /^-?(0|[1-9][0-9]*)(\.[0-9]+)?(e[+-]?[0-9]+)?$/i.test(score) ? Number(score) : Number.NaN;
-  if (!Number.isFinite(value) || value <= 0) throw new UnknownReplyError("the closing day's line (ZSCORE)");
+  const value = positiveScore(score);
+  if (value === null) throw new UnknownReplyError("the closing day's line (ZSCORE)");
   return value;
 }
 
@@ -271,11 +290,10 @@ export async function inClosingDay(ref: string): Promise<boolean> {
   return (await closingScore(ref)) !== null;
 }
 
-/** How the hold stands: the members it could not reach yet, and those past the budget. */
+/** How the hold stands: the members it could not reach yet, and those past the budget. Throws when it cannot be read: the notice then says it could not check. */
 export async function holdCounts(folder: string): Promise<{ failed: number; over: number }> {
   if (!isRedisConfigured()) return { failed: 0, over: 0 };
-  const [fields] = await redisPipeline([["HKEYS", workKey(folder)]]);
-  const keys = Array.isArray(fields) ? (fields as unknown[]).map(String) : [];
+  const keys = await stringsOf(["HKEYS", workKey(folder)], "how a closing's hold stands (HKEYS)");
   return { failed: keys.filter((k) => k.startsWith("f:")).length, over: keys.filter((k) => k.startsWith("o:")).length };
 }
 
@@ -329,8 +347,7 @@ export async function retryHolds(store: Store, endedAt: number, until: number): 
   const folder = await storeFolder(storeRef(store));
   const account = store.stripeAccountId;
   if (!account) return holdCounts(folder);
-  const [fields] = await redisPipeline([["HKEYS", workKey(folder)]]);
-  const ids = (Array.isArray(fields) ? (fields as unknown[]).map(String) : []).filter((k) => k.startsWith("f:")).map((k) => k.slice(2)).filter((id) => SUB_ID.test(id));
+  const ids = (await stringsOf(["HKEYS", workKey(folder)], "the members a closing has not held yet (HKEYS)")).filter((k) => k.startsWith("f:")).map((k) => k.slice(2)).filter((id) => SUB_ID.test(id));
   await inTurn(ids, until, async (id) => {
     try {
       if (!(await takeCalls(folder, 1))) {
@@ -363,9 +380,13 @@ export async function releaseHolds(store: Store, until: number, nowSeconds = Mat
     const all = await inTurn(todo, until, async (sub) => {
       const id = sub.id as string;
       try {
+        // The drafts its hold kept, read before it is let go: once let go its hold mark is gone and no later run
+        // would reach it, so a reply that is neither the list nor a confirmed absent field (null) keeps it held.
+        const replies = repliesFor(await redisPipeline([["HGET", workKey(folder), `d:${id}`]]), 1);
+        const kept = replies ? replies[0] : undefined;
+        if (kept !== null && typeof kept !== "string") throw new UnknownReplyError("the drafts a closing's hold kept (HGET)");
         await onAccount("POST", account, `/subscriptions/${encodeURIComponent(id)}`, releaseBody(sub, nowSeconds), undefined, `closing-release:${id}:${sub.metadata?.store_hold}`);
         // The drafts its hold kept as drafts go on as they were (their calls were taken with the hold); voided invoices do not come back.
-        const [kept] = await redisPipeline([["HGET", workKey(folder), `d:${id}`]]);
         for (const draft of typeof kept === "string" ? kept.split(",").filter((d) => INVOICE_ID.test(d)) : []) {
           await onAccount("POST", account, `/invoices/${encodeURIComponent(draft)}`, new URLSearchParams({ auto_advance: "true", "metadata[closing_draft]": "" }), undefined, `closing-draft-back:${draft}:${sub.metadata?.store_hold}`);
         }
@@ -388,8 +409,8 @@ export async function releaseHolds(store: Store, until: number, nowSeconds = Mat
 export async function paidPeriods(store: Store): Promise<Map<string, PaidPeriod>> {
   const out = new Map<string, PaidPeriod>();
   if (!isRedisConfigured()) return out;
-  const [raw] = await redisPipeline([["HGETALL", paidKey(await storeFolder(storeRef(store)))]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  // Throws when it cannot be read: the closing day's refunds and the members' notices then wait, never "nobody paid".
+  const flat = await stringsOf(["HGETALL", paidKey(await storeFolder(storeRef(store)))], "a closing's members' payments (HGETALL)", true);
   for (let i = 0; i + 1 < flat.length; i += 2) {
     try {
       const row = JSON.parse(flat[i + 1]) as PaidPeriod;
@@ -424,17 +445,32 @@ export async function releaseRestarted(deadline: number, staysOpen: (store: Stor
   if (!isRedisConfigured()) return [];
   const out: Released[] = [];
   const flat: string[] = [];
-  for (let from = 0; from < 100_000; from += 500) {
-    const [raw] = await redisPipeline([["ZRANGEBYSCORE", HELD_INDEX, "-inf", "+inf", "WITHSCORES", "LIMIT", from, 500]]);
-    const page = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
-    flat.push(...page);
-    if (page.length < 1000) break;
+  // The whole line is read exactly before any store in it is acted on: a member and a score that is not one is
+  // unknown, never "its plan ended on another day" (which would let a store still closing go and delete its payments).
+  try {
+    for (let from = 0; from < 100_000; from += 500) {
+      const page = await stringsOf(["ZRANGEBYSCORE", HELD_INDEX, "-inf", "+inf", "WITHSCORES", "LIMIT", from, 500], "the line of held stores (ZRANGEBYSCORE)", true);
+      for (let i = 1; i < page.length; i += 2) if (positiveScore(page[i]) === null) throw new UnknownReplyError("the line of held stores (ZRANGEBYSCORE)");
+      flat.push(...page);
+      if (page.length < 1000) break;
+    }
+  } catch (error) {
+    console.error("plan-closing: the line of held stores could not be read; no store is let go today", error);
+    return out;
   }
   for (let i = 0; i + 1 < flat.length; i += 2) {
     if (Date.now() > deadline) break;
     const key = flat[i];
     const endedAt = Number(flat[i + 1]);
-    const store = await storeForEmail(key).catch(() => null);
+    let store: Store | null;
+    try {
+      store = await storeForEmail(key);
+    } catch (error) {
+      // Not read is not gone: it stays in the line, for tomorrow.
+      console.error("plan-closing: a held store's record could not be read; tried again tomorrow", error);
+      out.push({ key, state: "held" });
+      continue;
+    }
     if (!store) {
       await redisPipeline([["ZREM", HELD_INDEX, key]]);
       out.push({ key, state: "gone" });
@@ -471,8 +507,8 @@ export async function heldPaymentsOf(store: Store, email: string): Promise<(Paid
   if (!isRedisConfigured()) return [];
   const address = email.trim().toLowerCase();
   const folder = await storeFolder(storeRef(store));
-  const [raw] = await redisPipeline([["HGETALL", paidKey(folder)]]);
-  const flat = Array.isArray(raw) ? raw.map(String) : [];
+  // Throws when it cannot be read: the person's copy is then not made (lib/person-copy.ts), never made without it.
+  const flat = await stringsOf(["HGETALL", paidKey(folder)], "a closing's members' payments (HGETALL)", true);
   const out: (PaidPeriod & { subscription: string })[] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) {
     try {

@@ -16,6 +16,31 @@ test("legacy store token identities and grants remain compatible after extractio
   assert.equal(parseStoreWaitlistGrant("{bad"), null);
   assert.equal(parseStoreWaitlistGrant(JSON.stringify({ ...storeGrant, k: "launch" })), null);
 });
+for (const [name, changed] of [
+  ["missing store id", { h: storeGrant.h, p: storeGrant.p, e: storeGrant.e, k: storeGrant.k }],
+  ["missing handle", { s: storeGrant.s, p: storeGrant.p, e: storeGrant.e, k: storeGrant.k }],
+  ["missing product", { s: storeGrant.s, h: storeGrant.h, e: storeGrant.e, k: storeGrant.k }],
+  ["missing address", { s: storeGrant.s, h: storeGrant.h, p: storeGrant.p, k: storeGrant.k }],
+  ["non-string store id", { ...storeGrant, s: 7 }],
+  ["non-string handle", { ...storeGrant, h: null }],
+  ["non-string product", { ...storeGrant, p: [] }],
+  ["non-string address", { ...storeGrant, e: {} }],
+  ["empty routing field", { ...storeGrant, p: "" }],
+  ["control character", { ...storeGrant, h: "harbor\nother" }],
+] as const) {
+  test(`creator grant rejects ${name}`, () => {
+    assert.equal(parseStoreWaitlistGrant(JSON.stringify(changed)), null);
+  });
+}
+test("creator grant is byte-bounded", () => {
+  assert.equal(parseStoreWaitlistGrant(JSON.stringify({ ...storeGrant, note: "x".repeat(2048) })), null);
+});
+test("creator grant returns only validated routing data", () => {
+  assert.deepEqual(
+    parseStoreWaitlistGrant(JSON.stringify({ ...storeGrant, email: "other@example.invalid", consent: true, paid: true })),
+    storeGrant,
+  );
+});
 test("fresh opaque tokens do not carry an email or a reversible Redis key", () => {
   const first = newWaitlistToken(), second = newWaitlistToken();
   assert.match(first, WAIT_TOKEN);

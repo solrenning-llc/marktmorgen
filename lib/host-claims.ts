@@ -25,6 +25,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
 
 /**
  * KEYS: one claims hash per host. ARGV: now, start, end, claim id, until
@@ -123,9 +124,12 @@ export function parseClaim(claim: string, raw: unknown): HostClaim | null {
 export async function readClaims(ids: string[], now = Date.now()): Promise<Map<string, HostClaim[]>> {
   const out = new Map<string, HostClaim[]>();
   if (!ids.length || !isRedisConfigured()) return out;
-  const replies = await redisPipeline(ids.map((id) => ["HGETALL", claimsKey(id)]));
+  const replies = repliesFor(await redisPipeline(ids.map((id) => ["HGETALL", claimsKey(id)])), ids.length);
+  if (!replies) throw new UnknownReplyError("the hosts' claims");
   ids.forEach((id, i) => {
-    const flat = Array.isArray(replies[i]) ? (replies[i] as unknown[]) : [];
+    // Only a list of field/value strings is a host's claims; an absent list is an empty one.
+    const flat = stringList(replies[i]);
+    if (!flat || flat.length % 2) throw new UnknownReplyError("a host's claims");
     const list: HostClaim[] = [];
     for (let j = 0; j + 1 < flat.length; j += 2) {
       const claim = parseClaim(String(flat[j]), flat[j + 1]);
@@ -159,9 +163,11 @@ export async function claimHosts(input: {
   if (!input.hosts.length || !isClaimId(input.claim) || !/^[A-Za-z0-9:_-]{1,120}$/.test(input.ref)) return { ok: false, reason: "invalid", host: 0 };
   const args: (string | number)[] = [now, input.start, input.end, input.claim, input.until, input.ref];
   for (const h of input.hosts) args.push(Math.max(0, Math.round(h.gapMs)), h.day[0], h.day[1], h.cap);
-  const [reply] = await redisPipeline([["EVAL", CLAIM_HOST_TIMES, input.hosts.length, ...input.hosts.map((h) => claimsKey(h.id)), ...args]]);
-  const [code, index] = Array.isArray(reply) ? (reply as unknown[]).map(Number) : [Number.NaN, 0];
-  if (code === 1) return { ok: true };
+  const replies = repliesFor(await redisPipeline([["EVAL", CLAIM_HOST_TIMES, input.hosts.length, ...input.hosts.map((h) => claimsKey(h.id)), ...args]]), 1);
+  // Only the script's exact pair of whole numbers is an answer; anything else is refused as invalid.
+  const pair = replies ? repliesFor(replies[0], 2) : null;
+  const [code, index] = pair && pair.every((n) => Number.isSafeInteger(n)) ? (pair as number[]) : [Number.NaN, 0];
+  if (code === 1 && index === 0) return { ok: true };
   const host = Math.max(0, (index || 1) - 1);
   if (code === -1) return { ok: false, reason: "taken", host };
   if (code === -2) return { ok: false, reason: "cap", host };
@@ -176,14 +182,27 @@ export async function claimHosts(input: {
 export async function confirmClaim(ids: string[], claim: string, start: number, end: number, ref: string): Promise<void> {
   if (!ids.length || !isClaimId(claim) || !isRedisConfigured()) return;
   const keep = Math.max(3600_000, end - Date.now() + 172_800_000);
-  const ttls = await redisPipeline(ids.flatMap((id) => [["HSET", claimsKey(id), claim, `${start}|${end}|0|${ref}`], ["PTTL", claimsKey(id)]]));
-  // Never shortened: a later booking on the same list may need it longer.
-  const short = ids.filter((_, i) => Number(ttls[i * 2 + 1]) < keep);
-  if (short.length) await redisPipeline(short.map((id) => ["PEXPIRE", claimsKey(id), keep]));
+  const commands = ids.flatMap((id) => [["HSET", claimsKey(id), claim, `${start}|${end}|0|${ref}`], ["PTTL", claimsKey(id)]]);
+  // Read exactly: an HSET or PTTL not answered as asked throws, so the booking's hosts are never taken for confirmed.
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  if (!replies) throw new UnknownReplyError("a paid booking's host claims");
+  const short: string[] = [];
+  ids.forEach((id, i) => {
+    const ttl = replies[i * 2 + 1];
+    if (countOf(replies[i * 2]) === null || typeof ttl !== "number" || !Number.isSafeInteger(ttl) || ttl < -2) throw new UnknownReplyError("a paid booking's host claims");
+    // Never shortened: a later booking on the same list may need it longer.
+    if (ttl < keep) short.push(id);
+  });
+  if (!short.length) return;
+  const expire = short.map((id) => ["PEXPIRE", claimsKey(id), keep]);
+  const set = repliesFor(await redisPipeline(expire), expire.length);
+  if (!set || set.some((r) => countOf(r) === null)) throw new UnknownReplyError("a paid booking's host claims' lifetime");
 }
 
 /** Lets a claim go on every host it was taken for: a hold given back, or a booking refunded in full. */
 export async function releaseClaim(ids: string[], claim: string): Promise<void> {
   if (!ids.length || !isClaimId(claim) || !isRedisConfigured()) return;
-  await redisPipeline(ids.map((id) => ["HDEL", claimsKey(id), claim]));
+  const commands = ids.map((id) => ["HDEL", claimsKey(id), claim]);
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  if (!replies || replies.some((r) => countOf(r) === null)) throw new UnknownReplyError("a host claim's release");
 }

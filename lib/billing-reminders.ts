@@ -50,13 +50,21 @@ export const YEAR_NOTICE_DAYS = 30;
  * A day the target month lacks is that month's last day, as Stripe ends the
  * period: 31 January + a month is 28 (or 29) February, 29 February 2028 + a
  * year is 28 February 2029, never a day of the month after.
+ *
+ * Stripe counts every period from the subscription's billing_cycle_anchor
+ * (API reference: it sets the day of the month), not from the last period's
+ * end: anchored on the 31st, the period ending 28 February is followed by
+ * one ending 31 March. So the day is the anchor's when the subscription
+ * gives one at or before `at`; without one, it is `at`'s own day.
  */
-export function fullPeriodAfter(at: number, cycle: Cycle): number {
+export function fullPeriodAfter(at: number, cycle: Cycle, anchor?: unknown): number {
   const date = new Date(at * 1000);
   const year = date.getUTCFullYear() + (cycle === "year" ? 1 : 0);
   const month = date.getUTCMonth() + (cycle === "year" ? 0 : 1);
+  const anchored = typeof anchor === "number" && Number.isInteger(anchor) && anchor > 0 && anchor <= at;
+  const dayOfMonth = anchored ? new Date(anchor * 1000).getUTCDate() : date.getUTCDate();
   const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-  const end = Date.UTC(year, month, Math.min(date.getUTCDate(), lastDay), date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds());
+  const end = Date.UTC(year, month, Math.min(dayOfMonth, lastDay), date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds());
   return Math.floor(end / 1000);
 }
 
@@ -192,7 +200,7 @@ function noticeFor(subscription: Record<string, unknown>, nowSeconds: number, to
   // cancel_at), so the email's amount and "another year" would be untrue:
   // nothing is sent, and the gap is recorded (queue 414 [KX1], G17).
   if (typeof subscription.cancel_at === "number" && subscription.cancel_at > 0) {
-    if (subscription.cancel_at < fullPeriodAfter(at, plan.cycle)) return null;
+    if (subscription.cancel_at < fullPeriodAfter(at, plan.cycle, subscription.billing_cycle_anchor)) return null;
   }
 
   if (trialing) {
@@ -307,8 +315,17 @@ export function failedPlanEmail(failed: FailedPlan): { subject: string; text: st
 }
 
 /** Every plan whose payment failed and that has not been written to about it yet. */
-export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: number; seen: number }> {
-  const counts = { sent: 0, failed: 0, seen: 0 };
+export async function sendFailedPlanNotices(): Promise<{
+  sent: number;
+  /**
+   * A claim the store answered in a shape that proves nothing (CX-123 rule
+   * 24): nothing sent and no card touched; the next run tries again.
+   */
+  unknown: number;
+  failed: number;
+  seen: number;
+}> {
+  const counts = { sent: 0, unknown: 0, failed: 0, seen: 0 };
   if (!isRedisConfigured() || !isSenderConfigured()) return counts;
   let after: string | undefined;
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -318,9 +335,15 @@ export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: n
       const due = failedPlan(subscription);
       if (!due) continue;
       // Claimed before anything is done, so a second run never writes twice.
+      // Done only on an exact claim (lib/claim-mark.ts): taken is an email
+      // already sent; unknown does nothing, and the next run asks again.
       const key = `nl:remind:failed:${due.invoice}`;
-      const [claimed] = await redisPipeline([["SET", key, "1", "NX", "EX", 90 * DAY]]);
-      if (claimed === null) continue;
+      const claimed = await claimMark(key, 90 * DAY, claimValue());
+      if (claimed === "unknown") {
+        counts.unknown += 1;
+        console.warn("failed plan payment claim unknown: not sent; tried again on the next run");
+      }
+      if (claimed !== "ours") continue;
       try {
         // A renewal's email says what has stopped, so it is written down
         // first (lib/billing-sync.ts); a failure waits for the next run.

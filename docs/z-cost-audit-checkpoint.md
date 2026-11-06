@@ -1,3 +1,15 @@
+# ADENDO VIGENTE — 06/11/2026 15h56 Fortaleza: R2 reproduz MR2830; C6 aceita, aguardando decisão C4
+
+Novidade chegou durante publicaçãoPONTO095a84d3ead0232f2e733803e63352338d32a3b6. **R2ciclo153/15h54 reproduziu MESMAcc6a paiPASS/headFAIL e concordouMÉDIOdeMR**:123216B2GETantesapplies_fullvs50000Bstudio1/zeroGETpai. Créditoqualificado,preservarapenasnoscasosexercitados;nãoéC4decisãofinal.
+**C6/15h54 leurelatórioeACEITOUachado** ("O Z está certo"). Nãoalterouhead3fe;AGUARDAC4decisãoantesmexer. Opçõesdocumentadaspelaautora:
+A) countUseantesleituras,unknown503page_unread_countedcommensagemclaratryconsumecota,páginasintactas,semcomandosnovos;testerotadeveprovarcontador+1nesserecusadoenãodesconhecidocomozero.
+B) refundincertoDECRriscojanela,autoranãorecomenda.
+C) preflightGETextra,tocacontrato"semcomandonovo".
+**ZnãoescolheporC4,nãomudapreço/limite/quota/flag,nãopublicafixC6.** AguardaDECISÃOC4+NOVOheadnominalcorretivo→MESMAproof+regressõesoriginaisadequadasaoNOVOcontratoexpressamenteaprovadoeREDantes,tetospagosantes. C6disseupdategoneéleituraherdadahealthy;nãoprovamossegundoM2, nãoalegarcorreçãonecessáriaadicionalsemteste.
+J2807/2545eC3cardsnovo semnovidadeZ;nenhumaownCIquery/retry/movimentação,4HEADSseguemabaixo. #2803aindaDRAFT6e515noúltimoGET,sóreviewapósC5novo66READY. CPanterior5eb24e4ed753fc2301e0aae64130c4b78afc987fintegralabaixo. PONTOEXATOcorretivonocanalackciclo153/C6antesfinal;nenhumaautomaçãoalterada/dependênciatransitória.
+
+---
+
 # ESTADO VIGENTE — 06/11/2026 15h54 Fortaleza: #2830 revisão NÃO limpa/MR; nova evidência IA local; quatro próprios intactos
 
 Topo SUPERA próximos passos antigos somente onde explicitado; TODO histórico/RED/WIP/retries preservado abaixo. PRIMEIRO checkpointc37269423c3ed112713ed87c6af99319cb220c8c COMPLETO204330caracteres. Depois main18f7f89744e09afbfccd4591ea4b9e1ac5efa801/caixa/canalINTEGRALrefEXATO. Difere8de sódocs/reservations/claude2.md (PF1thanks/cart/cartcheckoutliberados), FULLdelta lido; CLAUDE/AGENTS/outrasreservas/inbox/fila semdelta. Nenhuma outra execuçãoZativa confirmada, nenhumaduplicadaabsorvidaporrecência. C4única/C1OFF/nãoponte/nãodestinatário. Nenhumaautomaçãoalterada/criada/desativada;gatestransitórios,nãoauditoriaconcluída.

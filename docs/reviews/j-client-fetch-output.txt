@@ -1,0 +1,64 @@
+{"frozenSource":"5c07315505e1d53ee6401021601cd688fa98ecda","verifiedTrackedInputs":454,"canonicalAliases":"course-template-studio.test.ts","noProductAliasOrSourceTransform":true,"SDKDispatcherGuarded":true}
+
+Hard network guard controls before any scenario
+  ok    SDK dispatcher and socket controls are blocked before transport
+  ok    the actual product record points to the saved real course
+
+Course editor: healthy and genuinely empty reads
+  ok    actual healthy route text reaches the actual client field
+  ok    healthy unchanged Save sends and preserves the original body
+  ok    an explicitly confirmed empty route body is a legitimate empty field
+
+Course editor: a failed read must not enable saving a fabricated empty body
+  ok    http-error: the failed read itself did not alter the real saved body
+  FAIL  http-error: no unconfirmed empty editor with an enabled Save action
+        expected false
+        got      true
+  FAIL  http-error: unchanged Save after failed loading cannot erase the actual saved body
+        expected "Previously saved lesson words. Keep this content."
+        got      ""
+  ok    network-error: the failed read itself did not alter the real saved body
+  FAIL  network-error: no unconfirmed empty editor with an enabled Save action
+        expected false
+        got      true
+  FAIL  network-error: unchanged Save after failed loading cannot erase the actual saved body
+        expected "Previously saved lesson words. Keep this content."
+        got      ""
+  ok    invalid-json: the failed read itself did not alter the real saved body
+  FAIL  invalid-json: no unconfirmed empty editor with an enabled Save action
+        expected false
+        got      true
+  FAIL  invalid-json: unchanged Save after failed loading cannot erase the actual saved body
+        expected "Previously saved lesson words. Keep this content."
+        got      ""
+  ok    partial: the failed read itself did not alter the real saved body
+  FAIL  partial: no unconfirmed empty editor with an enabled Save action
+        expected false
+        got      true
+  FAIL  partial: unchanged Save after failed loading cannot erase the actual saved body
+        expected "Previously saved lesson words. Keep this content."
+        got      ""
+
+Bundle picker: healthy, known-empty and explicit failures
+  ok    actual healthy bundle route products reach the actual picker
+  ok    a confirmed empty query may show the actual no-match message
+  ok    http-error: existing explicit error handling shows an alert rather than an empty result
+  ok    network-error: existing explicit error handling shows an alert rather than an empty result
+  ok    invalid-json: existing explicit error handling shows an alert rather than an empty result
+
+Bundle picker: partial JSON and failed HTTP status must remain unknown
+  FAIL  partial: an unconfirmed response cannot claim that the populated store has no other products
+        expected false
+        got      true
+  FAIL  bad-status: an unconfirmed response cannot claim that the populated store has no other products
+        expected false
+        got      true
+
+Bundle picker: the existing late-response fence is a passing race control
+  ok    the late old query cannot replace the newer actual route result
+  ok    no SDK, direct socket or unmatched HTTP escapes the deliberate blocked controls
+{"source":"5c07315505e1d53ee6401021601cd688fa98ecda","runtime":"actual components/React elements/handlers and authenticated routes; controlled Node hook/effect host, no DOM/hydration","observations":[{"component":"CourseEditor/LessonEditor","failure":"http-error","blankField":true,"enabledSave":true,"storedBeforeSave":"Previously saved lesson words. Keep this content.","sentText":"","storedAfterSave":"","alertVisible":false},{"component":"CourseEditor/LessonEditor","failure":"network-error","blankField":true,"enabledSave":true,"storedBeforeSave":"Previously saved lesson words. Keep this content.","sentText":"","storedAfterSave":"","alertVisible":false},{"component":"CourseEditor/LessonEditor","failure":"invalid-json","blankField":true,"enabledSave":true,"storedBeforeSave":"Previously saved lesson words. Keep this content.","sentText":"","storedAfterSave":"","alertVisible":false},{"component":"CourseEditor/LessonEditor","failure":"partial","blankField":true,"enabledSave":true,"storedBeforeSave":"Previously saved lesson words. Keep this content.","sentText":"","storedAfterSave":"","alertVisible":false},{"component":"BundleEditor","failure":"partial","falseEmpty":true,"alertVisible":false},{"component":"BundleEditor","failure":"bad-status","falseEmpty":true,"alertVisible":false}],"internalCalls":["GET /api/store/course","POST /api/store/course","GET /api/store/course","GET /api/store/course","POST /api/store/course","GET /api/store/course","POST /api/store/course","GET /api/store/course","POST /api/store/course","GET /api/store/course","POST /api/store/course","GET /api/store/bundle","GET /api/store/bundle","GET /api/store/bundle","GET /api/store/bundle","GET /api/store/bundle","GET /api/store/bundle","GET /api/store/bundle","GET /api/store/bundle","GET /api/store/bundle","GET /api/store/bundle"]}
+
+26 checks, 10 failing.
+
+Process exit: 1 (expected 1 for the reproduced contract failures; not GREEN).

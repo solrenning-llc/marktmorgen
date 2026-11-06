@@ -83,7 +83,7 @@ export const nl: BuyerWords = {
   buyAsGift: "Koop als cadeau",
   buyAsGiftFor: (price) => `Koop als cadeau — ${price}`,
   giftNote: (store) =>
-    `Je betaalt op de pagina van Stripe. Direct daarna krijgt de ontvanger één e-mail van ${store} met je naam, je bericht en een link om het op het eigen adres te openen. Jij krijgt de bon, geen kopie.`,
+    `Je betaalt op de pagina van Stripe. Na betaling hoort het cadeau bij het adres van de ontvanger. Als de ene e-mail van ${store} aankomt, bevat die je naam, je bericht en een link om het te openen. Jij krijgt de bon, geen kopie.`,
   giftProblems: {
     email: "Dat lijkt geen e-mailadres. Controleer het adres van de ontvanger en probeer het opnieuw.",
     option: "Kies wat je wilt geven en probeer het opnieuw. Er is niets afgeschreven.",
@@ -133,7 +133,8 @@ export const nl: BuyerWords = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store) => `Blog van ${store}`,
-  blogEmpty: "Hier staat nog niets.",
+  blogPastEnd: "Geen berichten op deze pagina",
+  blogPastEndBody: "Deze pagina komt na het laatste bericht.",
   blogMinutes: (n) => `${n} min lezen`,
   blogNewer: "Nieuwere berichten",
   blogOlder: "Oudere berichten",
@@ -146,6 +147,7 @@ export const nl: BuyerWords = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent) => `je bespaart ${percent}%`,
   chooseOptionFor: (title) => `Kies een optie voor ${title}`,
+  chooseOne: "Kies er een",
   recommended: "Aanbevolen",
   recommendedAfter: " (aanbevolen)",
   howToPayFor: (title) => `Hoe je ${title} betaalt`,

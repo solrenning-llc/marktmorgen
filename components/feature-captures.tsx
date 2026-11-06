@@ -13,7 +13,7 @@ export function FeatureCapture({ slug }: { slug: string }) {
   });
   return (
     <figure className="w-full min-w-0 max-w-2xl overflow-hidden rounded-2xl border border-line bg-white text-ink" data-feature-capture={capture.slug}>
-      {/* Static inline pixels: no remote image, optimizer or runtime capture. */}
+      {/* Local static pixels: no remote image host, optimizer or runtime capture. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={capture.src} alt={capture.alt} width={capture.width} height={capture.height} loading="lazy" decoding="async" className="h-auto w-full object-contain" />
       <figcaption className="border-t border-line px-5 py-4 text-base leading-relaxed">

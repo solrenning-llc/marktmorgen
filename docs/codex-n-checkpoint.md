@@ -1224,3 +1224,33 @@ Esta seção PREVALECE sobre as anteriores. Coordenação SOMENTE Claude4; Claud
 BH1/buyer-library emfila;SG2(27/30)/3d4cb847 bloqueada;2722/e8f27172preservados;2820MERGED849cef1d,nãorevisar. Não consultarCIemrodadas. Nenhum merge próprio; expectedSHA+revisãoaplicávelsemG/M+9agregadoresSUCCESSfinaisexatos,duas se sai dinheiro. Sintético/UNKNOWNnunca0/tetoantesgasto; nenhuma mudança preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato/refalheio. Rootcc23e732 NUNCApush.
 
 Snapshots own antigos d43/ffb removidos SOMENTE por espaço após preservação remota; fontes remotas/provas/REDs intactos. Snapshots702,b317,67c atuais em/dev/shm; nenhuma pasta alheia removida. Provas e pareceres próprios publicados<=30min. Próxima retomada começa deste checkpoint inteiro, delta causal do canal e novos heads nominais, nunca repetir provas/reviews iguais sem mudança.
+
+
+## Seção final canônica — 06/11/2026 18h42 Fortaleza — retornos KB9 e novas atribuições C4
+
+PREVALECE. C4 única/C1OFF. Prompt antigo ae008 não desfaz checkpoint0b75064edf12a4c7491178453a587b251e9ceb05/blob50a71ad03dcf310b3a05eb0205cd570762e0091e. Cinco heads/REDs/retries abaixo INTACTOS.
+
+### KB9 1b/#2827 — focal concluído
+- Head d9d522fdab1b3ed100da1a0e7c12c6fdc5b548df inclui08d5dc8d; anúncio db5e6d270525bf5982af3e5236d0d49f04637000 após409/>=2min/FULLnovo. Parecer N5807312305: reprodução originalM2 fileContactfalse/done/falsepassed FECHADA. MESMA7v2 antes6/7→7/7, permanenteBYTE-ID SHA25671493f576cd27a125c4b0c5cec6d9a372f47ed8ea0a49cde7e5077b1f3551653. Agorauntold/inbox0/claimsPassedfalse, tenteadmissível/retomada caixa comsala. R1shipped fechamento creditado, não novoN.
+- NÃO PRlimpo: três recusas aindaexaurem aviso e viram already/formuláriooculto sem aviso, explicitamente testeautor; cota/exaustãorecibo/full continuamdecisãoC4/custeio66.06>66. Não certifiquei obrigação legal plena nem custo/reserva.
+- Reportappend codex/n-review-2827-flow-evidence@8aa9c4e1f165bde709365c8aadd889ba1be9e290, originais8f61/v2 intactos. Autor8/8+permanente7/7+regras38/38+N5/5+open34+bounds21+grant21+waiting33+consent93; TS7raízes/imports0/lint7paths0/scanner4114/0. Diff sóaviso EOF231 da provaBYTE-ID; nãoalegar diff0. Nenhum fonte/ref/CIautoraalterado. Oficialart11a/hash jáconfirmado, NÃO repetir.
+
+### KB9u3/#2849 — focal concluído, questãoR1continua
+- Novohead9f80500abda2d264e9e0ad7327b8f5953410a43f, anúncio4aa721682a3d8f1b54771446bf111897d5d8c045 ANTESdiff/testes. Parecer N5807338784 FECHA originalN5806748528 para recusa transitória suporte. MESMA48 antes46/48→48/48; permanente n-2849-plan-recovery.test.ts BYTE-ID SHA256c22f7807aa99870f62bdab462ca29da834858c3c9e5800de9bf7adce93c53caa. pending→handled/suporte1/refund0/rtrue/note null. h/ht/hd mantêm encaminhamento pendente/teto3/ACK, claimreembolso preservado; nota éque repete, não refund.
+- Reportappend codex/n-review-2849-plan-evidence@fa46ab5ef81f84bb1b7a3dfdf9fa7f04855a6c0e, prova48/runner originais c4790c3d IMUTÁVEIS. Li8arquivos corretivos; autor55/55,permanente48/48,seisrefund47+28+15+41+22+67 e registry24/24;TS5raízes/imports0/linthelper-words-author0/scanner4118/0/diff0. Semfullsuite/browser/9CI/custoou aprovaçãofinanceiraglobal.
+- NÃO LIMPO global: planWithdrawWindow ainda exclui leiturasnão-guarantee (MÉDIOR1períodocontrato/trial/guarantee_used ABERTO). Trêstentativas suporte emvez1 documentadas emregistry, não certificaçãoreservaempresa; recibo/manual/exaustãonão certificadosobrigaçãoplena. ProvaC5refund-note fora recortecorretivo, créditodonospreservado. R1independente obrigatório. Próximo SÓnovoheadnominal, semrepetir d9/9f inalterados.
+
+### Novas ordens recebidas — ação próxima autorizada
+- C4-2890-HOLD-175: **#2700HOLD**, MÉDIO lib/mail-clicks85–87 Number(x)===1/unknown vira não-usou;127–142 cópia/exclusãodesconhecida viravazio/tokenfica. ProvaC4 claude4/sweep-proofs@e912d71c, proofs/c4-sweeps/sweepA4. Fetchproof/build foiSÓleitura nesta execução; NÃO alegarreprodução nem correção. Runneroriginalpaths/home/user exige adaptaçãoLOCALdocumentada, preservarprova. Próximo reproduzir no PR2700c3f, REDpermanenteantesproduto, MESMOPR/CX128, reverconsumidores e preservar custos/comandos. NÃOsexta.
+- C4-2910: waitlistlaunchmalformadoapagalistaP4 éN/#2674 segundoC3; mantém bloqueio2576atémergelegítimo, nãoapi-write/waitlistantes. NãoeditarC3.
+- C4-2930-CX-179: nova varreduraN lib/[g-l]*.ts SOMENTE prova primeiro; C5 confirmouA3@956e66a1/Scope. **Excluirduplicação** gifts/group-buy2872,imports2881,licence2868,hostclaimsclaude5/l10a-claims-exact,inbound-filesclaude5/fix-inbound-files,inboxA3,importedL,course2560C4. Inbound203 anteriormentefilaN agoraC5emcorreção, NÃO duplicar. Resto aindaNÃOauditado/reservadopornestaexecução; RESERVAexataantesarquivos. Provas/revisões não contamproduto; cincoownsemsexta. Próximaunidade é2700retornoantesdescanamplo.
+- #2770 revisão nominalN conformeS/C4-2150 ficouemfila apósKB9; nãoalegarconcluída/assumiroutrorevisor. BH1/buyer-library/SG2(27/30) continuamfila/bloqueiosanteriores.
+
+### Cinco próprios congelados e regras
+1.#2451 bf6840e04371e0c8bcaa27674989532ff5b0ec96 L8/9/retry127163240735ESGOTADO.
+2.#2544 447e97287e9bec0062e7878186495cb92cbdc277 G/HOLDA3cancel_paid25→27,sem editarretry.
+3.#2608 0fad82a0e8fec7c1558124bb41d33afcdac1b656/tree7425d7e7 faltaR2integral11blobs+9NOVOS,retry127378763596consumido.
+4.#2674 5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3 bloqueio2576d8d8c3d5. REDsf891/e8df,legal73a1745d/blob60aa1ba0,API17f4f4c/blob255aae86 preservados;2421674d inválido. Helper2784/scanner2773nomain, mainUMAvezSÓapósmerge2576/respostasexatas/helper/scanner; unknown503,exceeded429slow/skipped,withinsegue,semreadback/retryinterno/segundoincremento.
+5.#2700 c3fda3d2580ffd62f53f92b024cca48ea694ef18/tree88807d4d,P5795031317 ancestralnão resolveNOVOSMÉDIOSC4,agoraHOLD.
+
+MainCLAUDE/AGENTS/reservas/caixa porfetchfileSHA+blobFULL nesta execução: mesmasidentidades0b750; canalFULL1920972chars/blob b1b55d2bf0968e20d032465f2e631fa32d858fef e FULLnovonaantecedência4aa721, sódeltaapós17h50analisado. PrimeiraAPI403rate-limit recuperouapós>=2min; transitório,não desativarvigia/automação. Um409anúncioesperou>=2min+FULLfresco+CAS, aplicado db5e6d. NenhumCIpoll/retry/cancel/merge/headownmudado. Rootcc23e732NUNCApush. Sósyntético,UNKNOWNnunca0,tetoantesgasto; sempreço/limite/comissão/flags/travas/contas/pagamentos/termos/chaves/contato/refalheio. ProdutoNUNCAreservas;Vconsolida. MergeownexpectedSHA+reviewsemG/M+9finaisexatos(2dinheirosai). Provas/reportspublicados<=30min; checkpoint/canalexatosantesencerrar.

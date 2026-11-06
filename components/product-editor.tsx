@@ -1044,7 +1044,7 @@ function OptionsBlock({
         <span>
           Recommend this one
           <span className="block font-normal text-ink-soft">
-            Chosen when the page opens and marked “Recommended.” One per product: picking it here unpicks any other.
+            Marked “Recommended” and listed first. Buyers still pick it themselves: nothing is chosen for them. One per product: picking it here unpicks any other.
           </span>
         </span>
       </label>

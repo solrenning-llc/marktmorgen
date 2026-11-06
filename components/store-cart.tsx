@@ -153,6 +153,7 @@ export function CartButton({
   const [digital, setDigital] = useState(true);
   const panel = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
+  const root = useRef<HTMLDivElement>(null);
   // Once opened, the button stays until the page is left, even with the cart emptied, so the focus always has it to go back to (2.4.3).
   const [kept, setKept] = useState(false);
   // Which product's button the focus moves to once one is removed: the next one, or the panel when none is left (2.4.3).
@@ -187,7 +188,9 @@ export function CartButton({
     if (open) panel.current?.focus();
   }, [open]);
 
-  // Escape shuts it from anywhere on the page; from inside it, the focus goes back to its button (2.1.1, 2.4.3).
+  // Escape shuts it from anywhere on the page; from inside it, the focus goes back to its button (2.1.1, 2.4.3). The panel lies
+  // over the page: wherever the focus lands outside the cart, however it got there, it shuts, so it never covers what has the
+  // focus (2.4.11, 2.4.12).
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
@@ -196,8 +199,15 @@ export function CartButton({
       setOpen(false);
       if (inside) opener.current?.focus();
     };
+    const onFocus = (event: FocusEvent) => {
+      if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false);
+    };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    document.addEventListener("focusin", onFocus);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", onFocus);
+    };
   }, [open]);
 
   useEffect(() => {
@@ -214,15 +224,7 @@ export function CartButton({
   const held = apart !== null && apart.ids.some((id) => ids.includes(id));
 
   return (
-    <div
-      id="cart"
-      className="st-cart"
-      onBlur={(event) => {
-        // The panel lies over the page: once the focus moves out of the cart, it shuts, so it never covers what has the focus (2.4.11, 2.4.12).
-        const next = event.relatedTarget;
-        if (open && next instanceof Node && !event.currentTarget.contains(next)) setOpen(false);
-      }}
-    >
+    <div ref={root} id="cart" className="st-cart">
       <button
         ref={opener}
         type="button"

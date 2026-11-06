@@ -103,7 +103,7 @@ try{
     // where the link points and where it is checked below.
     const plan=page.locator("[data-home-plan]");
     if(!(await plan.innerText()).includes("$69 a month"))throw Error("Home plan price mismatch");
-    if(await plan.getByRole("link",{name:"Start free",exact:true}).getAttribute("href")!=="/signin")throw Error("Home plan start lost");
+    if(await plan.getByRole("link",{name:"Start your store",exact:true}).getAttribute("href")!=="/signin")throw Error("Home plan start lost");
     if(await page.getByRole("link",{name:"Compare Store, Studio and Scale",exact:true}).getAttribute("href")!=="/pricing#plans")throw Error("Compare plans link lost");
    }
    if(path==="/pricing"&&sample===1){

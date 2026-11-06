@@ -37,6 +37,8 @@ for (const [label, mutate] of [
   ["invalid last use", (r: unknown[]) => [r[0], r[1], "unread", r[3]]],
   ["invalid team JSON", (r: unknown[]) => [r[0], r[1], r[2], "broken"]],
   ["invalid rule type", (r: unknown[]) => [r[0], r[1], r[2], '{"members":[],"invites":[],"requireTwoStep":"true"}']],
+  ["null member under a required rule", (r: unknown[]) => [r[0], r[1], r[2], '{"members":[null],"invites":[],"requireTwoStep":true}']],
+  ["null invite under a required rule", (r: unknown[]) => [r[0], r[1], r[2], '{"members":[],"invites":[null],"requireTwoStep":true}']],
 ] as const) {
   test(`unknown resolution ${label} refuses read and write before admission`, async () => {
     const made = await key();

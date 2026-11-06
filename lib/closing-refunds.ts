@@ -48,6 +48,22 @@ const lockKey = (folder: string) => `nl:closing:refund:${folder}`;
 const LOCK_SECONDS = 120;
 
 export type UnusedRow = { sub: string; paid: PaidPeriod; unused: number };
+/**
+ * What Stripe's answer to POST /refunds says, read exactly: "done" (succeeded), "pending" (pending or
+ * requires_action), "failed" (failed or canceled), or "unknown" for anything that is not a refund of this payment for
+ * this amount in one of Stripe's own states.
+ */
+export function refundState(refund: unknown, intent: string, amount: number): "done" | "pending" | "failed" | "unknown" {
+  if (!refund || typeof refund !== "object" || Array.isArray(refund)) return "unknown";
+  const own = (key: string): unknown => Object.getOwnPropertyDescriptor(refund, key)?.value;
+  if (own("object") !== "refund" || own("payment_intent") !== intent || own("amount") !== amount || !Number.isSafeInteger(amount)) return "unknown";
+  const status = own("status");
+  if (status === "succeeded") return "done";
+  if (status === "pending" || status === "requires_action") return "pending";
+  if (status === "failed" || status === "canceled") return "failed";
+  return "unknown";
+}
+
 
 /** A refund's outcome that is final: nothing more is tried for it. A short one is tried again until the closing day makes it final. */
 const settled = (paid: PaidPeriod) => paid.r === "done" || paid.r === "none" || paid.r === "disputed" || paid.r === "over" || (paid.r === "short" && paid.f === 1);
@@ -297,9 +313,21 @@ export async function giveBackUnused(
           }
           throw error;
         }
+        // Read exactly (Codex G on #2699; https://docs.stripe.com/api/refunds/object, read 06/11/2026): only a refund of
+        // this payment, for this amount, in one of Stripe's own states counts. Succeeded is done; pending or
+        // requires_action is made and waiting; failed or canceled gave nothing back and the member stays to be
+        // reconciled; any other answer is unknown, never "done", and is tried again under the same idempotency key, so
+        // Stripe answers with the same refund instead of making a second one.
+        const state = refundState(refund, intent, give);
+        if (state === "unknown") throw new Error("a closing refund's answer was not one this payment's refund gives");
+        if (state === "failed") {
+          console.error("a closing refund was refused by Stripe; the member stays to be reconciled");
+          out.failed += 1;
+          continue;
+        }
         funds.set(cost.cur, (funds.get(cost.cur) ?? 0) - cost.amount);
         // Pending for want of funds is Stripe holding it on the creator's account until they come: made, never Marktmorgen's.
-        if (refund.status === "pending") {
+        if (state === "pending") {
           await settle("pending", give);
           out.pending += 1;
         } else {

@@ -1,0 +1,41 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "app/api/store/crm/route.ts",
+    "app/api/store/form-opportunity/route.ts",
+    "app/api/store/pipeline-access/route.ts",
+    "app/studio/deals/page.tsx",
+    "app/studio/team/page.tsx",
+    "components/deals-board.tsx",
+    "components/pipeline-access-editor.tsx",
+    "lib/agent-coverage.ts",
+    "lib/crm-response.ts",
+    "lib/crm-rules.ts",
+    "lib/crm.ts",
+    "lib/data-families.ts",
+    "lib/pipeline-access-rules.ts",
+    "lib/pipeline-access.ts",
+    "lib/store-data.ts",
+    "lib/team.ts",
+    "tests/api-key-second-step.test.ts",
+    "tests/feature-visual-cards.test.ts",
+    "tests/pipeline-access-board.test.ts",
+    "tests/pipeline-access-edges.test.ts",
+    "tests/pipeline-access-names.test.ts",
+    "tests/pipeline-access-team.test.ts",
+    "tests/pipeline-access.test.ts",
+    "tests/pipeline-copy.test.ts",
+    "tests/store-data-registry.ts",
+    "tests/g2036-n-merged-move.proof.ts",
+    "tests/g2036-copy-lost-reply.proof.ts",
+    "tests/team-pipeline-copy-lost-reply.test.ts",
+    "tests/g2036-copy-recovery-matrix.proof.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

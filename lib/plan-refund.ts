@@ -106,8 +106,8 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
     if (calls > MAX_CALLS || Date.now() > deadline) throw new Spent();
     return onPlatformAt(AT, "GET", path);
   };
-  const list = (page: Row, maximum: number): Row[] | null => {
-    if (page.object !== "list" || typeof page.has_more !== "boolean" || !Array.isArray(page.data) || page.data.length > maximum) return null;
+  const list = (page: Row, maximum: number, object = "list"): Row[] | null => {
+    if (page.object !== object || typeof page.has_more !== "boolean" || !Array.isArray(page.data) || page.data.length > maximum) return null;
     const rows = page.data.map(obj);
     return rows.every((row): row is Row => row !== null) ? rows : null;
   };
@@ -226,7 +226,7 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       for (const email of emails) {
         const found = await get(`/customers/search?${new URLSearchParams({ query: `email:"${email.replace(/["\\]/g, "")}"`, limit: "100" })}`);
         if (found.has_more === true) return { refund: { kind: "unknown", reason: "too_many" } };
-        const foundRows = list(found, 100);
+        const foundRows = list(found, 100, "search_result");
         if (!foundRows) return { refund: { kind: "unknown", reason: "unreadable" } };
         for (const c of foundRows) if (typeof c.email === "string" && normaliseEmail(c.email) === email && idOf(c.id) !== customer.id) others.add(idOf(c.id));
       }
@@ -243,7 +243,7 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       const fingerprint = obj(obj(first.payment_method_details)?.card)?.fingerprint;
       if (!personPaidBefore && typeof fingerprint === "string" && /^[A-Za-z0-9]{4,64}$/.test(fingerprint)) {
         const found = await get(`/charges/search?${new URLSearchParams({ query: `payment_method_details.card.fingerprint:"${fingerprint}" AND status:"succeeded" AND created<${before}`, limit: "10" })}`);
-        const foundRows = list(found, 10);
+        const foundRows = list(found, 10, "search_result");
         if (!foundRows) return { refund: { kind: "unknown", reason: "unreadable" } };
         if (foundRows.some((c) => idOf(c.id) !== idOf(first!.id) && num(c.created) < before)) personPaidBefore = true;
       }

@@ -253,7 +253,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     world.balance -= cost;
     const charge = world.charges.get(pi.slice(3))!;
     charge.amount_refunded += amount;
-    const refund = { id: `re_${world.refunds.length + 1}`, payment_intent: pi, amount, status: "succeeded", metadata: Object.fromEntries([...form].filter(([k]) => k.startsWith("metadata[")).map(([k, v]) => [k.slice(9, -1), v])) };
+    const refund = { id: `re_fair${String(world.refunds.length + 1).padStart(6, "0")}`, object: "refund", payment_intent: pi, amount, currency: "usd", status: "succeeded", metadata: Object.fromEntries([...form].filter(([k]) => k.startsWith("metadata[")).map(([k, v]) => [k.slice(9, -1), v])) };
     world.refunds.push(refund);
     return json(refund);
   }

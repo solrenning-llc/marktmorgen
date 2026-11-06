@@ -40,7 +40,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (path === "/customers") return answer({ object: "list", data: url.searchParams.get("email") === "member@example.com" ? [{ id: "cus_member0001" }] : [] });
   if (path === "/subscriptions") return answer({ object: "list", data: url.searchParams.get("customer") === "cus_member0001" ? subs : [] });
-  if (path === "/promotion_codes") return answer({ object: "list", data: codes });
+  if (path === "/promotion_codes") return answer({ object: "list", data: codes, has_more: false });
   if (init?.method === "POST" && path.startsWith("/subscriptions/")) {
     const headers = new Headers(init.headers);
     posted.push({ path, body: String(init.body), key: headers.get("Idempotency-Key") });

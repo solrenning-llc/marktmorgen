@@ -262,6 +262,11 @@ export async function listCodes(account: string): Promise<CodeList> {
     // An absent/unreadable provider list is not evidence that no live code
     // exists. The route reconciles hasDiscounts only after a confirmed list.
     if (!Object.hasOwn(page,"data") || !Array.isArray(page.data)) return { state:"error" };
+    // One page is the whole list only when Stripe says it is the last one.
+    // Newest first with stopped codes included, a page with more behind it
+    // can hide an older live code, and a page that does not say is no proof
+    // either: refused, so the route writes nothing from it (rule 24).
+    if (!Object.hasOwn(page,"has_more") || page.has_more !== false) return { state:"error" };
     const codes: DiscountCode[] = [];
     const ids = new Set<string>();
     for (const raw of page.data) {

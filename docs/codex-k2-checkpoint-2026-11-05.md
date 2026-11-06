@@ -707,3 +707,13 @@ Two channel headings used ESTIMATED11h35/11h40 too early. Actualclockcheck **14:
 #2799 T2d review5800680540/ownreportdb597f0b remainsCLOSED, authorhandlingONEacceptedverifyretry; #2790 C5682 review5800721796/ownreport323b remainsCLOSED, authorstackgates. No re-review unchangedheads or foreignCI. #2797merged5d3, no duplicatedreview. #2801/#2803 stayHOLDownerBlobceilingdecision, no Range/providerexperiment. FutureC6Encanto651remainingK2review awaitsactualnominalrequest; current2733/Sreturn5801308393done, notK2duplicate. #2802V70e/Jreturnpending notK2. Ownold2340/2354/2345/2472/...2789+now2796alreadyMERGED, neverrecreate.
 
 Exactpoint: ONEownOPEN2811 exact3b7; wait nominalR2/terminalninecausal event underAV12, or next C4-assigned freepublicunit/futureC6nominalreturn whilegateswait. C4-1440 cacheclassification is nowIMPLEMENTEDin2811, not stillunassigned/proofonly. Fourunusedproductslots; do not edit others' assigned T/U/P etc scopes or invent approval. Existingcontinuitypreserved fortransientreview/CI, no automationcreated/updated/disabled. Before ending append thischeckpointSHA plus exactpendingstates toFULLfreshchannelCAS. No publication/deploy/availability/globalAAAclaim.
+
+
+## New nominal next item — 2026-11-06 11:39 Fortaleza
+Fresh FULLchannel **d64c36d64efe1612358f43affc7b6c504dd4bb74**/808673chars delivered **C4-20261106-1710-K2-101**:
+- #2811 review remains NOMINAL Revisor2; K2 NORMALmerge after qualifiedcleanreview and nine exactgreens.
+- **lib/form-store.ts rule30 candidate is now assigned K2, ONLY AFTER #2811 MERGES**. First prove the actual path with durable RED; only implement if reproduced. If not reproduced, report and close. No current source edits/reservation/RED claim for that follow-up. Do NOT treat future assignment as permission to bypass the stated sequencing gate.
+- lib/flows.ts belongs Claude3 AFTER1927; no K2duplication/edit.
+- C4#2810 stackedafter2655, R1closed8636; not K2unit.
+
+Read-only ancestry verification completed against fetched final branch: b83436e1,77b9ec45,fc07ebc5,22e09152,0a7d41fd ALL ancestors of3b7; original0597 NOTancestor, still preserved separateevidencebranch. Rootworkingtreeclean. Fetched3b7 tree760 matches stagedfinal and two-pathdiff. Actualclock **2026-11-06 14:39:15UTC =11:39:15Fortaleza**. No further CIpoll/reviewinference/headmove/retry/cancel. PendingonlyR2+terminalnine for2811; prescribedform-storefollow-upmustwait2811merge. Acknowledge C4-1710 and publish latestpointwiththischeckpointSHA; no newworker/automation/provider/cost/gateactions.

@@ -126,7 +126,7 @@ This proves only the component's acknowledgement behavior under the selected syn
 
 Quality checks also applied the repository public-data detector directly to all three new files: zero findings. New-file whitespace checks reported no diagnostics; git diff --no-index uses exit1 for the new-file difference itself, so this is not represented as an exit-zero normal tracked diff.
 
-The initial immutable proof commit 618d38 is preserved. The runner now accepts a selected source checkout and its complete expected component blob as CLI arguments, while retaining the same four cases, 24 functional checks, default waits and request ceilings. A provenance mismatch alone is not a product failure.
+The initial immutable proof commit 61890f32b72823c7422cac28d402e49a57ba430e is preserved. The runner now accepts a selected source checkout and its complete expected component blob as CLI arguments, while retaining the same four cases, 24 functional checks, default waits and request ceilings. A provenance mismatch alone is not a product failure.
 
 
 ## Comparing a corrective checkout

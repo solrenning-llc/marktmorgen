@@ -186,7 +186,8 @@ async function main(): Promise<void> {
   is("a product that is not a podcast: none", [...((await audioPlayedBy({ podcast: null })) ?? ["unknown"])], []);
   is("a podcast whose record is not there: none, no episode can name a file", [...((await audioPlayedBy({ podcast: { id: bonusRef, episodes: 0 } })) ?? ["unknown"])], []);
   const routeSource = readFileSync("app/api/store/file/attach/route.ts", "utf8");
-  is("the route asks with the product read after the write, or the one read before, and nothing else", routeSource.includes("audioPlayedBy((found ?? delivery)?.product)"), true);
+  // Claude 4 on #2657 (cost): a new file reuses the product read before the write; a detach reads it once, after.
+  is("the route asks with the product read before the write for a new file, or the one read after a detach, and nothing else", routeSource.includes("(delivery ? Promise.resolve(delivery) : readDelivery(result.store, id)).then((found) => audioPlayedBy(found?.product))") && routeSource.includes("const delivery = detach ? null : await readDelivery(store, id);"), true);
 
   part("What the creator reads");
   const messageOf = (file: string, key: string) => readFileSync(file, "utf8").match(new RegExp(`\\n  ${key}: [\`"]([^\`"]*)[\`"]`))?.[1] ?? "";

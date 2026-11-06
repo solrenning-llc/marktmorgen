@@ -43,7 +43,8 @@ export async function POST(request: NextRequest) {
     // A new file deletes the one there, with the buyers' stamped copies: not from a session let in
     // without its second step (lib/two-step.ts). The id may name a price option, whose file is its
     // own, so the file is read where the id points (readDelivery), not on a product only.
-    const delivery = await readDelivery(store, id);
+    // Read once, only for a new file (the lock and the episodes need it); a detach reads it after its write instead.
+    const delivery = detach ? null : await readDelivery(store, id);
     if (!detach && (await lockedFor(request, "products", "replace")) && deliveredFile(delivery)) return refusedJson("locked");
 
     let file: ProductFile | null = null;
@@ -88,11 +89,12 @@ export async function POST(request: NextRequest) {
     // Nor an episode's audio (a record written before a podcast took no file): read after the write, kept when the
     // episodes cannot be read. A file left behind costs storage; an episode deleted from under a feed costs listeners.
     const removed = result.removed;
-    // A read that throws is unknown (kept); one that finds nothing falls back to what was read before the write, and
-    // when neither found the product, audioPlayedBy answers unknown (kept), never "no episodes".
+    // A new file reuses what was read before the write (no second read of the listing, Claude 4 on #2657); a detach reads
+    // it once here. A read that throws is unknown (kept), and when no product was found, audioPlayedBy answers unknown
+    // (kept), never "no episodes".
     const stillPlayed = !removed
       ? new Set<string>()
-      : await readDelivery(result.store, id).then((found) => audioPlayedBy((found ?? delivery)?.product)).catch(() => null);
+      : await (delivery ? Promise.resolve(delivery) : readDelivery(result.store, id)).then((found) => audioPlayedBy(found?.product)).catch(() => null);
     if (removed && removed.pathname !== file?.pathname && stillPlayed && !stillPlayed.has(removed.pathname)) {
       await del(removed.pathname).catch((error: unknown) => {
         console.error("could not delete the replaced file", error);

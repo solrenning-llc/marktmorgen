@@ -8,7 +8,7 @@ import test from "node:test";
 import { ENDING_KEY, finishPlanRefunds, refundAndEndPlan } from "@/lib/plan-refund-flow";
 import { redisPipeline } from "@/lib/redis";
 import { store as redis } from "./redis-stub";
-import { NOW, paidShop, world } from "./plan-refund-stripe-world";
+import { DAY, NOW, paidShop, world } from "./plan-refund-stripe-world";
 
 type Command = (string | number)[];
 
@@ -139,4 +139,29 @@ await t.test("a Proxy HGETALL row list is not an empty recovery job", async () =
   await assert.rejects(() => finishPlanRefunds(Date.now() + 10_000, NOW + 60));
   assert.equal(typeof (await original([["HGET", ENDING_KEY, store.sid]]))[0], "string");
 });
+
+for (const malformed of ["null entry", "valid entry followed by null"] as const) {
+await t.test(`present debt evidence with a ${malformed} is retained`, async () => {
+  await reset();
+  const shop = await paidShop({ at: NOW - 20 * DAY });
+  shop.addPayment(NOW - 2 * DAY);
+  world.refundsLeft = 1;
+  try { await refundAndEndPlan(await shop.store(), NOW); }
+  finally { world.refundsLeft = null; }
+  const store = await shop.store();
+  const note = JSON.parse(String(await shop.note())) as { p: unknown[] };
+  assert.equal(note.p.length, 2, "the durable note starts with both debts");
+  note.p = malformed === "null entry" ? [null] : [note.p[0], null];
+  const damaged = JSON.stringify(note);
+  await redisPipeline([["HSET", ENDING_KEY, store.sid, damaged]]);
+  const callsBefore = world.calls.length;
+
+  await finishPlanRefunds(Date.now() + 10_000, NOW + 3_601);
+
+  assert.equal(shop.sub().status, "active", "ambiguous debt evidence cannot settle the plan");
+  assert.equal(await shop.note(), damaged, "the unknown evidence remains byte-identical for recovery");
+  assert.equal(world.calls.slice(callsBefore).filter((call) => call.startsWith("DELETE /subscriptions/")).length, 0);
+  assert.equal(shop.refunds().length, 1, "the known partial refund remains the only refund");
+});
+}
 });

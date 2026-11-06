@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { apiNumbers, keptNumbersCopy, openKeptNumbers } from "@/lib/api-numbers";
 import { emptyCatalog } from "@/lib/catalog";
-import type { StatsData } from "@/lib/stats";
+import { studioStats, type Stats, type StatsData } from "@/lib/stats";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 
@@ -13,9 +13,47 @@ const shop = {
   name: "Numbers read shape",
   currency: "usd",
   catalog: emptyCatalog("c".repeat(32)),
+  links: [],
 } as unknown as Store;
 
 const coldRefusal = new Response("cold read reached", { status: 429 });
+
+const emptyWindow = {
+  visitors: 0,
+  views: 0,
+  checkouts: 0,
+  sources: [],
+  mediums: [],
+  campaigns: [],
+  checkoutsByProduct: {},
+  viewsByProduct: {},
+  linkClicks: {},
+  countries: [],
+  devices: [],
+  checkoutsBySource: [],
+  freeBySource: [],
+  reach: {},
+  heard: {},
+  searchMisses: [],
+};
+
+const validStats = (): StatsData =>
+  studioStats(
+    shop,
+    {
+      days: [],
+      windows: { d7: emptyWindow, d30: emptyWindow, d90: emptyWindow },
+      previous: {
+        d7: { visitors: 0, views: 0, checkouts: 0 },
+        d30: { visitors: 0, views: 0, checkouts: 0 },
+        d90: { visitors: 0, views: 0, checkouts: 0 },
+      },
+      life: null,
+    } as Stats,
+    null,
+    "none",
+    [],
+  );
 
 for (const [name, reply] of [
   ["missing result", []],
@@ -166,15 +204,10 @@ test("a copy removed between its exact size and GET still permits the separately
 
 test("a kept copy whose paid content changed without its identity header is unknown", () => {
   const now = Date.now();
-  const data = {
-    days: [],
-    totals: { d7: { cents: 0 } },
-    sales: "ok",
-    partial: false,
-  } as unknown as StatsData;
+  const data = validStats();
   const raw = keptNumbersCopy(shop, "plain", data, now);
   assert.ok(raw);
-  assert.deepEqual(openKeptNumbers(shop, "plain", raw, now)?.data, data);
+  assert.deepEqual(openKeptNumbers(shop, "plain", raw, now)?.data, JSON.parse(JSON.stringify(data)));
 
   const end = raw.indexOf("\n");
   const changed = JSON.parse(raw.slice(end + 1)) as { totals: { d7: { cents: unknown } } };
@@ -183,3 +216,19 @@ test("a kept copy whose paid content changed without its identity header is unkn
 
   assert.equal(openKeptNumbers(shop, "plain", altered, now), null);
 });
+
+for (const [name, cents] of [
+  ["text", "unreadable"],
+  ["null", null],
+  ["fraction", 0.5],
+  ["unsafe integer", Number.MAX_SAFE_INTEGER + 1],
+] as const) {
+  test(`a coherently digested kept copy with ${name} cents is unknown`, () => {
+    const now = Date.now();
+    const data = validStats();
+    (data.totals.d7 as { cents: unknown }).cents = cents;
+    const raw = keptNumbersCopy(shop, "plain", data, now);
+    assert.ok(raw, "the malformed producer output has its own matching digest");
+    assert.equal(openKeptNumbers(shop, "plain", raw, now), null);
+  });
+}

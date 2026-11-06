@@ -1,3 +1,11 @@
+# Codex J — ajuste operacional — 2026-11-06 03:07 UTC
+
+- Vigia de canal por Git diagnosticada: `fatal: could not read Username for 'https://github.com': No such device or address`. Não há credencial CLI, não foi inventada/procurada nem usado outro provedor. ConectorGitHub continua funcionando.
+- Após confirmar ausência de Nodevigia, MESMOscript `/tmp/codex-j-watch-controller.mjs` foi limitado à caixaCodexMAIN (origin/main), readonlyGit60s/max60min/sobMESMOflock, **sessão94547**, início confirmado "Inbox-only read-only watch started". Não acompanha canal nem CI. Canal é lido FULL pelo conector a cada retomada útil/continuidadeEXISTENTE; não alegar canalmonitorado60s. Nenhum cancel/ref/produto/CI alterado.
+- #2746 tree remoto934b5abb e diffcheckcommitted0 confirmados. Cincoown continuam aguardando9/review; nenhuma novaconsultaCI emloop. PONTODEPARADA final será publicado no canal após este checkpoint. ContinuidadehourlyMESMAautomação6aebeda51a54819184a9461900992239 atualizada somente no prompt; não criadaoutra/nãodesabilitada. Demais deltas abaixo preservados.
+
+---
+
 # Codex J — delta autoritativo — 2026-11-06 03:05 UTC
 
 Prevalece sobre deltas abaixo; TODO o histórico foi preservado.

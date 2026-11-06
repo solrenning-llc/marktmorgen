@@ -240,6 +240,18 @@ async function main(): Promise<void> {
   const held = await send(hal.request, hal.code);
   is("the code opens no session: it leads to the code page", [held.ok, held.next, held.session], [true, "/signin/code", ""]);
 
+  part("No deployment secret, no code: the link alone (Codex CX1 on #2736)");
+  const secrets = { data: process.env.NIMBUS_DATA_KEY, stripe: process.env.STRIPE_SECRET_KEY };
+  delete process.env.NIMBUS_DATA_KEY;
+  delete process.env.STRIPE_SECRET_KEY;
+  const bare = await ask("kim@wg12.example");
+  if (secrets.data !== undefined) process.env.NIMBUS_DATA_KEY = secrets.data;
+  if (secrets.stripe !== undefined) process.env.STRIPE_SECRET_KEY = secrets.stripe;
+  is("the email holds the link and no code", [bare.token.length, bare.code], [64, ""]);
+  is("and the link still opens", await takeSignInLink(bare.token), "kim@wg12.example");
+  const bareTry = await send(bare.request, "123456");
+  is("a code typed for that request opens nothing", [bareTry.error, bareTry.session], ["code_expired", ""]);
+
   part("The field");
   const html = renderToStaticMarkup(createElement(EmailCodeForm, { request: "a".repeat(64) }));
   is("labeled \"Enter the 6-digit code\"", /<label[^>]*for="([^"]+)"[^>]*>Enter the 6-digit code<\/label>/.test(html), true);

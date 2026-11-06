@@ -32,6 +32,7 @@ import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Contact, UNSUB_TOKEN, leadsKey, mailable, parseContact, readUnsubToken } from "@/lib/contacts";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 
 /** How long a used link is remembered after the last one, in days. */
 export const CLICK_DAYS = 90;
@@ -124,11 +125,18 @@ export async function stopCounting(token: string): Promise<boolean> {
 export async function forgetClicksPerson(listId: string | null, rawEmail: string): Promise<number> {
   if (!listId || !isRedisConfigured()) return 0;
   const email = normaliseEmail(rawEmail);
-  const [raw] = await redisPipeline([["HGET", leadsKey(listId), email]]);
-  const token = parseContact(raw)?.t ?? "";
+  // Read exactly (CX-123 rule 24): only a confirmed absent row (null) has no
+  // token; any other reply that is not a kept contact leaves the key their
+  // links carried unknown, so nothing is taken for gone and the erasure says
+  // this part could not finish (lib/person-erasure.ts keeps the row for it).
+  const read = repliesFor(await redisPipeline([["HGET", leadsKey(listId), email]]), 1);
+  const contact = read && read[0] !== null ? parseContact(read[0]) : null;
+  if (!read || (read[0] !== null && !contact)) throw new UnknownReplyError("a contact's row");
+  const token = contact?.t ?? "";
   const keys = [usedKey(listId, email), ...(UNSUB_TOKEN.test(token) ? [keyIndex(linkKeyOf(token))] : [])];
-  const [gone] = await redisPipeline([["DEL", ...keys]]);
-  return Number(gone) || 0;
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0]);
+  if (gone === null) throw new UnknownReplyError("the deletion of a person's link use");
+  return gone;
 }
 
 /**
@@ -138,6 +146,8 @@ export async function forgetClicksPerson(listId: string | null, rawEmail: string
  */
 export async function clicksOf(listId: string | null, rawEmail: string): Promise<string[]> {
   if (!listId || !isRedisConfigured()) return [];
-  const [members] = await redisPipeline([["SMEMBERS", usedKey(listId, normaliseEmail(rawEmail))]]);
-  return (Array.isArray(members) ? members : []).map(String).sort();
+  // An SMEMBERS that is not a list of strings is unknown, never "used no link" (CX-123 rule 24).
+  const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", usedKey(listId, normaliseEmail(rawEmail))]]), 1)?.[0]);
+  if (!members) throw new UnknownReplyError("a person's link use");
+  return [...members].sort();
 }

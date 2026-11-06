@@ -1994,22 +1994,41 @@ export async function refundsOnIntent(paymentIntent: string): Promise<{ returned
   }
 }
 
-/** Whether a line with this mark was added to this customer since `sinceSeconds`, billed yet or not. */
+/**
+ * Whether a line with this mark was added to this customer since
+ * `sinceSeconds`, billed yet or not: true when found, false only when Stripe
+ * listed every line (CX-123 rule 24). Throws when that is not known: a reply
+ * that is not a list, `data` that is not an array of lines each with an id
+ * and a metadata object, `has_more` not a boolean, a page that cannot be
+ * continued, or the page ceiling reached. A caller about to add the line
+ * (lib/usage-billing.ts carryOut) adds nothing on a throw, so an unread
+ * answer never puts the same line on an invoice twice once Stripe's
+ * Idempotency-Key (24 hours) no longer covers the first request.
+ */
 export async function findInvoiceLine(customerId: string, mark: string, sinceSeconds: number): Promise<boolean> {
-  if (!CUSTOMER_PATTERN.test(customerId)) return false;
+  if (!CUSTOMER_PATTERN.test(customerId)) throw new Error("Invoice lines of an unknown customer");
   let after = "";
   // A customer has a handful of these a month at most; three pages is far more than any has.
   for (let page = 0; page < 3; page += 1) {
     const query = new URLSearchParams({ customer: customerId, limit: "100", "created[gte]": String(Math.max(0, Math.floor(sinceSeconds))) });
     if (after) query.set("starting_after", after);
-    const listed = await onPlatform("GET", `/invoiceitems?${query}`);
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-    if (rows.some((row) => (row.metadata as Record<string, string> | null | undefined)?.mark === mark)) return true;
-    const lastId = rows[rows.length - 1]?.id;
-    if (listed.has_more !== true || typeof lastId !== "string") return false;
+    const listed: unknown = await onPlatform("GET", `/invoiceitems?${query}`);
+    if (!listed || typeof listed !== "object" || Array.isArray(listed)) throw new Error("Invoice line list is unknown");
+    const { object, data, has_more: more } = listed as Record<string, unknown>;
+    if (object !== "list" || !Array.isArray(data) || data.length > 100 || typeof more !== "boolean") throw new Error("Invoice line list is incomplete");
+    let lastId = "";
+    for (const row of data as unknown[]) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) throw new Error("Invoice line is unknown");
+      const { id, metadata } = row as Record<string, unknown>;
+      if (typeof id !== "string" || !id || !metadata || typeof metadata !== "object" || Array.isArray(metadata)) throw new Error("Invoice line is unknown");
+      if ((metadata as Record<string, unknown>).mark === mark) return true;
+      lastId = id;
+    }
+    if (!more) return false;
+    if (!lastId) throw new Error("Invoice line list cannot be continued");
     after = lastId;
   }
-  return false;
+  throw new Error("Invoice line list is longer than is read");
 }
 
 /**

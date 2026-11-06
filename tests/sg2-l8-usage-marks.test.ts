@@ -47,7 +47,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
   if (url.origin !== "https://api.stripe.com") return json({}, 404);
   const path = url.pathname.replace(/^\/v1/, "");
-  if (path === "/invoiceitems" && method === "GET") return json({ data: [], has_more: false });
+  if (path === "/invoiceitems" && method === "GET") return json({ object: "list", data: [], has_more: false });
   if (path === "/invoiceitems" && method === "POST") {
     lineCount += 1;
     return json({ id: `ii_${String(lineCount).padStart(14, "0")}` });

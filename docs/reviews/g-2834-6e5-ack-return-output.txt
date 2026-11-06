@@ -1,0 +1,282 @@
+Saídas preservadas da execução G anterior; não são testes reexecutados nesta retomada. API-fields20 incidental não contado como ligado.
+
+
+===== g2834-6e5-proof-identity.log =====
+{'all_cases_checks_transport_and_cleanup_byte_identical': True}
+
+
+===== g2834-b33-ack.log =====
+{
+  "sourceBlob": "48397330d47572bd875b1dcb716168152b314033",
+  "checks": 24,
+  "failures": [
+    {
+      "name": "string-ok: close only after confirmed success",
+      "actual": false,
+      "expected": true
+    },
+    {
+      "name": "string-ok: refresh only after confirmed success",
+      "actual": 1,
+      "expected": 0
+    },
+    {
+      "name": "string-ok: toast only after confirmed success",
+      "actual": [
+        "Checkout questions saved."
+      ],
+      "expected": []
+    },
+    {
+      "name": "failed-http: close only after confirmed success",
+      "actual": false,
+      "expected": true
+    },
+    {
+      "name": "failed-http: refresh only after confirmed success",
+      "actual": 1,
+      "expected": 0
+    },
+    {
+      "name": "failed-http: toast only after confirmed success",
+      "actual": [
+        "Checkout questions saved."
+      ],
+      "expected": []
+    }
+  ],
+  "localPostCeiling": 4,
+  "externalRequests": 0
+}
+
+
+===== g2834-6e5-ack.log =====
+{
+  "sourceBlob": "c4cc0722623ddc00c451cc611df3988531558225",
+  "checks": 24,
+  "failures": [],
+  "localPostCeiling": 4,
+  "externalRequests": 0
+}
+
+
+===== g2834-b33-edges.log =====
+{
+  "sourceBlob": "48397330d47572bd875b1dcb716168152b314033",
+  "checks": 48,
+  "failures": [
+    {
+      "name": "numeric-ok: close only after confirmed success",
+      "actual": false,
+      "expected": true
+    },
+    {
+      "name": "numeric-ok: refresh only after confirmed success",
+      "actual": 1,
+      "expected": 0
+    },
+    {
+      "name": "numeric-ok: toast only after confirmed success",
+      "actual": [
+        "Checkout questions saved."
+      ],
+      "expected": []
+    },
+    {
+      "name": "unauthorized-http: close only after confirmed success",
+      "actual": false,
+      "expected": true
+    },
+    {
+      "name": "unauthorized-http: refresh only after confirmed success",
+      "actual": 1,
+      "expected": 0
+    },
+    {
+      "name": "unauthorized-http: toast only after confirmed success",
+      "actual": [
+        "Checkout questions saved."
+      ],
+      "expected": []
+    }
+  ],
+  "localPostCeiling": 8,
+  "externalRequests": 0
+}
+
+
+===== g2834-6e5-edges.log =====
+{
+  "sourceBlob": "c4cc0722623ddc00c451cc611df3988531558225",
+  "checks": 48,
+  "failures": [],
+  "localPostCeiling": 8,
+  "externalRequests": 0
+}
+
+
+===== g2834-6e5-linked.log =====
+
+Checkout-question controls are honest before hydration
+  ok    Ask the buyer something at checkout keeps one server-rendered control
+  ok    Ask the buyer something at checkout is natively unavailable before hydration
+  ok    Ask the buyer something at checkout exposes its unavailable state
+  ok    Ask the buyer something at checkout does not override its visible accessible name
+  ok    Ask the buyer something at checkout visibly keeps its action while loading
+  ok    Ask the buyer something at checkout does not draw a false open form
+  ok    Change keeps one server-rendered control
+  ok    Change is natively unavailable before hydration
+  ok    Change exposes its unavailable state
+  ok    Change does not override its visible accessible name
+  ok    Change visibly keeps its action while loading
+  ok    Change does not draw a false open form
+  ok    existing questions remain readable while the control loads
+  ok    a free product still offers no checkout questions
+
+14 checks, all passing.
+
+Read from the studio
+  ok    a phone needs no label and is never optional
+  ok    asked once at most
+  ok    the other questions keep their rules
+  ok    still three questions in all
+  ok    what is stored is read safely too
+  ok    there is room for it among Stripe's three
+
+At checkout, Stripe's own phone box
+  ok    the phone box is switched on
+  ok    and the other questions keep their places in Stripe's list
+  ok    not asked when not chosen
+
+Read back with the answers
+  ok    the number with the other answers
+  ok    nothing added when none was asked
+
+11 checks, all passing.
+✔ the pages' PayPal reading is the PayPal client's own, for every way the credentials can be set (1.64263ms)
+✔ the blog and the comparisons explain PayPal and affiliates the same way (1.100445ms)
+✔ the checkout questions row says what the checkout really asks (1.128998ms)
+✔ no public page or help answer still contradicts the checkout or PayPal explanation (4.970754ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 17.473914
+
+
+===== g2834-6e5-fields-linked.log =====
+
+The studio's own words
+  ok    the discount editor's title, fields, choices and button
+  ok    it opens only when the store can sell, and says the trial counts
+  ok    canSell needs a connected Stripe account and a paid-up plan, which a trial passes
+  ok    the product's own checkout settings do not wait for the store to sell
+  ok    the editor's own order: the button that opens it, the code, what it takes off, the amount, then the button that makes it
+  ok    it counts each code's uses from Stripe
+
+The answers
+  ok    four questions
+  ok    the main tools named as the page's own intro names them, never as a promise to earn more
+  ok    and in the intro's own list
+  ok    start: the editor's own words, in order, and when it opens
+  ok    try before paying: the shared answer for what is set on a product, then discount codes said apart
+  ok    while plans are off sale, it says the codes open for no one today
+  ok    more sales: no figure, the studio's count from Stripe
+  ok    one space between sentences, never two
+  ok    no number of sales, buyers or earnings, no percent, no result promised
+
+On the checkout page
+  ok    first in the page's own Questions block
+  ok    no question asked twice
+
+17 checks, all passing.
+
+What is asked
+  ok    nothing asked: the answer as before
+  ok    names, trimmed, each once
+  ok    empty, or a name that cannot be one, refused
+  ok    at most 30
+  ok    a name: lowercase letters, digits and underscores, starting with a letter, up to the most
+  ok    the developers page says so, from the code's own figures
+
+What is kept
+  ok    only the chosen fields of each row, in the answer's order; paging kept
+  ok    one object in data, the same
+  ok    a field no row has, named
+  ok    an empty list cannot say a field is unknown, so it is kept empty
+  ok    nothing asked: untouched
+  ok    the refusal is a 400 that names it
+
+Through the routes
+  ok    without fields, the products as before
+  ok    a bad name on a real route: 400 fields
+  ok    every list, Store and Bookings choose fields
+  ok    documented for developers
+
+Each list's fixed fields are exactly the fields its rows are sent with, so a field asked for is checked against what is sent
+  ok    products
+  ok    leads
+  ok    members
+  ok    codes
+
+20 checks, all passing.
+
+
+===== g2834-6e5-hydration-browser.log =====
+PASS new questions: SSR native disabled
+PASS new questions: SSR aria disabled
+PASS new questions: action visible while loading
+PASS new questions: saved text readable
+PASS new questions: unavailable control not in keyboard focus
+PASS new questions: native click cannot open before hydration
+PASS new questions: no pre-hydration POST
+PASS new questions: hydration preserves same native control
+PASS new questions: hydrated visible action
+PASS new questions: hydrated aria-disabled removed
+PASS new questions: keyboard opens actual form
+PASS new questions: original field value
+PASS new questions: local edit retained
+PASS new questions: cancel does not POST
+PASS new questions: reopen discards only unsaved edit
+PASS new questions: opening after prop refresh uses current product
+PASS new questions: no save/provider request at any point
+PASS new questions: no hydration/render error
+PASS saved questions: SSR native disabled
+PASS saved questions: SSR aria disabled
+PASS saved questions: action visible while loading
+PASS saved questions: saved text readable
+PASS saved questions: unavailable control not in keyboard focus
+PASS saved questions: native click cannot open before hydration
+PASS saved questions: no pre-hydration POST
+PASS saved questions: hydration preserves same native control
+PASS saved questions: hydrated visible action
+PASS saved questions: hydrated aria-disabled removed
+PASS saved questions: keyboard opens actual form
+PASS saved questions: original field value
+PASS saved questions: local edit retained
+PASS saved questions: cancel does not POST
+PASS saved questions: reopen discards only unsaved edit
+PASS saved questions: opening after prop refresh uses current product
+PASS saved questions: no save/provider request at any point
+PASS saved questions: no hydration/render error
+PASS free: SSR has no control
+PASS free: hydrated has no control
+PASS free: no hydration error
+PASS free: no POST
+40 checks, 0 failures
+
+
+===== g2834-6e5-types.log =====
+roots 2 files 398 diagnostics 0
+
+
+
+===== g2834-6e5-lint.log =====
+
+
+===== g2834-6e5-public.log =====
+Public data check: 4078 tracked files; 0 file(s) require correction.
+

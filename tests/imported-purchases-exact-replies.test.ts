@@ -72,6 +72,16 @@ async function main(): Promise<void> {
     assert.deepEqual(importedFrom(["course_1", valid()]).map((row) => row.productId), ["course_1"]);
   });
 
+  await check("a legacy exact purchase without items is still admitted", () => {
+    assert.deepEqual(importedFrom(["course_1", JSON.stringify({ at: 1_793_293_200, job: "api:legacy" })]), [{
+      productId: "course_1",
+      at: 1_793_293_200,
+      job: "api:legacy",
+      items: null,
+      option: null,
+    }]);
+  });
+
   await check("one legible purchase survives an incomplete neighbour", () => {
     assert.deepEqual(importedFrom(["course_1", valid(), "course_2"]).map((row) => row.productId), ["course_1"]);
   });

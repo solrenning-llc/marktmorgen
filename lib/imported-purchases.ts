@@ -111,7 +111,7 @@ function parse(productId: string, raw: unknown): ImportedPurchase | null {
     const value = decoded as Record<string, unknown>;
     if (typeof value.at !== "number" || !Number.isSafeInteger(value.at) || value.at < 0) return null;
     if (typeof value.job !== "string" || !value.job || value.job.length > 512) return null;
-    if (value.items !== null && !Array.isArray(value.items)) return null;
+    if (value.items !== undefined && value.items !== null && !Array.isArray(value.items)) return null;
     const items = value.items ?? [];
     if (items.length > 20 || items.some((id) => typeof id !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(id))) return null;
     if (value.option !== undefined && value.option !== null && (typeof value.option !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(value.option))) return null;

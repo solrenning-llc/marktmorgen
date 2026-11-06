@@ -4,6 +4,7 @@ import { useHydrated } from "@/components/use-hydrated";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "@/components/toast";
 import { FaqFromInbox } from "@/components/faq-from-inbox";
+import { randomLetters } from "@/lib/random-letters";
 import {
   type Conversation,
   type InboxSetting,
@@ -25,12 +26,12 @@ const REASONS: Record<string, string> = {
   assign: "That person cannot answer buyers. Give it to someone whose role can.",
   used: "This month's writing jobs are used up. They come back with your next billing month.",
   off: "The writing help is not on for this store.",
-  failed: "No suggestion came back. Nothing was counted; try again.",
+  failed: "No suggestion came back. Try again. This try counted as one of this month's writing jobs.",
   notes: "That conversation is no longer kept.",
 };
 
 const LETTERS = "abcdefghijklmnopqrstuvwxyz0123456789";
-const savedId = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => LETTERS[b % LETTERS.length]).join("");
+const savedId = () => randomLetters(LETTERS, 6);
 const when = (ms: number) => new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 async function post(body: Record<string, unknown>): Promise<Record<string, unknown> & { ok?: boolean; error?: string }> {

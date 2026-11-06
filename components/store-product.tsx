@@ -1124,6 +1124,7 @@ export function ProductCard({
   preorder = null,
   cart = false,
   sold = null,
+  grid = false,
 }: {
   store: Store;
   product: Listing;
@@ -1153,6 +1154,8 @@ export function ProductCard({
   bundleItems?: Listing[] | null;
   /** "Bought N times", from the creator's own Stripe account, when they chose to show it (lib/sold-count.ts). */
   sold?: string | null;
+  /** It stands in the store page's grid, two to a row on a computer (Encanto 3): its cover is described at that width. */
+  grid?: boolean;
 }) {
   const href = productPath(store, product);
   const { w, num } = speech(store);
@@ -1170,7 +1173,7 @@ export function ProductCard({
     <img
       src={servedImageUrl(image)}
       srcSet={servedSrcSet(image)}
-      sizes={image.small ? (style === "preview" ? IMAGE_SIZES.cover : IMAGE_SIZES.thumb) : undefined}
+      sizes={image.small ? (style === "preview" ? (grid ? IMAGE_SIZES.grid : IMAGE_SIZES.cover) : IMAGE_SIZES.thumb) : undefined}
       alt={image.alt}
       width={image.width}
       height={image.height}

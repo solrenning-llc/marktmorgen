@@ -45,6 +45,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
@@ -585,15 +586,25 @@ export async function mailableMembers(id: string): Promise<Member[]> {
 
 // ------------------------------------------------------------------ limits
 
-/** Counts one more of `kind` for this member, and says whether it is allowed. */
+/**
+ * Counts one more of `kind` for this member, and says whether it is allowed.
+ * A count not read in its exact shape is never taken as room, nor said as
+ * the limit reached: it is thrown, and the route answers with its error
+ * (CX-123 rule 24).
+ */
 export async function within(id: string, who: string, kind: RateKind): Promise<boolean> {
   const { limit, seconds } = RATE_LIMITS[kind];
   const key = rateKey(id, who, kind);
-  const [, count] = await redisPipeline([
-    ["SET", key, "0", "EX", seconds, "NX"],
-    ["INCR", key],
-  ]);
-  return Number(count) <= limit;
+  const both = repliesFor(
+    await redisPipeline([
+      ["SET", key, "0", "EX", seconds, "NX"],
+      ["INCR", key],
+    ]),
+    2,
+  );
+  const count = both && (both[0] === "OK" || both[0] === null) ? countOf(both[1]) : null;
+  if (count === null || count < 1) throw new UnknownReplyError(`a community ${kind} count`);
+  return count <= limit;
 }
 
 // ------------------------------------------------------------------ posts

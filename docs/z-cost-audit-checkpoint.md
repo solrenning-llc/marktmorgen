@@ -1,3 +1,51 @@
+# ESTADO VIGENTE — 06/11/2026 11h45 Fortaleza: #2773 MERGED; #2812 e #2813 abertos
+
+Este topo SUPERA dependências antigas; TODO o histórico/REDs/WIPs/retries abaixo preservado. Checkpoint9efcfe5e6be95bf031538969ac83c9bcf844cfb9 recuperado PRIMEIRO COMPLETO170084caracteres, histórico jáconhecido; depois main050bf383/caixa/canal novos. Instruções CLAUDE/AGENTS/reservas/inbox/fila sem delta835b→050b. Nenhuma duplicada absorvida por recência; sem outra execução Z ativa confirmada. C4 ÚNICA, C1OFF/não ponte/não destinatário. C4-20261106-1500-Z-89 lida integralmente:303Meta aprovado; LEVE resumo466237 atribuídoZ DEPOISMeta comvaga. Ambos executados nessa ordem; R2 nominal.
+
+## #2773 incorporado normalmente, não recriar
+
+Parecer formal **5801392477** S noheadEXATO **540030e445bb8672fe224a6e0752c92a8de21003**, SEMACHADO/LOW5796448521 FECHADO. NOVE workflows distintos completed/success doheadexato:42220192197/42220192322/42220192050/42220192020/42220192030/42220191906/42220191958/42220192134/42220191940. Uma leitura CAUSAL pelo retornoS, não pollingtemporal. Native merge-tree contra050bf383ae011cfedeed5d32f4198333a62423a8 LIMPO **90b4b88863c6101b35f738e0c0a555479927b6f0**; rawfreshtrue/clean. Merge NORMALexpected_head_sha540030 confirmadoGETmerged:true em **43249d0b10ca3b82c29621540fed8ee46716d313**. Não nova mainintegration/churn/retry/cancel/bypass. Sharedscanner agoraMAIN, Npreserva hunk; nãoaguardar2773de novo.
+
+Anúncio ANTESfixMeta canal **06e7aca45e6bbc2ad2b9e0315ab207b69856b520**; confirmoumerge+ordemC4. Unidade2773liberouquinta vaga; Meet NÃO iniciado.
+
+## CINCO produtos atuais
+
+|PR|Ramo|Head EXATO|Próximo|
+|---|---|---|---|
+|2800|codex/z-ai-counter-receipts|b05fd2cb14708e67a94cdfe92cf88ee6504dd430|R2fechaInbox no canal, ancoragem final pedida/retries consumidos/nove finais por evento|
+|2740|codex/z-assistant-counter-admission|b3d33ca176cf0d39161d31e985de5f6e0180b4f9|S5794710012aplicável; fotoantiga8SUCCESS/productativo,semrepoll|
+|2741|codex/z-chat-counter-admission|276a20e0caf9f21186c4654aacb47558f8651312|S5794737821aplicável; fotoantiga8SUCCESS/productativo,semrepoll|
+|2812|codex/z-meta-return-counter-admission|**076496d0cb35eac2d0469a7607d11a6ac6e05eb7**|289PASS;R2ciclo83fechaUX;nominalpedido/9NOVOS|
+|2813|codex/z-review-summary-keep-receipts|**b043d34b631e84dddcb1ecf7f3295f1d06f33b36**|148PASS;R2nominalpedido/9NOVOS|
+
+Nenhuma sexta/Meet. Provas/REDs/WIPsdessas unidades não são produto extra.2800/2740/2741headsintactos, nenhumCI deles consultado semnovidade. Retries CONSUMIDOSPERMANENTES2484verify127130387972;2615verify127143841589/mac127144213372;2741Windows127737110071;2800Firefox127885731234/mac127885740971. NENHUMretry novo nesta retomada.
+
+## #2812 Meta aprovado303, WIP inadequado superado preservando histórico
+
+C4-1500 aprova exatamenteunknown303 /studio?metaads=error#numbers (avisoexistente), exceeded303metaads=limited. App/studioOCUPADO NÃOeditado. MESMORED permanente **87f1c9099b7bdfc5a3403572cc722e602f9791b8**,15/4falhas→MESMOS15/15. TesteBYTESidênticosaoRED; antiga8394/JSON5falhas eWIPdc504permanecem ancestrais/histórico, nãoestadoatual. R2ciclo83no076 confirma avisoslegíveis/metaadsdestinos efechaLEVE-MÉDIOJSON ciclos56/57. IssoéretornonominaldeUX, nãoalegarbrowserwholeproduct ou9CIverdes.
+
+Integrei **43249d0b UMAvez necessária ao scanner** após2773MERGED. Conflito sótest-config conciliado comoMAIN+MESMOaliasMeta; todaslinhasalheias preservadas. Nenhuma réplica dofixscanner/helper. Finaltree **cba0bd5283203758c614d320c36353c2cd9c2abc** = native **213a87d37c326b0f252e0cb6d647f6dcc93c9046**; GitData paisdc504+87f1RED+43249, update_refexpected dc504/nonforce. PR2812criado5paths, bodyresultadofinal/R2nominal. Guards30/600/hash/TTLmensalpreservados,0novoIO/readback/retry. Helpertruebad3vetoresjárecusavamnoatualmainmaslimitedfalso; sótimeoutanterioradmitia1helperprovedorSINTÉTICO, semprovaUSDbypass.
+
+**9grupos289PASS**=15+105meta+7provider+25zoom+58essential+36state+12refusals+7data+24cost. TSestrito4raízes/imports0,ESLint5paths0,scanner**4016/0**,diff/tree0. Auth/access/funding/providerfixtures explícitos; realroute/guard/consentoneuse. Notice écontratoESTÁTICO, NÃO SSR/browser/nativeRedis/provider/globalbuild/AAAcertificado. Zero preço/limite/comissão/flag/gatealterado.
+NOVE workflowsNOVOS única foto inicial:42236230272 productactions,42236230196 buyer,42236230179 signup,42236230195 codeql,42236230635 studio,42236230331 public,42236230323 productchecks,42236230251 readers,42236230178 deps. 1SUCCESS+8queued/ativos, NÃO9greens,nãorepolled.
+
+## #2813 LEVE resumo atribuído e corrigido com RED antes
+
+Reserva ANTEScódigo **2c8fa90b6d160fca1d10e52e16506f8d87d4d539**. InventárioFRESCO146OPEN/todasfilelists/0erros; único1969listaancestral, diffprópriolib/review-ai-summary.tsVAZIO, nenhuma reservaexclusiva. Somente2paths lib/review-ai-summary.ts(batchkeep+helperpuro) eNOVOtests/review-summary-keep-receipts.test.ts. Nenhumalias/globaldocsreservas/foreignrefeditado.
+REDpermanente **codex/z-review-summary-keep-receipts-red@c83b15dc598592e0b9449e9331878270678dccce**, base43249, testeBYTE-IDÊNTICO prova466237 original:5casos/4falhascausais+controle. APPagora18comandosversus20nabase835bdevidoàincorporaçãodohelperlockatômico, nãoasserçãoafrouxada. CotaREALmensal1continua consumida/modelo1SINTÉTICO; writescriptnãoaplicado+ACKmalformadoantesafirmafreshsemhead/mark. NenhumUSDilimitado/gastogratuitoalegado.
+
+Correção exige envelope repliesFor exato(dense/own/cardinality) capturandorespostaininspecionável; ZADD===1/EXPIRE===1/EVAL===1 numéricos eeventualZREMcountOf<=leftover.length. Unknownusa MESMOfailedcleanupZREM existente, sem retry/readback/mudançaTTL/key/cota/flag. Vetoresmalformadosantesfalsosucesso18APPagoraentramnocleanupjáorçado+1comando; NÃOalegar0comandosadicionaisnessescasos, émesmocaminhofalhaanteriorcobertoregistry24PASS. Healthyinalterado, nenhumread-sidefixsilencioso. readOne/readReviewSummaries/lastOfpermanecemcandidatosr30reportados/foraescopo.
+FINAL **b043d34b631e84dddcb1ecf7f3295f1d06f33b36**, parentREDc83b, tree **28666ebdc7585a448b9bda067d3c05bbd82e8727** = native **fb988a3370af027412e2774483252fa4a3129c3c**. PR2813/R2nominalbody. **5grupos148PASS**=5+82+30+24+7;TSestrito2raízes/imports0,ESLint2paths0,scanner**4014/0**,diff/tree0. NenhumnativeRedis/fornecedor/browser/globalbuild/AAAglobalcertificado.
+NOVE workflowsNOVOS única foto inicial todosativos:42236597719 studio,42236597805 deps,42236597781 public,42236597687 readers,42236597678 productactions,42236597814 signup,42236597877 codeql,42236597804 buyer,42236597731 productchecks. NÃO9greens/nãorepolled.
+
+## Continuidade
+
+Vigiaantiga lockLIVREconfirmada; ÚNICAnova **5017**/tmp/z-main-watch.sh/MESMOflockfetch60s/deadline3500s/inboxmain+2784,sónovidade,NÃOCI/canalwatchautenticado. Nãoinferiragenteativoporvigia/checkpoint,nãoiniciarsegunda. Nenhumaautomaçãoalterada/desativada/criada;gatestransitórios,nãoauditoriaconcluída.
+Locaisz-meta-return(native213a),z-summary-keep-receipts(nativefb988),todosanteriorespreservados. Logs/tmp/z-meta-final-{tests,types,lint,scanner}.log,/tmp/z-summary-canonical-red.log,/tmp/z-summary-final-{tests,types,lint,scanner}.log. Donor776readonly/runnerisolado. Fonte/provas/remotosautoritativos;nenhumaPII/conta/pagamento/termo/chavereal/contatoexterno/fornecedorreal/refalheioalterado.
+Próximo: retornosnominaisR2 de2812/2813→REDnominalqualquerachado; terminalrealnoveexatos+reviewaplicável(2sesai dinheiro)+freshnative/rawclean+NORMALexpectedSHA+GETtrue. Nãointegrarmainporchurn. Com5abertosnenhumaunidade6, Meetaguardavaga. Antesfinal publicarPONTOEXATOesteCP+2PRs+merge2773+retriesconsumidos. Sechegarretornocausalnovodurantepublicação, continuar.
+
+---
+
 # ESTADO VIGENTE — 06/11/2026 10h45 Fortaleza: nova prova r24, cinco produtos intactos
 
 SUPERAtodos próximos passos antigos somente onde explicitado; histórico COMPLETO abaixo preservado. Retomada PRIMEIRO checkpoint cf1fea23de0bab3c0051bcd9c3f59184886ef456 completo163697caracteres (topo e histórico já conhecido), depois main835b70a531c45271c2e8fc7517b53dc0df302f3d/caixa/canal novos. CLAUDE/AGENTS/reservas/inbox/fila semdelta e985→835b. Nenhuma duplicada descartada por recência, nenhuma outra execução Z ativa confirmada. **C4 única; C1 OFF/não ponte/não destinatário.** V lotes de reservas. Nenhuma automação criada/alterada/desabilitada; dependências transitórias não concluem auditoria.

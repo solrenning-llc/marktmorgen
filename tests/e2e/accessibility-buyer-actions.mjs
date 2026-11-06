@@ -252,6 +252,10 @@ try{
    await openByKeyboard();await opener.focus();await page.keyboard.press("Shift+Tab");
    const behind=await focus();
    if(behind.inCart||await panel.count()!==0)throw Error("The open cart stayed over the page while the focus left it "+JSON.stringify(behind));
+   // Opened, a click on an empty part of the page (the focus leaves for the page itself), then Tab or a screen reader's own
+   // move puts it on a link under the panel: the panel shuts as well.
+   await openByKeyboard();await page.evaluate(()=>document.activeElement?.blur?.());await page.locator("main a[href]").first().focus();
+   if(await panel.count()!==0)throw Error("The open cart stayed over the page while the focus was put under it");
    // The last product removed: the cart says it is empty and keeps the focus; Close gives it back to the cart's button.
    await openByKeyboard();await lines.first().waitFor({timeout:15_000});await lines.first().locator("button").focus();await page.keyboard.press("Enter");
    await page.waitForFunction(()=>document.querySelectorAll("#cart .st-cart-panel li").length===0);

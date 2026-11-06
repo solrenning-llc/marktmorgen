@@ -46,6 +46,21 @@ test("PAYG monthly and twelve-worst-month Redis components stay explicit for eve
     assert.ok(Math.abs(month * 12 - year) < 1e-8, `${month} × 12 = ${year}`);
 });
 
+test("separately zeroed rates are described as conservative sensitivities, not exact attribution", () => {
+  const text = decision();
+  assert.match(text, /conservative sum of separate rate sensitivities/i);
+  assert.match(text, /not disjoint supplier components/i);
+  assert.doesNotMatch(text, /approximately [\d,]+[\s\S]*modeled commands per worst month/i);
+});
+
+test("the Scale annual transfer sensitivity is derived from the exact model value", () => {
+  const text = decision();
+  const scaleMonthlyTransferSensitivity = 0.8207254713460017;
+  const annual = (scaleMonthlyTransferSensitivity * 12).toFixed(6);
+  assert.equal(annual, "9.848706");
+  assert.ok(text.includes(`$${annual}`), `Scale annual transfer sensitivity: $${annual}`);
+});
+
 test("the fixed comparison assigns the whole fixed fee to an isolated store and remains conditional", () => {
   const text = decision();
   for (const row of [

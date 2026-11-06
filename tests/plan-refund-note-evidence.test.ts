@@ -45,6 +45,14 @@ await t.test("a missing HGET pipeline reply is not an absent recovery note", asy
   await rejectsWithoutRefund(() => refundAndEndPlan(store, NOW), shop.refunds);
 });
 
+await t.test("a Proxy HGET envelope cannot impersonate one absent note", async () => {
+  await reset();
+  const shop = await paidShop();
+  const store = await shop.store();
+  redis.pipeline = async (commands) => isNote(commands, "HGET") ? new Proxy([null], {}) : original(commands);
+  await rejectsWithoutRefund(() => refundAndEndPlan(store, NOW), shop.refunds);
+});
+
 await t.test("an unreadable stored note is preserved and stops another refund", async () => {
   await reset();
   const shop = await paidShop();
@@ -69,6 +77,19 @@ await t.test("a lost initial HSET answer stops before the refund", async () => {
   };
   await rejectsWithoutRefund(() => refundAndEndPlan(store, NOW), shop.refunds);
   assert.equal(typeof (await original([["HGET", ENDING_KEY, store.sid]]))[0], "string", "a note whose ACK was lost remains recoverable");
+});
+
+await t.test("an accessor HSET reply is rejected without invoking it", async () => {
+  await reset();
+  const shop = await paidShop();
+  const store = await shop.store();
+  let reads = 0;
+  const accessor: unknown[] = [];
+  Object.defineProperty(accessor, "0", { enumerable: true, get() { reads += 1; return 1; } });
+  Object.defineProperty(accessor, "length", { value: 1 });
+  redis.pipeline = async (commands) => isNote(commands, "HSET") ? accessor : original(commands);
+  await rejectsWithoutRefund(() => refundAndEndPlan(store, NOW), shop.refunds);
+  assert.equal(reads, 0, "reply getters are never evidence and never execute");
 });
 
 await t.test("the exact charge note is acknowledged before money moves", async () => {
@@ -107,5 +128,15 @@ await t.test("an unknown HGETALL is not an empty recovery job", async () => {
   redis.pipeline = async (commands) => isNote(commands, "HGETALL") ? [] : original(commands);
   await assert.rejects(() => finishPlanRefunds(Date.now() + 10_000, NOW + 60));
   assert.equal(typeof (await original([["HGET", ENDING_KEY, store.sid]]))[0], "string", "an unknown note list is not reported as an empty job");
+});
+
+await t.test("a Proxy HGETALL row list is not an empty recovery job", async () => {
+  await reset();
+  const shop = await paidShop();
+  const store = await shop.store();
+  await redisPipeline([["HSET", ENDING_KEY, store.sid, JSON.stringify({ s: store.subscriptionId, at: NOW, t: NOW, m: 0 })]]);
+  redis.pipeline = async (commands) => isNote(commands, "HGETALL") ? [new Proxy([], {})] : original(commands);
+  await assert.rejects(() => finishPlanRefunds(Date.now() + 10_000, NOW + 60));
+  assert.equal(typeof (await original([["HGET", ENDING_KEY, store.sid]]))[0], "string");
 });
 });

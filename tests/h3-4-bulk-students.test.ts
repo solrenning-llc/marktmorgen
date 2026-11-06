@@ -27,7 +27,6 @@ import {
   MAX_STUDENT_ACTION,
   STUDENTS_PER_PAGE,
   accessSummary,
-  accessUnits,
   filterStudents,
   labelUnits,
   listUnits,
@@ -37,7 +36,7 @@ import {
   studentsCsv,
   type StudentLine,
 } from "@/lib/student-bulk-rules";
-import { accessStates, applyAccess, readAccessAsk, studentList } from "@/lib/student-bulk";
+import { accessChangeUnits, accessReadUnits, accessStates, applyAccess, readAccessAsk, studentList } from "@/lib/student-bulk";
 import { emailKey, markLesson, setBlocked, studentsOf, touchStudent } from "@/lib/learn";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { leadsKey, upsertContact } from "@/lib/contacts";
@@ -80,7 +79,14 @@ async function main(): Promise<void> {
   );
   is("no label filter: nobody is left out for labels", filterStudents(lines, 5, { progress: "any", access: "any", label: "" }).labelsUnknown, 0);
   is("the undo is the opposite change", [oppositeAccess("revoke"), oppositeAccess("grant")], ["grant", "revoke"]);
-  is("studio requests taken before the work, by how much there is", [accessUnits(1), accessUnits(10), accessUnits(11), accessUnits(MAX_STUDENT_ACTION), listUnits(0), listUnits(100), labelUnits(100)], [1, 1, 2, 50, 0, 5, 4]);
+  // Review of #3035 (Codex P, 5808427711): one figure a change (a request per ten people) became two, each at its
+  // most in commands and bytes and taken before what it pays for: reading (accessReadUnits), then writing and reading
+  // back (accessChangeUnits). A hundred people take 204 commands, which ten requests (200) did not cover.
+  is(
+    "studio requests taken before the work, by how much there is",
+    [accessReadUnits(1), accessReadUnits(100), accessReadUnits(MAX_STUDENT_ACTION), accessChangeUnits(1), accessChangeUnits(99), accessChangeUnits(100), accessChangeUnits(MAX_STUDENT_ACTION), listUnits(0), listUnits(100), labelUnits(100)],
+    [1, 3, 11, 1, 10, 11, 51, 0, 5, 4],
+  );
   is("one page of students is a bounded read", STUDENTS_PER_PAGE, 100);
   is(
     "who is asked, read safely: each address once, in lower case; nothing else",
@@ -245,9 +251,10 @@ async function main(): Promise<void> {
 
   const notPaid = await applyAccess(store, course.id, { change: "revoke", emails: ["ana@example.com", "ben@example.com"], expect: 2 }, async (units) => ({ ok: false, reason: "used", message: `No room for ${units}.` }));
   is("studio requests refused: nothing is written", [notPaid.kind, await blocked()], ["refused", ["dee@example.com"]]);
-  let paidUnits = 0;
-  const paid = await applyAccess(store, course.id, { change: "revoke", emails: ["ana@example.com", "ben@example.com"], expect: 2 }, async (units) => ((paidUnits = units), { ok: true }));
-  is("taken before writing, by how many it changes", [paid.kind, paidUnits], ["done", accessUnits(2)]);
+  const paidUnits: number[] = [];
+  const paid = await applyAccess(store, course.id, { change: "revoke", emails: ["ana@example.com", "ben@example.com"], expect: 2 }, async (units) => (paidUnits.push(units), { ok: true }));
+  // Review of #3035: taken twice, before the first read and before the first write (tests/h3-4-access-admission.test.ts).
+  is("taken before reading and before writing, by how many it reads and changes", [paid.kind, paidUnits], ["done", [accessReadUnits(2), accessChangeUnits(2)]]);
   await setBlocked(store, course.id, "ana@example.com", false);
   await setBlocked(store, course.id, "ben@example.com", false);
 

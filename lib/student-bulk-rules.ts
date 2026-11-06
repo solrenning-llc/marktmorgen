@@ -27,15 +27,6 @@ const MAX_ADDRESS = 254;
 /** The longest body a change sends: every address at its longest, quoted and separated, and the rest of the request. */
 export const MAX_STUDENT_BODY_BYTES = 1_000 + MAX_STUDENT_ACTION * (MAX_ADDRESS * 6 + 3);
 
-/**
- * Studio requests a change of access takes before it writes: each person is
- * about two commands (the write of their access and their share of the reads
- * around it), and a studio request is priced at twenty commands
- * (tests/plan-cost-registry.ts, UNIT_COST.studio). At least one.
- */
-export function accessUnits(people: number): number {
-  return Math.max(1, Math.ceil(Math.max(0, Math.floor(people)) / 10));
-}
 /** Studio requests taken before a page's rows are read: one command a row (what each marked done), twenty to a request. */
 export function listUnits(rows: number): number {
   return Math.ceil(Math.max(0, Math.floor(rows)) / 20);

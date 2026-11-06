@@ -6,17 +6,22 @@
 import { NextRequest } from "next/server";
 import { POST as paySingle } from "@/app/api/store/checkout/route";
 import { POST as payPayPal } from "@/app/api/store/paypal/checkout/route";
+import { POST as bookCall } from "@/app/api/store/book/route";
+import { POST as buyPackage } from "@/app/api/store/package/route";
 import {
   addProduct,
   claimHandle,
   ensureStatsId,
+  setCallPackage,
   setPayPalSeller,
+  setProductCall,
   setProductLink,
   setStripeAccount,
   setSubscription,
   storeForEmail,
   type Store,
 } from "@/lib/store";
+import type { CallSetup } from "@/lib/call-setup";
 import { setSoon } from "@/lib/waitlist";
 import { paidPeriod } from "./billing-period-fixture";
 import { withConsent } from "./digital-consent-fixture";
@@ -75,6 +80,43 @@ async function shop(handle: string): Promise<{ store: Store; product: string }> 
   await setProductLink(owner, made.product.id, "https://example.test/guide");
   const store = await storeForEmail(owner);
   if (!store) throw new Error("fixture store not found");
+  return { store, product: made.product.id };
+}
+
+const weekly: CallSetup = {
+  kind: "weekly",
+  minutes: 60,
+  tz: "America/New_York",
+  weekly: [[], [[540, 1020]], [], [], [], [], []],
+  noticeHours: 12,
+  horizonDays: 30,
+  bufferMinutes: 0,
+  room: "https://example.test/room",
+  video: false,
+  meet: null,
+  seats: 1,
+  sessions: [],
+} as unknown as CallSetup;
+
+async function callShop(handle: string): Promise<{ store: Store; product: string }> {
+  const owner = `${handle}@example.test`;
+  const claimed = await claimHandle(owner, handle, "Boundary calls", "");
+  if (!claimed.ok) throw new Error("fixture could not claim call store");
+  await ensureStatsId(owner);
+  await setStripeAccount(owner, "acct_PreorderBoundary01", true);
+  await setSubscription(owner, {
+    customerId: `cus_${handle}00001`,
+    subscriptionId: `sub_${handle}00001`,
+    active: true,
+    tier: "creator",
+    period: paidPeriod(),
+  });
+  const made = await addProduct(owner, "Boundary call", "A synthetic call", "120", null);
+  if (!made.ok) throw new Error("fixture could not add call");
+  if (!(await setProductCall(owner, made.product.id, weekly)).ok) throw new Error("fixture could not set call");
+  if (!(await setCallPackage(owner, made.product.id, { sessions: 5, priceCents: 50_000, days: 90 })).ok) throw new Error("fixture could not set package");
+  const store = await storeForEmail(owner);
+  if (!store) throw new Error("fixture call store not found");
   return { store, product: made.product.id };
 }
 
@@ -143,6 +185,50 @@ async function paypal(mode: Mode) {
   }
 }
 
+async function booking(mode: Mode) {
+  redis.clear();
+  redis.pipeline = pipeline;
+  stripeBodies.length = 0;
+  const fixture = await callShop(`c2book${mode}`);
+  if (mode !== "empty") await setSoon(fixture.store, fixture.product, true);
+  const restore = intercept(fixture.store, mode);
+  try {
+    const form = new URLSearchParams({ handle: fixture.store.handle, product: fixture.product, start: "invalid" });
+    const response = await bookCall(new NextRequest("https://marktmorgen.test/api/store/book", {
+      method: "POST",
+      headers: { host: "marktmorgen.test", origin: "https://marktmorgen.test", "content-type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+    }));
+    return { status: response.status, opened: stripeBodies.length };
+  } finally {
+    restore();
+  }
+}
+
+async function callPackage(mode: Mode) {
+  redis.clear();
+  redis.pipeline = pipeline;
+  stripeBodies.length = 0;
+  const fixture = await callShop(`c2package${mode}`);
+  if (mode !== "empty") await setSoon(fixture.store, fixture.product, true);
+  const restore = intercept(fixture.store, mode);
+  try {
+    const form = new URLSearchParams({ handle: fixture.store.handle, product: fixture.product });
+    try {
+      const response = await buyPackage(new NextRequest("https://marktmorgen.test/api/store/package", {
+        method: "POST",
+        headers: { host: "marktmorgen.test", origin: "https://marktmorgen.test", "content-type": "application/x-www-form-urlencoded" },
+        body: form.toString(),
+      }));
+      return { status: response.status, opened: stripeBodies.length };
+    } catch {
+      return { status: -1, opened: stripeBodies.length };
+    }
+  } finally {
+    restore();
+  }
+}
+
 async function main() {
   part("Stripe checkout");
   const stripeComing = await stripe("coming");
@@ -158,6 +244,22 @@ async function main() {
   for (const mode of ["throw", "null", "short", "invalid"] as const) {
     const result = await paypal(mode);
     is(`PayPal ${mode}: unknown pre-sale evidence returns unavailable before order`, [result.status, result.opened], [503, 0]);
+  }
+
+  part("Call booking");
+  const bookingComing = await booking("coming");
+  is("confirmed coming-soon call stays unavailable", [bookingComing.status, bookingComing.opened], [303, 0]);
+  for (const mode of ["throw", "null", "short", "invalid"] as const) {
+    const result = await booking(mode);
+    is(`booking ${mode}: unknown pre-sale evidence is unavailable`, [result.status, result.opened], [503, 0]);
+  }
+
+  part("Call package");
+  const packageComing = await callPackage("coming");
+  is("confirmed coming-soon package stays unavailable", [packageComing.status, packageComing.opened], [303, 0]);
+  for (const mode of ["throw", "null", "short", "invalid"] as const) {
+    const result = await callPackage(mode);
+    is(`package ${mode}: unknown pre-sale evidence returns unavailable before checkout`, [result.status, result.opened], [503, 0]);
   }
 }
 

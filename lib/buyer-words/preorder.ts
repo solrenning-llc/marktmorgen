@@ -1,3 +1,45 @@
+/**
+ * The words of a pre-order (lib/preorder-rules.ts), in every language a store
+ * sells in: the box on the product's page, the page after paying, the
+ * receipt, the email the day it comes out, and the line on the buyer's list
+ * of purchases. Each day is given already written the language's way.
+ * Browser-safe.
+ */
+import { type LanguageCode, parseLanguage } from "@/lib/store-language";
+
+/** The space French puts before : ? ! and ;, which never breaks a line. */
+const S = " ";
+
+const en = {
+  label: "Pre-order",
+  button: (price: string) => `Pre-order for ${price}`,
+  note: "Paid today. The day it comes out, find it in your purchases. We also try to email the way to open it to the address you pay with.",
+  refund: (store: string) => `If it does not come out, ${store} refunds you in full.`,
+  orWait: "Rather wait? Join the waitlist",
+  expected: (day: string) => `Expected on ${day}`,
+  thanksTitle: "Pre-ordered",
+  thanksBought: (title: string, store: string, amount: string) => `You pre-ordered ${title} from ${store}, for ${amount}.`,
+  thanksWhen: (day: string, email: string) => `It is expected on ${day}. The day it comes out, find it in your purchases. We also try to email ${email} the way to open it.`,
+  thanksWhenAddress: (day: string) => `It is expected on ${day}. The day it comes out, find it in your purchases. We also try to email the way to open it to the address you paid with.`,
+  thanksOut: "It is out now. The way to open it may appear in your purchases or reach you by email.",
+  receiptSubject: (title: string) => `Your pre-order: ${title}`,
+  receiptLead: (store: string) => `Thank you for your pre-order from ${store}.`,
+  receiptWhat: (title: string) => `You pre-ordered: ${title}`,
+  receiptPaid: (amount: string) => `Paid: ${amount}`,
+  receiptRef: (reference: string) => `Order reference: ${reference}`,
+  receiptWhen: (day: string) => `It is expected on ${day}. The day it comes out, find it in your purchases. We also try to email you here the way to open it.`,
+  receiptLater: "The day it comes out, find it in your purchases. We also try to email you here the way to open it.",
+  receiptRefund: (store: string) => `If it does not come out, ${store} refunds you in full. Questions? Reply to this email: it reaches ${store}.`,
+  outSubject: (title: string) => `It is out: ${title}`,
+  outLead: (title: string, store: string) => `${title}, which you pre-ordered from ${store}, is out, and it is yours.`,
+  outOpen: "Open it here:",
+  outCourse: (link: string) => `Start the course here: ${link}`,
+  outQuestions: (store: string) => `Questions? Reply to this email: it reaches ${store}.`,
+  ordersLine: (day: string) => `Pre-ordered. Expected on ${day}; find it here when it comes out. We also try to email you.`,
+  preorderedOn: (date: string) => `Pre-ordered on ${date}`,
+  notYet: "This is a pre-order. It opens the day it comes out; find it in your purchases. We also try to email you.",
+};
+
 export type PreorderWords = typeof en;
 
 const es: PreorderWords = {
@@ -185,4 +227,3 @@ export const PREORDER_WORDS: Record<LanguageCode, PreorderWords> = { en, es, fr,
 export function preorderWords(language: unknown): PreorderWords {
   return PREORDER_WORDS[parseLanguage(language)];
 }
-?? tsconfig.codex-u.json

@@ -80,7 +80,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { giveData, needData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -523,10 +523,27 @@ function pairs(reply: unknown): [string, string][] {
   return out;
 }
 
+/**
+ * A HGETALL reply as pairs, read exactly: one reply for the one command, a list of strings with an even count, or
+ * UnknownReplyError (CX-123 rule 24). HGETALL answers an empty list for a hash with nothing in it, so a reply missing,
+ * cut short or of another shape is never "nobody".
+ */
+function hashPairsExact(replies: unknown, what: string): [string, string][] {
+  const list = stringList(repliesFor(replies, 1)?.[0]);
+  if (!list || list.length % 2 !== 0) throw new UnknownReplyError(what);
+  const out: [string, string][] = [];
+  for (let i = 0; i < list.length; i += 2) out.push([list[i], list[i + 1]]);
+  return out;
+}
+
+/**
+ * Every record of the program, newest first. Throws UnknownReplyError when the people could not be read exactly:
+ * the partner-share cap, a hold's release, the export and the duplicate-inbox check must never read "nobody" from a
+ * reply they do not understand (docs/reviews/c5-sweep-app1.md finding 1).
+ */
 export async function listAffiliates(store: Store): Promise<Affiliate[]> {
   if (!store.statsId || !isRedisConfigured()) return [];
-  const [reply] = await redisPipeline([["HGETALL", peopleKey(store.statsId)]]);
-  return pairs(reply)
+  return hashPairsExact(await redisPipeline([["HGETALL", peopleKey(store.statsId)]]), "an affiliate program's people")
     .map(([, raw]) => parseAffiliate(raw))
     .filter((a): a is Affiliate => a !== null)
     .sort((a, b) => b.appliedAt - a.appliedAt);
@@ -954,10 +971,18 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
   // The choice is read again from the store as it is now, and the application again, so a creator who turned
   // approval off, or declined or removed this person, in the meantime is not overruled.
   const autoChosen = created && grant.k !== 1 && store.affiliates.autoApprove === true && affiliate.status === "pending";
-  const knownInbox = autoChosen && (await sameInboxAsAnother(store, affiliate.email, affiliate.id));
+  // A list of the program that could not be read is not "no other inbox": the application waits, said as such.
+  const sameInbox = autoChosen
+    ? await sameInboxAsAnother(store, affiliate.email, affiliate.id).catch((error: unknown) => {
+        if (error instanceof UnknownReplyError) return null;
+        throw error;
+      })
+    : false;
+  const knownInbox = sameInbox === true;
+  const unreadList = sameInbox === null;
   const ownersInbox = autoChosen && canonicalEmail(affiliate.email) === canonicalEmail(store.email);
   let autoApproved = false;
-  if (autoChosen && !knownInbox && !ownersInbox) {
+  if (autoChosen && !knownInbox && !unreadList && !ownersInbox) {
     const now = store.sid ? await storeForId(store.sid) : null;
     const still = now?.affiliates.autoApprove === true ? await readAffiliate(store, affiliate.id) : null;
     if (still?.status === "pending") {
@@ -980,6 +1005,9 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
           ? ["It was not approved at once: the address matches one already on your list (including people you declined or removed), written the same way or another way, so it waits for your decision."]
           : []),
         ...(ownersInbox ? ["It was not approved at once: it is this store's own address, so it waits for your decision."] : []),
+        ...(unreadList
+          ? ["It was not approved at once: your list of affiliates could not be checked for the same address just now, so it waits for your decision."]
+          : []),
         ...(affiliate.note ? [`Where they will share it: ${affiliate.note}`] : []),
         "",
         autoApproved ? `Remove them in your studio if you would rather not: ${studioLink}` : `Approve or decline them in your studio: ${studioLink}`,
@@ -1011,6 +1039,7 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
  * Whether another record of this store than `self`, in any state (declined
  * and removed included), reaches the same inbox as `address`, by its address
  * or its payout address, written the same or another way (canonicalEmail).
+ * Throws UnknownReplyError when the program's people could not be read.
  */
 async function sameInboxAsAnother(store: Store, address: string, self: string | null): Promise<boolean> {
   const mine = canonicalEmail(address);

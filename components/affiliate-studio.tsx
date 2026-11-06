@@ -74,7 +74,7 @@ const MESSAGES: Record<string, string> = {
   unknown: "That affiliate or payout is no longer on record. Reload the page.",
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
-  unavailable: "Stores are not switched on yet, so nothing was saved.",
+  unavailable: "This could not be done just now, so nothing was saved. Try again in a moment.",
   store_full: "Your store is full. Remove something before adding more.",
   server_error: "Something went wrong on our side. Try again in a moment.",
   lead_kind: "Pick what counts as a lead, or no pay per lead.",
@@ -1903,6 +1903,11 @@ export function PartnerOffers({ offers }: { offers: { id: string; words: string;
       });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!data.ok) {
+        // Could not be done just now (503) or went wrong on our side: the offer is still there, so it stays listed.
+        if (response.status >= 500) {
+          toast(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
+          return;
+        }
         toast(MESSAGES[data.error ?? ""] ?? "That offer is no longer there. Reload the page.");
         setGone((prev) => [...prev, id]);
         return;

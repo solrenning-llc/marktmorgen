@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
-import { StoreFullError, setAffiliateSetting, storeForEmail, storeForId } from "@/lib/store";
+import { StoreFullError, setAffiliateSetting, storeForEmail, storeForId, storeIdGone } from "@/lib/store";
 import { readMoney } from "@/lib/money";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_COMMISSION, MIN_COMMISSION, commissionRate, parseAffiliateSetting, readBonuses } from "@/lib/affiliate-setting";
 import { parsePartnerShare, shareProblem } from "@/lib/partner-share";
@@ -103,7 +104,11 @@ export async function POST(request: NextRequest) {
       // Removing affiliates who bring nothing (630 [HN6](3)): 0, or 90 to 730 days, refused otherwise.
       const idleRefused = idleProblem(body.idle);
       if (idleRefused) return fail(idleRefused);
-      const before = (await storeForEmail(guarded.ref))?.affiliates ?? null;
+      // Read again for the terms as they are this moment. The guard found the store, so a read that comes back
+      // empty is not "no program yet": a cut would skip the notice its affiliates were promised. Nothing is saved.
+      const fresh = await storeForEmail(guarded.ref);
+      if (!fresh) return fail("unavailable", 503);
+      const before = fresh.affiliates;
       const terms = (s: { percent: number; rates: Record<string, number>; days: number }) => ({ percent: s.percent, rates: s.rates, days: s.days });
       // A cut waits the longer of the notice the program had, as its affiliates were told, and the one chosen now;
       // and never ends before a notice already running.
@@ -216,8 +221,12 @@ export async function POST(request: NextRequest) {
         await answerInvite(guarded.email, invite.id);
         return Response.json({ ok: true, accepted: false });
       }
-      const from = await storeForId(invite.sid).catch(() => null);
+      // A store that could not be read is not gone: the offer is kept and the answer can be sent again. Only an
+      // exact answer that no store has this id takes the offer out.
+      const from = await storeForId(invite.sid).catch(() => undefined);
+      if (from === undefined) return fail("unavailable", 503);
       if (!from) {
+        if (!(await storeIdGone(invite.sid))) return fail("unavailable", 503);
         await answerInvite(guarded.email, invite.id);
         return fail("gone");
       }
@@ -302,6 +311,11 @@ export async function POST(request: NextRequest) {
     return fail("unknown");
   } catch (error) {
     if (error instanceof StoreFullError) return fail("store_full", 409);
+    // A reply that could not be read exactly (the program's people, for the partner-share cap): nothing was saved.
+    if (error instanceof UnknownReplyError) {
+      console.error("changing the affiliate programme stopped on an unknown reply", error);
+      return fail("unavailable", 503);
+    }
     console.error("changing the affiliate programme failed", error);
     return fail("server_error", 500);
   }

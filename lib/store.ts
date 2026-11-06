@@ -48,6 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -1208,6 +1209,16 @@ export async function storeForHandle(handle: string): Promise<Store | null> {
  * the one answer. Only for pages; anything that writes reads afresh.
  */
 export const storeForPage = cache(storeForHandle);
+
+/**
+ * Whether Redis says, exactly, that no store has this id: the one EXISTS reply is 0. A reply missing, cut short or of
+ * another shape is not "gone" (CX-123 rule 24), so what would be deleted because the store is gone is kept.
+ */
+export async function storeIdGone(sid: string): Promise<boolean> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return false;
+  const reply = repliesFor(await redisPipeline([["EXISTS", storeIdKey(sid)]]), 1);
+  return reply !== null && countOf(reply[0]) === 0;
+}
 
 /**
  * Whether a store with this id still exists: one command, the id's own key,

@@ -89,7 +89,7 @@ async function main(): Promise<void> {
   await setProductLink(OWNER, basic, "https://example.com/basic");
   store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;
-  const people = ["ada", "ben", "cy", "dee", "eve", "fay", "gus"];
+  const people = ["ada", "ben", "cy", "dee", "eve", "fay", "gus", "hal"];
   const fields = await inviteMembers(store, "job_moveopenmark", people.map((name) => ({ email: `${name}@example.com`, productId, option: basic, renews: nowS + 20 * 86_400 })));
   const invites = Object.fromEntries(await Promise.all(people.map(async (name, i) => [name, (await readInvite(statsId, fields[i]!))!] as const)));
   const press = (name: string) => openMove(store, productId, invites[name].t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
@@ -121,7 +121,9 @@ async function main(): Promise<void> {
   lostAnswer = true;
   const b1 = await press("ben");
   const b2 = await press("ben");
-  is("Stripe made the session but its answer was lost: the press is refused", b1.ok ? "opened" : b1.reason, "refused");
+  // Changed assertion (rule 23, Claude 4 on #2690): the press whose answer was lost said "refused" ("try again in a
+  // few minutes"); it now says, as every later press does, that the last try is still being checked.
+  is("Stripe made the session but its answer was lost: the press says it is still being checked", b1.ok ? "opened" : b1.reason, "checking");
   // Changed assertion (rule 23, Revisor 1 on #2685): the second press used to say "refused" ("try again in a few
   // minutes") for a day. It now says the last try is still being checked, which is what is true.
   is("and a second press makes no second session, and says the last try is still being checked", [b2.ok ? "opened" : b2.reason, checkouts.length - before], ["checking", 1]);
@@ -149,6 +151,30 @@ async function main(): Promise<void> {
   is("Stripe's memberships cannot be read: refused, no checkout, and the next press may try again", [e1.ok ? "opened" : e1.reason, checkouts.length - madeBefore, redis.run(["EXISTS", mark("eve")])], ["refused", 0, 0]);
   const e2 = await press("eve");
   is("read whole the next time: it opens", e2.ok, true);
+
+  part("A5: Stripe shows the membership live and the write that notes it kept fails once (Claude 4 on #2690)");
+  paid.add("hal@example.com");
+  const realPipe = redis.pipeline.bind(redis);
+  let failedOnce = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!failedOnce && commands.some((c) => c[0] === "HSET" && c[1] === `nl:mv:${statsId}`)) {
+      failedOnce = true;
+      throw new Error("redis: connection reset");
+    }
+    return realPipe(commands);
+  }) as typeof redis.pipeline;
+  let h1 = "returned";
+  try {
+    const r = await press("hal");
+    h1 = r.ok ? "opened" : r.reason;
+  } catch {
+    h1 = "threw";
+  } finally {
+    redis.pipeline = realPipe;
+  }
+  is("the press says the membership was moved, and the mark is not left behind for a day", [failedOnce, h1, redis.run(["GET", mark("hal")])], [true, "done", null]);
+  const h2 = await press("hal");
+  is("the next press says it was moved too, and the invitation now reads as kept", [h2.ok ? "opened" : h2.reason, (await readInvite(statsId, fields[people.indexOf("hal")]!))!.kept > 0], ["done", true]);
   done();
 }
 

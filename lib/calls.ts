@@ -59,7 +59,7 @@ import { HOLD_SECONDS, checkoutClosesAt, onAccount } from "@/lib/stripe-account"
 import { applyTax, applyTaxDocuments, openKeepingTheSale } from "@/lib/tax";
 import { askForCallReminder, recoveryOn, refusedRecovery, withoutCallReminder } from "@/lib/recovery-setting";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods } from "@/lib/instant-pay";
-import { refundedInFull } from "@/lib/refunds";
+import { keptUnlessLost, refundedInFull } from "@/lib/refunds";
 import { type Answer, applyCheckoutFields, readAnswers } from "@/lib/checkout-fields";
 import type { Listing, Product, Store } from "@/lib/store";
 import { idsOfKind, listingFinder, readListing, readListings, sellsAny } from "@/lib/catalog";
@@ -273,8 +273,41 @@ export async function paidCallsRead(store: Store): Promise<{ paid: Awaited<Retur
 type CallRow = Awaited<ReturnType<typeof paidCalls>>[number];
 
 /**
+ * The most charges one reading of a store's bookings asks Stripe about a
+ * dispute (queue 388 [TB14]): only a charge Stripe marks as disputed is
+ * asked (GET /disputes?charge=, lib/refunds.ts, keptUnlessLost), which is
+ * rare, and none else. Past it, or when Stripe cannot be asked, the booking
+ * keeps its time: in the doubt the buyer keeps what they paid for, and a
+ * later reading frees it (Claude 4, C4-20261105-2100-C6-4).
+ */
+export const DISPUTE_READS_PER_READING = 5;
+
+/** Whether Stripe marks this booking's charge as disputed (the payment read with its latest charge expanded). */
+function disputedCharge(row: SessionRow): boolean {
+  const payment = row.payment_intent as { latest_charge?: { disputed?: unknown } | null } | null | undefined;
+  return !!payment && typeof payment === "object" && !!payment.latest_charge && typeof payment.latest_charge === "object" && payment.latest_charge.disputed === true;
+}
+
+/**
+ * callFromRow, with a disputed charge asked about while `reads.left` lasts: a
+ * dispute lost frees the booking as a full refund does (lib/refunds.ts, the
+ * owner's rule of 4 November 2026: whatever its amount).
+ */
+async function callOrLost(store: Store, row: SessionRow, handles: Set<string>, reads: { left: number }): Promise<CallRow | "refunded" | null> {
+  const call = callFromRow(row, handles);
+  if (!call || call === "refunded" || !disputedCharge(row) || !store.stripeAccountId) return call;
+  if (reads.left <= 0) {
+    console.warn("a disputed booking keeps its time: this reading asked Stripe about as many disputes as it may", store.handle, call.session);
+    return call;
+  }
+  reads.left -= 1;
+  return (await keptUnlessLost(store.stripeAccountId, row.payment_intent)) ? "refunded" : call;
+}
+
+/**
  * A paid booking of this store from one checkout session, or null. A booking
  * refunded in full is `refunded`: it no longer holds its time or gets reminders.
+ * A dispute lost is read by callOrLost, which asks Stripe.
  */
 function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded" | null {
   const meta = row.metadata ?? {};
@@ -332,6 +365,7 @@ async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refund
   const handles = saleHandles(store);
   const since = Math.floor(Date.now() / 1000) - LOOKBACK_DAYS * 86400;
   const found: CallRow[] = [];
+  const reads = { left: DISPUTE_READS_PER_READING };
   let after = "";
   // Whether the last page read still said there were more: older bookings were then left out.
   let partial = false;
@@ -343,7 +377,7 @@ async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refund
     )) as { data?: unknown; has_more?: unknown };
     const rows = Array.isArray(list.data) ? (list.data as SessionRow[]) : [];
     for (const row of rows) {
-      const call = callFromRow(row, handles);
+      const call = await callOrLost(store, row, handles, reads);
       if (call === "refunded") {
         if (typeof row.id === "string") refunded.add(row.id);
       } else if (call) found.push(call);
@@ -369,7 +403,7 @@ export async function paidCall(store: Store, session: string): Promise<CallRow |
     store.stripeAccountId,
     `/checkout/sessions/${encodeURIComponent(session)}?expand[]=payment_intent.latest_charge`,
   )) as SessionRow;
-  const call = callFromRow(row, saleHandles(store));
+  const call = await callOrLost(store, row, saleHandles(store), { left: 1 });
   if (!call || call === "refunded") return null;
   return (await withMoves([call]))[0] ?? null;
 }

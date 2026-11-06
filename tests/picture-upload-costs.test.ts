@@ -17,7 +17,8 @@ import { readFileSync } from "node:fs";
 import * as registry from "./plan-cost-registry";
 import { COST_LINES, BLOB_ADVANCED_OP, BLOB_SIMPLE_OP, BLOB_TRANSFER_PER_BYTE } from "./plan-cost-registry";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
-import { MAX_IMAGE_BYTES } from "@/lib/product-image";
+import { MAX_IMAGE_BYTES, MAX_THUMB_BYTES } from "@/lib/product-image";
+import { MAX_PAGE_PICTURES } from "@/lib/sales-page";
 import { done, is, part } from "./check";
 
 part("The official prices, with their source and date");
@@ -42,15 +43,25 @@ is("the SDK's get is one plain fetch, never tried again", /await fetch\(/.test(b
 const headTries = (registry as Record<string, unknown>).BLOB_HEAD_TRIES;
 is("a head counted with every try, as a put is", headTries, tries);
 
-part("Every studio picture upload's Blob operations, at the plan's studio ceiling");
-const line = COST_LINES.find((each) => each.id === "picture-uploads");
-is("a line of its own", Boolean(line), true);
-is("it says which pictures it covers: a product's, a link's and a page's (a review's photo and an email's picture are reported apart)", /product's, a link's and a page's/.test(line?.feature ?? "") && !/^Pictures uploaded \(a product's/.test(line?.feature ?? ""), true);
+part("Every studio picture's Blob operations, one line for the whole studio figure (MR audit gap 1, C4-20261106-2790-C56-167)");
+// Rule 23: picture-uploads and picture-thumbnails each multiplied the whole studio figure; doors, attaches and page
+// saves share it, so they are one line, studio-blob, each request at the dearest kind it may be.
+const line = COST_LINES.find((each) => each.id === "studio-blob");
+is("a line of its own, and the two lines it replaces are gone", [Boolean(line), COST_LINES.some((each) => each.id === "picture-uploads" || each.id === "picture-thumbnails")], [true, false]);
+is("it says which pictures it covers: a product's, a link's and a page's", /a product's, a link's and a page's/.test(line?.feature ?? ""), true);
+const tokenTries = (registry as Record<string, unknown>).BLOB_TOKEN_TRIES;
+is("a door's signed token: priced nowhere, so counted as an Advanced Operation with every try, never zero", tokenTries, tries);
 for (const tier of ["creator", "pro", "scale"] as const) {
-  // A put; three heads (the name, then the picture and its smaller copy); two reads, of those two copies.
   const put = typeof tries === "number" ? tries : Number.NaN, heads = typeof headTries === "number" ? headTries : Number.NaN;
-  const perRequest = put * BLOB_ADVANCED_OP + (3 * heads + 2) * BLOB_SIMPLE_OP + 2 * MAX_IMAGE_BYTES * BLOB_TRANSFER_PER_BYTE;
-  is(`${tier}: the studio figure, each request at its dearest`, Math.abs((line?.monthlyUsd(tier) ?? 0) - STORE_ALLOWANCES[tier].studio * perRequest) < 1e-9, true);
+  const token = typeof tokenTries === "number" ? tokenTries : Number.NaN;
+  // A door: its put, its token and the head that checks the name, every try.
+  const door = (put + token) * BLOB_ADVANCED_OP + heads * BLOB_SIMPLE_OP;
+  // A check: a head with every try, one plain read, the bytes counted whole.
+  const check = (bytes: number) => heads * BLOB_SIMPLE_OP + BLOB_SIMPLE_OP + bytes * BLOB_TRANSFER_PER_BYTE;
+  const reattach = 2 * check(MAX_IMAGE_BYTES) + check(MAX_THUMB_BYTES);
+  const page = (MAX_PAGE_PICTURES * (door + check(MAX_IMAGE_BYTES))) / (MAX_PAGE_PICTURES + 1);
+  const perRequest = check(MAX_IMAGE_BYTES) + Math.max(door, reattach, page);
+  is(`${tier}: the studio figure, each request at its dearest kind, and a day of doors from the month before checked on top`, Math.abs((line?.monthlyUsd(tier) ?? 0) - STORE_ALLOWANCES[tier].studio * perRequest) < 1e-9, true);
 }
 is("its source and date are said, and why the read is counted whole", /vercel\.com\/docs\/vercel-blob\/usage-and-pricing/.test(line?.basis ?? "") && /6 November 2026/.test(line?.basis ?? "") && /206/.test(line?.basis ?? ""), true);
 done();

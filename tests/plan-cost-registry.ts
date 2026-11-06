@@ -69,7 +69,7 @@ import { BATCH_BYTES, MAX_REPORT_ROWS } from "@/lib/imports";
 import { MAX_TRIMMED_PAGE_CHARS } from "@/lib/clickfunnels-page";
 import { IMPORTS_PER_SHARE_MONTH, MAX_APPLY_PAGES, PREVIEWS_PER_SHARE_MONTH, SHARE_LIMITS } from "@/lib/funnel-share-rules";
 import { MAX_SECTION_BYTES } from "@/lib/saved-blocks";
-import { MAX_PAGE_BYTES } from "@/lib/sales-page";
+import { MAX_PAGE_BYTES, MAX_PAGE_PICTURES } from "@/lib/sales-page";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { TEAM_LIMITS } from "@/lib/team-scheduling-rules";
 import { SYNC_SECONDS } from "@/lib/host-calendar";
@@ -364,6 +364,36 @@ export const BLOB_PUT_TRIES = 11;
  * plain fetch, sent once (Codex S on #2801; tests/picture-upload-costs.test.ts reads the installed SDK).
  */
 export const BLOB_HEAD_TRIES = BLOB_PUT_TRIES;
+/**
+ * A signed token for a door (issueSignedToken, a request to /signed-token through the same retrying requestApi). The
+ * pricing page names no such operation: unknown is never zero, so it is counted as an Advanced Operation with every
+ * try (MR audit item 9, Claude 4 C4-20261106-2790-C56-167), until an official source says otherwise.
+ */
+export const BLOB_TOKEN_TRIES = BLOB_PUT_TRIES;
+/** One studio picture door (app/api/store/image/upload): its put and its token, every try, and the head that checks the name is free. */
+export const STUDIO_DOOR_BLOB = (BLOB_PUT_TRIES + BLOB_TOKEN_TRIES) * BLOB_ADVANCED_OP + BLOB_HEAD_TRIES * BLOB_SIMPLE_OP;
+/** One check of a stored picture (lib/uploaded-image.ts, lib/picture-check.ts): a head with every try, one read, its bytes counted whole. */
+export function pictureCheckBlob(bytes: number): number {
+  return BLOB_HEAD_TRIES * BLOB_SIMPLE_OP + BLOB_SIMPLE_OP + bytes * BLOB_TRANSFER_PER_BYTE;
+}
+/**
+ * The dearest a studio request can make Vercel Blob work in a month, per request of the plan's studio figure (MR audit
+ * gap 1 and the single studio-blob line, C4-20261106-2790-C56-167). Every request is one of:
+ *   - a door: STUDIO_DOOR_BLOB;
+ *   - a product's picture attached (app/api/store/image/route.ts): up to three copies checked (the picture and its
+ *     smaller copy at MAX_IMAGE_BYTES, the thumbnail at MAX_THUMB_BYTES). A product's own picture sent again is checked
+ *     again, so this needs no door of its own;
+ *   - a page saved (product page, store page): it checks only the pictures it takes from the door, each once
+ *     (lib/picture-check.ts checkedPictures), up to MAX_PAGE_PICTURES a save; so, past what was let in before, 24 doors
+ *     and one save are 25 requests for 24 doors and 24 checks.
+ * A door note lives a day (PICTURE_DOOR_SECONDS), so a month may also check up to a whole figure of pictures let in on
+ * the last day of the month before: counted on top, at a full picture's check each.
+ */
+export function studioBlobPerRequest(): number {
+  const reattach = 2 * pictureCheckBlob(MAX_IMAGE_BYTES) + pictureCheckBlob(MAX_THUMB_BYTES);
+  const page = (MAX_PAGE_PICTURES * (STUDIO_DOOR_BLOB + pictureCheckBlob(MAX_IMAGE_BYTES))) / (MAX_PAGE_PICTURES + 1);
+  return pictureCheckBlob(MAX_IMAGE_BYTES) + Math.max(STUDIO_DOOR_BLOB, reattach, page);
+}
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */
@@ -868,28 +898,20 @@ export const COST_LINES: CostLine[] = [
     basis: "The plan's storage, all used, at the dearest store a file may be in.",
   },
   {
-    id: "picture-thumbnails",
-    feature: "The thumbnail copy of a product picture: its Blob put and the checks of its name and bytes (Encanto 5b-2, 6 November 2026)",
-    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * (BLOB_PUT_TRIES * BLOB_ADVANCED_OP + (2 * BLOB_HEAD_TRIES + 1) * BLOB_SIMPLE_OP + MAX_THUMB_BYTES * BLOB_TRANSFER_PER_BYTE),
+    id: "studio-blob",
+    feature: "Vercel Blob for studio pictures (a product's, a link's and a page's): doors, their signed tokens, and the checks of each picture, every try counted (6 November 2026; one line for the whole studio figure since MR audit gap 1)",
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * studioBlobPerRequest(),
     sources: [
-      { file: "app/api/store/image/upload/route.ts", names: ["studioAccess", "notePictureDoor"] },
+      { file: "app/api/store/image/upload/route.ts", names: ["studioAccess", "notePictureDoor", "issueSignedToken"] },
       { file: "lib/studio-route.ts", names: ["countStudio"] },
-      { file: "lib/product-image.ts", names: ["MAX_THUMB_BYTES"] },
-      { file: "app/api/store/image/route.ts", names: ["head(thumbPath)", "firstBytes(thumbPath)"] },
-    ],
-    basis: "Every thumbnail copy is put through its own upload request, a studio request (studioAccess, countStudio), so there are at most the plan's studio figure of them a month, a hard ceiling. Each is counted at its dearest: its put (an Advanced Operation) with every try again the Blob SDK may send (BLOB_PUT_TRIES), Simple Operations: two heads (the one that checks its name is free, and one when it is attached), each with its tries again (BLOB_HEAD_TRIES), and one read when it is attached, a plain fetch and the read of its whole bytes (MAX_THUMB_BYTES) at the dearer Blob transfer rate kept here. Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026. It adds no read on a public page: it replaces a larger copy in the same picture request (lib/picture-served.ts), already counted with the page. The Blob operations of the picture and its smaller copy, uploaded before this, are not counted by this line: that is reported apart (they are not a cost of the thumbnail).",
-  },
-  {
-    id: "picture-uploads",
-    feature: "Studio picture uploads (a product's, a link's and a page's picture): each copy's Blob puts, every try counted, and the checks of its name and bytes (6 November 2026; never counted before)",
-    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * (BLOB_PUT_TRIES * BLOB_ADVANCED_OP + (3 * BLOB_HEAD_TRIES + 2) * BLOB_SIMPLE_OP + 2 * MAX_IMAGE_BYTES * BLOB_TRANSFER_PER_BYTE),
-    sources: [
-      { file: "app/api/store/image/upload/route.ts", names: ["studioAccess", "notePictureDoor"] },
-      { file: "lib/studio-route.ts", names: ["countStudio"] },
-      { file: "lib/product-image.ts", names: ["MAX_IMAGE_BYTES"] },
+      { file: "lib/product-image.ts", names: ["MAX_IMAGE_BYTES", "MAX_THUMB_BYTES"] },
       { file: "lib/uploaded-image.ts", names: ["firstBytes", "reader.cancel()"] },
+      { file: "app/api/store/image/route.ts", names: ["head(thumbPath)", "firstBytes(thumbPath)"] },
+      { file: "lib/picture-check.ts", names: ["checkedPictures", "isStoredPicture"] },
+      { file: "lib/sales-page.ts", names: ["MAX_PAGE_PICTURES"] },
+      { file: "lib/picture-door.ts", names: ["PICTURE_DOOR_SECONDS"] },
     ],
-    basis: "Every copy of a picture (the picture and its smaller copy) is put through its own upload request, and attaching them is one more; each is a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling. Each request is counted at the dearest one may be: its put (an Advanced Operation) with every try again the SDK may send (BLOB_PUT_TRIES), Simple Operations: three heads (the one that checks a name is free; one for the picture and one for its smaller copy), each with its tries again (BLOB_HEAD_TRIES), and two reads, one plain fetch each and the read of both copies' whole bytes (MAX_IMAGE_BYTES each) at the dearer Blob transfer rate kept here. The read is counted whole: firstBytes reads a stream it cancels after sixteen bytes, and no official page says the Blob honors a byte range with 206 or bills only the bytes sent (Claude 4, C4-20261106-1120-TODOS-63). Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026. Not in this line: a buyer's review photo (lib/review-photo.ts) and an email's picture (lib/mail-pictures.ts), each a Blob put of its own, reported apart to be bounded and counted.",
+    basis: "Every studio picture operation goes through a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling; the doors, attaches and page saves share it, so they are one line (the two lines before counted the whole figure twice). Each request is counted at the dearest kind it may be (studioBlobPerRequest): a door (its put, its signed token counted as an Advanced Operation since no official page prices it, and the head that checks the name is free, every try); a product's picture attached, its three copies checked (a head with every try, a plain read, the bytes read counted whole: firstBytes cancels a stream after sixteen bytes and no official page says the Blob honors a byte range with 206); or a page saved, which checks each picture it takes from the door once, before it is the page's (checkedPictures). A month may also check a whole figure of pictures let in on the last day before, the door note's day: counted on top. Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026 (delete operations free). Not in this line: a buyer's review photo (lib/review-photo.ts), an email's picture (lib/mail-pictures.ts), community pictures and students' files, the public picture route and the link preview (MR audit items 2, 4, 7, 8), and the storage of images/ (item 3).",
   },
   {
     id: "free-delivery",

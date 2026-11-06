@@ -10,7 +10,7 @@ import { lockedFor } from "@/lib/two-step";
 import { claimNewPictures, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { imagePaths, ownsImagePath } from "@/lib/product-image";
-import { isStoredPicture } from "@/lib/picture-check";
+import { checkedPictures } from "@/lib/picture-check";
 
 /**
  * Thirty full blocks as JSON, twice — a page and a second version tested
@@ -89,14 +89,14 @@ export async function POST(request: NextRequest) {
       if (!store.statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
       const folder = await imageFolder(guarded.ref);
       const own = new Set(imagePaths(product.image));
-      for (const path of fresh) {
-        if (!ownsImagePath(path, folder) || own.has(path) || !(await isStoredPicture(path))) {
-          return Response.json({ ok: false, error: "pictures" }, { status: 400 });
-        }
+      if (fresh.some((path) => !ownsImagePath(path, folder) || own.has(path))) {
+        return Response.json({ ok: false, error: "pictures" }, { status: 400 });
       }
       // Each new one fresh from the picture door or already this page's, never another record's picture from the
       // shared folder, so taking it off later deletes only this page's own (lib/sales-page-store.ts, claimNewPictures).
-      if (!(await claimNewPictures(store.statsId, id, fresh))) {
+      // Only those this save takes from the door are checked in the file store, and once (MR audit gap 1): one taken
+      // by an earlier save was checked then, so a save tried again never asks Blob about the same picture twice.
+      if (!(await claimNewPictures(store.statsId, id, fresh, checkedPictures))) {
         return Response.json({ ok: false, error: "pictures" }, { status: 400 });
       }
     }

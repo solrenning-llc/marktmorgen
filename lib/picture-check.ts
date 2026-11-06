@@ -7,7 +7,7 @@
  * WebP's. The same check, for a picture put on a product's page
  * (lib/sales-page.ts, PicturesBlock).
  */
-import { get, head } from "@/lib/blob";
+import { del, get, head } from "@/lib/blob";
 import { IMAGE_CONTENT_TYPES, MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { sniffPhotoType } from "@/lib/store-photo";
 
@@ -45,4 +45,18 @@ export async function isStoredPicture(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Of the pictures a page save has just taken from the picture door (lib/sales-page-store.ts, claimNewPictures, before
+ * any is written down as the page's), checks each in the file store, once (MR audit gap 1: a save tried again never
+ * asks Blob about the same picture twice). Answers those that are pictures; any other is deleted: taken from the door
+ * by this very save, it is nobody else's, so deleting it can never take a file from another record.
+ */
+export async function checkedPictures(taken: string[]): Promise<string[]> {
+  const good: string[] = [];
+  const bad: string[] = [];
+  for (const path of taken) (await isStoredPicture(path) ? good : bad).push(path);
+  if (bad.length) await del(bad).catch((error: unknown) => console.error("could not delete files that are not pictures", error));
+  return good;
 }

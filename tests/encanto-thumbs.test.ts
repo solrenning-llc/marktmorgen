@@ -54,15 +54,13 @@ const route = readFileSync("app/api/store/image/route.ts", "utf8");
 is("the route takes it from the picture door with the others", /takePictureDoor\(\[path, \.\.\.\(smallOwned \? \[smallPath\] : \[\]\), \.\.\.\(thumbOwned \? \[thumbPath\] : \[\]\)\]\)/.test(route), true);
 is("and checks its size, type and width as the smaller copy's", /copy\.size <= MAX_THUMB_BYTES/.test(route) && /thumbWidth < \(small \? small\.width : width\)/.test(route), true);
 
-part("Its cost, at the plan's studio ceiling, from the official price");
-const line = COST_LINES.find((each) => each.id === "picture-thumbnails");
-is("a line for the thumbnail copy's Blob operations", Boolean(line), true);
-for (const tier of ["creator", "pro", "scale"] as const) {
-  // Its put with every try again the Blob SDK may send, 1 + 10 (Revisor 1 on #2803, rule 30); its two heads (the name,
-  // then the thumbnail) tried as often; its one read, a plain fetch, once (Codex S on #2801). Unknown is never zero.
-  const perRequest = 11 * (5 / 1e6) + (2 * 11 + 1) * (0.4 / 1e6) + 40_000 * (0.1 / 1e9);
-  is(`${tier}: the plan's studio figure, each at the dearest request it may be`, Math.abs((line?.monthlyUsd(tier) ?? 0) - STORE_ALLOWANCES[tier].studio * perRequest) < 1e-9, true);
-}
+part("Its cost, in the studio's one Blob line, from the official price");
+// Rule 23 (MR audit gap 1, C4-20261106-2790-C56-167): the thumbnail's own line multiplied the whole studio figure
+// again; its door and its check are now kinds of studio request in the single studio-blob line
+// (tests/picture-upload-costs.test.ts checks its formula), which counts the thumbnail's check at MAX_THUMB_BYTES.
+const line = COST_LINES.find((each) => each.id === "studio-blob");
+is("the studio's Blob line counts the thumbnail copy", Boolean(line) && (line?.sources ?? []).some((source) => source.names.includes("MAX_THUMB_BYTES")), true);
+is("and the thumbnail's own line is gone", COST_LINES.some((each) => each.id === "picture-thumbnails"), false);
 is("its source and date are said", /vercel\.com\/docs\/vercel-blob\/usage-and-pricing/.test(line?.basis ?? "") && /6 November 2026/.test(line?.basis ?? ""), true);
 
 done();

@@ -8,7 +8,7 @@ import { MAX_BLOCKS, emptyBlock, oversized, pageProblem, parsePage, picturePaths
 import { claimNewPictures, dropPage, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { ownsImagePath } from "@/lib/product-image";
-import { isStoredPicture } from "@/lib/picture-check";
+import { checkedPictures } from "@/lib/picture-check";
 import { hasPlaceholder } from "@/lib/mail-body";
 import { MAX_SITE_PAGES, SITE_KINDS, SITE_PAGE_ID, SITE_STARTERS, type SitePage, outFrom, siteKey, siteTitle, slugFrom, slugProblem } from "@/lib/site-page-rules";
 
@@ -125,12 +125,11 @@ export async function POST(request: NextRequest) {
       const fresh = shown.filter((path) => !before.includes(path));
       if (fresh.length) {
         const folder = await imageFolder(ref);
-        for (const path of fresh) {
-          if (!ownsImagePath(path, folder) || !(await isStoredPicture(path))) return refuse("pictures");
-        }
+        if (fresh.some((path) => !ownsImagePath(path, folder))) return refuse("pictures");
         // Fresh from the picture door or already this page's, never a product's, a link's or another page's picture
-        // from the shared folder (lib/sales-page-store.ts, claimNewPictures).
-        if (!(await claimNewPictures(statsId, key, fresh))) return refuse("pictures");
+        // from the shared folder (lib/sales-page-store.ts, claimNewPictures). Only those this save takes from the door
+        // are checked in the file store, and once (MR audit gap 1).
+        if (!(await claimNewPictures(statsId, key, fresh, checkedPictures))) return refuse("pictures");
       }
       await writePage(statsId, key, page, store);
       // When it is out, kept on the list so the menu reads nothing more (lib/site-page-rules.ts).

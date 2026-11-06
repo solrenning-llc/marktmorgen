@@ -26,6 +26,13 @@
  *                              spent on the tap that finishes it
  *   nl:auth:devices:<hash>  -> the browsers an account has signed in from,
  *                              each by a one-way hash of its nl_device cookie
+ *   nl:auth:code:<hash>     -> the six-digit code sent with a link (652 [WG12]),
+ *                              by the request that asked for it: a hash of the
+ *                              code, the link it spends, the tries; 15 minutes
+ *   nl:auth:linkcode:<hash> -> from a link to its code, so either spends both
+ *   nl:auth:lastcode:<hash> -> an address's newest code: only that one opens
+ *   nl:rl:code-addr:<hash>  -> the code tries for one address in the hour, all
+ *                              its requests together
  *
  * A passkey (lib/passkeys.ts) opens exactly the same kind of session, so
  * everything here — "log out of all devices" included — covers it too.
@@ -42,6 +49,7 @@
  * the address that would receive. The second one matters because the first one
  * cannot see a flood that arrives from many machines at once.
  */
+import { randomInt, timingSafeEqual } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { deleteIfHeldOnly } from "@/lib/redis-lock";
@@ -87,6 +95,17 @@ async function sha256Hex(value: string): Promise<string> {
 
 const linkKey = async (token: string) =>
   `nl:auth:link:${(await sha256Hex(`nimbus-auth-link:${token}`)).slice(0, 40)}`;
+
+const codeKey = async (request: string) =>
+  `nl:auth:code:${(await sha256Hex(`nimbus-auth-code:${request}`)).slice(0, 40)}`;
+const linkCodeKey = async (token: string) =>
+  `nl:auth:linkcode:${(await sha256Hex(`nimbus-auth-linkcode:${token}`)).slice(0, 40)}`;
+const lastCodeKey = async (address: string) =>
+  `nl:auth:lastcode:${(await sha256Hex(`nimbus-auth-lastcode:${address}`)).slice(0, 40)}`;
+const codeTriesKey = async (address: string) =>
+  `nl:rl:code-addr:${(await sha256Hex(`nimbus-auth-code-tries:${address}`)).slice(0, 32)}`;
+/** The code as kept: a hash with the request's own id, which Redis never holds, so the six digits cannot be read back from it. */
+const codeHash = async (request: string, code: string) => sha256Hex(`nimbus-auth-code-value:${request}:${code}`);
 
 const sessionKey = async (id: string) =>
   `nl:auth:session:${(await sha256Hex(`nimbus-auth-session:${id}`)).slice(0, 40)}`;
@@ -469,21 +488,48 @@ export async function withinAddressLimit(email: string): Promise<boolean> {
   return (await addressLimitAnswer(email)) === "within";
 }
 
-/** Creates the one-time link and emails it. Returns false if nothing was sent. */
+/** Wrong codes one request may try before its code stops working (the link still works). */
+export const EMAIL_CODE_TRIES = 5;
+/** Code tries one address may take in the hour, all its requests together (Claude 4 on 652 [WG12]). */
+export const EMAIL_CODE_TRIES_PER_ADDRESS_HOUR = 10;
+
+/** A request's id that opens nothing, for an answer that must look like every other (the form's honeypot). */
+export function unusedSignInRequest(): string {
+  return randomToken();
+}
+
+/** What a request for a link answers: whether it was sent, and the request's id, which only the asking browser holds. */
+export type SignInRequest = { sent: boolean; request: string };
+
+/**
+ * Creates the one-time link and a six-digit code (652 [WG12]) and emails them
+ * together. The request's id goes back to the browser that asked, whatever
+ * the address, so it says nothing about who has an account; the code opens
+ * only with it. A new request leaves only its own code working.
+ */
 export async function sendSignInLink(
   email: string,
   origin: string,
   handle?: unknown,
-): Promise<boolean> {
+): Promise<SignInRequest> {
   const address = normaliseEmail(email);
+  const request = randomToken();
   // The demo store's owner is nobody (lib/house-store.ts): no link is made
   // for that address, so no session can ever be opened as it. The caller
   // answers as it does for any address, and says nothing about this one.
-  if (isHouseAddress(address)) return false;
+  if (isHouseAddress(address)) return { sent: false, request };
   const token = randomToken();
+  const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+  const link = await linkKey(token);
+  const record = await codeKey(request);
 
   await redisPipeline([
-    ["SET", await linkKey(token), address, "EX", LINK_TTL_SECONDS],
+    ["SET", link, address, "EX", LINK_TTL_SECONDS],
+    ["HSET", record, "k", link, "p", await linkCodeKey(token), "a", await lastCodeKey(address), "t", await codeTriesKey(address), "h", await codeHash(request, code), "n", 0],
+    ["EXPIRE", record, LINK_TTL_SECONDS],
+    ["SET", await linkCodeKey(token), record, "EX", LINK_TTL_SECONDS],
+    // Only the newest code of an address opens (Claude 4 on 652 [WG12]): an older one is refused by this mark.
+    ["SET", await lastCodeKey(address), record, "EX", LINK_TTL_SECONDS],
   ]);
 
   // The link lands on a page that asks for one tap. It deliberately does not
@@ -491,20 +537,25 @@ export async function sendSignInLink(
   // The store address typed on the home page rides in the link itself, only
   // when it is a valid one, so the address step opens with it filled in
   // (lib/handle-prefill.ts). It is not stored with the token or anywhere else.
-  const link = withPrefill(`${origin}/signin/confirm?token=${token}`, handle);
-  return sendEmail({ meter: { by: "company" },
+  const url = withPrefill(`${origin}/signin/confirm?token=${token}`, handle);
+  const sent = await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
     to: address,
     subject: "Your Marktmorgen login link",
     text: [
       "Here is your link to log in to Marktmorgen.",
       "",
-      link,
+      url,
       "",
-      "It works once and stops working in 15 minutes.",
+      "Or type this code on the page where you asked for the link:",
+      "",
+      code,
+      "",
+      "The link works once and stops working in 15 minutes, and so does the code: using one spends the other.",
       "If you did not ask for it, ignore this email — nothing happens.",
     ].join("\n"),
   });
+  return { sent, request };
 }
 
 /**
@@ -522,7 +573,19 @@ export async function takeSignInLink(token: string): Promise<string | null> {
   // open a session. GETDEL does it in a single command; where that command is
   // missing, the fallback keeps the guarantee by trusting the delete, not the
   // read — only the caller whose DEL actually removed the key gets in.
-  const key = await linkKey(token);
+  const email = await spendLinkKey(await linkKey(token));
+  // The link spends its code too (652 [WG12]). Should this fail, the code still cannot open: the link it spends is gone.
+  try {
+    const [record] = await redisPipeline([["GETDEL", await linkCodeKey(token)]]);
+    if (typeof record === "string" && record.startsWith("nl:auth:code:")) await redisPipeline([["DEL", record]]);
+  } catch (error) {
+    console.error("letting a login link's code go failed", error);
+  }
+  return email;
+}
+
+/** Reads and deletes a link's record in one step: only the caller whose delete removed it gets the address. */
+async function spendLinkKey(key: string): Promise<string | null> {
   let email: unknown;
   try {
     [email] = await redisPipeline([["GETDEL", key]]);
@@ -532,6 +595,66 @@ export async function takeSignInLink(token: string): Promise<string | null> {
     email = Number(removed) === 1 ? read : null;
   }
   return typeof email === "string" && email ? email : null;
+}
+
+/**
+ * What typing the emailed code answered: whose it was (the link spent with
+ * it, nothing opened yet), a wrong code with the tries left, too many wrong
+ * codes, a code past its time or spent, the code's shape, or unknown.
+ */
+export type CodeAnswer =
+  | { owner: string }
+  | { wrong: number }
+  | "blocked"
+  | "address-blocked"
+  | "expired"
+  | "invalid"
+  | "unknown";
+
+/**
+ * Spends a request's code (652 [WG12]). Every try is counted before the
+ * comparison, for the request and for the address, each read in its exact
+ * shape (CX-123 rule 24): unknown refuses and never opens. The comparison is
+ * in constant time against a hash. Right, it spends the same link record the
+ * link would, so only one of the two can ever open.
+ */
+export async function takeSignInCode(request: unknown, typed: unknown): Promise<CodeAnswer> {
+  if (!isRedisConfigured()) return "unknown";
+  if (typeof request !== "string" || !/^[0-9a-f]{64}$/.test(request)) return "expired";
+  const code = typeof typed === "string" ? typed.replace(/[\s-]/g, "") : "";
+  if (!/^\d{6}$/.test(code)) return "invalid";
+  const record = await codeKey(request);
+  const read = repliesFor(await redisPipeline([["HMGET", record, "k", "p", "a", "t", "h"]]), 1)?.[0];
+  if (!Array.isArray(read) || read.length !== 5) return "unknown";
+  if (read.every((field) => field === null)) return "expired";
+  const [link, pointer, last, tries, hash] = read;
+  if ([link, pointer, last, tries, hash].some((field) => typeof field !== "string") || !/^[0-9a-f]{64}$/.test(hash as string)) return "unknown";
+  // The tries, counted before anything is compared: the address's in the hour, then the request's own.
+  const counted = repliesFor(await redisPipeline([
+    ["SET", tries as string, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
+    ["INCR", tries as string],
+    ["HINCRBY", record, "n", 1],
+    ["GET", last as string],
+  ]), 4);
+  const forAddress = countOf(counted?.[1]);
+  const forRequest = countOf(counted?.[2]);
+  if (!counted || forAddress === null || forRequest === null || (counted[3] !== null && typeof counted[3] !== "string")) return "unknown";
+  if (counted[3] !== record) {
+    // A newer request for the address, or none left: only the newest code opens.
+    await redisPipeline([["DEL", record]]);
+    return "expired";
+  }
+  // Kept until its time runs out, so every later try is told the same: too many wrong codes, use the link.
+  if (forRequest > EMAIL_CODE_TRIES) return "blocked";
+  if (forAddress > EMAIL_CODE_TRIES_PER_ADDRESS_HOUR) return "address-blocked";
+  const expected = Buffer.from(hash as string, "hex");
+  const given = Buffer.from(await codeHash(request, code), "hex");
+  if (expected.length !== given.length || !timingSafeEqual(expected, given)) {
+    return { wrong: Math.max(0, EMAIL_CODE_TRIES - forRequest) };
+  }
+  const owner = await spendLinkKey(link as string);
+  await redisPipeline([["DEL", record, pointer as string]]).catch((error: unknown) => console.error("letting a spent code go failed", error));
+  return owner ? { owner } : "expired";
 }
 
 const googleKey = async (state: string) =>
@@ -661,10 +784,11 @@ const devicesKey = async (email: string) =>
   `nl:auth:devices:${(await sha256Hex(`nimbus-auth-devices:${normaliseEmail(email)}`)).slice(0, 40)}`;
 
 /** How a session was opened, for the email that tells the creator about it. */
-export type SignInWay = "link" | "passkey" | "invitation" | "google";
+export type SignInWay = "link" | "code" | "passkey" | "invitation" | "google";
 
 const WAY_WORDS: Record<SignInWay, string> = {
   link: "with a login link sent to this address",
+  code: "with a login code sent to this address",
   passkey: "with a passkey",
   invitation: "by accepting an invitation to a store's team",
   google: "with Google, which confirmed this address",

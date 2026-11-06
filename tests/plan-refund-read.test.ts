@@ -283,6 +283,25 @@ async function main() {
     world.historyReply = { path: "/charges", customer: partialHistory.customer, data };
     is("a charge history row needs its identity, state and time", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
   }
+  const currentHistory = world.charges.find((charge) => charge.customer === partialHistory.customer)!;
+  for (const status of ["unrecognized", "", "processing"]) {
+    world.historyReply = {
+      path: "/charges",
+      customer: partialHistory.customer,
+      data: [currentHistory, { ...currentHistory, id: `ch_unknownown${status.length}0001`, created: NOW - 40 * DAY, status, paid: true }],
+    };
+    is("an unknown status in this customer's history is unknown", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  }
+  const unknownOther = "cus_unknownother0001";
+  world.customers.set(unknownOther, partialHistory.email);
+  for (const status of ["unrecognized", "", "processing"]) {
+    world.historyReply = {
+      path: "/charges",
+      customer: unknownOther,
+      data: [{ ...currentHistory, id: `ch_unknownother${status.length}0001`, customer: unknownOther, created: NOW - 40 * DAY, status, paid: true }],
+    };
+    is("an unknown status in a same-address customer's history is unknown", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  }
   world.historyReply = null;
   world.down = true;
   is("Stripe failing: unknown", (await a.read()).refund, { kind: "unknown", reason: "stripe_unread" });

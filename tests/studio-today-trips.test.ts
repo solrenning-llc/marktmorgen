@@ -13,7 +13,8 @@
  * aims at 12 steps and 0.8 s and tightens the bounds below.
  *
  * What fails here:
- *   - more than 20 steps, or more than 1.05 s, at 40 ms a trip;
+ *   - more than 20 steps one after another at 40 ms a trip (the time is printed, not checked: a clock on a busy
+ *     machine measures the machine, while the steps are counted from the order of the trips);
  *   - more than 65 trips in all: each trip is a request to Upstash, so more of them is more cost per visit (MR);
  *   - a page that no longer loads for its owner (a redirect or a throw).
  */
@@ -28,7 +29,6 @@ import { done, is, part } from "./check";
 const DELAY_MS = 40;
 const MAX_STEPS = 20;
 const MAX_TRIPS = 65;
-const MAX_MS = 1050;
 
 async function main(): Promise<void> {
   redis.clear();
@@ -76,7 +76,6 @@ async function main(): Promise<void> {
   part(`Today at ${DELAY_MS} ms a Redis trip`);
   is("the page loads for its owner", loaded, true);
   is(`at most ${MAX_STEPS} steps one after another`, steps <= MAX_STEPS, true);
-  is(`at most ${MAX_MS} ms`, ms <= MAX_MS, true);
   is(`no more than ${MAX_TRIPS} trips in all`, trips <= MAX_TRIPS, true);
   done();
 }

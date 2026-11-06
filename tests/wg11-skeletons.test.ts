@@ -1,6 +1,6 @@
 /**
- * 651 [WG11], unit 1: the loading skeletons (app/**\/loading.tsx,
- * components/loading-skeleton.tsx). What fails here:
+ * 651 [WG11], unit 1: the loading skeletons (components/page-skeletons.tsx,
+ * components/loading-skeleton.tsx) and how a page shows one. What fails here:
  *   - a skeleton that is not busy exactly once, or that says anything to a
  *     screen reader other than one "Loading" in one status;
  *   - a pulse that also runs for somebody who asked for less motion;
@@ -8,44 +8,71 @@
  *   - a block a screen reader can see;
  *   - a skeleton laid out on another width than the page it stands in for,
  *     which is the jump the skeleton is there to prevent;
- *   - a loading file that reads anything (a fallback must draw at once).
+ *   - a skeleton that reads anything (a fallback must draw at once);
+ *   - a loading.tsx anywhere under app/. Next prefetches every dynamic route
+ *     under one from each link on screen ("a dynamic route is skipped unless
+ *     it has a loading.js boundary", node_modules/next/dist/docs/01-app/
+ *     02-guides/prefetching.md). On a store's pages that is a read of the
+ *     store per product link per visit, and in the studio a request per
+ *     link, none with a ceiling (AGENTS.md MR: no spending without one);
+ *   - a page whose skeleton is not the fallback of a <Suspense> in the page
+ *     itself, around the part that reads;
+ *   - a redirect inside that <Suspense>. Once the page has started to
+ *     stream, Next can only write <meta http-equiv="refresh"
+ *     content="1;url=…"> with a 200 (node_modules/next/dist/server/app-render/
+ *     make-get-server-inserted-html.js), a refresh on a timer (WCAG F41,
+ *     2.2.1, 3.2.5). So the page reads who is signed in and redirects first.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import StudioLoading from "@/app/studio/loading";
-import InboxLoading from "@/app/studio/inbox/loading";
-import LibraryLoading from "@/app/library/loading";
-import CourseLoading from "@/app/[handle]/course/[product]/loading";
-import ProductLoading from "@/app/[handle]/p/[product]/loading";
+import { InboxSkeleton, LibrarySkeleton, StudioTodaySkeleton } from "@/components/page-skeletons";
 import { done, is, part } from "./check";
 
 type Case = {
   name: string;
   draw: () => ReactElement;
-  source: string;
+  /** The skeleton's name in components/page-skeletons.tsx. */
+  skeleton: string;
   page: string;
+  /** The function the page's <Suspense> draws: everything that reads after the sign-in. */
+  body: string;
+  /** What the exported page may wait for before its <Suspense>: the request, and who is signed in. */
+  before: RegExp[];
   /** The real page's container: these class names stand together on one element of each. */
   outline: string[];
 };
 
+const SIGNED_IN = [/^searchParams\b/, /^cookies\(\)/, /^studioView\(/];
+
 const CASES: Case[] = [
-  { name: "studio home", draw: StudioLoading, source: "app/studio/loading.tsx", page: "app/studio/page.tsx", outline: ["container-page", "pb-20", "pt-10", "sm:pt-14"] },
-  { name: "studio inbox", draw: InboxLoading, source: "app/studio/inbox/loading.tsx", page: "app/studio/inbox/page.tsx", outline: ["container-page", "pb-20", "pt-10", "sm:pt-14"] },
-  { name: "library", draw: LibraryLoading, source: "app/library/loading.tsx", page: "app/library/page.tsx", outline: ["container-page", "py-14", "sm:py-20"] },
   {
-    name: "course page",
-    draw: CourseLoading,
-    source: "app/[handle]/course/[product]/loading.tsx",
-    page: "app/[handle]/course/[product]/page.tsx",
-    outline: ["relative", "mx-auto", "max-w-2xl", "px-4", "py-12", "sm:py-16"],
+    name: "studio home",
+    draw: StudioTodaySkeleton,
+    skeleton: "StudioTodaySkeleton",
+    page: "app/studio/page.tsx",
+    body: "StudioToday",
+    before: SIGNED_IN,
+    outline: ["container-page", "pb-20", "pt-10", "sm:pt-14"],
   },
   {
-    name: "product page",
-    draw: ProductLoading,
-    source: "app/[handle]/p/[product]/loading.tsx",
-    page: "app/[handle]/p/[product]/page.tsx",
-    outline: ["relative", "mx-auto", "max-w-2xl", "px-4", "pb-16", "pt-10", "sm:pt-14"],
+    name: "studio inbox",
+    draw: InboxSkeleton,
+    skeleton: "InboxSkeleton",
+    page: "app/studio/inbox/page.tsx",
+    body: "StudioInbox",
+    before: SIGNED_IN,
+    outline: ["container-page", "pb-20", "pt-10", "sm:pt-14"],
+  },
+  {
+    name: "library",
+    draw: LibrarySkeleton,
+    skeleton: "LibrarySkeleton",
+    page: "app/library/page.tsx",
+    body: "LibraryShelves",
+    before: [/^searchParams\b/],
+    outline: ["container-page", "py-14", "sm:py-20"],
   },
 ];
 
@@ -66,9 +93,31 @@ function lineWithAll(source: string, names: string[]): boolean {
   return source.split("\n").some((line) => names.every((name) => word(name).test(line)));
 }
 
+/** A top-level function of a file, from its first line to the closing brace at the start of a line; "" when there is none. */
+function topLevel(source: string, start: RegExp): string {
+  const at = source.search(start);
+  if (at < 0) return "";
+  const end = source.indexOf("\n}\n", at);
+  return end < 0 ? "" : source.slice(at, end + 2);
+}
+
+/** Every file named loading.* under a folder. */
+function loadingFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return loadingFiles(path);
+    return /^loading\.(?:tsx|ts|jsx|js|mdx)$/.test(entry.name) ? [path] : [];
+  });
+}
+
 function main(): void {
+  part("no loading file anywhere under app/");
+  is("app/ has no loading.tsx, loading.ts, loading.jsx or loading.js", loadingFiles("app"), []);
+  is("in particular none under app/[handle]/, a store's own pages", loadingFiles("app/[handle]"), []);
+
+  const skeletons = readFileSync("components/page-skeletons.tsx", "utf8");
   for (const c of CASES) {
-    part(`${c.name} (${c.source})`);
+    part(`${c.name} (${c.skeleton}, ${c.page})`);
     const html = renderToStaticMarkup(c.draw());
     const all = tags(html);
 
@@ -91,20 +140,31 @@ function main(): void {
     is("no picture", [/<img\b/, /<picture\b/, /<svg\b/, /<video\b/, /<iframe\b/].filter((p) => p.test(html)).map(String), []);
 
     const page = readFileSync(c.page, "utf8");
-    const source = readFileSync(c.source, "utf8");
     is(`the real page lays out on ${c.outline.join(" ")}`, lineWithAll(page, c.outline), true);
     is(`the skeleton lays out on the same ${c.outline.join(" ")}`, all.some((t) => c.outline.every((name) => t.classes.includes(name))), true);
-    // Only a constant of the code may come in (lib/opening.ts: whether the site's "still being built" line stands above the menu); nothing that reads.
-    is("the loading file reads nothing", [/\basync\b/, /\bawait\b/, /@\/lib\/(?!opening")/, /next\/headers/, /\bfetch\(/].filter((p) => p.test(source)).map(String), []);
+
+    // How the page shows it.
+    const exported = topLevel(page, /^export default (?:async )?function /m);
+    const body = topLevel(page, new RegExp(`^async function ${c.body}\\(`, "m"));
+    is("the exported page is found", exported.length > 0, true);
+    is(`the part that reads is its own function, ${c.body}`, body.length > 0, true);
+    is(`the exported page draws ${c.body} inside <Suspense fallback={<${c.skeleton} />}>`, new RegExp(`<Suspense fallback=\\{<${c.skeleton} />\\}>\\s*<${c.body}\\b[^>]*/>\\s*</Suspense>`).test(exported), true);
+    is(`${c.skeleton} comes from components/page-skeletons`, new RegExp(`import \\{[^}]*\\b${c.skeleton}\\b[^}]*\\} from "@/components/page-skeletons";`).test(page), true);
+    is("Suspense comes from react", /import \{[^}]*\bSuspense\b[^}]*\} from "react";/.test(page), true);
+    is(`no redirect inside ${c.body}`, [/\bredirect\(/, /\bpermanentRedirect\(/, /\bnotFound\(/].filter((p) => p.test(body)).map(String), []);
+    const suspenseAt = exported.indexOf("<Suspense");
+    is("every redirect of the page comes before its <Suspense>", [...exported.matchAll(/\bredirect\(/g)].filter((m) => (m.index ?? 0) > suspenseAt).length, 0);
+    const waits = [...exported.matchAll(/\bawait\s+([^;]+)/g)].map((m) => m[1].trim());
+    is("before its <Suspense> the page waits only for the request and who is signed in", waits.filter((w) => !c.before.some((p) => p.test(w))), []);
+    is("the skeleton is exported by name", new RegExp(`^export function ${c.skeleton}\\(\\)`, "m").test(skeletons), true);
   }
 
-  part("the shared pieces (components/loading-skeleton.tsx)");
+  part("the skeletons and their pieces read nothing");
+  // Only a constant of the code may come in (lib/opening.ts: whether the site's "still being built" line stands above the menu); nothing that reads.
+  is("components/page-skeletons.tsx reads nothing", [/\basync\b/, /\bawait\b/, /@\/lib\/(?!opening")/, /next\/headers/, /\bfetch\(/].filter((p) => p.test(skeletons)).map(String), []);
   const shared = readFileSync("components/loading-skeleton.tsx", "utf8");
-  is("no bare animate-pulse anywhere in it", shared.replace(/motion-safe:animate-pulse/g, "").includes("animate-pulse"), false);
-  is("no client code: it draws on the server at once", /^["']use client["']/m.test(shared), false);
-
-  part("a loading file wraps the nested routes too, and the studio's says so");
-  is("app/studio/loading.tsx explains that it stands in for every studio screen below it", /nested|below it|every studio/i.test(readFileSync("app/studio/loading.tsx", "utf8")), true);
+  is("no bare animate-pulse anywhere in the pieces", shared.replace(/motion-safe:animate-pulse/g, "").includes("animate-pulse"), false);
+  is("no client code: they draw on the server at once", [shared, skeletons].filter((s) => /^["']use client["']/m.test(s)).length, 0);
   done();
 }
 

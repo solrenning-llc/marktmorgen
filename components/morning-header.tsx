@@ -31,10 +31,17 @@ export function MorningHeader({ current }: { current?: "/pricing" }) {
       <a href="#content" className="hm-skip">Skip to the page content</a>
       {PLANS_ON_SALE ? null : (
         <div className="hm-topbar" data-preview-bar="">
-          <p>
+          <p className="hm-preview-wide">
             {PREVIEW_LINE}{" "}
             <a href={PREVIEW_LINK.href}>{PREVIEW_LINK.label}</a>
           </p>
+          <details className="hm-preview-compact">
+            <summary>Still being built. Plans closed.</summary>
+            <p>
+              {PREVIEW_LINE}{" "}
+              <a href={PREVIEW_LINK.href}>{PREVIEW_LINK.label}</a>
+            </p>
+          </details>
         </div>
       )}
       <header className="hm-top">

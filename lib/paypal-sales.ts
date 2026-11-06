@@ -45,7 +45,7 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { repliesFor, stringList } from "@/lib/redis-reply";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { plainAmount, formatMoney } from "@/lib/money";
@@ -990,6 +990,45 @@ export async function readPayPalSales(statsId: string | null, since: number, lim
     }
   }
   return { sales, partial };
+}
+
+/**
+ * The store's PayPal sales paid from `from` (inclusive) to `to` (exclusive),
+ * in seconds, read exactly, for a file books are filed from
+ * (lib/accounting-export.ts, queue item 37 [F6]): every order listed, each
+ * record whole and this store's, its amount in whole units, its currency and
+ * its time in the period. Anything else, or no answer, is null: not known,
+ * never fewer sales. `more` when there are more than `limit`. Read oldest
+ * first, `limit` + 1 names and the records of `limit` of them at the most.
+ */
+export async function readPayPalSalesExact(statsId: string | null, from: number, to: number, limit: number): Promise<{ sales: Paid[]; more: boolean } | null> {
+  if (!statsId) return { sales: [], more: false };
+  if (!isRedisConfigured() || !Number.isSafeInteger(from) || !Number.isSafeInteger(to) || to <= from || !Number.isSafeInteger(limit) || limit < 1) return null;
+  try {
+    const listed = repliesFor(await redisPipeline([["ZRANGEBYSCORE", salesKey(statsId), String(from), String(to - 1), "LIMIT", "0", String(limit + 1)]]), 1);
+    const orders = listed ? stringList(listed[0]) : null;
+    if (!orders || orders.some((order) => !ORDER_ID.test(order))) return null;
+    const more = orders.length > limit;
+    const wanted = orders.slice(0, limit);
+    if (!wanted.length) return { sales: [], more };
+    const read = repliesFor(await redisPipeline([["MGET", ...wanted.map(paidKey)]]), 1);
+    const records = read ? stringList(read[0]) : null;
+    if (!records || records.length !== wanted.length) return null;
+    const sales: Paid[] = [];
+    for (let i = 0; i < records.length; i += 1) {
+      const paid = JSON.parse(records[i]) as unknown;
+      if (typeof paid !== "object" || paid === null || Array.isArray(paid)) return null;
+      const p = paid as Record<string, unknown>;
+      const whole = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+      if (p.store !== statsId || p.order !== wanted[i] || typeof p.product !== "string" || !whole(p.cents) || typeof p.currency !== "string" || !/^[a-zA-Z]{3}$/.test(p.currency) || !whole(p.at) || (p.at as number) < from || (p.at as number) >= to) return null;
+      sales.push(paid as Paid);
+    }
+    return { sales, more };
+  } catch (error) {
+    // A record that is not JSON is not known, as any other shape; only a failure of the reading itself is logged.
+    if (!(error instanceof SyntaxError)) console.error("reading PayPal sales exactly failed", error);
+    return null;
+  }
 }
 
 /** The keys a PayPal order kept, by the order: for a closed store's deletion (lib/closed-store-data.ts). */

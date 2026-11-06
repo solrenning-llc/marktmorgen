@@ -1576,6 +1576,7 @@
     "components/test-counts-notice.tsx",
     "components/thanks-note-editor.tsx",
     "components/thanks-note-view.tsx",
+    "components/tier-benefits.tsx",
     "components/tier-editor.tsx",
     "components/tips-editor.tsx",
     "components/toast.tsx",
@@ -1894,6 +1895,7 @@
     "app/api/store/tax/route.ts",
     "app/api/store/team/route.ts",
     "app/api/store/thanks-note/route.ts",
+    "app/api/store/tier-benefits/route.ts",
     "app/api/store/tiers/route.ts",
     "app/api/store/tip/route.ts",
     "app/api/store/tips/route.ts",
@@ -2022,6 +2024,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 137
+    "pageTemplates": 138
   }
 }

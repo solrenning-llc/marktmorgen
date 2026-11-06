@@ -17,6 +17,9 @@ import { memberHealth } from "@/lib/member-health";
 import { AWAY_POINTS, BAND_NAMES, HEALTH_WORDS } from "@/lib/member-health-rules";
 import { can } from "@/lib/team-roles";
 import { MrrChart } from "@/components/mrr-chart";
+import { type BenefitsPanel, TierBenefits } from "@/components/tier-benefits";
+import { benefitsDue } from "@/lib/tier-benefits";
+import { MAX_GIVE_AT_ONCE } from "@/lib/tier-benefit-rules";
 
 export const metadata: Metadata = {
   title: "Membership numbers — Marktmorgen",
@@ -65,6 +68,39 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
       })
     : null;
   const seesBuyers = can(access.role, "orders");
+  // Benefits handed over by hand (422 [PT2]): for a role that may see buyers or change settings; read from Stripe only when there is one.
+  const benefitRoles = { define: can(access.role, "settings"), mark: seesBuyers };
+  const benefits: BenefitsPanel | null = numbers && (benefitRoles.define || benefitRoles.mark)
+    ? await benefitsDue(store).then(
+        (due): BenefitsPanel => {
+          if (due.state !== "ok") return due;
+          // At most MAX_GIVE_AT_ONCE waiting and as many marked a benefit go to the page; the rest are counted.
+          const more: Record<string, number> = {};
+          const rows = due.benefits.flatMap((b) => {
+            const own = due.rows.filter((r) => r.benefit === b.id);
+            const pending = own.filter((r) => r.given === null);
+            more[b.id] = Math.max(0, pending.length - MAX_GIVE_AT_ONCE);
+            return [...pending.slice(0, MAX_GIVE_AT_ONCE), ...own.filter((r) => r.given !== null).slice(0, MAX_GIVE_AT_ONCE)];
+          });
+          return {
+            state: "ok",
+            benefits: due.benefits,
+            rows: rows.map((r) => ({ benefit: r.benefit, sub: r.sub, email: seesBuyers ? r.email : "", period: r.period, until: r.until, given: seesBuyers ? r.given : r.given === "unknown" ? "unknown" : r.given ? { at: r.given.at, by: "" } : null })),
+            more,
+            waiting: due.waiting,
+            complete: due.complete,
+            unreadable: due.unreadable,
+          };
+        },
+        (error: unknown): BenefitsPanel => {
+          console.error("reading membership benefits failed", error);
+          return { state: "unknown", why: "stripe" };
+        },
+      )
+    : null;
+  const membershipProducts = benefits && benefitRoles.define
+    ? (await readListings(store).catch(() => [])).filter((p) => p.recurring).map((p) => ({ id: p.id, title: p.title }))
+    : [];
   // This month on the store's own cancel page (lib/leave-flow.ts), when it asks.
   const asked = numbers && store.leaving.on ? await leaveMonth(store.statsId).catch(() => null) : null;
   // One of the reasons the store's own page offers, or one the creator wrote (lib/leave-rules.ts).
@@ -290,6 +326,15 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                     <li>A membership with neither a course nor a community has nothing here that says how much it is used, so its score is about paying alone. It is a rule, not a prediction.</li>
                     {health.complete ? null : <li>Your Stripe account holds more memberships than one reading takes, so the oldest are not scored.</li>}
                   </ul>
+                </section>
+              ) : null}
+
+              {benefits ? (
+                <section aria-labelledby="benefits-title" className="card mt-8 p-6 sm:p-8" data-tier-benefits>
+                  <h2 id="benefits-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Benefits you hand over</h2>
+                  <div className="mt-2">
+                    <TierBenefits panel={benefits} memberships={membershipProducts} canDefine={benefitRoles.define} canMark={benefitRoles.mark} />
+                  </div>
                 </section>
               ) : null}
 

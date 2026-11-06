@@ -101,6 +101,7 @@ async function main(): Promise<void> {
   is("retired before the member joined: not owed", owedNow({ ...once, retired: ANCHOR - 1 }, member, NOW), { owed: false, why: "retired" });
   is("retired after they joined: still owed", owedNow({ ...once, retired: ANCHOR + 1 }, member, NOW).owed, true);
   is("monthly, retired before this month began: not owed", owedNow({ ...monthly, retired: (win?.from ?? 0) - 1 }, member, NOW), { owed: false, why: "retired" });
+  is("monthly, retired: a member still in a free trial will never be owed it, so is not counted as waiting", owedNow({ ...monthly, retired: NOW - DAY }, { ...member, status: "trialing", anchor: NOW + 5 * DAY }, NOW), { owed: false, why: "retired" });
   is("monthly, added after this month ended cannot be owed for it", owedNow({ ...monthly, since: NOW + DAY }, member, NOW), { owed: false, why: "before" });
 
   part("Defining benefits on a membership");
@@ -122,14 +123,14 @@ async function main(): Promise<void> {
   is("words too long are refused, never cut", await addBenefit(store, { product: products.basic, text: "x".repeat(MAX_BENEFIT_TEXT + 1), cadence: "once" }, NOW * 1000), { ok: false, reason: "text" });
   is("once or monthly only", await addBenefit(store, { product: products.basic, text: "A print", cadence: "weekly" }, NOW * 1000), { ok: false, reason: "cadence" });
   const print = await addBenefit(store, { product: products.basic, text: "A signed print", cadence: "once" }, (ANCHOR - DAY) * 1000);
-  const call = await addBenefit(store, { product: products.basic, text: "A monthly call", cadence: "monthly" }, (ANCHOR - DAY) * 1000);
+  const call = await addBenefit(store, { product: products.basic, text: "A monthly call", cadence: "monthly" }, (ANCHOR - DAY + 1) * 1000);
   if (!print.ok || !call.ok) throw new Error("benefits not added");
   for (let i = 0; i < MAX_BENEFITS_PER_TIER - 2; i += 1) await addBenefit(store, { product: products.pro, text: `Extra ${i}`, cadence: "once" }, NOW * 1000);
   await addBenefit(store, { product: products.pro, text: "Extra 3", cadence: "once" }, NOW * 1000);
   await addBenefit(store, { product: products.pro, text: "Extra 4", cadence: "once" }, NOW * 1000);
   is(`at most ${MAX_BENEFITS_PER_TIER} running on one membership`, await addBenefit(store, { product: products.pro, text: "One too many", cadence: "once" }, NOW * 1000), { ok: false, reason: "full_tier" });
   const kept = await readBenefits(store);
-  is("each kept with its membership, its words, how often and since when", kept?.filter((b) => b.product === products.basic).map((b) => [b.text, b.cadence, b.since, b.retired]), [["A signed print", "once", ANCHOR - DAY, 0], ["A monthly call", "monthly", ANCHOR - DAY, 0]]);
+  is("each kept with its membership, its words, how often and since when", kept?.filter((b) => b.product === products.basic).map((b) => [b.text, b.cadence, b.since, b.retired]), [["A signed print", "once", ANCHOR - DAY, 0], ["A monthly call", "monthly", ANCHOR - DAY + 1, 0]]);
 
   part("Who is still waiting");
   store = (await storeForEmail(owner))!;

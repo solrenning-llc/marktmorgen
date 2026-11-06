@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { apiNumbers } from "@/lib/api-numbers";
+import { apiNumbers, keptNumbersCopy, openKeptNumbers } from "@/lib/api-numbers";
 import { emptyCatalog } from "@/lib/catalog";
+import type { StatsData } from "@/lib/stats";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 
@@ -161,4 +162,24 @@ test("a copy removed between its exact size and GET still permits the separately
   } finally {
     redis.pipeline = pipeline;
   }
+});
+
+test("a kept copy whose paid content changed without its identity header is unknown", () => {
+  const now = Date.now();
+  const data = {
+    days: [],
+    totals: { d7: { cents: 0 } },
+    sales: "ok",
+    partial: false,
+  } as unknown as StatsData;
+  const raw = keptNumbersCopy(shop, "plain", data, now);
+  assert.ok(raw);
+  assert.deepEqual(openKeptNumbers(shop, "plain", raw, now)?.data, data);
+
+  const end = raw.indexOf("\n");
+  const changed = JSON.parse(raw.slice(end + 1)) as { totals: { d7: { cents: unknown } } };
+  changed.totals.d7.cents = "unreadable";
+  const altered = raw.slice(0, end + 1) + JSON.stringify(changed);
+
+  assert.equal(openKeptNumbers(shop, "plain", altered, now), null);
 });

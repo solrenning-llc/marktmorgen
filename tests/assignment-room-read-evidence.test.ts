@@ -31,11 +31,29 @@ async function roomFrom(reply: unknown[]): Promise<{ fits: boolean | "unknown"; 
 }
 
 test("an unknown assignment-room read never becomes zero free usage", async () => {
-  for (const reply of [[], [undefined], ["not-a-number"], [{}], ["1e3"], [" 5"], ["-1.5"], ["0x10"], [true], [null, null]]) {
+  for (const reply of [
+    [],
+    [undefined],
+    ["not-a-number"],
+    [{}],
+    ["1e3"],
+    [" 5"],
+    ["-1.5"],
+    ["0x10"],
+    [true],
+    [null, null],
+  ]) {
     const result = await roomFrom(reply);
     assert.equal(result.fits, "unknown", `unknown room evidence must refuse before upload: ${JSON.stringify(reply)}`);
     assert.deepEqual(result.commands, [["GET", `nl:tasks:bytes:${ROOM}`]], "the proof reaches only the existing bounded read");
   }
+});
+
+test("a numeric GET reply is unknown even when its value looks usable", async () => {
+  const replies = [[0], [-10], [LIMIT - FILE_BYTES]];
+  const results = [];
+  for (const reply of replies) results.push((await roomFrom(reply)).fits);
+  assert.deepEqual(results, ["unknown", "unknown", "unknown"], "GET stores counters as text; numbers are not exact evidence");
 });
 
 test("known assignment-room counts retain their exact boundary", async () => {

@@ -1,0 +1,39 @@
+
+LOG g2581-c96-canonical-red.log SHA256 229791b9f6e15953f94e766d4e86f85657594a28e6606bb1862f27f28af1a0e4
+6 checks, 3 failing.
+
+A variation selector never disguises a mixed-alphabet urgency word
+  FAIL  variation selector U+FE0E cannot disguise mixed-script urgency
+        expected false
+        got      true
+  FAIL  variation selector U+FE0F cannot disguise mixed-script urgency
+        expected false
+        got      true
+  FAIL  variation selector U+E0100 cannot disguise mixed-script urgency
+        expected false
+        got      true
+
+Controls
+  ok    ordinary urgency refused
+  ok    legitimate emoji selector preserved
+  ok    legitimate Cyrillic text preserved
+
+6 checks, 3 failing.
+
+
+LOG g2581-c96-green.log SHA256 924757d2d121ec923dedabe1de574becf395626e82089db62dbeb97214979cee
+6 checks, all passing.
+6 checks, all passing.
+1036 checks, all passing.
+9 checks, all passing.
+
+LOG g2581-c96-types.log SHA256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+EMPTY: True
+
+LOG g2581-c96-lint.log SHA256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+EMPTY: True
+
+LOG g2581-c96-scan.log SHA256 62d8244b0f1d11575d2e90f6894db7c90f0408c2903f94a1b46addc23e3cc057
+Public data check: 3753 tracked files; 0 file(s) require correction.

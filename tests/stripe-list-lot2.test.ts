@@ -41,7 +41,7 @@ async function membershipProof(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "lottworeviews", "Lot two reviews", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1LotTwoReviews01", true);
+  await setStripeAccount(OWNER, "acct_1LotTwoReview1", true);
   await setSubscription(OWNER, { customerId: "cus_LotTwo000001", subscriptionId: "sub_LotTwo000001", active: true, tier: "creator", trialEnds: 0, period: paidPeriod() });
   const made = await addProduct(OWNER, "Weekly Club", "", "10", null);
   if (!made.ok) throw new Error("no product");

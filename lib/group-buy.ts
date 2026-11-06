@@ -51,7 +51,6 @@ import { addressHash, grantImported, importedKey } from "@/lib/imported-purchase
 import { bundleFromMeta } from "@/lib/bundle-rules";
 import { onAccount } from "@/lib/stripe-account";
 import { refundRowKnown } from "@/lib/refunds";
-import { countOf, repliesFor } from "@/lib/redis-reply";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, readStripePage, type StripePage } from "@/lib/stripe-list";
 import { formatMoney } from "@/lib/money";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";

@@ -23,20 +23,25 @@ const STATUSES = ["sent", "email", "limited", "closed", "error"] as const;
 /** Its height in a frame: the form, its box and its line, or the answer. */
 const FRAME_HEIGHT = 420;
 
-const load = cache(async (raw: string): Promise<Store | null> => {
+/** The store, null for one that is not there, or "unread" for a read that failed: never "not there" (CX-123 rule 24). */
+const load = cache(async (raw: string): Promise<Store | null | "unread"> => {
   let decoded = "";
   try {
     decoded = decodeURIComponent(raw);
   } catch {
     return null;
   }
-  const store = await storeForPage(normaliseHandle(decoded.replace(/^@/, ""))).catch(() => null);
-  return store && !store.suspended ? store : null;
+  try {
+    const store = await storeForPage(normaliseHandle(decoded.replace(/^@/, "")));
+    return store && !store.suspended ? store : null;
+  } catch {
+    return "unread";
+  }
 });
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const store = await load((await params).handle);
-  return { title: store ? `${joinWords(store.language).pageTitle} — ${store.name}` : "Email list", robots: { index: false, follow: false } };
+  return { title: store && store !== "unread" ? `${joinWords(store.language).pageTitle} — ${store.name}` : "Email list", robots: { index: false, follow: false } };
 }
 
 /**
@@ -58,7 +63,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  */
 export default async function EmbedJoin({ params, searchParams }: Params) {
   await connection();
-  const store = await load((await params).handle);
+  const found = await load((await params).handle);
   const query = await searchParams;
   const mode = scriptMode(query.mm) ?? "page";
   const framed = mode === "overlay";
@@ -80,9 +85,14 @@ export default async function EmbedJoin({ params, searchParams }: Params) {
       </div>
     );
 
-  if (!store) {
+  if (found === "unread") {
+    // The store could not be read, so neither could its language: in English, as for a store that is not there.
+    return shell(<p className="st-muted text-sm">This form could not be loaded just now. Try again in a moment.</p>, "en", {}, "light");
+  }
+  if (!found) {
     return shell(<p className="st-muted text-sm">{joinWords("en").notices.closed.title}</p>, "en", {}, "light");
   }
+  const store = found;
 
   const open = await readScriptOpen(store, mode, query);
   const w = joinWords(store.language);

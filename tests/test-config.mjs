@@ -23,6 +23,7 @@ export function testAliases(file,root,here){
  }
  if(file==='preview-counter-admission.test.ts')for(const name of ['redis','store','store-request','catalog','traffic','pdf-preview','serve-file'])aliases['@/lib/'+name]=join(here,'preview-counter-admission-world.ts');
  if(file==='flow-stop-action.test.ts')aliases['@/lib/ses']=join(here,'flow-stop-ses-network.ts');
+ if(file==='thanks-note-unread.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}
  if(!['order-email-fallback.test.ts','resend-fallback-budget.test.ts','auth-mail-unavailable.test.ts','course-link-mail-unavailable.test.ts','email-meter-preflight.test.ts'].includes(file))aliases['@/lib/resend-fallback-transport']=join(here,'resend-fallback-fixture.ts');
  if(file==='customer-base-fixed-evidence.test.ts')for(const [name,fixture] of [['upload-budget-policy','upload-budget-approved-policy'],['ai-spend-policy','commercial-ai-approved-policy'],['llc-fixed-costs','llc-fixed-approved-policy']])aliases['@/lib/'+name]=join(here,fixture+'.ts');
  if(file==='meeting-withdrawal-page.test.ts'){

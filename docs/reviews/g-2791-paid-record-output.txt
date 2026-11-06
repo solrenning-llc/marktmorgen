@@ -1,0 +1,179 @@
+
+LOG g2791-87-original-red-extra.log SHA256 b5bb40f81573878119b5003859dc0f0d57216e38df323f585bdac62dfe337d30
+62 checks, 2 failing.
+
+LOG g2791-87-original-green-extra.log SHA256 0d11bc0899b711fd439b9434a9fd7882a6ec829c1bf0b60272ce48b19eebc509
+62 checks, all passing.
+
+LOG g2791-87-original-green-control.log SHA256 e3693c7df352b9a14c4ee99313f8c21250e445932039600066fd374ea05eb8de
+62 checks, all passing.
+
+LOG g2791-87-original-green-empty.log SHA256 63b747c1abc94a61450f58a0805f9ea0f71948bc8bb971049c425d6d2662bcef
+62 checks, all passing.
+
+LOG g2791-87-original-green-queued.log SHA256 dbb95c1d5378b092caf35a4b21c7710871ca19668a3bd5c67f4d81f960c5f1e8
+62 checks, all passing.
+
+LOG g2791-87-canonical-red.log SHA256 530a52a2e3da33ad7eb24ebc5cd7c3f69bb1c7ce11294a4895aeebf7d1f391ca
+62 checks, 2 failing.
+
+LOG g2791-87-canonical-green.log SHA256 8276c03950816161e765704d93eaf326ecd48030795774a795d9b1f9ad7926e7
+62 checks, all passing.
+
+LOG g2791-87-paid-extra.log SHA256 2edfb30d36fdb8979c39d4773d0706af8032ce3ac794904972ac336209d4cde2
+62 checks, 2 failing.
+  FAIL  G: unknown receipt keeps this order on the watch
+        expected true
+        got      false
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":1,"purchases":["Sourdough Guide"],"dropped":[]}
+  FAIL  G: healthy retry removes the refunded purchase
+        expected 0
+        got      1
+
+LOG g2791-87-paid-head-control.log SHA256 0ca5847ac3050a3e683489a2562f937e3803f948fa2e5cf2b7bde2bc365a0608
+62 checks, all passing.
+
+LOG g2791-87-paid-head-empty.log SHA256 0934e7f0eba1a4e9bce08b17669e1f8400f7166a873f602e9d225b512ccb25ed
+62 checks, 2 failing.
+
+LOG g2791-87-paid-head-queued.log SHA256 10e6027312b4c56838eea77bae90c6cb8202bb203e8adac96474463fcba0caef
+62 checks, 2 failing.
+
+LOG g2791-87-paid-old-extra.log SHA256 0e203cf97026146a4a7ffb5924f1e48abcb3e7c5e99d4093feeba70e7ba67b97
+62 checks, 2 failing.
+
+LOG g2791-87-pair-yes-extra.log SHA256 a30f6eaf220e3a645f0c2520606b9be3841324196e3afc9f8160fe6ed8cde5ff
+62 checks, all passing.
+
+LOG g2791-87-pair-yes-empty.log SHA256 daaf2f38b495fa2777afaddfab4c62109905399cbd0bfda1ee966124d6aac56a
+62 checks, all passing.
+
+LOG g2791-87-pair-yes-queued.log SHA256 764af3fcdc3cbf0f69006b56c57ad1549619c7728e9d449237f52c51d0e83f93
+62 checks, all passing.
+
+LOG g2791-87-pair-yes-members.log SHA256 46ec5103ea46b54d2cd04656297ed18caf4555daffe854417b82a8998fead5c3
+62 checks, all passing.
+
+LOG g2791-87-pair-yes-missing.log SHA256 976f2538307862a75221ab1200ea4f0f6b349deb2a99c3ee4ab2930d31549828
+62 checks, all passing.
+
+LOG g2791-87-pair-no-extra.log SHA256 7e3702f5f08030a958fed46101badbb7b88da7f8d81c90513e0dd2cbea49a8f8
+62 checks, all passing.
+
+LOG g2791-87-pair-no-empty.log SHA256 068248a7c481fe2d795179f81a9bc285958205afcd7d2730cad1b3a046277e5f
+62 checks, all passing.
+
+LOG g2791-87-pair-yes-control.log SHA256 854306a073e07aa5f35286dc277cbc0e09823895506897966f18736733ae5c9d
+62 checks, all passing.
+
+LOG g2791-87-linked.log SHA256 9136d0e2094ec39b2db3e111e6b2109ad87588e8ba97d02b9ff550a2e16767b4
+31 checks, all passing.
+54 checks, all passing.
+51 checks, all passing.
+12 checks, all passing.
+25 checks, all passing.
+31 checks, all passing.
+9 checks, all passing.
+13 checks, all passing.
+29 checks, all passing.
+60 checks, all passing.
+70 checks, all passing.
+ℹ tests 1
+ℹ pass 1
+ℹ fail 0
+ℹ skipped 0
+12 checks, all passing.
+10 checks, all passing.
+84 checks, all passing.
+93 checks, all passing.
+35 checks, all passing.
+14 checks, all passing.
+4 checks, all passing.
+21 checks, all passing.
+34 checks, all passing.
+61 checks, all passing.
+39 checks, all passing.
+30 checks, all passing.
+67 checks, all passing.
+37 checks, all passing.
+ℹ tests 10
+ℹ pass 10
+ℹ fail 0
+ℹ skipped 0
+19 checks, all passing.
+49 checks, all passing.
+ℹ tests 16
+ℹ pass 16
+ℹ fail 0
+ℹ skipped 0
+15 checks, all passing.
+ℹ tests 21
+ℹ pass 21
+ℹ fail 0
+ℹ skipped 0
+64 checks, all passing.
+13 checks, all passing.
+12 checks, all passing.
+67 checks, all passing.
+13 checks, all passing.
+17 checks, all passing.
+32 checks, all passing.
+ℹ tests 4
+ℹ pass 4
+ℹ fail 0
+ℹ skipped 0
+77 checks, all passing.
+831 checks, all passing.
+186 checks, all passing.
+182 checks, all passing.
+ℹ tests 6
+ℹ pass 6
+ℹ fail 0
+ℹ skipped 0
+103 checks, all passing.
+21 checks, all passing.
+93 checks, all passing.
+14 checks, all passing.
+64 checks, all passing.
+18 checks, all passing.
+
+LOG g2791-87-types.log SHA256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+EMPTY: True
+
+LOG g2791-87-lint.log SHA256 3f7fe5cfd7a2a26f012ecfed7b94e61dc45c08d3c9b98791c66899665a238e4b
+
+
+/tmp/g2791-return-87b/tests/g2791-ownership-pair.proof.ts
+  25:23  warning  'ensureStoreId' is defined but never used            @typescript-eslint/no-unused-vars
+  38:3   warning  'readPaid' is defined but never used                 @typescript-eslint/no-unused-vars
+  51:10  warning  'NextRequest' is defined but never used              @typescript-eslint/no-unused-vars
+  52:10  warning  'openSession' is defined but never used              @typescript-eslint/no-unused-vars
+  52:23  warning  'SESSION_COOKIE' is defined but never used           @typescript-eslint/no-unused-vars
+  53:17  warning  'returnPayPalSeller' is defined but never used       @typescript-eslint/no-unused-vars
+  71:5   warning  'paypalRequests' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/tmp/g2791-return-87b/tests/g2791-paid-record-envelope.proof.ts
+  25:23  warning  'ensureStoreId' is defined but never used            @typescript-eslint/no-unused-vars
+  38:3   warning  'readPaid' is defined but never used                 @typescript-eslint/no-unused-vars
+  51:10  warning  'NextRequest' is defined but never used              @typescript-eslint/no-unused-vars
+  52:10  warning  'openSession' is defined but never used              @typescript-eslint/no-unused-vars
+  52:23  warning  'SESSION_COOKIE' is defined but never used           @typescript-eslint/no-unused-vars
+  53:17  warning  'returnPayPalSeller' is defined but never used       @typescript-eslint/no-unused-vars
+  71:5   warning  'paypalRequests' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/tmp/g2791-return-87b/tests/g2791-paypal-record-envelope.test.ts
+  26:23  warning  'ensureStoreId' is defined but never used            @typescript-eslint/no-unused-vars
+  39:3   warning  'readPaid' is defined but never used                 @typescript-eslint/no-unused-vars
+  52:10  warning  'NextRequest' is defined but never used              @typescript-eslint/no-unused-vars
+  53:10  warning  'openSession' is defined but never used              @typescript-eslint/no-unused-vars
+  53:23  warning  'SESSION_COOKIE' is defined but never used           @typescript-eslint/no-unused-vars
+  54:17  warning  'returnPayPalSeller' is defined but never used       @typescript-eslint/no-unused-vars
+  72:5   warning  'paypalRequests' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+✖ 21 problems (0 errors, 21 warnings)
+
+
+
+LOG g2791-87-scan.log SHA256 0276446561cc4e5565baa6b462e8d26341579dfa307a953d7e7730b9a82400aa
+Public data check: 3919 tracked files; 0 file(s) require correction.

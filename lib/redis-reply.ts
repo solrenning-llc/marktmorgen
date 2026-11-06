@@ -7,11 +7,19 @@
  * caller decides what failing closed means there (keep what it would have
  * deleted, refuse, or say it could not read).
  *
- * Node runtime only: `types.isProxy` comes from node:util. No importer is an
- * edge route, and no client bundle reaches this file (only server actions and
- * type imports do); Next 16's proxy.ts also runs on Node.
+ * Node's isProxy (node:util) is read at run time through
+ * process.getBuiltinModule (Node 20.16+/22.3+; CI and the server run Node 22/24)
+ * rather than imported, so a client bundle that reaches this file through a
+ * shared module (components/blog-body.tsx -> lib/store-blog.ts) still builds: in
+ * a browser there is no Redis reply to read, and no Proxy check is needed there.
  */
-import { types } from "node:util";
+type ProxyCheck = (value: unknown) => boolean;
+const isProxy: ProxyCheck = (() => {
+  const host = typeof process === "undefined" ? undefined : (process as { getBuiltinModule?: (id: string) => unknown });
+  const util = host?.getBuiltinModule?.("node:util") as { types?: { isProxy?: unknown } } | undefined;
+  const check = util?.types?.isProxy;
+  return typeof check === "function" ? (check as ProxyCheck) : () => false;
+})();
 
 /**
  * A list's own data slots, as a fresh plain list, with no code of the reply
@@ -23,7 +31,7 @@ import { types } from "node:util";
  * and the whole answer is null. With `expected`, the length must be exactly it.
  */
 function ownSlots(reply: unknown, expected?: number): unknown[] | null {
-  if (types.isProxy(reply) || !Array.isArray(reply)) return null;
+  if (isProxy(reply) || !Array.isArray(reply)) return null;
   const length = Object.getOwnPropertyDescriptor(reply, "length");
   if (!length || !Object.hasOwn(length, "value")) return null;
   const count: unknown = length.value;

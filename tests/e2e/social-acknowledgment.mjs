@@ -88,6 +88,10 @@ export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource
     if(scenario.confirmed){
      await page.locator(".nb-toast-region [role=status]").getByText(success,{exact:true}).waitFor({state:"attached"});
      is("confirmed profile editor closes "+name,await form.count(),0);
+     // React removes the form before it runs useLeaveGuard's effect cleanup, so the protection is released a moment
+     // after the form is gone (WebKit, #2808 job 128017854896). Wait until a fresh beforeunload is no longer held back,
+     // within Playwright's usual timeout; a protection that is never released still fails here.
+     await page.waitForFunction(()=>window.dispatchEvent(new Event("beforeunload",{cancelable:true})));
      is("confirmed profiles release unload protection "+name,await page.evaluate(()=>!window.dispatchEvent(new Event("beforeunload",{cancelable:true}))),false);
     }else{
      const alert=form.getByRole("alert");await alert.waitFor();

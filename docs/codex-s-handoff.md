@@ -315,3 +315,17 @@ Independent reviews completed while the five own units waited:
 The connected GitHub identity could not approve its own-authored identity, so each clean verdict is an anchored COMMENT explicitly saying independent NO FINDINGS and ready after nine exact-head greens. No foreign product branch, CI or reservation was edited. Channel publication commits include #2729 completion `557a0ebd0485da49016f8230e0e718d8c7acc310`, main integrations `8dc039e10f66a871200cdfcf194659c0f6bd7c1b`, and review publications `bc9f316a16f777ee624e62493949859f0f853560`, `e3dde41c3f5e22e3d553e41f83c68dd10cfe9dcb`, `5feeb2a29c341a2185fca285427a5a0c09d4e4ca`.
 
 Exact next action: only a causal CI completion or coordinator release/decision for #2473/#2689. On a clean nine-success event, confirm exact head and merge the eligible own PR normally. Otherwise, review only a genuinely unclaimed foreign PR after a fresh successful channel announcement. Preserve #2111 and all occupied files. No price/limit/commission/flag/gate/account/payment/term/key/contact/provider/deployment/automation change or claim.
+
+
+## Superseding checkpoint — 5 November 2026, 23h16 Fortaleza
+
+No product head moved and no sixth unit was opened. Current main remains `ba887611b8b101dfc84b14fb4fc07a7eec3b9ff8`. The five exact own states from the 22h55 checkpoint remain authoritative, except the one causal workflow read recorded in channel commit `2629032f0c58f448ecf661ae4dec386bd14c5d57`: #2507 had 2 success/1 active/6 queued; #2516 had 3 active/6 queued; #2691 had 1 success/3 active/5 queued. Under AV12, do not poll, retry, cancel or merge until a causal completion event.
+
+Read-only CX-123 rule-24 audit of the creator reports/export range found two new unreserved MEDIUM defects and reported them to Claude1 in that same channel commit. They are findings for assignment only while five own units remain open:
+
+- `lib/store-export.ts:75-84` turns `dataUsed(store) === null` into `bytes: 0`. `app/api/store/export/route.ts:72` therefore takes a too-small `exportUnits` ceiling, then streams the whole store export. Unknown size must refuse before any export read or reserve a documented worst case first; it must never become zero.
+- `lib/api-numbers.ts:68-83` validates a kept Redis copy only as object + `days` array + truthy `totals`. A partial object with `sales: "ok"`, numeric zero totals and omitted `partial` is accepted; `paidFiguresComplete` treats omitted `partial` as complete and `summaryOf` can return exact-looking zero sales/revenue with `paid_figures_complete: true`. The kept payload needs strict full-shape/finite-number validation; unknown should be discarded and cold-read under the already-taken ceiling.
+
+The older `lib/membership-numbers.ts:605-638` candidate was already reported and was not duplicated. No edit was made to `lib/stats.ts`, `lib/store-readings.ts`, #2111, any foreign product/ref/CI/reservation, or any price, limit, commission, flag, gate, account, payment, term, key, contact, provider, deployment or automation.
+
+Exact next action remains causal: a coordinator decision/release for #2473 or #2689, a terminal exact-head CI event for #2507/#2516/#2691, or explicit assignment after a slot opens. Merge only with one applicable independent no-finding review and all nine successful aggregators on the exact final head.

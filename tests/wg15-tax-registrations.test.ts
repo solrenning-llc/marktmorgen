@@ -16,6 +16,7 @@ import {
   readTaxRegistrations,
   taxLocationsPage,
 } from "@/lib/tax-registrations";
+import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -28,9 +29,12 @@ const reg = (id: string, over: Record<string, unknown> = {}) => ({
 });
 let pages: unknown[] = [];
 let asked: URL[] = [];
+/** The Stripe-Version header each read sent (Claude 4 on #2735). */
+let versions: (string | null)[] = [];
 let failing = false;
-globalThis.fetch = (async (input: string | URL | Request) => {
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
+  versions.push(new Headers(init?.headers).get("Stripe-Version"));
   if (url.hostname !== "api.stripe.com" || url.pathname !== "/v1/tax/registrations") return new Response("{}", { status: 404 });
   asked.push(url);
   if (failing) return new Response(JSON.stringify({ error: { message: "down" } }), { status: 500 });
@@ -43,6 +47,7 @@ async function fresh(list: unknown[]) {
   redis.clear();
   pages = list;
   asked = [];
+  versions = [];
   return readTaxRegistrations(store);
 }
 
@@ -105,6 +110,10 @@ async function main(): Promise<void> {
   const healed = await readTaxRegistrations(store);
   is("Stripe asked again, and the answer used", [asked.length, healed.state === "ok" ? healed.list[0]?.id : healed.state], [1, "taxreg_J1"]);
 
+  part("The read names its Stripe version (Claude 4 on #2735)");
+  await fresh([{ object: "list", data: [reg("taxreg_V1")], has_more: false }]);
+  is("every read sends the pinned Stripe-Version", versions.length > 0 && versions.every((v) => v === STRIPE_VERSION), true);
+
   part("No Stripe account connected");
   is("said as none", (await readTaxRegistrations({ stripeAccountId: null })).state, "none");
 
@@ -117,6 +126,11 @@ async function main(): Promise<void> {
   is("for a role with payments only", /studioView\(await cookies\(\), [^,]+, "payments"\)/.test(page), true);
   is("says what it is", page.includes("This is information from your Stripe account, not tax advice."), true);
   is("unknown is said as unknown", page.includes("We could not read this"), true);
+  // Claude 4 on #2735: Stripe adds tax only when tax is on in this store's checkout (lib/tax.ts, applyTax).
+  is("says tax is added only while it is on in the checkout", page.includes("Tax is on in your checkout: Stripe adds it only where you have an active registration."), true);
+  is("and says none is added while it is off, even where registered", page.includes("Tax is off in your checkout, so Stripe adds none now, even where you are registered."), true);
+  is("the sentence follows the store's own setting", /store\.tax\.enabled \?/.test(page), true);
+  is("never says tax is added whatever the setting", page.includes("Stripe adds tax at your\n            checkout only where you have one"), false);
   is("no threshold, no coverage", /threshold|you are covered|fully covered|compliant/i.test(page), false);
   done();
 }

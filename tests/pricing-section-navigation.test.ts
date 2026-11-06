@@ -40,7 +40,7 @@ test("the page maps every canonical group, row, period, note and plan value", ()
 
 test("the index is sticky and touch-sized using pricing-only CSS, without hiding rows", () => {
   const css = existsSync("app/pricing/pricing.css") ? readFileSync("app/pricing/pricing.css", "utf8") : "";
-  assert.match(css, /\.pricing-section-index\s*\{[^}]*position:\s*sticky/s);
-  assert.match(css, /\.pricing-section-index a\s*\{[^}]*min-height:\s*44px/s);
+  assert.match(css, /\.pricing-section-index\s*\{[^}]*position:\s*sticky/);
+  assert.match(css, /\.pricing-section-index a\s*\{[^}]*min-height:\s*44px/);
   assert.doesNotMatch(css, /display:\s*none|visibility:\s*hidden|overflow:\s*hidden/);
 });

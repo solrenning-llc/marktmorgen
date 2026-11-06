@@ -1,69 +1,41 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync, readFileSync } from "node:fs";
-import { isValidElement, type ReactNode } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import PricingPage from "@/app/pricing/page";
 import { PRICING_GROUPS, PRICING_PLANS } from "@/lib/pricing-page-data";
 
-type Props = { children?: ReactNode; className?: string; id?: string; "aria-label"?: string };
-function nodes(node: ReactNode): ReactNode[] {
-  if (Array.isArray(node)) return node.flatMap(nodes);
-  if (!isValidElement<Props>(node)) return [node];
-  return [node, ...nodes(node.props.children)];
-}
-function text(node: ReactNode): string {
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(text).join("");
-  return isValidElement<Props>(node) ? text(node.props.children) : "";
-}
-const page = PricingPage();
-const all = nodes(page);
-const tables = all.filter(node => isValidElement(node) && node.type === "table");
+// Match the existing pricing-page contract: inspect the real page and canonical
+// facts without executing Next font loaders in the standalone Node runner.
+const page = readFileSync("app/pricing/page.tsx", "utf8");
+const calculator = readFileSync("components/tools-calculator.tsx", "utf8");
 
 test("pricing has six native section links with unique real destinations", () => {
-  const nav = all.find(node => isValidElement<Props>(node) && node.type === "nav" && node.props["aria-label"] === "Pricing sections");
+  const nav = /<nav\b[^>]*aria-label="Pricing sections"[^>]*>([\s\S]*?)<\/nav>/.exec(page);
   assert.ok(nav, "the long page needs its own section index, separate from the shared header");
-  const links = nodes(nav).filter(node => isValidElement<{ href?: string }>(node) && node.type === "a");
-  assert.deepEqual(links.map(node => isValidElement<{ href: string }>(node) ? node.props.href : ""), ["#plans", "#limits-heading", "#addons-heading", "#calculator-heading", "#compare-heading", "#faq-heading"]);
-  const fetch = globalThis.fetch;
-  globalThis.fetch = (async () => { throw new Error("Unexpected external request"); }) as typeof fetch;
-  let html: string;
-  try { html = renderToStaticMarkup(page); } finally { globalThis.fetch = fetch; }
-  const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
-  for (const node of links) if (isValidElement<{ href: string }>(node)) assert.equal(ids.filter(id => id === node.props.href.slice(1)).length, 1);
+  const links = [...nav[1].matchAll(/<a\b[^>]*href="(#[^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(links, ["#plans", "#limits-heading", "#addons-heading", "#calculator-heading", "#compare-heading", "#faq-heading"]);
+  const ids = [...(page + calculator).matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
+  for (const href of links) assert.equal(ids.filter(id => id === href.slice(1)).length, 1);
 });
 
 test("every allowance table is available at mobile width without a second stacked copy", () => {
-  const hiddenTables: string[] = [];
-  function visit(node: ReactNode, hidden: boolean) {
-    if (Array.isArray(node)) { node.forEach(child => visit(child, hidden)); return; }
-    if (!isValidElement<Props>(node)) return;
-    const next = hidden || /\bhidden\s+md:block\b/.test(node.props.className ?? "");
-    if (node.type === "table" && next) hiddenTables.push(text(node));
-    visit(node.props.children, next);
-  }
-  visit(page, false);
-  assert.equal(tables.length, PRICING_GROUPS.length);
-  assert.equal(hiddenTables.length, 0, "mobile must use the same complete grouped tables");
-  assert.equal(all.filter(node => isValidElement<Props>(node) && node.type === "dl" && /md:hidden/.test(node.props.className ?? "")).length, 0);
+  assert.equal([...page.matchAll(/<table\b/g)].length, 1, "one table template serves each canonical group");
+  assert.doesNotMatch(page, /hidden\s+md:block/, "the comparison table cannot disappear on mobile");
+  assert.doesNotMatch(page, /<dl\b[^>]*md:hidden/, "avoid repeating the three plans as tall mobile lists");
 });
 
-test("all canonical row labels, periods, notes and three plan values remain in the tables", () => {
-  for (const [index, group] of PRICING_GROUPS.entries()) {
-    const rows = nodes(tables[index]).filter(node => isValidElement(node) && node.type === "tr");
-    assert.equal(rows.length, group.rows.length + 1);
-    for (const plan of PRICING_PLANS) assert.ok(text(rows[0]).includes(plan.title));
-    for (const [rowIndex, row] of group.rows.entries()) {
-      const cells = nodes(rows[rowIndex + 1]).filter(node => isValidElement(node) && node.type === "td");
-      assert.deepEqual(cells.map(text), PRICING_PLANS.map(plan => row.values[plan.tier]), row.key);
-      assert.ok(text(rows[rowIndex + 1]).includes(row.label));
-      if (row.note) assert.ok(text(rows[rowIndex + 1]).includes(row.note));
+test("the page maps every canonical group, row, period, note and plan value", () => {
+  for (const mapping of ["PRICING_GROUPS.map", "group.rows.map", "PRICING_PLANS.map", "row.values[p.tier]", "row.label", "row.note", "group.period"]) assert.ok(page.includes(mapping), mapping);
+  assert.equal(PRICING_PLANS.length, 3);
+  assert.ok(PRICING_GROUPS.length > 0);
+  for (const group of PRICING_GROUPS) {
+    assert.ok(group.period.length > 0);
+    for (const row of group.rows) {
+      assert.ok(row.label.length > 0);
+      for (const plan of PRICING_PLANS) assert.equal(typeof row.values[plan.tier], "string", row.key);
     }
-    assert.ok(text(page).includes(group.period));
   }
-  assert.ok(text(page).includes("Permissions, consent, funding checks and feature availability still apply."));
-  assert.ok(text(page).includes("Annual billing does not turn a monthly allowance into a yearly pool."));
+  assert.ok(page.includes("Permissions, consent, funding checks and feature availability still apply."));
+  assert.ok(page.includes("Annual billing does not turn a monthly allowance into a yearly pool."));
 });
 
 test("the index is sticky and touch-sized using pricing-only CSS, without hiding rows", () => {

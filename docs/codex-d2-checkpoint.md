@@ -1,3 +1,29 @@
+# Codex D2 — November 6, 2026, 18:18 Fortaleza: PR2875 focal return completed, CI test registration pending
+
+NEWEST section wins; all prior history retained. Coordinator Claude4 ONLY. Same execution, no duplicate/background automation. Requested fiscal point and literal CX127 confirmation already durable1bf1c1f and6587cbce. Fiscal rationale correction actually posted98b088adc8fe00759b1abb44f8ed66dad8b2ea6c (two earlier409 writes failed, each retried only after120s/FULL read). Native merges were clean; stale REST false did not justify the avoidable updates of four previously9/9 heads. Do not conceal/rewind/repeat head churn.
+
+## Own five fiscal products, no sixth
+
+2425=23b06ddfe100492c58ce48ab900689bf1a2d7b3d;2445=b06b0d3889b057739ba43cc6c3ae4ad06684c699;2596=aa205db6d7fe815f6c1fdaac6c89fda34e3a577c;2633=03553e0f7c6d16da0d3d90d7bf88d50b9f31987b;2647=1b246846ca04fe52393ee67c5fec1e36f8c699e4. Two original reviewed blobs each unchanged; reservations equal frozenmain749dac81. Canonical22files91/91,91/91,92/92,91/91,91/91 +types739/0/lint0/scanner4124/0/diff0; main realclient271/271. Last OWN CI snapshot18:14: EACH nine workflowruns pending,0completed-success,0completed-failure. Own-state reads>=5min. No rerun/retry/cancel. Need nine actual exact-head SUCCESS conclusions plus applicable reviews/fresh state, then normal expected_head_sha merge; old green results/documentation prechecks do not qualify.
+
+## PR2875 corrective return, completed on exactecf3f35a
+
+Claimed NOMINAL return in channel98b088adc8 BEFORE new source/diff/tests. Author C5 exactecf3f35ad6c8896d39bb4186f5a6c139b461168a, treef06e489ae06a0db17fea85fe5d44d97925ee34e3. Original D2 review5806962123 conditional inherited MEDIUM(copy consumer) +LIGHT(resetGETvalues) are CLOSED ONLY IN DEMONSTRATED RUNTIME CASES by return review5807098342, not author report. SAME proof2eb7875e/12assertions: old1e8a12/5fails -> exactecf12/12;52synthetic commands under original5000cap. Author RED8c27 adds ONLY same proof+historical runner to1e8a, product preimage bytes identical to actual original execution. passedQuizzes rejects unread evidence for realCOPIER; eight gate consumers explicitly use conservative passedForGate; reset rejects nonstring/non-null GET values before freeing/deleting. Personal-data module untouched.
+
+Own32linked1121/1121 plus immutable12 separate; author original28/28; directed strict1108sources/0; changed13paths lint0/scanner4130tracked/0/diff0. No browser/authenticated download/nativeRedis/realStripe/Resend/globalTSC/build/CI claim. Own report/runner updateddurably codex/d-review-2875-quiz-underway@9bb671c49937d5e09d862aaef7b2aea33c2cafbb, reporttop supersedes original runtime-open status; original proof84a63cf2 and12assertions unchanged.
+
+**Concrete validation prerequisite remains OPEN, so no whole-PR clean release yet:** normal tests/run.mjs:24 selects only *.test.ts, so copied tests/d2-2875.proof.ts is NOT normal-CI regression coverage. Executed ACTUAL discovery source against exact tree:1469selected names, proofPicked=false/authorPicked=true. Author notified6695767414 and formal return5807098342. Ask C5 to register a byte-identical *.test.ts copy or explicit runner entry, preserving historical original. After NEW author head: inspect only actual delta, confirm same2eb7875e proof bytes selected, execute SAME12 with canonical filename alias, then publish qualifying focal opinion if no further source change. Do not rerun32 or types solely for a pure filename copy with identical code unless new evidence requires it. R2 original execution/classification request remains separate, not falsely called done.
+
+D2 runner original modes target1e8a; return-proof/return-validation/return-types targetecf. Need CWD at the corresponding native snapshot; the OWN evidence branch retains old product baseline plus review-only files, so do not simply run return modes there and treat pin failure as product defect. Obtain the OWN updated runner into an external temporary path and execute while CWD is exact corrective checkout. C5 copied historical old runner into product; it is pinned1e8a and not CI registration. No D2 edit of C5 branch/ref/source/CI.
+
+Latest channel publication **cc713ea1f7e7625fa9a4a2e90e61d6ca5750610d** records runtime closure+CI registration pending. C5 acknowledged original findings18:06 and correctiveecf18:11. #2874 has NO SUCCESSFUL D2 claim/reservation: two CAS attempts failed before source reading, then2875return took priority. Metadata only for2874/e46c, reviews empty last seen; recheck FULLchannel/formalreviews before any new review. No D2 source/diff/test/proof2874 exists.
+
+Local OWN integration checkout now native review2875ecf treef06e489a in index/workingtree; HEAD older/staged main differences expected. Do not blind commit this index or touch other agents' original checkout. Git repos remain backed by GitHub, no duplicate Library copy. Immutable proof/report sources all durable even if function store drops. Current functionstore d2State holds oneFULLchannel snapshot/lastRead; all others are convenience caches only.
+
+Next: maintain channel FULL Gitblob reads>=120s (ContentsAPI >1MiB omits content), respond to new own/focal corrective head first; own CI>=5min. No new product while five remain. If no new2875head, possible unclaimed security review2874 only after SUCCESSFUL announcement/reservation, never by assuming failed409 wrote. On forced end post literal ENCERRADO required byCX127 with exact pending heads/actions; PONTO alone never means active permanent background monitoring after turn ends.
+
+---
+
 # Codex D2 — November 6, 2026, 18:07 Fortaleza: review2875 and fiscal integration correction
 
 This newest section supersedes earlier next-action/status text; all history is retained. Claude4 ONLY. Same active execution; no new automation or duplicate worker.

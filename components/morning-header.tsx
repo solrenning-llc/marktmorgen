@@ -33,7 +33,7 @@ export function MorningHeader({ current }: { current?: "/pricing" }) {
         <div className="hm-topbar" data-preview-bar="">
           {/* One complete paragraph at every width. The mobile-only native
               checkbox reveals it without client code or duplicated links. */}
-          <input id="hm-preview-toggle" className="hm-preview-toggle hm-sr" type="checkbox" aria-controls="hm-preview-detail" />
+          <input id="hm-preview-toggle" className="hm-preview-toggle" type="checkbox" aria-controls="hm-preview-detail" />
           <label className="hm-preview-compact" htmlFor="hm-preview-toggle">
             <span aria-hidden="true" className="hm-preview-chevron" />
             <span className="hm-sr">Show full notice: </span><span data-preview-summary>Still being built. Plans closed.</span>

@@ -1,0 +1,782 @@
+FILE /tmp/g2576-valid-author-before.log
+  ok    two confirmed and waiting
+
+the list's reply missing
+  FAIL  the list's reply missing: the launch is refused as unknown
+        expected "UnknownReply"
+        got      "{\"ok\":true,\"total\":0}"
+  FAIL  the list's reply missing: still coming soon, both still waiting, no launch
+        expected [true,2,null]
+        got      [false,0,{"handle":"harbor","note":"Thanks for waiting.","address":"1 Main St, Portland, OR 97201","total":0,"cursor":0,"sent":0,"started":1794002580,"finished":1794002580}]
+  FAIL  the list's reply missing: still marked
+        expected true
+        got      false
+
+the list as a number
+  FAIL  the list as a number: the launch is refused as unknown
+        expected "UnknownReply"
+        got      "{\"ok\":true,\"total\":0}"
+  FAIL  the list as a number: still coming soon, both still waiting, no launch
+        expected [true,2,null]
+        got      [false,0,{"handle":"harbor","note":"Thanks for waiting.","address":"1 Main St, Portland, OR 97201","total":0,"cursor":0,"sent":0,"started":1794002581,"finished":1794002581}]
+  FAIL  the list as a number: still marked
+        expected true
+        got      false
+
+the list of odd length
+  FAIL  the list of odd length: the launch is refused as unknown
+        expected "UnknownReply"
+        got      "{\"ok\":true,\"total\":0}"
+  FAIL  the list of odd length: still coming soon, both still waiting, no launch
+        expected [true,2,null]
+        got      [false,0,{"handle":"harbor","note":"Thanks for waiting.","address":"1 Main St, Portland, OR 97201","total":0,"cursor":0,"sent":0,"started":1794002581,"finished":1794002581}]
+  FAIL  the list of odd length: still marked
+        expected true
+        got      false
+
+the list holding something that is not text
+  FAIL  the list holding something that is not text: the launch is refused as unknown
+        expected "UnknownReply"
+        got      "{\"ok\":true,\"total\":0}"
+  FAIL  the list holding something that is not text: still coming soon, both still waiting, no launch
+        expected [true,2,null]
+        got      [false,0,{"handle":"harbor","note":"Thanks for waiting.","address":"1 Main St, Portland, OR 97201","total":0,"cursor":0,"sent":0,"started":1794002581,"finished":1794002581}]
+  FAIL  the list holding something that is not text: still marked
+        expected true
+        got      false
+
+one reply instead of two
+  FAIL  one reply instead of two: the launch is refused as unknown
+        expected "UnknownReply"
+        got      "{\"ok\":true,\"total\":0}"
+  FAIL  one reply instead of two: still coming soon, both still waiting, no launch
+        expected [true,2,null]
+        got      [false,0,{"handle":"harbor","note":"Thanks for waiting.","address":"1 Main St, Portland, OR 97201","total":0,"cursor":0,"sent":0,"started":1794002581,"finished":1794002581}]
+  FAIL  one reply instead of two: still marked
+        expected true
+        got      false
+
+the job's reply missing
+  FAIL  the job's reply missing: the launch is refused as unknown
+        expected "UnknownReply"
+        got      "{\"ok\":true,\"total\":0}"
+  FAIL  the job's reply missing: still coming soon, both still waiting, no launch
+        expected [true,2,null]
+        got      [false,0,{"handle":"harbor","note":"Thanks for waiting.","address":"1 Main St, Portland, OR 97201","total":0,"cursor":0,"sent":0,"started":1794002581,"finished":1794002581}]
+  FAIL  the job's reply missing: still marked
+        expected true
+        got      false
+
+the job as text that is not a job
+  FAIL  the job as text that is not a job: the launch is refused as unknown
+        expected "UnknownReply"
+        got      "{\"ok\":true,\"total\":0}"
+  FAIL  the job as text that is not a job: still coming soon, both still waiting, no launch
+        expected [true,2,null]
+        got      [false,0,{"handle":"harbor","note":"Thanks for waiting.","address":"1 Main St, Portland, OR 97201","total":0,"cursor":0,"sent":0,"started":1794002581,"finished":1794002581}]
+  FAIL  the job as text that is not a job: still marked
+        expected true
+        got      false
+
+a running job read as a number
+  FAIL  a running job read as a number: the launch is refused as unknown
+        expected "UnknownReply"
+        got      "{\"ok\":true,\"total\":0}"
+  FAIL  a running job read as a number: still coming soon, both still waiting, no launch
+        expected [true,2,null]
+        got      [false,0,{"handle":"harbor","note":"Thanks for waiting.","address":"1 Main St, Portland, OR 97201","total":0,"cursor":0,"sent":0,"started":1794002581,"finished":1794002581}]
+  FAIL  a running job read as a number: still marked
+        expected true
+        got      false
+
+A known list still launches
+  FAIL  both are to be emailed
+        expected {"ok":true,"total":2}
+        got      {"ok":true,"total":0}
+
+26 checks, 25 failing.
+
+FILE /tmp/g2576-valid-author-head.log
+  ok    two confirmed and waiting
+
+the list's reply missing
+  ok    the list's reply missing: the launch is refused as unknown
+  ok    the list's reply missing: still coming soon, both still waiting, no launch
+  ok    the list's reply missing: still marked
+
+the list as a number
+  ok    the list as a number: the launch is refused as unknown
+  ok    the list as a number: still coming soon, both still waiting, no launch
+  ok    the list as a number: still marked
+
+the list of odd length
+  ok    the list of odd length: the launch is refused as unknown
+  ok    the list of odd length: still coming soon, both still waiting, no launch
+  ok    the list of odd length: still marked
+
+the list holding something that is not text
+  ok    the list holding something that is not text: the launch is refused as unknown
+  ok    the list holding something that is not text: still coming soon, both still waiting, no launch
+  ok    the list holding something that is not text: still marked
+
+one reply instead of two
+  ok    one reply instead of two: the launch is refused as unknown
+  ok    one reply instead of two: still coming soon, both still waiting, no launch
+  ok    one reply instead of two: still marked
+
+the job's reply missing
+  ok    the job's reply missing: the launch is refused as unknown
+  ok    the job's reply missing: still coming soon, both still waiting, no launch
+  ok    the job's reply missing: still marked
+
+the job as text that is not a job
+  ok    the job as text that is not a job: the launch is refused as unknown
+  ok    the job as text that is not a job: still coming soon, both still waiting, no launch
+  ok    the job as text that is not a job: still marked
+
+a running job read as a number
+  ok    a running job read as a number: the launch is refused as unknown
+  ok    a running job read as a number: still coming soon, both still waiting, no launch
+  ok    a running job read as a number: still marked
+
+A known list still launches
+  ok    both are to be emailed
+
+26 checks, all passing.
+
+FILE /tmp/g2576-valid-entry-before.log
+  ok    {cut: launch read boundary reached
+  FAIL  {cut: undecodable item is unknown before changes
+        expected "UnknownReply"
+        got      "{\"ok\":true,\"total\":0}"
+  FAIL  {cut: live list is preserved byte-identically
+        expected ["g-person-a@example.test","{\"at\":1,\"ok\":1,\"c\":false,\"t\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}","g-person-b@example.test","{\"at\":1,\"ok\":1,\"c\":false,\"t\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}"]
+        got      []
+  FAIL  {cut: coming-soon mark is preserved
+        expected true
+        got      false
+G_LAUNCH_ENTRY {"bad":"{cut","outcome":"{\"ok\":true,\"total\":0}","before":["g-person-a@example.test","{\"at\":1,\"ok\":1,\"c\":false,\"t\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}","g-person-b@example.test","{\"at\":1,\"ok\":1,\"c\":false,\"t\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}"],"after":[]}
+  ok    {}: launch read boundary reached
+  FAIL  {}: undecodable item is unknown before changes
+        expected "UnknownReply"
+        got      "{\"ok\":true,\"total\":0}"
+  FAIL  {}: live list is preserved byte-identically
+        expected ["g-person-a@example.test","{\"at\":1,\"ok\":1,\"c\":false,\"t\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}","g-person-b@example.test","{\"at\":1,\"ok\":1,\"c\":false,\"t\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}"]
+        got      []
+  FAIL  {}: coming-soon mark is preserved
+        expected true
+        got      false
+G_LAUNCH_ENTRY {"bad":"{}","outcome":"{\"ok\":true,\"total\":0}","before":["g-person-a@example.test","{\"at\":1,\"ok\":1,\"c\":false,\"t\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}","g-person-b@example.test","{\"at\":1,\"ok\":1,\"c\":false,\"t\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}"],"after":[]}
+  ok    healthy two confirmed launch
+  ok    confirmed empty launch remains allowed
+  ok    no external requests
+  ok    complete synthetic exercise stayed in ceiling
+G_LAUNCH_COMMANDS 115
+
+12 checks, 6 failing.
+
+FILE /tmp/g2576-valid-entry-head.log
+  ok    {cut: launch read boundary reached
+  FAIL  {cut: undecodable item is unknown before changes
+        expected "UnknownReply"
+        got      "{\"ok\":true,\"total\":0}"
+  FAIL  {cut: live list is preserved byte-identically
+        expected ["g-person-a@example.test","{\"at\":1,\"ok\":1,\"c\":false,\"t\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}","g-person-b@example.test","{\"at\":1,\"ok\":1,\"c\":false,\"t\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}"]
+        got      []
+  FAIL  {cut: coming-soon mark is preserved
+        expected true
+        got      false
+G_LAUNCH_ENTRY {"bad":"{cut","outcome":"{\"ok\":true,\"total\":0}","before":["g-person-a@example.test","{\"at\":1,\"ok\":1,\"c\":false,\"t\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}","g-person-b@example.test","{\"at\":1,\"ok\":1,\"c\":false,\"t\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}"],"after":[]}
+  ok    {}: launch read boundary reached
+  FAIL  {}: undecodable item is unknown before changes
+        expected "UnknownReply"
+        got      "{\"ok\":true,\"total\":0}"
+  FAIL  {}: live list is preserved byte-identically
+        expected ["g-person-a@example.test","{\"at\":1,\"ok\":1,\"c\":false,\"t\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}","g-person-b@example.test","{\"at\":1,\"ok\":1,\"c\":false,\"t\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}"]
+        got      []
+  FAIL  {}: coming-soon mark is preserved
+        expected true
+        got      false
+G_LAUNCH_ENTRY {"bad":"{}","outcome":"{\"ok\":true,\"total\":0}","before":["g-person-a@example.test","{\"at\":1,\"ok\":1,\"c\":false,\"t\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}","g-person-b@example.test","{\"at\":1,\"ok\":1,\"c\":false,\"t\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}"],"after":[]}
+  ok    healthy two confirmed launch
+  ok    confirmed empty launch remains allowed
+  ok    no external requests
+  ok    complete synthetic exercise stayed in ceiling
+G_LAUNCH_COMMANDS 115
+
+12 checks, 6 failing.
+
+FILE /tmp/g2576-linked-community-push-erasure-evidence.test.log
+✔ community push erasure requires one exact Redis deletion acknowledgement (4.497671ms)
+✔ community push erasure accepts only a confirmed empty or taken hash (0.671585ms)
+✔ an applied deletion with a lost acknowledgement remains unknown and is never replayed (7.513484ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 21.143406
+
+FILE /tmp/g2576-linked-contacts-room-origin.test.log
+
+A contact from a sign-up gives back to the contacts' slot what it took, once
+  ok    it is marked as counted in the contacts' slot
+  ok    still counted in the contacts' slot
+  ok    one deletion took her
+  ok    exactly her room came back
+
+A contact an order put on the list gives back its field's share of the orders' part, once
+  ok    it is marked as counted in the orders' part
+  ok    the contacts' slot is not touched
+  ok    the orders' part grew
+  ok    its field's share came back once
+  ok    never more than it took
+
+A contact written before the field existed is left counted
+  ok    Eve is deleted
+  ok    and nothing is given back for her
+
+A member's record: its first write to the orders' part, what it grew by to the members' slot, once
+  ok    the record is marked as made by an order
+  ok    her name takes room in the members' slot
+
+Her posts, comments and likes are in her trace; the deletion gives it back once
+  ok    the members' slot is back where it was
+  ok    the orders' part gave back her first write's share
+  ok    nothing more than she took came back
+
+Deleting her post and comment afterward gives nothing back a second time
+  ok    the members' slot does not move
+
+A member written before the field existed is left counted
+  ok    nothing is given back for the record
+
+18 checks, all passing.
+
+FILE /tmp/g2576-linked-erasure-exact-replies.test.log
+
+Community devices: an unknown reply is never taken for none
+  ok    Ana's device
+  ok    refused on []
+  ok    no room given back on []
+  ok    refused on [null]
+  ok    no room given back on [null]
+  ok    refused on [{"endpoint":"x"}]
+  ok    no room given back on [{"endpoint":"x"}]
+  ok    refused on [["odd"]]
+  ok    no room given back on [["odd"]]
+  ok    refused on [[1,2]]
+  ok    no room given back on [[1,2]]
+  ok    the device is still kept
+  ok    then deleted for real
+  ok    a confirmed empty hash is none
+
+Imported purchases: an unknown reply is never taken for none
+  ok    refused on []
+  ok    no room given back on []
+  ok    refused on [null]
+  ok    no room given back on [null]
+  ok    refused on [[],null]
+  ok    no room given back on [[],null]
+  ok    refused on [null,0]
+  ok    no room given back on [null,0]
+  ok    refused on [[],"1"]
+  ok    no room given back on [[],"1"]
+  ok    the grant is still kept
+  ok    then deleted for real
+  ok    a confirmed empty hash is none
+
+Waitlist: an unknown reply is never taken for none
+  ok    Ana joins
+  ok    refused on []
+  ok    no room given back on []
+  ok    refused on [null]
+  ok    no room given back on [null]
+  ok    refused on [1]
+  ok    no room given back on [1]
+  ok    refused on [["a"]]
+  ok    no room given back on [["a"]]
+  ok    refused when one product of two has no reply
+  ok    her place is still kept
+  ok    then deleted for real
+  ok    a confirmed missing place is none
+
+Quiz: an unknown reply is never taken for none
+  ok    Ana's try is kept
+  ok    refused on []
+  ok    no room given back on []
+  ok    refused on [null]
+  ok    no room given back on [null]
+  ok    refused on [[]]
+  ok    no room given back on [[]]
+  ok    refused on [[[],[],null]]
+  ok    no room given back on [[[],[],null]]
+  ok    refused on [[["lesson000002"],[null,null],3]]
+  ok    no room given back on [[["lesson000002"],[null,null],3]]
+  ok    refused on [[["lesson000002"],[null,null,1,null],"3"]]
+  ok    no room given back on [[["lesson000002"],[null,null,1,null],"3"]]
+  ok    refused on [[{},[null,null,null,null],1]]
+  ok    no room given back on [[{},[null,null,null,null],1]]
+  ok    refused on [[["lesson000002"],[null,null,null,null],0]]
+  ok    no room given back on [[["lesson000002"],[null,null,null,null],0]]
+  ok    refused on [[["lesson000002"],[null,null,null,null],2]]
+  ok    no room given back on [[["lesson000002"],[null,null,null,null],2]]
+  ok    refused on [[["lesson000002"],[null,null,null,null],99]]
+  ok    no room given back on [[["lesson000002"],[null,null,null,null],99]]
+  ok    refused on [[["lesson000002"],[null,null,null,null],9007199254740992]]
+  ok    no room given back on [[["lesson000002"],[null,null,null,null],9007199254740992]]
+  ok    refused on [[[],["1","x",null,null],1]]
+  ok    no room given back on [[[],["1","x",null,null],1]]
+  ok    refused on [[["lesson000002"],[null,null,null,null],1.5]]
+  ok    no room given back on [[["lesson000002"],[null,null,null,null],1.5]]
+  ok    her pass is still kept
+  ok    then deleted for real
+  ok    confirmed nothing left is none
+
+70 checks, all passing.
+
+FILE /tmp/g2576-linked-g-2576-quiz-nested-replies.proof.log
+holes { result: undefined, refused: true, reads: 0 }
+  ok    holes: pass still stored
+  ok    holes: unconfirmed nested values must refuse
+  ok    holes: accessors never run
+  ok    holes: normal retry erases pass
+getter { result: undefined, refused: true, reads: 0 }
+  ok    getter: pass still stored
+  ok    getter: unconfirmed nested values must refuse
+  ok    getter: accessors never run
+  ok    getter: normal retry erases pass
+  ok    exact empty quiz reply remains valid
+
+9 checks, all passing.
+
+FILE /tmp/g2576-linked-g-2576-unknown-erasure.test.log
+  ok    control: note still present after unapplied partial answer []
+  ok    unknown deletion must be refused, not certified as zero []
+  ok    control: note still present after unapplied partial answer [null]
+  ok    unknown deletion must be refused, not certified as zero [null]
+  ok    confirmed empty hash remains a valid no-op
+Actual aggregate result {
+  ok: false,
+  reason: 'incomplete',
+  parts: [
+    { module: 'lib/order-confirmation-outbox.ts', records: 0 },
+    { module: 'lib/shipment-mail-outbox.ts', records: 0 },
+    { module: 'lib/flows.ts', records: 0 },
+    { module: 'lib/mail-clicks.ts', records: 0 },
+    { module: 'lib/mail-health.ts', records: 0 },
+    { module: 'lib/crm.ts', records: 0 },
+    { module: 'lib/payment-request-store.ts', records: 0 },
+    { module: 'lib/agreement-store.ts', records: 0 },
+    { module: 'lib/form-store.ts', records: 0 },
+    { module: 'lib/learn.ts', records: 1 },
+    { module: 'lib/course-finish.ts', records: 0 },
+    { module: 'lib/quiz.ts', records: 0 },
+    { module: 'lib/assignment.ts', records: 0 },
+    { module: 'lib/certificate.ts', records: 0 },
+    { module: 'lib/lesson-comments.ts', records: 0 },
+    { module: 'lib/community-erasure.ts', records: 0 },
+    { module: 'lib/waitlist.ts', records: 0 },
+    { module: 'lib/affiliate-bond.ts', records: 0 },
+    { module: 'lib/affiliate-leads.ts', records: 0 },
+    { module: 'lib/imported-purchases.ts', records: 0 },
+    { module: 'lib/podcast-access.ts', records: 0 },
+    { module: 'lib/welcome-offer-send.ts', records: 0 },
+    { module: 'lib/winback-send.ts', records: 0 },
+    { module: 'lib/checkout-recovery.ts', records: 0 },
+    { module: 'lib/assistant-reminder.ts', records: 1 },
+    { module: 'lib/move-members.ts', records: 0 },
+    { module: 'lib/inbox.ts', records: 0 },
+    { module: 'lib/discord-access.ts', records: 0 },
+    { module: 'lib/email-sync.ts', records: 0 },
+    { module: 'lib/segments.ts', records: 0 },
+    { module: 'lib/store-readings.ts', records: 0 },
+    { module: 'lib/calendar-sync.ts', records: 0 },
+    { module: 'lib/member-health.ts', records: 0 },
+    { module: 'lib/reviews.ts', records: 0 },
+    { module: 'lib/customer-voice.ts', records: 0 },
+    { module: 'lib/buyer-library.ts', records: 0 },
+    { module: 'lib/erasure-index.ts', records: 2 },
+    { module: 'lib/contacts.ts', records: 0 }
+  ],
+  failed: [ 'lib/buyer-profile.ts' ]
+}
+  ok    control: real note survives aggregate deletion
+  ok    aggregate must not certify erasure with surviving notes
+
+7 checks, all passing.
+deleting a person: lib/buyer-profile.ts could not finish UnknownReply: Redis answered the deletion of a person's notes with a reply it was not asked for; its outcome is unknown
+    at exactReplies ([stdin]:10992:48)
+    at forgetNotesPerson ([stdin]:89596:24)
+    at async erasePerson ([stdin]:91901:52)
+    at async main ([stdin]:91996:14)
+
+FILE /tmp/g2576-linked-g2576-quiz-count-consistency.proof.log
+G_QUIZ_COUNT {"gone":0,"hit":1,"refused":true,"before":208,"after":208}
+  ok    0: exact transport boundary reached
+  ok    0: personal pass remains before healthy retry
+  ok    0: contradictory or unsafe count is unknown
+  ok    0: unconfirmed deletion preserves occupied room
+  ok    0: healthy retry erases actual pass
+G_QUIZ_COUNT {"gone":2,"hit":1,"refused":true,"before":208,"after":208}
+  ok    2: exact transport boundary reached
+  ok    2: personal pass remains before healthy retry
+  ok    2: contradictory or unsafe count is unknown
+  ok    2: unconfirmed deletion preserves occupied room
+  ok    2: healthy retry erases actual pass
+G_QUIZ_COUNT {"gone":99,"hit":1,"refused":true,"before":208,"after":208}
+  ok    99: exact transport boundary reached
+  ok    99: personal pass remains before healthy retry
+  ok    99: contradictory or unsafe count is unknown
+  ok    99: unconfirmed deletion preserves occupied room
+  ok    99: healthy retry erases actual pass
+G_QUIZ_COUNT {"gone":9007199254740992,"hit":1,"refused":true,"before":208,"after":208}
+  ok    9007199254740992: exact transport boundary reached
+  ok    9007199254740992: personal pass remains before healthy retry
+  ok    9007199254740992: contradictory or unsafe count is unknown
+  ok    9007199254740992: unconfirmed deletion preserves occupied room
+  ok    9007199254740992: healthy retry erases actual pass
+  ok    known actual deletion succeeds
+  ok    known deletion frees its actual room
+  ok    confirmed absence remains zero
+
+23 checks, all passing.
+
+FILE /tmp/g2576-linked-person-erasers-room.test.log
+
+Notes: what each note took comes back, once
+  ok    Ana's notes take room
+  ok    one deletion found them, the other nothing
+  ok    exactly Ana's room is given back
+  ok    Ben's note is kept
+  ok    without a room nothing breaks
+
+Quiz: tries, results and passes come back, once
+  ok    Ana's try is kept
+  ok    their three keys deleted once
+  ok    exactly what they weigh is given back
+  ok    and never past what Ana's tries took
+  ok    Ben's pass is kept
+
+Waitlist: a place and its link to leave come back, once, confirmed or not
+  ok    Ben joins
+  ok    Ana joins
+  ok    Ana confirms
+  ok    Ana asks again
+  ok    Ana's place takes room
+  ok    one deletion took her place
+  ok    exactly Ana's room is given back
+
+Imported purchases: what an import or the API gave comes back, once
+  ok    Ana's grants take room
+  ok    one deletion took them
+  ok    exactly Ana's room is given back
+
+A gift written as an order's gives back its field's own share
+  ok    the gift is counted with the orders
+  ok    its field's share comes back
+  ok    never more than the gift took
+
+Community devices come back, once
+  ok    Bia's device
+  ok    Ana's first device
+  ok    Ana's second device
+  ok    one deletion took them
+  ok    exactly Ana's room is given back
+
+Places at live events come back, once
+  ok    Bia is coming
+  ok    Ana is coming
+  ok    one deletion took her place
+  ok    exactly her place's room is given back
+
+Private conversations and the people declined come back, once
+  ok    Carla's request lands
+  ok    Ana declines it
+  ok    Ana's conversation and refusal take room
+  ok    exactly Ana's room is given back
+  ok    Bia and Carla's conversation is kept
+
+37 checks, all passing.
+
+FILE /tmp/g2576-linked-quiz-attempts.test.log
+
+Finite new quizzes
+  ok    blank uses the finite default
+  ok    blank uses the finite default
+  ok    blank uses the finite default
+  ok    blank uses the finite default
+  ok    invalid or unbounded limit rejected
+  ok    invalid or unbounded limit rejected
+  ok    invalid or unbounded limit rejected
+  ok    invalid or unbounded limit rejected
+  ok    invalid or unbounded limit rejected
+  ok    invalid or unbounded limit rejected
+  ok    minimum accepted
+  ok    maximum accepted
+
+Existing settings
+  ok    legacy stored zero remains readable
+  ok    invalid stored attempts do not become unbounded
+  ok    invalid stored attempts do not become unbounded
+  ok    invalid stored attempts do not become unbounded
+  ok    invalid stored attempts do not become unbounded
+  ok    invalid stored attempts do not become unbounded
+  ok    existing zero retained explicitly
+  ok    old editor blank retains the legacy setting
+  ok    legacy can choose a finite limit
+  ok    finite quiz cannot gain an unbounded setting
+  ok    finite limit survives storage
+
+Actual submissions respect the limit
+  ok    first try accepted
+  ok    second try accepted
+  ok    third try rejected
+  ok    another learner has their own allowance
+  ok    legacy allowance is not retroactively capped
+
+28 checks, all passing.
+
+FILE /tmp/g2576-linked-quiz-usage.test.log
+
+Stored policy, not caller preference
+  ok    new quiz receives the current policy
+  ok    new client cannot remove the policy
+  ok    editing preserves the policy
+  ok    editing does not cut legacy rights
+  ok    policy survives storage
+  ok    policy survives course outline
+  ok    unknown policy is not legacy
+
+UTC month and isolation
+  ok    December key
+  ok    year boundary creates a new month
+  ok    invalid store is refused
+  ok    invalid clock is refused
+  ok    only the last available slot is admitted concurrently
+  ok    other stores have their own allowance
+
+Reset and deletion cannot replenish allowance
+  ok    first submission accepted
+  ok    reset restores learner tries
+  ok    another quiz and learner cannot bypass the shared limit
+  ok    legacy is not retroactively blocked by the new budget
+  ok    new quiz without trusted store identity is refused
+
+Uncertain reservations never grant work
+  ok    missing counter is unavailable
+  ok    unconfirmed retention is unavailable
+  ok    an extra pipeline answer is unavailable
+  ok    network failure is unavailable
+
+22 checks, all passing.
+
+FILE /tmp/g2576-linked-room-give-back-races.test.log
+  ok    Ben joins
+
+A place confirmed while its person is deleted is not made again
+  ok    Ana joins
+  ok    the confirmation finds the place gone
+  ok    and does not make it again
+  ok    her room came back once
+
+Two presses of the confirm button count its growth once
+  ok    Dana joins
+  ok    the outer press answers yes
+  ok    its growth is a step here
+  ok    counted once
+  ok    and given back whole
+
+Asking again while the person is deleted does not make the place again
+  ok    Cleo joins
+  ok    asking again is refused
+  ok    the place is not made again
+  ok    her room came back once
+
+Leaving gives the place back, once
+  ok    Eve joins
+  ok    she leaves
+  ok    her place is gone
+  ok    her room came back once
+
+A launch of three places with nobody confirmed
+  ok    joins
+  ok    joins
+  ok    joins
+  ok    launched, nobody to email
+  ok    the waitlist is gone
+  ok    its links are counted until they expire
+  ok    and the places' room came back
+
+A launch that emailed everyone, when it is done
+  ok    Gus joins
+  ok    Gus confirms
+  ok    Hana joins and does not confirm
+  ok    launched to one
+  ok    the waitlist is gone
+  ok    its links are counted until they expire
+  ok    and the places' room came back
+
+Once the links have expired, their room comes back
+  ok    the expiring month is gone
+  ok    with exactly what it held
+
+A double click on joining: the second finds the first's place and asks again
+  ok    the first answers sent
+  ok    so does the second
+  ok    one place, counted once
+
+The links are written before the place: a deletion in between takes them too
+  ok    Kai's request answers
+  ok    no link with the address is left
+  ok    nor any room
+
+A place that cannot be read is replaced when its address asks again
+  ok    asking again works
+  ok    the place is readable again
+  ok    and its room comes back whole
+
+A deletion that takes the places before this sign-up writes one, and the links after, leaves nothing
+  ok    the sign-up is refused
+  ok    no place with the address is left
+  ok    nothing was emailed
+  ok    nor any room kept
+
+A sign-up changed under it three times drops its link to confirm
+  ok    Ned joins
+  ok    asking again gives up
+  ok    its link to confirm was written
+  ok    and is gone
+
+A store renamed afterward gets back exactly what a place took
+  ok    the longest handle is the pattern's
+  ok    Ivy joins
+  ok    renamed to the longest handle
+  ok    the new handle is the longest
+  ok    exactly what she took came back
+
+Tries reset while the student is deleted come back once
+  ok    what her tries weighed came back once
+
+A place over the cap taken back while its member is deleted comes back once
+  ok    Bia takes the one place
+  ok    Ana finds it full
+  ok    her place's room came back once
+
+What the API gave and takes back comes back, once
+  ok    the grant takes room
+  ok    taken back beside a deletion: the deletion had it
+  ok    its room came back once
+  ok    two takes at once: one took it
+  ok    and its room came back once
+
+65 checks, all passing.
+
+FILE /tmp/g2576-linked-waitlist-tokens.test.log
+✔ legacy store token identities and grants remain compatible after extraction (7.20804ms)
+✔ creator grant rejects missing store id (0.300941ms)
+✔ creator grant rejects missing handle (0.880756ms)
+✔ creator grant rejects missing product (0.205373ms)
+✔ creator grant rejects missing address (0.347322ms)
+✔ creator grant rejects non-string store id (1.311494ms)
+✔ creator grant rejects non-string handle (0.587905ms)
+✔ creator grant rejects non-string product (0.252455ms)
+✔ creator grant rejects non-string address (0.555608ms)
+✔ creator grant rejects empty routing field (0.985098ms)
+✔ creator grant rejects control character (0.947208ms)
+✔ creator grant is byte-bounded (0.193011ms)
+✔ creator grant returns only validated routing data (2.419147ms)
+✔ creator grant rejects conflicting duplicate s (0.333618ms)
+✔ creator grant rejects conflicting duplicate h (9.182738ms)
+✔ creator grant rejects conflicting duplicate p (1.729237ms)
+✔ creator grant rejects conflicting duplicate e (0.297453ms)
+✔ creator grant rejects conflicting duplicate k (0.112714ms)
+✔ creator grant rejects an escaped duplicate routing member (0.176327ms)
+✔ fresh opaque tokens do not carry an email or a reversible Redis key (1.109697ms)
+✔ platform and creator grants cannot cross confirmation or leave flows (0.612048ms)
+✔ platform grant validation rejects expiry, future issuance, unbounded lifetime and wrong identities (1.104171ms)
+✔ malformed or oversized platform records and unknown clocks fail closed (0.410468ms)
+✔ platform grants return only routing data and never imply consent or consumption (0.408863ms)
+✔ platform grant rejects conflicting duplicate scope (0.435438ms)
+✔ platform grant rejects conflicting duplicate version (0.202626ms)
+✔ platform grant rejects conflicting duplicate entryId (0.173836ms)
+✔ platform grant rejects conflicting duplicate generation (0.155974ms)
+✔ platform grant rejects conflicting duplicate k (0.153492ms)
+✔ platform grant rejects conflicting duplicate issuedAt (0.677565ms)
+✔ platform grant rejects conflicting duplicate expiresAt (0.206236ms)
+✔ platform grant rejects an escaped duplicate routing member (0.712184ms)
+ℹ tests 32
+ℹ suites 0
+ℹ pass 32
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 62.553366
+
+FILE /tmp/g2576-linked-waitlist.test.log
+
+Only a product coming soon
+  ok    not before it is marked
+  ok    marked
+  ok    an address that is not one
+
+Joining, and confirming
+  ok    Dana joins
+  ok    an email with a button to confirm
+  ok    it says no other email comes unless the box was checked
+  ok    not counted until confirmed
+  ok    the button counts it
+  ok    pressed twice, still one
+  ok    confirmed
+  ok    without the box, not on the creator's list
+  ok    Hal joins and asks to hear more
+  ok    on the creator's list, as he asked
+  ok    Sam joins and never confirms
+  ok    Kim joins, confirms, then leaves
+
+Too many at once
+  ok    the same address, a sixth time in an hour
+
+Launching
+  ok    a postal address is asked for when anyone will be emailed
+  ok    and nothing changed
+  ok    launched, for everyone confirmed then
+  ok    on sale at once
+  ok    Kim leaves before it goes out
+  ok    a coming-soon sign-up is refused now
+  ok    one batch, to the confirmed who stayed
+  ok    its subject
+  ok    its link and price
+  ok    the note
+  ok    the postal address
+  ok    a one-click way out
+  ok    never to Sam, who did not confirm
+  ok    run again, nothing more
+  ok    the addresses are gone, the count stays
+
+The words
+  ok    without a price or note
+
+32 checks, all passing.
+
+MIXED valid
+  ok    actual mixed pipeline reached
+  ok    unknown second course propagates incomplete
+  ok    first actual course was deleted
+  ok    unknown second course remains
+  ok    unrelated third course remains
+  ok    only confirmed course room is released
+  ok    healthy retry removes only still-present target course
+  ok    unrelated room remains after recovery
+  ok    another retry is idempotent
+  ok    unrelated course can be deleted normally
+  ok    all actual occupied room is released once
+
+11 checks, all passing.
+
+TYPES
+G2576_TYPES {"roots":3,"sourceFiles":1032,"target":"ES2017","diagnostics":0}
+

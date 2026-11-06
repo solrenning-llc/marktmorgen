@@ -12,7 +12,7 @@ export async function checkHomeHero({browser,LOCAL,axeSource,is}){
    is("HT1 creator result "+width,(await hero.locator("h1").innerText()).replace(/\s+/g," ").trim(),"Your link in bio, now a store.");
    is("HT1 subhead "+width,(await hero.locator(".hm-hero-lead").innerText()).trim(),"Simple to set up, easy to run, and every sale goes straight to your own account.");
    // The closed-sale truth stays in two places: the line above the page and the offer under the field.
-   const compact=page.locator(".hm-preview-toggle");
+   const compact=page.locator(".hm-preview-compact");
    if(await compact.isVisible())await page.locator(".hm-preview-compact").click();
    is("HT1 closed-sale notice above the page "+width,(await page.locator("[data-preview-bar]").innerText()).includes("its paid plans are not on sale yet"),true);
    if(await compact.isVisible())await page.locator(".hm-preview-compact").click();
@@ -56,7 +56,11 @@ export async function checkHomeHero({browser,LOCAL,axeSource,is}){
 export async function checkMorningNoticeFocus({page,width,is}){
  if(width>=640)return;
  await page.keyboard.press("Tab");await page.keyboard.press("Tab");
- is("Encanto14 notice has disclosure button semantics "+width,await page.getByRole("button",{name:"Still being built. Plans closed.",exact:true}).count(),1);
+ // Playwright 1.56's implicit-role table omits SUMMARY. Accept the native
+ // disclosure itself or a correctly named explicit expanded button.
+ const nativeSummary=await page.locator("details.hm-preview > summary#hm-preview-toggle").count();
+ const expandedButton=await page.getByRole("button",{name:"Still being built. Plans closed.",exact:true}).count();
+ is("Encanto14 notice has disclosure button semantics "+width,nativeSummary===1||expandedButton===1,true);
  // Native focus can still be completing the page's existing smooth scroll.
  // Observe the exact hit condition, within the original help-focus 3s bound.
  try{await page.waitForFunction(()=>{
@@ -98,12 +102,13 @@ export async function checkHomeHeroLayout({page,width,is}){
  if(width<640){
   is("Encanto14 native compact notice visible "+width,await compact.isVisible(),true);
   if(await compact.count()){
-   const toggle=page.getByRole("checkbox",{name:"Show full notice: Still being built. Plans closed.",exact:true});
-   const size=await compact.evaluate(node=>({height:node.getBoundingClientRect().height,text:node.querySelector("[data-preview-summary]").textContent}));
+   const toggle=page.locator("summary#hm-preview-toggle");
+   const disclosure=page.locator("details.hm-preview");
+   const size=await compact.evaluate(node=>({height:node.getBoundingClientRect().height,text:node.textContent}));
    is("Encanto14 factual summary "+width,size.text,"Still being built. Plans closed.");
    is("Encanto14 single line at default text size "+width,size.height,44);
    await toggle.focus();await page.keyboard.press("Space");
-   is("Encanto14 keyboard opens full notice "+width,await toggle.isChecked(),true);
+   is("Encanto14 keyboard opens full notice "+width,await disclosure.evaluate(node=>node.open),true);
    is("Encanto14 open notice is rendered "+width,await page.locator(".hm-preview-full").isVisible(),true);
    is("Encanto14 visible label carries the keyboard ring "+width,await compact.evaluate(node=>getComputedStyle(node).outlineWidth),"3px");
    is("Encanto14 full closed-plan fact visible "+width,(await page.locator(".hm-preview-full").innerText()).includes("its paid plans are not on sale yet"),true);
@@ -111,12 +116,14 @@ export async function checkHomeHeroLayout({page,width,is}){
    is("Encanto14 original detail destination "+width,await link.getAttribute("href"),"/mission");
    await page.keyboard.press("Tab");
    is("Encanto14 keyboard reaches detail link "+width,await link.evaluate(node=>node===document.activeElement),true);
-   await toggle.focus();await page.keyboard.press("Space");
-   is("Encanto14 keyboard closes notice "+width,await toggle.isChecked(),false);
+   await toggle.focus();await page.keyboard.press("Enter");
+   is("Encanto14 keyboard closes notice "+width,await disclosure.evaluate(node=>node.open),false);
    is("Encanto14 closed notice is hidden "+width,await page.locator(".hm-preview-full").isVisible(),false);
   }
  }else{
-  is("Encanto14 desktop keeps complete notice visible "+width,(await page.locator("[data-preview-bar]").innerText()).includes("its paid plans are not on sale yet"),true);
+  await compact.click();
+  is("Encanto14 desktop disclosure retains the complete notice "+width,(await page.locator("[data-preview-bar]").innerText()).includes("its paid plans are not on sale yet"),true);
+  await compact.click();
  }
  is("Encanto hero page fits "+width,await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  console.log("HERO_GEOMETRY",JSON.stringify({width,...geometry}));

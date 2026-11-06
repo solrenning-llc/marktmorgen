@@ -50,6 +50,20 @@ try{
     console.log("CASE",JSON.stringify({engine,reducedMotion,width}));
     await checkMorningNoticeFocus({page,width,is});
     await checkHomeHeroLayout({page,width,is});
+    if(engine==="chromium"&&width===320&&reducedMotion==="reduce"){
+     const protocol=await context.newCDPSession(page);
+     for(const expanded of [false,true]){
+      if(expanded){await page.locator("summary#hm-preview-toggle").focus();await page.keyboard.press("Space");}
+      const tree=await protocol.send("Accessibility.getFullAXTree");
+      const nodes=tree.nodes.filter(node=>node.name?.value==="Still being built. Plans closed."&&node.properties?.some(p=>p.name==="expanded"));
+      is("native browser AX disclosure exists",nodes.length,1);
+      is("native browser AX disclosure role",["DisclosureTriangle","button"].includes(nodes[0]?.role?.value),true);
+      is("native browser AX expanded state",nodes[0]?.properties?.find(p=>p.name==="expanded")?.value?.value,expanded);
+      console.log("NOTICE_NATIVE_AX",JSON.stringify({expanded,nodes}));
+     }
+     await page.locator("summary#hm-preview-toggle").focus();await page.keyboard.press("Enter");
+     await protocol.detach();
+    }
     if(process.argv[3]&&reducedMotion==="reduce"&&[390,1440].includes(width)){
      mkdirSync(process.argv[3],{recursive:true});
      await page.locator(".hm-hero-art").screenshot({path:join(process.argv[3],engine+"-hero-"+width+".png")});
@@ -70,7 +84,7 @@ try{
     is("200% summary uses enlarged type",size.font,32);
     is("200% summary reflows without clipping",size.scroll<=size.client,true);
     is("200% summary keeps large target",size.height>=44,true);
-    await page.locator(".hm-preview-toggle").focus();await page.keyboard.press("Space");
+    await page.locator("#hm-preview-toggle").focus();await page.keyboard.press("Space");
     is("200% full notice accessible",(await page.locator(".hm-preview-full").innerText()).includes("its paid plans are not on sale yet"),true);
    }
    await context.close();

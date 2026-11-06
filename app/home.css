@@ -117,66 +117,28 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-.hm-preview-toggle,
-.hm-preview-compact {
-  display: none;
+.hm-preview {
+  max-width: 77.5rem;
+  margin: 0 auto;
 }
-@media (max-width: 639px) {
-  .hm-topbar {
-    display: grid;
-    grid-template-columns: 44px minmax(0, 1fr);
-  }
-  .hm-preview-toggle:not(:checked) ~ .hm-preview-full {
-    display: none;
-  }
-  .hm-preview-toggle {
-    display: block;
-    width: 44px;
-    height: 44px;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    appearance: none;
-    background: transparent;
-    cursor: pointer;
-  }
-  .hm-preview-compact {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    min-height: 44px;
-    padding: 0.625rem 1rem 0.625rem 0;
-    box-sizing: border-box;
-    font-size: 1rem;
-    line-height: 1.5;
-    cursor: pointer;
-    text-align: center;
-  }
-  .hm-preview-chevron {
-    position: absolute;
-    inset-inline-start: 19px;
-    top: 18px;
-    pointer-events: none;
-    border-block: 4px solid transparent;
-    border-inline-start: 6px solid var(--hm-text);
-  }
-  .hm-preview-toggle:checked + .hm-preview-compact .hm-preview-chevron {
-    transform: rotate(90deg);
-  }
-  .hm-preview-toggle:focus-visible + .hm-preview-compact {
-    outline: 3px solid var(--hm-text);
-    outline-offset: -3px;
-  }
-  .hm-topbar .hm-preview-full {
-    grid-column: 1 / -1;
-    padding-top: 0;
-  }
-  .hm-preview-full a {
-    display: inline-flex;
-    align-items: center;
-    min-height: 44px;
-  }
+.hm-preview-compact {
+  min-height: 44px;
+  margin-inline: 0.5rem;
+  padding: 0.625rem 1rem;
+  box-sizing: border-box;
+  font-size: 1rem;
+  line-height: 1.5;
+  cursor: pointer;
+  text-align: center;
+  list-style-position: inside;
+}
+.hm-topbar .hm-preview-full {
+  padding-top: 0;
+}
+.hm-preview-full a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
 }
 
 /* The menu and the first screen: a morning sky, light blue above and peach

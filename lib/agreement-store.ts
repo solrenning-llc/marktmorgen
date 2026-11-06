@@ -26,6 +26,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { personKey } from "@/lib/person-key";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, releaseMark } from "@/lib/claim-mark";
 import { type Held, LockBusyError, releaseLock, takeLock, withLock } from "@/lib/redis-lock";
 import { type Store } from "@/lib/store";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -289,9 +290,13 @@ export async function reviseAgreement(store: Store, id: string, draft: Agreement
     // The version's own key, and its title kept in the record's mark of it (the record's growth room is for signatures and sends).
     const room = await takeData(store, [{ until: a.createdAt + KEEP_MS, bytes: versionRoomBytes(version) + dataBytes([version.title], 1) }], now);
     if (!room.ok) return room.reason === "full" ? { ok: false, reason: "full", message: room.message } : unavailable();
-    const [written] = await redisPipeline([["SET", versionKey(a.id, n), JSON.stringify(version), "NX", "EX", keepSeconds(a, now)]]);
-    // A version's key is written once: never over one already there.
-    if (written === null) return unavailable();
+    // A version's key is written once: never over one already there. Read exactly (CX-123 rule 24): the record names
+    // it only when the key holds this version's own text. One that cannot be read is let go only while it holds this
+    // text, so the next try can write version n; another text there is never touched.
+    const text = JSON.stringify(version);
+    const written = await claimMark(versionKey(a.id, n), keepSeconds(a, now), text);
+    if (written === "unknown") await releaseMark(versionKey(a.id, n), text);
+    if (written !== "ours") return unavailable();
     const next: Agreement = {
       ...a,
       versions: [...a.versions, { n, sha256: version.sha256, title: version.title, createdAt: now, signature: null }],

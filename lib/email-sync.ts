@@ -47,6 +47,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark } from "@/lib/claim-mark";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { normaliseEmail } from "@/lib/auth";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import {
@@ -296,7 +298,8 @@ function firstName(name: string | null | undefined): string | null {
  * Hands one person to the creator's platform, when the creator's settings
  * take them and they agreed. Returns what happened: "off" (not connected, or
  * not wanted), "seen" (sent already), "skipped" (did not agree: logged,
- * never sent) or "queued".
+ * never sent) or "queued". Throws UnknownReplyError, with nothing written,
+ * when whether it was sent already cannot be read.
  */
 export async function queuePerson(store: Store, person: Person, now = Date.now()): Promise<"off" | "seen" | "skipped" | "queued"> {
   if (!store.statsId || !isRedisConfigured()) return "off";
@@ -312,8 +315,11 @@ export async function queuePerson(store: Store, person: Person, now = Date.now()
   if (!wanted || person.at < config.since - GRACE_MS) return "off";
   const email = (person.email ?? "").trim().toLowerCase();
   if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "off";
-  const [fresh] = await redisPipeline([["SET", seenKey(statsId, `${person.source}|${person.seed}`), "1", "NX", "EX", SEEN_SECONDS]]);
-  if (fresh === null) return "seen";
+  // Read exactly (CX-123 rule 24): only a mark that is ours writes a job. One held by another run is a person already
+  // handed over; one that cannot be read writes nothing and is said as not done, so a person is never handed over twice.
+  const fresh = await claimMark(seenKey(statsId, `${person.source}|${person.seed}`), SEEN_SECONDS);
+  if (fresh === "taken") return "seen";
+  if (fresh === "unknown") throw new UnknownReplyError("the mark of a person handed to an email platform");
 
   const agreed = person.consent;
   const job: Job = {

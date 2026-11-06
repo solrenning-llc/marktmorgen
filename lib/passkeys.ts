@@ -43,7 +43,8 @@ import {
 import { SessionsUnknownError, dropSecondStep, normaliseEmail, sessionMark } from "@/lib/auth";
 import { NIMBUS_FROM, headerText, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { type Claimed, releaseMark } from "@/lib/claim-mark";
 import { SITE_URL } from "@/lib/site-url";
 import { type Held, LockBusyError, deleteIfHeldOnly, setIfHeldOnly, withLock } from "@/lib/redis-lock";
 import { removalWhen } from "@/lib/removal-time";
@@ -102,6 +103,32 @@ async function fencedSet(held: Held, key: string, value: string): Promise<void> 
 async function fencedDel(held: Held, keys: string[]): Promise<void> {
   if (!keys.length) return;
   if (!(await deleteIfHeldOnly(held, keys))) throw new LockBusyError();
+}
+
+/**
+ * Claims a credential for an account with SET NX of its address, read exactly (CX-123 rule 24): "OK" is ours and nil
+ * is another account's. Any other answer is read back: the key holding this address is ours (the caller has checked the
+ * account does not have this credential yet, so it is this claim's write, or an earlier try's left behind); another
+ * address is another account's; anything else is unknown. A credential's claim never lapses, so it is not claimMark's.
+ */
+async function claimCredential(id: string, address: string): Promise<Claimed> {
+  const key = credKey(id);
+  let reply: unknown[] | null = null;
+  try {
+    reply = repliesFor(await redisPipeline([["SET", key, address, "NX"]]), 1);
+  } catch {
+    reply = null;
+  }
+  if (reply && reply[0] === "OK") return "ours";
+  if (reply && reply[0] === null) return "taken";
+  try {
+    const held = repliesFor(await redisPipeline([["GET", key]]), 1);
+    if (held && held[0] === address) return "ours";
+    if (held && typeof held[0] === "string") return "taken";
+  } catch {
+    // Unreadable: unknown, below.
+  }
+  return "unknown";
 }
 
 /** Reads a key and deletes it in one step, so a challenge answers once. */
@@ -256,8 +283,17 @@ export async function addPasskey(
     if (!(await mayAdd())) return { ok: false, reason: "second_step" };
     const list = await listPasskeys(address);
     if (list.length >= MAX_PASSKEYS) return { ok: false, reason: "full" };
-    const [claimed] = await redisPipeline([["SET", credKey(credential.id), address, "NX"]]);
-    if (claimed === null) return { ok: false, reason: "taken" };
+    // Already this account's: nothing to claim again.
+    if (list.some((p) => p.id === credential.id)) return { ok: false, reason: "taken" };
+    const claimed = await claimCredential(credential.id, address);
+    if (claimed === "taken") return { ok: false, reason: "taken" };
+    if (claimed === "unknown") {
+      // Nothing added; a claim this try may have written is let go only while it holds this address (the account does
+      // not have the credential, under its lock), so trying again adds it. Said as not done (a server error, to try
+      // again), never as another request changing the passkeys.
+      await releaseMark(credKey(credential.id), address);
+      throw new UnknownReplyError("a passkey's claim");
+    }
     const now = new Date().toISOString();
     const made: Passkey = {
       id: credential.id,

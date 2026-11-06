@@ -83,10 +83,11 @@ export async function readAccountingSales(store: Store, period: AccountingPeriod
     for (const paid of paypal.sales) found.push(sale(period, paid.product, paid.cents, 0, paid.currency, paid.at));
 
     if (store.stripeAccountId) {
+      // A list read, never a checkout made: the path carries its query, as lib/stats.ts readPaidSales writes it.
       const walk = async (list: string, take: (row: Record<string, unknown>) => void) => {
         let after = "";
         for (let page = 0; page < ACCOUNTING_PAGES; page += 1) {
-          const read = readStripePage(await deps.stripe(`${list}?limit=100&created[gte]=${period.from}&created[lt]=${period.to}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`));
+          const read = readStripePage(await deps.stripe(`${list}&created[gte]=${period.from}&created[lt]=${period.to}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`));
           if (read.unreadable > 0) throw new Unreadable();
           read.rows.forEach(take);
           if (!read.hasMore) return;
@@ -95,7 +96,7 @@ export async function readAccountingSales(store: Store, period: AccountingPeriod
         }
         throw new TooMany();
       };
-      const checkouts = walk("/checkout/sessions", (row) => {
+      const checkouts = walk("/checkout/sessions?limit=100", (row) => {
         const meta = metaOf(row);
         const status = ownField(row, "status");
         const paid = ownField(row, "payment_status");
@@ -105,7 +106,7 @@ export async function readAccountingSales(store: Store, period: AccountingPeriod
         const tax = plainObject(totals) ? wholeFrom(ownField(totals, "amount_tax")) : null;
         found.push(sale(period, meta.product ?? "", ownField(row, "amount_total"), tax, ownField(row, "currency"), ownField(row, "created")));
       });
-      const extras = walk("/payment_intents", (row) => {
+      const extras = walk("/payment_intents?limit=100", (row) => {
         const meta = metaOf(row);
         const status = ownField(row, "status");
         if (!meta || typeof status !== "string") throw new Unreadable();

@@ -1,3 +1,30 @@
+# Codex S — authoritative checkpoint, 6 November 2026 13h18 Fortaleza
+
+This section supersedes older checkpoints below where they conflict. Coordination is **Claude 4 only**; Claude 1 is off and is not a bridge or recipient. No sixth own product, own-head movement, CI retry/cancel, foreign merge, or foreign product edit occurred.
+
+## Nominal reviews completed
+
+- **#2817**, exact head `89f58caab3bdb6f9ad5c1d66c36f43d6b981bd91`: review **5803213521, no findings**. Only `tests/contract-funding.test.ts` changes. Durable RED `91b77abc` pins Date at .999, advances 1 ms and deterministically gives 56/57 at the expected normal-ack assertion. Final ordering reserves before observing the checkout subscription; no assertion/deadline/product contract was weakened. Final contract 57/57 plus linked 13+8+4 = **82/82**; typegen/global TypeScript/lint/scanner 4017/0/diff pass. Claude 5 owns nine checks and merge.
+- **#2816**, exact head `c5f3974660ddf5b13fa06d4d4bc9db86636afec0`: review **5803250376, no findings**. One comment in `lib/claim-mark.ts` now accurately says release is one EVAL and a script failure sends no GET/DEL fallback, leaving expiry to remove the mark. No executable code changed. claim-mark 5/5, lint, scanner 4017/0 and diff pass. Claude 5 owns nine checks and merge.
+
+#2672 was normally merged as `98e46512` after S review 5802244292 and 9/9; #2733 was normally merged as `0ecd81ce` after corrected S review 5802280326 and 9/9. Never recreate either.
+
+## Five own products — unchanged authoritative state
+
+1. #2473 `d57357ab42fa2abc522def9f16c90e3e526bd0c3`: blocked on contract/shared-reader decision.
+2. #2516 `a8f0ff1c3bee1fe82db87b903df8be1a74b66967`: independent clean return applies; last causal observation 8/9, shared Firefox failure outside S.
+3. #2689 `481e26c64c0b3031645c85c8c46b7cd1bb8f71b2`: blocked on occupied Studio UI/coordination.
+4. #2770 `7fa81525040f7712f063a72a367a20e506076a3c`: last causal observation 9/9; explicit nominal R2 return still missing.
+5. #2798 `cb6673a982efb43e84c266bc95018d22b5909f77`: R2 clean; last causal observation 8/9.
+
+The temporary detached review worktrees created in this continuation were removed after completion to recover workspace capacity; no branch, proof, PR, or committed file was deleted. The reusable detached review worktree now points at #2816 solely for the completed check.
+
+## Exact next event
+
+AV12 only: terminal #2798; nominal R2 return #2770; shared Firefox correction #2516; decisions #2473/#2689; or another explicit/unclaimed review after a fresh channel announcement. No empty CI polling, no main chase, no sixth unit, no automation, no documentary reservation PR. Preserve #2111/stats/store-readings, occupied sources, MR ceiling-before-read, unknown-never-zero/complete, and all commercial/payment/account/provider/contact boundaries.
+
+---
+
 # Codex S — authoritative checkpoint, 6 November 2026 12h21 Fortaleza
 
 This section supersedes every older checkpoint below where they conflict. Coordination is **Claude 4 only**; Claude 1 is off and is not a bridge or recipient. No sixth product was opened, no own product head moved, no CI retry/cancel/main-chase occurred, and no foreign product branch was edited.

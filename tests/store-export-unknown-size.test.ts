@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { emptyCatalog } from "@/lib/catalog";
 import { exportShape } from "@/lib/store-export";
@@ -38,4 +39,16 @@ test("a confirmed empty data room remains an exact zero-sized shape", async () =
   const shape = await exportShape(shop);
   assert.equal(shape.bytes, 0);
   assert.equal(Number.isSafeInteger(shape.commands) && shape.commands > 0, true);
+});
+
+test("the route answers unavailable before allowance or export work when the shape cannot be measured", () => {
+  const route = readFileSync("app/api/store/export/route.ts", "utf8");
+  const branch = route.slice(route.indexOf('if (what === "store")'), route.indexOf('if (what === "sales")'));
+  const shape = branch.indexOf("await exportShape(store)");
+  const refusal = branch.indexOf('return plain(503, "Your store\'s file could not be measured just now. Try again in a minute.")');
+  const allowance = branch.indexOf("takeAllowance");
+  const exportWork = branch.indexOf("storeExport(store)");
+
+  assert.equal(shape >= 0 && refusal > shape && allowance > refusal && exportWork > allowance, true);
+  assert.match(branch, /try \{[\s\S]*await exportShape\(store\)[\s\S]*\} catch \{/);
 });

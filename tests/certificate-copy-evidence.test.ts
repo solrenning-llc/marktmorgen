@@ -76,6 +76,7 @@ test("certificate privacy copy requires the exact index-read envelope and slot t
     ["non-string standing id", [[], 7, 0]],
     ["numeric-text count", [[], null, "0"]],
     ["negative count", [[], null, -1]],
+    ["unsafe count", [[], null, Number.MAX_SAFE_INTEGER + 1]],
   ];
   for (const [name, reply] of bad) {
     assert.equal(await unknown(() => copyWith(reply)), "UnknownReply", name);
@@ -144,6 +145,7 @@ test("certificate erasure preflight count requires one exact numeric reply per c
     ["negative count", [1, -1]],
     ["fractional count", [1, 1.5]],
     ["infinite count", [1, Infinity]],
+    ["unsafe count", [1, Number.MAX_SAFE_INTEGER + 1]],
   ];
   for (const [name, reply] of bad) {
     assert.equal(await unknown(() => countWith(reply)), "UnknownReply", name);

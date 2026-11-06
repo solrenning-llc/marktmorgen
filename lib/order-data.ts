@@ -199,22 +199,58 @@ function scriptOf(room: string, commands: Command[]): (string | number)[] {
   return ["EVAL", ORDER_WRITE, keys.length, ...keys, ...argv];
 }
 
+/** Whether a reply is a whole count from `low` to `high` (inclusive). */
+const between = (reply: unknown, low: number, high: number): boolean => typeof reply === "number" && Number.isSafeInteger(reply) && reply >= low && reply <= high;
+
 /**
- * Whether one command's reply is in the exact shape that command answers when it ran (Codex G on #2719): a whole
- * count for the counting writes, "OK" for SET (or nothing only when it was asked NX or XX), a number for ZINCRBY.
- * Anything else, a null included, is not a write that landed.
+ * Whether one command's reply is in the exact shape and range that command answers when it ran (Codex G on #2719,
+ * twice): "OK" for SET (or nothing only when it was asked NX or XX); a number for ZINCRBY and ZADD INCR; any whole
+ * number for the counters, whose negatives are real; and for the rest, a whole count no larger than what the command
+ * could have changed: a one-field HSET answers 0 or 1, never -1 or 2. Anything else, a null or a missing reply
+ * included, is not a write that landed.
  */
 function replyFits(command: Command, reply: unknown): boolean {
   const name = String(command[0]).toUpperCase();
+  const args = command.slice(2).map((a) => String(a).toUpperCase());
   const count = typeof reply === "number" && Number.isSafeInteger(reply);
   const numeric = count || (typeof reply === "string" && reply.trim() !== "" && Number.isFinite(Number(reply)));
-  if (name === "SET") {
-    const conditional = command.slice(3).some((a) => ["NX", "XX"].includes(String(a).toUpperCase()));
-    return reply === "OK" || (conditional && (reply === null || reply === false));
+  switch (name) {
+    case "SET":
+      return reply === "OK" || (args.slice(1).some((a) => a === "NX" || a === "XX") && (reply === null || reply === false));
+    case "ZINCRBY":
+      return numeric;
+    case "ZADD": {
+      if (args.includes("INCR")) return numeric || reply === null;
+      const flags = args.filter((a) => ["NX", "XX", "GT", "LT", "CH"].includes(a)).length;
+      return between(reply, 0, Math.floor((args.length - flags) / 2));
+    }
+    case "INCR":
+    case "INCRBY":
+    case "DECR":
+    case "DECRBY":
+    case "HINCRBY":
+      return count;
+    case "HSET":
+      return between(reply, 0, Math.floor(args.length / 2));
+    case "HSETNX":
+    case "EXPIRE":
+    case "PEXPIRE":
+    case "EXPIREAT":
+    case "PEXPIREAT":
+      return between(reply, 0, 1);
+    case "SADD":
+    case "SREM":
+    case "HDEL":
+    case "ZREM":
+      return between(reply, 0, args.length);
+    case "DEL":
+      return between(reply, 0, args.length + 1);
+    case "RPUSH":
+    case "LPUSH":
+      return between(reply, Math.max(1, args.length), Number.MAX_SAFE_INTEGER);
+    default:
+      return false;
   }
-  if (name === "ZINCRBY") return numeric;
-  if (name === "ZADD" && command.slice(3).some((a) => String(a).toUpperCase() === "INCR")) return numeric || reply === null;
-  return count;
 }
 
 /**
@@ -230,7 +266,8 @@ function readScript(reply: unknown, commands: Command[]): { charged: number; rep
   const replies = (reply as unknown[]).slice(1);
   const failed = replies.find((r) => typeof r === "string" && r.startsWith(ORDER_WRITE_ERROR));
   if (failed) throw new Error(`Redis error: ${String(failed).slice(ORDER_WRITE_ERROR.length)}`);
-  if (replies.some((r, i) => !replyFits(commands[i], r))) throw new UnknownReplyError("an order's write: a command's reply");
+  // Every place, a hole included (Array.prototype.some skips holes): a reply that is not there is not a write that landed.
+  for (let i = 0; i < commands.length; i++) if (!replyFits(commands[i], replies[i])) throw new UnknownReplyError("an order's write: a command's reply");
   return { charged, replies: replies.map((r) => (r === false ? null : r)) };
 }
 

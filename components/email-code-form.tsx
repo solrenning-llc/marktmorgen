@@ -13,7 +13,8 @@ export const CODE_MESSAGES: Record<string, string> = {
   code_shape: "The code is 6 digits, like 123456.",
   code_expired: "That code has expired or was already used. Ask for a new link and code.",
   code_blocked: "Too many wrong codes. Use the link in the email.",
-  code_address_blocked: "Too many codes were tried for this address in the last hour. Use the link in the email.",
+  code_address_blocked: "Too many codes were tried for this address. Use the link in the email.",
+  code_rate_limited: "Too many codes were tried from here in the last hour. Use the link in the email, or wait an hour.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 
@@ -66,7 +67,7 @@ export function EmailCodeForm({ request }: { request: string }) {
           Enter the 6-digit code
         </label>
         <p id={`${id}-hint`} className="field-hint">
-          It is in the same email as the link. Use it if you opened the email on another device.
+          It is in the same email as the link. Use it if you opened the email on another device, and type it here without reloading this page.
         </p>
         <input
           id={`${id}-code`}

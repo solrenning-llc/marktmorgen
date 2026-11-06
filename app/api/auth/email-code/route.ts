@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { takeSignInCode } from "@/lib/auth";
+import { codeRateAnswer, takeSignInCode } from "@/lib/auth";
 import { finishProvenSignIn } from "@/lib/signin-finish";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 
@@ -26,8 +26,13 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   }
 
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown";
   let answer: Awaited<ReturnType<typeof takeSignInCode>>;
   try {
+    // The machine's tries, counted before any record is read (Claude 3 on #2736): past them, nothing is read.
+    const machine = await codeRateAnswer(ip);
+    if (machine === "unknown") return Response.json({ ok: false, error: "server_error" }, { status: 503 });
+    if (machine === "over") return Response.json({ ok: false, error: "code_rate_limited" }, { status: 429 });
     answer = await takeSignInCode(body.request, body.code);
   } catch (error) {
     console.error("a login code could not be checked", error);

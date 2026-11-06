@@ -33,6 +33,8 @@
  *   nl:auth:lastcode:<hash> -> an address's newest code: only that one opens
  *   nl:rl:code-addr:<hash>  -> the code tries for one address in the hour, all
  *                              its requests together
+ *   nl:rl:code-day:<hash>   -> the same, for a day from the first try
+ *   nl:rl:code-ip:<hash>    -> the code tries from one machine in the hour
  *
  * A passkey (lib/passkeys.ts) opens exactly the same kind of session, so
  * everything here — "log out of all devices" included — covers it too.
@@ -104,6 +106,10 @@ const lastCodeKey = async (address: string) =>
   `nl:auth:lastcode:${(await sha256Hex(`nimbus-auth-lastcode:${address}`)).slice(0, 40)}`;
 const codeTriesKey = async (address: string) =>
   `nl:rl:code-addr:${(await sha256Hex(`nimbus-auth-code-tries:${address}`)).slice(0, 32)}`;
+const codeDayKey = async (address: string) =>
+  `nl:rl:code-day:${(await sha256Hex(`nimbus-auth-code-day:${address}`)).slice(0, 32)}`;
+const codeIpKey = async (ip: string) =>
+  `nl:rl:code-ip:${(await sha256Hex(`nimbus-auth-code-ip:${ip}`)).slice(0, 32)}`;
 /** The code as kept: a hash with the request's own id, which Redis never holds, so the six digits cannot be read back from it. */
 const codeHash = async (request: string, code: string) => sha256Hex(`nimbus-auth-code-value:${request}:${code}`);
 
@@ -497,6 +503,19 @@ export const EMAIL_CODE_TRIES_PER_ADDRESS_DAY = 20;
 /** Code tries one machine may take in the hour, counted before any record is read (Claude 3 on #2736). */
 export const EMAIL_CODE_TRIES_PER_IP_HOUR = 30;
 
+/** A day, in seconds: the window of EMAIL_CODE_TRIES_PER_ADDRESS_DAY. */
+const CODE_DAY_SECONDS = 24 * 60 * 60;
+
+/**
+ * Where a machine stands against its code tries of the hour (Claude 3 on
+ * #2736): counted before any record is read, so a machine cannot buy reads
+ * of made-up ids without bound; unknown is said as such, and nothing is read.
+ */
+export async function codeRateAnswer(ip: string): Promise<LimitAnswer> {
+  if (!isRedisConfigured()) return "unknown";
+  return hourCount(await codeIpKey(ip), EMAIL_CODE_TRIES_PER_IP_HOUR);
+}
+
 /** A request's id that opens nothing, for an answer that must look like every other (the form's honeypot). */
 export function unusedSignInRequest(): string {
   return randomToken();
@@ -529,7 +548,7 @@ export async function sendSignInLink(
 
   await redisPipeline([
     ["SET", link, address, "EX", LINK_TTL_SECONDS],
-    ["HSET", record, "k", link, "p", await linkCodeKey(token), "a", await lastCodeKey(address), "t", await codeTriesKey(address), "h", await codeHash(request, code), "n", 0],
+    ["HSET", record, "k", link, "p", await linkCodeKey(token), "a", await lastCodeKey(address), "t", await codeTriesKey(address), "d", await codeDayKey(address), "h", await codeHash(request, code), "n", 0],
     ["EXPIRE", record, LINK_TTL_SECONDS],
     ["SET", await linkCodeKey(token), record, "EX", LINK_TTL_SECONDS],
     // Only the newest code of an address opens (Claude 4 on 652 [WG12]): an older one is refused by this mark.
@@ -551,7 +570,7 @@ export async function sendSignInLink(
       "",
       url,
       "",
-      "Or type this code on the page where you asked for the link:",
+      "Or type this code on the page where you asked for the link, without reloading that page:",
       "",
       code,
       "",
@@ -628,29 +647,38 @@ export async function takeSignInCode(request: unknown, typed: unknown): Promise<
   const code = typeof typed === "string" ? typed.replace(/[\s-]/g, "") : "";
   if (!/^\d{6}$/.test(code)) return "invalid";
   const record = await codeKey(request);
-  const read = repliesFor(await redisPipeline([["HMGET", record, "k", "p", "a", "t", "h"]]), 1)?.[0];
-  if (!Array.isArray(read) || read.length !== 5) return "unknown";
+  const read = repliesFor(await redisPipeline([["HMGET", record, "k", "p", "a", "t", "d", "h"]]), 1)?.[0];
+  if (!Array.isArray(read) || read.length !== 6) return "unknown";
   if (read.every((field) => field === null)) return "expired";
-  const [link, pointer, last, tries, hash] = read;
-  if ([link, pointer, last, tries, hash].some((field) => typeof field !== "string") || !/^[0-9a-f]{64}$/.test(hash as string)) return "unknown";
-  // The tries, counted before anything is compared: the address's in the hour, then the request's own.
+  const [link, pointer, last, tries, day, hash] = read;
+  if ([link, pointer, last, tries, day, hash].some((field) => typeof field !== "string") || !/^[0-9a-f]{64}$/.test(hash as string)) return "unknown";
+  // The tries, counted before anything is compared: the address's in the hour and in the day, then the request's own.
+  // The record's time is read with them: a record gone since the HMGET is recreated by HINCRBY without one, and is
+  // let go here rather than kept forever (Claude 3 on #2736).
   const counted = repliesFor(await redisPipeline([
     ["SET", tries as string, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
     ["INCR", tries as string],
+    ["SET", day as string, "0", "EX", CODE_DAY_SECONDS, "NX"],
+    ["INCR", day as string],
     ["HINCRBY", record, "n", 1],
+    ["TTL", record],
     ["GET", last as string],
-  ]), 4);
+  ]), 7);
   const forAddress = countOf(counted?.[1]);
-  const forRequest = countOf(counted?.[2]);
-  if (!counted || forAddress === null || forRequest === null || (counted[3] !== null && typeof counted[3] !== "string")) return "unknown";
-  if (counted[3] !== record) {
-    // A newer request for the address, or none left: only the newest code opens.
+  const forDay = countOf(counted?.[3]);
+  const forRequest = countOf(counted?.[4]);
+  const left = counted?.[5];
+  const newest = counted?.[6];
+  if (!counted || forAddress === null || forDay === null || forRequest === null) return "unknown";
+  if (typeof left !== "number" || !Number.isSafeInteger(left) || left < -2 || (newest !== null && typeof newest !== "string")) return "unknown";
+  if (left === -1 || newest !== record) {
+    // Recreated without a time, a newer request for the address, or none left: only the newest code opens.
     await redisPipeline([["DEL", record]]);
     return "expired";
   }
   // Kept until its time runs out, so every later try is told the same: too many wrong codes, use the link.
   if (forRequest > EMAIL_CODE_TRIES) return "blocked";
-  if (forAddress > EMAIL_CODE_TRIES_PER_ADDRESS_HOUR) return "address-blocked";
+  if (forAddress > EMAIL_CODE_TRIES_PER_ADDRESS_HOUR || forDay > EMAIL_CODE_TRIES_PER_ADDRESS_DAY) return "address-blocked";
   const expected = Buffer.from(hash as string, "hex");
   const given = Buffer.from(await codeHash(request, code), "hex");
   if (expected.length !== given.length || !timingSafeEqual(expected, given)) {

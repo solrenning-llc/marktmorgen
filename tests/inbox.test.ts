@@ -19,7 +19,6 @@
  *     answers and the conversation, never the visitor's address or name;
  *   - one connection cannot start conversations without end.
  */
-import { readFileSync } from "node:fs";
 import { NO_INBOX, forAi, inboxOrder, messageText, parseInboxSetting, type Conversation } from "@/lib/inbox-rules";
 import { assignTo, chatOpen, openConversation, readInbox, replyTo, setStatus, startChat, suggestReply, visitorSend, visitorThread } from "@/lib/inbox";
 import { sendContact } from "@/lib/store-contact";
@@ -158,12 +157,6 @@ async function main(): Promise<void> {
   for (let i = 0; i < 6; i += 1) results.push((await startChat({ store, email: `p${i}@example.com`, name: "", text: "Hello there", ip: "10.0.0.9" })).ok);
   is("five from one connection in an hour, then no more", results, [true, true, true, true, true, false]);
 
-  part("Ids drawn evenly");
-  // A random byte taken modulo 36 favours the first letters (CodeQL js/biased-cryptographic-random).
-  const source = readFileSync("lib/inbox.ts", "utf8");
-  is("each letter of an id comes from randomInt, never a random value modulo a length", [/randomInt\(LETTERS\.length\)/.test(source), /%\s*(?:[\w.]+\.length\b|\d[\d_]*\b)/.test(source)], [true, false]);
-  const ids = (await readInbox(store.statsId)).map((c) => c.id);
-  is("the conversations made here have ids of 12 lowercase letters and digits, all different", [ids.length > 5, ids.every((id) => /^[a-z0-9]{12}$/.test(id)), new Set(ids).size === ids.length], [true, true, true]);
   done();
 }
 

@@ -42,6 +42,7 @@ import {
   MAX_KEPT_AGREEMENTS,
   MAX_PER_PERSON,
   MAX_VERSIONS,
+  SHA_PATTERN,
   SIGN_MS,
   type Agreement,
   type AgreementDraft,
@@ -217,9 +218,21 @@ async function recordNames(id: string, n: number, sha256: string): Promise<"yes"
     if (!reply) return "unknown";
     if (reply[0] === null) return "no";
     if (typeof reply[0] !== "string") return "unknown";
-    const record = parseAgreement(JSON.parse(reply[0]));
-    if (!record) return "unknown";
-    return record.versions.some((m) => m.n === n && m.sha256 === sha256) ? "yes" : "no";
+    // Read at the edge of a clean-up, strictly (Codex CX1 on #2723): parseAgreement drops rows it does not understand
+    // and cuts at MAX_VERSIONS, which is right for a page but would turn a record that still names this version into
+    // "no" here. Any row that names it exactly is "yes"; "no" only when every row is understood and the list is whole.
+    const raw: unknown = JSON.parse(reply[0]);
+    const rows = raw && typeof raw === "object" && !Array.isArray(raw) ? Object.getOwnPropertyDescriptor(raw, "versions")?.value : undefined;
+    if (!Array.isArray(rows)) return "unknown";
+    const field = (row: unknown, name: string): unknown =>
+      row && typeof row === "object" && !Array.isArray(row) ? Object.getOwnPropertyDescriptor(row, name)?.value : undefined;
+    if (rows.some((row) => field(row, "n") === n && field(row, "sha256") === sha256)) return "yes";
+    const understood = rows.every((row) => {
+      const at = field(row, "n"), sha = field(row, "sha256");
+      return Number.isSafeInteger(at) && (at as number) >= 1 && typeof sha === "string" && SHA_PATTERN.test(sha);
+    });
+    if (!understood || rows.length > MAX_VERSIONS || !parseAgreement(raw)) return "unknown";
+    return "no";
   } catch {
     return "unknown";
   }

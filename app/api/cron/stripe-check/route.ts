@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isDemoCheckoutConfigured } from "@/lib/demo-store";
 import { type Check, verifyCartShipping, verifyPackages, verifyTaxDocuments, verifyTiers } from "@/lib/verify-stripe";
@@ -27,8 +28,11 @@ export async function GET(request: NextRequest) {
   if (!isRedisConfigured() || !isDemoCheckoutConfigured()) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
-  const [got] = await redisPipeline([["SET", "nl:stripe-check:lock", "1", "NX", "EX", 120]]);
-  if (got === null) return Response.json({ ok: true, busy: true });
+  // Taken only on an exact "OK"; null is another run holding it. Anything else
+  // is unknown: no test charge runs and no lock is let go of.
+  const lock = repliesFor(await redisPipeline([["SET", "nl:stripe-check:lock", "1", "NX", "EX", 120]]), 1);
+  if (!lock || (lock[0] !== "OK" && lock[0] !== null)) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  if (lock[0] === null) return Response.json({ ok: true, busy: true });
   try {
     let checks: Check[];
     try {
@@ -39,8 +43,14 @@ export async function GET(request: NextRequest) {
     const ok = checks.length > 0 && checks.every((c) => c.ok);
     // In Vercel's logs for every run, passing or not.
     console.log(`stripe-check ${ok ? "pass" : "FAIL"}: ${checks.map((c) => `${c.ok ? "PASS" : "FAIL"} ${c.check} (${c.detail})`).join(" | ")}`);
-    const [previous] = await redisPipeline([["GET", LAST]]);
+    const read = repliesFor(await redisPipeline([["GET", LAST]]), 1);
+    const previous = read?.[0];
     const failedBefore = typeof previous === "string" && previous.includes('"ok":false');
+    // An unknown reply is not an earlier pass either: no "passing again" is
+    // claimed, but a recovery it may hide is said in the log, not dropped.
+    if (ok && (!read || (previous !== null && typeof previous !== "string"))) {
+      console.error('stripe-check passes, but the previous result could not be read: no "passing again" notice was sent');
+    }
     await redisPipeline([["SET", LAST, JSON.stringify({ at: Date.now(), ok, checks }), "EX", 30 * 86_400]]);
     if ((!ok || failedBefore) && isSenderConfigured()) {
       await sendEmail({ meter: { by: "company" },

@@ -860,17 +860,20 @@ function LessonEditor({
   useLeaveGuard(unsaved || uploading !== null);
   const streams = useContext(Streams);
 
+  // Only a read that came back in its exact shape opens the box: a text not read is never shown as an empty one,
+  // because "Save text" sends the box as the whole text and would put the empty box over the saved text (CX-123 rule 24).
   async function loadText() {
+    onError(null);
     setLoadingText(true);
     try {
       const response = await fetch(`/api/store/course?id=${productId}&lessonId=${lesson.id}`, { cache: "no-store" });
-      const data = (await response.json()) as { ok?: boolean; text?: string };
-      const read = data.ok ? data.text ?? "" : "";
-      setText(read);
-      setSavedText(read);
+      const data = (await response.json()) as { ok?: unknown; text?: unknown } | null;
+      if (!response.ok || data?.ok !== true || typeof data.text !== "string") throw new Error("unread");
+      setText(data.text);
+      setSavedText(data.text);
     } catch {
-      setText("");
-      setSavedText("");
+      // The box stays closed, so there is no "Save text" to press; "Edit the text" is the retry.
+      onError("The lesson's text could not be read just now, so it is not shown and nothing was changed. Try again in a moment.");
     } finally {
       setLoadingText(false);
     }

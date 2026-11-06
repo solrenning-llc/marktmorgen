@@ -17,6 +17,7 @@
 import type { Store } from "@/lib/store";
 import { idsOfKind, readProducts } from "@/lib/catalog";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { type Member, directory } from "@/lib/community";
 import { allEvents, eventCount } from "@/lib/community-events";
@@ -54,9 +55,14 @@ const WALK_MEMBERS = 5_000;
 
 /**
  * Whether this community still needs its one-time walk. One read.
+ *
+ * Read exactly (CX-123 rule 24): only nil or another version walks; a reply in any other shape throws
+ * UnknownReplyError, and nothing is walked or paid on it.
  */
 export async function needsWalk(communityId: string): Promise<boolean> {
-  const [mark] = await redisPipeline([["GET", markKey(communityId)]]);
+  const replies = repliesFor(await redisPipeline([["GET", markKey(communityId)]]), 1);
+  const mark = replies?.[0];
+  if (mark !== null && typeof mark !== "string") throw new UnknownReplyError("a community's search walk marker");
   return mark !== INDEX_VERSION;
 }
 
@@ -143,7 +149,10 @@ export async function walkCommunity(store: Store, pay: WalkPay): Promise<boolean
     for (const product of products) {
       if (!product.course) continue;
       if (!(await pay(walkUnits(1, WALK_COURSE_BYTES)))) return false;
-      const course = await readCourse(product.course.id).catch(() => null);
+      // A course that could not be read stops the walk unmarked (rule 24): taken for none, its lessons would stay
+      // out of the search for good once the community is marked. Only a course confirmed gone is passed over.
+      const course = await readCourse(product.course.id).catch(() => undefined);
+      if (course === undefined) return false;
       if (!course) continue;
       const lessons = lessonsInOrder(course).length;
       if (lessons && !(await pay(walkUnits(lessons, lessons * WALK_BODY_BYTES)))) return false;
@@ -155,7 +164,9 @@ export async function walkCommunity(store: Store, pay: WalkPay): Promise<boolean
     const events = await eventCount(communityId).catch(() => null);
     if (events === null) return false;
     if (events && !(await pay(walkUnits(2 + events, events * WALK_EVENT_BYTES)))) return false;
-    const all = events ? await allEvents(communityId).catch(() => []) : [];
+    // The same for the calendar: an unread one is not an empty one.
+    const all = events ? await allEvents(communityId).catch(() => null) : [];
+    if (all === null) return false;
     if (!(await indexPaid(communityId, "event", all.map(eventEntry), pay))) return false;
 
     // Only the people who asked to be listed, which is the same rule the

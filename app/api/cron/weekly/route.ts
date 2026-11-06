@@ -1,13 +1,14 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { visitedFolders } from "@/lib/traffic";
 import { monthKey } from "@/lib/delivery";
 import { storeOf } from "@/lib/usage-billing";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
-import { claimWeek, readNumbers, weeklyMessage, weeklyOff, weeklyToken } from "@/lib/stats-report";
+import { claimWeek, readNumbers, releaseWeek, weeklyMessage, weeklyOff, weeklyToken } from "@/lib/stats-report";
 import { weeklySummary } from "@/lib/numbers-ask";
 import { aiAvailableFor } from "@/lib/ai";
 import { readSpends } from "@/lib/ad-spend";
@@ -45,8 +46,13 @@ export async function GET(request: NextRequest) {
   if (!isRedisConfigured() || !isSenderConfigured()) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
-  const [got] = await redisPipeline([["SET", "nl:weekly:lock", "1", "NX", "EX", 120]]);
-  if (got === null) return Response.json({ ok: true, busy: true });
+  // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run is busy; an
+  // unknown answer runs nothing this time, and the lock is let go at the end only while it still holds this run's
+  // own value, so a run never deletes another run's lock.
+  const lock = claimValue();
+  const got = await claimMark("nl:weekly:lock", 120, lock);
+  if (got === "taken") return Response.json({ ok: true, busy: true });
+  if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
 
   const started = Date.now();
   const out = { looked: 0, sent: 0, quiet: 0, stopped: 0, unpaid: 0, failed: 0 };
@@ -69,9 +75,17 @@ export async function GET(request: NextRequest) {
         out.stopped += 1;
         continue;
       }
-      if (!(await claimWeek(store.handle))) continue;
+      // The week is read once, so the claim and its release name the same week even across Monday's midnight.
+      const at = Date.now();
+      if (!(await claimWeek(store.handle, at))) continue;
       out.looked += 1;
       const data = await readNumbers(store).catch(() => null);
+      if (!data) {
+        // Not read this time: the week is let go and counted failed, so a later run that week tries again (as monthly).
+        await releaseWeek(store.handle, at).catch(() => undefined);
+        out.failed += 1;
+        continue;
+      }
       // Its rates, for the ranges stores its size are set beside (lib/benchmarks.ts): read here anyway.
       await recordSample(store, data);
       const token = weeklyToken(store.handle);
@@ -122,6 +136,6 @@ export async function GET(request: NextRequest) {
     console.error("weekly emails failed", error);
     return Response.json({ ok: false, error: "failed", ...out }, { status: 500 });
   } finally {
-    await redisPipeline([["DEL", "nl:weekly:lock"]]).catch(() => undefined);
+    await releaseMark("nl:weekly:lock", lock);
   }
 }

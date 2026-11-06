@@ -536,7 +536,9 @@ async function main(): Promise<void> {
 
   part("Where it runs, and what the pages say");
   const job = read("app/api/cron/closing/route.ts");
-  is("the job is one of ours to run, one at a time", [/cronAllowed\(request\)/.test(job), /"nl:closing:lock", "1", "NX"/.test(job), /closeEnded\(/.test(job)], [true, true, true]);
+  // Changed (claude5/fix-cron-locks, CX-123 rule 24): the lock was a SET NX of "1" read as ours on any answer but nil;
+  // it is now claimMark with this run's own value (lib/claim-mark.ts), held exactly in tests/cron-locks-twelve.test.ts.
+  is("the job is one of ours to run, one at a time", [/cronAllowed\(request\)/.test(job), /claimMark\("nl:closing:lock", /.test(job), /closeEnded\(/.test(job)], [true, true, true]);
   const crons = (JSON.parse(read("vercel.json")) as { crons: { path: string; schedule: string }[] }).crons;
   const at = (path: string) => crons.find((cron) => cron.path === path)?.schedule;
   is("every day, after the check of every store's plan", [at("/api/cron/plans"), at("/api/cron/closing")], ["0 9 * * *", "30 9 * * *"]);

@@ -409,6 +409,14 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
   const now = Math.floor(Date.now() / 1000);
   const since = now - CONFIRM_WITHIN_SECONDS;
   const reminding = recoveryOn(store);
+  // An order that fails is counted once in this pass, however many of its steps failed (Claude 5 on #2977): its
+  // confirmation and its place on the list can both throw on the same unreadable record, and that is one order.
+  const failedOrders = new Set<string>();
+  const failOrder = (id: string): void => {
+    if (failedOrders.has(id)) return;
+    failedOrders.add(id);
+    counts.failed += 1;
+  };
   let after = "";
   for (let page = 0; page < MAX_PAGES_PER_STORE && Date.now() < deadline; page += 1) {
     const listed = await onAccount(
@@ -482,19 +490,23 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       // Unknown is said as failed (Claude 3 on #2714): past the confirmation window the order is not read again, so a
       // silent skip would be a confirmation never sent and never noticed.
       if (mark === null || mark > 1) {
-        counts.failed += 1;
+        failOrder(paid[i].id as string);
         continue;
       }
       if (mark !== 0) continue;
       try {
         const outcome = await confirmPurchase(store, paid[i].id as string, paid[i]);
         if (outcome === "sent") counts.confirmed += 1;
-        if (outcome === "failed") counts.failed += 1;
+        if (outcome === "failed") failOrder(paid[i].id as string);
       } catch (error) {
         // One order's confirmation that throws (a record that does not read) never ends the store's pass: the orders
-        // behind it, the next pages, the library and the list go on (Claude 4, C4-2990). Nothing marks it here, so it
-        // stays to be confirmed on the next run; it is counted as failed, and logged by the order, not the buyer.
-        counts.failed += 1;
+        // behind it, the next pages, the library and the list go on (Claude 4, C4-2990). It is counted as failed, once,
+        // and logged by the order, not the buyer. When it is tried again depends on where it threw: before its
+        // "sending" mark was taken (a record that does not read), nothing is marked and the next run tries it; when
+        // the mark was taken and letting it go failed too, the runs skip it until the mark expires
+        // (SENDING_MARK_SECONDS in lib/purchase-email.ts, 15 minutes) and the first run after that tries it; after
+        // the email went (a throw after sending), it is marked sent and never sent again.
+        failOrder(paid[i].id as string);
         console.error("a paid order's confirmation was left for the next run", paid[i].id, describe(error));
       }
     }
@@ -530,7 +542,8 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
         const email = typeof row.customer_details?.email === "string" ? row.customer_details.email : typeof row.customer_email === "string" ? row.customer_email : "";
         if (!email) continue;
         // One order that throws here (its products not read) never holds back the orders behind it (C4-2990): nothing
-        // marks it, so it is listed on the next run; it is counted as failed, logged by the order, not the buyer.
+        // marks it, so it is listed on the next run; it is counted as failed (once, with its confirmation), logged by
+        // the order, not the buyer. The try's body is left unindented on purpose: #2719 rewrites those lines.
         try {
         const products = await listingsNamed(store, row.metadata);
         if ((await listOrder(store, {
@@ -542,7 +555,7 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
           products: products.map((p) => ({ id: p.id, title: p.title })),
         })) === "done") counts.listed += 1;
         } catch (error) {
-          counts.failed += 1;
+          failOrder(row.id as string);
           console.error("a paid order was left off the list for the next run", row.id, describe(error));
         }
       }

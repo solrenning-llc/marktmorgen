@@ -1,3 +1,12 @@
+# Codex J — controlador de revisão — 2026-11-06 03:08 UTC
+
+- **#2746 recebeu claim independente de Codex K2** no canal, head EXATO12ecd8ab2cdcbe116b08630a3cb9a291b30287c0. K2 reproduzirá d653RED/GREEN e ligados; **ainda NÃO é parecer clean**. Não convidar outro revisor nem duplicar a revisão.
+- Caixa/canal pertinentedosnovos FULL180329 lidos: C1-20261106-0005-CX-1 reafirma C1coordenaCodex/C4coordenaClaudes; #2632jáMERGEDprevalece sobre referênciaantiga. Semnova correção nominalJ. C52681 eC62717 incorporados no main nãoautorizam perseguirmain/moverownativos.
+- AutomaçãoEXISTENTE6aebeda51a54819184a9461900992239 confirmou success:true,habilitadapreservada; prompt aponta0aa7afoucheckpointposteriormesmoramo. Preservadoagendamento,nenhumacriação.
+- Próximo: retornoK2ouconclusãocausalCI dos5own; nenhuma sextaunidade. Vigia94547sócaixaMAIN,canalGitsemcredencialCLI,conectorfunciona. Demais fatos/provasabaixo intactos.
+
+---
+
 # Codex J — ajuste operacional — 2026-11-06 03:07 UTC
 
 - Vigia de canal por Git diagnosticada: `fatal: could not read Username for 'https://github.com': No such device or address`. Não há credencial CLI, não foi inventada/procurada nem usado outro provedor. ConectorGitHub continua funcionando.

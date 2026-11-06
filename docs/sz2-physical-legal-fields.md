@@ -139,7 +139,10 @@ under 30 days, and progressively increasing reductions (art. 6a(3)–(5)).
 **What Marktmorgen does:** the store sale (`lib/store-sale.ts`) is the only
 announced reduction. A price history per physical product records each price
 actually applied (the regular price, and the sale price while a sale ran),
-kept for 30 days. During a sale, a buyer in the EU/EEA sees the prior price
+kept for 61 days: the 30-day period plus the longest store sale
+(`MAX_SALE_DAYS`, 31), so a sale still running on its last day finds the
+prior price computed at its start (the queue item said "limited to 30 days";
+30 alone would lose that price mid-sale). During a sale, a buyer in the EU/EEA sees the prior price
 computed from that history, and the percentage shown is computed from it.
 History shorter than 30 days (a new product) is flagged, and the next unit
 decides the wording ("Lowest price since it went on sale on ..."). A sale
@@ -165,13 +168,15 @@ type SafetyInfo = {
   noWarnings: boolean;         // the creator states there are none; never inferred from an empty field
 };
 type NetQuantity = { amount: string; unit: QuantityUnit }; // per price option
-type PriceStep = { at: number; cents: number };            // seconds; history kept 30 days
+type PriceStep = { at: number; cents: number };            // seconds; history kept 61 days (30 + longest sale)
 type Prop65 = string;                                      // "" is none
 ```
 
 Limits: each text field has a maximum length (`MAX_*` in the module), control
-characters are refused, the price history holds at most `MAX_PRICE_STEPS`
-steps; when a creator changes prices more often than that within 30 days,
+characters and overlong values read as empty (never silently cut),
+a clock that goes back adds the new step one second after the last (no
+applied price is lost), the price history holds at most `MAX_PRICE_STEPS`
+steps; when a creator changes prices more often than that within the kept period,
 adjacent old steps are merged into one at the **lower** price, so the prior
 price can only come out lower (a smaller announced reduction), never higher.
 

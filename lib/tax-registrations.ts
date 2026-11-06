@@ -23,6 +23,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { onAccount } from "@/lib/stripe-account";
+import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import type { Store } from "@/lib/store";
 
 /** How long a complete list is kept before Stripe is asked again. */
@@ -151,7 +152,7 @@ export async function readTaxRegistrations(store: Pick<Store, "stripeAccountId">
     for (let page = 0; page < TAX_REGISTRATION_PAGES; page += 1) {
       const query = new URLSearchParams({ status: "active", limit: "100" });
       if (after) query.set("starting_after", after);
-      const read = readPage(await onAccount("GET", account, `/tax/registrations?${query}`));
+      const read = readPage(await onAccount("GET", account, `/tax/registrations?${query}`, undefined, STRIPE_VERSION));
       if (!read) return { state: "unknown", dashboard };
       list.push(...read.rows);
       if (!read.more) {

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -60,8 +61,22 @@ export default async function StudioTaxPage({ searchParams }: Params) {
           <p className="eyebrow">Tax</p>
           <h1 className="t-h2 mt-3">Where you collect tax</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
-            The tax registrations that are active on your Stripe account, as Stripe lists them. Stripe adds tax at your
-            checkout only where you have one. This is information from your Stripe account, not tax advice.
+            The tax registrations that are active on your Stripe account, as Stripe lists them.
+            This is information from your Stripe account, not tax advice.
+          </p>
+          {/* What is true now (Claude 4 on #2735): the checkout asks Stripe for tax only while it is on (lib/tax.ts, applyTax). */}
+          <p className="mt-3 max-w-2xl text-ink">
+            {store.tax.enabled ? (
+              "Tax is on in your checkout: Stripe adds it only where you have an active registration."
+            ) : (
+              <>
+                Tax is off in your checkout, so Stripe adds none now, even where you are registered.{" "}
+                <Link href={`${studioPath(store)}#tax-title`} className="font-semibold underline underline-offset-4">
+                  Turn on tax in your studio
+                </Link>
+                .
+              </>
+            )}
           </p>
 
           <section aria-labelledby="registrations-title" className="mt-8 max-w-3xl">

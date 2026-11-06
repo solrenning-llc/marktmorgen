@@ -24,6 +24,7 @@
  */
 import { createHmac, randomBytes, randomInt, scryptSync, timingSafeEqual } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { deriveKey } from "@/lib/secret-box";
 
 export type NumbersLink = {
@@ -139,13 +140,18 @@ export async function unindexLink(id: string): Promise<void> {
 /** The store a link belongs to, or null when it has ended or was taken back. */
 export async function linkStore(id: string): Promise<string | null> {
   if (!LINK_ID.test(id) || !isRedisConfigured()) return null;
-  const [sid] = await redisPipeline([["GET", indexKey(id)]]);
+  // A reply in any other shape is unknown (CX-123 rule 24), never "This link has ended".
+  const read = repliesFor(await redisPipeline([["GET", indexKey(id)]]), 1);
+  if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("a numbers link's store");
+  const [sid] = read;
   return typeof sid === "string" && sid ? sid : null;
 }
 
-/** Counts one opening; false once the day's openings are used. */
+/** Counts one opening; false once the day's openings are used. A count in any other shape throws UnknownReplyError, never a zero. */
 export async function countOpen(id: string, now: number): Promise<boolean> {
   const day = new Date(now).toISOString().slice(0, 10);
-  const [n] = await redisPipeline([["INCR", opensKey(id, day)], ["EXPIRE", opensKey(id, day), 2 * 86_400]]);
-  return Number(n) <= OPENS_PER_DAY;
+  const read = repliesFor(await redisPipeline([["INCR", opensKey(id, day)], ["EXPIRE", opensKey(id, day), 2 * 86_400]]), 2);
+  const n = countOf(read?.[0]);
+  if (n === null) throw new UnknownReplyError("a numbers link's openings today");
+  return n <= OPENS_PER_DAY;
 }

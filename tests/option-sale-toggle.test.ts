@@ -249,7 +249,7 @@ async function main(): Promise<void> {
   is("an unknown count links to Memberships instead of saying 0", /href="\/studio\/memberships"/.test(editor), true);
   is("it asks for the invitations of the product", /action: "invited", id: product\.id/.test(editor), true);
   is("it never says an invitation can't be used on a price off sale: it can (Claude 4 on #2690)", /can’t be used while it is off sale/.test(editor), false);
-  is("the count says it is as of the last membership reading", /still pays? on it here, as of your last membership reading/.test(editor), true);
+  is("the count says it is as of the last membership reading", /still on it here \(paying, in a free trial or with a late payment\), as of your last membership reading/.test(editor), true);
   is("it says the invitations on their way apart, and an unknown number as unknown", [/invited to move here/.test(editor), /couldn’t count the invitations/.test(editor)], [true, true]);
   const extras = readFileSync("components/checkout-extras.tsx", "utf8");
   is("the plan form asks no payment for a price off sale, and says why", [/required=\{!option\.offSale\}/.test(extras), /option\.offSale \? [^\n]*Off sale/.test(extras)], [true, true]);

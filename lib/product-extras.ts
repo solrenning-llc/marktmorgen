@@ -376,6 +376,21 @@ export function activePlan(product: Listing): Plan | null {
 }
 
 /**
+ * The lowest payment of a plan with one payment per price, among the prices
+ * on sale only: what "from $X each" may name. Null when no price on sale has
+ * a payment set (Claude 5 on #2690: an off-sale price's payment is never it).
+ */
+export function lowestPaymentOnSale(plan: Plan, options: ProductOption[]): number | null {
+  const each: number[] = [];
+  for (const option of options) {
+    if (option.offSale) continue;
+    const cents = plan.options?.[option.id];
+    if (typeof cents === "number" && Number.isSafeInteger(cents) && cents > 0) each.push(cents);
+  }
+  return each.length > 0 ? Math.min(...each) : null;
+}
+
+/**
  * Whether putting this price back on sale stops a payment plan offered now:
  * the plan has no payment for it, or one that falls short, so planState turns
  * to "options" or "short" for every price. False when there is no plan, the

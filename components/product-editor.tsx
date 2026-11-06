@@ -1299,7 +1299,7 @@ function OptionsBlock({
                           </p>
                         ) : (
                           <p className="mt-1 font-semibold">
-                            {count === 1 ? "1 member still pays on it here, as of your last membership reading." : `${count} members still pay on it here, as of your last membership reading.`}
+                            {count === 1 ? "1 membership is still on it here (paying, in a free trial or with a late payment), as of your last membership reading." : `${count} memberships are still on it here (paying, in a free trial or with a late payment), as of your last membership reading.`}
                           </p>
                         )
                       ) : null}

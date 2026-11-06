@@ -18,6 +18,7 @@ import {
   MIN_PLAN_PAYMENTS,
   canBeBumped,
   isOneOff,
+  lowestPaymentOnSale,
   planWords,
 } from "@/lib/product-extras";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
@@ -558,10 +559,12 @@ function PlanBlock({
     );
   }
   if (current) {
+    // Only a price on sale can be the "from" (Claude 5 on #2690).
+    const from = several ? lowestPaymentOnSale(current, product.options) : null;
     return (
       <p className="text-sm text-ink-soft">
         <span className={`font-semibold ${paused ? "text-ink-soft" : "text-ink"}`}>
-          {`${paused ? "Payment plan, paused" : "Payment plan"}: ${planWords(current, currency)}${current.options && several ? `, from ${formatMoney(current.amountCents, currency)} each` : ""}`}
+          {`${paused ? "Payment plan, paused" : "Payment plan"}: ${planWords(current, currency)}${current.options && from !== null ? `, from ${formatMoney(from, currency)} each` : ""}`}
         </span>
         {" \u00b7 "}
         <button type="button" className={link} onClick={onOpen}>Change</button>

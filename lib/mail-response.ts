@@ -1,3 +1,4 @@
+import { cleanPreview } from "@/lib/preheader";
 import { readDraftSubjectTest, sameDraftSubjectTest } from "@/lib/mail-draft-test";
 import { sameDraftAudience } from "@/lib/mail-draft-audience";
 import { readTags } from "@/lib/contact-rules";
@@ -57,6 +58,11 @@ export function confirmedDraftId(answer: MailAnswer, expectedId = "", expectedAu
     const body = expectedContent.body.trim().slice(0, 20_000);
     const productId = expectedContent.productId || null;
     if (!subject || !body || draft.subject !== subject || draft.body !== body || draft.productId !== productId) return null;
+    // The preview text, when one was sent with the save (537 [PH1]): kept as its rules keep it, never lost or changed.
+    if (Object.hasOwn(expectedContent, "preview")) {
+      const preview = cleanPreview(expectedContent.preview);
+      if (!preview.ok || (draft.preview !== undefined && typeof draft.preview !== "string") || (draft.preview ?? "") !== preview.text) return null;
+    }
   }
   return draft.id;
 }

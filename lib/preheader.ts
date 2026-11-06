@@ -23,7 +23,16 @@
 /** The most characters a preview text may have. */
 export const MAX_PREVIEW = 120;
 
-export type PreviewProblem = "long" | "markup" | "link" | "subject";
+/**
+ * The most bytes it may take (UTF-8), besides MAX_PREVIEW (unit 2, 6 November
+ * 2026): one character as a reader counts it can carry any number of marks,
+ * so 120 of them are no bound on what is kept and sent. 120 of the longest
+ * emoji a person types (a family of four with skin tones, 41 bytes) fit, with
+ * room; the cost of what fits is in tests/plan-cost-registry.ts (list-email).
+ */
+export const MAX_PREVIEW_BYTES = 6_144;
+
+export type PreviewProblem = "long" | "markup" | "link" | "subject" | "heavy";
 
 /** What the studio says for each problem, in plain words. */
 export const PREVIEW_PROBLEMS: Record<PreviewProblem, string> = {
@@ -31,6 +40,7 @@ export const PREVIEW_PROBLEMS: Record<PreviewProblem, string> = {
   markup: "The preview text is plain words: take out the < and > signs.",
   link: "A mail app shows the preview text as plain words, so a link or address in it cannot be opened. Put it in the email instead.",
   subject: "The mail app shows the subject and the preview text side by side, so say something the subject does not.",
+  heavy: "Some letters or emoji in the preview text carry too many marks to send. Take some of them out.",
 };
 
 // An address written out: a scheme, "www.", an email address, or a name with a common or country ending.
@@ -74,6 +84,7 @@ export function cleanPreview(raw: unknown, subject = ""): { ok: true; text: stri
   if (typeof raw !== "string") return { ok: true, text: "" };
   const text = tidy(raw);
   if (!text) return { ok: true, text: "" };
+  if (new TextEncoder().encode(text).length > MAX_PREVIEW_BYTES) return { ok: false, why: "heavy" };
   if (previewLength(text) > MAX_PREVIEW) return { ok: false, why: "long" };
   if (/[<>]/.test(text)) return { ok: false, why: "markup" };
   if (holdsLink(text)) return { ok: false, why: "link" };
@@ -109,4 +120,18 @@ export function preheaderHtml(preview: string): string {
 export function withPreviewLine(text: string, preview: string): string {
   const line = kept(preview);
   return line ? `${line}\n\n${text}` : text;
+}
+
+/**
+ * A whole email's HTML with the preview text first in its body, right after
+ * the opening <body> tag (or first of all, for HTML without one); the HTML as
+ * it is without one, or with one its rules refuse.
+ */
+export function withPreheader(html: string, preview: string): string {
+  const hidden = preheaderHtml(preview);
+  if (!hidden) return html;
+  const body = /<body\b[^>]*>/i.exec(html);
+  if (!body) return hidden + html;
+  const at = body.index + body[0].length;
+  return html.slice(0, at) + hidden + html.slice(at);
 }

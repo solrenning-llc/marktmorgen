@@ -20,6 +20,15 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_MAIL_BODY, MAX_SUBJECT } from "@/lib/mail";
 import type { Store } from "@/lib/store";
 import { hasProduct } from "@/lib/catalog";
+import { type PreviewProblem, cleanPreview } from "@/lib/preheader";
+
+/** A stored preview text exactly as its rules keep it; anything else is not read as none. */
+function storedPreview(value: unknown): string | undefined | null {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !value) return null;
+  const read = cleanPreview(value);
+  return read.ok && read.text === value ? value : null;
+}
 
 /** A write may have happened even when its acknowledgement is lost. */
 export class DraftWriteUnconfirmed extends Error {
@@ -55,6 +64,8 @@ export type Draft = {
   subjectTest?: DraftSubjectTest | null;
   /** Absent only in drafts saved before audience persistence existed. */
   audience?: DraftAudience;
+  /** The preview text (lib/preheader.ts, 537 [PH1]); absent for none, and on every draft saved before 6 November 2026. */
+  preview?: string;
   id: string;
   subject: string;
   body: string;
@@ -77,9 +88,12 @@ function parse(raw: unknown): Draft | null {
     if (audience === null) return null;
     const subjectTest = readDraftSubjectTest(value.subjectTest);
     if (Object.hasOwn(value, "subjectTest") && subjectTest === undefined) return null;
+    const preview = storedPreview(value.preview);
+    if (preview === null) return null;
     return {
       ...(subjectTest !== undefined ? { subjectTest } : {}),
       ...(audience ? { audience } : {}),
+      ...(preview ? { preview } : {}),
       id: value.id,
       subject: typeof value.subject === "string" ? value.subject.slice(0, MAX_SUBJECT) : "",
       body: typeof value.body === "string" ? value.body.slice(0, MAX_MAIL_BODY) : "",
@@ -109,8 +123,10 @@ export function parseDraftList(raw: unknown): Draft[] | null {
     if (audience === null) return null;
     const subjectTest = readDraftSubjectTest(draft.subjectTest);
     if (Object.hasOwn(draft, "subjectTest") && subjectTest === undefined) return null;
+    const preview = storedPreview(draft.preview);
+    if (preview === null) return null;
     seen.add(id);
-    drafts.push({ ...(subjectTest !== undefined ? { subjectTest } : {}), ...(audience ? { audience } : {}), id, subject: draft.subject, body: draft.body, productId: draft.productId, by: draft.by, savedAt: draft.savedAt });
+    drafts.push({ ...(subjectTest !== undefined ? { subjectTest } : {}), ...(audience ? { audience } : {}), ...(preview ? { preview } : {}), id, subject: draft.subject, body: draft.body, productId: draft.productId, by: draft.by, savedAt: draft.savedAt });
   }
   return drafts.sort((a, b) => Date.parse(b.savedAt) - Date.parse(a.savedAt));
 }
@@ -139,7 +155,7 @@ export async function listDrafts(listId: string | null): Promise<Draft[]> {
 
 export type DraftResult =
   | { ok: true; draft: Draft }
-  | { ok: false; reason: "subject" | "body" | "product" | "full" | "unknown" | "list" | "audience" | "draft_test" | "draft_conflict" | "draft_busy" };
+  | { ok: false; reason: "subject" | "body" | "product" | "full" | "unknown" | "list" | "audience" | "draft_test" | "draft_conflict" | "draft_busy" | `preview_${PreviewProblem}` };
 
 /**
  * Saves a draft: a new one without `id`, or over the one with it. The text is
@@ -149,7 +165,7 @@ export type DraftResult =
 async function saveDraftUnlocked(
   store: Store,
   who: string,
-  input: { id?: string; subject: string; body: string; productId: string; audience?: unknown; subjectTest?: unknown; expectedSavedAt?: unknown },
+  input: { id?: string; subject: string; body: string; productId: string; audience?: unknown; subjectTest?: unknown; preview?: unknown; expectedSavedAt?: unknown },
 ): Promise<DraftResult> {
   if (!store.listId) return { ok: false, reason: "list" };
   const subject = input.subject.replace(/\s+/g, " ").trim().slice(0, MAX_SUBJECT);
@@ -164,6 +180,10 @@ async function saveDraftUnlocked(
   if (audience?.notProductId && !hasProduct(store, audience.notProductId)) return { ok: false, reason: "product" };
   let subjectTest = input.subjectTest === undefined ? undefined : readDraftSubjectTest(input.subjectTest);
   if (input.subjectTest !== undefined && subjectTest === undefined) return { ok: false, reason: "draft_test" };
+  // Refused as the send refuses it (lib/broadcasts.ts createBroadcast), so a draft never keeps one that cannot go out.
+  const previewRead = input.preview === undefined ? null : cleanPreview(input.preview, subject);
+  if (previewRead && !previewRead.ok) return { ok: false, reason: `preview_${previewRead.why}` };
+  let preview = previewRead?.text;
   let savedAt = new Date().toISOString();
   const key = draftsKey(store.listId);
   let id = input.id ?? "";
@@ -184,12 +204,13 @@ async function saveDraftUnlocked(
     savedAt = new Date(Math.max(Date.now(), Date.parse(previous.savedAt) + 1)).toISOString();
     if (input.audience === undefined) audience = previous.audience;
     if (input.subjectTest === undefined) subjectTest = previous.subjectTest;
+    if (input.preview === undefined) preview = previous.preview;
   } else {
     const count = await draftPreflight(["HLEN", key]);
     if (count >= MAX_DRAFTS) return { ok: false, reason: "full" };
     id = randomBytes(8).toString("hex");
   }
-  const draft: Draft = { ...(subjectTest !== undefined ? { subjectTest } : {}), ...(audience ? { audience } : {}), id, subject, body, productId, by: who.toLowerCase(), savedAt };
+  const draft: Draft = { ...(subjectTest !== undefined ? { subjectTest } : {}), ...(audience ? { audience } : {}), ...(preview ? { preview } : {}), id, subject, body, productId, by: who.toLowerCase(), savedAt };
   let acknowledgement: unknown;
   try {
     acknowledgement = await redisPipeline([["HSET", key, id, JSON.stringify(draft)]]);
@@ -243,7 +264,7 @@ async function releaseDraftLock(listId: string, id: string): Promise<void> {
   await redisPipeline([["DEL", draftLockKey(listId, id)]]).catch(() => {});
 }
 /** Existing drafts are read, version-checked and written under the same lease as deletion. */
-export async function saveDraft(store: Store, who: string, input: { id?: string; subject: string; body: string; productId: string; audience?: unknown; subjectTest?: unknown; expectedSavedAt?: unknown }): Promise<DraftResult> {
+export async function saveDraft(store: Store, who: string, input: { id?: string; subject: string; body: string; productId: string; audience?: unknown; subjectTest?: unknown; preview?: unknown; expectedSavedAt?: unknown }): Promise<DraftResult> {
   if (!store.listId) return { ok: false, reason: "list" };
   if (!input.id) return saveDraftUnlocked(store, who, input);
   if (!DRAFT_ID.test(input.id)) return { ok: false, reason: "unknown" };

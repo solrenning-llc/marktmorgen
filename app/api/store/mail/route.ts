@@ -14,6 +14,7 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_IMPORT, WHO, type Who, audience, importContacts, isBuyer, leadsKey, listCounts, parseContact, readAddresses, readTags } from "@/lib/contacts";
 import { MAX_MAIL_BODY, MAX_SUBJECT, fromLine, monthlyAllowance, render, reserve, release } from "@/lib/mail";
 import { sendBatch } from "@/lib/email";
+import { cleanPreview } from "@/lib/preheader";
 import { healthId, startRamp } from "@/lib/mail-health";
 import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, advanceBroadcast, cancelBroadcast, createBroadcast, whoOf } from "@/lib/broadcasts";
 import { LedgerNotCounted, buyerLedger, isNarrowed, keeps, ledgerChannels, readNarrow, removeSegment, saveSegment } from "@/lib/segments";
@@ -84,9 +85,9 @@ const MAIL_PERMISSIONS: Record<string, Permission> = {
  *                            narrow: { minSpent, channel, quietDays, group?, activeDays? } (lib/segments.ts); answers the
  *                            channels the store's buyers first came from too, when it reads them
  *   { action: "segment-save", name, who, productId, notProductId, narrow }  /  { action: "segment-remove", id }
- *   { action: "test", subject, body }
- *   { action: "draft-save", id?, subject, body, productId }  /  { action: "draft-remove", id }
- *   { action: "broadcast", subject, body, productId, notProductId, who, sendAt, draftId? }
+ *   { action: "test", subject, body, preview? }
+ *   { action: "draft-save", id?, subject, body, productId, preview? }  /  { action: "draft-remove", id }
+ *   { action: "broadcast", subject, body, productId, notProductId, who, sendAt, draftId?, preview? }
  *   { action: "cancel", id }
  *   { action: "flow", flow: {...} }  /  { action: "flow-remove", id }
  *   { action: "flow-activate", id, active }   switch a saved workflow on or off
@@ -118,6 +119,8 @@ export async function POST(request: NextRequest) {
   const { email, ref, body } = guarded;
   const action = text(body.action, 20);
   const fail = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
+  // The preview text whole, never cut here (the body is capped above): its rules refuse one too long, never shorten it (lib/preheader.ts).
+  const previewOf = (value: unknown) => (typeof value === "string" ? value : "");
   // The store's buyers not read because what reading them costs could not be counted (lib/segments.ts, buyerLedger).
   const notCounted = (message: string) => Response.json({ ok: false, error: "studio_used", message: message || NOT_COUNTED }, { status: 429 });
 
@@ -202,9 +205,12 @@ export async function POST(request: NextRequest) {
       const content = text(body.body, MAX_MAIL_BODY * 2).trim().slice(0, MAX_MAIL_BODY);
       if (!subject) return fail("subject");
       if (!content) return fail("body");
+      // The preview text, refused as the send refuses it, before the email is counted (537 [PH1]).
+      const preview = cleanPreview(previewOf(body.preview), subject);
+      if (!preview.ok) return fail(`preview_${preview.why}`);
       const reserved = await reserve(store, 1);
       if (reserved !== "ok") return fail(reserved === "month" ? "allowance" : reserved === "sender" ? "sender" : "day");
-      const r = render(store, `[Test] ${subject}`, content, null);
+      const r = render(store, `[Test] ${subject}`, content, null, undefined, undefined, undefined, preview.text);
       const outcome = await sendBatch(
         // To whoever pressed it: the owner, or the person on their team who is
         // writing the draft.
@@ -228,6 +234,8 @@ export async function POST(request: NextRequest) {
         productId: text(body.productId, 40),
         audience: body.audience,
         subjectTest: body.subjectTest,
+        // Absent keeps the draft's own; empty clears it.
+        preview: body.preview === undefined ? undefined : previewOf(body.preview),
         expectedSavedAt: body.expectedSavedAt,
       });
       return result.ok ? Response.json({ ok: true, draft: result.draft }) : fail(result.reason, result.reason === "draft_conflict" || result.reason === "draft_busy" ? 409 : 400);
@@ -256,6 +264,8 @@ export async function POST(request: NextRequest) {
         // A second subject line to try against the first; what it may be is
         // decided where the email is written down (lib/mail-test.ts).
         test: body.test && typeof body.test === "object" ? body.test : undefined,
+        // Its preview text (537 [PH1]); checked against both subjects where it is written down.
+        preview: previewOf(body.preview),
       }, counting.count).catch((error) => {
         if (error instanceof LedgerNotCounted) return error;
         throw error;

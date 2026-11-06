@@ -55,6 +55,7 @@ import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
 import { monthlyEmails, type Tier } from "@/lib/plan";
+import { MAX_PREVIEW_BYTES } from "@/lib/preheader";
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TOP_HEIGHT, viewingBytes } from "@/lib/stream-rules";
@@ -135,6 +136,17 @@ export const STREAM_STORAGE_PER_GB = 0.02;
 export const STREAM_DELIVERY_PER_GB = 0.005;
 export const FETCHED_AHEAD = 1.25;
 export const PER_EMAIL = 0.0009;
+/**
+ * What an email's preview text (lib/preheader.ts, 537 [PH1]) adds to a list
+ * email at the most, besides PER_EMAIL, whose price does not depend on size:
+ * its place in the email's record, at most MAX_PREVIEW_BYTES doubled by JSON
+ * escapes, read and written twice for each email as if every batch were one
+ * email (lib/broadcasts.ts, advanceBroadcast), and what goes to the sender,
+ * the hidden copy escaped (an ASCII character at most six bytes) with its
+ * spacers and wrapper, and the text version's first line.
+ */
+export const PREVIEW_RECORD_BYTES = 2 * MAX_PREVIEW_BYTES + 16;
+export const PREVIEW_SENT_BYTES = 7 * MAX_PREVIEW_BYTES + 2_600;
 /** DR1 unit 1 components. A priced successful delivery is not evidence of
  * the live retry policy, total provider publications or admission funding.
  * Lua includes EVAL and every internal command. These are disconnected
@@ -337,6 +349,8 @@ export const PAUSED_PER_DAY = 20;
 export const TAKE_COMMANDS = 4;
 /** What a function sends on to the browser, by the byte ("Fast Origin Transfer", tests/traffic-cost.ts). */
 export const ORIGIN_PER_BYTE = 0.06 / 1e9;
+/** A list email's preview text at its largest (PREVIEW_RECORD_BYTES, PREVIEW_SENT_BYTES above): the "list-email" line adds it to PER_EMAIL. */
+export const PREVIEW_PER_EMAIL = 4 * PREVIEW_RECORD_BYTES * DB_BYTE + PREVIEW_SENT_BYTES * ORIGIN_PER_BYTE;
 /**
  * What the file store charges to hand a private file to a function that
  * reads it, by the byte: a review ceiling, twice Vercel Blob's published
@@ -905,12 +919,13 @@ export const COST_LINES: CostLine[] = [
   {
     id: "list-email",
     feature: "The monthly emails: list email, sequences and workflows (#507), their notices to the owner, and emails to people brought over on Studio and Scale",
-    monthlyUsd: (tier) => monthlyEmails(tier) * PER_EMAIL,
+    monthlyUsd: (tier) => monthlyEmails(tier) * (PER_EMAIL + PREVIEW_PER_EMAIL),
     sources: [
       { file: "lib/plan.ts", names: ["PRO_MONTHLY_EMAILS", "SCALE_MONTHLY_EMAILS", "TRIAL_MONTHLY_EMAILS"] },
       { file: "lib/mail.ts", names: ["reserve", "takeFromMonth"] },
+      { file: "lib/preheader.ts", names: ["MAX_PREVIEW_BYTES", "cleanPreview", "withPreheader"] },
     ],
-    basis: "Every monthly email sent, at the most an email costs.",
+    basis: "Every monthly email sent, at the most an email costs, with its preview text at its largest (537 [PH1], PREVIEW_PER_EMAIL).",
   },
   {
     id: "transactional-email",

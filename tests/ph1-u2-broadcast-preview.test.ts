@@ -151,13 +151,13 @@ async function main(): Promise<void> {
   const studio = readFileSync("components/email-studio.tsx", "utf8");
   const route = readFileSync("app/api/store/mail/route.ts", "utf8");
   is("a visible label, the field tied to its count and its problem", [/<span className="field-label">Preview text<\/span>/.test(studio), /id="mail-preview"[^>]*aria-describedby="mail-preview-count mail-preview-hint mail-preview-problem"/.test(studio)], [true, true]);
-  is("the count is the reader's count, announced politely", [/previewLength\(preview\)/.test(studio), /id="mail-preview-count"[^>]*aria-live="polite"/.test(studio), studio.includes("MAX_PREVIEW")], [true, true, true]);
+  is("the count is the reader's count, announced politely", [/previewLength\(preview\b/.test(studio), /id="mail-preview-count"[^>]*aria-live="polite"/.test(studio), studio.includes("MAX_PREVIEW")], [true, true, true]);
   is("its problem is said in words, beside it, and marks it invalid", [/aria-invalid=\{previewProblem \? true : undefined\}/.test(studio), studio.includes("PREVIEW_PROBLEMS[previewProblem]")], [true, true]);
-  is("it goes with the send, the test and the draft", [/action: "broadcast",[\s\S]{0,400}preview,/.test(studio), /action: "test", subject, body, preview \}/.test(studio), /action: "draft-save"[^}]*preview[,\s]/.test(studio)], [true, true, true]);
+  is("it goes with the send, the test and the draft", [/action: "broadcast",[\s\S]{0,700}preview,/.test(studio), /action: "test", subject, body, preview \}/.test(studio), /action: "draft-save"[^}]*preview[,\s]/.test(studio)], [true, true, true]);
   is("it is kept when the composer is set aside, and counts as unsaved work", [/type ComposerSnapshot = \{[\s\S]{0,200}preview: string;/.test(studio), /const snapshot = \(\): ComposerSnapshot => \(\{[^)]*preview,/.test(studio)], [true, true]);
   is("sending and saving wait while it has a problem", (studio.match(/Boolean\(previewProblem\)/g) ?? []).length >= 3, true);
   is("each refusal has its words in the studio", ["preview_long", "preview_markup", "preview_link", "preview_subject", "preview_heavy"].every((r) => new RegExp(`${r}: PREVIEW_PROBLEMS\\.`).test(studio)), true);
-  is("the route passes it to the send, the test and the draft", [/createBroadcast\(store, \{[\s\S]{0,300}preview: text\(body\.preview, /.test(route), /action === "test"[\s\S]{0,900}cleanPreview\(/.test(route), /saveDraft\(store, email, \{[\s\S]{0,300}preview: /.test(route)], [true, true, true]);
+  is("the route passes it to the send, the test and the draft", [/createBroadcast\(store, \{[\s\S]{0,900}preview: previewOf\(body\.preview\)/.test(route), /action === "test"[\s\S]{0,900}cleanPreview\(/.test(route), /saveDraft\(store, email, \{[\s\S]{0,600}preview: /.test(route)], [true, true, true]);
 
   part("What it costs");
   const line = COST_LINES.find((l) => l.id === "list-email");

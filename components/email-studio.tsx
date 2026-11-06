@@ -38,6 +38,7 @@ import { subjectTestPreview, type SubjectTestPreview } from "@/lib/mail-test-pre
 import { readMailSchedule } from "@/lib/mail-schedule";
 import { PublishControl } from "@/components/letter-publish-control";
 import { channelName } from "@/lib/channel-names";
+import { MAX_PREVIEW, PREVIEW_PROBLEMS, type PreviewProblem, cleanPreview, previewLength } from "@/lib/preheader";
 import { type Narrow, ACTIVE_DAYS, MAX_SPENT, readSegmentSpend, QUIET_DAYS, type Segment } from "@/lib/segments-rules";
 
 const MESSAGES: Record<string, string> = {
@@ -56,6 +57,11 @@ const MESSAGES: Record<string, string> = {
   product: "That product is not in your store anymore.",
   empty: "Nobody on your list matches, so there is nobody to send it to yet.",
   test_subject: "Write a second subject line that is different from the first, or uncheck the test.",
+  preview_long: PREVIEW_PROBLEMS.long,
+  preview_markup: PREVIEW_PROBLEMS.markup,
+  preview_link: PREVIEW_PROBLEMS.link,
+  preview_subject: PREVIEW_PROBLEMS.subject,
+  preview_heavy: PREVIEW_PROBLEMS.heavy,
   test_small: `Trying two subject lines needs at least ${MIN_TEST_REACH} people, or each line reaches too few for the result to mean anything. Send it without the test, or to a bigger group.`,
   test_links:
     "Two subject lines are compared by the visits and sales the email's links bring, and this email has no link to your store. Add a link to your store or to a product, or send it without the test.",
@@ -277,6 +283,8 @@ function hoursWords(hours: number): string {
 }
 export type DraftRow = {
   subjectTest?: DraftSubjectTest | null;
+  /** The preview text kept with a draft (537 [PH1]). */
+  preview?: string;
   id: string;
   subject: string;
   body: string;
@@ -644,6 +652,7 @@ function ListCard({
 /** Everything the composer holds that is not saved, to set aside and bring back (485 [IT2]). */
 type ComposerSnapshot = {
   subject: string; body: string; productId: string; notProductId: string; who: Who; draftId: string; draftSavedAt: string;
+  preview: string;
   later: boolean; at: string; testing: boolean; subjectB: string; share: number; hours: number; by: TestBy;
   spentText: string; channel: string; quietDays: number; activeDays?: number; more: boolean; savedContent: string; label: string; buyerGroup?: RfmGroup | "";
   /** A draft save that could not be confirmed: saving stays blocked when brought back, so a draft is never made twice. */
@@ -682,6 +691,8 @@ function Compose(props: {
   const draftSaveBlocked = uncertainDrafts !== null && (uncertainDrafts === props.savedDrafts || props.draftsReadFailed);
   const [subject, setSubject] = useState(props.restore ? props.restore.subject : props.draft?.subject ?? props.initialTemplate?.subject ?? "");
   const [body, setBody] = useState(props.restore ? props.restore.body : props.draft?.body ?? props.initialTemplate?.body ?? "");
+  // The preview text (537 [PH1]): the line a mail app shows after the subject. Optional; checked here as the server checks it.
+  const [preview, setPreview] = useState(props.restore ? props.restore.preview ?? "" : props.draft?.preview ?? "");
   // The email's box, so a picture goes where the cursor is.
   const bodyBox = useRef<HTMLTextAreaElement>(null);
   // Brought back (485 [IT2]): the button that did it is gone, so the focus goes to the email it brought back.
@@ -753,6 +764,11 @@ function Compose(props: {
   const monthCount = reach !== null && !later && props.month ? sendCount(reach, props.month.used, props.month.allowance) : null;
   const testPreview = testing ? subjectTestPreview(subject, { subjectB, share, hours, by }, reach) : null;
   const invalidTest = testing && testPreview?.state !== "ready";
+  // Its problem, as the server would say it: against the subject, and the second subject while a test is on (lib/broadcasts.ts, previewFor).
+  const previewRead = cleanPreview(preview, subject);
+  const previewChecked = previewRead.ok && previewRead.text && testing ? cleanPreview(previewRead.text, subjectB.replace(/\s+/g, " ").trim()) : previewRead;
+  const previewProblem: PreviewProblem | null = previewChecked.ok ? null : previewChecked.why;
+  const previewCount = previewLength(preview.replace(/\s+/g, " ").trim());
   const reachPending = !invalidSpent && (reachResult?.key !== countKey || cleanLabel !== countedLabel);
   const [busy, setBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
@@ -768,12 +784,12 @@ function Compose(props: {
   const [goal, setGoal] = useState<EmailGoal>("announce");
   const [about, setAbout] = useState("");
   const draftSubjectTest: DraftSubjectTest | null = testing ? { subjectB, share, hours, by } : null;
-  const content = JSON.stringify([subject, body, productId, who, notProductId, spentText, channel, quietDays, activeDays, buyerGroup, draftSubjectTest, label]);
+  const content = JSON.stringify([subject, preview, body, productId, who, notProductId, spentText, channel, quietDays, activeDays, buyerGroup, draftSubjectTest, label]);
   const [savedContent, setSavedContent] = useState(props.restore ? props.restore.savedContent : !props.draft && props.initialTemplate ? "" : content);
   const dirty = (!draftId && Boolean(props.draft)) || content !== savedContent || later || at !== "";
   useLeaveGuard(dirty || aiBusy);
   // What is set aside when another email is opened over unsaved changes, so they can be brought back (485 [IT2]).
-  const snapshot = (): ComposerSnapshot => ({ subject, body, productId, notProductId, who, draftId, draftSavedAt, later, at, testing, subjectB, share, hours, by, spentText, channel, quietDays, activeDays, more, savedContent, uncertain: draftSaveBlocked, label, buyerGroup });
+  const snapshot = (): ComposerSnapshot => ({ subject, body, productId, notProductId, who, draftId, draftSavedAt, preview, later, at, testing, subjectB, share, hours, by, spentText, channel, quietDays, activeDays, more, savedContent, uncertain: draftSaveBlocked, label, buyerGroup });
   useImperativeHandle(props.composerState, () => ({ dirty, busy: locked, snapshot }));
 
   // The sentence the last count showed, so a count that then goes through takes away its own message and no other.
@@ -864,18 +880,18 @@ function Compose(props: {
   }
 
   async function keep() {
-    if (locked || draftSaveBlocked || invalidSpent) return;
+    if (locked || draftSaveBlocked || invalidSpent || Boolean(previewProblem)) return;
     setBusy(true);
     setError(null);
     const audience = { who, notProductId: notProductId || null, narrow: minSpent || channel || quietDays || buyerGroup || activeDays ? narrow : null, ...(cleanLabel ? { label: cleanLabel } : {}) };
-    const a = await call({ action: "draft-save", id: draftId || undefined, subject, body, productId, audience, subjectTest: draftSubjectTest, expectedSavedAt: draftId ? draftSavedAt : undefined });
+    const a = await call({ action: "draft-save", id: draftId || undefined, subject, body, productId, audience, subjectTest: draftSubjectTest, preview, expectedSavedAt: draftId ? draftSavedAt : undefined });
     setBusy(false);
     if (!a.ok) {
       if (a.error === "draft_write_unconfirmed") setUncertainDrafts(props.savedDrafts);
       setError(message(a));
       return;
     }
-    const savedId = confirmedDraftId(a, draftId, audience, { subject, body, productId }, draftSubjectTest);
+    const savedId = confirmedDraftId(a, draftId, audience, { subject, body, productId, preview }, draftSubjectTest);
     if (!savedId) {
       setUncertainDrafts(props.savedDrafts);
       setError("The draft save could not be confirmed. Your text is still here. Check your saved drafts before saving again; the draft may already exist.");
@@ -946,6 +962,36 @@ function Compose(props: {
           <span className="field-label">Subject</span>
           <input id="mail-subject" ref={subjectBox} className="field mt-2" maxLength={150} value={subject} onChange={(e) => setSubject(e.target.value)} />
         </label>
+        {/*
+          The preview text (537 [PH1]): plain words a mail app shows after the
+          subject. Optional; without it the app shows the email's first words,
+          as before. Counted as a reader counts (an emoji is one), refused,
+          never cut, when it has a problem, said here in words.
+        */}
+        <div>
+          <label className="block" htmlFor="mail-preview">
+            <span className="field-label">Preview text</span>
+            <span className="field-hint mt-1 block" id="mail-preview-hint">
+              Optional. The short line your readers see after the subject, before they open the email. Say what is inside, for example: &ldquo;Three quick dinners and a shopping list.&rdquo;
+            </span>
+          </label>
+          <input
+            id="mail-preview"
+            className="field mt-2"
+            value={preview}
+            autoComplete="off"
+            aria-invalid={previewProblem ? true : undefined}
+            aria-describedby="mail-preview-count mail-preview-hint mail-preview-problem"
+            onChange={(e) => setPreview(e.target.value)}
+          />
+          <span id="mail-preview-count" className="field-hint mt-1 block tabular-nums" aria-live="polite">
+            {`${n(previewCount)} of ${MAX_PREVIEW} characters`}
+          </span>
+          {/* Always in the page, so a problem that appears is read out once (WCAG 3.3.1, 4.1.3); in the error ink, 7:1 and more. */}
+          <span id="mail-preview-problem" className="mt-1 block text-sm font-semibold text-danger-text" aria-live="polite">
+            {previewProblem ? PREVIEW_PROBLEMS[previewProblem] : ""}
+          </span>
+        </div>
         {/*
           A second subject line, tried against the first.
 
@@ -1252,6 +1298,11 @@ function Compose(props: {
                 <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => changeAnswer("mail-subject")}>Change<span className="sr-only"> subject</span></button></dd>
               </div>
               <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                <dt className="basis-full font-semibold sm:basis-28 sm:shrink-0">Preview text</dt>
+                <dd className="min-w-0 basis-full break-words sm:basis-0 sm:flex-1">{previewRead.ok && previewRead.text ? previewRead.text : "None: mail apps show the email's first words"}</dd>
+                <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => changeAnswer("mail-preview")}>Change<span className="sr-only"> preview text</span></button></dd>
+              </div>
+              <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
                 <dt className="basis-full font-semibold sm:basis-28 sm:shrink-0">Who gets it</dt>
                 <dd className="min-w-0 basis-full break-words sm:basis-0 sm:flex-1">
                   {`${n(reach)} ${reach === 1 ? "person" : "people"}`}
@@ -1284,16 +1335,17 @@ function Compose(props: {
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            aria-busy={busy} disabled={busy}
+            aria-busy={busy}
             className="btn btn-secondary"
-            onClick={() => send({ action: "test", subject, body }, `Test sent to ${props.email}.`)}
+            disabled={busy || Boolean(previewProblem)}
+            onClick={() => send({ action: "test", subject, body, preview }, `Test sent to ${props.email}.`)}
           >
             Send me a test
           </button>
           <button
             type="button"
             aria-busy={busy}
-            disabled={busy || draftSaveBlocked || invalidSpent || !subject.trim() || !body.trim()}
+            disabled={busy || draftSaveBlocked || invalidSpent || Boolean(previewProblem) || !subject.trim() || !body.trim()}
             className="btn btn-secondary"
             onClick={() => void keep()}
           >
@@ -1303,7 +1355,7 @@ function Compose(props: {
             <>
               <button
                 type="button"
-                aria-busy={busy} disabled={busy || props.broadcastUnconfirmed || invalidSchedule || invalidTest || !subject.trim() || !body.trim()}
+                aria-busy={busy} disabled={busy || props.broadcastUnconfirmed || invalidSchedule || invalidTest || Boolean(previewProblem) || !subject.trim() || !body.trim()}
                 aria-describedby="mail-send-note"
                 className="btn btn-primary"
                 onClick={async () => {
@@ -1322,12 +1374,14 @@ function Compose(props: {
                       draftId: draftId || undefined,
                       draftSavedAt: draftId ? draftSavedAt : undefined,
                       test: testing ? { subjectB, share, hours, by } : undefined,
+                      preview,
                     },
                     later ? "Your email is scheduled." : "Your email is on its way.",
                   );
                   if (ok) {
                     setSubject("");
                     setBody("");
+                    setPreview("");
                     setDraftId("");
                     setTesting(false);
                     setSubjectB("");
@@ -1345,7 +1399,7 @@ function Compose(props: {
           ) : (
             <button
               type="button"
-              disabled={busy || props.broadcastUnconfirmed || !subject.trim() || !body.trim() || reach === null || reach === 0 || invalidSchedule || invalidTest}
+              disabled={busy || props.broadcastUnconfirmed || !subject.trim() || !body.trim() || reach === null || reach === 0 || invalidSchedule || invalidTest || Boolean(previewProblem)}
               className="btn btn-primary"
               onClick={() => {
                 if (props.broadcastUnconfirmed || invalidTest) return;

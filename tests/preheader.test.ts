@@ -23,7 +23,7 @@ is("markup refused", [cleanPreview("<b>New</b> recipes"), cleanPreview("a > b")]
 is("a link or an address refused, common and country endings alike", ["See https://x.example", "Visit www.example.com", "Read it on example.com", "Write to ana@example.com", "shop.de", "tool.ai", "blog.dev", "bit.ly", "loja.com.br"].map((t) => cleanPreview(t).ok), Array(9).fill(false));
 is("ordinary words with a full stop are not taken for one", ["Dr.Smith says hi", "e.g. soups", "3.5 hours", "co-op dinners", "Built with Node.js", "Thanks, me.", "Ready? Go.Shop now", "Read more.Info inside"].map((t) => cleanPreview(t).ok), Array(8).fill(true));
 is("not the subject again, in any case, spacing or invisible character", [cleanPreview("Three new recipes", `three  new${ZWSP} recipes`), cleanPreview("Inside: three dinners", "Three new recipes")], [{ ok: false, why: "subject" }, { ok: true, text: "Inside: three dinners" }]);
-is("every problem has its plain words", Object.keys(PREVIEW_PROBLEMS).sort(), ["link", "long", "markup", "subject"]);
+is("every problem has its plain words", Object.keys(PREVIEW_PROBLEMS).sort(), ["heavy", "link", "long", "markup", "subject"]);
 
 part("In the email");
 const html = preheaderHtml("Three dinners & a list");

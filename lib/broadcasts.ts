@@ -15,6 +15,7 @@
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { hasPlaceholder } from "@/lib/mail-body";
+import { type PreviewProblem, cleanPreview } from "@/lib/preheader";
 import { randomBytes, randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { needData, takeData } from "@/lib/store-data";
@@ -94,6 +95,12 @@ export type Broadcast = {
    * email with one subject, which is every email made before this existed.
    */
   test: SubjectTest | null;
+  /**
+   * The preview text a mail app shows after the subject (lib/preheader.ts,
+   * 537 [PH1]), the same whichever subject a reader gets; kept as its rules
+   * keep it. Absent for none, which is every email made before 6 November 2026.
+   */
+  preview?: string;
   /**
    * Studio requests held for the readings of the store's buyers its list
    * needs when the scheduled job makes it (a narrowed email: READS_HELD
@@ -194,7 +201,8 @@ export const BROADCAST_ID = /^[0-9a-f]{24}$/;
 function parse(raw: unknown): Broadcast | null {
   if (typeof raw !== "string") return null;
   try {
-    const value = JSON.parse(raw) as Broadcast;
+    // A preview its rules would not keep is left out here (the strict reader refuses it).
+    const { preview, ...value } = JSON.parse(raw) as Broadcast;
     if (!BROADCAST_ID.test(value.id)) return null;
     // Written before the exclusion existed: it goes to everyone it was
     // addressed to, exactly as it was when it was scheduled.
@@ -205,6 +213,7 @@ function parse(raw: unknown): Broadcast | null {
       who: WHO.includes(value.who) ? value.who : "all",
       narrow: isNarrowed(value.narrow) ? readNarrow(value.narrow) : null,
       ...(typeof value.label === "string" && value.label ? { label: value.label } : {}),
+      ...(keptPreview(preview) ? { preview } : {}),
       test: parseTest(value.test),
     };
   } catch {
@@ -264,6 +273,8 @@ function parseStoredBroadcast(raw: unknown, id: string, listId?: string): Broadc
   // These fields were absent in older campaigns; explicit malformed values are not legacy defaults.
   if (value.who !== undefined && !WHO.includes(value.who as Who) || value.notProductId !== undefined && !association(value.notProductId) || value.tagged !== undefined && typeof value.tagged !== "boolean" || value.test !== undefined && value.test !== null && b.test === null) throw new Error("Invalid campaign options");
   if (value.label !== undefined && value.label !== null && (typeof value.label !== "string" || readTags([value.label])[0] !== value.label)) throw new Error("Invalid campaign label");
+  // Written only as its rules keep it: anything else is not read as "no preview", and the email is not sent without it.
+  if (value.preview !== undefined && !keptPreview(value.preview)) throw new Error("Invalid campaign preview");
   if (value.hold !== undefined && (!value.hold || typeof value.hold !== "object" || Array.isArray(value.hold) || typeof (value.hold as { window?: unknown }).window !== "string" || !WINDOW_ID.test((value.hold as { window: string }).window) || !nonnegative((value.hold as { units?: unknown }).units))) throw new Error("Invalid campaign hold");
   for (const field of ["reads", "misses", "retryAt"] as const) if (value[field] !== undefined && !nonnegative(value[field])) throw new Error(`Invalid campaign ${field}`);
   if (value.narrow !== undefined && value.narrow !== null) {
@@ -307,11 +318,26 @@ export function whoOf(store: Store, kind: Who): { kind: Who; paid: ReadonlySet<s
   return kind === "all" ? undefined : { kind, paid: new Set(idsOfKind(store, "paid")) };
 }
 
+/** A stored preview its own rules keep exactly as it is (lib/preheader.ts). */
+function keptPreview(value: unknown): value is string {
+  if (typeof value !== "string" || !value) return false;
+  const read = cleanPreview(value);
+  return read.ok && read.text === value;
+}
+
+/** The preview as an email keeps it, checked against its subject and against a test's second subject when one is asked for. */
+export function previewFor(raw: unknown, subject: string, test: unknown): ReturnType<typeof cleanPreview> {
+  const read = cleanPreview(raw, subject);
+  if (!read.ok || !read.text || !test || typeof test !== "object") return read;
+  const subjectB = (test as { subjectB?: unknown }).subjectB;
+  return typeof subjectB === "string" ? cleanPreview(read.text, subjectB.replace(/\s+/g, " ").trim().slice(0, MAX_SUBJECT)) : read;
+}
+
 export type CreateResult =
   // `keep`: the narrowing read and counted here, for a send that starts in the same request (advanceBroadcast's `given`).
   // `startsNow`: it is due already, so the request that wrote it starts it (the scheduled job takes up the rest).
   | { ok: true; broadcast: Broadcast; keep: ((email: string) => boolean) | undefined; startsNow: boolean }
-  | { ok: false; reason: "subject" | "body" | "when" | "product" | "empty" | "allowance" | "setup" | "plan" | "test_subject" | "test_small" | "test_links" | "placeholder" }
+  | { ok: false; reason: "subject" | "body" | "when" | "product" | "empty" | "allowance" | "setup" | "plan" | "test_subject" | "test_small" | "test_links" | "placeholder" | `preview_${PreviewProblem}` }
   // Its readings of the buyers could not be held (lib/store-allowance.ts holdAllowanceAt): the sentence says why.
   | { ok: false; reason: "studio_used"; message: string };
 
@@ -346,7 +372,7 @@ export function linksToStore(body: string, store: Pick<Store, "handle" | "domain
  */
 export async function createBroadcast(
   store: Store,
-  input: { subject: unknown; body: unknown; productId: unknown; notProductId: unknown; sendAt: unknown; who?: unknown; test?: unknown; narrow?: unknown; label?: unknown },
+  input: { subject: unknown; body: unknown; productId: unknown; notProductId: unknown; sendAt: unknown; who?: unknown; test?: unknown; narrow?: unknown; label?: unknown; preview?: unknown },
   count?: (units: number) => Promise<boolean>,
 ): Promise<CreateResult> {
   if (monthlyAllowance(store) === 0) return { ok: false, reason: "plan" };
@@ -357,6 +383,12 @@ export async function createBroadcast(
   if (!body) return { ok: false, reason: "body" };
   // A template's part left to write is a direction, never words sent in the creator's name (lib/mail-body.ts).
   if (hasPlaceholder(subject) || hasPlaceholder(body)) return { ok: false, reason: "placeholder" };
+  // The preview text, checked before anything is read: against the subject and, in a test, the second subject too,
+  // since a reader may get either. Refused, with the reason, never cut.
+  const previewRead = previewFor(input.preview, subject, input.test);
+  if (!previewRead.ok) return { ok: false, reason: `preview_${previewRead.why}` };
+  const preview = previewRead.text;
+  if (hasPlaceholder(preview)) return { ok: false, reason: "placeholder" };
   const productId = typeof input.productId === "string" && input.productId ? input.productId : null;
   if (productId && !hasProduct(store, productId)) return { ok: false, reason: "product" };
   const notProductId = typeof input.notProductId === "string" && input.notProductId ? input.notProductId : null;
@@ -420,6 +452,7 @@ export async function createBroadcast(
     listed: false,
     tagged: true,
     test,
+    ...(preview ? { preview } : {}),
   };
   // What the scheduled job's readings of the buyers will cost at the most, held in the month it goes out, before
   // anything is written. Given back if its room in the data room is not there (below), so a refusal holds nothing.
@@ -698,6 +731,7 @@ export async function advanceBroadcast(
         // Only an email made since links were tagged: one scheduled before
         // goes out exactly as it was written and scheduled.
         b.tagged ? { medium: "broadcast", campaign } : undefined,
+        b.preview ?? "",
       );
       // Whatever went before a stop counts, so the next run starts after it.
       const processed = emails.length - result.rest.length;

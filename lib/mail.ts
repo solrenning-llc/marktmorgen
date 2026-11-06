@@ -14,6 +14,7 @@
  * has a published number of emails, counted before each batch goes out.
  */
 import { bodyHtml, bodyText } from "@/lib/mail-body";
+import { withPreheader, withPreviewLine } from "@/lib/preheader";
 import { lookColours } from "@/lib/store-look";
 import { NIMBUS_FROM, type BatchMessage, hasResend, sendListBatch, sendEmail, sentThisMonth } from "@/lib/email";
 import { isSesConfigured, sesBulkRoom, sesReady } from "@/lib/ses";
@@ -411,6 +412,8 @@ export function render(
   tag?: MailTag,
   /** The reader's link key, when they allowed their link use to be seen (lib/mail-clicks.ts): their links carry it, and the foot says how to stop it. */
   readerKey?: string,
+  /** The preview text the creator wrote (lib/preheader.ts, 537 [PH1]): first in the body and first line of the text; none leaves the email as it is. */
+  preview = "",
 ): Rendered {
   const fromName = store.mail?.fromName || store.name;
   const address = store.mail?.address ?? "";
@@ -451,7 +454,7 @@ ${address ? `<p style="margin:0 0 8px">${escape(fromName)} · ${escape(address)}
   const headers: Record<string, string> = oneClick
     ? { "List-Unsubscribe": `<${oneClick}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" }
     : {};
-  return { subject: subject.slice(0, MAX_SUBJECT), html, text, headers };
+  return { subject: subject.slice(0, MAX_SUBJECT), html: withPreheader(html, preview), text: withPreviewLine(text, preview), headers };
 }
 
 /**
@@ -513,6 +516,8 @@ export async function sendTo(
   keyBase: string,
   /** Which email this is, so a sale from one of its links can be counted for it (lib/mail-links.ts). */
   tag?: MailTag,
+  /** Its preview text (lib/preheader.ts, 537 [PH1]); none sends it as it is. */
+  preview = "",
 ): Promise<SendOutcome> {
   const done: string[] = [];
   // A store whose addresses turned out to be bad ones waits its week out
@@ -544,7 +549,7 @@ export async function sendTo(
       .filter((email) => tokens.has(email))
       .map((email) => {
         const token = tokens.get(email)!;
-        const r = render(store, subject, body, token, undefined, tag, counting?.has(email) ? keys.get(token) : undefined);
+        const r = render(store, subject, body, token, undefined, tag, counting?.has(email) ? keys.get(token) : undefined, preview);
         return { from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers, tags };
       });
     if (messages.length) await paced();

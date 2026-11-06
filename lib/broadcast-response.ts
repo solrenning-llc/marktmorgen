@@ -2,7 +2,8 @@ import { MIN_TEST_REACH, newTest } from "@/lib/mail-test";
 import type { MailAnswer } from "@/lib/mail-response";
 import { readNarrow, sameNarrow } from "@/lib/segments-rules";
 import { readTags } from "@/lib/contact-rules";
-const REFUSALS = new Set(["subject", "body", "when", "product", "empty", "allowance", "setup", "plan", "test_subject", "test_small", "test_links", "placeholder", "role", "locked", "store_gone", "none", "signed_out", "origin", "bad_request", "studio_used", "store_full"]);
+import { cleanPreview } from "@/lib/preheader";
+const REFUSALS = new Set(["subject", "body", "when", "product", "empty", "allowance", "setup", "plan", "test_subject", "test_small", "test_links", "placeholder", "role", "locked", "store_gone", "none", "signed_out", "origin", "bad_request", "studio_used", "store_full", "preview_long", "preview_markup", "preview_link", "preview_subject", "preview_heavy"]);
 const positive = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n > 0;
 const association = (value: unknown) => typeof value === "string" && value ? value : null;
 /** Confirm creation, not delivery. Unknown write outcomes must not invite an immediate retry. */
@@ -28,6 +29,9 @@ export function broadcastAnswer(responseOk: boolean, raw: unknown, input: Record
   // The label as createBroadcast keeps it (99 [E2-TAG-BROADCAST]): a server that lost it would write to a broader group.
   const expectedLabel = readTags([typeof input.label === "string" ? input.label : ""])[0] ?? null;
   if ((typeof b.label === "string" ? b.label : null) !== expectedLabel) return unknown;
+  // The preview text as createBroadcast keeps it (537 [PH1]): one lost, changed or added is not the email asked for.
+  const expectedPreview = cleanPreview(input.preview);
+  if (!expectedPreview.ok || (typeof b.preview === "string" ? b.preview : "") !== expectedPreview.text || (b.preview !== undefined && typeof b.preview !== "string")) return unknown;
   const expectedTest = newTest(input.test, subject, 150);
   if (expectedTest === "subject") return unknown;
   if (expectedTest === "none") {

@@ -68,6 +68,7 @@ import { MAX_CRM_FIELDS, MAX_FIELD_OPTIONS, MAX_STAGES } from "@/lib/crm-rules";
 import { MAX_FORMS, MAX_FIELDS, MAX_OPTIONS, MAX_OUTCOMES } from "@/lib/forms";
 import { MAX_DRAFTS } from "@/lib/mail-drafts";
 import { MAX_MAIL_BODY } from "@/lib/mail";
+import { MAX_PREVIEW_BYTES } from "@/lib/preheader";
 import { MAX_SEGMENTS } from "@/lib/segments-rules";
 import { MAX_CHAT_KEPT, MAX_CHAT_TEXT } from "@/lib/community-chat-rules";
 import { MAX_REPORT_QUEUE, MAX_SPACES, MAX_QUESTIONS, MAX_WELCOME } from "@/lib/community-text";
@@ -649,7 +650,7 @@ export const FAMILIES: Record<string, Family> = {
   // ---------------------------------------------------------------- lib/ m
   "nl:mail:clk:@lib/mail-clicks.ts": short("The emails whose links a person used, ninety days", "monthly", 90, 128, MAIL("list")),
   "nl:mail:mk:@lib/mail-clicks.ts": { what: "The stop token a link key was made from: one a contact, counted with it (TOKEN_BYTES)", room: ["lib/contacts.ts"] },
-  "nl:mail:drafts:@lib/mail-drafts.ts": { what: "Email drafts", parts: [capped(MAX_DRAFTS * (MAX_MAIL_BODY * 3 + 2 * KB), "MAX_DRAFTS drafts.", src("lib/mail-drafts.ts", "MAX_DRAFTS"), src("lib/mail.ts", "MAX_MAIL_BODY"))] },
+  "nl:mail:drafts:@lib/mail-drafts.ts": { what: "Email drafts", parts: [capped(MAX_DRAFTS * (MAX_MAIL_BODY * 3 + 2 * KB + 2 * MAX_PREVIEW_BYTES), "MAX_DRAFTS drafts, each with its preview text (537 [PH1]).", src("lib/mail-drafts.ts", "MAX_DRAFTS"), src("lib/mail.ts", "MAX_MAIL_BODY"), src("lib/preheader.ts", "MAX_PREVIEW_BYTES"))] },
   "nl:mail:health:@lib/mail-health.ts": { what: "Sent, bounced and complained, by the day; addresses already counted", parts: [per("day", 33, 128, "A day's counts."), per("monthly", 33, MARK, "An address counted this week.", MAIL("list"))] },
   "nl:mail:paused:@lib/mail-health.ts": { what: "Why sending is paused", parts: [capped(KB, "One a store.")] },
   "nl:mail:ramp:@lib/mail-health.ts": { what: "The portion being sent", parts: [capped(KB, "One a store.")] },

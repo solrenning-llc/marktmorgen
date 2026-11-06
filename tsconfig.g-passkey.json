@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"noEmit":true,"incremental":false},"include":["lib/passkeys.ts","lib/redis-lock.ts","lib/move-repair.ts","tests/g-passkey-move.proof.ts","tests/passkey-world.ts"],"exclude":["node_modules"]}

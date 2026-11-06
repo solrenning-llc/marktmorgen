@@ -8,6 +8,7 @@ export function testAliases(file,root,here){
   for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'meeting-withdrawal-page-world.ts');
   for(const name of ['studio-header','studio-store-pin'])aliases['@/components/'+name]=join(here,'meeting-withdrawal-page-world.ts');
  }
+ if(file==='preview-counter-admission.test.ts')for(const name of ['redis','store','store-request','catalog','traffic','pdf-preview','serve-file'])aliases['@/lib/'+name]=join(here,'preview-counter-admission-world.ts');
  if(file==='flow-stop-action.test.ts')aliases['@/lib/ses']=join(here,'flow-stop-ses-network.ts');
  if(!['order-email-fallback.test.ts','resend-fallback-budget.test.ts','auth-mail-unavailable.test.ts','course-link-mail-unavailable.test.ts','email-meter-preflight.test.ts'].includes(file))aliases['@/lib/resend-fallback-transport']=join(here,'resend-fallback-fixture.ts');
  if(file==='customer-base-fixed-evidence.test.ts')for(const [name,fixture] of [['upload-budget-policy','upload-budget-approved-policy'],['ai-spend-policy','commercial-ai-approved-policy'],['llc-fixed-costs','llc-fixed-approved-policy']])aliases['@/lib/'+name]=join(here,fixture+'.ts');
@@ -28,6 +29,7 @@ export function testAliases(file,root,here){
  }
  if(file==='host-calendar-removal.test.ts')aliases['@/lib/host-calendar']=join(here,'host-calendar-removal-world.ts');
  if(file==='outreach-counter-admission.test.ts')for(const name of ['redis','store-request','outreach','metered-limits'])aliases['@/lib/'+name]=join(here,'outreach-counter-admission-world.ts');
+ if(file==='ai-report-counter-admission.test.ts')for(const name of ['redis','store-request','review-ai-summary','stats-report','numbers-ask','person-agenda-read','ai'])aliases['@/lib/'+name]=join(here,'ai-report-counter-admission-world.ts');
  if(file==='mail-check-route.test.ts')for(const name of ['request-guard','email','verify-mail'])aliases['@/lib/'+name]=join(here,'mail-check-route-world.ts');
  if(file==='plan-break-off-cron.test.ts')for(const name of ['request-guard','billing-reminders','trial-nudges','payment-requests'])aliases['@/lib/'+name]=join(here,'plan-break-off-cron-world.ts');
  if(file==='plan-refund-route.test.ts')aliases['@/lib/studio-route']=join(here,'plan-refund-route-world.ts');

@@ -24,11 +24,13 @@
  *   nl:course:<course>:certs:all  -> set of every certificate id issued, withdrawn ones too
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReply, exactReplies, plainList, replyCount } from "@/lib/redis-exact";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Course, lessonsInOrder } from "@/lib/course";
 import { requiredQuizLessons } from "@/lib/quiz";
 import { emailKey } from "@/lib/learn";
+import { randomLetters } from "@/lib/random-letters";
 
 export const CERT_ID_PATTERN = /^[a-z0-9]{16}$/;
 export const MIN_CERT_NAME = 2;
@@ -52,13 +54,30 @@ export type Certificate = {
   issuedAt: number;
   /** When the creator withdrew it; 0 while it stands. */
   withdrawnAt: number;
+  /**
+   * The last moment it is valid, in seconds (639 [GL7](32)), fixed when it is
+   * issued from the course's validity then; absent is for good.
+   */
+  validUntil?: number;
 };
 
+/** A moment `months` calendar months after `seconds`, in UTC: the 31st of a short month falls on its last day. */
+export function monthsAfter(seconds: number, months: number): number {
+  const d = new Date(seconds * 1000);
+  const target = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + months, 1, d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()));
+  const last = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(d.getUTCDate(), last));
+  return Math.floor(target.getTime() / 1000);
+}
+
+/** Whether a certificate still certifies now, by its own validity: withdrawn, expired, or standing. */
+export function standingOf(c: Pick<Certificate, "withdrawnAt" | "validUntil">, nowSeconds: number): "withdrawn" | "expired" | "valid" {
+  if (c.withdrawnAt > 0) return "withdrawn";
+  return c.validUntil && nowSeconds > c.validUntil ? "expired" : "valid";
+}
+
 export function newCertificateId(): string {
-  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
+  return randomLetters("abcdefghijklmnopqrstuvwxyz0123456789", 16);
 }
 
 /**
@@ -80,7 +99,7 @@ export function cleanName(raw: unknown): string | null {
  * links to. The student checks it and saves it there themselves; nothing is
  * posted for them. The parameters are LinkedIn's "Add to Profile" ones.
  */
-export function linkedInAddUrl(certificate: Pick<Certificate, "id" | "title" | "creator" | "issuedAt">, pageUrl: string): string {
+export function linkedInAddUrl(certificate: Pick<Certificate, "id" | "title" | "creator" | "issuedAt" | "validUntil">, pageUrl: string): string {
   const issued = new Date(certificate.issuedAt * 1000);
   const query = new URLSearchParams({
     startTask: "CERTIFICATION_NAME",
@@ -91,6 +110,12 @@ export function linkedInAddUrl(certificate: Pick<Certificate, "id" | "title" | "
     certId: certificate.id,
     certUrl: pageUrl,
   });
+  // A certificate that expires says when, on the same form (639 [GL7](32)).
+  if (certificate.validUntil) {
+    const until = new Date(certificate.validUntil * 1000);
+    query.set("expirationYear", String(until.getUTCFullYear()));
+    query.set("expirationMonth", String(until.getUTCMonth() + 1));
+  }
   return `https://www.linkedin.com/profile/add?${query}`;
 }
 
@@ -106,27 +131,62 @@ export function hasFinished(course: Course, done: Set<string>, passed: Set<strin
   return lessons.every(({ lesson }) => done.has(lesson.id)) && requiredQuizLessons(course).every((id) => passed.has(id));
 }
 
-function parseCertificate(raw: unknown): Certificate | null {
+type CertificateRecord = Record<string, unknown> & Pick<Certificate, "id" | "name" | "title" | "store">;
+/** Privacy export keeps status as stored, without claiming that it is valid. */
+type CertificateCopy = Omit<Certificate, "issuedAt" | "withdrawnAt" | "validUntil"> & Partial<Record<"issuedAt" | "withdrawnAt" | "validUntil", unknown>>;
+
+function certificateRecord(raw: unknown): CertificateRecord | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
-    const value = JSON.parse(raw) as Partial<Certificate>;
+    const value = JSON.parse(raw) as Record<string, unknown> | null;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     if (typeof value.id !== "string" || !CERT_ID_PATTERN.test(value.id)) return null;
     if (typeof value.name !== "string" || typeof value.title !== "string" || typeof value.store !== "string") return null;
-    return {
-      id: value.id,
-      store: value.store,
-      productId: typeof value.productId === "string" ? value.productId : "",
-      courseId: typeof value.courseId === "string" ? value.courseId : "",
-      name: value.name,
-      title: value.title,
-      creator: typeof value.creator === "string" ? value.creator : "",
-      email: typeof value.email === "string" ? value.email : "",
-      issuedAt: typeof value.issuedAt === "number" ? value.issuedAt : 0,
-      withdrawnAt: typeof value.withdrawnAt === "number" ? value.withdrawnAt : 0,
-    };
+    return value as CertificateRecord;
   } catch {
     return null;
   }
+}
+
+function certificateFields(value: CertificateRecord): Omit<Certificate, "issuedAt" | "withdrawnAt" | "validUntil"> {
+  return {
+    id: value.id,
+    store: value.store,
+    productId: typeof value.productId === "string" ? value.productId : "",
+    courseId: typeof value.courseId === "string" ? value.courseId : "",
+    name: value.name,
+    title: value.title,
+    creator: typeof value.creator === "string" ? value.creator : "",
+    email: typeof value.email === "string" ? value.email : "",
+  };
+}
+
+function copyCertificate(value: CertificateRecord): CertificateCopy {
+  return {
+    ...certificateFields(value),
+    ...(Object.hasOwn(value, "issuedAt") ? { issuedAt: value.issuedAt } : {}),
+    ...(Object.hasOwn(value, "withdrawnAt") ? { withdrawnAt: value.withdrawnAt } : {}),
+    ...(Object.hasOwn(value, "validUntil") ? { validUntil: value.validUntil } : {}),
+  };
+}
+
+function parseCertificate(raw: unknown): Certificate | null {
+  const value = certificateRecord(raw);
+  if (!value) return null;
+  // Status is evidence, not a default. Only absence of expiration means
+  // a legacy permanent certificate; malformed dates must never make one
+  // standing again. Bound dates to what JavaScript can actually display.
+  const seconds = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0 && n <= 8_640_000_000_000;
+  if (!Object.hasOwn(value, "issuedAt") || !seconds(value.issuedAt)) return null;
+  if (!Object.hasOwn(value, "withdrawnAt") || !seconds(value.withdrawnAt)) return null;
+  const hasExpiration = Object.hasOwn(value, "validUntil");
+  if (hasExpiration && (!seconds(value.validUntil) || value.validUntil === 0)) return null;
+  return {
+    ...certificateFields(value),
+    issuedAt: value.issuedAt,
+    withdrawnAt: value.withdrawnAt,
+    ...(hasExpiration ? { validUntil: value.validUntil as number } : {}),
+  };
 }
 
 export const certKey = (id: string) => `nl:cert:${id}`;
@@ -191,6 +251,8 @@ export async function issueCertificate(input: {
     issuedAt: Math.floor(Date.now() / 1000),
     withdrawnAt: 0,
   };
+  // The course's validity now, fixed on this certificate (639 [GL7](32)).
+  if (input.course.certificateMonths) certificate.validUntil = monthsAfter(certificate.issuedAt, input.course.certificateMonths);
   // The record is written before the student's slot is claimed (changed
   // 17 October 2026). Claiming first left a moment in which the slot named
   // a certificate not yet written, and a second press arriving then read it
@@ -238,7 +300,9 @@ export async function withdrawCertificate(courseId: string, id: string): Promise
   const found = await readCertificate(id);
   if (!found || found.courseId !== courseId) return false;
   if (!found.withdrawnAt) {
-    await redisPipeline([["SET", certKey(id), JSON.stringify({ ...found, withdrawnAt: Math.floor(Date.now() / 1000) })]]);
+    // XX: only while it is still there, so a withdrawal racing the person's deletion never writes it back.
+    const [written] = await redisPipeline([["SET", certKey(id), JSON.stringify({ ...found, withdrawnAt: Math.floor(Date.now() / 1000) }), "XX"]]);
+    if (written === null) return false;
   }
   const who = emailKey(found.email);
   const [current] = await redisPipeline([["HGET", indexKey(courseId), who]]);
@@ -252,30 +316,80 @@ export async function withdrawCertificate(courseId: string, id: string): Promise
  * not found. Found by the student's own list, and, for certificates issued
  * before that list was kept, by reading the course's certificates when it
  * has LEGACY_SCAN or fewer; a standing one is always found by its slot.
+ * A reply that is not exactly what was asked for throws UnknownReply, and a
+ * certificate whose deletion is unknown keeps the references that find it.
  */
-export async function forgetCertificatesPerson(courseIds: string[], email: string): Promise<number> {
+export async function forgetCertificatesPerson(courseIds: string[], email: string, room?: DataStore): Promise<number> {
   if (!courseIds.length || !isRedisConfigured()) return 0;
   const who = emailKey(email);
   const address = email.trim().toLowerCase();
+  const what = "the deletion of a person's certificates";
+  // Every reply read exactly (lib/redis-exact.ts): one that is not what was
+  // asked for throws UnknownReply before any reference that finds a
+  // certificate is removed, so a retry still finds it.
+  const ids = (raw: unknown): string[] => {
+    const list = plainList(raw);
+    if (!list || !list.every((id) => typeof id === "string")) throw new UnknownReply(what);
+    return list as string[];
+  };
   let gone = 0;
   for (const courseId of courseIds) {
-    const [mine, current, size] = await redisPipeline([["SMEMBERS", byKey(courseId, who)], ["HGET", indexKey(courseId), who], ["SCARD", allKey(courseId)]]);
-    const [all] = Number(size) > 0 && Number(size) <= LEGACY_SCAN ? await redisPipeline([["SMEMBERS", allKey(courseId)]]) : [[]];
-    const ids = new Set<string>([...(Array.isArray(mine) ? mine.map(String) : []), ...(typeof current === "string" ? [current] : [])]);
-    const others = (Array.isArray(all) ? all.map(String) : []).filter((id) => CERT_ID_PATTERN.test(id) && !ids.has(id));
+    const [mine, current, size] = exactReplies(await redisPipeline([["SMEMBERS", byKey(courseId, who)], ["HGET", indexKey(courseId), who], ["SCARD", allKey(courseId)]]), 3, what);
+    if (current !== null && typeof current !== "string") throw new UnknownReply(what);
+    const known = new Set<string>([...ids(mine), ...(typeof current === "string" ? [current] : [])]);
+    const [all] = replyCount(size, what) > 0 && (size as number) <= LEGACY_SCAN ? exactReplies(await redisPipeline([["SMEMBERS", allKey(courseId)]]), 1, what) : [[]];
+    const others = ids(all).filter((id) => CERT_ID_PATTERN.test(id) && !known.has(id));
     for (let i = 0; i < others.length; i += 500) {
       const chunk = others.slice(i, i + 500);
-      const [rows] = await redisPipeline([["MGET", ...chunk.map(certKey)]]);
-      (Array.isArray(rows) ? rows : []).forEach((raw, j) => {
-        if (parseCertificate(raw)?.email.trim().toLowerCase() === address) ids.add(chunk[j]);
+      const [rows] = exactReplies(await redisPipeline([["MGET", ...chunk.map(certKey)]]), 1, what);
+      const values = plainList(rows);
+      if (!values || values.length !== chunk.length || !values.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReply(what);
+      values.forEach((raw, j) => {
+        const record = certificateRecord(raw);
+        if (typeof record?.email === "string" && record.email.trim().toLowerCase() === address) known.add(chunk[j]);
       });
     }
-    const list = [...ids].filter((id) => CERT_ID_PATTERN.test(id));
-    await redisPipeline([
-      ["DEL", byKey(courseId, who), ...list.map(certKey)],
-      ["HDEL", indexKey(courseId), who],
-      ...(list.length ? [["SREM", allKey(courseId), ...list]] : []),
-    ]);
+    const list = [...known].filter((id) => CERT_ID_PATTERN.test(id));
+    // Each record taken out with GETDEL, so only the deletion that removed it
+    // gives back what it took when issued (the record as made, withdrawnAt 0):
+    // two deletions at once never give the same room back twice. Each reply
+    // must be the record or a confirmed none (null), one per certificate.
+    let freed = 0;
+    let unknown = false;
+    for (let i = 0; i < list.length; i += 500) {
+      const chunk = list.slice(i, i + 500);
+      const rows = plainList(await redisPipeline(chunk.map((id) => ["GETDEL", certKey(id)])));
+      if (!rows || rows.length !== chunk.length) {
+        unknown = true;
+        continue;
+      }
+      for (const raw of rows) {
+        if (raw === null) continue;
+        if (typeof raw !== "string") {
+          unknown = true;
+          continue;
+        }
+        try {
+          const value = JSON.parse(raw) as Record<string, unknown>;
+          if (value && typeof value === "object") freed += dataBytes([JSON.stringify({ ...value, withdrawnAt: 0 })], 3);
+        } catch {
+          // Unreadable: nothing is known of what it took, so nothing is given back for it.
+        }
+      }
+    }
+    // What was confirmed taken comes back now; a retry finds it gone and gives nothing again.
+    if (room && freed > 0) await giveData(room, [{ slot: CERTS_SLOT(courseId), bytes: freed }]);
+    // A certificate whose deletion is unknown keeps every reference to it, for the retry.
+    if (unknown) throw new UnknownReply(what);
+    exactReplies(
+      await redisPipeline([
+        ["DEL", byKey(courseId, who)],
+        ["HDEL", indexKey(courseId), who],
+        ...(list.length ? [["SREM", allKey(courseId), ...list]] : []),
+      ]),
+      list.length ? 3 : 2,
+      what,
+    ).forEach((n) => replyCount(n, what));
     gone += list.length;
   }
   return gone;
@@ -287,11 +401,11 @@ export async function forgetCertificatesPerson(courseIds: string[], email: strin
  * address), withdrawn ones included: for the copy of their data (619 [SZ3]).
  * Only reads.
  */
-export async function certificatesOf(courseIds: string[], email: string): Promise<Certificate[]> {
+export async function certificatesOf(courseIds: string[], email: string): Promise<CertificateCopy[]> {
   if (!courseIds.length || !isRedisConfigured()) return [];
   const who = emailKey(email);
   const address = email.trim().toLowerCase();
-  const out: Certificate[] = [];
+  const out: CertificateCopy[] = [];
   for (const courseId of courseIds) {
     const [mine, current, size] = await redisPipeline([["SMEMBERS", byKey(courseId, who)], ["HGET", indexKey(courseId), who], ["SCARD", allKey(courseId)]]);
     const [all] = Number(size) > 0 && Number(size) <= LEGACY_SCAN ? await redisPipeline([["SMEMBERS", allKey(courseId)]]) : [[]];
@@ -301,8 +415,8 @@ export async function certificatesOf(courseIds: string[], email: string): Promis
       const chunk = candidates.slice(i, i + 500);
       const [rows] = await redisPipeline([["MGET", ...chunk.map(certKey)]]);
       (Array.isArray(rows) ? rows : []).forEach((raw, k) => {
-        const certificate = parseCertificate(raw);
-        if (certificate && (ids.has(chunk[k]) || certificate.email.trim().toLowerCase() === address)) out.push(certificate);
+        const record = certificateRecord(raw);
+        if (record && (ids.has(chunk[k]) || (typeof record.email === "string" && record.email.trim().toLowerCase() === address))) out.push(copyCertificate(record));
       });
     }
   }

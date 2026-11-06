@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
+import { pendingRemoval } from "@/lib/passkeys";
 import { originFrom } from "@/lib/request-origin";
-import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
+import { DEVICE_COOKIE, SESSION_COOKIE, endSession, isMoving, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
+import { repairMove } from "@/lib/move-repair";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { recoveryLockUntil, spendLostEmailLink } from "@/lib/recovery-address";
 import { HOLD_SECONDS, TWO_STEP_COOKIE, holdSignIn, openLockedSession, twoStepOn } from "@/lib/two-step";
@@ -26,6 +28,12 @@ export async function POST(request: NextRequest) {
   try {
     const email = await spendLostEmailLink(token);
     if (!email) return away("/signin?status=expired");
+    // An address in the middle of a move, or left by one that broke, takes no login without a second step until
+    // the move is over or repaired (lib/auth.ts isMoving, lib/move-repair.ts; review of 1daa9131e).
+    // With the app, the login waits for its code as always (below); without it, it is refused.
+    if ((await isMoving(email)) && !((await repairMove(email)) && !(await isMoving(email))) && !(await twoStepOn(email))) return away("/signin?status=move-busy");
+    // A passkey removal whose days are over is applied at every login (lib/passkeys.ts).
+    await pendingRemoval(email).catch((error) => console.error("applying a passkey removal failed", error));
     const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
     if (await twoStepOn(email)) {
       const held = await holdSignIn(email, true);

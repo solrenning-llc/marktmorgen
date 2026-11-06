@@ -17,6 +17,13 @@ import { hasContent } from "@/lib/preorder-rules";
  *
  * Either way off "coming soon", its pre-orders still waiting are handed over
  * (lib/preorders.ts), so it is refused while the product has nothing in it.
+ *
+ * A session let in without its second step (lib/two-step.ts) may not
+ * "launch": that email goes to everyone on the list once, in the creator's own
+ * words, and the list is spent. "soon" stays open to it: taking the mark off
+ * emails nobody on the waitlist, and the pre-orders it hands over get the
+ * fixed delivery email (lib/preorders.ts sendOut), only to buyers who paid
+ * for the product, with nothing typed in this request.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "products", 4_000);

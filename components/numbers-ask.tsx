@@ -35,8 +35,10 @@ export function NumbersAsk({ onShow }: { onShow: (window: AskWindow, section: As
     setError(null);
     try {
       const response = await fetch("/api/store/numbers/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: asked }) });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; value?: NumbersAnswer; left?: number | null };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; message?: string; value?: NumbersAnswer; left?: number | null };
       if (data.ok && data.value) setAnswer({ ...data.value, left: data.left ?? null });
+      // A refusal for the studio's requests carries its own sentence (how many this needs, how many are left).
+      else if (data.error === "studio_used" && typeof data.message === "string" && data.message) setError(data.message);
       else setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
     } catch {
       setError(MESSAGES.server_error);

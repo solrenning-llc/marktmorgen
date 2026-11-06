@@ -35,8 +35,6 @@ const TITLES: Readonly<Record<string, string>> = {
   get_memberships: "Membership numbers",
   get_emails: "Emails and sequences",
   get_affiliates: "Affiliates",
-  get_live: "Live and today",
-  get_numbers_for_days: "Numbers for any days",
   get_product_description: "Product description",
   get_sales_page: "Sales page",
   get_course_outline: "Course outline",
@@ -98,50 +96,31 @@ const DRAFTS: readonly ToolDraft[] = [
   },
   {
     name: "get_affiliates",
-    description: "The affiliate program's terms and each affiliate by their link's code: clicks, sales, earned, paid, owed, payable now, and anything held for review and why. No addresses.",
+    description: "The affiliate program's terms and each affiliate by their link's code: clicks, sales, earned, paid, owed, payable now, and anything held for review and why. No addresses. It reads the whole program, so it counts as several of the store's API requests, more as the program grows.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true },
-  },
-  {
-    name: "get_live",
-    description: "Who is on the store right now (visitors in the last few minutes, each once, by where they came from) and today so far: visitors, page views, checkouts started, sales and revenue. No visitor is identified.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true },
-  },
-  {
-    name: "get_numbers_for_days",
-    description: "The store's numbers for any stretch of UTC days, up to 400 days back: visitors, page views, checkouts, sales and revenue, day by day, by channel and by product, beside the same number of days just before. Paid figures are null when the sales reading was incomplete.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        from: { type: "string", description: "The first day, YYYY-MM-DD (UTC)." },
-        to: { type: "string", description: "The last day, YYYY-MM-DD (UTC), not after today." },
-      },
-      additionalProperties: false,
-    },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_product_description",
-    description: "One product's long description, exactly as the creator wrote it, with its title. Use list_products for the ids.",
+    description: "One product's long description, exactly as the creator wrote it, with its title. Use list_products for the ids. It counts as a few of the store's API requests, set by the most it could read.",
     inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_sales_page",
-    description: "One product's sales page as saved, block by block in page order (hero, benefits, FAQ, guarantee and the rest), with its search title and description. Testimonials are counted, never quoted.",
+    description: "One product's sales page as saved, block by block in page order (hero, benefits, FAQ, guarantee and the rest), with its search title and description. Testimonials are counted, never quoted. It counts as a few of the store's API requests, set by the most it could read.",
     inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_course_outline",
-    description: "A course's modules and lessons in order, with each lesson's title, whether it is a free preview, whether it has text, its video and files by name, and when each module opens.",
+    description: "A course's modules and lessons in order, with each lesson's title, whether it is a free preview, whether it has text, its video and files by name, and when each module opens. It counts as a few of the store's API requests, set by the most it could read.",
     inputSchema: { type: "object", properties: { product: { type: "string", description: "The course's product id, from list_products." } }, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_lesson",
-    description: "One lesson of a course as the creator wrote it: its text, its quiz with the right answers, and its task.",
+    description: "One lesson of a course as the creator wrote it: its text, its quiz with the right answers, and its task. It counts as a few of the store's API requests, set by the most it could read.",
     inputSchema: {
       type: "object",
       properties: {
@@ -154,19 +133,19 @@ const DRAFTS: readonly ToolDraft[] = [
   },
   {
     name: "get_page_test",
-    description: "How a product's page test is going (a second headline or a second version of the whole page): views, checkouts, sales and money of each version, and whether it has been won by the studio's own rule.",
+    description: "How a product's page test is going (a second headline or a second version of the whole page): views, checkouts, sales and money of each version, and whether it has been won by the studio's own rule. It counts as a few of the store's API requests, set by the most it could read.",
     inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_page_reading",
-    description: "How far down a product's sales page visitors read, block by block, the reasons visitors picked for not buying, and how far each video was watched.",
+    description: "How far down a product's sales page visitors read, block by block, the reasons visitors picked for not buying, and how far each video was watched. It counts as a few of the store's API requests, set by the most it could read.",
     inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_page_versions",
-    description: "A product's sales page as it was before its last saves: the list of earlier versions, newest first, or one version block by block. Testimonials are counted, never quoted.",
+    description: "A product's sales page as it was before its last saves: the list of earlier versions, newest first, or one version block by block. Testimonials are counted, never quoted. It counts as a few of the store's API requests, more as more versions are kept.",
     inputSchema: {
       type: "object",
       properties: {
@@ -179,7 +158,7 @@ const DRAFTS: readonly ToolDraft[] = [
   },
   {
     name: "list_saved_blocks",
-    description: "The sections the creator saved to reuse on any page, each with its name and its blocks, newest change first. Testimonials are counted, never quoted.",
+    description: "The sections the creator saved to reuse on any page, each with its name and its blocks, newest change first. Testimonials are counted, never quoted. It counts as a few of the store's API requests, more as more sections are saved.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },

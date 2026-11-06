@@ -14,6 +14,7 @@
  */
 import type { FactKey } from "@/lib/sales-page";
 import { blockWords } from "@/lib/buyer-words/blocks";
+import { listedLengths } from "@/lib/call-lengths";
 
 export type FactValue = { key: FactKey; value: string; label: string };
 export type PageFacts = Partial<Record<FactKey, FactValue>>;
@@ -24,7 +25,8 @@ export type FactInputs = {
   product: {
     course?: { lessons: number } | null;
     podcast?: { episodes: number } | null;
-    call?: { kind: "weekly" | "live"; minutes: number } | null;
+    priceCents?: number;
+    call?: { kind: "weekly" | "live"; minutes: number; lengths?: { minutes: number; cents: number }[]; deposit?: number } | null;
   };
   /** How many products a bundle holds now, or null for anything else. */
   bundleItems: number | null;
@@ -45,9 +47,9 @@ export function pageFacts(input: FactInputs): PageFacts {
   if (input.bundleItems !== null && input.bundleItems > 0) {
     out.products = { key: "products", value: number(input.bundleItems), label: w.products(input.bundleItems) };
   }
-  // A dated session has its own length each; only one length for every booking is a fact.
+  // A dated session has its own length each, and so does a call with several (lib/call-lengths.ts); only one length for every booking is a fact.
   const call = input.product.call;
-  if (call && call.kind === "weekly" && call.minutes > 0) out.length = { key: "length", value: number(call.minutes), label: w.minutes(call.minutes) };
+  if (call && call.kind === "weekly" && call.minutes > 0 && listedLengths(call, input.product.priceCents ?? 0).length === 0) out.length = { key: "length", value: number(call.minutes), label: w.minutes(call.minutes) };
   if (input.sold !== null && input.sold > 0) out.buyers = { key: "buyers", value: number(input.sold), label: w.bought(input.sold) };
   const reviews = input.reviews;
   if (reviews && reviews.count >= 1) {

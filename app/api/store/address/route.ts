@@ -4,16 +4,20 @@ import {
   EMAIL_PATTERN,
   MAX_EMAIL_LENGTH,
   SESSION_COOKIE,
+  addressLimitAnswer,
   emailForSession,
   isAuthConfigured,
   isFreshSession,
   normaliseEmail,
   sendMoveLink,
-  withinAddressLimit,
 } from "@/lib/auth";
 import { storeForEmail } from "@/lib/store";
-import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { lockedUntil } from "@/lib/two-step";
+import { hasSecondStep, holdsSecondStep, liveSecondStep } from "@/lib/second-step-gate";
+
+/** Addresses one account may ask to move to in an hour. */
+const MOVE_ASKS_PER_HOUR = 5;
 
 /**
  * Asks to move the sign-in address.
@@ -60,6 +64,9 @@ export async function POST(request: NextRequest) {
   }
   if (normaliseEmail(wanted) === normaliseEmail(email)) return back("same");
 
+  // Moving the account outlives the session that asks, so an account with a passkey or an app asks it
+  // from a session opened with one (lib/second-step-gate.ts): an emailed link alone never moves it.
+  if ((await hasSecondStep(email)) && (await liveSecondStep(email, session)) === null) return back("second-step");
   // Moving is moving a store. With no store there is nothing to carry, and the
   // creator simply signs in with the other address instead.
   const store = await storeForEmail(email);
@@ -75,7 +82,16 @@ export async function POST(request: NextRequest) {
   if (!(await isFreshSession(session))) return back("reauth");
 
   try {
-    if (!(await withinAddressLimit(wanted))) return back("limited");
+    // Past the address's hourly count is "limited"; a count that could not be read is an error, said as one
+    // (CX-123 rules 24 and 27): nothing is sent either way.
+    const inbox = await addressLimitAnswer(wanted);
+    if (inbox === "unknown") return back("error");
+    if (inbox === "over") return back("limited");
+    // Never onto an address with ways in of its own: they would join this account's (checked again at the
+    // tap). Asked only after the store, a recent login, the address's hourly count and the account's own
+    // (five addresses an hour), so finding out which addresses have passkeys this way stays slow and limited.
+    if (!(await withinLimit("move-ask", normaliseEmail(email), MOVE_ASKS_PER_HOUR, 60 * 60))) return back("limited");
+    if (await holdsSecondStep(wanted)) return back("has-login");
     await sendMoveLink(email, wanted, linkOrigin(request), session as string);
   } catch (error) {
     console.error("address move request failed", error);

@@ -77,6 +77,18 @@ export async function readGift(id: string): Promise<Gift | null> {
   return typeof raw === "string" ? parseKeptGift(raw, id) : null;
 }
 
+/**
+ * A gift's record for handing it over, read exactly (sweep A3; CX-123 rules 24 and 30): no record is null, and an
+ * answer that is not one reply of text or nothing is unknown and throws, never "no gift", so a paid checkout is
+ * never said as having nothing to hand over because Redis answered in another shape.
+ */
+async function readGiftExactly(id: string): Promise<Gift | null> {
+  if (!GIFT_ID.test(id) || !isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline([["GET", giftKey(id)]]), 1);
+  if (!replies || (replies[0] !== null && typeof replies[0] !== "string")) throw new UnknownReplyError("a gift's record");
+  return typeof replies[0] === "string" ? parseKeptGift(replies[0], id) : null;
+}
+
 /** A kept gift's record, when it is one and is this id's. */
 function parseKeptGift(raw: string, id: string): Gift | null {
   try {
@@ -138,7 +150,10 @@ export async function startGift(store: Store, product: Listing, input: GiftInput
     message: cleanText(input.message, MAX_GIFT_MESSAGE),
     at: now(),
   };
-  await saveGift(gift, GIFT_PENDING_SECONDS);
+  // Written down exactly before any checkout opens (sweep A3; CX-123 rules 24 and 30): a write answered in another
+  // shape may not have landed, and a gift paid for with no record is never handed over. Refused instead, as
+  // "unavailable" (the page says nothing was charged), and no checkout is made.
+  if (!(await saveGift(gift, GIFT_PENDING_SECONDS))) return { ok: false, reason: "unavailable" };
   return { ok: true, gift };
 }
 
@@ -178,7 +193,7 @@ export async function deliverGift(input: {
 }): Promise<GiftOutcome> {
   const { store, session, product, base } = input;
   const id = session.metadata?.gift ?? "";
-  const gift = await readGift(id);
+  const gift = await readGiftExactly(id);
   if (!gift || gift.s !== store.statsId || gift.p !== product.id) return "skip";
   if (gift.given) return "already";
   // The mark read exactly (lib/claim-mark.ts; CX-123 rules 24 and 25): somebody else's is "already"; an unknown one
@@ -205,12 +220,21 @@ export async function deliverGift(input: {
   // A course, or a course inside a bundle, is dated from the day it was paid.
   for (const id of [gift.p, ...(grant.items ?? [])]) await input.recordStart(gift.to, id, created);
 
+  // What a refund looks up (the payment's gift, and that this store sold one) is written first and the gift marked
+  // given last, each answered exactly "OK" (sweep A3; CX-123 rules 24 and 30): a write left unknown lets go of the
+  // mark and throws, so confirmGift keeps no "sent" mark and the next run does it again, never "already" on a gift
+  // whose payment a refund could not find.
+  const kept: (string | number)[][] = [...(pi ? [["SET", piKey(pi), gift.id, "EX", GIFT_KEPT_SECONDS]] : []), ["SET", anyKey(gift.s), "1"]];
+  const keptReplies = repliesFor(await redisPipeline(kept), kept.length);
+  if (!keptReplies || !keptReplies.every((reply) => reply === "OK")) {
+    await releaseMark(mark, value);
+    throw new UnknownReplyError("a given gift's payment record");
+  }
   const given: Gift = { ...gift, session: sessionId, pi, given: now() };
-  await saveGift(given, GIFT_KEPT_SECONDS);
-  await redisPipeline([
-    ...(pi ? [["SET", piKey(pi), gift.id, "EX", GIFT_KEPT_SECONDS] as (string | number)[]] : []),
-    ["SET", anyKey(gift.s), "1"],
-  ]);
+  if (!(await saveGift(given, GIFT_KEPT_SECONDS))) {
+    await releaseMark(mark, value);
+    throw new UnknownReplyError("a given gift's record");
+  }
   // Let go only while it still holds this run's value: one whose time ran out may be another run's now.
   await releaseMark(mark, value);
 

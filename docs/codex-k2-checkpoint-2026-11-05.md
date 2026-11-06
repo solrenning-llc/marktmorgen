@@ -580,3 +580,61 @@ Logs/tmp/k2-review-2799-{linked,red,store,sales,types,lint}.log;4visualimages/tm
 ## Latest coordination delta — 2026-11-06 09:34 Fortaleza — supersedes unconditional #2799 merge language
 FULL fresh channelblob9e31d1bf43738399e4e872ca4528d1e852589195/560185charsread. R2cycle50concurredK2scope/noHIGHMEDIUM, then proposedONELOWperformanceinferenceforinlinebase64/RSC/routepayload; **notreproducedbyR2inrealbuild**. C4-20261106-1150-T-67 explicitlyASSIGNEDthatLOWtoT: SAMEWebPbytes/hashstaticpublicassets, intrinsicdimensions/alt/lazyappropriateplacement, measureBEFORE/AFTERroutebundlewithrealnextbuild/bundlerreport; THENK2focalreturn. DoNOTcertifytheinferredsizeincreaseasameasurement. K2initialreviewdidnotmeasureproductionbundle/hydration/LCPandexplicitlyexcludedthem. Prior5800101567cleanscoperemainsvalid, butNOTunconditionalclearanceofnewLOW; follow-upcommentpostedPR2799. AwaitNEWcorrectiveTsource, donotrepeat96eunchanged. NoK2assetmove/authorref/CIedit. Reportb1b20cf2originalscopepreserved.
 C4-1145congelouV2802em5ce72e76, newreservationsnextbatch; noK2reservationdocwork. P09h32confirms2539MERGED35261ed3and2542integrated5633/focalreturnT-R2, notK2. P2797R2qualifiedalreadydone, noK2duplicatedreview. C4nextK2ownpublicassignment/cacheclassificationpending. CurrentOWN2796fa7/RED1753/Range13b/tree939/303local/R2observerpending/9NEWinitial1success7progress1queued UNCHANGED, no furtherCIpoll/headmove/retry. #2801HOLDownerBlobceilingstillapplies, #2790permanentcanvasLOWstillC5. ONEownOPEN, no newproductbysilence. PublishnewcheckpointSHAwithcompletion/currentpendingstatesbeforeend. Noautomationschanges; blockersaretransientCI/review/coordination.
+
+
+## COMPLETE CHECKPOINT — 2026-11-06 10:31 Fortaleza — two nominal returns CLOSED, own nine checks green
+C4 SOLE coordinator/C1 OFF/V reservation batches. Prior checkpoint74a58255 and all source/RED/evidence histories preserved. No new worker/subagent or product unit. Main fetched **5d3c91c96d7369e311bc35d209418a6d4003f5b5**; mandatory CLAUDE/AGENTS/reservations.md/ALLreservations/agent-inbox/codex-queue compared71b->5d: NOdelta, allpreviousfullreadsapplicable. CurrentchannelreadthroughC4-1405-C2-80/C4-1410-C6-81/C4-1415-U-82/C4-1420-O-83. No own new public/cache assignment; others' scopes remain excluded.
+
+### Own #2796/fa7: NINE completedSUCCESS, waiting ONLY designated C2 focal return
+ONEownOPEN/DRAFT **fa7f4214b1ecfd66d93c110e417f1899ae1f1b7e**, tree93967d9f. Samebranch/reservation/PR; no source/head/CI changes this run. No retries/cancels/force. Terminalcausalphoto confirmed **9DISTINCTworkflows ALL completedSUCCESS**:
+42217892420,42217892446,42217892451,42217892485,42217892424,42217892391,42217892452,42217892392,42217892668.
+No old1195green reused. Exactfa7 includes allthreeenginehostedgates; NOTproduction/globalAAA. No subsequentCIpoll.
+
+R2 product/design1195 qualified with nativebrowser08h20 (187 checks,14width/motioncases,0fail/blocked/writes), which was missed inearliertail-onlyreadandnowFULLchannelrecovered. R2'soldcycle45notediffonlyhasbeensupersededbyhisactualbrowsercompletion. **Neither1195reviewisfocalfa7observerqualification**; reviews=[]/PRcommentsonlyauthorrequests, so doNOTmergefromninecheckswithoutapplicableobserverreview.
+
+C4 **C4-20261106-1405-C2-80** assigns the **fa7 observer return to Codex C2**, replaces overloadedR2queue. ScopeRED175377ca3checks/2fails→Range13b/native3/3,44minimum/focusunchanged. C4explicit:cleanC2+9fa7->K2NORMALmerge. NoextraR2orduplicateproductreviewrequired. PendingC2, notR2. Request6684828639andlatestchannela4eaec0bprovidereviewconcreteevidence. AwaitnominalC2response, no userpermission needed.
+
+Read-onlynativepreparedmerge **gitmerge-tree origin/main5d3c91c9 fa7 ->cf042ffe3dce2d7b6c3be9736dbcab0f6e404cc6 CLEAN**. NewerrawPRat13:30UTCstillheadfa7/base71b/draft/mergeableunknown; don'tpromoteunknowntoclean. AtC2clean:fetchfreshmain/head/9exact/native/rawclean,markreadyandNORMALexpectedheadmerge/GETconfirm. C4-1120:don'tintegratemainjusttogenerateCI. Ifactualconflict,causaloneintegration/revalidate/9new; don'theadchase.
+
+Allolderown2340/2354/2345/2472/...2789remainMERGED, no recreation. Local303/SSR+5linked/actualTS-lint/scanner3968/0previousverifiedunchanged. All1753/13b/fa7ancestorspreserved. Product/SSRfourblobsbyte-id1195. No test/CI weakening.
+
+### #2799 nominal C4-1150 return COMPLETE, LOW CLOSED
+Exactauthor **2d281416a492542fd911ac4ef7c0ab62b31e7f06**, prior96e/5800101567preserved. ClaimBEFOREdelta/tests channela4eaec0b. Entire7correctivepathsread, twoassetsverifiedbyte/digests,fullmeasureproof/contextreviewed. **QualifiedCOMMENT5800680540: C4-1150LOWCLOSED/SEM NOVO ACHADO/PODEENTRARafterauthor9exactgates/freshclean**. R2cycle54alreadyclosedstaticassets, K2nominalmeasuredreturnnowcomplete; don'trepeat2dunchanged.
+
+SAMEauthorRED **7eda5d9d045b24305bc394648281496bb619adc8** standalonecheckout:5tests1assertionfail4controls ->samefinaltestblob **6f19212bf28bc333cb3e10af88a191dd1972c419**5/5. Originalc434/02378historyunchanged; inline-onlyassumptionexplicitlychangedunderC4publicationrequirement, allimageformat/bytebound/dimension/hash/provenanceassertsretained.
+SAMErouteSERVERdependencygraph/esbuild/packagesexternal/fontsubstitution:
+before **1769389B/gzip534311/module124610**, after **1645958B/gzip441191/module1179**. Exactlyauthornumbers, reductions123431/93120/123431. NOTNextproduction/client/RSC/hydration/LCPCLS/cachehitormarginmeasurement; originalR2RSCduplicationwasinference,norunhascertifiedit.
+Eightcanonicalgroups **233/233**, actualTS4roots/imports0/lint/diff0,scanner3972/0+ownreport3973/0.
+SAMEproof2pages×390/1440:exact1localGET/each,0foreign,decoded1280x820,caption16/provenance,0overflow,figureaxe0violationAND0incompleteall4. **FOURfinalPNGscreenshotsBYTE-IDENTICALtoFOURoriginalvisuallyinspectedfigures**, so scopedSC1.4.9/alt/layoutjudgmentunchanged. ExactWebP **37746/54842B**, hashes750d35d8/5c5a9690/source49eb/dates/alt/dimensionsunchanged. Staticseparatelycacheableassets,notzerocostclaim. Noforeignmutation.
+
+Durable SAMEownbranch **codex/k-review-2799-feature-notes@db597f0bf72dba9d09372fc980363513c85f4f9e**, parentb1b20cf2+additional2d281416, tree**d5d2f4fb1d563dbbfa332472000611e144668d53**, native=GitData; reportdocs/reviews/k2-2799.mdonlychanged. Priorb1reportpreserved. Local k2-review-2799-static HEAD2d/stagedownreport;REDworktreek2-review-2799-static-red HEAD7eda. Logs/tmp/k2-static-feature-{before-bundle,bundle,red,linked,types,lint,store,sales}.log;canonicaldurableauthorproofsreproduced. The RED command followed bymeasurementhadfinalshell0becausemeasurementpasses; actualREDresult5/1readandreported, nevercalledREDgreen.
+
+T'sverify127900686125/pricingFAQtimeoutoutsideTdiffand403retryrequestareAUTHOR-controlled. K2didNOTread/modify/retrytheirCIorassertgatesgreen. Reviewdoesnotwaivenineexactchecks.
+
+### #2790 final nominal canvas return COMPLETE, remaining LOW CLOSED
+Exactauthor **68285760c4b4b219b19f1f651247404522f8cf07**, basea7ec8efe, RAWPRconfirmed. Readall9changedpaths a2ac..682: productioncommentsONLYAmerican spelling; runtimefixesunchanged. Twoactualcommitsb2d5bfe93(canvasadoption),68285760(spelling). Claimbeforetheseviewsalsoa4eaec0b; afterTreturnpriority.
+**QualifiedCOMMENT5800721796: remainingcanvascoverageLOWCLOSED/SEM HIGHMEDIUMLOW/PODEENTRARafterSTACKdependencies+9exactchecks/freshclean/NORMALexpectedSHA**. OriginalL1/L2functionalclosures5799195602retained. No newfindingorredundantindependentreview.
+
+Actualcanonicalhelper **tests/e2e/shrink-tone.mjs**, blob **61b4cb4be5a40e3c0f77eb27d7f18df6c02a4681**:bundlesREALshrink,actualencode/decode+fullalpha,count4cases(opaque/onepixel/stripe/JPEG),conditionalnullifOUTPUThastransparencyelseexact#rrggbb,pluscount/networkcontrols=6. Actualstore-copy.mjsimport105/await919UNCONDITIONAL;existingproduct-checksverify/crossbrowsercommandsrunthatentrypoint. Noopt-inonlygapremains.
+
+NativeChromiumSAMEhelper:
+-unchangedoldactualshrinksourcefrom5767193cb: **6checks/1causalfailure**, actualonepixelWebPtransparent1buttoneincorrect;5controlspass.
+-current682source **SAME6/6**, opaque/JPEGtoneexact,onepixel1/null,stripe65536/null,0requests.
+Driver/tmp/k2-shrink-canonical-return.mjsonlysuppliesbrowser/root/is/optionalsource, noassertchanges. Oldsource/tmp/k2-shrink-sampling.tsBYTEFROMgitshow576. AuthorhelperandoldsourceAREDURABLEGitobjects, scratchdrivernotsolecopyofproof.
+Originalindependentproofs **dc470cd1/d5f02228BYTE-ID unchanged** alsopass actualroute13/13+nativecanvas4/4/0requests. TheyOVERLAPpermanentcases, notuniqueextra13+4.
+**16canonicalfiles503/503** (prior15461+US-English42),actualscopedTS/imports0,directedESLintincludesnewhelper/store-copy0,diff0,scanner3916/0+stagedown3evidence **3919/0**. Actualfilenameplatform-us-english.test.tsexists, no nonexistent invocation. OriginalL2REDwase5eproofBEFOREproductrepair;canonicalcoverageaddedlaterb2, don'tclaimotherwise.
+No complete store-copy/globalCI/Nextbrowserjourney/localFirefoxWebKit/nativeRedis/production/provider/LCP/AAAverification.
+
+Durable SAMEownbranch **codex/k-review-2790-tone@323b932b167f56d978f35b3e121062c19016a6aa**, parenta555+additional682, tree **42fbd1e336f23a8db28596edce6e3f59e1ea2b8e**=nativeGitData. SAMEreportdocs/reviews/k2-2790.mdappendonly;original2proofblobsunchanged. Local k2-review-2790-canvas HEAD682/staged3ownevidence. Logs/tmp/k2-canvas-{canonical-red,canonical-green,original-proof,linked,types,lint}.log. Noforeignref/base/CI/sourceedit;authorhandlesstack2785/2786andgates. ThisdoesNOTwaive2801/2803cost-ownerHOLD.
+
+### Other status and exact next
+#2797P MERGED5d3c91c9byPwithR2clean+9exacts; noK2duplicatereview. #2801/#2803remainHOLDpendingownerbudgetdecision; noK2reviewspend/providerRangeexperiment. NewC6Encanto651additionalreviewK2designatedbyC4-1215(notcurrent2733/Snominal),awaitactualrequest,newproductnotassumed.
+Recent-salescache **0597b110** remainsproofONLY/classificationC4pending, no lib/recent-sales.tsedit. ONEownOPEN2796, fourunusedproducts slots; no newpublicunitbysilence,C4hascoordination. Tblog2805R2nominal, Umetadata/FAQ/Uletterevidence,U+PprivacyetcnotK2scope.
+
+Nextvalid:
+1. **C2fa7qualifiedreturn** ->freshgates/ready/NORMALexpectedSHA/GET; noadditionalR2review. Ninefa7alreadySUCCESS.
+2.T2799andC52790returnsareDONEonexactheads; no repeatedreviewunlessNEWsource/finding. Authorsincorporatewiththeir9checksanddependencies, neverK2mergeforeign.
+3.C4nominalnextpublicunitorcacheclassification; awaitownerrelease2801; C6futureK2nominalrequestwhendelivered.
+4.Noeligibleevent->AV12noemptyCIloop/headchurn/retry; dependenciesTRANSIENTsoexistingcontinuitynotdisabled. Noautomationchanges/newtasks. Beforeendingappendtwo unitcompletions+exactpoint+thischeckpointSHAtoFULLfreshchannelCAS(noC1recipient).
+
+Operationalprecision: one duplicateddetachedworktreecreationattemptforTwasrejected(pathalreadyexists)becausefirstsetuphadactuallycompleted; proceededwithfirstexact2dworktree, nosource/refdamage,noresultfromrejectedsetupcountedasverification. No409thisrun. Neverrestoreoldchannelprefix/deletemessages. Allpersonal/contact/providercommercialprohibitionsunchanged.

@@ -16,7 +16,7 @@ const store = {
   sid: "11111111111111111111111111111111",
   extra: false,
   catalog: { id: "synthetic", items: [] },
-} as Store;
+} as unknown as Store;
 const config = JSON.stringify({
   handle: "exact-view",
   provider: "kit",

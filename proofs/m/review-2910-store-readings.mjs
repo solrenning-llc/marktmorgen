@@ -86,7 +86,7 @@ try{
   const bundle=join(out,(before?'base':'head')+'.cjs');
   try{
    room();
-   await build({stdin:{contents:entry,resolveDir:DEPS,sourcefile:'m2910-entry.ts',loader:'ts'},bundle:true,platform:'node',format:'cjs',target:'node24',packages:'external',outfile:bundle,logLevel:'silent',plugins:[...(ownPlugin?[ownPlugin]:[]),plugin(before)]});
+   await build({stdin:{contents:entry,resolveDir:DEPS,sourcefile:'m2910-entry.ts',loader:'ts'},bundle:true,platform:'node',format:'cjs',target:'node24',packages:'external',tsconfigRaw:source('tsconfig.json',before),outfile:bundle,logLevel:'silent',plugins:[...(ownPlugin?[ownPlugin]:[]),plugin(before)]});
   }catch(error){throw new Error('M2910_BUILD_FAILURE: '+String(error?.message??error).slice(0,4096));
   }finally{stop();}
   const remaining=120000-(Date.now()-started);if(remaining<=0)throw new Error('M2910_WALL_CAP');

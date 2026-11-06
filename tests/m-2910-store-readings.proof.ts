@@ -9,6 +9,8 @@ import {POST as requestLibrary} from "@/app/api/library/route";
 import {addProduct,claimHandle,ensureStatsId,setLanguage,setProductLink,setStripeAccount,setSubscription,storeForEmail} from "@/lib/store";
 import {personWrite} from "@/lib/joined-stores";
 import {wordsIn} from "@/lib/buyer-words";
+import {productPath} from "@/components/store-product";
+import {tagged,placeFrom} from "@/lib/embed-rules";
 import {LANGUAGE_CODES,LANGUAGES} from "@/lib/store-language";
 import {paidPeriod} from "@/tests/billing-period-fixture";
 import {store as redis} from "@/tests/redis-stub";
@@ -29,6 +31,15 @@ function check(label:string,pass:boolean,scope="four-fixes"){checks.push({label,
 const failed=()=>Promise.reject(new Error("M synthetic pre-execution Redis failure"));
 const command=(op:string,prefix:string)=>(batch:Command[])=>batch.some(c=>c[0]===op&&typeof c[1]==="string"&&c[1].startsWith(prefix));
 const flat=(s:string)=>s.replace(/<[^>]*>/g," ").replace(/&#x27;|&#39;/g,"'").replace(/&quot;/g,'"').replace(/&amp;/g,"&").replace(/\s+/g," ");
+type BuyLink={href:string;label:string;markup:string};
+function buyLinks(markup:string):BuyLink[]{
+  return [...markup.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)].flatMap(m=>{
+    const href=m[1].match(/\bhref="([^"]*)"/)?.[1];
+    const classes=m[1].match(/\bclass="([^"]*)"/)?.[1]?.split(/\s+/)??[];
+    return href&&["btn","st-btn","btn-block"].every(c=>classes.includes(c))?[{href:href.replace(/&amp;/g,"&"),label:flat(m[2]).trim(),markup:m[0]}]:[];
+  });
+}
+const hasBuy=(markup:string,buy:BuyLink)=>buyLinks(markup).some(a=>a.href===buy.href&&a.label===buy.label);
 async function html(node:React.ReactElement){const s=await renderToReadableStream(node,{onError:()=>{}});await s.allReady;return new Response(s).text();}
 const owner="m2910-owner@example.test",handle="m2910shop",buyer="m2910-buyer@example.test";
 async function card(product:string,other=handle){
@@ -58,7 +69,18 @@ async function main(){
   const head=new Set(shop.catalog.head.map(p=>p.id));
   const present=ids.find(id=>head.has(id))!,outside=ids.find(id=>!head.has(id))!;
   if(!present||!outside||shop.catalog.inline)throw new Error("public fixture did not produce a listing outside head");
-  check("healthy paid card retains its buy action",flat(await card(present)).includes(wordsIn("en").buyFor("$40")));
+  const presentListing=shop.catalog.head.find(p=>p.id===present)!;
+  const expectedBuyHref=tagged(productPath(shop,presentListing),placeFrom(undefined))+"#buy";
+  const literalExpectedBuyHref=`/@m2910shop/p/m-guide-1-${present}?utm_source=website&utm_medium=buy-button#buy`;
+  const fixtureBuyContract=present===ids[0]&&presentListing.title==="M guide 1"&&expectedBuyHref===literalExpectedBuyHref;
+  check("pure fixture buy href matches literal website/buy-button/#buy contract before SSR",fixtureBuyContract,"fixture-contract");
+  if(!fixtureBuyContract)throw new Error("M pure fixture purchase URL contract failed before page rendering");
+  const expectedBuyLabel=wordsIn("en").buyFor("$40");
+  const healthySSR=await card(present);
+  const healthyBuy=buyLinks(healthySSR).find(a=>a.href===expectedBuyHref&&a.label===expectedBuyLabel);
+  check("healthy paid card retains its exact buy destination and label",Boolean(healthyBuy));
+  console.log("M2910_PURCHASE_CONTROL:"+JSON.stringify({expectedBuyHref,literalExpectedBuyHref,fixtureContractSetupOnly:true,expectedBuyLabel,observed:healthyBuy??null,healthySSR}));
+  if(!healthyBuy)throw new Error("M healthy purchase fixture did not establish its exact destination and label");
   check("confirmed absent store retains old answer",flat(await card(present,"m2910missing")).includes("This product is no longer on sale."));
   fault={when:command("GET","nl:store:handle:"),reply:failed};
   const unreadStore=await card(present);
@@ -89,14 +111,14 @@ async function main(){
   check("known coming-soon state keeps waitlist",flat(await card(present)).includes(wordsIn("en").joinWaitlist));
   fault={when:soon,reply:failed};
   const unknownSoon=await card(present);
-  check("thrown soon read has no checkout form",!unknownSoon.includes('action="/api/store/checkout"'));
+  check("thrown soon read refuses healthy buy destination and checkout form",!hasBuy(unknownSoon,healthyBuy)&&!unknownSoon.includes('action="/api/store/checkout"'));
   check("thrown soon read says unavailable",flat(unknownSoon).includes("Buying is not available just now"));
   check("thrown soon read has no embedded calendar",!unknownSoon.includes("data-embed-calendar"));
   fault={when:soon,reply:()=>[]};
   const shortSoon=await card(present);
-  check("short soon envelope does not offer checkout",!shortSoon.includes('action="/api/store/checkout"'),"inherited-soon-shape");
+  check("short soon envelope refuses healthy buy destination and checkout form",!hasBuy(shortSoon,healthyBuy)&&!shortSoon.includes('action="/api/store/checkout"'),"inherited-soon-shape");
   fault=null;
-  check("known ordinary product still offers checkout",(await card(present)).includes('action="/api/store/checkout"'));
+  check("known ordinary product retains healthy buy destination and label",hasBuy(await card(present),healthyBuy));
 
   part(4);
   check("missing join store keeps closed answer",flat(await join("m2910missing")).includes("This list is not taking sign-ups"));

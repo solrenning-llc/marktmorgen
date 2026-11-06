@@ -1,0 +1,259 @@
+
+===== /tmp/g2834-fd4-red.log =====
+
+Checkout-question controls are honest before hydration
+  ok    Ask the buyer something at checkout keeps one server-rendered control
+  FAIL  Ask the buyer something at checkout is natively unavailable before hydration
+        expected true
+        got      false
+  FAIL  Ask the buyer something at checkout exposes its unavailable state
+        expected true
+        got      false
+  ok    Ask the buyer something at checkout does not override its visible accessible name
+  FAIL  Ask the buyer something at checkout visibly keeps its action while loading
+        expected true
+        got      false
+  ok    Ask the buyer something at checkout does not draw a false open form
+  ok    Change keeps one server-rendered control
+  FAIL  Change is natively unavailable before hydration
+        expected true
+        got      false
+  FAIL  Change exposes its unavailable state
+        expected true
+        got      false
+  ok    Change does not override its visible accessible name
+  FAIL  Change visibly keeps its action while loading
+        expected true
+        got      false
+  ok    Change does not draw a false open form
+  ok    existing questions remain readable while the control loads
+  ok    a free product still offers no checkout questions
+
+14 checks, 6 failing.
+
+
+===== /tmp/g2834-6af-canonical.log =====
+
+Checkout-question controls are honest before hydration
+  ok    Ask the buyer something at checkout keeps one server-rendered control
+  ok    Ask the buyer something at checkout is natively unavailable before hydration
+  ok    Ask the buyer something at checkout exposes its unavailable state
+  ok    Ask the buyer something at checkout does not override its visible accessible name
+  ok    Ask the buyer something at checkout visibly keeps its action while loading
+  ok    Ask the buyer something at checkout does not draw a false open form
+  ok    Change keeps one server-rendered control
+  ok    Change is natively unavailable before hydration
+  ok    Change exposes its unavailable state
+  ok    Change does not override its visible accessible name
+  ok    Change visibly keeps its action while loading
+  ok    Change does not draw a false open form
+  ok    existing questions remain readable while the control loads
+  ok    a free product still offers no checkout questions
+
+14 checks, all passing.
+
+
+===== /tmp/g2834-fd4-browser.log =====
+FAIL new questions: SSR native disabled {"got":false,"want":true}
+FAIL new questions: SSR aria disabled {"got":null,"want":"true"}
+FAIL new questions: action visible while loading {"got":"Ask the buyer something at checkout","want":"Ask the buyer something at checkout — Loading…"}
+PASS new questions: saved text readable
+FAIL new questions: unavailable control not in keyboard focus {"got":true,"want":false}
+PASS new questions: native click cannot open before hydration
+PASS new questions: no pre-hydration POST
+PASS new questions: hydration preserves same native control
+PASS new questions: hydrated visible action
+PASS new questions: hydrated aria-disabled removed
+PASS new questions: keyboard opens actual form
+PASS new questions: original field value
+PASS new questions: local edit retained
+PASS new questions: cancel does not POST
+PASS new questions: reopen discards only unsaved edit
+PASS new questions: opening after prop refresh uses current product
+PASS new questions: no save/provider request at any point
+PASS new questions: no hydration/render error
+FAIL saved questions: SSR native disabled {"got":false,"want":true}
+FAIL saved questions: SSR aria disabled {"got":null,"want":"true"}
+FAIL saved questions: action visible while loading {"got":"Change","want":"Change — Loading…"}
+PASS saved questions: saved text readable
+FAIL saved questions: unavailable control not in keyboard focus {"got":true,"want":false}
+PASS saved questions: native click cannot open before hydration
+PASS saved questions: no pre-hydration POST
+PASS saved questions: hydration preserves same native control
+PASS saved questions: hydrated visible action
+PASS saved questions: hydrated aria-disabled removed
+PASS saved questions: keyboard opens actual form
+PASS saved questions: original field value
+PASS saved questions: local edit retained
+PASS saved questions: cancel does not POST
+PASS saved questions: reopen discards only unsaved edit
+PASS saved questions: opening after prop refresh uses current product
+PASS saved questions: no save/provider request at any point
+PASS saved questions: no hydration/render error
+PASS free: SSR has no control
+PASS free: hydrated has no control
+PASS free: no hydration error
+PASS free: no POST
+40 checks, 8 failures
+
+
+===== /tmp/g2834-6af-browser.log =====
+PASS new questions: SSR native disabled
+PASS new questions: SSR aria disabled
+PASS new questions: action visible while loading
+PASS new questions: saved text readable
+PASS new questions: unavailable control not in keyboard focus
+PASS new questions: native click cannot open before hydration
+PASS new questions: no pre-hydration POST
+PASS new questions: hydration preserves same native control
+PASS new questions: hydrated visible action
+PASS new questions: hydrated aria-disabled removed
+PASS new questions: keyboard opens actual form
+PASS new questions: original field value
+PASS new questions: local edit retained
+PASS new questions: cancel does not POST
+PASS new questions: reopen discards only unsaved edit
+PASS new questions: opening after prop refresh uses current product
+PASS new questions: no save/provider request at any point
+PASS new questions: no hydration/render error
+PASS saved questions: SSR native disabled
+PASS saved questions: SSR aria disabled
+PASS saved questions: action visible while loading
+PASS saved questions: saved text readable
+PASS saved questions: unavailable control not in keyboard focus
+PASS saved questions: native click cannot open before hydration
+PASS saved questions: no pre-hydration POST
+PASS saved questions: hydration preserves same native control
+PASS saved questions: hydrated visible action
+PASS saved questions: hydrated aria-disabled removed
+PASS saved questions: keyboard opens actual form
+PASS saved questions: original field value
+PASS saved questions: local edit retained
+PASS saved questions: cancel does not POST
+PASS saved questions: reopen discards only unsaved edit
+PASS saved questions: opening after prop refresh uses current product
+PASS saved questions: no save/provider request at any point
+PASS saved questions: no hydration/render error
+PASS free: SSR has no control
+PASS free: hydrated has no control
+PASS free: no hydration error
+PASS free: no POST
+40 checks, 0 failures
+
+
+===== /tmp/g2834-6af-linked.log =====
+
+Read from the studio
+  ok    a phone needs no label and is never optional
+  ok    asked once at most
+  ok    the other questions keep their rules
+  ok    still three questions in all
+  ok    what is stored is read safely too
+  ok    there is room for it among Stripe's three
+
+At checkout, Stripe's own phone box
+  ok    the phone box is switched on
+  ok    and the other questions keep their places in Stripe's list
+  ok    not asked when not chosen
+
+Read back with the answers
+  ok    the number with the other answers
+  ok    nothing added when none was asked
+
+11 checks, all passing.
+
+The studio's own words
+  ok    the discount editor's title, fields, choices and button
+  ok    it opens only when the store can sell, and says the trial counts
+  ok    canSell needs a connected Stripe account and a paid-up plan, which a trial passes
+  ok    the product's own checkout settings do not wait for the store to sell
+  ok    the editor's own order: the button that opens it, the code, what it takes off, the amount, then the button that makes it
+  ok    it counts each code's uses from Stripe
+
+The answers
+  ok    four questions
+  ok    the main tools named as the page's own intro names them, never as a promise to earn more
+  ok    and in the intro's own list
+  ok    start: the editor's own words, in order, and when it opens
+  ok    try before paying: the shared answer for what is set on a product, then discount codes said apart
+  ok    while plans are off sale, it says the codes open for no one today
+  ok    more sales: no figure, the studio's count from Stripe
+  ok    one space between sentences, never two
+  ok    no number of sales, buyers or earnings, no percent, no result promised
+
+On the checkout page
+  ok    first in the page's own Questions block
+  ok    no question asked twice
+
+17 checks, all passing.
+✔ the pages' PayPal reading is the PayPal client's own, for every way the credentials can be set (1.597466ms)
+✔ the blog and the comparisons explain PayPal and affiliates the same way (2.956041ms)
+✔ the checkout questions row says what the checkout really asks (2.215877ms)
+✔ no public page or help answer still contradicts the checkout or PayPal explanation (7.443357ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 29.010179
+
+
+===== /tmp/g2834-6af-m-ack.log =====
+{
+  "sourceBlob": "48397330d47572bd875b1dcb716168152b314033",
+  "checks": 24,
+  "failures": [
+    {
+      "name": "string-ok: close only after confirmed success",
+      "actual": false,
+      "expected": true
+    },
+    {
+      "name": "string-ok: refresh only after confirmed success",
+      "actual": 1,
+      "expected": 0
+    },
+    {
+      "name": "string-ok: toast only after confirmed success",
+      "actual": [
+        "Checkout questions saved."
+      ],
+      "expected": []
+    },
+    {
+      "name": "failed-http: close only after confirmed success",
+      "actual": false,
+      "expected": true
+    },
+    {
+      "name": "failed-http: refresh only after confirmed success",
+      "actual": 1,
+      "expected": 0
+    },
+    {
+      "name": "failed-http: toast only after confirmed success",
+      "actual": [
+        "Checkout questions saved."
+      ],
+      "expected": []
+    }
+  ],
+  "localPostCeiling": 4,
+  "externalRequests": 0
+}
+
+
+===== /tmp/g2834-6af-tsc.log =====
+
+
+===== /tmp/g2834-6af-lint.log =====
+
+
+===== /tmp/g2834-6af-public.log =====
+Public data check: 4077 tracked files; 0 file(s) require correction.
+
+
+===== /tmp/g2834-6af-diffcheck.log =====
+

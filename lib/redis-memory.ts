@@ -639,6 +639,75 @@ export class MemoryRedis {
           this.data.set(args[1], String(n - 1));
           return n - 1;
         }
+        if (key.startsWith("-- marktmorgen:lesson-comments-add:v2\n") && args[0] === "4" && args.length === 13) {
+          const [, comments, lesson, all, replies, parentId, lessonId, id, raw, score, rawMost, rawRecent, rawLessonMost] = args;
+          let count = 0;
+          if (parentId !== "") {
+            const parentRaw = this.run(["HGET", comments, parentId]);
+            if (typeof parentRaw !== "string") return [1, 0, 0, 0, 0];
+            try {
+              const parent = JSON.parse(parentRaw) as { id?: unknown; l?: unknown; r?: unknown };
+              if (parent.id !== parentId || parent.l !== lessonId || (parent.r !== undefined && parent.r !== null)) return [3, 0, 0, 0, 0];
+            } catch { return [3, 0, 0, 0, 0]; }
+            count = Number(this.run(["HGET", replies, parentId]) ?? 0);
+            const most = Number(rawMost);
+            if (!Number.isSafeInteger(count) || count < 0 || !Number.isSafeInteger(most) || most < 1) return [3, 0, 0, 0, 0];
+            if (count >= most) return [2, 0, 0, 0, 0];
+          } else {
+            const lessonCount = Number(this.run(["ZCARD", lesson])), most = Number(rawLessonMost);
+            if (!Number.isSafeInteger(lessonCount) || lessonCount < 0 || !Number.isSafeInteger(most) || most < 1) return [3, 0, 0, 0, 0];
+            if (lessonCount >= most) return [4, 0, 0, 0, 0];
+          }
+          const kept = this.run(["HSET", comments, id, raw]);
+          const underLesson = this.run(["ZADD", lesson, score, id]);
+          const newest = this.run(["ZADD", all, score, id]);
+          const trimmed = this.run(["ZREMRANGEBYRANK", all, 0, -Number(rawRecent) - 1]);
+          const answers = parentId === "" ? 0 : this.run(["HINCRBY", replies, parentId, 1]);
+          return [kept, underLesson, newest, trimmed, answers];
+        }
+        if (key.startsWith("-- marktmorgen:lesson-comment-thread-delete:v1\n") && args[0] === "4" && args.length === 10) {
+          const [, comments, lesson, all, replies, target, lessonId, rawMost, rawEntry, rawStep] = args;
+          const raw = this.run(["HGET", comments, target]);
+          if (typeof raw !== "string") return [0, 0];
+          const validId = (value: unknown): value is string => typeof value === "string" && /^[a-z0-9]{12}$/.test(value);
+          const parsed = (value: string, expected: string): { r: string | null; hidden: boolean } | null => {
+            try {
+              const row = JSON.parse(value) as { id?: unknown; l?: unknown; b?: unknown; t?: unknown; r?: unknown; h?: unknown };
+              if (row.id !== expected || row.l !== lessonId || typeof row.b !== "string" || typeof row.t !== "string") return null;
+              if (row.r !== undefined && row.r !== null && !validId(row.r)) return null;
+              return { r: typeof row.r === "string" ? row.r : null, hidden: row.h === true };
+            } catch { return null; }
+          };
+          const root = parsed(raw, target);
+          if (!root) return [-1, 0];
+          const gone: [string, string, boolean][] = [[target, raw, root.hidden]], known = new Set([target]);
+          const most = Number(rawMost), entry = Number(rawEntry), step = Number(rawStep);
+          if (![most, entry, step].every(Number.isSafeInteger) || most < 1 || entry < 0 || step < 1) return [-1, 0];
+          if (root.r === null) {
+            const ids = this.zset(lesson).slice().sort((a, b) => a.score - b.score || a.member.localeCompare(b.member)).slice(0, most + 1).map(row => row.member);
+            if (ids.length > most) return [-1, 0];
+            for (const id of ids) {
+              const value = this.run(["HGET", comments, id]);
+              if (typeof value !== "string") return [-1, 0];
+              const row = parsed(value, id);
+              if (!row) return [-1, 0];
+              if (row.r === target && !known.has(id)) { known.add(id); gone.push([id, value, row.hidden]); }
+            }
+          } else {
+            const count = Number(this.run(["HGET", replies, root.r]));
+            if (!Number.isSafeInteger(count) || count < 1) return [-1, 0];
+          }
+          const hiddenMark = new TextEncoder().encode(',"h":true').length;
+          const freed = gone.reduce((sum, [, value, hidden]) => sum + Math.ceil((new TextEncoder().encode(value).length - (hidden ? hiddenMark : 0) + entry * 4) / step) * step, 0);
+          for (const [id] of gone) {
+            this.run(["HDEL", comments, id]);
+            this.run(["ZREM", lesson, id]);
+            this.run(["ZREM", all, id]);
+            this.run(["HDEL", replies, id]);
+          }
+          if (root.r !== null) this.run(["HINCRBY", replies, root.r, -1]);
+          return [gone.length, freed];
+        }
         if (key.startsWith("-- marktmorgen:lesson-comments-forget:v2\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);
@@ -677,16 +746,6 @@ export class MemoryRedis {
           if (this.run(["HEXISTS", args[1], args[2]]) !== 1) return 0;
           this.run(["HSET", args[1], args[2], args[3]]);
           return 1;
-        }
-        if (key.startsWith("-- marktmorgen:lesson-comments-add:v1\n") && args[0] === "4" && args.length === 10) {
-          const [, comments, lesson, all, replies, id, raw, at, lastRank, parent] = args;
-          if (parent !== "" && this.run(["HEXISTS", comments, parent]) !== 1) return "gone";
-          this.run(["HSET", comments, id, raw]);
-          this.run(["ZADD", lesson, at, id]);
-          this.run(["ZADD", all, at, id]);
-          this.run(["ZREMRANGEBYRANK", all, 0, lastRank]);
-          if (parent !== "") this.run(["HINCRBY", replies, parent, 1]);
-          return "ok";
         }
         if (key.startsWith("-- marktmorgen:lesson-comments-take:v2\n")) {
           const count = Number(args[0]);

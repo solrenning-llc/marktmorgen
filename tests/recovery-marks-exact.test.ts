@@ -20,6 +20,7 @@ import { test } from "node:test";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { remindAbandoned } from "@/lib/checkout-recovery";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setRecovery, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { suppressCommand } from "@/lib/suppression";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -174,4 +175,36 @@ test("a claim reply other than OK or nothing is unknown: nothing is sent", async
   }
   await refuses(isClaims, async (c, real) => (await real(c)).slice(0, 1), "one claim reply");
   await refuses(isClaims, async () => [], "no claim replies");
+});
+
+/**
+ * The fifth reply, the erasure check (lib/suppression.ts, HEXISTS), is read
+ * as exactly as the other four (CX-116 second money review of #2929, F1):
+ * 1 is erased, 0 is not, anything else is unknown. Read through
+ * `Number(reply) === 1`, a lost reply (nothing, QUEUED, no slot) said "not
+ * erased" and sent a paid reminder to an address the creator erased, and
+ * `[1]` said "erased" by luck. Here the address really is erased, so only
+ * an exact reading may let anything through, and none does.
+ */
+test("the erasure check of any other shape is unknown, never 'not erased'", async () => {
+  const store = await shop();
+  const listId = store.listId as string;
+  // Control: the address really erased, read whole, is skipped and nothing goes.
+  const kept = fresh();
+  await redis.pipeline([suppressCommand(listId, kept.email)]);
+  const before = sent.length;
+  assert.equal(await remindAbandoned(store, left(kept.id, kept.email)), "skip", "control: an erased address is skipped");
+  assert.deepEqual(sent.slice(before), [], "control: nothing went to an erased address");
+  for (const value of [null, "QUEUED", undefined, [1], ...ODD]) {
+    const { id, email } = fresh();
+    await redis.pipeline([suppressCommand(listId, email)]);
+    const at = sent.length;
+    await assert.rejects(
+      intercept(isMarks, slotAs(4, value), () => remindAbandoned(store, left(id, email))),
+      UnknownReplyError,
+      `erasure check ${JSON.stringify(value) ?? "undefined"}: must be unknown`,
+    );
+    assert.deepEqual(sent.slice(at), [], `erasure check ${String(value)}: a reminder went to an erased address`);
+    assert.notEqual(await markOf(id), "sent", `erasure check ${String(value)}: the checkout was marked as sent`);
+  }
 });

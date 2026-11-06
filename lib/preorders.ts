@@ -226,7 +226,12 @@ export async function handOverPreorder(store: Store, product: Listing, sessionId
   // hands nothing over and says so, as when Redis does not answer, and the next run tries again.
   const value = claimValue();
   const claimed = await claimMark(giveKey(sessionId), 300, value);
-  if (claimed === "taken") return "already";
+  if (claimed === "taken") {
+    // Another run holds the mark: "already" only once the pre-order is given, as for a gift (lib/gifts.ts):
+    // confirmPreorder answers "given" for it, so said while the other run may still fail, nothing would hand it over.
+    if ((await readPreorder(store, product.id, sessionId))?.given) return "already";
+    throw new Error("another run is handing this pre-order over right now");
+  }
   if (claimed === "unknown") throw new UnknownReplyError("a pre-order's giving mark");
   try {
     const entry = await readPreorder(store, product.id, sessionId);

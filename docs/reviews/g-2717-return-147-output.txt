@@ -1,0 +1,727 @@
+
+=== 147-author-red ===
+=== sg2-l3-counts.test.ts ===
+
+withinRateLimit and withinAddressLimit: a sign-in email goes out only on a whole count under the limit
+  ok    withinRateLimit, a count that is null: over the limit
+  ok    withinAddressLimit, a count that is null: over the limit
+  ok    withinRateLimit, a count written as text: over the limit
+  ok    withinAddressLimit, a count written as text: over the limit
+  ok    withinRateLimit, a fractional count: over the limit
+  ok    withinAddressLimit, a fractional count: over the limit
+  ok    withinRateLimit, a negative count: over the limit
+  ok    withinAddressLimit, a negative count: over the limit
+  ok    withinRateLimit, a count that is an object: over the limit
+  ok    withinAddressLimit, a count that is an object: over the limit
+  ok    withinRateLimit, a count that is true: over the limit
+  ok    withinAddressLimit, a count that is true: over the limit
+  ok    withinRateLimit, a reply missing the count: over the limit
+  ok    withinAddressLimit, a reply missing the count: over the limit
+  ok    withinRateLimit, a third, unasked-for reply: over the limit
+  ok    withinAddressLimit, a third, unasked-for reply: over the limit
+  ok    withinRateLimit, a reply that is not a list: over the limit
+  ok    withinAddressLimit, a reply that is not a list: over the limit
+  ok    withinRateLimit: the fifth is still in
+  ok    withinRateLimit: the sixth is over
+  ok    withinAddressLimit: a window already open (SET NX null) and the eighth is in
+  ok    withinRateLimit: the real counter still lets the first in
+  ok    withinAddressLimit: the real counter still lets the first in
+
+requestCourseLink: a course link is emailed only on whole counts under the limits
+  ok    requestCourseLink, a count that is null: limited
+  ok    requestCourseLink, a count that is null: no email
+  ok    requestCourseLink, a count written as text: limited
+  ok    requestCourseLink, a count written as text: no email
+  ok    requestCourseLink, a fractional count: limited
+  ok    requestCourseLink, a fractional count: no email
+  ok    requestCourseLink, a negative count: limited
+  ok    requestCourseLink, a negative count: no email
+  ok    requestCourseLink, a count that is an object: limited
+  ok    requestCourseLink, a count that is an object: no email
+  ok    requestCourseLink, a count that is true: limited
+  ok    requestCourseLink, a count that is true: no email
+  ok    requestCourseLink, a reply missing the count: limited
+  ok    requestCourseLink, a reply missing the count: no email
+  ok    requestCourseLink, a third, unasked-for reply: limited
+  ok    requestCourseLink, a third, unasked-for reply: no email
+  ok    requestCourseLink, a reply that is not a list: limited
+  ok    requestCourseLink, a reply that is not a list: no email
+  ok    requestCourseLink: the real counters still let a request in
+
+openCourseLink: an emailed link opens only on a whole count of opens under the limit
+  ok    openCourseLink, a count that is null: not opened
+  ok    openCourseLink, a count written as text: not opened
+  ok    openCourseLink, a fractional count: not opened
+  ok    openCourseLink, a negative count: not opened
+  ok    openCourseLink, a count that is an object: not opened
+  ok    openCourseLink, a count that is true: not opened
+  ok    openCourseLink, a reply missing the count: not opened
+  ok    openCourseLink, a third, unasked-for reply: not opened
+  ok    openCourseLink, a reply that is not a list: not opened
+  ok    openCourseLink: the tenth open still opens
+  ok    openCourseLink: the eleventh does not
+
+studentPage: an unknown number of students is never 0
+  ok    studentPage, a total that is null: unknown
+  ok    studentPage, a total that is text: unknown
+  ok    studentPage, a total that is fractional: unknown
+  ok    studentPage, a total that is negative: unknown
+  ok    studentPage, a total that is an object: unknown
+  ok    studentPage, a total that is true: unknown
+  ok    studentPage: no students is 0
+  ok    studentPage: three is three
+
+studentDates and lastSeenMany: a reply or a kept row of another shape is never "never opened"
+  FAIL  studentDates, a reply that is a number: unknown
+        expected "rejected: UnknownReplyError"
+        got      null
+  FAIL  lastSeenMany, a reply that is a number: unknown
+        expected "rejected: UnknownReplyError"
+        got      {}
+  FAIL  studentDates, a reply that is a list: unknown
+        expected "rejected: UnknownReplyError"
+        got      null
+  FAIL  lastSeenMany, a reply that is a list: unknown
+        expected "rejected: UnknownReplyError"
+        got      {}
+  FAIL  studentDates, a reply that is true: unknown
+        expected "rejected: UnknownReplyError"
+        got      null
+  FAIL  lastSeenMany, a reply that is true: unknown
+        expected "rejected: UnknownReplyError"
+        got      {}
+  FAIL  studentDates, a row that is not JSON: unknown
+        expected "rejected: UnknownReplyError"
+        got      null
+  FAIL  lastSeenMany, a row that is not JSON: unknown
+        expected "rejected: UnknownReplyError"
+        got      {}
+  FAIL  studentDates, a row whose start is text: unknown
+        expected "rejected: UnknownReplyError"
+        got      {"since":1700000000,"lastSeen":1700000500}
+  FAIL  lastSeenMany, a row whose start is text: unknown
+        expected "rejected: UnknownReplyError"
+        got      {}
+  FAIL  studentDates, a row whose last visit is missing: unknown
+        expected "rejected: UnknownReplyError"
+        got      {"since":1700000000,"lastSeen":0}
+  FAIL  lastSeenMany, a row whose last visit is missing: unknown
+        expected "rejected: UnknownReplyError"
+        got      {}
+  FAIL  studentDates, a row whose start is negative: unknown
+        expected "rejected: UnknownReplyError"
+        got      {"since":-1,"lastSeen":1700000500}
+  FAIL  lastSeenMany, a row whose start is negative: unknown
+        expected "rejected: UnknownReplyError"
+        got      {}
+  FAIL  studentDates, a row that is a list: unknown
+        expected "rejected: UnknownReplyError"
+        got      {"since":0,"lastSeen":0}
+  FAIL  lastSeenMany, a row that is a list: unknown
+        expected "rejected: UnknownReplyError"
+        got      {}
+  FAIL  lastSeenMany, an HMGET that is not a list: unknown
+        expected "rejected: UnknownReplyError"
+        got      {}
+  FAIL  lastSeenMany, an HMGET that is a list one short: unknown
+        expected "rejected: UnknownReplyError"
+        got      {}
+  FAIL  lastSeenMany, an HMGET that is a list one too long: unknown
+        expected "rejected: UnknownReplyError"
+        got      {}
+  FAIL  lastSeenMany, an HMGET that is null: unknown
+        expected "rejected: UnknownReplyError"
+        got      {}
+  FAIL  lastSeenMany, a pipeline with no reply: unknown
+        expected "rejected: UnknownReplyError"
+        got      {}
+  ok    studentDates: a student never seen is null
+  ok    studentDates: a kept row is read
+  ok    lastSeenMany: one seen, one never
+
+runImport: an unknown length or count leaves the import as it was
+  ok    runImport, the rows' length null: not failed, rows kept
+  ok    runImport, the rows' length text: not failed, rows kept
+  ok    runImport, the rows' length fractional: not failed, rows kept
+  ok    runImport, the rows' length negative: not failed, rows kept
+  ok    runImport, the rows' length an object: not failed, rows kept
+  ok    runImport, the rows' length true: not failed, rows kept
+  ok    runImport, the rows' length missing: not failed
+  ok    runImport, the report's length null: the step is not saved as done
+  ok    runImport, the report's length text: the step is not saved as done
+  ok    runImport, the report's length fractional: the step is not saved as done
+  ok    runImport, the report's length negative: the step is not saved as done
+  ok    runImport, the report's length an object: the step is not saved as done
+  ok    runImport, the report's length true: the step is not saved as done
+  ok    runImport: the real replies still bring the rows in and note the bad one
+
+runImport: an unknown count of addresses to email never finishes the mailing
+  ok    runImport, the addresses to email null: still mailing, the address kept
+  ok    runImport, the addresses to email text: still mailing, the address kept
+  ok    runImport, the addresses to email fractional: still mailing, the address kept
+  ok    runImport, the addresses to email negative: still mailing, the address kept
+  ok    runImport, the addresses to email an object: still mailing, the address kept
+  ok    runImport, the addresses to email true: still mailing, the address kept
+
+forgetLearnerPerson: a person's passes and records are said as removed only on exact replies
+  ok    forgetLearnerPerson, passes read as null: did not finish
+  ok    forgetLearnerPerson, passes read as text: did not finish
+  ok    forgetLearnerPerson, passes read as an object: did not finish
+  ok    forgetLearnerPerson, passes read as an empty reply: did not finish
+  ok    forgetLearnerPerson, passes read as a list holding a number: did not finish
+  ok    forgetLearnerPerson, a DEL that is null: did not finish
+  ok    forgetLearnerPerson, an HDEL that is null: did not finish
+  ok    forgetLearnerPerson, a DEL that is text: did not finish
+  ok    forgetLearnerPerson, an HDEL that is text: did not finish
+  ok    forgetLearnerPerson, a DEL that is fractional: did not finish
+  ok    forgetLearnerPerson, an HDEL that is fractional: did not finish
+  ok    forgetLearnerPerson, a DEL that is negative: did not finish
+  ok    forgetLearnerPerson, an HDEL that is negative: did not finish
+  ok    forgetLearnerPerson, a DEL that is an object: did not finish
+  ok    forgetLearnerPerson, an HDEL that is an object: did not finish
+  ok    forgetLearnerPerson, a DEL that is true: did not finish
+  ok    forgetLearnerPerson, an HDEL that is true: did not finish
+  ok    forgetLearnerPerson, a reply missing the HDEL: did not finish
+  ok    forgetLearnerPerson: three keys and one row are four records
+  ok    forgetLearnerPerson: the real path still finishes with a whole count
+  ok    UnknownReplyError is the shape error the erasure runner reports as not finished
+
+126 checks, 21 failing.
+an import step failed UnknownReplyError: Redis answered the batches of an import in an unknown shape
+    at runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62407:32)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62686:20
+an import step failed UnknownReplyError: Redis answered the batches of an import in an unknown shape
+    at runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62407:32)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62686:20
+an import step failed UnknownReplyError: Redis answered the batches of an import in an unknown shape
+    at runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62407:32)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62686:20
+an import step failed UnknownReplyError: Redis answered the batches of an import in an unknown shape
+    at runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62407:32)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62686:20
+an import step failed UnknownReplyError: Redis answered the batches of an import in an unknown shape
+    at runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62407:32)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62686:20
+an import step failed UnknownReplyError: Redis answered the batches of an import in an unknown shape
+    at runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62407:32)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62686:20
+an import step failed UnknownReplyError: Redis answered the batches of an import in an unknown shape
+    at runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62407:32)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62691:59
+an import step failed UnknownReplyError: Redis answered the length of an import's report in an unknown shape
+    at note (/tmp/g-2717-proof-XtN6FE/0.cjs:61899:30)
+    at async contactsStep (/tmp/g-2717-proof-XtN6FE/0.cjs:61978:3)
+    at async runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62441:42)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62694:5
+an import step failed UnknownReplyError: Redis answered the length of an import's report in an unknown shape
+    at note (/tmp/g-2717-proof-XtN6FE/0.cjs:61899:30)
+    at async contactsStep (/tmp/g-2717-proof-XtN6FE/0.cjs:61978:3)
+    at async runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62441:42)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62694:5
+an import step failed UnknownReplyError: Redis answered the length of an import's report in an unknown shape
+    at note (/tmp/g-2717-proof-XtN6FE/0.cjs:61899:30)
+    at async contactsStep (/tmp/g-2717-proof-XtN6FE/0.cjs:61978:3)
+    at async runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62441:42)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62694:5
+an import step failed UnknownReplyError: Redis answered the length of an import's report in an unknown shape
+    at note (/tmp/g-2717-proof-XtN6FE/0.cjs:61899:30)
+    at async contactsStep (/tmp/g-2717-proof-XtN6FE/0.cjs:61978:3)
+    at async runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62441:42)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62694:5
+an import step failed UnknownReplyError: Redis answered the length of an import's report in an unknown shape
+    at note (/tmp/g-2717-proof-XtN6FE/0.cjs:61899:30)
+    at async contactsStep (/tmp/g-2717-proof-XtN6FE/0.cjs:61978:3)
+    at async runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62441:42)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62694:5
+an import step failed UnknownReplyError: Redis answered the length of an import's report in an unknown shape
+    at note (/tmp/g-2717-proof-XtN6FE/0.cjs:61899:30)
+    at async contactsStep (/tmp/g-2717-proof-XtN6FE/0.cjs:61978:3)
+    at async runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62441:42)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62694:5
+an import step failed UnknownReplyError: Redis answered the addresses an import still has to email in an unknown shape
+    at mailStep (/tmp/g-2717-proof-XtN6FE/0.cjs:62317:31)
+    at async runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62463:22)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62708:5
+an import step failed UnknownReplyError: Redis answered the addresses an import still has to email in an unknown shape
+    at mailStep (/tmp/g-2717-proof-XtN6FE/0.cjs:62317:31)
+    at async runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62463:22)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62708:5
+an import step failed UnknownReplyError: Redis answered the addresses an import still has to email in an unknown shape
+    at mailStep (/tmp/g-2717-proof-XtN6FE/0.cjs:62317:31)
+    at async runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62463:22)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62708:5
+an import step failed UnknownReplyError: Redis answered the addresses an import still has to email in an unknown shape
+    at mailStep (/tmp/g-2717-proof-XtN6FE/0.cjs:62317:31)
+    at async runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62463:22)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62708:5
+an import step failed UnknownReplyError: Redis answered the addresses an import still has to email in an unknown shape
+    at mailStep (/tmp/g-2717-proof-XtN6FE/0.cjs:62317:31)
+    at async runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62463:22)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62708:5
+an import step failed UnknownReplyError: Redis answered the addresses an import still has to email in an unknown shape
+    at mailStep (/tmp/g-2717-proof-XtN6FE/0.cjs:62317:31)
+    at async runImport (/tmp/g-2717-proof-XtN6FE/0.cjs:62463:22)
+    at async outcome (/tmp/g-2717-proof-XtN6FE/0.cjs:62552:12)
+    at async /tmp/g-2717-proof-XtN6FE/0.cjs:62708:5
+
+
+
+=== 147-tests ===
+=== sg2-l3-counts.test.ts ===
+
+withinRateLimit and withinAddressLimit: a sign-in email goes out only on a whole count under the limit
+  ok    withinRateLimit, a count that is null: over the limit
+  ok    withinAddressLimit, a count that is null: over the limit
+  ok    withinRateLimit, a count written as text: over the limit
+  ok    withinAddressLimit, a count written as text: over the limit
+  ok    withinRateLimit, a fractional count: over the limit
+  ok    withinAddressLimit, a fractional count: over the limit
+  ok    withinRateLimit, a negative count: over the limit
+  ok    withinAddressLimit, a negative count: over the limit
+  ok    withinRateLimit, a count that is an object: over the limit
+  ok    withinAddressLimit, a count that is an object: over the limit
+  ok    withinRateLimit, a count that is true: over the limit
+  ok    withinAddressLimit, a count that is true: over the limit
+  ok    withinRateLimit, a reply missing the count: over the limit
+  ok    withinAddressLimit, a reply missing the count: over the limit
+  ok    withinRateLimit, a third, unasked-for reply: over the limit
+  ok    withinAddressLimit, a third, unasked-for reply: over the limit
+  ok    withinRateLimit, a reply that is not a list: over the limit
+  ok    withinAddressLimit, a reply that is not a list: over the limit
+  ok    withinRateLimit: the fifth is still in
+  ok    withinRateLimit: the sixth is over
+  ok    withinAddressLimit: a window already open (SET NX null) and the eighth is in
+  ok    withinRateLimit: the real counter still lets the first in
+  ok    withinAddressLimit: the real counter still lets the first in
+
+requestCourseLink: a course link is emailed only on whole counts under the limits
+  ok    requestCourseLink, a count that is null: limited
+  ok    requestCourseLink, a count that is null: no email
+  ok    requestCourseLink, a count written as text: limited
+  ok    requestCourseLink, a count written as text: no email
+  ok    requestCourseLink, a fractional count: limited
+  ok    requestCourseLink, a fractional count: no email
+  ok    requestCourseLink, a negative count: limited
+  ok    requestCourseLink, a negative count: no email
+  ok    requestCourseLink, a count that is an object: limited
+  ok    requestCourseLink, a count that is an object: no email
+  ok    requestCourseLink, a count that is true: limited
+  ok    requestCourseLink, a count that is true: no email
+  ok    requestCourseLink, a reply missing the count: limited
+  ok    requestCourseLink, a reply missing the count: no email
+  ok    requestCourseLink, a third, unasked-for reply: limited
+  ok    requestCourseLink, a third, unasked-for reply: no email
+  ok    requestCourseLink, a reply that is not a list: limited
+  ok    requestCourseLink, a reply that is not a list: no email
+  ok    requestCourseLink: the real counters still let a request in
+
+openCourseLink: an emailed link opens only on a whole count of opens under the limit
+  ok    openCourseLink, a count that is null: not opened
+  ok    openCourseLink, a count written as text: not opened
+  ok    openCourseLink, a fractional count: not opened
+  ok    openCourseLink, a negative count: not opened
+  ok    openCourseLink, a count that is an object: not opened
+  ok    openCourseLink, a count that is true: not opened
+  ok    openCourseLink, a reply missing the count: not opened
+  ok    openCourseLink, a third, unasked-for reply: not opened
+  ok    openCourseLink, a reply that is not a list: not opened
+  ok    openCourseLink: the tenth open still opens
+  ok    openCourseLink: the eleventh does not
+
+studentPage: an unknown number of students is never 0
+  ok    studentPage, a total that is null: unknown
+  ok    studentPage, a total that is text: unknown
+  ok    studentPage, a total that is fractional: unknown
+  ok    studentPage, a total that is negative: unknown
+  ok    studentPage, a total that is an object: unknown
+  ok    studentPage, a total that is true: unknown
+  ok    studentPage: no students is 0
+  ok    studentPage: three is three
+
+studentDates and lastSeenMany: a reply or a kept row of another shape is never "never opened"
+  ok    studentDates, a reply that is a number: unknown
+  ok    lastSeenMany, a reply that is a number: unknown
+  ok    studentDates, a reply that is a list: unknown
+  ok    lastSeenMany, a reply that is a list: unknown
+  ok    studentDates, a reply that is true: unknown
+  ok    lastSeenMany, a reply that is true: unknown
+  ok    studentDates, a row that is not JSON: unknown
+  ok    lastSeenMany, a row that is not JSON: unknown
+  ok    studentDates, a row whose start is text: unknown
+  ok    lastSeenMany, a row whose start is text: unknown
+  ok    studentDates, a row whose last visit is missing: unknown
+  ok    lastSeenMany, a row whose last visit is missing: unknown
+  ok    studentDates, a row whose start is negative: unknown
+  ok    lastSeenMany, a row whose start is negative: unknown
+  ok    studentDates, a row that is a list: unknown
+  ok    lastSeenMany, a row that is a list: unknown
+  ok    lastSeenMany, an HMGET that is not a list: unknown
+  ok    lastSeenMany, an HMGET that is a list one short: unknown
+  ok    lastSeenMany, an HMGET that is a list one too long: unknown
+  ok    lastSeenMany, an HMGET that is null: unknown
+  ok    lastSeenMany, a pipeline with no reply: unknown
+  ok    studentDates: a student never seen is null
+  ok    studentDates: a kept row is read
+  ok    lastSeenMany: one seen, one never
+
+runImport: an unknown length or count leaves the import as it was
+  ok    runImport, the rows' length null: not failed, rows kept
+  ok    runImport, the rows' length text: not failed, rows kept
+  ok    runImport, the rows' length fractional: not failed, rows kept
+  ok    runImport, the rows' length negative: not failed, rows kept
+  ok    runImport, the rows' length an object: not failed, rows kept
+  ok    runImport, the rows' length true: not failed, rows kept
+  ok    runImport, the rows' length missing: not failed
+  ok    runImport, the report's length null: the step is not saved as done
+  ok    runImport, the report's length text: the step is not saved as done
+  ok    runImport, the report's length fractional: the step is not saved as done
+  ok    runImport, the report's length negative: the step is not saved as done
+  ok    runImport, the report's length an object: the step is not saved as done
+  ok    runImport, the report's length true: the step is not saved as done
+  ok    runImport: the real replies still bring the rows in and note the bad one
+
+runImport: an unknown count of addresses to email never finishes the mailing
+  ok    runImport, the addresses to email null: still mailing, the address kept
+  ok    runImport, the addresses to email text: still mailing, the address kept
+  ok    runImport, the addresses to email fractional: still mailing, the address kept
+  ok    runImport, the addresses to email negative: still mailing, the address kept
+  ok    runImport, the addresses to email an object: still mailing, the address kept
+  ok    runImport, the addresses to email true: still mailing, the address kept
+
+forgetLearnerPerson: a person's passes and records are said as removed only on exact replies
+  ok    forgetLearnerPerson, passes read as null: did not finish
+  ok    forgetLearnerPerson, passes read as text: did not finish
+  ok    forgetLearnerPerson, passes read as an object: did not finish
+  ok    forgetLearnerPerson, passes read as an empty reply: did not finish
+  ok    forgetLearnerPerson, passes read as a list holding a number: did not finish
+  ok    forgetLearnerPerson, a DEL that is null: did not finish
+  ok    forgetLearnerPerson, an HDEL that is null: did not finish
+  ok    forgetLearnerPerson, a DEL that is text: did not finish
+  ok    forgetLearnerPerson, an HDEL that is text: did not finish
+  ok    forgetLearnerPerson, a DEL that is fractional: did not finish
+  ok    forgetLearnerPerson, an HDEL that is fractional: did not finish
+  ok    forgetLearnerPerson, a DEL that is negative: did not finish
+  ok    forgetLearnerPerson, an HDEL that is negative: did not finish
+  ok    forgetLearnerPerson, a DEL that is an object: did not finish
+  ok    forgetLearnerPerson, an HDEL that is an object: did not finish
+  ok    forgetLearnerPerson, a DEL that is true: did not finish
+  ok    forgetLearnerPerson, an HDEL that is true: did not finish
+  ok    forgetLearnerPerson, a reply missing the HDEL: did not finish
+  ok    forgetLearnerPerson: three keys and one row are four records
+  ok    forgetLearnerPerson: the real path still finishes with a whole count
+  ok    UnknownReplyError is the shape error the erasure runner reports as not finished
+
+126 checks, all passing.
+an import step failed UnknownReplyError: Redis answered the batches of an import in an unknown shape
+    at runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62412:32)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62691:20
+an import step failed UnknownReplyError: Redis answered the batches of an import in an unknown shape
+    at runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62412:32)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62691:20
+an import step failed UnknownReplyError: Redis answered the batches of an import in an unknown shape
+    at runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62412:32)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62691:20
+an import step failed UnknownReplyError: Redis answered the batches of an import in an unknown shape
+    at runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62412:32)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62691:20
+an import step failed UnknownReplyError: Redis answered the batches of an import in an unknown shape
+    at runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62412:32)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62691:20
+an import step failed UnknownReplyError: Redis answered the batches of an import in an unknown shape
+    at runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62412:32)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62691:20
+an import step failed UnknownReplyError: Redis answered the batches of an import in an unknown shape
+    at runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62412:32)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62696:59
+an import step failed UnknownReplyError: Redis answered the length of an import's report in an unknown shape
+    at note (/tmp/g-2717-proof-Lv8fZb/0.cjs:61904:30)
+    at async contactsStep (/tmp/g-2717-proof-Lv8fZb/0.cjs:61983:3)
+    at async runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62446:42)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62699:5
+an import step failed UnknownReplyError: Redis answered the length of an import's report in an unknown shape
+    at note (/tmp/g-2717-proof-Lv8fZb/0.cjs:61904:30)
+    at async contactsStep (/tmp/g-2717-proof-Lv8fZb/0.cjs:61983:3)
+    at async runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62446:42)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62699:5
+an import step failed UnknownReplyError: Redis answered the length of an import's report in an unknown shape
+    at note (/tmp/g-2717-proof-Lv8fZb/0.cjs:61904:30)
+    at async contactsStep (/tmp/g-2717-proof-Lv8fZb/0.cjs:61983:3)
+    at async runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62446:42)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62699:5
+an import step failed UnknownReplyError: Redis answered the length of an import's report in an unknown shape
+    at note (/tmp/g-2717-proof-Lv8fZb/0.cjs:61904:30)
+    at async contactsStep (/tmp/g-2717-proof-Lv8fZb/0.cjs:61983:3)
+    at async runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62446:42)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62699:5
+an import step failed UnknownReplyError: Redis answered the length of an import's report in an unknown shape
+    at note (/tmp/g-2717-proof-Lv8fZb/0.cjs:61904:30)
+    at async contactsStep (/tmp/g-2717-proof-Lv8fZb/0.cjs:61983:3)
+    at async runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62446:42)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62699:5
+an import step failed UnknownReplyError: Redis answered the length of an import's report in an unknown shape
+    at note (/tmp/g-2717-proof-Lv8fZb/0.cjs:61904:30)
+    at async contactsStep (/tmp/g-2717-proof-Lv8fZb/0.cjs:61983:3)
+    at async runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62446:42)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62699:5
+an import step failed UnknownReplyError: Redis answered the addresses an import still has to email in an unknown shape
+    at mailStep (/tmp/g-2717-proof-Lv8fZb/0.cjs:62322:31)
+    at async runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62468:22)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62713:5
+an import step failed UnknownReplyError: Redis answered the addresses an import still has to email in an unknown shape
+    at mailStep (/tmp/g-2717-proof-Lv8fZb/0.cjs:62322:31)
+    at async runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62468:22)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62713:5
+an import step failed UnknownReplyError: Redis answered the addresses an import still has to email in an unknown shape
+    at mailStep (/tmp/g-2717-proof-Lv8fZb/0.cjs:62322:31)
+    at async runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62468:22)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62713:5
+an import step failed UnknownReplyError: Redis answered the addresses an import still has to email in an unknown shape
+    at mailStep (/tmp/g-2717-proof-Lv8fZb/0.cjs:62322:31)
+    at async runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62468:22)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62713:5
+an import step failed UnknownReplyError: Redis answered the addresses an import still has to email in an unknown shape
+    at mailStep (/tmp/g-2717-proof-Lv8fZb/0.cjs:62322:31)
+    at async runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62468:22)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62713:5
+an import step failed UnknownReplyError: Redis answered the addresses an import still has to email in an unknown shape
+    at mailStep (/tmp/g-2717-proof-Lv8fZb/0.cjs:62322:31)
+    at async runImport (/tmp/g-2717-proof-Lv8fZb/0.cjs:62468:22)
+    at async outcome (/tmp/g-2717-proof-Lv8fZb/0.cjs:62557:12)
+    at async /tmp/g-2717-proof-Lv8fZb/0.cjs:62713:5
+
+=== g-2717-boundaries.proof.ts ===
+
+Real authenticated API: unknown scan and blocked readings are unavailable, never invented rows/state
+  ok    native control: one real blocked student
+  ok    scan payload null: injection reached
+  FAIL  scan payload null: refuses unavailable instead of 200/empty/end
+        expected [502,"unavailable"]
+        got      [200,null]
+OBSERVED scan payload null {"status":200,"body":{"total":1,"data":[],"next":null}}
+  ok    scan payload object: injection reached
+  FAIL  scan payload object: refuses unavailable instead of 200/empty/end
+        expected [502,"unavailable"]
+        got      [200,null]
+OBSERVED scan payload object {"status":200,"body":{"total":1,"data":[],"next":null}}
+  ok    odd hash: injection reached
+  FAIL  odd hash: refuses unavailable instead of 200/empty/end
+        expected [502,"unavailable"]
+        got      [200,null]
+OBSERVED odd hash {"status":200,"body":{"total":1,"data":[],"next":null}}
+  ok    bad stored row: injection reached
+  FAIL  bad stored row: refuses unavailable instead of 200/empty/end
+        expected [502,"unavailable"]
+        got      [200,null]
+OBSERVED bad stored row {"status":200,"body":{"total":1,"data":[],"next":null}}
+  ok    blocked list unknown injection reached
+  FAIL  blocked list unknown is unavailable, not blocked=false
+        expected [502,"unavailable"]
+        got      [200,null]
+OBSERVED blocked {"status":200,"body":{"total":1,"data":[{"email":"g2717-student@example.com","lessons_done":0,"lessons_total":0,"started_at":"2026-09-21T14:13:20.000Z","last_seen_at":"2026-09-21T14:13:30.000Z","blocked":false}],"next":null}}
+  ok    native control after faults: row and block still there
+
+Fresh login: complete EXISTS only; the real passkey route refuses an ended session
+  ok    fresh null refuses
+  ok    fresh text refuses
+  ok    fresh extra refuses
+  ok    fresh missing refuses
+  ok    fresh object refuses
+  ok    fresh two refuses
+  ok    real fresh session is fresh
+  ok    ended session cannot request passkey options
+
+New browser: unknown does not note or email; exact positive path stays reachable
+  ok    notice rejects [null,1]
+  ok    notice rejects [0,"1"]
+  ok    notice rejects [2,1]
+  ok    notice rejects [0,1,1]
+  ok    notice rejects []
+  ok    exact new-browser path sends one synthetic notice
+
+Erasure: real pass persists on unknown read, then exact retry deletes it
+  ok    real minted pass works
+  ok    unknown pass list refuses unfinished
+  ok    unknown read preserved pass for retry
+  ok    exact retry removes actual pass
+
+30 checks, 5 failing.
+noting a sign-in failed UnknownReplyError: Redis answered the browsers seen with an account in an unknown shape
+    at noteSignIn (/tmp/g-2717-proof-Lv8fZb/1.cjs:18476:63)
+    at async main (/tmp/g-2717-proof-Lv8fZb/1.cjs:59909:5)
+noting a sign-in failed UnknownReplyError: Redis answered the browsers seen with an account in an unknown shape
+    at noteSignIn (/tmp/g-2717-proof-Lv8fZb/1.cjs:18476:63)
+    at async main (/tmp/g-2717-proof-Lv8fZb/1.cjs:59909:5)
+noting a sign-in failed UnknownReplyError: Redis answered the browsers seen with an account in an unknown shape
+    at noteSignIn (/tmp/g-2717-proof-Lv8fZb/1.cjs:18476:63)
+    at async main (/tmp/g-2717-proof-Lv8fZb/1.cjs:59909:5)
+noting a sign-in failed UnknownReplyError: Redis answered the browsers seen with an account in an unknown shape
+    at noteSignIn (/tmp/g-2717-proof-Lv8fZb/1.cjs:18476:63)
+    at async main (/tmp/g-2717-proof-Lv8fZb/1.cjs:59909:5)
+noting a sign-in failed UnknownReplyError: Redis answered the browsers seen with an account in an unknown shape
+    at noteSignIn (/tmp/g-2717-proof-Lv8fZb/1.cjs:18476:63)
+    at async main (/tmp/g-2717-proof-Lv8fZb/1.cjs:59909:5)
+
+
+
+=== 147-types ===
+
+
+=== 147-lint ===
+
+
+=== LINKED ===
+booking-block-save.test.ts: 3 checks, all passing.
+access-revocation.test.ts: 31 checks, all passing.
+community-chat-acknowledgment.test.ts: 68 checks, all passing.
+course-finish-claim.test.ts: 70 checks, all passing.
+course-paid-legacy-isolation.test.ts: node:test 1 fail 0
+blog-outline-route.test.ts: 7 checks, all passing.
+affiliate-bulk.test.ts: 10 checks, all passing.
+call-lengths-editor.test.ts: 31 checks, all passing.
+buyer-profile.test.ts: 31 checks, all passing.
+certificate-validity.test.ts: 29 checks, all passing.
+assignments.test.ts: 51 checks, all passing.
+form-opportunity.test.ts: 30 checks, all passing.
+forms.test.ts: 19 checks, all passing.
+affiliate-notice-wired.test.ts: 23 checks, all passing.
+community-reward-evidence.test.ts: 60 checks, all passing.
+community-report-queue-view.test.ts: 24 checks, all passing.
+import-paused.test.ts: 35 checks, all passing.
+integrations-paused.test.ts: 32 checks, all passing.
+api-read-units.test.ts: 54 checks, all passing.
+course-triggers.test.ts: 12 checks, all passing.
+letter-members.test.ts: 67 checks, all passing.
+assistant-memory-route.test.ts: 27 checks, all passing.
+crm-deal-writes.test.ts: 125 checks, all passing.
+crm-pipelines.test.ts: 63 checks, all passing.
+crm-schema-writes.test.ts: 117 checks, all passing.
+member-health.test.ts: 19 checks, all passing.
+meta-ads.test.ts: 105 checks, all passing.
+host-tools-paused.test.ts: 36 checks, all passing.
+faq-from-inbox.test.ts: 35 checks, all passing.
+person-copy-world.test.ts: 9 checks, all passing.
+assistant-memory-route-read-evidence.test.ts: node:test 4 fail 0
+form-deal.test.ts: 19 checks, all passing.
+affiliate-bulk-rate.test.ts: 10 checks, all passing.
+form-scoring.test.ts: 49 checks, all passing.
+course-template-studio.test.ts: 55 checks, all passing.
+creator-card.test.ts: 28 checks, all passing.
+crm-contact-writes.test.ts: 57 checks, all passing.
+funnel-ai.test.ts: 41 checks, all passing.
+recovery-address.test.ts: 44 checks, all passing.
+certificate-pdf-ceiling.test.ts: 13 checks, all passing.
+lesson-comments.test.ts: 30 checks, all passing.
+clickfunnels-import.test.ts: 56 checks, all passing.
+community-points.test.ts: 29 checks, all passing.
+community-starter.test.ts: 12 checks, all passing.
+security-page.test.ts: 41 checks, all passing.
+meeting-withdrawal-page.test.ts: node:test 1 fail 0
+email-disconnect-idempotent.test.ts: node:test 1 fail 0
+creator-card-receipt.test.ts: node:test 6 fail 0
+bulk-labels.test.ts: 130 checks, all passing.
+numbers-seven.test.ts: 24 checks, all passing.
+erasure-request-asked.test.ts: 4 checks, all passing.
+call-series-currency-route.test.ts: 16 checks, all passing.
+host-calendar-removal.test.ts: node:test 1 fail 0
+form-response-pdf.test.ts: 17 checks, all passing.
+help-path-counter-admission.test.ts: 20 checks, all passing.
+meeting-disabled-withdrawal.test.ts: node:test 1 fail 0
+person-copy-stripe.test.ts: 9 checks, all passing.
+invite-two-step.test.ts: 8 checks, all passing.
+agreements.test.ts: 59 checks, all passing.
+move-members.test.ts: 41 checks, all passing.
+numbers-links-owner.test.ts: 10 checks, all passing.
+zoom-review.test.ts: 25 checks, all passing.
+opening.test.ts: 21 checks, all passing.
+api-key-second-step.test.ts: 187 checks, all passing.
+page-funnel.test.ts: 74 checks, all passing.
+assistant-memory-route-evidence.test.ts: node:test 4 fail 0
+review-2556-sessions.test.ts: 7 checks, all passing.
+person-copy-mirror.test.ts: 5 checks, all passing.
+crm-deal-conflict.test.ts: 47 checks, all passing.
+clickfunnels-faq.test.ts: 17 checks, all passing.
+two-step.test.ts: 46 checks, all passing.
+crm.test.ts: 32 checks, all passing.
+store-copy.test.ts: 32 checks, all passing.
+community-platform-guide.test.ts: node:test 8 fail 0
+studio-demo-rules.test.ts: 65 checks, all passing.
+switching-faq.test.ts: 15 checks, all passing.
+person-tasks.test.ts: 132 checks, all passing.
+pipeline-access.test.ts: 40 checks, all passing.
+zoom-arrival.test.ts: 54 checks, all passing.
+person-copy-checkout-evidence.test.ts: node:test 26 fail 0
+voice-counter-admission.test.ts: 10 checks, all passing.
+team-two-step-session.test.ts: 30 checks, all passing.
+read-ceilings.test.ts: 77 checks, all passing.
+second-step-gate.test.ts: 201 checks, all passing.
+sg2-unknown-replies.test.ts: 125 checks, all passing.
+letters.test.ts: 21 checks, all passing.
+webhook-test-paused.test.ts: 13 checks, all passing.
+sg2-l3-counts.test.ts: 126 checks, all passing.
+sign-in-history-rules.test.ts: 51 checks, all passing.
+webhook-wait-paused.test.ts: 30 checks, all passing.
+review-2556-delta4.test.ts: 3 checks, all passing.
+readings-erasure.test.ts: 70 checks, all passing.
+person-copy-kept.test.ts: 6 checks, all passing.
+review-2556-delta3.test.ts: 4 checks, all passing.
+order-data.test.ts: 15 checks, all passing.
+form-schedule.test.ts: 21 checks, all passing.
+saved-sections.test.ts: 18 checks, all passing.
+erasure-request-full.test.ts: 21 checks, all passing.
+funnel-share.test.ts: 79 checks, all passing.
+funnel-types.test.ts: 56 checks, all passing.
+discord.test.ts: 35 checks, all passing.
+failure-cleanup-paths.test.ts: 37 checks, all passing.
+google-signin.test.ts: 47 checks, all passing.
+demo-store.test.ts: 84 checks, all passing.
+feature-visual-cards.test.ts: 197 checks, all passing.
+traffic.test.ts: 75 checks, all passing.
+flow-people.test.ts: 13 checks, all passing.
+funnel-copy-account.test.ts: 16 checks, all passing.
+paypal-sales.test.ts: 66 checks, all passing.
+locked-deletes.test.ts: 115 checks, all passing.
+watch.test.ts: 64 checks, all passing.
+review-2556-delta2.test.ts: 4 checks, all passing.
+product-outline.test.ts: 13 checks, all passing.
+review-ai-summary.test.ts: 82 checks, all passing.
+lost-dispute-access.test.ts: 37 checks, all passing.
+orders-page-bounds.test.ts: node:test 21 fail 0
+review-2556-delta.test.ts: 10 checks, all passing.
+person-copy.test.ts: 20 checks, all passing.
+handle-prefill.test.ts: 32 checks, all passing.

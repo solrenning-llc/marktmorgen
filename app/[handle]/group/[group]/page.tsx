@@ -6,7 +6,7 @@ import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { readListing } from "@/lib/catalog";
 import { GROUP_ID, PLACE_TOKEN, placesWords } from "@/lib/group-rules";
-import { type Taken, groupTitle, placesTaken, readGroup, takePlace } from "@/lib/group-buy";
+import { type Taken, groupTitle, placeNotice, placesTaken, readGroup, takePlace } from "@/lib/group-buy";
 import { ordersLinkFor } from "@/lib/buyer-orders";
 import { recordEnrollment } from "@/lib/learn";
 import { storeBase } from "@/lib/purchase-email";
@@ -96,18 +96,26 @@ export default async function GroupPage({ params, searchParams }: Params) {
 
   // The link from a place's email: the place is taken now, once.
   let taken: Taken | null = null;
+  // Opening the link threw: said as not finished, to be opened again (the
+  // place may be the person's already), never as an expired link.
+  let failed = false;
   if (PLACE_TOKEN.test(token)) {
-    taken = await takePlace({
+    const opened = await takePlace({
       store,
       token,
       recordStart: async (email, productId, start) => {
         const course = productId === product.id ? product : await readListing(store, productId);
         if (course?.course) await recordEnrollment(store, email, productId, start);
       },
-    }).catch((error) => {
-      console.error("taking a place failed", error);
-      return null;
-    });
+    }).then(
+      (value) => ({ value }),
+      (error: unknown) => {
+        console.error("taking a place failed", error);
+        return { value: null };
+      },
+    );
+    taken = opened.value;
+    failed = !taken;
     if (taken && taken.outcome !== "gone" && taken.outcome !== "full" && taken.outcome !== "resting") {
       const link = (await ordersLinkFor(store, taken.email, base).catch(() => null)) ?? `${base}/orders`;
       const email = taken.email;
@@ -131,14 +139,8 @@ export default async function GroupPage({ params, searchParams }: Params) {
 
   const count = await placesTaken(group.id).catch(() => 0);
   const left = Math.max(0, group.people - count);
-  const notice =
-    taken?.outcome === "full"
-      ? g.groupNotices.full
-      : taken?.outcome === "resting"
-        ? g.groupNotices.resting
-      : taken?.outcome === "gone" || (token && !taken)
-        ? g.groupNotices.expired
-        : status !== "expired" ? g.groupNotices[status] ?? null : null;
+  const noticeName = placeNotice({ token, tokenValid: PLACE_TOKEN.test(token), taken, threw: failed, status });
+  const notice = noticeName ? g.groupNotices[noticeName as keyof typeof g.groupNotices] ?? null : null;
 
   return shell(
     <>

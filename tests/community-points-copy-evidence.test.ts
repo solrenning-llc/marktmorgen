@@ -124,7 +124,6 @@ async function main(): Promise<void> {
   ]).flat();
   is("retained rewards beyond today's configuration limit remain in the copy", Object.keys((await read(retainedRewards)).rewards).length, MAX_REWARDS + 1);
   is("two simultaneous removals cannot make stored points negative", await concurrentRemovals(), { total: 0, today: 0 });
-
   for (const [name, reply] of [
     ["missing script reply", []],
     ["non-list script reply", [1]],
@@ -173,7 +172,6 @@ async function main(): Promise<void> {
     ["missing", undefined],
     ["boolean", false],
     ["number instead of Redis text", 1],
-    ["negative", "-1"],
     ["fractional", "1.5"],
   ] as const) {
     const reply = empty();

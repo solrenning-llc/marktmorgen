@@ -144,7 +144,7 @@ function BlockView({ block }: { block: Block }) {
               return (
                 <li key={item.title}>
                   {item.href ? (
-                    <Link href={item.href} className="card flex h-full gap-4 p-5 transition-shadow hover:shadow-[var(--shadow-md)]">
+                    <Link href={item.href} className="card flex gap-4 p-5 transition-shadow hover:shadow-[var(--shadow-md)]">
                       {inner}
                     </Link>
                   ) : (

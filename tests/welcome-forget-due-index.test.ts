@@ -120,12 +120,15 @@ void (async () => {
   ];
   for (const [what, value] of markBad) {
     await seed(String(WHEN));
-    bad = { command: "GET", reply: () => [value, 2] };
+    // Rule 23, with the review note on #2998 (the mark and the queue racing an erasure): the mark is read and
+    // deleted at once (GETDEL) and the DEL takes only the start, so the reply under test is GETDEL's, beside
+    // an exact DEL of the one start key (1), so only the mark's shape can make the part fail.
+    bad = { command: "GETDEL", reply: () => [value, 1] };
     is(`the mark answered ${what}: the part is not finished`, await outcome(() => forgetWelcomePerson(STATS, EMAIL)), "rejected: UnknownReplyError");
     bad = null;
   }
   await seed(String(WHEN));
-  bad = { command: "GET", reply: () => [String(WHEN)] };
+  bad = { command: "GETDEL", reply: () => [String(WHEN)] };
   is("the mark and deletion answered with one reply missing: the part is not finished", await outcome(() => forgetWelcomePerson(STATS, EMAIL)), "rejected: UnknownReplyError");
   bad = null;
   const rangeBad: [string, unknown[]][] = [

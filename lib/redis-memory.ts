@@ -155,6 +155,13 @@ export class MemoryRedis {
           const length = this.run(["STRLEN", args[2]]);
           return [this.run(["DEL", args[2]]), length];
         }
+        // lib/welcome-offer-send.ts REMIND_ONCE: the reminder's mark set only if absent, and the reminder queued with it.
+        if (key.startsWith("-- marktmorgen:welcome-remind:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, mark, due, when, ttl, member] = args;
+          if (this.run(["SET", mark, when, "NX", "EX", ttl]) === null) return 0;
+          this.run(["ZADD", due, when, member]);
+          return 1;
+        }
         // DR1: one provider receipt and its campaign counter, atomically.
         if (key.startsWith("-- marktmorgen:mail-report:v1\n") && args[0] === "1" && args.length === 7) {
           const [, daily, receipt, aggregate, count, expiry, limit] = args;

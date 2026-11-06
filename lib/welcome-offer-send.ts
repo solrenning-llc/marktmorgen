@@ -40,6 +40,18 @@ const startKey = (statsId: string, email: string) => `nl:wo:start:${statsId}:${h
 const countKey = (statsId: string) => `nl:wo:n:${statsId}`;
 const remindedKey = (statsId: string, email: string) => `nl:wo:r:${statsId}:${hash(email)}`;
 
+/**
+ * The mark that a person's reminder is set, written only if it is not there,
+ * and the reminder queued at its time, in one step (review on #2998): an
+ * erasure sees both or neither. 1 set, 0 already set.
+ */
+const REMIND_ONCE = [
+  "-- marktmorgen:welcome-remind:v1",
+  'if not redis.call("SET", KEYS[1], ARGV[1], "NX", "EX", ARGV[2]) then return 0 end',
+  'redis.call("ZADD", KEYS[2], ARGV[1], ARGV[3])',
+  "return 1",
+].join("\n");
+
 /** A product the offer may be on: paid, sold here, one price, the buyer not naming it. */
 export function canOfferWelcome(store: Store, product: Listing | null): product is Listing {
   return Boolean(product && product.priceCents > 0 && !product.options?.length && !product.pwyw && canSellProduct(store, product));
@@ -82,12 +94,13 @@ export async function scheduleReminder(store: Store, claim: Claim, token: string
   const began = offer.until - store.welcomeOffer.hours * 3600;
   const when = remindAt(began, store.welcomeOffer.hours);
   if (when <= nowSeconds) return false;
-  // One reminder per person and store, whatever else they ask for.
-  const [first] = await redisPipeline([["SET", remindedKey(store.statsId, claim.e), String(when), "NX", "EX", Math.max(60, offer.until - nowSeconds + 86_400)]]);
-  if (first === null) return false;
+  // One reminder per person and store, whatever else they ask for: the mark and the queued reminder written
+  // together in one script, so an erasure never runs between them and a failure never leaves the mark alone.
   const member = JSON.stringify({ s: store.sid, i: store.statsId, h: hash(claim.e), e: claim.e, t: token });
-  await redisPipeline([["ZADD", DUE_KEY, String(when), member]]);
-  return true;
+  const ttl = Math.max(60, offer.until - nowSeconds + 86_400);
+  const set = repliesFor(await redisPipeline([["EVAL", REMIND_ONCE, 2, remindedKey(store.statsId, claim.e), DUE_KEY, String(when), ttl, member]]), 1)?.[0];
+  if (set !== 0 && set !== 1) throw new UnknownReplyError("the setting of a person's welcome reminder");
+  return set === 1;
 }
 
 /** "October 14, 2026, 3:00 PM UTC", in the store's language. */
@@ -293,12 +306,14 @@ async function dueAtSecond(statsId: string, email: string, when: string): Promis
  */
 export async function forgetWelcomePerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  // The mark is read before it goes, in the same round trip: it says which second of the queue holds the reminder.
-  const replies = repliesFor(await redisPipeline([["GET", remindedKey(statsId, email)], ["DEL", startKey(statsId, email), remindedKey(statsId, email)]]), 2);
-  const gone = replies ? countOf(replies[1]) : null;
+  // The mark is read and deleted in one command (GETDEL): it says which second of the queue holds the reminder,
+  // and a reminder set at the same moment either is seen here or keeps its own mark (review on #2998).
+  const replies = repliesFor(await redisPipeline([["GETDEL", remindedKey(statsId, email)], ["DEL", startKey(statsId, email)]]), 2);
+  const started = replies ? countOf(replies[1]) : null;
   // Never 0 removed on a reply of another shape (CX-123 rule 24): thrown, so the erasure says this part did not finish (lib/person-erasure.ts).
-  if (!replies || gone === null || gone > 2) throw new UnknownReplyError("the deletion of a person's welcome offer start and reminder mark");
+  if (!replies || started === null || started > 1) throw new UnknownReplyError("the deletion of a person's welcome offer start and reminder mark");
   const mark = replies[0];
+  const gone = started + (mark === null ? 0 : 1);
   // No mark: no reminder was set for this person here (the mark outlives its reminder by a day).
   if (mark === null) return gone;
   if (typeof mark !== "string" || !MARK_TIME.test(mark)) throw new UnknownReplyError("a person's welcome reminder mark");

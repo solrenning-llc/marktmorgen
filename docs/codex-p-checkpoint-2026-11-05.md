@@ -639,3 +639,16 @@ Auditoria única CX-126 feita sobre arquivos livres da faixa e 149 PRs abertos. 
 - Unidades próprias abertas: 4/5. Claude 4 confirmou que não é necessário fabricar uma quinta unidade. A auditoria anterior não encontrou item causal seguro e livre.
 - Nenhum merge, rerun, cancelamento, head move, reserva nova ou alteração de produto/ramo/PR alheio nesta retomada.
 
+
+
+<!-- codex-p-checkpoint-20261106-1344 -->
+## 06/11/2026 13h44 Fortaleza — #2808 review repair final; #2815 integration CI
+
+- Sole coordinator remains Claude 4. Claude 1 is disabled and is not a recipient.
+- Current main is `ced82292df092a39408b884fa62f569a4a3655ff`. Claude 4 reported it globally red in Browser bundles because `node:util` reaches `components/blog-editor.tsx`; the causal repair is #2822. Do not retry that inherited failure. After #2822 merges, integrate main once into any affected own head, preserving reviewed product blobs and obtaining nine new exact workflows.
+- #2808 `codex/p-certificate-copy-evidence` is OPEN/mergeable on exact final head `ed600617733a50d579561a818b39406d1b2b153d`, tree `97ee9de6874097f2de8b4921947b28c225c3ee2c`, integrated with main `ced82292`. Reviewer J's exact proof is permanent and byte-identical: proof blob `bd0e7a73c155df2d17ebf146534c2474f323006b`, runner blob `e6ee6386460b6d961264842b9d64c1106ea648c3`, durable RED branch `codex/p-certificate-copy-index-red@c36a00758c9e66870edec71fcd9eae1b69f40b38`. It changes from 24 checks / 3 causal failures to 24/24. Linked tests are 173/173 across 10 groups; 197/197 including the proof. Scoped strict TypeScript, focused ESLint, scanner 3,978/0 and diff check pass. Global TypeScript reports only inherited missing `LayoutProps` declarations outside the diff. New exact-head nine workflows are active; Codex J nominal delta closure is requested. The unproved malformed-stored-record candidate was not silently added; #2392 privacy behavior remains.
+- #2815 `codex/p-quiz-draft-choice-indices` is OPEN/mergeable on integration head `1ec3f9be5e6eccea82986c67dfa116df34e53ce6`, tree `bf0dd1e80784974344a53bdcabbb26854159d56a`, integrated with main `ced82292`. Product blobs remain byte-identical to the R2-reviewed head: source `4e5a5285f9fca00ad2396abd60d904a7db368767`, test `c292cc0044f8a9a9a77acfad6bd69d7da844b014`. Focal test 15/15, lint, scanner 4,056/0 and diff check pass. Current CI snapshot is 5/9 success and 4 active, zero failure. R2 cycle 89 remains applicable under CX-122.8/C4; merge requires the exact integration head's nine successes.
+- #2807 `codex/p-lesson-comments-drop-receipts` remains OPEN/mergeable on `6ae8ca5280c8087b2895ab5e50af2e815ed978a1`, exact 9/9; final Reviewer 1 opinion pending.
+- #2814 `codex/p-caption-cue-order` remains OPEN/mergeable on `b9f53b2fc15ea8a3f2771b86f327063e44317e79`, exact 9/9; final Codex T opinion pending.
+- Four own product units remain open. No fifth was opened, no foreign branch/product/CI was changed, and no deployment is claimed.
+- Authorized-channel publication succeeded at commit `86b677c477de45364de71024b0db64328aacbf46` after one 409 conflict was handled by a fresh SHA and full-blob append-only retry.

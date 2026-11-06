@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "paths": { "@/*": ["../*"] },
+    "baseUrl": "."
+  },
+  "include": ["e2-2689-recovered-retry.proof.ts", "stats-notes-read-evidence.test.ts", "../lib/stats-notes.ts"],
+  "exclude": []
+}

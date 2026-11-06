@@ -403,7 +403,7 @@ export const BOOK_PART_BYTES = 2_048;
 /** One load of an affiliate's page, besides a later page's own commands: the kept book's time and length, the codes counted, its part read. */
 export const AFFILIATE_LOAD_COMMANDS = 4;
 /** Working through a body past what a request's shape holds: a heavy request's CPU and wait for each megabyte. */
-const perMegabyte = (bytes: number) => (bytes / 1e6) * (SHAPES.heavy.cpu * CPU_SECOND + SHAPES.heavy.seconds * MEMORY_SECOND);
+export const perMegabyte = (bytes: number) => (bytes / 1e6) * (SHAPES.heavy.cpu * CPU_SECOND + SHAPES.heavy.seconds * MEMORY_SECOND);
 /** One call to the creator's Stripe account, waited on at 2 GB, its body worked through. */
 const stripePage = (bytes = STRIPE_PAGE_BYTES) => EXPORT_PAGE_SECONDS * MEMORY_SECOND + perMegabyte(bytes);
 /**

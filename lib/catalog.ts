@@ -12,6 +12,11 @@
  *                                page, a checkout and a download need to know
  *   nl:catalog:<id>:x:<product>  the heavy rest, the checkout questions and
  *                                the funnel, only when there is any
+ *   nl:catalog:<id>:g:<product>  the page's copy of the legal information of
+ *                                a product the creator ships (618 [SZ2]),
+ *                                written with the heavy rest, which keeps it
+ *                                too, only when there is any: the product's
+ *                                page reads this alone, never the questions
  *
  * The <id> is the catalog's own, written in the store record, so a new
  * address or a new sign-in email moves nothing here.
@@ -370,6 +375,8 @@ function parseCard(id: string, raw: string): Card | null {
   }
 }
 const extrasKey = (catalog: string, product: string) => `nl:catalog:${catalog}:x:${product}`;
+/** The page's copy of a product's legal record (618 [SZ2]): at most LEGAL_RECORD_MAX_BYTES, read on its page alone. */
+const legalKey = (catalog: string, product: string) => `nl:catalog:${catalog}:g:${product}`;
 
 type Command = (string | number)[];
 
@@ -760,16 +767,18 @@ export async function readProducts(store: Store, ids?: Iterable<string>): Promis
 
 /**
  * The legal information of one product (618 [SZ2]; lib/physical-legal-record.ts),
- * from its own record: null when it has none or the record cannot be read.
- * One GET of that record and nothing else, for the page of a shipped product.
+ * from the page's copy of it, written with the product: null when it has none
+ * or the copy cannot be read. One GET of that copy alone (at most
+ * LEGAL_RECORD_MAX_BYTES), never the checkout questions or the funnel kept in
+ * the heavy rest, for the page of a shipped product; every checkout reads the
+ * heavy rest itself.
  */
 export async function readProductLegal(store: Store, id: string): Promise<PhysicalLegal | null> {
   const catalog = store.catalog;
   if (catalog.inline) return catalog.inline.find((product) => product.id === id)?.legal ?? null;
   if (!SAFE_ID.test(id) || !catalog.id || !isRedisConfigured() || !catalog.items.some((item) => item.id === id)) return null;
-  const [raw] = await getMany([extrasKey(catalog.id, id)]);
-  const extras = parseJson(raw);
-  return extras && typeof extras === "object" && !Array.isArray(extras) ? readPhysicalLegal((extras as Record<string, unknown>).legal) : null;
+  const [raw] = await getMany([legalKey(catalog.id, id)]);
+  return readPhysicalLegal(parseJson(raw));
 }
 
 /** One product in full, or null when the store has no such product (or no id was given). */
@@ -1082,30 +1091,42 @@ export function productWrites(catalog: string, product: Product): Command[] {
   const listing = JSON.stringify(listingOf(product));
   const extras = extrasOf(product);
   const heavy = extras !== "";
-  if (byteLength(listing) + byteLength(extras) > MAX_PRODUCT_BYTES) throw new StoreFullError();
+  const legal = legalCopyOf(product);
+  if (byteLength(listing) + byteLength(extras) + byteLength(legal) > MAX_PRODUCT_BYTES) throw new StoreFullError();
+  // What is not written is deleted, in one command: a product with neither sends what it always did.
+  const gone = [...(heavy ? [] : [extrasKey(catalog, product.id)]), ...(legal ? [] : [legalKey(catalog, product.id)])];
   return [
     ["SET", listingKey(catalog, product.id), listing],
-    heavy ? ["SET", extrasKey(catalog, product.id), extras] : ["DEL", extrasKey(catalog, product.id)],
+    ...(heavy ? [["SET", extrasKey(catalog, product.id), extras]] : []),
+    ...(legal ? [["SET", legalKey(catalog, product.id), legal]] : []),
+    ...(gone.length ? [["DEL", ...gone]] : []),
     ["HSET", titlesKey(catalog), product.id, cardValue(product)],
   ];
 }
 
+/** The page's copy of a product's legal record, "" when it has none (618 [SZ2]). */
+function legalCopyOf(product: Product): string {
+  return product.legal ? JSON.stringify(product.legal) : "";
+}
+
 /**
  * What one product's records count for in the store's data room
- * (lib/store-data.ts): its listing, its heavy rest and its card, each under
+ * (lib/store-data.ts): its listing, its heavy rest, the page's copy of its
+ * legal record and its card, each under
  * its own key or field.
  */
 export function productBytes(product: Product): number {
   const listing = JSON.stringify(listingOf(product));
   const extras = extrasOf(product);
   const heavy = extras !== "";
-  return dataBytes([listing, extras, product.id, cardValue(product)], heavy ? 3 : 2);
+  const legal = legalCopyOf(product);
+  return dataBytes([listing, extras, legal, product.id, cardValue(product)], 2 + (heavy ? 1 : 0) + (legal ? 1 : 0));
 }
 
 /** The writes that forget one product's records. */
 export function productDrops(catalog: string, id: string): Command[] {
   if (!SAFE_ID.test(id)) return [];
-  return [["DEL", listingKey(catalog, id), extrasKey(catalog, id)], ["HDEL", titlesKey(catalog), id]];
+  return [["DEL", listingKey(catalog, id), extrasKey(catalog, id), legalKey(catalog, id)], ["HDEL", titlesKey(catalog), id]];
 }
 
 /**

@@ -24,7 +24,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { offeredItems } from "@/lib/bundles";
-import { readListings, readPage } from "@/lib/catalog";
+import { readListings, readPage, readProductLegal } from "@/lib/catalog";
 import { monthKey } from "@/lib/delivery";
 import { outOfKeys } from "@/lib/licence-keys";
 import { PLAN_PRICES } from "@/lib/plan";
@@ -32,7 +32,10 @@ import { readAbout } from "@/lib/product-about";
 import { withinLimit } from "@/lib/request-guard";
 import { summaries, summaryOf } from "@/lib/reviews";
 import { stockLeft } from "@/lib/stock";
-import { addProduct, claimHandle, setProductFile, setSubscription, storeFolder, storeForEmail, storeForHandle, storeForPage } from "@/lib/store";
+import { addProduct, claimHandle, setProductFields, setProductFile, setProductLegal, setProductShipping, setSubscription, storeFolder, storeForEmail, storeForHandle, storeForPage } from "@/lib/store";
+import { activeShipping, parseShipping } from "@/lib/shipping";
+import { MAX_PROP65 } from "@/lib/physical-legal";
+import { LEGAL_RECORD_MAX_BYTES } from "@/lib/physical-legal-record";
 import { isResting, recordVisit, visitedFolders, visitsIn } from "@/lib/traffic";
 import { firstWordOnVisits } from "@/lib/traffic-billing";
 import {
@@ -59,7 +62,7 @@ import { STORE_SCOPE, readToken } from "@/lib/page-read";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { addMonthsMs, allowanceWindow } from "@/lib/allowance-window";
-import { REQUEST_COMMANDS } from "./plan-cost-registry";
+import { COMMAND, DB_BYTE, REQUEST_COMMANDS, perMegabyte } from "./plan-cost-registry";
 
 /** A store's window at a moment (lib/allowance-window.ts): its billing month when it pays, the calendar month or its trial otherwise. */
 const windowOf = (store: Parameters<typeof allowanceWindow>[0], at = Date.now()) => allowanceWindow(store, at)!.id;
@@ -125,15 +128,27 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 /** How many commands were sent to the database while something ran. */
 let commands = 0;
+/** And the bytes of what they answered. */
+let replyBytes = 0;
 const real = redis.pipeline.bind(redis);
-(redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = ((list: (string | number)[][]) => {
+(redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (list: (string | number)[][]) => {
   commands += list.length;
-  return real(list);
+  const answers = await real(list);
+  for (const answer of answers) replyBytes += typeof answer === "string" ? Buffer.byteLength(answer) : 0;
+  return answers;
 }) as typeof redis.pipeline;
 async function counted(work: () => Promise<unknown>): Promise<number> {
   commands = 0;
   await work();
   return commands;
+}
+
+/** The commands sent and the bytes of the replies while something ran. */
+async function measured(work: () => Promise<unknown>): Promise<{ commands: number; bytes: number }> {
+  commands = 0;
+  replyBytes = 0;
+  await work();
+  return { commands, bytes: replyBytes };
 }
 
 /** The request a page's count arrives as. */
@@ -334,6 +349,36 @@ async function main(): Promise<void> {
     ]);
   };
   is("a product's page is drawn inside it", (await counted(drawLater)) <= COMMANDS.laterPage + REQUEST_COMMANDS, true);
+  // A product the creator ships also reads its legal information on its page (618 [SZ2],
+  // lib/catalog.ts readProductLegal): one command more, of the page's copy alone, however large the
+  // checkout questions kept beside it. Its bytes, at the record's ceiling, are priced with the
+  // commands and stay inside what a later page is costed at (rule MR: a public view's reads are counted).
+  const shipped = await addProduct(joy.email, "Printed book", "", "35", null);
+  if (!shipped.ok) throw new Error("no shipped product");
+  await setProductShipping(joy.email, shipped.product.id, parseShipping({ cents: 600, region: "custom", countries: ["US", "FR"], note: "" })!);
+  await setProductFields(joy.email, shipped.product.id, [0, 1, 2].map((n) => ({ label: `Question ${n}`, type: "dropdown" as const, optional: true, options: Array.from({ length: 200 }, (_, i) => `${n}-${i}-${"q".repeat(90)}`) })));
+  await setProductLegal(joy.email, shipped.product.id, { safety: null, prop65: "WARNING: ".padEnd(MAX_PROP65, "x"), quantities: [] });
+  const shippedListing = (await readListings((await storeForPage("joy"))!, [shipped.product.id]))[0];
+  const drawShipped = async (legal = true) => {
+    const store = (await storeForPage("joy"))!;
+    await isResting(store);
+    await readListings(store, [shippedListing.id]);
+    await Promise.all([
+      shippedListing.about ? readAbout(store.statsId, shippedListing.id) : Promise.resolve(""),
+      stockLeft(store, shippedListing).catch(() => null),
+      outOfKeys(store, shippedListing).catch(() => false),
+      summaryOf(store.statsId, shippedListing.id).catch(() => null),
+      isSoon(store, shippedListing.id).catch(() => false),
+      legal && activeShipping(shippedListing) ? readProductLegal(store, shippedListing.id).catch(() => null) : Promise.resolve(null),
+    ]);
+  };
+  const plain = await counted(() => drawShipped(false));
+  const joyNow = (await storeForPage("joy"))!;
+  const legalRead = await measured(() => readProductLegal(joyNow, shippedListing.id));
+  const withLegal = await counted(() => drawShipped());
+  is("a shipped product's page: one command more, of the legal copy alone", [withLegal - plain, legalRead.commands, legalRead.bytes > 0, legalRead.bytes <= LEGAL_RECORD_MAX_BYTES, withLegal <= COMMANDS.laterPage + REQUEST_COMMANDS], [1, 1, true, true, true]);
+  is("its commands, and its legal read at the record's ceiling, inside what a later page is costed at",
+    withLegal * COMMAND + LEGAL_RECORD_MAX_BYTES * DB_BYTE + perMegabyte(LEGAL_RECORD_MAX_BYTES) <= (COMMANDS.laterPage + REQUEST_COMMANDS) * COMMAND, true);
   const countLater = async (ip: string) => {
     const store = (await storeForHandle("joy"))!;
     await withinLimit("hit", `${ip}|${store.handle}`, 120, 600);

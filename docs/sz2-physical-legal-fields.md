@@ -240,8 +240,16 @@ rest of the studio. This unit has no interface: 0 → 0 steps and decisions.
    exactly `true` counts). A product shipped only to the EU/EEA with a gap is
    not sold (`canSellProduct`) and its checkout is refused before Stripe. The
    page of a shipped product reads its legal record with one GET of the
-   product's own record, in parallel with its other reads, and nothing for any
-   other product (`readProductLegal`); `components/product-safety-facts.tsx`
+   page's copy of it (`nl:catalog:<id>:g:<product>`, written and deleted with
+   the product's heavy rest, which keeps the record the checkouts read), in
+   parallel with its other reads, and nothing for any other product
+   (`readProductLegal`). Cost (rule MR): one command and at most
+   `LEGAL_RECORD_MAX_BYTES` (about 45 KB), never the checkout questions or the
+   funnel beside it; `tests/traffic.test.ts` holds the shipped page's commands,
+   and this read priced at that ceiling, inside what a later page of a visit is
+   costed at, so the visits line does not move. The listing was not used: it
+   is also carried in the store record's head and read on every store page,
+   priced at 16 KB a listing. `components/product-safety-facts.tsx`
    draws it before the buy button, words in `lib/buyer-words/product-safety.ts`
    (7 languages). The unit price is shown for each price sold, from the price
    charged now (store sale or fair price), above the block. The studio's

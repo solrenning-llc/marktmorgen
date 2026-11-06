@@ -62,6 +62,7 @@ import { eventCount } from "@/lib/community-events";
 import { certificateCount } from "@/lib/certificate";
 import { forgetContactPerson } from "@/lib/contacts";
 import { forgetClicksPerson } from "@/lib/mail-clicks";
+import { forgetPollPerson } from "@/lib/mail-poll-votes";
 import { forgetHealthPerson } from "@/lib/mail-health";
 import { forgetWorkflowPerson } from "@/lib/flows";
 import { forgetCrmPerson } from "@/lib/crm";
@@ -122,6 +123,7 @@ export const ERASERS: Eraser[] = [
   { module: "lib/shipment-mail-outbox.ts", run: (s) => forgetShipmentMail(s.statsId, s.email) },
   { module: "lib/flows.ts", run: async (s) => (await forgetWorkflowPerson(s.store, s.email)).flows },
   { module: "lib/mail-clicks.ts", run: (s) => forgetClicksPerson(s.listId, s.email) },
+  { module: "lib/mail-poll-votes.ts", run: (s) => forgetPollPerson(s.listId, s.email) },
   { module: "lib/mail-health.ts", run: (s) => forgetHealthPerson(s.store, s.email) },
   { module: "lib/crm.ts", run: (s) => forgetCrmPerson(s.statsId, s.person, s.email, s.store) },
   { module: "lib/payment-request-store.ts", run: (s) => forgetRequestsPerson(s.sid, s.email) },

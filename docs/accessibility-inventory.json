@@ -836,6 +836,12 @@
       "parameters": []
     },
     {
+      "source": "app/poll/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/poll",
+      "parameters": []
+    },
+    {
       "source": "app/pricing/page.tsx",
       "status": "AAA review not completed; scoped keyboard, viewport and automated AA checks in tests/e2e/pricing.mjs",
       "routeTemplate": "/pricing",
@@ -1410,6 +1416,7 @@
     "components/mail-click.tsx",
     "components/mail-designer.tsx",
     "components/mail-picture-button.tsx",
+    "components/mail-poll-results.tsx",
     "components/mark-shipped.tsx",
     "components/meeting-connections.tsx",
     "components/member-discount.tsx",
@@ -1665,6 +1672,7 @@
     "app/api/library/route.ts",
     "app/api/mail/clicked/route.ts",
     "app/api/mail/inbound/route.ts",
+    "app/api/mail/poll/route.ts",
     "app/api/mail/ses/route.ts",
     "app/api/mail/unsubscribe/route.ts",
     "app/api/mcp/route.ts",
@@ -2023,6 +2031,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 137
+    "pageTemplates": 139
   }
 }

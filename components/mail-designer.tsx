@@ -15,6 +15,7 @@ import {
   serializeMailBlocks,
 } from "@/lib/mail-body";
 import { readPicture } from "@/lib/mail-picture-rules";
+import { POLL_STARTER, pollPreviewBody, pollProblem } from "@/lib/mail-poll";
 
 /** The store's colour for a button in its emails (lib/store-look.ts), for the preview to draw what is sent. */
 export const MailAccent = createContext("#4c1d95");
@@ -56,6 +57,7 @@ export function MailBodyEditor({
   label = "Email",
   rows = 12,
   boxRef,
+  polls = false,
 }: {
   body: string;
   onChange: (next: string) => void;
@@ -63,6 +65,8 @@ export function MailBodyEditor({
   rows?: number;
   /** The text box, for "Add a picture" to put the picture where the cursor is. */
   boxRef?: (el: HTMLTextAreaElement | null) => void;
+  /** Whether this email may hold a poll (lib/mail-poll.ts): a one-off email may, a sequence's not yet. */
+  polls?: boolean;
 }) {
   const accent = useContext(MailAccent);
   const [mode, setMode] = useState<"write" | "design">("write");
@@ -127,7 +131,7 @@ export function MailBodyEditor({
           className="mx-auto rounded-2xl bg-white p-5 text-[16px] leading-[1.6] text-[#1c1917] [overflow-wrap:anywhere]"
           style={phone ? { maxWidth: 390 } : undefined}
           // Drawn by the same function that draws the email: everything in it is escaped (lib/mail-body.ts).
-          dangerouslySetInnerHTML={{ __html: bodyHtml(body, undefined, accent) || "<p style=\"color:#57534e\">Nothing yet.</p>" }}
+          dangerouslySetInnerHTML={{ __html: bodyHtml(polls ? pollPreviewBody(body) : body, undefined, accent) || "<p style=\"color:#57534e\">Nothing yet.</p>" }}
         />
       </div>
     </div>
@@ -233,7 +237,24 @@ export function MailBodyEditor({
                   {a.label}
                 </button>
               ))}
+              {polls ? (
+                // A question and its answers as a text block, the parts to write marked: it cannot go until they are written.
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => update([...blocks, { kind: "text", text: POLL_STARTER }])}>
+                  <Icon name="plus" size={16} />
+                  Poll
+                </button>
+              ) : null}
             </div>
+            {polls && pollProblem(body) ? (
+              <p className="notice notice-warn text-sm" role="status">
+                {pollProblem(body)}
+              </p>
+            ) : null}
+            {polls ? (
+              <p className="text-xs text-ink-soft">
+                A poll is a question after @poll, then 2 to 5 answers, one a line starting with &quot;- &quot;. Each reader gets their own answer buttons; a page opens where they confirm, once each. You see only the totals, under Poll results.
+              </p>
+            ) : null}
             {hasPlaceholder(body) ? (
               <p className="notice notice-warn text-sm" role="status">
                 Parts of a template are still in ⟦brackets⟧. Replace each with your own words or remove it: the email cannot go out with them.

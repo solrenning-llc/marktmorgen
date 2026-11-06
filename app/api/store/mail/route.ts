@@ -1,3 +1,5 @@
+import { pollPreviewBody } from "@/lib/mail-poll";
+import { pollWords } from "@/lib/buyer-words/mail-poll";
 import { readSequenceCsv } from "@/lib/sequence-import";
 import { type NextRequest, after } from "next/server";
 import { rfmSummary } from "@/lib/rfm-rules";
@@ -204,7 +206,8 @@ export async function POST(request: NextRequest) {
       if (!content) return fail("body");
       const reserved = await reserve(store, 1);
       if (reserved !== "ok") return fail(reserved === "month" ? "allowance" : reserved === "sender" ? "sender" : "day");
-      const r = render(store, `[Test] ${subject}`, content, null);
+      // A poll in a test is drawn with links to the preview page: only a reader's own email records an answer (lib/mail-poll.ts).
+      const r = render(store, `[Test] ${subject}`, pollPreviewBody(content, pollWords(store.language).emailNote(store.mail.fromName || store.name)), null);
       const outcome = await sendBatch(
         // To whoever pressed it: the owner, or the person on their team who is
         // writing the draft.

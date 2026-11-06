@@ -29,6 +29,9 @@ import type { Store } from "@/lib/store";
 import { creatorAddress } from "@/lib/mail-from";
 import { type MailTag, taggedLink } from "@/lib/mail-links";
 import { rememberLinkKeys } from "@/lib/mail-clicks";
+import { hasPoll, pollProblem, readPoll, withPollLinks } from "@/lib/mail-poll";
+import { openPoll, voteLinks } from "@/lib/mail-poll-votes";
+import { pollWords } from "@/lib/buyer-words/mail-poll";
 import { type Pause, healthId, healthTags, noteSent, pauseForSending, rampBack, rampRoom } from "@/lib/mail-health";
 import { affiliatesWords } from "@/lib/buyer-words/affiliates";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
@@ -513,8 +516,14 @@ export async function sendTo(
   keyBase: string,
   /** Which email this is, so a sale from one of its links can be counted for it (lib/mail-links.ts). */
   tag?: MailTag,
+  /** The poll's id when the email holds one (lib/mail-poll.ts): a one-off email's own id. */
+  pollId?: string,
 ): Promise<SendOutcome> {
   const done: string[] = [];
+  // A poll goes only as it can be answered: written down first, each reader's links signed (lib/mail-poll-votes.ts).
+  // One that cannot be is never sent as raw text: nothing goes.
+  const poll = hasPoll(body) ? readPoll(body) : null;
+  if (hasPoll(body) && (!poll || pollProblem(body) !== null || !pollId || !store.listId)) return { done, rest: emails, stopped: "refused" };
   // A store whose addresses turned out to be bad ones waits its week out
   // (lib/mail-health.ts). Nothing is taken from its month for it.
   const watched = healthId(store);
@@ -523,6 +532,8 @@ export async function sendTo(
   if (pause === undefined) return { done, rest: emails, stopped: "retry" };
   if (pause) return { done, rest: emails, stopped: "paused", pause };
   const tags = healthTags(store, true, tag?.campaign);
+  if (poll && !(await openPoll(store.listId as string, store.handle, pollId as string, poll))) return { done, rest: emails, stopped: "retry" };
+  const pollNote = poll ? pollWords(store.language).emailNote(store.mail?.fromName || store.name) : "";
   for (let i = 0; i < emails.length; ) {
     const room = await dailyRoom();
     if (room <= 0) return { done, rest: emails.slice(i), stopped: "day" };
@@ -540,11 +551,25 @@ export async function sendTo(
     const counting = tag?.medium === "sequence" ? new Set<string>() : undefined;
     const tokens = await tokensFor(store.listId as string, chunk, store.handle, counting);
     const keys = counting?.size ? await rememberLinkKeys([...counting].map((email) => tokens.get(email) ?? "")) : new Map<string, string>();
+    // Each reader's own poll links; a reader whose links cannot be signed is not sent to, and the send stops.
+    const links = new Map<string, string[]>();
+    if (poll) {
+      for (const email of chunk) {
+        const own = voteLinks(store.listId as string, pollId as string, email, poll.answers.length);
+        if (!own) {
+          await release(store, chunk.length);
+          await rampBack(watched, chunk.length);
+          return { done, rest: emails.slice(i), stopped: "refused" };
+        }
+        links.set(email, own);
+      }
+    }
     const messages: BatchMessage[] = chunk
       .filter((email) => tokens.has(email))
       .map((email) => {
         const token = tokens.get(email)!;
-        const r = render(store, subject, body, token, undefined, tag, counting?.has(email) ? keys.get(token) : undefined);
+        const own = links.get(email);
+        const r = render(store, subject, own ? withPollLinks(body, (answer) => own[answer], pollNote) : body, token, undefined, tag, counting?.has(email) ? keys.get(token) : undefined);
         return { from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers, tags };
       });
     if (messages.length) await paced();

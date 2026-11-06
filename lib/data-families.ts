@@ -74,7 +74,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:meet:refresh:", "nl:meet:rf:", "nl:meet:state:", "nl:meet:stores", "nl:meet:test:", "nl:meet:user:",
   "nl:meet:zoomseen:", "nl:member:status:", "nl:metaads:conn:", "nl:metaads:read:", "nl:metaads:reading:",
   "nl:metaads:state:", "nl:metaads:stores", "nl:metaads:user:", "nl:mnum:", "nl:monthly:lock",
-  "nl:monthly:sent:", "nl:mv:due", "nl:next:", "nl:next:lock:", "nl:nlink:", "nl:nlink:opens:", "nl:none",
+  "nl:monthly:sent:", "nl:mpoll:", "nl:mpoll:ix:", "nl:mpoll:v:", "nl:mv:due", "nl:next:", "nl:next:lock:", "nl:nlink:", "nl:nlink:opens:", "nl:none",
   "nl:order-confirmation:closed:", "nl:order-confirmation:erased:", "nl:order-confirmation:due", "nl:order-confirmation:person:", "nl:order-confirmation:row:",
   "nl:order-confirmation:source:", "nl:order-confirmation:store:",
   "nl:nudge:", "nl:nudge:count:", "nl:nudge:cursor", "nl:orders:folders:", "nl:orders:link:", "nl:orders:n:",
@@ -308,6 +308,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:metaads:conn:": E, "nl:metaads:read:": E, "nl:metaads:reading:": E, "nl:metaads:state:": X(1), "nl:metaads:stores": I, "nl:metaads:user:": I,
   "nl:mnum:": E,
   "nl:monthly:lock": C, "nl:monthly:sent:": Cr(62),
+  // A one-off email's poll, its answers and the list's polls (125 [F2-EMAIL-POLLS], lib/mail-poll-votes.ts): each named by the list.
+  "nl:mpoll:": E, "nl:mpoll:ix:": E, "nl:mpoll:v:": E,
   "nl:mv:": E, "nl:mv:due": I, "nl:mv:link:": T("nl:mv:"),
   // ---------------------------------------------------------------- n-p
   "nl:next:": E, "nl:next:lock:": E,

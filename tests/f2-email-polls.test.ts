@@ -117,7 +117,7 @@ async function main(): Promise<void> {
 
   part("Opening the page records nothing; the button does, once");
   const opened = await page(queryOf(anaLinks[1]));
-  is("the page shows the answer and a button that posts", [opened.includes("Your answer: A printable guide"), /<form action="\/api\/mail\/poll\?[^"]*" method="post"/.test(opened), opened.includes("Send my answer")], [true, true, true]);
+  is("the page shows the answer and a button that posts", [opened.includes("Your answer: A printable guide"), /<form[^>]* action="\/api\/mail\/poll\?[^"]*" method="post"/.test(opened), opened.includes("Send my answer")], [true, true, true]);
   is("the page offers the other answers as links", ["A video course", "A template pack"].every((answer) => opened.includes(`>${answer}</a>`)), true);
   is("opening it recorded nothing", (await pollResults(listId))?.[0]?.total, 0);
   const tampered = anaLinks[1].replace(/s=([0-9a-f])/, (_, c) => `s=${c === "0" ? "1" : "0"}`);

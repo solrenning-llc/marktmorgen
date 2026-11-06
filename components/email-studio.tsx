@@ -50,6 +50,7 @@ const MESSAGES: Record<string, string> = {
   subject: "Write a subject line.",
   body: "Write the email itself.",
   placeholder: "Part of the template is still in ⟦brackets⟧. Replace each with your own words, or remove it, before it can go out.",
+  poll: "The poll is not complete. Design shows what to change: one question after @poll, then 2 to 5 different answers, one a line starting with \"- \". An email holds one poll.",
   when: "Pick a time between now and a year from now.",
   broadcast_cancel_unconfirmed: "The cancellation could not be confirmed. The campaign may still go out. Reload Sent and scheduled to check its current status.",
   broadcast_write_unconfirmed: "The campaign could not be confirmed. Your text is still here. It may already have been created; check Sent and scheduled before trying again.",
@@ -1015,6 +1016,7 @@ function Compose(props: {
         <MailBodyEditor
           body={body}
           onChange={setBody}
+          polls
           boxRef={(el) => {
             bodyBox.current = el;
           }}

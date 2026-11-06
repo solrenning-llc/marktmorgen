@@ -10,6 +10,7 @@
  * The copy and its entry are counted in the store's data room before they are
  * written (lib/store-data.ts), until the day the copy goes by itself.
  */
+import { pollOnWeb } from "@/lib/mail-poll";
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
@@ -130,7 +131,8 @@ export async function publishLetter(store: Store, broadcast: Broadcast, now = Da
       id,
       sid: store.sid,
       subject: broadcast.subject,
-      body: broadcast.body,
+      // A poll is answered only from the email a reader got (lib/mail-poll.ts): on the web it is its question and answers, nothing that records.
+      body: pollOnWeb(broadcast.body),
       sentAt: broadcast.finishedAt ? broadcast.finishedAt * 1000 : broadcast.sendAt * 1000,
       publishedAt: now,
       ...(chosen.length ? { products: chosen } : {}),

@@ -15,6 +15,7 @@
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { hasPlaceholder } from "@/lib/mail-body";
+import { pollProblem } from "@/lib/mail-poll";
 import { randomBytes, randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { needData, takeData } from "@/lib/store-data";
@@ -311,7 +312,7 @@ export type CreateResult =
   // `keep`: the narrowing read and counted here, for a send that starts in the same request (advanceBroadcast's `given`).
   // `startsNow`: it is due already, so the request that wrote it starts it (the scheduled job takes up the rest).
   | { ok: true; broadcast: Broadcast; keep: ((email: string) => boolean) | undefined; startsNow: boolean }
-  | { ok: false; reason: "subject" | "body" | "when" | "product" | "empty" | "allowance" | "setup" | "plan" | "test_subject" | "test_small" | "test_links" | "placeholder" }
+  | { ok: false; reason: "subject" | "body" | "when" | "product" | "empty" | "allowance" | "setup" | "plan" | "test_subject" | "test_small" | "test_links" | "placeholder" | "poll" }
   // Its readings of the buyers could not be held (lib/store-allowance.ts holdAllowanceAt): the sentence says why.
   | { ok: false; reason: "studio_used"; message: string };
 
@@ -357,6 +358,8 @@ export async function createBroadcast(
   if (!body) return { ok: false, reason: "body" };
   // A template's part left to write is a direction, never words sent in the creator's name (lib/mail-body.ts).
   if (hasPlaceholder(subject) || hasPlaceholder(body)) return { ok: false, reason: "placeholder" };
+  // A poll goes only whole and as it can be answered (lib/mail-poll.ts); its problem in words is the designer's to show.
+  if (pollProblem(body) !== null) return { ok: false, reason: "poll" };
   const productId = typeof input.productId === "string" && input.productId ? input.productId : null;
   if (productId && !hasProduct(store, productId)) return { ok: false, reason: "product" };
   const notProductId = typeof input.notProductId === "string" && input.notProductId ? input.notProductId : null;
@@ -698,6 +701,8 @@ export async function advanceBroadcast(
         // Only an email made since links were tagged: one scheduled before
         // goes out exactly as it was written and scheduled.
         b.tagged ? { medium: "broadcast", campaign } : undefined,
+        // Its poll, if it has one, is the broadcast's own: both subject lines share it (lib/mail-poll-votes.ts).
+        id,
       );
       // Whatever went before a stop counts, so the next run starts after it.
       const processed = emails.length - result.rest.length;

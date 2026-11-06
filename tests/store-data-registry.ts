@@ -68,6 +68,7 @@ import { MAX_CRM_FIELDS, MAX_FIELD_OPTIONS, MAX_STAGES } from "@/lib/crm-rules";
 import { MAX_FORMS, MAX_FIELDS, MAX_OPTIONS, MAX_OUTCOMES } from "@/lib/forms";
 import { MAX_DRAFTS } from "@/lib/mail-drafts";
 import { MAX_MAIL_BODY } from "@/lib/mail";
+import { MAX_POLLS_KEPT, POLL_RECORD_BYTES } from "@/lib/mail-poll-votes";
 import { MAX_SEGMENTS } from "@/lib/segments-rules";
 import { MAX_CHAT_KEPT, MAX_CHAT_TEXT } from "@/lib/community-chat-rules";
 import { MAX_REPORT_QUEUE, MAX_SPACES, MAX_QUESTIONS, MAX_WELCOME } from "@/lib/community-text";
@@ -648,6 +649,10 @@ export const FAMILIES: Record<string, Family> = {
   "nl:keys:@lib/licence-keys.ts": { what: "License keys: the pool, every key added, who got which", room: ["lib/licence-keys.ts"], parts: [item(512, "A key given: its record and who got it.", "membership"), capped(64 * KB, "The refunds already handled (sixty-one days after the last one read) and the marks.")] },
   // ---------------------------------------------------------------- lib/ m
   "nl:mail:clk:@lib/mail-clicks.ts": short("The emails whose links a person used, ninety days", "monthly", 90, 128, MAIL("list")),
+  // A one-off email's poll (125 [F2-EMAIL-POLLS]): its record and the list's polls capped, each answer written by the public request that pressed it.
+  "nl:mpoll:@lib/mail-poll-votes.ts": { what: "A one-off email's poll: its question, answers and when", parts: [capped(MAX_POLLS_KEPT * POLL_RECORD_BYTES, "MAX_POLLS_KEPT polls a list, each its record at its largest.", src("lib/mail-poll-votes.ts", "MAX_POLLS_KEPT", "POLL_RECORD_BYTES"))] },
+  "nl:mpoll:ix:@lib/mail-poll-votes.ts": { what: "A list's polls, by when they were first sent", parts: [capped(KEY + MAX_POLLS_KEPT * ENTRY_BYTES, "MAX_POLLS_KEPT members, the oldest deleted whole past them.", src("lib/mail-poll-votes.ts", "MAX_POLLS_KEPT"))] },
+  "nl:mpoll:v:@lib/mail-poll-votes.ts": short("A reader's answer to a poll, gone with it ninety days after its email first went", "request", 90, ENTRY_BYTES, REQ("poll answer")),
   "nl:mail:mk:@lib/mail-clicks.ts": { what: "The stop token a link key was made from: one a contact, counted with it (TOKEN_BYTES)", room: ["lib/contacts.ts"] },
   "nl:mail:drafts:@lib/mail-drafts.ts": { what: "Email drafts", parts: [capped(MAX_DRAFTS * (MAX_MAIL_BODY * 3 + 2 * KB), "MAX_DRAFTS drafts.", src("lib/mail-drafts.ts", "MAX_DRAFTS"), src("lib/mail.ts", "MAX_MAIL_BODY"))] },
   "nl:mail:health:@lib/mail-health.ts": { what: "Sent, bounced and complained, by the day; addresses already counted", parts: [per("day", 33, 128, "A day's counts."), per("monthly", 33, MARK, "An address counted this week.", MAIL("list"))] },

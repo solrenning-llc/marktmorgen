@@ -51,6 +51,7 @@ import { readFlows, flowsStartedFor } from "@/lib/flows";
 import { personOf, readRun } from "@/lib/flow-runs";
 import { storeKey } from "@/lib/learn";
 import { clicksOf } from "@/lib/mail-clicks";
+import { pollAnswersOf } from "@/lib/mail-poll-votes";
 import { waitlistPlacesOf } from "@/lib/waitlist";
 import { feedsOf } from "@/lib/podcast-access";
 import { remindersOf } from "@/lib/assistant-reminder";
@@ -88,6 +89,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/orders.ts": { how: "marks", what: "Order-reference and accounting fingerprints that prevent counting a payment twice; they contain no plain email message and do not prove delivery" },
   "lib/flows.ts": { how: "copied", what: "Which of the store's sequences and workflows you are in, and each step taken" },
   "lib/mail-clicks.ts": { how: "copied", what: "Which of the store's sequence emails you used a link in" },
+  "lib/mail-poll-votes.ts": { how: "copied", what: "Your answers to the polls in the store's emails" },
   "lib/mail-health.ts": { how: "marks", what: "A mark that your address was counted in this week's delivery checks, with nothing else in it" },
   "lib/crm.ts": { how: "copied", what: "The store's fields about you, its deals with you, and the tasks its team wrote about you" },
   "lib/payment-request-store.ts": { how: "copied", what: "Payment requests the store sent you" },
@@ -319,6 +321,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   },
   "lib/buyer-library.ts": async (s) => ((await storesKnownFor(s.email)).includes(s.sid) ? [{ inYourLibrary: true }] : []),
   "lib/mail-clicks.ts": async (s) => (await clicksOf(s.listId, s.email)).map((email) => ({ email })),
+  "lib/mail-poll-votes.ts": (s) => pollAnswersOf(s.listId, s.email),
   "lib/waitlist.ts": async (s) => (await waitlistPlacesOf(s.statsId, s.productIds, s.email)).map((w) => ({ product: w.product, joined: iso(w.joined), confirmed: iso(w.confirmed), alsoAskedForNews: w.news })),
   "lib/podcast-access.ts": async (s) => (await feedsOf(s.store, s.productIds, s.email)).map((product) => ({ product, privateFeed: true })),
   "lib/assistant-reminder.ts": async (s) => (await remindersOf(s.statsId, s.email)).map((r) => ({ ...r, at: new Date(r.at).toISOString() })),

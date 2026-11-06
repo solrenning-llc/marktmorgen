@@ -38,6 +38,7 @@ import { can } from "@/lib/team-roles";
  */
 import { emitEvent } from "@/lib/webhooks";
 import { hasPlaceholder } from "@/lib/mail-body";
+import { hasPoll } from "@/lib/mail-poll";
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -321,6 +322,8 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   if (checkRoutes(steps) !== null) return { ok: false, reason: "route" };
   // A template's part left to write is a direction, never words sent in the creator's name (lib/mail-body.ts).
   if (hasPlaceholder(JSON.stringify(steps))) return { ok: false, reason: "placeholder" };
+  // A poll goes in a one-off email for now (lib/mail-poll.ts): a sequence's email is refused with one, never sent as raw text.
+  if (steps.some((step) => !step.action && hasPoll(step.body))) return { ok: false, reason: "step" };
   const goal = readGoal(raw.goal, known);
   if (goal === "bad") return { ok: false, reason: "goal" };
   const startsPaid = Boolean(productId) && idsOfKind(store, "paid").includes(productId as string);

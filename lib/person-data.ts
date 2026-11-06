@@ -48,6 +48,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/suppression.ts", how: "suppression", what: "A one-way fingerprint of the address, so your store never emails it again and no import puts it back. It cannot be turned back into the address. Only the person can lift it, by joining your list again themselves." },
   { file: "lib/joined-stores.ts", how: "erased", via: "lib/buyer-library.ts", what: "The note that they joined your list, used to find them when they ask to be deleted everywhere" },
   { file: "lib/mail-clicks.ts", how: "erased", what: "Which links in your sequences' emails they used" },
+  { file: "lib/mail-poll-votes.ts", how: "erased", what: "Their answers to the polls in your emails, kept under a key that cannot be turned back into their address" },
   { file: "lib/mail-health.ts", how: "erased", what: "The mark that their address was counted in this week's delivery checks" },
   { file: "lib/flows.ts", how: "erased", what: "Their way through every sequence and workflow, and any step still waiting to reach them" },
   { file: "lib/flow-runs.ts", how: "erased", via: "lib/flows.ts", what: "Each workflow run's record and history" },

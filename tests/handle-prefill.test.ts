@@ -58,7 +58,7 @@ async function main(): Promise<void> {
   is("added to an address only when valid", [withPrefill("/studio", "harborkitchen"), withPrefill("/a?b=1", "harbor"), withPrefill("/studio", "no way"), withPrefill("/studio", undefined)], ["/studio?handle=harborkitchen", "/a?b=1&handle=harbor", "/studio", "/studio"]);
 
   part("The emailed link carries it, and nothing is kept for it");
-  is("sent", await sendSignInLink("maker@example.com", ORIGIN, "harborkitchen"), true);
+  is("sent", (await sendSignInLink("maker@example.com", ORIGIN, "harborkitchen")).sent, true);
   const link = linkIn(mails.at(-1)!.text);
   const url = new URL(link);
   is("the link has the address", url.searchParams.get("handle"), "harborkitchen");

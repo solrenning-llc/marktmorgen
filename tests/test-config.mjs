@@ -2,6 +2,7 @@ import {join} from 'node:path';
 /** One wiring source for the repository runner and local parallel verification. */
 export function testAliases(file,root,here){
  const aliases={'@':root,'@/lib/redis':['range-traffic-coverage.test.ts','stats-traffic-coverage.test.ts'].includes(file)?join(root,'lib/redis.ts'):join(here,'redis-stub.ts')};
+ if(file==='yearly-ask-read-evidence.test.ts')for(const name of ['redis','order-data','stripe-account','email','store','membership-manage','mail','contacts','purchase-email','catalog','store-checkout','auth','member-health','yearly-switch'])aliases['@/lib/'+name]=join(here,'yearly-ask-read-world.ts');
  if(file==='community-mail-read-evidence.test.ts')for(const name of ['redis','community','community-access','community-events','email','mail','order-data','calls','phone-alerts'])aliases['@/lib/'+name]=join(here,'community-mail-read-world.ts');
  if(file==='podcast-grant-read-evidence.test.ts')for(const name of ['redis','order-data','metered-limits','request-guard','community-access','email','auth','buyer-words/courses'])aliases['@/lib/'+name]=join(here,'podcast-grant-read-world.ts');
  if(file==='community-report-queue-view.test.ts'){
@@ -54,7 +55,7 @@ export function testAliases(file,root,here){
  }
  if(file==='path-growth-facts.test.ts')for(const name of ['redis','catalog','broadcasts','reviews'])aliases['@/lib/'+name]=join(here,'path-growth-world.ts');
  if(file==='path-reminder-push.test.ts')aliases['@/lib/web-push']=join(here,'path-push-world.ts');
- if(file==='digital-consent.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
+ if(file==='digital-consent.test.ts'||file==='checkout-key-count.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='cart-physical.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='review-photo-paused.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='orders-open.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');

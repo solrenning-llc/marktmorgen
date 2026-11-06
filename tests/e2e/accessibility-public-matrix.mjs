@@ -97,13 +97,22 @@ try{
     // Firefox may retain CSS smooth scrolling despite an "instant" request.
     // Keyboard proof is already complete; only normalize whole-document audit geometry.
     root.style.setProperty("scroll-behavior","auto","important");
+    // Diagnosis only (C4-20261106-1845-L-110): the page's size and every scroll after
+    // the request, so a stuck origin tells "ignored" from "scrolled back". No criterion uses it.
+    const scroller=document.scrollingElement;
+    window.__publicScrollTrace={before:{x:scrollX,y:scrollY,scrollHeight:scroller?.scrollHeight,clientHeight:scroller?.clientHeight,innerHeight,scroller:scroller?.tagName,overflowAnchor:getComputedStyle(root).overflowAnchor,bodyOverflow:getComputedStyle(document.body).overflow},events:[],asked:performance.now()};
+    window.__publicScrollListener=()=>{const trace=window.__publicScrollTrace;if(trace&&trace.events.length<50)trace.events.push({y:scrollY,ms:Math.round(performance.now()-trace.asked)});};
+    window.addEventListener("scroll",window.__publicScrollListener,{passive:true});
     window.scrollTo({top:0,left:0,behavior:"auto"});
+    window.__publicScrollTrace.afterRequest={x:scrollX,y:scrollY};
    });
    try{await page.waitForFunction(()=>{
     if(scrollX!==0||scrollY!==0){delete window.__publicOriginSince;return false;}
     window.__publicOriginSince??=performance.now();return performance.now()-window.__publicOriginSince>=200;
-   },undefined,{timeout:10000});}catch(error){console.error("PUBLIC_SCROLL_DIAGNOSTIC:"+JSON.stringify({engine,path,width,stage:"audit-origin",...await page.evaluate(()=>({x:scrollX,y:scrollY,originSince:window.__publicOriginSince,active:document.activeElement?.tagName,scrollBehavior:getComputedStyle(document.documentElement).scrollBehavior}))}));throw error;}
-   await page.evaluate(()=>{delete window.__publicOriginSince;});
+   },undefined,{timeout:10000});}catch(error){console.error("PUBLIC_SCROLL_DIAGNOSTIC:"+JSON.stringify({engine,path,width,stage:"audit-origin",...await page.evaluate(()=>({x:scrollX,y:scrollY,originSince:window.__publicOriginSince,active:document.activeElement?.tagName,scrollBehavior:getComputedStyle(document.documentElement).scrollBehavior}))}));const retry=await page.evaluate(async()=>{window.scrollTo({top:0,left:0,behavior:"auto"});const asked={x:scrollX,y:scrollY};await new Promise(resolve=>setTimeout(resolve,1000));return {asked,afterOneSecond:{x:scrollX,y:scrollY}};});console.error("PUBLIC_SCROLL_TRACE:"+JSON.stringify({engine,path,width,mode,...await page.evaluate(()=>window.__publicScrollTrace),secondRequest:retry}));throw error;}
+   const scrollTrace=await page.evaluate(()=>{const trace=window.__publicScrollTrace;delete window.__publicOriginSince;window.removeEventListener("scroll",window.__publicScrollListener);delete window.__publicScrollListener;delete window.__publicScrollTrace;return trace;});
+   // The case that timed out in CI (#2761, #2545, #2733): its trace when it passes, to compare with one that fails.
+   if(engine==="firefox"&&path==="/signin"&&width===1280&&mode==="baseline")console.log("PUBLIC_SCROLL_TRACE_PASS:"+JSON.stringify({engine,path,width,mode,...scrollTrace}));
    if(mode==="dark"&&!await page.evaluate(()=>matchMedia("(prefers-color-scheme: dark)").matches))throw Error("Dark color-scheme request not honored");
    await page.addScriptTag({content:axe});
    const report=await page.evaluate(async()=>{

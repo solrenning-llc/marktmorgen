@@ -1,0 +1,107 @@
+/**
+ * A plan refund may move money only while its durable recovery note is read,
+ * written and removed with exact Redis evidence.  These hostile replies model
+ * a command whose answer was cut short or lost after the command ran.
+ */
+import assert from "node:assert/strict";
+import test from "node:test";
+import { ENDING_KEY, finishPlanRefunds, refundAndEndPlan } from "@/lib/plan-refund-flow";
+import { redisPipeline } from "@/lib/redis";
+import { store as redis } from "./redis-stub";
+import { NOW, paidShop, world } from "./plan-refund-stripe-world";
+
+type Command = (string | number)[];
+
+const original = redis.pipeline.bind(redis);
+const isNote = (commands: Command[], name: string) => commands.length === 1 && commands[0][0] === name && commands[0][1] === ENDING_KEY;
+
+async function reset(): Promise<void> {
+  redis.pipeline = original;
+  redis.clear();
+  world.calls = [];
+  world.refundsDown = false;
+  world.loseAnswer = false;
+  world.listDown = false;
+  world.chargeListDown = false;
+  world.endDown = false;
+  world.stopDown = false;
+  world.refundsLeft = null;
+  world.refundStatus = "succeeded";
+}
+
+async function rejectsWithoutRefund(run: () => Promise<unknown>, refunds: () => unknown[]): Promise<void> {
+  await assert.rejects(run);
+  assert.equal(refunds().length, 0, "unknown note evidence must stop before the refund POST");
+}
+
+test("a missing HGET pipeline reply is not an absent recovery note", async () => {
+  await reset();
+  const shop = await paidShop();
+  const store = await shop.store();
+  redis.pipeline = async (commands) => isNote(commands, "HGET") ? [] : original(commands);
+  await rejectsWithoutRefund(() => refundAndEndPlan(store, NOW), shop.refunds);
+});
+
+test("an unreadable stored note is preserved and stops another refund", async () => {
+  await reset();
+  const shop = await paidShop();
+  const store = await shop.store();
+  await redisPipeline([["HSET", ENDING_KEY, store.sid, "{"]]);
+  await rejectsWithoutRefund(() => refundAndEndPlan(store, NOW), shop.refunds);
+  assert.equal((await redisPipeline([["HGET", ENDING_KEY, store.sid]]))[0], "{", "an unreadable prior note is never overwritten");
+});
+
+test("a lost initial HSET answer stops before the refund", async () => {
+  await reset();
+  const shop = await paidShop();
+  const store = await shop.store();
+  let lost = false;
+  redis.pipeline = async (commands) => {
+    if (!lost && isNote(commands, "HSET")) {
+      lost = true;
+      await original(commands);
+      return [];
+    }
+    return original(commands);
+  };
+  await rejectsWithoutRefund(() => refundAndEndPlan(store, NOW), shop.refunds);
+  assert.equal(typeof (await original([["HGET", ENDING_KEY, store.sid]]))[0], "string", "a note whose ACK was lost remains recoverable");
+});
+
+test("the exact charge note is acknowledged before money moves", async () => {
+  await reset();
+  const shop = await paidShop();
+  const store = await shop.store();
+  let noteWrites = 0;
+  redis.pipeline = async (commands) => {
+    if (isNote(commands, "HSET")) {
+      noteWrites += 1;
+      const answer = await original(commands);
+      if (noteWrites === 2) return [];
+      return answer;
+    }
+    return original(commands);
+  };
+  await rejectsWithoutRefund(() => refundAndEndPlan(store, NOW), shop.refunds);
+  assert.equal(noteWrites, 2, "the second write binds the exact charges before money moves");
+});
+
+test("an unconfirmed HDEL cannot claim the finished recovery note is gone", async () => {
+  await reset();
+  const shop = await paidShop();
+  const store = await shop.store();
+  redis.pipeline = async (commands) => isNote(commands, "HDEL") ? [] : original(commands);
+  await assert.rejects(() => refundAndEndPlan(store, NOW));
+  assert.equal(shop.refunds().length, 1, "the refund itself stays idempotently recorded");
+  assert.equal(typeof (await original([["HGET", ENDING_KEY, store.sid]]))[0], "string", "an unconfirmed deletion keeps the recovery note");
+});
+
+test("an unknown HGETALL is not an empty recovery job", async () => {
+  await reset();
+  const shop = await paidShop();
+  const store = await shop.store();
+  await redisPipeline([["HSET", ENDING_KEY, store.sid, JSON.stringify({ s: store.subscriptionId, at: NOW, t: NOW, m: 0 })]]);
+  redis.pipeline = async (commands) => isNote(commands, "HGETALL") ? [] : original(commands);
+  await assert.rejects(() => finishPlanRefunds(Date.now() + 10_000, NOW + 60));
+  assert.equal(typeof (await original([["HGET", ENDING_KEY, store.sid]]))[0], "string", "an unknown note list is not reported as an empty job");
+});

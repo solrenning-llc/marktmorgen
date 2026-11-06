@@ -103,13 +103,21 @@ export async function apiNumbers(store: Store, variant: NumbersVariant, charge: 
   const key = store.statsId ? keptNumbersKey(store.statsId, variant) : "";
   let taken = 0;
   if (keeps) {
-    const [length] = await redisPipeline([["STRLEN", key]]);
-    const bytes = Number(length);
-    if (Number.isSafeInteger(bytes) && bytes > 0 && bytes <= NUMBERS_KEPT_BYTES + HEAD_BYTES + 1) {
+    const lengthReply: unknown = await redisPipeline([["STRLEN", key]]);
+    if (!Array.isArray(lengthReply) || lengthReply.length !== 1) return null;
+    const length = lengthReply[0];
+    if (typeof length !== "number" || !Number.isSafeInteger(length) || length < 0) return null;
+    const bytes = length;
+    if (bytes > 0 && bytes <= NUMBERS_KEPT_BYTES + HEAD_BYTES + 1) {
       const most = apiReadUnits(keptNumbersWork(bytes, NUMBERS_SENT_BYTES));
       const settle = await hold(most);
       if (settle instanceof Response) return settle;
-      const [raw] = await redisPipeline([["GET", key]]);
+      const readReply: unknown = await redisPipeline([["GET", key]]);
+      if (!Array.isArray(readReply) || readReply.length !== 1 || (readReply[0] !== null && typeof readReply[0] !== "string")) {
+        const refused = await settle(settledUnits(keptNumbersWork(bytes, 0), most));
+        return refused ?? null;
+      }
+      const raw = readReply[0];
       // What the read really answered, if the copy was written again in between.
       const read = Math.max(bytes, typeof raw === "string" ? Buffer.byteLength(raw) : 0);
       const kept = openKeptNumbers(store, variant, raw, now);

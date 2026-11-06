@@ -327,6 +327,11 @@ async function main(): Promise<void> {
 
   part("Codex G return: exact wire rows and bounded reads");
   for (const [label, payload, endpoint] of [
+    ["session id only", {data:[{id:"cs_test_unknown001"}],has_more:false}, "/checkout/sessions"],
+    ["session missing status", {data:[{...paid("cs_test_unknown002",club),status:undefined}],has_more:false}, "/checkout/sessions"],
+    ["session missing payment", {data:[{...paid("cs_test_unknown003",club),payment_status:undefined}],has_more:false}, "/checkout/sessions"],
+    ["intent id only", {data:[{id:"pi_TestUnknown001"}],has_more:false}, "/payment_intents"],
+    ["intent missing status", {data:[{id:"pi_TestUnknown002",metadata:{kind:"upsell",store:HANDLE,product:club}}],has_more:false}, "/payment_intents"],
     ["empty row", {data:[{}],has_more:false}, "/checkout/sessions"],
     ["array row", {data:[[]],has_more:false}, "/checkout/sessions"],
     ["missing has_more", {data:[]}, "/checkout/sessions"],

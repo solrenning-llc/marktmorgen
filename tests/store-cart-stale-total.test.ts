@@ -11,6 +11,14 @@
  * on claude5/sweep-app-6 @ b7e7a13d, docs/reviews/c5-sweep-app6.md), with its
  * "DEFECT" checks turned into what must hold. It runs the component's real
  * hooks through tests/sweep-app6-hooks.ts, copied from that branch unchanged.
+ *
+ * Claude 5's review of PR #2978 (comment 6697431273) added four cases, rebuilt
+ * here from her description: a product ADDED while the re-read fails must not
+ * vanish from what is posted while the header still counts it; a re-read that
+ * never answers must not keep the old total past a bounded wait; a FIRST read
+ * that fails must not leave the panel on "Checking the prices…"; and the
+ * buyer gets a "Try again" button that runs the read again. The wait is the
+ * component's window.setTimeout, replaced here by a fake clock.
  */
 import { CartButton } from "@/components/store-cart";
 import { CART_WORDS, cartWords } from "@/lib/buyer-words/cart";
@@ -19,7 +27,19 @@ import { done, is, part } from "./check";
 
 const c = cartWords("en");
 const stored = new Map<string, string>();
+/** The fake clock: every window.setTimeout the cart starts, fired only when a check says so. */
+const timers: { fn: () => void; ms: number; id: number; live: boolean }[] = [];
+let timerIds = 0;
 const win = Object.assign(new EventTarget(), {
+  setTimeout: (fn: () => void, ms = 0) => {
+    const timer = { fn, ms, id: ++timerIds, live: true };
+    timers.push(timer);
+    return timer.id;
+  },
+  clearTimeout: (id: number) => {
+    const timer = timers.find((t) => t.id === id);
+    if (timer) timer.live = false;
+  },
   localStorage: { getItem: (k: string) => stored.get(k) ?? null, setItem: (k: string, v: string) => void stored.set(k, v) },
   location: { href: "https://marktmorgen.com/@sweepshop" },
   history: { state: null, replaceState() {} },
@@ -72,6 +92,85 @@ async function cartAfterRemovingB(second: () => Promise<Response>, first: object
   return { reads, before, after, button, alerts, again };
 }
 
+type Answer = (init?: RequestInit) => Promise<Response>;
+const answer = (body: object): Answer => async () => new Response(JSON.stringify(body), { status: 200 });
+/** A read that never answers; like a real fetch it gives up when its signal is aborted, unless `deaf`. */
+const hang = (deaf = false): Answer => (init) =>
+  new Promise<Response>((_, reject) => {
+    if (!deaf) init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+  });
+/** A read that answers only when the check says so. */
+function later(): { read: Answer; give: (body: object) => void } {
+  let give: (r: Response) => void = () => {};
+  const promise = new Promise<Response>((resolve) => (give = resolve));
+  return { read: () => promise, give: (body) => give(new Response(JSON.stringify(body), { status: 200 })) };
+}
+
+// Words this review adds, read without assuming they exist yet (so a missing word is a failing check, not a crash).
+const wordsOf = (w: unknown) => w as Record<string, unknown>;
+const uncheckedSome = (n: number, w: unknown = c) => {
+  const say = wordsOf(w).uncheckedSome;
+  return typeof say === "function" ? (say as (n: number) => string)(n) : "<no uncheckedSome>";
+};
+const retryWord = (w: unknown = c) => {
+  const say = wordsOf(w).retry;
+  return typeof say === "string" ? say : "<no retry>";
+};
+
+const suggestC = { id: "c", title: "Product c", href: "/@sweepshop/p/c", price: "$5.00", why: "Picked to go with Product a", kind: "pick" };
+const onlyAWithC = { ...onlyA, suggest: [suggestC] };
+const aAndC = { ok: true, items: [line("a", "$10.00"), line("c", "$5.00")], total: "$15.00", deal: null, next: null, suggest: [], bundle: null, shipping: null, apart: null, digital: true };
+
+/** What the open panel shows, read from the component's own tree. */
+function view(tree: Tree) {
+  const forms = find(tree, (n) => n.type === "form" && n.props?.["data-checkout"] !== undefined);
+  return {
+    text: texts(tree).join(" | "),
+    button: submit(tree).map((n) => texts(n.props?.children).join("")),
+    alerts: alertsOf(tree).map((n) => texts(n.props?.children).join("")),
+    posted: forms.length === 0 ? null : find(forms, (n) => n.type === "input" && n.props?.name === "id").map((n) => n.props?.value),
+    retry: find(tree, (n) => n.type === "button" && texts(n.props?.children).join("") === retryWord()),
+  };
+}
+
+/** Opens a cart holding `start`; each read takes the next answer, the last one repeating. */
+async function openCart(start: string[], answers: Answer[]) {
+  stored.set("mm-cart:sweepshop", JSON.stringify(start));
+  timers.length = 0;
+  let reads = 0;
+  globalThis.fetch = ((_: unknown, init?: RequestInit) => {
+    const next = answers[Math.min(reads, answers.length - 1)];
+    reads += 1;
+    return next(init);
+  }) as typeof fetch;
+  const cart = await mount(CartButton, { handle: "sweepshop", lang: "en" as const, notice: null, restore: [] });
+  (find(cart.tree(), (n) => n.type === "button" && n.props?.["aria-expanded"] === false)[0].props!.onClick as () => void)();
+  await cart.settle();
+  const press = async (test: Parameters<typeof find>[1]) => {
+    const button = find(cart.tree(), test)[0];
+    if (button) (button.props!.onClick as () => void)();
+    await cart.settle();
+    return Boolean(button);
+  };
+  return {
+    reads: () => reads,
+    view: () => view(cart.tree()),
+    press,
+    retry: () => press((n) => n.type === "button" && texts(n.props?.children).join("") === retryWord()),
+    /** Fires every pending wait of a second or more, as the clock running out would. */
+    waitOut: async () => {
+      for (const t of timers.filter((t) => t.live && t.ms >= 1000)) {
+        t.live = false;
+        t.fn();
+      }
+      await cart.settle();
+    },
+    settle: () => cart.settle(),
+    unmount: () => cart.unmount(),
+  };
+}
+const bounded = () => timers.some((t) => t.live && t.ms >= 1000 && t.ms <= 15_000);
+
 const failures = [
   ["{ ok: false } answer", async () => new Response(JSON.stringify({ ok: false }), { status: 503 })],
   ["503 non-JSON page", async () => new Response("<html>unavailable</html>", { status: 503 })],
@@ -119,6 +218,91 @@ async function main() {
   is("after closing and opening again, the button says $10.00", back.again?.button, [c.checkout("$10.00")]);
   is("and the alert is gone", back.again?.alerts, 0);
 
+  // ---- Claude 5's review of #2978, finding 1 (MÉDIO): a product added while the re-read fails ----
+  for (const [label, fail] of failures) {
+    part(`A product is added and the re-read fails (${label})`);
+    const cart = await openCart(["a"], [answer(onlyAWithC), fail, answer(aAndC)]);
+    is("first panel offers Product c", cart.view().text.includes("Product c"), true);
+    is("the add button is there", await cart.press((n) => n.type === "button" && n.props?.["aria-label"] === `${c.add}: Product c`), true);
+    const v = cart.view();
+    is("cart read again after the add", cart.reads(), 2);
+    is("the header counts 2 products", v.text.includes(c.open(2)), true);
+    is("no form posts fewer products than the header counts", v.posted === null || v.posted.join(",") === "a,c", true);
+    is("no amount on any button", v.button.every((b) => !b.includes("$")), true);
+    is("the buyer is told 1 product could not be checked", v.alerts, [uncheckedSome(1)]);
+    is("a \"Try again\" button is offered", v.retry.length, 1);
+    is("pressing it reads the cart again", (await cart.retry()) && cart.reads(), 3);
+    const w = cart.view();
+    is("then the form posts both products", w.posted, ["a", "c"]);
+    is("and the button says $15.00", w.button, [c.checkout("$15.00")]);
+    is("and no alert or retry button is left", [w.alerts, w.retry.length], [[], 0]);
+    cart.unmount();
+  }
+
+  part("A product is added and the re-read has not answered yet");
+  {
+    const slow = later();
+    const cart = await openCart(["a"], [answer(onlyAWithC), slow.read]);
+    await cart.press((n) => n.type === "button" && n.props?.["aria-label"] === `${c.add}: Product c`);
+    const v = cart.view();
+    is("no form posts only Product a while the header counts 2", v.posted === null || v.posted.join(",") === "a,c", true);
+    is("no old \"Check out · $10.00\" for a cart of two", v.button.includes(c.checkout("$10.00")), false);
+    is("the panel says the prices are being checked", v.text.includes(c.loading), true);
+    slow.give(aAndC);
+    await cart.settle();
+    is("once it answers, the form posts both", cart.view().posted, ["a", "c"]);
+    is("and the button says $15.00", cart.view().button, [c.checkout("$15.00")]);
+    cart.unmount();
+  }
+
+  // ---- Finding 2 (LEVE): a re-read that hangs ----
+  for (const deaf of [false, true]) {
+    part(`The re-read after a removal never answers${deaf ? " (and ignores the abort)" : ""}`);
+    const cart = await openCart(["a", "b"], [answer(both), hang(deaf), answer(onlyA)]);
+    await cart.press((n) => n.type === "button" && n.props?.["aria-label"] === c.remove("Product b"));
+    is("the wait is bounded (between 1 and 15 seconds)", bounded(), true);
+    await cart.waitOut();
+    const v = cart.view();
+    is("after the wait, no old $27.00 anywhere", v.text.includes("$27.00"), false);
+    is("the button says only \"Check out\"", v.button, [c.checkoutUnpriced]);
+    is("one alert says the prices could not be checked", v.alerts, [c.unchecked]);
+    is("a \"Try again\" button is offered", v.retry.length, 1);
+    is("pressing it reads the cart again", (await cart.retry()) && cart.reads(), 3);
+    is("then the button says $10.00", cart.view().button, [c.checkout("$10.00")]);
+    is("and no alert or retry button is left", [cart.view().alerts, cart.view().retry.length], [[], 0]);
+    cart.unmount();
+  }
+
+  // ---- Finding 3 (LEVE): the very first read fails ----
+  for (const [label, fail] of failures) {
+    part(`The first read fails (${label})`);
+    const cart = await openCart(["a"], [fail, answer(onlyA)]);
+    const v = cart.view();
+    is("not stuck on \"Checking the prices…\"", v.text.includes(c.loading), false);
+    is("the alert says 1 product could not be checked", v.alerts, [uncheckedSome(1)]);
+    is("nothing to pay is offered", [v.posted, v.button], [null, []]);
+    is("a \"Try again\" button is offered", v.retry.length, 1);
+    is("pressing it reads the cart again", (await cart.retry()) && cart.reads(), 2);
+    const w = cart.view();
+    is("then Product a is listed", w.text.includes("Product a"), true);
+    is("and the button says $10.00", w.button, [c.checkout("$10.00")]);
+    is("and no alert or retry button is left", [w.alerts, w.retry.length], [[], 0]);
+    cart.unmount();
+  }
+
+  part("The first read never answers");
+  {
+    const cart = await openCart(["a", "b"], [hang()]);
+    is("the panel says the prices are being checked", cart.view().text.includes(c.loading), true);
+    is("the wait is bounded (between 1 and 15 seconds)", bounded(), true);
+    await cart.waitOut();
+    const v = cart.view();
+    is("after the wait, no longer \"Checking the prices…\"", v.text.includes(c.loading), false);
+    is("the alert says 2 products could not be checked", v.alerts, [uncheckedSome(2)]);
+    is("a \"Try again\" button is offered", v.retry.length, 1);
+    cart.unmount();
+  }
+
   part("The words exist in every language a store sells in");
   for (const [code, words] of Object.entries(CART_WORDS)) {
     is(`${code}: "Check out" with no amount is set`, words.checkoutUnpriced.trim().length > 0 && !words.checkoutUnpriced.includes("·"), true);
@@ -126,6 +310,13 @@ async function main() {
     is(`${code}: the alert is a full sentence`, words.unchecked.trim().length > 20, true);
   }
   is("the seven languages say it differently", new Set(Object.values(CART_WORDS).map((w) => w.unchecked)).size, 7);
+  for (const [code, words] of Object.entries(CART_WORDS)) {
+    is(`${code}: "Try again" is set`, retryWord(words).trim().length > 0 && !retryWord(words).startsWith("<"), true);
+    is(`${code}: 1 and 2 unchecked products are full sentences that differ`, uncheckedSome(1, words).length > 20 && !uncheckedSome(1, words).startsWith("<") && uncheckedSome(1, words) !== uncheckedSome(2, words), true);
+    is(`${code}: the count is in the sentence`, uncheckedSome(1, words).includes("1") && uncheckedSome(2, words).includes("2"), true);
+  }
+  is("the seven \"Try again\" differ", new Set(Object.values(CART_WORDS).map((w) => retryWord(w))).size, 7);
+  is("the seven unchecked-products sentences differ", new Set(Object.values(CART_WORDS).map((w) => uncheckedSome(2, w))).size, 7);
   done();
 }
 void main();

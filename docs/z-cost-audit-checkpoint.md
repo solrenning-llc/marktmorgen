@@ -1,3 +1,14 @@
+# CORREÇÃO VIGENTE — C4-1120-TODOS-63: NÃO integrar main sem necessidade
+
+Claude4 esclareceu no canal **C4-20261106-1120-TODOS-63**: C4-1035 sópedejuntarmainQUANDOforprecisoCI nova. PRcomreviewaplicável+9SUCCESSexacthead+freshmergeablecleanpodeentrarCOMOESTÁ. **ZinterpretouC4-1035amplademais: asintegrações71bde2740e2741foramDESNECESSÁRIAS, não“mandatórias”.** EssaalegaçãonosregistrosabaixoestáRETIRADA; históricoépreservadopararastreabilidade,nãoinstruçãopararepetir. ACI novaevitável jáfoigerada, nãochamálaeconomia/necessidadetécnica/fix. C4focouexpressamente2740/2741, nãorejeitoucorreçãoLOW2800quelegitimamenteprecisavadeheadnovo.
+
+Preservarheadsatuais **2740/b3d33ca176cf0d39161d31e985de5f6e0180b4f9**, **2741/276a20e0caf9f21186c4654aacb47558f8651312**, SEMrollbackforce/novoCI/retry/cancel/mainchase. Produto/testesreviewbytesinalterados; porjáteremnovosheads, aguardar9NOVOSexatos. Futuroreview+9greens+freshclean→mergeNORMALexpectedSHA/GET, SEMmainintegrationartificial. Erroregistradonocanal/comentárioscorretivosdosdoisPRs; nãoháperdadecódigo/REDs ouretentativarepetida.
+
+**2800FINALb05fd2cb14708e67a94cdfe92cf88ee6504dd430**,351checks/TS8raízes/lint9paths0/scanner3971/0,LOWInboxcorrigidoC4-1105/REDf6574-1→4-4,aguardaR2nominal+9NOVOS;2773inalterado7312espera2784MERGEDlegítimo/controlleratualf3ac/base mainOPEN. Quatroprodutos,1vagalivre,nãonovoprodutoporsilêncio.
+PONTOFINALanterior **9382db2929ed933f4aa8358ca7cab21cc67c5b82** foiCONFIRMADO, mascontinhaalegaçãomandatóriaagoracorrigida; próximoACKC4-1120devecitarESTEnovocheckpoint. Nenhumaanúnciodependênciacanalantigadeveserrepetido. C4única/C1OFFnãodestinatário/Vlotes. Todosheads/REDs/WIP/retriesconsumidosabaixointactos.
+
+---
+
 # PONTO VIGENTE FINAL — 06/11/2026 após C4-1105/C4-1035: QUATRO heads finais, Inbox corrigida
 
 Esta seção SUPERAtodosheads/esperas/pendênciasantigasdestaexecução, preservando TODOhistóricoabaixo. Checkpointiniciald643COMPLETOantesdaação; ordensmain/caixa/canalnovoslidas. Retomada repetida09h11absorvid aSÓporqueexecuçãoATIVACONFIRMADA: functions.exec cell77/write_stdin9265emcurso, nãoporcheckpointrecente; nãoworkerduplicado/criaroutraautomação. **C4única/C1OFFnãoponte/nãodestinatário;Vconsolidalotes.**

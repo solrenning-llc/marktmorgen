@@ -82,6 +82,7 @@ const en = {
     out: "Your session here ended. Ask for a new link below.",
     off: "This community is closed right now.",
     error: "Something went wrong on our side. Nothing was changed; try again in a moment.",
+    unconfirmed: "We could not confirm that this went through. Check the conversation before you try again.",
   } as Record<string, string>,
   /** After asking for a link to come in (?link=...). */
   linkNotices: {
@@ -651,6 +652,7 @@ const es: CommunityWords = {
     out: "Tu sesión aquí ha terminado. Pide un enlace nuevo abajo.",
     off: "Esta comunidad está cerrada ahora mismo.",
     error: "Algo falló por nuestra parte. No se cambió nada; vuelve a intentarlo en un momento.",
+    unconfirmed: "No pudimos confirmar si esto se completó. Revisa la conversación antes de volver a intentarlo.",
   },
   linkNotices: {
     sent: {
@@ -1198,6 +1200,7 @@ const fr: CommunityWords = {
     out: "Votre session ici a pris fin. Demandez un nouveau lien ci-dessous.",
     off: "Cette communauté est fermée pour le moment.",
     error: `Un problème est survenu de notre côté. Rien n'a été modifié${S}; réessayez dans un instant.`,
+    unconfirmed: "Nous n’avons pas pu confirmer que cela a abouti. Consultez la conversation avant de réessayer.",
   },
   linkNotices: {
     sent: {
@@ -1745,6 +1748,7 @@ const de: CommunityWords = {
     out: "Ihre Sitzung hier ist beendet. Fordern Sie unten einen neuen Link an.",
     off: "Diese Community ist gerade geschlossen.",
     error: "Bei uns ist etwas schiefgelaufen. Es wurde nichts geändert; versuchen Sie es gleich noch einmal.",
+    unconfirmed: "Wir konnten nicht bestätigen, dass das geklappt hat. Prüfen Sie die Unterhaltung, bevor Sie es erneut versuchen.",
   },
   linkNotices: {
     sent: {
@@ -2292,6 +2296,7 @@ const it: CommunityWords = {
     out: "La tua sessione qui è terminata. Chiedi un nuovo link qui sotto.",
     off: "Questa community è chiusa in questo momento.",
     error: "Qualcosa è andato storto da parte nostra. Non è stato modificato nulla; riprova tra un momento.",
+    unconfirmed: "Non è stato possibile confermare che sia andato a buon fine. Controlla la conversazione prima di riprovare.",
   },
   linkNotices: {
     sent: {
@@ -2839,6 +2844,7 @@ const nl: CommunityWords = {
     out: "Je sessie hier is afgelopen. Vraag hieronder een nieuwe link aan.",
     off: "Deze community is op dit moment gesloten.",
     error: "Er ging aan onze kant iets mis. Er is niets gewijzigd; probeer het zo meteen opnieuw.",
+    unconfirmed: "We konden niet bevestigen dat dit is gelukt. Controleer het gesprek voordat je het opnieuw probeert.",
   },
   linkNotices: {
     sent: {
@@ -3386,6 +3392,7 @@ const pt: CommunityWords = {
     out: "A sua sessão aqui terminou. Peça uma nova ligação abaixo.",
     off: "Esta comunidade está fechada neste momento.",
     error: "Algo correu mal do nosso lado. Nada foi alterado; tente novamente daqui a pouco.",
+    unconfirmed: "Não foi possível confirmar que isso foi concluído. Confira a conversa antes de tentar novamente.",
   },
   linkNotices: {
     sent: {

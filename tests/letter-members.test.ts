@@ -32,6 +32,8 @@ import type { Broadcast } from "@/lib/broadcasts";
 import { MAX_LETTER_PRODUCTS, membersOnly, parseLetter } from "@/lib/letter-rules";
 import { letterIdFor, listLetters, publishLetter, publishedLetters, readLetter } from "@/lib/letters";
 import { letterReader } from "@/lib/letter-access";
+import { holdsProducts, holdsProductsOrThrow, paidForAny } from "@/lib/community-access";
+import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import { mintPass, passCookieName } from "@/lib/learn";
 import LetterPage, { generateMetadata } from "@/app/[handle]/letters/[letter]/page";
 import LettersPage from "@/app/[handle]/letters/page";
@@ -39,6 +41,7 @@ import { POST as publishRoute } from "@/app/api/store/letters/route";
 import { POST as linkRoute } from "@/app/api/store/letters/link/route";
 import { GET as openRoute } from "@/app/api/store/letters/open/route";
 import { PublishControl } from "@/components/letter-publish-control";
+import { LinkRequestForm } from "@/components/link-request-form";
 import { cookieValues } from "./letter-members-world";
 import { afterTasks } from "./next-server-after-world";
 import { advance, store as redis } from "./redis-stub";
@@ -59,6 +62,8 @@ const mails: { to: string; text: string }[] = [];
 /** How often the creator's Stripe account was asked, and whether the email service is down. */
 let stripeAsked = 0;
 let mailDown = false;
+/** Whether the creator's Stripe account cannot be asked (it answers 500). */
+let stripeDown = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -70,6 +75,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   const path = url.pathname.replace(/^\/v1/, "");
   stripeAsked += 1;
+  if (stripeDown) return answer({ error: { message: "down" } }, 500);
   if (path === "/checkout/sessions") return answer({ object: "list", data: sessions[url.searchParams.get("customer_details[email]") ?? ""] ?? [], has_more: false });
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
@@ -280,6 +286,125 @@ async function main(): Promise<void> {
   is("the membership stopped: closed", (await letterReader(store, letter, jar({ [cookieName]: deePass }))).state, "closed");
   forgetAnswers();
 
+  part("Stripe that cannot be asked is unknown, never \"none of these products\"");
+  stripeDown = true;
+  is("a holder whose answer ran out, with Stripe down: unknown", (await letterReader(store, letter, jar({ [cookieName]: anaPass }))).state, "unknown");
+  const downHtml = await render(store, letter.id, { [cookieName]: anaPass });
+  is(
+    "the page says it could not check, offers to check again, never says none, never shows the form or the words",
+    [downHtml.includes("We couldn&#x27;t check your purchase just now"), downHtml.includes(`href="/@${HANDLE}/letters/${letter.id}"`), downHtml.includes("This address has none of these products"), downHtml.includes("/api/store/letters/link"), downHtml.includes(SECRET)],
+    [true, true, false, false, false],
+  );
+  is("nothing is kept from the failed ask", redis.keys().filter((k) => k.startsWith("nl:letters:ok:")).length, 0);
+  stripeDown = false;
+  is("Stripe back: the holder reads it again", [(await letterReader(store, letter, jar({ [cookieName]: anaPass }))).state, (await render(store, letter.id, { [cookieName]: anaPass })).includes(SECRET)], ["in", true]);
+  forgetAnswers();
+
+  part("Codex G: HTTP 200 that is incomplete is unknown, not a closed door");
+  const savedFetch = globalThis.fetch;
+  for (const [label, payload] of [
+    ["missing data", {}],
+    ["null data", { object: "list", data: null, has_more: false }],
+    ["unscanned next page", { object: "list", data: Array.from({length:100}, (_,i)=>paid(`cs_test_other${String(i).padStart(12,"0")}`, other.product.id)), has_more: true }],
+  ] as const) {
+    forgetAnswers();
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input instanceof Request ? input.url : input));
+      return url.hostname === "api.stripe.com" && url.pathname.endsWith("/checkout/sessions")
+        ? new Response(JSON.stringify(payload), {status:200}) : savedFetch(input,init);
+    }) as typeof fetch;
+    try {
+      const result = await letterReader(store, letter, jar({[cookieName]:anaPass}));
+      is(`${label}: ownership unknown, not closed`, result.state, "unknown");
+      is(`${label}: no negative cache invented`, redis.keys().filter(k=>k.startsWith("nl:letters:ok:")).length, 0);
+      const html = await render(store,letter.id,{[cookieName]:anaPass});
+      is(`${label}: real page says unknown and never shows body/false denial`,
+        [html.includes("We couldn&#x27;t check your purchase just now"),html.includes("This address has none of these products"),html.includes(SECRET)], [true,false,false]);
+    } finally {globalThis.fetch=savedFetch;}
+    forgetAnswers();
+    is(`${label}: valid provider control reopens holder`, (await letterReader(store,letter,jar({[cookieName]:anaPass}))).state,"in");
+  }
+  forgetAnswers();
+
+  part("Codex G return: exact wire rows and bounded reads");
+  for (const [label, payload, endpoint] of [
+    ["session id only", {data:[{id:"cs_test_unknown001"}],has_more:false}, "/checkout/sessions"],
+    ["session missing status", {data:[{...paid("cs_test_unknown002",club),status:undefined}],has_more:false}, "/checkout/sessions"],
+    ["session missing payment", {data:[{...paid("cs_test_unknown003",club),payment_status:undefined}],has_more:false}, "/checkout/sessions"],
+    ["intent id only", {data:[{id:"pi_TestUnknown001"}],has_more:false}, "/payment_intents"],
+    ["intent missing status", {data:[{id:"pi_TestUnknown002",metadata:{kind:"upsell",store:HANDLE,product:club}}],has_more:false}, "/payment_intents"],
+    ["empty row", {data:[{}],has_more:false}, "/checkout/sessions"],
+    ["array row", {data:[[]],has_more:false}, "/checkout/sessions"],
+    ["missing has_more", {data:[]}, "/checkout/sessions"],
+    ["string has_more", {data:[],has_more:"false"}, "/checkout/sessions"],
+    ["null entry", {data:[null],has_more:false}, "/checkout/sessions"],
+    ["primitive entry", {data:[0],has_more:false}, "/checkout/sessions"],
+    ["unknown session status", {data:[{...paid("cs_test_badstatus001",club),status:"alien",payment_status:"alien"}],has_more:false}, "/checkout/sessions"],
+    ["intent empty row", {data:[{}],has_more:false}, "/payment_intents"],
+    ["intent array row", {data:[[]],has_more:false}, "/payment_intents"],
+    ["intent missing pagination", {data:[]}, "/payment_intents"],
+    ["intent more pages", {data:[],has_more:true}, "/payment_intents"],
+  ] as const) {
+    forgetAnswers();
+    const answer=globalThis.fetch;
+    globalThis.fetch=(async(input: string | URL | Request, init?:RequestInit)=>{
+      const url=new URL(String(input instanceof Request?input.url:input));
+      if(url.hostname!=="api.stripe.com")return answer(input,init);
+      if(url.pathname.endsWith(endpoint)) return new Response(JSON.stringify(payload),{status:200});
+      if(endpoint==="/payment_intents" && url.pathname.endsWith("/checkout/sessions")) return new Response(JSON.stringify({data:[paid("cs_test_otherCust01",other.product.id)],has_more:false}));
+      return answer(input,init);
+    }) as typeof fetch;
+    try {
+      is(`${label}: reader unknown`,(await letterReader(store,letter,jar({[cookieName]:anaPass}))).state,"unknown");
+      is(`${label}: negative cache absent`,redis.keys().filter(k=>k.startsWith("nl:letters:ok:")).length,0);
+      const html=await render(store,letter.id,{[cookieName]:anaPass});
+      is(`${label}: no false denial or body`,[html.includes("We couldn&#x27;t check your purchase just now"),html.includes("This address has none of these products"),html.includes(SECRET)],[true,false,false]);
+      const key=`nl:g2464:${label}`;
+      is(`${label}: nonstrict refuses`,await holdsProducts(store,[club],"ana@example.com",key,"g"),false);
+      is(`${label}: nonstrict cache absent`,redis.run(["GET",key]),null);
+      let thrown=false;
+      try { await holdsProductsOrThrow(store,[club],"ana@example.com",key+":strict","g"); } catch {thrown=true;}
+      is(`${label}: strict throws`,thrown,true);
+    } finally {globalThis.fetch=answer;forgetAnswers();}
+  }
+  for(const count of [10,11]) {
+    const answer=globalThis.fetch;
+    let piCalls=0;
+    globalThis.fetch=(async(input:string | URL | Request)=>{
+      const url=new URL(String(input instanceof Request?input.url:input));
+      if(url.pathname.endsWith("/checkout/sessions")) return new Response(JSON.stringify({data:Array.from({length:count},(_,i)=>({...paid(`cs_test_bound${i}`,other.product.id),customer:`cus_TestBoundary${i}`})),has_more:false}));
+      piCalls+=1;
+      return new Response(JSON.stringify({data:[],has_more:false}));
+    }) as typeof fetch;
+    try {
+      let result:unknown;
+      try { result=await paidForAny(store,"ana@example.com",new Set([club])); } catch {result="unknown";}
+      is(`${count} customers: result`,result,count===10?false:"unknown");
+      is(`${count} customers: at most ten payment queries`,piCalls,10);
+    } finally {globalThis.fetch=answer;}
+  }
+  part("The link form: its field is named and described, and a notice after it is reached");
+  const formHtml = await render(store, letter.id);
+  is(
+    "the field is labeled as an email address and described by the line that explains it",
+    [/<label[^>]*for="letter-email"[^>]*>Your email address<\/label>/.test(formHtml), /<p[^>]*id="letter-email-explain"[^>]*>Type the address you used/.test(formHtml), /<input[^>]*aria-describedby="letter-email-explain"/.test(formHtml)],
+    [true, true, true],
+  );
+  is("the form is named by its question", /<form[^>]*aria-labelledby="letter-email-title"/.test(formHtml) && /id="letter-email-title"[^>]*>Already have one\? Read it here</.test(formHtml), true);
+  for (const state of ["email", "limited", "error", "sent"]) {
+    const arrived = await render(store, letter.id, {}, { link: state });
+    is(`after the form (?link=${state}), the notice can take the focus the page gives it`, /<div[^>]*tabindex="-1"[^>]*data-arrival="focus"[^>]*role="status"/.test(arrived) || /<div[^>]*data-arrival="focus"[^>]*tabindex="-1"/.test(arrived) || /<div[^>]*role="status"[^>]*tabindex="-1"[^>]*data-arrival/.test(arrived), true);
+  }
+  for (const odd of ["constructor", "toString", "__proto__", "hasOwnProperty", "nope"]) {
+    is(`?link=${odd} draws no notice`, (await render(store, letter.id, {}, { link: odd })).includes('role="status"'), false);
+  }
+  const shared = renderToStaticMarkup(createElement(LinkRequestForm, { action: "/api/store/community/link", hidden: { handle: HANDLE }, id: "community-email", label: "Already a member?", explain: "Type the address you used to buy or sign up.", button: "Send me the link", placeholder: "you@example.com", language: "es" }));
+  is(
+    "the community's form, the same component: named, described, labeled in the store's language",
+    [/aria-labelledby="community-email-title"/.test(shared), /aria-describedby="community-email-explain"/.test(shared), /<label[^>]*for="community-email"[^>]*>Tu dirección de email<\/label>/.test(shared)],
+    [true, true, true],
+  );
+
   part("The emailed link: the same answer, at once, whoever asks");
   const ask = async (email: string, ip = "203.0.113.7") => {
     const form = new FormData();
@@ -353,6 +478,39 @@ async function main(): Promise<void> {
   const notice = await render(store, letter.id, {}, { link: "sent" });
   is("the page says to check the inbox", notice.includes("Check your inbox"), true);
 
+  part("The limits on the form and on the link");
+  for (let i = 1; i <= 10; i += 1) await ask(`ip-limit-${i}@example.com`, "198.51.100.50");
+  await runAfter();
+  is("the 11th request from one address on the internet: too many", (await ask("ip-limit-11@example.com", "198.51.100.50")).location.endsWith("?link=limited"), true);
+  const perAddress: string[] = [];
+  for (let i = 1; i <= 6; i += 1) perAddress.push((await ask("zed@example.com", `198.51.100.${60 + i}`)).location.replace(/^.*\?link=/, ""));
+  await runAfter();
+  is("the 6th request for one email address, from anywhere: too many", perAddress, ["sent", "sent", "sent", "sent", "sent", "limited"]);
+  is("and the page says so", (await render(store, letter.id, {}, { link: "limited" })).includes("Too many requests"), true);
+  const mailsBeforeOpens = mails.length;
+  await ask("ana@example.com", "198.51.100.80");
+  await runAfter();
+  is("a fresh link for the holder", mails.length, mailsBeforeOpens + 1);
+  const fresh = /token=([0-9a-f]{64})/.exec(mails.at(-1)!.text)![1];
+  const opens: number[] = [];
+  for (let i = 1; i <= 11; i += 1) opens.push((await openRoute(new NextRequest(`https://marktmorgen.com/api/store/letters/open?token=${fresh}`))).status);
+  is("a link opens 10 times; the 11th is gone", opens, [...Array(10).fill(303), 410]);
+
+  part("The email service known to be down: said honestly, the same for everyone");
+  const key = process.env.RESEND_API_KEY;
+  delete process.env.RESEND_API_KEY;
+  afterTasks.length = 0;
+  const holderNoMail = await ask("ana@example.com", "198.51.100.90");
+  const strangerNoMail = await ask("nobody-else@example.com", "198.51.100.90");
+  const leftAfter = afterTasks.length;
+  process.env.RESEND_API_KEY = key;
+  is(
+    "no \"on its way\": both told the email could not be sent, and nothing is left to do after the answer",
+    [holderNoMail.location.replace(/^.*\?link=/, ""), strangerNoMail.location.replace(/^.*\?link=/, ""), leftAfter],
+    ["error", "error", 0],
+  );
+  is("the page says the email could not be sent", (await render(store, letter.id, {}, { link: "error" })).includes("The email could not be sent"), true);
+
   part("Nowhere public: the list, the metadata, the code that reads copies");
   cookieValues.clear();
   const list = renderToStaticMarkup(await LettersPage({ params: Promise.resolve({ handle: `@${HANDLE}` }) }));
@@ -393,6 +551,44 @@ async function main(): Promise<void> {
   is("no EXPIRE with an option was ever sent", expireOptions, 0);
   is("the store lists all four", (await listLetters(store)).length, 4);
 
+  part("The feature page says what is true of an email kept for members");
+  // lib/help-content.ts says the same and waits: it is reserved by another agent (Claude 2, 513 [PF1]).
+  for (const file of ["lib/feature-pages.ts"]) {
+    const text = readFileSync(join(process.cwd(), file), "utf8");
+    is(`${file}: "anyone can read it" always comes with its exception`, [/anyone can read it once it is(?: published, including people who are not on your list)?\. /.test(text), text.includes("unless you keep it for the people who have products you choose")], [false, true]);
+  }
+
+  part("A product still for sale whose listing does not read is not \"no longer for sale\"");
+  // More products than the first page holds, so one listing is read from its own record, not the store's head.
+  const extra: string[] = [];
+  for (let i = 0; i < 3; i += 1) {
+    const one = await addProduct(OWNER, `Extra ${i + 1}`, "", "9", null);
+    if (!one.ok) throw new Error("no extra product");
+    extra.push(one.product.id);
+  }
+  const current = (await storeForEmail(OWNER))!;
+  const unlisted = [...many, ...extra].find((id) => !current.catalog.head.some((l) => l.id === id));
+  if (!unlisted || current.catalog.inline || !current.catalog.id) throw new Error("no product outside the head to make unreadable");
+  const kept2 = await publishLetter(current, broadcast(current, "f1", { subject: "Workbook members" }), now, [unlisted]);
+  if (!kept2.ok) throw new Error(kept2.message);
+  const listingKey = `nl:catalog:${current.catalog.id}:l:${unlisted}`;
+  const listing = redis.run(["GET", listingKey]);
+  if (typeof listing !== "string") throw new Error("no listing record");
+  redis.run(["SET", listingKey, "{not json"]);
+  const unreadableHtml = await render(store, kept2.letter.id);
+  is(
+    "a visitor: never told it is gone; told the products could not all be shown, without \"below\", and still offered the form",
+    [unreadableHtml.includes("no longer for sale"), unreadableHtml.includes("products below"), unreadableHtml.includes("We couldn&#x27;t show every one of them just now"), unreadableHtml.includes("/api/store/letters/link"), unreadableHtml.includes(SECRET)],
+    [false, false, true, true, false],
+  );
+  const fayPass = await pass("fay@example.com", "all");
+  sessions["fay@example.com"] = [paid("cs_test_fay000000001", unlisted)];
+  is("and a proved holder of it reads it", (await render(store, kept2.letter.id, { [cookieName]: fayPass })).includes(SECRET), true);
+  const ownerUnreadable = await render(store, kept2.letter.id, { [SESSION_COOKIE]: owner });
+  is("the creator is not told none of the products is left", [ownerUnreadable.includes("None of the products you chose is on your store anymore"), ownerUnreadable.includes("Only you and people who have one of these products")], [false, true]);
+  redis.run(["SET", listingKey, listing]);
+  is("read again, the list is whole and says \"below\"", (await render(store, kept2.letter.id)).includes("products below"), true);
+
   part("The creator is told when none of the products is left");
   const lone = await publishLetter(store, broadcast(store, "c1", { subject: "Knife notes" }), now, [other.product.id]);
   if (!lone.ok) throw new Error(lone.message);
@@ -401,6 +597,35 @@ async function main(): Promise<void> {
   const loneHtml = await render(afterRemoval, lone.letter.id, { [SESSION_COOKIE]: owner });
   is("the creator reads it and is told nobody else can", [loneHtml.includes(SECRET), loneHtml.includes("None of the products you chose is on your store anymore")], [true, true]);
   is("a visitor still sees no words", (await render(afterRemoval, lone.letter.id)).includes(SECRET), false);
+  for (const [who, cookie] of [["a visitor", {}], ["a proved address", { [cookieName]: anaPass }]] as [string, Record<string, string>][]) {
+    const gone = await render(afterRemoval, lone.letter.id, cookie);
+    is(
+      `${who} is told its products are no longer for sale, with no empty list, no "below" and no form`,
+      [gone.includes("The products this email was for are no longer for sale"), gone.includes("<ul"), gone.includes("products below"), gone.includes("/api/store/letters/link"), gone.includes("This address has none of these products")],
+      [true, false, false, false, false],
+    );
+  }
+
+  part("Revisor 1 on #2464: one unreadable entry does not take away a purchase another entry proves; reads pin Stripe's version");
+  {
+    forgetAnswers();
+    const answer = globalThis.fetch;
+    const versions: (string | null)[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input instanceof Request ? input.url : input));
+      if (url.hostname !== "api.stripe.com") return answer(input, init);
+      if (url.pathname.endsWith("/checkout/sessions") || url.pathname.endsWith("/payment_intents")) versions.push(new Headers(init?.headers).get("Stripe-Version"));
+      if (url.pathname.endsWith("/checkout/sessions")) return new Response(JSON.stringify({ object: "list", data: [{ ...paid("cs_test_oddstate0001", club), status: "a_state_stripe_adds_later" }, paid("cs_test_goodstate001", club)], has_more: false }), { status: 200 });
+      return answer(input, init);
+    }) as typeof fetch;
+    try {
+      is("a paid session beside an entry in a state not known here: the holder is let in", (await letterReader(store, letter, jar({ [cookieName]: anaPass }))).state, "in");
+      is("every list read pins Stripe's version", versions.length > 0 && versions.every((v) => v === STRIPE_VERSION), true);
+    } finally {
+      globalThis.fetch = answer;
+      forgetAnswers();
+    }
+  }
   done();
 }
 

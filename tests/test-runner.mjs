@@ -81,16 +81,18 @@ export function procState(pid) {
   } catch { return 'proc=unreadable'; }
 }
 
-/** Where each test file runs in a process group of its own, so its whole tree can be ended (POSIX). */
+/** Where each test file runs in a process group of its own, so that group can be ended (POSIX). */
 const OWN_GROUP = process.platform !== 'win32';
 /** The groups of the files running now, ended if the runner itself is stopped (they no longer share its terminal group). */
 const active = new Set();
 let hooked = false;
 
 /**
- * Ends a test file's whole process tree, not only the process it started (Codex G on #2826, 5805110853: a descendant
- * left alive kept the inherited output open after the runner finished and overlapped the next file). POSIX: the
- * file's own process group; Windows: taskkill /T. Never throws.
+ * Ends a test file's process group, not only the process it started (Codex G on #2826, 5805110853: a descendant left
+ * alive kept the inherited output open after the runner finished and overlapped the next file). POSIX: the file's own
+ * process group; Windows: taskkill /T, the tree it can find. A process the file starts in a group of its own
+ * (detached: true, or setsid) leaves the group and is not reached; only the system's own tools could follow it, and no
+ * test file starts one (tests/test-runner.test.ts holds that; Codex G, 5805374280). Never throws.
  * @param {number} pid
  */
 function endTree(pid) {
@@ -113,7 +115,7 @@ function hookRunnerStop() {
 /**
  * @param {string} bundle @param {NodeJS.ProcessEnv} env @param {string} [executable]
  * @param {{timeoutMs?: number, label?: string, diagnose?: () => string}} [limit] with timeoutMs, a process still
- *   running then is described (whether exit came, /proc, and what diagnose adds), its tree ended and counted as failed
+ *   running then is described (whether exit came, /proc, and what diagnose adds), its process group ended and counted as failed
  * @returns {Promise<number>}
  */
 export function runBundle(bundle, env, executable = process.execPath, limit = {}) {
@@ -140,8 +142,8 @@ export function runBundle(bundle, env, executable = process.execPath, limit = {}
       const proc = pid === undefined ? 'pid=none' : procState(pid);
       let extra = '';
       try { extra = limit.diagnose ? `; ${limit.diagnose()}` : ''; } catch { /* the line goes out without it */ }
-      console.error(`TIMEOUT: ${limit.label ?? bundle} did not finish in ${(limit.timeoutMs ?? 0) / 1000} s; ${seen}; ${proc}${extra}; killed with its process tree and counted as a failure.`);
-      // Already gone (close never came): its tree is ended and it fails now.
+      console.error(`TIMEOUT: ${limit.label ?? bundle} did not finish in ${(limit.timeoutMs ?? 0) / 1000} s; ${seen}; ${proc}${extra}; killed with its process group and counted as a failure.`);
+      // Already gone (close never came): its process group is ended and it fails now.
       if (exited) return finish(1);
       if (pid !== undefined) endTree(pid);
       else child.kill('SIGKILL');

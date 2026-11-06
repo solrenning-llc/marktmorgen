@@ -1,5 +1,6 @@
 import { del, head } from "@/lib/blob";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 
 /**
  * Pictures let in through the picture door (app/api/store/image/upload) and
@@ -53,13 +54,17 @@ function doorsKey(path: string): string | null {
 export async function notePictureDoor(path: string, now = Date.now()): Promise<boolean> {
   const key = doorsKey(path);
   if (!key || !isRedisConfigured()) return false;
-  await redisPipeline([
+  const replies = repliesFor(await redisPipeline([
     ["ZREMRANGEBYSCORE", key, 0, now - PICTURE_DOOR_SECONDS * 1000],
     ["ZADD", key, now, path],
     ["ZREMRANGEBYRANK", key, 0, -(PICTURE_DOOR_MAX + 1)],
     ["EXPIRE", key, PICTURE_DOOR_SECONDS],
-  ]);
-  return true;
+  ]), 4);
+  // Noted only on its whole acknowledgement (Codex P on #2156): a count for each trim, 0 or 1 for the add, and 1
+  // for the expiry the add made possible. Anything else is not a note, and the upload is not opened.
+  if (!replies) return false;
+  const [trimmed, added, kept, expires] = replies.map(countOf);
+  return trimmed !== null && (added === 0 || added === 1) && kept !== null && expires === 1;
 }
 
 /**
@@ -88,9 +93,17 @@ export async function takePictureDoor(paths: string[], now = Date.now()): Promis
   }));
   if (!Array.isArray(answers) || answers.length !== 2 * unique.length) throw new Error("could not confirm the pictures taken from the door");
   unique.forEach((path, i) => {
-    const at = Number(answers[2 * i]);
+    // Read exactly (Codex P on #2156): the score is absent (null) or a number Redis wrote, the removal an exact 0 or
+    // 1; anything else is not a confirmed take, and throws as an unconfirmed take does.
+    const score = answers[2 * i];
+    const removed = countOf(answers[2 * i + 1]);
+    if (removed !== 0 && removed !== 1) throw new UnknownReplyError("taking a picture from the door: ZREM");
+    if (score !== null && !(typeof score === "number" || (typeof score === "string" && /^\d{1,16}(\.\d+)?$/.test(score)))) {
+      throw new UnknownReplyError("taking a picture from the door: ZSCORE");
+    }
+    const at = score === null ? NaN : Number(score);
     const fresh = Number.isFinite(at) && at > 0 && at >= now - PICTURE_DOOR_SECONDS * 1000;
-    if (Number(answers[2 * i + 1]) === 1 && fresh) taken.set(path, at);
+    if (removed === 1 && fresh) taken.set(path, at);
   });
   return taken;
 }

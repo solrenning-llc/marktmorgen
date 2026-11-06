@@ -79,6 +79,29 @@ async function main(): Promise<void> {
   counts = await sweepCheckouts(Date.now() + 20_000);
   console.error = errors;
   is("A, kept for the next run, is put on the list then", [await listed(A), counts.listed, counts.failed], [1, 1, 0]);
+
+  part("An order whose products cannot be read in both loops is one failed order, not two (Claude 5 on #2977)");
+  // C, not yet confirmed, bought the hidden product: its confirmation reads that product and throws, and so does the
+  // list's read of it. It is one order that failed, counted once, and it stays unmarked in both for the next run.
+  const C = "cs_test_sweeplistC00000001";
+  sessions = [paid(C, "cat@example.com", hidden.product.id, 30), ...sessions];
+  throws = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:catalog:") && String(c[1]).endsWith(`:l:${hidden.product.id}`))) {
+      throws += 1;
+      throw new Error("a record that does not read");
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  console.error = () => undefined;
+  counts = await sweepCheckouts(Date.now() + 20_000);
+  redis.pipeline = real;
+  console.error = errors;
+  is("both loops threw on C (its confirmation and its list read)", throws >= 2, true);
+  is("C is counted as failed once", counts.failed, 1);
+  is("C is neither confirmed nor listed, so the next run tries both", [Number((await real([["EXISTS", `nl:confirm:${C}`]]))[0]), await listed(C), mail.ses.filter((m) => m.to.includes("cat@example.com")).length], [0, 0, 0]);
+  counts = await sweepCheckouts(Date.now() + 20_000);
+  is("the read back, C is confirmed and listed on the next run", [counts.confirmed, counts.listed, counts.failed, await listed(C)], [1, 1, 0, 1]);
   done();
 }
 

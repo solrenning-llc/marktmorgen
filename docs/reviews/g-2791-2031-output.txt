@@ -1,0 +1,2873 @@
+===== /tmp/g2791-2031-focal.log =====
+=== g2791-refund-order.proof.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+G_REFUND_ORDER {"order":"newfirst","grant":[],"purchases":[],"watch":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"statuses":["REFUNDED","REFUNDED"]}
+  ok    G serial: both real captures refunded
+  ok    G serial: no imported entitlement after both refunds
+  ok    G serial: no paid purchase after both refunds
+  ok    G serial: both refund watch entries completed
+
+60 checks, all passing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-Ue1q2m/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-Ue1q2m/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-Ue1q2m/0.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-Ue1q2m/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-Ue1q2m/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-Ue1q2m/0.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+=== g2791-refund-order.test.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+G_REFUND_ORDER {"order":"newfirst","grant":[],"purchases":[],"watch":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"statuses":["REFUNDED","REFUNDED"]}
+  ok    G serial: both real captures refunded
+  ok    G serial: no imported entitlement after both refunds
+  ok    G serial: no paid purchase after both refunds
+  ok    G serial: both refund watch entries completed
+
+60 checks, all passing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-Ue1q2m/1.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-Ue1q2m/1.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-Ue1q2m/1.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-Ue1q2m/1.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-Ue1q2m/1.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-Ue1q2m/1.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+=== g2791-dual-reassign.proof.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+  ok    G other: exact ownership-pair boundary reached
+  ok    G other: unknown does not reassign ownership
+  ok    G other: target stays watched
+G_OTHER_ID_FIRST {"otherMode":"extra","grant":["paypal:5O190127TN3647102"],"watch":["5O190127TN3647102","5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"otherPaid":true,"otherStatus":"COMPLETED"}
+  ok    G other: healthy retry assigns real other payment
+  ok    G other: no course removal while other payment stands
+G_REASSIGN_AFTER_BOTH_REFUNDED {"grant":[],"purchases":[]}
+  ok    G mutation: refunding both real payments leaves no imported purchase
+
+62 checks, all passing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-Ue1q2m/2.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-Ue1q2m/2.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-Ue1q2m/2.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-Ue1q2m/2.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-Ue1q2m/2.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-Ue1q2m/2.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+=== g2791-dual-revoke.proof.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+  ok    the first refunded in full: the second payment keeps it
+  ok    now standing on the second
+
+G: unknown paid-record GET envelope must keep the watch and the purchase
+  ok    G: exact transport boundary was reached
+  ok    G: purchase state after the first run
+  ok    G: unknown receipt keeps this order on the watch
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|28860fa3ad","buyer@example.com|28860fa3ad"]}
+  ok    G: healthy retry removes the refunded purchase
+
+62 checks, all passing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-Ue1q2m/3.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-Ue1q2m/3.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-Ue1q2m/3.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-Ue1q2m/3.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-Ue1q2m/3.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-Ue1q2m/3.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+=== g2791-applied-reassign.proof.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+  ok    G other: exact ownership-pair boundary reached
+  ok    G other: unknown does not reassign ownership
+  ok    G other: target stays watched
+G_OTHER_ID_FIRST {"otherMode":"extra","grant":["paypal:5O190127TN3647107"],"watch":["5O190127TN3647102","5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"otherPaid":true,"otherStatus":"COMPLETED"}
+  ok    G other: healthy retry assigns real other payment
+  ok    G other: no course removal while other payment stands
+G_REASSIGN_AFTER_BOTH_REFUNDED {"grant":[],"purchases":[]}
+  ok    G mutation: refunding both real payments leaves no imported purchase
+
+62 checks, all passing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-Ue1q2m/4.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-Ue1q2m/4.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-Ue1q2m/4.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-Ue1q2m/4.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-Ue1q2m/4.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-Ue1q2m/4.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+=== g2791-applied-revoke.proof.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+  ok    the first refunded in full: the second payment keeps it
+  ok    now standing on the second
+
+G: unknown paid-record GET envelope must keep the watch and the purchase
+  ok    G: exact transport boundary was reached
+  ok    G: purchase state after the first run
+  ok    G: unknown receipt keeps this order on the watch
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|d1cb6faa35"]}
+  ok    G: healthy retry removes the refunded purchase
+
+62 checks, all passing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-Ue1q2m/5.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-Ue1q2m/5.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-Ue1q2m/5.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-Ue1q2m/5.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-Ue1q2m/5.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-Ue1q2m/5.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+
+
+===== /tmp/g2791-2031-oldfirst.log =====
+=== g2791-refund-order.proof.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+G_REFUND_ORDER {"order":"oldfirst","grant":[],"purchases":[],"watch":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"statuses":["REFUNDED","REFUNDED"]}
+  ok    G serial: both real captures refunded
+  ok    G serial: no imported entitlement after both refunds
+  ok    G serial: no paid purchase after both refunds
+  ok    G serial: both refund watch entries completed
+
+60 checks, all passing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-AyRuEi/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-AyRuEi/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-AyRuEi/0.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-AyRuEi/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-AyRuEi/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-AyRuEi/0.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+=== g2791-refund-order.test.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+G_REFUND_ORDER {"order":"oldfirst","grant":[],"purchases":[],"watch":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"statuses":["REFUNDED","REFUNDED"]}
+  ok    G serial: both real captures refunded
+  ok    G serial: no imported entitlement after both refunds
+  ok    G serial: no paid purchase after both refunds
+  ok    G serial: both refund watch entries completed
+
+60 checks, all passing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-AyRuEi/1.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-AyRuEi/1.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-AyRuEi/1.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-AyRuEi/1.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-AyRuEi/1.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-AyRuEi/1.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+
+
+===== /tmp/g2791-2031-concurrent.log =====
+=== g2791-concurrent-payment.proof.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+  ok    the first refunded in full: the second payment keeps it
+  ok    now standing on the second
+
+G: unknown paid-record GET envelope must keep the watch and the purchase
+  ok    G: exact transport boundary was reached
+  FAIL  G: purchase state after the first run
+        expected 1
+        got      0
+  ok    G: unknown receipt keeps this order on the watch
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647108"],"imported":0,"purchases":[],"dropped":["buyer@example.com|49f2519b81"]}
+  FAIL  G race: concurrent paid purchase survives healthy retry
+        expected 1
+        got      0
+  ok    G race: new Paid record is still real
+
+63 checks, 2 failing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-UHCrr3/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-UHCrr3/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-UHCrr3/0.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-UHCrr3/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-UHCrr3/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-UHCrr3/0.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+
+
+===== /tmp/g2791-2031-concurrent-control.log =====
+=== g2791-concurrent-payment.proof.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+  ok    the first refunded in full: the second payment keeps it
+  ok    now standing on the second
+
+G: unknown paid-record GET envelope must keep the watch and the purchase
+  ok    G: exact transport boundary was reached
+  ok    G: purchase state after the first run
+  ok    G: unknown receipt keeps this order on the watch
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"control","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":0,"purchases":[],"dropped":["buyer@example.com|2152ee2832"]}
+  ok    G race: concurrent paid purchase survives healthy retry
+  ok    G race: new Paid record is still real
+
+63 checks, all passing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-QWeKCv/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-QWeKCv/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-QWeKCv/0.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-QWeKCv/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-QWeKCv/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-QWeKCv/0.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+
+
+===== /tmp/g2791-a2-return-red.log =====
+=== g2791-refund-order.proof.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+G_REFUND_ORDER {"order":"newfirst","grant":["paypal:5O190127TN3647107"],"purchases":["Sourdough Guide"],"watch":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"statuses":["REFUNDED","REFUNDED"]}
+  ok    G serial: both real captures refunded
+  FAIL  G serial: no imported entitlement after both refunds
+        expected 0
+        got      1
+  FAIL  G serial: no paid purchase after both refunds
+        expected 0
+        got      1
+  ok    G serial: both refund watch entries completed
+
+60 checks, 2 failing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-B6S7Ij/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-B6S7Ij/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-B6S7Ij/0.cjs:63766:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-B6S7Ij/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-B6S7Ij/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-B6S7Ij/0.cjs:63772:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+=== g2791-concurrent-payment.proof.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+  ok    the first refunded in full: the second payment keeps it
+  ok    now standing on the second
+
+G: unknown paid-record GET envelope must keep the watch and the purchase
+  ok    G: exact transport boundary was reached
+  FAIL  G: purchase state after the first run
+        expected 1
+        got      0
+  ok    G: unknown receipt keeps this order on the watch
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647108"],"imported":0,"purchases":[],"dropped":["buyer@example.com|af789fe370"]}
+  FAIL  G race: concurrent paid purchase survives healthy retry
+        expected 1
+        got      0
+  ok    G race: new Paid record is still real
+
+63 checks, 2 failing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-B6S7Ij/1.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-B6S7Ij/1.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-B6S7Ij/1.cjs:63766:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-B6S7Ij/1.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-B6S7Ij/1.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-B6S7Ij/1.cjs:63772:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+
+
+===== /tmp/g2791-2031-score-empty.log =====
+=== g2791-refund-score.proof.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+G_REFUND_SCORE {"mode":"empty","injected":1,"grant":[],"purchases":[],"watch":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"status":"COMPLETED"}
+  ok    G score: exact new ZSCORE reached
+  ok    G score: other real capture remains completed
+  ok    G score: actual other paid record remains
+  FAIL  G score: malformed refund marker cannot delete paid entitlement
+        expected 1
+        got      0
+  FAIL  G score: malformed refund marker cannot hide paid purchase
+        expected 1
+        got      0
+  FAIL  G score: unknown stays watched
+        expected true
+        got      false
+  FAIL  G score: paid entitlement survives healthy retry
+        expected 1
+        got      0
+
+63 checks, 4 failing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-FYRJ3k/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-FYRJ3k/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-FYRJ3k/0.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-FYRJ3k/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-FYRJ3k/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-FYRJ3k/0.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+
+
+===== /tmp/g2791-2031-score-spaces.log =====
+=== g2791-refund-score.proof.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+G_REFUND_SCORE {"mode":"spaces","injected":1,"grant":[],"purchases":[],"watch":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"status":"COMPLETED"}
+  ok    G score: exact new ZSCORE reached
+  ok    G score: other real capture remains completed
+  ok    G score: actual other paid record remains
+  FAIL  G score: malformed refund marker cannot delete paid entitlement
+        expected 1
+        got      0
+  FAIL  G score: malformed refund marker cannot hide paid purchase
+        expected 1
+        got      0
+  FAIL  G score: unknown stays watched
+        expected true
+        got      false
+  FAIL  G score: paid entitlement survives healthy retry
+        expected 1
+        got      0
+
+63 checks, 4 failing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-phxCBq/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-phxCBq/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-phxCBq/0.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-phxCBq/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-phxCBq/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-phxCBq/0.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+
+
+===== /tmp/g2791-2031-score-hex.log =====
+=== g2791-refund-score.proof.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+G_REFUND_SCORE {"mode":"hex","injected":1,"grant":[],"purchases":[],"watch":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"status":"COMPLETED"}
+  ok    G score: exact new ZSCORE reached
+  ok    G score: other real capture remains completed
+  ok    G score: actual other paid record remains
+  FAIL  G score: malformed refund marker cannot delete paid entitlement
+        expected 1
+        got      0
+  FAIL  G score: malformed refund marker cannot hide paid purchase
+        expected 1
+        got      0
+  FAIL  G score: unknown stays watched
+        expected true
+        got      false
+  FAIL  G score: paid entitlement survives healthy retry
+        expected 1
+        got      0
+
+63 checks, 4 failing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-XfGgIu/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-XfGgIu/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-XfGgIu/0.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-XfGgIu/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-XfGgIu/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-XfGgIu/0.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+
+
+===== /tmp/g2791-2031-score-extra.log =====
+=== g2791-refund-score.proof.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+G_REFUND_SCORE {"mode":"extra","injected":1,"grant":["paypal:5O190127TN3647102"],"purchases":["Sourdough Guide"],"watch":["5O190127TN3647102","5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"status":"COMPLETED"}
+  ok    G score: exact new ZSCORE reached
+  ok    G score: other real capture remains completed
+  ok    G score: actual other paid record remains
+  ok    G score: malformed refund marker cannot delete paid entitlement
+  ok    G score: malformed refund marker cannot hide paid purchase
+  ok    G score: unknown stays watched
+  ok    G score: paid entitlement survives healthy retry
+
+63 checks, all passing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-Ypj1Mj/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-Ypj1Mj/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-Ypj1Mj/0.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-Ypj1Mj/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-Ypj1Mj/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-Ypj1Mj/0.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+
+
+===== /tmp/g2791-2031-score-null.log =====
+=== g2791-refund-score.proof.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+G_REFUND_SCORE {"mode":"null","injected":1,"grant":["paypal:5O190127TN3647107"],"purchases":["Sourdough Guide"],"watch":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"status":"COMPLETED"}
+  ok    G score: exact new ZSCORE reached
+  ok    G score: other real capture remains completed
+  ok    G score: actual other paid record remains
+  ok    G score: malformed refund marker cannot delete paid entitlement
+  ok    G score: malformed refund marker cannot hide paid purchase
+  ok    G score: paid entitlement survives healthy retry
+
+62 checks, all passing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-rtnnjO/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-rtnnjO/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-rtnnjO/0.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-rtnnjO/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-rtnnjO/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-rtnnjO/0.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+
+
+===== /tmp/g2791-a2-score-empty.log =====
+=== g2791-refund-score.proof.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+G_REFUND_SCORE {"mode":"empty","injected":0,"grant":["paypal:5O190127TN3647107"],"purchases":["Sourdough Guide"],"watch":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"status":"COMPLETED"}
+  FAIL  G score: exact new ZSCORE reached
+        expected 1
+        got      0
+  ok    G score: other real capture remains completed
+  ok    G score: actual other paid record remains
+  ok    G score: malformed refund marker cannot delete paid entitlement
+  ok    G score: malformed refund marker cannot hide paid purchase
+  FAIL  G score: unknown stays watched
+        expected true
+        got      false
+  ok    G score: paid entitlement survives healthy retry
+
+63 checks, 2 failing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-OTtgbv/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-OTtgbv/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-OTtgbv/0.cjs:63766:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-OTtgbv/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-OTtgbv/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-OTtgbv/0.cjs:63772:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+
+
+===== /tmp/g2791-2031-srem-notapplied.log =====
+=== g2791-job-mismatch-srem.proof.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+  ok    G SREM: exact job mismatch boundary reached
+  ok    G SREM: unknown ACK keeps watch
+  ok    G SREM: healthy other grant survives unknown ACK
+  ok    G SREM: healthy retry completes refund watch
+  ok    G SREM: healthy payment remains entitled
+G_SREM_ACK {"mode":"notapplied","injected":1,"watch":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"after":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"]}
+
+61 checks, all passing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-TtrKH7/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-TtrKH7/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-TtrKH7/0.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-TtrKH7/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-TtrKH7/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-TtrKH7/0.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+
+
+===== /tmp/g2791-2031-srem-applied.log =====
+=== g2791-job-mismatch-srem.proof.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+  ok    G SREM: exact job mismatch boundary reached
+  ok    G SREM: unknown ACK keeps watch
+  ok    G SREM: healthy other grant survives unknown ACK
+  ok    G SREM: healthy retry completes refund watch
+  ok    G SREM: healthy payment remains entitled
+G_SREM_ACK {"mode":"applied","injected":1,"watch":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"after":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"]}
+
+61 checks, all passing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-rHCxx9/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-rHCxx9/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-rHCxx9/0.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-rHCxx9/0.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-rHCxx9/0.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-rHCxx9/0.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+
+
+===== /tmp/g2791-2031-linked.log =====
+=== paypal-sales.test.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+  ok    the first refunded in full: the second payment keeps it
+  ok    now standing on the second
+  ok    a course removal that fails keeps the purchase for the next run
+  ok    both refunded: taken back
+  ok    from their purchases and their course
+  ok    the paid record stays, for the thanks page and PayPal's id
+
+A funded new seller onboarding requires its resource cohort
+  ok    no new referral without a funded resource window
+  ok    the provider is not asked and the existing seller stays
+
+A funded seller return rechecks admission before provider verification
+  ok    a marked owner stays at the studio without completing seller installation
+  ok    no PayPal request including auth and no seller replacement
+
+Disconnected
+  ok    no PayPal button, no order
+
+67 checks, all passing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-UIUvrR/0.cjs:18367:13)
+    at async captureOrder (/tmp/g-2681-proof-UIUvrR/0.cjs:18634:13)
+    at async main (/tmp/g-2681-proof-UIUvrR/0.cjs:67118:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-UIUvrR/0.cjs:18367:13)
+    at async captureOrder (/tmp/g-2681-proof-UIUvrR/0.cjs:18634:13)
+    at async main (/tmp/g-2681-proof-UIUvrR/0.cjs:67124:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+taking a refunded PayPal sale's course away failed; looked at again in an hour Error: the ledger did not answer
+    at dropStart (/tmp/g-2681-proof-UIUvrR/0.cjs:67156:11)
+    at watchPayPal (/tmp/g-2681-proof-UIUvrR/0.cjs:18864:56)
+    at async main (/tmp/g-2681-proof-UIUvrR/0.cjs:67155:3)
+
+=== paypal-sales-shape.test.ts ===
+
+Captured, the answer unreadable: kept for the sweep, handed over once PayPal is read
+  ok    not reported as paid yet
+  ok    the order is kept for the sweep
+  ok    the sweep hands it over, once
+
+Captured, the answer without the buyer's address: kept for the sweep
+  ok    not reported as paid yet
+  ok    the order is kept for the sweep
+  ok    the sweep hands it over, once
+
+A pending order read back garbled stays watched
+  ok    pending
+  ok    still watched after a garbled read
+  ok    handed over once PayPal completes it
+
+A paid order read back COMPLETED without its captures stays watched (review of Codex G on #2681)
+  ok    still watched
+  ok    handed over once PayPal shows the capture
+
+A capture read back garbled at the end of its refund window is not taken for 'not refunded'
+  ok    still watched, to be asked again
+
+12 checks, all passing.
+
+=== paypal-numbers.test.ts ===
+
+The order keeps what the visit carried
+  ok    the channel, the affiliate, the sale and the yes to start access at once, on the payment
+
+In the store's numbers, like a Stripe sale
+  ok    written down once
+  ok    in the totals, by product and by channel, on a store with no Stripe
+  ok    its store sale in the discounts beside full price
+  ok    in the sales file, said to be paid with PayPal
+
+Credited to the affiliate who sent the buyer
+  ok    at the share the buyer paid at, once
+
+Told to the webhooks, once
+  ok    sale.completed, paid with PayPal, with the amount and the channel
+
+A refund in full on PayPal
+  ok    counted as a refund in the numbers
+  ok    and takes the commission back
+
+Buyers brought over: history, never a sale
+  ok    in the list's groups, with nothing spent and no purchase here
+  ok    a gift is not an import
+  ok    named for what it is
+  ok    the PayPal buyer refunded in full is not a buyer in the list's groups
+
+13 checks, all passing.
+a webhook delivery failed Error: MemoryRedis: unsupported EVAL
+    at MemoryRedis.run (/tmp/g-2681-proof-UIUvrR/2.cjs:1183:121)
+    at /tmp/g-2681-proof-UIUvrR/2.cjs:382:72
+    at Array.map (<anonymous>)
+    at MemoryRedis.pipeline (/tmp/g-2681-proof-UIUvrR/2.cjs:382:54)
+    at redisPipeline (/tmp/g-2681-proof-UIUvrR/2.cjs:2103:41)
+    at claim (/tmp/g-2681-proof-UIUvrR/2.cjs:53331:23)
+    at /tmp/g-2681-proof-UIUvrR/2.cjs:53405:37
+    at soon (/tmp/g-2681-proof-UIUvrR/2.cjs:53342:12)
+    at emitEvent (/tmp/g-2681-proof-UIUvrR/2.cjs:53404:9)
+    at async handOverPayPal (/tmp/g-2681-proof-UIUvrR/2.cjs:63430:3)
+
+=== paypal-payouts.test.ts ===
+
+Connecting the creator's own PayPal app
+  ok    not a Client ID
+  ok    PayPal refuses it
+  ok    an app without Payouts on
+  ok    an app with Payouts on
+  ok    the Secret is not stored readable
+  ok    the studio sees only a shortened Client ID
+
+One press
+  ok    another payout holding the lock: busy, never an error, and nothing asked of PayPal or Stripe
+  ok    a balance that does not cover it sends nothing
+  ok    everyone owed, in one batch
+  ok    with PayPal's idempotency key, the batch's own id
+  ok    each by email, in the store's currency, as PayPal writes amounts
+  ok    only fields PayPal's description has
+  ok    both on their way
+  ok    nobody is sent twice while on their way
+  ok    the book does not say paid yet
+
+Unavailable pending records never start a new payment
+  ok    unknown pending exposure rejects the read
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    unknown pending exposure rejects the read
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    unknown pending exposure rejects the read
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    unknown pending exposure rejects the read
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    unknown pending exposure rejects the read
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    saved pending records were not changed
+  ok    valid pending records recover immediately
+
+What PayPal reports
+  ok    paid, and still waiting to be claimed
+  ok    the book says paid for SUCCESS only
+  ok    asked again, nothing is written twice
+  ok    still counted as paid once
+  ok    not claimed in time: back to owed
+  ok    nobody on their way any more
+  ok    and they can be paid again
+
+Payday by itself
+  ok    off until asked
+  ok    on when asked
+  ok    the email says what was sent, from where
+  ok    and when nothing could be sent, why
+
+Taken away
+  ok    nothing is sent without it
+
+49 checks, all passing.
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable (/tmp/g-2681-proof-UIUvrR/3.cjs:46286:9)
+    at readPendingPayoutBatches (/tmp/g-2681-proof-UIUvrR/3.cjs:46301:17)
+    at readOpen (/tmp/g-2681-proof-UIUvrR/3.cjs:46476:10)
+    at async onTheirWay (/tmp/g-2681-proof-UIUvrR/3.cjs:46480:16)
+    at async /tmp/g-2681-proof-UIUvrR/3.cjs:46538:40
+    at async withLock (/tmp/g-2681-proof-UIUvrR/3.cjs:4063:12)
+    at async payWithPayPal (/tmp/g-2681-proof-UIUvrR/3.cjs:46535:12)
+    at async main (/tmp/g-2681-proof-UIUvrR/3.cjs:46935:21)
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable (/tmp/g-2681-proof-UIUvrR/3.cjs:46286:9)
+    at readPendingPayoutBatches (/tmp/g-2681-proof-UIUvrR/3.cjs:46301:17)
+    at readOpen (/tmp/g-2681-proof-UIUvrR/3.cjs:46476:10)
+    at async onTheirWay (/tmp/g-2681-proof-UIUvrR/3.cjs:46480:16)
+    at async /tmp/g-2681-proof-UIUvrR/3.cjs:46538:40
+    at async withLock (/tmp/g-2681-proof-UIUvrR/3.cjs:4063:12)
+    at async payWithPayPal (/tmp/g-2681-proof-UIUvrR/3.cjs:46535:12)
+    at async main (/tmp/g-2681-proof-UIUvrR/3.cjs:46935:21)
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable (/tmp/g-2681-proof-UIUvrR/3.cjs:46286:9)
+    at readPendingPayoutBatches (/tmp/g-2681-proof-UIUvrR/3.cjs:46294:38)
+    at readOpen (/tmp/g-2681-proof-UIUvrR/3.cjs:46476:10)
+    at async onTheirWay (/tmp/g-2681-proof-UIUvrR/3.cjs:46480:16)
+    at async /tmp/g-2681-proof-UIUvrR/3.cjs:46538:40
+    at async withLock (/tmp/g-2681-proof-UIUvrR/3.cjs:4063:12)
+    at async payWithPayPal (/tmp/g-2681-proof-UIUvrR/3.cjs:46535:12)
+    at async main (/tmp/g-2681-proof-UIUvrR/3.cjs:46935:21)
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable (/tmp/g-2681-proof-UIUvrR/3.cjs:46286:9)
+    at readPendingPayoutBatches (/tmp/g-2681-proof-UIUvrR/3.cjs:46309:14)
+    at readOpen (/tmp/g-2681-proof-UIUvrR/3.cjs:46476:10)
+    at async onTheirWay (/tmp/g-2681-proof-UIUvrR/3.cjs:46480:16)
+    at async /tmp/g-2681-proof-UIUvrR/3.cjs:46538:40
+    at async withLock (/tmp/g-2681-proof-UIUvrR/3.cjs:4063:12)
+    at async payWithPayPal (/tmp/g-2681-proof-UIUvrR/3.cjs:46535:12)
+    at async main (/tmp/g-2681-proof-UIUvrR/3.cjs:46935:21)
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable (/tmp/g-2681-proof-UIUvrR/3.cjs:46286:9)
+    at readPendingPayoutBatches (/tmp/g-2681-proof-UIUvrR/3.cjs:46315:155)
+    at readOpen (/tmp/g-2681-proof-UIUvrR/3.cjs:46476:10)
+    at async onTheirWay (/tmp/g-2681-proof-UIUvrR/3.cjs:46480:16)
+    at async /tmp/g-2681-proof-UIUvrR/3.cjs:46538:40
+    at async withLock (/tmp/g-2681-proof-UIUvrR/3.cjs:4063:12)
+    at async payWithPayPal (/tmp/g-2681-proof-UIUvrR/3.cjs:46535:12)
+    at async main (/tmp/g-2681-proof-UIUvrR/3.cjs:46935:21)
+
+=== paypal-payouts-reconcile.test.ts ===
+
+The answer was lost after PayPal made the batch: the retry gets it back, one payment
+  ok    the press is not known
+  ok    one batch in all, now known by PayPal's id
+  ok    paid once, and nobody on their way any more
+  ok    counted for the month: one unknown, one settled
+
+The first request never reached PayPal: the retry makes it, once
+  ok    one batch, paid once
+
+PayPal says the batch already exists, with its link: taken as sent, its id kept, never paid again
+  ok    still one batch, known by the original's id
+
+PayPal says it already exists, without a link: needs a manual check, never paid again
+  ok    kept, marked for a manual check
+  ok    and not tried again
+  ok    both still on their way, nobody paid
+
+Any other answer: still on its way, at most one try a day
+  ok    one try
+  ok    no second try the same day
+  ok    still on its way, nothing made
+  ok    a day later, one more try, still unknown
+
+After 7 days: a manual check, no more tries
+  ok    marked for a manual check and not tried
+
+The settling gets the batch back and writing its id fails: the evidence stays, nobody is paid twice (review of Codex G on #2681)
+  ok    the write of its id failed, the '?' evidence is kept
+  ok    both still on their way
+  ok    a press sends no new batch
+  ok    the next day's try gets the same batch back and settles it, paid once
+
+An affiliate changed their PayPal address before the retry: never sent to another recipient (review of Codex H2 on #2681, GRAVE)
+  ok    no request to PayPal, no batch
+  ok    nothing ever sent to the new address
+  ok    left for the creator's own check
+  ok    the address itself is never kept in the batch, only its fingerprint
+  ok    the fingerprint is keyed, never a plain hash of the address
+
+The same address: the retry sends the same recipients
+  ok    same recipients as the first request
+
+Before the retry, Stripe's refunds cannot be read: nothing is sent (review of Codex G on #2681)
+  ok    no request to PayPal, no batch
+  ok    still on its way
+  ok    waiting for refunds that can be read, not a manual check
+
+Before the retry, Stripe's refunds took back every sale: nothing is sent (review of Codex G on #2681)
+  ok    no request to PayPal, no batch
+  ok    still on its way
+  ok    less owed now than was sent: a manual check
+
+Counted by month for the owner's report, with no store or person
+  ok    unknown and manual (settled is counted in the first part)
+  ok    only those three counts
+
+The month's counts are read only in their exact envelope (review of Codex G on #2681, LEVE)
+  ok    one answer of three counts is read
+  ok    two answers to one command: not known
+  ok    an inherited reply: not known
+  ok    a getter reply: not known
+  ok    a getter count: not known
+  ok    no getter was run
+  ok    a Proxy reply: not known
+  ok    a Proxy count list: not known
+  ok    no Proxy trap was run
+
+The studio says it, with the way to look in PayPal
+  ok    words for a batch being checked and one that needs a manual check, and PayPal's activity page
+  ok    the studio page passes both counts
+
+43 checks, all passing.
+
+=== paypal-payouts-unknown.test.ts ===
+
+A batch made, its answer garbled: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer empty: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer no-id: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer dropped: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer server: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+The daily settling leaves a batch whose answer is not known on its way, and asks PayPal nothing about it
+  ok    both still waiting, no read of a batch id PayPal never gave
+  ok    and still on their way
+
+What the creator is told never says nothing was sent
+  ok    the payday email says it is not known, and to look at PayPal
+  ok    the studio's words for it
+
+A 4xx without PayPal's own error name (nameless) is not a refusal: kept on its way
+  ok    unknown, never 'nothing was sent'
+  ok    both stay on their way
+
+A 4xx without PayPal's own error name (blank-name) is not a refusal: kept on its way
+  ok    unknown, never 'nothing was sent'
+  ok    both stay on their way
+
+A 4xx without PayPal's own error name (blank-error) is not a refusal: kept on its way
+  ok    unknown, never 'nothing was sent'
+  ok    both stay on their way
+
+PayPal made the batch, and writing its id got no answer: nobody is paid twice (review of Codex G on #2681, GRAVE)
+  ok    the write of its id failed
+  ok    both stay on their way
+  ok    a second press sends no new batch
+
+PayPal made the batch, and writing its id got an error: nobody is paid twice (review of Codex G on #2681, GRAVE)
+  ok    the write of its id failed
+  ok    both stay on their way
+  ok    a second press sends no new batch
+
+A batch PayPal refused by name (insufficient funds): owed, paid on the next press
+  ok    refused for funds
+  ok    nobody is on their way
+  ok    the next press pays both, once
+  ok    both on their way under the real batch
+
+45 checks, all passing.
+
+=== drop-enrollment-exact.test.ts ===
+
+only the exact replies count as done
+  ok    no reply: unknown, never "taken away"
+  ok    one reply: unknown, never "taken away"
+  ok    three replies: unknown, never "taken away"
+  ok    a null HDEL: unknown, never "taken away"
+  ok    a queued HDEL: unknown, never "taken away"
+  ok    a count as text: unknown, never "taken away"
+  ok    a DEL of 2: unknown, never "taken away"
+  ok    a fraction: unknown, never "taken away"
+  ok    not a list: unknown, never "taken away"
+  ok    HDEL 0, DEL 0: done
+  ok    HDEL 1, DEL 0: done
+  ok    HDEL 0, DEL 1: done
+  ok    HDEL 1, DEL 1: done
+
+the real commands
+  ok    the stand-in Redis answers and it is done
+
+14 checks, all passing.
+
+=== g2791-paypal-record-envelope.test.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+  ok    the first refunded in full: the second payment keeps it
+  ok    now standing on the second
+
+G: unknown HGET envelope must keep the watch and the purchase
+  ok    G: exact transport boundary was reached
+  ok    G: purchase state after the first run
+  ok    G: unknown receipt keeps this order on the watch
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|90ea9ba139"]}
+  ok    G: healthy retry removes the refunded purchase
+
+62 checks, all passing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-UIUvrR/7.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-UIUvrR/7.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-UIUvrR/7.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-UIUvrR/7.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-UIUvrR/7.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-UIUvrR/7.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+=== g2791-final-reassign-receipt.test.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+  ok    G other: exact ownership-pair boundary reached
+  ok    G other: unknown does not reassign ownership
+  ok    G other: target stays watched
+G_OTHER_ID_FIRST {"otherMode":"extra","grant":["paypal:5O190127TN3647102"],"watch":["5O190127TN3647102","5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"otherPaid":true,"otherStatus":"COMPLETED"}
+  ok    G other: healthy retry assigns real other payment
+  ok    G other: no course removal while other payment stands
+G_REASSIGN_AFTER_BOTH_REFUNDED {"grant":[],"purchases":[]}
+  ok    G mutation: refunding both real payments leaves no imported purchase
+
+62 checks, all passing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-UIUvrR/8.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-UIUvrR/8.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-UIUvrR/8.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-UIUvrR/8.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-UIUvrR/8.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-UIUvrR/8.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+=== g2791-final-revoke-receipt.test.ts ===
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+  ok    the first refunded in full: the second payment keeps it
+  ok    now standing on the second
+
+G: unknown paid-record GET envelope must keep the watch and the purchase
+  ok    G: exact transport boundary was reached
+  ok    G: purchase state after the first run
+  ok    G: unknown receipt keeps this order on the watch
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|14c35a7642","buyer@example.com|14c35a7642"]}
+  ok    G: healthy retry removes the refunded purchase
+
+62 checks, all passing.
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/g-2681-proof-UIUvrR/9.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-UIUvrR/9.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-UIUvrR/9.cjs:63777:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/g-2681-proof-UIUvrR/9.cjs:17789:13)
+    at async captureOrder (/tmp/g-2681-proof-UIUvrR/9.cjs:18056:13)
+    at async main (/tmp/g-2681-proof-UIUvrR/9.cjs:63783:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+
+
+
+===== /tmp/g2791-2031-tsc.log =====
+
+
+===== /tmp/g2791-2031-lint.log =====
+
+/tmp/g2791-return-2031/tests/g2791-refund-order.test.ts
+  27:23  warning  'ensureStoreId' is defined but never used            @typescript-eslint/no-unused-vars
+  40:3   warning  'readPaid' is defined but never used                 @typescript-eslint/no-unused-vars
+  53:10  warning  'NextRequest' is defined but never used              @typescript-eslint/no-unused-vars
+  54:10  warning  'openSession' is defined but never used              @typescript-eslint/no-unused-vars
+  54:23  warning  'SESSION_COOKIE' is defined but never used           @typescript-eslint/no-unused-vars
+  55:17  warning  'returnPayPalSeller' is defined but never used       @typescript-eslint/no-unused-vars
+  73:5   warning  'paypalRequests' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+✖ 7 problems (0 errors, 7 warnings)
+

@@ -18,9 +18,8 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { COURSE_FACTS_COMMANDS, courseVideoSeconds, readCourseFacts, videoTotalLine } from "@/lib/course-facts";
+import { COURSE_FACTS_COMMANDS, courseVideoLengths, courseVideoSeconds, readCourseFacts, videoTotalLine } from "@/lib/course-facts";
 import { MAX_LESSONS, type Course, type Lesson } from "@/lib/course";
-import { streamLengths } from "@/lib/stream";
 import { streamPath } from "@/lib/stream-rules";
 import { redisPipeline } from "@/lib/redis";
 import { COURSES_WORDS } from "@/lib/buyer-words/courses";
@@ -107,7 +106,7 @@ async function main() {
     await record(2, "ready", 300);
     await record(4, "working", 0);
     await record(6, "failed", 400);
-    const lengths = await streamLengths([streamed(1), streamed(2), streamed(4), streamed(6), `stores/${FOLDER}/p/f.mp4`]);
+    const lengths = await courseVideoLengths([streamed(1), streamed(2), streamed(4), streamed(6), `stores/${FOLDER}/p/f.mp4`]);
     is("only ready, measured videos have a length", lengths && [...lengths.entries()].sort(), [[streamed(1), 600], [streamed(2), 300]]);
     const { commands: one, value } = await counted(() => readCourseFacts(course([lesson(1, streamed(1)), lesson(2, streamed(2)), lesson(3, null)])));
     is("the facts of a measured course", value, { lessons: 3, videoSeconds: 900 });

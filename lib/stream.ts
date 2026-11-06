@@ -221,27 +221,23 @@ export async function streamStates(pathnames: string[]): Promise<Record<string, 
 }
 
 /**
- * How long each of these videos runs, in seconds, by its path: only a video
- * the service has made ready and measured (292 [SQ3], lib/course-facts.ts).
- * Every record in one MGET, so a course of any size is one command; a path
- * that is not a video's, or one nothing is known about, is left out. Null
- * with no database: nothing is known.
+ * The record key of the video a path names, for a caller that reads many of
+ * them in one MGET and reads the reply exactly (292 [SQ3], lib/course-facts.ts);
+ * null for a path that is not a video's.
  */
-export async function streamLengths(pathnames: string[]): Promise<Map<string, number> | null> {
-  const wanted = pathnames.flatMap((path) => {
-    const parts = readStreamPath(path);
-    return parts ? [{ path, id: parts.id }] : [];
-  });
-  if (!isRedisConfigured()) return null;
-  const out = new Map<string, number>();
-  if (!wanted.length) return out;
-  const [rows] = await redisPipeline([["MGET", ...wanted.map(({ id }) => recordKey(id))]]);
-  if (!Array.isArray(rows)) return null;
-  wanted.forEach(({ path }, i) => {
-    const record = parseRecord(rows[i]);
-    if (record && record.path === path && record.state === "ready" && record.seconds > 0) out.set(path, record.seconds);
-  });
-  return out;
+export function streamRecordKey(pathname: string): string | null {
+  const parts = readStreamPath(pathname);
+  return parts ? recordKey(parts.id) : null;
+}
+
+/**
+ * How long the video a path names runs, in seconds, from its record as stored
+ * (one MGET slot): only a video the service has made ready and measured, whose
+ * record is that path's own; null for anything else.
+ */
+export function readyStreamSeconds(pathname: string, raw: unknown): number | null {
+  const record = parseRecord(raw);
+  return record && record.path === pathname && record.state === "ready" && record.seconds > 0 ? record.seconds : null;
 }
 
 type Answer = { status: number; data: unknown };

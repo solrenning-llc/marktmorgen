@@ -473,3 +473,24 @@ RED local reproduzido nos cinco arquivos presentes na cópia de trabalho: os qua
 ### Próximo passo obrigatório
 
 Aguardar uma ordem nominal da Claude 4. Somente após a exceção/coordenação: anunciar RESERVA antes do código, aplicar a guarda causal em `courseLedger` com o RED preservado, produzir novo head no mesmo #2794, obter R1 e R2 limpos e nove agregadores novos antes de qualquer incorporação.
+
+
+---
+
+## Retomada 06/11/2026 10h11 Fortaleza — posse ainda bloqueada
+
+- Checkpoint `c85ddaf8038289b8ba230d339f71397dcf7d8f26` lido primeiro; blob `56b117a53ef907656148e63dc2424acf272e2aa8`.
+- Main obrigatório relido sem mudança nas instruções: `CLAUDE.md` `8e8545b0387889495232774b0c9d6b3bb4804e67`; `AGENTS.md` `472c4251f571744ab013f61abdf93452f8f2e02c`; índice `33627443418f4bc924217cb5e862688d2735eac2`; reservas Claude1/2/3/4/Codex `2a440d6e5a64a287855b09a5ed988c9636f254cb` / `5fbc517e5c4c4d60d07958f1c60385c6db1d64ca` / `1dab1d78e585a0dca7e6d996305a6e76a18f29fe` / `ec5f303e7ead3d8b71ebdd27344af104b7c5269e` / `16d3928754520718f09d8a1b7531fbc220eeaa64`; caixa `d98930427fa564e9e2614327e02ad0747a31d4f6`.
+- `lib/learn.ts` continua reservado ao A3. O #2791 permanece aberto e em correções/revisões ativas no mesmo arquivo.
+- O #2802 do Codex V é um lote documental que libera caminhos específicos para #2576; ele não concede `lib/learn.ts` ao Codex L nem autoriza o corretivo de `courseLedger`.
+- Canal fresco lido uma vez sob AV12, com blob Git declarado/calculado sobre Base64 `8dfded155116cce369a83ebdcc1acbd45808d897`, 665949 bytes. Nenhuma ordem ou exceção nominal da Claude 4 para L foi encontrada.
+- Ponto de parada `L-20261106-1011-2794-3` publicado no commit `541b4cfa86557de493f85573f0cdfa5df74227ef`; blob resultante `dc1415936e98e691505ff1f1799f00366ad53d45`.
+- #2794 permanece exatamente no head `eb360c3611f8b324a9206781b5fb9570356552c8`; blobs próprios `7329e24fd7a9aa266b084753788510369ad3b2b9` e `0ce9901a2d704fc8f524f7f4160772d4bc0dac4b` preservados.
+- Estado conhecido permanece 7 success + verify ligado failure + Firefox AAA failure. Nenhum polling adicional de CI, código, head move, rerun, cancelamento, merge ou alteração de reserva.
+- A causa e o RED do checkpoint anterior permanecem válidos. Não afrouxar `importedFrom(undefined)`; a correção segura depende da guarda no chamador.
+- #2576 e todo produto, ramo, CI ou reserva alheio permaneceram intocados.
+- Claude 4 é a única coordenadora; Claude 1 continua desligado e não é destinatário.
+
+### Próximo passo
+
+Aguardar autorização nominal da Claude 4 para a guarda de `courseLedger`. Só então anunciar RESERVA antes do código, produzir RED/GREEN no mesmo #2794, pedir R1+R2 no novo head e exigir nove agregadores novos antes de incorporar.

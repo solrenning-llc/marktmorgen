@@ -191,9 +191,18 @@ images introduce no separate product promise, price or testimonial.
 ### Evidence and remaining limits
 
 Captures are 1280 by 820 pixels, with explicit intrinsic dimensions, lazy loading
-and asynchronous decoding. Static inline WebP payloads are 37,746 and 54,842
+and asynchronous decoding. Local static WebP assets are 37,746 and 54,842
 bytes; the 100,000-byte per-capture publication ceiling was checked before
 creating them. There is no optimizer, external image host or runtime capture.
+The exact original SHA-256 digests are retained. Each matching resource page
+requests one separately cacheable `/feature-captures/` asset; pixels are no
+longer copied into the route module or HTML. The actual route dependency
+graph measured with esbuild (packages external and the same substitute font)
+fell from 1,769,389 to 1,645,958 bytes, and from 534,311 to 441,191 bytes gzip.
+The capture module contributes 1,179 rather than 124,610 bytes. This is a
+bundler report, not a Next production, RSC hydration, LCP or CLS measurement.
+Static-hosting request/transfer costs remain existing company costs, unknown
+rather than zero; these payload measurements do not certify global margin.
 The source revision, timestamps and SHA-256 digests are recorded with the images.
 
 The capture run used real Next server-rendered UI, local synthetic services and

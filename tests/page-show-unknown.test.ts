@@ -26,7 +26,7 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureStatsId, setProductPage, setSitePages, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { writePage } from "@/lib/sales-page-store";
-import { parsePage } from "@/lib/sales-page";
+import { emptyBlock, parsePage, type PageBlock } from "@/lib/sales-page";
 import { siteKey } from "@/lib/site-page-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { PageEditor } from "@/components/page-editor";
@@ -78,11 +78,14 @@ async function main(): Promise<void> {
   const statsId = shop.statsId!;
   const hero = (id: string, headline: string) => ({ id, kind: "hero", headline, sub: "For busy parents", media: "none", video: null });
   const cta = (id: string) => ({ id, kind: "cta", label: "", note: "" });
+  const faq: PageBlock = { ...(emptyBlock("faq") as Extract<PageBlock, { kind: "faq" }>), id: "faq00001", items: [{ q: "Is it a PDF?", a: "Yes, a PDF of forty pages." }] };
   if (!(await setProductPage(OWNER, paid.product.id, true)).ok || !(await setProductPage(OWNER, free.product.id, true)).ok) throw new Error("setup");
-  await writePage(statsId, paid.product.id, parsePage({ blocks: [hero("hero0001", "Forty dinners"), cta("cta00001")], variant: { blocks: [hero("hero0002", "Dinner, sorted"), cta("cta00002")] } }), shop);
+  await writePage(statsId, paid.product.id, parsePage({ blocks: [hero("hero0001", "Forty dinners"), faq, cta("cta00001")], variant: { blocks: [hero("hero0002", "Dinner, sorted"), cta("cta00002")] } }), shop);
   await writePage(statsId, free.product.id, parsePage({ blocks: [hero("hero0003", "A free week")], next: paid.product.id }), shop);
   if (!(await setSitePages(OWNER, [{ id: SITE, slug: "about", title: "About", nav: true, target: "", from: 0 }])).ok) throw new Error("setup");
   await writePage(statsId, siteKey(SITE), parsePage({ blocks: [hero("hero0004", "About us")] }), shop);
+  // The store as it is now, with both products' pages on (the one read above was taken before).
+  const now = (await storeForEmail(OWNER))!;
   const session = await openSession(OWNER);
   const headers = { cookie: `${SESSION_COOKIE}=${session}` };
   const get = (path: string) => new NextRequest(`${ORIGIN}${path}`, { headers });
@@ -137,12 +140,12 @@ async function main(): Promise<void> {
     is(`${mode}: after a free sign-up, no next product it could not confirm`, after.includes('id="next-title"'), false);
 
     let facts: string | Error;
-    try { facts = await unknown(mode, () => readAssistantFacts(shop)); } catch (error) { facts = error as Error; }
+    try { facts = await unknown(mode, () => readAssistantFacts(now)); } catch (error) { facts = error as Error; }
     is(`${mode}: the assistant's facts refuse instead of leaving the page out`, facts instanceof Error, true);
 
     const kitRead = (kit as Record<string, unknown>).kitPageRead as ((store: typeof shop, product: unknown) => Promise<unknown>) | undefined;
-    const product = await readListing(shop, paid.product.id);
-    is(`${mode}: the affiliate kit's read of the page says unread, not none`, kitRead ? await unknown(mode, () => kitRead(shop, product)) : "missing", "unread");
+    const product = await readListing(now, paid.product.id);
+    is(`${mode}: the affiliate kit's read of the page says unread, not none`, kitRead ? await unknown(mode, () => kitRead(now, product)) : "missing", "unread");
   }
 
   part("Read as it is, everything else goes on as before");
@@ -153,7 +156,7 @@ async function main(): Promise<void> {
   answering(new Request(`${ORIGIN}/@pageshow/free`));
   const fine = await html(() => FreePage({ params: Promise.resolve({ handle: "@pageshow" }), searchParams: Promise.resolve({ status: "sent", product: free.product.id }) }));
   is("after a free sign-up, the next product the page names, when it is for sale (here it is not: no Stripe)", fine.includes('id="next-title"'), false);
-  is("the assistant's facts are read with the page", (await readAssistantFacts(shop)).includes("Guide"), true);
+  is("the assistant's facts are read with the page: its questions are in them", (await readAssistantFacts(now)).includes("Is it a PDF?"), true);
   done();
 }
 

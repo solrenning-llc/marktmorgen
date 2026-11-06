@@ -1,0 +1,34 @@
+J2941 execution receipt — BLOCKED / NOT EXECUTED
+
+Pinned author head: fd4cd750131b226dbac078923f6cb345a03d1936
+Whole author RED: 859882b0c1bad7de2616cc6167eb5588a64fabc0
+Root PR claim: 6696750614
+Channel reservation: 3f32f155821747776a65c015ff497558650962c8
+
+OBSERVED BEFORE STOP:
+- GitHub metadata: OPEN, exact fd4, three author paths.
+- Complete source/test/design read.
+- Whole RED test blob matches final: 4c790bbfc43dc65c550e465371866ed81cf3fae5.
+- Whole RED lib/earnings-by-month.ts: GitHub404 NOT_FOUND.
+- Exact tsconfig: ES2017, strict:true, lib includes esnext.
+- Initial local runner process exited before product evaluation:
+  ERR_MODULE_NOT_FOUND: Cannot find package 'esbuild' imported from
+  /workspace/scratch/72485b6ecfa0/j-review-2762-return-red/scripts/j-review-2941-earnings.mjs
+  Node.js v24.22.1
+
+ROOT STOP AFTERWARD:
+Shared primary executor could not create processes; no further probe permitted.
+No retry, alternate provider/sandbox or orchestration-runtime product evaluation.
+
+ACTUAL INDEPENDENT RESULTS:
+Author RED assertions executed: NONE.
+Author final assertions executed: NONE.
+Proposed independent assertions executed: NONE.
+2941 network negative controls executed: NONE.
+TypeScript/lint/scanner/diff/client/browser/CI execution: NONE.
+New graded executed findings: NONE.
+Clean/qualifying opinion: NONE.
+
+Published proof/runner are PROPOSED and NOT EXECUTED.
+Author54GREEN is a report, not a J verification.
+Module absence is a source receipt, not54 causal assertion failures.

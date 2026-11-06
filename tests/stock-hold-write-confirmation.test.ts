@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { withStockHold } from "@/lib/stock";
 import { parseProduct } from "@/lib/catalog";
-import type { Store } from "@/lib/store";
+import type { Product, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 
 // Since 2 November 2026 (513 [PF1], unit 3 review) a unit is held in two writes: a provisional hold
@@ -194,5 +194,86 @@ test("a product bought on its own never gets two checkouts for its last unit", a
   } finally {
     redis.pipeline = original;
     globalThis.fetch = realFetch;
+  }
+});
+
+// Claude 4's review of #1732 (C4-2980, 6 November 2026), two holds for nothing. (1) Any error raised before Stripe is asked to
+// open the checkout (a false option id, read at lib/store-checkout.ts) held the last unit for the provisional hold's whole term,
+// about 37 minutes, so one address could pin units it never paid for. (2) A hold that ran out and was not settled yet made the
+// first click "Sold out" (it is counted as used under the lock, where Stripe is never asked) though Stripe says it expired.
+const pinnedStore = { statsId: "f".repeat(32), stripeAccountId: "acct_test_pinned01", handle: "pinned", name: "Pinned", email: "pinned@example.com", language: "en", currency: "usd",
+  tax: { enabled: false, included: false, ids: false, invoices: false }, affiliates: { enabled: false, buyers: false }, catalog: { id: null, items: [], head: [], inline: null } } as unknown as Store;
+/** Stripe, counted: every request, the checkouts it opens, and the ones it says expired. */
+function countingStripe(expiredAt: Set<string>) {
+  const counts = { asked: 0, opened: 0 };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.hostname !== "api.stripe.com") throw new Error(`Unexpected request ${url.hostname}`);
+    counts.asked += 1;
+    if (url.pathname === "/v1/checkout/sessions" && init?.method === "POST") {
+      counts.opened += 1;
+      const id = `cs_test_pinned${String(counts.opened).padStart(8, "0")}`;
+      return new Response(JSON.stringify({ id, url: `https://checkout.stripe.com/c/pay/${id}`, status: "open" }));
+    }
+    const one = /^\/v1\/checkout\/sessions\/([^/]+)$/.exec(url.pathname);
+    if (one && (init?.method ?? "GET") === "GET") return new Response(JSON.stringify({ id: one[1], status: expiredAt.has(one[1]) ? "expired" : "open" }));
+    return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
+  }) as typeof fetch;
+  return { counts, restore: () => { globalThis.fetch = realFetch; } };
+}
+
+test("an error raised before Stripe is asked to open the checkout gives the unit back at once", async () => {
+  const { stockLeft, withCartStockHolds } = await import("@/lib/stock");
+  const { createCheckout } = await import("@/lib/store-checkout");
+  const { TEST_CONSENT } = await import("./digital-consent-fixture");
+  process.env.STRIPE_SECRET_KEY = "sk_test_only";
+  const sized = { ...parseProduct({ id: "sized00001", title: "Sized", summary: "", priceCents: 100, stock: 1, link: "https://example.com/sized" })!,
+    options: [{ id: "opt_real01", label: "Large", priceCents: 100, file: null, link: "https://example.com/large" }] } as unknown as Product;
+  const stripe = countingStripe(new Set());
+  try {
+    redis.clear();
+    // A false option id, refused by the real checkout before it asks Stripe anything, tried again and again from one address.
+    for (let i = 0; i < 3; i += 1) {
+      const pinned = await withStockHold(pinnedStore, sized, held => createCheckout(pinnedStore, sized, "https://marktmorgen.com", "opt_false01", { held, digitalConsent: TEST_CONSENT }))
+        .then((result) => JSON.stringify(result), (error: Error) => error.message);
+      assert.equal(pinned, "This product needs one of its options", `try ${i + 1} is refused for its option, never sold out by the tries before`);
+    }
+    assert.equal(stripe.counts.asked, 0, "Stripe was never asked");
+    assert.equal(await stockLeft(pinnedStore, sized), 1, "every refused try gave its unit back at once");
+    // Any other error raised before Stripe is asked, through a cart's checkout too.
+    const print = parseProduct({ id: "print00001", title: "Print", summary: "", priceCents: 100, stock: 1 })!;
+    await assert.rejects(withCartStockHolds(pinnedStore, [print], async () => { throw new Error("This bundle needs its buyer's choice"); }));
+    assert.equal(await stockLeft(pinnedStore, print), 1, "a cart's unit given back too");
+    // And a buyer who then picks a real option gets the unit.
+    const bought = await withStockHold(pinnedStore, sized, held => createCheckout(pinnedStore, sized, "https://marktmorgen.com", "opt_real01", { held, digitalConsent: TEST_CONSENT }));
+    assert.equal(bought.ok, true, "the last unit is still there for a real buyer");
+    assert.deepEqual([stripe.counts.opened, await stockLeft(pinnedStore, sized)], [1, 0]);
+  } finally {
+    stripe.restore();
+  }
+});
+
+test("a hold that ran out and is not settled yet never makes the first click sold out", async () => {
+  const { stockLeft } = await import("@/lib/stock");
+  process.env.STRIPE_SECRET_KEY = "sk_test_only";
+  const stripe = countingStripe(new Set(["cs_test_ranout000001"]));
+  const last = parseProduct({ id: "lastone002", title: "Last one", summary: "", priceCents: 100, stock: 1 })!;
+  const holds = `nl:stock:${pinnedStore.statsId}:${last.id}`;
+  try {
+    redis.clear();
+    // The last unit's hold ran out; Stripe says its checkout expired.
+    await redis.pipeline([["HSET", holds, "cs_test_ranout000001", JSON.stringify({ until: Date.now() - 1000 })]]);
+    const first = await withStockHold(pinnedStore, last, async () => ({ id: "cs_test_firstclick01" }));
+    assert.deepEqual(first, { ok: true, value: { id: "cs_test_firstclick01" } }, "the first click gets the unit the expired checkout gave back");
+    assert.equal(await stockLeft(pinnedStore, last), 0);
+    // A hold that ran out but whose checkout Stripe still has open stays counted: sold out, and nothing opened.
+    redis.clear();
+    await redis.pipeline([["HSET", holds, "cs_test_stillopen001", JSON.stringify({ until: Date.now() - 1000 })]]);
+    let opened = 0;
+    assert.deepEqual(await withStockHold(pinnedStore, last, async () => { opened += 1; return { id: "cs_test_never0000001" }; }), { ok: false, reason: "soldout" });
+    assert.equal(opened, 0);
+  } finally {
+    stripe.restore();
   }
 });

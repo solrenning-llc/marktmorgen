@@ -42,6 +42,7 @@ import { type PaidCall, isCallProduct, paidCalls, tellNewLink } from "@/lib/call
 import { eventStillWants, readEventScope } from "@/lib/event-meetings";
 import type { Store } from "@/lib/store";
 import { isClaimId, isHostId, releaseClaim } from "@/lib/host-claims";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 
 const BATCH = 40;
 const REFUND_STORES = 20;
@@ -55,6 +56,10 @@ const seenKey = (callsId: string) => `nl:meet:rf:${callsId}:seen`;
 
 export type MeetingsRun = { done: number; failed: number; switched: number; told: number; refunds: number };
 
+/** A store that could not be read: unknown, never "gone" (CX-123 rule 24). */
+const UNREAD = "unread" as const;
+type StoreRead = Store | null | typeof UNREAD;
+
 export async function syncMeetings(
   findStore: (handle: string) => Promise<Store | null>,
   deadline: number,
@@ -62,10 +67,18 @@ export async function syncMeetings(
 ): Promise<MeetingsRun> {
   const run: MeetingsRun = { done: 0, failed: 0, switched: 0, told: 0, refunds: 0 };
   if (!isRedisConfigured()) return run;
-  const stores = new Map<string, Store | null>();
+  const stores = new Map<string, StoreRead>();
   const paid = new Map<string, PaidCall[] | null>();
-  const storeFor = async (handle: string) => {
-    if (!stores.has(handle)) stores.set(handle, await findStore(handle).catch(() => null));
+  const storeFor = async (handle: string): Promise<StoreRead> => {
+    if (!stores.has(handle)) {
+      stores.set(
+        handle,
+        await findStore(handle).catch((error: unknown): StoreRead => {
+          console.error("reading a store for its meetings failed", error);
+          return UNREAD;
+        }),
+      );
+    }
     return stores.get(handle) ?? null;
   };
   const paidFor = async (store: Store) => {
@@ -75,12 +88,21 @@ export async function syncMeetings(
 
   for (const scope of await dueScopes(BATCH)) {
     if (Date.now() > deadline) break;
-    const record = await readRecord(scope);
+    // A record that could not be read keeps its place, and the run goes on to the next (lib/meet-records.ts).
+    let record: Awaited<ReturnType<typeof readRecord>>;
+    try {
+      record = await readRecord(scope);
+    } catch (error) {
+      console.error("reading a meeting record failed", error);
+      continue;
+    }
     if (!record) {
       await dropScope(scope);
       continue;
     }
     const store = await storeFor(record.handle);
+    // A store that could not be read keeps its meeting queued: only one confirmed gone lets it go.
+    if (store === UNREAD) continue;
     if (!store || store.statsId !== record.statsId || (record.callsId && store.callsId !== record.callsId)) {
       // The store is gone or is somebody else's now: nothing we may do with it.
       await dropScope(scope);
@@ -141,7 +163,7 @@ export async function syncMeetings(
 }
 
 /** Refunds in full since the last run, for every store with meetings still to come. */
-async function readRefunds(storeFor: (handle: string) => Promise<Store | null>, deadline: number): Promise<number> {
+async function readRefunds(storeFor: (handle: string) => Promise<StoreRead>, deadline: number): Promise<number> {
   const now = Date.now();
   // Stores whose last meeting is over leave the list.
   const [old] = await redisPipeline([["ZRANGEBYSCORE", MEET_STORES, 0, now - 86_400_000, "LIMIT", 0, 100]]);
@@ -154,7 +176,7 @@ async function readRefunds(storeFor: (handle: string) => Promise<Store | null>, 
     if (Date.now() > deadline) break;
     const [callsId, handle] = member.split("|");
     const store = callsId && handle ? await storeFor(handle) : null;
-    if (!store || store.callsId !== callsId || !store.stripeAccountId) continue;
+    if (!store || store === UNREAD || store.callsId !== callsId || !store.stripeAccountId) continue;
     handled += await refundsOf(store, callsId, deadline).catch((error) => {
       console.error("reading a store's refunds for meetings failed", error);
       return 0;
@@ -166,10 +188,15 @@ async function readRefunds(storeFor: (handle: string) => Promise<Store | null>, 
 async function refundsOf(store: Store, callsId: string, deadline: number): Promise<number> {
   const account = store.stripeAccountId as string;
   const nowSeconds = Math.floor(Date.now() / 1000);
-  const [anchorRaw] = await redisPipeline([["GET", anchorKey(callsId)]]);
+  // Only a place confirmed absent is "none yet"; any other shape is unknown, and the store waits for the next run
+  // with its place as it was, never moved past refunds not read (CX-123 rule 24).
+  const anchorReply = repliesFor(await redisPipeline([["GET", anchorKey(callsId)]]), 1);
+  const anchorRaw = anchorReply ? anchorReply[0] : undefined;
+  if (anchorRaw !== null && (typeof anchorRaw !== "string" || !/^[1-9]\d{0,11}$/.test(anchorRaw))) throw new UnknownReplyError("the meetings' refunds place");
+  const placed = anchorRaw !== null;
   // The first look goes back a day: meetings are only made from now on, and
   // a refund made before one existed has nothing to remove.
-  const anchor = Number(anchorRaw) > 0 ? Number(anchorRaw) : nowSeconds - 86_400;
+  const anchor = placed ? Number(anchorRaw) : nowSeconds - 86_400;
   const since = Math.max(0, anchor - 300);
   const handles = saleHandles(store);
   let newest = anchor;
@@ -185,7 +212,9 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
     query.append("expand[]", "data.charge");
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", account, `/refunds?${query}`);
-    const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // A list not in Stripe's shape is unknown, never "no refunds" or "the last page".
+    if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") throw new Error("Stripe answered the refunds in an unknown shape");
+    const refunds = listed.data as Record<string, unknown>[];
     // A dispute closed as lost ends the booking's meeting
     // as a full refund does (lib/refunds.ts, queue 388 [TB14]): read once,
     // with the first page, from Stripe's closing events (kept thirty days).
@@ -202,8 +231,10 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
         newest = Math.max(newest, created);
         continue;
       }
-      const [seen] = await redisPipeline([["SISMEMBER", seenKey(callsId), id]]);
-      if (Number(seen) === 1) {
+      const seenReply = repliesFor(await redisPipeline([["SISMEMBER", seenKey(callsId), id]]), 1);
+      const seen = seenReply ? countOf(seenReply[0]) : null;
+      if (seen === null || seen > 1) throw new UnknownReplyError("a refund's read mark");
+      if (seen === 1) {
         newest = Math.max(newest, created);
         continue;
       }
@@ -221,7 +252,10 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
       if (lookups <= 0) continue;
       lookups -= 1;
       const sessions = await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ payment_intent: intent, limit: "1" })}`);
-      const session = (Array.isArray(sessions.data) ? (sessions.data as Record<string, unknown>[]) : [])[0];
+      // Only a confirmed empty list means "no booking": anything else leaves the refund unread, for the next run.
+      if (!Array.isArray(sessions.data)) throw new Error("Stripe answered the checkout sessions in an unknown shape");
+      const session = (sessions.data as unknown[])[0] as Record<string, unknown> | undefined;
+      if (session !== undefined && (!session || typeof session !== "object" || Array.isArray(session))) throw new Error("Stripe answered a checkout session in an unknown shape");
       const meta = ((session?.metadata ?? {}) as Record<string, string>) ?? {};
       if (session && typeof session.id === "string" && meta.kind === "call" && handles.has(meta.store ?? "")) {
         const moved = (await readMoves([session.id])).get(session.id);
@@ -267,7 +301,7 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
   // lapses as it always did, and the read refunds, kept sixty-one days after the last one, always outlive it.
   const done = complete && !unsure && lookups > 0 && Date.now() < deadline;
   if (done) await redisPipeline([["SET", anchorKey(callsId), String(Math.max(newest, anchor)), "EX", REFUND_KEEP_SECONDS * 2]]);
-  else if (!(Number(anchorRaw) > 0)) {
+  else if (!placed) {
     await redisPipeline([
       ["SET", anchorKey(callsId), String(anchor), "EX", REFUND_KEEP_SECONDS * 2],
       ["EXPIRE", seenKey(callsId), REFUND_KEEP_SECONDS * 2 + 86_400],

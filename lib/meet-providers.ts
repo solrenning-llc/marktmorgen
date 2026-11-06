@@ -646,7 +646,12 @@ export async function googleGuests(token: string, id: string, want: string[], ha
   const lower = (s: string) => s.toLowerCase();
   const wanted = new Set(want.map(lower));
   const ours = new Set(had.map(lower));
-  const current = Array.isArray(read.json.attendees) ? (read.json.attendees as { email?: unknown }[]) : [];
+  // Only this event, with its guests left out (none) or as a list of guests, is read: any other answer would write a
+  // list that drops the guests the creator added themselves (CX-123 rule 24).
+  const listed = read.json.attendees;
+  if (read.json.id !== id || (listed !== undefined && !Array.isArray(listed))) throw new ProviderError("server", read.status, "Google's answer about the event was incomplete");
+  const current = (listed ?? []) as { email?: unknown }[];
+  if (current.some((a) => !a || typeof a !== "object" || Array.isArray(a))) throw new ProviderError("server", read.status, "Google's answer about the event was incomplete");
   const kept = current.filter((a) => typeof a.email === "string" && (wanted.has(lower(a.email)) || !ours.has(lower(a.email))));
   const present = new Set(kept.map((a) => lower(a.email as string)));
   const attendees = [...kept, ...[...wanted].filter((e) => !present.has(e)).map((email) => ({ email }))];
@@ -699,10 +704,14 @@ export async function googleFreeBusy(token: string, calendars: string[], from: n
         const reason = String(entry.errors[0]?.reason ?? "error").slice(0, 60);
         throw new ProviderError(reason === "notFound" ? "gone" : "server", 200, `Google could not read one of your calendars (${reason})`);
       }
-      for (const b of Array.isArray(entry.busy) ? entry.busy.slice(0, 5_000) : []) {
-        const s = Date.parse(String(b.start ?? ""));
-        const e = Date.parse(String(b.end ?? ""));
-        if (Number.isFinite(s) && Number.isFinite(e) && e > s) busy.push([s, e]);
+      // Busy times not in their shape are unknown, never free: the whole reading fails, as for a calendar's error.
+      if (!Array.isArray(entry.busy)) throw new ProviderError("server", 200, "its answer was incomplete");
+      for (const b of entry.busy.slice(0, 5_000) as unknown[]) {
+        const stretch = b && typeof b === "object" ? (b as { start?: unknown; end?: unknown }) : {};
+        const s = typeof stretch.start === "string" ? Date.parse(stretch.start) : Number.NaN;
+        const e = typeof stretch.end === "string" ? Date.parse(stretch.end) : Number.NaN;
+        if (!Number.isFinite(s) || !Number.isFinite(e)) throw new ProviderError("server", 200, "its answer was incomplete");
+        if (e > s) busy.push([s, e]);
       }
     }
   }
@@ -718,7 +727,9 @@ export async function googleCalendars(token: string): Promise<GoogleCalendar[]> 
     headers: { Authorization: `Bearer ${token}` },
   });
   if (answer.status !== 200) throw problem(answer, "listing your calendars");
-  const items = Array.isArray(answer.json.items) ? (answer.json.items as Record<string, unknown>[]) : [];
+  // A list not in its shape is unknown, never "no calendars".
+  if (!Array.isArray(answer.json.items)) throw new ProviderError("server", 200, "its answer was incomplete");
+  const items = answer.json.items as Record<string, unknown>[];
   return items
     .filter((c) => typeof c.id === "string" && c.id && (c.id as string).length <= 300)
     .map((c) => ({

@@ -24,6 +24,8 @@ export const MAX_NOTE_LENGTH = 80;
 
 export type StatsNote = { id: string; day: string; text: string };
 
+export class StatsNoteAttemptConflict extends Error {}
+
 const key = (statsId: string) => `nl:stats:${statsId}:notes`;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const ID = /^[a-f0-9]{8}$/;
@@ -113,17 +115,31 @@ export async function readNotes(statsId: string | null): Promise<StatsNote[]> {
  * days of visits are, from the last note added. Null when the day or the
  * words are not ones a note can have.
  */
-export async function addNote(statsId: string, dayRaw: unknown, textRaw: unknown, now = Date.now()): Promise<StatsNote[] | null> {
+export async function addNote(
+  statsId: string,
+  dayRaw: unknown,
+  textRaw: unknown,
+  now = Date.now(),
+  attemptRaw?: unknown,
+): Promise<StatsNote[] | null> {
   const day = noteDay(dayRaw, now);
   const text = noteText(textRaw);
   if (!day || !text || !isRedisConfigured()) return null;
-  const id = randomBytes(4).toString("hex");
-  try {
+  const id = attemptRaw === undefined ? randomBytes(4).toString("hex") : typeof attemptRaw === "string" && ID.test(attemptRaw) ? attemptRaw : "";
+  if (!id) return null;
+  const stored = JSON.stringify({ day, text });
+  const [created, expiry] = exactArray(
     await redisPipeline([
-      ["HSET", key(statsId), id, JSON.stringify({ day, text })],
+      ["HSETNX", key(statsId), id, stored],
       ["EXPIRE", key(statsId), KEEP_SECONDS],
-    ]);
+    ]),
+    2,
+  );
+  if ((created !== 0 && created !== 1) || expiry !== 1) throw new Error("Chart note write could not be confirmed");
+  try {
     const complete = await readAllNotes(statsId);
+    const own = complete.find((note) => note.id === id);
+    if (!own || own.day !== day || own.text !== text) throw new StatsNoteAttemptConflict("Chart note attempt belongs to another addition");
     const notes = complete.slice(-MAX_NOTES);
     const [raw] = exactArray(await redisPipeline([["HLEN", key(statsId)]]), 1);
     if (Number(raw) > MAX_NOTES) {
@@ -139,7 +155,7 @@ export async function addNote(statsId: string, dayRaw: unknown, textRaw: unknown
     }
     return notes;
   } catch (error) {
-    await containUnconfirmedAddition(statsId, id);
+    if (created === 1) await containUnconfirmedAddition(statsId, id);
     throw error;
   }
 }

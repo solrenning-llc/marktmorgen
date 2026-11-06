@@ -1,5 +1,5 @@
 import { addNote, MAX_NOTES, parseNotes, readNotes } from "@/lib/stats-notes";
-import { changeKeyReading, changeReading, commands, reset, store } from "./stats-notes-read-world";
+import { changeKeyReading, changeReading, changeWriteReading, commands, reset, store } from "./stats-notes-read-world";
 import { done, is, part } from "./check";
 
 const stats = "a".repeat(32);
@@ -164,6 +164,25 @@ async function main() {
   is("the recovered retry returns the one landed note", recovered?.filter(note => note.text === "The stable requested note").length, 1);
   const deliberate = await addWithAttempt(stats, "2026-11-05", "The stable requested note", now, "22222222");
   is("a separate operation may deliberately add the same day and words", deliberate?.filter(note => note.text === "The stable requested note").length, 2);
+
+  reset();
+  await store.pipeline([["HSET", key, "33333333", value]]);
+  let collisionRefused = false;
+  try { await addWithAttempt(stats, "2026-11-05", "A different note", now, "33333333"); } catch { collisionRefused = true; }
+  is("a colliding operation id is refused", collisionRefused, true);
+  is("a colliding operation id never overwrites or removes the earlier note", await store.pipeline([["HGET", key, "33333333"]]), [value]);
+
+  for (const reply of [[], [1], [1, 0], ["1", 1], [2, 1]]) {
+    reset();
+    changeWriteReading(() => reply);
+    let writeRefused = false;
+    try { await addWithAttempt(stats, "2026-11-05", "An unconfirmed write", now, "44444444"); } catch { writeRefused = true; }
+    is(`an unknown write reply is refused: ${JSON.stringify(reply)}`, writeRefused, true);
+  }
+
+  reset();
+  is("an invalid operation id is refused before Redis", await addWithAttempt(stats, "2026-11-05", "A note", now, "not-an-id"), null);
+  is("an invalid operation id sends no command", commands.length, 0);
 
   reset();
   await store.pipeline([["HSET", key, "00000001", "{"]]);

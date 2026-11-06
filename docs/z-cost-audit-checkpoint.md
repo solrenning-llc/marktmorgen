@@ -1,3 +1,67 @@
+# ESTADO VIGENTE — 06/11/2026 16h44 Fortaleza: #2830 e #2803 revisados; quatro integrações causais novas; CX-127 ativa
+
+Este topo supera próximos passos antigos; TODO histórico/RED/WIP/retentativas abaixo preservado integralmente. Primeiro b6aaa844 COMPLETO216692, depois main/caixa/canalFULL. Main18f7→849cef: SÓ reservas Codex com liberação A3learn e Qmailpaths; CLAUDE/AGENTS/inbox/fila semdelta. Main#2821 MERGED738a7124 gerou conflitosREAISconfig; não é mainchase. C4 ÚNICA; C1OFF/não ponte/não destinatário. Nova mensagem de retomada durante execução: ESTA execução ativa confirmada continuou, não reiniciou nem criou duplicata/automações/subagentes.
+
+## CX-127, regra nova PERMANENTE
+
+C4/CX-127 16h14 cabeçalho16h20 LIDA COMPLETA, ACK canal56e? (anúncio inicial confirmado no históricoFULL; último canal53d7e50b). Substitui AV12 contra vigia. NÃO finalizar enquanto há ownPR/review/prova/espera; PONTO EXATO e VOLTAR ao vigia. Canal >=120s; próprios estados >=300s; NENHUMretry/rerun/cancel/Redisnovo/pago. Só se ambiente força limite: ENCERRADO: Codex Z precisa ser acordado pelo dono +ponto. Semtarefa LIVREuma vez+vigia.
+Fetch GIT do canal falhou auth, não contornado. FallbackFULL viaGitHubconnector refEXATO+corpoRESTcontentsbruto+prefixoCAS; nunca fetch_file no canal>1MiB. Uma ÚNICA vigia shell55393, /tmp/z-channel-watch16.sh, MESMOflock/tmp/codex-z-main-watch.lock, 5ticks120s (cadenciafallbackconnector, NÃOalega gitfetchautenticado); deve acabaraprox19:41:45UTC. Antesreiniciarconferirterminou/locklivre. Nenhumaautomaçãoalterada/criada/desativada.
+A função append16 emfunctions preservaFULLprefixo+CAS e bloqueia leitura<120s; stores nãopersistementreretomadas. Canallatestpublicado53d7e50b0f0be3901799baaff0b14f89439521ac. Semerro409/canal nesta execução; erroGITauthnãofoiretentativaCI.
+
+## Próprios QUATRO — NOVOS heads publicados, NÃO merge/autoria alheia
+
+Uma foto atual dosheadsANTIGOS teve2800/2740/2819 NOVE agregadoresSUCCESS;2741productFAIL verifyCANCELLED/publicFirefoxFAIL. SEMretry. Rehearsal contra849cef inicialmente limpo3; main#2821MERGED738a7124 causou conflitoREALtests/test-config nosQUATRO (inclusive2741). Nãomergeiárvoreconflitada.
+Reserva/avisoANTESintegração canal47de7063b8342c7c701c9e8e29803d8def1503be. Integrei UMA vez mainCONGELADO738a7124c3fd75cdbcf1b3fed4e544cf7d5a8575 emcada MESMOPR. Resolver SÓ config=MAININTEGRAL+SÓaliasesoriginaisown; TODOSblobsproduto/testesown BYTE-ID aoheadrevisto. GitDatapaisoldcanonical+738/nãoforce/expected_sha. TreesAPIEXATASNATIVE:
+
+|PR|Ramo|Head remoto NOVO EXATO|Tree API=nativa|Locais PASS|
+|---|---|---|---|---|
+|2800|codex/z-ai-counter-receipts|5c3d93b4cb2640e9e353c2f4ff0833ba05f50fb2|5b0af33ce2bb2cbbbb1d2492485e12ac39570e2d|478/26grupos|
+|2740|codex/z-assistant-counter-admission|5f2859c8ec4c9da3ef5ff43540854645c09512ce|eab8e0d690fce9951560248635f64693fd1908a5|240/7grupos|
+|2741|codex/z-chat-counter-admission|92947a264492cbd4c508fd5e39bbf1b3cbf8a146|6e5c7f36e676c543090b072a7df72b4792a9647a|308/9grupos|
+|2819|codex/z-meet-return-counter-admission|fa99967c370f92f3aa62d6f2367e127132a39fc0|0a26bb630123a9b44b03827ac2ad91ae1f4521f6|317/9grupos|
+
+TOTAL1343PASS; cadaumtipos/lint0/client269/269/diff0; scannersREAIS4081/4078/4078/4079todos0 (canalmensagem16h36citoucountsantigos, corrigida16h39). Comentários6693632625/6693632936/6693633341/6693633675. ReviewS5794710012assistant eS5794737821chat aplicáveisownblobsinalterados; R2helper+Inbox09h13(canalfechaLOW) eMeetC99-100 a595 limpo lidos/citados; endpointsreviews2800/2819vaziosNÃOapagamnominalqualificadoemcanal. Nãopedirduplicadas.
+
+**NOVE NOVOS obrigatórios por CADAhead; nãoverdepresumido:** única foto inicial após>=5min emaprox19:38UTC:2800depsSUCCESS/codeqlin_progress;2740depsSUCCESS;2741studio+depsSUCCESS;2819depsSUCCESS;outrosagregadoresemexecução/aindanãocriados. CodeQLneutralnãoéverdeagregador. Nenhumretry/rerun/cancel. Próxima leituraown>=5min, respeitarCX127.
+Locais /dev/shm/z-int16-{2800,2740,2741,2819}, todosCOMMITADOS/limpos. Natives055f0f41ee39e3e4f0cdf1cd19e531bb42c216be /336037611f885e97d24e727dcd1ee884c93d04b9 /36c8f51133e0aa41c93b94be03585c4b0fd69bfe /53022c9709d9516e8f146b736e580571f99d4ae0. Planos /dev/shm/z-int16-N-plan.json e -run-plans; logs -tests/-remaining/-types/-lint/-scanner/-diff/-client.
+2800 seleçãoextraai-entitlement.test.ts NÃOexiste: erroHARNESSdeargumento; gruposjáPASSretidos, faltantes11 executadosPASS. Nenhumassertafrouxado/produtofalhou. Totaisparserinicialnãoincluía42passed/28passed, corrigidoANTESrelatartotais. Semtestsredundantes/CIrerun. Cópiaownz-merge2740-16(93d8tree,rehearsalobsoleto/sem.git) removidaREPRODUZÍVEL,logsfora preservados; nenhumforeign/donor/WIPapagado.
+**Risco operacional próximo:** todosaliasesownforaminseridosantesreturn, então futuramain/test-config podeconflitarde novo. NÃOchase/alterarheadativoartificialmente. SeconflitoREALnovo apósterminal exigirintegração, considerar sóREPOSICIONARoaliasPRÓPRIOparacontextorelacionadoESTÁVELdistintoporPR, semalterartexto/aliasesalheios; isso evita conflito recorrentedofechamento, exigindo9NOVOS+validaçãocomosempre.
+
+## #2830 retorno nominal CONCLUÍDO
+
+Novo43d598208c7a8e52c32e1a242c463ee5436bb741/4-filedelta3fe→43d lido. **Parecer5805809374 SEMnovoachado; MÉDIO MR5805314075 FECHADO**. Mesmaproofcc6a BYTE-ID agoraPASS1/1:10APPcommands/0GETpágina/0B/429applies_full;studioREAL2→3umaunidade50000B;mensal5→6incrementorecusado/0applyadicionaladmitido. Antes123216B12cmd, causaordemcountUseagorarestauradaantescards/páginas.
+MESMOtesteCORRETIVO121 autorcontra3fe **SEISfalhas**,não5:2códigos+2contadores+mensagem+pageGET. Parecerinicialrepetiu5daautoraantesconferirlogcompleto; CORRIGIDOcomentário6693538663, canalnominal;C6CONFIRMOU/retificou6693622478 ("rodoucommensagemnovajápresente"). Nenhumaassertmodificada.
+Final121/121 e8grupos305PASS(12+121+2+18+79+24+7+42). Unknownapply503page_unread_counted,+1tryexato;demaisdados/pages/pictures/versions/sectionuses/flagBYTE-ID. TS4raízes/imports0/lint4paths0/scanner4067/0/diff0. Client268/269HERDADObase1947permaneceexplicitamente,nãoreruncertificado/nãocopiadofix2822. C6 integraestackcommainnaordemparentlegítima;R2outrorevisornominal/C6donomerge9NOVOS.
+Logs/dev/shm/z2830-frozen-green16.log/z2830-author-corrective-red16.log/z2830-linked16.log/z2830-types16.log/z2830-lint16.log. Read-onlysource/dev/shm/z-review2830-16(localinit/index43d,frozenprooffica15). Semproduto/ref/CIautoraalterados.
+
+## #2803 revisão financeira CONCLUÍDA no849a875
+
+Headslegítimosnominaisf11→d877→2e808mergeonly→**849a875c972f2730d31703989ded236c70a93447**. C5novoHEADfix creditouS5805761543, R1PUT/scope;NÃOduplicadoporZ. **Parecer5805968413 SEMACHADO MATERIALnoescopo.** DonoC4-2640autorizouUS$66tetoINTERNO, nãoquota/price. Readceilingspreservadimensionamentodas2heavyunder65semuploads;comentáriosprodutosóclarificam. SDK2.8.0head→requestApi/retries11;get→fetchúnico;PUT11;registry(3*11+2)35simple+2MAXIMAGE1MB;officialhttps://vercel.com/docs/vercel-blob/usage-and-pricing lido06/11primary. No desconhecidofailedbillingzero. Docsgeradosbatem,marginstestPASS. WorstCostÉUMPIORMÊS+taxaano+closing,não12meses;Sretificouaritmética.
+AuthorMESMO13casoscontra2e=4falhas→84913/13. Seisligados162PASS (13+24+8+77+39+1). TS6raízes/imports0/lint0erros+1warningHERDADOplan-marginSTORAGE_BRAKE_BYTES. Scanner4075inclui3own/0/diff0. PediSÓatualizarbodyPRobsoleto1PUT/valores,semheadchurn;nenhumCIautorconsultado/operado.
+C5aindaprecisaR1retornofinanceiroqualificadoe9exactheads+freshmergegates;ZéUMAfinanceira. #2801éR2+S, S5805877609limpo24a134e3/retificação,nãoduplicar. Legacylacunasreviewphoto/mailC4-2720/C4-2740agoraC5;Znãoalegalacunasresolvidas/grátis/globalmargemcertificada.
+
+### Prova nova SUPLEMENTAR, sem déficit MR demonstrado
+
+**codex/z-review-2803-blob-attempts@21e1d4d2fdf377710b31f386618d1a30212f5353**, treeae72aec3b50db8dc89a08ba78a5e359c6c002b3a =natived17e606c727a48c4793607876db61d4e8901ff63, parent849a875. ReservaANTEScódigo47de7063. Só3novos:tests/z2803-blob-attempts.proof.ts,tests/z2803-blob-attempts-run.mjs,docs/reviews/z-2803-blob-attempts.md. NÃOprodutoquinta/vaga/reviewduplicada.
+Actualroute/auth/session/studio/SDKhandleUploadPresigned+uploadPresigned+multipart+requestApi+async-retry/signaturarealexecutam,RedisMemory+supplier/signingresponsefixturesSINTÉTICOS. Undicialias APENASrede;nenhumURLsaiprocesso/credencialreal/browser/AT/Redisnativo/paidvendor/payment. MocktimersSÓsetTimeoutbackoff,Dateintacto,actualasync-retrydecide10extras;finite200ticks. NovoJPEGBufferheadercontentTypevalidsyntheticprefix. Fixtureheadnotfound1;upperboundHEAD11CONSERVADOR,não11observados.
+4cenários /3PASS+1REDsomentecomponentclaim11; **fundingTOTAL4/4PASS**. Singlehealthy1advanced;multiparthealthy3;singleretries11;multipart3stages×11=33. Umrequestapp/signature/studioincrementREALcada. Wholeunitbudget0.000269USD cobre33advanced+11headworst=0.0001694USD: uploadnãofazattach/GET,reservaconservadora2MBGET+35simplefinanciaessecaso. **NÃOachadoMRperda/teto66rompido**. Asserçãocomponente33<=11preservadaREDno.proofsemCI, nãopromovidafalsofinding;originalasserçãofundingtotalPASSem4casos,nãoafrouxada. NÃOprovauniversalsignedURLadversarialreuse/anymultipart/provideracceptance/invoice/globalmargin.
+ProofTS1rootimports0/lint2paths0/scanner4075/0/diff0. PrelimharnessOriginmismatch403corrigidosec-fetch-site same-origin;hostnameSDKrealvercel.com/api/blobvsantigoblobhostcorrigidonoMOCK;TSsignalnullable/Buffercorrigidosantesdurável,nãoprodutodefects. Local /dev/shm/z-review2803-16b ownbranchCOMMITADOlimpo;old2e read-only /dev/shm/z-review2803-16. Logs/dev/shm/z2803-{blob-proof,author-red,final-linked,final-types,final-lint,proof-types,proof-lint}16.log. RunnerTMPDIR=/dev/shm node tests/z2803-blob-attempts-run.mjs.
+
+## Novidades coordenação / fila precisa
+
+C4-2710nominaisO2736/U2833(jálimpa5805876433)/R22831 respeitados. C4-2720C2prévendaleitorexato+checkout/paypalatribuiC2,cartdepois1730/1928;taskHEADcasoB inicialmenteC4transferidoC6emC4-2730,dependente2608N. C4-2730 longfilaC6performance+Tabout/thanksfixdepoisclassificação, Zsócópia. C4-2740 permite6frentes/subagentes SOMENTEClaudes5/6,NÃOZ; C5assumeauditoriaCOMPLETAcustoexterno/preçosBlob/SES/Stripe/PayPal/IA. Nãoiniciarunidadeexternaduplicada;Zficaownretornos/withinLimitadmission/r24 comcoordenaçãoantesprova/novospaths. ProvaIAJSlocald7a1a9abaixoaindasolicitaclassificaçãoC4, nãoremoteexploit/automaticbudgetbypass.
+#1928último13f31883OPENsemreenvioPF1,nãoreviewigual;esperarnovonominalC3. #2812/#2813/#2773/#2602concluídos/nãorecriar;#2823Tmerged/nossareviewconcluída.
+TriagemESTÁTICAàs16h43main738withinLimitlista: assistant/chat/meetjá4own;mail/inbox/auth/import/checkout/coursesclaramenteoutrosdonos/reservas ecapssobrepostos;NENHUMnovoachado/grausemprova/NENHUMprodutoquintaaberto. Próxima auditoriaZpaid-admissionprecisainventárioPRsdonosfresco+reserva,semduplicarC5priceaudit/C2money/C6task.
+
+## Continuidade: não encerrar só por espera
+
+RootoverlayENOSPC;RAMvaria24–100MBfreeporatividadealheia. Nenhumforeign/donor/WIPapagado. Sóremoçãoprópriareproducívelz-merge2740-16(51MB)comtreeremotocapturado/logsfora;old4integrate14cleanpreservados,novos4int16committed/refsGitHubcanônicos. ControllerRAM/dev/shm/z-controller16minimalgit+alternatescommon p/objetosnewSDK/ownchat. Comandosnoexistente18f7shortambiguouscorrigidofullSHA,archivecwdmkdirfaltantepreparado,nãoalterouproduto.
+
+TODASretentativasPERMANENTEMENTECONSUMIDAS2484verify127130387972;2615verify127143841589/mac127144213372;2741Windows127737110071;2800Firefox127885731234/mac127885740971. NENHUMAnova;CX127proíbeCIretry/rerun. NovaheadNÃOresetabudget.
+PRÓXIMO: channel>=2min+ownstate>=5min,9DISTINCTSUCCESSexacthead+reviewaplicável(2sesai dinheiro)+freshnative/rawclean+NORMALexpectedSHA/GETmergedtrue;conflitoREALnovoaguardarterminal/integrarumaFrozenmain,semartificialchase. Retornocorretivopróprio→REDantes. #1928reenviou/novonominal→review. ClassificaçãoC4provaIAouadiçãodentrofaixa→coordena/reservaantescódigo. PublicarPONTOEXATOeVOLTARvigia;semfinalenquantoabertoseambientepermite.
+
+---
+
 # ADENDO VIGENTE — 06/11/2026 15h56 Fortaleza: R2 reproduz MR2830; C6 aceita, aguardando decisão C4
 
 Novidade chegou durante publicaçãoPONTO095a84d3ead0232f2e733803e63352338d32a3b6. **R2ciclo153/15h54 reproduziu MESMAcc6a paiPASS/headFAIL e concordouMÉDIOdeMR**:123216B2GETantesapplies_fullvs50000Bstudio1/zeroGETpai. Créditoqualificado,preservarapenasnoscasosexercitados;nãoéC4decisãofinal.

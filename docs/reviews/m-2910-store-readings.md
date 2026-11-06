@@ -177,3 +177,21 @@ O object root futuro é `m-source-recovery`, agora autônomo, sem alternate. O p
 Os3casos usam o mesmo validator da CLI V2, não uma cópia de sua lógica ou modelo do produto; logs somam746bytes, guardas heap64MiB/10scada. Só fixtures de filesystem próprias foram criadas. Nenhum GET, alteração no object root alheio, referência, conta, fornecedor, CI ou execução dos pares30/52 ocorreu nesta fase. Prova6df e driverc1f3 permanecem byte-identificados. Evidência `m-2910-runtime/v2-portability-results.json` SHA256 `b7f2949a4e033ac084f274a8e7a4dabaddd934d179c8ac2d98817c5d0cbedebf`.
 
 Ainda falta novo GO e execução dirigida antes de atribuir os resultados de produto à V2. Root poderá publicar seu conteúdo no caminho canônico do runner entre os mesmos3artefatos, preservando o histórico; a V2 não exige commands-native para configurar Git. Comando explícito preparado, ainda não executado como produto: `node --max-old-space-size=512 proofs/m/review-2910-store-readings.v2.mjs --git-cwd /workspace/scratch/d1ece80b1417/m-source-recovery --deps /workspace/scratch/d1ece80b1417/m-2910-runtime/view`, com `--own` apenas no par próprio e tetos externos120s/128KiB mantidos.
+
+
+## Publicação B: V2 canônica, resultados funcionais preservados do commit A
+
+Este segundo commit substitui somente o conteúdo do runner canônico pela V2 de portabilidade: Gitblob f420a952e5e230d20f41bf29d4547a53f6be6bd4 / SHA2561acfa77d33a1d8b48e1481bfda838feb3a06dac507e87d4144e6f34658e66e5e. A referência anterior a arquivo .v2.mjs identifica a candidata local; na publicação B, o conteúdo passa ao caminho canônico proofs/m/review-2910-store-readings.mjs, sem adicionar um quarto caminho. A prova52 permanece byte a byte a do commit A, Gitblob982450679995caed1fbd65a3efd8346e3d2c8de4.
+
+Os pares funcionais autor30 e própria52 pertencem ao commit A e ao driver executado Gitblob79b20df8ea6ad0eabc4af9096a63643a5cd52c28 / SHA256c1f3f36c1e0351c820405539173720962b96c94c69caf1add7a3c17393356f9d. Não foram reexecutados com a V2. A V2 teve somente syntax check, os3casos locais de guarda Git usando seu próprio validator, o guard dirigido de admissão de memória descrito abaixo e lintJS real; os passes de tipos/prova continuam qualificados pelo escopo e pelos bytes documentados em A.
+
+O ambiente Git nativo foi fixado externamente nos runs de A. A autonomia interna e as recusas do store são hardening futuro de B, não retcon desses runs nem nova observação histórica de rede. Não atribuir a B um GREEN30/52 independente. Os9checks herdados falham em ambos os lados e continuam explícitos; não há parecer limpo global, novo grau MED, aprovação de incorporação ou duplicação da prova C6→R2. O prefixo integral do relatório de A, incluindo as falhas anteriores de harness/fixture, foi preservado.
+
+
+### B: correção do guard próprio de admissão de memória
+
+O coordenador identificou que a candidata629b convertia memory.max/current com Number e admitia NaN porque NaN<MIN era falso. Foi feito RED dirigido sobre o texto exato de free()/room() daquela candidata:6casos,4falhas (max=“max”, currentmalformed, máximo acima de safeinteger, currentnegativo). Os controles de folga exatamenteMIN e1byteabaixoMIN estavam preservados. A injeção de readFileSync existiu somente na unidade própria dessas duas funções, restrita aos2paths de cgroup; não houve mock de SDK/produto, alteração de cgroup real ou execução da V2 inteira nessa unidade.
+
+A V2 final1acfa77d exige strings decimais e Number.isSafeInteger, limite>0,current>=0; room também exige disponível safeinteger e>=MIN_FREE. O mesmo unit passou6/6 após a correção, com exatamente as2leituras permitidas em cada caso. Os3guards locais Git e syntaxcheck foram reconferidos; lint da V2JS e da unidade própria passou exit0/log0 com a configuração real. Não foram reexecutados autor30, própria52 ou TypeScript.
+
+Isso é correção de admissão do harness próprio, não finding de produto/CI. A publicação A permanece byte a byte a preparada anteriormente, inclusive proof982450/driver79b20 e seu relatório integral. O resultado funcional de A não é transferido como se tivesse sido executado pela V2 final. Evidência local v2-portability-results.json SHA256 f370bfeee95ca1345c6d3e6d994535b25fcf4e46789acc2089fc55fbcf0e6570; guardRED629b4falhas→guardGREEN1ac6/6. Nenhum novo resultado histórico de rede ou autonomia é inferido.

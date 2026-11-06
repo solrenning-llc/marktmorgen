@@ -9,7 +9,8 @@
  * asks again a month later is told theirs ended, not offered a new one.
  *
  *   nl:wo:start:<statsId>:<hash>   when a person's offer began, in seconds
- *   nl:wo:due                      reminders to send: score = when, member = what
+ *   nl:wo:due                      reminders to send: score = when, member = what, with the address;
+ *                                  a person's is taken out when they are erased (forgetWelcomePerson)
  *   nl:wo:r:<statsId>:<hash>       that person's reminder is set, once
  *   nl:wo:n:<statsId>              how many people have been offered it, for the studio
  */
@@ -18,6 +19,7 @@ import { OrdersPausedError } from "@/lib/order-admission";
 import { createHash } from "node:crypto";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Store, storeForId } from "@/lib/store";
 import { type Listing, readListing, readProduct } from "@/lib/catalog";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
@@ -209,9 +211,51 @@ export async function openWelcome(
   }
 }
 
-/** Forgets when one person's welcome offer began and that their reminder was set (lib/person-erasure.ts). */
+/** The most rounds a scan of the reminder queue may take before the erasure says this part did not finish. */
+const DUE_SCAN_ROUNDS = 10_000;
+
+/**
+ * The reminders waiting for their hour that name one person in one store,
+ * read from the queue with ZSCAN. Every reply is read in its exact shape;
+ * any other shape, or a scan that does not end, throws.
+ */
+async function dueFor(statsId: string, email: string): Promise<string[]> {
+  const h = hash(email);
+  const found: string[] = [];
+  let cursor = "0";
+  for (let round = 0; round < DUE_SCAN_ROUNDS; round += 1) {
+    const pair = repliesFor(repliesFor(await redisPipeline([["ZSCAN", DUE_KEY, cursor, "MATCH", `*${h}*`, "COUNT", 1000]]), 1)?.[0], 2);
+    const flat = pair ? stringList(pair[1]) : null;
+    if (!pair || typeof pair[0] !== "string" || !/^\d+$/.test(pair[0]) || !flat || flat.length % 2 !== 0) {
+      throw new UnknownReplyError("the scan of the welcome reminders waiting for their hour");
+    }
+    for (let i = 0; i < flat.length; i += 2) {
+      try {
+        const v = JSON.parse(flat[i]) as { i?: unknown; h?: unknown };
+        if (v && v.i === statsId && v.h === h && !found.includes(flat[i])) found.push(flat[i]);
+      } catch {
+        // Not a reminder this module wrote: not this person's.
+      }
+    }
+    cursor = pair[0];
+    if (cursor === "0") return found;
+  }
+  throw new UnknownReplyError("the scan of the welcome reminders waiting for their hour, which did not end");
+}
+
+/**
+ * Forgets when one person's welcome offer began, that their reminder was set,
+ * and the reminder itself if it still waits for its hour, which holds their
+ * address (lib/person-erasure.ts).
+ */
 export async function forgetWelcomePerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", startKey(statsId, email), remindedKey(statsId, email)]]);
-  return Number(gone) || 0;
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", startKey(statsId, email), remindedKey(statsId, email)]]), 1)?.[0]);
+  // Never 0 removed on a reply of another shape (CX-123 rule 24): thrown, so the erasure says this part did not finish (lib/person-erasure.ts).
+  if (gone === null || gone > 2) throw new UnknownReplyError("the deletion of a person's welcome offer start and reminder mark");
+  const waiting = await dueFor(statsId, email);
+  if (!waiting.length) return gone;
+  const taken = countOf(repliesFor(await redisPipeline([["ZREM", DUE_KEY, ...waiting]]), 1)?.[0]);
+  if (taken === null || taken > waiting.length) throw new UnknownReplyError("the removal of a person's welcome reminder from the queue");
+  return gone + taken;
 }

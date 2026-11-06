@@ -1,0 +1,126 @@
+=== red ===
+G_QUIZ_COUNT {"gone":0,"hit":1,"refused":false,"result":0,"before":208,"after":0}
+  FAIL  0: contradictory or unsafe count is unknown
+        expected true
+        got      false
+  FAIL  0: unconfirmed deletion preserves occupied room
+        expected 208
+        got      0
+G_QUIZ_COUNT {"gone":2,"hit":1,"refused":false,"result":2,"before":208,"after":0}
+  FAIL  2: contradictory or unsafe count is unknown
+        expected true
+        got      false
+  FAIL  2: unconfirmed deletion preserves occupied room
+        expected 208
+        got      0
+G_QUIZ_COUNT {"gone":99,"hit":1,"refused":false,"result":99,"before":208,"after":0}
+  FAIL  99: contradictory or unsafe count is unknown
+        expected true
+        got      false
+  FAIL  99: unconfirmed deletion preserves occupied room
+        expected 208
+        got      0
+G_QUIZ_COUNT {"gone":9007199254740992,"hit":1,"refused":false,"result":9007199254740992,"before":208,"after":0}
+  FAIL  9007199254740992: contradictory or unsafe count is unknown
+        expected true
+        got      false
+  FAIL  9007199254740992: unconfirmed deletion preserves occupied room
+        expected 208
+        got      0
+23 checks, 8 failing.
+  FAIL  refused on [[["lesson000002"],[null,null,null,null],0]]
+        expected true
+        got      false
+  FAIL  no room given back on [[["lesson000002"],[null,null,null,null],0]]
+        expected 1232
+        got      1088
+  FAIL  refused on [[["lesson000002"],[null,null,null,null],2]]
+        expected true
+        got      false
+  FAIL  no room given back on [[["lesson000002"],[null,null,null,null],2]]
+        expected 1232
+        got      944
+  FAIL  refused on [[["lesson000002"],[null,null,null,null],99]]
+        expected true
+        got      false
+  FAIL  no room given back on [[["lesson000002"],[null,null,null,null],99]]
+        expected 1232
+        got      800
+  FAIL  refused on [[["lesson000002"],[null,null,null,null],9007199254740992]]
+        expected true
+        got      false
+  FAIL  no room given back on [[["lesson000002"],[null,null,null,null],9007199254740992]]
+        expected 1232
+        got      656
+  FAIL  refused on [[[],["1","x",null,null],1]]
+        expected true
+        got      false
+  FAIL  no room given back on [[[],["1","x",null,null],1]]
+        expected 1232
+        got      416
+  FAIL  no room given back on [[["lesson000002"],[null,null,null,null],1.5]]
+        expected 1232
+        got      416
+70 checks, 11 failing.
+
+=== green ===
+G_QUIZ_COUNT {"gone":0,"hit":1,"refused":true,"before":208,"after":208}
+G_QUIZ_COUNT {"gone":2,"hit":1,"refused":true,"before":208,"after":208}
+G_QUIZ_COUNT {"gone":99,"hit":1,"refused":true,"before":208,"after":208}
+G_QUIZ_COUNT {"gone":9007199254740992,"hit":1,"refused":true,"before":208,"after":208}
+23 checks, all passing.
+9 checks, all passing.
+70 checks, all passing.
+
+=== mixed-red ===
+  FAIL  unknown second course propagates incomplete
+        expected true
+        got      false
+  FAIL  only confirmed course room is released
+        expected 416
+        got      208
+11 checks, 2 failing.
+
+=== mixed ===
+11 checks, all passing.
+
+=== linked ===
+ℹ tests 4
+ℹ pass 4
+ℹ fail 0
+ℹ skipped 0
+ℹ tests 3
+ℹ pass 3
+ℹ fail 0
+ℹ skipped 0
+13 checks, all passing.
+70 checks, all passing.
+37 checks, all passing.
+32 checks, all passing.
+ℹ tests 24
+ℹ pass 24
+ℹ fail 0
+ℹ skipped 0
+28 checks, all passing.
+40 checks, all passing.
+16 checks, all passing.
+14 checks, all passing.
+19 checks, all passing.
+20 checks, all passing.
+64 checks, all passing.
+21 checks, all passing.
+65 checks, all passing.
+ℹ tests 7
+ℹ pass 7
+ℹ fail 0
+ℹ skipped 0
+32 checks, all passing.
+
+=== types ===
+
+
+=== lint ===
+
+
+=== scan ===
+Public data check: 3760 tracked files; 0 file(s) require correction.

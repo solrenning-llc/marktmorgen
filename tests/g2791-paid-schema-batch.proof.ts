@@ -332,6 +332,11 @@ async function main(): Promise<void> {
         atnegative: ["at", -1], atfraction: ["at", 1.5], atunsafe: ["at", Number.MAX_SAFE_INTEGER+1], atnull: ["at", null],
         storemissing: ["store", undefined], centsnull: ["cents", null], currencyobject: ["currency", {}],
       };
+      const typed = /^type_(email|product|capture|order|at)_(missing|null|boolean|array|object|number)$/.exec(mode);
+      if (typed) {
+        const values: Record<string, unknown> = { missing: undefined, null: null, boolean: false, array: [], object: {}, number: 7 };
+        return [JSON.stringify({ ...base, [typed[1]]: values[typed[2]] })];
+      }
       if (mode in modeFields) {
         const [field, value] = modeFields[mode];
         return [JSON.stringify({ ...base, [field]: value })];

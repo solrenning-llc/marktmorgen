@@ -185,7 +185,7 @@ const en = {
   oneMoreThing: "One more thing",
   titleFor: (title: string, price: string) => `${title} for ${price}`,
   onItsOwn: (price: string) => `${price} on its own`,
-  yesAdd: (price: string) => `Yes, add it for ${price}`,
+  yesAdd: (price: string) => `Yes, buy now for ${price}`,
   noThanks: "No thanks",
   offerNote: (store: string) =>
     `Yes charges the card you just used, once, on ${store}'s own account. No thanks charges nothing. You can also simply leave this page.`,
@@ -385,7 +385,7 @@ const es: ThanksWords = {
   oneMoreThing: "Una cosa más",
   titleFor: (title, price) => `${title} por ${price}`,
   onItsOwn: (price) => `${price} por separado`,
-  yesAdd: (price) => `Sí, añadirlo por ${price}`,
+  yesAdd: (price) => `Sí, comprar ahora por ${price}`,
   noThanks: "No, gracias",
   offerNote: (store) =>
     `Sí cobra una vez en la tarjeta que acabas de usar, en la cuenta propia de ${store}. No, gracias no cobra nada. También puedes simplemente salir de esta página.`,
@@ -581,7 +581,7 @@ const fr: ThanksWords = {
   oneMoreThing: "Encore une chose",
   titleFor: (title, price) => `${title} pour ${price}`,
   onItsOwn: (price) => `${price} seul`,
-  yesAdd: (price) => `Oui, l'ajouter pour ${price}`,
+  yesAdd: (price) => `Oui, acheter maintenant pour ${price}`,
   noThanks: "Non merci",
   offerNote: (store) =>
     `Oui débite une fois la carte que vous venez d'utiliser, sur le compte de ${store}. Non merci ne débite rien. Vous pouvez aussi simplement quitter cette page.`,
@@ -778,7 +778,7 @@ const de: ThanksWords = {
   oneMoreThing: "Noch etwas",
   titleFor: (title, price) => `${title} für ${price}`,
   onItsOwn: (price) => `${price} einzeln`,
-  yesAdd: (price) => `Ja, für ${price} hinzufügen`,
+  yesAdd: (price) => `Ja, jetzt für ${price} kaufen`,
   noThanks: "Nein danke",
   offerNote: (store) =>
     `Ja belastet die Karte, die Sie gerade benutzt haben, einmal, auf dem eigenen Konto von ${store}. Nein danke belastet nichts. Sie können diese Seite auch einfach verlassen.`,
@@ -975,7 +975,7 @@ const it: ThanksWords = {
   oneMoreThing: "Un'ultima cosa",
   titleFor: (title, price) => `${title} a ${price}`,
   onItsOwn: (price) => `${price} da solo`,
-  yesAdd: (price) => `Sì, aggiungilo a ${price}`,
+  yesAdd: (price) => `Sì, acquista ora a ${price}`,
   noThanks: "No grazie",
   offerNote: (store) =>
     `Sì addebita una volta la carta che hai appena usato, sul conto di ${store}. No grazie non addebita nulla. Puoi anche semplicemente lasciare questa pagina.`,
@@ -1172,7 +1172,7 @@ const nl: ThanksWords = {
   oneMoreThing: "Nog één ding",
   titleFor: (title, price) => `${title} voor ${price}`,
   onItsOwn: (price) => `${price} los`,
-  yesAdd: (price) => `Ja, voeg toe voor ${price}`,
+  yesAdd: (price) => `Ja, nu kopen voor ${price}`,
   noThanks: "Nee bedankt",
   offerNote: (store) =>
     `Ja schrijft één keer af van de kaart die je net gebruikte, op de eigen rekening van ${store}. Nee bedankt schrijft niets af. Je kunt deze pagina ook gewoon verlaten.`,
@@ -1369,7 +1369,7 @@ const pt: ThanksWords = {
   oneMoreThing: "Só mais uma coisa",
   titleFor: (title, price) => `${title} por ${price}`,
   onItsOwn: (price) => `${price} em separado`,
-  yesAdd: (price) => `Sim, acrescentar por ${price}`,
+  yesAdd: (price) => `Sim, comprar agora por ${price}`,
   noThanks: "Não, obrigado",
   offerNote: (store) =>
     `Sim cobra uma vez o cartão que acabou de usar, na conta própria de ${store}. Não, obrigado não cobra nada. Também pode simplesmente sair desta página.`,

@@ -1,3 +1,34 @@
+# PONTO VIGENTE — 06/11/2026: retorno2751 FECHADO; bloqueio compartilhado2740
+
+CP8fa86fc8971a8634fc13b6a83c586470f5468217 lido COMPLETO antesdeagir; main/caixaCodex snapshot5651ac514b457ef60a02d02cd9e1d1d7f8b076aa e canalnovofull lidos. Estaexecuçãonãofoidescartadaporrecênciadecheckpoint. Ascinco própriasAPI OPEN/headinalterado(abaixo), nenhummerge/headmove/retry/cancel/mainchase/sexta. Provas/REDs/WIP/retentativasabaixointegralmentepreservados.
+
+## #2751 — MÉDIO Z FECHADO no corretivo nominal
+
+AutorSpe diu retorno no778f182222d9770c3010a3b7f11502c02c914a9d, REDf91b9099e31b852ca935ff912a41565250938225. R2cleanseparado,nãoéduplicaçãointegral:Zretornosópróprio5795470462. AnúncioANTESexecução **10d41f44482b95f64a0ba6c23f615a61f072de55**. Diffinteirodd1..778só2paths(store-data/canonicaltest) lido; decoderagora1resultadopipeline/HMGET2fields,cadanullconhecidooudecimalcanônicointeiroseguronãonegativo;boolean/vazio/negativo/fração/extras/ausente/unsafe ficamunknown. SemNumbercoercion/clamp,comandos/chaves/TTL/tetoiná lterados.
+MESMAprova **z2751-export-size.proof.ts** INALTERADA do e207: dd1=8tests/6falhas+2controles →778=8/8. Desconhecidosparamantesdequalquercomandomediçãoposterior, positivoexato/ausenteconfirmadopreservados. AutorREDf91canonical9/6fail+3controlesreproduzido;final9/9. Ligadosclosingcost6,helppromise33,storedata33,cost24,data7+canonical9=112GREEN. StrictTSC5raízes/imports/prova0,lint0,scanner3831/0,diff0,árvoreAPI=nativa.
+Parecer **5795837924**, EXATO778f1822, **MÉDIO5795470462 FECHADO/semnovograve-médiofocal/PODEENTRARsomentecom9finalexacthead+cleanNORMALexpected_head_sha peloS**. Relatóriodurável **codex/z-review-2751-export-size@874efbf1ec720c76982a767d080ff4f95e61db4e**, treec4bc8428f049ab906a2f317e0e1d41b37a64d840, docs/reviews/z-2751-export-size.md; prova e207byteidêntica. NãoeditadosSsource/ramo/CI nemmerge. Restriçõespreservadas: quotescomputadas,nãodébitoobservado/stream300MB/authHTTPreal;upstreamcotanãomedidanuncazero. Rotacanonicalsourceorder,nãoHTTPjornada. SemnativeRedis/browser/AAA/realprovider/payment/globalbuild/TSC/CIcertificados;semcertificardólaresglobaisoustorecopy/studioUI. NãoinventarnovaresidualporJSProxy/getter: wrappernativopipelinegeraArrayoulança.
+Localnewdetached z-return-2751@778; oldz-review-2751ownbranch mantémnativecommitdd0bfcace vsremoto874assinatura,treesiguais; z2751-red-exact@f91 paraREDcanônico. Runner/tmp/z2751-run.mjs(mkdtempisolado,imports/testaliasesoriginaisrootalvo+proofsourcepróprio); /tmp/z-target-tests.mjscanonical. Logs/tmp/z2751-return-{parent,proof,linked,author-red,types,lint,scanner}.log econfig/tmp/z2751-return-types.json. Nenhumafonteprodutivaalteradaemworktrees.
+
+## Próprias: cinco heads preservados, #2740 blocker causal agora conhecido
+
+|PR|headEXATOremoto|parecer/gate|
+|---|---|---|
+|2602|75617eb5757d950feaddfb9b1386abca82ca94b3|E2+C2duasfinanceirasaplicáveis,9NOVOSobrigatórios|
+|2615|fc5d371c5375e0ee2f06a26e81b3871cbec2ba2e|Qaplicável,9NOVOSobrigatórios|
+|2739|14ce1adb045772eec896494d5c9ce623e34773df|Scleanaplicável,9NOVOSobrigatórios|
+|2740|410e68747b30edea76d02f184874189f954ef085|Scleanaplicável;8success+1failure, controladorV2765|
+|2741|806c11f8211e636c1b5fcca79f85573a91adc7f9|Sclean5794737821;últimaobservaçãoanterior8success+1active42145628087,nãorepolled|
+
+NOVIDADEnominalV01h20/01h31citoujobPR2740 **127658833893**. UMAconsultaCAUSALhead410eveunos9runs **42145626360failure**,osoutros8success. Jobs: verify127658833893FAILemCopyingawholestore; agregador127672769844consequenteFAIL; demaisjobsdoc/Redis/mobile/Firefox/WebKitPASS. Logdecodedlido: real-reveal-tall-section6/6focuschecksPASS, depoispage.waitForFunction Timeout3000ms em **tests/e2e/public-keyboard-focus-regression.mjs:82** (02:20:03UTC), chamado depublic-us-english/store-copy. ConfirmaEXATAMENTEfrentedeV **#2765/head615bb40703f8ac9327b960d813c8ff523147d280**, REDcd3de5ae e2arquivosdekeyboardreservados. Nãoalterarproduto/CIalheio,nãoduplicarsharedfixoureviewG2/R2ocupado(Gorientou2765G2/R2). #2765aindaOPEN/reviewspublicadasnenhumanaconsultadeposse; apenaspedidosemcanalnãoéclean. EsperarcontroladorlegitimamenteMERGED+gates; nãointegrarownwhilecontrolleropen nemretrycego. Nenhumarepetiçãofoiac ionada;NÃOconverterheadnov oparaburlarretentativasconsumidas.
+Osoutros4CIsnãoforamconsultadosnovamentenessaretomada, semeventoterminalaplicável. Sem9verdesexatos+noreview/MR→semmerge. Congeladomainba887611jáintegradoUMAvezcadaapós2632MERGED; nãoesperar2632de novo,nãojulgarmergeable:nullcomo conflito. WIPb096ancestral2602preservado. Retentativasúnicas2484verify127130387972,2615verify127143841589/mac127144213372CONSUMIDASpara sempre.
+
+## Continuidade
+
+Vigiaúnica/tmp/z-main-watch.sh MESMOflock/tmp/codex-z-main-watch.lock sessão78743,fetch60s,sóinbox/main,prazo3500s. NãocertificarwatchCICLIautenticada. #2724APIjáMERGED87ddconfirmadoabaixo, Zfechado,nãoreabrir. #2709qualificação5795021479continuaaplicável,preserveescopo. Nenhumaferramentacriouautomaçãooualterouexternofornecedor/conta/preço/limite/flag/PII.
+Próximopermitido:retornoowncausal/CIterminalpara9exacthead+parecer+merge-treeclean+NORMALexpectedhead,oucontrolador2765MERGEDlegítimo→integraçãocausalnecessária/checksNOVOSsemduplicarcontrole;ouretornonominalnovoS2751senecessário,nãorefazermesmo778. Checkpoint+PONTOcanalantesencerrar/≤30min. TrabalhoemesperatemporáriadeCI/capacidade,nãoauditoriaconcluída.
+
+---
+
 # Novidade confirmada — #2724 MERGED legítimo
 
 API confirma merged:true, headEXATOc5b302f8a95260b1451cb9b8488cb4275b6dbcfb, merge **87dd5d939bce0672f967c8e92cbda31f4a870124**. C6canal00h44reportou9/9+Q5795076516+Z5795447659. FoiAUTORquemincorporou, nãoZ. Zvetoresfechados, nãoreabrir2724ou integrarownmainporchurn. Estado2751MED5795470462/provae207e5ownheadsabaixointactos. PONTOanterior b202dddad62731d2a7d82b2197e65cfaa084c931 públicoconfirmado, esta novidade supera sóesperafuturapor2724.

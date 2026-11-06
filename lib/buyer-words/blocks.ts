@@ -81,6 +81,8 @@ const en = {
   searchFound: (n: number, q: string) => `${n} ${plural(n, "product", "products")} for “${q}”`,
   searchNone: (q: string) => `Nothing here for “${q}”. Try another word, or see every product.`,
   searchClear: "Show every product",
+  /** Beside search results: how they are ordered (EU 2011/83/EU Art. 6a(1)(a)). Only the creator's own order, never paid. */
+  searchOrder: (store: string) => `Shown in the order ${store} set for its products. Nobody can pay to be listed higher.`,
   searchSlow: "Too many searches for now. Try again in a few minutes.",
   /** The store's own questions and answers (lib/store-faq.ts). */
   storeFaqTitle: "Questions, answered",
@@ -144,6 +146,7 @@ const es: BlockWords = {
   searchFound: (n, q) => `${n} ${plural(n, "producto", "productos")} para «${q}»`,
   searchNone: (q) => `No hay nada para «${q}». Prueba con otra palabra o mira todos los productos.`,
   searchClear: "Ver todos los productos",
+  searchOrder: (store) => `En el orden que ${store} fijó para sus productos. Nadie puede pagar para aparecer más arriba.`,
   searchSlow: "Demasiadas búsquedas por ahora. Inténtalo dentro de unos minutos.",
   storeFaqTitle: "Preguntas y respuestas",
 };
@@ -204,6 +207,7 @@ const fr: BlockWords = {
   searchFound: (n, q) => `${n} ${frPlural(n, "produit", "produits")} pour « ${q} »`,
   searchNone: (q) => `Rien ici pour « ${q} ». Essayez un autre mot, ou voyez tous les produits.`,
   searchClear: "Voir tous les produits",
+  searchOrder: (store) => `Dans l'ordre que ${store} a fixé pour ses produits. Personne ne peut payer pour apparaître plus haut.`,
   searchSlow: "Trop de recherches pour le moment. Réessayez dans quelques minutes.",
   storeFaqTitle: "Vos questions, nos réponses",
 };
@@ -264,6 +268,7 @@ const de: BlockWords = {
   searchFound: (n, q) => `${n} ${plural(n, "Produkt", "Produkte")} für „${q}“`,
   searchNone: (q) => `Hier gibt es nichts zu „${q}“. Versuche ein anderes Wort oder sieh dir alle Produkte an.`,
   searchClear: "Alle Produkte zeigen",
+  searchOrder: (store) => `In der Reihenfolge, die ${store} für die eigenen Produkte festgelegt hat. Niemand kann dafür bezahlen, weiter oben zu stehen.`,
   searchSlow: "Gerade zu viele Suchen. Versuche es in ein paar Minuten wieder.",
   storeFaqTitle: "Fragen und Antworten",
 };
@@ -324,6 +329,7 @@ const it: BlockWords = {
   searchFound: (n, q) => `${n} ${plural(n, "prodotto", "prodotti")} per «${q}»`,
   searchNone: (q) => `Niente qui per «${q}». Prova un'altra parola o guarda tutti i prodotti.`,
   searchClear: "Mostra tutti i prodotti",
+  searchOrder: (store) => `Nell'ordine che ${store} ha stabilito per i suoi prodotti. Nessuno può pagare per comparire più in alto.`,
   searchSlow: "Troppe ricerche per ora. Riprova tra qualche minuto.",
   storeFaqTitle: "Domande e risposte",
 };
@@ -384,6 +390,7 @@ const nl: BlockWords = {
   searchFound: (n, q) => `${n} ${plural(n, "product", "producten")} voor ‘${q}’`,
   searchNone: (q) => `Niets gevonden voor ‘${q}’. Probeer een ander woord, of bekijk alle producten.`,
   searchClear: "Alle producten tonen",
+  searchOrder: (store) => `In de volgorde die ${store} voor de eigen producten heeft gekozen. Niemand kan betalen om hoger te staan.`,
   searchSlow: "Even te veel zoekopdrachten. Probeer het over een paar minuten opnieuw.",
   storeFaqTitle: "Vragen en antwoorden",
 };
@@ -444,6 +451,7 @@ const pt: BlockWords = {
   searchFound: (n, q) => `${n} ${plural(n, "produto", "produtos")} para «${q}»`,
   searchNone: (q) => `Não há nada aqui para «${q}». Experimente outra palavra ou veja todos os produtos.`,
   searchClear: "Ver todos os produtos",
+  searchOrder: (store) => `Na ordem que ${store} definiu para os seus produtos. Ninguém pode pagar para aparecer mais acima.`,
   searchSlow: "Demasiadas pesquisas por agora. Tente novamente dentro de alguns minutos.",
   storeFaqTitle: "Perguntas e respostas",
 };

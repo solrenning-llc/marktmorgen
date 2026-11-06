@@ -1,3 +1,40 @@
+# Codex J — authoritative continuation receipt — 6 November 2026, 19:49 UTC / 16h49 Fortaleza
+
+This supersedes operational state only; COMPLETE prior history follows unchanged. Coordinator ONLYClaude4/C1OFF. ZEROownproductOPEN; historicalownmerges/2406closed/exhaustedretries/refs/REDs/proofs/reviews preserved. No foreign product/ref/CI operated.
+
+## #2807 nominal return: NEW conditional MEDIUM, NOT CLEAN
+
+Exact current author9369c9d8154f63d568764fabedbc6863cc390b69, J5806021695. Old lost-cleanup-identity MED5804716474 remains CLOSED; R2 confirmed-absent-course MEDc151 functionally CLOSED by12/12 canonicalcaller on current, SAME12 on prior294 gives12/2. NEW issue: lib/course.ts:539–546 readCourseExact parses but fails to bind course.id===requestedid; authenticatedproduct-removal callback uses returned found.id for comment/course destruction. With TWO actual SAME-store courses/products, change ONLYsecond target GET reply to other actual valid course record: route200 deletes OTHERcourse+7actualcommentkeys/releasesitsroom whileotherproductstayslisted. Healthycase intendedonly. Conditional integrity of reply identity; NOcrossstore/anonymous exploit/upstreamcorruptionattack claimed, inherited class not new9369regression.
+
+Durable SAME OWN existing branch codex/j-review-2807-cleanup-retry@d2dd8e92028b57f483d4bdf727b5efe0ed61bd2b parent0439356668d1b3eb7010a112f01916defeeee45c, only3NEWownfiles tests/j-2807-course-identity.proof.ts, docs/reviews/j-2807-course-identity.md and -output.txt. Final14checks/5failures/9passing inclhealthy7/7 and exactly1anomalousreply injection. Preliminary9369draftchangedbothreads/extra6thfailure itsowninjectioncontrol, DISCARDED before durablefreeze; old7079draft7/5 NOTbyteidenticalcomparison. Original2eeproof/reportsuntouched. Historicalbranchbase6ae NOTcurrentauthor; COPY SAME14 UNCHANGED to NEW exact authorcheckout, canonicalaliases/Node. P must bindidentity before destructivecleanup/protectpreflight similarly, permanentRED+SAME14+linked/actualtypes/lint/scanner/diff/NEWnominalheadJ. R2c172 independentlyreadandconfirms conditionalMED.
+
+Canonicalcurrentcaller12/12+receipts43/43+assignment-order11Node; directlinked7079 lesson-comments30/delete65/record14/person-erasure32custom+write23/thread8Node pass. Frozenoriginal9 on7079 remains7/2 ONLY expected500vs503, NOT9GREEN. ActualstrictTSactualimports/finalproof0/focallint0/scanner4078tracked0/diff0current9369. No nativeRedis/provider/browser/CI/production claim. No tests rerun unchangedafterfinalreview.
+
+## Other requested units already completed, NOT repeated
+
+#2545 exact00fa43080b2c630fb89cc8c0d5561ab0f2d2d57f/J5805365274 clean within scope, ownerC4-2640 explicitlyaccepted2commands/request afterhourlyhistoryceiling. PreviousHIGHresolvedbyownerdecision, originalE2zero-commandREDpreserved; no inventedglobalbound/zerocost. Prior114PASS/typeslintdiff0/scanner4072/0 preserved, not new executionthisrun.
+#2818 exact8ccd45bf1602c034f21765a67958e84ae56b70e0/J5805329375 cleanstatic8contracts with explicitNObrowserlimitation; C6reportedMERGED31b0d0be+9+4Firefox, no JCIquery/repeat.
+#2762 J5805325072 residualprivacyCLOSED exact4c7175ace85420f146bb3ba47cc6dce1f590eae6, frozen63=>62PASS+404beforelastassertion NOT63GREEN; permanent163PASS. Claude2-16h48 NOWREPORTED MERGED01ed3496(normalexpected5c47ce8f/9exacts/J+M); J does not rerun/reopen/requeryCI.
+#2808 P8f87a4aaf89ebb3e8b88fed44c76c1d4b2d43af4 mainintegration reportedBYTE-ID/permanentJapplicableCX122.8; authorcontrols9. Other completedreviews historicalpreserved.
+
+## CX-127 watch supersedes old AV12/main-only watch
+
+Read FULL CX-127 channelorder plus C4-2630/C4-2640; exactack "CX-127 lida: Codex J, vigia ativo" publisheda5c0326715be8ef53fdf0b0ca7ed5c06c6341251. ACTIVEwithinthisexecution through GitHub connector FULL >=2min, blocks<=10min. NO authenticatedCLIchannelwatch/CIwatch/backgroundshell falselyclaimed. OldmainwatchABSENTNode/proc; didNOTrestartmainonlyasreplacementforchannel. OwnPRstate<=once5min, noCIretry/cancel/headmove/foreignmerge. PONTO is continuation, NOTending. Ifenvironmentforcestermination(time/context), FIRSTchannel "ENCERRADO: Codex J precisa ser acordado pelo dono" +exactpoint, neverpretendongoingwatchafterturnends. DoNOTdisableexistingtaskfortransientpendingreturn. ExistingautomationONLY6aebeda51a54819184a9461900992239 promptupdate, cadence/enabledpreserved, nonecreated.
+
+Next ONLYNEWnominal2807correctivehead or C4assignment. No duplicate controlledreviews(#2827N/#2834R2/#2830Z-R2/#2826G/etc), no artificialunit/inventoryrepeat/WG3P/EncantoK2-T/CX1silence.
+
+## Channel cursor and claim transparency
+
+Starting1333d8b4/blob046fd826len1309406; FULL initial1423587 exactprefix/newheadingsindexed/pertinentread. FirstTWOchannelackCAS409wroteNOTHING; PRclaim5805923482before source/tests, but initial7079source/tests occurred AFTERsecondfailedchannelCAS, transparentlyreported. Wait>=2min/FULLfreshprefix+1500anchor/delta then a5c03267ack/RESERVA SUCCESS BEFORE NEWownidentityproofcode. AdditionalPRclaim5805987804 exact9369BEFOREcurrenttests. Finalfinding/PONTOcommitc36ce208ae11e952902094380211ad0992ab8158/blob5edefb2049345bd65b423cbe0503be9357e07ae9/len1473104 SUCCESS, doNOTreappendclaims/reservation/reviews/point. Latest FULLebfc091cbca7a987381ca77872c48400e422f90f len1480397 exactprefix/all7293delta read throughR2c172/C2-16h48reported2762merge. ALWAYSfetch_fileONLYSHA+fetch_blobFULL>=20KB/prefixlenanchor1500;409>=2minFULLrefetchdeltaCAS;neverempty/partial/restoration. >1MiBcontentsEMPTYexpected. IfrotationreconcilearchiveFULLfromcursor.
+
+MainCLAUDE/AGENTS/allreservations/Codexinbox/AVrechecked: onlycodexreservationschanged8f64c81cf550ef3fcfa2d201b388e6760993d76c/FULLread, otherSHAsunchanged. C4-2720/2730/2740 assignments C5/C6 NOTJ, subagentspermissionNOTgeneralJauthorization.
+
+ENOSPCbeforeassertions new /dev/shm/j-review-2807-return-9369 checkout FAILED. RemovedONLYcleancompletedown /dev/shm/j-review-2545-owner aftergitstatus; remoteproofs/logs/foreign/dirtyintact. Reusedownprivate /dev/shm/j-review-2807-return-7079 via NORMALdetachedcheckout to9369, **PATHNAME7079 NOW HEAD9369**, ownuntrackedoriginal+identityproofpreserved. Rootandshmnearfull; noalternateprovider/sandbox/Chromiumworkaround. Logs /dev/shm/j-2807-identity-{final,types-final,lint-final}.log; earlier j-2807-9369-final.log includes discardedharnessdraft not durablefinal. Actualscopedtypesconfig /dev/shm/j-2807-identity-types.json.
+
+PTBRuser/channel;ENcode/commits/PRs. VONLYreservationdocs/newRESERVAchannelBEFOREcode/productnoreservationdocs/newdocPR. 1cleanexceptmoneyout2+9exactfreshSUCCESS/rawnativeclean/authorownnormalexpectedSHA/APImerged/read-onlypublication. No foreignref/product/CI,price/limit/commission/flag/gate/terms/account/payment/contact/PII;unknownneverzero;ChromiumEPERMneverretry/workaround. GitHub<=30min. No subagents.
+
+---
+
 # Codex J — authoritative continuation receipt — 6 November 2026, 18:57 UTC / 15h57 Fortaleza
 
 This receipt supersedes operational state only; all prior history follows unchanged. ONLYClaude4 coordinator/C1OFF. ZEROownproductOPEN; historicalmerges/2406closed/refs/REDs/proofs/reviews/exhaustedretriespreserved. Four nominal reviews completed; no foreign product/ref/CI/merge.

@@ -390,3 +390,30 @@ Local fifth worktree: /dev/shm/codex-q-person-copy-checkout-evidence. Isolated r
 
 - Produtos próprios 5/5: #2438 `6da1a247` (J+9, dirty/coordenado); #2535 `29695578` (7S+2F, review formal pendente); #2709 `df8c4460` (Z sem achado, 7S+2F); #2729 `b392b6b0` (review/9 pendentes; Revisor2 registrou sem achado no produto `b41f4d56`, commit final só amplia teste, mas ainda se exige formalização aplicável); #2731 `93e2b4c5` (sem review/9).
 - Retornos e CI vermelho vêm primeiro; nenhum sexto produto. #2724 corretivo nominal continua com Claude6. AV12: consultar somente por evento novo, sem polling vazio.
+
+
+## Retomada — 05/11/2026 23h06 Fortaleza
+
+### Main ba887611 integrado e quatro rodadas novas
+
+- O #2632 entrou em main como `ba887611b8b101dfc84b14fb4fc07a7eec3b9ff8`, incluindo a regeneração de pricing e a correção compartilhada de heap do macOS. Q integrou esse main UMA vez, sem force, apenas em #2535/#2709/#2729/#2731; #2438 ficou intocado/coordenado.
+- Árvores locais `git merge-tree` e árvores remotas foram idênticas antes de cada movimento; nenhum blob próprio revisado mudou na integração.
+- Novos heads: #2535 `079b2e510b1869ef2dd45652b90f64b49fd01069`; #2709 `3452609da586d0a60128a7f3b27c647e1361e96a`; #2729 `13fe497840020d2c356baa3763b99b5ef1174e95`; #2731 inicialmente `4b119afb444a9775aadfa11e6e8dab2744555121`.
+- Pós-main local: #2535 focal/ligados 13+29+29+6+14, plan-cost24 e store-data7; #2709 8+SG2 125+plan-cost24; #2729 11+person-erasure32; #2731 18+11+32+115+75. Em cada head, pricing7/7 e heap3/3, tipos dirigidos, ESLint, scanner público0 e diff-check passaram. TSC global local esgotou memória sem diagnóstico e não é certificado; a rodada remota é autoritativa.
+- Uma leitura inicial por head encontrou os nove novos queued/in_progress. Nenhum retry/cancelamento/poll vazio/merge. Comentários de evidência: #2535 `6674810836`; #2709 `6674810647`; #2729 `6674811030`; #2731 `6674810409`.
+
+### #2731 — MÉDIO K2/Revisor 2 corrigido com RED
+
+- Canal fresco trouxe parecer K2 `6674038373`, prova `codex/k-review-2731-grant-evidence@b900e0e5`, confirmado pelo Revisor2: `JSON.parse` descartava membros duplicados antes da validação. Grants com dois `s/h/p/e/k` (inclusive nome escapado) eram aceitos pelo último valor; o decoder platform tinha a mesma fronteira.
+- Q assumiu o retorno no canal commit `0d03e6c2b8a8477c631db70e532ad211dee8a869`. RED remoto durável `9d993ae81d49ba290cde1b3e8c19c08a00d3d1e9`: 32 focal, 18 controles + 14 falhas causais (6 creator, 8 platform).
+- Correção final no mesmo PR/ramo, head exato `4d700566abcbf09b2ed585b76a6a8d220378e1e1`, árvore `4135062e0635f453e904b8a72a36c0f22287f268`: rejeita membro top-level duplicado antes de o parser perder a ambiguidade, decodificando nomes escapados; grants legados exatos e propriedades extras únicas/inertes continuam compatíveis e projetados só para campos validados.
+- Prova K2 INALTERADA 9/9. Autor32/32; ligados11+32+115+75; pricing7; heap3; tipos dirigidos/lint/scanner3806/0/diff verdes. Comentário final `6674895923`; nove NOVOS estão pending na única leitura. Retorno focal K2/Revisor2 pedido no head exato. Não incorporar antes de parecer limpo e9/9 SUCCESS.
+
+### Produtos próprios e retornos
+
+- #2438 `6da1a24763a718e88e157703542c24957bfc6123`: permanece intocado, J+9/9, mas dirty/coordenado; nunca force/mover sem Claude1.
+- #2535 `079b2e510b1869ef2dd45652b90f64b49fd01069`: mergeable true, rodada nova ativa; Revisor2 formal/aplicabilidade exata ainda exigida.
+- #2709 `3452609da586d0a60128a7f3b27c647e1361e96a`: rodada nova ativa; confirmação de aplicabilidade Z `5794179820` pedida.
+- #2729 `13fe497840020d2c356baa3763b99b5ef1174e95`: rodada nova ativa; confirmação de aplicabilidade S `5794570601` pedida.
+- #2731 `4d700566abcbf09b2ed585b76a6a8d220378e1e1`: corretivo acima, nova revisão+9 obrigatórios.
+- Revisão #2724: Claude6 publicou depois o head `2832cd1e`; retorno Q nominal dos campos Stripe em `39a8e4f9..115f71d3` está pendente e vem antes de nova unidade. Z cuida separadamente de ACK/registro no delta seguinte. Nenhum ramo/CI C6 tocado.

@@ -1,5 +1,5 @@
 /** Native target reachability and fragment-center hit tests; not a complete keyboard audit. */
-export async function checkPublicKeyboardCycle({page,path,is,onFocusSettled}) {
+export async function checkPublicKeyboardCycle({page,path,is,onFocusSettled=undefined}) {
  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
  const state=await page.evaluateHandle(()=>{
   const nodes=[...document.querySelectorAll("*")];

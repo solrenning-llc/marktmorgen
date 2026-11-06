@@ -41,6 +41,7 @@ import { storeForId } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { withinLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -89,11 +90,16 @@ export async function rememberBuyers(sid: string, emails: string[]): Promise<voi
   }
 }
 
-/** The ids of the stores an address bought from, closed ones among them until they run out (a closed store no longer resolves). */
+/**
+ * The ids of the stores an address bought from, closed ones among them until they run out (a closed store no longer
+ * resolves). Read in its exact shape (CX-123 rule 24): one list of strings, or UnknownReplyError, never "none".
+ */
 export async function storesBoughtFrom(email: string): Promise<string[]> {
   if (!isRedisConfigured()) return [];
-  const [all] = await redisPipeline([["SUNION", ...libraryKeys(email)]]);
-  return [...new Set(ids(all))].slice(0, MAX_LIBRARY_STORES);
+  const replies = repliesFor(await redisPipeline([["SUNION", ...libraryKeys(email)]]), 1);
+  const all = replies ? stringList(replies[0]) : null;
+  if (!all) throw new UnknownReplyError("a library's stores");
+  return [...new Set(all.filter((id) => STORE_ID.test(id)))].slice(0, MAX_LIBRARY_STORES);
 }
 
 export type LibraryRequest = "sent" | "email" | "limited" | "error";

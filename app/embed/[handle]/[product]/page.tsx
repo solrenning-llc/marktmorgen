@@ -62,26 +62,41 @@ type Params = {
  * Once a creator lists their sites, a card pasted anywhere else shows the
  * plain link too; with no list it is drawn wherever it is pasted, as before.
  */
-const load = cache(async (raw: string, id: string): Promise<{ store: Store | null; product: Listing | null }> => {
+/**
+ * The store and the product, or null for one that is not there. A read that
+ * failed is `unread`, never "not there" (CX-123 rule 24): the card then says
+ * it could not be loaded just now, never that the product is no longer on sale.
+ */
+const load = cache(async (raw: string, id: string): Promise<{ store: Store | null; product: Listing | null; unread: boolean }> => {
   let decoded = "";
   try {
     decoded = decodeURIComponent(raw);
   } catch {
-    return { store: null, product: null };
+    return { store: null, product: null, unread: false };
   }
-  const store = await storeForPage(normaliseHandle(decoded.replace(/^@/, ""))).catch(() => null);
+  let store: Store | null;
+  try {
+    store = await storeForPage(normaliseHandle(decoded.replace(/^@/, "")));
+  } catch {
+    return { store: null, product: null, unread: true };
+  }
   // A store switched off after notices (lib/takedown.ts) shows no card.
-  if (!store || store.suspended) return { store: null, product: null };
+  if (!store || store.suspended) return { store: null, product: null, unread: false };
   // A draft is not on sale, and its card says so as its page would.
-  const product = await readListing(store, id).catch(() => null);
-  return { store, product: product && !product.hidden ? product : null };
+  let product: Listing | null;
+  try {
+    product = await readListing(store, id);
+  } catch {
+    return { store, product: null, unread: true };
+  }
+  return { store, product: product && !product.hidden ? product : null, unread: false };
 });
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle, product: id } = await params;
-  const { store, product } = await load(handle, id);
+  const { store, product, unread } = await load(handle, id);
   return {
-    title: store && product ? `${product.title} — ${store.name}` : "Not on sale",
+    title: store && product ? `${product.title} — ${store.name}` : unread ? "Not available just now" : "Not on sale",
     robots: { index: false, follow: false },
   };
 }
@@ -144,11 +159,14 @@ export default async function EmbedCard({ params, searchParams }: Params) {
         <p className="rounded-3xl bg-white px-5 py-4 text-center text-sm text-ink-soft ring-1 ring-line">
           {store ? (
             <>
-              {`${speech(store).w.noLongerOnSale} `}
+              {`${loaded.unread ? speech(store).w.cardUnread : speech(store).w.noLongerOnSale} `}
               <a href={tag(`/@${store.handle}`)} {...aside} className="font-semibold underline underline-offset-4">
                 {speech(store).w.seeStore(store.name)}
               </a>
             </>
+          ) : loaded.unread ? (
+            // The store could not be read, so neither could its language: in English, as below.
+            "This product could not be loaded just now. Try again in a moment."
           ) : (
             "This product is no longer on sale."
           )}
@@ -159,16 +177,21 @@ export default async function EmbedCard({ params, searchParams }: Params) {
 
   const selling = canSell(store);
   const [coming, stock, noKeys, related, summary] = await Promise.all([
-    soonOne(store, product.id).catch(() => ({ soon: false, day: null })),
+    // Unknown is null, never "not coming soon" (CX-123 rule 24): the card then draws no buy button.
+    soonOne(store, product.id).catch(() => null),
     stockLeft(store, product).catch(() => null),
     outOfKeys(store, product).catch(() => false),
     product.bumps.length ? readListings(store, bumpTargets(product)).catch(() => []) : Promise.resolve([]),
     summaryOf(store.statsId, product.id).catch(() => null),
   ]);
-  const soon = coming.soon;
+  const soon = coming?.soon ?? false;
   const count = noKeys ? 0 : stock;
   const remaining = count !== null && canSellProduct(store, product) ? count : null;
-  const computed = pageAction(store, product, remaining, selling, related, soon, preorderDay(store, product, coming.soon, coming.day));
+  // Whether it is coming soon could not be read: buying, the waitlist or the pre-order cannot be told apart, so the card
+  // says buying is not available just now, and its title still leads to the product's page.
+  const computed = coming
+    ? pageAction(store, product, remaining, selling, related, soon, preorderDay(store, product, coming.soon, coming.day))
+    : { action: { kind: "none" as const, text: speech(store).w.cardBuyUnread }, label: "" };
   const page = tag(productPath(store, product));
   // A card the script opened on a site the creator did not list, past the
   // store's visits or past the opens one connection gets, and one pasted

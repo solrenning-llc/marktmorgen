@@ -38,8 +38,16 @@ export default async function LibraryPage({ searchParams }: Params) {
 
   // Each store's own list, opened by a link made for this address now (lib/buyer-orders.ts).
   const shelves: { store: Store; open: string | null }[] = [];
+  // What could not be read just now is said, never left out as if nothing were there (CX-123 rule 24): the list of
+  // stores itself, or each store whose record did not answer. A store that is gone (null) is left out, as before.
+  let listUnread = false;
+  let storesUnread = 0;
   if (email) {
-    const stores = (await Promise.all((await storesBoughtFrom(email)).map((sid) => storeForId(sid).catch(() => null)))).filter((s): s is Store => s !== null);
+    const sids = await storesBoughtFrom(email).catch(() => null);
+    if (!sids) listUnread = true;
+    const read = await Promise.all((sids ?? []).map((sid) => storeForId(sid).then((store) => ({ store }), () => null)));
+    storesUnread = read.filter((r) => r === null).length;
+    const stores = read.flatMap((r) => (r?.store ? [r.store] : []));
     for (const store of stores) {
       const base = storeBase(store);
       shelves.push({ store, open: canRecover(store) ? await ordersLinkFor(store, email, base).catch(() => null) : null });
@@ -69,6 +77,13 @@ export default async function LibraryPage({ searchParams }: Params) {
               <p className="mt-2 text-sm text-ink-soft">
                 What you bought from a store is here while that store is open on Marktmorgen. A store whose creator closes it takes what was bought from it along, so download the files you want to keep. <Link href="/terms#closing" className="underline underline-offset-4">How a store closes</Link>.
               </p>
+              {listUnread || storesUnread ? (
+                <p role="status" className="notice notice-error mt-6">
+                  {listUnread
+                    ? "The stores you bought from could not be read just now. Reload this page in a moment."
+                    : `${storesUnread} ${storesUnread === 1 ? "store" : "stores"} could not be read just now. Reload this page in a moment to see ${storesUnread === 1 ? "it" : "them"}.`}
+                </p>
+              ) : null}
               {shelves.length ? (
                 <ul className="mt-6 grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {shelves.map(({ store, open }) => (
@@ -103,7 +118,7 @@ export default async function LibraryPage({ searchParams }: Params) {
                     </li>
                   ))}
                 </ul>
-              ) : (
+              ) : listUnread || storesUnread ? null : (
                 <p className="mt-6 text-ink">Nothing is listed for this address any more.</p>
               )}
             </>

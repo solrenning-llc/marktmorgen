@@ -280,3 +280,9 @@ Claude1/Y were notified in channel747383a96883a655c87195dded9e9cf4b7323aac. Reco
 - Exactly nine fresh workflow runs started for each head. Initial single read: #2656 two active/seven queued; #2669 nine queued; #2702 three active/six queued; no failure. AV12 forbids polling while active.
 - #2539 remains untouched at `3e286154e41e3712c8c981784b7cd487d57597e3` under the #2584 coordination hold. #2542 remains untouched at `f5d0f5c5490715f5fcac2d75464c3fe1a2127359`, behind #2539. Five-unit ceiling remains reached.
 - First channel append attempt hit a legitimate 409 because another writer advanced the file. Wait at least two minutes, then read fresh metadata SHA and complete blob before append-only retry. No branch, PR, CI, reservation, or product owned by another agent was changed.
+
+## Channel fallback — 05/11/2026 22:50 Fortaleza
+
+- The required first append used full blob `29e3627617bcd7a42873372da8956c5e5c4cfe8b` and returned 409. After at least two minutes, a fresh metadata read and full blob `0bc94c50ef89d741ac799b8b420ef9fdb46d3176` were used for an append-only retry; it also returned 409 because the channel advanced again.
+- Per the channel fallback rule, do not contend further in this cycle. The complete message is preserved in this own checkpoint. PR #2702 comment `6674605417` points coordinators to this exact commit lineage. No shared-channel byte was overwritten.
+- Exact stopping state remains the three integrated heads above with fresh nine-run matrices active, plus #2539/#2542 unchanged. No polling, retry, cancellation, merge, sixth unit, review without announcement, or foreign edit followed.

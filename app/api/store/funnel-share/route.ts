@@ -156,10 +156,6 @@ export async function POST(request: NextRequest) {
   // Whether this attempt was counted against a figure yet: a read that fails after it says the try still counts
   // (Codex K2 on #2880), and one that fails before it does not.
   const tried = { counted: false };
-  const count = (key: string, limit: number, seconds: number) => {
-    tried.counted = true;
-    return countUse(key, limit, seconds);
-  };
   try {
     if (action === "share") {
       const funnelId = text(body.funnel, 10);
@@ -169,7 +165,8 @@ export async function POST(request: NextRequest) {
       const held = await listShares(statsId);
       if (held.length >= limits.shares) return refuse("shares_full", 400, { limit: limits.shares });
       // Links made in the month, revoked ones included: each writes a snapshot.
-      if (!(await count(storeMonthKey(statsId, "share", month), limits.sharesPerMonth, MONTH_USE_SECONDS))) return refuse("shares_month", 429, { limit: limits.sharesPerMonth });
+      tried.counted = true;
+      if (!(await countUse(storeMonthKey(statsId, "share", month), limits.sharesPerMonth, MONTH_USE_SECONDS))) return refuse("shares_month", 429, { limit: limits.sharesPerMonth });
       const collected = await collectBundle(store, funnelId, "share");
       if (!collected) return refuse("unknown", 404);
       const outline = outlineOf(collected.bundle);
@@ -192,8 +189,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "preview") {
-      if (!(await count(storeUseKey(statsId, "preview"), PREVIEWS_PER_STORE_HOUR, 3_600))) return refuse("busy", 429);
-      if (!(await count(storeMonthKey(statsId, "preview", month), limits.previewsPerMonth, MONTH_USE_SECONDS))) return refuse("previews_month", 429, { limit: limits.previewsPerMonth });
+      tried.counted = true;
+      if (!(await countUse(storeUseKey(statsId, "preview"), PREVIEWS_PER_STORE_HOUR, 3_600))) return refuse("busy", 429);
+      tried.counted = true;
+      if (!(await countUse(storeMonthKey(statsId, "preview", month), limits.previewsPerMonth, MONTH_USE_SECONDS))) return refuse("previews_month", 429, { limit: limits.previewsPerMonth });
       const source = await sourceOf(body, store, "preview");
       if (!source.ok) return source.response;
       const receiver = await receiverOf(store);
@@ -219,13 +218,17 @@ export async function POST(request: NextRequest) {
       if (!FUNNEL_ID.test(funnelId)) return refuse("unknown", 404);
       if (action === "copy-preview") {
         // A preview is the destination's, as a preview of a link or file would be.
-        if (!(await count(storeUseKey(to.statsId, "preview"), PREVIEWS_PER_STORE_HOUR, 3_600))) return refuse("busy", 429);
-        if (!(await count(storeMonthKey(to.statsId, "preview", toMonth), toLimits.previewsPerMonth, MONTH_USE_SECONDS))) return refuse("previews_month", 429, { limit: toLimits.previewsPerMonth });
+        tried.counted = true;
+        if (!(await countUse(storeUseKey(to.statsId, "preview"), PREVIEWS_PER_STORE_HOUR, 3_600))) return refuse("busy", 429);
+        tried.counted = true;
+        if (!(await countUse(storeMonthKey(to.statsId, "preview", toMonth), toLimits.previewsPerMonth, MONTH_USE_SECONDS))) return refuse("previews_month", 429, { limit: toLimits.previewsPerMonth });
       } else {
         // Reading it out of this store is one of its exports, bringing it into the other one of its imports;
         // both are counted before anything is written, and kept when it fails.
-        if (!(await count(storeMonthKey(statsId, "export", month), limits.exportsPerMonth, MONTH_USE_SECONDS))) return refuse("exports_month", 429, { limit: limits.exportsPerMonth });
-        if (!(await count(storeMonthKey(to.statsId, "import", toMonth), toLimits.importsPerMonth, MONTH_USE_SECONDS))) return refuse("imports_full", 429, { limit: toLimits.importsPerMonth });
+        tried.counted = true;
+        if (!(await countUse(storeMonthKey(statsId, "export", month), limits.exportsPerMonth, MONTH_USE_SECONDS))) return refuse("exports_month", 429, { limit: limits.exportsPerMonth });
+        tried.counted = true;
+        if (!(await countUse(storeMonthKey(to.statsId, "import", toMonth), toLimits.importsPerMonth, MONTH_USE_SECONDS))) return refuse("imports_full", 429, { limit: toLimits.importsPerMonth });
       }
       // The same creator's copy: their about text, videos, deadline and quotes stay; pictures never come along.
       const collected = await collectBundle(store, funnelId, "own");
@@ -277,7 +280,8 @@ export async function POST(request: NextRequest) {
         if (source.kind === "starter") before = source.before;
       }
       // Counted before anything is written, and kept when it fails: an attempt costs reads as well.
-      if (!(await count(storeMonthKey(statsId, "import", month), limits.importsPerMonth, MONTH_USE_SECONDS))) return refuse("imports_full", 429, { limit: limits.importsPerMonth });
+      tried.counted = true;
+      if (!(await countUse(storeMonthKey(statsId, "import", month), limits.importsPerMonth, MONTH_USE_SECONDS))) return refuse("imports_full", 429, { limit: limits.importsPerMonth });
       const result = await importBundle(ref, store, bundle, mapping, name);
       if (!result.ok) return refuse(result.error, result.error === "setup_incomplete" ? 500 : 400, { lines: result.lines ?? [] });
       return Response.json({ ok: true, funnel: result.funnel, pages: result.pages, lines: [...before, ...result.lines], left });

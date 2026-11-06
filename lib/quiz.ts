@@ -597,8 +597,10 @@ export async function forgetQuizPerson(courses: { courseId: string; lessonIds: s
       values.length !== c.lessonIds.length * 2 ||
       !values.every((raw) => raw === null || typeof raw === "string" || typeof raw === "number") ||
       typeof gone !== "number" ||
-      !Number.isInteger(gone) ||
-      gone < 0
+      !Number.isSafeInteger(gone) ||
+      // The same DEL took exactly the keys this reply says were there (Codex G on #2576): the passes' set when it held
+      // any, and each value that was not none. Any other count is a reply that contradicts itself: unknown.
+      gone !== (passed.length > 0 ? 1 : 0) + values.filter((raw) => raw !== null).length
     ) {
       unknown = true;
       return;

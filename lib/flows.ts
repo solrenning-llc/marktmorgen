@@ -482,12 +482,23 @@ function queuedOf(store: Store, flow: Pick<Flow, "id">, emails: string[]): (stri
   return out;
 }
 
-/** Confirms a pipeline of deletions was answered in full; anything else is not an erasure. */
+/**
+ * Confirms a pipeline of deletions (DEL, ZREM) was answered in full, each
+ * command with its own count, a whole number from zero, read without running
+ * a getter: anything else (a missing, null or other reply in any place) is not
+ * an erasure, and throws (Codex G and Revisor 2 on #1927: a null in the place
+ * of the workflows' DEL was taken for done).
+ */
 async function erase(commands: (string | number)[][]): Promise<void> {
   for (let i = 0; i < commands.length; i += 500) {
     const chunk = commands.slice(i, i + 500);
-    const reply = await redisPipeline(chunk);
+    const reply: unknown = await redisPipeline(chunk);
     if (!Array.isArray(reply) || reply.length !== chunk.length) throw new FlowWriteUnconfirmed();
+    for (let j = 0; j < chunk.length; j += 1) {
+      const place = Object.getOwnPropertyDescriptor(reply, String(j));
+      const count: unknown = place && "value" in place ? place.value : undefined;
+      if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) throw new FlowWriteUnconfirmed();
+    }
   }
 }
 

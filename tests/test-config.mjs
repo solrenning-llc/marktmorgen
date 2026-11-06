@@ -74,6 +74,9 @@ export function testAliases(file,root,here){
  if(file==='path-growth-facts.test.ts')for(const name of ['redis','catalog','broadcasts','reviews'])aliases['@/lib/'+name]=join(here,'path-growth-world.ts');
  if(file==='path-reminder-push.test.ts')aliases['@/lib/web-push']=join(here,'path-push-world.ts');
  if(file==='digital-consent.test.ts'||file==='checkout-key-count.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
+ // Sweep app1 proofs (docs/reviews/c5-sweep-app1.md): routes called outside a request; the task proof reaches the real hand-in route.
+ if(file.startsWith('sweep-app1-'))aliases['next/server']=join(here,'next-server-after-world.ts');
+ if(file==='sweep-app1-task-file.proof.test.ts'){aliases['@/lib/blob']=join(here,'buyer-actions-blob.ts');aliases['next/headers']=join(here,'security/next-headers.ts');}
  if(file==='cart-physical.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='review-photo-paused.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='orders-open.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');

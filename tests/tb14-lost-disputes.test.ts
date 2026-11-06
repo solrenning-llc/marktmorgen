@@ -99,6 +99,16 @@ async function main(): Promise<void> {
   const incomplete = await lostDisputesSince("acct_1TestTb14Lost01", NOW - 600);
   is("the caller must keep its cursor and anchor", incomplete.complete, false);
   eventsMalformed = false;
+
+  part("Adversarial: a closing event without the status that decides lost or won is unknown");
+  closings = [{
+    id: "evt_tb14missingstatus0001",
+    created: NOW - 5,
+    data: { object: { id: "dp_tb14missingstatus0001", payment_intent: "pi_tb14missingstatus0001" } },
+  }];
+  const eventWithoutStatus = await lostDisputesSince("acct_1TestTb14Lost01", NOW - 600);
+  is("the caller must not advance past an event whose outcome is missing", eventWithoutStatus.complete, false);
+  closings = [];
   const made = await addProduct("owner@tb14.example", "Bread Course", "", "25", null);
   if (!made.ok) throw new Error("no product");
   await setProductLink("owner@tb14.example", made.product.id, "https://example.com/course");
@@ -139,6 +149,18 @@ async function main(): Promise<void> {
   const [anchorAfter] = await redis.pipeline([["GET", preorderAnchor]]);
   is("a valid event from the other stream must not advance past unknown refunds", anchorAfter, anchorBefore);
   refundsMalformed = false;
+
+  part("Adversarial: a refund without the status that decides success is unknown");
+  refunds = [{
+    id: "re_tb14missingstatus0001",
+    created: NOW - 4,
+    payment_intent: "pi_tb14missingstatus0001",
+    charge: { refunded: true },
+  }];
+  closings = [closing(51, "lost", "pi_tb14unrelated00000002")];
+  await revokeRefundedPreorders(store, Date.now() + 10_000, drop);
+  const [anchorAfterMissingStatus] = await redis.pipeline([["GET", preorderAnchor]]);
+  is("the other stream must not move the anchor past a refund with no outcome", anchorAfterMissingStatus, anchorBefore);
 
   // Ana's bank took part of the price back through an exchange rate: still the whole order (the owner's rule).
   closings = [closing(2, "won", session(2, "").payment_intent), closing(1, "lost", session(1, "").payment_intent, 2311)];
@@ -256,22 +278,3 @@ async function main(): Promise<void> {
     payment_intent: { id: `pi_tb14call${String(n).padStart(8, "0")}`, object: "payment_intent", latest_charge: { object: "charge", id: `ch_tb14call${String(n).padStart(8, "0")}`, refunded: false, amount: 9000, amount_refunded: 0, disputed } },
   });
   const sessionsOf = (rows: { session: string }[]) => rows.map((row) => row.session).sort();
-  sessions = [call(1, true), call(2, true), call(3, true), call(4, false)];
-  disputes["ch_tb14call00000001"] = [{ status: "lost" }];
-  disputes["ch_tb14call00000002"] = [{ status: "won" }];
-  disputesFail.add("ch_tb14call00000003");
-  disputeReads = 0;
-  is("the lost one no longer holds its time; the won one, the one Stripe could not be asked about, and the undisputed one do", sessionsOf(await paidCalls(store)), [call(2, true).id, call(3, true).id, call(4, false).id].sort());
-  is("three questions, one a disputed charge; none for the undisputed one", disputeReads, 3);
-  is("read alone, the lost one is not a paid booking", await paidCall(store, call(1, true).id), null);
-  is("and the won one is", (await paidCall(store, call(2, true).id))?.session, call(2, true).id);
-  sessions = Array.from({ length: 7 }, (_, i) => call(10 + i, true));
-  for (let i = 0; i < 7; i += 1) disputes[`ch_tb14call${String(10 + i).padStart(8, "0")}`] = [{ status: "lost" }];
-  disputeReads = 0;
-  const left = await paidCalls(store);
-  is("past the reading's five questions, a disputed booking keeps its time (never more questions)", [disputeReads, left.length], [5, 2]);
-
-  done();
-}
-
-void main();

@@ -54,7 +54,9 @@ export function readDrafted(raw: unknown, count: number): DraftedQuestion[] {
     const choices = (Array.isArray(value.choices) ? value.choices : []).slice(0, MAX_CHOICES).map((c) => clean(c, MAX_CHOICE_LENGTH));
     if (!text || choices.length < MIN_CHOICES || choices.some((choice) => !choice)) continue;
     if (new Set(choices.map((c) => c.toLowerCase())).size !== choices.length) continue;
-    const correct = [...new Set((Array.isArray(value.correct) ? value.correct : []).filter((n): n is number => Number.isInteger(n) && n >= 0 && n < choices.length))].sort((a, b) => a - b);
+    const rawCorrect = Array.isArray(value.correct) ? value.correct : [];
+    if (rawCorrect.some((n) => typeof n !== "number" || !Number.isInteger(n) || n < 0 || n >= choices.length)) continue;
+    const correct = [...new Set(rawCorrect as number[])].sort((a, b) => a - b);
     if (correct.length === 0 || correct.length === choices.length) continue;
     const kind: QuestionKind = correct.length > 1 ? "multiple" : "single";
     out.push({ text, kind, choices, correct, explanation: clean(value.explanation, MAX_EXPLANATION_LENGTH) });

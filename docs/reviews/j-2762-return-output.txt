@@ -1,0 +1,94 @@
+
+The rules: how much a preview may show
+  ok    at most five parts
+  ok    a stored preview of 2 with products is kept
+  ok    a stored preview of 0 shows none, and the email stays kept
+  ok    a stored preview of 6 shows none, and the email stays kept
+  ok    a stored preview of 1.5 shows none, and the email stays kept
+  ok    a stored preview of -1 shows none, and the email stays kept
+  ok    a stored preview of a string shows none, and the email stays kept
+  ok    a stored preview of NaN shows none, and the email stays kept
+  ok    a stored preview of null shows none, and the email stays kept
+  ok    a stored preview without products is dropped (the email is open to all anyway)
+  ok    previewOf: the first two parts, as written
+  ok    never the words after them
+  ok    a preview longer than the email stops before its last part
+  ok    an email of one part shows no preview at all
+  ok    no preview chosen: nothing
+  ok    an email open to all has no preview (everyone reads it whole)
+
+Publishing with a preview
+  ok    a preview of 6 is refused
+  ok    a preview of 0.5 is refused
+  ok    a preview of -1 is refused
+  ok    a preview of a string is refused
+  ok    a preview of an array is refused
+  ok    a preview with no product checked is refused (everyone would read it whole)
+  ok    no preview said: the same copy as before
+  ok    a preview of 0 is no preview
+  ok    kept for members with a preview of 2
+  ok    read back the same
+  ok    published again with nothing said: the products and the preview stay
+  ok    or a new preview is taken
+  ok    and products given with no preview take it off
+
+Who sees what on the page
+  ok    a visitor sees the preview: the heading and the hello
+  ok    and is told it is the start
+  ok    never the words after it
+  ok    the products and the form are still there
+  ok    a holder reads the whole email, once, with no preview label
+  ok    the creator reads it whole and is told what everyone sees
+  ok    an email kept with no preview shows a visitor no words, as before
+
+The words after the preview reach no public place
+  ok    the list shows neither the preview nor the words
+  ok    the metadata holds neither
+
+The route
+  ok    takes a preview with the products
+  ok    refuses one out of range, and the kept one stays
+
+The words in every buyer language
+  ok    en: the preview's heading and the creator's note
+  ok    es: the preview's heading and the creator's note
+  ok    es: in its own words
+  ok    fr: the preview's heading and the creator's note
+  ok    fr: in its own words
+  ok    de: the preview's heading and the creator's note
+  ok    de: in its own words
+  ok    it: the preview's heading and the creator's note
+  ok    it: in its own words
+  ok    nl: the preview's heading and the creator's note
+  ok    nl: in its own words
+  ok    pt: the preview's heading and the creator's note
+  ok    pt: in its own words
+
+J: unknown kept-record reads never open members-only words
+publishing an email failed UnknownReplyError: Redis answered publishing an email: its place and its copy in an unknown shape
+    at publishLetter (/tmp/j2762-XBDodz/proof.cjs:86966:13)
+    at async main (/tmp/j2762-XBDodz/proof.cjs:89346:7)
+  ok    missing-slot: original member products remain
+  ok    missing-slot: visitor never sees the private recipe
+publishing an email failed UnknownReplyError: Redis answered publishing an email: its place and its copy in an unknown shape
+    at publishLetter (/tmp/j2762-XBDodz/proof.cjs:86966:13)
+    at async main (/tmp/j2762-XBDodz/proof.cjs:89346:7)
+  ok    boolean-slot: original member products remain
+  ok    boolean-slot: visitor never sees the private recipe
+publishing an email failed UnknownReplyError: Redis answered publishing an email: its place and its copy in an unknown shape
+    at publishLetter (/tmp/j2762-XBDodz/proof.cjs:86966:13)
+    at async main (/tmp/j2762-XBDodz/proof.cjs:89346:7)
+  ok    empty-envelope: original member products remain
+  ok    empty-envelope: visitor never sees the private recipe
+  ok    control: original member products remain
+  ok    control: visitor never sees the private recipe
+
+J: missing copy with a surviving members-only score
+  FAIL  a missing member copy refuses republication
+        expected false
+        got      true
+  FAIL  a visitor never reads the private recipe after missing-copy republication
+        expected false
+        got      true
+
+63 checks, 2 failing.

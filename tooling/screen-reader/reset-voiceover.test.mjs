@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {resetVoiceOverRunner} from "./reset-voiceover.mjs";
 function fixture(){
- const signals=[],requests=[],state={running:true,foreign:false,unknown:false,changed:false,zombie:false,keepAlive:false,postKillZombie:false};
+ const signals=[],requests=[],state={running:true,foreign:false,unknown:false,changed:false,zombie:false,keepAlive:false,postKillZombie:false,disappearAfterTerm:false,psMissing:false};
  const options={platform:"darwin",uid:501,env:{GITHUB_ACTIONS:"true",GITHUB_REPOSITORY:"viniciussucupira/marktmorgen",AX2_PUBLIC_DISPOSABLE_RUNNER:"true"},
   now:()=>1,wait:async()=>{},
   run:(file,args)=>{
@@ -12,9 +12,10 @@ function fixture(){
     if(!state.running)throw Object.assign(Error("no process"),{status:1});
     return state.changed?"43\n":"42\n";
    }
+   if(state.psMissing)throw Object.assign(Error("process disappeared"),{status:1,signal:null});
    return (state.foreign?"0":"501")+(state.zombie?" Z ":" S ")+"/System/Library/CoreServices/VoiceOver.app/Contents/MacOS/VoiceOver\n";
   },
-  kill:(pid,signal)=>{signals.push([pid,signal]);if(signal==="SIGKILL"){if(state.postKillZombie)state.zombie=true;else if(!state.keepAlive)state.running=false;}},
+  kill:(pid,signal)=>{signals.push([pid,signal]);if(signal==="SIGTERM"&&state.disappearAfterTerm)state.psMissing=true;if(signal==="SIGKILL"){if(state.postKillZombie)state.zombie=true;else if(!state.keepAlive)state.running=false;}},
  };
  return {options,signals,state,requests};
 }
@@ -51,6 +52,11 @@ test("post-kill zombie is distinguished from a persistent live reader",async()=>
  const live=fixture();live.state.keepAlive=true;
  await assert.rejects(resetVoiceOverRunner(live.options),/did not prove a stopped reader.*"state":"S"/);
  assert.equal(live.signals.length,2,"no retry or additional signal after the existing kill ceiling");
+});
+test("a verified process disappearing after SIGTERM is stopped evidence",async()=>{
+ const f=fixture();f.state.disappearAfterTerm=true;
+ assert.deepEqual(await resetVoiceOverRunner(f.options),{initialProcesses:1,forcedProcesses:0});
+ assert.deepEqual(f.signals,[[42,"SIGTERM"]]);
 });
 test("foreign or replacement zombie cannot bypass ownership and identity checks",async()=>{
  const foreign=fixture();foreign.state.zombie=true;foreign.state.foreign=true;

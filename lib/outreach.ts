@@ -57,7 +57,7 @@ import {
 import { storeBase } from "@/lib/purchase-email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { textCountOf } from "@/lib/redis-count";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { SafeFetchError, checkUrl, safeFetch } from "@/lib/safe-fetch";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -443,10 +443,14 @@ export async function dropPitch(store: Store, id: string): Promise<boolean> {
 
 type StopLink = { s: string; id: string; d: string; n: string };
 
+/** A stop link's record: null when nobody has it; a reply in any other shape throws UnknownReplyError (CX-123 rule 24). */
 async function readLink(token: string): Promise<StopLink | null> {
   if (!STOP_LINK.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", linkKey(token)]]);
-  if (typeof raw !== "string") return null;
+  const read = repliesFor(await redisPipeline([["GET", linkKey(token)]]), 1);
+  if (!read) throw new UnknownReplyError("an outreach stop link");
+  const [raw] = read;
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("an outreach stop link");
   try {
     const v = JSON.parse(raw) as Partial<StopLink>;
     return typeof v.s === "string" && typeof v.id === "string" && typeof v.d === "string" ? { s: v.s, id: v.id, d: v.d, n: typeof v.n === "string" ? v.n : "" } : null;

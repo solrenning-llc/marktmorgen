@@ -1,0 +1,726 @@
+
+===== /tmp/g2719-return608-red-af23.log =====
+
+Already on the list? Only an exact 0 or 1 says
+  ok    an exact reading
+  ok    a reply missing for one: that one is unknown
+  ok    a count as text: unknown
+  ok    more replies than were asked: all unknown
+
+Is this run the one putting it on the list? Only OK, or our own value read back
+  ok    a claim answered oddly that did not land: nothing done this time
+  ok    the next try does it
+  ok    a claim answered oddly that did land with our own value: ours, and done
+  ok    and never twice
+
+A run that fails lets go only of its own claim (Revisor 1 on #2719)
+  ok    the failing run says skip, and the other run's claim is left alone
+
+The sweep: a mark it cannot read is not 'not listed', and the run says it failed
+  ok    unknown: not put on the list this run, and counted as failed
+  ok    the next whole reading puts it on the list, once
+  ok    and not again
+
+G independent: an unknown own claim is included in the sweep's failure count
+  ok    G unknown-claim transport boundary reached
+  ok    G unknown claim performs no contact write
+  FAIL  G unknown claim is said failed by the real sweep
+        expected true
+        got      false
+  ok    G healthy claim retry lists exactly once
+  ok    G healthy claim retry really records the product
+
+G independent: unreadable contact write receipt cannot certify a completed order
+  ok    G unknown-record transport boundary reached
+  FAIL  G unknown record cannot claim done
+        expected "skip"
+        got      "done"
+  FAIL  G unknown record cannot leave permanent done
+        expected false
+        got      true
+  ok    G injected unknown did not write the real contact
+  FAIL  G healthy record retry can finish instead of being deduplicated forever
+        expected "done"
+        got      "already"
+  FAIL  G healthy retry really retains the product
+        expected true
+        got      undefined
+  ok    G confirmed record is processed only once
+  ok    G complete real record write still finishes
+  ok    G complete real write actually retains the product
+
+G independent: numeric zero charge cannot make unreadable mutation replies confirmed
+  ok    G numeric-charge/unknown-record transport boundary reached
+  FAIL  G numeric-charge/unknown record cannot claim done
+        expected "skip"
+        got      "done"
+  FAIL  G numeric-charge/unknown record cannot leave permanent done
+        expected false
+        got      true
+  ok    G numeric-charge injected unknown did not write the real contact
+  FAIL  G numeric-charge healthy record retry can finish instead of being deduplicated forever
+        expected "done"
+        got      "already"
+  FAIL  G numeric-charge healthy retry really retains the product
+        expected true
+        got      undefined
+  ok    G numeric-charge confirmed record is processed only once
+
+33 checks, 9 failing.
+
+
+===== /tmp/g2719-return608-frozen-and-core.log =====
+
+Already on the list? Only an exact 0 or 1 says
+  ok    an exact reading
+  ok    a reply missing for one: that one is unknown
+  ok    a count as text: unknown
+  ok    more replies than were asked: all unknown
+
+Is this run the one putting it on the list? Only OK, or our own value read back
+  ok    a claim answered oddly that did not land: nothing done this time
+  ok    the next try does it
+  ok    a claim answered oddly that did land with our own value: ours, and done
+  ok    and never twice
+
+A run that fails lets go only of its own claim (Revisor 1 on #2719)
+  ok    the failing run says skip, and the other run's claim is left alone
+
+The sweep: a mark it cannot read is not 'not listed', and the run says it failed
+  ok    unknown: not put on the list this run, and counted as failed
+  ok    the next whole reading puts it on the list, once
+  ok    and not again
+
+G independent: an unknown own claim is included in the sweep's failure count
+  ok    G unknown-claim transport boundary reached
+  ok    G unknown claim performs no contact write
+  ok    G unknown claim is said failed by the real sweep
+  ok    G healthy claim retry lists exactly once
+  ok    G healthy claim retry really records the product
+
+G independent: unreadable contact write receipt cannot certify a completed order
+putting an order on the list failed Error: an order's records could not be written
+    at readScript (/tmp/codex-g-proof-OyXXk2/proof.cjs:14554:31)
+    at orderWriteCharged (/tmp/codex-g-proof-OyXXk2/proof.cjs:14571:18)
+    at async orderWrite (/tmp/codex-g-proof-OyXXk2/proof.cjs:14578:11)
+    at async upsertContact (/tmp/codex-g-proof-OyXXk2/proof.cjs:14802:34)
+    at async putOnList (/tmp/codex-g-proof-OyXXk2/proof.cjs:70464:21)
+    at async listOrder (/tmp/codex-g-proof-OyXXk2/proof.cjs:70450:19)
+    at async main (/tmp/codex-g-proof-OyXXk2/proof.cjs:72955:17)
+  ok    G unknown-record transport boundary reached
+  ok    G unknown record cannot claim done
+  ok    G unknown record cannot leave permanent done
+  ok    G injected unknown did not write the real contact
+  ok    G healthy record retry can finish instead of being deduplicated forever
+  ok    G healthy retry really retains the product
+  ok    G confirmed record is processed only once
+  ok    G complete real record write still finishes
+  ok    G complete real write actually retains the product
+
+G independent: numeric zero charge cannot make unreadable mutation replies confirmed
+putting an order on the list failed UnknownReplyError: Redis answered an order's write: a command's reply in an unknown shape
+    at readScript (/tmp/codex-g-proof-OyXXk2/proof.cjs:14558:65)
+    at orderWriteCharged (/tmp/codex-g-proof-OyXXk2/proof.cjs:14571:18)
+    at async orderWrite (/tmp/codex-g-proof-OyXXk2/proof.cjs:14578:11)
+    at async upsertContact (/tmp/codex-g-proof-OyXXk2/proof.cjs:14802:34)
+    at async putOnList (/tmp/codex-g-proof-OyXXk2/proof.cjs:70464:21)
+    at async listOrder (/tmp/codex-g-proof-OyXXk2/proof.cjs:70450:19)
+    at async main (/tmp/codex-g-proof-OyXXk2/proof.cjs:72997:17)
+  ok    G numeric-charge/unknown-record transport boundary reached
+  ok    G numeric-charge/unknown record cannot claim done
+  ok    G numeric-charge/unknown record cannot leave permanent done
+  ok    G numeric-charge injected unknown did not write the real contact
+  ok    G numeric-charge healthy record retry can finish instead of being deduplicated forever
+  ok    G numeric-charge healthy retry really retains the product
+  ok    G numeric-charge confirmed record is processed only once
+
+33 checks, all passing.
+
+Already on the list? Only an exact 0 or 1 says
+  ok    an exact reading
+  ok    a reply missing for one: that one is unknown
+  ok    a count as text: unknown
+  ok    more replies than were asked: all unknown
+
+Is this run the one putting it on the list? Only OK, or our own value read back
+  ok    a claim answered oddly that did not land: nothing done this time
+  ok    the next try does it
+  ok    a claim answered oddly that did land with our own value: ours, and done
+  ok    and never twice
+
+A run that fails lets go only of its own claim (Revisor 1 on #2719)
+  ok    the failing run says skip, and the other run's claim is left alone
+
+The sweep: a mark it cannot read is not 'not listed', and the run says it failed
+  ok    unknown: not put on the list this run, and counted as failed
+  ok    the next whole reading puts it on the list, once
+  ok    and not again
+
+12 checks, all passing.
+
+Was the confirmation already sent? Only an exact 0 says no
+  ok    a mark read in an unknown shape (no answer) sends nothing this run, and the run counts it as failed
+  ok    nor one answered as text, counted as failed
+  ok    nor an answer with more replies than were asked, counted as failed
+  ok    an exact answer on the next run sends it, once
+  ok    and never again
+
+A page of checkouts that is not a list is not "no checkouts"
+  ok    it is said to have failed, so the run is not taken as a clean read
+
+6 checks, all passing.
+
+The script, as Redis runs it
+  ok    its sizes are the constants'
+  ok    it runs the commands the code allows, and no other
+  ok    nothing is fixed in it
+
+Each write is charged what it adds
+  ok    a new key and field: its name and the key's own, the field, the value and the entry's own, a quarter more, in steps
+  ok    the reply is HSETNX's
+  ok    the room's slot for orders, and its total with the slot's own field
+  ok    what is already there costs nothing: a buyer's second order of it
+  ok    a value made longer is charged what it grew by
+  ok    one made shorter is charged nothing, and given nothing back
+  ok    a command outside the list is refused before it is sent
+  ok    one Redis refuses throws, as a pipeline does
+
+Never below what is stored
+  ok    after each of 300 writes of every kind, all that was charged is at least all that is kept
+
+What one order really leaves, and what a room now holds
+  a new buyer's one-product course order leaves 1584 bytes, a repeat buyer's next 160; the ceiling held at the checkout is 8960
+  ok    a new buyer's order is a small part of the ceiling it was charged before
+  ok    a buyer who has bought before costs less still
+  creator: 18,000,000 bytes held 2,008 orders at the fixed charge; 11,363 orders of new buyers now, each a new address
+  pro: 135,000,000 bytes held 15,066 orders at the fixed charge; 85,227 orders of new buyers now, each a new address
+  scale: 250,000,000 bytes held 27,901 orders at the fixed charge; 157,828 orders of new buyers now, each a new address
+  ok    the order's own records were all counted, nothing kept beside them uncounted
+
+15 checks, all passing.
+
+
+===== /tmp/g2719-return608-domain-af23-final.log =====
+
+Already on the list? Only an exact 0 or 1 says
+  ok    an exact reading
+  ok    a reply missing for one: that one is unknown
+  ok    a count as text: unknown
+  ok    more replies than were asked: all unknown
+
+Is this run the one putting it on the list? Only OK, or our own value read back
+  ok    a claim answered oddly that did not land: nothing done this time
+  ok    the next try does it
+  ok    a claim answered oddly that did land with our own value: ours, and done
+  ok    and never twice
+
+A run that fails lets go only of its own claim (Revisor 1 on #2719)
+  ok    the failing run says skip, and the other run's claim is left alone
+
+The sweep: a mark it cannot read is not 'not listed', and the run says it failed
+  ok    unknown: not put on the list this run, and counted as failed
+  ok    the next whole reading puts it on the list, once
+  ok    and not again
+
+G independent: an unknown own claim is included in the sweep's failure count
+  ok    G unknown-claim transport boundary reached
+  ok    G unknown claim performs no contact write
+  FAIL  G unknown claim is said failed by the real sweep
+        expected true
+        got      false
+  ok    G healthy claim retry lists exactly once
+  ok    G healthy claim retry really records the product
+
+G independent: unreadable contact write receipt cannot certify a completed order
+  ok    G unknown-record transport boundary reached
+  FAIL  G unknown record cannot claim done
+        expected "skip"
+        got      "done"
+  FAIL  G unknown record cannot leave permanent done
+        expected false
+        got      true
+  ok    G injected unknown did not write the real contact
+  FAIL  G healthy record retry can finish instead of being deduplicated forever
+        expected "done"
+        got      "already"
+  FAIL  G healthy retry really retains the product
+        expected true
+        got      undefined
+  ok    G confirmed record is processed only once
+  ok    G complete real record write still finishes
+  ok    G complete real write actually retains the product
+
+G independent: numeric zero charge cannot make unreadable mutation replies confirmed
+  ok    G numeric-charge/unknown-record transport boundary reached
+  FAIL  G numeric-charge/unknown record cannot claim done
+        expected "skip"
+        got      "done"
+  FAIL  G numeric-charge/unknown record cannot leave permanent done
+        expected false
+        got      true
+  ok    G numeric-charge injected unknown did not write the real contact
+  FAIL  G numeric-charge healthy record retry can finish instead of being deduplicated forever
+        expected "done"
+        got      "already"
+  FAIL  G numeric-charge healthy retry really retains the product
+        expected true
+        got      undefined
+  ok    G numeric-charge confirmed record is processed only once
+
+G independent: integer-valued is not a command-appropriate HSET receipt
+G2719_SCHEMA_CARRIER {"mode":"negative-hset","plan":[{"name":"HSET","argc":2},{"name":"INCR","argc":0},{"name":"SADD","argc":1},{"name":"EXPIREAT","argc":1}],"out":[0,-1,0,0,0],"ownSlots":["0","1","2","3","4"],"jsonDense":true}
+  ok    G negative-hset: real contact write boundary reached
+  ok    G negative-hset: the actual plan contains HSET
+  ok    G negative-hset: contact was not written by the injected transport
+  FAIL  G negative-hset: invalid mutation evidence cannot certify done
+        expected "skip"
+        got      "done"
+  FAIL  G negative-hset: no permanent done mark
+        expected false
+        got      true
+  FAIL  G negative-hset: a later healthy write can finish
+        expected "done"
+        got      "already"
+  FAIL  G negative-hset: healthy retry retains the product
+        expected true
+        got      undefined
+  ok    G negative-hset: confirmed retry stays deduplicated
+G2719_SCHEMA_CARRIER {"mode":"excess-hset","plan":[{"name":"HSET","argc":2},{"name":"INCR","argc":0},{"name":"SADD","argc":1},{"name":"EXPIREAT","argc":1}],"out":[0,2,0,0,0],"ownSlots":["0","1","2","3","4"],"jsonDense":true}
+  ok    G excess-hset: real contact write boundary reached
+  ok    G excess-hset: the actual plan contains HSET
+  ok    G excess-hset: contact was not written by the injected transport
+  FAIL  G excess-hset: invalid mutation evidence cannot certify done
+        expected "skip"
+        got      "done"
+  FAIL  G excess-hset: no permanent done mark
+        expected false
+        got      true
+  FAIL  G excess-hset: a later healthy write can finish
+        expected "done"
+        got      "already"
+  FAIL  G excess-hset: healthy retry retains the product
+        expected true
+        got      undefined
+  ok    G excess-hset: confirmed retry stays deduplicated
+G2719_SCHEMA_CARRIER {"mode":"sparse-inner","plan":[{"name":"HSET","argc":2},{"name":"INCR","argc":0},{"name":"SADD","argc":1},{"name":"EXPIREAT","argc":1}],"out":[0,null,null,null,null],"ownSlots":["0"],"jsonDense":false}
+  ok    G sparse-inner: real contact write boundary reached
+  ok    G sparse-inner: the actual plan contains HSET
+  ok    G sparse-inner: contact was not written by the injected transport
+  FAIL  G sparse-inner: invalid mutation evidence cannot certify done
+        expected "skip"
+        got      "done"
+  FAIL  G sparse-inner: no permanent done mark
+        expected false
+        got      true
+  FAIL  G sparse-inner: a later healthy write can finish
+        expected "done"
+        got      "already"
+  FAIL  G sparse-inner: healthy retry retains the product
+        expected true
+        got      undefined
+  ok    G sparse-inner: confirmed retry stays deduplicated
+
+G controls: legitimate command domains and an applied-but-lost mutation receipt
+  ok    G genuine two-field HSET may add two
+  ok    G actual HSET retained both fields
+  ok    G updating an existing HSET field may add zero
+  ok    G a legitimate DECR may be negative
+  ok    G a legitimate HINCRBY may be negative
+  ok    G a legitimate ZINCRBY may return a negative numeric string
+  ok    G applied/lost ACK boundary reached
+  ok    G an applied contact remains present despite its lost ACK
+  FAIL  G applied/lost ACK is not certified done
+        expected "skip"
+        got      "done"
+  FAIL  G applied/lost ACK leaves no permanent done mark
+        expected false
+        got      true
+  FAIL  G healthy same-intent retry confirms the already-kept contact
+        expected "done"
+        got      "already"
+  ok    G applied/lost ACK retry preserves one product identity
+
+69 checks, 24 failing.
+
+
+===== /tmp/g2719-return608-domain-final.log =====
+
+Already on the list? Only an exact 0 or 1 says
+  ok    an exact reading
+  ok    a reply missing for one: that one is unknown
+  ok    a count as text: unknown
+  ok    more replies than were asked: all unknown
+
+Is this run the one putting it on the list? Only OK, or our own value read back
+  ok    a claim answered oddly that did not land: nothing done this time
+  ok    the next try does it
+  ok    a claim answered oddly that did land with our own value: ours, and done
+  ok    and never twice
+
+A run that fails lets go only of its own claim (Revisor 1 on #2719)
+  ok    the failing run says skip, and the other run's claim is left alone
+
+The sweep: a mark it cannot read is not 'not listed', and the run says it failed
+  ok    unknown: not put on the list this run, and counted as failed
+  ok    the next whole reading puts it on the list, once
+  ok    and not again
+
+G independent: an unknown own claim is included in the sweep's failure count
+  ok    G unknown-claim transport boundary reached
+  ok    G unknown claim performs no contact write
+  ok    G unknown claim is said failed by the real sweep
+  ok    G healthy claim retry lists exactly once
+  ok    G healthy claim retry really records the product
+
+G independent: unreadable contact write receipt cannot certify a completed order
+putting an order on the list failed Error: an order's records could not be written
+    at readScript (/tmp/codex-g-proof-7r8Fjl/proof.cjs:6896:31)
+    at orderWriteCharged (/tmp/codex-g-proof-7r8Fjl/proof.cjs:6913:18)
+    at async orderWrite (/tmp/codex-g-proof-7r8Fjl/proof.cjs:6920:11)
+    at async upsertContact (/tmp/codex-g-proof-7r8Fjl/proof.cjs:14802:34)
+    at async putOnList (/tmp/codex-g-proof-7r8Fjl/proof.cjs:70467:21)
+    at async listOrder (/tmp/codex-g-proof-7r8Fjl/proof.cjs:70453:19)
+    at async main (/tmp/codex-g-proof-7r8Fjl/proof.cjs:72958:17)
+  ok    G unknown-record transport boundary reached
+  ok    G unknown record cannot claim done
+  ok    G unknown record cannot leave permanent done
+  ok    G injected unknown did not write the real contact
+  ok    G healthy record retry can finish instead of being deduplicated forever
+  ok    G healthy retry really retains the product
+  ok    G confirmed record is processed only once
+  ok    G complete real record write still finishes
+  ok    G complete real write actually retains the product
+
+G independent: numeric zero charge cannot make unreadable mutation replies confirmed
+putting an order on the list failed UnknownReplyError: Redis answered an order's write: a command's reply in an unknown shape
+    at readScript (/tmp/codex-g-proof-7r8Fjl/proof.cjs:6900:65)
+    at orderWriteCharged (/tmp/codex-g-proof-7r8Fjl/proof.cjs:6913:18)
+    at async orderWrite (/tmp/codex-g-proof-7r8Fjl/proof.cjs:6920:11)
+    at async upsertContact (/tmp/codex-g-proof-7r8Fjl/proof.cjs:14802:34)
+    at async putOnList (/tmp/codex-g-proof-7r8Fjl/proof.cjs:70467:21)
+    at async listOrder (/tmp/codex-g-proof-7r8Fjl/proof.cjs:70453:19)
+    at async main (/tmp/codex-g-proof-7r8Fjl/proof.cjs:73000:17)
+  ok    G numeric-charge/unknown-record transport boundary reached
+  ok    G numeric-charge/unknown record cannot claim done
+  ok    G numeric-charge/unknown record cannot leave permanent done
+  ok    G numeric-charge injected unknown did not write the real contact
+  ok    G numeric-charge healthy record retry can finish instead of being deduplicated forever
+  ok    G numeric-charge healthy retry really retains the product
+  ok    G numeric-charge confirmed record is processed only once
+
+G independent: integer-valued is not a command-appropriate HSET receipt
+G2719_SCHEMA_CARRIER {"mode":"negative-hset","plan":[{"name":"HSET","argc":2},{"name":"INCR","argc":0},{"name":"SADD","argc":1},{"name":"EXPIREAT","argc":1}],"out":[0,-1,0,0,0],"ownSlots":["0","1","2","3","4"],"jsonDense":true}
+  ok    G negative-hset: real contact write boundary reached
+  ok    G negative-hset: the actual plan contains HSET
+  ok    G negative-hset: contact was not written by the injected transport
+  FAIL  G negative-hset: invalid mutation evidence cannot certify done
+        expected "skip"
+        got      "done"
+  FAIL  G negative-hset: no permanent done mark
+        expected false
+        got      true
+  FAIL  G negative-hset: a later healthy write can finish
+        expected "done"
+        got      "already"
+  FAIL  G negative-hset: healthy retry retains the product
+        expected true
+        got      undefined
+  ok    G negative-hset: confirmed retry stays deduplicated
+G2719_SCHEMA_CARRIER {"mode":"excess-hset","plan":[{"name":"HSET","argc":2},{"name":"INCR","argc":0},{"name":"SADD","argc":1},{"name":"EXPIREAT","argc":1}],"out":[0,2,0,0,0],"ownSlots":["0","1","2","3","4"],"jsonDense":true}
+  ok    G excess-hset: real contact write boundary reached
+  ok    G excess-hset: the actual plan contains HSET
+  ok    G excess-hset: contact was not written by the injected transport
+  FAIL  G excess-hset: invalid mutation evidence cannot certify done
+        expected "skip"
+        got      "done"
+  FAIL  G excess-hset: no permanent done mark
+        expected false
+        got      true
+  FAIL  G excess-hset: a later healthy write can finish
+        expected "done"
+        got      "already"
+  FAIL  G excess-hset: healthy retry retains the product
+        expected true
+        got      undefined
+  ok    G excess-hset: confirmed retry stays deduplicated
+G2719_SCHEMA_CARRIER {"mode":"sparse-inner","plan":[{"name":"HSET","argc":2},{"name":"INCR","argc":0},{"name":"SADD","argc":1},{"name":"EXPIREAT","argc":1}],"out":[0,null,null,null,null],"ownSlots":["0"],"jsonDense":false}
+  ok    G sparse-inner: real contact write boundary reached
+  ok    G sparse-inner: the actual plan contains HSET
+  ok    G sparse-inner: contact was not written by the injected transport
+  FAIL  G sparse-inner: invalid mutation evidence cannot certify done
+        expected "skip"
+        got      "done"
+  FAIL  G sparse-inner: no permanent done mark
+        expected false
+        got      true
+  FAIL  G sparse-inner: a later healthy write can finish
+        expected "done"
+        got      "already"
+  FAIL  G sparse-inner: healthy retry retains the product
+        expected true
+        got      undefined
+  ok    G sparse-inner: confirmed retry stays deduplicated
+
+G controls: legitimate command domains and an applied-but-lost mutation receipt
+  ok    G genuine two-field HSET may add two
+  ok    G actual HSET retained both fields
+  ok    G updating an existing HSET field may add zero
+  ok    G a legitimate DECR may be negative
+  ok    G a legitimate HINCRBY may be negative
+  ok    G a legitimate ZINCRBY may return a negative numeric string
+putting an order on the list failed UnknownReplyError: Redis answered an order's write: a command's reply in an unknown shape
+    at readScript (/tmp/codex-g-proof-7r8Fjl/proof.cjs:6900:65)
+    at orderWriteCharged (/tmp/codex-g-proof-7r8Fjl/proof.cjs:6913:18)
+    at async orderWrite (/tmp/codex-g-proof-7r8Fjl/proof.cjs:6920:11)
+    at async upsertContact (/tmp/codex-g-proof-7r8Fjl/proof.cjs:14802:34)
+    at async putOnList (/tmp/codex-g-proof-7r8Fjl/proof.cjs:70467:21)
+    at async listOrder (/tmp/codex-g-proof-7r8Fjl/proof.cjs:70453:19)
+    at async main (/tmp/codex-g-proof-7r8Fjl/proof.cjs:73105:17)
+  ok    G applied/lost ACK boundary reached
+  ok    G an applied contact remains present despite its lost ACK
+  ok    G applied/lost ACK is not certified done
+  ok    G applied/lost ACK leaves no permanent done mark
+  ok    G healthy same-intent retry confirms the already-kept contact
+  ok    G applied/lost ACK retry preserves one product identity
+
+69 checks, 12 failing.
+
+
+===== /tmp/g2719-return608-linked.log =====
+
+Was the confirmation already sent? Only an exact 0 says no
+  ok    a mark read in an unknown shape (no answer) sends nothing this run, and the run counts it as failed
+  ok    nor one answered as text, counted as failed
+  ok    nor an answer with more replies than were asked, counted as failed
+  ok    an exact answer on the next run sends it, once
+  ok    and never again
+
+A page of checkouts that is not a list is not "no checkouts"
+  ok    it is said to have failed, so the run is not taken as a clean read
+
+6 checks, all passing.
+
+Taken and let go by the same run
+  ok    taken
+  ok    taken again by another: not ours
+  ok    let go by its own run
+
+A mark that ran out and was taken by another run is not ours to let go
+  ok    the second run takes it
+  ok    the first run failing later leaves the second run's mark alone
+
+5 checks, all passing.
+
+The words
+  ok    a sequence on a call starts when someone books it; any other product, when someone gets it
+  ok    the trigger's choice says it covers booking a call, only when the store has one
+  ok    the store's calls are handed to the studio
+
+Nothing else changes
+  ok    the trigger is still the product's
+  ok    a paid order, a call included, starts the sequences of its product
+
+5 checks, all passing.
+
+A condition reads what the list keeps
+  ok    having a product, or not
+  ok    having paid: a product sold for money, or first agreeing at a checkout
+  ok    a label, whatever its capitals and spaces
+  ok    the end: one product, or anything paid for
+  ok    a condition on a product the store does not have is refused
+  ok    an end that would come before the first email is refused
+
+Saved, and checked when saved
+  ok    a condition on a product that is not the store's
+  ok    an end that would come first
+  ok    kept as asked: the label trimmed, the others skipping unless told to leave
+
+Sent only to those it is for
+  ok    the first email: not to Ben, who already has what it sells
+  ok    the second, for those who have not bought: Ana; Cleo skips it
+  ok    and Cleo's next one waits its day, counted from the one she skipped
+  ok    the third, for the label: Cleo, a day after the one she skipped; Ana leaves
+  ok    the last: nobody — Ana left, Cleo now has the course
+  ok    counted: who started, what went, who left by buying, what was skipped
+
+A paid order on the list, once
+  ok    put on the list by whichever comes first, and not again
+  ok    with everything the order handed over
+  ok    somebody who did not check the box and is not on the list is added to nothing
+  ok    a buyer who never reached the thanks page is on the list, with what they bought
+  ok    and the job does not do it twice
+  ok    and the store is in that buyer's library (lib/buyer-library.ts)
+
+Which links somebody used, only if they allowed it
+  ok    allowed only by somebody's own check, with their yes to the list
+  ok    a condition on the email before cannot be on the first
+  ok    only Gus's links carry his key, and only his email says how to stop it
+  ok    the key is not the unsubscribe code
+  ok    a page opened through his link notes it; a made-up key notes nothing
+  ok    the email for those who used a link: Gus only
+  ok    the one for those who did not use the email before's link: both, as neither used one there
+
+Taken back in one press, and by leaving
+  ok    the stop page knows it is on
+  ok    stopped: what was counted is deleted, the permission gone, his key leads nowhere, and he is still on the list
+  ok    checking it again after leaving the list asks again: coming back without it, it stays off
+  ok    a buyer who checked both boxes at checkout
+
+32 checks, all passing.
+
+The script, as Redis runs it
+  ok    its sizes are the constants'
+  ok    it runs the commands the code allows, and no other
+  ok    nothing is fixed in it
+
+Each write is charged what it adds
+  ok    a new key and field: its name and the key's own, the field, the value and the entry's own, a quarter more, in steps
+  ok    the reply is HSETNX's
+  ok    the room's slot for orders, and its total with the slot's own field
+  ok    what is already there costs nothing: a buyer's second order of it
+  ok    a value made longer is charged what it grew by
+  ok    one made shorter is charged nothing, and given nothing back
+  ok    a command outside the list is refused before it is sent
+  ok    one Redis refuses throws, as a pipeline does
+
+Never below what is stored
+  ok    after each of 300 writes of every kind, all that was charged is at least all that is kept
+
+What one order really leaves, and what a room now holds
+  a new buyer's one-product course order leaves 1584 bytes, a repeat buyer's next 160; the ceiling held at the checkout is 8960
+  ok    a new buyer's order is a small part of the ceiling it was charged before
+  ok    a buyer who has bought before costs less still
+  creator: 18,000,000 bytes held 2,008 orders at the fixed charge; 11,363 orders of new buyers now, each a new address
+  pro: 135,000,000 bytes held 15,066 orders at the fixed charge; 85,227 orders of new buyers now, each a new address
+  scale: 250,000,000 bytes held 27,901 orders at the fixed charge; 157,828 orders of new buyers now, each a new address
+  ok    the order's own records were all counted, nothing kept beside them uncounted
+
+15 checks, all passing.
+  ok    a store record has an `order` field, which is why it was taken for an order's
+
+The whole store as the room: charged before writing
+  ok    a sign-up takes room in the contacts' slot
+  ok    an import takes room too
+  ok    a label set takes what it grows the record by
+
+An order's write: marked by orderRoom, charged where an order's records are
+  ok    counted with the order's records
+  ok    and not twice in the contacts' slot
+  ok    the thanks page marks its writes with orderRoom, never the older `{ order: store }`
+  ok    the older form is no longer read as an order's
+
+A paste that fills the room partway: what went in is said, and nothing else is written
+  ok    some went in, the rest are said to be left out, and why
+  ok    the paste starts the ramp for those added, full or not, and says so
+  ok    a file of contacts that fills the room starts the ramp for those already in
+
+11 checks, all passing.
+✔ a first click is both ends of the journey (2.350364ms)
+✔ a second affiliate's link moves the last click and leaves the first alone (0.144597ms)
+✔ a third click still points back to the first (0.137176ms)
+✔ the same affiliate clicked twice is one affiliate at both ends (0.158238ms)
+✔ a cookie written before the first click was kept still works (0.293822ms)
+✔ nothing usable in the cookie is nothing, not a guess (0.155904ms)
+✔ a first click dated after the last one is a cookie somebody edited (0.141352ms)
+✔ last click is the default, and the only thing a missing rule can mean (0.502956ms)
+✔ a rule we do not have never becomes a rule we do (0.251918ms)
+✔ there is no rule that splits one commission between two affiliates (0.832832ms)
+✔ the window asks for every day a browser gives today, and claims none of them (0.523076ms)
+✔ the sentence an affiliate reads says which rule, and counts the window from the right click (0.215804ms)
+✔ one day reads as a day (0.095583ms)
+✔ the code typed into an order is read off the order (0.252299ms)
+✔ a discount the creator applied themselves belongs to nobody (0.102555ms)
+✔ a promotion code arriving expanded is read the same as an id (0.083726ms)
+✔ anything that is not a promotion code id is not treated as one (0.185179ms)
+✔ a code that was given to somebody credits them (0.162905ms)
+✔ a code nobody was given credits nobody (0.093541ms)
+✔ the click wins over the code, always (0.365269ms)
+✔ a code only ever earns for somebody the creator approves today (0.366811ms)
+✔ the sweep looks at codes too, or a sale with no click is never written down (0.224878ms)
+✔ nothing about a person is stored to make any of this work (0.27969ms)
+✔ directory consent is a no until the creator says otherwise (0.174863ms)
+✔ the switch says where the program is listed and what the row shows (0.873333ms)
+✔ the directory is sold as a way to be found, never as income or buyers (3.695828ms)
+✔ only the index reads that consent (385.251074ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 408.382125
+✔ inactive diagnostic observations retain their existing absolute one-day expiry (4.100575ms)
+✔ every family of the registry says what becomes of it when its store closes, and nothing more is said (1.104331ms)
+✔ what each says fits how the registry bounds it (4.564513ms)
+✔ a key belongs to its longest family, and the walk takes only what names a closing store (0.663838ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 33.929037
+✔ a share is a whole percentage of named products, and nothing else (1.60949ms)
+✔ a share of everything is refused, because nobody agreed to the next product (0.167131ms)
+✔ a share outside the range is nothing, not a clamped something (0.224337ms)
+✔ the ceiling leaves the creator something, which is the point of having one (0.171959ms)
+✔ it applies to the products named and no others (0.17344ms)
+✔ the money is whole cents, rounded down, never invented (0.154362ms)
+✔ one partner inside the cap is allowed (0.170566ms)
+✔ two partners and a commission that together pass the cap are refused (0.112089ms)
+✔ the affiliate commission counts, because it rides on the same sale (0.184948ms)
+✔ a product takes the cap product by product, not on average (0.182475ms)
+✔ a product cannot hold more partners than it can be divided between (0.130666ms)
+✔ the cap is checked before the range, so a bad number says it is a bad number (0.091648ms)
+✔ what the creator keeps counts everything promised, and never goes below zero (0.180912ms)
+✔ the creator sees what they keep while they choose, not on an invoice (1.152578ms)
+✔ no part of this divides a payment: the share is recorded and paid later (0.492841ms)
+✔ a partner is paid through the rails the affiliates already use (0.596928ms)
+✔ a partner never earns on their own purchase (0.510047ms)
+✔ a share is written for every sale, not only the referred ones (0.727293ms)
+✔ a sale already made keeps the share it was made at (0.48564ms)
+✔ the partner needs no account anywhere, which is where Hotmart stops (0.534854ms)
+✔ nothing is written down until the invitation is opened (0.645601ms)
+✔ an invitation arrives already approved, with the share the email stated (0.419531ms)
+✔ an invitation cannot be used to attach a share nobody checked (0.232279ms)
+✔ the creator can see the credit route on each commission record (28.556659ms)
+✔ displayed positive commission records are counted without mixing currencies or inventing purchases (2.841402ms)
+✔ no number is invented for a store that has the bond switched off (0.536206ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 52.792936
+✔ production has no policy or journal IO, even when other inputs are executable (3.415636ms)
+✔ missing, inherited, accessor or incomplete lifetime/cost evidence makes no request (1.702691ms)
+✔ scope and executable or duplicate source rows are refused before IO (1.358783ms)
+✔ the real adapter dispatches one composed script with immutable minimal facts; ACK here is synthetic (1.341217ms)
+✔ unknown facts remain null, and malformed/coercible/truncated ACK never establishes storage (1.558814ms)
+✔ the sweep continues handing a paid purchase to its list when observation IO fails (59.798903ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 76.849262
+
+
+===== /tmp/g2719-return608-tsc.log =====
+
+
+===== /tmp/g2719-return608-lint.log =====
+
+
+===== /tmp/g2719-return608-public.log =====
+Public data check: 4070 tracked files; 0 file(s) require correction.
+
+
+===== /tmp/g2719-return608-diffcheck.log =====
+

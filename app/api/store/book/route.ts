@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
 
   if (!canSellProduct(store, product)) return back("unavailable");
   const comingSoon = await isComingSoon(store, product.id).catch(() => null);
-  if (comingSoon === null) return new Response("Unavailable", { status: 503, headers: { "Cache-Control": "no-store" } });
+  if (comingSoon === null) return back("error");
   if (comingSoon) return back("unavailable");
   if (!Number.isFinite(start)) return back("invalid");
   // A length chosen comes with the price the page showed for it. One the creator took off meanwhile, or one sent with

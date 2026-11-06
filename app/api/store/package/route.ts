@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
   if (!product || !isCallProduct(product) || product.call.kind !== "weekly" || !product.callPackage) return away(`/@${store.handle}`);
   if (!canSellProduct(store, product)) return away(`/@${store.handle}/book/${product.id}?status=unavailable`);
   const comingSoon = await isComingSoon(store, product.id).catch(() => null);
-  if (comingSoon === null) return new Response("Unavailable", { status: 503, headers: { "Cache-Control": "no-store" } });
+  if (comingSoon === null) return away(`/@${store.handle}/book/${product.id}?status=error`);
   if (comingSoon) return away(`/@${store.handle}/book/${product.id}?status=unavailable`);
   try {
     const made = await packageCheckout(

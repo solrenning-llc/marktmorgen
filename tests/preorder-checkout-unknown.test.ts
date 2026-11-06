@@ -66,7 +66,7 @@ async function shop(handle: string): Promise<{ store: Store; product: string }> 
   const claimed = await claimHandle(owner, handle, "Boundary shop", "");
   if (!claimed.ok) throw new Error("fixture could not claim store");
   await ensureStatsId(owner);
-  await setStripeAccount(owner, "acct_PreorderBoundary01", true);
+  await setStripeAccount(owner, "acct_TestPreorder1", true);
   await setSubscription(owner, {
     customerId: `cus_${handle}00001`,
     subscriptionId: `sub_${handle}00001`,
@@ -103,7 +103,7 @@ async function callShop(handle: string): Promise<{ store: Store; product: string
   const claimed = await claimHandle(owner, handle, "Boundary calls", "");
   if (!claimed.ok) throw new Error("fixture could not claim call store");
   await ensureStatsId(owner);
-  await setStripeAccount(owner, "acct_PreorderBoundary01", true);
+  await setStripeAccount(owner, "acct_TestPreorder1", true);
   await setSubscription(owner, {
     customerId: `cus_${handle}00001`,
     subscriptionId: `sub_${handle}00001`,

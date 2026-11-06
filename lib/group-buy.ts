@@ -46,6 +46,7 @@ import { bundleFromMeta } from "@/lib/bundle-rules";
 import { onAccount } from "@/lib/stripe-account";
 import { refundRowKnown } from "@/lib/refunds";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, readStripePage, type StripePage } from "@/lib/stripe-list";
 import { formatMoney } from "@/lib/money";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
@@ -242,8 +243,12 @@ export async function settleGroup(input: {
   if (!group || group.s !== store.statsId || group.p !== product.id) return "skip";
   if (group.paid) return "already";
   const settling = `${groupKey(id)}:settling`;
-  const [claimed] = await redisPipeline([["SET", settling, "1", "NX", "EX", 300]]);
-  if (claimed === null) {
+  // Claimed with this run's own value and read exactly (C4-3000): an answer in another shape is read back, never taken
+  // as ours, and the mark is let go only while it still holds this run's value (lib/claim-mark.ts).
+  const mark = claimValue();
+  const claimed = await claimMark(settling, 300, mark);
+  if (claimed === "unknown") throw new UnknownReplyError("a purchase for several's settling mark");
+  if (claimed === "taken") {
     // Another run is settling it. "already" only once it is paid: confirmGroup (lib/purchase-email.ts) keeps its
     // "sent" mark on "already", so said while the other run may still fail, the paid purchase would never be settled
     // (as deliverGift does since Claude 4 on #2726). Thrown, no "sent" mark is kept and the next run tries again.
@@ -267,14 +272,14 @@ export async function settleGroup(input: {
   const kept: (string | number)[][] = [...(pi ? [["SET", piKey(pi), group.id, "EX", GROUP_KEPT_SECONDS]] : []), ["SET", anyKey(group.s), "1"]];
   const keptReplies = repliesFor(await redisPipeline(kept), kept.length);
   if (!keptReplies || !keptReplies.every((reply) => reply === "OK")) {
-    await redisPipeline([["DEL", settling]]);
+    await releaseMark(settling, mark);
     throw new UnknownReplyError("a paid purchase for several's payment record");
   }
   if (!(await saveGroup(paid, GROUP_KEPT_SECONDS))) {
-    await redisPipeline([["DEL", settling]]);
+    await releaseMark(settling, mark);
     throw new UnknownReplyError("a paid purchase for several's record");
   }
-  await redisPipeline([["DEL", settling]]);
+  await releaseMark(settling, mark);
 
   await sendReceipt({ ...input, group: paid, lead: givingWords(store.language).thanksReceipt(store.name), idempotencyKey: `nimbus-group-receipt:${group.id}` }).catch((error) =>
     console.error("a receipt for several people failed", error),

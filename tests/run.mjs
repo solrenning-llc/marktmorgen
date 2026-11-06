@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { checkClientBundles } from "./client-bundles.mjs";
 import {testAliases,testEnvironment} from "./test-config.mjs";
-import {runTestFiles,runBundle} from "./test-runner.mjs";
+import {runTestFiles,runBundle,TEST_FILE_TIMEOUT_MS} from "./test-runner.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
@@ -40,7 +40,7 @@ try {
     return bundle;
   }, run: async (file, bundle) => {
     console.log(`\n=== ${file} ===`);
-    return runBundle(bundle, testEnvironment(process.env));
+    return runBundle(bundle, testEnvironment(process.env), process.execPath, {timeoutMs: TEST_FILE_TIMEOUT_MS, label: file});
   }});
 } finally {
   rmSync(out, { recursive: true, force: true });

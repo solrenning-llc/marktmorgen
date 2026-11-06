@@ -166,6 +166,6 @@ test('every file in tests/run.mjs runs under the limit, generous over the slowes
   // 53.9 s and 100.8 s. The verify job itself is cancelled at 50 minutes (.github/workflows/product-checks.yml).
   assert.ok((limit as number) >= 5 * 100_800, 'at least five times the slowest file measured');
   assert.ok((limit as number) <= 15 * 60_000, 'well under the job\'s 50 minutes, so a stuck file is named, not cancelled');
-  const run = readFileSync(join(import.meta.dirname ?? __dirname, 'run.mjs'), 'utf8');
+  const run = readFileSync('tests/run.mjs', 'utf8');
   assert.match(run, /runBundle\(bundle, testEnvironment\(process\.env\), process\.execPath, \{timeoutMs: TEST_FILE_TIMEOUT_MS, label: file\}\)/);
 });

@@ -33,14 +33,35 @@ export async function runTestFiles({files, compile, run}) {
   }
 }
 
-/** @param {string} bundle @param {NodeJS.ProcessEnv} env @param {string} [executable] @returns {Promise<number>} */
-export function runBundle(bundle, env, executable = process.execPath) {
+/**
+ * The most one test file may run: past it the file is killed and counted as a failure that names it (C4-20261106-2550-C5-151:
+ * on #2790 and #2820 the verify job sat 47 minutes in one file with no output until the job's own cancellation, which
+ * names nothing). Ten minutes: about six times the slowest file in two full CI verify logs (contract-admission-ack,
+ * 53.9 s and 100.8 s), and well under the job's 50 minutes (.github/workflows/product-checks.yml).
+ */
+export const TEST_FILE_TIMEOUT_MS = 600_000;
+
+/**
+ * @param {string} bundle @param {NodeJS.ProcessEnv} env @param {string} [executable]
+ * @param {{timeoutMs?: number, label?: string}} [limit] with timeoutMs, a process still running then is killed and counted as failed
+ * @returns {Promise<number>}
+ */
+export function runBundle(bundle, env, executable = process.execPath, limit = {}) {
   return new Promise(resolve => {
     const child = spawn(executable, [bundle], {stdio: 'inherit', env});
+    let settled = false;
+    /** @param {number} code */
+    const finish = code => { if (!settled) { settled = true; clearTimeout(timer); resolve(code); } };
+    const timer = limit.timeoutMs === undefined ? undefined : setTimeout(() => {
+      console.error(`TIMEOUT: ${limit.label ?? bundle} did not finish in ${limit.timeoutMs / 1000} s; killed and counted as a failure.`);
+      child.kill('SIGKILL');
+      // Settle on exit, not on close: a process it started may still hold the inherited output open.
+      child.once('exit', () => finish(1));
+    }, limit.timeoutMs);
     // spawnSync returned a null status on launch errors: count the failure
     // and keep running the other test files, rather than dropping coverage.
-    child.once('error', () => resolve(1));
+    child.once('error', () => finish(1));
     // Wait for stdio to close before the next test's heading, as spawnSync did.
-    child.once('close', code => resolve(code ?? 1));
+    child.once('close', code => finish(code ?? 1));
   });
 }

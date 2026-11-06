@@ -89,9 +89,11 @@ export async function readDepth(
   const pairs: Record<string, string> = {};
   if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) pairs[String(raw[i])] = String(raw[i + 1]);
   else if (raw && typeof raw === "object") Object.assign(pairs, raw);
-  const stopped: Record<string, number> = {};
+  // A block id is sent by the visitor, and BLOCK_ID_PATTERN lets "constructor" through: added up with no prototype
+  // (tests/proto-keys.test.ts), handed on as ordinary records of own keys.
+  const stopped: Record<string, number> = Object.create(null);
   const whyNot: Partial<Record<WhyNot, number>> = {};
-  const videos: Record<string, VideoReach> = {};
+  const videos: Record<string, VideoReach> = Object.create(null);
   let visitors = 0;
   for (const [field, value] of Object.entries(pairs)) {
     if (field === "_n" || !(Number(value) > 0)) continue;
@@ -116,5 +118,5 @@ export async function readDepth(
   }
   // Every visitor counted stopped at exactly one block, so the blocks add up
   // to the visitors; "_n", written until 11 October 2026, said the same.
-  return { visitors, stopped, whyNot, videos };
+  return { visitors, stopped: { ...stopped }, whyNot, videos: { ...videos } };
 }

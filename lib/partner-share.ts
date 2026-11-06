@@ -129,9 +129,10 @@ export function shareProblem(input: {
   }
   if (!input.products.length) return "products";
   for (const id of input.products) {
-    const held = input.others[id] ?? [];
+    // Only own entries: a product id here is typed by the creator, and "constructor" passes its pattern (tests/proto-keys.test.ts).
+    const held = Object.hasOwn(input.others, id) ? input.others[id] : [];
     if (held.length >= MAX_PARTNERS_PER_PRODUCT) return "crowded";
-    const committed = held.reduce((sum, n) => sum + n, 0) + input.percent + (input.affiliatePercent[id] ?? 0);
+    const committed = held.reduce((sum, n) => sum + n, 0) + input.percent + (Object.hasOwn(input.affiliatePercent, id) ? input.affiliatePercent[id] : 0);
     if (committed > MAX_COMMITTED_SHARE) return "committed";
   }
   return null;

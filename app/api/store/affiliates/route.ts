@@ -232,7 +232,7 @@ export async function POST(request: NextRequest) {
       // as any other share, before the email goes out.
       const share = parsePartnerShare({ percent: body.percent, products: body.products });
       if (!share) return fail(Array.isArray(body.products) && body.products.length ? "share_percent" : "share_products");
-      const others: Record<string, number[]> = {};
+      const others: Record<string, number[]> = Object.create(null);
       for (const other of await listPartners(store)) {
         if (other.status !== "approved" || !other.share) continue;
         for (const product of other.share.products) (others[product] ??= []).push(other.share.percent);
@@ -271,7 +271,7 @@ export async function POST(request: NextRequest) {
       // The cap counts everything promised on each of these products at once:
       // the other partners' shares and the affiliate commission, which rides
       // on the same sale (lib/partner-share.ts).
-      const others: Record<string, number[]> = {};
+      const others: Record<string, number[]> = Object.create(null);
       for (const other of await listPartners(store)) {
         if (other.id === id || other.status !== "approved" || !other.share) continue;
         for (const product of other.share.products) {

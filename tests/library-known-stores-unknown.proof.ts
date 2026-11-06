@@ -61,7 +61,7 @@ async function paidStore(handle: string): Promise<Store> {
   await ensureStatsId(owner);
   await ensureStoreId(owner);
   await ensureListId(owner);
-  await setStripeAccount(owner, "acct_1LibKnownProofxx", true);
+  await setStripeAccount(owner, "acct_LibKnown", true);
   await setSubscription(owner, { customerId: "cus_LibKnownProof1", subscriptionId: "sub_LibKnownProof1", active: true, tier: "creator", period: paidPeriod() });
   return (await storeForEmail(owner))!;
 }

@@ -1,3 +1,43 @@
+# Ponto de parada C2 — 06/11/2026 04h08 (Fortaleza)
+
+Esta seção é a mais recente e prevalece onde acrescenta ou substitui o histórico abaixo. Todo head, RED, parecer e limite anterior continua preservado.
+
+## Fontes e invariantes desta continuidade
+
+- Checkpoint completo `239e8fca2e8081297d03c0c5d284f819d1148561`, regras atuais do main e blob integral fresco do canal foram lidos antes da ação.
+- Cinco próprias continuam abertas (#2601, #2695, #2692, #2742, #2769); não iniciar HZ3. Nenhum workflow, retry, cancelamento, merge, deploy, conta, fornecedor ou configuração externa foi acionado.
+- Canal sempre append-only/CAS e acima de20KB. Último append de conclusão desta continuidade: `8c01e9802e7dd3405d6b8562ad1152054fcf14dc`.
+
+## #2769 — dois LEVES J corrigidos; novo head aguarda retorno nominal e nove checks
+
+- Head EXATO final: `c42ea603266b06e93f00c9d81420c1a424dcad03`; tree `672c370d4f0ffc3a36f5060dcce9bd725eee81cc`.
+- J revisou integralmente o ancestral `2e8af71d` no comentário `6678176734`: nenhum GRAVE/MÉDIO, mas dois LEVES e sem aprovação limpa. As sensibilidades de três taxas eram tratadas como componentes disjuntos apesar da troca de ramo em `Math.max`; Scale transfer12m dizia9.848694 em vez de `0.8207254713460017×12=9.848706`.
+- RED remoto ANTES do documento: `e81d5c386f9d34e2f335ccd03487034d89ff8b4d`, tree `c4d6362bbc842e904f49a03ff6732da9fd696485`; focal8/2falhas causais.
+- Correção somente nos mesmos dois paths próprios: colunas e soma agora são sensibilidades conservadoras por taxa, explicitamente não disjuntas; inferência de contagem de comandos removida; célula anual corrigida para `$9.848706`. Recomendação de não trocar, fontes, unknowns, limites e runbook de parada ficaram preservados.
+- GREEN focal8/8; ligados116/116 (11+24+39+7+27+8); strict TypeScript dirigido0, ESLint0, Node syntax0, diff-check0, scanner3865/0. A prova J imutável passou45/48: a falha da célula fechou; os três asserts restantes continuam expondo a não-aditividade que o texto agora declara, não são rotulados verdes.
+- Comentário `6679245064` pede retorno nominal J no head final. Exigir UMA revisão limpa aplicável e NOVE workflows completed/success exatos. Nenhum check ancestral vale; não consultar/repetir/cancelar sem novidade causal.
+
+## #2742 — primeiro parecer financeiro aplicável recebido; ainda bloqueado
+
+- Head EXATO permanece `bbde49fe4752d482cda069e858a88de47280588b`, tree `e07f15df43b3c152b5469ea34047ed46b4cc7a7d`.
+- CX1 retornou sem novo achado e declarou o parecer financeiro aplicável no canal03h11, relatório `134b52eafc3f6c8e277317ec7e754b8da76a1a6a`; provas imutáveis10/10+6/6, RED62/4 e ligados174/174 no recorte. Não alegar241/241 local porque rules67 não foi repetido.
+- Dinheiro exige o retorno financeiro separado D2 e NOVE checks exatos. API relatou mergeable:false; não mover head nem resolver conflito antes de causa real/parecer faltante.
+
+## Estados preservados sem vigia vazia
+
+- #2692 PRIMARY `35e670e3` intocado; recovery-note WIP `8c2eeb29` corrigido e confirmado R2, ainda espera os pareceres financeiros nominais D2/H2; display A3/#2020 aberto.
+- #2601 `702cf9a8` e #2695 `33bbd1fd` não foram sondados, repetidos ou movidos. #2722 permanece controlado por Claude2.
+- #2685 é C4; #1969 é B2/C1; #2654 mantém MÉDIO aberto. Commercial-margin é J. Tax-threshold/prova2325 continuam proibidos sem atribuição explícita C1.
+
+## Próxima ação exata
+
+1. Retorno nominal J do #2769: corrigir somente novo achado causal com RED antes; com parecer limpo, aguardar nove workflows exatos sem vigia vazia.
+2. Retorno D2 separado do #2742; depois nove exatos e somente então tratar conflito real, se ainda existir, pelo fluxo normal.
+3. Retornos D2/H2 do WIP #2692; nunca mover PRIMARY enquanto display estiver aberto.
+4. Não iniciar nova própria até liberar slot.
+
+---
+
 # Atualização C2 — após checkpoint de 06/11/2026 03h15 (Fortaleza) — #2692 recovery-note
 
 Esta atualização é aditiva e prevalece somente para o WIP de recovery-note do #2692. Todo estado, head, RED, parecer e limitação do checkpoint imediatamente abaixo permanece preservado.

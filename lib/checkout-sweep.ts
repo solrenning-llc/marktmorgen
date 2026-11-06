@@ -345,6 +345,11 @@ function worthAsking(store: Store, requesting = false): boolean {
   );
 }
 
+/** What an order's error is said as in the log: its name and the start of its message, never the whole object. */
+function describe(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message.slice(0, 200)}` : typeof error;
+}
+
 /** One store: its checkouts of the last day, each handed to what it needs. */
 async function sweepStore(store: Store, counts: SweepCounts, deadline: number, reviewed: boolean, requesting: boolean, taxPass: { policy: unknown; pagesLeft: number }): Promise<void> {
   // Refunds first: a key that should no longer open anything matters more
@@ -481,9 +486,17 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
         continue;
       }
       if (mark !== 0) continue;
-      const outcome = await confirmPurchase(store, paid[i].id as string, paid[i]);
-      if (outcome === "sent") counts.confirmed += 1;
-      if (outcome === "failed") counts.failed += 1;
+      try {
+        const outcome = await confirmPurchase(store, paid[i].id as string, paid[i]);
+        if (outcome === "sent") counts.confirmed += 1;
+        if (outcome === "failed") counts.failed += 1;
+      } catch (error) {
+        // One order's confirmation that throws (a record that does not read) never ends the store's pass: the orders
+        // behind it, the next pages, the library and the list go on (Claude 4, C4-2990). Nothing marks it here, so it
+        // stays to be confirmed on the next run; it is counted as failed, and logged by the order, not the buyer.
+        counts.failed += 1;
+        console.error("a paid order's confirmation was left for the next run", paid[i].id, describe(error));
+      }
     }
 
     // Every buyer of an ordinary order finds this store in their library,
@@ -516,6 +529,9 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
         const row = ordinary[i];
         const email = typeof row.customer_details?.email === "string" ? row.customer_details.email : typeof row.customer_email === "string" ? row.customer_email : "";
         if (!email) continue;
+        // One order that throws here (its products not read) never holds back the orders behind it (C4-2990): nothing
+        // marks it, so it is listed on the next run; it is counted as failed, logged by the order, not the buyer.
+        try {
         const products = await listingsNamed(store, row.metadata);
         if ((await listOrder(store, {
           sessionId: row.id as string,
@@ -525,6 +541,10 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
           created: typeof row.created === "number" ? row.created : Math.floor(Date.now() / 1000),
           products: products.map((p) => ({ id: p.id, title: p.title })),
         })) === "done") counts.listed += 1;
+        } catch (error) {
+          counts.failed += 1;
+          console.error("a paid order was left off the list for the next run", row.id, describe(error));
+        }
       }
     }
 

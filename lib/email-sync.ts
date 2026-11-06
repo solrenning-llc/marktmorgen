@@ -176,6 +176,22 @@ function parseJob(raw: unknown): Job | null {
   }
 }
 
+/** A Redis list or pipeline envelope is evidence only when every position is
+ * an own data property. Sparse or inherited cells are an unknown read, not an
+ * empty connection or a shorter activity log. */
+function exactOwnArray(value: unknown, length?: number): unknown[] | null {
+  if (!Array.isArray(value)) return null;
+  const size = Object.getOwnPropertyDescriptor(value, "length");
+  if (!size || !Object.hasOwn(size, "value") || (length !== undefined && size.value !== length)) return null;
+  const out: unknown[] = [];
+  for (let index = 0; index < size.value; index += 1) {
+    const item = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!item || !Object.hasOwn(item, "value")) return null;
+    out.push(item.value);
+  }
+  return out;
+}
+
 async function readConfig(statsId: string): Promise<Config | null> {
   const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
   return parseConfig(raw);
@@ -496,14 +512,21 @@ export async function syncView(store: Store): Promise<SyncView> {
   const available = canSeal() && isRedisConfigured();
   if (!store.statsId || !isRedisConfigured()) return { available, connected: null, log: [] };
   const statsId = store.statsId;
-  const [rawConfig, rawBad, rawLog] = await redisPipeline([
+  const view = exactOwnArray(await redisPipeline([
     ["GET", cfgKey(statsId)],
     ["GET", badKey(statsId)],
     ["LRANGE", logKey(statsId), 0, LOG_SIZE - 1],
-  ]);
+  ]), 3);
+  if (!view) throw new Error("The email platform view is unavailable");
+  const [rawConfig, rawBad, rawLog] = view;
   const config = parseConfig(rawConfig);
-  const ids = Array.isArray(rawLog) ? (rawLog as unknown[]).map(String).filter((id) => JOB_ID.test(id)) : [];
-  const jobs = ids.length ? await redisPipeline(ids.map((id) => ["GET", jobKey(id)])) : [];
+  const log = exactOwnArray(rawLog);
+  if (!log || log.some((id) => typeof id !== "string" || !JOB_ID.test(id))) throw new Error("The email platform view is unavailable");
+  const ids = log as string[];
+  const jobs = ids.length ? exactOwnArray(await redisPipeline(ids.map((id) => ["GET", jobKey(id)])), ids.length) : [];
+  if (!jobs) throw new Error("The email platform view is unavailable");
+  const parsedJobs = jobs.map(parseJob);
+  if (parsedJobs.some((job) => job === null)) throw new Error("The email platform view is unavailable");
   let problem: { message: string; at: number } | null = null;
   try {
     const value = typeof rawBad === "string" ? (JSON.parse(rawBad) as { message?: unknown; at?: unknown }) : null;
@@ -531,9 +554,7 @@ export async function syncView(store: Store): Promise<SyncView> {
           problem,
         }
       : null,
-    log: jobs
-      .map(parseJob)
-      .filter((job): job is Job => job !== null)
+    log: (parsedJobs as Job[])
       .map((job) => ({
         id: job.id,
         email: job.email,

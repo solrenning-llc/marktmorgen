@@ -5,7 +5,7 @@
  *
  * Synthetic store and Redis (tests/redis-stub.ts); one read is made to fail on purpose.
  */
-import { createElement } from "react";
+import { createElement, type FunctionComponent } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextRequest } from "next/server";
 import StudioImportPage from "@/app/studio/import/page";
@@ -46,7 +46,7 @@ async function lastImports(failing: boolean): Promise<string> {
     const page = await StudioImportPage({ searchParams: Promise.resolve({}) });
     const past = named(page, "PastImports");
     if (!past) return "";
-    return renderToStaticMarkup(createElement(past.type as (props: never) => never, past.props as never));
+    return renderToStaticMarkup(createElement(past.type as FunctionComponent<Record<string, unknown>>, past.props ?? {}));
   } finally {
     redis.pipeline = original;
     answering(null);

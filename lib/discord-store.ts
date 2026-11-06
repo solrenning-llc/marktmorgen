@@ -16,7 +16,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { emailKey, storeKey } from "@/lib/learn";
 import { normaliseEmail } from "@/lib/auth";
@@ -119,7 +119,9 @@ export async function productRolesOrThrow(room: string): Promise<Map<string, str
   const out = new Map<string, string[]>();
   for (let i = 0; i < pairs.length; i += 2) {
     const value = parse<unknown>(pairs[i + 1]);
-    if (!Array.isArray(value)) throw new UnknownReplyError(what);
+    // Every member must be a role id, and a product kept at all gives one (setProductRoles deletes an empty list):
+    // cleanRoles would drop an invalid member silently, so [7] would read as "no role" and end paid access (Codex Z on #2932).
+    if (!Array.isArray(value) || !value.length || !value.every((role) => typeof role === "string" && SNOWFLAKE.test(role))) throw new UnknownReplyError(what);
     const roles = cleanRoles(value);
     if (roles.length) out.set(pairs[i], roles);
   }
@@ -213,13 +215,17 @@ export async function keepMember(room: string, sid: string, userId: string, memb
 /** Forgets a person: their access ended and their roles were taken back, or they left. */
 export async function forgetMember(room: string, sid: string, userId: string, email: string): Promise<void> {
   // Read exactly: an unknown reply throws before anything is deleted, never leaving the address's link behind as "not this id's".
+  // Only the exact null or a Discord id is a known link: any other present reply throws (Codex Z on #2932).
   const held = oneReply(await redisPipeline([["GET", addressKey(room, email)]]), "the Discord account an address brought in");
-  if (held !== null && typeof held !== "string") throw new UnknownReplyError("the Discord account an address brought in");
-  await redisPipeline([
+  if (held !== null && !(typeof held === "string" && SNOWFLAKE.test(held))) throw new UnknownReplyError("the Discord account an address brought in");
+  const commands: (string | number)[][] = [
     ["HDEL", membersKey(room), userId],
     ["ZREM", DUE_KEY, `${sid}|${userId}`],
     ...(held === userId ? [["DEL", addressKey(room, email)]] : []),
-  ]);
+  ];
+  // The deletes are read too: a missing, short or queued answer is not "forgotten", so the erasure is retried.
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  if (!replies || !replies.every((reply) => countOf(reply) !== null)) throw new UnknownReplyError("the deletion of a Discord member");
 }
 
 /** Puts a person first in line to be checked: a refund made in the studio, say. */

@@ -1,6 +1,8 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { allPosts, publishedPosts, readPost, savePost } from "@/lib/store-blog";
+import { allPosts, publishedPosts, readPost, readPosts, savePost } from "@/lib/store-blog";
+import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
+import { storeExport } from "@/lib/store-export";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 
@@ -63,4 +65,58 @@ test("confirmed empty lists and absent post remain legitimate", async () => {
   assert.deepEqual(await allPosts("synthetic-empty-blog"), []);
   assert.deepEqual(await publishedPosts("synthetic-empty-blog", 1), { posts: [], total: 0 });
   assert.equal(await readPost(sid, "0000000002"), null);
+});
+
+const validBody = JSON.stringify({ body: "The complete fictional post.", product: null });
+for (const [label, reply] of [
+  ["missing envelope", []], ["null slot", [null]], ["wrong slot", [{}]],
+  ["short body list", [[]]], ["absent body record", [[null]]],
+  ["malformed body JSON", [["{"]]],
+  ["wrong body type", [[JSON.stringify({ body: 1, product: null })]]],
+  ["extra envelope slot", [[validBody], 99]],
+] as const) {
+  test(`whole-post reader rejects ${label} rather than exporting invented empty words`, async () => {
+    await fixture;
+    const metas = await allPosts(sid), original = redis.pipeline;
+    redis.pipeline = async () => [...reply];
+    try { await assert.rejects(() => readPosts(sid, metas)); }
+    finally { redis.pipeline = original; }
+  });
+}
+
+test("whole-post reader preserves writer-produced words and a confirmed empty selection", async () => {
+  await fixture;
+  assert.equal((await readPosts(sid, await allPosts(sid)))[0]?.body, "The complete fictional post.");
+  assert.deepEqual(await readPosts(sid, []), []);
+});
+
+const createExportFixture = async () => {
+  const owner = "blog-reader-export@example.test";
+  assert.equal((await claimHandle(owner, "blogreaderexport", "Fictional blog", "Synthetic evidence only.")).ok, true);
+  await ensureStatsId(owner);
+  const store = await storeForEmail(owner);
+  assert.ok(store?.statsId);
+  assert.equal((await savePost(store.statsId, null, { title: "Fictional bread guide", body: "The complete fictional post.", product: null, draft: false }, () => id, ROOM, 1000)).ok, true);
+  return store;
+};
+let exportFixtureResult: ReturnType<typeof createExportFixture> | undefined;
+const exportFixture = () => exportFixtureResult ??= createExportFixture();
+
+for (const [label, reply] of [["missing envelope", []], ["absent body", [[null]]], ["invalid JSON", [["{"]]]] as const) {
+  test(`the real export stream labels unread blog data for ${label}`, async () => {
+    const store = await exportFixture(), original = redis.pipeline;
+    redis.pipeline = async commands => commands[0]?.[0] === "HMGET" && commands[0]?.[1] === `nl:blog:body:${store.statsId}` ? [...reply] : original(commands);
+    try {
+      const exported = JSON.parse(await new Response(storeExport(store, 1000)).text());
+      assert.equal(exported.posts, undefined);
+      assert.equal(exported.unreadPart3, "This part could not be read just now. Download the file again in a few minutes.");
+    } finally { redis.pipeline = original; }
+  });
+}
+
+test("the real export stream preserves complete blog words on the healthy path", async () => {
+  const store = await exportFixture();
+  const exported = JSON.parse(await new Response(storeExport(store, 1000)).text());
+  assert.equal(exported.posts[0]?.body, "The complete fictional post.");
+  assert.equal(exported.unreadPart3, undefined);
 });

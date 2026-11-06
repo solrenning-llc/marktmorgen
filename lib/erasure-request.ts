@@ -38,6 +38,7 @@ import { type Store, storeForHandle, storeForId } from "@/lib/store";
 import { leadsKey } from "@/lib/contacts";
 import { storesKnownFor } from "@/lib/buyer-library";
 import { erasePerson } from "@/lib/person-erasure";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { allowancesUsedStrict } from "@/lib/store-allowance";
 import { allowanceFor, askedCeiling } from "@/lib/store-allowance-rules";
@@ -88,12 +89,17 @@ export const nextWholeDay = (ms: number) => Math.ceil(ms / DAY_MS) * DAY_MS;
 
 const sooner = (a: number, b: number) => (a && b ? Math.min(a, b) : a || b);
 
-/** Whether this store holds the address: on its list, or as a buyer or a joiner it noted. */
+/**
+ * Whether this store holds the address: on its list, or as a buyer or a joiner it noted. The list's HEXISTS is read in
+ * its exact shape (CX-123 rule 24): only 0 or 1 is an answer; anything else throws UnknownReplyError, never "not on it".
+ */
 async function knows(store: Store, email: string, known: Set<string>): Promise<boolean> {
   if (store.sid && known.has(store.sid)) return true;
   if (!store.listId) return false;
-  const [held] = await redisPipeline([["HEXISTS", leadsKey(store.listId), email]]);
-  return Number(held) === 1;
+  const replies = repliesFor(await redisPipeline([["HEXISTS", leadsKey(store.listId), email]]), 1);
+  const held = replies ? countOf(replies[0]) : null;
+  if (held !== 0 && held !== 1) throw new UnknownReplyError("whether a store's list holds an address");
+  return held === 1;
 }
 
 /** The same, as the status alone. */

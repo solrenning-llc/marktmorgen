@@ -50,5 +50,5 @@ test("the route answers unavailable before allowance or export work when the sha
   const exportWork = branch.indexOf("storeExport(store)");
 
   assert.equal(shape >= 0 && refusal > shape && allowance > refusal && exportWork > allowance, true);
-  assert.match(branch, /try \{[\s\S]*await exportShape\(store\)[\s\S]*\} catch \{/);
+  assert.match(branch, /try \{[\s\S]*await exportShape\(store\)[\s\S]*\} catch(?: \(error\))? \{/);
 });

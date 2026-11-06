@@ -36,4 +36,24 @@ The proof renders the actual blog/reviews page functions and uses the actual per
 
 An optional Chromium test of the actual server-rendered anchor was attempted. Chromium could not launch: `process_singleton_posix.cc` reported `socket() failed: Operation not permitted`. Browser focus behavior is therefore unverified here. The proof checks the real markup, not an authenticated Next deployment or a real browser journey. No global TypeScript run, native Redis, real service, screen reader, human accessibility study, rendered contrast measurement, zoom/reflow/forced-colors matrix or complete AAA audit was performed. This is PR testing, not a claim of deployment or customer availability.
 
-Disposition: changes requested for the medium truthfulness regression; no other grave or medium finding established.
+Original disposition: changes requested for the medium truthfulness regression; no other grave or medium finding established.
+
+## Corrective return — 105f3e3839dda6311980a22cd9f2e59def1ca335
+
+Return announcement receipt, before reading the new diff: channel commit `dc64b99f6b92de304290b31b2305700a73263945`, blob `ccbbcb7d77cebdfefb410bea001347ef14becb6d`.
+
+The entire four-file delta from the original reviewed head was read. The sole product change restores the neutral sentence “No product review totals are available in this view” and removes the unsupported empty-state heading and prediction. The existing permissive summary reader is unchanged. This resolves the reported medium regression.
+
+The author copied the launcher byte-identically (`1058d18bd0baac022ae63f0031e638cc19e1bc92`) and copied the independent test with one explicit contract correction: its zero-state control now expects the neutral sentence instead of requiring the removed h2 “No product totals yet”. The six adverse envelopes and their expected results are unchanged. The studio component test similarly replaces the assertions requiring that heading/empty-state component with the neutral sentence. These changes reflect the requested fix; they are not a new defect or weakened adverse assertions.
+
+The original independent proof remains byte-identical: `d5bbd85a60024bdee1d62d79ba6ca5b2dacf7230`. It was replayed with the original filter and all six vectors passed. The local evidence checkout stayed based on `c33f9576476531e19fbd424293def0463a87b6eb`; the two changed product/test files were restored from the corrective head into this reviewer's worktree. Their exact Git blob hashes were checked against the corrective commit: reviews page `abd56062bc20403eb2a380fcc9c3f8908bf04610`, studio test `99fa56cd33ad59eb8ed8c9c2564d4e12c7b41b12`. All other product files are identical between these commits. This preserves the original independent proof while executing the corrected product source.
+
+```
+git restore --source=105f3e3839dda6311980a22cd9f2e59def1ca335 --worktree -- app/studio/reviews/page.tsx tests/wg16-studio-empty.test.ts
+Q2841_NAME_PATTERN='unknown real summaries' TMPDIR=/dev/shm node proofs/q/review-2841.mjs
+# original proof d5bbd85a: 6 tests, 6 pass
+```
+
+The author's adapted proof `f93331a0d` also passed all 10 tests when loaded directly from its corrective Git blob with an esbuild onLoad boundary; the original local test was never replaced. Four pertinent canonical files passed 54 checks: wg16-studio-empty 31; empty-screens 6; reviews-faq 14; review-summary-unavailable-page 3. ESLint on the changed page, changed studio test and preserved independent test was clean; `git diff --check` was clean. Browser, public-data and global types were not rerun; the original verification limits still apply. Author branch, PR, CI, channel and reservations were not modified by this return.
+
+Corrective disposition: the medium is resolved; no new grave or medium finding established. **May merge**, subject to the coordinator's normal required checks. This is a source-and-tests review of the exact corrective head, not a deployment or customer-availability claim.

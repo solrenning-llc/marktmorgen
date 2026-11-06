@@ -17,6 +17,7 @@
  *   nl:depth:<statsId>:<productId>   hash: <blockId> (stopped there); _n (visitors) until 11 October 2026
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { cappedCount } from "@/lib/capped-count";
 import { DEPTH_FIELDS_MAX, DEPTH_RECORD_BYTES } from "@/lib/page-depth-rules";
 import { BLOCK_ID_PATTERN } from "@/lib/sales-page";
@@ -85,10 +86,12 @@ export async function readDepth(
   productId: string,
 ): Promise<{ visitors: number; stopped: Record<string, number>; whyNot: Partial<Record<WhyNot, number>>; videos: Record<string, VideoReach> }> {
   if (!statsId || !isRedisConfigured()) return { visitors: 0, stopped: {}, whyNot: {}, videos: {} };
-  const [raw] = await redisPipeline([["HGETALL", key(statsId, productId)]]);
+  // Exactly one flat list of string pairs, or unknown: never "no visitors" from a reply that is not one (CX-123 rule 24).
+  const replies = repliesFor(await redisPipeline([["HGETALL", key(statsId, productId)]]), 1);
+  const flat = replies ? stringList(replies[0]) : null;
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a page's reading depth");
   const pairs: Record<string, string> = {};
-  if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) pairs[String(raw[i])] = String(raw[i + 1]);
-  else if (raw && typeof raw === "object") Object.assign(pairs, raw);
+  for (let i = 0; i < flat.length; i += 2) pairs[flat[i]] = flat[i + 1];
   const stopped: Record<string, number> = {};
   const whyNot: Partial<Record<WhyNot, number>> = {};
   const videos: Record<string, VideoReach> = {};

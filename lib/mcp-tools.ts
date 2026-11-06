@@ -629,8 +629,9 @@ export async function readPageReadingTool(store: Store, id: string, charge: Char
   const listing = await readListing(store, id);
   if (!listing) return null;
   // The page read exactly: an answer that is not known is "unavailable", never a page with no blocks.
-  const [kept, depth] = await Promise.all([store.statsId ? readPageExact(store.statsId, listing.id).catch(() => undefined) : { page: null, bytes: 0 }, readDepth(store.statsId, listing.id)]);
-  if (kept === undefined) return { error: "The page could not be read just now. Try again in a moment." };
+  const [kept, depth] = await Promise.all([store.statsId ? readPageExact(store.statsId, listing.id).catch(() => undefined) : { page: null, bytes: 0 }, readDepth(store.statsId, listing.id).catch(() => undefined)]);
+  // Depth that cannot be read is not "no visitors measured" (CX-123 rule 30, after readDepth).
+  if (kept === undefined || depth === undefined) return { error: "The page could not be read just now. Try again in a moment." };
   const page = kept.page ?? { ...EMPTY_PAGE, blocks: [] };
   // While a whole second version is tested, each visitor reads one of two pages: no single depth means anything.
   const reach = page.variant ? null : reachShares(page.blocks.map((b) => b.id), depth.stopped, depth.visitors);

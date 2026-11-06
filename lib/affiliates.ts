@@ -1168,7 +1168,9 @@ export async function joinAsBuyer(store: Store, sessionId: string): Promise<Join
   const knownInbox = await sameInboxAsAnother(store, email, affiliate?.id ?? null);
   if (affiliate) {
     if (affiliate.status === "declined" || affiliate.status === "removed") return { ok: false, reason: "declined" };
-    if (affiliate.status === "pending" && !knownInbox) {
+    // Somebody waiting who holds a share stays waiting: approving them makes the share count, and that is the
+    // creator's decision, checked against the cap (decide), never an order's (#2995, rule 30).
+    if (affiliate.status === "pending" && !knownInbox && affiliate.share === null) {
       affiliate = { ...affiliate, status: "approved", decidedAt: Date.now() };
       await writeAffiliate(store, affiliate);
     }
@@ -1231,14 +1233,48 @@ export async function endAffiliateSession(session: string | undefined): Promise<
 
 export type Decision = "approve" | "decline" | "remove" | "restore";
 
-/** Lets someone in, turns them down, or takes them out. Their history stays. */
+/** A share that would pass the cap if its holder became approved now (lib/partner-share.ts). Nothing was written. */
+export class ShareCapError extends Error {
+  constructor(readonly problem: ShareProblem) {
+    super(`a partner share would pass the cap: ${problem}`);
+    this.name = "ShareCapError";
+  }
+}
+
+/**
+ * Lets someone in, turns them down, or takes them out. Their history stays.
+ *
+ * Somebody holding a share who becomes approved (a removed partner restored, a pending person approved) makes that
+ * share count again, so the cap is checked again first, under the program's partner lock, against the partners read
+ * exactly now (#2995, rule 30). Over it: ShareCapError, nothing written. Unknown reply: UnknownReplyError; the lock
+ * not held: LockBusyError; nothing written either way.
+ */
 export async function decide(store: Store, id: string, decision: Decision): Promise<Affiliate | null> {
-  const affiliate = await readAffiliate(store, id);
-  if (!affiliate) return null;
+  const found = await readAffiliate(store, id);
+  if (!found) return null;
   const status: AffiliateStatus =
     decision === "approve" || decision === "restore" ? "approved" : decision === "decline" ? "declined" : "removed";
-  const next: Affiliate = { ...affiliate, status, decidedAt: Date.now() };
-  await writeAffiliate(store, next);
+  const counts = (a: Affiliate) => status === "approved" && a.status !== "approved" && a.share !== null;
+  const write = async (affiliate: Affiliate) => {
+    const next: Affiliate = { ...affiliate, status, decidedAt: Date.now() };
+    await writeAffiliate(store, next);
+    return { affiliate, next };
+  };
+  const written = counts(found)
+    ? await withPartnerLock(store, async (held) => {
+        // Read again under the lock: the share or the status may have changed since.
+        const now = await readAffiliate(store, id);
+        if (!now) return null;
+        if (counts(now) && now.share) {
+          const problem = await partnerShareProblem(store, now.share, now.id);
+          if (problem) throw new ShareCapError(problem);
+          if (!(await holdLock(held))) throw new LockBusyError("the partner lock was lost before the decision was written");
+        }
+        return write(now);
+      })
+    : await write(found);
+  if (!written) return null;
+  const { affiliate, next } = written;
   if (decision === "approve" && affiliate.status === "pending" && isSenderConfigured()) {
     const a = affiliatesWords(store.language);
     await sendEmail({ meter: { by: "store", store: store, kind: "email" },
@@ -1295,7 +1331,12 @@ export async function decideMany(store: Store, ids: string[], decision: "approve
   for (const id of [...new Set(ids)].slice(0, MAX_BULK_DECISIONS)) {
     const affiliate = await readAffiliate(store, id);
     if (!affiliate || affiliate.status !== "pending") continue;
-    const done = await decide(store, id, decision);
+    // A share that would pass the cap, a reply that could not be read or the partner lock held elsewhere: this one is
+    // left pending, nothing written for it, and the rest go on (decide).
+    const done = await decide(store, id, decision).catch((error: unknown) => {
+      if (error instanceof ShareCapError || error instanceof UnknownReplyError || error instanceof LockBusyError) return null;
+      throw error;
+    });
     if (done) before.push({ id, status: affiliate.status, decidedAt: affiliate.decidedAt });
   }
   return before;

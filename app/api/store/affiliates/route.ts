@@ -26,6 +26,7 @@ import {
   removePayout,
   setAffiliateRate,
   setPartnerShare,
+  ShareCapError,
   withPartnerLock,
 } from "@/lib/affiliates";
 import { PROMO_ID_PATTERN, giveCode, takeCodeBack } from "@/lib/affiliate-codes";
@@ -188,7 +189,12 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, undone: await undoRates(store, before, rate) });
     }
     if (action === "approve" || action === "decline" || action === "remove" || action === "restore") {
-      const done = await decide(store, text(body.id, 20), action);
+      // A share that would pass the cap once its holder is approved again: refused, nothing written (lib/affiliates.ts).
+      const done = await decide(store, text(body.id, 20), action).catch((error: unknown) => {
+        if (error instanceof ShareCapError) return error;
+        throw error;
+      });
+      if (done instanceof ShareCapError) return fail(`share_${done.problem}`, 409);
       return done ? Response.json({ ok: true }) : fail("unknown");
     }
     if (action === "payout") {

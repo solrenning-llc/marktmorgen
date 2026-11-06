@@ -197,7 +197,7 @@ export async function previewYearly(store: Store, token: string, subscription: s
 
 export type YearlyResult =
   | { ok: true; title: string }
-  | { ok: false; reason: "expired" | "gone" | "yearly" | "stale" | "declined" | "busy" | "consent" | "error" };
+  | { ok: false; reason: "expired" | "gone" | "yearly" | "stale" | "declined" | "busy" | "consent" | "unconfirmed" | "error" };
 
 /**
  * Moves the membership to yearly, at the second the preview was worked out
@@ -225,7 +225,7 @@ export async function switchYearly(store: Store, token: string, subscription: st
       const answered = switchReply(updated, subscription, price, kept);
       if (answered === "unknown") {
         console.error("a move to yearly's reply was not one this code knows", subscription);
-        return { ok: false, reason: "error" };
+        return { ok: false, reason: "unconfirmed" };
       }
       if (answered === "pending") {
         const invoice = updated.latest_invoice as { id?: unknown; status?: unknown } | null;

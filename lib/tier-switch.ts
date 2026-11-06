@@ -284,7 +284,7 @@ export async function previewSwitch(store: Store, token: string, subscription: s
 
 export type SwitchResult =
   | { ok: true; title: string }
-  | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "stale" | "declined" | "busy" | "consent" | "error" };
+  | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "stale" | "declined" | "busy" | "consent" | "unconfirmed" | "error" };
 
 /**
  * Makes the switch, at the second the preview was worked out for. The card on
@@ -317,8 +317,9 @@ export async function switchTier(store: Store, token: string, subscription: stri
       const answered = switchReply(updated, subscription, price, kept);
       if (answered === "unknown") {
         // Not known to be made: nothing more is written or sent, and the member is told it did not go through.
+        // Not "error", whose words say nothing was changed: the card may have been charged (Revisor 2 on #2764).
         console.error("a tier switch's reply was not one this code knows", subscription);
-        return { ok: false, reason: "error" };
+        return { ok: false, reason: "unconfirmed" };
       }
       if (answered === "pending") {
         // Declined, or the bank asked for a step the member was not there to

@@ -3,6 +3,11 @@ import {join} from 'node:path';
 export function testAliases(file,root,here){
  const aliases={'@':root,'@/lib/redis':['range-traffic-coverage.test.ts','stats-traffic-coverage.test.ts'].includes(file)?join(root,'lib/redis.ts'):join(here,'redis-stub.ts')};
 
+ if(file==='store-sitemap-exact-read.test.ts'){
+  aliases['@/lib/store']=join(here,'store-sitemap-exact-read.test.ts');
+  aliases['@/lib/traffic']=join(here,'store-sitemap-exact-read.test.ts');
+ }
+
 
  if(file==='review-summary-unavailable-page.test.ts'){
   for(const name of ['catalog','studio-route','reviews','review-ai-summary','customer-voice','buyer-orders','purchase-email','ai','mail'])aliases['@/lib/'+name]=join(here,'review-summary-page-world.tsx');

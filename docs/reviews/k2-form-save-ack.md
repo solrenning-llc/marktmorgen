@@ -126,4 +126,17 @@ This proves only the component's acknowledgement behavior under the selected syn
 
 Quality checks also applied the repository public-data detector directly to all three new files: zero findings. New-file whitespace checks reported no diagnostics; git diff --no-index uses exit1 for the new-file difference itself, so this is not represented as an exit-zero normal tracked diff.
 
-The runner deliberately freezes the pre-repair component blob. A future corrective comparison must update or explicitly parameterize that provenance guard for its new source, while retaining these functional assertions, cases and bounds unchanged. A provenance mismatch alone is not a product failure.
+The initial immutable proof commit 618d38 is preserved. The runner now accepts a selected source checkout and its complete expected component blob as CLI arguments, while retaining the same four cases, 24 functional checks, default waits and request ceilings. A provenance mismatch alone is not a product failure.
+
+
+## Comparing a corrective checkout
+
+The evidence checkout owns the fixture and runner. The source checkout owns the component, its application imports, framework packages and tsconfig. With no arguments, both checkouts are the evidence checkout and the expected component remains the original d38fe5553e45b3e214a7f46ceb5052bd218940a7.
+
+    TMPDIR=/dev/shm node /path/to/evidence/proofs/k2/form-save-ack.mjs /path/to/source EXPECTED_40_HEX_COMPONENT_BLOB
+
+Argument 2 selects sourceRoot; argument 3 is validated as a complete 40-hex Git blob and checked against the selected components/forms-editor.tsx before browser requests. The fixture import always points to evidenceRoot/tests/k-form-save-ack.proof.ts. The runner resolves @/ imports to sourceRoot and resolves real React, ReactDOM and Next packages from that source checkout, keeping one framework identity through SSR and hydration. No product source is rewritten. The selected evidence/source roots, expected blob and actual blob are included in the output.
+
+One full default baseline execution after this wiring change reproduced **24 checks, 18 pass, six fail**, with the same exact six failing observations, Chromium 141.0.7390.37, four local POSTs under 4096 B, responses under 128 B, and zero forbidden requests. The fixture remains byte-identical (Git blob 9f695eec78376a05437ad67480d6fb8b836f9951). Syntax and directed runner ESLint pass. This execution does not claim a corrective checkout is green or that a distinct sourceRoot has already been executed; that comparison belongs to the future corrective change.
+
+Architecture remains credited to Codex M 948d2c88; the original proof is not replaced. No functional assertion, case, timeout or ceiling changed to enable parameterization.

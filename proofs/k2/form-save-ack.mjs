@@ -6,13 +6,26 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { build } from "esbuild";
-import { chromium } from "playwright-core";
+import { createRequire } from "node:module";
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const component = join(root, "components/forms-editor.tsx");
-const sourceBlob = execFileSync("git", ["hash-object", component], { cwd: root, encoding: "utf8" }).trim();
-assert.equal(sourceBlob, "d38fe5553e45b3e214a7f46ceb5052bd218940a7", "freeze the real component under review");
+const evidenceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const sourceRoot = resolve(process.argv[2] ?? evidenceRoot);
+const expectedSourceBlob = (process.argv[3] ?? "d38fe5553e45b3e214a7f46ceb5052bd218940a7").toLowerCase();
+assert.match(expectedSourceBlob, /^[a-f0-9]{40}$/, "the expected source blob must be a complete Git SHA");
+const component = join(sourceRoot, "components/forms-editor.tsx");
+const sourceBlob = execFileSync("git", ["hash-object", component], { cwd: sourceRoot, encoding: "utf8" }).trim();
+assert.equal(sourceBlob, expectedSourceBlob, "confirm the caller-selected product source before any browser request");
+const sourceRequire = createRequire(join(sourceRoot, "package.json"));
+const { build } = sourceRequire("esbuild");
+const { chromium } = sourceRequire("playwright-core");
+// Keep framework identity and every @/ product import in the selected source
+// checkout, while the immutable fixture stays in this evidence checkout.
+const alias = {
+  "@": sourceRoot,
+  react: dirname(sourceRequire.resolve("react/package.json")),
+  "react-dom": dirname(sourceRequire.resolve("react-dom/package.json")),
+  next: dirname(sourceRequire.resolve("next/package.json")),
+};
 const cases = [
   { name: "confirmed", status: 200, body: { ok: true }, accepted: true },
   { name: "explicit-refusal", status: 200, body: { ok: false, error: "server_error" }, accepted: false },
@@ -34,22 +47,22 @@ function check(name, actual, expected) {
 }
 const common = `
 import {createElement as h} from 'react';
-import {FormSaveAckProofRoot,installFormSaveObservation} from ${JSON.stringify(join(root, "tests/k-form-save-ack.proof.ts"))};
+import {FormSaveAckProofRoot,installFormSaveObservation} from ${JSON.stringify(join(evidenceRoot, "tests/k-form-save-ack.proof.ts"))};
 `;
 try {
-  const options = { bundle: true, write: false, absWorkingDir: root, tsconfig: join(root, "tsconfig.json"), logLevel: "error" };
+  const options = { bundle: true, write: false, absWorkingDir: sourceRoot, tsconfig: join(sourceRoot, "tsconfig.json"), alias, logLevel: "error" };
   const ssr = await build({ ...options, platform: "node", format: "cjs", stdin: {
     contents: common + `import {renderToString} from 'react-dom/server';console.log(JSON.stringify(renderToString(h(FormSaveAckProofRoot))));process.exit(0);`,
-    resolveDir: root, loader: "tsx",
+    resolveDir: sourceRoot, loader: "tsx",
   } });
   const ssrFile = join(temp, "ssr.cjs");
   writeFileSync(ssrFile, ssr.outputFiles[0].text);
-  const rendered = spawnSync(process.execPath, [ssrFile], { cwd: root, encoding: "utf8", timeout: 10000, maxBuffer: 5e6 });
+  const rendered = spawnSync(process.execPath, [ssrFile], { cwd: sourceRoot, encoding: "utf8", timeout: 10000, maxBuffer: 5e6 });
   if (rendered.status !== 0) throw Error(rendered.stderr || String(rendered.error));
   const html = JSON.parse(rendered.stdout);
   const client = await build({ ...options, platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '\"production\"', "process.env": "{}" }, stdin: {
     contents: common + `import {hydrateRoot} from 'react-dom/client';installFormSaveObservation();hydrateRoot(document.getElementById('app'),h(FormSaveAckProofRoot));`,
-    resolveDir: root, loader: "tsx",
+    resolveDir: sourceRoot, loader: "tsx",
   } });
   server = createServer((_request, response) => {
     response.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -102,7 +115,7 @@ try {
   }
   assert.equal(localPosts, POST_CEILING);
   assert.equal(forbiddenRequests, 0);
-  console.log(JSON.stringify({ sourceBlob, browser: browser.version(), checks, failures, observations,
+  console.log(JSON.stringify({ evidenceRoot, sourceRoot, expectedSourceBlob, sourceBlob, browser: browser.version(), checks, failures, observations,
     bounds: { localPosts, postBytes: POST_BYTES, responseBytes: RESPONSE_BYTES }, forbiddenRequests }, null, 2));
   if (failures.length) process.exitCode = 1;
 } finally {

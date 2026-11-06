@@ -18,19 +18,18 @@ import { crc32 } from "node:zlib";
 import { NextRequest } from "next/server";
 import { PDFDocument } from "pdf-lib";
 import {
-  NOT_INCLUDED_NAME,
+  LEFT_OUT_FILE,
   RECEIPT_BATCH_MAX,
-  RECEIPT_BATCH_MAX_BYTES,
   RECEIPT_BATCH_READS_AT_ONCE,
   RECEIPT_BATCH_RESERVE_SECONDS,
-  RECEIPT_BATCH_SHAPE,
-  RECEIPT_BATCH_UNITS,
   RECEIPT_LIST_PAGES,
+  SKIP_WORDS,
+  lastMonthDays,
   notIncludedText,
   receiptRange,
   zipStored,
 } from "@/lib/receipt-batch-rules";
-import { receiptBatch } from "@/lib/receipt-batch";
+import { RECEIPT_BATCH_MAX_BYTES, RECEIPT_BATCH_SHAPE, RECEIPT_BATCH_UNITS, receiptBatch } from "@/lib/receipt-batch";
 import { RECEIPT_PDF_MAX_BYTES, RECEIPT_PDF_UNITS, RECEIPT_STRIPE_TIMEOUT_MS } from "@/lib/receipt-pdf";
 import { claimHandle, ensureStatsId, saleHandles, setMailSettings, setStripeAccount, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -179,6 +178,8 @@ async function main(): Promise<void> {
   const text = notIncludedText("October 1, 2026 to October 31, 2026", [{ reference: ref("x1"), why: "refunded" }, { reference: ref("x2"), why: "slow" }], 3);
   is("every sale left out is named with its reason", [text.includes(`${ref("x1")}: `), text.includes(`${ref("x2")}: `), /refunded in full/.test(text), /did not answer in time/.test(text)], [true, true, true, true]);
   is("and how many receipts the folder does have", /3 receipts are in this download/.test(text), true);
+  is("every reason fits the line its ceiling allows", Object.values(SKIP_WORDS).every((w) => w.length <= 200), true);
+  is("the form starts with last month", [lastMonthDays(Date.UTC(2026, 10, 6, 3)), lastMonthDays(Date.UTC(2027, 0, 2))], [{ from: "2026-10-01", to: "2026-10-31" }, { from: "2026-12-01", to: "2026-12-31" }]);
 
   part("Its cost: counted and capped before anything is read");
   is(`at most ${RECEIPT_BATCH_MAX} receipts a download`, RECEIPT_BATCH_MAX <= 50, true);
@@ -206,6 +207,11 @@ async function main(): Promise<void> {
   const get = (query: string, signedIn = true, path = "receipt-batch") =>
     (path === "receipt-batch" ? receiptMany : receiptOne)(new NextRequest(`https://marktmorgen.com/api/store/${path}?${query}`, { headers: signedIn ? { cookie: `${SESSION_COOKIE}=${session}` } : {} }));
 
+  // The store's studio requests this month, started again between parts (a store with no plan has a few hundred).
+  const studioKeys = () => redis.keys().filter((k) => k.startsWith("nl:allow:studio:"));
+  const refill = async () => { for (const k of studioKeys()) await redis.pipeline([["DEL", k]]); };
+  const studioUsed = async () => (await Promise.all(studioKeys().map(async (k) => Number((await redis.pipeline([["GET", k]]))[0] ?? 0)))).reduce((a, b) => a + b, 0);
+
   listed = [
     sale(ref("a"), OCT(5)),
     sale(ref("b"), OCT(3)),
@@ -227,13 +233,15 @@ async function main(): Promise<void> {
   const single = await get(`store=${store.sid}&reference=${ref("a")}`, true, "receipt-pdf");
   is("a receipt downloaded on its own first is R-000001", [single.status, single.headers.get("content-disposition")], [200, 'attachment; filename="receipt-R-000001.pdf"']);
 
+  await refill();
   calls.length = 0;
   const res = await get(`store=${store.sid}&month=2026-10`);
+  is(`the download took ${RECEIPT_BATCH_UNITS} studio requests, the studio's own check among them`, await studioUsed(), RECEIPT_BATCH_UNITS);
   const bytes = new Uint8Array(await res.arrayBuffer());
   is("a ZIP, made on request, kept nowhere", [res.status, res.headers.get("content-type"), res.headers.get("cache-control"), res.headers.get("content-disposition")], [200, "application/zip", "private, no-store", 'attachment; filename="receipts-2026-10-01-to-2026-10-31.zip"']);
   is("under its ceiling", bytes.byteLength <= RECEIPT_BATCH_MAX_BYTES, true);
   const entries = unzip(bytes);
-  is("the receipts in number order, then what was left out", entries.map((e) => e.name), ["receipt-R-000001.pdf", "receipt-R-000002.pdf", "receipt-R-000003.pdf", NOT_INCLUDED_NAME]);
+  is("the receipts in number order, then what was left out", entries.map((e) => e.name), ["receipt-R-000001.pdf", "receipt-R-000002.pdf", "receipt-R-000003.pdf", LEFT_OUT_FILE]);
   is("every file whole", entries.every((e) => e.crcOk && e.stored), true);
   const titles = await Promise.all(entries.slice(0, 3).map(async (e) => (await PDFDocument.load(e.data)).getTitle()));
   is("the sale numbered first keeps its number; the new ones are numbered in the order they were paid", titles, [
@@ -253,6 +261,7 @@ async function main(): Promise<void> {
   is("downloaded again: the same numbers on the same sales", await Promise.all(again.slice(0, 3).map(async (e) => (await PDFDocument.load(e.data)).getTitle())), titles);
 
   part("Over the cap: refused with the count, before anything is read or numbered");
+  await refill();
   listed = Array.from({ length: RECEIPT_BATCH_MAX + 1 }, (_, i) => sale(ref(`many${i}`), OCT(1 + (i % 28))));
   calls.length = 0;
   const counted = (await redis.pipeline([["GET", `nl:rcpt:seq:${store.sid}`]]))[0];
@@ -265,6 +274,7 @@ async function main(): Promise<void> {
   is("half the month fits", [halfMonth.status, halfMonth.headers.get("content-type")], [200, "application/zip"]);
 
   part("Unknown never becomes a partial download presented as complete");
+  await refill();
   listed = Array.from({ length: RECEIPT_LIST_PAGES * 100 + 1 }, (_, i) => sale(ref(`open${i}`), OCT(2), { metadata: { store: "someoneelse" } }));
   const tooLong = await get("month=2026-10");
   is("more checkouts than the pages read: refused, nothing made", [tooLong.status, /shorter/.test(await tooLong.text())], [409, true]);
@@ -278,6 +288,7 @@ async function main(): Promise<void> {
   const down = await get("month=2026-10");
   is("Stripe not answering the list: unavailable, no file", [down.status, down.headers.get("content-type")?.includes("zip") ?? false], [503, false]);
   listStatus = 200;
+  await refill();
   listed = [sale(ref("r"), OCT(2)), sale(ref("s"), OCT(3))];
   lineStatus.set(ref("s"), 500);
   const partly = unzip(new Uint8Array(await (await get("month=2026-10")).arrayBuffer()));

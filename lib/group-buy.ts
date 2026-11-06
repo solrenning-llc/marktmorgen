@@ -591,23 +591,36 @@ export async function revokeRefundedGroups(
         // the refund is not marked handled (it waits to be tried again), never "nobody to take back".
         const members = hashValues(repliesFor(await redisPipeline([["HGETALL", membersKey(group.id)]]), 1)?.[0]);
         if (!members) return false;
+        // Every readable place is taken back now; one that does not read leaves the refund unmarked, to be tried
+        // again, without holding back the others (Claude 4 on #2781).
         const places = members.map(parseMember);
-        if (places.some((member) => !member)) return false;
-        for (const member of places as Member[]) {
+        let unread = false;
+        for (const member of places) {
+          if (!member) {
+            unread = true;
+            continue;
+          }
           // Only what this purchase gave: an address that also has the product
           // another way keeps that.
           const given = repliesFor(await redisPipeline([["HGET", importedKey(sid, member.e), group.p]]), 1);
-          if (!given || (given[0] !== null && typeof given[0] !== "string")) return false;
+          if (!given || (given[0] !== null && typeof given[0] !== "string")) {
+            unread = true;
+            continue;
+          }
           let job = "";
           try {
             job = String((JSON.parse(String(given[0])) as { job?: unknown }).job ?? "");
           } catch {}
           if (job !== groupJob(group.id)) continue;
           const removed = repliesFor(await redisPipeline([["HDEL", importedKey(sid, member.e), group.p]]), 1);
-          if (!oneWrite(removed?.[0])) return false;
+          if (!oneWrite(removed?.[0])) {
+            unread = true;
+            continue;
+          }
           for (const productId of [group.p, ...(group.items ?? [])]) await dropStart(member.e, productId);
           revoked += 1;
         }
+        if (unread) return false;
       }
     }
     // Marked handled only now, once everything it takes back was written.

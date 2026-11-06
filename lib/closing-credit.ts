@@ -8,6 +8,8 @@
  *   nl:closing:credit:<folder>   what is left, until the store closes or stays
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { signedOf } from "@/lib/redis-count";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 
 export const creditKey = (folder: string) => `nl:closing:credit:${folder}`;
 
@@ -17,10 +19,18 @@ export async function startClosingCredit(folder: string, emails: number): Promis
   await redisPipeline([["SET", creditKey(folder), Math.max(0, Math.floor(emails))]]);
 }
 
-/** Takes `n`, all or none. Nothing set is nothing to take. */
+/**
+ * Takes `n`, all or none. Nothing set is nothing to take. Throws
+ * UnknownReplyError when DECRBY's total is not a whole number (CX-123 rule
+ * 24): no email goes, and nothing is given back, since it is not known
+ * whether the take ran; a closing that loses some credit sends fewer
+ * emails, never more than its cap.
+ */
 export async function takeCredit(folder: string, n: number): Promise<boolean> {
-  const [left] = await redisPipeline([["DECRBY", creditKey(folder), n]]);
-  if (Number(left) >= 0) return true;
+  const replies = repliesFor(await redisPipeline([["DECRBY", creditKey(folder), n]]), 1);
+  const left = replies ? signedOf(replies[0]) : null;
+  if (left === null) throw new UnknownReplyError("a closing's email credit");
+  if (left >= 0) return true;
   await redisPipeline([["INCRBY", creditKey(folder), n]]);
   return false;
 }

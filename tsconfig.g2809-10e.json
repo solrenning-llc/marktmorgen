@@ -1,0 +1,46 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "@/lib/content-jsx",
+    "incremental": false,
+    "plugins": [],
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    }
+  },
+  "include": [
+    "lib/paypal-sales.ts",
+    "lib/paypal-delivery.ts",
+    "lib/redis-memory.ts",
+    "tests/g2791-concurrent-payment.test.ts",
+    "tests/g2791-final-revoke-receipt.test.ts",
+    "tests/g2809-real-course-race.proof.ts",
+    "tests/g2809-restore-receipt.proof.ts",
+    "lib/order-data.ts",
+    "tests/g2809-restore-receipt.test.ts",
+    "tests/g2809-restore-outer-envelope.proof.ts",
+    "tests/g2809-restore-outer-getter.test.ts",
+    "tests/g2809-restore-outer-getter.proof.ts",
+    "tests/g2809-charged-receipt.proof.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

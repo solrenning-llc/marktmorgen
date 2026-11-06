@@ -494,3 +494,14 @@ Aguardar uma ordem nominal da Claude 4. Somente após a exceção/coordenação:
 ### Próximo passo
 
 Aguardar autorização nominal da Claude 4 para a guarda de `courseLedger`. Só então anunciar RESERVA antes do código, produzir RED/GREEN no mesmo #2794, pedir R1+R2 no novo head e exigir nove agregadores novos antes de incorporar.
+
+## 06/11/2026 11h10 Fortaleza — AV12: sem autorização nominal para `lib/learn.ts`
+
+- Retomada lida primeiro do checkpoint durável `b3b29554f22fb4dfe87ccc704e8f3f862e5bd2d8` (`docs/codex-l-checkpoint-2026-11-05.md`, blob `064dbec7bbf03025a7551632dd42735bd7d8e479`).
+- Main auditado uma vez: `CLAUDE.md` `8e8545b0387889495232774b0c9d6b3bb4804e67`; `AGENTS.md` `472c4251f571744ab013f61abdf93452f8f2e02c`; `docs/reservations.md` `33627443418f4bc924217cb5e862688d2735eac2`; reservas Claude1 `2a440d6e5a64a287855b09a5ed988c9636f254cb`, Claude2 `5fbc517e5c4c4d60d07958f1c60385c6db1d64ca`, Claude3 `1dab1d78e585a0dca7e6d996305a6e76a18f29fe`, Claude4 `ec5f303e7ead3d8b71ebdd27344af104b7c5269e`, Codex `16d3928754520718f09d8a1b7531fbc220eeaa64`; caixa `d98930427fa564e9e2614327e02ad0747a31d4f6`.
+- Canal integral verificado antes do append: Base64 decodificado em 769102 bytes; Git blob calculado `d19680c1dcd3c93a64578a45d20c42483f7ff186`, idêntico ao declarado. Leitura causal desde `L-20261106-1011-2794-3` não trouxe ordem/exceção nominal da Claude 4 para L tocar `lib/learn.ts`.
+- `lib/learn.ts` permanece reservado ao A3 e o #2791 continua em correções/revisões ativas no arquivo; o #2802 libera caminhos específicos para #2576, não `lib/learn.ts` para L.
+- #2794 continua OPEN no head EXATO `eb360c3611f8b324a9206781b5fb9570356552c8`; nenhuma alteração de código, head, CI, retry, cancelamento ou merge. Blobs preservados: `lib/imported-purchases.ts` `7329e24fd7a9aa266b084753788510369ad3b2b9`; `tests/imported-purchases-exact-replies.test.ts` `0ce9901a2d704fc8f524f7f4160772d4bc0dac4b`.
+- Causa ligada preservada: `courseLedger` chama `importedFrom(undefined)` quando `importedRead` não inclui o terceiro comando. Correção segura continua sendo guardar a iteração somente quando `imported` existe, sem afrouxar unknown nem adicionar IO. RED local já reproduzido; não aplicado sem posse nominal.
+- Ponto curto publicado somente à Claude 4/R1/R2: `L-20261106-1110-2794-4`, commit de canal `513c1d906f1fd694ac21abcbd6f085cb1108c2b9`, novo blob `6475ccf54ec443600de20b6d80d1e699223a9178`. Claude 1 não foi destinatário.
+- Próxima ação somente por novidade causal: autorização nominal da Claude 4 e coordenação da posse; então RED/GREEN, dois pareceres aplicáveis R1+R2 e nove agregadores NOVOS no novo head. Nenhuma unidade adicional.

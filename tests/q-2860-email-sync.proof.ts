@@ -49,6 +49,8 @@ async function scenario(total:number){
  const add=async(email:string,seed:string)=>queuePerson(store,{source:'free',email,name:'Synthetic Person',products:[{id:made.product.id,title:'Guide'}],consent:true,seed,at:now},now);
  assert.equal(await add(person,'target'),'queued');
  const id=String((run(['LRANGE',`nl:esync:log:${statsId}`,0,0]) as string[])[0]);
+ const written=JSON.parse(String(run(['GET',`nl:esync:j:${id}`])));
+ assert.equal(written.email,person,'real writer stores the agreed address in plaintext');
  assert.equal((await syncJobsOf(statsId,person)).length,1,'writer initially discovers target');
  for(let i=1;i<total;i++)assert.equal(await add(`other${i}@example.test`,`other-${i}`),'queued');
  assert.equal(run(['LLEN',`nl:esync:log:${statsId}`]),LOG_SIZE,'real writer holds exactly its documented log size');
@@ -58,7 +60,9 @@ async function scenario(total:number){
  const syncCopy=copied.sections.find(s=>s.module==='lib/email-sync.ts');
  const erased=await erasePerson(store,person,{kind:'person'});
  const key=`nl:esync:j:${id}`,member=`${statsId}|${id}`;
- const held=run(['GET',key])!==null,queued=run(['ZSCORE',QUEUE_KEY,member])!==null;
+ const erasedRaw=run(['GET',key]);
+ const held=erasedRaw!==null,queued=run(['ZSCORE',QUEUE_KEY,member])!==null;
+ const plaintextAddressAfterErasure=typeof erasedRaw==='string'&&JSON.parse(erasedRaw).email===person;
  const suppressed=await isSuppressed(store.listId,person);
  const mailToken=(await tokensFor(store.listId!,[person],store.handle)).has(person);
  // Keep only the target due; unrelated synthetic people are not exercised by this retry.
@@ -68,7 +72,7 @@ async function scenario(total:number){
  holdLease=false;
  const retry=await syncDue(Date.now()+2000,now);
  const after=run(['GET',key]);
- const result={total,logSize:LOG_SIZE,directCopy:direct.length,fullCopy:syncCopy?.records.length??0,erasureOk:erased.ok,jobHeld:held,queued,suppressed,mailToken,retry,providerLookups:lookups,stateAfter:typeof after==='string'?JSON.parse(after).state:null,commands:budget};
+ const result={total,logSize:LOG_SIZE,directCopy:direct.length,fullCopy:syncCopy?.records.length??0,erasureOk:erased.ok,jobHeld:held,plaintextAddressAfterErasure,queued,suppressed,mailToken,retry,providerLookups:lookups,stateAfter:typeof after==='string'?JSON.parse(after).state:null,commands:budget};
  console.log('Q2860_OBSERVATION '+JSON.stringify(result));
  setPlatformHooksForTests(undefined);
  return result;
@@ -76,7 +80,7 @@ async function scenario(total:number){
 test('control: the fiftieth logged job is copied and erased by real consumers',async()=>{
  const r=await scenario(LOG_SIZE);
  assert.equal(r.directCopy,1);assert.equal(r.fullCopy,1);assert.equal(r.erasureOk,true);
- assert.equal(r.jobHeld,false);assert.equal(r.queued,false);assert.equal(r.providerLookups,0);
+ assert.equal(r.jobHeld,false);assert.equal(r.plaintextAddressAfterErasure,false);assert.equal(r.queued,false);assert.equal(r.providerLookups,0);
  assert.equal(r.suppressed,true);assert.equal(r.mailToken,false);
 });
 test('after 51 real queued jobs, the oldest person still needs a complete copy and erasure',async()=>{

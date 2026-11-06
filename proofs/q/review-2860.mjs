@@ -39,7 +39,7 @@ for(const file of process.argv.slice(2)){
   });
  }};
  try{
-  const result=await build({entryPoints:[join(root,'tests',file)],bundle:true,platform:'node',format:'cjs',write:false,logLevel:'error',plugins:[plugin],absWorkingDir:root,
+  const result=await build({entryPoints:[join(root,'tests',file)],bundle:true,platform:'node',format:'cjs',jsx:'automatic',write:false,logLevel:'error',plugins:[plugin],absWorkingDir:root,
    banner:{js:"globalThis.fetch=async()=>{throw Error('Q review prohibits unmocked external fetch');};"}});
   const run=spawnSync(process.execPath,[],{cwd:root,input:result.outputFiles[0].text,encoding:'utf8',env:testEnvironment({...process.env,TMPDIR:process.env.TMPDIR??'/tmp'}),timeout:120000,maxBuffer:8*1024*1024});
   const log=`FILE ${file} SOURCE ${source} EXIT ${run.status}\n${run.stdout??''}\n${run.stderr??''}\n${run.error?String(run.error):''}\n`;

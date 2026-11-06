@@ -407,7 +407,11 @@ export const FAMILIES: Record<string, Family> = {
   "nl:sweep:cursor@lib/checkout-sweep.ts": company("Where the checkout sweep stopped", "One key, the company's job."),
   "nl:taxobs:v1:@lib/checkout-sweep.ts": room("Inactive diagnostic checkout observations: no production policy. A reviewed synthetic policy reserves its whole bounded document, index and byte count atomically in the existing room before one SET PXAT; at most 300 observations and an absolute expiry within 24 hours. Activation still needs reviewed scope, retention and full-lifetime cost funding.", "lib/checkout-sweep.ts"),
   "nl:wf:abandoned:@lib/checkout-sweep.ts": short("An abandoned checkout noticed", "request", 2, KEY, REQ("checkout")),
-  "nl:cotrouble:@lib/checkout-trouble.ts": { what: "Checkouts refused by day, and the last reason", parts: [capped(40 * 64 + KB, "A field a day, 35 days, and the last one.")] },
+  // The reader now selects seven days + last (CHECKOUT_TROUBLE_READ in the
+  // plan registry); historical fields are not downloaded. Separate audit gap:
+  // renewing the hash TTL does not enforce this legacy per-field storage cap.
+  // Bounding the read does not certify the stored-byte allocation below.
+  "nl:cotrouble:@lib/checkout-trouble.ts": { what: "Checkouts refused by day, and the last reason", parts: [capped(40 * 64 + KB, "Legacy 35-day allocation; per-field retention remains unverified.")] },
   "nl:cotrouble:mail:@lib/checkout-trouble.ts": short("The day's email about it claimed", "day", 2, 128),
   "nl:imports:cf:@lib/clickfunnels-funnel.ts": { what: "What a ClickFunnels move made, so it is not made twice", parts: [capped((tier) => (IMPORT_ALLOWANCES[tier].funnelSaves * 14 + 1) * 4 * KB, "A record per funnel made, 400 days.", src("lib/import-limits.ts", "IMPORT_ALLOWANCES"))] },
   "nl:imports:cf:lock:@lib/clickfunnels-funnel.ts": short("One move at a time", "studio", 1, 128),
@@ -738,6 +742,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pp:item:@lib/paypal-payouts.ts": short("A PayPal payout item written into the book: up to three partners a sale", "order", 400, 3 * MARK),
   "nl:pp:open:@lib/paypal-payouts.ts": { what: "Payout batches not yet settled", parts: [capped((MAX_AFFILIATES + 1) * 512, "A line per affiliate in an open batch.", src("lib/affiliate-setting.ts", "MAX_AFFILIATES"))] },
   "nl:pp:stores@lib/paypal-payouts.ts": company("Stores with a batch open", "One set for every store."),
+  "nl:pp:unk:month:@lib/paypal-payouts.ts": company("Monthly counts of PayPal payout batches whose answer was not known", "Three counts a month (unknown, settled, manual), no store or person; at most 14 monthly keys alive for 400 days."),
   "nl:ppsell:o:@lib/paypal-sales.ts": { what: "A PayPal order opened", parts: [per("order", 30, KB, "Its record, thirty days at most.", KIND("paypal")), per("request", 3, 768, "One opened and never paid, three days.", REQ("paypal checkout"))] },
   "nl:ppsell:own:@lib/paypal-sales.ts": short("The paid orders behind one address's product", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:paid:@lib/paypal-sales.ts": short("A PayPal order paid", "order", 400, KB, KIND("paypal")),

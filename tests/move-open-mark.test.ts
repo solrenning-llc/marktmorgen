@@ -21,6 +21,10 @@ const closes = new Map<string, number>();
 let lostAnswer = false;
 let refusedByStripe = false;
 let sessionUnreadable = false;
+/** Stripe answers the creation with the checkout's own expires_at, as the API does; off to play an answer without it. */
+let postSaysCloses = true;
+/** GET /checkout/sessions/:id reads, to show none is needed when the creation said when it closes. */
+let sessionReads = 0;
 /** The emails Stripe shows a live membership to this product for. */
 const paid = new Set<string>();
 let membershipsUnreadable = false;
@@ -45,10 +49,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       lostAnswer = false;
       throw new TypeError("fetch failed: socket hang up");
     }
-    return json({ id, url: `https://checkout.stripe.com/c/pay/test${checkouts.length}` });
+    return json({ id, url: `https://checkout.stripe.com/c/pay/test${checkouts.length}`, ...(postSaysCloses ? { expires_at: closes.get(id) } : {}) });
   }
   const session = /^\/checkout\/sessions\/(cs_test_\w+)$/.exec(path);
   if (session && method === "GET") {
+    sessionReads += 1;
     if (sessionUnreadable) return json({ id: session[1], object: "checkout.session" });
     const at = closes.get(session[1]);
     return at ? json({ id: session[1], object: "checkout.session", expires_at: at, status: at > Date.now() / 1000 ? "open" : "expired" }) : json({ error: { message: "No such session" } }, 404);
@@ -89,7 +94,7 @@ async function main(): Promise<void> {
   await setProductLink(OWNER, basic, "https://example.com/basic");
   store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;
-  const people = ["ada", "ben", "cy", "dee", "eve", "fay", "gus", "hal"];
+  const people = ["ada", "ben", "cy", "dee", "eve", "fay", "gus", "hal", "ivy"];
   const fields = await inviteMembers(store, "job_moveopenmark", people.map((name) => ({ email: `${name}@example.com`, productId, option: basic, renews: nowS + 20 * 86_400 })));
   const invites = Object.fromEntries(await Promise.all(people.map(async (name, i) => [name, (await readInvite(statsId, fields[i]!))!] as const)));
   const press = (name: string) => openMove(store, productId, invites[name].t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
@@ -109,10 +114,22 @@ async function main(): Promise<void> {
   const a3 = await press("ada");
   is("two hours later, its checkout closed unpaid: a live one, not the closed one", a3.ok && a1.ok ? (a3.url === a1.url ? "the closed one" : "a live one") : a3.ok ? "a live one" : a3.reason, "a live one");
 
+  part("The closing time Stripe gave when the checkout was made is used, with no second read (Claude 4 A3 on #2690)");
+  sessionUnreadable = true;
+  const readsBefore = sessionReads;
+  const i1 = await press("ivy");
+  sessionUnreadable = false;
+  const ivyLife = Number(checkouts.at(-1)!.get("expires_at")) - Math.floor(Date.now() / 1000);
+  const ivyTtl = Number(redis.run(["TTL", mark("ivy")]));
+  is("opened; the mark lives as long as that checkout and a minute, though the session cannot be read", [i1.ok, ivyTtl > ivyLife && ivyTtl <= ivyLife + 60], [true, true]);
+  is("and the session was not read again", sessionReads - readsBefore, 0);
+
   part("A checkout whose closing time cannot be read keeps the mark for the longest a checkout lives");
   sessionUnreadable = true;
+  postSaysCloses = false;
   const g1 = await press("gus");
   sessionUnreadable = false;
+  postSaysCloses = true;
   const longest = Number(redis.run(["TTL", mark("gus")]));
   is("opened, and the mark kept a day and a minute (no second checkout while one may be open)", [g1.ok, longest > 86_400 && longest <= 86_460], [true, true]);
 

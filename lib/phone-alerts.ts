@@ -61,6 +61,7 @@ import { maySendPathReminder } from "@/lib/path-reminder-rules";
 import { createHash, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { type Store, accountStores, setPhoneSales, storeRef } from "@/lib/store";
 import { normaliseEmail } from "@/lib/auth";
 import { type Permission, type Role, can } from "@/lib/team-roles";
@@ -387,14 +388,17 @@ export async function alertCreator(
     return role !== undefined && eventsFor(role).includes(event);
   });
   if (!listening.length) return 0;
-  const [fresh] = await redisPipeline([["SET", seenKey(statsId, event, options.seed), "1", "NX", "EX", SEEN_SECONDS]]);
-  if (fresh === null) return 0;
+  // SET NX answers OK when this event is new here and null when it was sent already; anything else is unknown, and nothing is sent on it.
+  const fresh = repliesFor(await redisPipeline([["SET", seenKey(statsId, event, options.seed), "1", "NX", "EX", SEEN_SECONDS]]), 1)?.[0];
+  if (fresh !== "OK") return 0;
   if (event === "report" || event === "affiliate" || event === "comment") {
-    const [, count] = await redisPipeline([
+    const replies = repliesFor(await redisPipeline([
       ["SET", quietKey(statsId, event), "0", "EX", 3600, "NX"],
       ["INCR", quietKey(statsId, event)],
-    ]);
-    if (Number(count) > QUIET_PER_HOUR) return 0;
+    ]), 2);
+    // A count in any other shape is unknown (CX-123 rule 24): nothing is sent on it.
+    const count = countOf(replies?.[1]);
+    if (count === null || count > QUIET_PER_HOUR) return 0;
   }
   await soon(() => Promise.all(listening.map((device) => event === "path" && !maySendPathReminder(options.pathTimeZone || "", Date.now()) ? Promise.resolve(null) : deliver(store, device, event, alert))));
   return listening.length;
@@ -592,11 +596,13 @@ export async function sendTest(
   const device = config?.devices.find((d) => d.id === id && isMine(store, d, who));
   if (!device || !keys) return { ok: false, reason: "missing" };
   if (!vapidKeysFor(device.kid)) return { ok: false, reason: "stale" };
-  const [, count] = await redisPipeline([
+  const replies = repliesFor(await redisPipeline([
     ["SET", testsKey(store.statsId), "0", "EX", 60, "NX"],
     ["INCR", testsKey(store.statsId)],
-  ]);
-  if (Number(count) > TESTS_PER_MINUTE) return { ok: false, reason: "limited" };
+  ]), 2);
+  // A count in any other shape is unknown (CX-123 rule 24): no test is sent on it.
+  const count = countOf(replies?.[1]);
+  if (count === null || count > TESTS_PER_MINUTE) return { ok: false, reason: "limited" };
   const state = await deliver(store, device, "test", {
     title: "Marktmorgen Studio",
     body: "Notifications work on this device. Nothing happened in your store.",

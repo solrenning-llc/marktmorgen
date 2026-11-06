@@ -56,6 +56,9 @@ export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource
     await route.fulfill({status:work.scenario.status??200,contentType:"application/json",body:work.scenario.raw??JSON.stringify(work.scenario.body(value))});
    });
    await page.goto(LOCAL+"/studio?store="+fixture.sid,{waitUntil:"networkidle",timeout:60000});
+   // At 390 the leave guard's cleanup is held back 300 ms, as WebKit can run it after the form is gone (#2808, job
+   // 128017854896): React removes the form first and runs useLeaveGuard's effect cleanup later. At 1280 it runs as is.
+   if(width===390)await page.evaluate(()=>{const remove=window.removeEventListener.bind(window);window.removeEventListener=(type,listener,options)=>{if(type!=="beforeunload")return remove(type,listener,options);setTimeout(()=>remove(type,listener,options),300);};});
    await page.locator("main details").evaluateAll(nodes=>nodes.forEach(n=>{n.open=true;}));
    await page.getByRole("button",{name:/^(Add|Edit) your profiles$/}).click();
    const form=page.locator("form[data-socials-editor]");await form.waitFor({state:"visible"});
@@ -85,6 +88,10 @@ export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource
     if(scenario.confirmed){
      await page.locator(".nb-toast-region [role=status]").getByText(success,{exact:true}).waitFor({state:"attached"});
      is("confirmed profile editor closes "+name,await form.count(),0);
+     // React removes the form before it runs useLeaveGuard's effect cleanup, so the protection is released a moment
+     // after the form is gone (WebKit, #2808 job 128017854896). Wait until a fresh beforeunload is no longer held back,
+     // within Playwright's usual timeout; a protection that is never released still fails here.
+     await page.waitForFunction(()=>window.dispatchEvent(new Event("beforeunload",{cancelable:true})));
      is("confirmed profiles release unload protection "+name,await page.evaluate(()=>!window.dispatchEvent(new Event("beforeunload",{cancelable:true}))),false);
     }else{
      const alert=form.getByRole("alert");await alert.waitFor();

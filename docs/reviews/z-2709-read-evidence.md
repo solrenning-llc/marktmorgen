@@ -1,5 +1,13 @@
 # Independent review of PR #2709
 
+## Nominal return: both LOW findings closed
+
+Corrective exact head `df8c44604d54560e046207f8e335c5297f5134fd`, announced in channel `d332bf99311f99ce8e50dfcd8d453e85dc85c2e4`. The entire three-file delta from873a914e was read. The unchanged independent eleven-case proof now11/11, versus9pass/2latent failures before. Actual commands remain4, writes0. Transport rejection now returns null, preserving the actual unknown line formatter. `STORE_FORGET_MONTH_READ_COMMANDS=4` has an explicit registry attribution: this unwired company reader needs frequency and nonzero cost included in the reviewed fixed-cost ceiling before wiring. No company funding, production use, or dollar margin is thereby certified; app/lib still has no production caller.
+
+The author's corrective RED `fdc8cab5b3974caff4d80cfed1cf19fe4eec90ce` reproduces the escaping transport failure and absent four-command/company attribution. The same eight-case author file passes on final. Linked SG2 125/125, cost registry24/24 and data registry7/7 pass. Scoped types of all three changed files and dependencies, changed-file lint and diff-check pass. Original eleven-case proof and its runner are not edited. Final public-data scan and native/remote tree equality are recorded in the posted return.
+
+**NO FINDINGS in the corrective scope / MAY MERGE only with all nine exact-head final aggregate checks and a clean normal expected-head merge by the author.** Generic helper work remains with Claude4/#2672. No native Redis, browser, supplier, payment, global build or hosted CI was certified. No author source, branch, reservation or CI was changed. This return supersedes the two open LOW dispositions below only; historical evidence is preserved.
+
 Reviewed head: `873a914e739d14a3e1deacbe85241ec5b6cbefac`. Base: `66b704e2e93610439b712d17adeff1d692017ed2`. Review announced and evidence reserved in channel commit `2379cfcd01981bf6308cccf0ef8f659faa0afde6` before writing evidence. The author's two-file diff was read in full; no author branch, source, reservation, or CI was changed.
 
 The changed decoder closes missing, foreign and duplicate monthly fields. Complete sparse hashes still legitimately imply zero for fields that do not exist. Unknown outer lengths, invalid counts and malformed decimal strings refuse. No new high or medium finding was demonstrated. Two **LOW, LATENT** issues need explicit disposition; this is not an unconditional merge approval.

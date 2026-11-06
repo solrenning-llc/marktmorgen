@@ -140,8 +140,19 @@ export async function sendDueReminders(deadline: number, now = Date.now()): Prom
     if (!due.length) break;
     for (const { sid, id } of due) {
       if (Date.now() >= deadline) return counts;
-      const store = await storeForId(sid).catch(() => null);
-      const request = store ? await requestOf(store, id).catch(() => null) : null;
+      // Dropped only when the store or the request is confirmed gone: one that could not be read just now (a thrown
+      // read) is put off a day and tried again, never dropped for good (rule 24).
+      let store: Store | null;
+      let request: PaymentRequest | null;
+      try {
+        store = await storeForId(sid);
+        request = store ? await requestOf(store, id) : null;
+      } catch (error) {
+        console.error("reading a payment request for its reminder failed", error);
+        await delayReminder(sid, id, now + RETRY_MS);
+        counts.skipped += 1;
+        continue;
+      }
       if (!store || !request) {
         await dropReminder(sid, id);
         counts.skipped += 1;

@@ -1,0 +1,1 @@
+{"extends": "./tsconfig.json", "compilerOptions": {"noEmit": true, "incremental": false}, "include": ["lib/outreach.ts", "tests/g-2697-outreach-snapshot.proof.ts", "tests/g-2697-return-boundaries.proof.ts", "tests/sg2-l1-outreach-snapshot.test.ts"], "exclude": ["node_modules"]}

@@ -1,3 +1,54 @@
+# ESTADO VIGENTE — 06/11/2026 18h16 Fortaleza: revisões #2839/#2840/#2843 concluídas; prova #2854 causal e validada
+
+Retomada-base: `e3d545816a59282ad2f585f274313aa8d8f6bd7d`. Este bloco substitui somente o resumo de estado corrente abaixo; todo o histórico anterior permanece preservado e vinculante.
+
+## Coordenação, vigia e regras
+
+- Coordenação operativa lida no canal: **somente Claude 4; Claude 1 desligado**. O ramo físico continua `para-claude-1`, mas os destinatários vigentes são C4/C5 conforme cada frente.
+- CX-127/CX-128 vigentes. Uma única vigia: `/tmp/z-channel-watch16.sh`, cadência 120s, cinco ticks por ciclo, lock `/tmp/codex-z-main-watch.lock`; ciclo atual na sessão shell 5535.
+- Última versão completa do canal conhecida: `ff8c9b078404fe5c3ff3f0c4e06e972e5d205210`. Nunca substituir/truncar `messages.md`; anexar somente com ref fresca, prefixo completo preservado e `expected_head`.
+- Nenhum rerun/retry/cancelamento de CI, push direto no main, bypass, alteração de preço/limite/comissão/flag/trava/conta/pagamento/fornecedor/PII nesta retomada.
+
+## Unidades próprias de produto
+
+1. **#2740 incorporado** normalmente: head esperado `5f2859c8ec4c9da3ef5ff43540854645c09512ce`, merge `f5c8f58f7d83880882b6f9dadfe36f0de872788c`. Checkout nativo arquivado preserva commit/índice/objetos/metadados; arquivos rastreados foram removidos somente após prova de reprodutibilidade, portanto restaurar do SHA antes de reutilizar.
+2. **#2741** head `21e200bbcc4a934ac49536d0903ac38915d9af68`, tree `92c4dd532f5f1594eceff1818143cbdfe4abe2d6`. Validação local verde. Último estado qualificado: oito agregadores verdes; o nono/product-checks ainda não concluído/ausente. Nenhuma retentativa.
+3. **#2800** head `7b8a2440f2c1a3a1b17c02473299deaeae8be927`, tree `625281595011899cfff60eb2d08b3dfee2601467`. Local: 478 assertions/26 grupos + tipos/lint/scanner/diff verdes. O macOS reader do head exato, job `128137530608`/run `42288627802`, falhou na preparação com única mensagem específica disponível: “Owned reader preparation failed; actual reader approval is unavailable.” Não repetir. Relatos: PR `6695149666`, canal `ff8c9b078404fe5c3ff3f0c4e06e972e5d205210`. Revisão C4 `6694976802` continua limpa para blobs de produto/teste inalterados.
+4. **#2819** head `3aac53168eb0686b7eb0ed4427fd1e473d42bd24`, tree `17630c713c043c908caaa026cfddf4a8a5769560`. Local: 317 assertions/9 grupos + tipos/lint/scanner/diff verdes. CI do head exato incompleto na última observação qualificada; nenhuma retentativa.
+
+Três unidades de produto abertas; ramos de prova/revisão não contam no teto. WIP antigo da integração #2602 continua preservado e não deve ser recriado/rebaseado de modo independente.
+
+## Retentativas consumidas — nunca repetir; head novo não reinicia orçamento
+
+- #2484 verify `127130387972`.
+- #2615 verify `127143841589`; macOS `127144213372`.
+- #2741 Windows `127737110071`.
+- #2800 Firefox `127885731234`; macOS `127885740971`; macOS do head atual `128137530608` falhou e também não autoriza rerun.
+
+## Revisões/provas concluídas desde o bloco anterior
+
+- **#2839, head exato `3a58c000caf6994f343e8adbea1c9a88aacd72a1`: achado MÉDIO herdado; revisão não limpa.** Review `5806652640`. `readPayPalRefunds()` perde `.partial`, permitindo `refundsChecked=true` e comissão pagável quando falta registro pago ou quando um reembolso saudável está além da janela 500. Prova durável `codex/z-review-2839-refund-coverage-proof@f3f315c7dbf4f66c8e422bfe8918e685e035203e`: 4 testes, 2 RED + 2 controles, mesmo resultado no pai `5eff1299bb07857a4be89c4c24297044d13c4c52` (herdado). Autor: 726 assertions/19 grupos; tipos/lint/scanner/diff verdes. R2 precisa executar a prova de fato; ACK/leitura não basta.
+- **#2840, head exato `1fc60590c88a2c4f11bb5a73dbcf8d05ede1ab38`: revisão focal limpa.** Review `5806683887`. RED 6 testes/2 falhas+4 controles, final 6/6; 990 assertions/19 grupos; tipos/lint/scanner/diff verdes. Nenhum achado material.
+- **#2843, head exato `0e7bcae82c67296d03e0caccbe51f6485a29cc3d`: novo MÉDIO; revisão não limpa.** Review `5806758917`. A posse é gravada antes da validação Blob; retry/concor­rência pode publicar caminho de imagem inválida ainda não validada. Prova durável `codex/z-review-2843-picture-validation-proof@f0df9005b72aab5e38a16124182c2c768c664ebf`: head 4/2 falhas+2 controles; overlay pai exato de quatro módulos `d6e1ee313721b64fa7e1b5ea47d07a0f31fe9d6a` 4/4. Autor atual: 13/5 → 13/13; o RED original tinha 7 assertions e não deve ser descrito como 13/5. Ligados 326/11; tipos/scanner/diff verdes; lint com um warning introduzido de constante não usada em teste. C5 é dono da correção. R2 precisa execução real.
+
+## Revisão financeira ativa prioritária: #2854
+
+- Head exato `a58a2eeca5f728898ebc3b46b5f15a82438f18cb`; base #2839 `3a58c000caf6994f343e8adbea1c9a88aacd72a1`.
+- Reserva postada antes do código no commit de canal `ff8c9b078404fe5c3ff3f0c4e06e972e5d205210`. Ramo reservado: `codex/z-review-2854-paid-delivery-proof`. Fonte/produto pertence à C4; Z apenas prova e reporta.
+- Achado GRAVE do Revisor 1 reproduzido independentemente e creditado a ele. Transporte PayPal é totalmente sintético; não há pagamento real. Entradas reais exercitadas: `captureOrder()`, `readPaid()`, `watchPayPal()` e Redis stub do repositório.
+- Primeira execução usou valor sintético malformado `15` em vez de `15.00`; o controle saudável falhou. Isso é erro do fixture, **não RED do produto**. Corrigiu-se somente o transporte para `plainAmount(1500,'usd')`; assertions permaneceram idênticas.
+- Resultado correto no head: **3 testes, 1 controle passou, 2 casos causais falharam**. Em ambos: 1 capture sintético, registro pago durável, 0 hand-over, sem owner index, sem sales index e sem refund-watch. Casos: (a) `SET NX` aplicado com resposta perdida; (b) `SET NX` respondeu OK e a pipeline de índices falhou.
+- Fonte exata do pai `52c61612cc9a90cf47f684bd9555e8629876b08b`, assertions idênticas: **3 testes, 2 passam, 1 falha**. Logo, a perda da resposta do SET é regressão do #2854; a falha após SET é herdada.
+- RED/final do autor: 65 assertions reproduzidas falhando/passando como pretendido. Ligados completos: primeiros 13 grupos = 592 assertions; continuados somente os 7 ainda não executados = 199; total **791 assertions/20 grupos**. Tipos focais das duas raízes+imports, ESLint, scanner (4.102 arquivos/0) e diff verdes.
+- Prova local em `/dev/shm/z2854-proof17`; ramo remoto ainda não publicado neste ponto. Próxima ação exata: criar worktree/ramo próprio, acrescentar somente `tests/z-2854-paid-delivery.proof.ts`, `tests/z-2854-paid-delivery-run.mjs`, `docs/reviews/z-2854-paid-delivery.md`; rodar tipos/lint/scanner/diff no ramo; exigir tree nativa=API; publicar; postar revisão financeira não limpa e pedir segunda execução real.
+
+## Provas preservadas pendentes
+
+- `codex/z-review-summary-read-cost-proof@0cb866d9cc466f562ea7e89de006a96f19d0c29a`: 3 testes/2 RED+1 controle. R2 real ainda pendente; não abrir correção de produto até execução real CX-128 e nova confirmação de fonte livre.
+- `codex/z-ai-spend-receipt-proof@d7a1a92410dc2c807cc73e6f235b2cf014b62408`: LEVE/condicional local somente; nenhuma alegação de custo remoto gratuito.
+
+---
+
 # ESTADO VIGENTE — 06/11/2026 17h32 Fortaleza: integrações #2800/#2819 publicadas; revisão #2839 em execução
 
 Histórico COMPLETO preservado abaixo; corrigidas apenas duas referências incompletas no topo anterior com SHAs reais confirmados. MESMA execução ativa, C4 única/C1 OFF. Nenhuma automação tocada. CX-127/CX-128 e C4-2830-CX-171 lidas; provas/revisões isentas de vagas. Três produtos OPEN; #2740 já MERGED f5c8f58f7d83880882b6f9dadfe36f0de872788c, NÃO recriar.

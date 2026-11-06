@@ -90,10 +90,10 @@ function scopesInCode(): Map<string, string[]> {
   const add = (scope: string, file: string) => found.set(scope, [...(found.get(scope) ?? []), file]);
   for (const file of code) {
     const text = read(file);
-    // withinServiceWhy is withinService that also says why it refused (lib/metered-limits.ts): the same count.
-    for (const m of text.matchAll(/\bwithin(EssentialLimit|Limit|Month|Store|Service)(?:Why)?\(([^,]+),/g)) {
+    // withinServiceWhy and essentialLimitState expose refusal reasons for the same counters.
+    for (const m of text.matchAll(/\b(?:within(EssentialLimit|Limit|Month|Store|Service)(?:Why)?|essentialLimitState)\(([^,]+),/g)) {
       const literals = [...m[2].matchAll(/"([^"]+)"/g)].map((l) => l[1]);
-      if (literals.length) for (const l of literals) { add(l, file); counters.set(l, new Set([...(counters.get(l) ?? []), m[1]])); }
+      if (literals.length) for (const l of literals) { add(l, file); counters.set(l, new Set([...(counters.get(l) ?? []), m[1] ?? "EssentialLimit"])); }
       else add(`<dynamic:${m[2].trim()}>`, file);
     }
     for (const m of text.matchAll(/\bcountUse\(([^,]+),/g)) add(`countUse:${m[1].trim().slice(0, 60)}`, file);

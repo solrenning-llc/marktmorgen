@@ -75,8 +75,8 @@ const en = {
     `, ${sessions} sessions, from ${store} for ${price}. Book each one whenever you like; nothing more is charged.`,
   bookBy: (date: string) => `Book them by ${date}.`,
   bookFirst: "Book your first session",
-  noBookingLink: "We could not get your booking link just now. Refresh this page in a moment; it is also on its way to your email.",
-  packageSameLink: (email: string) => `The same link is in the email sent to ${email}: keep it, it is how you book the rest.`,
+  noBookingLink: "We could not get your booking link just now. Refresh this page in a moment. If an email with the link reaches you, keep it to book the rest.",
+  packageSameLink: (email: string) => `The same link may reach ${email} by email. If it does, keep it: it is how you book the rest.`,
 
   // ---- A gift ----------------------------------------------------------------------------------------
   giftOnWay: "Your gift is on its way",
@@ -95,12 +95,12 @@ const en = {
   groupBoughtFor: (store: string, forWhom: string, price: string) => ` from ${store} for ${forWhom}, for ${price}.`,
   groupBought: (store: string, price: string) => ` from ${store}, for ${price}.`,
   groupSend: (title: string) =>
-    `Send it to the people it is for. Each one opens it and types their own email address; a link arrives in their inbox, and opening it puts ${title} on that address, as if they had bought it.`,
+    `Send it to the people it is for. Each one opens it and types their own email address. If the email with the link reaches them, opening it puts ${title} on that address, as if they had bought it.`,
   groupTakeOne: (people: number) => `Take a place yourself the same way: you paid for ${people}, and you are one of them only if you take one.`,
   groupDemo:
     "This is the demo store, which sends no email, so it makes no link and hands out no places. On a real store this page shows one link to pass on, and the same link is in your receipt: each person opens it, types their own email and has it on their own address.",
-  noGroupLink: "We could not get your link just now. Refresh this page in a moment; it is also on its way to your email.",
-  groupReceipt: (email: string) => `The same link is in the receipt sent to ${email}: keep it, it is how the places are handed out.`,
+  noGroupLink: "We could not get your link just now. Refresh this page in a moment; an email with it may also reach you.",
+  groupReceipt: (email: string) => `If the receipt reaches ${email}, it includes the same link: keep it, it is how the places are handed out.`,
 
   // ---- What was bought -------------------------------------------------------------------------------
   trialStarted: "Trial started",
@@ -283,8 +283,8 @@ const es: ThanksWords = {
     `, ${sessions} sesiones, a ${store} por ${price}. Reserva cada una cuando quieras; no se cobra nada más.`,
   bookBy: (date) => `Resérvalas antes del ${date}.`,
   bookFirst: "Reservar tu primera sesión",
-  noBookingLink: "Ahora mismo no pudimos obtener tu enlace de reserva. Actualiza esta página en un momento; también va de camino a tu email.",
-  packageSameLink: (email) => `El mismo enlace está en el email enviado a ${email}: guárdalo, es como reservas las demás.`,
+  noBookingLink: "No pudimos obtener tu enlace de reserva ahora mismo. Actualiza esta página en un momento. Si recibes un email con el enlace, guárdalo para reservar las demás.",
+  packageSameLink: (email) => `El mismo enlace puede llegar por email a ${email}. Si llega, guárdalo: es como reservas las demás.`,
 
   giftOnWay: "Tu regalo está en camino",
   giftBoughtFor: (store, price, to) => ` a ${store} por ${price}, como regalo para ${to}.`,
@@ -301,12 +301,12 @@ const es: ThanksWords = {
   groupBoughtFor: (store, forWhom, price) => ` a ${store} para ${forWhom}, por ${price}.`,
   groupBought: (store, price) => ` a ${store}, por ${price}.`,
   groupSend: (title) =>
-    `Envíalo a las personas para quienes es. Cada una lo abre y escribe su propia dirección de email; le llega un enlace a su bandeja de entrada, y al abrirlo ${title} queda en esa dirección, como si lo hubiera comprado.`,
+    `Envíalo a las personas para quienes es. Cada una lo abre y escribe su propia dirección de email. Si le llega el email con el enlace, al abrirlo ${title} queda en esa dirección, como si lo hubiera comprado.`,
   groupTakeOne: (people) => `Toma tú una plaza de la misma manera: pagaste por ${people}, y solo ocupas una si la tomas.`,
   groupDemo:
     "Esta es la tienda de demostración, que no envía emails, así que no crea ningún enlace ni reparte plazas. En una tienda real, esta página muestra un enlace para compartir, y el mismo enlace está en tu recibo: cada persona lo abre, escribe su propio email y lo tiene en su propia dirección.",
-  noGroupLink: "Ahora mismo no pudimos obtener tu enlace. Actualiza esta página en un momento; también va de camino a tu email.",
-  groupReceipt: (email) => `El mismo enlace está en el recibo enviado a ${email}: guárdalo, es como se reparten las plazas.`,
+  noGroupLink: "Ahora mismo no pudimos obtener tu enlace. Actualiza esta página en un momento; también puede llegarte por email.",
+  groupReceipt: (email) => `Si el recibo llega a ${email}, incluye el mismo enlace: guárdalo, es como se reparten las plazas.`,
 
   trialStarted: "Prueba iniciada",
   youAreBooked: "Tienes tu reserva",
@@ -479,8 +479,8 @@ const fr: ThanksWords = {
     `, ${sessions}${S}séances, auprès de ${store} pour ${price}. Réservez chacune quand vous le souhaitez${S}; rien de plus n'est débité.`,
   bookBy: (date) => `À réserver avant le ${date}.`,
   bookFirst: "Réserver votre première séance",
-  noBookingLink: `Nous n'avons pas pu obtenir votre lien de réservation pour l'instant. Actualisez cette page dans un instant${S}; il est aussi en route vers votre boîte e-mail.`,
-  packageSameLink: (email) => `Le même lien se trouve dans l'e-mail envoyé à ${email}${S}: gardez-le, c'est avec lui que vous réservez les autres.`,
+  noBookingLink: "Nous n'avons pas pu obtenir votre lien de réservation pour l'instant. Actualisez cette page dans un instant. Si vous recevez un e-mail contenant le lien, gardez-le pour réserver les autres séances.",
+  packageSameLink: (email) => `Le même lien peut arriver par e-mail à ${email}. S'il arrive, gardez-le${S}: c'est avec lui que vous réservez les autres.`,
 
   giftOnWay: "Votre cadeau est en route",
   giftBoughtFor: (store, price, to) => ` auprès de ${store} pour ${price}, en cadeau pour ${to}.`,
@@ -496,12 +496,12 @@ const fr: ThanksWords = {
   groupBoughtFor: (store, forWhom, price) => ` auprès de ${store} pour ${forWhom}, pour ${price}.`,
   groupBought: (store, price) => ` auprès de ${store}, pour ${price}.`,
   groupSend: (title) =>
-    `Envoyez-le aux personnes concernées. Chacune l'ouvre et saisit sa propre adresse e-mail${S}; un lien arrive dans sa boîte de réception, et l'ouvrir met ${title} sur cette adresse, comme si elle l'avait acheté.`,
+    `Envoyez-le aux personnes concernées. Chacune l'ouvre et saisit sa propre adresse e-mail${S}; si l'e-mail contenant le lien lui parvient, l'ouvrir met ${title} sur cette adresse, comme si elle l'avait acheté.`,
   groupTakeOne: (people) =>
     `Prenez vous-même une place de la même façon${S}: vous avez payé pour ${people}, et vous n'en faites partie que si vous en prenez une.`,
   groupDemo: `Ceci est la boutique de démonstration, qui n'envoie aucun e-mail, elle ne crée donc aucun lien et ne distribue aucune place. Dans une vraie boutique, cette page affiche un lien à transmettre, et le même lien figure sur votre reçu${S}: chaque personne l'ouvre, saisit son propre e-mail et l'a sur sa propre adresse.`,
-  noGroupLink: `Nous n'avons pas pu obtenir votre lien pour l'instant. Actualisez cette page dans un instant${S}; il est aussi en route vers votre boîte e-mail.`,
-  groupReceipt: (email) => `Le même lien se trouve sur le reçu envoyé à ${email}${S}: gardez-le, c'est avec lui que les places sont distribuées.`,
+  noGroupLink: `Nous n'avons pas pu obtenir votre lien pour l'instant. Actualisez cette page dans un instant${S}; il peut aussi vous parvenir par e-mail.`,
+  groupReceipt: (email) => `Si le reçu arrive à ${email}, il contient le même lien${S}: gardez-le, c'est avec lui que les places sont distribuées.`,
 
   trialStarted: "Essai commencé",
   youAreBooked: "Votre réservation est faite",
@@ -676,8 +676,8 @@ const de: ThanksWords = {
     `, ${sessions} Termine, bei ${store} für ${price}. Buchen Sie jeden, wann Sie möchten; es wird nichts weiter berechnet.`,
   bookBy: (date) => `Buchen Sie sie bis zum ${date}.`,
   bookFirst: "Ersten Termin buchen",
-  noBookingLink: "Wir konnten Ihren Buchungslink gerade nicht abrufen. Laden Sie diese Seite gleich neu; er ist auch per E-Mail unterwegs.",
-  packageSameLink: (email) => `Derselbe Link steht in der E-Mail an ${email}: Bewahren Sie ihn auf, damit buchen Sie die übrigen.`,
+  noBookingLink: "Wir konnten Ihren Buchungslink gerade nicht abrufen. Laden Sie diese Seite gleich neu. Falls Sie eine E-Mail mit dem Link erhalten, bewahren Sie ihn auf, um die übrigen Termine zu buchen.",
+  packageSameLink: (email) => `Derselbe Link kann per E-Mail an ${email} ankommen. Falls er ankommt, bewahren Sie ihn auf: Damit buchen Sie die übrigen.`,
 
   giftOnWay: "Ihr Geschenk ist unterwegs",
   giftBoughtFor: (store, price, to) => ` bei ${store} für ${price}, als Geschenk für ${to}.`,
@@ -694,12 +694,12 @@ const de: ThanksWords = {
   groupBoughtFor: (store, forWhom, price) => ` bei ${store} für ${forWhom}, für ${price}.`,
   groupBought: (store, price) => ` bei ${store}, für ${price}.`,
   groupSend: (title) =>
-    `Schicken Sie ihn an die Personen, für die er gedacht ist. Jede öffnet ihn und gibt ihre eigene E-Mail-Adresse ein; ein Link kommt in ihr Postfach, und wer ihn öffnet, hat ${title} auf dieser Adresse, als hätte er es gekauft.`,
+    `Schicken Sie ihn an die Personen, für die er gedacht ist. Jede öffnet ihn und gibt ihre eigene E-Mail-Adresse ein. Falls die E-Mail mit dem Link sie erreicht, wird ${title} beim Öffnen dieser Adresse zugeordnet, als hätte sie es gekauft.`,
   groupTakeOne: (people) => `Nehmen Sie selbst auf dieselbe Weise einen Platz: Sie haben für ${people} bezahlt und gehören nur dazu, wenn Sie einen nehmen.`,
   groupDemo:
     "Dies ist der Demo-Shop, der keine E-Mails verschickt, daher erstellt er keinen Link und vergibt keine Plätze. In einem echten Shop zeigt diese Seite einen Link zum Weitergeben, und derselbe Link steht auf Ihrer Quittung: Jede Person öffnet ihn, gibt ihre eigene E-Mail ein und hat es auf ihrer eigenen Adresse.",
-  noGroupLink: "Wir konnten Ihren Link gerade nicht abrufen. Laden Sie diese Seite gleich neu; er ist auch per E-Mail unterwegs.",
-  groupReceipt: (email) => `Derselbe Link steht auf der Quittung an ${email}: Bewahren Sie ihn auf, damit werden die Plätze vergeben.`,
+  noGroupLink: "Wir konnten Ihren Link gerade nicht abrufen. Laden Sie diese Seite gleich neu; er kann Sie auch per E-Mail erreichen.",
+  groupReceipt: (email) => `Falls die Quittung ${email} erreicht, enthält sie denselben Link: Bewahren Sie ihn auf, damit werden die Plätze vergeben.`,
 
   trialStarted: "Testphase gestartet",
   youAreBooked: "Ihr Termin ist gebucht",
@@ -873,8 +873,8 @@ const it: ThanksWords = {
     `, ${sessions} sessioni, da ${store} per ${price}. Prenota ciascuna quando vuoi; non viene addebitato altro.`,
   bookBy: (date) => `Prenotale entro il ${date}.`,
   bookFirst: "Prenota la tua prima sessione",
-  noBookingLink: "Al momento non siamo riusciti a ottenere il tuo link di prenotazione. Aggiorna questa pagina tra un momento; è anche in arrivo nella tua email.",
-  packageSameLink: (email) => `Lo stesso link è nell'email inviata a ${email}: conservalo, è così che prenoti le altre.`,
+  noBookingLink: "Al momento non siamo riusciti a ottenere il tuo link di prenotazione. Aggiorna questa pagina tra un momento. Se ricevi un'email con il link, conservalo per prenotare le altre sessioni.",
+  packageSameLink: (email) => `Lo stesso link potrebbe arrivare via email a ${email}. Se arriva, conservalo: è così che prenoti le altre.`,
 
   giftOnWay: "Il tuo regalo è in arrivo",
   giftBoughtFor: (store, price, to) => ` da ${store} per ${price}, come regalo per ${to}.`,
@@ -891,12 +891,12 @@ const it: ThanksWords = {
   groupBoughtFor: (store, forWhom, price) => ` da ${store} per ${forWhom}, per ${price}.`,
   groupBought: (store, price) => ` da ${store}, per ${price}.`,
   groupSend: (title) =>
-    `Mandalo alle persone a cui è destinato. Ognuna lo apre e scrive il proprio indirizzo email; arriva un link nella sua casella, e aprirlo mette ${title} su quell'indirizzo, come se l'avesse comprato.`,
+    `Mandalo alle persone a cui è destinato. Ognuna lo apre e scrive il proprio indirizzo email. Se le arriva l'email con il link, aprendolo ${title} viene associato a quell'indirizzo, come se l'avesse comprato.`,
   groupTakeOne: (people) => `Prendi anche tu un posto allo stesso modo: hai pagato per ${people}, e ne fai parte solo se ne prendi uno.`,
   groupDemo:
     "Questo è il negozio dimostrativo, che non invia email, quindi non crea nessun link e non assegna posti. In un negozio vero, questa pagina mostra un link da passare, e lo stesso link è nella tua ricevuta: ogni persona lo apre, scrive la propria email e lo ha sul proprio indirizzo.",
-  noGroupLink: "Al momento non siamo riusciti a ottenere il tuo link. Aggiorna questa pagina tra un momento; è anche in arrivo nella tua email.",
-  groupReceipt: (email) => `Lo stesso link è nella ricevuta inviata a ${email}: conservalo, è così che si assegnano i posti.`,
+  noGroupLink: "Al momento non siamo riusciti a ottenere il tuo link. Aggiorna questa pagina tra un momento; potrebbe anche arrivarti via email.",
+  groupReceipt: (email) => `Se la ricevuta arriva a ${email}, contiene lo stesso link: conservalo, è così che si assegnano i posti.`,
 
   trialStarted: "Prova iniziata",
   youAreBooked: "Hai prenotato",
@@ -1070,8 +1070,8 @@ const nl: ThanksWords = {
     `, ${sessions} sessies, bij ${store} voor ${price}. Boek ze elk wanneer je wilt; er wordt niets meer afgeschreven.`,
   bookBy: (date) => `Boek ze vóór ${date}.`,
   bookFirst: "Boek je eerste sessie",
-  noBookingLink: "We konden je boekingslink nu niet ophalen. Vernieuw deze pagina zo meteen; hij is ook onderweg naar je e-mail.",
-  packageSameLink: (email) => `Dezelfde link staat in de e-mail naar ${email}: bewaar hem, daarmee boek je de rest.`,
+  noBookingLink: "We konden je boekingslink nu niet ophalen. Vernieuw deze pagina zo meteen. Als je een e-mail met de link ontvangt, bewaar hem dan om de rest te boeken.",
+  packageSameLink: (email) => `Dezelfde link kan per e-mail aankomen op ${email}. Als hij aankomt, bewaar hem: daarmee boek je de rest.`,
 
   giftOnWay: "Je cadeau is onderweg",
   giftBoughtFor: (store, price, to) => ` bij ${store} voor ${price}, als cadeau voor ${to}.`,
@@ -1088,12 +1088,12 @@ const nl: ThanksWords = {
   groupBoughtFor: (store, forWhom, price) => ` bij ${store} voor ${forWhom}, voor ${price}.`,
   groupBought: (store, price) => ` bij ${store}, voor ${price}.`,
   groupSend: (title) =>
-    `Stuur hem naar de mensen voor wie hij is. Ieder opent hem en typt een eigen e-mailadres; er komt een link in hun inbox, en wie die opent, heeft ${title} op dat adres, alsof ze het zelf kochten.`,
+    `Stuur hem naar de mensen voor wie hij is. Ieder opent hem en typt een eigen e-mailadres. Als de e-mail met de link aankomt, staat ${title} na het openen op dat adres, alsof die persoon het zelf kocht.`,
   groupTakeOne: (people) => `Neem zelf op dezelfde manier een plek: je betaalde voor ${people}, en je hoort er alleen bij als je er een neemt.`,
   groupDemo:
     "Dit is de demowinkel, die geen e-mails verstuurt, dus hij maakt geen link en deelt geen plekken uit. In een echte winkel toont deze pagina één link om door te geven, en dezelfde link staat op je bon: ieder opent hem, typt een eigen e-mailadres en heeft het op een eigen adres.",
-  noGroupLink: "We konden je link nu niet ophalen. Vernieuw deze pagina zo meteen; hij is ook onderweg naar je e-mail.",
-  groupReceipt: (email) => `Dezelfde link staat op de bon naar ${email}: bewaar hem, daarmee worden de plekken uitgedeeld.`,
+  noGroupLink: "We konden je link nu niet ophalen. Vernieuw deze pagina zo meteen; hij kan je ook per e-mail bereiken.",
+  groupReceipt: (email) => `Als de bon ${email} bereikt, staat dezelfde link erop: bewaar hem, daarmee worden de plekken uitgedeeld.`,
 
   trialStarted: "Proefperiode gestart",
   youAreBooked: "Je bent geboekt",
@@ -1267,8 +1267,8 @@ const pt: ThanksWords = {
     `, ${sessions} sessões, a ${store} por ${price}. Marque cada uma quando quiser; nada mais é cobrado.`,
   bookBy: (date) => `Marque-as até ${date}.`,
   bookFirst: "Marcar a primeira sessão",
-  noBookingLink: "Não conseguimos obter a sua ligação de marcação neste momento. Atualize esta página daqui a pouco; também vai a caminho do seu email.",
-  packageSameLink: (email) => `A mesma ligação está no email enviado para ${email}: guarde-a, é com ela que marca as restantes.`,
+  noBookingLink: "Não conseguimos obter a sua ligação de marcação neste momento. Atualize esta página daqui a pouco. Se receber um email com a ligação, guarde-a para marcar as restantes sessões.",
+  packageSameLink: (email) => `A mesma ligação pode chegar por email a ${email}. Se chegar, guarde-a: é com ela que marca as restantes.`,
 
   giftOnWay: "O seu presente está a caminho",
   giftBoughtFor: (store, price, to) => ` a ${store} por ${price}, como presente para ${to}.`,
@@ -1285,12 +1285,12 @@ const pt: ThanksWords = {
   groupBoughtFor: (store, forWhom, price) => ` a ${store} para ${forWhom}, por ${price}.`,
   groupBought: (store, price) => ` a ${store}, por ${price}.`,
   groupSend: (title) =>
-    `Envie-a às pessoas a quem se destina. Cada uma abre-a e escreve o próprio endereço de email; chega uma ligação à caixa de correio, e abri-la põe ${title} nesse endereço, como se o tivesse comprado.`,
+    `Envie-a às pessoas a quem se destina. Cada uma abre-a e escreve o próprio endereço de email. Se o email com a ligação lhe chegar, ao abri-la ${title} fica associado a esse endereço, como se o tivesse comprado.`,
   groupTakeOne: (people) => `Fique também com um lugar da mesma forma: pagou por ${people}, e só faz parte delas se ficar com um.`,
   groupDemo:
     "Esta é a loja de demonstração, que não envia emails, por isso não cria nenhuma ligação nem distribui lugares. Numa loja real, esta página mostra uma ligação para partilhar, e a mesma ligação está no seu recibo: cada pessoa abre-a, escreve o próprio email e fica com ele no próprio endereço.",
-  noGroupLink: "Não conseguimos obter a sua ligação neste momento. Atualize esta página daqui a pouco; também vai a caminho do seu email.",
-  groupReceipt: (email) => `A mesma ligação está no recibo enviado para ${email}: guarde-a, é com ela que os lugares são distribuídos.`,
+  noGroupLink: "Não conseguimos obter a sua ligação neste momento. Atualize esta página daqui a pouco; também pode chegar-lhe por email.",
+  groupReceipt: (email) => `Se o recibo chegar a ${email}, inclui a mesma ligação: guarde-a, é com ela que os lugares são distribuídos.`,
 
   trialStarted: "Período experimental iniciado",
   youAreBooked: "A sua marcação está feita",

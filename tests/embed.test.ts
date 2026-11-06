@@ -29,10 +29,10 @@ async function main(): Promise<void> {
   is("and has a size, a name and no border", [/width="400" height="260"/.test(card), /height:260px/.test(card), /title="Buy Meal Planner"/.test(card), /border:0/.test(card)], [true, true, true, true]);
   const tall = (height: number) => cardCode({ handle: "k", productId: "p", title: "T", place: "", height }).match(/height="(\d+)"/)?.[1];
   is("taller for a product with a picture, and never a height that makes no sense", [tall(420), tall(5), tall(5000), tall(300.5)], ["420", "260", "260", "260"]);
-  const button = buttonCode({ handle: "kitchen", productId: "abc123", text: "Get the planner", place: "", fill: "#5a36ee", onFill: "#ffffff" });
+  const button = buttonCode({ handle: "kitchen", productId: "abc123", text: "Get the planner", place: "", fill: "#4f2acc", onFill: "#ffffff" });
   is("the button is a link to the product's page, in the store's color", [
     button.startsWith('<a href="https://marktmorgen.com/@kitchen/p/abc123?utm_source=website&amp;utm_medium=buy-button"'),
-    /background:#5a36ee;color:#ffffff/.test(button),
+    /background:#4f2acc;color:#ffffff/.test(button),
     button.endsWith(">Get the planner</a>"),
   ], [true, true, true]);
   const nasty = 'Tips "for" <you> & me';

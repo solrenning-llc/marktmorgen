@@ -40,9 +40,10 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
-import { dropSecondStep, normaliseEmail, sessionMark } from "@/lib/auth";
+import { SessionsUnknownError, dropSecondStep, normaliseEmail, sessionMark } from "@/lib/auth";
 import { NIMBUS_FROM, headerText, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf } from "@/lib/redis-reply";
 import { SITE_URL } from "@/lib/site-url";
 import { type Held, LockBusyError, deleteIfHeldOnly, setIfHeldOnly, withLock } from "@/lib/redis-lock";
 import { removalWhen } from "@/lib/removal-time";
@@ -295,6 +296,8 @@ export async function addPasskey(
 export const REMOVAL_DAYS = 7;
 
 const dropKey = (email: string) => `nl:pk:drop:${sha(`nimbus-passkey-drop:${normaliseEmail(email)}`).slice(0, 40)}`;
+/** The passkeys set to be removed whose browsers could not be logged out when it was asked (scheduleRemovalSaid). */
+const openKey = (email: string) => `${dropKey(email)}:open`;
 
 /**
  * Passkeys waiting to be removed, each with its own moment in ms
@@ -435,6 +438,15 @@ export class MoveSplitError extends Error {
  * Answers the passkey's moment, or null when the account has no such passkey.
  */
 export async function scheduleRemoval(email: string, id: string, session: string, appOn = false, now = Date.now()): Promise<number | null> {
+  return (await scheduleRemovalSaid(email, id, session, appOn, now))?.at ?? null;
+}
+
+/**
+ * The same, answering also whether the browsers the passkey opened were
+ * logged out (review of #2556): false when they could not be read when it
+ * was first asked, so that is what the studio and the email say.
+ */
+export async function scheduleRemovalSaid(email: string, id: string, session: string, appOn = false, now = Date.now()): Promise<{ at: number; loggedOut: boolean } | null> {
   const address = normaliseEmail(email);
   let gone: Due = NONE;
   const asked = await withPasskeys(address, async (held) => {
@@ -454,13 +466,23 @@ export async function scheduleRemoval(email: string, id: string, session: string
     // A new passkey is untold until a delivery is confirmed; one already waiting keeps what it was.
     const untold = [...(before?.untold ?? []), ...(isNew ? [id] : [])];
     await writeDrop(held, address, dropOf(atOf, before?.told ?? 0, { telling: tellNow ? { token, since: now } : undefined, untold }));
-    // Logged out under the same lock, the first time it is asked: nothing P opened stays open past this request
-    // (asked again, the owner's own sessions are not logged out again).
-    if (isNew) await dropSecondStep(address, (mark) => mark === `passkey:${id}`, session);
+    // Logged out under the same lock, the first time it is asked, once the removal is kept: nothing P opened stays
+    // open past this request (asked again, the owner's own sessions are not logged out again). Sessions that could
+    // not be read (audit SG2, finding 6) are noted, so every notice about this passkey says they were not logged
+    // out; the removal stands (review of #2556: never a logout without the removal kept, nor the other way round said).
+    let loggedOut: boolean;
+    if (isNew) {
+      loggedOut = await dropPasskeySessions(address, (mark) => mark === `passkey:${id}`, session);
+      await redisPipeline([loggedOut ? ["SREM", openKey(address), id] : ["SADD", openKey(address), id], ["EXPIRE", openKey(address), (REMOVAL_DAYS + 1) * 86_400]]);
+    } else {
+      // Asked again: what the first request could do. Unknown is never said as logged out.
+      const [open] = await redisPipeline([["SISMEMBER", openKey(address), id]]);
+      loggedOut = countOf(open) === 0;
+    }
     // Whether a second step is left that can still keep it: another passkey not set to go, or the app.
     const another = list.some((p) => atOf[p.id] === undefined);
     const waiting = list.filter((p) => atOf[p.id] !== undefined).map((p) => ({ name: p.name, at: atOf[p.id] }));
-    return { at: atOf[id], name: row.name, tellNow, another, waiting, isNew, token };
+    return { at: atOf[id], name: row.name, tellNow, another, waiting, isNew, token, loggedOut };
   });
   await afterDue(address, gone);
   if (asked === "busy") throw new RemovalBusyError();
@@ -471,7 +493,7 @@ export async function scheduleRemoval(email: string, id: string, session: string
     const canStop = asked.another || appOn;
     const subject = "A passkey is set to be removed from your Marktmorgen account";
     const all = asked.waiting.length > 1 ? `\n\nEvery passkey set to be removed now, each on its own day:\n${asked.waiting.map((p) => `- “${headerText(p.name, 60)}”: ${removalWhen(p.at)}`).join("\n")}` : "";
-    const line = `Somebody logged in to your Marktmorgen account (${address}) and asked to remove the passkey called “${headerText(asked.name, 60)}”. Every browser that logged in with it was logged out.\n\nIt will be removed on ${when}.${all}`;
+    const line = `Somebody logged in to your Marktmorgen account (${address}) and asked to remove the passkey called “${headerText(asked.name, 60)}”. ${asked.loggedOut ? "Every browser that logged in with it was logged out." : PASSKEY_SESSIONS_OPEN}\n\nIt will be removed on ${when}.${all}`;
     const own = {
       ifYou: "If this was you, there is nothing to do: each is removed on its day.",
       ifNotYou: canStop
@@ -514,7 +536,7 @@ export async function scheduleRemoval(email: string, id: string, session: string
     // The email listed every passkey set to go: none is untold any more.
     await settle((record) => dropOf(record.atOf, now)).catch(() => {});
   }
-  return asked.at;
+  return { at: asked.at, loggedOut: asked.loggedOut };
 }
 
 /**
@@ -551,15 +573,35 @@ async function removeDue(held: Held, address: string, now: number): Promise<Due 
   return { gone: removed, ids: record.ids.filter(due) };
 }
 
+/**
+ * Logs out the sessions these passkeys' marks opened. False, with nothing
+ * changed, when the sessions could not be read (lib/auth.ts
+ * SessionsUnknownError): what follows says so, never that they were.
+ */
+async function dropPasskeySessions(address: string, gone: (mark: string) => boolean, keep?: string): Promise<boolean> {
+  try {
+    await dropSecondStep(address, gone, keep);
+    return true;
+  } catch (error) {
+    if (!(error instanceof SessionsUnknownError)) throw error;
+    console.error("logging out what a removed passkey opened failed", error);
+    return false;
+  }
+}
+
+/** Said when a passkey is gone but the browsers it let in could not be logged out (audit SG2, finding 6). */
+export const PASSKEY_SESSIONS_OPEN = "The browsers that logged in with it could not be logged out just now. Choose “Log out of all devices” at the bottom of your studio.";
+
 /** What follows a removal that waited its days, once the lock is let go: its sessions logged out, the account told. */
 async function afterDue(address: string, due: Due): Promise<void> {
+  let ended = true;
   if (due.ids.length) {
     const marks = due.ids.map((id) => `passkey:${id}`);
-    await dropSecondStep(address, (mark) => marks.includes(mark));
+    ended = await dropPasskeySessions(address, (mark) => marks.includes(mark));
   }
   const gone = due.gone;
   if (!gone.length) return;
-  await tell(address, "Passkeys were removed from your Marktmorgen account", `${gone.map((p) => `“${headerText(p.name, 60)}”`).join(", ")} ${gone.length === 1 ? "was" : "were"} removed from your Marktmorgen account (${address}) after the wait. ${gone.length === 1 ? "It cannot" : "They cannot"} log in anymore. You can add a new passkey in your studio.`);
+  await tell(address, "Passkeys were removed from your Marktmorgen account", `${gone.map((p) => `“${headerText(p.name, 60)}”`).join(", ")} ${gone.length === 1 ? "was" : "were"} removed from your Marktmorgen account (${address}) after the wait. ${gone.length === 1 ? "It cannot" : "They cannot"} log in anymore. ${ended ? "" : `${PASSKEY_SESSIONS_OPEN} `}You can add a new passkey in your studio.`);
 }
 
 /**
@@ -616,9 +658,11 @@ export async function cancelRemoval(email: string, id: string, session: string |
  * second step). Checked again under the lock: a session opened with a
  * passkey that is set to be removed, or gone, removes nothing at once. The
  * sessions the removed passkey opened are logged out; `keep`, the session
- * removing it, only loses its mark.
+ * removing it, only loses its mark. "removed-sessions-open": the passkey is
+ * gone but its sessions could not be read, so they were not logged out, and
+ * the account is told so (audit SG2, finding 6).
  */
-export async function removePasskey(email: string, id: string, keep?: string, now = Date.now()): Promise<"removed" | "unknown" | "second_step"> {
+export async function removePasskey(email: string, id: string, keep?: string, now = Date.now()): Promise<"removed" | "removed-sessions-open" | "unknown" | "second_step"> {
   const address = normaliseEmail(email);
   let due: Due = NONE;
   const answer = await withPasskeys(address, async (held): Promise<Passkey | "unknown" | "second_step"> => {
@@ -637,13 +681,13 @@ export async function removePasskey(email: string, id: string, keep?: string, no
   });
   await afterDue(address, due);
   if (typeof answer === "string") return answer;
-  await dropSecondStep(address, (mark) => mark === `passkey:${id}`, keep);
-  const line = `The passkey called “${headerText(answer.name, 60)}” was removed from your Marktmorgen account (${address}). It cannot log in anymore.`;
+  const ended = await dropPasskeySessions(address, (mark) => mark === `passkey:${id}`, keep);
+  const line = `The passkey called “${headerText(answer.name, 60)}” was removed from your Marktmorgen account (${address}). It cannot log in anymore.${ended ? "" : ` ${PASSKEY_SESSIONS_OPEN}`}`;
   await tell(address, "A passkey was removed from your Marktmorgen account", line);
   // A passkey is one of the ways the owner calls off a login without two-step login (lib/two-step.ts),
   // so its removal is told to the confirmed recovery address too (MM-SA-19).
   await tellRecovery(address, "A passkey was removed from your Marktmorgen account", line);
-  return "removed";
+  return ended ? "removed" : "removed-sessions-open";
 }
 
 /**

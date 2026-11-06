@@ -575,3 +575,27 @@ export function savedBlocksWork(sections: number): ReadWork {
   const n = Math.min(Math.max(sections, 0), SAVED_SECTIONS_MAX);
   return { commands: 2, bytes: COUNT_REPLY_BYTES + n * SECTION_BYTES, sent: n * SECTION_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 2 };
 }
+
+/** What a proposal adds to the agent's book beyond its "before" and "after": its id, kind, target, who asked and when. */
+export const PROPOSAL_ENTRY_BYTES = 1_024;
+
+/**
+ * propose_product_description (631 [AA1] (c)): the book of proposals measured
+ * first (STRLEN), then the product's current description and the book read,
+ * the book written back whole with the new proposal in it, and the lock and
+ * the data room around it. The listing, read three times (to find the
+ * product, to check its words and with its description), is counted apart
+ * (listingsWork). One proposal's growth more is read and written than was
+ * measured, for one made by another key between the count and the read.
+ */
+export function proposeWork(bookBytes: number, kindMaxBytes: number): ReadWork {
+  const book = Math.max(bookBytes, 0);
+  const growth = kindMaxBytes + PROPOSAL_ENTRY_BYTES;
+  return {
+    commands: 10,
+    bytes: COUNT_REPLY_BYTES + ABOUT_BYTES + book + growth,
+    sent: book + 2 * growth + TOOL_NOTE_BYTES,
+    stripePages: 0,
+    roundTrips: 8,
+  };
+}

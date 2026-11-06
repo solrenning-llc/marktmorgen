@@ -1,5 +1,9 @@
 import { apiAgent, apiStore, holdMoreApi, takeMoreApi } from "@/lib/api-guard";
 import { proposeDescription } from "@/lib/agent-propose";
+import { bookBytes } from "@/lib/agent-book";
+import { PRODUCT_DESCRIPTION } from "@/lib/agent-kinds";
+import { addWork, apiReadUnits, listingsWork, proposeWork } from "@/lib/api-read-rules";
+import { listingsToRead } from "@/lib/catalog-read-count";
 import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
 import { apiNumbers } from "@/lib/api-numbers";
@@ -93,6 +97,15 @@ export async function POST(request: Request) {
     if (agent instanceof Response) {
       const refusal = (await agent.json().catch(() => null)) as { message?: unknown } | null;
       return failure(id, -32001, typeof refusal?.message === "string" ? refusal.message : "This key cannot prepare changes for you to confirm.");
+    }
+    // The book is measured, and what the proposal reads and writes back is taken, before anything is read (lib/api-read-rules.ts, proposeWork).
+    const named = typeof asked.arguments?.product === "string" ? asked.arguments.product.slice(0, 40) : "";
+    const book = agent.store.statsId ? await bookBytes(agent.store.statsId) : 0;
+    if (book === null) return failure(id, -32001, "That could not be prepared just now. Try again in a moment.");
+    const refused = await takeMoreApi(agent.store, apiReadUnits(addWork(listingsWork(3 * listingsToRead(agent.store, named ? [named] : [])), proposeWork(book, PRODUCT_DESCRIPTION.maxBytes))));
+    if (refused) {
+      const words = (await refused.json().catch(() => null)) as { message?: unknown } | null;
+      return failure(id, -32001, typeof words?.message === "string" ? words.message : "That could not be prepared just now. Try again in a moment.");
     }
     return result(id, await proposeDescription(agent.store, agent.keyId, asked.arguments ?? {}));
   }

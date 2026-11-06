@@ -165,7 +165,7 @@ const DRAFTS: readonly ToolDraft[] = [
   {
     name: "propose_product_description",
     description:
-      "Prepares a new long description for one product, for the creator to read beside the current one and confirm in their studio (What the AI proposes). Nothing on the store changes until they confirm; they can undo it afterward. Needs a key that may prepare changes. A newer proposal for the same product replaces a waiting one.",
+      "Prepares a new long description for one product, for the creator to read beside the current one and confirm in their studio (What the AI proposes). Nothing on the store changes until they confirm; they can undo it afterward. Needs a key that may prepare changes. A newer proposal for the same product replaces a waiting one. It counts as a few of the store's API requests, more as more proposals wait or are kept.",
     inputSchema: {
       type: "object",
       properties: {

@@ -31,6 +31,8 @@ is("the Stripe link only once Stripe is connected", [panel.includes(`ways.state 
 // lib/earnings-read.ts only lists checkout sessions already paid (426 [BX2]), it never makes one.
 const checkouts = readdirSync("lib").filter((f) => f.endsWith(".ts") && f !== "card-update.ts" && f !== "earnings-read.ts").map((f) => [f, read(`lib/${f}`)] as const).filter(([, t]) => t.includes("onAccount(") && /["`]\/checkout\/sessions["`]/.test(t));
 is("every buyer checkout on the creator's account asks Stripe not to convert", [checkouts.length > 4, checkouts.filter(([, t]) => !t.includes("inTheCurrencyShown(body);")).map(([f]) => f), read("lib/instant-pay.ts").includes('body.set("adaptive_pricing[enabled]", "false");')], [true, [], true]);
+const earningsCalls = read("lib/earnings-read.ts").match(/onAccount\(\s*[^,]*,/g) ?? [];
+is("the earnings reading left out above only reads from the creator's account", [earningsCalls.length > 0, earningsCalls.filter((c) => !/^onAccount\(\s*"GET",$/.test(c))], [true, []]);
 is("a payment request keeps the currency it was sent in", read("lib/payment-requests.ts").includes("request.currency"), true);
 
 part("The answers, in both states");

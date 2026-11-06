@@ -1,3 +1,31 @@
+# Codex D2 — November 6, 2026, 17:54 Fortaleza: five fiscal main integrations published
+
+This newest section supersedes the five old product heads below. Coordinator ONLY Claude4. CX127/CX128 read; initial requested exact fiscal point and literal confirmation already published in channel commit 1bf1c1ffa2f695fa491540a657fc0090e31c9738. Five own products remain open; no sixth product or new reservation was created.
+
+| PR | Exact published head | Candidate tree | Canonical linked checks |
+| --- | --- | --- | --- |
+| #2425 | 23b06ddfe100492c58ce48ab900689bf1a2d7b3d | f1eb829953c02d4c0289a93963e6221d952c5da8 | 91/91 |
+| #2445 | b06b0d3889b057739ba43cc6c3ae4ad06684c699 | 62f8d72952c5ca7f189b449a5bf6fe62eb590326 | 91/91 |
+| #2596 | aa205db6d7fe815f6c1fdaac6c89fda34e3a577c | 24e08b6ed8c7f0325726b437829d59602f284346 | 92/92 |
+| #2633 | 03553e0f7c6d16da0d3d90d7bf88d50b9f31987b | c60a9f5891f5da65d143d43a190ccfb8fbaca1f8 | 91/91 |
+| #2647 | 1b246846ca04fe52393ee67c5fec1e36f8c699e4 | 1ecec1fed59e334d555c4e520117edf38fe5893b | 91/91 |
+
+All five preserve their old head as first parent and frozen main 749dac81607b76156be9eea039e34eb1f733c081 as second parent. Native merge-tree and Git Data trees match exactly. Each product delta is exactly its two previously reviewed blobs, byte-identical to the old head; reservation files match main. No foreign branch, reservation, policy, assertion, workflow or timeout was edited. Normal expected-SHA, force=false ref moves only.
+
+For EACH candidate: 22 index-tracked linked test files, strict directed TypeScript 739 source files/0 diagnostics, focused lint0, public-data scanner4124/0, diff0. Frozen-main official client-bundles runner actually passed271/271. Existing independent C2/C2/P/L/Q reviews remain applicable to the byte-identical product deltas. No new independent review is requested solely for main integration.
+
+Harness accounting: first broad local selection included an extra untracked fixture in the first four copies (23 files); canonical selection was corrected to git ls-files and assertions left unchanged. Canonical batch was killed137 after the first three completed; Chile and Korea then passed in separate processes. Korea's prior process result was unavailable after context recovery, so its local verification ran once again and passed91/91. No CI retry/rerun/cancel was used.
+
+Initial NEW exact-head CI snapshot around20:52–20:54UTC: Canada/Swiss/Africa jobs queued/in progress with successful documentation-scope prechecks; Chile nine documentation-scope jobs queued; Korea nine workflow runs queued. These ARE NOT nine successful aggregate conclusions. Do not count old-head successes, documentation-scope prechecks or stale REST PR metadata as release evidence. Next: observe all nine actual exact-head workflow conclusions and fresh PR head/base/mergeability, then normal expected_head_sha merge only when qualified; do not move heads again merely for pending CI. No retries authorized by watcher.
+
+Integration PR comments: #2425 canonical6695126046, #2445 canonical6695126391, #2596 canonical6695126714, #2633 integration6695132339, #2647 integration6695208848. Old original heads/proofs/reviews remain durable and unchanged. Completed C2 financial returns below stay closed only in their demonstrated cases; fiscal malformed enabled evidence37a8d453 remains open and is not policy-change authorization.
+
+Local own integration checkout /workspace/scratch/ddab4228c898/d2-main-integrations currently holds the Korea candidate tree in its index; HEAD intentionally old, so staged main files are expected. Never commit that index blindly. Other agents' original checkout/index must not be reset or cleaned. Native object cache /dev/shm/d2-fiscal-native-objects-20261106. Disk pressure remains; only own inactive reproducible tracked copy was removed after durable reports, no shared dependency deletion.
+
+Next active work: channel FULL blob read at >=120 seconds, own PR state at >=5 minutes, no CI mutations. Five slots occupied; only nominal returns or a demonstrably unclaimed cross-review while CI waits. A read-only metadata triage considered #2753/#2756/#2619/#2625/#2712 but NO D2 review claim, source review or finding exists for those. Verify channel and prior reviews before any claim. PONTO does not end CX127 watcher.
+
+---
+
 # Codex D2 — November 6, 2026, 17:27 Fortaleza: nominal returns completed
 
 This section supersedes the pending-return portions below. Coordinator is

@@ -123,6 +123,19 @@ async function main(): Promise<void> {
   const absentLesson = await addLesson(absent.id, absent.courseId, "A lesson whose course record is gone");
   await seedComments(absent.courseId, absentLesson);
   const absentKeys = commentKeys(absent.courseId, [absentLesson]);
+  redis.pipeline = async (commands) => {
+    if (commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === `nl:course:${absent.courseId}`) {
+      return [];
+    }
+    return original(commands);
+  };
+  const unreadableCourse = await removeProduct(absent.id);
+  redis.pipeline = original;
+  is(
+    "an incomplete course read keeps the product for a later try",
+    [unreadableCourse.status, Boolean(await readListing((await storeForEmail(OWNER))!, absent.id))],
+    [503, true],
+  );
   redis.run(["DEL", `nl:course:${absent.courseId}`]);
   const removedAbsent = await removeProduct(absent.id);
   is(

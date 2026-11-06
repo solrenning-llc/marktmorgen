@@ -30,11 +30,16 @@ export function waitlistTokenKey(token: string): string {
  * A scoped platform grant must never enter a creator's confirm/leave flow.
  */
 export function parseStoreWaitlistGrant(raw: unknown): StoreWaitlistGrant | null {
-  if (typeof raw !== "string") return null;
+  if (typeof raw !== "string" || Buffer.byteLength(raw, "utf8") > 2048) return null;
   try {
     const value = JSON.parse(raw);
-    return (value.k === "confirm" || value.k === "leave") &&
-      !Object.hasOwn(value, "scope") ? value as StoreWaitlistGrant : null;
+    if (!value || typeof value !== "object" || Array.isArray(value) || Object.hasOwn(value, "scope")) return null;
+    const row = value as Record<string, unknown>;
+    const route = (field: unknown): field is string =>
+      typeof field === "string" && field.length > 0 && !/[\u0000-\u001f\u007f]/.test(field);
+    if (!route(row.s) || !route(row.h) || !route(row.p) || !route(row.e) ||
+        (row.k !== "confirm" && row.k !== "leave")) return null;
+    return { s: row.s, h: row.h, p: row.p, e: row.e, k: row.k };
   } catch {
     return null;
   }

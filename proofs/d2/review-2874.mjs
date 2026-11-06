@@ -4,7 +4,6 @@
  * Existing dependencies only; P-256/real local POST, MemoryRedis, no external provider.
  */
 import {execFileSync,spawnSync} from "node:child_process";
-import {readFileSync} from "node:fs";
 import {resolve} from "node:path";
 import {createRequire} from "node:module";
 import {createHash} from "node:crypto";

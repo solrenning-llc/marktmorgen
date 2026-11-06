@@ -61,6 +61,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/review-ask.ts", how: "none", what: "Review requests wait for their day by the order's reference, never by address, and are not sent to a deleted address" },
   { file: "lib/welcome-offer-send.ts", how: "erased", what: "When their welcome offer began, and that its reminder was set" },
   { file: "lib/winback-send.ts", how: "erased", what: "The marks that they heard a come-back offer about a product" },
+  { file: "lib/anniversary-send.ts", how: "erased", what: "The mark that they were sent the email on a purchase's anniversary lately" },
   { file: "lib/erasure-index.ts", how: "erased", what: "Every link your store emailed them that is still kept: stop links, waitlist links, review links, free-product and sign-up links" },
   { file: "lib/email-sync.ts", how: "erased", what: "The record of sending them to your connected email platform, and any send still waiting" },
   { file: "lib/email-sync.ts", how: "expires", days: 30, what: "A one-way mark that a sign-up or purchase was already sent to your email platform. What the platform took is in your own account there: delete them there too" },

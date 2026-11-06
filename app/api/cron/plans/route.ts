@@ -15,6 +15,7 @@ import { sendVerified } from "@/lib/verified-numbers";
 import { refreshRanges } from "@/lib/benchmarks";
 import { settleInvites } from "@/lib/creator-invite-credit";
 import { sendWinBacks } from "@/lib/winback-send";
+import { sendAnniversaries } from "@/lib/anniversary-send";
 import { ensureDemoStore } from "@/lib/demo-seed";
 
 export const maxDuration = 60;
@@ -36,6 +37,8 @@ export const maxDuration = 60;
  *     quietly cut off without ever being asked for a new one;
  *   - sends a former member who agreed to hear from the creator one
  *     come-back offer, days after their membership ended (lib/winback-send.ts);
+ *   - writes once to a buyer who agreed to hear from the creator, a year
+ *     after they bought, where the creator turned it on (lib/anniversary-send.ts);
  *   - adds the credit creators earned by inviting other creators
  *     (lib/creator-invite-credit.ts), once each payment's refund window has
  *     closed.
@@ -131,6 +134,14 @@ async function run(request: NextRequest): Promise<Response> {
     } catch (error) {
       console.error("sending the yearly offer failed", error);
     }
+    // Buyers who agreed to hear from the creator, a year after they bought, where the creator
+    // turned it on: one email per person per date (lib/anniversary-send.ts, 283 [HG2]).
+    let anniversaries = null;
+    try {
+      anniversaries = await sendAnniversaries(deadline);
+    } catch (error) {
+      console.error("sending anniversary emails failed", error);
+    }
     // The numbers stores show others, counted once a day (lib/verified-numbers.ts).
     let verified = null;
     try {
@@ -168,7 +179,7 @@ async function run(request: NextRequest): Promise<Response> {
     });
     if (demo && demo.pending.length) console.error("the demo store is missing something", demo.pending);
     const ok = plans !== null && ((billing !== null && disputes !== null) || !isBillingConfigured());
-    return Response.json({ ok, ...(plans ?? {}), billing, disputes, recovered, comeBack, nudged, yearly, verified, benchmarks, invites, catalogs, demo }, { status: ok ? 200 : 500, headers: { "Cache-Control": "no-store" } });
+    return Response.json({ ok, ...(plans ?? {}), billing, disputes, recovered, comeBack, nudged, yearly, anniversaries, verified, benchmarks, invites, catalogs, demo }, { status: ok ? 200 : 500, headers: { "Cache-Control": "no-store" } });
   } finally {
     await redisPipeline([["DEL", "nl:plans:lock"]]).catch(() => {});
   }

@@ -123,6 +123,8 @@ import { DunningEditor } from "@/components/dunning-editor";
 import { LeaveEditor } from "@/components/leave-editor";
 import { NudgeEditor } from "@/components/nudge-editor";
 import { nudgesThisMonth } from "@/lib/member-nudge";
+import { AnniversaryEditor } from "@/components/anniversary-editor";
+import { anniversariesThisMonth } from "@/lib/anniversary-send";
 import { YearlyAskEditor } from "@/components/yearly-ask-editor";
 import { readVoice } from "@/lib/customer-voice";
 import { readMarks } from "@/lib/auto-marks";
@@ -2029,6 +2031,16 @@ export default async function StudioPage({
                   suggestedAddress={store.mail?.address ?? ""}
                   connected={Boolean(current?.stripeAccountId)}
                 />
+
+                {may("settings") ? (
+                  <AnniversaryEditor
+                    setting={store.anniversary}
+                    storeName={store.name}
+                    suggestedAddress={store.mail?.address || store.nudge.address || store.winback.address || store.recovery.address || ""}
+                    sent={await anniversariesThisMonth(store).catch(() => 0)}
+                    connected={Boolean(current?.stripeAccountId)}
+                  />
+                ) : null}
 
                 {/* Only where there is a membership to cancel: an offer on a
                     store that sells nothing that renews would be a setting

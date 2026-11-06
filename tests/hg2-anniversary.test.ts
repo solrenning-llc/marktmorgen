@@ -26,6 +26,7 @@
  *     readable, a reply about deleted people that is not whole: nothing sent;
  *   - the marks go with the person (lib/person-erasure.ts).
  */
+import { createHash } from "node:crypto";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setAnniversary, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { stopWriting, unsubscribe, upsertContact, tokensFor } from "@/lib/contacts";
 import { suppressCommand } from "@/lib/suppression";
@@ -68,7 +69,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (sessionPage) return answer(sessionPage());
     const gte = Number(url.searchParams.get("created[gte]"));
     const lte = Number(url.searchParams.get("created[lte]"));
-    return answer({ object: "list", data: sessions.filter((s) => Number(s.created) >= gte && Number(s.created) <= lte), has_more: false });
+    // Newest first, as Stripe lists them: by time, and the later made first at the same second.
+    const found = sessions.map((s, i) => ({ s, i })).filter(({ s }) => Number(s.created) >= gte && Number(s.created) <= lte);
+    found.sort((a, b) => Number(b.s.created) - Number(a.s.created) || b.i - a.i);
+    return answer({ object: "list", data: found.map(({ s }) => s), has_more: false });
   }
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${path}` } }), { status: 404 });
 }) as typeof fetch;
@@ -97,7 +101,7 @@ function bought(email: string, meta: Record<string, string>, extra: { created?: 
 
 async function main(): Promise<void> {
   process.env.STRIPE_SECRET_KEY = "sk_test_hg2_only_a_stand_in";
-  process.env.RESEND_API_KEY = "re_test_hg2_only_a_stand_in";
+  process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
   redis.clear();
 
   part("The setting");
@@ -132,7 +136,7 @@ async function main(): Promise<void> {
   await ensureStatsId("owner@example.com");
   await ensureListId("owner@example.com");
   await setStripeAccount("owner@example.com", "acct_1TestHarbor0001", true);
-  await setSubscription("owner@example.com", { customerId: "cus_Owner00001", subscriptionId: "sub_Owner00001", active: true, period: paidPeriod() });
+  await setSubscription("owner@example.com", { customerId: "cus_Owner00001", subscriptionId: "sub_Owner00001", active: true, tier: "pro", period: paidPeriod() });
   const refusedOn = await setAnniversary("owner@example.com", { on: true, message: "Hi", address: "" });
   is("on without an address is refused, said why", refusedOn.ok ? "saved" : refusedOn.reason, "address");
   const course = await addProduct("owner@example.com", "Bread Basics", "", "49");
@@ -233,12 +237,13 @@ async function main(): Promise<void> {
   const left = await takeAllowance(store!, "email", 1, Date.now());
   if (!left.ok) throw new Error("the figure could not be read");
   // Spend the rest of the figure: the largest bite that still fits, halving until none does.
-  for (let bite = left.limit; bite >= 1; ) if (!(await takeAllowance(store!, "email", bite, Date.now())).ok) bite = Math.floor(bite / 2);
+  for (let bite = left.left; bite >= 1; ) if (!(await takeAllowance(store!, "email", bite, Date.now())).ok) bite = Math.floor(bite / 2);
   const spentStart = emails.length;
-  const markBefore = marks();
   await sendAnniversaries(Date.now() + 30_000, now);
   is("nothing sent", emails.length - spentStart, 0);
-  is("no once-mark kept, so a later run inside the window may send it", marks(), markBefore);
+  redis.advance(2_000); // a claim let go lapses within a second (lib/claim-mark.ts)
+  const samMark = `nl:hg:once:${store!.statsId}:${createHash("sha256").update("nimbus-hg-once:sam@example.com").digest("hex").slice(0, 32)}`;
+  is("no once-mark kept, so a later run inside the window may send it", redis.keys().includes(samMark), false);
 
   part("Turned off: nothing more");
   await setAnniversary("owner@example.com", { on: false, message: "", address: "1 Main St" });

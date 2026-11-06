@@ -70,6 +70,7 @@ import { parsePauseMonths } from "@/lib/membership-pause-rules";
 import { type Dunning, DEFAULT_DUNNING, parseDunning } from "@/lib/dunning-rules";
 import { type LeaveSetting, NO_LEAVE, parseLeave } from "@/lib/leave-rules";
 import { NO_NUDGE, type Nudge, parseNudge } from "@/lib/member-health-rules";
+import { type Anniversary, NO_ANNIVERSARY, parseAnniversary } from "@/lib/anniversary-rules";
 import { NO_YEARLY_ASK, type YearlyAsk, parseYearlyAsk } from "@/lib/yearly-switch-rules";
 import { type WinBack, NO_WINBACK, parseWinBack } from "@/lib/winback";
 import { type WelcomeOffer, NO_WELCOME_OFFER, parseWelcomeOffer } from "@/lib/welcome-offer";
@@ -549,6 +550,11 @@ export type Store = {
    * price (lib/yearly-ask.ts). Off until its creator turns it on, with a postal address.
    */
   yearlyAsk: YearlyAsk;
+  /**
+   * The email on the anniversary of a purchase (lib/anniversary-rules.ts, 283 [HG2]).
+   * Off for every store until its creator turns it on, with a postal address.
+   */
+  anniversary: Anniversary;
   /** Whether the weekly email opens with a few sentences written by AI from the week's numbers (lib/numbers-ask.ts). Off until turned on. */
   weeklyAi: boolean;
   /**
@@ -1018,6 +1024,7 @@ function parseStore(raw: unknown): Store | null {
       leaving: parseLeave(value.leaving),
       nudge: parseNudge(value.nudge),
       yearlyAsk: parseYearlyAsk(value.yearlyAsk),
+      anniversary: parseAnniversary(value.anniversary),
       weeklyAi: value.weeklyAi === true,
       adsServer: parseAdsServer(value.adsServer),
       attributionDays: parseAttributionDays(value.attributionDays),
@@ -1338,6 +1345,7 @@ async function freshStore(fields: {
     leaving: { ...NO_LEAVE, reasons: [...NO_LEAVE.reasons] },
     nudge: { ...NO_NUDGE },
     yearlyAsk: { ...NO_YEARLY_ASK },
+    anniversary: { ...NO_ANNIVERSARY },
     weeklyAi: false,
     adsServer: [],
     attributionDays: DEFAULT_ATTRIBUTION_DAYS,
@@ -2701,6 +2709,15 @@ export async function setNudge(email: string, raw: unknown): Promise<{ ok: true;
   const asked = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   if (asked.on === true && !nudge.on) return { ok: false, reason: "address" };
   const next = await patchStore(email, () => ({ nudge }));
+  return next ? { ok: true, store: next } : { ok: false, reason: "none" };
+}
+
+/** Saves the email on the anniversary of a purchase (lib/anniversary-rules.ts, 283 [HG2]). */
+export async function setAnniversary(email: string, raw: unknown): Promise<{ ok: true; store: Store } | { ok: false; reason: "none" | "address" }> {
+  const anniversary = parseAnniversary(raw);
+  const asked = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  if (asked.on === true && !anniversary.on) return { ok: false, reason: "address" };
+  const next = await patchStore(email, () => ({ anniversary }));
   return next ? { ok: true, store: next } : { ok: false, reason: "none" };
 }
 

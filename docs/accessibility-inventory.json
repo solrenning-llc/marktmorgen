@@ -1257,6 +1257,7 @@
     "components/agreements-studio.tsx",
     "components/ai-assist.tsx",
     "components/ai-posts.tsx",
+    "components/anniversary-editor.tsx",
     "components/answers-editor.tsx",
     "components/api-key-editor.tsx",
     "components/app-code-invite.tsx",
@@ -1691,6 +1692,7 @@
     "app/api/store/agreement-sign/route.ts",
     "app/api/store/agreements/route.ts",
     "app/api/store/ai/route.ts",
+    "app/api/store/anniversary/route.ts",
     "app/api/store/announcement/route.ts",
     "app/api/store/answers/route.ts",
     "app/api/store/api-keys/route.ts",
@@ -2023,6 +2025,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 137
+    "pageTemplates": 138
   }
 }

@@ -78,8 +78,8 @@ async function main() {
   const a = await paidShop({ at: REAL - 3 * DAY });
   who.store = await a.store();
   const offered = await page();
-  is("the function, labelled as the law says", offered.includes("Withdraw from contract here"), true);
-  is("its confirmation, labelled as the law says", offered.includes("Confirm withdrawal"), true);
+  is("the function, labeled as the law says", offered.includes("Withdraw from contract here"), true);
+  is("its confirmation, labeled as the law says", offered.includes("Confirm withdrawal"), true);
   const nameField = offered.match(/<input[^>]*name="name"[^>]*>/)?.[0] ?? "";
   is("a name is asked for, and required", [nameField !== "", /\brequired\b/.test(nameField)], [true, true]);
   const emailField = offered.match(/<input[^>]*name="email"[^>]*>/)?.[0] ?? "";

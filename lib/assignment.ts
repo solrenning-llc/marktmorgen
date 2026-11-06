@@ -20,7 +20,8 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { signedOf } from "@/lib/redis-count";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { ENTRY_BYTES, dataBytes } from "@/lib/store-data-rules";
 import { markLesson } from "@/lib/learn";
@@ -99,25 +100,22 @@ export type TaskDrop = { courseId: string; lessonId: string; files: string[]; by
  * takes the assignment out of the course (Revisor 1 on #2810), so a read that fails leaves everything findable.
  */
 export async function readTaskDrop(courseId: string, lessonId: string): Promise<TaskDrop> {
-  const flat = repliesFor(await redisPipeline([["HGETALL", filesKey(courseId, lessonId)]]), 1)?.[0];
-  const pairs: unknown[] | null = Array.isArray(flat)
-    ? flat
-    : flat && typeof flat === "object"
-      ? Object.entries(flat as Record<string, unknown>).flat()
-      : null;
+  // HGETALL and ZRANGEBYSCORE answer a plain list of text: read from its own slots (stringList), so a Proxy, a hole,
+  // a member that is not text or a reply that is not a list is unknown, never a list.
+  const pairs = stringList(repliesFor(await redisPipeline([["HGETALL", filesKey(courseId, lessonId)]]), 1)?.[0]);
   if (!pairs || pairs.length % 2 !== 0) throw new UnknownReplyError("the files handed in for an assignment");
   const files: string[] = [];
   let bytes = 0;
   for (let i = 0; i < pairs.length; i += 2) {
     const [name, size] = [pairs[i], pairs[i + 1]];
-    if (typeof name !== "string" || !name || typeof size !== "string" || !FILE_BYTES_TEXT.test(size)) throw new UnknownReplyError("the files handed in for an assignment");
+    if (!name || !FILE_BYTES_TEXT.test(size)) throw new UnknownReplyError("the files handed in for an assignment");
     files.push(name);
     bytes += Number(size);
   }
   // Each student's own record, found by the list of all the work handed in.
-  const waiting = repliesFor(await redisPipeline([["ZRANGEBYSCORE", allKey(courseId), "-inf", "+inf"]]), 1)?.[0];
-  if (!Array.isArray(waiting) || !waiting.every((m) => typeof m === "string")) throw new UnknownReplyError("the work handed in for a course");
-  const gone = (waiting as string[]).filter((m) => m.startsWith(`${lessonId}|`));
+  const waiting = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", allKey(courseId), "-inf", "+inf"]]), 1)?.[0]);
+  if (!waiting) throw new UnknownReplyError("the work handed in for a course");
+  const gone = waiting.filter((m) => m.startsWith(`${lessonId}|`));
   // What the prompt and the work weighed comes back to the store's data room.
   const held = repliesFor(
     await redisPipeline([["GET", taskKey(courseId, lessonId)], ...gone.map((member) => ["GET", subKey(courseId, lessonId, member.slice(lessonId.length + 1))])]),
@@ -226,7 +224,8 @@ export async function undoTakeRoom(room: string, bytes: number, path: string): P
   const replies = repliesFor(await redisPipeline([["DEL", takenKey(path)]]), 1);
   if (!replies || (replies[0] !== 0 && replies[0] !== 1)) throw new UnknownReplyError("whether a handed-in file took its room");
   if (replies[0] !== 1) return false;
-  await releaseBytes(room, bytes);
+  // The mark is gone: an unknown give-back is said as unknown to the caller, which handles it, never as given back.
+  if (!(await releaseBytes(room, bytes))) throw new UnknownReplyError("whether a handed-in file's room was given back");
   return true;
 }
 
@@ -260,11 +259,22 @@ export async function hasRoom(room: string, bytes: number, limit: number = MAX_S
   return used + bytes <= limit;
 }
 
-/** Gives back room taken for files that are no longer kept. */
-export async function releaseBytes(room: string, bytes: number): Promise<void> {
-  if (!isRedisConfigured() || !(bytes > 0)) return;
-  const [left] = await redisPipeline([["DECRBY", bytesKey(room), Math.ceil(bytes)]]);
-  if (typeof left === "number" && Number.isSafeInteger(left) && left < 0) await redisPipeline([["SET", bytesKey(room), 0]]);
+/**
+ * Gives back room taken for files that are no longer kept. True when the DECRBY answered the counter's new total, a
+ * whole number (below zero it comes back to zero); nothing to give back is true too. Any other reply is unknown
+ * (CX-123 rule 24): it is not known whether the bytes came back, so it answers false and says so in the log, never
+ * "given back". It does not throw: the callers that delete records call it after the deletion, which must not be
+ * undone or hidden by it (applyTaskDrop, forgetTasksPerson); undoTakeRoom throws on false itself.
+ */
+export async function releaseBytes(room: string, bytes: number): Promise<boolean> {
+  if (!isRedisConfigured() || !(bytes > 0)) return true;
+  const left = signedOf(repliesFor(await redisPipeline([["DECRBY", bytesKey(room), Math.ceil(bytes)]]), 1)?.[0]);
+  if (left === null) {
+    console.error(`giving back ${Math.ceil(bytes)} bytes of a store's task room: unknown reply, not counted as given back`);
+    return false;
+  }
+  if (left < 0) await redisPipeline([["SET", bytesKey(room), 0]]);
+  return true;
 }
 
 /** What handing in did: where the work stands, and the earlier file it replaced, with its size, to delete. */

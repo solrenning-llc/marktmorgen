@@ -509,14 +509,33 @@ export async function revokeRefundedPreorders(
             unsure = true;
             continue;
           }
-          const job = (() => {
+          // No record: nothing of this pre-order is held as a purchase any more (null). A record that does not read,
+          // or whose job is not text, is unknown, never "given another way" (rule 30, Claude 4 on #2781).
+          let job = "";
+          if (typeof given === "string") {
+            let v: unknown;
             try {
-              return String((JSON.parse(String(given)) as { job?: unknown }).job ?? "");
+              v = JSON.parse(given);
             } catch {
-              return "";
+              v = undefined;
             }
-          })();
+            const named = v && typeof v === "object" && !Array.isArray(v) ? (v as { job?: unknown }).job : undefined;
+            if (typeof named !== "string") {
+              unsure = true;
+              continue;
+            }
+            job = named;
+          }
           if (job === `pre:${session}`) {
+            // The course first, then the purchase (Codex G on #2781; rule 30): a course removal that fails keeps the
+            // purchase, so the next run takes both away again; taking a course away twice is harmless.
+            try {
+              await dropStart(entry.to, productId);
+            } catch (error) {
+              console.error("taking a refunded pre-order's course away failed; tried again next run", error);
+              unsure = true;
+              continue;
+            }
             // Each write confirmed in its exact shape before the next (Codex Z, review 5794703899; CX-123 rule 24):
             // a write left unknown marks nothing taken back or read and keeps the anchor, so the next run does it again.
             const removed = repliesFor(await redisPipeline([["HDEL", importedKey(sid, entry.to), productId]]), 1);
@@ -524,7 +543,6 @@ export async function revokeRefundedPreorders(
               unsure = true;
               continue;
             }
-            await dropStart(entry.to, productId);
           }
         }
         const saved = repliesFor(await redisPipeline([["HSET", entriesKey(sid, productId), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, productId)]), 2);

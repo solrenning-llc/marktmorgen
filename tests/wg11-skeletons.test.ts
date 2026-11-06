@@ -80,7 +80,7 @@ function main(): void {
     is("the status says Loading", statuses.map((m) => m[3]), ["Loading"]);
     is("the status is hidden from sight with the site's sr-only class, never from a screen reader", statuses.map((m) => [/\bclass="[^"]*\bsr-only\b/.test(m[2]), /aria-hidden/.test(m[2])]), [[true, false]]);
     is("the word Loading appears once in the whole markup", count(html, /Loading/g), 1);
-    is("no text but Loading", html.replace(/<[^>]*>/g, "").trim(), "Loading");
+    is("no text but Loading", html.split(/<[^>]*>/).join("").trim(), "Loading"); // text between tags, read only (not a sanitizer)
 
     const pulses = all.flatMap((t) => t.classes.filter((name) => name.includes("animate-")));
     is("it pulses (Tailwind's animate-pulse)", pulses.length > 0, true);

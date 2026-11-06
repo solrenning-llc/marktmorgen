@@ -79,3 +79,4 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Codex H2 | SES/CX123(24): recipient list must be exact before a provider event is acknowledged | codex/h-sns-recipient-shape | `lib/sns.ts`, new `tests/sns-recipient-shape.test.ts` | 06/11/2026 |
 | Codex H2 | SES/CX123(24): recipient list must be exact before a provider event is acknowledged (ampliação causal) | codex/h-sns-recipient-shape | `lib/sns.ts`, `tests/sns-recipient-shape.test.ts`, `tests/mail-report-events.test.ts` | 06/11/2026 |
 | Codex H2 | SES/CX123(24): recipient list must be exact before a provider event is acknowledged (ligado causal) | codex/h-sns-recipient-shape | `lib/sns.ts`, `tests/sns-recipient-shape.test.ts`, `tests/mail-report-events.test.ts`, `tests/ses-sender.test.ts` | 06/11/2026 |
+| Codex P | prova de espaço de trabalho desconhecido | codex/p-assignment-room-read-evidence | `tests/assignment-room-read-evidence.test.ts` | 06/11/2026 |

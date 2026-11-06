@@ -1,0 +1,62 @@
+{
+  tier: 'creator',
+  line: 'store-readings',
+  value: 0.4084443598222222,
+  separate: 0.26897203968,
+  combined: 0.2619413376,
+  variants: [ 0.2885496577422223, 0.2593702990222222, 0.4084410830222222 ],
+  without: 0.14650302222222222
+}
+{
+  tier: 'creator',
+  line: 'free-share',
+  value: 0.1327053172822107,
+  separate: 0.09357106049994443,
+  combined: 0.09339529294794444,
+  variants: [ 0.0565302497302107, 0.1166455963362107, 0.13136904528026624 ],
+  without: 0.03931002433426626
+}
+{
+  tier: 'pro',
+  line: 'store-readings',
+  value: 0.4490764931555556,
+  separate: 0.30782083968,
+  combined: 0.30079013760000006,
+  variants: [ 0.29918179107555565, 0.2911536323555555, 0.4490732163555556 ],
+  without: 0.14828635555555555
+}
+{
+  tier: 'pro',
+  line: 'free-share',
+  value: 0.1327053172822107,
+  separate: 0.09357106049994443,
+  combined: 0.09339529294794444,
+  variants: [ 0.0565302497302107, 0.1166455963362107, 0.13136904528026624 ],
+  without: 0.03931002433426626
+}
+{
+  tier: 'scale',
+  line: 'store-readings',
+  value: 0.5845169376,
+  separate: 0.4373168396800001,
+  combined: 0.4302861376,
+  variants: [ 0.33462223552000003, 0.3970980768, 0.5845136608 ],
+  without: 0.1542308
+}
+{
+  tier: 'scale',
+  line: 'free-share',
+  value: 0.1327053172822107,
+  separate: 0.09357106049994443,
+  combined: 0.09339529294794444,
+  variants: [ 0.0565302497302107, 0.1166455963362107, 0.13136904528026624 ],
+  without: 0.03931002433426626
+}
+FAIL creator independent sensitivities sum to combined Redis sensitivity
+{"tier":"creator","commands":3.208617769632,"transfer":0.6591796713460001,"storage":0.03778408163527747,"total":3.9055815226132777,"annual":46.86697827135933,"peak":0.3125576013333334,"conditionalTier":1}
+FAIL pro independent sensitivities sum to combined Redis sensitivity
+{"tier":"pro","commands":4.990521769632,"transfer":0.7180504713460039,"storage":0.11081613188527939,"total":5.819388372863283,"annual":69.8326604743594,"peak":0.9390095653333332,"conditionalTier":5}
+FAIL scale independent sensitivities sum to combined Redis sensitivity
+FAIL scale 12 months 0.8207254713460017
+{"tier":"scale","commands":8.203841769632,"transfer":0.8207254713460017,"storage":0.24999934738528395,"total":9.274566588363285,"annual":111.29479906035942,"peak":2.7228170453333336,"conditionalTier":5}
+48 independent model checks: 44 passed, 4 failed

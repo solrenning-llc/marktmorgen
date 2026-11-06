@@ -56,6 +56,16 @@ export async function checkHomeHero({browser,LOCAL,axeSource,is}){
 export async function checkMorningNoticeFocus({page,width,is}){
  if(width>=640)return;
  await page.keyboard.press("Tab");await page.keyboard.press("Tab");
+ // Native focus can still be completing the page's existing smooth scroll.
+ // Observe the exact hit condition, within the original help-focus 3s bound.
+ try{await page.waitForFunction(()=>{
+  const node=document.activeElement;if(node?.id!=="hm-preview-toggle")return false;
+  const rects=[...node.getClientRects()].filter(r=>r.width>0&&r.height>0);
+  return rects.length>0&&rects.every(r=>{
+   const x=r.left+r.width/2,y=r.top+r.height/2,hit=document.elementFromPoint(x,y);
+   return x>=0&&x<innerWidth&&y>=0&&y<innerHeight&&Boolean(hit&&(hit===node||node.contains(hit)));
+  });
+ },undefined,{timeout:3000});}catch{/* Keep the strict assertions and diagnostic below. */}
  const state=await page.evaluate(()=>{
   const node=document.activeElement,box=node.getBoundingClientRect();
   const own=[...node.getClientRects()].every(r=>{
@@ -63,7 +73,7 @@ export async function checkMorningNoticeFocus({page,width,is}){
    const hit=document.elementFromPoint(x,y);
    return x>=0&&x<innerWidth&&y>=0&&y<innerHeight&&Boolean(hit&&(hit===node||node.contains(hit)));
   });
-  return {id:node.id,visible:node.matches(":focus-visible"),width:box.width,height:box.height,own};
+  return {id:node.id,visible:node.matches(":focus-visible"),left:box.left,top:box.top,scrollY,width:box.width,height:box.height,own};
  });
  is("Encanto14 second Tab is the native notice control "+width,state.id,"hm-preview-toggle");
  is("Encanto14 native control focus is visible "+width,state.visible,true);

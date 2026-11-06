@@ -6,6 +6,9 @@
  * not a podcast. Under the lock the route then wrote the podcast back whole: an upload left the private feed with only
  * the new episode, and "disable" deleted a podcast that had episodes. Now readPodcast answers null only for Redis's
  * exact null and throws UnknownReplyError for anything else, and the route answers 503 "unavailable" and writes nothing.
+ * A record with this podcast's own id is read exactly too (review of #2982): episodes missing, not a list, or with one
+ * entry that does not read as the writer wrote it throw, never an empty or partial podcast that "add", "edit" or
+ * "remove" would write back whole.
  *
  * Synthetic only: the in-memory Redis double, and a local stand-in for Vercel Blob's HEAD answering for the upload.
  */
@@ -41,13 +44,17 @@ const original = redis.pipeline.bind(redis);
 const post = (session: string, body: unknown) =>
   podcastRoute(new NextRequest(`${ORIGIN}/api/store/podcast`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify(body) }));
 
-/** Only the next GET of nl:pod:<id> answers `reply`; everything else is the double's own. */
-function bendPodcastGet(podcastId: string, reply: () => unknown) {
+/**
+ * Only the next GET of nl:pod:<id> answers `reply`, which is handed the record as stored (its exact text) so a shape can
+ * be made from the real one; everything else is the double's own.
+ */
+function bendPodcastGet(podcastId: string, reply: Bend) {
   let bent = false;
   redis.pipeline = (async (commands: (string | number)[][]) => {
     if (!bent && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === `nl:pod:${podcastId}`) {
       bent = true;
-      return reply();
+      const [stored] = await original(commands);
+      return reply(String(stored));
     }
     return original(commands);
   }) as typeof redis.pipeline;
@@ -72,7 +79,12 @@ async function thrown(run: () => Promise<unknown>): Promise<string> {
   }
 }
 
-const UNKNOWN: [string, () => unknown][] = [
+type Bend = (stored: string) => unknown;
+type Stored = { id: string; episodes: Record<string, unknown>[] };
+/** The stored record changed by `change`, as the text a GET would answer. */
+const reshaped = (change: (record: Stored) => unknown): Bend => (stored) => [JSON.stringify(change(JSON.parse(stored) as Stored))];
+
+const UNKNOWN: [string, Bend][] = [
   ["no reply", () => []],
   ["two replies", () => [null, null]],
   ["not a list", () => ({ 0: null })],
@@ -80,6 +92,18 @@ const UNKNOWN: [string, () => unknown][] = [
   ["unparseable text", () => ["{\"id\":"]],
   ["JSON that is not a podcast", () => ["{\"id\":\"not a podcast id\"}"]],
   ["a Proxy", () => new Proxy([null], {})],
+  // This podcast's own id over episodes that cannot be read whole (review of #2982): never an empty or partial podcast.
+  ["the right id, no episodes", reshaped((record) => ({ id: record.id }))],
+  ["the right id, episodes not a list", reshaped((record) => ({ id: record.id, episodes: { a: 1 } }))],
+  ["the right id, episodes as text", reshaped((record) => ({ id: record.id, episodes: JSON.stringify(record.episodes) }))],
+  ["episode two without its file", reshaped((record) => ({ ...record, episodes: record.episodes.map((e, i) => (i === 1 ? { ...e, pathname: undefined } : e)) }))],
+  ["episodes null", reshaped((record) => ({ id: record.id, episodes: null }))],
+  ["an episode that is not an object", reshaped((record) => ({ ...record, episodes: [record.episodes[0], "two"] }))],
+  ["an episode's size as text", reshaped((record) => ({ ...record, episodes: record.episodes.map((e, i) => (i === 1 ? { ...e, bytes: "10" } : e)) }))],
+  ["an episode with a field the writer never writes", reshaped((record) => ({ ...record, episodes: record.episodes.map((e, i) => (i === 1 ? { ...e, extra: 1 } : e)) }))],
+  ["a record with a field the writer never writes", reshaped((record) => ({ ...record, extra: 1 }))],
+  ["more episodes than a podcast may hold", reshaped((record) => ({ ...record, episodes: Array.from({ length: 301 }, (_, i) => ({ ...record.episodes[0], id: `ep${String(i).padStart(10, "0")}` })) }))],
+  ["the record as a list", reshaped((record) => [record])],
 ];
 
 async function main(): Promise<void> {
@@ -162,6 +186,16 @@ async function main(): Promise<void> {
       redis.pipeline = original;
       is(`edit (${label}): 503 unavailable`, [edited.status, ((await edited.json()) as { error?: string }).error], [503, "unavailable"]);
       is(`edit (${label}): the record is unchanged`, await titles(podcastId), ["Episode one", "Episode two"]);
+    }
+    {
+      const { pid, podcastId } = await setUp(`Show F ${label}`);
+      const episode = (await readPodcast(podcastId))!.episodes[0].id;
+      bendPodcastGet(podcastId, reply);
+      const removed = await post(session, { action: "remove", id: pid, episode });
+      redis.pipeline = original;
+      is(`remove (${label}): 503 unavailable`, [removed.status, ((await removed.json()) as { error?: string }).error], [503, "unavailable"]);
+      is(`remove (${label}): the record keeps both episodes`, await titles(podcastId), ["Episode one", "Episode two"]);
+      is(`remove (${label}): the product still counts two`, (await podcastOf(pid))?.episodes, 2);
     }
   }
 

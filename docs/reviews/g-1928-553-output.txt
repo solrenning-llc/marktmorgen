@@ -1,0 +1,501 @@
+===== /tmp/g1928-553-focal.log =====
+G_WEIGHT_ENVELOPE {"mode":"extra","injected":1,"reads":24,"bytes":446390,"debits":[4,123],"paidBeforeFirst":127,"capacity":6350000,"listed":24}
+  ok    the exact weight boundary was reached
+  ok    the builder reads and offers its bounded 24 existing products
+  ok    an unknown outer envelope charges the conservative per-record ceiling
+  ok    actual listing bytes fit all admission completed before the first read
+
+4 checks, all passing.
+G_WEIGHT_ENVELOPE {"mode":"extra","injected":1,"reads":24,"bytes":446390,"debits":[4,123],"paidBeforeFirst":127,"capacity":6350000,"listed":24}
+  ok    the exact weight boundary was reached
+  ok    the builder reads and offers its bounded 24 existing products
+  ok    an unknown outer envelope charges the conservative per-record ceiling
+  ok    actual listing bytes fit all admission completed before the first read
+
+4 checks, all passing.
+✔ control: an exact complete successful link is confirmed (1.126574ms)
+✔ an explicit error beside otherwise complete success is unknown (0.204187ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 8.214781
+✔ MEDIUM 1: a short link is shown only on a full confirmation of the link asked for (1.578213ms)
+✔ MEDIUM 1: a refusal is believed only in full; everything else is not known (0.490628ms)
+✔ MEDIUM 2: an answer is read against what was asked when it was sent (0.426391ms)
+✔ the builder says when only the first products are listed (8.874355ms)
+✔ MEDIUM 3: a studio request's shape is the cost registry's (3.197487ms)
+✔ MEDIUM 3: listings past the head are weighed and paid for before any is read, and at most CART_LINK_CHOICES (163.366497ms)
+✔ MEDIUM 3: a weight Redis did not answer exactly is the ceiling (49.544691ms)
+✔ MEDIUM 3: studio requests used up read nothing and offer nothing (52.261581ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 285.727517
+
+
+===== /tmp/g1928-553-unknown.log =====
+G_WEIGHT_ENVELOPE {"mode":"unknown","injected":1,"reads":24,"bytes":446390,"debits":[4,123],"paidBeforeFirst":127,"capacity":6350000,"listed":24}
+  ok    the exact weight boundary was reached
+  ok    the builder reads and offers its bounded 24 existing products
+  ok    an unknown outer envelope charges the conservative per-record ceiling
+  ok    actual listing bytes fit all admission completed before the first read
+
+4 checks, all passing.
+
+
+===== /tmp/g1928-553-healthy.log =====
+G_WEIGHT_ENVELOPE {"mode":"healthy","injected":1,"reads":24,"bytes":446390,"debits":[4,19],"paidBeforeFirst":23,"capacity":1150000,"listed":24}
+  ok    the exact weight boundary was reached
+  ok    the builder reads and offers its bounded 24 existing products
+  ok    actual listing bytes fit all admission completed before the first read
+
+3 checks, all passing.
+
+
+===== /tmp/g1928-553-race-80k.log =====
+G_WEIGHT_ENVELOPE {"mode":"race","injected":1,"reads":24,"bytes":1934390,"debits":[4,10],"paidBeforeFirst":14,"capacity":700000,"listed":24}
+  ok    the exact weight boundary was reached
+  ok    the builder reads and offers its bounded 24 existing products
+  FAIL  actual listing bytes fit all admission completed before the first read
+        expected true
+        got      false
+
+3 checks, 1 failing.
+
+
+===== /tmp/g1928-553-race-80k-control.log =====
+G_WEIGHT_ENVELOPE {"mode":"healthy","injected":1,"reads":24,"bytes":1934390,"debits":[4,49],"paidBeforeFirst":53,"capacity":2650000,"listed":24}
+  ok    the exact weight boundary was reached
+  ok    the builder reads and offers its bounded 24 existing products
+  ok    actual listing bytes fit all admission completed before the first read
+
+3 checks, all passing.
+
+
+===== /tmp/g1928-1bc-race-80k-parent.log =====
+G_WEIGHT_ENVELOPE {"mode":"race","injected":1,"reads":24,"bytes":1934390,"debits":[4,10],"paidBeforeFirst":14,"capacity":700000,"listed":24}
+  ok    the exact weight boundary was reached
+  ok    the builder reads and offers its bounded 24 existing products
+  FAIL  actual listing bytes fit all admission completed before the first read
+        expected true
+        got      false
+
+3 checks, 1 failing.
+
+
+===== /tmp/g1928-553-linked.log =====
+
+A code from a link
+  ok    a live code of the creator's is applied, with no box beside it
+  ok    one Stripe does not know leaves the box, as before
+  ok    no code: the box, as before
+
+One discount at a time
+  ok    a sale already taken off: no code and no box
+  ok    a store with no codes: nothing applied
+
+Refused for this cart
+a code from a link did not fit this cart; opened with the box instead StripeError: Stripe request failed (400 invalid_request_error): This promotion code cannot be redeemed because the order does not meet its minimum amount.
+    at onAccount (/tmp/codex-g-proof-aw2OIN/proof.cjs:34390:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async createCartCheckout (/tmp/codex-g-proof-aw2OIN/proof.cjs:37486:23)
+    at async main (/tmp/codex-g-proof-aw2OIN/proof.cjs:37606:18) {
+  status: 400,
+  code: 'invalid_request_error',
+  stripeMessage: 'This promotion code cannot be redeemed because the order does not meet its minimum amount.'
+}
+  ok    tried with the code, then opened with the box instead
+
+The route
+  ok    the cart reads the code from the same cookie as one product
+
+The studio's link builder
+  ok    two products and a code
+  ok    read back as the store page and the checkout read them
+  ok    no code is fine
+  ok    one product, more than a cart holds, or a code of the wrong shape: no link
+  ok    a named section, a list of products with a legend, a labeled code field with its help
+  ok    it says what to do before the link exists, in a live region
+  ok    nothing with fewer than two products to choose
+  ok    shown in the studio where a cart is offered, from the products a cart takes
+
+15 checks, all passing.
+  ok    live link code is applied at cart checkout
+
+1 checks, all passing.
+G2_CART_LINK_COST {"reads":0,"bytes":0,"debits":[4],"paidBeforeFirst":null,"units":4}
+✔ ready-cart listing reads must fit the actual studio page admission before their reads (73.511666ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 80.232221
+
+A cart as where a link goes
+  ok    two of the store's products, and a code in capitals
+  ok    no code is fine
+  ok    refused: one product, the same twice, too many, another store's, or a code of the wrong shape
+  ok    it opens the store with the cart and the code, tagged with the post
+
+Through the real redirect
+  ok    sent to the store with the cart and the code
+
+The studio
+  ok    the list says where it goes and keeps it as its own choice
+  ok    the builder offers a short link with a labeled name and place
+  ok    and says the result in a status, or why not in an alert
+
+8 checks, all passing.
+
+What goes in a cart
+  ok    a paid product at one price, sold once
+  ok    never something free, a membership, a call, a choice of prices, a price the buyer names or a limited one
+  ok    nor a draft, a bundle the buyer builds, or something with nothing to hand over
+  ok    a bundle that hands over everything can
+  ok    each product once, 4 at most, ids only
+  ok    a store offers a cart only with two that could go in one
+
+What each line is charged
+  ok    its sale, on the products the sale is on
+  ok    or the fair price for the buyer's country when it takes off more
+
+The checkout
+  ok    one line each, at its price
+  ok    the first is the order's product, the rest named as added ones
+  ok    with what each added one was charged
+  ok    and each one's share for the affiliate who sent the buyer
+  ok    a code box, since nothing was taken off
+  ok    a sale taken off its own line, and then no code box
+  ok    never more than four
+
+Buy more, save more
+  ok    off until switched on, from 2, 3 or 4, 5% to 50%
+  ok    taken off from that many, and not before
+  ok    each line that much cheaper, said on the order, and no code box
+  ok    two are not enough for a deal from three
+
+19 checks, all passing.
+  ok    the course's three offers are accepted
+  ok    a funnel may offer the same product for less after a no
+  ok    and the pastry course's one
+  ok    the bundle holds the kit, the notes and the checklist
+
+Whose offers follow a cart
+  ok    no product in it has offers: none
+  ok    the course, second in the cart, has them: its own
+  ok    its first offer is in the cart: still the course, its next offers are left
+  ok    every offer it could lead to is in the cart: none, and no card is kept for nothing
+  ok    every offer it could lead to is in a bundle in the cart: none, and no card is kept for nothing
+  ok    the first with offers decides: the pastry course's only offer is in the cart, so none, never the course's instead
+
+The cart's checkout keeps the card only when offers follow
+  ok    as for one product: a customer is made, the card kept for payments made while the buyer is there, the browser's key and whose offers
+  ok    the order is still the cart's, with its deal
+  ok    without offers: no customer, no card kept, no key
+  ok    a product named that is not in the cart: nothing kept either
+
+Whose offers, read back from the checkout
+  ok    a cart's line, first or added: believed
+  ok    anything else: nothing
+
+A cart with a product that has offers: the first offer not in it
+  ok    the thanks page shows the course's first offer, the kit
+  ok    yes to it charges the kit at the offer's own price: the cart's 10% is not taken off again
+  ok    on the card just used, as the same "upsell" payment the numbers already count, after this order
+  ok    pressed again: done, and charged once
+  ok    the kit taken leads to the end: nothing more is shown
+
+Passed over: in the cart, bought before, turned down
+  ok    the kit is in the cart and the notes were bought before: the checklist is the one shown
+  ok    neither can be answered instead
+  ok    no thanks to the checklist charges nothing
+  ok    and nothing is left: none shown, and the checklist is never asked again
+  ok    the no is kept
+  ok    what the buyer owns cannot be read in full: nothing shown, nothing can be answered
+  ok    a cart's checkout that named no product: nothing
+
+Every protection of the offers after one product
+  ok    another browser: nothing shown, nothing charged
+  ok    after the hour: nothing
+  ok    paid with Klarna, which one click cannot charge again: nothing
+  ok    a checkout naming a product that is not one of its lines: nothing
+  ok    the bank asks to confirm: sent there, nothing delivered yet
+  ok    and nothing more is offered meanwhile
+
+Turned down in this order: never again, not even for less
+  ok    the kit first
+  ok    no thanks to it
+  ok    the same kit for less is passed over: the checklist is next
+  ok    and the cheaper kit cannot be answered instead
+
+On the page too: the hour, and a method one click cannot charge again
+  ok    after the hour, the page shows nothing
+  ok    paid with Klarna (the page's eligible is false), nothing
+
+The store's month of requests used: nothing is read, nothing is offered
+  ok    the page shows no offer, and the answer is refused
+  ok    and the buyer's purchases were never read from Stripe
+
+Its reads are counted, and the studio says it
+  ok    what the buyer owns counts as many public requests as the next product after a purchase
+  ok    counted before it is read
+  ok    the cart's form sets the browser's secret as one product's does
+  ok    the thanks page passes the cart's named product and the address paid with
+  ok    the studio says so in one sentence
+
+47 checks, all passing.
+
+What goes in a cart
+  ok    a product the creator ships, at one price
+  ok    not yet one that is limited or has sizes
+  ok    shipped and online products together are told apart
+  ok    the shipped ones first, each group in the cart's order
+  ok    a line about when it ships only when there is one to say
+
+The checkout
+  ok    the order's own product and the one added, in the cart's order
+  ok    an address only where both ship, once each
+  ok    each one's shipping added on one line, with the line they share
+  ok    the order marked as shipped, on the checkout and the payment
+  ok    no tax codes while Stripe Tax is off
+  ok    with tax on: the shipping as shipping, each shipped line as goods
+  ok    free when they all are, and no line about when when they differ
+  ok    tax included in the price: the shipping included the same way
+  ok    the deal for buying more takes off the lines, never the shipping
+  ok    sharing no country: refused, nothing opened
+  ok    shipped with online products: refused, nothing opened, until the confirmation email names both
+  ok    shipped products only: no box to start at once needed
+  ok    a digital cart asks for no address, as before
+
+The open cart, before paying
+  ok    each product in it with its own shipping and line about when
+  ok    shipping and where it can go, the total Stripe will charge before tax, no box to start at once
+  ok    shipped with online products: said, and nothing to pay for until one kind is taken out
+  ok    with the deal: the saving without the shipping, the total with it
+  ok    the visitor's country, when it is not one of them
+  ok    sharing no country: which to take out, by name
+
+Paying for a cart that cannot ship together
+  ok    two that share a country open Stripe's page, with no box to start at once
+  ok    two that share none go back to the cart, which says why, and open nothing
+  ok    nor a shipped product with an online one
+
+After paying
+  ok    a second shipped product's box says it goes to the same address, on an order that was shipped
+
+28 checks, all passing.
+
+The checkout of a cart
+  ok    without reminders: the way back it always had, and Stripe asked nothing
+  ok    with them: Stripe asks for consent, and keeps the address if the buyer leaves
+  ok    and the way back offers one reminder of the cart
+
+A cart left with Stripe's yes
+  ok    not without the yes
+  ok    with it: one email
+  ok    to the buyer, about their cart
+  ok    naming everything in it, at today's prices
+  ok    with the link that puts the cart back as it was
+  ok    and why it came, the stop link and the creator's address
+  ok    never twice for that checkout
+  ok    nor for the same cart, in any order, in a week
+  ok    nor to somebody who has paid for one of them since
+  ok    nor about products that cannot be sold any more
+
+A cart's reminder, asked for on the way back
+  ok    the ask keeps the cart's products where a product's id would be
+  ok    kept
+  ok    nothing goes before its hour
+  ok    then one email about the cart, saying it was asked for
+
+17 checks, all passing.
+
+The courses an order hands over
+  ok    each one added and each bundle's, once each
+  ok    the product bought first
+  ok    none when nothing is a course
+
+Which course a press opens
+  ok    the one named, added to a cart
+  ok    or inside a bundle added to it
+  ok    never one the order does not hand over, nor a product that is no course
+  ok    with nothing named, or a name it does not hold, the product bought when it is a course
+
+The buyer's list of purchases
+  ok    a gift's course is not on the payer's list
+  ok    the course after the first is listed, with its own way in, beside the one with a link
+
+The thanks page's Start the course
+  ok    opens a course that was not the cart's first
+  ok    never a product of the order that is no course, nor one the order does not hold
+  ok    never for a gift, a group purchase or a pre-order
+  ok    nor once the order was refunded
+
+Where it is read
+  ok    the route opens only what courseToStart allows
+  ok    the thanks page writes every course down as bought
+  ok    and draws an added course's button before saying nothing is attached
+  ok    the list of purchases names its button
+
+17 checks, all passing.
+
+What ships, and where
+  ok    digital only: nothing ships
+  ok    one physical with digital: its own countries and amount
+  ok    two physical: only the shared countries, once each, amounts added and kept
+  ok    free shipping counts as nothing
+
+Unknown fails: refused, never taken as digital
+  ok    physical with unreadable shipping
+  ok    no country, a negative, a broken or an over-the-bound amount
+
+When nothing is shared: the fewest named, the rest ship
+  ok    cart 0: taking out the named ones leaves a cart that ships, and they are the fewest
+  ok    cart 1: taking out the named ones leaves a cart that ships, and they are the fewest
+  ok    cart 2: taking out the named ones leaves a cart that ships, and they are the fewest
+  ok    cart 3: taking out the named ones leaves a cart that ships, and they are the fewest
+  ok    cart 4: taking out the named ones leaves a cart that ships, and they are the fewest
+  ok    cart 5: taking out the named ones leaves a cart that ships, and they are the fewest
+  ok    the case the review found: a,b to US; c,d to CA; e to DE → take out c, d, e at once
+  ok    the buyer's country is kept when it is one of the best
+
+14 checks, all passing.
+
+The rule
+  ok    a bundle that holds both and costs less: swap them, saving the difference
+  ok    one that would cost more is not offered
+  ok    what it does not hold stays in the cart and is counted
+  ok    the deal for buying more is counted both ways: 20% off two lines can beat one bundle
+  ok    and a deal that still applies after the swap is counted on the bundle's line too
+  ok    a bundle already in the cart, or one that holds none of it, is never offered
+  ok    the one that saves the most
+  ok    the swap replaces, never adds a second copy
+  ok    the words name what it holds and the saving, and promise nothing more (en)
+  ok    the words name what it holds and the saving, and promise nothing more (es)
+  ok    the words name what it holds and the saving, and promise nothing more (fr)
+  ok    the words name what it holds and the saving, and promise nothing more (de)
+  ok    the words name what it holds and the saving, and promise nothing more (it)
+  ok    the words name what it holds and the saving, and promise nothing more (nl)
+  ok    the words name what it holds and the saving, and promise nothing more (pt)
+
+In the store's cart
+  ok    the creator's bundle holds three of them
+  ok    offered at its own price, with what it holds from the cart and the exact saving
+  ok    the cart read nothing of the bundle's own record for it
+  ok    a cart it would make dearer is offered nothing
+  ok    nor one where what it does not hold makes the swap dearer
+  ok    swapped, the cart is the bundle alone, at its price, and offers nothing more
+  ok    with 20% off two or more, the two cost less than the bundle: nothing offered
+  ok    a draft bundle is never offered
+  ok    the store record still has its bundle
+
+24 checks, all passing.
+
+Names, places and where a link goes
+  ok    a post's name as a utm_campaign is counted
+  ok    a place from the list, or somewhere else
+  ok    a product only when the store has it
+  ok    it opens the page tagged with where it was posted and the post's name
+
+Making links
+  ok    six letters nobody misreads
+  ok    one link to a name
+  ok    a product of another store is refused
+  ok    the store's links, the newest first
+
+Opening a link
+  ok    sent to the store, tagged, kept by the CDN for five minutes
+  ok    typed in capitals it still opens
+  ok    a code that never was opens the page that says so
+
+Changing where it goes, and ending it
+  ok    the same link now opens the product
+  ok    another store cannot change it
+  ok    nor end it
+  ok    ended, it opens the page that says so and leaves the list
+
+A hundred links at most
+  ok    the hundred and first is refused
+
+16 checks, all passing.
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $1.3022
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (53.106045ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (373.606298ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (53.993611ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.637846ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.287733ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.758951ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.599892ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (112.573302ms)
+✔ every store figure taken in the code is a kind a line prices (95.863785ms)
+✔ every email sent names a meter, and each file only the meters it may use (138.200259ms)
+✔ the units a figure is taken in cost at least what they stand for (11.20683ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (2.603815ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.278729ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.416606ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.158288ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.131989ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.494904ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (1.075527ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.151618ms)
+✔ Path push fits its reserved studio requests (0.101593ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.098338ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.121273ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.192639ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (70.089052ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 931.96894
+creator: room 18 MB; outside it 119.1 MB on average, 291.7 MB at once
+pro: room 135 MB; outside it 285.7 MB on average, 800.3 MB at once
+scale: room 250 MB; outside it 701.6 MB on average, 2466.1 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (137.723091ms)
+✔ each family is bounded one way at least, and what it says can be checked (62.625589ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (6.583979ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.759255ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.400432ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (7.663683ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.184788ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 236.332765
+
+
+===== /tmp/g1928-553-tsc.log =====
+
+
+===== /tmp/g1928-553-lint.log =====

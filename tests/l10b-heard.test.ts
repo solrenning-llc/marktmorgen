@@ -63,6 +63,17 @@ async function main(): Promise<void> {
   answer(setNx(DONE), THROWS, { run: false });
   answer(getOf(DONE), THROWS);
   is("the database not answering at all: not counted", await recordHeard(store, order(), "friend").catch(() => "threw"), "unavailable");
+
+  part("Claude 3 on #2723: a mark of this run's that could not be read back is let go, so the buyer's next try counts");
+  for (const [shape, reply] of UNREADABLE) {
+    clearAnswers();
+    const s = order();
+    answer(setNx(DONE), () => ["QUEUED"], { run: true });
+    answer(getOf(DONE), reply);
+    const first = await recordHeard(store, s, "friend").catch(() => "threw");
+    clearAnswers();
+    is(`the mark written, its answer lost and its read-back ${shape}: unavailable now, counted on the next try`, [first, await recordHeard(store, s, "friend")], ["unavailable", "counted"]);
+  }
   clearAnswers();
   done();
 }

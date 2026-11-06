@@ -82,6 +82,18 @@ async function main(): Promise<void> {
     const again = await reviseAgreement(store, a.id, edit(a, "Seven months"), now + 2);
     is(`and the next try writes version 2 (${shape})`, again.ok && [again.version.n, kept(a.id) === again.version.sha256], [2, true]);
   }
+
+  part("Claude 3 on #2723: the record not saved after the text was written: unavailable, and the text let go so the next try writes it");
+  for (const [shape, reply] of [["the save failing", THROWS], ["the save answered QUEUED", () => ["QUEUED"]]] as const) {
+    clearAnswers();
+    const a = await fresh();
+    answer((c) => c[0] === "SET" && String(c[1]) === `nl:agree:r:${a.id}` && !c.includes("NX"), reply, { run: false });
+    const got = await reviseAgreement(store, a.id, edit(a, "Eight months"), now + 1);
+    is(`${shape}: unavailable, the record at version 1, no text left behind`, [got.ok, (await agreementOf(store, a.id))?.versions.length, redis.run(["EXISTS", V2(a.id)])], [false, 1, 0]);
+    clearAnswers();
+    const again = await reviseAgreement(store, a.id, edit(a, "Eight months"), now + 2);
+    is(`and the next try writes version 2 (${shape})`, again.ok && [again.version.n, kept(a.id) === again.version.sha256], [2, true]);
+  }
   clearAnswers();
   done();
 }

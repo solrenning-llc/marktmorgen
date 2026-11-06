@@ -57,6 +57,18 @@ async function main(): Promise<void> {
     const got = await queuePerson(store, person()).catch((error: unknown) => (error instanceof UnknownReplyError ? "unknown" : "threw"));
     is(`the mark unknown and its read-back ${shape}: no job, said as unknown`, [got, jobs() - before], ["unknown", 0]);
   }
+
+  part("Claude 3 on #2723: a mark of this run's that could not be read back is let go, so the person is handed over on the next try");
+  for (const [shape, reply] of UNREADABLE) {
+    clearAnswers();
+    const p = person();
+    const before = jobs();
+    answer(setNx(SEEN), () => ["QUEUED"], { run: true });
+    answer(getOf(SEEN), reply);
+    const first = await queuePerson(store, p).catch((error: unknown) => (error instanceof UnknownReplyError ? "unknown" : "threw"));
+    clearAnswers();
+    is(`the mark written, its answer lost and its read-back ${shape}: unknown now, one job on the next try`, [first, await queuePerson(store, p), jobs() - before], ["unknown", "skipped", 1]);
+  }
   clearAnswers();
   done();
 }

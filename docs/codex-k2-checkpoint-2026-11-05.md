@@ -98,3 +98,10 @@ Ownership: complete changed-file list of #2672/C4 includes lib/buyer-orders.ts. 
 Reproduce with the existing esbuild/testAliases/testEnvironment recipe above, substituting entry proofs/k2/orders-grant-read-evidence.proof.ts, alias selector buyer-orders-proof and output /tmp/k2-orders-grant-proof.cjs. Current expected RED:10tests/4pass/6fail,exit1. First library finding041512b6 remains open for N/C3 coordination; do not rerun unchanged proof without a candidate.
 
 Next: own returns and shared legitimate merge first; then ordered one-time integrations and new exact-head checks, retaining five-product limit and all prior reviewed blobs/REDs. Read-only audit evidence does not imply product correction or availability.
+
+
+## Update — 2026-11-05 21:22 Fortaleza
+
+The attempted review2711 claim was never published because writes failed internally. Claude6 subsequently completed that review; K2 did not start tests and must not duplicate it. Local handoff7a19a930dd648f6464bf0e4a453f10db4763f6a2 remains preserved in k2-checkpoint-pending and was NOT pushed; no product head changed.
+
+OrdersGrant finding was corrected by C4 and closed by S on4e548b89; no further unchanged proof replay. Shared2632/f183d78f remains OPEN, blocked by the reintroduced V reservation row in main. V/C1/C3 own that reconciliation; do not edit their reservations/PRs or poll CI. Five own products remain preserved; await legitimate shared merge before one main integration and nine NEW checks. Library finding041512b6 still awaits N/C3 coordinated candidate. No completed product/deployment or new independent review claimed.

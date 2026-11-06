@@ -223,3 +223,17 @@ The environment cwd moved to /workspace/scratch/e976a72ed984. Existing worktrees
 3. Só depois de #2632 ter nove success e merge normal, integrar latest main uma vez no #2475, preservando `0bf91247c35c48de835631603c5816344e099ac7` e `1ba1591411648751f9332036cea42e5e468412cf`, provar os demais paths iguais ao main e exigir nove workflows novos.
 4. Achados de `lib/imported-purchases.ts`: aguardar atribuição nominal; antes de qualquer correção, refazer auditoria de sobreposição e anunciar RESERVA.
 
+
+
+## Retomada 05/11/2026 23h07 Fortaleza — controlador incorporado; Zapier integrado uma vez
+
+- O canal `para-claude-1/messages.md` foi relido integralmente. Antes do append final, o blob Git calculado localmente coincidiu com o blob publicado `46556d4c54f7180af0d3c9f7e99f030be31c5664`. O checkpoint curto entrou no canal no commit `7061c8a9f336fa5d2591300245a420524f9ea294` (novo blob `65ebadc1654b7f8a07914de3700c9e60afaac450`).
+- #2632 foi incorporado normalmente como main `ba887611b8b101dfc84b14fb4fc07a7eec3b9ff8`, tree `cf1e897a7dcf0c665793b593a245e699c5c9a63a`, depois de 9/9 no head `cda3dda927ac145887b56d2ce3d0014065f9cb06`.
+- #2475 permanecia OPEN no head exato `a430d71ccf466f1a4e504c2ae79a2d07aab469bb`. Depois da condição causal, integrei esse main exatamente UMA vez no mesmo ramo, sem force e com expected SHA antigo.
+- Novo head exato #2475: `c9405e2d9165fcce31195265b901b341305c331d`; tree `7afc6ea31865fa4e7acaf32a39a407dff54f7a43`; pais ordenados `a430d71ccf466f1a4e504c2ae79a2d07aab469bb` + `ba887611b8b101dfc84b14fb4fc07a7eec3b9ff8`; OPEN e mergeable na leitura pós-promoção.
+- Prova da junção: árvore recursiva completa não truncada. Todos os outros 3.805 objetos não-tree coincidem com main. As únicas diferenças são `zapier/index.js` blob revisado `0bf91247c35c48de835631603c5816344e099ac7` no lugar do main `3ed64fb229bc5b5e13f82d51562785cdf9ffc1ff`, e o novo `tests/zapier-response.test.ts` blob revisado `1ba1591411648751f9332036cea42e5e468412cf`. Nenhuma reserva foi editada.
+- Nove workflows inteiramente novos nasceram no head `c9405e2d`, todos inicialmente `queued`: `42148215851`, `42148215880`, `42148215892`, `42148215894`, `42148215905`, `42148215914`, `42148215942`, `42148215958`, `42148215975`. Nenhum verde/cancelamento anterior conta. Não incorporar antes dos nove `completed/success` exatos e de uma leitura fresca de head/mergeabilidade.
+- Descrição do #2475 atualizada no GitHub com head, tree, blobs e IDs dos nove novos. H2 continua sendo a revisão independente aplicável ao conteúdo byte-idêntico; a junção pura não exige revisão nova pela CX-122.8.
+- AV12 daqui: não sondar em rodadas enquanto os nove estiverem ativos; não cancelar, repetir ou mover head. Se surgir uma falha fora do escopo, uma repetição isolada de job no máximo e nunca segunda repetição; falha própria exige correção causal, RED e ciclo novo.
+- Os três MÉDIOS de `lib/imported-purchases.ts` permanecem sem atribuição. Prova somente leitura `codex/l-imported-purchases-read-proof@875d73a704fb319cc085d09c87235654c53da161`. Não reservar/corrigir sem atribuição nominal e auditoria fresca.
+- Três produtos originais seguem incorporados; #2475 é a única unidade própria aberta. Não abrir quinta unidade.

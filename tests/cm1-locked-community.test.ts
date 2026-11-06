@@ -19,11 +19,13 @@ import { createElement } from "react";
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
+import { NextRequest } from "next/server";
 import CommunityPage from "@/app/[handle]/community/page";
-import { addProduct, claimHandle, ensureListId, ensureStatsId, setCommunity, setProductHidden, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { POST as spaceView } from "@/app/api/store/community/space-view/route";
+import { SESSION_COOKIE, normaliseEmail, openSession } from "@/lib/auth";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, setCommunity, setProductHidden, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { CREATOR, type CommunityConfig, addComment, createPost, freshConfig, memberKey, newItemId, readMember, saveConfig, touchMember } from "@/lib/community";
 import { leadsKey } from "@/lib/contacts";
-import { normaliseEmail } from "@/lib/auth";
 import { mintPass, passCookieName } from "@/lib/learn";
 import { productSegment } from "@/lib/product-slug";
 import { store as redis } from "./redis-stub";
@@ -121,7 +123,8 @@ async function main(): Promise<void> {
   is("Unlock with the product, leading to its page", [locked.includes("Unlock with Guide"), locked.includes(`href="${guideHref}"`)], [true, true]);
   is("nothing of the space's posts, comments or members reaches the page", nothingInside(html), []);
   is("the locked space's address is nowhere on the page", [html.includes(inner), html.includes(`space=${inner}`)], [false, false]);
-  is("no number in the locked list (no count of posts or members)", /\d/.test(locked.replace(/href="[^"]*"/g, "").replace(/id="[^"]*"/g, "")), false);
+  // The text a person reads or hears, and no data attribute: no count of posts or members anywhere in the list.
+  is("no number in the locked list (no count of posts or members)", [/\d/.test(locked.replace(/<[^>]*>/g, " ").replace(/&#x27;/g, "'")), /\sdata-/.test(locked)], [false, false]);
   is("a space left Hidden shows no sign of itself", [html.includes("Secret room"), html.includes("A line nobody outside should read"), html.includes(secret)], [false, false, false]);
   is("a space whose product is a draft says access isn't available yet, with no link", [locked.includes("Draft room"), locked.includes("Access isn&#x27;t available yet."), html.includes(productSegment({ id: draft, title: "Draft plan" }))], [true, true, false]);
 
@@ -156,6 +159,19 @@ async function main(): Promise<void> {
   is("a store that cannot take money: no Unlock link to the paid product", [shut.includes("Unlock with Guide"), shut.includes(guideHref)], [false, false]);
   is("the free product it is also kept for is named instead, when the store can give it", shut.includes("Unlock with Bonus"), true);
   await setStripeAccount(OWNER, "acct_1TestLocked0001", true);
+
+  part("The creator's choice, saved by its own route");
+  const ownerCookie = `${SESSION_COOKIE}=${await openSession(OWNER)}`;
+  const choose = async (body: Record<string, unknown>, cookie = ownerCookie) => {
+    const response = await spaceView(new NextRequest("https://marktmorgen.com/api/store/community/space-view", { method: "POST", headers: { "content-type": "application/json", "x-nimbus-store": store.sid, cookie }, body: JSON.stringify(body) }));
+    return [response.status, ((await response.json()) as { ok: boolean }).ok];
+  };
+  is("Secret room made Visible and locked", await choose({ id: secret, view: "locked" }), [200, true]);
+  is("Draft room made Hidden", await choose({ id: later, view: "hidden" }), [200, true]);
+  is("an unknown space, or a view that is neither, is refused", [await choose({ id: newItemId(), view: "locked" }), await choose({ id: secret, view: "open" })], [[404, false], [400, false]]);
+  is("nobody signed in is refused", await choose({ id: secret, view: "hidden" }, ""), [401, false]);
+  html = await draw(OUTSIDER);
+  is("the page follows: Secret room locked with nothing from inside, Draft room gone", [lockedPart(html).includes("Secret room"), lockedPart(html).includes("Draft room"), nothingInside(html)], [true, false, []]);
 
   part("The creator chooses it in the studio");
   const studio = readFileSync("components/community-studio.tsx", "utf8");

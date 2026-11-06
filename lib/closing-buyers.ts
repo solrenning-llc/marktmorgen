@@ -28,7 +28,7 @@
  * (lib/company-postal.ts), counted on the company's sender (EmailMeter
  * "company"), never on the store's own emails, which end with its plan.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendBatch, type BatchMessage } from "@/lib/email";
 import { onAccount } from "@/lib/stripe-account";
@@ -63,8 +63,31 @@ export const toldKey = (folder: string) => `nl:closing:told:${folder}`;
  * never printed.
  */
 const contactOf = (store: Store) => (store.contact?.on ? `use the contact form on its page, ${storeBase(store)}#contact, or reply to this email` : "reply to this email: your reply goes to the store");
-/** The told list's mark for an address the cap did not cover: written once, so each is counted once. */
-const UNTOLD = "x";
+/**
+ * The told list's mark for an address the cap did not cover: written once (HSETNX), so each is counted once. Each
+ * write is its own mark, "x:" and 16 hex digits (untoldMark), so after a lost reply a read-back proves whether the
+ * write that landed is ours (markUntold). The bare "x" of the marks written before stays read as the same mark.
+ */
+const UNTOLD_MARK = /^x(?::[0-9a-f]{16})?$/;
+const untoldMark = () => `x:${randomBytes(8).toString("hex")}`;
+const isUntold = (raw: unknown): boolean => typeof raw === "string" && UNTOLD_MARK.test(raw);
+
+/**
+ * Marks `field` as not told and says whether this call wrote it, so it is counted once (CX-123 rule 24). HSETNX
+ * answers 1 (written) or 0 (there already). Any other reply is not "not written": the field is read back once (HGET),
+ * and only our own mark counts. Nil there is not written (tried again next run); another value is not ours. A
+ * read-back out of shape gives back the `certain` credit taken before it this round, whose emails will not go now,
+ * and throws UnknownReplyError, so the closing job holds and tries again.
+ */
+async function markUntold(folder: string, field: string, certain: number): Promise<boolean> {
+  const mark = untoldMark();
+  const written = repliesFor(await redisPipeline([["HSETNX", toldKey(folder), field, mark]]), 1)?.[0];
+  if (written === 1 || written === 0) return written === 1;
+  const back = repliesFor(await redisPipeline([["HGET", toldKey(folder), field]]), 1)?.[0];
+  if (back === null || typeof back === "string") return back === mark;
+  await returnCredit(folder, certain).catch((failed) => console.error("giving back a closing's email credit failed; not tried again", failed));
+  throw new UnknownReplyError("whether a closing's buyer was marked as not told");
+}
 
 /**
  * One entry of the told list, only in its exact shape (audit SG2, CX-123
@@ -73,7 +96,7 @@ const UNTOLD = "x";
  * as written), or null: unknown, and then nothing is sent on it this round.
  */
 function markOf(raw: unknown): "absent" | "untold" | number | null {
-  return raw === UNTOLD ? "untold" : textCountOf(raw);
+  return isUntold(raw) ? "untold" : textCountOf(raw);
 }
 
 /**
@@ -162,11 +185,8 @@ export async function tellBuyers(store: Store, endedAt: number, day: number, aft
       const going: string[] = [];
       for (const email of todo.slice(i, i + 100)) {
         if (await takeCreditOrGiveBack(folder, EMAILS_PER_BUYER_PER_ENDING, going.length * EMAILS_PER_BUYER_PER_ENDING)) going.push(email);
-        else {
-          // Counted once however many times the address turns up (HSETNX).
-          const [fresh] = await redisPipeline([["HSETNX", toldKey(folder), email, UNTOLD]]);
-          if (Number(fresh) === 1) out.untold += 1;
-        }
+        // Counted once however many times the address turns up (HSETNX of our own mark).
+        else if (await markUntold(folder, email, going.length * EMAILS_PER_BUYER_PER_ENDING)) out.untold += 1;
       }
       const letters = going.map((email) =>
         message(store, email, buyerNotice({ store: store.name, storeUrl: base, day, contact: contactOf(store), member: members.has(email), paused: !unpaused.has(email), refund: members.get(email) || undefined }), postal),
@@ -184,10 +204,7 @@ export async function tellBuyers(store: Store, endedAt: number, day: number, aft
   if (!out.after) {
     // (The told list of an earlier ending was let go when this one's members were held: lib/plan-closing.ts.)
     // A member with no address on Stripe cannot be told: counted, once.
-    for (const sub of held.missing) {
-      const [fresh] = await redisPipeline([["HSETNX", toldKey(folder), `#${sub}`, UNTOLD]]);
-      if (Number(fresh) === 1) out.untold += 1;
-    }
+    for (const sub of held.missing) if (await markUntold(folder, `#${sub}`, 0)) out.untold += 1;
     const kept: string[] = [...members.keys()];
     kept.push(...(await importedBuyers(store.statsId)).keys());
     kept.push(...(await readPayPalSales(store.statsId, 0, 100_000)).sales.map((sale) => sale.email));
@@ -229,7 +246,7 @@ export async function tellStaysOpen(store: Store, until: number): Promise<boolea
     const told: { email: string; ending: string }[] = [];
     const untold: string[] = [];
     for (let i = 0; i + 1 < flat.length; i += 2) {
-      if (flat[i + 1] === UNTOLD) untold.push(flat[i]);
+      if (isUntold(flat[i + 1])) untold.push(flat[i]);
       else told.push({ email: flat[i], ending: flat[i + 1] });
     }
     if (untold.length) await redisPipeline([["HDEL", toldKey(folder), ...untold]]);

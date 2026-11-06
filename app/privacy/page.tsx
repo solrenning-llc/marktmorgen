@@ -657,6 +657,20 @@ export default function PrivacyPage() {
           on a list so the course stays closed to them. To check who bought a
           course, we ask the creator&apos;s own Stripe account by email address.
         </p>
+        <p id="lesson-places">
+          <strong className="text-black">Where you stopped in a lesson video.</strong>{" "}
+          When a student watches a lesson video a store hosts with us, their
+          own browser keeps where they stopped, so the lesson can offer to
+          continue from there: in its storage, under <code>mm:lp:</code>{" "}
+          followed by the course, the lesson and a code made on our server
+          that cannot be worked out from their email address. It holds the
+          second they reached and when, and nothing else, and is never sent to
+          us. The speed they chose is kept the same way, under{" "}
+          <code>mm:lp-speed</code>. A place is removed when the video is
+          watched to its end, when they press Start over, after 90 days, and
+          for the whole course once their access to it ends; clearing the
+          browser&apos;s site data removes it at any time.
+        </p>
         <p id="lesson-comments">
           <strong className="text-black">Comments under lessons.</strong>{" "}
           A student who comments under a lesson chooses a name, and we keep that

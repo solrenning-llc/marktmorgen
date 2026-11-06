@@ -24,6 +24,7 @@ import { MAX_CERT_NAME, MIN_CERT_NAME, certificateOf, hasFinished } from "@/lib/
 import { canManage } from "@/lib/membership-manage";
 import { CourseOutline, WithDay } from "@/components/course-outline";
 import { ForgetLessonPositions } from "@/components/forget-lesson-positions";
+import { devicePlaceKey } from "@/lib/lesson-position";
 import { readListing } from "@/lib/catalog";
 import { membershipLine, speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
@@ -71,6 +72,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const query = await searchParams;
   const notice = w.linkNotices[typeof query.link === "string" ? query.link : ""] ?? null;
   const access = await courseAccess(store, product, await cookies());
+  // A signed-in student whose access is not open: their places in this course's videos go from their device (650 [WG10]).
+  const forgetKey = access.state !== "open" && access.learner && !access.learner.owner ? devicePlaceKey(course.id, access.learner.email) : null;
   const open = access.state === "open";
   const start = open ? access.start : null;
   const studying = open && !access.learner.owner;
@@ -128,9 +131,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
       <main id="content" className="relative mx-auto max-w-2xl px-4 py-12 sm:py-16">
         {/* Access not open for a signed-in student (a refund, a lost dispute, an ended membership, taken off):
             where they stopped in this course's videos is removed from their device (650 [WG10]). */}
-        {access.state !== "open" && access.learner && !access.learner.owner ? (
-          <ForgetLessonPositions courseId={course.id} learner={emailKey(access.learner.email)} />
-        ) : null}
+        {forgetKey ? <ForgetLessonPositions courseId={course.id} learner={forgetKey} /> : null}
         <div className="flex items-center justify-center gap-3">
           {store.photoId ? (
             // eslint-disable-next-line @next/next/no-img-element

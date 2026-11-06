@@ -29,6 +29,7 @@ import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
 import { StampedPlayer } from "@/components/video-stamp";
 import { LessonPlayer } from "@/components/lesson-player";
+import { devicePlaceKey } from "@/lib/lesson-position";
 import { videoStampText } from "@/lib/video-stamp";
 
 type Params = {
@@ -151,7 +152,9 @@ export default async function LessonPage({ params, searchParams }: Params) {
   const previous = order.slice(0, at).reverse().find(reachable) ?? null;
   const next = order.slice(at + 1).find(reachable) ?? null;
   const isDone = done.has(lesson.id);
-  // Where the student stopped, kept on their device and offered back (650 [WG10], components/lesson-player.tsx).
+  // Where the student stopped, kept on their device and offered back (650 [WG10], components/lesson-player.tsx),
+  // under a key only the server can make (lib/lesson-position.ts); never for the creator or a visitor.
+  const placeKey = student ? devicePlaceKey(course.id, student.email) : null;
   const resumeWords = { label: w.resumeLabel, stopped: w.resumeStopped, resume: w.resumeContinue, startOver: w.resumeStartOver };
   const moduleNumber = course.modules.findIndex((m) => m.id === unit.id) + 1;
 
@@ -237,7 +240,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
                     <LessonPlayer
                       courseId={course.id}
                       lessonId={lesson.id}
-                      learner={student ? who : null}
+                      learner={placeKey}
                       words={resumeWords}
                       src={video.src}
                       controls
@@ -255,7 +258,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
                     <LessonPlayer
                       courseId={course.id}
                       lessonId={lesson.id}
-                      learner={student ? who : null}
+                      learner={placeKey}
                       words={resumeWords}
                       src={video.src}
                       controls

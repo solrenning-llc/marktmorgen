@@ -237,9 +237,10 @@ export async function undoTakeRoom(room: string, bytes: number, path: string): P
  */
 const BYTES_TEXT = /^(0|-?[1-9]\d{0,15})$/;
 
-/** A counter's reply as a whole number, below zero read as zero; null for anything else. */
+/** A GET of the counter as text, a whole number, below zero read as zero; null for anything else, a number included (GET answers text or nil only; Codex P on #2655). */
 function bytesUsed(reply: unknown): number | null {
-  const n = typeof reply === "string" && BYTES_TEXT.test(reply) ? Number(reply) : typeof reply === "number" ? reply : NaN;
+  if (typeof reply !== "string" || !BYTES_TEXT.test(reply)) return null;
+  const n = Number(reply);
   return Number.isSafeInteger(n) ? Math.max(0, n) : null;
 }
 

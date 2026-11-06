@@ -1,4 +1,4 @@
-import {spawn} from 'node:child_process';
+import {spawn, spawnSync} from 'node:child_process';
 import {readdirSync, readFileSync} from 'node:fs';
 
 /**
@@ -81,30 +81,70 @@ export function procState(pid) {
   } catch { return 'proc=unreadable'; }
 }
 
+/** Where each test file runs in a process group of its own, so its whole tree can be ended (POSIX). */
+const OWN_GROUP = process.platform !== 'win32';
+/** The groups of the files running now, ended if the runner itself is stopped (they no longer share its terminal group). */
+const active = new Set();
+let hooked = false;
+
+/**
+ * Ends a test file's whole process tree, not only the process it started (Codex G on #2826, 5805110853: a descendant
+ * left alive kept the inherited output open after the runner finished and overlapped the next file). POSIX: the
+ * file's own process group; Windows: taskkill /T. Never throws.
+ * @param {number} pid
+ */
+function endTree(pid) {
+  try {
+    if (OWN_GROUP) process.kill(-pid, 'SIGKILL');
+    else spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], {stdio: 'ignore'});
+  } catch { /* nothing left in the group */ }
+}
+
+function hookRunnerStop() {
+  if (hooked || !OWN_GROUP) return;
+  hooked = true;
+  const sweep = () => { for (const pid of active) endTree(/** @type {number} */ (pid)); };
+  process.once('exit', sweep);
+  for (const signal of /** @type {const} */ (['SIGINT', 'SIGTERM'])) {
+    process.once(signal, () => { sweep(); process.kill(process.pid, signal); });
+  }
+}
+
 /**
  * @param {string} bundle @param {NodeJS.ProcessEnv} env @param {string} [executable]
  * @param {{timeoutMs?: number, label?: string, diagnose?: () => string}} [limit] with timeoutMs, a process still
- *   running then is described (whether exit came, /proc, and what diagnose adds), killed and counted as failed
+ *   running then is described (whether exit came, /proc, and what diagnose adds), its tree ended and counted as failed
  * @returns {Promise<number>}
  */
 export function runBundle(bundle, env, executable = process.execPath, limit = {}) {
   return new Promise(resolve => {
-    const child = spawn(executable, [bundle], {stdio: 'inherit', env});
+    hookRunnerStop();
+    const child = spawn(executable, [bundle], {stdio: 'inherit', env, detached: OWN_GROUP});
+    const pid = child.pid;
+    if (pid !== undefined && OWN_GROUP) active.add(pid);
     let settled = false;
     /** @type {{code: number | null, signal: NodeJS.Signals | null} | null} */
     let exited = null;
     /** @param {number} code */
-    const finish = code => { if (!settled) { settled = true; clearTimeout(timer); resolve(code); } };
+    const finish = code => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      // Whatever the file started and left running goes with it, so nothing overlaps the next file or holds the output.
+      if (pid !== undefined) { endTree(pid); active.delete(pid); }
+      resolve(code);
+    };
     child.once('exit', (code, signal) => { exited = {code, signal}; });
     const timer = limit.timeoutMs === undefined ? undefined : setTimeout(() => {
       const seen = exited ? `exit seen (code ${exited.code}, signal ${exited.signal})` : 'exit not seen';
-      const proc = child.pid === undefined ? 'pid=none' : procState(child.pid);
+      const proc = pid === undefined ? 'pid=none' : procState(pid);
       let extra = '';
       try { extra = limit.diagnose ? `; ${limit.diagnose()}` : ''; } catch { /* the line goes out without it */ }
-      console.error(`TIMEOUT: ${limit.label ?? bundle} did not finish in ${(limit.timeoutMs ?? 0) / 1000} s; ${seen}; ${proc}${extra}; killed and counted as a failure.`);
-      // Already gone (close never came): nothing to kill, it fails now.
+      console.error(`TIMEOUT: ${limit.label ?? bundle} did not finish in ${(limit.timeoutMs ?? 0) / 1000} s; ${seen}; ${proc}${extra}; killed with its process tree and counted as a failure.`);
+      // Already gone (close never came): its tree is ended and it fails now.
       if (exited) return finish(1);
-      child.kill('SIGKILL');
+      if (pid !== undefined) endTree(pid);
+      else child.kill('SIGKILL');
       child.once('exit', () => finish(1));
       // Should no exit follow the kill (a process never reaped), the file still fails, and the run goes on.
       setTimeout(() => finish(1), 5_000).unref();

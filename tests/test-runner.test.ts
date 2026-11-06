@@ -245,7 +245,12 @@ test('a run is told whether the next file\'s compilation has settled, and that t
 // Codex G on #2826 (5805110853, MEDIUM; proofs 285f70bb and 43c69845, kept here): killing only the direct worker left a
 // process it had started alive, still holding the inherited output, overlapping the next test and keeping whoever reads
 // the runner's pipes waiting after the runner itself had finished. A timed-out file's whole process tree goes.
-const running = (pid: number) => { try { process.kill(pid, 0); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false; throw error; } };
+// Running: signal 0 reaches it and it is not a zombie. A process that died after its parent is reparented to PID 1,
+// which may never reap it (this container's init does not): dead, holding nothing open, yet signal 0 still reaches it.
+const running = (pid: number) => {
+  try { process.kill(pid, 0); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false; throw error; }
+  try { return !/^State:\s*Z/m.test(readFileSync(`/proc/${pid}/status`, 'utf8')); } catch { return true; }
+};
 async function gone(pid: number, ms = 3000): Promise<boolean> {
   const until = Date.now() + ms;
   while (running(pid) && Date.now() < until) await new Promise(done => setTimeout(done, 10));

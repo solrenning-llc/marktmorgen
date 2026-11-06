@@ -206,3 +206,20 @@ The environment cwd moved to /workspace/scratch/e976a72ed984. Existing worktrees
 3. Nesse caso, integrar latest main uma vez, preservar `0bf91247c35c48de835631603c5816344e099ac7` e `1ba1591411648751f9332036cea42e5e468412cf`, provar todos os demais paths iguais ao main e exigir nove workflows novos.
 4. Se Claude 1 atribuir os achados de `lib/imported-purchases.ts`, refazer auditoria de sobreposição e anunciar RESERVA antes do código; até lá, não corrigir.
 
+## Retomada 22h03–22h10 (Fortaleza) — controlador desbloqueado; novo ciclo com falha WebKit externa
+
+- Checkpoint `510da0ae16d8d51ed43267aa26bccb504e7884d7` lido primeiro; depois main `CLAUDE.md`, `AGENTS.md`, índice e cinco reservas, seção Codex da caixa e canal integral.
+- Canal integral inicialmente conferido com blob declarado/calculado `bcdbac8b77e2f94a7c00c0a5c9e571af12d732a2` (313500 bytes). Antes do append, nova leitura conferiu `df1502c2e83cbc55a79e74428cddbbca2c1a8055` (315701 bytes). A mensagem causal entrou em `e3380a4315d596b13e722ad513f5893b4fc03627`, blob resultante `ebc65b009497ee75e56df042172b707436c0f5e5`.
+- #2725 incorporou normalmente como main `1ec60aad5ca686d1c03efd39d9fca1b99efb733b`, removendo de novo somente a linha V de `codex/v-ci-build-macos-heap`. A reserva não aparece mais no main.
+- Claude3 integrou esse main uma única vez no #2632, sem conflito. Novo head legítimo `cda3dda927ac145887b56d2ce3d0014065f9cb06`, OPEN/mergeable, base `1ec60aad5ca686d1c03efd39d9fca1b99efb733b`; o conteúdo próprio continua o revisado.
+- Estado exato da rodada nova numa única leitura: sete workflows success, um in_progress e workflow `42138817454` failure. A falha é somente o job WebKit `127633793323` na etapa deals-board-focus; Firefox e Chromium da mesma matriz passaram. L não repetiu/cancelou/moveu nada. Claude3 controla eventual repetição única somente desse job sob CX122.15.
+- #2475 continua OPEN/non-mergeable no head exato `a430d71ccf466f1a4e504c2ae79a2d07aab469bb`, tree `610292e28dcc82ab928377d21ae9a519158511bf`, sem retry/cancelamento/head move/integração/merge. A única ação futura continua condicionada a #2632 obter nove success e merge normal.
+- Os três MÉDIOS de `lib/imported-purchases.ts` permanecem sem atribuição; prova `codex/l-imported-purchases-read-proof@875d73a704fb319cc085d09c87235654c53da161` preservada. Nenhuma correção/reserva/quinto produto ou revisão duplicada.
+
+### Próxima retomada
+
+1. Ler este checkpoint primeiro e as fontes/canal obrigatórios com SHA Git calculado.
+2. Não pollar #2632 em rodadas. Aguardar sinal causal de Claude3 sobre a repetição isolada e o estado terminal.
+3. Só depois de #2632 ter nove success e merge normal, integrar latest main uma vez no #2475, preservando `0bf91247c35c48de835631603c5816344e099ac7` e `1ba1591411648751f9332036cea42e5e468412cf`, provar os demais paths iguais ao main e exigir nove workflows novos.
+4. Achados de `lib/imported-purchases.ts`: aguardar atribuição nominal; antes de qualquer correção, refazer auditoria de sobreposição e anunciar RESERVA.
+

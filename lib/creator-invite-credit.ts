@@ -90,15 +90,15 @@ async function refundedOn(invoice: Invoice): Promise<number> {
     throw new UnknownReplyError("invite credits: the payments of an invoice");
   }
   for (const row of list.data as { payment?: { type?: unknown; payment_intent?: unknown; charge?: unknown } | null }[]) {
-    const known = row && typeof row === "object" && row.payment && typeof row.payment === "object" && typeof row.payment.type === "string";
-    const ref = (v: unknown) => v === undefined || v === null || typeof v === "string";
-    if (!known || !ref(row.payment!.payment_intent) || !ref(row.payment!.charge)) throw new UnknownReplyError("invite credits: a payment of an invoice");
-    const payment = row.payment;
-    const intent = typeof payment?.payment_intent === "string" ? payment.payment_intent : "";
-    const charge = typeof payment?.charge === "string" ? payment.charge : "";
-    if (!intent && !charge) continue;
+    // Only a payment whose refunds can be read (Codex C2 on #2722): a payment intent or a charge, naming its own
+    // reference. A payment record (paid outside Stripe's charges), a type not known here or a type without its own
+    // reference has no refund list to read, so its refunds are unknown, not none: the store fails this run.
+    const payment = row && typeof row === "object" && row.payment && typeof row.payment === "object" ? row.payment : null;
+    const type = payment?.type;
+    const ref = type === "payment_intent" ? payment?.payment_intent : type === "charge" ? payment?.charge : undefined;
+    if (typeof ref !== "string" || !ref) throw new UnknownReplyError("invite credits: a payment of an invoice");
     const query = new URLSearchParams({ limit: "100" });
-    query.set(intent ? "payment_intent" : "charge", intent || charge);
+    query.set(type as string, ref);
     const list = await onPlatformAt(INVITE_STRIPE_VERSION, "GET", `/refunds?${query}`);
     // Read exactly (Codex C2 on #2722): a whole list, at most the hundred asked for, each refund with a whole
     // non-negative amount and a status in words. Anything else is not "no refund": the store fails this run and no

@@ -5,6 +5,8 @@ import { store as redis } from './redis-stub';
 import { ROOM } from './data-room';
 import { form, responses } from './form-response-fixture';
 import { done, is } from './check';
+import { receiverOf } from '@/lib/funnel-bundle-store';
+import { MAX_FORMS } from '@/lib/forms';
 import { COPIERS } from '@/lib/person-copy';
 import { erasureScope } from '@/lib/person-erasure';
 import { storeExport } from '@/lib/store-export';
@@ -60,6 +62,7 @@ async function main() {
       is('healthy person copy with no answers stays empty', await COPIERS['lib/form-store.ts'](scope), []);
       const known = JSON.parse(await new Response(storeExport(shop)).text());
       is('healthy store export keeps the saved form', known.forms[0].form.id, form.id);
+      is('healthy funnel receiver counts its saved form', (await receiverOf(shop)).room.formsLeft, MAX_FORMS - 1);
       unknown = true;
       let copyUnknown = false;
       try { await COPIERS['lib/form-store.ts'](scope); } catch (error) { copyUnknown = error instanceof UnknownReply; }
@@ -67,7 +70,10 @@ async function main() {
       const partial = JSON.parse(await new Response(storeExport(shop)).text());
       is('store stream omits forms rather than inventing none', partial.forms, undefined);
       is('store stream declares the unread forms section', typeof partial.unreadPart4 === 'string' && partial.unreadPart4.includes('could not be read'), true);
-      is('both actual consumers encountered the selected unknown reply', injections, 2);
+      let receiverUnknown = false;
+      try { await receiverOf(shop); } catch (error) { receiverUnknown = error instanceof UnknownReply; }
+      is('funnel receiver refuses unknown capacity instead of inventing free slots', receiverUnknown, true);
+      is('all three actual consumers encountered the selected unknown reply', injections, 3);
       console.log('FORM_SIBLING_CONSUMER_COMMANDS', commands);
     } finally { globalThis.fetch = fetchBefore; }
   } finally { redis.pipeline = pipeline; }

@@ -35,3 +35,7 @@ A required discovered test aliases only lib/store to the existing synthetic worl
 Eight actual TypeScript roots plus real imports: zero diagnostics; directed lint zero; scanner4079/0; client bundles269/269; diff clean for this HTTP phase.
 
 The next StudioForms inventory test is now RED: 13 tests, 12 pass, one fails because the real page propagates UnknownReply. The fix is NOT included until the shared-line coordination request is answered. The public POST, StudioEmail and public-page consumers remain unmodified and unfinished; the branch is still WIP, with no product PR or CI request.
+
+## Funnel receiver corroboration
+
+After the helper repair, the same shape proof additionally runs receiverOf from the real funnel-bundle-store: a saved form consumes one slot; unknown HVALS must not invent free slots. Replaying all119 checks against original738 gives57 failures; repaired helper119/119. Three actual consumers encounter the selected unknown reply; the copy/export/receiver section observes18 application commands under its prechecked300 ceiling. This is corroboration added after repair, not a claim that119 preceded that repair. The original117/56 causal commit remains unchanged. One actual root plus real imports0 and directed lint0 for this addition. Studio inventory13/1 is still deliberately RED pending shared-line coordination.

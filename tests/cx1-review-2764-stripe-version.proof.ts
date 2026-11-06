@@ -4,7 +4,7 @@ import { requestManageLink } from "@/lib/membership-manage";
 import { onAccount } from "@/lib/stripe-account";
 import { switchTier } from "@/lib/tier-switch";
 import { switchYearly } from "@/lib/yearly-switch";
-import { EU_WITHDRAWAL_CONSENT_VERSION, consentMetaValue } from "@/lib/digital-consent";
+import { EU_WITHDRAWAL_CONSENT_VERSION } from "@/lib/digital-consent";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { is, done } from "./check";
@@ -16,7 +16,6 @@ const subscription = "sub_CX1Member0001", customer = "cus_CX1Member0001";
 const now = Math.floor(Date.now() / 1000);
 const consent = { version: EU_WITHDRAWAL_CONSENT_VERSION, at: now };
 let product = "", mode = "exact", actualPrice = "price_CX1Monthly0001", actualConsent = "";
-let chargeRequests = 0;
 const row = () => ({
   id: subscription, object: "subscription", status: "active", customer, created: now - 90 * 86400,
   start_date: now - 90 * 86400, trial_end: null, discount: null, discounts: [], pause_collection: null,
@@ -36,7 +35,6 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (method === "POST" && path === "/prices") return json({ id: "price_CX1Target0001" });
   if (method === "POST" && path === `/subscriptions/${subscription}`) {
     if (!body.has("items[0][price]")) return json(row());
-    chargeRequests++;
     const invoice = { id: "in_CX1Paid0001", status: "paid", total: 1000, amount_paid: 1000, currency: "usd" };
     if (mode === "empty") return json({});
     if (mode === "wrong subscription") return json({ ...row(), id: "sub_CX1Other0001", pending_update: null, latest_invoice: invoice });
@@ -79,7 +77,7 @@ async function main() {
       store = (await storeForEmail(owner))!;
     }
     for (mode of ["exact"]) {
-      emails.length = 0; calls.length = 0; chargeRequests = 0;
+      emails.length = 0; calls.length = 0;
       actualPrice = "price_CX1Monthly0001"; actualConsent = "";
       const result = flow === "tier"
         ? await switchTier(store, token, subscription, b.product.id, now, consent)

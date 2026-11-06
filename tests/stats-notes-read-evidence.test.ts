@@ -7,6 +7,13 @@ const key = `nl:stats:${stats}:notes`;
 const now = Date.UTC(2026, 10, 5, 12);
 const value = JSON.stringify({ day: "2026-11-04", text: "Published the course" });
 const pair = ["00000001", value];
+const addWithAttempt = addNote as (
+  statsId: string,
+  day: unknown,
+  text: unknown,
+  now: number,
+  attempt: unknown,
+) => ReturnType<typeof addNote>;
 function refuses(action: () => unknown): boolean {
   try { action(); return false; } catch { return true; }
 }
@@ -145,6 +152,18 @@ async function main() {
   try { await addNote(stats, "2026-11-05", "The requested chart note", now); } catch { retryRefused = true; }
   is("the retry still reports the unavailable result", retryRefused, true);
   is("the retry does not duplicate the requested note", await store.pipeline([["HLEN", key]]), [1]);
+
+  part("A recovered retry reuses its operation without hiding a deliberate duplicate");
+  reset();
+  changeReading(() => []);
+  let stableFirstRefused = false;
+  try { await addWithAttempt(stats, "2026-11-05", "The stable requested note", now, "11111111"); } catch { stableFirstRefused = true; }
+  is("the stable first attempt still reports its unavailable result", stableFirstRefused, true);
+  changeReading(reply => reply);
+  const recovered = await addWithAttempt(stats, "2026-11-05", "The stable requested note", now, "11111111");
+  is("the recovered retry returns the one landed note", recovered?.filter(note => note.text === "The stable requested note").length, 1);
+  const deliberate = await addWithAttempt(stats, "2026-11-05", "The stable requested note", now, "22222222");
+  is("a separate operation may deliberately add the same day and words", deliberate?.filter(note => note.text === "The stable requested note").length, 2);
 
   reset();
   await store.pipeline([["HSET", key, "00000001", "{"]]);

@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "lib/redis-memory.ts",
+    "lib/crm.ts",
+    "lib/flows.ts",
+    "lib/buyer-profile.ts",
+    "tests/flow-lease-effect.test.ts",
+    "tests/flow-lease-completion.test.ts",
+    "tests/crm-deal-writes.test.ts",
+    "tests/form-opportunity.test.ts",
+    "tests/mail-report-events.test.ts",
+    "tests/review-g2-deal-preflight-shrink.test.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

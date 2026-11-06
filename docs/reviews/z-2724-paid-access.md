@@ -1,3 +1,17 @@
+# Focal return: single-item acknowledgements closed
+
+Exact head `c5b302f8a95260b1451cb9b8488cb4275b6dbcfb`, nominal corrective delta `58aa1d7995ff5ff9d5f6ce532197d90603de801f..c5b302f8` read in full (gifts, preorders, canonical test). Return announced before execution in channel `d8c13f195b1446e02e2333dfeaefee046b002744`. Q retains its separate completeness review5795076516; no author product/branch/CI edited.
+
+**Z MEDIUM5795016677 CLOSED; NO NEW HIGH/MEDIUM IN THE FOCAL DELTA. MAY MERGE only with both applicable clean financial opinions, nine exact-head final green aggregators and clean normal expected-head merge by the author.** This is not a full re-review of other owners' scope or certification of main/future integration.
+
+The exact same durable `tests/z2724-single-count.proof.ts` is53checks/8causal failures on the prior58aa head and53/53 on c5b302f8. The earlier immutable missing-ACK `tests/z2724-write-ack.proof.ts` remains53/53 on c5. Neither proof nor runner was changed. Single-field HDEL, HSET, EXPIRE and single-member SADD now require exactly numeric0 or1; missing/other counts, text and null keep the row unsure and the anchor unchanged. OneWrite changes no command, key, TTL or ceiling. Existing SET requires exactOK, SISMEMBER keeps its own0/1 validation. Normal retries remove the previously unconfirmed access; both gift and preorder journeys and positive duplicate controls remain green. The author's canonical93 assertions cover HDEL/HSET/EXPIRE/SADD count2 and unknown responses across both consumers.
+
+Validation on this exact head: author93, gifts33, preorders31, call-cancel22, call-reminder17, team-scheduling100, cost24, data7 =327linked passing; independent proofs53+53 also pass. Strict scoped types/imports including retained proof files0, changed-file lint0, scanner3807tracked/0corrections, diffcheck clean. The earlier registry SISMEMBER/read-description correction remains unchanged and applicable; structural bounded work only, no company funding/dollar-margin certification.
+
+All Redis/network/provider boundaries are synthetic as in the durable proofs. No native Redis, real Stripe/payment/email, browser, global build or hosted CI certified. No merge, retry or author source/branch/CI action. Historical findings below are preserved for traceability and superseded only by the scoped closure above.
+
+---
+
 # Focal return: impossible single-field count remains unknown
 
 Exact reviewed head: `58aa1d7995ff5ff9d5f6ce532197d90603de801f`. Requested write-ack corrective delta `115f71d3..2832cd1ef741c45113208daa217e8001ae7b6eec` read in full (gifts, preorders, author test, cost registry). The later refunds-only correction stays with Q; it does not change this ACK boundary. Return announced before execution, new proof reserved in channel `ec74711c8faf6e90e9cbad3091510563756efa58`.

@@ -247,8 +247,21 @@ async function readConnection(statsId: string): Promise<Connection | null> {
  */
 export async function metaLines(statsId: string): Promise<AdSpend[]> {
   if (!isRedisConfigured()) return [];
-  const [conn, raw] = await redisPipeline([["EXISTS", connKey(statsId)], ["GET", linesKey(statsId)]]);
-  return Number(conn) ? parseLines(raw) : [];
+  // Read exactly (CX-123 rule 24): no lines only when the store is confirmed not connected or nothing was read yet;
+  // a reply in another shape throws, so the figures that use spend say it is unread instead of leaving it out as 0.
+  const replies = repliesFor(await redisPipeline([["EXISTS", connKey(statsId)], ["GET", linesKey(statsId)]]), 2);
+  const connected = replies ? countOf(replies[0]) : null;
+  if (!replies || connected === null || connected > 1) throw new UnknownReplyError("Meta's ad spend lines");
+  const raw = replies[1];
+  if (connected === 0 || raw === null) return [];
+  let list: unknown;
+  try {
+    list = typeof raw === "string" ? JSON.parse(raw) : null;
+  } catch {
+    list = null;
+  }
+  if (!Array.isArray(list)) throw new UnknownReplyError("Meta's ad spend lines");
+  return parseLines(raw);
 }
 
 /** What the studio shows; null while the deployment has no Meta app, so nothing about it is shown. */

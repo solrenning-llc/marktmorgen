@@ -24,7 +24,11 @@ function toCents(raw: string, currency: string): number {
   return Math.round(value * 10 ** decimals);
 }
 
+/** The same as META_SPEND_UNREAD in lib/ad-spend.ts, written here so this browser file stays free of server code. */
+const META_UNREAD = "Ad spend from your Meta ad account could not be read just now, so the figures that use ad spend leave it out. Reload to try again.";
+
 const REASONS: Record<string, string> = {
+  unread: "The list could not be read back just now. Reload the page to see where it stands.",
   channel: "Choose where the ad ran.",
   amount: "Type what you spent, more than zero.",
   days: "Check the days: the first before the last, not in the future, and no more than 400 days apart.",
@@ -53,7 +57,7 @@ function MetaAds({
   canConnect: boolean;
   pin: string;
   money: (cents: number) => string;
-  onChosen: (meta: MetaAdsView, spends: AdSpend[]) => void;
+  onChosen: (meta: MetaAdsView, spends: AdSpend[], metaUnread: boolean) => void;
 }) {
   const [pick, setPick] = useState(meta.account?.id ?? meta.accounts.find((a) => a.currency === meta.currency)?.id ?? meta.accounts[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
@@ -72,9 +76,9 @@ function MetaAds({
     setBusy(true);
     try {
       const response = await fetch("/api/store/meta-ads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "account", id: pick }) });
-      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; meta?: MetaAdsView; spends?: AdSpend[] };
+      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; meta?: MetaAdsView; spends?: AdSpend[]; spendsUnread?: boolean };
       if (answer.ok && answer.meta && answer.spends) {
-        onChosen(answer.meta, answer.spends);
+        onChosen(answer.meta, answer.spends, answer.spendsUnread === true);
         toast(answer.meta.readPaused ? `Chosen. ${READ_PAUSED}` : answer.meta.read?.day ? "Read from Meta." : "Chosen. It is read within the hour.");
       } else toast("That did not save. Try again.");
     } catch {
@@ -205,8 +209,11 @@ export function AdSpendEditor({
   meta: metaGiven = null,
   canConnectMeta = false,
   pin = "",
+  spendsUnread = false,
 }: {
   spends: AdSpend[];
+  /** Meta's lines could not be read when `spends` was: they are left out, and the editor says so. */
+  spendsUnread?: boolean;
   onChange: (spends: AdSpend[]) => void;
   /** The channels the numbers know, offered first. */
   channels: { value: string; label: string }[];
@@ -218,6 +225,7 @@ export function AdSpendEditor({
   pin?: string;
 }) {
   const [meta, setMeta] = useState(metaGiven);
+  const [metaUnread, setMetaUnread] = useState(spendsUnread);
   const typed = spends.filter((s) => s.source !== "meta");
   const fromMeta = spends.filter((s) => s.source === "meta");
   const overlap = typedOverlap(typed, fromMeta);
@@ -235,9 +243,10 @@ export function AdSpendEditor({
     setBusy(true);
     try {
       const response = await fetch("/api/store/spend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; spends?: AdSpend[]; error?: string };
+      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; spends?: AdSpend[]; spendsUnread?: boolean; error?: string };
       if (answer.ok && answer.spends) {
         onChange(answer.spends);
+        setMetaUnread(answer.spendsUnread === true);
         toast(done);
         return true;
       }
@@ -268,11 +277,17 @@ export function AdSpendEditor({
           canConnect={canConnectMeta}
           pin={pin}
           money={money}
-          onChosen={(next, all) => {
+          onChosen={(next, all, unread) => {
             setMeta(next);
             onChange(all);
+            setMetaUnread(unread);
           }}
         />
+      ) : null}
+      {metaUnread ? (
+        <p className="mt-2 text-xs text-ink" role="status" data-meta-unread>
+          {META_UNREAD}
+        </p>
       ) : null}
       {overlap.length ? (
         <p className="mt-2 text-xs text-ink" role="status">

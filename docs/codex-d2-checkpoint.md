@@ -1,3 +1,27 @@
+# Codex D2 — superseding checkpoint, November 6, 2026,03:14 UTC
+
+The former shared blocker is resolved: #2632 MERGEDba887611b8b101dfc84b14fb4fc07a7eec3b9ff8, confirmed in GitHub API. Applied C1-20261106-0005-CX-1. Frozen main b1911f2d4df0e18cad38f373e3da6d97c76e27bc was integrated ONCE into each of the SAME five products. Every integration is a normal two-parent commit with old head first and frozen main second, API expected old SHA and force=false. No active old workflow was canceled or rerun.
+
+| PR | NEW exact head | Exact verified tree | Counted linked checks |
+| --- | --- | --- | --- |
+| #2425 | bbe60b3866cb12d2651b91ad949c056d558aa0b7 | b2ff2af8e9d6767194b72d0005bf8ea20d422123 | 75 |
+| #2445 | 5bca79c0333ac91f46231cbf80e744930a36c8ae | 4ad438e1f79010dba100fe9920e9d8f566c4c885 | 75 |
+| #2596 | 5ffe2d0b6a8e2a35113eec1968980343b74d5f82 | 030d931be4d6fba1410a850fce82a681b08063b1 | 76 |
+| #2633 | a02d43b8a022455b7996567338598dc8dabf62b9 | d4c342d7c08cf29fe0f4130c95da0406aa31729b | 75 |
+| #2647 | d21666dd71efd8c1fb1178f4973373f8eb36e52d | f86a892a800c70522969e24e926c65a4dad547c6 | 75 |
+
+Each candidate is exactly frozen main plus its TWO unchanged reviewed evidence blobs. Local merge-tree, isolated candidate index/working tree and Git Data tree matched. Reservations exactly match frozen main; no reservation/product policy edit. Per candidate18linked files, strict scoped TypeScript with actual transitive imports0, focused lint0, scanner3828/0, diff0. Individual logs and plan were produced in /workspace/scratch/ddab4228c898; no changes to the contaminated original worktree index/files. Original REDs/review proofs and all retry counters remain in ancestry.
+
+ONE initial CI read after publication: Canada/Swiss/Africa each1SUCCESS+7IN_PROGRESS+1QUEUED; Chile/Korea each9IN_PROGRESS, zero terminal failures. Those are NEW workflows, not nine green checks. Preserve heads during active CI; no polling loop, no premature merge. Review content is unchanged under CX122(8): C2 Canada5779485901/Swiss5779513660, P Africa5781636870, L Chile5788130959, Q Korea5788835941. The owner's C1-0005 one-review rule applies to documentary evidence with no outgoing money; do not invent an additional financial review merely because the subject is fiscal. P's factual no-finding content remains preserved.
+
+Next independent action while five CI runs wait: nominal FIRST financial review of C2 recovery-note WIP2692 head3a61b5bc8a8ebbeae37746be07024e3ef999225d, based on primary35e. H2 already gave SECOND focal review6673595529; D2's first is still requested in the archived channel. Announce current focal head before new proof work. This is not a sixth product, not promotion of the WIP, not overall clearance of2692; R2's occupied-home outage MEDIUM remains open. Five own product slots remain occupied.
+
+At any new terminal CI event, verify the nine completed/success exact-head aggregators plus fresh mergeability and applicable review, then merge own normally with expected_head_sha. If a genuine failure is unrelated, inspect its full job log before the one permitted isolated retry; historical retry counts do not authorize rerunning old jobs. Do not chase new main without real conflict/dependency.
+
+The fiscal malformed-present enabled MEDIUM37a8d453 remains reported/open; no new nominal assignment discovered. No price/limit/commission/flag/gate/account/filing/payment/term/supplier/contact change. Current task is active again; old paused/blocker/watcher instructions below are historical and superseded by this section.
+
+# Historical full ledger
+
 # Codex D2 — exact blocked checkpoint, November 5, 2026,23:53 UTC
 
 This latest section supersedes older pending-return and watcher instructions below. Fresh channel, rotated archive2334, Codex inbox and exact PR metadata read. No active Codex implementation was confirmed, so this continuation did not discard itself as a duplicate.

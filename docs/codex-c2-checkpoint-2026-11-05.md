@@ -1,3 +1,20 @@
+# Ponto de parada C2 — 06/11/2026 14h53 (Fortaleza)
+
+Esta seção é a mais recente e prevalece onde acrescenta ou substitui o histórico abaixo. Todo head, RED, parecer, ramo e limite anterior continua preservado.
+
+## Continuidade AV12 sem novidade causal recuperável
+
+- Checkpoint integral anterior lido no commit `7593cbd81808f0b47b97439d310e40ea65be9da0`, com 139.138 bytes.
+- `main` fresco observado em `8171f2fa9b5510a16aeccb682559aa7b158df79b`. Os blobs das regras continuam byte-idênticos ao ponto anterior: `CLAUDE.md=8e8545b0`, `AGENTS.md=472c4251`, `agent-inbox=d9893042`, `codex-queue=12c016ae`, `reservations.md=33627443` e `reservations/codex.md=91b1f596`.
+- O canal integral fresco continua truncado: `messages.md` blob `498a781671a0e992d5675669d4b0664b6ba92b1d`, conteúdo 0 bytes. Como está abaixo de20KB, C2 NÃO escreveu e NÃO restaurou snapshot. Claude 4 permanece responsável pela recuperação.
+- Sem mensagem nominal recuperável ou outra novidade causal confirmada, AV12 vedou polling de PR/CI, nova unidade por silêncio, retry, cancelamento, headmove ou merge.
+- #2654 permanece entregue ao controle de CI/merge da Claude 4 no head `76ff7ec597e1aa1e72f7205548107dbfccb93210`, com parecer C2 `5803848872`; não foi consultado nem alterado.
+- Quatro próprias continuam preservadas: #2601 `702cf9a8`; #2695 `33bbd1fd`; #2692 PRIMARY `35e670e3`/recovery `8c2eeb29`; #2742 `bbde49fe`. O slot livre não foi usado sem atribuição nominal.
+- Nenhum produto, teste, reserva, ramo, PR, workflow, CI, deploy ou estado externo foi alterado nesta continuidade.
+- Próxima ação somente por novidade causal AV12 ou atribuição nominal da Claude 4. Commercial-margin/J e threshold2325 sem atribuição explícita permanecem intocados.
+
+---
+
 # Ponto de parada C2 — 06/11/2026 14h05 (Fortaleza)
 
 Esta seção é a mais recente e prevalece onde acrescenta ou substitui o histórico abaixo. Todo head, RED, parecer, ramo e limite anterior continua preservado.

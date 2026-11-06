@@ -43,11 +43,14 @@ export async function reserveFundedExposure(statsId:string,scope:ExposureScope,p
   const result=await redisPipeline([['EVAL',RESERVE_EXPOSURE,1,'nl:exposure:v1:'+config.month,config.reviewId,config.binding,scope,statsId,allocation.cents,config.budgetCents,allocation.slots]]);
   // Only an own numeric Redis ACK admits spending; never execute a getter
   // or accept an inherited entry while inspecting financial evidence.
-  if(!Array.isArray(result)||Object.getOwnPropertySymbols(result).length)return false;
+  if(!Array.isArray(result)||Object.getPrototypeOf(result)!==Array.prototype||Reflect.ownKeys(result).length!==2)return false;
   const length=Object.getOwnPropertyDescriptor(result,'length');
   if(!length||!Object.hasOwn(length,'value')||length.value!==1)return false;
   const ack=Object.getOwnPropertyDescriptor(result,'0');
-  if(!ack||!Object.hasOwn(ack,'value')||ack.value!==1)return false;
+  if(!ack||!ack.enumerable||!Object.hasOwn(ack,'value')||ack.value!==1)return false;
+  // Native serialization rejects Proxy-forged descriptors. The only admitted
+  // slot is already validated numeric data, so no unknown getter is cloned.
+  structuredClone(result);
   // A delayed acknowledgement cannot authorize work under changed or expired
   // evidence. Keep the committed reservation even when revalidation refuses.
   const current=exposureBudgetConfiguration(policy,context);

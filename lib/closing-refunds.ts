@@ -350,8 +350,17 @@ export async function giveBackUnused(
         const state = refundState(refund, intent, give, row.paid.cur);
         if (state === "unknown") throw new Error("a closing refund's answer was not one this payment's refund gives");
         if (state === "failed") {
-          console.error("a closing refund was refused by Stripe; the member stays to be reconciled");
-          out.failed += 1;
+          // Refused by Stripe (a closed card, say). Before the closing day it is tried again; on the closing day it is
+          // final and goes the same way as one not made automatically (Revisor 1 on #2699): the member is told
+          // honestly, with what is left to give and the creator's contact, and the closing can finish.
+          if (options.final) {
+            const amount = stillToGive(row.unused, row.paid.back ?? 0);
+            await settle("over", amount);
+            out.unmade.push({ sub: row.sub, amount, cur: row.paid.cur, email: row.paid.e });
+          } else {
+            console.error("a closing refund was refused by Stripe; the member stays to be reconciled");
+            out.failed += 1;
+          }
           continue;
         }
         funds.set(cost.cur, (funds.get(cost.cur) ?? 0) - cost.amount);

@@ -1647,8 +1647,11 @@ export class MemoryRedis {
     }
     const months = new Set<string>();
     let relist = false;
+    let cleared = 0;
     for (const m of (room.get("~") ?? "").split(",").filter(Boolean)) {
-      if (m < month) {
+      // At most DATA_MONTHS_CLEARED_MOST (lib/store-data.ts) months that are over a call, the oldest first.
+      if (m < month && cleared < 2) {
+        cleared += 1;
         const held = Number(room.get(`~${m}`) ?? "0") || 0;
         if (held > 0) total -= held + 64;
         room.delete(`~${m}`);

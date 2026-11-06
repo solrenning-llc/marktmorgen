@@ -25,3 +25,13 @@ Original29 and added117 pass; forms19 pass. Nine linked files pass: 190 custom c
 CSV/PDF currently await readForm outside their response-read catch. CRUD returns generic 500 for UnknownReply. New real-handler tests will require 503 without download or write, with existing permission/healthy controls retained.
 
 The public POST form, StudioForms and StudioEmail overlap #2287/#1969/#1965/#2314. The channel requests narrowly coordinated unavailable handling; they are not edited before that reply. Public formsOf/result-page catch-null also remains a coordinated public-page boundary. Store-copy/funnel-bundle form lines are K2; page lines are C4 B2. No claim of completed browser, HTTP journey, accessibility audit, provider or production verification.
+
+## HTTP follow-up, 6 November 2026
+
+Canonical RED afc70f325a09c207ae7ad42b64e060f25c69be4d: 12 real-handler/page tests, four failures, eight controls. CSV/PDF failed by throwing on an unknown definition; CRUD editing/deletion returned generic 500. The same twelve pass after definition-read failures become 503 and UnknownReply is mapped to unavailable in CRUD. Confirmed absence retains 404; authorization refusal remains before reads; downloads and healthy answers retain their controls. Service/auth/PDF boundaries are synthetic; the handlers/page/editor are real.
+
+A required discovered test aliases only lib/store to the existing synthetic world when importing this CRUD handler, avoiding a real-store/synthetic-catalog mounting mismatch. No other alias block moved or changed. Initial mounting errors are not counted as product RED.
+
+Eight actual TypeScript roots plus real imports: zero diagnostics; directed lint zero; scanner4079/0; client bundles269/269; diff clean for this HTTP phase.
+
+The next StudioForms inventory test is now RED: 13 tests, 12 pass, one fails because the real page propagates UnknownReply. The fix is NOT included until the shared-line coordination request is answered. The public POST, StudioEmail and public-page consumers remain unmodified and unfinished; the branch is still WIP, with no product PR or CI request.

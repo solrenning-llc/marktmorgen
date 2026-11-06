@@ -44,3 +44,13 @@ for(const [name,handler] of [['CSV',csv],['PDF',pdf]] as const){
   finally{state.missing=false;}
  });
 }
+
+test('unknown form inventory has a status notice and no empty editable inventory',async()=>{
+ state.inventoryUnavailable=true;
+ try{
+  const html=renderToStaticMarkup(await Page({searchParams:Promise.resolve({})}));
+  assert.match(html,/Forms could not be read right now/);
+  assert.match(html,/role="status"/);
+  assert.doesNotMatch(html,/New form/);
+ }finally{state.inventoryUnavailable=false;}
+});

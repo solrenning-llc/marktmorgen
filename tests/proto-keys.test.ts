@@ -7,9 +7,14 @@
  * swaps the object's prototype instead of storing x. Each test below asks for the tag to be an ordinary own key of
  * the answer and for nothing shared (Object.prototype, the Object function) to be written.
  *
- * Fixed here: lib/source-rules.ts (sourceAlias), lib/also-bought.ts, lib/next-bought.ts.
+ * Fixed here: lib/source-rules.ts (sourceAlias), lib/also-bought.ts, lib/next-bought.ts, lib/stats.ts (the sums by
+ * channel and by product, and the short links' results by campaign) and lib/stats-report.ts (a channel's word).
  * Proved but not fixed, because the file is held by an open pull request: those tests are marked `todo`, so they
  * report without failing the run, and turn green once the holder applies the same pattern.
+ *
+ * What reaches a page is checked to have Object.prototype as its prototype too: a Client Component refuses an object
+ * with no prototype (React's "Only plain objects ... null prototypes are not supported"), so a record added up with
+ * none must be handed on as an ordinary one.
  */
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
@@ -20,7 +25,8 @@ import { parseTogether, togetherFrom } from "@/lib/also-bought";
 import { parsePaths, pathsFrom } from "@/lib/next-bought";
 import { readDepth } from "@/lib/page-depth";
 import { shareProblem } from "@/lib/partner-share";
-import { readAllTimeSales, readSales, renewalsFrom } from "@/lib/stats";
+import { readAllTimeSales, readSales, readStats, recordHit, renewalsFrom, resultsByCampaign, studioStats } from "@/lib/stats";
+import { weeklyMessage } from "@/lib/stats-report";
 import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 
@@ -162,7 +168,6 @@ const TODAY = new Date(NOW).toISOString().slice(0, 10);
 
 test(
   "stats renewalsFrom: a renewal whose channel is \"__proto__\" or \"constructor\" is its own channel's day, not Object.prototype's",
-  { todo: "lib/stats.ts is held by #2571 (Claude 3) and #1933 (Claude 3, claude3/aa1-read-imports-bundles)" },
   () => {
     const store = { handle: "harbor", previousHandles: [], releasedHandles: [] } as never;
     const invoice = (channel: string, n: number) => ({
@@ -186,13 +191,15 @@ test(
 );
 
 let sessions: Record<string, unknown>[] = [];
+let refunds: Record<string, unknown>[] = [];
 const realFetch = globalThis.fetch;
 async function harbor() {
   redis.clear();
+  refunds = [];
   process.env.STRIPE_SECRET_KEY = "sk_test_proto_keys_stand_in";
   globalThis.fetch = (async (input: string | URL | Request) => {
     const path = new URL(String(input)).pathname.replace(/^\/v1/, "");
-    return new Response(JSON.stringify({ object: "list", data: path === "/checkout/sessions" ? sessions : [], has_more: false }));
+    return new Response(JSON.stringify({ object: "list", data: path === "/checkout/sessions" ? sessions : path === "/refunds" ? refunds : [], has_more: false }));
   }) as typeof fetch;
   await claimHandle("owner@example.com", "harbor", "Harbor Kitchen", "");
   await ensureStatsId("owner@example.com");
@@ -214,20 +221,26 @@ const YESTERDAY = new Date(NOW - 86_400_000).toISOString().slice(0, 10);
 
 test(
   "stats readSales: a sale tagged utm_source \"__proto__\" is its own channel's day, and a product id \"__proto__\" its own product",
-  { todo: "lib/stats.ts is held by #2571 and #1933 (Claude 3)" },
   async () => {
     try {
       const store = await harbor();
       sessions = [paid("cs_proto_a", { utm_source: "__proto__" }), paid("cs_proto_b", { utm_source: "constructor" })];
       const bySource = await readSales(store, NOW);
       nothingShared([YESTERDAY]);
+      assert.equal(Object.getPrototypeOf(bySource!.channelDays), Object.prototype);
       assert.deepEqual([own(bySource!.channelDays!, "__proto__"), own(bySource!.channelDays!, "constructor")], [{ [YESTERDAY]: 1900 }, { [YESTERDAY]: 1900 }]);
 
       // A creator's own Stripe account can carry any product id: before, this threw (Object.prototype.d90 is undefined).
-      sessions = [paid("cs_proto_c", { product: "__proto__" })];
+      sessions = [paid("cs_proto_c", { product: "__proto__" }), paid("cs_proto_f", { product: "prod000001" })];
+      refunds = [{ id: "re_proto_1", status: "succeeded", amount: 500, currency: "usd", created: SEC - 3600, payment_intent: "pi_cs_proto_c" }];
       const byProduct = await readSales(store, NOW);
       nothingShared(WRITTEN);
+      assert.equal(Object.getPrototypeOf(byProduct!.byProduct), Object.prototype);
+      assert.deepEqual(Object.keys(byProduct!.byProduct).sort(), ["__proto__", "prod000001"]);
       assert.equal((own(byProduct!.byProduct, "__proto__") as { d90: { sales: number } }).d90.sales, 1);
+      assert.equal((own(byProduct!.byProduct, "prod000001") as { d90: { sales: number } }).d90.sales, 1);
+      assert.equal(Object.getPrototypeOf(byProduct!.refundsByProduct), Object.prototype);
+      assert.deepEqual(byProduct!.refundsByProduct, JSON.parse('{"__proto__":{"refunds":1,"cents":500}}'));
     } finally {
       globalThis.fetch = realFetch;
       cleanShared([YESTERDAY, ...WRITTEN]);
@@ -237,13 +250,13 @@ test(
 
 test(
   "stats readAllTimeSales: a product id \"__proto__\" or \"constructor\" is its own product and writes no sales onto Object.prototype",
-  { todo: "lib/stats.ts is held by #2571 and #1933 (Claude 3)" },
   async () => {
     try {
       const store = await harbor();
       sessions = [paid("cs_proto_d", { product: "__proto__" }), paid("cs_proto_e", { product: "constructor" })];
       const all = await readAllTimeSales(store);
       nothingShared(WRITTEN);
+      assert.equal(Object.getPrototypeOf(all!.byProduct), Object.prototype);
       assert.deepEqual([own(all!.byProduct, "__proto__"), own(all!.byProduct, "constructor")], [{ sales: 1, cents: 1900 }, { sales: 1, cents: 1900 }]);
     } finally {
       globalThis.fetch = realFetch;
@@ -251,3 +264,41 @@ test(
     }
   },
 );
+
+for (const tag of TAGS) {
+  test(`the studio's short links: a utm_campaign "${tag}" is its own campaign's line, on an ordinary record`, () => {
+    const results = resultsByCampaign([
+      { campaign: tag, visits: 4, sales: 1, cents: 1900 },
+      { campaign: tag, visits: 2, sales: 0, cents: 0 },
+      { campaign: "spring", visits: 3, sales: 2, cents: 3800 },
+    ]);
+    // Handed to components/short-links.tsx: an object whose prototype is anything else is refused by the page.
+    assert.equal(Object.getPrototypeOf(results), Object.prototype);
+    assert.deepEqual(Object.keys(results).sort(), [tag, "spring"].sort());
+    assert.deepEqual(own(results, tag), { visits: 6, sales: 1, cents: 1900 });
+    assert.deepEqual(own(results, "spring"), { visits: 3, sales: 2, cents: 3800 });
+    nothingShared(["visits", "sales", "cents"]);
+  });
+}
+
+test("the studio's short links: ordinary campaigns add up as before", () => {
+  assert.deepEqual(resultsByCampaign([{ campaign: "a", visits: 1, sales: 0, cents: 0 }, { campaign: "a", visits: 2, sales: 1, cents: 500 }]), { a: { visits: 3, sales: 1, cents: 500 } });
+  assert.deepEqual(resultsByCampaign([]), {});
+});
+
+test("the weekly email names a channel \"__proto__\" or \"constructor\" by its own word", async () => {
+  redis.clear();
+  process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
+  await claimHandle("owner@example.com", "harbor", "Harbor Kitchen", "");
+  await ensureStatsId("owner@example.com");
+  const store = (await storeForEmail("owner@example.com"))!;
+  const at = Date.UTC(2026, 9, 12, 12);
+  await recordHit(store, { kind: "view", source: "__proto__", ip: "192.0.2.1", userAgent: BROWSER, country: "US", device: "mobile" }, at);
+  await recordHit(store, { kind: "view", source: "__proto__", ip: "192.0.2.2", userAgent: BROWSER, country: "US", device: "mobile" }, at);
+  await recordHit(store, { kind: "view", source: "constructor", ip: "192.0.2.3", userAgent: BROWSER, country: "US", device: "mobile" }, at);
+  const data = studioStats(store, (await readStats(store, at))!, null, "none", []);
+  const text = weeklyMessage(store, data, "https://marktmorgen.com/api/store/weekly?h=harbor&t=x")?.text ?? "";
+  assert.match(text, /^- __proto__: 2 visits$/m);
+  assert.match(text, /^- constructor: 1 visit$/m);
+  assert.doesNotMatch(text, /function Object|\[object Object\]/);
+});

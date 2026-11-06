@@ -13,6 +13,7 @@
  *     with the link back to their page;
  *   - the numbers count those sales as "Welcome offer".
  */
+import { createHash } from "node:crypto";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { NO_WELCOME_OFFER, endsAt, leftWords, parseWelcomeOffer, remindAt } from "@/lib/welcome-offer";
 import { openWelcome, scheduleReminder, sendWelcomeReminders, welcomeFor } from "@/lib/welcome-offer-send";
@@ -106,6 +107,10 @@ async function main(): Promise<void> {
   await recordLead(store, claim, "Pantry Guide");
   store = (await storeForEmail(OWNER))!;
   is("set once", [await scheduleReminder(store, claim, token, asked + HOUR), await scheduleReminder(store, claim, token2, asked + 2 * HOUR)], [true, false]);
+  // Review L2 on #2998: the mark holds the reminder's time, so an erasure reads only that second of the queue.
+  const markHash = createHash("sha256").update("welcome:lead@example.com").digest("hex").slice(0, 32);
+  const [markHolds, dueAt] = await redis.pipeline([["GET", `nl:wo:r:${store.statsId}:${markHash}`], ["ZRANGEBYSCORE", "nl:wo:due", "-inf", "+inf", "WITHSCORES"]]);
+  is("the mark that it was set holds its time, the same as the queue's", [markHolds, (dueAt as string[])[1]], [String(remindAt(asked, 48)), String(remindAt(asked, 48))]);
   const quiet = await ask("quiet@example.com", free.product.id, false);
   is("never for someone who did not agree", await scheduleReminder(store, (await readClaimFull(quiet))!, quiet, asked + HOUR), false);
   const before = sent.length;

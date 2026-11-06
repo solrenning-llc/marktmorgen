@@ -286,7 +286,7 @@ export type BuyerProfile = {
   sequences: string[];
   person: string;
   notes: PersonNote[];
-  /** Stripe held more of their payments than one reading takes. */
+  /** Not every payment was read: Stripe held more than one reading takes, a PayPal sale's paid record was unread, or the handed-over purchases could not be read. */
   partial: boolean;
   /** Stripe could not be read: the payments are not on the page. */
   stripeError: boolean;
@@ -525,11 +525,16 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
   // Handed over without a payment here: brought from another platform, a
   // gift, a place someone bought for several, or a sale paid with PayPal.
   if (store.pastBuyers && store.statsId) {
-    for (const given of await importedFor(store, email).catch(() => [])) {
+    // A failed read is not "nothing handed over": the page says the reading is partial.
+    const handed = await importedFor(store, email).catch(() => null);
+    if (!handed) partial = true;
+    for (const given of handed ?? []) {
       const listing = await find(given.productId);
       productIds.push(given.productId, ...(given.items ?? []));
       // A sale paid with PayPal is a sale (lib/paypal-sales.ts): its amount, its channel, counted in what they paid.
       const paypal = given.job.startsWith("paypal:") ? await readPaid(given.job.slice(7)).catch(() => null) : null;
+      // Its paid record unread (gone, another shape, another store's, or the read failed): the amount is unknown, never $0, and the page says so.
+      if (given.job.startsWith("paypal:") && paypal?.store !== store.statsId) partial = true;
       if (paypal && paypal.store === store.statsId) {
         const channel = saleChannel(paypal.meta ?? {});
         const recorded = Boolean(paypal.meta && "channel" in paypal.meta);

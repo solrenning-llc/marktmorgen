@@ -92,7 +92,19 @@ async function main(): Promise<void> {
   const thrown = await seen(store);
   console.log(`        page: ${JSON.stringify(thrown)}`);
   is("a thrown read is never shown as 'No payment here', $0, with no word of a failed read", falseStatement(thrown), false);
+  is("the sale stays an unknown amount (no money counted) and the page warns", thrown, { kind: "brought", cents: 0, note: "paypal", paid: 0, stripeError: false, partial: true });
+
+  part("The handed-over purchases cannot be read");
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((command) => command[0] === "HGETALL" && String(command[1]).startsWith(`nl:imp:buy:${STATS}:`))) throw new Error("Redis did not answer");
+    return pipeline(commands);
+  }) as typeof redis.pipeline;
+  const lost = await buyerProfile(store, "buyer@example.com");
+  is("a failed read is not 'nothing handed over': the page warns", { orders: lost.orders.length, paid: lost.paid, partial: lost.partial }, { orders: 0, paid: 0, partial: true });
   redis.pipeline = pipeline;
+
+  part("Control after the failures");
+  is("the healthy sale is read again, nothing flagged", await seen(store), { kind: "sale", cents: 4900, note: "paypal", paid: 4900, stripeError: false, partial: false });
 
   done();
 }

@@ -24,10 +24,12 @@ const helper = check.slice(helperStart, check.indexOf("\n  };", helperStart));
 
 async function controlledRemount() {
   let mountedEpoch = 4;
+  let refreshEpoch = 4;
   const requestedEpoch = 5;
   let publishCommit!: () => void;
   const commit = new Promise<void>((resolve) => {
     publishCommit = () => {
+      refreshEpoch = requestedEpoch;
       mountedEpoch = requestedEpoch;
       resolve();
     };
@@ -39,26 +41,34 @@ async function controlledRemount() {
 
   let gateReturned = false;
   const gate = commit.then(() => {
-    gateReturned = mountedEpoch === requestedEpoch;
+    gateReturned = mountedEpoch === requestedEpoch && refreshEpoch === requestedEpoch;
   });
   await Promise.resolve();
   const gateReturnedBeforeCommit = gateReturned;
   publishCommit();
   await gate;
-  return { oldTitleReturnedBeforeCommit, gateReturnedBeforeCommit, gateReturned };
+  return { oldTitleReturnedBeforeCommit, gateReturnedBeforeCommit, gateReturned, refreshEpoch, mountedEpoch };
 }
 
 controlledRemount().then((result) => {
   is(
     "a stale title returns before the controlled commit, while the epoch gate does not",
     result,
-    { oldTitleReturnedBeforeCommit: true, gateReturnedBeforeCommit: false, gateReturned: true },
+    { oldTitleReturnedBeforeCommit: true, gateReturnedBeforeCommit: false, gateReturned: true, refreshEpoch: 5, mountedEpoch: 5 },
   );
 
   is("the harness records both requested and committed mount epochs", /requestedEpoch:\s*number/.test(harness) && /mountedEpoch:\s*number/.test(harness), true);
   is("mount publishes the requested epoch to the caller", /this\.requestedEpoch\s*\+=\s*1/.test(mount) && /return this\.requestedEpoch/.test(mount), true);
   is("the new board receives the same requested epoch", /<Board\s+key=\{[^}]+\}\s+epoch=\{this\.requestedEpoch\}\s*\/>/.test(mount), true);
   is("the board publishes its epoch only from a layout effect", /useLayoutEffect\(\(\)\s*=>\s*\{\s*page\.harness\.mountedEpoch\s*=\s*epoch;\s*\},\s*\[epoch\]\)/.test(board), true);
+
+  const layoutStart = board.indexOf("useLayoutEffect(() => {");
+  const layoutEnd = board.indexOf("}, [epoch]);", layoutStart);
+  const layout = board.slice(layoutStart, layoutEnd);
+  const refreshInstalled = layout.indexOf("page.harness.refresh =");
+  const epochPublished = layout.indexOf("page.harness.mountedEpoch = epoch");
+  is("the commit installs this board's refresh before publishing its epoch", refreshInstalled >= 0 && epochPublished > refreshInstalled, true);
+  is("no passive effect can leave refresh owned by the previous board after readiness", /useEffect\(\(\)\s*=>\s*\{\s*page\.harness\.refresh\s*=/.test(board), false);
 
   const requested = helper.indexOf("window.harness.mount(w)");
   const committed = helper.indexOf("window.harness.mountedEpoch === epoch");

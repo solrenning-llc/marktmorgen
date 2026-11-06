@@ -569,6 +569,16 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // A webhook's try (lib/webhooks.ts): the delivery and the store read and written, the endpoint waited on for up to eight seconds.
   webhook: request("wait", 20 + TAKE_COMMANDS, 40_000),
 };
+
+/** Checkout-refusal panel, inside the existing studio unit (not added again):
+ * one HMGET for seven UTC days plus last, with the writer's 60/300-character
+ * code/message ceilings and safe integer counts. JSON control-character
+ * escapes are escaped again by the REST response (2,770 bytes measured at
+ * the writer's maximum); 4,096 includes framing and the fixed read command.
+ * Historical fields never cross
+ * this read boundary. This is not a storage-retention or whole-page proof.
+ */
+export const CHECKOUT_TROUBLE_READ = { commands: 1, fields: 8, bytes: 4_096 } as const;
 /**
  * An API reading that reads more than its request pays for (lib/api-read-rules.ts:
  * a course's students, the affiliates, the bookings) takes further API requests

@@ -572,3 +572,12 @@ Claude1/Y were notified in channel747383a96883a655c87195dded9e9cf4b7323aac. Reco
 - #2808 reservation channel commit: `04b80fec9812121531e04e098ee592621a8813cd`; final publication/review request: `e43c0d4a1ca7c85983672d32d160b2ed8597dba2`. New exact-head CI is active; one qualified independent review and nine exact workflows are required.
 - Active own products are three (#2542, #2807, #2808). A read-only audit found the analogous course export/body envelope issue in `lib/course.ts`, but open #2560 already changes that file; do not reserve or duplicate. Automatic-caption candidates cross paid/refund/provider boundaries and are outside the allowed safe next unit. No fifth product was manufactured by silence.
 - Next exact actions: (1) #2542 terminal exact 9/9 → fresh PR/head/mergeable snapshot, normal merge with expected SHA, GET confirmation; (2) #2807 terminal CI plus final R2 closure; (3) #2808 review and exact CI; (4) only a genuinely free audited course item or nominal review, never `lib/course.ts`, `lib/quiz.ts`, course import, #1932 or money/gate work.
+
+
+## 06/11/2026 11h35 Fortaleza — canal 409 duas vezes; reserva pendente preservada
+
+O append ao canal autorizado falhou duas vezes com 409, a segunda após a espera exigida e nova leitura integral do blob. Nenhum conteúdo alheio foi sobrescrito. A mensagem exata abaixo fica preservada neste commit próprio e **não autoriza editar produto** até ser acrescentada ao canal:
+
+> RESERVA: | Codex P | WebVTT: recusar cues cujo início volta no tempo, preservando inícios iguais | codex/p-caption-cue-order | `lib/captions.ts`, `tests/captions.test.ts` | 06/11/2026 |
+
+Auditoria ancorada no main `050bf383ae011cfedeed5d32f4198333a62423a8`: reservas, buscas de PRs/issues abertos e canal completo sem colisão nos dois arquivos. Causa: a especificação WebVTT exige início de cue não decrescente; o conversor atual aceita cue que volta no tempo. Próximo: só após append efetivo no canal, RED durável antes de produto.

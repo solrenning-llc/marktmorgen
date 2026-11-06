@@ -19,7 +19,6 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type FormDef, type FormResponse, FORM_RESPONSE_ID, FORM_ID, KEPT_RESPONSES, MAX_FORMS, parseForm } from "@/lib/forms";
 
 const formsKey = (statsId: string) => `nl:forms:${statsId}`;
@@ -42,28 +41,16 @@ export async function readForms(statsId: string | null): Promise<FormDef[]> {
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-/**
- * One form, or null when Redis confirms it is not kept (an HGET that answers
- * null). Any other answer (no reply, more than one, a slot that is not a text,
- * a text that is not a JSON object) throws UnknownReplyError, so a funnel's
- * file or copy never leaves out a form it could not read (CX-123 rule 24). A
- * kept object is read by parseForm as before. A failed request throws as before.
- */
+/** One form, or null. */
 export async function readForm(statsId: string | null, id: string): Promise<FormDef | null> {
   if (!statsId || !FORM_ID.test(id) || !isRedisConfigured()) return null;
-  const replies = repliesFor(await redisPipeline([["HGET", formsKey(statsId), id]]), 1);
-  if (!replies) throw new UnknownReplyError("a form read");
-  const raw = replies[0];
-  if (raw === null) return null;
-  if (typeof raw !== "string") throw new UnknownReplyError("a kept form");
-  let value: unknown;
+  const [raw] = await redisPipeline([["HGET", formsKey(statsId), id]]);
+  if (typeof raw !== "string") return null;
   try {
-    value = JSON.parse(raw);
+    return parseForm(JSON.parse(raw));
   } catch {
-    throw new UnknownReplyError("a kept form");
+    return null;
   }
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new UnknownReplyError("a kept form");
-  return parseForm(value);
 }
 
 /** Checks capacity before a multi-step setup; writeForm still checks concurrent changes. */

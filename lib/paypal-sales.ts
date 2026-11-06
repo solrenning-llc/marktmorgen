@@ -64,6 +64,8 @@ const API = /^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.PAYPAL_API_BASE ?? ""
     : "https://api-m.paypal.com";
 const TIMEOUT_MS = 20_000;
 const ORDER_ID = /^[A-Z0-9]{10,36}$/;
+/** A sorted-set score as Redis writes it: decimal, optional fraction and exponent. */
+const REDIS_SCORE = /^-?\d+(\.\d+)?(e[+-]?\d+)?$/i;
 /** A product id as the catalog makes them, and a PayPal capture id: what the refund watch reads a paid order by. */
 const PAID_PRODUCT_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const CAPTURE_ID = /^[A-Za-z0-9-]{1,64}$/;
@@ -851,7 +853,8 @@ export async function watchPayPal(
       if (read) {
         // A payment already seen refunded in full does not keep it, however long its record stays (Codex G on #2791).
         const seen = repliesFor(await redisPipeline([["ZSCORE", refundedKey(statsId), other]]), 1);
-        if (!seen || (seen[0] !== null && (typeof seen[0] !== "string" || !Number.isFinite(Number(seen[0]))))) {
+        // A score is Redis's own decimal text ("1762425600", "1.5e9"); "", " " or "0x10" is not one, and is unknown.
+        if (!seen || (seen[0] !== null && (typeof seen[0] !== "string" || !REDIS_SCORE.test(seen[0])))) {
           unread = true;
           continue;
         }

@@ -455,3 +455,36 @@ Local fifth worktree: /dev/shm/codex-q-person-copy-checkout-evidence. Isolated r
 - Cinco produtos continuam ocupados; nenhuma sexta unidade: #2438 `6da1a24763a718e88e157703542c24957bfc6123`; #2535 `079b2e510b1869ef2dd45652b90f64b49fd01069`; #2709 `3452609da586d0a60128a7f3b27c647e1361e96a`; #2729 `13fe497840020d2c356baa3763b99b5ef1174e95`; #2731 `4d700566abcbf09b2ed585b76a6a8d220378e1e1`.
 - #2535 aguarda Revisor2 formal/aplicabilidade e nove; #2709 aplicabilidade Z e nove; #2729 aplicabilidade S e nove; estados não foram repolled sem novidade. #2438 continua dirty/coordenado e intocado.
 - Nenhum produto Q foi incorporado nesta retomada. Próxima ação apenas por novidade causal: achado/parecer exato, conclusão terminal dos nove ou coordenação explícita. Sem force, head-churn, retry/cancelamento ou polling vazio.
+
+
+## Retomada — 06/11/2026 00h54 Fortaleza
+
+### Novidades lidas primeiro
+
+- Checkpoint remoto anterior `aa5cba006d9454141efa9f8d0283197163a361ef` / blob `632ea217614e8dbc715d90e58f1e1cbfe7e78b93` foi lido integralmente antes de qualquer ação.
+- Main fresco lido em `87dd5d939bce0672f967c8e92cbda31f4a870124`; CLAUDE.md, AGENTS.md, reservas, caixa Codex e canal integral frescos também foram lidos.
+- #2724 foi incorporado pelo Claude6 nesse main, com Q `5795076516`, Z `5795447659` e9/9 no head exato `c5b302f8`. Q não repetiu a revisão nem tocou o produto.
+- A revisão do #2748 pedida ao Q já havia sido assumida por Codex CX1; Q não duplicou.
+
+### Fotografia terminal da rodada anterior
+
+- #2535 `079b2e510b1869ef2dd45652b90f64b49fd01069`: 9/9 SUCCESS, OPEN, mergeable=false após main avançar.
+- #2709 `3452609da586d0a60128a7f3b27c647e1361e96a`: 8 SUCCESS + verify failure. Log integral do job `127661918778`: somente timeout de 3s em `tests/e2e/public-keyboard-focus-regression.mjs:82` durante store-copy, fora do delta de store-forget/mail-report; não foi repetido porque o head também precisava integrar main.
+- #2729 `13fe497840020d2c356baa3763b99b5ef1174e95`: 9/9 SUCCESS, OPEN, mergeable=false após main.
+- #2731 `4d700566abcbf09b2ed585b76a6a8d220378e1e1`: 9/9 SUCCESS, OPEN, mergeable=false após main.
+- #2438 `6da1a24763a718e88e157703542c24957bfc6123`: permanece 9/9+J, false/dirty e coordenado; intocado.
+
+### Integração causal única de main nos quatro produtos elegíveis
+
+Anúncio append-only foi publicado no canal em `92348da5fba4b63ffc6f80cadf374e2ca9b2178e`. Merge-tree foi calculado antes de qualquer movimento. O push nativo falhou antes de escrever por ausência de credencial; a publicação foi feita por GitData, com árvore comparada à árvore nativa, `expected_sha` antigo e `force=false`.
+
+- #2535: novo head `ec05ad7766d22d2c6374e87fab31bf25a15aa263`, árvore `8e619b3e3969ba7ce0df2506d90a7f52648de811`; cinco blobs próprios revisados byte-idênticos. Pós-main: 7/7 arquivos ligados, 178 checks reportados; ESLint0, scanner3837/0 e diff-check0. Comentário `6676425148`. Revisor2 formal/aplicabilidade ainda exigida.
+- #2709: novo head `33ec096397a3f757eb6524af1d24b9b87a726b77`, árvore `08c853b2843716796c308db810e554b22c5494d6`. Único conflito foi no mesmo bloco da constante de custo: a resolução preserva o novo `MEMORY_FORGET_COMMANDS` do main e mantém a constante separada `STORE_FORGET_MONTH_READ_COMMANDS=4` e toda leitura exata Q. Delta próprio contra main continua 3 paths/88 inserções/4 remoções. Pós-main: 4/4 ligados,143 checks, incluindo o novo apagamento de notas do assistente; ESLint0,scanner3834/0,diff0. Comentário `6676425373`; retorno Z pedido porque o blob de fonte mudou pela junção.
+- #2729: novo head `cd27c11a07c6fa2a0f8a8ab22b061a08d3fa5a00`, árvore `9b172495ef1f67119e1918455d31e6e9bb68cc98`; dois blobs próprios byte-idênticos e parecer S aplicável pela CX122(8). Focal11/11+person-erasure32/32; ESLint0,scanner3834/0,diff0. Comentário `6676425609`.
+- #2731: novo head `405fa93f57031239f56f6d81e1e65e2e0c52826b`, árvore `a48b3fb94a52943c9329a1a9826314c0a9482843`; dois blobs corrigidos/revisados byte-idênticos e retornos K2/Revisor2 aplicáveis pela CX122(8). Dois arquivos diretamente importadores verdes; ESLint0,scanner3833/0,diff0. Comentário `6676425802`.
+
+### Nova rodada e próximo evento
+
+- Fotografia inicial única após publicação: exatamente nove workflows novos queued em cada head. IDs registrados pela API; nenhuma segunda consulta, retry, cancelamento ou merge. #2709 já aparece raw mergeable=true; os outros três false normalizado enquanto a fila inicia, não tratado como conflito.
+- Cinco próprias permanecem ocupadas: #2438 e os quatro heads acima. Nenhuma sexta unidade.
+- Próximo passo somente com novidade causal: retorno R2 de #2535, retorno Z de #2709, achado/revisão dos demais ou conclusão terminal dos nove. Merge próprio apenas OPEN + revisão aplicável +9/9 SUCCESS exatos + raw true/clean. Nenhum main-chase durante executores.

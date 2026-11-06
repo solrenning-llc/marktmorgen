@@ -1,3 +1,37 @@
+# C2 checkpoint — latest causal section, 2026-11-06 18:54 Fortaleza
+
+This section supersedes older states below. Preserve all history and all REDs.
+Coordination only Claude4; Claude1 is off. User language PT-BR, code/PR English.
+
+## Latest exact state
+
+- #2931 urgent independent review COMPLETE: exact44aa73d359b367a4aa6acd5d90cbca07a5749505, COMMENT5807418669 no finding. Parent5c073:58/1 causal failure; final58/58 + plan-refund-read62 + write22; lint/diff0/scanner4132/0. Report codex/c-review-2931-stripe-list-fixture@46eb88b66615cc885799865b80c8c64c97d539aa. Claude4 controls CI/merge. Claim6696388388, channel fac1c22d then result9da27cbc.
+- #2927 financial review COMPLETE with LOW scanner prerequisite: exact89d6a2ad9da11a31541817e3ba17888cd2c858e3 COMMENT5807454192. Unchanged test SHA256a29e9e65248063344ab315614d8b91fe4130b235ce1a5bcf32553a524fe06d80 RED72c9 4/2 -> final4/4; eight linked198; read-only composition with2846preorders7cd same4/4. Lint/diff0, scanner4133/1 (synthetic provider-account fixture). Author must change fixture, preserve assertions, rerun scanner; do not self-close. Report codex/c-review-2927-cart-preorder@373c5271cff12e5114540680791af45a5ffb779f. Claude6 inherited malformed/short gap6696408005 credited. Claim6696461764. Claude2 owns product/CI.
+- #2846 PRIMARY remains7cd563d7d781838455b0f06088ccaa95bbc79f19/treea14ac2963848f136b03008ff2813eda1e207b591. BLOCKED C4/Claude2 MEDIUM6695978870/6696014745 + LIGHT release/UX. No CI retry/cancel/primary move.
+- #2846 corrective WIP durable codex/c-preorder-review-fix-wip@3d83819cdef21f31270fcfd5d97fce0cf7e54c04, tree4598fdc5a3100dde3f7738ac328ee3e03019a27a; byte-identical local da0b352d124c53c7022897b607a11c5f7b03c223 in /workspace/scratch/a2db1cdebaaa/c2-2846-review-fix. RED585be2269fb7a9d1e7ddc266c5a84bd7b764442c: release4/3 + forms20/16. Additional unchanged8 regression RED codex/c-preorder-review-regression-red@222dcd63eba650cdaf0ab9d8823b8e9bb86c0852, final8/8. Original Claude2e5bba448 proof byte-identical12/12. Final491 checks/15groups, directed strictTS7roots/imports0, lint/diff0, scanner4106/0. Raw logs /tmp/c2-2846-review-red.log, red8.log, green8.log, proof-return.log, linked2.log. Tests' HTTP assertions deliberately changed for F3 (303 + exact explained destination + zero provider effects), original20/503 preserved in7cd and120f1a1f. Short synthetic account fixture now scanner-safe. No global/native/provider/hostedCI claimed.
+- WIP restores BASE soonState/removes redundant exactDays; retains exact soonOne/isComingSoon; catch per release member without SREM; form errors use existing redirects, booking/product context retained. No cart/page/reservation docs/test-config changed. New permanent tests/preorder-review-regression.test.ts is canonically discovered (*.test.ts), no custom aliases.
+- IMPORTANT C4-2990 overlapping HIGH P1: C4 subagent repairs runPreorderReleases dropping paid jobs on unknown load/readProduct, stacked on2846. C4 also noted P4soonOne. DO NOT promote WIP or touch C4 branch before NOMINAL composition/base. C2 already requested coordination via channel7aed412e and PRcomment6696735180. Need preserve C4 proof and replay before one final causal primary head, two financial reviews and9new workflows.
+- C4-2970 orders legitimate merges2931 then2894 before integration of own PRs; no blind retry of stripe-list-lot1/backup-run. #2931 review done; #2894 G5807353945. Neither author's merge/CI is C2's task.
+- #2903 doc E8 exact69b163ef70f79baa9b538c18535be38136e5aec0/treea9927f2baf183b83dd1e32ef2d961619331ba88e remains awaiting R2 documentary review and9green; no new poll. E8 product blocked stats-report2876, cost-registry2848/49/52, and C4 admission/scope decisions. Doc does not count product.
+- #2742 MERGED91d6bb50d98c20990c28d7efc8f09a0c17bfee92; #2601 MERGED638741bb9964c8ecb4cb542ab84753fcf6a604ce. No redeploy.
+- Other own products #2695/33bbd1fd retries consumed, #2692PRIMARY35e670e3/recovery8c2eeb29 financial returns preserved/displayA3#2020 blocked. Three own product PRs (#2695/#2692/#2846), doc2903 not counted.
+
+## API proof continuation
+
+C4-2930 assigns Q app/api/store/[a-m]*/**, C2 n-z and restAPI. Reservation successfully posted BEFORE source in16222458f093aff9786125ae538d9052e673dd85 after several GraphQL update-ref failures/rate-limit; Contents update_file with blob CAS worked. Branch local codex/c-api-nz-read-decision-proof at5c07315505 in /workspace/scratch/a2db1cdebaaa/c2-api-nz-proof, CLEAN/no proof file yet. Reserved NEW tests/c-api-nz-read-decision.proof.ts, proofs/c2/api-nz-read-decision.mjs, docs/reviews/c2-api-nz-read-decision.md. Up to8scenarios/5000commands per/40000total/120s/256KiBlog; all providers blocked/synthetic.
+
+Audited217openPRs/paths via native refs; no modifications to author refs. Excluded page/page-versions/site-page/saved-blocks and occupied paths. Static candidates only: cron/affiliates SETNX unknown can proceed then DEL existing lock; mail/inbound SETNX loose; billingcheckout accountStores catch[]; numbers-links readVerified catchnull. NO execution or finding yet. C5 later blanket sweep-app1..6 overlaps; C2/Q asked C5/C4 for case coverage/recut before reproducing. Q confirmed a-m; T proposed api/v1/leads scanLeads empty200 against502 guide, NOT executed by T/C2; coordinate G1 owner before proof. Original API proof2f672351 preserved, CaseA in2846, CaseB Claude6. No duplicated RED.
+
+## Continuity and channel
+
+CX127 vigia channel every2min/ownPR no more often than5min. Full channel exceeds1MiB; fetch_file returns empty content withSHA, then fetch_blob FULL. <20KB never write. update_file complete FULL+append with blobSHA CAS succeeds; GraphQL update_ref repeatedly failed on channel, do not force/restore snapshot. On409/error wait>=2min and full reread. Last successful channel7aed412eee87a777e8bfb9a44aab114ecaa5ba4f; next append should cite this checkpoint/result and exact WIP.
+
+CX129 from channel requests3subagents, but active developer restriction forbids spawning unless user or applicable AGENTS/skill explicitly requests delegation. No new subagent was spawned by root in this work segment. Do not falsely report3active. Existing tree must be inspected before any claim of activity. Preserve unique automation6aebf029c4a081918eea6c623dd9aa2c; do not create another.
+
+No commercial-margin(J), tax-threshold/proof2325 without explicit C4 assignment, price/limit/commission/flag/gate/account/payment/provider/contact/PII change. Unknown cost neverzero; paidIO ceiling beforehand. No new real provider/IO. Pending work remains; checkpoint is continuation.
+
+---
+
 # LATEST — 06/11/2026 18h12 Fortaleza — #2903 E8 cost-boundary audit published
 
 This section supersedes only the active-work inventory and next action in the sections below. Every historical head, RED, review, and branch remains preserved.

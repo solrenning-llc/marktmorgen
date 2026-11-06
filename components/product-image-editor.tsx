@@ -165,7 +165,8 @@ export function ProductImageEditor({
         }
       }
       const described = describe ?? alt;
-      const problem = await post({ action: "attach", path, width: shrunk.width, height: shrunk.height, alt: described, ...(small ? { small } : {}) });
+      // The picture's color, painted under it while it loads (Encanto 5b); none for one with transparency.
+      const problem = await post({ action: "attach", path, width: shrunk.width, height: shrunk.height, alt: described, ...(small ? { small } : {}), ...(shrunk.tone ? { tone: shrunk.tone } : {}) });
       if (problem) {
         setError(problem);
         return;

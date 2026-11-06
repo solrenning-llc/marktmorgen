@@ -47,6 +47,7 @@ const subscription = (id: string, extra: Record<string, unknown> = {}): Record<s
   status: "active",
   metadata: { store: "daysstore", product: "prod000001" },
   items: { data: [{ current_period_end: PERIOD_END, price: { unit_amount: 2900, currency: "usd", recurring: { interval: "month" } } }] },
+  discounts: [],
   ...extra,
 });
 const subs: Record<string, unknown>[] = [
@@ -74,8 +75,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return answer({ id: `email_${emails.length}` });
   }
   const path = url.pathname.replace(/^\/v1/, "");
-  if (path === "/customers") return answer({ object: "list", data: url.searchParams.get("email") === "member@example.com" ? [{ id: "cus_member0001" }] : [] });
-  if (path === "/subscriptions" && (init?.method ?? "GET") === "GET") return answer({ object: "list", data: url.searchParams.get("customer") === "cus_member0001" ? subs : [] });
+  if (path === "/customers") return answer({ object: "list", has_more: false, data: url.searchParams.get("email") === "member@example.com" ? [{ id: "cus_member0001" }] : [] });
+  if (path === "/subscriptions" && (init?.method ?? "GET") === "GET") return answer({ object: "list", has_more: false, data: url.searchParams.get("customer") === "cus_member0001" ? subs : [] });
   if (path.startsWith("/products")) return answer({ object: "list", data: [] });
   if (init?.method === "POST" && path.startsWith("/subscriptions/")) {
     const headers = new Headers(init.headers);

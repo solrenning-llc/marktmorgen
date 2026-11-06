@@ -29,7 +29,8 @@ for(const reply of [[],[undefined]])test('partial book read cannot erase a diffe
 test('a book write without acknowledgement cannot be reported as a kept proposal',async()=>{
  const {shop,product,book}=await setup(),base=redis.pipeline.bind(redis);let result;
  try{
-  redis.pipeline=async commands=>{if(commands.length===1&&commands[0][0]==='SET'&&commands[0][1]===book)return [];return base(commands);};
+  // The book is written in one step only while its lock is held (lib/agent-book.ts AGENT_BOOK_WRITE, #1856): that write is matched too.
+  redis.pipeline=async commands=>{if(commands.length===1&&((commands[0][0]==='SET'&&commands[0][1]===book)||(commands[0][0]==='EVAL'&&String(commands[0][1]).startsWith('-- marktmorgen:agent-book-write:')&&commands[0][4]===book)))return [];return base(commands);};
   result=await proposeTitle(shop,'review-key',{product,title:'Suggested title'});
  }finally{redis.pipeline=base;}
  assert.equal((await readBook(shop.statsId!)).waiting.length,0,'the intercepted write was not applied');

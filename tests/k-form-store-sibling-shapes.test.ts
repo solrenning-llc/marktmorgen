@@ -5,6 +5,10 @@ import { store as redis } from './redis-stub';
 import { ROOM } from './data-room';
 import { form, responses } from './form-response-fixture';
 import { done, is } from './check';
+import { COPIERS } from '@/lib/person-copy';
+import { erasureScope } from '@/lib/person-erasure';
+import { storeExport } from '@/lib/store-export';
+import { claimHandle, ensureStatsId, storeForEmail } from '@/lib/store';
 
 async function main() {
   const pipeline = redis.pipeline.bind(redis);
@@ -36,6 +40,36 @@ async function main() {
       is(`${scenario.name} injects exactly once`, injected, 1);
       is(`${scenario.name} makes no further storage or room command`, after, 0);
     }
+    redis.pipeline = pipeline; redis.clear();
+    const owner = 'sibling-owner@example.com';
+    await claimHandle(owner, 'siblingcopy', 'Synthetic forms', '');
+    await ensureStatsId(owner);
+    const shop = (await storeForEmail(owner))!;
+    await writeForm(shop.statsId!, form);
+    const scope = (await erasureScope(shop, 'person@example.com'))!;
+    let unknown = false, commands = 0, injections = 0;
+    const fetchBefore = globalThis.fetch;
+    globalThis.fetch = (async () => { throw Error('No provider IO allowed'); }) as typeof fetch;
+    redis.pipeline = async batch => {
+      if (commands + batch.length > 300) throw Error('Three hundred application commands is the export/copy ceiling');
+      commands += batch.length;
+      if (unknown && batch[0][0] === 'HVALS' && batch[0][1] === `nl:forms:${shop.statsId}`) { injections++; return [null]; }
+      return pipeline(batch);
+    };
+    try {
+      is('healthy person copy with no answers stays empty', await COPIERS['lib/form-store.ts'](scope), []);
+      const known = JSON.parse(await new Response(storeExport(shop)).text());
+      is('healthy store export keeps the saved form', known.forms[0].form.id, form.id);
+      unknown = true;
+      let copyUnknown = false;
+      try { await COPIERS['lib/form-store.ts'](scope); } catch (error) { copyUnknown = error instanceof UnknownReply; }
+      is('person copier refuses an unknown form inventory', copyUnknown, true);
+      const partial = JSON.parse(await new Response(storeExport(shop)).text());
+      is('store stream omits forms rather than inventing none', partial.forms, undefined);
+      is('store stream declares the unread forms section', typeof partial.unreadPart4 === 'string' && partial.unreadPart4.includes('could not be read'), true);
+      is('both actual consumers encountered the selected unknown reply', injections, 2);
+      console.log('FORM_SIBLING_CONSUMER_COMMANDS', commands);
+    } finally { globalThis.fetch = fetchBefore; }
   } finally { redis.pipeline = pipeline; }
   done();
 }

@@ -497,9 +497,26 @@ export function codesWork(): ReadWork {
 export function codeMakeWork(): ReadWork {
   return { commands: 0, bytes: 0, sent: CODE_SENT_BYTES, stripePages: 2, roundTrips: 0 };
 }
-/** Switching a code off (DELETE /api/v1/codes): the codes read to find it, the call that switches it off and the codes read again and sent, at their most. */
+/**
+ * One field of a store's scheduled codes as kept (lib/discount-schedule.ts): a promotion code id of at most 80
+ * characters and its record (the code's word of at most 40, its start, end, tries and failed mark), at its most.
+ */
+export const SCHEDULE_ENTRY_BYTES = 256;
+/**
+ * The store's schedules held by one hand (lib/discount-schedule.ts, holding): the claim, the claim read back when
+ * its answer is not known, and the release, each a trip of its own.
+ */
+const SCHEDULE_LOCK_WORK: ReadWork = { commands: 3, bytes: 0, sent: 0, stripePages: 0, roundTrips: 3 };
+/**
+ * Switching a code off (DELETE /api/v1/codes): the codes read to find it, its schedule dropped first (the lock,
+ * the schedule read, then taken out with its due time in one trip, 511 [CK3]), the call that switches it off and
+ * the codes read again and sent, at their most.
+ */
 export function codeStopWork(): ReadWork {
-  return { commands: 0, bytes: 0, sent: MAX_CODES * CODE_SENT_BYTES, stripePages: 3, roundTrips: 0 };
+  return addWork(
+    { commands: 0, bytes: 0, sent: MAX_CODES * CODE_SENT_BYTES, stripePages: 3, roundTrips: 0 },
+    addWork(SCHEDULE_LOCK_WORK, { commands: 3, bytes: SCHEDULE_ENTRY_BYTES, roundTrips: 2 }),
+  );
 }
 
 // ---------------------------------------------------------------- the store's pages and courses (MCP read tools, 631 [AA1] (a))

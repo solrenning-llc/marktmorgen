@@ -56,7 +56,7 @@ function invoice(id: string, customer: string, payment: string): Record<string, 
     created: paidAt,
     status_transitions: { paid_at: paidAt },
     parent: { type: "subscription_details" },
-    payments: { data: [{ payment: { type: "payment_intent", payment_intent: payment } }] },
+    payments: { object: "list", data: [{ payment: { type: "payment_intent", payment_intent: payment } }], has_more: false },
   };
   invoiceByCustomer.set(customer, row);
   return row;
@@ -73,6 +73,9 @@ async function main() {
     { handle: "unknown-refund", customer: "cus_Unknown001", invoice: "in_Unknown001", payment: "pi_unknown", refunds: { object: "list", has_more: false } },
     { handle: "known-refund", customer: "cus_Refunded01", invoice: "in_Refunded01", payment: "pi_refunded", refunds: { object: "list", data: [{ amount: 2_900, status: "succeeded" }], has_more: false } },
     { handle: "clean-payment", customer: "cus_Clean0001", invoice: "in_Clean0001", payment: "pi_clean", refunds: { object: "list", data: [], has_more: false } },
+    // Revisor 1 and Codex C2 on #2722: the invoice's own list of payments must be read whole too.
+    { handle: "no-payments", customer: "cus_NoPay0001", invoice: "in_NoPay0001", payment: "pi_nopay", refunds: { object: "list", data: [], has_more: false }, payments: null },
+    { handle: "more-payments", customer: "cus_MorePay01", invoice: "in_MorePay01", payment: "pi_morepay", refunds: { object: "list", data: [], has_more: false }, payments: "more" },
   ];
   for (const c of cases) {
     const made = await claimHandle(`${c.handle}@example.com`, c.handle, c.handle, "");
@@ -80,7 +83,9 @@ async function main() {
     await setSubscription(`${c.handle}@example.com`, { customerId: c.customer, subscriptionId: `sub_${c.handle.replace(/-/g, "")}01`, active: true });
     redis.run(["SET", byKey(made.store.sid), JSON.stringify({ r: inviter.store.sid, at: NOW - 60 * DAY, terms: { version: 1, sharePercent: 50, bonusCents: 0 } })]);
     redis.run(["ZADD", ALL_KEY, NOW - 60 * DAY, made.store.sid]);
-    invoice(c.invoice, c.customer, c.payment);
+    const row = invoice(c.invoice, c.customer, c.payment);
+    if ("payments" in c && c.payments === null) delete row.payments;
+    if ("payments" in c && c.payments === "more") row.payments = { object: "list", data: [{ payment: { type: "payment_intent", payment_intent: c.payment } }], has_more: true };
     refundAnswerByPayment.set(c.payment, c.refunds);
   }
 
@@ -91,6 +96,9 @@ async function main() {
   part("Refunds read exactly before a credit is earned");
   is("unknown refund evidence creates no credit record", unknown, null);
   is("and the run says a store failed and is not complete", [run.failed >= 1, run.complete], [true, false]);
+  is("an invoice whose payments were not expanded earns nothing", redis.run(["GET", creditKey("in_NoPay0001")]), null);
+  is("an invoice whose payments say there are more earns nothing", redis.run(["GET", creditKey("in_MorePay01")]), null);
+  is("and neither is posted", [postedCredits.includes("in_NoPay0001"), postedCredits.includes("in_MorePay01")], [false, false]);
   is("a confirmed full refund earns nothing", [refunded.state, postedCredits.includes("in_Refunded01")], ["none", false]);
   is("a confirmed empty refund list earns its clean payment once", [clean.state, postedCredits.filter((id) => id === "in_Clean0001").length], ["done", 1]);
   done();

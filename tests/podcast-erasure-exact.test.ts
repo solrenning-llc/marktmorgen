@@ -113,7 +113,7 @@ test("the whole erasure says incomplete on an unknown feed read, and a later one
   } finally { redis.pipeline = original; console.error = log; }
   assert.equal((await readFeedToken(token))?.e, email, "the grant is still findable, not orphaned");
   const again = await erasePerson(await store(), email, { kind: "person" });
-  assert.ok(again.ok || !again.failed.includes("lib/podcast-access.ts"), "the feed module finishes on a healthy read");
+  assert.ok(again.ok || (again.reason === "incomplete" && !again.failed.includes("lib/podcast-access.ts")), "the feed module finishes on a healthy read");
   assert.equal(await readFeedToken(token), null);
 });
 

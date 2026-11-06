@@ -34,6 +34,7 @@ import { withinStore } from "@/lib/metered-limits";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { holdsProducts } from "@/lib/community-access";
 import { sendEmail } from "@/lib/email";
@@ -59,11 +60,14 @@ export async function feedToken(store: Store, productId: string, email: string):
   const token = randomBytes(24).toString("hex");
   const grant: FeedGrant = { s: sid, h: store.handle, p: productId, e: normaliseEmail(email) };
   // A listener's access is kept for good: counted in the store's room at what it adds (lib/order-data.ts).
+  // Only "OK" made the index and only null says another token was kept first: any other reply is unknown, and
+  // writing a grant then could leave one holding the address that no index leads to, which an erasure never finds.
   const [set] = await orderWrite(store, [["SET", byKey(sid, productId, email), token, "NX"]]);
   if (set === null) {
     const [again] = await redisPipeline([["GET", byKey(sid, productId, email)]]);
-    return typeof again === "string" ? again : null;
+    return typeof again === "string" && FEED_TOKEN.test(again) ? again : null;
   }
+  if (set !== "OK") return null;
   await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant)]]);
   return token;
 }
@@ -166,10 +170,27 @@ export async function sendFeedLink(input: { store: Store; product: Listing; emai
 export async function forgetPodcastPerson(store: Store, productIds: string[], email: string): Promise<number> {
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return 0;
   const sid = store.statsId;
-  const tokens = await redisPipeline(productIds.map((p) => ["GET", byKey(sid, p, email)]));
-  const held = tokens.filter((t): t is string => typeof t === "string" && FEED_TOKEN.test(t));
-  const [gone] = await redisPipeline([["DEL", ...productIds.flatMap((p) => [byKey(sid, p, email), okKey(sid, p, email)]), ...held.map(tokenKey)]]);
-  return Number(gone) || 0;
+  // Read exactly before anything is deleted (CX-123 rule 24): the index is the only way back to the grant that holds
+  // the address, so on an unknown read both stay, the step throws and the erasure says it is not finished.
+  const held = (await indexedTokens(sid, productIds, email)).filter((t): t is string => t !== null);
+  const reply = repliesFor(
+    await redisPipeline([["DEL", ...productIds.flatMap((p) => [byKey(sid, p, email), okKey(sid, p, email)]), ...held.map(tokenKey)]]),
+    1,
+  );
+  const gone = reply ? countOf(reply[0]) : null;
+  if (gone === null) throw new UnknownReplyError("the deletion of a person's podcast feeds");
+  return gone;
+}
+
+/**
+ * The feed token each product's index holds for this address, in product order; null where none. A reply of
+ * another length or shape, or a slot that is neither null nor text, throws UnknownReplyError. Text that is not a
+ * token is kept as it is: deleting the key it would name is harmless, and its index goes with the erasure.
+ */
+async function indexedTokens(sid: string, productIds: string[], email: string): Promise<(string | null)[]> {
+  const replies = repliesFor(await redisPipeline(productIds.map((p) => ["GET", byKey(sid, p, email)])), productIds.length);
+  if (!replies || !replies.every((t) => t === null || typeof t === "string")) throw new UnknownReplyError("a person's podcast feed tokens");
+  return replies as (string | null)[];
 }
 
 /**
@@ -180,7 +201,6 @@ export async function forgetPodcastPerson(store: Store, productIds: string[], em
  */
 export async function feedsOf(store: Store, productIds: string[], email: string): Promise<string[]> {
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
-  const sid = store.statsId;
-  const tokens = await redisPipeline(productIds.map((p) => ["GET", byKey(sid, p, email)]));
+  const tokens = await indexedTokens(store.statsId, productIds, email);
   return productIds.filter((_, i) => typeof tokens[i] === "string" && FEED_TOKEN.test(tokens[i] as string));
 }

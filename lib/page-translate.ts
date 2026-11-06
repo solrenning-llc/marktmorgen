@@ -13,7 +13,8 @@
  * list points, an icon's words, a button's words, a picture's description
  * and line, a video's title). Never an id, a picture's file, a video, a
  * button's address, a product picked for a card, a review picked, a date,
- * a layout, or a comparison's tick or cross.
+ * a layout, or a comparison's tick or cross. A divider or a space (375 [TB1])
+ * has no words at all, so nothing of theirs is sent and a space's size stays.
  * Browser-safe.
  */
 import { CELL_NO, CELL_YES, type PageBlock, type RowElement, type SalesPage, parsePage } from "@/lib/sales-page";

@@ -38,6 +38,7 @@
  */
 import { MAX_CHAT_TEXT, MAX_CHAT_KEPT, CHAT_PAGE, MAX_SLOW, type ChatRefusal } from "@/lib/community-chat-rules";
 export { MAX_CHAT_TEXT, MAX_CHAT_KEPT, CHAT_PAGE, MAX_SLOW, type ChatRefusal } from "@/lib/community-chat-rules";
+import { isProxy } from "node:util/types";
 import { redisPipeline } from "@/lib/redis";
 import { cleanText, linkCount } from "@/lib/community-text";
 import { holdsAll } from "@/lib/community-search";
@@ -46,6 +47,7 @@ const base = (id: string) => `nl:cm:${id}`;
 const roomKey = (id: string) => `${base(id)}:ch`;
 const countKey = (id: string) => `${base(id)}:chn`;
 const spokeKey = (id: string, who: string) => `${base(id)}:chs:${who}`;
+const CHAT_AUTHOR = /^(?:creator|[0-9a-f]{32})$/;
 
 export type ChatMessage = {
   /** Its number: what a reader asks for "everything after". */
@@ -100,6 +102,87 @@ function parse(raw: unknown): ChatMessage | null {
   } catch {
     return null;
   }
+}
+
+/** JSON.parse keeps only the last repeated key; a personal copy must not lose that ambiguity. */
+function hasRepeatedTopLevelKey(raw: string): boolean {
+  const keys = new Set<string>();
+  let depth = 0;
+  let stringStart = -1;
+  let escaped = false;
+  for (let index = 0; index < raw.length; index += 1) {
+    const character = raw[index];
+    if (stringStart >= 0) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        const token = raw.slice(stringStart, index + 1);
+        stringStart = -1;
+        if (depth === 1) {
+          let next = index + 1;
+          while (/\s/.test(raw[next] ?? "")) next += 1;
+          if (raw[next] === ":") {
+            let key: unknown;
+            try {
+              key = JSON.parse(token);
+            } catch {
+              return true;
+            }
+            if (typeof key !== "string" || keys.has(key)) return true;
+            keys.add(key);
+          }
+        }
+      }
+      continue;
+    }
+    if (character === '"') stringStart = index;
+    else if (character === "{") depth += 1;
+    else if (character === "}") depth -= 1;
+  }
+  return false;
+}
+
+function copyMessage(raw: unknown): ChatMessage {
+  if (typeof raw !== "string" || !raw) throw new Error("Incomplete community chat record");
+  if (hasRepeatedTopLevelKey(raw)) throw new Error("Incomplete community chat record");
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error("Incomplete community chat record");
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Incomplete community chat record");
+  const message = value as Partial<ChatMessage>;
+  if (!Number.isSafeInteger(message.i) || (message.i as number) <= 0
+    || typeof message.a !== "string" || !CHAT_AUTHOR.test(message.a)
+    || typeof message.text !== "string"
+    || !Number.isSafeInteger(message.at) || (message.at as number) < 0
+    || (message.n !== undefined && (typeof message.n !== "string" || !message.n || message.n.length > 80))) {
+    throw new Error("Incomplete community chat record");
+  }
+  return message as ChatMessage;
+}
+
+/** A JSON response array: ordinary, dense and made only of own inert positions. */
+function copyArray(raw: unknown): unknown[] {
+  // Node can recognize a Proxy without invoking any of its traps. Do this
+  // before Array.isArray, prototype or descriptor reflection.
+  if (isProxy(raw) || !Array.isArray(raw) || Object.getPrototypeOf(raw) !== Array.prototype) {
+    throw new Error("Incomplete community chat record");
+  }
+  const keys = Reflect.ownKeys(raw);
+  if (keys.length !== raw.length + 1 || keys.some((key) => key !== "length" && (typeof key !== "string" || !/^(0|[1-9][0-9]*)$/.test(key) || Number(key) >= raw.length))) {
+    throw new Error("Incomplete community chat record");
+  }
+  const values: unknown[] = [];
+  for (let index = 0; index < raw.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(raw, String(index));
+    if (!descriptor || !("value" in descriptor)) throw new Error("Incomplete community chat record");
+    values.push(descriptor.value);
+  }
+  return values;
 }
 
 export type SaidResult =
@@ -304,13 +387,7 @@ export async function forgetChatPerson(id: string, who: string): Promise<number>
 
 /** What one member said in the community's room, for the copy of their data (619 [SZ3]): the messages the erasure deletes. Only reads. */
 export async function chatMessagesOf(id: string, who: string): Promise<{ text: string; at: number }[]> {
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", roomKey(id), "-inf", "+inf"]]);
-  return (Array.isArray(raw) ? raw : []).map(String).flatMap((row) => {
-    try {
-      const message = JSON.parse(row) as Partial<ChatMessage>;
-      return message.a === who && typeof message.text === "string" ? [{ text: message.text, at: Number(message.at) || 0 }] : [];
-    } catch {
-      return [];
-    }
-  });
+  const replies = copyArray(await redisPipeline([["ZRANGEBYSCORE", roomKey(id), "-inf", "+inf"]]));
+  if (replies.length !== 1) throw new Error("Incomplete community chat record");
+  return copyArray(replies[0]).map(copyMessage).flatMap((message) => (message.a === who ? [{ text: message.text, at: message.at }] : []));
 }

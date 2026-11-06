@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "lib/closing-refunds.ts",
+    "tests/closing-refund-refused-final.test.ts",
+    "tests/g2699-prior-list-envelope.test.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

@@ -100,6 +100,9 @@ async function refundPass(): Promise<void> {
     ["has_more missing, a newer refund on it", { object: "list", data: [fresh] }],
     ["has_more as text, a newer refund on it", { object: "list", data: [fresh], has_more: "false" }],
     ["a row not readable beside a newer refund", { object: "list", data: [fresh, "re_garbled"], has_more: false }],
+    // Codex P on #2774 (review 5796364571): a refund whose charge does not say whether it was refunded is not
+    // readable by the refunds' own rule (refundRowKnown, lib/refunds.ts), even though its status is text.
+    ["a refund whose charge's refunded is not readable, beside a newer refund", { object: "list", data: [fresh, { id: "re_LotTwoUnknown1", object: "refund", status: "succeeded", created: before + 3_600, payment_intent: "pi_LotTwoOther001", charge: { id: "ch_LotTwo2", object: "charge", amount: 1000, amount_refunded: 1000 } }], has_more: false }],
   ];
   for (const [label, page] of cases) {
     redis.run(["SET", anchorKey, String(before)]);

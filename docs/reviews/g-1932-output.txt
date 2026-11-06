@@ -1,0 +1,180 @@
+
+=== author-red ===
+=== course-shelf.test.ts ===
+
+What a shelf may hold
+  ok    at most six
+  ok    each once, in the creator's order
+  ok    never the course's own product
+  ok    anything that is not a product id is left out
+  ok    not a list: empty
+
+Kept on the course, and changed by the studio's edit
+  ok    a new course has none
+/tmp/g-1932-proof-EXmZMp/0.cjs:3594
+is("saved without the course itself", set.ok ? set.course.shelf : null, ["prod0001", "prod0002"]);
+                                          ^
+
+TypeError: Cannot read properties of undefined (reading 'ok')
+    at Object.<anonymous> (/tmp/g-1932-proof-EXmZMp/0.cjs:3594:43)
+    at Module._compile (node:internal/modules/cjs/loader:1929:14)
+    at Object..js (node:internal/modules/cjs/loader:2060:10)
+    at Module.load (node:internal/modules/cjs/loader:1651:32)
+    at Module._load (node:internal/modules/cjs/loader:1443:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47
+
+Node.js v24.22.1
+
+
+
+=== author-head ===
+=== course-shelf.test.ts ===
+
+What a shelf may hold
+  ok    at most six
+  ok    each once, in the creator's order
+  ok    never the course's own product
+  ok    anything that is not a product id is left out
+  ok    not a list: empty
+
+Kept on the course, and changed by the studio's edit
+  ok    a new course has none
+  ok    saved without the course itself
+  ok    read back the same
+  ok    cleared: no shelf at all
+
+What a student sees
+  ok    listed products only, in order, less what they own
+  ok    a product no longer listed (a draft or gone) is not shown
+  ok    what they own unknown: nothing
+  ok    never the course itself
+
+13 checks, all passing.
+
+
+
+=== proof-red ===
+=== g-1932-before-feature.proof.ts ===
+  FAIL  new edit is supported
+        expected true
+        got      undefined
+  FAIL  new edit keeps the shelf
+        expected ["prod0001"]
+        got      null
+  FAIL  clear removes the shelf field
+        expected false
+        got      null
+  ok    control: unknown ownership never recommends
+
+4 checks, 3 failing.
+
+
+
+=== proof-head ===
+=== g-1932-junction.proof.ts ===
+
+Pure choices and unknown ownership
+  ok    non-array choice stays empty
+  ok    non-array choice stays empty
+  ok    non-array choice stays empty
+  ok    non-array choice stays empty
+  ok    non-array choice stays empty
+  ok    non-array choice stays empty
+  ok    non-array choice stays empty
+  ok    six valid unique choices preserve order
+  ok    own course excluded before the six-item cap
+  ok    sparse holes do not become ids
+  ok    unknown ownership never recommends
+  ok    known owned/draft/course excluded in order
+  ok    all owned recommends none
+
+Manual junction keeps all independent course settings
+  ok    shelf added without losing certificate/cohort/video
+  ok    input course unchanged
+  ok    JSON round trip keeps all fields
+  ok    certificate edit keeps shelf/cohort/video
+  ok    clear removes only shelf
+  ok    legacy course gains no optional flags
+  ok    JSON prototype-named field changes no settings
+  ok    JSON prototype-named field pollutes no object
+
+Real save reserves the complete JSON before it writes
+  ok    reservation precedes SET
+  ok    complete JSON counted before SET
+  ok    real save/read preserves merged fields
+  ok    unknown admission refuses with zero course SET
+  ok    unknown admission retains old bytes
+  ok    exact retry changes only the requested shelf
+
+27 checks, all passing.
+could not count a store's data Error: synthetic unknown admission
+    at store.pipeline (/tmp/g-1932-proof-un3QPY/0.cjs:4827:105)
+    at redisPipeline (/tmp/g-1932-proof-un3QPY/0.cjs:1761:41)
+    at run (/tmp/g-1932-proof-un3QPY/0.cjs:4357:27)
+    at takeData (/tmp/g-1932-proof-un3QPY/0.cjs:4372:10)
+    at needData (/tmp/g-1932-proof-un3QPY/0.cjs:4375:23)
+    at saveCourse (/tmp/g-1932-proof-un3QPY/0.cjs:4734:14)
+    at main (/tmp/g-1932-proof-un3QPY/0.cjs:4833:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+=== g-1932-before-feature.proof.ts ===
+  ok    new edit is supported
+  ok    new edit keeps the shelf
+  ok    clear removes the shelf field
+  ok    control: unknown ownership never recommends
+
+4 checks, all passing.
+
+
+
+=== types ===
+
+
+=== lint ===
+
+
+=== LINKED (raw, includes duplicate registry) ===
+api-read-units.test.ts: 54 checks, all passing.
+ai.test.ts: 30 checks, all passing.
+assignments.test.ts: 51 checks, all passing.
+certificate-pdf-ceiling.test.ts: 13 checks, all passing.
+certificate-pdf.test.ts: 6 checks, all passing.
+certificate-issue.test.ts: 17 checks, all passing.
+certificate-record-evidence.test.ts: 30 checks, all passing.
+certificate-look.test.ts: 26 checks, all passing.
+certificate-share.test.ts: 6 checks, all passing.
+course-access-check.test.ts: 24 checks, all passing.
+course-faq.test.ts: 19 checks, all passing.
+course-day-preview.test.ts: 30 checks, all passing.
+course-paid-observation.test.ts: ['ℹ tests 10', 'ℹ pass 10', 'ℹ fail 0', 'ℹ cancelled 0', 'ℹ skipped 0']
+course-origin-persistence.test.ts: ['ℹ tests 10', 'ℹ pass 9', 'ℹ fail 0', 'ℹ cancelled 0', 'ℹ skipped 1']
+course-paid-legacy-isolation.test.ts: ['ℹ tests 1', 'ℹ pass 1', 'ℹ fail 0', 'ℹ cancelled 0', 'ℹ skipped 0']
+course-triggers.test.ts: 12 checks, all passing.
+course-import.test.ts: 96 checks, all passing.
+course-cohort.test.ts: ['ℹ tests 10', 'ℹ pass 10', 'ℹ fail 0', 'ℹ cancelled 0', 'ℹ skipped 0']
+course-outline-items.test.ts: 5 checks, all passing.
+course-videos.test.ts: 18 checks, all passing.
+course-template-picker-pending.test.ts: 9 checks, all passing.
+course-finish-claim.test.ts: 70 checks, all passing.
+course-shelf.test.ts: 13 checks, all passing.
+course-origin-binding.test.ts: ['ℹ tests 11', 'ℹ pass 11', 'ℹ fail 0', 'ℹ cancelled 0', 'ℹ skipped 0']
+course-templates.test.ts: 23 checks, all passing.
+certificate-validity.test.ts: 29 checks, all passing.
+course-template-studio.test.ts: 55 checks, all passing.
+member-health.test.ts: 19 checks, all passing.
+locked-deletes.test.ts: 115 checks, all passing.
+membership-faq.test.ts: 17 checks, all passing.
+order-confirmation-course.test.ts: ['ℹ tests 11', 'ℹ pass 11', 'ℹ fail 0', 'ℹ cancelled 0', 'ℹ skipped 0']
+plan-cost-registry.test.ts: ['ℹ tests 24', 'ℹ pass 24', 'ℹ fail 0', 'ℹ cancelled 0', 'ℹ skipped 0']
+plan-closing.test.ts: 90 checks, all passing.
+quiz-usage.test.ts: 21 checks, all passing.
+tagged-pdf.test.ts: 28 checks, all passing.
+template-library.test.ts: ['ℹ tests 7', 'ℹ pass 7', 'ℹ fail 0', 'ℹ cancelled 0', 'ℹ skipped 0']
+video-stamp.test.ts: 16 checks, all passing.
+video-stamp-player.test.ts: 28 checks, all passing.
+plan-cost-registry.test.ts: ['ℹ tests 24', 'ℹ pass 24', 'ℹ fail 0', 'ℹ cancelled 0', 'ℹ skipped 0']
+store-data-registry.test.ts: ['ℹ tests 7', 'ℹ pass 7', 'ℹ fail 0', 'ℹ cancelled 0', 'ℹ skipped 0']
+Native integration skip: course-origin-persistence requires MARKTMORGEN_REDIS_INTEGRATION=1; not executed here.
+Browser helper bundle678bytes; strict0/lint0/scanner3751/0/diff0.

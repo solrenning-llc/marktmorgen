@@ -46,6 +46,7 @@ import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
+import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { plainAmount, formatMoney } from "@/lib/money";
 import { saleOff, salePrice } from "@/lib/store-sale";
@@ -63,6 +64,9 @@ const API = /^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.PAYPAL_API_BASE ?? ""
     : "https://api-m.paypal.com";
 const TIMEOUT_MS = 20_000;
 const ORDER_ID = /^[A-Z0-9]{10,36}$/;
+/** A product id as the catalog makes them, and a PayPal capture id: what the refund watch reads a paid order by. */
+const PAID_PRODUCT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const CAPTURE_ID = /^[A-Za-z0-9-]{1,64}$/;
 const MERCHANT_ID = /^[A-Z0-9]{8,20}$/;
 /** How long a refund on PayPal is watched for, after the sale. PayPal allows refunds for 180 days. */
 const WATCH_SECONDS = 180 * 86_400;
@@ -452,10 +456,23 @@ async function readPaidExact(order: string): Promise<Paid | null | "unknown"> {
   }
   if (!v || typeof v !== "object" || Array.isArray(v)) return "unknown";
   const r = v as Record<string, unknown>;
-  // Each field the watch acts on is real text: an empty capture, email or product would read as "nothing to take
-  // back" or look under the wrong key (Codex G on #2791), so it is unknown.
-  const text = (key: string) => typeof r[key] === "string" && (r[key] as string).trim().length > 0;
-  if (r.order !== order || !text("email") || !(r.email as string).includes("@") || !text("product") || !text("capture") || !Number.isFinite(r.at)) {
+  // Each field the watch acts on in its own format (Codex G on #2791): an address as sign-in reads one, a product id,
+  // a capture id and a whole positive time in seconds. Anything else would look under the wrong key or end the watch
+  // early, so it is unknown.
+  const matches = (key: string, pattern: RegExp) => typeof r[key] === "string" && pattern.test(r[key] as string);
+  if (
+    r.order !== order ||
+    !matches("email", EMAIL_PATTERN) ||
+    !matches("product", PAID_PRODUCT_ID) ||
+    !matches("capture", CAPTURE_ID) ||
+    !Number.isSafeInteger(r.at) ||
+    (r.at as number) <= 0 ||
+    typeof r.store !== "string" ||
+    !r.store ||
+    !Number.isSafeInteger(r.cents) ||
+    (r.cents as number) < 0 ||
+    !matches("currency", /^[A-Za-z]{3}$/)
+  ) {
     return "unknown";
   }
   return v as Paid;

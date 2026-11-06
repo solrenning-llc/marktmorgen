@@ -109,6 +109,12 @@ export function askedCeiling(limit: number): number {
 
 /** A contact added or a product given through the API is this many of the window's API requests, the request included (lib/api-write.ts). */
 export const API_WRITE_UNITS = 5;
+/**
+ * A page of sales read through the API (GET /api/v1/sales, lib/api-sales.ts) is this many of the window's API
+ * requests, the request included: it may wait on the creator's Stripe account for its whole ceiling while a
+ * hundred checkouts come back (tests/plan-cost-registry.ts, API_SALES_READ).
+ */
+export const API_SALES_UNITS = 10;
 
 /** How each kind is named in a sentence: "studio requests", "API requests". */
 export const KIND_WORDS: Record<AllowanceKind, { many: string; what: string }> = {

@@ -22,7 +22,7 @@ export function MorningLogo() {
 
 /**
  * The way past the menu, the line said while plans are not on sale
- * (lib/opening.ts), and the menu: Pricing, Log in and Start free.
+ * (lib/opening.ts), and the menu: Pricing, Log in and Start your store.
  * `current` marks the page the visitor is on (2.4.8).
  */
 export function MorningHeader({ current }: { current?: "/pricing" }) {
@@ -44,7 +44,7 @@ export function MorningHeader({ current }: { current?: "/pricing" }) {
             <ul className="hm-nav-links">
               <li><a href="/pricing" className="hm-nav-link" aria-current={current === "/pricing" ? "page" : undefined}>Pricing</a></li>
               <li><a href="/signin?to=login" className="hm-nav-link">Log in</a></li>
-              <li><a href="/signin" className="hm-nav-cta">Start free</a></li>
+              <li><a href="/signin" className="hm-nav-cta">Start your store</a></li>
             </ul>
           </nav>
         </div>

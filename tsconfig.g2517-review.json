@@ -1,0 +1,1 @@
+{"extends": "./tsconfig.json", "compilerOptions": {"noEmit": true, "incremental": false}, "include": ["lib/membership-access.ts", "lib/store-checkout.ts", "tests/g-2517-provider-identity.test.ts", "tests/membership-status-evidence.test.ts", "tests/g-2517-expanded-order.proof.ts"], "exclude": ["node_modules"]}

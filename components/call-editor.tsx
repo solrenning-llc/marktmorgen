@@ -2,6 +2,9 @@
 
 import { MAX_PLACE_LINE, MAX_PLACE_LINES, placeLine } from "@/lib/call-place";
 import { useState, useId } from "react";
+import { useStoreCurrency } from "@/components/store-currency";
+import { MAX_CALL_LENGTHS, lengthsRefusal, problemOnPrice } from "@/lib/call-lengths";
+import { type Currency, priceExample, rangeWords, toMajor } from "@/lib/money";
 import { UrlField } from "@/components/url-field";
 import { roomOnLeave } from "@/lib/url-check";
 import { useRouter } from "next/navigation";
@@ -32,7 +35,7 @@ import {
 } from "@/lib/call-setup";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
-const MESSAGES: Record<string, string> = {
+export const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   minutes: "Pick how long a call lasts.",
   tz: "Pick your time zone.",
@@ -64,6 +67,10 @@ const MESSAGES: Record<string, string> = {
   bundle: "A bundle cannot be a call. Stop it being a bundle first.",
   pwyw: "A call has a set price. Stop letting buyers choose the price first.",
   unknown: "That product is not there anymore. Reload the page.",
+  // The other lengths (637 [GL5]): refused where they are kept (lib/store.ts, setProductCall) or sent in a shape the editor never sends.
+  lengths_package: "This call now sells a package of sessions, and a package's sessions are free once bought, so it offers one length. Remove the other lengths, or stop selling the package first.",
+  lengths_price: "This product's price changed while you were editing, so the other lengths were not saved. Close the hours, open them again and save.",
+  lengths: "The other lengths could not be read, so nothing was saved. Close the hours, open them again and save.",
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
@@ -132,7 +139,12 @@ export type Draft = {
   sessions: SessionDraft[];
   /** The cancellation deadline in hours before the start (lib/call-setup.ts, CANCEL_HOURS); 0 is none. */
   cancelHours: number;
+  /** Other lengths than the call's own, each with its price as typed (lib/call-lengths.ts); the call's own is at the product's price. */
+  extra: { id: string; minutes: number; price: string }[];
 };
+
+/** A row's own key, so removing one never moves focus or a typed price onto another. */
+const rowId = () => Math.random().toString(36).slice(2, 10);
 
 /** A Google Calendar or Zoom account this store can make meetings on, as the studio shows it. */
 export type MeetAccount = { provider: MeetProvider; account: string };
@@ -318,7 +330,7 @@ function newSession(tz: string, before: SessionDraft | undefined): SessionDraft 
   };
 }
 
-function toDraft(setup: CallSetup | null, kind: "weekly" | "live"): Draft {
+function toDraft(setup: CallSetup | null, kind: "weekly" | "live", currency: Currency): Draft {
   if (setup) {
     const now = Date.now();
     return {
@@ -329,6 +341,7 @@ function toDraft(setup: CallSetup | null, kind: "weekly" | "live"): Draft {
       place: setup.place?.lines.join("\n") ?? "",
       seats: String(setup.seats),
       cancelHours: setup.cancelHours ?? 0,
+      extra: (setup.lengths ?? []).slice(1).map((l) => ({ id: rowId(), minutes: l.minutes, price: String(toMajor(l.cents, currency)) })),
       // Sessions that are over are not shown, and are let go when this is saved.
       sessions: setup.sessions
         .filter((s) => s.start + s.minutes * 60_000 > now)
@@ -362,6 +375,7 @@ function toDraft(setup: CallSetup | null, kind: "weekly" | "live"): Draft {
     seats: "1",
     sessions: kind === "live" ? [newSession(tz, undefined)] : [],
     cancelHours: 0,
+    extra: [],
   };
 }
 
@@ -382,13 +396,114 @@ function sessionWhen(start: number, tz: string): string {
   }).format(new Date(start));
 }
 
+/**
+ * Other lengths a one-to-one call may offer, each with its price (637 [GL5],
+ * lib/call-lengths.ts). The call's own length, at this product's price, is
+ * always the first; each other one is longer, so the price on the store is
+ * the call's own. Optional: none keeps the call exactly as it is.
+ */
+export function OtherLengths({ draft, setDraft, currency, id, wrong, clearWrong, errorId }: { draft: Draft; setDraft: (d: Draft) => void; currency: Currency; id: string; wrong: { id: string; problem: string } | null; clearWrong: () => void; errorId: string }) {
+  const longer = CALL_LENGTHS.filter((m) => m > draft.minutes);
+  const unused = longer.filter((m) => !draft.extra.some((row) => row.minutes === m));
+  // A line the server marked is unmarked once the creator changes or removes it; the others keep their marks (3.3.1).
+  const setRow = (index: number, change: Partial<Draft["extra"][number]>) => {
+    if (draft.extra[index]?.id === wrong?.id) clearWrong();
+    setDraft({ ...draft, extra: draft.extra.map((row, i) => (i === index ? { ...row, ...change } : row)) });
+  };
+  // Focus follows the change (2.4.3): to a new row's length, or back to the group's explanation once a row is gone.
+  const focusSoon = (target: string) => requestAnimationFrame(() => document.getElementById(target)?.focus());
+  return (
+    <fieldset aria-describedby={`lengths-hint-${id}`}>
+      <legend className="field-label">Other lengths (optional)</legend>
+      <p id={`lengths-hint-${id}`} className="field-hint" tabIndex={-1}>
+        {`Let people choose a longer call at its own price. ${draft.minutes} minutes at this product's price is always the first choice. You can add up to ${MAX_CALL_LENGTHS - 1} more.`}
+      </p>
+      {draft.extra.map((row, index) => {
+        // Not longer than the call's own length any more (its length was changed above): said on the row, kept until the creator decides.
+        const notLonger = row.minutes <= draft.minutes;
+        const flagged = wrong?.id === row.id;
+        // Only the field the server's problem is about is marked: a price out of range or below a shorter length's on the
+        // price, any other on the length (3.3.1).
+        const priceWrong = flagged && problemOnPrice(wrong?.problem ?? "");
+        const lengthWrong = flagged && !priceWrong;
+        const marked = notLonger || lengthWrong;
+        // The message the server sent is said on the field it is about, not only above the save button (3.3.1).
+        const said = [priceWrong ? errorId : "", `lengths-price-${id}`].filter(Boolean).join(" ");
+        return (
+        <div key={row.id} className="mt-3 grid items-end gap-3 sm:grid-cols-[1fr_1fr_auto]">
+          <label className="block">
+            <span className="field-label">{`Length ${index + 2}`}</span>
+            <select id={`length-${id}-${row.id}`} className="field mt-2" value={row.minutes} aria-invalid={marked || undefined} aria-describedby={[notLonger ? `length-short-${id}-${row.id}` : "", lengthWrong ? errorId : ""].filter(Boolean).join(" ") || undefined} onChange={(e) => setRow(index, { minutes: Number(e.target.value) })}>
+              {[row.minutes, ...unused].filter((m, i, all) => all.indexOf(m) === i).sort((a, b) => a - b).map((m) => (
+                <option key={m} value={m}>{`${m} minutes`}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="field-label">{`Price for ${row.minutes} minutes`}</span>
+            <input
+              className="field mt-2"
+              inputMode="decimal"
+              autoComplete="off"
+              required
+              value={row.price}
+              onChange={(e) => setRow(index, { price: e.target.value })}
+              aria-invalid={priceWrong || undefined}
+              aria-describedby={said}
+            />
+          </label>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => {
+              if (flagged) clearWrong();
+              setDraft({ ...draft, extra: draft.extra.filter((_, i) => i !== index) });
+              focusSoon(`lengths-hint-${id}`);
+            }}
+          >
+            {`Remove ${row.minutes} minutes`}
+          </button>
+          {/* Always in the page, so the line said when the call's own length grows past this one is announced (4.1.3). */}
+          <div role="status" className="sm:col-span-3">
+            {notLonger ? (
+              <p id={`length-short-${id}-${row.id}`} className="field-hint font-semibold text-ink">
+                {`${row.minutes} minutes is not longer than the call's own length of ${draft.minutes} minutes. Pick a longer one, or remove it.`}
+              </p>
+            ) : null}
+          </div>
+        </div>
+        );
+      })}
+      {draft.extra.length ? (
+        <p id={`lengths-price-${id}`} className="field-hint mt-2">{`Type each price ${rangeWords(currency)}, like ${priceExample(currency, 80)}.`}</p>
+      ) : null}
+      {draft.extra.length < MAX_CALL_LENGTHS - 1 && unused.length ? (
+        <button
+          type="button"
+          className="btn btn-secondary mt-3"
+          onClick={() => {
+            const added = { id: rowId(), minutes: unused[0], price: "" };
+            setDraft({ ...draft, extra: [...draft.extra, added] });
+            focusSoon(`length-${id}-${added.id}`);
+          }}
+        >
+          Add a length
+        </button>
+      ) : null}
+    </fieldset>
+  );
+}
+
 /** Selling a product as a paid call: hours or dated sessions, length, seats, and where it happens. */
 export function CallEditor({ product, email, meetings = [] }: { product: Product; email: string; meetings?: MeetAccount[] }) {
   const router = useRouter();
+  const currency = useStoreCurrency();
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<Draft>(() => toDraft(product.call, product.call?.kind ?? "weekly"));
+  const [draft, setDraft] = useState<Draft>(() => toDraft(product.call, product.call?.kind ?? "weekly", currency));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The other length the server said is wrong, kept by its row (not its place), so removing another row never moves the mark.
+  const [wrongLength, setWrongLength] = useState<{ id: string; problem: string } | null>(null);
 
   const eligible =
     product.priceCents > 0 &&
@@ -405,17 +520,29 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
   async function send(payload: Record<string, unknown>, confirmation: string) {
     setBusy(true);
     setError(null);
+    setWrongLength(null);
     try {
       const response = await fetch("/api/store/call", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; problem?: string; minutes?: number; index?: number };
       if (data.ok) {
         setOpen(false);
         toast(confirmation);
         router.refresh();
+        return;
+      }
+      // The other lengths (lib/call-lengths.ts): what is wrong with them, in the rules' own words.
+      if (data.error === "lengths" && data.problem) {
+        // Line 0 is the call's own length at this product's price, which is not typed here (lengthsRefusal).
+        const said = lengthsRefusal({ problem: data.problem, index: data.index, minutes: data.minutes }, currency);
+        setError(said.message);
+        // The server counts lines from the call's own length (0); the editor's rows start at 1.
+        // The rows are read from the draft this save sent, so a row removed while it was on its way never moves the mark onto another.
+        const sentRow = said.row !== null ? draft.extra[said.row - 1] : undefined;
+        setWrongLength(sentRow ? { id: sentRow.id, problem: said.problem } : null);
         return;
       }
       setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
@@ -448,7 +575,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
         <button
           type="button"
           onClick={() => {
-            setDraft(toDraft(null, "weekly"));
+            setDraft(toDraft(null, "weekly", currency));
             setOpen(true);
           }}
           className="inline-flex min-h-11 -my-2.5 items-center text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
@@ -458,7 +585,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
         <button
           type="button"
           onClick={() => {
-            setDraft(toDraft(null, "live"));
+            setDraft(toDraft(null, "live", currency));
             setOpen(true);
           }}
           className="inline-flex min-h-11 -my-2.5 items-center text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
@@ -510,11 +637,15 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
           <>
             <p className="text-sm font-semibold text-ink">
               {setup.place
-                ? `In person · ${setup.minutes} minutes${setup.seats > 1 ? ` · up to ${setup.seats} people` : ""} · ${setup.tz}`
+                ? `In person · ${setup.seats <= 1 && setup.lengths?.length ? setup.lengths.map((l) => l.minutes).join(", ") : setup.minutes} minutes${setup.seats > 1 ? ` · up to ${setup.seats} people` : ""} · ${setup.tz}`
                 : setup.seats > 1
                   ? `Group call · ${setup.minutes} minutes · up to ${setup.seats} people · ${setup.tz}`
-                  : `Paid call · ${setup.minutes} minutes · ${setup.tz}`}
+                  : `Paid call · ${setup.lengths?.length ? setup.lengths.map((l) => l.minutes).join(", ") : setup.minutes} minutes · ${setup.tz}`}
             </p>
+            {setup.lengths?.length && setup.lengths[0].cents !== product.priceCents ? (
+              // The price changed since the lengths were saved: only the call's own length sells (lib/call-lengths.ts, bookingLength).
+              <p className="mt-1 text-sm font-semibold text-ink" role="status">{"You changed this product's price after setting the other lengths, so only the first length is on sale. Open the hours and save them again to offer the others."}</p>
+            ) : null}
             <p className="mt-1 text-sm text-ink-soft">{summarise(setup)}</p>
             <p className="mt-1 text-sm text-ink-soft">
               {`At least ${setup.noticeHours === 1 ? "1 hour's" : `${setup.noticeHours} hours'`} notice, up to ${setup.horizonDays} days ahead${setup.bufferMinutes ? `, ${setup.bufferMinutes} minutes between calls` : ""}.`}
@@ -540,7 +671,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
           <button
             type="button"
             onClick={() => {
-              setDraft(toDraft(setup, setup.kind));
+              setDraft(toDraft(setup, setup.kind, currency));
               setOpen(true);
             }}
             className="inline-flex min-h-11 -my-2.5 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
@@ -780,6 +911,8 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
               ...(draft.cancelHours ? { cancelHours: draft.cancelHours } : {}),
               seats: Number(draft.seats),
             },
+            // The other lengths, one person a time only; the server checks each against the store's currency and rules.
+            lengths: Number(draft.seats) === 1 ? draft.extra.map((row) => ({ minutes: row.minutes, price: row.price })) : [],
           },
           saved ? "Hours saved." : "It's now sold as a paid booking.",
         );
@@ -825,6 +958,18 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
           {`1 is a one-to-one call. Up to ${MAX_SEATS} makes it a group call: each time stays open until every seat is taken, and each person pays for their own seat.`}
         </p>
       </div>
+
+      {Number(draft.seats) === 1 && product.callPackage && !draft.extra.length ? (
+        // A package's sessions are free once bought, so a call with a package has one length (lib/store.ts, lengths_package): said before saving, not after.
+        <p className="field-hint">{"This call has a package of sessions, so it has one length. To offer other lengths, choose “Stop offering it” in the package first."}</p>
+      ) : Number(draft.seats) === 1 ? (
+        <OtherLengths draft={draft} setDraft={setDraft} currency={currency} id={product.id} wrong={wrongLength} clearWrong={() => setWrongLength(null)} errorId={`call-error-${product.id}`} />
+      ) : draft.extra.length ? (
+        // A group shares one time, so it has one length: said before saving, never dropped in silence.
+        <p className="field-hint font-semibold text-ink" role="status">
+          {`A group call has one length. Saving it as a group removes the other lengths: ${draft.extra.map((row) => `${row.minutes} minutes`).join(", ")}.`}
+        </p>
+      ) : null}
 
       <fieldset>
         <legend className="field-label">When people can book, in your time zone</legend>
@@ -976,7 +1121,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
         {`When someone books, it shows under Upcoming calls in your studio. The buyer gets an email with a calendar file. You get one too, or the host does on a team call. If the call is already in that person's Google Calendar, their email has no file. You and the buyer get reminders a day and an hour before. A reminder that would come less than an hour after the booking is skipped. On a team call, your reminders still come to you. Buyers can move their booking to another open time themselves, twice at most, up to your notice before it starts. A buyer can reply to their email to reach you, and the reply goes to ${email}.`}
       </p>
 
-      {error ? <p className="notice notice-error" role="alert">{error}</p> : null}
+      {error ? <p id={`call-error-${product.id}`} className="notice notice-error" role="alert">{error}</p> : null}
 
       <div className="flex flex-wrap gap-2">
         <button type="submit" aria-busy={busy} disabled={busy} className="btn btn-primary">

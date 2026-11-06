@@ -29,6 +29,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { installSesMailFixture } from "./ses-mail-fixture";
 
 const HOUR = 3_600_000;
 const realNow = Date.now;
@@ -41,27 +42,11 @@ scenarioStartedAt.setUTCHours(12, 0, 0, 0);
 let shift = 0;
 Date.now = () => scenarioStartedAt.getTime() + (realNow() - clockStartedAt) + shift;
 
-const sent: { to: string; subject: string }[] = [];
-let resendDown = false;
-globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-  const url = new URL(String(input));
-  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-  if (url.hostname === "api.resend.com") {
-    type Sent = { to: string | string[]; subject: string };
-    const body = JSON.parse(String(init?.body)) as Sent | Sent[];
-    const all = Array.isArray(body) ? body : [body];
-    // The provider took it, and its answer was lost on the way back.
-    if (resendDown) {
-      for (const m of all) sent.push({ to: [m.to].flat()[0], subject: m.subject });
-      return json({ error: "unavailable" }, 503);
-    }
-    for (const m of all) sent.push({ to: [m.to].flat()[0], subject: m.subject });
-    return json(Array.isArray(body) ? { data: all.map((_, i) => ({ id: `email_${sent.length}_${i}` })) } : { id: `email_${sent.length}` });
-  }
-  return json({ object: "list", data: [], has_more: false });
-}) as typeof fetch;
-
-const to = (subject: string) => sent.filter((m) => m.subject === subject).map((m) => m.to).sort();
+const mail = installSesMailFixture({
+  fallback: () => new Response(JSON.stringify({ object: "list", data: [], has_more: false })),
+});
+const to = (subject: string) =>
+  mail.sesAttempts.filter((message) => message.subject === subject).flatMap((message) => message.to).sort();
 const run = () => sendDueSteps((handle) => storeForHandle(handle), Date.now() + 20_000);
 const later = async (hours: number) => {
   shift += hours * HOUR;
@@ -71,6 +56,8 @@ const id = (n: number) => n.toString(16).padStart(16, "0");
 
 async function main(): Promise<void> {
   redis.clear();
+  mail.configure();
+  await mail.setReady(true, { max24: 50_000, rate: 100 });
   process.env.STRIPE_SECRET_KEY = "sk_test_workflows_only_a_stand_in";
   process.env.RESEND_API_KEY = "re_test_workflows_only_a_stand_in";
 
@@ -188,9 +175,9 @@ async function main(): Promise<void> {
   is("only somebody on the list is started", (await listRuns(lostId, 10)).length, 0);
   await upsertContact(list, "cleo@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
   await enroll(store, "cleo@example.com", { joined: false, tag: "lost" });
-  resendDown = true;
+  mail.setSesOutcome("lost");
   await run();
-  resendDown = false;
+  mail.setSesOutcome("ok");
   is("the provider got it once, but said nothing back", to("Maybe sent"), ["cleo@example.com"]);
   const held = await readRun(lostId, personOf("cleo@example.com"));
   is("the run is held at that step, uncertain", [held?.run.status, held?.events.at(-1)?.state], ["held", "uncertain"]);
@@ -288,6 +275,7 @@ async function main(): Promise<void> {
   is("deleting the store erases every workflow, run, start and hold", live().filter((k) => k.startsWith("nl:wf:run:") || k.startsWith("nl:wf:log:") || k.startsWith("nl:wf:runs:") || k.startsWith("nl:wf:held:") || k.startsWith("nl:mail:enr:") || k === `nl:mail:flows:${list}`), []);
   is("and no queued step of the store is left", ((await redisPipeline([["ZRANGEBYSCORE", "nl:mail:flowq", 0, "+inf"]]))[0] as string[]).filter((m) => m.startsWith(`${list}|`)), []);
 
+  mail.restore();
   done();
 }
 

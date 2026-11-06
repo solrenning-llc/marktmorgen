@@ -15,6 +15,8 @@ const MESSAGES: Record<string, string> = {
   limited: "That is a lot of codes in an hour. Try again later.",
   unreadable: "Your app's codes cannot be checked right now, after a security change on our side. Use a recovery code.",
   reauth: "Turning this on needs a login from the last 15 minutes. Log in again, then come back here.",
+  busy: "Your account is being changed by another request right now. Try again in a moment.",
+  second_step: "Your account already has a passkey, so turning on an authenticator app needs a login with it. Log in again with your passkey, then come back here.",
   rate_limited: "That is a lot of changes in an hour. Try again later.",
   unavailable: "Two-step login is not available on this deployment yet.",
   signed_out: "Your session ended. Log in again.",
@@ -23,9 +25,16 @@ const MESSAGES: Record<string, string> = {
   same: "The recovery address has to be another inbox than the one you log in with: that is what makes it a way back in.",
   unsent: "The code could not be emailed to that address just now. Check it, and try again.",
   "backup-wrong": "The code from your recovery address is not right. Type the six digits in the email we sent there.",
+  sessions: "Two-step login was not turned on: we could not check your other browsers just now. Try again in a moment.",
 };
 
-type Answer = { ok?: boolean; error?: string; secret?: string; uri?: string; codes?: string[] };
+type Answer = { ok?: boolean; error?: string; secret?: string; uri?: string; codes?: string[]; loggedOut?: boolean };
+
+/** Said when the request is canceled but the browsers let in without the second step could not be logged out (review of #2556). */
+export const CANCEL_NOT_LOGGED_OUT = "Canceled. Two-step login stays on, but the browsers let in without it could not be logged out just now. They stay locked until they are. Choose “Log out of all devices” at the bottom of your studio.";
+
+/** Said when the app is off but the browsers it let in could not be logged out (audit SG2, finding 6). */
+export const OFF_NOT_LOGGED_OUT = "Two-step login is off, but the browsers it let in could not be logged out just now. Choose “Log out of all devices” at the bottom of your studio.";
 
 async function call(payload: Record<string, unknown>): Promise<Answer> {
   try {
@@ -160,9 +169,11 @@ export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: i
             className="btn btn-primary mt-3"
             disabled={busy}
             onClick={() =>
-              void run({ action: "cancel" }, () => {
+              void run({ action: "cancel" }, (answer) => {
                 setReset(0);
-                toast("Canceled. Two-step login stays on.");
+                // Something to act on stays inline, never in a toast that goes (components/toast.tsx).
+                if (answer.loggedOut === false) setError(CANCEL_NOT_LOGGED_OUT);
+                else toast("Canceled. Two-step login stays on.");
               })
             }
           >
@@ -250,10 +261,12 @@ export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: i
           onSubmit={(e) => {
             e.preventDefault();
             if (asking === "off") {
-              void run({ action: "off", code }, () => {
+              void run({ action: "off", code }, (answer) => {
                 setOn(false);
                 setAsking(null);
-                toast("Two-step login is off.");
+                // Something to act on stays inline, never in a toast that goes (components/toast.tsx).
+                if (answer.loggedOut === false) setError(OFF_NOT_LOGGED_OUT);
+                else toast("Two-step login is off.");
               });
             } else {
               void run({ action: "codes", code }, (answer) => {

@@ -81,6 +81,12 @@ export type AffiliateSetting = {
    */
   buyers: boolean;
   /**
+   * Whether every new application is approved at once (624 [SZ8](35)),
+   * instead of waiting for the creator. Off unless switched on, as for every
+   * program saved before it existed; someone declined or removed stays out.
+   */
+  autoApprove?: boolean;
+  /**
    * Whether this creator has said their programme may be listed in a public
    * directory of Marktmorgen affiliate programmes, if one ever opens.
    *
@@ -321,6 +327,7 @@ export function parseAffiliateSetting(raw: unknown, now: number = Date.now()): A
     payday: whole(value.payday, NO_PAYDAY, MAX_PAYDAY) ?? NO_AFFILIATES.payday,
     hold: whole(value.hold, 0, MAX_HOLD_DAYS) ?? NO_AFFILIATES.hold,
     buyers: value.buyers === true,
+    ...(value.autoApprove === true ? { autoApprove: true } : {}),
     // Consent is given, never assumed: anything but an explicit yes is a no.
     directory: value.directory === true,
     numbers: value.numbers === true,

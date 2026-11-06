@@ -1,8 +1,9 @@
 import type { NextRequest } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
-import { TWO_STEP_COOKIE, enterLocked, finishSignIn, sendRescue } from "@/lib/two-step";
+import { TWO_STEP_COOKIE, enterLocked, finishSignIn, sendRescue, twoStepOn } from "@/lib/two-step";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { pendingRemoval } from "@/lib/passkeys";
 
 /**
  * The second step of logging in (lib/two-step.ts): the code from the app, or
@@ -70,9 +71,18 @@ export async function POST(request: NextRequest) {
   }
   if (!answer.ok) return away(answer.reason === "expired" ? "/signin?status=expired" : `/signin/code?status=${answer.reason}`);
 
+  // Opened with its second step: the app's code or a recovery code (lib/auth.ts SecondStep).
+  const sessionId = await openSession(answer.email, answer.how);
+  // Turned off between the code's check and this session: turning it off closes what it opened
+  // (lib/auth.ts dropSecondStep), so this one is closed too, and the person logs in again.
+  if (!(await twoStepOn(answer.email))) {
+    await endSession(sessionId);
+    return away("/signin?status=expired");
+  }
   const previous = request.cookies.get(SESSION_COOKIE)?.value;
-  if (previous) await endSession(previous);
-  const sessionId = await openSession(answer.email);
+  if (previous && previous !== sessionId) await endSession(previous);
+  // A passkey removal whose days are over is applied at every login; none is called off by one (lib/passkeys.ts).
+  await pendingRemoval(answer.email).catch((error) => console.error("applying a passkey removal failed", error));
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   const response = away("/studio");
   response.headers.append("Set-Cookie", sessionCookie(sessionId));

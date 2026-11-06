@@ -106,3 +106,49 @@ test("the explicit TX scenario does not change any binding tax reading, floor or
   assert.deepEqual([PLANS_ON_SALE, EU_HOSTING_CONFIRMED,
     CONSULTATION_ANSWERS.length, CURRENT_COMMERCIAL_MARGIN_REVIEW], [false, false, 0, null]);
 });
+
+
+test("exchange books with extra own entries are unknown instead of silently reduced to zero", () => {
+  let reads = 0;
+  const decorated: number[] = [];
+  Object.defineProperty(decorated, "pending", { value: 100_000, enumerable: true });
+  const symbolic: number[] = [];
+  Object.defineProperty(symbolic, Symbol("unknown exchange"), { value: null });
+  const accessor: number[] = [];
+  Object.defineProperty(accessor, "unresolved", { get() { reads++; return 100_000; } });
+  const nonIndex: number[] = [];
+  Object.defineProperty(nonIndex, "4294967295", { value: 100_000, enumerable: true });
+  for (const entries of [decorated, symbolic, accessor, nonIndex]) {
+    assert.equal(calculate(bases(0, entries)), null);
+  }
+  assert.equal(reads, 0);
+});
+
+test("hidden fiscal fields and exchange entries cannot disagree with their persisted snapshot", () => {
+  for (const key of ["currency", "annualProfitCents", "incomingExchangeCents"] as const) {
+    const value = bases(1_000_000, [100_000]);
+    Object.defineProperty(value, key, { enumerable: false });
+    assert.equal(calculate(value), null);
+  }
+  const entries = [100_000];
+  Object.defineProperty(entries, "0", { enumerable: false });
+  assert.equal(calculate(bases(0, entries)), null);
+});
+
+test("only plain exact fiscal records and ordinary dense exchange arrays are evidence", () => {
+  const extra = { ...bases(0, []), unclassified: null };
+  const symbolic = { ...bases(0, []), [Symbol("unclassified")]: null };
+  const derived = Object.assign(Object.create({ source: "unreviewed" }), bases(0, []));
+  class ExchangeBook extends Array<number> {}
+  const derivedEntries = new ExchangeBook();
+  derivedEntries.push(100);
+  for (const value of [extra, symbolic, derived, bases(0, derivedEntries)]) {
+    assert.equal(calculate(value), null);
+  }
+  const plain = bases(1_000_000, [1, 100_000]);
+  const frozen = Object.freeze({ ...plain, incomingExchangeCents: Object.freeze([1, 100_000]) });
+  const nullPrototype = Object.assign(Object.create(null), plain);
+  assert.deepEqual(calculate(frozen), calculate(plain));
+  assert.deepEqual(calculate(nullPrototype), calculate(plain));
+  assert.equal(calculate(bases(0, []))?.totalTaxCents, 0);
+});

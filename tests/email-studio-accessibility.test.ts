@@ -60,6 +60,7 @@ async function main(): Promise<void> {
   is("Open, on a draft, is at least 44px wide", wide(openingBefore(studio, /"Open above" : "Open"/, "button")), true);
   is("Edit, on a sequence, is at least 44px wide", wide(openingBefore(studio, />\s*Edit\s*<\/button>/, "button")), true);
   is("Runs, on a sequence, is at least 44px wide", wide(openingBefore(studio, /"Hide runs" : "Runs"/, "button")), true);
+  is("Close, under a sequence being edited, is at least 44px wide (39px measured)", wide(openingBefore(studio, />\s*Close\s*<\/button>/, "button")), true);
   // `.input` is not a class of this site, so the history's search and status filter were bare 20px controls.
   is("the site has no .input class", /(^|\n)\s*\.input\s*[{,:]/.test(css), false);
   is("the history's search and status use the site's 48px field", [/id="history-search"[^>]*className="field\b/.test(studio), /id="history-status"[^>]*className="field\b/.test(studio)], [true, true]);
@@ -70,8 +71,12 @@ async function main(): Promise<void> {
   const lookup = classes(openingBefore(workflowTools, /<span className="text-sm text-ink-soft">Or start from someone on your list/, "label"));
   is("the path preview's address keeps a 14rem basis, so its button wraps below it instead of squeezing it to 31px", [lookup.includes("basis-56"), lookup.includes("flex-1")], [true, false]);
 
+  // A fieldset is as wide as its widest content by default; with text spacing (1.4.12) the date field's own width pushed the page 22px past 320.
+  is("the When choices' fieldset can shrink to a 320px screen", /<fieldset className="[^"]*\bmin-w-0\b[^"]*">\s*<legend className="field-label">When<\/legend>/.test(studio), true);
+
   part("2.4.13: a date and time field keeps its focus bands while the focus is inside it");
-  is("date and time fields show the bands on :focus, as the picker's own parts never match :focus-visible on the field", /\.field:is\(\[type="date"\], \[type="time"\], \[type="datetime-local"\]\):focus\s*\{[^}]*outline: 3px solid var\(--violet-deep\)/.test(css), true);
+  // On the calendar button the field matches neither :focus-visible nor :focus in Chromium, only :focus-within (measured).
+  is("date and time fields show the bands on :focus-within, which still matches while the calendar button has the focus", /\.field:is\(\[type="date"\], \[type="time"\], \[type="datetime-local"\]\):focus-within\s*\{[^}]*outline: 3px solid var\(--violet-deep\)/.test(css), true);
 
   part("1.3.1 / 2.4.10: each card's title is a heading");
   for (const title of ["First, how your emails are signed", "Not set up yet", "This month", "How your emails are signed", "Your list"]) {

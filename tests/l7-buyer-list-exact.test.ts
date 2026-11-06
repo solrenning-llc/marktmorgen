@@ -83,6 +83,31 @@ async function main(): Promise<void> {
   is("a claim answered oddly that did land with our own value: ours, and done", said, "done");
   is("and never twice", await listOrder(store, order("cs_test_lsevenoddlanded00001", "bob@example.com")), "already");
 
+  part("A run that fails lets go only of its own claim (Revisor 1 on #2719)");
+  {
+    const real = redis.pipeline.bind(redis);
+    let tripped = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const first = String(commands[0]?.[1] ?? "");
+      if (!tripped && !first.startsWith("nl:listed:")) {
+        // This run's claim ran out while it worked, another run took it, and this run then fails.
+        tripped = true;
+        redis.run(["SET", "nl:listed:cs_test_lsevenslowrun000001", "another-run"]);
+        throw new Error("a stand-in failure while putting the order on the list");
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    const errors = console.error;
+    console.error = () => {};
+    try {
+      said = await listOrder(store, order("cs_test_lsevenslowrun000001", "dee@example.com"));
+    } finally {
+      redis.pipeline = real;
+      console.error = errors;
+    }
+    is("the failing run says skip, and the other run's claim is left alone", [said, redis.run(["GET", "nl:listed:cs_test_lsevenslowrun000001"])], ["skip", "another-run"]);
+  }
+
   part("The sweep: a mark it cannot read is not 'not listed', and the run says it failed");
   sessions = [{
     id: "cs_test_lsevensweep00000001", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment",

@@ -1,0 +1,1 @@
+{"extends": "./tsconfig.json", "compilerOptions": {"incremental": false, "plugins": []}, "include": ["components/checkout-fields-editor.tsx", "tests/checkout-fields-hydration-readiness.test.ts"], "exclude": ["node_modules"]}

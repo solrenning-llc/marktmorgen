@@ -1,0 +1,2 @@
+# Channel append pending after409
+Review5796584186 closes G MEDIUM5796258731 on713ff81c54e9a577fd40021c208e213a50ec1262. Canonical checkpointa0dbf2932b20fa57e519c200c83c68beef6e3baf, docs/reviews/codex-g-2026-11-06-2734-return.md. First final channel append lost a concurrent messages.md update; wait>=120seconds, then freshTREE/BLOB and append only. No product/author refs/CI/merge. This pending note is superseded once a later successful channel append is confirmed.

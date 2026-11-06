@@ -71,7 +71,12 @@ async function main() {
     const { out, saved, remaining } = await run(label, reply, false);
     is("one POST reached; provider fixture has applied no refund", [posts, refunded], [1, 0]);
     is("unknown, failed or foreign payment evidence cannot settle this member as refunded", typeof out === "object" ? [out.done.length, saved.r === "done"] : out, [0, false]);
-    is("unconfirmed refund remains discoverable for reconciliation on a later run", remaining, 1);
+    // Rule 23, Claude 4's decision C4-20261106-1255 (Revisor 1 on #2699): this run is the closing day (final: true), and
+    // after it there is no later run. A refund Stripe itself refused (failed, canceled) is final there: the member is
+    // settled "over" and told honestly what is left and how to reach the creator, never left held. Every other
+    // unconfirmed answer still stays to be reconciled, as Codex G asked.
+    if (label === "failed" || label === "canceled") is("a refund Stripe refused on the closing day is told, not left held", [remaining, saved.r], [0, "over"]);
+    else is("unconfirmed refund remains discoverable for reconciliation on a later run", remaining, 1);
   }
   part("exact successful refund control");
   const { out, saved } = await run("control", valid, true);

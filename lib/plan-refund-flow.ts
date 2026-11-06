@@ -53,6 +53,7 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { planRefundLetter, planRefundNotMadeLetter, planRefundPartLetter } from "@/lib/plan-refund-words";
 import { randomBytes } from "node:crypto";
 import { types } from "node:util";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 const AT = "2024-06-20";
 /** The notes of plan refunds not finished yet: field a store's id, value a Note. */
@@ -114,9 +115,49 @@ function readNote(raw: unknown): Note | null {
     return null;
   }
 }
-const noteOf = async (sid: string): Promise<Note | null> => readNote((await redisPipeline([["HGET", ENDING_KEY, sid]]))[0]);
-const writeNote = (sid: string, note: Note) => redisPipeline([["HSET", ENDING_KEY, sid, JSON.stringify(note)]]);
-const dropNote = (sid: string) => redisPipeline([["HDEL", ENDING_KEY, sid]]);
+
+/** Plain owned array slots only: a getter, Proxy, hole or extra field is not Redis evidence. */
+function exactArray(value: unknown, expected?: number): unknown[] | null {
+  try {
+    if (types.isProxy(value) || !Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return null;
+    const length = Object.getOwnPropertyDescriptor(value, "length");
+    if (!length || !Object.hasOwn(length, "value") || !Number.isSafeInteger(length.value) || length.value < 0 ||
+      (expected !== undefined && length.value !== expected) || Reflect.ownKeys(value).length !== length.value + 1) return null;
+    const out: unknown[] = [];
+    for (let i = 0; i < length.value; i += 1) {
+      const slot = Object.getOwnPropertyDescriptor(value, String(i));
+      if (!slot || !Object.hasOwn(slot, "value")) return null;
+      out.push(slot.value);
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+const oneNoteReply = async (command: (string | number)[], what: string): Promise<unknown> => {
+  const replies = exactArray(await redisPipeline([command]), 1);
+  if (!replies) throw new UnknownReplyError(what);
+  return replies[0];
+};
+
+const noteOf = async (sid: string): Promise<Note | null> => {
+  const raw = await oneNoteReply(["HGET", ENDING_KEY, sid], "the plan-refund recovery note");
+  if (raw === null) return null;
+  const note = readNote(raw);
+  if (!note) throw new UnknownReplyError("the plan-refund recovery note");
+  return note;
+};
+
+const writeNote = async (sid: string, note: Note): Promise<void> => {
+  const count = await oneNoteReply(["HSET", ENDING_KEY, sid, JSON.stringify(note)], "the plan-refund recovery note write");
+  if (count !== 0 && count !== 1) throw new UnknownReplyError("the plan-refund recovery note write");
+};
+
+const dropNote = async (sid: string): Promise<void> => {
+  const count = await oneNoteReply(["HDEL", ENDING_KEY, sid], "the plan-refund recovery note removal");
+  if (count !== 0 && count !== 1) throw new UnknownReplyError("the plan-refund recovery note removal");
+};
 
 /** The subscription as Stripe has it now, or null when it cannot be read. */
 async function subscriptionOf(id: string): Promise<Row | null> {
@@ -457,8 +498,11 @@ export async function refundAndEndPlan(store: Store, nowSeconds = Math.floor(Dat
 export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<{ ended: number; dropped: number; left: number }> {
   const counts = { ended: 0, dropped: 0, left: 0 };
   if (!isRedisConfigured() || !isBillingConfigured()) return counts;
-  const [raw] = await redisPipeline([["HGETALL", ENDING_KEY]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]) : [];
+  const raw = await oneNoteReply(["HGETALL", ENDING_KEY], "the plan-refund recovery-note list");
+  const flat = exactArray(raw);
+  if (!flat || flat.length % 2 !== 0 || flat.some((value) => typeof value !== "string")) {
+    throw new UnknownReplyError("the plan-refund recovery-note list");
+  }
   const fields: [string, unknown][] = [];
   for (let i = 0; i + 1 < flat.length && fields.length < MAX_NOTES; i += 2) fields.push([String(flat[i]), flat[i + 1]]);
   counts.left = Math.max(0, flat.length / 2 - fields.length);

@@ -437,7 +437,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
       {/* 618 [SZ2]: what the creator filled on a physical product, before the buy button (components/product-safety-facts.tsx). */}
       <ProductSafetyFacts store={store} product={product} legal={legal} />
       <BuyBox store={store} product={shippedNow} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} />
-      {cartOn && !soon && cartable(product) ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
+      {cartOn && !soon && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {/* A question before buying, answered from this page (lib/answers.ts): only where the creator switched it on. */}
       {selling && answersOn(store) ? (
         <AskBox
@@ -504,7 +504,9 @@ export default async function ProductPage({ params, searchParams }: Params) {
   });
   // Which of them can go in the cart now: one more read, only when there are any (lib/preorders.ts).
   const pairedSoon = cartOn && paired.length ? (await soonState(store).catch(() => ({ soon: new Set<string>() }))).soon : new Set<string>();
-  const pairedCart = new Set(paired.filter((p) => cartOn && cartable(p) && canSellProduct(store, p) && !pairedSoon.has(p.id)).map((p) => p.id));
+  // A limited one with none left is not offered for the cart (lib/stock.ts); only limited ones are counted.
+  const pairedOut = new Set((await Promise.all(paired.filter((p) => cartOn && p.stock !== null).map(async (p) => ((await stockLeft(store, p).catch(() => 0)) === 0 ? p.id : null)))).filter((id) => id !== null));
+  const pairedCart = new Set(paired.filter((p) => cartOn && cartable(p) && canSellProduct(store, p) && !pairedSoon.has(p.id) && !pairedOut.has(p.id)).map((p) => p.id));
   const shownElsewhere = [...paired.map((p) => p.id), ...alsoBought.map((item) => item.product.id)];
   const more = (
     <>

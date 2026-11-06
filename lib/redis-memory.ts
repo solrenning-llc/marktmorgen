@@ -956,6 +956,41 @@ export class MemoryRedis {
           }
           return taken;
         }
+        // lib/stock.ts STOCK_ADMIT and STOCK_BIND (513 [PF1], Codex G2's review of #1730, 5 November 2026), step for step.
+        if (key.startsWith("-- marktmorgen:stock-admit:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count), argv = args.slice(1 + count);
+          const n = Number(argv[0]);
+          if (!Number.isInteger(n) || n < 1 || n > 8 || count !== 2 * n || argv.length !== n + 2) return -1;
+          const pending = argv[n + 1];
+          for (const k of keys) this.live(k);
+          let ours = true;
+          for (let i = 0; i < n; i += 1) {
+            if (this.data.get(keys[i]) !== argv[1 + i]) ours = false;
+            const hold = this.data.get(keys[n + i]);
+            if (hold !== undefined && !(hold instanceof Map)) return -1;
+            if (!(hold instanceof Map) || !hold.has(pending)) ours = false;
+          }
+          if (ours) return 1;
+          for (let i = 0; i < n; i += 1) {
+            const hold = this.data.get(keys[n + i]);
+            if (hold instanceof Map) this.run(["HDEL", keys[n + i], pending]);
+          }
+          return 0;
+        }
+        if (key.startsWith("-- marktmorgen:stock-bind:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count), argv = args.slice(1 + count);
+          const n = Number(argv[0]);
+          if (!Number.isInteger(n) || n < 1 || n > 8 || count !== n || argv.length !== 3) return -1;
+          for (const k of keys) this.live(k);
+          for (const k of keys) {
+            const hold = this.data.get(k);
+            if (!(hold instanceof Map) || !hold.has(argv[1]) || !hold.has(argv[2])) return 0;
+          }
+          for (const k of keys) this.run(["HDEL", k, argv[1]]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
         if (key.startsWith("-- marktmorgen:recount-page:v1\n") && args[0] === "2") {

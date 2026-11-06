@@ -1,0 +1,18 @@
+[
+  "creator-card-page.test.ts",
+  "creator-card-page-evidence.test.ts",
+  "creator-card.test.ts",
+  "creator-card-races.test.ts",
+  "creator-card-receipt.test.ts",
+  "public-reads-ceiling.test.ts",
+  "public-reads-ceiling-2.test.ts",
+  "traffic-admission.test.ts",
+  "plan-cost-registry.test.ts",
+  "store-data-registry.test.ts",
+  "store-language.test.ts",
+  "store-contact.test.ts",
+  "site-pages.test.ts",
+  "accessibility-inventory.test.ts",
+  "accessibility-statement.test.ts",
+  "pricing-optimization.test.ts"
+]

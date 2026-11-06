@@ -112,13 +112,27 @@ export class UnreadPurchasesError extends Error {
  * is false when Stripe has more than this page: a "no" read from it is not a
  * "no" (Codex G on #2464), so a caller that finds nothing in it throws.
  */
-function listOf(listed: unknown): { rows: Row[]; complete: boolean } {
+function listOf(listed: unknown, readable: (row: Row) => boolean): { rows: Row[]; complete: boolean } {
   const list = listed && typeof listed === "object" ? (listed as { data?: unknown; has_more?: unknown }) : null;
   if (!list || !Array.isArray(list.data) || typeof list.has_more !== "boolean") throw new UnreadPurchasesError("a reply that is not a list");
-  const rows = list.data.filter((row): row is Row => Boolean(row) && typeof row === "object");
+  const rows = list.data.filter((row): row is Row => isRecord(row) && readable(row));
+  // An entry that is not the kind asked for (no id, an unknown state, a list in its place) is not a "no" either.
   if (rows.length !== list.data.length) throw new UnreadPurchasesError("a list with an entry that is not one");
   return { rows, complete: !list.has_more };
 }
+
+const isRecord = (value: unknown): value is Row => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+const SESSION_STATES = new Set(["open", "complete", "expired"]);
+const SESSION_PAYMENTS = new Set(["paid", "unpaid", "no_payment_required"]);
+const INTENT_STATES = new Set(["requires_payment_method", "requires_confirmation", "requires_action", "processing", "requires_capture", "canceled", "succeeded"]);
+/** A field that Stripe always fills is read only when it is one of its values; one it may leave out may be absent. */
+const oneOf = (value: unknown, known: Set<string>) => value === undefined || (typeof value === "string" && known.has(value));
+const hasId = (row: Row) => typeof row.id === "string" && row.id.length > 0;
+const hasMeta = (row: Row) => row.metadata === undefined || row.metadata === null || isRecord(row.metadata);
+/** A Checkout Session as Stripe lists it: an id, and its state and payment state among Stripe's own. */
+const isSessionRow = (row: Row) => hasId(row) && hasMeta(row) && oneOf(row.status, SESSION_STATES) && oneOf(row.payment_status, SESSION_PAYMENTS);
+/** A PaymentIntent as Stripe lists it: an id and a state among Stripe's own. */
+const isIntentRow = (row: Row) => hasId(row) && hasMeta(row) && oneOf(row.status, INTENT_STATES);
 
 /** The rule every door uses for a refund (lib/refunds.ts). */
 const refunded = refundedInFull;
@@ -140,7 +154,7 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
     const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
     query.append("expand[]", "data.subscription");
     query.append("expand[]", "data.payment_intent.latest_charge");
-    const listed = listOf(await onAccount("GET", account, `/checkout/sessions?${query}`));
+    const listed = listOf(await onAccount("GET", account, `/checkout/sessions?${query}`), isSessionRow);
     if (!listed.complete) complete = false;
     for (const session of listed.rows) {
       // A membership switched to another tier hands over what it is on now (lib/tier-rules.ts).
@@ -170,7 +184,7 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
   for (const customer of [...customers].slice(0, CUSTOMERS_READ)) {
     const query = new URLSearchParams({ customer, limit: "50" });
     query.append("expand[]", "data.latest_charge");
-    const listed = listOf(await onAccount("GET", account, `/payment_intents?${query}`));
+    const listed = listOf(await onAccount("GET", account, `/payment_intents?${query}`), isIntentRow);
     if (!listed.complete) complete = false;
     for (const intent of listed.rows) {
       const meta = (intent.metadata ?? {}) as Record<string, string>;

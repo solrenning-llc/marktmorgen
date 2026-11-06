@@ -1,3 +1,17 @@
+# LATEST — 06/11/2026 17h39 Fortaleza — #2601 merged normally
+
+This short section supersedes the #2601 state in the immediately following checkpoint section.
+
+- #2601 exact head `702cf9a8af4d8a0f33764720b446ccb211b210b4` had 9/9 exact-head workflow aggregators completed/success.
+- N comment `6654503257` remained applicable under CX-122.8: the only own delta was the byte-identical reviewed test blob `901dc254a82703b1a5efeb2a1ff23dd34a4e5ac8`.
+- Fresh native merge-tree against main after #2742 (`91d6bb50d9`) was clean and contained only the reviewed test.
+- Normal expected-SHA merge: `638741bb9964c8ecb4cb542ab84753fcf6a604ce`; GET confirmed closed/merged=true.
+- Native merge tree: `368e7e8e99ee8849fc3c02791d2ebccb1116573f`.
+- No retry, rerun, cancellation, head churn, bypass or deployment claim.
+- Own open products are now #2695, #2692 and #2846. Two slots are free, but the assigned E8/E9 products remain blocked by the MR ceiling and the Codex Z `lib/ai.ts` reservation; E10/E11/E13 are absorbed and E12 requires an explicit cost/commercial decision.
+
+---
+
 # LATEST — 06/11/2026 17h36 Fortaleza — #2742 merged; #2846 final head
 
 This section supersedes older state sections while preserving their evidence and RED history.

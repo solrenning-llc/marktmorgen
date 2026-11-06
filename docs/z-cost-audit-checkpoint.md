@@ -1,3 +1,41 @@
+# PONTO VIGENTE — 06/11/2026 03h06 Fortaleza: CINCO unidades, #2776 pronto, retorno Q fechado
+
+Esta seção SUPERA pendências antigas; histórico COMPLETO abaixo preservado. Checkpoint7bb05bee35f179caaf964c8805ee648fd02a3da2 publicado nesta execução após leitura integral79f7cb53. Não absorver retomada duplicada só por checkpoint recente; só execução ativa CONFIRMADA. Nenhuma sexta unidade, nenhum retry/cancel/force/mainchase. #2484 verify127130387972 e #2615 verify127143841589/mac127144213372 CONSUMIDOS para sempre. #2632/#2765 já legitimamente MERGED, não recriar espera/correção compartilhada.
+
+## CINCO produtos próprios atuais
+
+| PR | Head EXATO | Review e próximo permitido |
+|---|---|---|
+|2602|5bb857f82dd5c4e9c606c1330bdd52904fa5fad4|E2+C2 financeiras aplicáveis;226checkslocais,9NOVOS obrigatórios|
+|2740|1a061b09912914e9f2df2c3b2471d48f1d597964|S anterior aplicável;240checks locais,9NOVOS obrigatórios|
+|2741|3f29ea4d8c03bcbed9c5d4d5df04e02ffab89e39|S5794737821 aplicável;298checks locais,9NOVOS obrigatórios|
+|2773|7312dceb66fed9918c6ad82be5c01325d114cfda|294checks; S anunciou revisão INTEGRAL03h05, NÃO duplicar; R2 ciclos17/18 reproduziu81RED54→81GREEN, não é formal integral noPR (último reviews=[]).9NOVOS|
+|2776|aa08e809bfc52be0dcb8660eea75c754dccaaa0b|338checks; revisão independente integral pedida no próprio PR, canal sujeito à retentativa abaixo;9NOVOS|
+
+#2615 MERGEDb54e7172ca3d0a82661c8d5572882c9db9a740d1 e #2739 MERGEDb60156215c78bbda34a8c113bb46ecb068802d63, ambos NORMAL expected_head+review+9SUCCESS+nativeclean+GETtrue, detalhes abaixo. #2751 também MERGEDe327626f93f4bcde0cec5370d493501681a95561 pelo S, retornoZfechado, não reabrir.
+Sem fotografia repetida de CI: três integrations+2773 só observação inicial listada abaixo;2776 nove inicialmente in_progress. NÃO tratar checks anteriores como novos nem consulta temporal como evento causal. Enquanto5abertos, nenhuma nova unidade produto/ramo semPR. Próximo somente retorno nominal/review/terminal causal; merge exige parecer aplicável (DOIS se dinheiro)+NOVE SUCCESS exatos+merge-tree atual limpo+NORMAL expected_head_sha+GETtrue. Não mover ramo/CI de outro.
+
+## #2776 webhook de vídeo — MEDIUM demonstrado e corrigido
+
+PR https://github.com/solrenning-llc/marktmorgen/pull/2776. Reserva ANTES código canal089fe702df02477dbc59fc9118cc329c6417c5dd. Inventário fresco161open heads:151 inventories reutilizados SÓ em SHA idêntico;10novos, TODAS páginas files,0erros; cinco arquivos de reservas no maince1aa44b e canal completos. app/api/stream/hook/route.ts livre. Não toquei lib/stream.ts, lib/auto-captions.ts nem fornecedor/P/outro produto. Quatro paths: route, novos tests/stream-hook-counter-admission.test.ts e world.ts, SOMENTE alias próprio tests/test-config.mjs. Sem docs/reservations delta.
+Base congelada maince1aa44b6fbe1298a65d50d10388fefbcc448716. RED remoto dee83787ce4b6e894c294e2896b29e0d4f15bd96, tree0be5c9709b3f31b23dd21755977d4950d28cc88b, ramo codex/z-stream-hook-counter-admission-red PUBLICADO ANTES produto.20checks=9falhas causais+11controles. Primeiro run local não publicado tinha controle de hash scope incorreto; corrigido ANTES durableRED, não contado como achado produtivo. Red final imutável.
+MÉDIO route:29 withinLimit aceita missing/extra/text/null/zero/negative/fraction/unknownSET/timeout antes de heard/syncAutoCaptions. [] e['OK'] já recusavam antes. No RED2comandos tentados+1videohelper+1captionhelper/109bytes ARGUMENTOSfixture; GREEN2countercommands+ZEROhelpers/bytesposteriores. NÃO bytes efetivos de rede/faturaUSD nem prova de bypass de todas reservas internas; desconhecido nãozero. Config e helpersheard/sync sintéticos, mas REAL route/requestguard/MemoryRedis increments e REAL believed HMAC (world reexport relativo ../lib/stream) com assinatura sintética. Nenhuma chave real lida/conta/provedor acionado.
+Correção só import/call withinLimit→withinEssentialLimit existente (2linhas); mesmas600/min/60s/hash/ordem signature/body/config. Positivos600/601/expiração, SETnull válido, lostACK increment consumido semretry/readback,404config/401actualHMAC/400signedJSON/413body/ignored/500helper preservados. Mesmo20/20GREEN+stream148+streammeasurement11+autocaptions58+essential58+refusals12+cost24+data7=338. StrictTSC3raízes/imports0,lint4paths0,scanner3888/0,diff0. Sem IO/família nova produtiva; registries existentes passam. No nativeRedis/browser/AAA/supplier/payment/globalbuild/TSC/CI certificado.
+Head remoto GREEN aa08e809bfc52be0dcb8660eea75c754dccaaa0b, tree9dd4c7af00de75c82b8e0bcc28ba8051a8278d80=árvore nativa22e24aaea9ac725b0bcafca19a8de9762b02556d; nativeREDde3e87458 assinatura diferente/mesmatree. Mesmo ramo próprio z-stream-hook limpo, node_modules symlinkdonor776. Logs/tmp/z-stream-{red,green,types,lint,scanner}.log, config/tmp/z-stream-types.json. Nenhum WIP anterior perdido.
+Nove workflows novos, única observação inicial in_progress:42172185001,42172185110,42172185005,42172185226,42172185040,42172185038,42172185013,42172185016,42172185063. Requer revisão integral UMA (não inicia cobrança/transferência/conta) e9NEW exacthead. Pedido no corpo PR publicado. Append canal conclusão/pedido teve422nonfastforward; aguardando2min e fresh FULL reappend, texto preservado em memória streamCompletionSuffix. NÃO alegar que esse append foi publicado até confirmação. Canal da RESERVA já publicado, portanto trabalho autorizado/reservado.
+
+## #2709 retorno nominal RESOLVIDO, não repetir
+
+Pedido Q comment6677959205 no EXATO86ee74a569e7170a1493618893955b79c60eed4f, anúncio antes retorno bf57d06805779b63730472244953af2facd05a14. Li delta inteiro3paths versus integrado mainb601 e todos3desde3452609. Main adicionou memory-forget ao writer separado; constantes FORGET_TRY_COMMANDS com MEMORY_FORGET_COMMANDS e STORE_FORGET_MONTH_READ_COMMANDS=4 coexistem; reader/formatter/teste do autor/attribution company4reads intactos. Sem caller produtivo no app/lib (declaração only), funding/frequência empresa antes wiring permanecem desconhecidos/nãozero.
+MESMA prova independente11/11,4fixturecommands/0writes; ligados166=author8+SG2125+mainmemoryforget2+cost24+data7. ScopedTS3raízes/imports0,lint0,diff0,scanner3883/0. Nenhuma mudança de leitor corretivo, não inventar novo RED. Parecer **5796340546**: SEM NOVO ACHADO nominal; clean5794179820/5795021479 aplicável a86ee, merge só Q com9NOVOS/clean/expectedhead. Não conta segunda opinião independente nem certifica CI/funding/global/memory novo. Relatório durável **codex/z-review-2709-read-evidence@e995be079052c1f5dde7fb423158c8411d171ee6**, docs/reviews/z-2709-read-evidence.md, histórico/prova/runner preservados. Canal089fe702 confirmou conclusão. Detached local z-return-2709-86ee, logs/tmp/z2709-86ee-{proof,linked,types,lint,scanner}.log; nenhum source/branch/CI/merge/reserva Q modificado.
+
+## Coordenação e ponto de retomada
+
+2773 pedido formal canalbf57d068 confirmado (primeiroappend perdeuconcorrência, aguardou2min,freshFULLreappend); S revisa agora, não duplicar. R2ciclos17/18 corroboram foco RED/GREEN. 2776 pedido canal em retentativa, resevarva089fe702 já vale; antes encerrar publicar PONTO EXATO com este checkpoint e confirmação do append. Se GitHubfalhar novamente aguardar2min,freshfull,semforçar/pisarhistórico.
+Vigia ÚNICA /tmp/z-main-watch.sh,flock/tmp/codex-z-main-watch.lock,sessão22240 CONFIRMADA ainda running06:05UTC (saída vazia); fetchmain60s,só matchingnovo inbox/#2632/#2679,deadline3500s. NÃO observa CI/canal autenticados, não inferir execução de agente por vigia/checkpoint. Não iniciar outra vigia, não criar/alterar automação. Cinco slots ocupados aguardam eventos reais, auditoria não concluída. Publicações GitHub contínuas nesta execução (doismerges, trêsintegrações, doisRED/GREEN/PRs, retornoQ, checkpoint), nunca pushmain/bypass.
+
+---
+
 # PONTO VIGENTE — 06/11/2026 02h56 Fortaleza: dois merges, quatro unidades abertas
 
 Esta seção supera estados antigos; TODO histórico abaixo preservado. Checkpoint anterior79f7cb53c951f6d064fd979b1079394456c411f2 lido COMPLETO, main/caixa/canal frescos. Nenhuma duplicada absorvida só por checkpoint recente. Retentativas únicas #2484 verify127130387972 e #2615 verify127143841589/mac127144213372 CONSUMIDAS para sempre; nenhuma acionada nesta execução. Nenhum ramo/PR/produto alheio alterado, preço/limite/TTL/flag/gate/conta/fornecedor/PII intocado.

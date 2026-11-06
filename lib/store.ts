@@ -48,6 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -921,11 +922,20 @@ export async function imageFolder(email: string): Promise<string> {
   return (await sha256Hex(`nimbus-images:${email.toLowerCase()}`)).slice(0, 24);
 }
 
+/**
+ * A store's record read exactly (CX-123 rule 24): Redis's nil is no store
+ * (null); anything else that is not a store's JSON (no reply, another type,
+ * text that is not JSON, JSON without the store's handle, name and address)
+ * is unknown and throws, never "no store", which callers act on.
+ */
 function parseStore(raw: unknown): Store | null {
-  if (typeof raw !== "string" || !raw) return null;
+  if (raw === null) return null;
+  if (typeof raw !== "string" || !raw) throw new UnknownReplyError("a store's record");
   try {
     const value = JSON.parse(raw) as Partial<Store>;
-    if (!value.handle || !value.name || !value.email) return null;
+    if (!value || typeof value !== "object" || Array.isArray(value) ||
+        typeof value.handle !== "string" || !value.handle || typeof value.name !== "string" || !value.name ||
+        typeof value.email !== "string" || !value.email) throw new UnknownReplyError("a store's record");
     // Stores from before there could be several have neither: each of them
     // is its owner's first store, kept under the owner's address.
     const sid = typeof value.sid === "string" && STORE_ID_PATTERN.test(value.sid) ? value.sid : "";
@@ -1076,7 +1086,7 @@ function parseStore(raw: unknown): Store | null {
       paypalSeller: parsePayPalSeller(value.paypalSeller),
     };
   } catch {
-    return null;
+    throw new UnknownReplyError("a store's record");
   }
 }
 
@@ -1088,8 +1098,8 @@ export async function storeForEmail(
   email: string | null,
 ): Promise<Store | null> {
   if (!email || !isRedisConfigured()) return null;
-  const reply = await redisPipeline([["GET", await ownerKey(email)]]);
-  if (!Array.isArray(reply) || reply.length !== 1) return null;
+  const reply = repliesFor(await redisPipeline([["GET", await ownerKey(email)]]), 1);
+  if (!reply) throw new UnknownReplyError("a store's record");
   const store = parseStore(reply[0]);
   // A readable record must belong to this exact owner key. Preserve legacy
   // first-store records and case-insensitive email lookup; extra stores must
@@ -1227,8 +1237,12 @@ export async function storeIdExists(sid: string): Promise<boolean> {
  */
 export async function storeForId(sid: string): Promise<Store | null> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return null;
-  const [ref] = await redisPipeline([["GET", storeIdKey(sid)]]);
-  if (typeof ref !== "string" || !ref) return null;
+  // Read exactly: nil is no store with this id; anything else but its owner's key is unknown.
+  const reply = repliesFor(await redisPipeline([["GET", storeIdKey(sid)]]), 1);
+  if (!reply) throw new UnknownReplyError("a store's id");
+  const [ref] = reply;
+  if (ref === null) return null;
+  if (typeof ref !== "string" || !ref) throw new UnknownReplyError("a store's id");
   const store = await storeForEmail(ref);
   return store && store.sid === sid ? store : null;
 }

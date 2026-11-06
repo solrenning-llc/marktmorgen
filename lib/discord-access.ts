@@ -88,7 +88,8 @@ export type Checked = "kept" | "changed" | "ended" | "gone" | "later";
 
 /** Checks one person again, and gives or takes back roles to match what they hold now. */
 export async function checkMember(sid: string, userId: string, now = Date.now()): Promise<Checked> {
-  const store = await storeForId(sid).catch(() => null);
+  // A store that could not be read throws (the pass checks the member again soon); only one confirmed gone is "gone".
+  const store = await storeForId(sid);
   if (!store) return "gone";
   const room = storeKey(store);
   const [server, member] = await Promise.all([readServer(room), readMember(room, userId)]);

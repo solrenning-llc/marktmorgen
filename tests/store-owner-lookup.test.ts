@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {createHash} from "node:crypto";
 import {claimHandle,storeForEmail,storeRef} from "@/lib/store";
+import {UnknownReplyError} from "@/lib/redis-reply";
 import {store as redis} from "./redis-stub";
 
 test("owner lookup requires one reply and the exact persisted store identity",async()=>{
@@ -17,24 +18,30 @@ test("owner lookup requires one reply and the exact persisted store identity",as
  assert.ok(original);
  assert.equal((await storeForEmail(owner.toUpperCase()))?.handle,original.handle);
  let reads=0,otherCommands=0;
- const unknown:unknown[][]=[
-  [],[null],["{invalid"],[undefined],[raw,raw],
+ // Nil, or a readable record that is not this owner's: no store here (null).
+ const notHere:unknown[][]=[
+  [null],
   [JSON.stringify({...value,email:"other-owner@example.test"})],
-  [JSON.stringify({...value,email:42})],
   [JSON.stringify({...value,extra:true,sid:"a".repeat(32)})],
  ];
+ // A reply out of shape is unknown (CX-123 rule 24): it throws, never "no store".
+ const unknown:unknown[][]=[
+  [],["{invalid"],[undefined],[raw,raw],
+  [JSON.stringify({...value,email:42})],
+ ];
  try{
-  for(const reply of unknown){
+  for(const [reply,want] of [...notHere.map((r)=>[r,"null"] as const),...unknown.map((r)=>[r,"unknown"] as const)]){
    redis.pipeline=async(commands)=>{
     if(commands.length===1&&commands[0][0]==="GET"&&commands[0][1]===key){reads++;return reply;}
     otherCommands+=commands.length;
     return pipeline(commands);
    };
-   assert.equal(await storeForEmail(owner),null);
+   const got=await storeForEmail(owner).then((s)=>s===null?"null":"store",(e:unknown)=>e instanceof UnknownReplyError?"unknown":"threw");
+   assert.equal(got,want,JSON.stringify(reply));
    assert.deepEqual(await pipeline([["GET",key]]),[raw]);
   }
  }finally{redis.pipeline=pipeline;}
- assert.equal(reads,unknown.length);
+ assert.equal(reads,notHere.length+unknown.length);
  assert.equal(otherCommands,0);
  assert.deepEqual(await storeForEmail(owner),original);
 });

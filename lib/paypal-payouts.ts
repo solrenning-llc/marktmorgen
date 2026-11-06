@@ -583,7 +583,14 @@ export async function settleAllPayPal(deadline: number): Promise<number> {
   let done = 0;
   for (const sid of Array.isArray(sids) ? (sids as string[]) : []) {
     if (Date.now() >= deadline) break;
-    const store = await storeForId(sid).catch(() => null);
+    // Only a store confirmed gone leaves the set; one that could not be read stays for the next run.
+    let store: Store | null;
+    try {
+      store = await storeForId(sid);
+    } catch (error) {
+      console.error("reading a store to settle its PayPal payouts failed", error);
+      continue;
+    }
     if (!store) {
       await redisPipeline([["SREM", STORES, sid]]);
       continue;

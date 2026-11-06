@@ -140,7 +140,8 @@ export async function sendDueReminders(deadline: number, now = Date.now()): Prom
     if (!due.length) break;
     for (const { sid, id } of due) {
       if (Date.now() >= deadline) return counts;
-      const store = await storeForId(sid).catch(() => null);
+      // A store that could not be read throws, ending the pass: its reminder is kept for the next run, never dropped.
+      const store = await storeForId(sid);
       const request = store ? await requestOf(store, id).catch(() => null) : null;
       if (!store || !request) {
         await dropReminder(sid, id);

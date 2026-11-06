@@ -1,0 +1,1137 @@
+
+===== /tmp/g2574-96a-frozen.log =====
+review-g2-company-broken-encoded-person.test.ts exit 1   AssertionError [ERR_ASSERTION]: the copy must refuse unknown evidence with the retained link |   AssertionError [ERR_ASSERTION]: unparseable evidence with a retained personal link cannot certify completed absence | deleting a person: lib/crm-companies.ts could not finish Error: a company record that cannot be read names the person: the deletion is not done
+
+
+===== /tmp/g2574-d868-frozen.log =====
+review-g2-company-broken-encoded-person.test.ts exit 0 ℹ fail 0 | deleting a person: lib/crm-companies.ts could not finish Error: a company record that cannot be read names the person: the deletion is not done | deleting a person: lib/crm-companies.ts could not finish Error: a company record that cannot be read may name the person: the deletion is not done
+review-g2-company-evidence.test.ts exit 1 ℹ fail 1 | ✖ failing tests: |   AssertionError [ERR_ASSERTION]: {"status":200,"companies":[{"id":"bed91f67bd","name":"Synthetic company","website":"","note":"","people":["2e32fc71adb5d706b014aca4babac142"],"createdAt":1793993146}],"erased":true}
+
+
+===== /tmp/g2574-96a-mixed.log =====
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":false,"action":"erase","unknown":true,"retained":true}
+✔ an unparseable record with a plain retained link cannot complete erase (25.840637ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":false,"action":"copy","unknown":true,"retained":true}
+✔ an unparseable record with a plain retained link cannot complete copy (5.886431ms)
+deleting a person: lib/crm-companies.ts could not finish Error: a company record that cannot be read names the person: the deletion is not done
+    at forgetCompanyPerson (/tmp/codex-g-proof-aBiXKo/proof.cjs:89831:34)
+    at async erasePerson (/tmp/codex-g-proof-aBiXKo/proof.cjs:92300:52)
+    at async TestContext.<anonymous> (/tmp/codex-g-proof-aBiXKo/proof.cjs:92814:23)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":false,"action":"full","unknown":true,"result":{"ok":false,"reason":"incomplete","parts":[{"module":"lib/order-confirmation-outbox.ts","records":0},{"module":"lib/shipment-mail-outbox.ts","records":0},{"module":"lib/flows.ts","records":0},{"module":"lib/mail-clicks.ts","records":0},{"module":"lib/mail-health.ts","records":0},{"module":"lib/crm.ts","records":0},{"module":"lib/payment-request-store.ts","records":0},{"module":"lib/agreement-store.ts","records":0},{"module":"lib/buyer-profile.ts","records":0},{"module":"lib/form-store.ts","records":0},{"module":"lib/learn.ts","records":1},{"module":"lib/course-finish.ts","records":0},{"module":"lib/quiz.ts","records":0},{"module":"lib/assignment.ts","records":0},{"module":"lib/certificate.ts","records":0},{"module":"lib/lesson-comments.ts","records":0},{"module":"lib/community-erasure.ts","records":0},{"module":"lib/waitlist.ts","records":0},{"module":"lib/affiliate-bond.ts","records":0},{"module":"lib/affiliate-leads.ts","records":0},{"module":"lib/imported-purchases.ts","records":0},{"module":"lib/podcast-access.ts","records":0},{"module":"lib/welcome-offer-send.ts","records":0},{"module":"lib/winback-send.ts","records":0},{"module":"lib/checkout-recovery.ts","records":0},{"module":"lib/assistant-reminder.ts","records":1},{"module":"lib/move-members.ts","records":0},{"module":"lib/inbox.ts","records":0},{"module":"lib/discord-access.ts","records":0},{"module":"lib/email-sync.ts","records":0},{"module":"lib/segments.ts","records":0},{"module":"lib/member-health.ts","records":0},{"module":"lib/reviews.ts","records":0},{"module":"lib/buyer-library.ts","records":0},{"module":"lib/erasure-index.ts","records":2},{"module":"lib/contacts.ts","records":0}],"failed":["lib/crm-companies.ts"]},"retained":true}
+✔ an unparseable record with a plain retained link cannot complete full (14.110508ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":true,"action":"erase","unknown":false,"result":0,"retained":true}
+✖ an unparseable record with a encoded retained link cannot complete erase (4.744104ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":true,"action":"copy","unknown":false,"result":[],"retained":true}
+✖ an unparseable record with a encoded retained link cannot complete copy (3.725321ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":true,"action":"full","unknown":false,"result":{"ok":true,"parts":[{"module":"lib/order-confirmation-outbox.ts","records":0},{"module":"lib/shipment-mail-outbox.ts","records":0},{"module":"lib/flows.ts","records":0},{"module":"lib/mail-clicks.ts","records":0},{"module":"lib/mail-health.ts","records":0},{"module":"lib/crm.ts","records":0},{"module":"lib/crm-companies.ts","records":0},{"module":"lib/payment-request-store.ts","records":0},{"module":"lib/agreement-store.ts","records":0},{"module":"lib/buyer-profile.ts","records":0},{"module":"lib/form-store.ts","records":0},{"module":"lib/learn.ts","records":1},{"module":"lib/course-finish.ts","records":0},{"module":"lib/quiz.ts","records":0},{"module":"lib/assignment.ts","records":0},{"module":"lib/certificate.ts","records":0},{"module":"lib/lesson-comments.ts","records":0},{"module":"lib/community-erasure.ts","records":0},{"module":"lib/waitlist.ts","records":0},{"module":"lib/affiliate-bond.ts","records":0},{"module":"lib/affiliate-leads.ts","records":0},{"module":"lib/imported-purchases.ts","records":0},{"module":"lib/podcast-access.ts","records":0},{"module":"lib/welcome-offer-send.ts","records":0},{"module":"lib/winback-send.ts","records":0},{"module":"lib/checkout-recovery.ts","records":0},{"module":"lib/assistant-reminder.ts","records":1},{"module":"lib/move-members.ts","records":0},{"module":"lib/inbox.ts","records":0},{"module":"lib/discord-access.ts","records":0},{"module":"lib/email-sync.ts","records":0},{"module":"lib/segments.ts","records":0},{"module":"lib/member-health.ts","records":0},{"module":"lib/reviews.ts","records":0},{"module":"lib/buyer-library.ts","records":0},{"module":"lib/erasure-index.ts","records":2},{"module":"lib/contacts.ts","records":0}],"records":4,"notes":[]},"retained":true}
+✖ an unparseable record with a encoded retained link cannot complete full (5.017485ms)
+✖ G mixed-boundary mixed-records erase (4.430442ms)
+✖ G mixed-boundary mixed-records copy (3.389978ms)
+✖ G mixed-boundary mixed-records full (12.485845ms)
+✔ G mixed-boundary nested-proto-key erase (4.24257ms)
+✔ G mixed-boundary nested-proto-key copy (11.423908ms)
+deleting a person: lib/crm-companies.ts could not finish Error: a company record that cannot be read names the person: the deletion is not done
+    at forgetCompanyPerson (/tmp/codex-g-proof-aBiXKo/proof.cjs:89831:34)
+    at async erasePerson (/tmp/codex-g-proof-aBiXKo/proof.cjs:92300:52)
+    at async TestContext.<anonymous> (/tmp/codex-g-proof-aBiXKo/proof.cjs:92856:22)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+✔ G mixed-boundary nested-proto-key full (5.438658ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 6
+ℹ fail 6
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 110.777336
+
+✖ failing tests:
+
+test at ../codex-g-proof-aBiXKo/proof.cjs:92799:119
+✖ an unparseable record with a encoded retained link cannot complete erase (4.744104ms)
+  AssertionError [ERR_ASSERTION]: unparseable evidence with a retained personal link cannot certify completed absence
+      at TestContext.<anonymous> (/tmp/codex-g-proof-aBiXKo/proof.cjs:92830:32)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at ../codex-g-proof-aBiXKo/proof.cjs:92799:119
+✖ an unparseable record with a encoded retained link cannot complete copy (3.725321ms)
+  AssertionError [ERR_ASSERTION]: the copy must refuse unknown evidence with the retained link
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/tmp/codex-g-proof-aBiXKo/proof.cjs:92829:27)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../codex-g-proof-aBiXKo/proof.cjs:92799:119
+✖ an unparseable record with a encoded retained link cannot complete full (5.017485ms)
+  AssertionError [ERR_ASSERTION]: unparseable evidence with a retained personal link cannot certify completed absence
+      at TestContext.<anonymous> (/tmp/codex-g-proof-aBiXKo/proof.cjs:92830:32)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at ../codex-g-proof-aBiXKo/proof.cjs:92832:137
+✖ G mixed-boundary mixed-records erase (4.430442ms)
+  AssertionError [ERR_ASSERTION]: mixed/own-prototype-key evidence must not certify absence or completed work
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/tmp/codex-g-proof-aBiXKo/proof.cjs:92865:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../codex-g-proof-aBiXKo/proof.cjs:92832:137
+✖ G mixed-boundary mixed-records copy (3.389978ms)
+  AssertionError [ERR_ASSERTION]: mixed/own-prototype-key evidence must not certify absence or completed work
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/tmp/codex-g-proof-aBiXKo/proof.cjs:92865:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../codex-g-proof-aBiXKo/proof.cjs:92832:137
+✖ G mixed-boundary mixed-records full (12.485845ms)
+  AssertionError [ERR_ASSERTION]: mixed/own-prototype-key evidence must not certify absence or completed work
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/tmp/codex-g-proof-aBiXKo/proof.cjs:92865:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+
+===== /tmp/g2574-d868-mixed.log =====
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":false,"action":"erase","unknown":true,"retained":true}
+✔ an unparseable record with a plain retained link cannot complete erase (29.621882ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":false,"action":"copy","unknown":true,"retained":true}
+✔ an unparseable record with a plain retained link cannot complete copy (7.067036ms)
+deleting a person: lib/crm-companies.ts could not finish Error: a company record that cannot be read names the person: the deletion is not done
+    at forgetCompanyPerson (/tmp/codex-g-proof-vJ2Nwk/proof.cjs:90119:34)
+    at async erasePerson (/tmp/codex-g-proof-vJ2Nwk/proof.cjs:92677:52)
+    at async TestContext.<anonymous> (/tmp/codex-g-proof-vJ2Nwk/proof.cjs:93194:23)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":false,"action":"full","unknown":true,"result":{"ok":false,"reason":"incomplete","parts":[{"module":"lib/order-confirmation-outbox.ts","records":0},{"module":"lib/shipment-mail-outbox.ts","records":0},{"module":"lib/flows.ts","records":0},{"module":"lib/mail-clicks.ts","records":0},{"module":"lib/mail-health.ts","records":0},{"module":"lib/crm.ts","records":0},{"module":"lib/payment-request-store.ts","records":0},{"module":"lib/agreement-store.ts","records":0},{"module":"lib/buyer-profile.ts","records":0},{"module":"lib/form-store.ts","records":0},{"module":"lib/learn.ts","records":1},{"module":"lib/course-finish.ts","records":0},{"module":"lib/quiz.ts","records":0},{"module":"lib/assignment.ts","records":0},{"module":"lib/certificate.ts","records":0},{"module":"lib/lesson-comments.ts","records":0},{"module":"lib/community-erasure.ts","records":0},{"module":"lib/waitlist.ts","records":0},{"module":"lib/affiliate-bond.ts","records":0},{"module":"lib/affiliate-leads.ts","records":0},{"module":"lib/imported-purchases.ts","records":0},{"module":"lib/podcast-access.ts","records":0},{"module":"lib/welcome-offer-send.ts","records":0},{"module":"lib/winback-send.ts","records":0},{"module":"lib/checkout-recovery.ts","records":0},{"module":"lib/assistant-reminder.ts","records":1},{"module":"lib/move-members.ts","records":0},{"module":"lib/inbox.ts","records":0},{"module":"lib/discord-access.ts","records":0},{"module":"lib/email-sync.ts","records":0},{"module":"lib/segments.ts","records":0},{"module":"lib/store-readings.ts","records":0},{"module":"lib/calendar-sync.ts","records":0},{"module":"lib/member-health.ts","records":0},{"module":"lib/reviews.ts","records":0},{"module":"lib/customer-voice.ts","records":0},{"module":"lib/buyer-library.ts","records":0},{"module":"lib/erasure-index.ts","records":2},{"module":"lib/contacts.ts","records":0}],"failed":["lib/crm-companies.ts"]},"retained":true}
+✔ an unparseable record with a plain retained link cannot complete full (21.420861ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":true,"action":"erase","unknown":true,"retained":true}
+✔ an unparseable record with a encoded retained link cannot complete erase (4.963553ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":true,"action":"copy","unknown":true,"retained":true}
+✔ an unparseable record with a encoded retained link cannot complete copy (5.924289ms)
+deleting a person: lib/crm-companies.ts could not finish Error: a company record that cannot be read may name the person: the deletion is not done
+    at forgetCompanyPerson (/tmp/codex-g-proof-vJ2Nwk/proof.cjs:90117:38)
+    at async erasePerson (/tmp/codex-g-proof-vJ2Nwk/proof.cjs:92677:52)
+    at async TestContext.<anonymous> (/tmp/codex-g-proof-vJ2Nwk/proof.cjs:93194:23)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":true,"action":"full","unknown":true,"result":{"ok":false,"reason":"incomplete","parts":[{"module":"lib/order-confirmation-outbox.ts","records":0},{"module":"lib/shipment-mail-outbox.ts","records":0},{"module":"lib/flows.ts","records":0},{"module":"lib/mail-clicks.ts","records":0},{"module":"lib/mail-health.ts","records":0},{"module":"lib/crm.ts","records":0},{"module":"lib/payment-request-store.ts","records":0},{"module":"lib/agreement-store.ts","records":0},{"module":"lib/buyer-profile.ts","records":0},{"module":"lib/form-store.ts","records":0},{"module":"lib/learn.ts","records":1},{"module":"lib/course-finish.ts","records":0},{"module":"lib/quiz.ts","records":0},{"module":"lib/assignment.ts","records":0},{"module":"lib/certificate.ts","records":0},{"module":"lib/lesson-comments.ts","records":0},{"module":"lib/community-erasure.ts","records":0},{"module":"lib/waitlist.ts","records":0},{"module":"lib/affiliate-bond.ts","records":0},{"module":"lib/affiliate-leads.ts","records":0},{"module":"lib/imported-purchases.ts","records":0},{"module":"lib/podcast-access.ts","records":0},{"module":"lib/welcome-offer-send.ts","records":0},{"module":"lib/winback-send.ts","records":0},{"module":"lib/checkout-recovery.ts","records":0},{"module":"lib/assistant-reminder.ts","records":1},{"module":"lib/move-members.ts","records":0},{"module":"lib/inbox.ts","records":0},{"module":"lib/discord-access.ts","records":0},{"module":"lib/email-sync.ts","records":0},{"module":"lib/segments.ts","records":0},{"module":"lib/store-readings.ts","records":0},{"module":"lib/calendar-sync.ts","records":0},{"module":"lib/member-health.ts","records":0},{"module":"lib/reviews.ts","records":0},{"module":"lib/customer-voice.ts","records":0},{"module":"lib/buyer-library.ts","records":0},{"module":"lib/erasure-index.ts","records":2},{"module":"lib/contacts.ts","records":0}],"failed":["lib/crm-companies.ts"]},"retained":true}
+✔ an unparseable record with a encoded retained link cannot complete full (13.119899ms)
+✔ G mixed-boundary mixed-records erase (9.924363ms)
+✔ G mixed-boundary mixed-records copy (15.650313ms)
+deleting a person: lib/crm-companies.ts could not finish Error: a company record that cannot be read may name the person: the deletion is not done
+    at forgetCompanyPerson (/tmp/codex-g-proof-vJ2Nwk/proof.cjs:90117:38)
+    at async erasePerson (/tmp/codex-g-proof-vJ2Nwk/proof.cjs:92677:52)
+    at async TestContext.<anonymous> (/tmp/codex-g-proof-vJ2Nwk/proof.cjs:93236:22)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+✔ G mixed-boundary mixed-records full (23.705886ms)
+✔ G mixed-boundary nested-proto-key erase (8.864379ms)
+✔ G mixed-boundary nested-proto-key copy (12.711479ms)
+deleting a person: lib/crm-companies.ts could not finish Error: a company record that cannot be read names the person: the deletion is not done
+    at forgetCompanyPerson (/tmp/codex-g-proof-vJ2Nwk/proof.cjs:90119:34)
+    at async erasePerson (/tmp/codex-g-proof-vJ2Nwk/proof.cjs:92677:52)
+    at async TestContext.<anonymous> (/tmp/codex-g-proof-vJ2Nwk/proof.cjs:93236:22)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+✔ G mixed-boundary nested-proto-key full (25.670601ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 190.768974
+
+
+===== /tmp/g2574-d868-linked.log =====
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":false,"action":"erase","unknown":true,"retained":true}
+✔ an unparseable record with a plain retained link cannot complete erase (23.902192ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":false,"action":"copy","unknown":true,"retained":true}
+✔ an unparseable record with a plain retained link cannot complete copy (4.797594ms)
+deleting a person: lib/crm-companies.ts could not finish Error: a company record that cannot be read names the person: the deletion is not done
+    at forgetCompanyPerson (/tmp/codex-g-proof-d64hym/proof.cjs:90119:34)
+    at async erasePerson (/tmp/codex-g-proof-d64hym/proof.cjs:92677:52)
+    at async TestContext.<anonymous> (/tmp/codex-g-proof-d64hym/proof.cjs:93194:23)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":false,"action":"full","unknown":true,"result":{"ok":false,"reason":"incomplete","parts":[{"module":"lib/order-confirmation-outbox.ts","records":0},{"module":"lib/shipment-mail-outbox.ts","records":0},{"module":"lib/flows.ts","records":0},{"module":"lib/mail-clicks.ts","records":0},{"module":"lib/mail-health.ts","records":0},{"module":"lib/crm.ts","records":0},{"module":"lib/payment-request-store.ts","records":0},{"module":"lib/agreement-store.ts","records":0},{"module":"lib/buyer-profile.ts","records":0},{"module":"lib/form-store.ts","records":0},{"module":"lib/learn.ts","records":1},{"module":"lib/course-finish.ts","records":0},{"module":"lib/quiz.ts","records":0},{"module":"lib/assignment.ts","records":0},{"module":"lib/certificate.ts","records":0},{"module":"lib/lesson-comments.ts","records":0},{"module":"lib/community-erasure.ts","records":0},{"module":"lib/waitlist.ts","records":0},{"module":"lib/affiliate-bond.ts","records":0},{"module":"lib/affiliate-leads.ts","records":0},{"module":"lib/imported-purchases.ts","records":0},{"module":"lib/podcast-access.ts","records":0},{"module":"lib/welcome-offer-send.ts","records":0},{"module":"lib/winback-send.ts","records":0},{"module":"lib/checkout-recovery.ts","records":0},{"module":"lib/assistant-reminder.ts","records":1},{"module":"lib/move-members.ts","records":0},{"module":"lib/inbox.ts","records":0},{"module":"lib/discord-access.ts","records":0},{"module":"lib/email-sync.ts","records":0},{"module":"lib/segments.ts","records":0},{"module":"lib/store-readings.ts","records":0},{"module":"lib/calendar-sync.ts","records":0},{"module":"lib/member-health.ts","records":0},{"module":"lib/reviews.ts","records":0},{"module":"lib/customer-voice.ts","records":0},{"module":"lib/buyer-library.ts","records":0},{"module":"lib/erasure-index.ts","records":2},{"module":"lib/contacts.ts","records":0}],"failed":["lib/crm-companies.ts"]},"retained":true}
+✔ an unparseable record with a plain retained link cannot complete full (14.450204ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":true,"action":"erase","unknown":true,"retained":true}
+✔ an unparseable record with a encoded retained link cannot complete erase (5.425533ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":true,"action":"copy","unknown":true,"retained":true}
+✔ an unparseable record with a encoded retained link cannot complete copy (8.680003ms)
+deleting a person: lib/crm-companies.ts could not finish Error: a company record that cannot be read may name the person: the deletion is not done
+    at forgetCompanyPerson (/tmp/codex-g-proof-d64hym/proof.cjs:90117:38)
+    at async erasePerson (/tmp/codex-g-proof-d64hym/proof.cjs:92677:52)
+    at async TestContext.<anonymous> (/tmp/codex-g-proof-d64hym/proof.cjs:93194:23)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":true,"action":"full","unknown":true,"result":{"ok":false,"reason":"incomplete","parts":[{"module":"lib/order-confirmation-outbox.ts","records":0},{"module":"lib/shipment-mail-outbox.ts","records":0},{"module":"lib/flows.ts","records":0},{"module":"lib/mail-clicks.ts","records":0},{"module":"lib/mail-health.ts","records":0},{"module":"lib/crm.ts","records":0},{"module":"lib/payment-request-store.ts","records":0},{"module":"lib/agreement-store.ts","records":0},{"module":"lib/buyer-profile.ts","records":0},{"module":"lib/form-store.ts","records":0},{"module":"lib/learn.ts","records":1},{"module":"lib/course-finish.ts","records":0},{"module":"lib/quiz.ts","records":0},{"module":"lib/assignment.ts","records":0},{"module":"lib/certificate.ts","records":0},{"module":"lib/lesson-comments.ts","records":0},{"module":"lib/community-erasure.ts","records":0},{"module":"lib/waitlist.ts","records":0},{"module":"lib/affiliate-bond.ts","records":0},{"module":"lib/affiliate-leads.ts","records":0},{"module":"lib/imported-purchases.ts","records":0},{"module":"lib/podcast-access.ts","records":0},{"module":"lib/welcome-offer-send.ts","records":0},{"module":"lib/winback-send.ts","records":0},{"module":"lib/checkout-recovery.ts","records":0},{"module":"lib/assistant-reminder.ts","records":1},{"module":"lib/move-members.ts","records":0},{"module":"lib/inbox.ts","records":0},{"module":"lib/discord-access.ts","records":0},{"module":"lib/email-sync.ts","records":0},{"module":"lib/segments.ts","records":0},{"module":"lib/store-readings.ts","records":0},{"module":"lib/calendar-sync.ts","records":0},{"module":"lib/member-health.ts","records":0},{"module":"lib/reviews.ts","records":0},{"module":"lib/customer-voice.ts","records":0},{"module":"lib/buyer-library.ts","records":0},{"module":"lib/erasure-index.ts","records":2},{"module":"lib/contacts.ts","records":0}],"failed":["lib/crm-companies.ts"]},"retained":true}
+✔ an unparseable record with a encoded retained link cannot complete full (6.574867ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 72.950966
+✔ control: a valid escaped company is copied then safely unlinked (25.476719ms)
+G2_ENCODED_COMPANY {"action":"erase","unknown":false,"result":1,"retained":false}
+✔ an encoded personal link in an unreadable company cannot certify a completed empty erase (6.698893ms)
+G2_ENCODED_COMPANY {"action":"copy","unknown":true,"retained":true}
+✔ an encoded personal link in an unreadable company cannot certify a completed empty copy (7.632367ms)
+G2_ENCODED_COMPANY_FULL {"ok":true,"records":5,"retained":false}
+✔ full real erasure cannot complete while the encoded personal link remains (10.958829ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 55.707698
+✔ G2 known company write is funded, copied and erased from its own real row (254.755075ms)
+✔ G2 partial company read cannot certify a completed erasure [] (67.098205ms)
+✔ G2 partial company read cannot certify a completed erasure [null] (204.31183ms)
+✔ G2 missing company count cannot become an empty successful page (66.958446ms)
+✔ G2 missing company read cannot become an empty completed data copy (12.644443ms)
+✔ G2 applied company write with unknown acknowledgement keeps its room [] (5.842615ms)
+✔ G2 applied company write with unknown acknowledgement keeps its room [null] (10.156192ms)
+✔ G2 extra company-write acknowledgement cannot claim an unapplied mutation (23.540823ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 717.202127
+✔ control: a valid real company link is copied, then removed while the company stays (23.573212ms)
+G2_UNREADABLE_COMPANY_PERSON {"action":"erase","unknown":false,"result":1,"people":[]}
+✔ an unreadable company name cannot certify an empty personal erase (7.18225ms)
+G2_UNREADABLE_COMPANY_PERSON {"action":"copy","unknown":true,"people":["b425e3e19732d9ce59fc4bd2d9d85ea8"]}
+✔ an unreadable company name cannot certify an empty personal copy (4.710663ms)
+G2_FULL_ERASURE_UNREADABLE_COMPANY {"result":{"ok":true,"parts":[{"module":"lib/order-confirmation-outbox.ts","records":0},{"module":"lib/shipment-mail-outbox.ts","records":0},{"module":"lib/flows.ts","records":0},{"module":"lib/mail-clicks.ts","records":0},{"module":"lib/mail-health.ts","records":0},{"module":"lib/crm.ts","records":0},{"module":"lib/crm-companies.ts","records":1},{"module":"lib/payment-request-store.ts","records":0},{"module":"lib/agreement-store.ts","records":0},{"module":"lib/buyer-profile.ts","records":0},{"module":"lib/form-store.ts","records":0},{"module":"lib/learn.ts","records":1},{"module":"lib/course-finish.ts","records":0},{"module":"lib/quiz.ts","records":0},{"module":"lib/assignment.ts","records":0},{"module":"lib/certificate.ts","records":0},{"module":"lib/lesson-comments.ts","records":0},{"module":"lib/community-erasure.ts","records":0},{"module":"lib/waitlist.ts","records":0},{"module":"lib/affiliate-bond.ts","records":0},{"module":"lib/affiliate-leads.ts","records":0},{"module":"lib/imported-purchases.ts","records":0},{"module":"lib/podcast-access.ts","records":0},{"module":"lib/welcome-offer-send.ts","records":0},{"module":"lib/winback-send.ts","records":0},{"module":"lib/checkout-recovery.ts","records":0},{"module":"lib/assistant-reminder.ts","records":1},{"module":"lib/move-members.ts","records":0},{"module":"lib/inbox.ts","records":0},{"module":"lib/discord-access.ts","records":0},{"module":"lib/email-sync.ts","records":0},{"module":"lib/segments.ts","records":0},{"module":"lib/store-readings.ts","records":0},{"module":"lib/calendar-sync.ts","records":0},{"module":"lib/member-health.ts","records":0},{"module":"lib/reviews.ts","records":0},{"module":"lib/customer-voice.ts","records":0},{"module":"lib/buyer-library.ts","records":0},{"module":"lib/erasure-index.ts","records":2},{"module":"lib/contacts.ts","records":0}],"records":5,"notes":[]},"people":[]}
+✔ full real person erasure cannot complete while an unreadable company retains the personal link (16.785345ms)
+✔ a record whose list of people cannot be read but names the person: the deletion is said not done, the record kept (4.846187ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 65.198569
+
+The rules
+  ok    typed, made safe
+  ok    a name is needed, and is never cut
+  ok    a website that is not one
+  ok    added
+  ok    one name once, in any case
+  ok    at most the store's companies
+  ok    renamed, its people kept
+  ok    linking moves a person: one company at most
+  ok    a company has at most its people
+  ok    someone is linked by their key, never an address
+  ok    where a person works
+  ok    taken off every company
+  ok    deleted
+  ok    read back, checked again
+
+Text as it is typed (edge review)
+  ok    a name of only signs that are not drawn is no name
+  ok    a name that reads backwards from where it is shown loses its direction signs
+  ok    half a character pair (never typed) is shown as the replacement sign, never kept broken
+  ok    an accent typed as two characters is kept as one
+  ok    the C1 controls in a note are made spaces, like the others
+  ok    emoji joined by a joiner stay as typed
+  ok    one name once, whatever the case folds to (ß is ss)
+  ok    one name once, typed wide or with a zero-width space
+  ok    one name once, with an accent typed either way
+  ok    the name compared is the folded one
+  ok    the dotless ı and the dotted İ are kept apart from i, as full case folding does
+  ok    the capital sharp S folds to ss too, and signs Unicode ignores when drawing never make a name differ (round 3, L2)
+  ok    the direction marks, the soft hyphen and the zero-width space go, as in the tasks' words (round 4, L6)
+  ok    a company whose name folds like another's can still have its note changed, or its name written another way
+  ok    but a new name that another company already has is still taken
+  ok    an edit keeps a website and a note it leaves out
+  ok    an edit clears one sent empty
+  ok    websites with a port, or a name in another script
+  ok    every refusal says what to do
+
+Through the studio's route
+  ok    added
+  ok    the new company's own id comes back, so the screen links to it and never to one added elsewhere at the same moment
+  ok    its room in the store's data room taken first
+  ok    a name taken is refused, saying what to do
+  ok    linked by key
+  ok    where that person works, with the companies to choose from
+  ok    an address is not a key
+
+A person deleted goes from every company
+  ok    the erasure takes a person off the companies in its own row, never inside lib/crm.ts
+  ok    no longer linked
+  ok    the company stays
+
+One change at a time
+  ok    while another change is being written, a change is refused, saying so
+  ok    and nothing of it is kept
+  ok    a deletion that cannot take the lock is never skipped quietly: it fails, so it is reported as not done
+  ok    two at once never write over each other: every change that went through is kept
+  ok    the lock is let go after each change
+saving a company failed Error: down
+    at store.pipeline (/tmp/codex-g-proof-d64hym/proof.cjs:63896:180)
+    at redisPipeline (/tmp/codex-g-proof-d64hym/proof.cjs:8961:41)
+    at writeChanges (/tmp/codex-g-proof-d64hym/proof.cjs:61175:23)
+    at async changeCompanies (/tmp/codex-g-proof-d64hym/proof.cjs:61198:21)
+    at async POST (/tmp/codex-g-proof-d64hym/proof.cjs:61750:16)
+    at async post (/tmp/codex-g-proof-d64hym/proof.cjs:63856:22)
+    at async main (/tmp/codex-g-proof-d64hym/proof.cjs:63899:18)
+  ok    and when a write fails too, so the next change is not refused
+
+The room, counted as kept (edge review)
+  ok    before: the room counts what the companies weigh, and what a write that may have landed took
+  ok    people deleted from the store give back the room their links took
+
+A change whose lock ran out never writes over the next one (edge review)
+  ok    the late change is refused as busy and writes nothing; the one that went through is kept
+  ok    and the room counts what is kept
+
+The room is moved by difference, never set to a total read outside the lock (round 2, M1)
+  ok    the change whose lock was lost is refused and writes nothing; the next one is kept
+  ok    and the room still counts exactly what is kept
+  ok    removing what was added gives its room back
+
+A write that fails without saying whether it landed (round 2, M1)
+saving a company failed Error: down
+    at store.pipeline (/tmp/codex-g-proof-d64hym/proof.cjs:63971:120)
+    at redisPipeline (/tmp/codex-g-proof-d64hym/proof.cjs:8961:41)
+    at writeChanges (/tmp/codex-g-proof-d64hym/proof.cjs:61175:23)
+    at async changeCompanies (/tmp/codex-g-proof-d64hym/proof.cjs:61198:21)
+    at async POST (/tmp/codex-g-proof-d64hym/proof.cjs:61750:16)
+    at async post (/tmp/codex-g-proof-d64hym/proof.cjs:63856:22)
+    at async main (/tmp/codex-g-proof-d64hym/proof.cjs:63975:21)
+  ok    keeps the room it took, so the room never counts less than is kept
+
+A record that cannot be read (round 3, L3)
+  ok    it is told apart from the companies, so the creator can see it
+  ok    it still takes its place: the 300th company is refused while it is there
+  ok    and the creator can delete it, which gives back its room
+  ok    an id that is neither a company nor a record kept is still unknown
+  ok    one kept under an id longer than a company's is deleted by that exact id (round 4, L3)
+  ok    only words in the editor's status region; the Undo button is outside it (round 4, L4)
+  ok    only words in a person's company status region too; Undo is outside it (round 5, L2)
+  ok    each company's name written again in the buttons' names is counted in what the page sends (round 5, L3)
+  ok    the companies page shows each such record with a button to delete it
+
+What reading the companies costs (round 2, M2)
+  ok    the heaviest company kept weighs no more than MAX_COMPANY_RECORD_BYTES
+  ok    so every company weighs no more than MAX_COMPANIES_BYTES
+  ok    every companies request counts what reading them costs, from how many are kept, before it reads them all
+  ok    the companies page counts its reading first, the buyers only when they are read, and what it sends by its size before drawing it (round 3, M1/M2)
+  ok    what is sent is measured as Next sends it: nothing within the page's own 50 KB, then one studio request a megabyte (round 5, M1)
+  ok    a name full of & is sent as more than ten bytes each (round 4, M1)
+  ok    a person's page sends their own company whole and every other by its id and name
+  ok    as the people page does, through personCompanies (round 3, M2)
+
+The pages counted before they read, on the real store (round 4, M4 and L5)
+  ok    reading a few companies counts nothing beyond the page; twenty full ones one more; three hundred two
+  ok    with no studio request left, the companies page and a person's page with twenty companies are refused with the allowance's sentence and read no company
+  ok    with room, the page reads them and counts its reading and what it sends
+  ok    a store with no company counts nothing and reads no hash (L5)
+
+The studio requests a companies request takes (round 3, L6; round 5, M1)
+  ok    with twenty companies, one change takes its own studio request and what reading and sending them costs
+  ok    and so does a reading of them
+  ok    when only the request itself fits, the change is refused as used, says it needs more than is left, and keeps nothing
+  ok    when what reading them costs cannot be counted, the change answers 503 unavailable, never 429 used, and keeps nothing (round 6, L2; round 7, L1)
+  ok    with a few companies, a change takes only its own studio request
+
+An edit through the route keeps what it leaves out (edge review)
+  ok    renamed, its website and note kept
+
+A delete undone (review A2/A3)
+  ok    the rule: the company back with its people, except who is at another company now
+  ok    put back in one change: who is free comes back, who moved since stays where they went, and the screen is told
+  ok    too many people at once is refused
+
+Changed and removed
+  ok    renamed
+  ok    a company that is gone
+  ok    removed
+  ok    an action that is not one
+  ok    no session: refused, and nothing kept
+
+92 checks, all passing.
+
+The community: emailing every member and deleting wait
+  ok    set up by the full session
+  ok    an announcement emailed to every member is refused
+  ok    a post deleted is refused, and the post is still there
+  ok    a comment deleted is refused
+  ok    a post that emails nobody is not
+  ok    emptying the chat room is refused
+  ok    taking a chat message out is refused
+  ok    a reported post deleted from the studio is refused
+
+Events: canceling, deleting and moving one emails everyone coming
+  ok    made by the full session
+  ok    canceling it is refused
+  ok    deleting it is refused
+  ok    moving it is refused
+  ok    renaming it, at the same time, is not
+
+The course: what takes a lesson, a file or students' work away waits
+  ok    a lesson added from the locked session: adding stays open
+  ok    "lesson-remove" is refused
+  ok    "module-remove" is refused
+  ok    "media-remove" is refused
+  ok    taking an assignment off, with the work handed in, is refused
+  ok    taking a quiz off is refused
+  ok    sending a purchase email again, which carries the thank-you note, is refused
+  ok    withdrawing a student's certificate is refused
+  ok    deleting a lesson comment from the studio is refused
+  ok    a new video over the lesson's old one is refused
+  ok    and the lesson keeps it
+  ok    deleting it from the lesson page is refused too, and it is still there
+
+The product: its file, picture, page, keys and the rest
+  ok    a link put over the file, which deletes it, is refused
+  ok    and the product keeps its file
+  ok    a link on a product with no file is not
+  ok    marked coming soon by the full session
+  ok    launching it, one email in the creator's words to everyone waiting, is refused
+  ok    and it is still coming soon, its list unspent
+changing a waitlist failed Error: `after` was called outside a request scope. Read more: https://nextjs.org/docs/messages/next-dynamic-api-wrong-context
+    at after10 (/tmp/codex-g-proof-d64hym/proof.cjs:2500:15)
+    at POST17 (/tmp/codex-g-proof-d64hym/proof.cjs:145019:32)
+    at async main (/tmp/codex-g-proof-d64hym/proof.cjs:150727:33)
+  ok    taking the mark off, which emails nobody waiting and gives paid pre-orders the fixed delivery email, is not
+  ok    taking the file off is refused
+  ok    a new file over it is refused
+  ok    and the product still keeps its file
+  ok    a link put over a price option's file is refused
+  ok    and the option keeps its file
+  ok    a new file over a price option's file is refused
+  ok    taking a price option's file off is refused
+  ok    and the option still keeps it
+  ok    removing the price option, with its file, is refused
+  ok    and the option is still there with its file
+  ok    a link on a price option with no file is not refused
+  ok    removing the picture is refused
+  ok    a new picture over it is refused
+  ok    and the product keeps its picture
+  ok    its alt text is not
+  ok    a page saved without a picture it showed is refused
+  ok    and the page still shows it
+  ok    removing an episode, with its audio, is refused
+  ok    and the episode is still there
+  ok    product: remove is refused
+  ok    keys: clear is refused
+  ok    bundle: clear is refused
+  ok    option: remove is refused
+  ok    podcast: remove is refused
+  ok    page-funnels: remove is refused
+  ok    stream/captions: remove is refused
+  ok    and the product is still there
+
+The store's pages
+  ok    a site page saved without a picture it showed is refused
+  ok    a new link picture over the old one is refused
+  ok    and the link keeps its picture
+  ok    turning the link into a heading, which lets its picture go, is refused
+  ok    and the link keeps its picture and its address
+  ok    editing the link's title is not refused
+  ok    removing the store photo is refused
+  ok    a new store photo over it is refused
+  ok    forms: {"action":"remove","id":"x"} is refused
+  ok    site-page: {"action":"remove","id":"pagepage01"} is refused
+  ok    saved-blocks: {"action":"remove","id":"x"} is refused
+  ok    links: {"action":"remove","id":"abd4b24954"} is refused
+  ok    link-image: {"action":"remove","id":"abd4b24954"} is refused
+  ok    short-links: {"action":"remove","code":"x"} is refused
+  ok    blog: {"action":"delete","id":"x"} is refused
+  ok    answers: {"clear":true} is refused
+  ok    assistant-settings: {"clear":true} is refused
+  ok    and after all of them the link is still there with its picture
+  ok    and the site page still shows its picture
+  ok    saving a form is not
+
+Notes, tasks, deals, pitches, segments, drafts and review photos
+  ok    person: unnote is refused
+  ok    person-tasks: remove is refused
+  ok    crm: undeal is refused
+  ok    companies: remove is refused
+  ok    crm: unpipeline is refused
+  ok    notes: remove is refused
+  ok    spend: remove is refused
+  ok    outreach: drop is refused
+  ok    mail: segment-remove is refused
+  ok    mail: draft-remove is refused
+  ok    reviews: photo is refused
+
+The store's own fields about each person
+  ok    two fields saved by the full session
+  ok    saved without one of them, which takes its answers off every person, is refused
+  ok    and both are still there
+  ok    saving them with a new one, taking none away, is not
+
+A passkey change from a locked session does not spend the owner's
+  ok    the locked session removes nothing at once: it may only ask for a wait, on a count of its own
+  ok    and the owner's own change is not refused for the hour
+  ok    31 lists from a locked session are told locked
+  ok    and the owner can still list their passkeys
+
+Said the same way everywhere, and true
+  ok    app/signin/code/page.tsx says the one list
+  ok    app/signin/lost/page.tsx says the one list
+  ok    app/studio/page.tsx says the one list
+  ok    lib/two-step.ts says the one list
+  ok    lib/recovery-address.ts says the one list
+  ok    lib/help-content.ts says the one list
+  ok    lib/feature-pages.ts says the one list
+  ok    the list names imports, passkeys, two-step login, email to members and deleting for good
+  ok    and starts a sentence with a capital
+
+Every route that deletes or sends is held
+  ok    every route that deletes is named here (a new one has to say how it is held)
+  ok    and none named here is gone
+  ok    each one held the way it says
+  ok    every route that deletes a file has a request above that reads the file still there
+  ok    and no action is named for one route only by its path
+  ok    and every action LOCKED_ACTIONS names is one a route here uses (the in-route ones are asked through lockedFor)
+
+Every action of a route that deletes or sends is named, held or open with a reason
+  ok    every action of a route that deletes or sends is in the table (a new one has to say how it is held)
+  ok    and none in the table is gone from its route
+  ok    each one held, or open, the way it says
+
+116 checks, all passing.
+
+The list
+  ok    each company under its own heading, with its count
+  ok    its site and note
+  ok    each person linked to their page by key, named by their address, the link saying where it goes in words everyone sees (2.4.9; round 6, L5)
+  ok    someone not among the buyers is said to be so, in plain words (3.1.5)
+  ok    when Stripe could not be read, nobody is said to be missing from the buyers
+  ok    each company's heading can take the focus, for an undo that puts it back
+  ok    each button names its company
+  ok    none yet, said how to add one
+
+Adding and changing
+  ok    every field labeled, the optional ones said to be, each with an example kept out of its name
+  ok    refusals said in an alert, what was done in a status
+  ok    no button switched off, so the focus never falls off one (C1, C3)
+  ok    at the most a store can keep, the add button says why it does nothing, beside it (C3)
+
+The AAA audit of 4 November 2026
+  ok    C1: busy buttons are said to be, never switched off, and do nothing then
+  ok    C1: the focus is moved by refs once the change is drawn, never by a timer
+  ok    C1: a delete takes the focus to Undo; an undo to the company put back; Cancel and a save to the Change button; an add to the name
+  ok    C2: a refusal names its field, marked invalid and described by the message beside it
+  ok    C3: an empty name is told at the field, not by a dead button
+  ok    C6: a delete and its undo are said once, in the status line, never also in a toast
+  ok    C7: a full store said in plain words
+
+The independent review of the audit fixes
+  ok    HIGH 1: a refusal tied to a field is also said in the alert when the focus is already in that field, hidden there as it shows beside the field
+  ok    MEDIUM 3: correcting the field at fault takes its refusal away
+  ok    LIGHT 4: at the most a store can keep, a submit says why, shown once beside the button
+  ok    LIGHT 5: a reading of Stripe cut short is said beside someone not found
+  ok    the alert region is there before any refusal, its message drawn as a new node each time
+  ok    a delete keeps the people, and is undone in one change with them, saying who had moved and stays
+  ok    Change takes the focus to the form it opens, and the website field has its limit (review A6)
+
+The page
+  ok    for those who see the people's pages
+  ok    the people found among the buyers, never stored by address
+  ok    said when Stripe or the companies cannot be read
+  ok    the editor told when Stripe could not be read, or read only in part
+  ok    where it is said by a breadcrumb back to the buyers (2.4.8)
+  ok    reached from the buyers page
+
+32 checks, all passing.
+
+Where they work
+  ok    said in words, with the company's site and note
+  ok    the site's link says it opens a new tab, where everyone sees it
+  ok    none, said as none
+
+Choosing one
+  ok    a labeled choice of the store's companies, or none
+  ok    a new one made in place, labeled, its example and effect said in a hint that stays while typing (3.3.2)
+  ok    no button or choice switched off, so the focus never falls off one (C1, C3)
+  ok    no choice before the store has a company, only the way to add one
+  ok    refusals said in an alert, what was done in a status
+  ok    taking them off is undone by linking them back
+
+The AAA audit of 4 November 2026
+  ok    C1: busy controls are said to be, never switched off, and do nothing then
+  ok    C1: the focus is moved by refs once the change is drawn, never by a timer
+  ok    C1: taking them off takes the focus to Undo; the undo to the choice; adding back to the field
+  ok    C2: a name refused is told beside the field, marked invalid and described by it
+  ok    C3: Save with nothing changed, and Add with nothing typed, say what to do
+  ok    C6: taking them off is said once, in the status line; adding and linking in one toast
+
+The independent review of the audit fixes
+  ok    HIGH 1: a refusal tied to a field is also said in the alert when the focus is already in that field, hidden there as it shows beside the field
+  ok    MEDIUM 2: correcting the choice or the name takes the whole refusal away, never moving it under the form
+  ok    LIGHT 6: a refused choice is marked invalid as well as described
+  ok    the alert region is there before any refusal, its message drawn as a new node each time
+  ok    C7: a full store said in plain words
+  ok    the browser gets the rules, never the storage
+
+On the person's page
+  ok    a named section with its heading
+  ok    read with the page, and said when it cannot be
+  ok    add and link uses the id the server made, never one guessed from the list (review A5)
+
+24 checks, all passing.
+
+The address as it is kept
+  ok    a kind a store can pick
+  ok    https kept as the browser reads it
+  ok    http kept
+  ok    no scheme: read as https
+  ok    spaces around are trimmed
+  ok    never a script, a mailto or a file
+  ok    never a bare word, a number address or a name with no dot
+  ok    a port with no scheme is a host and its port, read as https
+  ok    a last part in another script, as the browser reads it
+  ok    a port never makes a bare word or a number an address
+  ok    never with a user and password in it
+  ok    never with spaces inside
+  ok    too long is refused, never cut into another address
+  ok    a field keeps the address; empty clears it
+  ok    the store keeps the kind with its fields
+
+A workflow step that sets it
+  ok    an address it can keep passes
+  ok    one it cannot is named
+
+On the contact's record
+  ok    a web address input with its keyboard
+  ok    no link before an address is saved
+  ok    a saved address is a link that names it
+  ok    it opens in a new tab, says so, and passes nothing on
+  ok    a stored value that is not an address never becomes a link
+
+22 checks, all passing.
+
+A person in every part of a store, deleted
+  ok    the person is in many parts of the store
+  ok    and their seeding changed many keys, so the comparison below means something
+  ok    the store finds them for every-store requests
+  ok    asking sends a link
+  ok    the email carries a link that works
+  ok    asking about an address no store knows sends nothing, and says the same
+  ok    the link names the address and the store
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth (/tmp/codex-g-proof-d64hym/proof.cjs:43212:9)
+    at async requestApi (/tmp/codex-g-proof-d64hym/proof.cjs:43381:16)
+    at async del (/tmp/codex-g-proof-d64hym/proof.cjs:44560:3)
+  ok    the link deletes them
+  ok    it sent no more commands than it took units for (245 of 602)
+  ok    and moved no more bytes (54686 of 396850)
+  ok    the units it takes cover that work
+  ok    the link works once
+  ok    the store's owner is told, not asked
+  (left as allowed: nl:allow:email:…:2026-10-27, nl:allow:studio:…:2026-10-27, nl:allow:transactional:…:2026-10-27, nl:data:…, nl:data:room-test-store, nl:erased:…, nl:health:…, nl:mail:flowstats:96762c9b13445865, nl:rl:erase-address:…, nl:rl:erase-address:…, nl:rl:erase-ip:…, nl:rl:erase-ip:…, nl:rsum:ver:…:9b8e4484e3, nl:sender:2026-11, nl:stats:…:ledger, nl:tasks:doors, nl:wf:day:…:2026-11-06, nl:wl:…:9b8e4484e3:send)
+  ok    everything is as it was before them, but what is allowed to change
+  ok    no key or value names them, by address or by any key made from it
+  ok    only a fingerprint is kept, under the store's list
+  ok    which cannot be read back to the address
+  ok    the other person is untouched
+  ok    the store knows the address was deleted
+  ok    an import leaves them out
+  ok    a purchase without their own yes notes the purchase, not a yes
+  ok    their own yes, given again, puts them back and lifts the fingerprint
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth (/tmp/codex-g-proof-d64hym/proof.cjs:43212:9)
+    at async requestApi (/tmp/codex-g-proof-d64hym/proof.cjs:43381:16)
+    at async del (/tmp/codex-g-proof-d64hym/proof.cjs:44560:3)
+  ok    the studio deletes them
+  ok    what the studio's door keeps: what an import gave them, by a one-way hash; nothing else names them
+  ok    their review stays, without their address (a store may not take reviews down)
+  ok    and everything else is as it was before them
+  ok    the activity log says a person was deleted, never who
+
+What it takes covers what it costs
+  ok    the base units cover the request itself and Discord
+  ok    units cover 550 commands and 310000 bytes
+  ok    units cover 1272 commands and 1709000 bytes
+  ok    units cover 39130 commands and 20115000 bytes
+  ok    the least a deletion takes is what the help says
+
+32 checks, all passing.
+
+The entry's weight is a set entry's
+  ok    as the community counts one
+
+Written with each, and counted first
+  ok    six entries in her trace
+  ok    the creator's own post is in nobody's trace
+  ok    each entry took its room in the members' slot
+  ok    a like taken back takes its entry and its room back
+
+The copy reads her trace, and only what is hers
+  ok    her post, not the one she commented on
+  ok    her comment, not the reply to her post
+  ok    what she liked, reported and voted in
+  ok    reading the whole community finds the same
+
+Deleted with the person
+  ok    her trace is gone
+
+10 checks, all passing.
+
+Before the erasure
+  ok    the protected-mail fixture exclusion requires never activated
+  ok    the world has no protected-mail records to omit
+  (copied modules with nothing for them: lib/shipment-mail-outbox.ts, lib/order-confirmation-outbox.ts, lib/agreement-store.ts, lib/affiliate-leads.ts, lib/assistant-reminder.ts, lib/paypal-sales.ts, lib/licence-keys.ts, lib/gifts.ts, lib/group-buy.ts, lib/preorders.ts, lib/call-packages.ts, lib/meet-records.ts, lib/shipments.ts, lib/closing-buyers.ts, lib/closing-holds.ts)
+  ok    every module that keeps something about them is in their copy
+  ok    inactive mail readers created no records
+  ok    the other person's address is not in it
+  ok    the store's owner's is not either
+  ok    what they said in the community's room, and the event they are coming to
+
+After the erasure
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth (/tmp/codex-g-proof-d64hym/proof.cjs:42979:9)
+    at async requestApi (/tmp/codex-g-proof-d64hym/proof.cjs:43148:16)
+    at async del (/tmp/codex-g-proof-d64hym/proof.cjs:44327:3)
+  ok    erased
+  ok    nothing the erasure reaches is left to copy
+
+9 checks, all passing.
+
+Every module the erasure reaches is said
+  ok    each eraser's module has a line in the copy's plan
+  ok    and so does each module that keeps something on purpose
+  ok    and no line names a module that keeps nothing about people
+  ok    each module the copy reads has its reader
+  ok    each line says what it is, in words
+  ok    nothing is pending: the copy is complete
+  ok    no page gives it out yet (its door is the next unit)
+  ok    a task about them, given to a teammate and done
+
+The copy
+  ok    only reads: nothing in the database changed
+  ok    the conversation is not marked read
+  ok    for this person and store, with the day it was made
+  ok    their place on the list
+  ok    the team's note about them, without who wrote it
+  ok    the deal with them
+  ok    the team's task about them: its words, date, done and when
+  ok    their conversation, both sides, said as you and the store
+  ok    a teammate's address is nowhere in it
+  ok    nor anybody else's
+  ok    what is held only as marks is said in words
+
+Nobody's copy for an address the store does not know
+  ok    empty
+
+20 checks, all passing.
+
+Kept on purpose, and still theirs to see
+  ok    all four are copied
+  ok    their key, and only theirs
+  ok    their PayPal order
+  ok    their pre-order, not the other buyer's
+  ok    on the list to be told the store closes, not told yet
+  ok    the other buyer's address is in none of it
+
+6 checks, all passing.
+
+Each reader finds what its module keeps
+  ok    all five are copied now
+  ok    one record each
+  ok    the waitlist link's secret and the feed's address are not in it
+  ok    the reminder says the sentence checked and when
+
+After the erasure, each finds nothing
+  ok    nothing left to copy
+
+5 checks, all passing.
+
+What is measured is what the registry counts in the room
+  ok    the families the room counts
+  ok    and every other one
+  ok    a key is its longest family's
+  ok    ids are long, with a digit or all hex; words are not
+
+A store's keys from before its room counted them
+  ok    one run reads every store, every page and sets every room
+  ok    the slot holds what was measured beyond what the room counted: a rate count and another store's record are not this store's
+  ok    so the room is at least what was measured, and was never made emptier
+  ok    the job's own keys are gone, and it says it is done
+
+Idempotent and resumable
+  ok    a run after it is done changes nothing
+  ok    counted twice, the room is what it was after once
+  ok    a page read from where the job no longer is adds nothing
+  ok    the page from where it is adds once and moves on
+  ok    a run out of time does nothing and loses nothing
+
+13 checks, all passing.
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3022
+the fullest companies page: 4 + 2 + 74 studio requests, and its reading of the buyers when Stripe is read
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (61.328304ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (415.421063ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (83.581912ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (5.607272ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.448384ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.27246ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.898962ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (121.095606ms)
+✔ every store figure taken in the code is a kind a line prices (100.574704ms)
+✔ every email sent names a meter, and each file only the meters it may use (114.443389ms)
+✔ the units a figure is taken in cost at least what they stand for (20.902797ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (6.278661ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.728094ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.557358ms)
+✔ Path page and its actual usage count fit its reserved studio page (1.179253ms)
+✔ a companies request fits its studio requests, and each page that reads every company fits what it counts (1.09731ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.207693ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.709897ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (1.534542ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.094572ms)
+✔ Path push fits its reserved studio requests (0.055173ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.049835ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.052138ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.09303ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (59.878296ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1010.030323
+
+Every test the page names runs in the CI, as the page says
+  ok    Public pages: its workflow and its script exist
+  ok    Public pages: the workflow runs that script
+  ok    Public pages: it runs on each proposed change and every day
+  ok    Public pages: no step may fail quietly
+  ok    Public pages: it is skipped only for a change to documentation alone
+  ok    Public pages: the workflow or its script has browser: [chromium, firefox, webkit]
+  ok    Public pages: the workflow or its script has "wcag2aaa"
+  ok    Public pages: the workflow or its script has "color-contrast-enhanced"
+  ok    Public pages: the workflow or its script has ["/","/pricing","/signin"]
+  ok    Public pages: the workflow or its script has [320,390,768,1280,1920]
+  ok    Public pages: the workflow or its script has "text-spacing","reduced-motion","forced-colors","reflow-320"
+  ok    Signing up: its workflow and its script exist
+  ok    Signing up: the workflow runs that script
+  ok    Signing up: it runs on each proposed change and every day
+  ok    Signing up: no step may fail quietly
+  ok    Signing up: it is skipped only for a change to documentation alone
+  ok    Signing up: the workflow or its script has browser: [chromium, firefox, webkit]
+  ok    Signing up: the workflow or its script has "color-contrast-enhanced"
+  ok    Signing up: the workflow or its script has Real local request/captured fake email/explicit confirmation/new empty studio
+  ok    The studio: its workflow and its script exist
+  ok    The studio: the workflow runs that script
+  ok    The studio: it runs on each proposed change and every day
+  ok    The studio: no step may fail quietly
+  ok    The studio: it is skipped only for a change to documentation alone
+  ok    The studio: the workflow or its script has browser: [chromium, firefox, webkit]
+  ok    The studio: the workflow or its script has "wcag2aaa"
+  ok    The studio: the workflow or its script has "color-contrast-enhanced"
+  ok    The studio: the workflow or its script has Two authenticated read-only studio/editor surfaces only
+  ok    Products: its workflow and its script exist
+  ok    Products: the workflow runs that script
+  ok    Products: it runs on each proposed change and every day
+  ok    Products: no step may fail quietly
+  ok    Products: it is skipped only for a change to documentation alone
+  ok    Products: the workflow or its script has browser: [chromium, firefox, webkit]
+  ok    Products: the workflow or its script has "wcag2aaa"
+  ok    Products: the workflow or its script has "color-contrast-enhanced"
+  ok    Products: the workflow or its script has Product form and actual disposable local creation/reload/manual visibility/storefront proof only
+  ok    Buying: its workflow and its script exist
+  ok    Buying: the workflow runs that script
+  ok    Buying: it runs on each proposed change and every day
+  ok    Buying: no step may fail quietly
+  ok    Buying: it is skipped only for a change to documentation alone
+  ok    Buying: the workflow or its script has browser: [chromium, firefox, webkit]
+  ok    Buying: the workflow or its script has "color-contrast-enhanced"
+  ok    Buying: the workflow or its script has Real local app checkout against fake Stripe paid return; local captured inbox/library/orders
+  ok    A real screen reader: its workflow and its script exist
+  ok    A real screen reader: the workflow runs that script
+  ok    A real screen reader: it runs on each proposed change and every day
+  ok    A real screen reader: no step may fail quietly
+  ok    A real screen reader: it is skipped only for a change to documentation alone
+  ok    A real screen reader: the workflow or its script has os: [windows-latest, macos-latest]
+  ok    A real screen reader: the workflow or its script has process.platform==="win32"?"nvda":process.platform==="darwin"?"voiceover"
+  ok    A real screen reader: the workflow or its script has {path:"/signin",heading:"Start your store"}
+  ok    A real screen reader: the workflow or its script has {path:"/signin?to=login",heading:"Log in to your store"}
+  ok    the enhanced contrast rule is named wherever the page says the enhanced level is checked
+
+What is open and what is reviewed come from the inventory, in its own public words
+  ok    every open item has public words in the inventory
+  ok    the public words are plain: no internal delivery numbers, no commas without a space, no slashes
+  ok    the screen reader gap matches the trial the page describes
+  ok    testing with people who have disabilities is listed as not done
+  ok    a reviewed page needs the exact finished status, which no template has today
+
+The date of the last review follows the records
+  ok    the records the page shows were reviewed on the date it gives
+  ok    the date is a real date
+
+What the page says, and what it never says
+  ok    the goal is said as a goal, not as conformity
+  ok    no claim of conformity, certification, a seal or being best
+  ok    every gap is on the page, in its public words
+  ok    no internal area names or statuses on the page
+  ok    no unverifiable promise to read every message
+  ok    an alternative is offered where something stops a person
+  ok    not shown as terms with an effective date
+  ok    the glossary expands the screen readers and engines it names
+  ok    how many pages still wait for a full review is said
+  ok    no widget or overlay, said plainly
+  ok    how to report a problem, without a promised reply time
+  ok    a glossary for the terms it uses
+  ok    creators' stores: what the studio checks, and that their content is theirs
+
+Where it is found
+  ok    in the footer's legal links, which the slim footer uses too
+  ok    in the sitemap
+
+77 checks, all passing.
+
+
+===== /tmp/g2574-d868-tsc.log =====
+
+
+===== /tmp/g2574-d868-lint.log =====
+
+
+===== /tmp/g2574-d868-public.log =====
+Public data check: 3751 tracked files; 0 file(s) require correction.
+
+
+===== /tmp/g2574-d868-diffcheck.log =====
+
+
+===== /tmp/g2574-red-96a/.review-output/review-g2-company-broken-encoded-person.test.ts.log =====
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":false,"action":"erase","unknown":true,"retained":true}
+✔ an unparseable record with a plain retained link cannot complete erase (23.018889ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":false,"action":"copy","unknown":true,"retained":true}
+✔ an unparseable record with a plain retained link cannot complete copy (7.042229ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":false,"action":"full","unknown":true,"result":{"ok":false,"reason":"incomplete","parts":[{"module":"lib/order-confirmation-outbox.ts","records":0},{"module":"lib/shipment-mail-outbox.ts","records":0},{"module":"lib/flows.ts","records":0},{"module":"lib/mail-clicks.ts","records":0},{"module":"lib/mail-health.ts","records":0},{"module":"lib/crm.ts","records":0},{"module":"lib/payment-request-store.ts","records":0},{"module":"lib/agreement-store.ts","records":0},{"module":"lib/buyer-profile.ts","records":0},{"module":"lib/form-store.ts","records":0},{"module":"lib/learn.ts","records":1},{"module":"lib/course-finish.ts","records":0},{"module":"lib/quiz.ts","records":0},{"module":"lib/assignment.ts","records":0},{"module":"lib/certificate.ts","records":0},{"module":"lib/lesson-comments.ts","records":0},{"module":"lib/community-erasure.ts","records":0},{"module":"lib/waitlist.ts","records":0},{"module":"lib/affiliate-bond.ts","records":0},{"module":"lib/affiliate-leads.ts","records":0},{"module":"lib/imported-purchases.ts","records":0},{"module":"lib/podcast-access.ts","records":0},{"module":"lib/welcome-offer-send.ts","records":0},{"module":"lib/winback-send.ts","records":0},{"module":"lib/checkout-recovery.ts","records":0},{"module":"lib/assistant-reminder.ts","records":1},{"module":"lib/move-members.ts","records":0},{"module":"lib/inbox.ts","records":0},{"module":"lib/discord-access.ts","records":0},{"module":"lib/email-sync.ts","records":0},{"module":"lib/segments.ts","records":0},{"module":"lib/member-health.ts","records":0},{"module":"lib/reviews.ts","records":0},{"module":"lib/buyer-library.ts","records":0},{"module":"lib/erasure-index.ts","records":2},{"module":"lib/contacts.ts","records":0}],"failed":["lib/crm-companies.ts"]},"retained":true}
+✔ an unparseable record with a plain retained link cannot complete full (12.211961ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":true,"action":"erase","unknown":false,"result":0,"retained":true}
+✖ an unparseable record with a encoded retained link cannot complete erase (6.578871ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":true,"action":"copy","unknown":false,"result":[],"retained":true}
+✖ an unparseable record with a encoded retained link cannot complete copy (4.034035ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":true,"action":"full","unknown":false,"result":{"ok":true,"parts":[{"module":"lib/order-confirmation-outbox.ts","records":0},{"module":"lib/shipment-mail-outbox.ts","records":0},{"module":"lib/flows.ts","records":0},{"module":"lib/mail-clicks.ts","records":0},{"module":"lib/mail-health.ts","records":0},{"module":"lib/crm.ts","records":0},{"module":"lib/crm-companies.ts","records":0},{"module":"lib/payment-request-store.ts","records":0},{"module":"lib/agreement-store.ts","records":0},{"module":"lib/buyer-profile.ts","records":0},{"module":"lib/form-store.ts","records":0},{"module":"lib/learn.ts","records":1},{"module":"lib/course-finish.ts","records":0},{"module":"lib/quiz.ts","records":0},{"module":"lib/assignment.ts","records":0},{"module":"lib/certificate.ts","records":0},{"module":"lib/lesson-comments.ts","records":0},{"module":"lib/community-erasure.ts","records":0},{"module":"lib/waitlist.ts","records":0},{"module":"lib/affiliate-bond.ts","records":0},{"module":"lib/affiliate-leads.ts","records":0},{"module":"lib/imported-purchases.ts","records":0},{"module":"lib/podcast-access.ts","records":0},{"module":"lib/welcome-offer-send.ts","records":0},{"module":"lib/winback-send.ts","records":0},{"module":"lib/checkout-recovery.ts","records":0},{"module":"lib/assistant-reminder.ts","records":1},{"module":"lib/move-members.ts","records":0},{"module":"lib/inbox.ts","records":0},{"module":"lib/discord-access.ts","records":0},{"module":"lib/email-sync.ts","records":0},{"module":"lib/segments.ts","records":0},{"module":"lib/member-health.ts","records":0},{"module":"lib/reviews.ts","records":0},{"module":"lib/buyer-library.ts","records":0},{"module":"lib/erasure-index.ts","records":2},{"module":"lib/contacts.ts","records":0}],"records":4,"notes":[]},"retained":true}
+✖ an unparseable record with a encoded retained link cannot complete full (5.757777ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 3
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 65.536796
+
+✖ failing tests:
+
+test at .review-output/review-g2-company-broken-encoded-person.test.ts.cjs:92799:119
+✖ an unparseable record with a encoded retained link cannot complete erase (6.578871ms)
+  AssertionError [ERR_ASSERTION]: unparseable evidence with a retained personal link cannot certify completed absence
+      at TestContext.<anonymous> (/tmp/g2574-red-96a/.review-output/review-g2-company-broken-encoded-person.test.ts.cjs:92830:32)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at .review-output/review-g2-company-broken-encoded-person.test.ts.cjs:92799:119
+✖ an unparseable record with a encoded retained link cannot complete copy (4.034035ms)
+  AssertionError [ERR_ASSERTION]: the copy must refuse unknown evidence with the retained link
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/tmp/g2574-red-96a/.review-output/review-g2-company-broken-encoded-person.test.ts.cjs:92829:27)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .review-output/review-g2-company-broken-encoded-person.test.ts.cjs:92799:119
+✖ an unparseable record with a encoded retained link cannot complete full (5.757777ms)
+  AssertionError [ERR_ASSERTION]: unparseable evidence with a retained personal link cannot certify completed absence
+      at TestContext.<anonymous> (/tmp/g2574-red-96a/.review-output/review-g2-company-broken-encoded-person.test.ts.cjs:92830:32)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+deleting a person: lib/crm-companies.ts could not finish Error: a company record that cannot be read names the person: the deletion is not done
+    at forgetCompanyPerson (/tmp/g2574-red-96a/.review-output/review-g2-company-broken-encoded-person.test.ts.cjs:89831:34)
+    at async erasePerson (/tmp/g2574-red-96a/.review-output/review-g2-company-broken-encoded-person.test.ts.cjs:92300:52)
+    at async TestContext.<anonymous> (/tmp/g2574-red-96a/.review-output/review-g2-company-broken-encoded-person.test.ts.cjs:92814:23)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+
+===== /tmp/g2574-return-d868/.review-output/review-g2-company-broken-encoded-person.test.ts.log =====
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":false,"action":"erase","unknown":true,"retained":true}
+✔ an unparseable record with a plain retained link cannot complete erase (37.6582ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":false,"action":"copy","unknown":true,"retained":true}
+✔ an unparseable record with a plain retained link cannot complete copy (713.038201ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":false,"action":"full","unknown":true,"result":{"ok":false,"reason":"incomplete","parts":[{"module":"lib/order-confirmation-outbox.ts","records":0},{"module":"lib/shipment-mail-outbox.ts","records":0},{"module":"lib/flows.ts","records":0},{"module":"lib/mail-clicks.ts","records":0},{"module":"lib/mail-health.ts","records":0},{"module":"lib/crm.ts","records":0},{"module":"lib/payment-request-store.ts","records":0},{"module":"lib/agreement-store.ts","records":0},{"module":"lib/buyer-profile.ts","records":0},{"module":"lib/form-store.ts","records":0},{"module":"lib/learn.ts","records":1},{"module":"lib/course-finish.ts","records":0},{"module":"lib/quiz.ts","records":0},{"module":"lib/assignment.ts","records":0},{"module":"lib/certificate.ts","records":0},{"module":"lib/lesson-comments.ts","records":0},{"module":"lib/community-erasure.ts","records":0},{"module":"lib/waitlist.ts","records":0},{"module":"lib/affiliate-bond.ts","records":0},{"module":"lib/affiliate-leads.ts","records":0},{"module":"lib/imported-purchases.ts","records":0},{"module":"lib/podcast-access.ts","records":0},{"module":"lib/welcome-offer-send.ts","records":0},{"module":"lib/winback-send.ts","records":0},{"module":"lib/checkout-recovery.ts","records":0},{"module":"lib/assistant-reminder.ts","records":1},{"module":"lib/move-members.ts","records":0},{"module":"lib/inbox.ts","records":0},{"module":"lib/discord-access.ts","records":0},{"module":"lib/email-sync.ts","records":0},{"module":"lib/segments.ts","records":0},{"module":"lib/store-readings.ts","records":0},{"module":"lib/calendar-sync.ts","records":0},{"module":"lib/member-health.ts","records":0},{"module":"lib/reviews.ts","records":0},{"module":"lib/customer-voice.ts","records":0},{"module":"lib/buyer-library.ts","records":0},{"module":"lib/erasure-index.ts","records":2},{"module":"lib/contacts.ts","records":0}],"failed":["lib/crm-companies.ts"]},"retained":true}
+✔ an unparseable record with a plain retained link cannot complete full (40.66067ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":true,"action":"erase","unknown":true,"retained":true}
+✔ an unparseable record with a encoded retained link cannot complete erase (11.863788ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":true,"action":"copy","unknown":true,"retained":true}
+✔ an unparseable record with a encoded retained link cannot complete copy (9.372852ms)
+G2_BROKEN_ENCODED_COMPANY {"useEscapes":true,"action":"full","unknown":true,"result":{"ok":false,"reason":"incomplete","parts":[{"module":"lib/order-confirmation-outbox.ts","records":0},{"module":"lib/shipment-mail-outbox.ts","records":0},{"module":"lib/flows.ts","records":0},{"module":"lib/mail-clicks.ts","records":0},{"module":"lib/mail-health.ts","records":0},{"module":"lib/crm.ts","records":0},{"module":"lib/payment-request-store.ts","records":0},{"module":"lib/agreement-store.ts","records":0},{"module":"lib/buyer-profile.ts","records":0},{"module":"lib/form-store.ts","records":0},{"module":"lib/learn.ts","records":1},{"module":"lib/course-finish.ts","records":0},{"module":"lib/quiz.ts","records":0},{"module":"lib/assignment.ts","records":0},{"module":"lib/certificate.ts","records":0},{"module":"lib/lesson-comments.ts","records":0},{"module":"lib/community-erasure.ts","records":0},{"module":"lib/waitlist.ts","records":0},{"module":"lib/affiliate-bond.ts","records":0},{"module":"lib/affiliate-leads.ts","records":0},{"module":"lib/imported-purchases.ts","records":0},{"module":"lib/podcast-access.ts","records":0},{"module":"lib/welcome-offer-send.ts","records":0},{"module":"lib/winback-send.ts","records":0},{"module":"lib/checkout-recovery.ts","records":0},{"module":"lib/assistant-reminder.ts","records":1},{"module":"lib/move-members.ts","records":0},{"module":"lib/inbox.ts","records":0},{"module":"lib/discord-access.ts","records":0},{"module":"lib/email-sync.ts","records":0},{"module":"lib/segments.ts","records":0},{"module":"lib/store-readings.ts","records":0},{"module":"lib/calendar-sync.ts","records":0},{"module":"lib/member-health.ts","records":0},{"module":"lib/reviews.ts","records":0},{"module":"lib/customer-voice.ts","records":0},{"module":"lib/buyer-library.ts","records":0},{"module":"lib/erasure-index.ts","records":2},{"module":"lib/contacts.ts","records":0}],"failed":["lib/crm-companies.ts"]},"retained":true}
+✔ an unparseable record with a encoded retained link cannot complete full (10.320452ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 885.047994
+deleting a person: lib/crm-companies.ts could not finish Error: a company record that cannot be read names the person: the deletion is not done
+    at forgetCompanyPerson (/tmp/g2574-return-d868/.review-output/review-g2-company-broken-encoded-person.test.ts.cjs:90119:34)
+    at async erasePerson (/tmp/g2574-return-d868/.review-output/review-g2-company-broken-encoded-person.test.ts.cjs:92677:52)
+    at async TestContext.<anonymous> (/tmp/g2574-return-d868/.review-output/review-g2-company-broken-encoded-person.test.ts.cjs:93194:23)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+deleting a person: lib/crm-companies.ts could not finish Error: a company record that cannot be read may name the person: the deletion is not done
+    at forgetCompanyPerson (/tmp/g2574-return-d868/.review-output/review-g2-company-broken-encoded-person.test.ts.cjs:90117:38)
+    at async erasePerson (/tmp/g2574-return-d868/.review-output/review-g2-company-broken-encoded-person.test.ts.cjs:92677:52)
+    at async TestContext.<anonymous> (/tmp/g2574-return-d868/.review-output/review-g2-company-broken-encoded-person.test.ts.cjs:93194:23)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+
+===== /tmp/g2574-return-d868/.review-output/review-g2-company-evidence.test.ts.log =====
+✔ G2 known company write is funded, copied and erased from its own real row (24.871474ms)
+✔ G2 partial company read cannot certify a completed erasure [] (7.01018ms)
+✔ G2 partial company read cannot certify a completed erasure [null] (8.223785ms)
+✔ G2 missing company count cannot become an empty successful page (4.940328ms)
+✔ G2 missing company read cannot become an empty completed data copy (4.215238ms)
+✔ G2 applied company write with unknown acknowledgement keeps its room [] (4.171051ms)
+✔ G2 applied company write with unknown acknowledgement keeps its room [null] (5.317956ms)
+✔ G2 extra company-write acknowledgement cannot claim an unapplied mutation (5.426449ms)
+✖ G2 stale undo cannot put back a person after real successful erasure (34.719772ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 8
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 106.92236
+
+✖ failing tests:
+
+test at .review-output/review-g2-company-evidence.test.ts.cjs:97347:30
+✖ G2 stale undo cannot put back a person after real successful erasure (34.719772ms)
+  AssertionError [ERR_ASSERTION]: {"status":200,"companies":[{"id":"bed91f67bd","name":"Synthetic company","website":"","note":"","people":["2e32fc71adb5d706b014aca4babac142"],"createdAt":1793993146}],"erased":true}
+  
+  true !== false
+  
+      at TestContext.<anonymous> (/tmp/g2574-return-d868/.review-output/review-g2-company-evidence.test.ts.cjs:97367:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+

@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "lib/cart-link-products.ts",
+    "lib/cart-checkout.ts",
+    "lib/short-link-rules.ts",
+    "components/cart-link-builder.tsx",
+    "components/short-links.tsx",
+    "app/api/store/cart/route.ts",
+    "app/api/store/short-links/route.ts",
+    "tests/cart-link-contradictory-evidence.test.ts",
+    "tests/cart-link-fixes.test.ts",
+    "tests/g1928-weight-envelope.proof.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

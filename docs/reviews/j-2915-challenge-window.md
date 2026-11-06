@@ -44,3 +44,63 @@ ESLint dos dois paths do autor, prova e runner: **zero erros/avisos**. Scanner t
 Antes de cada filho, o wrapper bloqueia sockets TCP/TLS/UDP, DNS, fetch global e o dispatcher da mesma undici do SDK. Controles negativos de socket e destino não registrado precisam passar **antes de carregar o grafo**; falha interrompe o filho. Todos passaram. Este helper puro não tentou fornecedor/rede; não houve conta, pagamento, contato ou browser.
 
 Não rodei navegador, suíte global, Redis nativo, fornecedor ou CI. Não mexi em produto, ramo do autor, workflows, provas antigas2844 ou seus logs/refs. A revisão diz apenas o que foi executado no head nominal, sem certificar integração futura ou disponibilização ao cliente. O formal e a decisão de incorporação ficam com o root.
+
+## Independent return — exact source 32abdc784041d2982568d61467f8778c04aa46af
+
+This English addendum records a **source-only return with execution blocked**. It does not replace the historical evidence above. The original source 149a6fdf0c2808f525601cb5588674ebcf1a1abd and evidence commit 2efd2fceb4f9dc9a2e364059b85f47f095cd2008 remain preserved. The old proof, runner and output are unchanged. Their previous results are historical results, not a rerun on this return.
+
+Coordination: the combined claim/resumption was published through CAS 58b85bb9 before this return's source inspection, after the coordinator sent GO. GitHub metadata independently reported PR #2915 open, non-draft, and exact head **32abdc784041d2982568d61467f8778c04aa46af**, with two PR paths.
+
+### Complete delta and preserved contract
+
+The complete comparison from 149a6fdf0c2808f525601cb5588674ebcf1a1abd to 32abdc784041d2982568d61467f8778c04aa46af reports one added commit, one modified file, one added line and one removed line:
+
+```diff
+-    ["a bigint", 1000n],
++    ["a bigint", BigInt(1000)],
+```
+
+Full old/new file text was retrieved. Exact string comparison confirmed that replacing only this occurrence in the old text yields the complete new text. There is **no 0n replacement** in this author delta. Cases, labels, expected states, coercion checks and all other assertions remain identical. The original RED permanent is therefore intentionally not byte-identical to the return permanent, while the test value remains the bigint value 1000.
+
+| Artifact | Original source blob | Exact return blob |
+| --- | --- | --- |
+| tests/community-challenge-rules.test.ts | 554ed8d950dfb26278f1744201d5f0be87c2a706 | 0d1dd74ac67a345cec9405e7ae21ab7294032371 |
+| lib/community-challenge-rules.ts | 902dd245207dd391d275f60c888ecbe386c601a1 | 902dd245207dd391d275f60c888ecbe386c601a1 |
+| tsconfig.json | f126992ca95c6da5359e547a2e58e92fccd3d02c | f126992ca95c6da5359e547a2e58e92fccd3d02c |
+| tests/community-points.test.ts | 95a73fc8f3a8dac4cc209144a002fb9382a0bbe3 | 95a73fc8f3a8dac4cc209144a002fb9382a0bbe3 |
+| tests/course-templates.test.ts | 8671e6822071235b87082fb2f12a9631643014ec | 8671e6822071235b87082fb2f12a9631643014ec |
+
+The real config still targets ES2017 and includes esnext library declarations; it was not raised to conceal the old diagnostic. The source repair matches the earlier LOW recommendation: use the BigInt function rather than bigint literal syntax. This removes the offending source construct without changing the pure helper. **Independent actual-target typecheck success is still pending execution**, rather than inferred from the replacement or copied from the author's report.
+
+The helper's entire source was reread. It remains an unwired, pure classifier of supplied integer millisecond instants, with an inclusive start and exclusive end, no ambient clock, and no storage, points, daily-calendar policy or public feature activation. The author delta adds no caller. No new functional finding was established.
+
+### RED provenance and execution limitation
+
+The whole original feature-RED test at 04fa7ab06967c0637ca817abf73d7ef9e8bd61f6 was retrieved again: blob 554ed8d950dfb26278f1744201d5f0be87c2a706, matching the original source and historical evidence. No RED replay was possible in this return. The PR body also names type-RED 96a043693216f7e7e3e5c66a73ef07330dc4e05a. A contents request for tests/community-challenge-rules.test.ts at that exact ref returned HTTP 404; this establishes only that this path/ref request was unavailable. It does not establish that the commit is absent or that the author's separately published compiler artifact is defective. That additional artifact was not independently certified.
+
+After the coordinator reported executor recovery and authorized GO, the first and only local process request failed before the requested git status command could start:
+
+```text
+exec_command failed: CreateProcess {
+  message: "Rejected(\"Failed to create unified exec process:
+  exec-server rejected request (-32603):
+  No such file or directory (os error 2)\")"
+}
+```
+
+No product graph or test child loaded, and no provider or network call was made by a product process. The process failure is an environment/setup limitation, not a RED test result. No alternate shell, executor, sandbox, browser or provider was used, and there were no further process retries.
+
+| Requested independent return check | Status on exact 32abdc784041d2982568d61467f8778c04aa46af |
+| --- | --- |
+| Whole feature RED and return permanent | NOT RUN — process creation unavailable |
+| Existing independent 18-case proof | NOT RUN — historical proof preserved unchanged |
+| Linked community-points and course-templates | NOT RUN — source blobs compared only |
+| Actual ES2017 strict TypeScript with real imports | NOT RUN |
+| Scoped ESLint | NOT RUN |
+| Public-data scanner | NOT RUN |
+| Local git diff/whitespace and discovery checks | NOT RUN |
+| API complete delta and full source comparison | READ AND COMPARED — one fixture line only |
+
+The author's claimed final 91/91, linked29/29+23/23, types, lint, scanner and diff results remain **author-reported**, not fresh independent execution results. No global suite, browser or CI was run or modified.
+
+Factual disposition: the source of the previous LOW has been repaired in the exact author delta, with unchanged configuration, helper and remaining assertions. This return is **incomplete for executable confirmation** and does not certify an all-green exact-head review. A runnable same-environment replay of the listed focused checks is required to close that qualification. Only this existing review report is appended on the existing own evidence branch; author product files, author refs and CI remain untouched.

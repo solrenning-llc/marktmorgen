@@ -103,16 +103,19 @@ export function storeExport(store: Store, now = Date.now()): ReadableStream<Uint
     async () => {
       const listings = await readAllListings(store);
       const ids = listings.map((listing) => listing.id);
-      const pages = await readPages(statsId, ids).catch(() => ids.map(() => null));
+      // Pages whose read is not known are left out with a note that says so, never written as no page
+      // (C4-20261106-2610-C6-153, unit B part 2).
+      const pages = await readPages(statsId, ids).catch(() => null);
       const abouts = await readAbouts(statsId, ids).catch(() => ids.map(() => ""));
       const notes = await readThanksNotes(statsId, ids).catch(() => ids.map(() => null));
-      const out = listings.map((listing, i) => ({ product: listing, page: statsId ? pages[i] : null, about: abouts[i] ?? "", thanks: notes[i] ?? null }));
+      const out = listings.map((listing, i) => ({ product: listing, ...(pages ? { page: statsId ? pages[i] : null } : {}), about: abouts[i] ?? "", thanks: notes[i] ?? null }));
       const courseIds = listings.flatMap((l) => (l.course ? [l.course.id] : []));
       const courses = courseIds.length ? await readCourses(courseIds) : new Map();
       const list = [...courses.values()];
       const bodies = await readAllBodies(list.map((course) => ({ id: course.id, lessons: course.modules.flatMap((unit: { lessons: { id: string }[] }) => unit.lessons.map((lesson) => lesson.id)) })));
       const withText: unknown[] = list.map((course) => ({ ...course, lessonText: bodies.get(course.id) ?? {} }));
-      return `,"products":${JSON.stringify(out)},"courses":${JSON.stringify(withText)}`;
+      const pagesNote = pages ? "" : `,"pagesNote":"Your products' pages could not be read just now, so they are not in this file. Download the file again in a few minutes to get them."`;
+      return `,"products":${JSON.stringify(out)}${pagesNote},"courses":${JSON.stringify(withText)}`;
     },
     async () => {
       const posts = await readPosts(statsId, await allPosts(statsId));

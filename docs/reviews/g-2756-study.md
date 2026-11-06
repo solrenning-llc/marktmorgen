@@ -1,0 +1,30 @@
+# Codex G documentary review #2756
+
+Exact70df8898e95a883f4743005d80c5aa098a8e99df. Whole one-file253-line added study docs/live-quiz-study-2026-11-06.md/blob1a9318488ef115286e313fc3693aba8033a8fabd read. No product implementation in this diff. Claim channelac2e774a/PR6683248652 before reading. Existing legal-source acceptance failure is explicitly declared by the author and stays unresolved; NOT counted as a new G finding. This review does not validate any jurisdiction's law, the rules template, sponsor liability, launch, pricing or margin.
+
+## Verdict: two LOW documentary/design findings; no HIGH/MEDIUM established
+
+**LOW1 — study:103,113,123–130.** The rules give an enforceable closing date, while the summary/design and accessibility statement promise absence of any time limit. A participant who needs to submit after that date cannot do so under the stated rules. This is an internal wording/design-evidence conflict; a longer window is not literally unlimited. Please name the actual deadline and qualify the AAA claim, or supply the precise supported untimed/exception design. Do not change any production limit/gate from a study.
+
+**Critical nuance from primary source:** this is NOT a categorical finding that any contest closing date fails SC2.2.3. W3C G5 includes a one-submission auction example with a full-day window. Its applicability to this longer quiz, the difference between an external event deadline and timed interaction, and the criterion's real-time exception need a reasoned design assessment. The study expressly disclaims reliance on the real-time exception. I initially described the deadline too broadly in progress commentary, then read G5 fully and narrowed this finding BEFORE submitting a verdict. No runtime/UI exists to test; I do not claim a demonstrated WCAG failure in a shipped product.
+
+**LOW2 — study:131,137–139.** Describing incoming questions as polite announcements with no focus jump does not establish SC2.2.4. The proposed design gives no participant-controlled way to postpone/suppress incoming question announcements/updates while staying in the quiz. Its manual refresh button is described only after the store's visits are exhausted; quota exhaustion is not a user preference/control. Specify an accessible participant pause/manual-update/suppress mechanism and the behavior when resumed, or explicitly mark that criterion unresolved. This is a missing design/evidence requirement, not a claim that a browser implementation was tested and failed.
+
+## Primary accessibility sources read 6 November 2026
+
+- Normative WCAG2.2 SC2.2.3 and2.2.4: https://www.w3.org/TR/WCAG22/#no-timing and https://www.w3.org/TR/WCAG22/#interruptions . SC2.2.3 is about timing being nonessential apart from its stated exceptions; SC2.2.4 requires participant control over interruptions except emergencies.
+- W3C explanatory No Timing: https://www.w3.org/WAI/WCAG22/Understanding/no-timing.html . Informative, not a new normative rule. Its example distinguishes test scoring without time pressure.
+- W3C G5: https://www.w3.org/WAI/WCAG22/Techniques/general/G5 . Informative sufficient technique, not mandatory in all implementations; fully read INCLUDING its one-bid auction example. Do not cite only its headline to assert all deadlines are prohibited.
+- W3C explanatory Interruptions: https://www.w3.org/WAI/WCAG22/Understanding/interruptions.html . Gives user deferral/suppression and links mechanisms for postponed or requested updates. Politeness/no focus jump alone is not that mechanism.
+
+These pages were accessible through this review's permitted web tools; that does not disprove the author's prior session-specific network block and does not establish the other40government hosts accessible. I did not attempt a network bypass or open accounts. Legal leads remain leads; no statutory opinion is supplied.
+
+## Cost reproduction and existing code
+
+I imported the ACTUAL exact-head exports, rather than retyping the hosting/Redis rate formulas, in tests/g2756-known-costs.proof.ts (own branch codex/g-review-2756-study). Eight checks pass. Historical modeled A=5.935695511971326 and B=3.1380317014874555, rounded5.94/3.14 as stated. Visits11700; buyer actionsA10000/B500; actual allowance constants[200,1000,3000]. Positive numerical checks are not a cost proof of unbuilt quiz functions: the bytes/CPU/retention and unknown items remain hypothetical/unmeasured. No complete worst-month margin or paid admission is certified. Unknown cost never becomes zero.
+
+Own regex search across lib/app/components found no prize/contest/giveaway/raffle/sweepstake feature tokens, matching the study's narrow textual claim; it is not proof of legal absence or a replacement for functional inventory. Code constants/formula context referenced in the study were read; no product source changed.
+
+Five linked actual files225checks/tests pass:room63,traffic75,community-chat35,quiz-attempts28,plan-cost-registry24node,0fail/skip. An initial combined command ranroom/traffic/registry successfully then failed to resolve guessed chat-pace.test.ts; quiz-attempts had NOT run in that invocation. I then discovered actualcommunity-chat and executed it plusquiz-attempts; no repeated-success inflation or nonexistent file counted. Eight own arithmetic checks are additional, not product REDs. No causal RED before implementation is available/applicable: this PR adds a study, no product. The documentary reproductions are the exact cited conflicting phrases and the primary-source comparison above.
+
+Scoped strict types for own proof/real imports0, ownproof ESLint0, public-data scanner3831tracked/0, study diff against parentf6359ae3df649b690d8dbb5cc8ffdca48172179d --check0. No browser/assistive-technology/humanAAA/nativeRedis/provider/globalCI/build certification. No product/reservation/foreignref/base/CI/merge, prices/limits/commissions/flags/gates/accounts/payment/terms/contact changed byG. Correct the documentary claims and request a focal return; author-declared legal gaps and future cost/admission/design approvals remain.

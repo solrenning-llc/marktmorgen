@@ -12,9 +12,9 @@ import { isResting } from "@/lib/traffic";
 import { StoreResting } from "@/components/store-resting";
 import { StoreTracking } from "@/components/store-tracking";
 import { LinkRequestForm } from "@/components/link-request-form";
-import { bodyHtml } from "@/lib/mail-body";
+import { bodyHtml, parseMailBlocks } from "@/lib/mail-body";
 import { readLetter } from "@/lib/letters";
-import { membersOnly } from "@/lib/letter-rules";
+import { membersOnly, previewOf } from "@/lib/letter-rules";
 import { letterReader } from "@/lib/letter-access";
 import { readListings } from "@/lib/catalog";
 import { productSegment } from "@/lib/product-slug";
@@ -51,8 +51,9 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  * as they were sent, drawn the way the email drew them, with its links as
  * the creator typed them. An email kept for members shows its words only to
  * the creator and to a proved address that holds one of its products now
- * (lib/letter-access.ts); everyone else sees its subject, who it is for and
- * a way to prove their address.
+ * (lib/letter-access.ts); everyone else sees its subject, the start the
+ * creator chose to show everyone (previewOf; never the words after it), who
+ * it is for and a way to prove their address.
  */
 export default async function LetterPage({ params, searchParams }: Params) {
   const { handle, letter: id } = await params;
@@ -71,6 +72,8 @@ export default async function LetterPage({ params, searchParams }: Params) {
   const query = kept ? await searchParams : {};
   const linkState = typeof query.link === "string" ? query.link : "";
   const notice = kept && !readable ? w.linkNotices[linkState] : undefined;
+  // Only the start chosen for everyone, and only to somebody who cannot read the whole email.
+  const preview = kept ? previewOf(letter) : "";
   return (
     <div lang={say.lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
       <main id="content" className="relative mx-auto max-w-2xl px-4 pb-16 pt-10 sm:pt-14">
@@ -81,10 +84,17 @@ export default async function LetterPage({ params, searchParams }: Params) {
             {kept ? ` · ${w.membersLabel}` : null}
           </p>
           <h1 className="font-display mt-2 text-3xl font-semibold leading-tight sm:text-4xl [overflow-wrap:anywhere]">{letter.subject}</h1>
+          {preview && !readable ? (
+            <section aria-labelledby="letter-start" className="mt-6">
+              <h2 id="letter-start" className="text-sm font-semibold">{w.previewHeading}</h2>
+              {/* The same drawing as the whole email (lib/mail-body.ts), of its first parts only. */}
+              <div className="mt-2 rounded-2xl bg-white p-6 text-[15px] leading-relaxed text-stone-900 [overflow-wrap:anywhere] sm:p-8" dangerouslySetInnerHTML={{ __html: bodyHtml(preview, undefined, store.look.accent) }} />
+            </section>
+          ) : null}
           {kept ? (
             <section aria-labelledby="letter-for" className="mt-6">
               <h2 id="letter-for" className="text-sm font-semibold">{readable ? w.forHolders : w.lockedLead}</h2>
-              {reader.state === "owner" ? <p className="st-muted mt-1 text-sm">{products.length ? w.ownerNote : w.noneLeft}</p> : null}
+              {reader.state === "owner" ? <p className="st-muted mt-1 text-sm">{products.length ? (preview ? w.ownerPreviewNote(parseMailBlocks(preview).length) : w.ownerNote) : w.noneLeft}</p> : null}
               <ul className="mt-2 space-y-1">
                 {products.map((p) => (
                   <li key={p.id} className="[overflow-wrap:anywhere]">

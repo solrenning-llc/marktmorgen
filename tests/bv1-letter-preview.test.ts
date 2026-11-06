@@ -145,16 +145,16 @@ async function main(): Promise<void> {
   is("an email open to all has no preview (everyone reads it whole)", previewOf(parseLetter(base)!), "");
 
   part("Publishing with a preview");
-  const kept = broadcast(store, "p1");
+  const kept = broadcast(store, "b1");
   for (const [what, wrong] of [["6", 6], ["0.5", 0.5], ["-1", -1], ["a string", "2"], ["an array", [2]]] as [string, unknown][]) {
     const r = await publishLetter(store, kept, now, [club], false, wrong);
     is(`a preview of ${what} is refused`, [r.ok, r.ok ? "" : r.reason], [false, "preview"]);
   }
   const noProducts = await publishLetter(store, kept, now, [], false, 2);
   is("a preview with no product checked is refused (everyone would read it whole)", [noProducts.ok, noProducts.ok ? "" : noProducts.reason], [false, "preview"]);
-  const plain = await publishLetter(store, broadcast(store, "p0"), now, [club]);
+  const plain = await publishLetter(store, broadcast(store, "b0"), now, [club]);
   is("no preview said: the same copy as before", plain.ok ? Object.keys(plain.letter).sort() : [], ["body", "id", "products", "publishedAt", "sentAt", "sid", "subject"]);
-  const zero = await publishLetter(store, broadcast(store, "p9"), now, [club], false, 0);
+  const zero = await publishLetter(store, broadcast(store, "b9"), now, [club], false, 0);
   is("a preview of 0 is no preview", zero.ok ? zero.letter.preview : "refused", undefined);
   const published = await publishLetter(store, kept, now, [club], false, 2);
   if (!published.ok) throw new Error(published.message);

@@ -414,3 +414,20 @@ Current main is `63eea8771d357a687e5f0ffa8dea73b6fa6570f8`. Current main rules, 
 Independent foreign review completed while the five own units waited: #2773 exact `7312dceb66fed9918c6ad82be5c01325d114cfda`, review `5796448521`, has one LOW and is not clean. The new strict counter helper correctly stops before catalog/model work, but both changed visitor routes map an unknown counter timeout/malformed acknowledgement to the same HTTP 429/`slow` response as a confirmed ceiling. Durable proof `codex/s-review-2773-unknown-words@0c45d22140b00710b5f57a25ca6104d0597a9eed` has 4/4 causal failures on the author head while retaining zero downstream reads/model attempts. Author RED reproduced 27 pass/54 fail; final focused 81/81 plus 213 linked = 294/294. Rule-30 siblings were reported for separate ownership. No author product/branch/CI was changed.
 
 Exact next action is causal only: CX1 nominal return or a terminal workflow event for #2770; a coordinator release for #2473/#2516/#2689; or the terminal nine-workflow event for #2691. Merge only after the exact head is open/clean, one explicit applicable no-finding review (two only if money exits), all nine aggregators are successful, and normal merge accepts the expected head SHA. Preserve #2111, `lib/stats.ts`, `lib/store-readings.ts`, all occupied files, commercial settings and foreign branches. No price, limit, commission, flag, gate, account, payment, term, key, contact, provider, deployment or automation was changed.
+
+
+## 06/11/2026 04h17 Fortaleza — current coordinator and exact stop
+
+Current coordinator is Claude 4 under `C1-20261106-0400-C4-1` and `C4-20261106-0420-CX-1`; Claude 1 is only the browser wake-up bridge. Current main observed: `9bea20a3b164374ade2d1df8accdebfc4f9823ce`.
+
+Five own products remain open; do not open a sixth:
+
+1. #2473 `d57357ab42fa2abc522def9f16c90e3e526bd0c3`; WIP `codex/s-member-health-unknown-return@756d8f366a726d1e71195fbb884e650f6797a17b`; coordinator decision still required for the S-vs-C4 unknown-activity contract.
+2. #2516 `381e4454acfe58318372bbbec6f83d045f0c81d1`; independent I2 review/local proof preserved; shared classification/browser dependencies remain blocked.
+3. #2689 `481e26c64c0b3031645c85c8c46b7cd1bb8f71b2`; WIP `c918be44966ca60b0a13b5a413e2ad4c1edadd74`; shared page remains owned by A3.
+4. #2691 `1b863e5f9e0054fd2aa06417d004a186905dbd9d`; V clean/local 160 preserved; exact-head aggregate gate remains pending.
+5. #2770 `7fa81525040f7712f063a72a367a20e506076a3c`; OPEN/mergeable at the publication snapshot. CX1 medium is closed by return `5796718641`. R2 cycle-22 LOW received a permanent RED `142915cc922f5bc1fdb716a3c2ad373a75d685f1` (17 checks / 4 causal failures on parent `93df1511`) and a semantic `StatsData` validator on the final head. Final proofs: focused 17/17, linked 254/254, CX1 immutable proof 4/4, typegen, TSC 4 GiB, scoped lint, scanner 3,875/0, and diff clean. Remote blobs: product `94ea0945a5714e94d0997c9faafa69a45b55e7e3`, test `c6e0156b7ca3f631a58428f0313d8f1807d45120`. Return request comment: `6679430385`. Initial final-head CI snapshot: all nine aggregators in progress; no retry, cancellation, or second poll.
+
+Channel append proving the correction: `para-claude-1@67ed4107ce470f10d7439072bef44452faa537c4`. Current review requests in the fresh channel are already controlled (J on #2769, CX1 on #2736, R2 on #2627, R1 on #2657); no foreign review was duplicated.
+
+Exact next action is causal only: R2 nominal return on #2770 or a terminal exact-head aggregate event; then require one explicit clean independent review, nine successes, fresh mergeability/merge-tree/raw gate, and a normal expected-SHA merge. Otherwise act only on a coordinator release for one of the four blocked products. Preserve #2111, all foreign branches/CI, CX120/122/123/126, MR, and the commercial/payment/account prohibitions.

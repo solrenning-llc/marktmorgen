@@ -699,6 +699,24 @@ export async function readListings(store: Store, ids?: Iterable<string>): Promis
   return asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l));
 }
 
+/**
+ * What these products' listing records weigh now, in bytes (STRLEN), on
+ * Redis's exact answer only (one whole number per product), so a read can be
+ * paid for at what it will read; null when it cannot be known. Products the
+ * store record holds whole (inline, or in the head) weigh 0: nothing is read.
+ */
+export async function listingSizes(store: Store, ids: string[]): Promise<number[] | null> {
+  const catalog = store.catalog;
+  if (catalog.inline || !ids.length) return ids.map(() => 0);
+  if (!catalog.id || !isRedisConfigured()) return null;
+  const head = new Set(catalog.head.map((listing) => listing.id));
+  const asked = ids.filter((id) => !head.has(id));
+  const replies: unknown = asked.length ? await redisPipeline(asked.map((id) => ["STRLEN", listingKey(catalog.id!, id)])) : [];
+  if (!Array.isArray(replies) || replies.length !== asked.length || replies.some((n) => typeof n !== "number" || !Number.isSafeInteger(n) || n < 0)) return null;
+  const sizes = new Map(asked.map((id, i) => [id, replies[i] as number]));
+  return ids.map((id) => sizes.get(id) ?? 0);
+}
+
 /** One listing, or null when the store has no such product (or no id was given). */
 export async function readListing(store: Store, id: string | null | undefined): Promise<Listing | null> {
   if (typeof id !== "string" || !id) return null;

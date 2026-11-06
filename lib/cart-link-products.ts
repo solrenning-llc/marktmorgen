@@ -19,7 +19,7 @@
  *     shape (tests/plan-cost-registry.ts, line studio) before a single one is
  *     read. Refused, nothing is read and nothing is offered.
  */
-import { KIND, MAX_PRODUCT_BYTES, STORE_PAGE_SIZE, readListings } from "@/lib/catalog";
+import { KIND, MAX_PRODUCT_BYTES, STORE_PAGE_SIZE, listingSizes, readListings } from "@/lib/catalog";
 import { cartable } from "@/lib/cart-rules";
 import { soonState } from "@/lib/preorders";
 import { redisPipeline } from "@/lib/redis";
@@ -44,7 +44,7 @@ export function cartLinkCandidates(store: Pick<Store, "catalog">): string[] {
 
 /** The studio requests a read of these many listings weighing these many bytes takes. Pure. */
 export function cartLinkUnits(listings: number, bytes: number): number {
-  // The weighing command and one GET per listing; bytes at what the data room says they weigh.
+  // The weighing command and `listings` more (one STRLEN and one GET per listing read); bytes at what they weigh.
   return Math.max(1, Math.ceil((listings + 1) / CART_LINK_UNIT_COMMANDS), Math.ceil(bytes / CART_LINK_UNIT_BYTES));
 }
 
@@ -54,18 +54,18 @@ export function cartLinkUnits(listings: number, bytes: number): number {
  * and the value is a positive whole number; every other product is weighed at
  * MAX_PRODUCT_BYTES.
  */
-async function weigh(store: Store, ids: string[]): Promise<number> {
+async function weigh(store: Store, ids: string[]): Promise<number[]> {
   const key = dataKey(store);
   // Exactly one reply for the one command (Codex G on #1928): an answer with more or fewer is not known, and every
   // product is then weighed at its ceiling.
   const replies: unknown = key ? await redisPipeline([["HMGET", key, ...ids.map((id) => `p:${id}`)]]) : null;
   const reply = Array.isArray(replies) && replies.length === 1 ? replies[0] : null;
   const exact = Array.isArray(reply) && reply.length === ids.length ? reply : null;
-  return ids.reduce((sum, _id, i) => {
+  return ids.map((_id, i) => {
     const raw = exact?.[i];
     const n = typeof raw === "string" && /^[0-9]{1,9}$/.test(raw) ? Number(raw) : typeof raw === "number" && Number.isSafeInteger(raw) ? raw : NaN;
-    return sum + (n > 0 && n <= MAX_PRODUCT_BYTES ? n : MAX_PRODUCT_BYTES);
-  }, 0);
+    return n > 0 && n <= MAX_PRODUCT_BYTES ? n : MAX_PRODUCT_BYTES;
+  });
 }
 
 /**
@@ -81,7 +81,13 @@ export async function cartLinkProducts(store: Store): Promise<{ id: string; titl
     const held = new Set(store.catalog.head.map((listing) => listing.id));
     const toRead = store.catalog.inline ? [] : ids.filter((id) => !held.has(id));
     if (toRead.length) {
-      const units = cartLinkUnits(toRead.length, await weigh(store, toRead));
+      // The data room's weights, raised to what each listing record weighs now (Codex G on #1928: a record that grew
+      // after it was weighed is paid at its new size before it is read); one that cannot be measured at its ceiling.
+      const weights = await weigh(store, toRead);
+      const sizes = await listingSizes(store, toRead);
+      const bytes = weights.reduce((sum, weight, i) => sum + Math.min(MAX_PRODUCT_BYTES, sizes ? Math.max(weight, sizes[i]) : MAX_PRODUCT_BYTES), 0);
+      // One STRLEN and one GET per listing, and the weighing.
+      const units = cartLinkUnits(2 * toRead.length, bytes);
       if (!(await countStudio(store, null, units)).ok) return [];
     }
     const coming = await soonState(store);

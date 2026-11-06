@@ -36,7 +36,7 @@ const STANDING: Record<Affiliate["status"], string> = {
   removed: "Ended by the creator",
 };
 
-type Row = { store: Store; affiliate: Affiliate; link: string | null; open: string | null; on: boolean; cut: { day: string; lines: string[] } | null };
+type Row = { store: Store; affiliate: Affiliate; link: string | null; open: string | null; on: boolean; cut: { day: string; lines: string[]; unread: boolean } | null };
 
 /**
  * A cut the creator announced and that is not in force yet (630 [HN6](2),
@@ -49,8 +49,15 @@ async function cutFor(store: Store, affiliate: Affiliate): Promise<Row["cut"]> {
   const pending = store.affiliates.pending;
   if (!pending || affiliate.status !== "approved") return null;
   const ids = [...new Set([...Object.keys(store.affiliates.rates), ...Object.keys(pending.rates)])];
-  const titles = new Map((ids.length ? await readListings(store, ids).catch(() => []) : []).map((p) => [p.id, p.title]));
-  return noticeFor(store.affiliates, pending, affiliate.rate ?? null, (id) => titles.get(id) ?? null);
+  const listings = ids.length ? await readListings(store, ids).catch(() => null) : [];
+  const titles = new Map((listings ?? []).map((p) => [p.id, p.title]));
+  const notice = noticeFor(store.affiliates, pending, affiliate.rate ?? null, (id) => titles.get(id) ?? null);
+  if (listings) return notice ? { ...notice, unread: false } : null;
+  // The names could not be read: a product's change is never left out for that, it is said as not read.
+  const named = noticeFor(store.affiliates, pending, affiliate.rate ?? null, () => "?");
+  if (!named) return null;
+  const unread = named.lines.length > (notice?.lines.length ?? 0);
+  return { day: named.day, lines: notice?.lines ?? [], unread };
 }
 
 /**
@@ -66,11 +73,16 @@ export default async function AffiliateHubPage({ searchParams }: Params) {
   const email = token ? await hubOwner(token) : null;
 
   const rows: Row[] = [];
+  // Stores, or the affiliate's record at one, that could not be read just now: said so, never left out without a word.
+  let unread = 0;
   if (email) {
     const origin = SITE_URL;
-    const stores = (await Promise.all((await storesPromoted(email)).map((sid) => storeForId(sid).catch(() => null)))).filter((s): s is Store => s !== null);
+    const read = await Promise.all((await storesPromoted(email)).map((sid) => storeForId(sid).catch(() => undefined)));
+    unread += read.filter((s) => s === undefined).length;
+    const stores = read.filter((s): s is Store => Boolean(s));
     for (const store of stores) {
-      const affiliate = await affiliateByEmail(store, email).catch(() => null);
+      const affiliate = await affiliateByEmail(store, email).catch(() => undefined);
+      if (affiliate === undefined) unread += 1;
       if (!affiliate) continue;
       const on = affiliatesOn(store);
       rows.push({
@@ -105,6 +117,11 @@ export default async function AffiliateHubPage({ searchParams }: Params) {
           {email ? (
             <>
               <p className="text-ink-soft">{`For ${email}. This page works for 24 hours from the email.`}</p>
+              {unread ? (
+                <p className="notice notice-info mt-6" role="status" data-hub-unread>
+                  {`${unread === 1 ? "One of your programs" : `${unread} of your programs`} could not be read just now. Try again in a moment.`}
+                </p>
+              ) : null}
               {rows.length ? (
                 <ul className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {rows.map(({ store, affiliate, link, open, on, cut }) => (
@@ -139,6 +156,7 @@ export default async function AffiliateHubPage({ searchParams }: Params) {
                             {cut.lines.map((line) => (
                               <li key={line}>{line}</li>
                             ))}
+                            {cut.unread ? <li>What changes for some products could not be read just now. Try again in a moment.</li> : null}
                           </ul>
                           <p className="mt-1 text-ink-soft">Until then your terms stay as they are, and every sale keeps the share it was made at.</p>
                         </div>
@@ -161,7 +179,7 @@ export default async function AffiliateHubPage({ searchParams }: Params) {
                     </li>
                   ))}
                 </ul>
-              ) : (
+              ) : unread ? null : (
                 <p className="mt-6 text-ink">Nothing is listed for this address any more.</p>
               )}
               <div className="card mt-10 flex flex-col items-start gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">

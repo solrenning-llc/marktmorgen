@@ -6,6 +6,7 @@ export async function checkHomeHero({browser,LOCAL,axeSource,is}){
    const page=await context.newPage();let writes=0;
    await page.route("**/api/**",async route=>{if(route.request().method()!=="GET"){writes++;await route.abort();}else await route.continue();});
    await page.goto(LOCAL+"/",{waitUntil:"domcontentloaded",timeout:60000});
+   await checkMorningNoticeFocus({page,width,is});
    const hero=page.locator("[data-home-hero]");
    is("HT1 one page heading "+width,await page.locator("h1").count(),1);
    is("HT1 creator result "+width,(await hero.locator("h1").innerText()).replace(/\s+/g," ").trim(),"Your link in bio, now a store.");
@@ -49,6 +50,26 @@ export async function checkHomeHero({browser,LOCAL,axeSource,is}){
    is("HT1 no API write "+width,writes,0);
   }finally{await context.close();}
  }
+}
+
+/** The actual second native Tab target must own a visible, unobscured box. */
+export async function checkMorningNoticeFocus({page,width,is}){
+ if(width>=640)return;
+ await page.keyboard.press("Tab");await page.keyboard.press("Tab");
+ const state=await page.evaluate(()=>{
+  const node=document.activeElement,box=node.getBoundingClientRect();
+  const own=[...node.getClientRects()].every(r=>{
+   const x=r.left+r.width/2,y=r.top+r.height/2;
+   const hit=document.elementFromPoint(x,y);
+   return x>=0&&x<innerWidth&&y>=0&&y<innerHeight&&Boolean(hit&&(hit===node||node.contains(hit)));
+  });
+  return {id:node.id,visible:node.matches(":focus-visible"),width:box.width,height:box.height,own};
+ });
+ is("Encanto14 second Tab is the native notice control "+width,state.id,"hm-preview-toggle");
+ is("Encanto14 native control focus is visible "+width,state.visible,true);
+ is("Encanto14 actual focused control is 44px "+width,state.width>=44&&state.height>=44,true);
+ is("Encanto14 actual focused fragments hit their own node "+width,state.own,true);
+ console.log("NOTICE_NATIVE_FOCUS",JSON.stringify({viewportWidth:width,...state}));
 }
 
 /** Real rendered rectangles, also exercised by the opt-in wider breakpoint proof. */

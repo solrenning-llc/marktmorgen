@@ -9,7 +9,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 const root=resolve(process.argv[2] || process.cwd());
 const require=createRequire(join(root,"package.json"));
 const {startServices}=await import(pathToFileURL(join(root,"tests/e2e/services.mjs")));
-const {checkHomeHero,checkHomeHeroLayout}=await import(pathToFileURL(join(root,"tests/e2e/home-hero.mjs")));
+const {checkHomeHero,checkHomeHeroLayout,checkMorningNoticeFocus}=await import(pathToFileURL(join(root,"tests/e2e/home-hero.mjs")));
 const {checkHomeActions}=await import(pathToFileURL(join(root,"tests/e2e/home-actions.mjs")));
 const services=await startServices(4519);
 const fake="http://127.0.0.1:4519",origin="http://127.0.0.1:3219";
@@ -48,11 +48,17 @@ try{
     await page.evaluate(()=>document.fonts.ready);
     await page.locator(".hm-hero-art").evaluate(async node=>{await Promise.all(node.getAnimations({subtree:true}).map(a=>a.finished.catch(()=>{})));});
     console.log("CASE",JSON.stringify({engine,reducedMotion,width}));
+    await checkMorningNoticeFocus({page,width,is});
     await checkHomeHeroLayout({page,width,is});
     if(process.argv[3]&&reducedMotion==="reduce"&&[390,1440].includes(width)){
      mkdirSync(process.argv[3],{recursive:true});
      await page.locator(".hm-hero-art").screenshot({path:join(process.argv[3],engine+"-hero-"+width+".png")});
     }
+   }
+   for(const width of [320,390]){
+    await page.setViewportSize({width,height:1000});
+    await page.goto(origin+"/pricing",{waitUntil:"networkidle",timeout:60000});
+    await checkMorningNoticeFocus({page,width,is});
    }
    await page.setViewportSize({width:320,height:1000});
    await page.goto(origin+"/",{waitUntil:"networkidle",timeout:60000});
@@ -73,6 +79,7 @@ try{
   await guard(plain);
   const plainPage=await plain.newPage();
   await plainPage.goto(origin+"/",{waitUntil:"networkidle",timeout:60000});
+  await checkMorningNoticeFocus({page:plainPage,width:320,is});
   await checkHomeHeroLayout({page:plainPage,width:320,is});
   await plain.close();
   // Preserve the existing full hero/typed-address/native sign-in journey and axe checks.

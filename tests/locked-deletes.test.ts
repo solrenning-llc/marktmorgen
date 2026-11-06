@@ -576,7 +576,8 @@ async function main(): Promise<void> {
     "mail": {
       broadcast: "need:send", cancel: "need:send", copy: "open:adds", count: "open:reads", "draft-remove": "act:draft", "draft-save": "open:edits",
       flow: "need:send", "flow-activate": "need:send", "flow-forget": "need:send", "flow-import": "need:send", "flow-remove": "need:send",
-      "flow-resolve": "need:send", "flow-run": "need:send", "flow-runs": "need:send", "flow-sample": "need:send", import: "need:send",
+      "flow-resolve": "need:send", "flow-restore": "need:send", "flow-run": "need:send", "flow-runs": "need:send", "flow-sample": "need:send",
+       "flow-versions": "need:send", import: "need:send",
       keep: "need:send", "segment-remove": "act:draft", "segment-save": "open:edits", settings: "need:settings", starters: "need:send",
       test: "open:one email to the person who pressed it, at their own address",
     },

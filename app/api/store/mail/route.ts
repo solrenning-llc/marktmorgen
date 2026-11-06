@@ -18,7 +18,8 @@ import { healthId, startRamp } from "@/lib/mail-health";
 import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, advanceBroadcast, cancelBroadcast, createBroadcast, whoOf } from "@/lib/broadcasts";
 import { LedgerNotCounted, buyerLedger, isNarrowed, keeps, ledgerChannels, readNarrow, removeSegment, saveSegment } from "@/lib/segments";
 import { NOT_COUNTED, countLedger } from "@/lib/person-agenda-read";
-import { FLOW_ID, FlowWriteUnconfirmed, RESOLVE_CHOICES, type ResolveChoice, forgetWorkflowPerson, removeFlow, resolveHeldRun, saveFlow, setFlowActive } from "@/lib/flows";
+import { FLOW_ID, FlowWriteUnconfirmed, RESOLVE_CHOICES, type ResolveChoice, forgetWorkflowPerson, removeFlow, resolveHeldRun, restoreFlowVersion, saveFlow, setFlowActive } from "@/lib/flows";
+import { FlowVersionsUnavailable, readFlowVersions } from "@/lib/flow-versions";
 import { readFlowListStrict } from "@/lib/flow-list";
 import { FlowRunUnavailable, PERSON_KEY, listRuns, readRun } from "@/lib/flow-runs";
 import { RUNS_LISTED } from "@/lib/flow-limits";
@@ -59,6 +60,9 @@ const MAIL_PERMISSIONS: Record<string, Permission> = {
   "flow-remove": "send",
   // Switching a workflow on is its own, explicit step (lib/flows.ts, setFlowActive).
   "flow-activate": "send",
+  // A workflow's earlier versions and putting one back (639 [GL7](19)): as a save is.
+  "flow-versions": "send",
+  "flow-restore": "send",
   // A workflow's runs name the people in them, so they are for those who send.
   "flow-runs": "send",
   "flow-run": "send",
@@ -90,6 +94,8 @@ const MAIL_PERMISSIONS: Record<string, Permission> = {
  *   { action: "cancel", id }
  *   { action: "flow", flow: {...} }  /  { action: "flow-remove", id }
  *   { action: "flow-activate", id, active }   switch a saved workflow on or off
+ *   { action: "flow-versions", id }           its earlier versions, newest first (lib/flow-versions.ts)
+ *   { action: "flow-restore", id, at }        put one back: a save, checked whole, that can be undone the same way
  *   { action: "flow-runs", id }               its most recent runs
  *   { action: "flow-run", id, run }           one run's history, step by step
  *   { action: "flow-resolve", id, run, choice }   a held run: "continue" | "retry" | "end"
@@ -290,6 +296,22 @@ export async function POST(request: NextRequest) {
       return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason);
     }
 
+    if (action === "flow-versions") {
+      const id = text(body.id, 40);
+      const flows = FLOW_ID.test(id) ? await readFlowListStrict(store.listId) : [];
+      if (!flows.some((f) => f.id === id)) return fail("unknown", 404);
+      const versions = await readFlowVersions(store.listId, id);
+      return Response.json({ ok: true, versions: versions.map((v) => ({ at: v.at, name: v.flow.name, trigger: v.flow.trigger, steps: v.flow.steps.length })) });
+    }
+
+    if (action === "flow-restore") {
+      const id = text(body.id, 40);
+      const at = typeof body.at === "number" && Number.isSafeInteger(body.at) ? body.at : 0;
+      if (!FLOW_ID.test(id) || !at) return fail("unknown", 404);
+      const result = await restoreFlowVersion(store, id, at);
+      return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason, result.reason === "unknown" || result.reason === "version" ? 404 : result.reason === "history_room" ? 409 : 400);
+    }
+
     if (action === "flow-import") {
       // Only read: the steps come back to the studio's editor, where the creator picks what starts it,
       // reviews every email and saves it, paused (544 [SQ9]). Nothing is saved or sent here.
@@ -370,7 +392,7 @@ export async function POST(request: NextRequest) {
 
     if (action === "flow-remove") {
       const result = await removeFlow(store, text(body.id, 40));
-      return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason, 404);
+      return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason, result.reason === "history_unconfirmed" ? 503 : 404);
     }
 
     return fail("invalid");
@@ -382,6 +404,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof BroadcastWriteUnconfirmed) return fail("broadcast_write_unconfirmed", 502);
     if (error instanceof FlowWriteUnconfirmed) return fail("flow_write_unconfirmed", 502);
     if (error instanceof FlowRunUnavailable) return fail("flow_runs_unavailable", 503);
+    if (error instanceof FlowVersionsUnavailable) return fail("flow_versions_unavailable", 503);
     if (error instanceof DraftWriteUnconfirmed) return fail("draft_write_unconfirmed", 502);
     if (error instanceof DraftReadUnavailable) return fail("draft_read_unavailable", 503);
     if (error instanceof DraftRemovalConflict) return fail("draft_remove_conflict", 409);

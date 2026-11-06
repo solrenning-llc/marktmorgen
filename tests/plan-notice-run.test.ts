@@ -9,9 +9,16 @@
  *   - a notice never sent, found a day or less before the charge, is counted
  *     as missed once, and not sent;
  *   - a failed send is counted as failed, and if the charge then comes too
- *     close, it is counted as missed.
+ *     close, it is counted as missed;
+ *   - a claim is won only on a proven "OK" (lib/claim-mark.ts, CX-123 rule
+ *     24): any other answer to the SET NX ([], [undefined], ["unconfirmed"],
+ *     [0]) whose write is not read back sends nothing, counts nothing as
+ *     missed, is counted as unknown, and the next run tries again; a proven
+ *     nil is somebody else's claim, and a reply lost on a write that landed
+ *     is read back as ours.
  */
 import { sendReminders } from "@/lib/billing-reminders";
+import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_notice_run_only";
@@ -95,6 +102,80 @@ async function main() {
     const missed = await sendReminders(at - 12 * 3600);
     is("half a day before the charge it is counted as missed", [missed.sent, missed.missed], [0, 1]);
   }
+
+  // The claim's SET NX answered in a shape that proves nothing; every other command is the stand-in's own.
+  // With `landed`, the write is made first and only its answer is lost.
+  const original = redis.pipeline;
+  async function withClaimReply<T>(reply: unknown[], run: () => Promise<T>, landed = false): Promise<T> {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const claim = commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).startsWith("nl:remind:") && commands[0].includes("NX");
+      if (!claim) return original.call(redis, commands);
+      if (landed) await original.call(redis, commands);
+      return [...reply];
+    }) as typeof redis.pipeline;
+    try {
+      return await run();
+    } finally {
+      redis.pipeline = original;
+    }
+  }
+  const UNKNOWN_REPLIES: unknown[][] = [[], [undefined], ["unconfirmed"], [0]];
+  const shown = (reply: unknown[]) => `[${reply.map((value) => (value === undefined ? "undefined" : JSON.stringify(value))).join(", ")}]`;
+
+  part("an unknown answer to the missed-notice claim is not a missed notice");
+  for (const [i, reply] of UNKNOWN_REPLIES.entries()) {
+    const at = TODAY + (60 + i) * DAY + 5 * 3600;
+    const id = `sub_noticeunk1${i}`;
+    subscriptions = [yearly(id, at)];
+    const odd = await withClaimReply(reply, () => sendReminders(at - 12 * 3600));
+    is(`reply ${shown(reply)}: not counted as missed, counted as unknown, not sent`, [odd.missed, odd.unknown, odd.sent], [0, 1, 0]);
+    const next = await sendReminders(at - 6 * 3600);
+    is(`reply ${shown(reply)}: the next run claims it and counts it as missed once`, [next.missed, next.unknown], [1, 0]);
+    is(`reply ${shown(reply)}: no email`, emails.some((to) => to.startsWith(id)), false);
+  }
+
+  part("an unknown answer to the send claim sends nothing");
+  for (const [i, reply] of UNKNOWN_REPLIES.entries()) {
+    const at = TODAY + 30 * DAY + (6 + i) * 3600;
+    const id = `sub_noticeunk2${i}`;
+    subscriptions = [yearly(id, at)];
+    const odd = await withClaimReply(reply, () => sendReminders(NOW));
+    is(`reply ${shown(reply)}: nothing sent, counted as unknown, not failed`, [odd.sent, odd.unknown, odd.failed, odd.missed], [0, 1, 0, 0]);
+    is(`reply ${shown(reply)}: no email on the unknown claim`, emails.filter((to) => to.startsWith(id)).length, 0);
+    const next = await sendReminders(NOW + 3600);
+    is(`reply ${shown(reply)}: the next run sends it once`, [next.sent, next.unknown], [1, 0]);
+    is(`reply ${shown(reply)}: one email in all`, emails.filter((to) => to.startsWith(id)).length, 1);
+  }
+
+  part("controls: a proven nil, and an answer lost on a write that landed");
+  const controls: unknown[] = [];
+  {
+    const at = TODAY + 30 * DAY + 11 * 3600;
+    subscriptions = [yearly("sub_noticenil01", at)];
+    await redis.pipeline([["SET", `nl:remind:renewal:sub_noticenil01:${at}`, "someone-else", "EX", 60]]);
+    const taken = await sendReminders(NOW);
+    is("a proven nil (claimed elsewhere): nothing sent, nothing failed", [taken.sent, taken.failed], [0, 0]);
+    controls.push(taken.unknown);
+    is("and no email", emails.some((to) => to.startsWith("sub_noticenil01")), false);
+  }
+  {
+    const at = TODAY + 30 * DAY + 12 * 3600;
+    subscriptions = [yearly("sub_noticelost1", at)];
+    const lost = await withClaimReply([undefined], () => sendReminders(NOW), true);
+    is("an answer lost on a write that landed is read back as ours: sent once", lost.sent, 1);
+    controls.push(lost.unknown);
+    is("one email", emails.filter((to) => to.startsWith("sub_noticelost1")).length, 1);
+  }
+  {
+    const at = TODAY + 70 * DAY + 5 * 3600;
+    subscriptions = [yearly("sub_noticelost2", at)];
+    const lost = await withClaimReply(["unconfirmed"], () => sendReminders(at - 12 * 3600), true);
+    is("a missed-notice claim lost but landed is counted as missed once", lost.missed, 1);
+    const again = await sendReminders(at - 6 * 3600);
+    is("and not again", again.missed, 0);
+    controls.push(lost.unknown, again.unknown);
+  }
+  is("none of the controls is counted as unknown", controls, [0, 0, 0, 0]);
   done();
 }
 

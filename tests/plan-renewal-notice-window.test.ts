@@ -10,9 +10,12 @@
  *   - a notice found later (yearly: any later day; trial: fewer
  *     than 7) is still due, but marked late, never as on time;
  *   - inside the window it is not marked late;
- *   - a monthly plan gets no renewal notice, as before.
+ *   - a monthly plan gets no renewal notice, as before;
+ *   - a full period ends where Stripe ends it: a day the next month lacks
+ *     is that month's last day (31 Jan + a month is 28 Feb, 29 Feb 2028 + a
+ *     year is 28 Feb 2029), never a day of the month after.
  */
-import { dueReminder, missedReminder } from "@/lib/billing-reminders";
+import { dueReminder, fullPeriodAfter, missedReminder } from "@/lib/billing-reminders";
 import { done, is, part } from "./check";
 
 const NOW = 1_791_700_000;
@@ -80,6 +83,32 @@ const atCharge = { ...sub("year", charge(30, 5)), cancel_at: renewsAt };
 is("cancellation at the charge itself: no notice", dueReminder(atCharge, NOW), null);
 const sooner = { ...sub("year", charge(30, 5)), cancel_at: NOW + 10 * DAY };
 is("cancellation set before the renewal: no notice", dueReminder(sooner, NOW), null);
+
+part("a full period ends on the last day of a shorter month, as Stripe ends it");
+const iso = (seconds: number) => new Date(seconds * 1000).toISOString();
+const utc = (y: number, m: number, d: number, h = 0) => Date.UTC(y, m, d, h) / 1000;
+is("31 Jan 2027 + a month is 28 Feb 2027", iso(fullPeriodAfter(utc(2027, 0, 31, 9), "month")), iso(utc(2027, 1, 28, 9)));
+is("31 Jan 2028 + a month is 29 Feb 2028 (leap year)", iso(fullPeriodAfter(utc(2028, 0, 31), "month")), iso(utc(2028, 1, 29)));
+is("31 Mar 2027 + a month is 30 Apr 2027", iso(fullPeriodAfter(utc(2027, 2, 31), "month")), iso(utc(2027, 3, 30)));
+is("31 Dec 2027 + a month is 31 Jan 2028", iso(fullPeriodAfter(utc(2027, 11, 31), "month")), iso(utc(2028, 0, 31)));
+is("15 Jan 2027 + a month is 15 Feb 2027 (control)", iso(fullPeriodAfter(utc(2027, 0, 15, 5), "month")), iso(utc(2027, 1, 15, 5)));
+is("29 Feb 2028 + a year is 28 Feb 2029", iso(fullPeriodAfter(utc(2028, 1, 29, 7), "year")), iso(utc(2029, 1, 28, 7)));
+is("28 Feb 2027 + a year is 28 Feb 2028 (control)", iso(fullPeriodAfter(utc(2027, 1, 28), "year")), iso(utc(2028, 1, 28)));
+{
+  // A trial ending 31 Jan 2027, cancel_at at Stripe's own end of the first full month: a full-price charge.
+  const trialEnd = utc(2027, 0, 31);
+  const trial = { ...sub("month", 0, "trialing"), trial_end: trialEnd, cancel_at: utc(2027, 1, 28) };
+  is("trial ending 31 Jan, canceling at 28 Feb: the full first month is noticed", dueReminder(trial, trialEnd - 7.5 * DAY)?.kind, "trial");
+  is("and counted as missed if first found on its last day", missedReminder(trial, trialEnd - 12 * 3600)?.kind, "trial");
+  const short = { ...trial, cancel_at: utc(2027, 1, 27) };
+  is("canceling a day before Stripe's end (prorated): no notice (control)", dueReminder(short, trialEnd - 7.5 * DAY), null);
+}
+{
+  // A yearly plan renewing 29 Feb 2028, cancel_at at Stripe's own end of that year: 28 Feb 2029.
+  const renews = utc(2028, 1, 29);
+  const yearly = { ...sub("year", 0), items: { data: [{ current_period_start: utc(2027, 1, 28), current_period_end: renews, price: { lookup_key: "nimbus_labs_creator_year", unit_amount: 29000, recurring: { interval: "year" } } }] }, cancel_at: utc(2029, 1, 28) };
+  is("yearly renewing 29 Feb 2028, canceling 28 Feb 2029: noticed on the 30th day", dueReminder(yearly, renews - 30 * DAY + 3600)?.kind, "renewal");
+}
 
 part("monthly");
 is("a monthly plan gets no renewal notice", dueReminder(sub("month", 10 * DAY), NOW), null);

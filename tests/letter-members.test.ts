@@ -298,6 +298,32 @@ async function main(): Promise<void> {
   is("Stripe back: the holder reads it again", [(await letterReader(store, letter, jar({ [cookieName]: anaPass }))).state, (await render(store, letter.id, { [cookieName]: anaPass })).includes(SECRET)], ["in", true]);
   forgetAnswers();
 
+  part("Codex G: HTTP 200 that is incomplete is unknown, not a closed door");
+  const savedFetch = globalThis.fetch;
+  for (const [label, payload] of [
+    ["missing data", {}],
+    ["null data", { object: "list", data: null, has_more: false }],
+    ["unscanned next page", { object: "list", data: Array.from({length:100}, (_,i)=>paid(`cs_test_other${String(i).padStart(12,"0")}`, other.product.id)), has_more: true }],
+  ] as const) {
+    forgetAnswers();
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input instanceof Request ? input.url : input));
+      return url.hostname === "api.stripe.com" && url.pathname.endsWith("/checkout/sessions")
+        ? new Response(JSON.stringify(payload), {status:200}) : savedFetch(input,init);
+    }) as typeof fetch;
+    try {
+      const result = await letterReader(store, letter, jar({[cookieName]:anaPass}));
+      is(`${label}: ownership unknown, not closed`, result.state, "unknown");
+      is(`${label}: no negative cache invented`, redis.keys().filter(k=>k.startsWith("nl:letters:ok:")).length, 0);
+      const html = await render(store,letter.id,{[cookieName]:anaPass});
+      is(`${label}: real page says unknown and never shows body/false denial`,
+        [html.includes("We couldn&#x27;t check your purchase just now"),html.includes("This address has none of these products"),html.includes(SECRET)], [true,false,false]);
+    } finally {globalThis.fetch=savedFetch;}
+    forgetAnswers();
+    is(`${label}: valid provider control reopens holder`, (await letterReader(store,letter,jar({[cookieName]:anaPass}))).state,"in");
+  }
+  forgetAnswers();
+
   part("The link form: its field is named and described, and a notice after it is reached");
   const formHtml = await render(store, letter.id);
   is(

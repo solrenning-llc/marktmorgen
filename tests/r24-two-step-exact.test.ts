@@ -15,6 +15,7 @@
  * Synthetic records only; no email leaves.
  */
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { NextRequest } from "next/server";
@@ -156,3 +157,13 @@ test("adding a second step: refused, and one counted as there, while the record 
     });
   }
 });
+
+// ?status=constructor (or any name Object.prototype holds) picks no notice on the login pages: the tables are read
+// only by their own keys, as TOASTS already is (on /signin/code an inherited function would be drawn as a child).
+for (const path of ["app/signin/page.tsx", "app/signin/code/page.tsx"]) {
+  test(`${path} reads ?status= only as one of its own notices`, () => {
+    const text = readFileSync(path, "utf8");
+    assert.equal((text.match(/NOTICES\[status\]/g) ?? []).length, (text.match(/Object\.hasOwn\(NOTICES, status\) \? NOTICES\[status\]/g) ?? []).length);
+    assert.match(text, /Object\.hasOwn\(NOTICES, status\)/);
+  });
+}

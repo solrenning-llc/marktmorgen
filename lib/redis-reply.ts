@@ -60,7 +60,7 @@ export function countOf(reply: unknown): number | null {
  * A pipeline's replies, only when there is exactly one for each command sent,
  * as a fresh plain list. Each reply is read from the list's own data slot:
  * a slot that is missing (a hole), inherited from a prototype or a getter is
- * not a reply, and the whole answer is null (Codex S on #2672), so nothing
+ * not a reply, and the whole answer is null (Codex S on #2672; Codex G on #2806), so nothing
  * read later can answer differently from what was checked. A Proxy is refused
  * before any of its traps can run.
  */

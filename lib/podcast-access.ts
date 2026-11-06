@@ -55,8 +55,10 @@ export type FeedGrant = { s: string; h: string; p: string; e: string };
 export async function feedToken(store: Store, productId: string, email: string): Promise<string | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   const sid = store.statsId;
-  const [existing] = await redisPipeline([["GET", byKey(sid, productId, email)]]);
-  if (typeof existing === "string" && FEED_TOKEN.test(existing)) return existing;
+  // An unknown read of the index is not "no feed yet" (CX-123 rule 24): nothing is written on it.
+  const existing = await indexedToken(sid, productId, email);
+  if (existing === undefined) return null;
+  if (existing !== null && FEED_TOKEN.test(existing)) return existing;
   const token = randomBytes(24).toString("hex");
   const grant: FeedGrant = { s: sid, h: store.handle, p: productId, e: normaliseEmail(email) };
   // A listener's access is kept for good: counted in the store's room at what it adds (lib/order-data.ts).
@@ -64,18 +66,32 @@ export async function feedToken(store: Store, productId: string, email: string):
   // writing a grant then could leave one holding the address that no index leads to, which an erasure never finds.
   const [set] = await orderWrite(store, [["SET", byKey(sid, productId, email), token, "NX"]]);
   if (set === null) {
-    const [again] = await redisPipeline([["GET", byKey(sid, productId, email)]]);
+    const again = await indexedToken(sid, productId, email);
     return typeof again === "string" && FEED_TOKEN.test(again) ? again : null;
   }
   if (set !== "OK") return null;
-  await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant)]]);
-  return token;
+  // Only "OK" wrote the grant: on any other reply no link is given to a feed that may not open.
+  const [made] = await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant)]]);
+  return made === "OK" ? token : null;
 }
 
+/** The token one product's index holds for this address: text, null where none, undefined where the reply is unknown. */
+async function indexedToken(sid: string, productId: string, email: string): Promise<string | null | undefined> {
+  const reply = repliesFor(await redisPipeline([["GET", byKey(sid, productId, email)]]), 1);
+  const value = reply?.[0];
+  return value === null || typeof value === "string" ? value : undefined;
+}
+
+/**
+ * The grant a feed token opens; null only when Redis says there is none. A reply in an unknown shape throws
+ * UnknownReplyError, so the feed answers a server error its app asks again after, never "No such feed." (a 404).
+ */
 export async function readFeedToken(token: string): Promise<FeedGrant | null> {
   if (!FEED_TOKEN.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", tokenKey(token)]]);
-  if (typeof raw !== "string") return null;
+  const reply = repliesFor(await redisPipeline([["GET", tokenKey(token)]]), 1);
+  const raw = reply?.[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a podcast feed's grant");
   try {
     const g = JSON.parse(raw) as FeedGrant;
     return typeof g.s === "string" && typeof g.p === "string" && typeof g.e === "string" ? g : null;
@@ -109,18 +125,18 @@ export const FEED_READS_A_DAY = 8;
  * A feed about to be put together: counted, and refused past
  * FEED_READS_A_DAY in a day. One command, and a second with a day's first,
  * because this runs every time a feed is put together and is part of what
- * that costs. A count that cannot be kept lets the feed through.
+ * that costs. A count that cannot be kept or read never lets the feed
+ * through (CX-123 rule 24): it throws, and the feed answers a server error
+ * that the app asks again after, never "Too many requests" for hours.
  */
 export async function feedReadAllowed(token: string, now = Date.now()): Promise<boolean> {
   if (!isRedisConfigured()) return true;
-  try {
-    const key = `nl:pod:n:${sha(token).slice(0, 32)}:${new Date(now).toISOString().slice(0, 10)}`;
-    const [count] = await redisPipeline([["INCR", key]]);
-    if (Number(count) === 1) await redisPipeline([["EXPIRE", key, 2 * 86_400]]);
-    return Number(count) <= FEED_READS_A_DAY;
-  } catch {
-    return true;
-  }
+  const key = `nl:pod:n:${sha(token).slice(0, 32)}:${new Date(now).toISOString().slice(0, 10)}`;
+  const reply = repliesFor(await redisPipeline([["INCR", key]]), 1);
+  const count = reply ? countOf(reply[0]) : null;
+  if (count === null || count < 1) throw new UnknownReplyError("a podcast feed's day count");
+  if (count === 1) await redisPipeline([["EXPIRE", key, 2 * 86_400]]);
+  return count <= FEED_READS_A_DAY;
 }
 
 /** What a feed's subscriber is told apart by for the day's visit: never the feed's address itself. */

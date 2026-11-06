@@ -1,0 +1,13 @@
+# D2 G5 fiscal cost audit — November 6, 2026
+
+Pinned main:5c07315505e1d53ee6401021601cd688fa98ecda. Reservation/coordination86fc17330f4ca07cedcfadb2fc0d11a4010e5757. Evidence-only, no product PR, new runtime, reservation-document edit or invented RED.
+
+The inspected fiscal delta incorporated on November6 introduces no new reader, writer, provider request or scheduled operation. This refutes the new-I/O hypothesis for this exact delta. Runtime, module loading and review costs were not measured and are not called zero; no global MR, profitability or legal conclusion follows.
+
+PR2646 merged at2026-11-06T03:59:13Z, merge08bb2b0aa0bacc0a4c15ed7c6e2cdca81bfee75f, head152789489b9b964a1c3e6cff159bf4ca0172dc71, baseba887611b8b101dfc84b14fb4fc07a7eec3b9ff8. Its exact three-path diff adds48 lines to lib/company-margin-report.ts, changes docs/company-margin-report.md(+4/-2), and adds tests/company-margin-report-operations.test.ts(+82/-0). Commit52090dd0635fa98ad58cb6aac7190c6b534f8087 predates the merge; filtering only by commit date would miss this incorporated delta.
+
+At the pin, company-margin-report.ts:3-4 imports storeForgetLine/StoreForgetMonth(type) and keptStarLine. Lines72-109 validate caller-supplied serialized evidence, bounded at4096characters, then format it. Lines176-180 add the optional operations input; line211 omits it when undefined or parses the supplied value; line234 joins text. The added calls reach synchronous formatters store-forget-retry.ts:189-197 and two-step.ts:137-141. The separate Redis readers storeForgetMonth:156-183 and keptStarMonth:126-131 are not imported or called by this delta. Existing readHeldMonth/companyMonthlyMarginReportWithHeld at242-245 predate the patch. New static imports can affect dependency loading/CPU/memory; the complete transitive graph is not certified.
+
+Other scoped source blobs are identical to the inspected pre-day ancestorb10812d21c1d065677e83de9d93f597a11e43a17: llc-fixed-costs.ts16203f548279c9167c6a6254e7103cbd707b2907; tax-threshold.ts86e86db6d2b6e14d9c4bd50b2129651763264dfb; tax-sales-counter.ts0a244092d3778a60766495df8c32e264a3e4370e. Last-touch PRs2175/2217/2224 merged beforeNovember6. Pinned company-margin-report blobae3dc8ea3469a935d66c9132dd3ed5821712245a.
+
+Read-only evidence: exact GitHub metadata/file inventory, pinned source and the two invoked formatter bodies, checked by D2-B and consolidated by D2. No application/proof code ran, no actual Redis/provider was called, no source/ref/CI/policy was changed. Broad compare/search responses were capped300files/100PRs and were not used to assert global completeness. No proof or regression test is justified by this refuted hypothesis.

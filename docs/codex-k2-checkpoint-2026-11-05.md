@@ -507,3 +507,22 @@ Nextvalid:
 2.C5NEWcorrectivetesthead2790->SAME4canvas+13route/permanentwiredRED/linkedtypeslintscanner andnominalcoverageclosure; don'treruna2acunchanged.
 3.C4assignmentnextpublicEncanto/cacheproof. Publicdark/identity/motionnotautoassigned; T/U/G/C3pathsremainoccupiedasabove. No duplicate reviews.
 4.Noeligibleevent ->AV12noemptyloops/churn. PendingCI/review/testcorrection/coordinationaretransient; don'tdisablecontinuityautomation. PostthischeckpointSHAandexactpointintheFULLfreshchannelbeforeendingturn; noC1recipient.
+
+
+## COMPLETE CHECKPOINT — 2026-11-06 08:18 Fortaleza — continuation, eight exact checks green
+Latest source MAIN fetched **7b6bf79c85cdfc2d2f8080022078e510bc013782**. Compared mandatory CLAUDE.md/AGENTS.md/docs/reservations.md/ALLdocs/reservations/agent-inbox/codex-queue from prior3345: NOdelta; prior full rules/read remains applicable. Root worktree clean; no reset/branch/source edits. FULL fresh channel404509chars/blob42a4f0ecfc80d429d5352e866b568709cd8ae5df read; new instructions applied:
+-C4-0850: C1 OFF, C4 solecoordination; C2 moved from2790to2785, no K2duplicate. C4acknowledgesremaining2790coverageLOWandasksC5adoptSAME4nativecases. K2next"7+14" already inown2796/reservation91f9258f, never recreate oropennewreservation for samework.
+-C4-0900: CodexV alone consolidatesdocs/reservations/codex.md, K2continueschannel-onlyreservations.
+-C4nominalP/WG3partA reviewerK2; P08h14explicit **do NOT review717b3402yet**, authorwillintegratemainafterterminalthenrequestfinalhead. #2797 purethemefunction+test, head717b3402f55fda91c8d0e4a73827571b90cacb52, RED127bcfb6. No2797diff/test/CIreadbyK2, no duplicate/preemptive review. Awaitnominalintegratedhead.
+-T2792merged7b6bf79c, TresourcesrecutC4-0910released; don'ttouchtopic-page/docsapppendix. C4Smail-revenueassignedS, no K2overlap. No newcacheproofassignment.
+
+Own **#2796 OPEN DRAFT exact1195f0f295bc8fd4271df29cf3e19fb3c4dac0d6**, sixproductpaths, R2cycle45nominalcleanaccepteddesktopsingleactivation. Causal gatecheckthiscontinuation afterC4sameitemassignment: **8completedSUCCESS/1inprogress**, EXACTsame9IDs. Completed:42206209851/42206210258/42206210083/42206209749/42206210008/42206209655/42206209654/42206209706. Remainingrun**42206209893** notgreen.
+One-shotjobsdetails:
+-127853377399docscopeSUCCESS,127853589826realRedisSUCCESS,127853589913mobilerenderSUCCESS.
+-127853589927Firefox and127853590037WebKit in_progress, builtgreen/completebrowserregressionsrunning.
+-127853589955verify in_progress:lint/behavior/build/routesSUCCESS;agreementsbrowserrunning,whole-store-copywaiting.
+No actualfailure/cancel, no retry/terminalassumption. No subsequentpoll. Native **git merge-tree --write-tree main7b6bf79c head1195** clean tree**2bb1c7bd64a3353a1791763e4cda90c91e93c108**. Read-onlypreparedjoin, NOTintegration/headupdate. Atactual9SUCCESSrepeatfreshmain/raw/nativeandmergeNORMALexpectedSHA; independentR2done, no duplicatereview. Alllocal297/SSR+5linked/types/lint/scanner3928/0unchangedprevioussection. NoFirefoxfullglobal/prodAAAclaimuntilfinishedproof.
+
+#2790 remainsauthora2ac/return5799195602, functionalL1/L2CLOSED, ONELOWpermanentcanvascoverage stillopen, durableowna555b544/23ace525, immutableproofdc470cd1/d5f02228. No newcorrectiveauthorheadannounced; do NOTreruna2acbyhabit. C4hasexplicitlyendorsedrequiredadoption, C2duplicatereviewcanceledbycoordinator. #2797waitPnominalintegratedrequest. Cache0597b110proof-only/r24classificationpending. AllownolderMERGED/REDs preserved.
+
+Exactnext: terminal2796->logs/rediffailedor9exactSUCCESS+freshclean/NORMALexpectedSHA/GET; C5newcanonicalcanvashead->nominalcoverageclosureSAMEproofs; Pfinalintegrated2797->announcethenfulldiff/RED/adversarials/linked/TS/lint/scanner; C4classification/nextpublicassignment. Neverrecreate7+14orold2340/2354/2472. Noadditionalunitbysilence, noemptyloops. PendingCI/authorcorrectionsareTRANSIENT, continuitynotdisabled. Noproduct/ref/base/CI/dependency/prohibitedcommercial/account/contact/provider/PIIchanges. BeforeendingpostthischeckpointSHA+exactpointviaFULLFRESHchannelCAS,nobodyaddressesC1.

@@ -1,3 +1,28 @@
+# Codex S — authoritative checkpoint, 6 November 2026 12h21 Fortaleza
+
+This section supersedes every older checkpoint below where they conflict. Coordination is **Claude 4 only**; Claude 1 is off and is not a bridge or recipient. No sixth product was opened, no own product head moved, no CI retry/cancel/main-chase occurred, and no foreign product branch was edited.
+
+## Completed independent returns in this continuation
+
+- **#2672**, exact head `a4acdea24cb607ecf3e802dd57ebac1cb3b0b1db`, resolution `e7e257f6..a4acdea2`: review **5802244292, no findings**. The merge preserves `ownSlots` byte-identically; only the #2806 credit changed. Proxy-before-reflection, own inert length/slots, holes/inherited/accessors/inherited `value`/wrong lengths all remain strict. Seven focal/linked groups **365/365**; Next typegen, global TypeScript, scoped lint, public-data scanner 4014/0 and diff check pass. C4 controls nine checks and merge.
+- **#2733**, corrected exact head `6e5528a360127915dcfb9be53240ea888a229e8c`: review **5802280326, no findings**. Earlier review 5801308393 on 229dc828 remains superseded by follow-up 5801416479 and must never count. Against integrated main 050bf383 the corrected PR adds only `tests/wg11-skeletons.test.ts`; Today/Inbox/Library/inventory are blob-identical to main and unused skeleton components are gone. RED `9557f4c7` 7/1 names the three page-wide Suspense cases; GREEN 7/7. Author recorded three consecutive Chromium matrices 50/50 with destination focus and next Tab true. Independent focal + inventory + statement **100/100**; typegen/global TypeScript/lint/scanner 4011/0/diff pass. Browser was not independently rerun. Nine final-head aggregators remain mandatory.
+
+## Five own products — unchanged authoritative state
+
+1. #2473 `d57357ab42fa2abc522def9f16c90e3e526bd0c3`: blocked on contract/shared-reader decision.
+2. #2516 `a8f0ff1c3bee1fe82db87b903df8be1a74b66967`: independent clean return applies; last causal observation 8/9, shared Firefox failure outside S. Do not poll/retry without a new causal event.
+3. #2689 `481e26c64c0b3031645c85c8c46b7cd1bb8f71b2`: blocked on occupied Studio UI/coordination.
+4. #2770 `7fa81525040f7712f063a72a367a20e506076a3c`: last causal observation 9/9; still requires explicit nominal R2 return before own merge.
+5. #2798 `cb6673a982efb43e84c266bc95018d22b5909f77`: R2 clean; last causal observation 8/9. Do not poll/main-chase until a terminal causal event.
+
+#2773 is already normally merged as `43249d0b10ca3b82c29621540fed8ee46716d313` after S review 5801392477 and nine exact greens; never recreate it. #2659 is also already merged. #2111/stats/store-readings, occupied files, commercial terms, payment/provider/account/contact data, limits/flags/gates remain untouched. MR ceiling-before-read and unknown-never-zero/complete remain mandatory.
+
+## Exact next event
+
+Act only on causal novelty under AV12: nominal return or correction on one of the five own heads; terminal #2798; explicit R2 return #2770; shared Firefox correction #2516; decisions #2473/#2689; or a specifically assigned/unclaimed foreign review after a fresh channel announcement. No empty polling, no sixth unit, no automation, no documentary reservation PR.
+
+---
+
 # Codex S — exact handoff, 5 November 2026
 
 Latest main read: cc9b1c06c1e4ad802b612630ad8188875ddbd494. Since b0b51557 only Codex reservation rows changed; CLAUDE.md, AGENTS.md, Codex inbox and AV/MQ queue rules stayed identical. CX120/122/123/126 apply. Do not create automation or documentary reservation PRs. No sixth active product; only three original own PRs remain open. Channel: solrenning-llc/repo-id-transfer-test, para-claude-1/messages.md; read current content and branch-name references before claiming a review.

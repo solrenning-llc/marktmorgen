@@ -6,11 +6,12 @@
  * claimed without proof:
  *
  *   - the address is proved the way courses are opened (lib/learn.ts,
- *     learnerFrom): the pass the browser was given by a link sent to that
- *     inbox, or a signed-in session with that address. A pass for one
- *     course only (the browser that paid for it, whose address was typed at
- *     checkout and never checked) proves only that course. The creator on
- *     their own store is never a member of it;
+ *     learnerFrom), but only where the inbox itself was proved: the pass a
+ *     link sent to that address gave the browser, or a signed-in session
+ *     with it. A pass for some courses only (the browser that paid for
+ *     them) proves nothing here: its address was typed at checkout and never
+ *     checked, and everything else bought under it may be somebody else's.
+ *     The creator on their own store is never a member of it;
  *   - what it holds is read from the creator's own Stripe account, at most
  *     two calls (the address as typed and as kept): a membership counts only
  *     while Stripe calls it active and no pause the member chose is running
@@ -18,8 +19,8 @@
  *     only when it was paid, never refunded in full or in part and never
  *     disputed; never a payment plan, nor a gift, a group place or a
  *     pre-order bought for others. A purchase the creator brought over from
- *     another platform, or sold through their PayPal, counts as bought; a
- *     gift someone else paid for does not;
+ *     another platform counts as bought; a gift someone else paid for does
+ *     not, nor a PayPal sale, whose refunds and disputes are not read here;
  *   - an answer Stripe does not give, or gives in another shape
  *     (lib/stripe-list.ts), proves nothing, and a check that cannot finish
  *     is "unknown": the normal price is shown and charged.
@@ -33,7 +34,9 @@
  * The page and the checkout ask the same function (memberPriceFor). The
  * page's form sends the percentage it showed; the checkout proves it again
  * and refuses, before Stripe, a claim that is not what is proved now
- * (memberClaim), so what Stripe charges is what the page said.
+ * (memberClaim), so what Stripe charges is what the page said. The
+ * checkout then opens with the proved address fixed, so the product at the
+ * member price is the member's, never typed over for somebody else.
  *
  * Nothing is kept: no list of members, no answer cached.
  */
@@ -42,7 +45,7 @@ import { takeBuyerRead } from "@/lib/buyer-actions";
 import { readListings } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { importedFrom, importedRead } from "@/lib/imported-purchases";
-import { learnerFrom, passCookieName } from "@/lib/learn";
+import { TOKEN_PATTERN, learnerFrom, passCookieName } from "@/lib/learn";
 import { memberState } from "@/lib/membership-access";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { isMemberPercent, memberOffFrom, qualifyingFor } from "@/lib/member-price-rules";
@@ -58,13 +61,18 @@ export const MEMBER_PRICE_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS;
 export const MEMBER_PRICE_STRIPE_CALLS = 2;
 
 const SESSION_ROW = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
-/** An import's own job (lib/imports.ts), or a sale paid into the creator's PayPal (lib/paypal-sales.ts): bought. A gift is not. */
-const BOUGHT_JOB = /^([0-9a-f]{24}|paypal:.+)$/;
+/**
+ * An import's own job (lib/imports.ts): bought on another platform. A gift
+ * (someone else paid) is not, nor a PayPal sale (lib/paypal-sales.ts),
+ * whose partial refunds and disputes nothing here reads.
+ */
+const BOUGHT_JOB = /^[0-9a-f]{24}$/;
 
-export type MemberCheck = { state: "none" } | { state: "member"; percent: number } | { state: "unknown" };
+/** "member" carries the address it was proved for, so the checkout opens with it fixed. */
+export type MemberCheck = { state: "none" } | { state: "member"; percent: number; email: string } | { state: "unknown" };
 type CookieJar = { get(name: string): { value: string } | undefined };
 /** What a qualifying product is, for reading its rows. */
-export type QualifyingKind = { recurring: boolean; course: string | null };
+export type QualifyingKind = { recurring: boolean };
 
 const NONE: MemberCheck = { state: "none" };
 const UNKNOWN: MemberCheck = { state: "unknown" };
@@ -154,11 +162,16 @@ async function heldHere(store: Store, email: string, kinds: ReadonlyMap<string, 
 export async function memberPriceFor(store: Store, product: Listing, cookies: CookieJar): Promise<MemberCheck> {
   const qualifying = qualifyingFor(store.memberPrices, product);
   if (qualifying.length === 0 || !store.stripeAccountId) return NONE;
-  // Nobody to prove without a pass or a session: nothing is read or counted.
-  if (!cookies.get(passCookieName(store))?.value && !cookies.get(SESSION_COOKIE)?.value) return NONE;
+  // Nobody to prove without a pass in its shape or a session: nothing is read or counted.
+  if (!TOKEN_PATTERN.test(cookies.get(passCookieName(store))?.value ?? "") && !cookies.get(SESSION_COOKIE)?.value) return NONE;
   if (!(await takeBuyerRead(store, MEMBER_PRICE_REQUEST_UNITS))) return UNKNOWN;
-  const learner = await learnerFrom(store, cookies).catch(() => null);
-  if (!learner || learner.owner) return NONE;
+  const learner = await learnerFrom(store, cookies).then(
+    (found) => found,
+    () => undefined,
+  );
+  if (learner === undefined) return UNKNOWN;
+  // Only an inbox proved (a link's pass, or signed in) and never the creator (above).
+  if (!learner || learner.owner || learner.scope !== "all") return NONE;
   let listings: Listing[];
   try {
     listings = await readListings(store, qualifying);
@@ -167,17 +180,12 @@ export async function memberPriceFor(store: Store, product: Listing, cookies: Co
     return UNKNOWN;
   }
   const kinds = new Map<string, QualifyingKind>();
-  for (const listing of listings) {
-    const course = listing.course?.id ?? null;
-    // A pass for some courses only proves those: the browser that paid for them.
-    if (learner.scope !== "all" && !(course && learner.scope.includes(course))) continue;
-    kinds.set(listing.id, { recurring: listing.recurring !== null, course });
-  }
+  for (const listing of listings) kinds.set(listing.id, { recurring: listing.recurring !== null });
   if (kinds.size === 0) return NONE;
   const held = await heldHere(store, learner.email, kinds);
   if (held === null) return UNKNOWN;
   const percent = memberOffFrom(store.memberPrices, product, held);
-  return percent > 0 ? { state: "member", percent } : NONE;
+  return percent > 0 ? { state: "member", percent, email: learner.email } : NONE;
 }
 
 /** The percentage a product page's form says it showed as the member price; 0 for none or anything else. */
@@ -192,8 +200,9 @@ export function readMemberClaim(raw: unknown): number {
  * exactly what this address is proved to get now. Anything else is refused
  * before Stripe, so nobody is charged a price the page did not show.
  */
-export async function memberClaim(store: Store, product: Listing, claimed: number, cookies: CookieJar): Promise<{ ok: true; member: number } | { ok: false }> {
+export async function memberClaim(store: Store, product: Listing, claimed: number, cookies: CookieJar): Promise<{ ok: true; member: number; email: string } | { ok: false }> {
   if (!isMemberPercent(claimed)) return { ok: false };
   const check = await memberPriceFor(store, product, cookies);
-  return check.state === "member" && check.percent === claimed ? { ok: true, member: claimed } : { ok: false };
+  if (check.state !== "member" || check.percent !== claimed) return { ok: false };
+  return { ok: true, member: claimed, email: check.email };
 }

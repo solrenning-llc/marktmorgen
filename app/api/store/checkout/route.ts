@@ -266,14 +266,17 @@ export async function POST(request: NextRequest) {
     }
     const ads = await adsCheckout(request, store);
     // A member price the page showed: charged only when it is exactly what
-    // this address is proved to get now; otherwise back to the page, with
-    // nothing charged, rather than a price it did not show. Not on a payment
-    // plan, which is never lowered.
-    let member: number | undefined;
-    if (memberAsked && !inPlan) {
+    // this address is proved to get now, for the member's own purchase of
+    // this product alone (not a payment plan, a box ticked, a gift, places
+    // for others or a pre-order); otherwise back to the page, with nothing
+    // charged, rather than a price it did not show. The checkout opens with
+    // the proved address fixed, so it is the member's purchase.
+    let member: { percent: number; email: string } | undefined;
+    if (memberAsked) {
+      if (inPlan || bumps.length > 0 || gift || group || preorder) return away(`/@${store.handle}/p/${product.id}?member=alone#buy`);
       const claim = await memberClaim(store, product, memberAsked, request.cookies);
       if (!claim.ok) return away(`/@${store.handle}/p/${product.id}?member=changed#buy`);
-      member = claim.member;
+      member = { percent: claim.member, email: claim.email };
     }
     // Only where the box was offered, for a purchase of the buyer's own, with an address that is one.
     const reminding = remind && !gift && !group && !preorder && remindEmail.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(remindEmail) && assistReminderOffered(store, product);
@@ -312,7 +315,8 @@ export async function POST(request: NextRequest) {
         // Where the buyer's connection is, for a fair price for that country
         // (lib/fair-price.ts), the same header the page read to show it.
         country: readCountry(request.headers.get("x-vercel-ip-country")),
-        member,
+        member: member?.percent,
+        email: member?.email,
         // A funnel of pages this product is a step of, read off the page the
         // button was pressed on like the tags above (lib/page-funnel.ts).
         funnel: funnel ?? undefined,

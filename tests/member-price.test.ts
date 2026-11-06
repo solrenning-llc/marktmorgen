@@ -180,8 +180,8 @@ async function main(): Promise<void> {
   part("Who is a member, from Stripe's rows");
   const handles = new Set([HANDLE]);
   const kinds = new Map([
-    ["club", { recurring: true, course: null }],
-    ["guide", { recurring: false, course: null }],
+    ["club", { recurring: true }],
+    ["guide", { recurring: false }],
   ]);
   const held = (rows: unknown[]) => [...heldFromSessions(rows as Record<string, unknown>[], handles, kinds)];
   is("an active membership", held([joined("club", "active")]), ["club"]);
@@ -258,10 +258,10 @@ async function main(): Promise<void> {
     return memberPriceFor(await current(), await plannerNow(), cookies);
   };
   sessionsByEmail = { [MEMBER]: [joined(club.product.id, "active")] };
-  is("an active member with a proved address: the member price", await check(), { state: "member", percent: 20 });
+  is("an active member with a proved address: the member price", await check(), { state: "member", percent: 20, email: MEMBER });
   is("at most two calls to Stripe", sessionReads <= MEMBER_PRICE_STRIPE_CALLS, true);
   sessionsByEmail = { [MEMBER]: [joined(club.product.id, "active"), oneOff(guide.product.id)] };
-  is("a member who also bought the guide: the larger percentage", await check(), { state: "member", percent: 30 });
+  is("a member who also bought the guide: the larger percentage", await check(), { state: "member", percent: 30, email: MEMBER });
   sessionsByEmail = { [MEMBER]: [joined(club.product.id, "canceled")] };
   is("a cancelled membership: no member price", await check(), { state: "none" });
   sessionsByEmail = { [MEMBER]: [oneOff(guide.product.id, { payment_intent: intent({}, { refunded: true, amount_refunded: 1200 }) })] };
@@ -273,13 +273,13 @@ async function main(): Promise<void> {
   is("no pass and not signed in: nothing asked of Stripe", [await check(jar({})), sessionReads], [{ state: "none" }, 0]);
   is("a pass that is not one: nothing asked", [await check(jar({ [passCookieName(store)]: "f".repeat(64) })), sessionReads], [{ state: "none" }, 0]);
   const scoped = jar({ [passCookieName(store)]: await mintPass(store, MEMBER, ["some-course"]) });
-  is("a pass for one course only (the browser that paid for it) proves nothing about a membership", [await check(scoped), sessionReads], [{ state: "none" }, 0]);
+  is("a pass for some courses only (the browser that paid, its address typed and never checked) proves nothing: Stripe is not asked", [await check(scoped), sessionReads], [{ state: "none" }, 0]);
   sessionsByEmail = { [OWNER]: [joined(club.product.id, "active")] };
   const ownerSession = jar({ [SESSION_COOKIE]: await openSession(OWNER) });
   is("the creator signed in to their own store is never shown a member price", await check(ownerSession), { state: "none" });
   sessionsByEmail = { [MEMBER]: [joined(club.product.id, "active")] };
   const memberSession = jar({ [SESSION_COOKIE]: await openSession(MEMBER) });
-  is("a member signed in to Marktmorgen with that address: proved", await check(memberSession), { state: "member", percent: 20 });
+  is("a member signed in to Marktmorgen with that address: proved", await check(memberSession), { state: "member", percent: 20, email: MEMBER });
 
   sessionsByEmail = { [MEMBER]: "fail" };
   is("Stripe failing: unknown, never a discount", await check(), { state: "unknown" });
@@ -301,14 +301,16 @@ async function main(): Promise<void> {
   sessionsByEmail = {};
   await redis.pipeline([["HSET", importedKey(store.statsId!, MEMBER), guide.product.id, JSON.stringify({ at: 1, job: "a".repeat(24), items: [] })]]);
   const withPast = { ...(await current()), pastBuyers: true } as Awaited<ReturnType<typeof current>>;
-  is("a purchase brought over from another platform counts", await memberPriceFor(withPast, await plannerNow(), proved), { state: "member", percent: 30 });
+  is("a purchase brought over from another platform counts", await memberPriceFor(withPast, await plannerNow(), proved), { state: "member", percent: 30, email: MEMBER });
   await redis.pipeline([["HSET", importedKey(store.statsId!, MEMBER), guide.product.id, JSON.stringify({ at: 1, job: "gift:g1", items: [] })]]);
   is("a gift someone else paid for does not", await memberPriceFor(withPast, await plannerNow(), proved), { state: "none" });
+  await redis.pipeline([["HSET", importedKey(store.statsId!, MEMBER), guide.product.id, JSON.stringify({ at: 1, job: "paypal:ORDER0001", items: [] })]]);
+  is("nor a PayPal sale, whose refunds and disputes are not read here", await memberPriceFor(withPast, await plannerNow(), proved), { state: "none" });
 
   part("The page's claim, checked again at checkout");
   is("a claim is a percentage from the list, or none", [readMemberClaim("20"), readMemberClaim("23"), readMemberClaim("-5"), readMemberClaim(null), readMemberClaim("20abc")], [20, 0, 0, 0, 0]);
   sessionsByEmail = { [MEMBER]: [joined(club.product.id, "active")] };
-  is("the claim equals what is proved now: applied", await memberClaim(await current(), await plannerNow(), 20, proved), { ok: true, member: 20 });
+  is("the claim equals what is proved now: applied", await memberClaim(await current(), await plannerNow(), 20, proved), { ok: true, member: 20, email: MEMBER });
   is("a claim larger than what is proved: refused, nothing charged", await memberClaim(await current(), await plannerNow(), 30, proved), { ok: false });
   sessionsByEmail = { [MEMBER]: [joined(club.product.id, "canceled")] };
   is("a member no more: refused", await memberClaim(await current(), await plannerNow(), 20, proved), { ok: false });
@@ -341,6 +343,17 @@ async function main(): Promise<void> {
   is("a larger member price wins over a smaller sale, never both", [sent.get("metadata[member]"), sent.get("metadata[sale]"), sent.get("discounts[0][coupon]")], ["20", null, "mm_member_20"]);
   sent = await open({ member: 20, coupon: "winback_coupon" });
   is("a come-back offer replaces it", [sent.get("metadata[member]"), sent.get("discounts[0][coupon]")], [null, "winback_coupon"]);
+  sent = await open({ member: 20, gift: "gift_test_0001" });
+  is("a gift hands nothing to the member: no member price", sent.get("metadata[member]"), null);
+  sent = await open({ member: 20, preorder: true });
+  is("a pre-order: none", sent?.get("metadata[member]") ?? null, null);
+  sent = await open({ member: 20, email: MEMBER });
+  is("with the proved address, the checkout opens with it fixed", [sent.get("metadata[member]"), sent.get("customer_email")], ["20", MEMBER]);
+  const charge_ = readFileSync(join(process.cwd(), "lib/store-checkout.ts"), "utf8");
+  is("never with a box ticked: a coupon comes off every line, and a ticked product may be one no rule covers", charge_.includes("const memberAlone = added.length === 0 && !extras.gift && !extras.group && !extras.preorder;"), true);
+  const route = readFileSync(join(process.cwd(), "app/api/store/checkout/route.ts"), "utf8");
+  is("the route refuses a claim on anything but the member's own purchase alone, before proving it", /if \(memberAsked\) \{\s*if \(inPlan \|\| bumps\.length > 0 \|\| gift \|\| group \|\| preorder\) return away\(/.test(route), true);
+  is("the route opens the checkout with the proved address and the proved percentage only", [route.includes("member: member?.percent,"), route.includes("email: member?.email,")], [true, true]);
 
   part("What it reads, held to an existing line");
   is("counted as the next product after a purchase is, from the plan's public requests", MEMBER_PRICE_REQUEST_UNITS, NEXT_OFFER_REQUEST_UNITS);

@@ -490,8 +490,12 @@ export async function createCheckout(
   const fairOffNow = !extras.coupon && !plan && !membership ? fairOff(store.fair, product, extras.country ?? "") : 0;
   // A member price (lib/member-price.ts), already proved by the route: on
   // what a sale covers, the same way, when it takes off more than a sale or
-  // a fair price does. Never two.
-  const memberOffNow = !extras.coupon && !plan && !membership && saleable(product) && isMemberPercent(extras.member) ? extras.member : 0;
+  // a fair price does. Never two. Only on the member's own purchase of that
+  // product alone: a coupon comes off every line, so not with a box ticked
+  // (a product no rule may cover), nor a gift, places for others or a
+  // pre-order, which hand nothing to the member (lib/bundle-rules.ts).
+  const memberAlone = added.length === 0 && !extras.gift && !extras.group && !extras.preorder;
+  const memberOffNow = !extras.coupon && !plan && !membership && memberAlone && saleable(product) && isMemberPercent(extras.member) ? extras.member : 0;
   // A membership's introductory price (lib/intro-price.ts), unless a
   // come-back offer replaces it: one discount at a time, as everywhere here.
   const intro = membership && !extras.coupon ? activeIntro(product, store.tiers) : null;

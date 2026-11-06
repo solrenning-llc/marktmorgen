@@ -6,8 +6,9 @@
  * was shared, downloaded or copied as if complete:
  *   - the funnel (HGET, lib/page-funnel-store.ts readPageFunnel): "That funnel is gone" (404 unknown) for a funnel
  *     that is there;
- *   - each of its forms (HGET, lib/form-store.ts readForm): the form was quietly left out of the share snapshot, the
- *     file and the copy, and its page kept a form block pointing at nothing;
+ *   - each of its forms (HGET, lib/form-store.ts readForm): once Codex K's #2857 makes readForm throw UnknownReply
+ *     (lib/redis-exact.ts) on an unknown answer, the route answered 500 server_error; before it, the form was quietly
+ *     left out of the share snapshot, the file and the copy (that reader's reply shapes come with #2857, not here);
  *   - each of its pages (GET, lib/sales-page-store.ts readPage, line 38): once #2830 makes readPage throw
  *     UnknownReplyError on an unknown answer, the route answered 500 server_error ("We could not confirm the result").
  *
@@ -18,7 +19,8 @@
  *
  * The real route, a real store over the memory Redis stub; only the one targeted reply is changed after the real
  * command runs. For the page read, the stub throws the UnknownReplyError readPage throws after #2830 (its reply shapes
- * are proven in that PR's tests/page-reads-exact.test.ts). Synthetic data only.
+ * are proven in that PR's tests/page-reads-exact.test.ts); for the form read, the UnknownReply readForm throws after
+ * #2857 (its reply shapes are proven there). The route refuses either class. Synthetic data only.
  */
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -27,6 +29,7 @@ import { readPageFunnels } from "@/lib/page-funnel-store";
 import { readForms } from "@/lib/form-store";
 import { listShares } from "@/lib/funnel-share-store";
 import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReply } from "@/lib/redis-exact";
 import { GET, POST } from "@/app/api/store/funnel-share/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -35,7 +38,7 @@ const OWNER = "bundle-reads@example.com";
 const URL = "https://marktmorgen.com/api/store/funnel-share";
 
 type Read = "funnel" | "form" | "page";
-type Mode = "no reply" | "not a record" | "not a text" | "unknown page" | "confirmed none";
+type Mode = "no reply" | "not a record" | "not a text" | "unknown page" | "unknown form" | "confirmed none";
 
 async function main(): Promise<void> {
   redis.clear();
@@ -95,6 +98,7 @@ async function main(): Promise<void> {
       if (!target) return reply;
       hits += 1;
       if (mode === "unknown page") throw new UnknownReplyError("a page read");
+      if (mode === "unknown form") throw new UnknownReply("the form");
       if (mode === "no reply") return [];
       if (mode === "not a record") return ["{"];
       if (mode === "not a text") return [7];
@@ -111,9 +115,8 @@ async function main(): Promise<void> {
     ["funnel", "no reply"],
     ["funnel", "not a record"],
     ["funnel", "not a text"],
-    ["form", "no reply"],
-    ["form", "not a record"],
-    ["form", "not a text"],
+    // The form's own reply shapes (no reply, not a record, not a text) come with #2857, which makes readForm exact.
+    ["form", "unknown form"],
     ["page", "unknown page"],
   ];
   for (const [read, mode] of cases) {

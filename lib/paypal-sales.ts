@@ -734,18 +734,29 @@ export async function watchPayPal(
     if (on.refunded) await on.refunded(paid).catch((error) => console.error("telling of a PayPal refund failed", error));
     const [given] = await redisPipeline([["HGET", importedKey(statsId, paid.email), paid.product]]);
     let items: string[] = [];
-    try {
-      const v = JSON.parse(String(given)) as { job?: unknown; items?: unknown };
-      // Only what this very payment gave is taken back.
-      if (v.job !== `paypal:${order}`) {
-        await redisPipeline([["ZREM", watchKey(statsId), order]]);
-        continue;
-      }
-      items = Array.isArray(v.items) ? (v.items as string[]) : [];
-    } catch {
+    // No record: nothing of this payment is held any more, so nothing to take back. A record that does not read is
+    // unknown, never "not this payment's": looked at again in an hour (rule 30, Claude 4 on #2781).
+    if (given === null) {
       await redisPipeline([["ZREM", watchKey(statsId), order]]);
       continue;
     }
+    let v: unknown;
+    try {
+      v = typeof given === "string" ? JSON.parse(given) : undefined;
+    } catch {
+      v = undefined;
+    }
+    if (!v || typeof v !== "object" || Array.isArray(v) || typeof (v as { job?: unknown }).job !== "string") {
+      await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
+      continue;
+    }
+    // Only what this very payment gave is taken back.
+    if ((v as { job: string }).job !== `paypal:${order}`) {
+      await redisPipeline([["ZREM", watchKey(statsId), order]]);
+      continue;
+    }
+    const listed = (v as { items?: unknown }).items;
+    items = Array.isArray(listed) ? listed.filter((item): item is string => typeof item === "string") : [];
     // Another payment of this address for the same product still stands: it keeps it.
     const own = ownKey(statsId, paid.email, paid.product);
     const [, others] = await redisPipeline([["SREM", own, order], ["SMEMBERS", own]]);
@@ -761,11 +772,19 @@ export async function watchPayPal(
       ]);
       continue;
     }
+    // The course first, then the purchase and the watch (Codex G on #2781; rule 30): a course removal that fails keeps
+    // both, so the order is looked at again and both are taken away then; taking a course away twice is harmless.
+    try {
+      for (const id of [paid.product, ...items]) await dropStart(paid.email, id);
+    } catch (error) {
+      console.error("taking a refunded PayPal sale's course away failed; looked at again in an hour", error);
+      await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
+      continue;
+    }
     await redisPipeline([
       ["HDEL", importedKey(statsId, paid.email), paid.product],
       ["ZREM", watchKey(statsId), order],
     ]);
-    for (const id of [paid.product, ...items]) await dropStart(paid.email, id);
     revoked += 1;
   }
   result.revoked = revoked;

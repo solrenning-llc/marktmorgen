@@ -27,6 +27,20 @@ async function main() {
     {name:"unreadable list row",bad:true,answer:[null,[null]]},
     {name:"confirmed empty list",bad:false,empty:true,answer:undefined},
     {name:"confirmed real purchase",bad:false,empty:false,answer:undefined},
+    {name:"missing LRANGE result",bad:true,answer:[null]},
+    {name:"extra pipeline result",bad:true,answer:[null,[],0]},
+    {name:"numeric LRANGE",bad:true,answer:[null,0]},
+    {name:"string LRANGE",bad:true,answer:[null,"[]"]},
+    {name:"broken JSON row",bad:true,answer:[null,["{"]]},
+    {name:"null JSON row",bad:true,answer:[null,["null"]]},
+    {name:"missing record fields",bad:true,answer:[null,["{}"]]},
+    {name:"missing payment identity",bad:true,answer:[null,[JSON.stringify({p:made.product.id,at:Math.floor(now/1000)-60})]]},
+    {name:"fractional record time",bad:true,answer:[null,[JSON.stringify({p:made.product.id,at:Math.floor(now/1000)-60.5,pi:"pi_PublicCache000001"})]]},
+    {name:"nonpositive record time",bad:true,answer:[null,[JSON.stringify({p:made.product.id,at:0,pi:"pi_PublicCache000001"})]]},
+    {name:"empty product identity",bad:true,answer:[null,[JSON.stringify({p:"",at:Math.floor(now/1000)-60,pi:"pi_PublicCache000001"})]]},
+    {name:"unreadable payment identity",bad:true,answer:[null,[JSON.stringify({p:made.product.id,at:Math.floor(now/1000)-60,pi:"unknown"})]]},
+    {name:"partly readable list",bad:true,answer:[null,[JSON.stringify({p:made.product.id,at:Math.floor(now/1000)-60,pi:"pi_PublicCache000001",c:"US"}),null]]},
+    {name:"overfull LRANGE",bad:true,answer:[null,Array.from({length:21},()=>JSON.stringify({p:made.product.id,at:Math.floor(now/1000)-60,pi:"pi_PublicCache000001",c:"US"}))]},
   ];
   try{
     part("Only the first list reply is changed; the next visit gets the real intact purchase");
@@ -36,6 +50,7 @@ async function main() {
       if(scenario.empty)await pipeline([["DEL",list]]);
       let injected=false,writes=0,commands=0;refunds=0;
       redis.pipeline=async batch=>{
+        if(commands+batch.length>5)throw Error("Five application Redis commands across both visits is the proof ceiling");
         commands+=batch.length;
         if(batch.some(c=>c[0]==="SET"&&c[1]===feed))writes++;
         if(!injected&&batch.length===2&&batch[0][0]==="GET"&&batch[0][1]===feed&&batch[1][0]==="LRANGE"){

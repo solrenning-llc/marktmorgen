@@ -92,7 +92,7 @@ export const fr: BuyerWords = {
   buyAsGift: "Offrir en cadeau",
   buyAsGiftFor: (price) => `Offrir en cadeau — ${price}`,
   giftNote: (store) =>
-    `Vous payez sur la page de Stripe. Juste après, la personne reçoit un seul e-mail de ${store} avec votre nom, votre message et un lien pour l'ouvrir avec sa propre adresse. Vous recevez le reçu, pas une copie.`,
+    `Vous payez sur la page de Stripe. Après le paiement, le cadeau est associé à son adresse. Si l'e-mail unique de ${store} lui parvient, il contient votre nom, votre message et un lien pour l'ouvrir. Vous recevez le reçu, pas une copie.`,
   giftProblems: {
     email: "Cela ne ressemble pas à une adresse e-mail. Vérifiez l'adresse du destinataire et réessayez.",
     option: "Choisissez ce que vous offrez, puis réessayez. Rien n'a été débité.",
@@ -142,7 +142,8 @@ export const fr: BuyerWords = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store) => `Le blog de ${store}`,
-  blogEmpty: "Rien ici pour le moment.",
+  blogPastEnd: "Aucun article sur cette page",
+  blogPastEndBody: "Cette page se trouve après le dernier article.",
   blogMinutes: (n) => `${n}\u00a0min de lecture`,
   blogNewer: "Articles plus récents",
   blogOlder: "Articles précédents",
@@ -155,6 +156,7 @@ export const fr: BuyerWords = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent) => `soit ${percent}\u00a0% d’économie`,
   chooseOptionFor: (title) => `Choisissez une option pour ${title}`,
+  chooseOne: "Choisissez-en une",
   recommended: "Recommandé",
   recommendedAfter: " (recommandé)",
   howToPayFor: (title) => `Comment payer ${title}`,
@@ -306,6 +308,7 @@ export const fr: BuyerWords = {
   newer: "Plus récents",
   older: "Plus anciens",
   askUnknown: (store) => `Cette page ne le précise pas. Posez la question à ${store} avant d'acheter.`,
+  askTermsCut: () => "Je n'ai pas ici les conditions complètes. Posez la question au créateur avant d'acheter.",
 
   noLongerOnSale: "Ce produit n'est plus en vente.",
   seeStore: (store) => `Voir ${store}`,

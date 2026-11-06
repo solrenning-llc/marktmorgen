@@ -144,7 +144,7 @@ function BlockView({ block }: { block: Block }) {
               return (
                 <li key={item.title}>
                   {item.href ? (
-                    <Link href={item.href} className="card flex h-full gap-4 p-5 transition-shadow hover:shadow-[var(--shadow-md)]">
+                    <Link href={item.href} className="card flex gap-4 p-5 transition-shadow hover:shadow-[var(--shadow-md)]">
                       {inner}
                     </Link>
                   ) : (
@@ -339,8 +339,8 @@ function BlockView({ block }: { block: Block }) {
 
     case "note":
       return (
-        <section className="rounded-[var(--r-lg)] border border-line bg-sand p-6">
-          <h2 className="flex items-center gap-2 font-semibold text-ink">
+        <section className="rounded-[var(--r-lg)] border border-line bg-sand p-6" aria-labelledby={sectionId(block.title)}>
+          <h2 id={sectionId(block.title)} className="flex items-center gap-2 font-semibold text-ink">
             <Icon name="info" size={18} className="text-violet-deep" />
             {block.title}
           </h2>

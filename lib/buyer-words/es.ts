@@ -89,7 +89,7 @@ export const es: BuyerWords = {
   buyAsGift: "Comprar como regalo",
   buyAsGiftFor: (price) => `Comprar como regalo — ${price}`,
   giftNote: (store) =>
-    `Pagas en la página de Stripe. Justo después, recibe un único email de ${store} con tu nombre, tu mensaje y un enlace para abrirlo con su propio email. Tú recibes el recibo, no una copia.`,
+    `Pagas en la página de Stripe. Después del pago, el regalo queda en su dirección. Si le llega el único email de ${store}, contiene tu nombre, tu mensaje y un enlace para abrirlo. Tú recibes el recibo, no una copia.`,
   giftProblems: {
     email: "Eso no parece una dirección de email. Revisa la dirección del destinatario y vuelve a intentarlo.",
     option: "Elige cuál quieres regalar y vuelve a intentarlo. No se ha cobrado nada.",
@@ -139,7 +139,8 @@ export const es: BuyerWords = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store) => `Blog de ${store}`,
-  blogEmpty: "Todavía no hay nada aquí.",
+  blogPastEnd: "No hay entradas en esta página",
+  blogPastEndBody: "Esta página está después de la última entrada.",
   blogMinutes: (n) => `${n} min de lectura`,
   blogNewer: "Entradas más recientes",
   blogOlder: "Entradas anteriores",
@@ -152,6 +153,7 @@ export const es: BuyerWords = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent) => `ahorras un ${percent}\u00a0%`,
   chooseOptionFor: (title) => `Elige una opción de ${title}`,
+  chooseOne: "Elige una",
   recommended: "Recomendado",
   recommendedAfter: " (recomendado)",
   howToPayFor: (title) => `Cómo pagar ${title}`,
@@ -303,6 +305,7 @@ export const es: BuyerWords = {
   newer: "Más recientes",
   older: "Más antiguas",
   askUnknown: (store) => `Esta página no lo dice. Pregunta a ${store} antes de comprar.`,
+  askTermsCut: () => "No tengo aquí las condiciones completas. Pregunta al creador antes de comprar.",
 
   noLongerOnSale: "Este producto ya no está a la venta.",
   seeStore: (store) => `Ver ${store}`,

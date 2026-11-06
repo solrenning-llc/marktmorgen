@@ -84,7 +84,7 @@ export const it: BuyerWords = {
   buyAsGift: "Acquista come regalo",
   buyAsGiftFor: (price) => `Acquista come regalo — ${price}`,
   giftNote: (store) =>
-    `Paghi sulla pagina di Stripe. Subito dopo, la persona riceve un'unica email da ${store} con il tuo nome, il tuo messaggio e un link per aprirlo con il proprio indirizzo. Tu ricevi la ricevuta, non una copia.`,
+    `Paghi sulla pagina di Stripe. Dopo il pagamento, il regalo appartiene al suo indirizzo. Se le arriva l'unica email da ${store}, contiene il tuo nome, il tuo messaggio e un link per aprirlo. Tu ricevi la ricevuta, non una copia.`,
   giftProblems: {
     email: "Non sembra un indirizzo email. Controlla l'indirizzo del destinatario e riprova.",
     option: "Scegli cosa regalare, poi riprova. Non è stato addebitato nulla.",
@@ -134,7 +134,8 @@ export const it: BuyerWords = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store) => `Il blog di ${store}`,
-  blogEmpty: "Qui non c’è ancora niente.",
+  blogPastEnd: "Nessun articolo in questa pagina",
+  blogPastEndBody: "Questa pagina viene dopo l’ultimo articolo.",
   blogMinutes: (n) => `${n} min di lettura`,
   blogNewer: "Articoli più recenti",
   blogOlder: "Articoli precedenti",
@@ -147,6 +148,7 @@ export const it: BuyerWords = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent) => `risparmi il ${percent}%`,
   chooseOptionFor: (title) => `Scegli un'opzione per ${title}`,
+  chooseOne: "Scegline una",
   recommended: "Consigliato",
   recommendedAfter: " (consigliato)",
   howToPayFor: (title) => `Come pagare ${title}`,
@@ -298,6 +300,7 @@ export const it: BuyerWords = {
   newer: "Più recenti",
   older: "Meno recenti",
   askUnknown: (store) => `Questa pagina non lo dice. Chiedi a ${store} prima di acquistare.`,
+  askTermsCut: () => "Qui non ho le condizioni complete. Chiedi al creatore prima di acquistare.",
 
   noLongerOnSale: "Questo prodotto non è più in vendita.",
   seeStore: (store) => `Vedi ${store}`,

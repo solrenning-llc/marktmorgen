@@ -25,6 +25,7 @@ const MESSAGES: Record<string, string> = {
   same: "They already have that role.",
   not_found: "That address is not on the team. Reload the page.",
   repeat: "They are off the team, but some of the API keys they made may still work. Press Remove again to finish.",
+  unread: "We could not read your team just now. Reload the page and try again in a moment.",
   signed_out: "Your session ended. Log in again.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };

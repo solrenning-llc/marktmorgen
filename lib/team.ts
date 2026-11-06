@@ -39,7 +39,7 @@ import { liveSecondStep } from "@/lib/second-step-gate";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
 import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
@@ -143,76 +143,72 @@ export type LogLine = {
 
 const EMPTY: Team = { members: [], invites: [] };
 
-/** A team record as read, keeping only members and invitations the studio accepts (a valid address and role, MAX_TEAM at most); lib/api-keys.ts reads the team with it too. */
-export function parseTeam(raw: unknown): Team {
-  if (typeof raw !== "string" || !raw) return { members: [], invites: [] };
-  try {
-    const value = JSON.parse(raw) as { members?: unknown; invites?: unknown };
-    const members: Member[] = [];
-    for (const entry of Array.isArray(value.members) ? value.members : []) {
-      const m = entry as Record<string, unknown>;
-      const role = parseTeamRole(m.role);
-      if (typeof m.email !== "string" || !EMAIL_PATTERN.test(m.email) || !role) continue;
-      members.push({ email: normaliseEmail(m.email), role, joinedAt: typeof m.joinedAt === "string" ? m.joinedAt : "" });
-    }
-    const invites: Invite[] = [];
-    for (const entry of Array.isArray(value.invites) ? value.invites : []) {
-      const i = entry as Record<string, unknown>;
-      const role = parseTeamRole(i.role);
-      if (typeof i.id !== "string" || !INVITE_ID.test(i.id) || typeof i.email !== "string" || !role) continue;
-      invites.push({
-        id: i.id,
-        email: normaliseEmail(i.email),
-        role,
-        createdAt: typeof i.createdAt === "string" ? i.createdAt : "",
-        expiresAt: typeof i.expiresAt === "number" ? i.expiresAt : 0,
-      });
-    }
-    const required = (value as { requireTwoStep?: unknown }).requireTwoStep === true;
-    return { members: members.slice(0, MAX_TEAM), invites: invites.slice(0, MAX_TEAM), ...(required ? { requireTwoStep: true } : {}) };
-  } catch {
-    return { members: [], invites: [] };
-  }
-}
-
-/** A team record that could not be read whole: never taken for an empty team, so nothing is written back over it and nobody is let past its rule. */
-export class TeamUnreadable extends Error {
-  constructor() {
-    super("The team could not be read just now.");
-  }
-}
-
 /**
- * The team from the reply to its one GET: no record (null) is an empty team;
- * a reply that is not that GET's, a value that is not text, or text that is
- * not a team as saveTeam writes it (an object whose members and invites are
- * lists, and whose two-step rule, when there, is true or false) throws
- * TeamUnreadable (Claude 4's sweep, C4-2910, sweepA7 P3).
+ * A team record as read, keeping only members and invitations the studio accepts (a valid address and role,
+ * MAX_TEAM at most); lib/api-keys.ts reads the team with it too. Only null is "no team yet" (a store nobody
+ * was invited to). Anything else that is not the record's JSON object (another type, broken JSON, a list, a
+ * members or invites field that is not a list, an entry that is not an object, a rule that is not true or
+ * false) is unknown and throws UnknownReplyError (CX-123 rule 24): never read as an empty team, which would
+ * let a member past the owner's second step, write the team back with nobody on it, or drop the store from
+ * a member's index.
  */
-function teamFromReply(reply: unknown): Team {
-  if (!Array.isArray(reply) || reply.length !== 1) throw new TeamUnreadable();
-  const [raw] = reply;
+export function parseTeam(raw: unknown): Team {
   if (raw === null) return { members: [], invites: [] };
-  if (typeof raw !== "string" || !raw) throw new TeamUnreadable();
-  let value: unknown;
+  const unknown = () => new UnknownReplyError("a team record");
+  if (typeof raw !== "string") throw unknown();
+  let parsed: unknown;
   try {
-    value = JSON.parse(raw);
+    parsed = JSON.parse(raw);
   } catch {
-    throw new TeamUnreadable();
+    throw unknown();
   }
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TeamUnreadable();
-  const record = value as Record<string, unknown>;
-  if (!Array.isArray(record.members) || !Array.isArray(record.invites)) throw new TeamUnreadable();
-  if (Object.hasOwn(record, "requireTwoStep") && typeof record.requireTwoStep !== "boolean") throw new TeamUnreadable();
-  return parseTeam(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw unknown();
+  const value = parsed as { members?: unknown; invites?: unknown; requireTwoStep?: unknown };
+  for (const entries of [value.members, value.invites]) {
+    if (entries === undefined) continue;
+    if (!Array.isArray(entries)) throw unknown();
+    for (const entry of entries as unknown[]) if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw unknown();
+  }
+  if (value.requireTwoStep !== undefined && typeof value.requireTwoStep !== "boolean") throw unknown();
+  const members: Member[] = [];
+  for (const entry of (value.members ?? []) as Record<string, unknown>[]) {
+    const role = parseTeamRole(entry.role);
+    if (typeof entry.email !== "string" || !EMAIL_PATTERN.test(entry.email) || !role) continue;
+    members.push({ email: normaliseEmail(entry.email), role, joinedAt: typeof entry.joinedAt === "string" ? entry.joinedAt : "" });
+  }
+  const invites: Invite[] = [];
+  for (const entry of (value.invites ?? []) as Record<string, unknown>[]) {
+    const role = parseTeamRole(entry.role);
+    if (typeof entry.id !== "string" || !INVITE_ID.test(entry.id) || typeof entry.email !== "string" || !role) continue;
+    invites.push({
+      id: entry.id,
+      email: normaliseEmail(entry.email),
+      role,
+      createdAt: typeof entry.createdAt === "string" ? entry.createdAt : "",
+      expiresAt: typeof entry.expiresAt === "number" ? entry.expiresAt : 0,
+    });
+  }
+  const required = value.requireTwoStep === true;
+  return { members: members.slice(0, MAX_TEAM), invites: invites.slice(0, MAX_TEAM), ...(required ? { requireTwoStep: true } : {}) };
+}
+
+/** The team record's own reply, exactly one for the one GET sent; any other answer is unknown (rule 24). */
+async function teamRecord(sid: string): Promise<unknown> {
+  const replies = repliesFor(await redisPipeline([["GET", teamKey(sid)]]), 1);
+  if (!replies) throw new UnknownReplyError("a team record");
+  return replies[0];
 }
 
 const now = () => Math.floor(Date.now() / 1000);
 
-/** A store's team as it is now. Invitations past their seven days are left out. A record that cannot be read whole throws TeamUnreadable. */
+/**
+ * A store's team as it is now. Invitations past their seven days are left out. A record that cannot be read
+ * in its exact shape throws UnknownReplyError (parseTeam): what depends on it refuses instead of acting on
+ * an empty team.
+ */
 export async function readTeam(sid: string): Promise<Team> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return { ...EMPTY };
-  const team = teamFromReply(await redisPipeline([["GET", teamKey(sid)]]));
+  const team = parseTeam(await teamRecord(sid));
   return { members: team.members, invites: team.invites.filter((i) => i.expiresAt > now()), ...(team.requireTwoStep ? { requireTwoStep: true } : {}) };
 }
 
@@ -224,7 +220,8 @@ export async function readTeam(sid: string): Promise<Team> {
 async function saveTeam(sid: string, team: Team): Promise<void> {
   let required = team.requireTwoStep;
   if (required === undefined) {
-    required = teamFromReply(await redisPipeline([["GET", teamKey(sid)]])).requireTwoStep === true;
+    // Unreadable, nothing is written: the rule is never switched off by a save that could not read it.
+    required = parseTeam(await teamRecord(sid)).requireTwoStep === true;
   }
   const kept: Team = { members: team.members, invites: team.invites, ...(required ? { requireTwoStep: true } : {}) };
   await redisPipeline([["SET", teamKey(sid), JSON.stringify(kept)]]);
@@ -240,7 +237,8 @@ async function saveTeam(sid: string, team: Team): Promise<void> {
  * passkey and logs in by the link is asked for the second step here. A
  * session read without its id, or opened before this was written down, has
  * none: the answer is to ask for the step, never to let it through.
- * Read only when the requirement is on.
+ * Read only when the requirement is on. A team that cannot be read throws (readTeam), so nobody but the
+ * owner is let through on it: the door stays shut until the record reads again.
  */
 export async function teamTwoStepBlocks(store: Store, email: string, role: Role, session?: string): Promise<boolean> {
   if (role === "owner" || !store.sid) return false;
@@ -322,7 +320,9 @@ export async function roleIn(store: Store, email: string): Promise<Role | null> 
 /**
  * The stores this person is on as one of a team, with their role in each,
  * read from each store's own record. An entry in the index the record no
- * longer agrees with is dropped from the index on the way.
+ * longer agrees with is dropped from the index on the way. A team record that
+ * cannot be read throws (readTeam) before anything is dropped, so an unknown
+ * reply never takes a store off the person's index.
  */
 export async function memberStores(email: string): Promise<{ store: Store; role: TeamRole }[]> {
   if (!isRedisConfigured()) return [];
@@ -371,14 +371,20 @@ export async function logTeam(sid: string, line: Omit<LogLine, "at">): Promise<v
   }
 }
 
-/** The activity log, newest first. */
+/**
+ * The activity log, newest first. Only a list of text lines (or null, no log) is read: any other reply is
+ * unknown and throws UnknownReplyError (rule 24), never "nothing happened here", as the Team route reads
+ * from it whether a removal is being repeated (and its API keys swept again).
+ */
 export async function readLog(sid: string): Promise<LogLine[]> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return [];
-  const [rows] = await redisPipeline([["LRANGE", logKey(sid), 0, LOG_LINES - 1]]);
+  const replies = repliesFor(await redisPipeline([["LRANGE", logKey(sid), 0, LOG_LINES - 1]]), 1);
+  const rows = replies?.[0] === null ? [] : stringList(replies?.[0]);
+  if (!rows) throw new UnknownReplyError("the team's activity log");
   const lines: LogLine[] = [];
-  for (const row of Array.isArray(rows) ? rows : []) {
+  for (const row of rows) {
     try {
-      const value = JSON.parse(String(row)) as Partial<LogLine>;
+      const value = JSON.parse(row) as Partial<LogLine>;
       if (typeof value.at !== "string" || typeof value.who !== "string" || typeof value.what !== "string") continue;
       const role: Role = value.role === "owner" ? "owner" : parseTeamRole(value.role) ?? "support";
       const access = parseAccessLog(value.access);

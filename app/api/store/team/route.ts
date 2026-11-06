@@ -7,6 +7,7 @@ import { applyPause, pauseForRule, pausePreview, planPause, tellPaused, undoPaus
 import { SESSION_COOKIE } from "@/lib/auth";
 import { hasSecondStep, liveSecondStep } from "@/lib/second-step-gate";
 import { ROLE_NAMES, parseTeamRole } from "@/lib/team-roles";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { forgetPerson } from "@/lib/phone-alerts";
 
 /** A person off the team keeps no device here (lib/phone-alerts.ts). Never fails the change itself. */
@@ -30,6 +31,7 @@ const ANSWERS: Record<string, number> = {
   changed: 409,
   unsaved: 503,
   unsure: 503,
+  unread: 503,
   not_found: 404,
 };
 
@@ -92,14 +94,19 @@ export async function POST(request: NextRequest) {
       const who = text(body.email, 300).trim().toLowerCase();
       // Somebody the log shows taken off, or leaving, before: a removal repeated, which sweeps their API keys
       // again (lib/team.ts removeMember). Anybody else not on the team is not found, and nothing is touched.
-      const gone = (await readLog(store.sid)).some((line) => line.what === `Took ${who} off the team` || (line.who === who && line.what === "Left the team"));
-      const removed = await removeMember(store, who, { repeat: gone }).catch((error: unknown) => (error instanceof KeysNotSwept ? "repeat" : Promise.reject(error)));
+      // A log that cannot be read (rule 24) is neither: somebody still on the team is taken off and swept as
+      // usual; anybody else is answered 503, never "not on the team", so the sweep is repeated once it reads.
+      const gone = await readLog(store.sid).then(
+        (lines) => lines.some((line) => line.what === `Took ${who} off the team` || (line.who === who && line.what === "Left the team")),
+        (error: unknown) => (error instanceof UnknownReplyError ? null : Promise.reject(error)),
+      );
+      const removed = await removeMember(store, who, { repeat: gone === true }).catch((error: unknown) => (error instanceof KeysNotSwept ? "repeat" : Promise.reject(error)));
       if (removed === "repeat") {
         // Off the team already: written in the log now, so pressing again is known for a repeat.
         await logTeam(store.sid, { who: email, role, what: `Took ${who} off the team` });
         return repeat();
       }
-      if (!removed) return gone ? Response.json({ ok: true, already: true }) : fail("not_found");
+      if (!removed) return gone === null ? fail("unread") : gone ? Response.json({ ok: true, already: true }) : fail("not_found");
       await forgetDevices(store, who);
       await logTeam(store.sid, { who: email, role, what: `Took ${who.toLowerCase()} off the team` });
       return Response.json({ ok: true });
@@ -177,6 +184,11 @@ export async function POST(request: NextRequest) {
 
     return fail("invalid");
   } catch (error) {
+    // The team or its log answered in an unknown shape (lib/team.ts, rule 24): said as not read (503), so it is tried again.
+    if (error instanceof UnknownReplyError) {
+      console.error("a team change could not read the team", error);
+      return fail("unread");
+    }
     console.error("a team change failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

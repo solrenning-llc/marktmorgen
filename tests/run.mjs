@@ -26,7 +26,7 @@ try {
     console.log("No tests found.");
     process.exit(0);
   }
-  failed = await runTestFiles({files, compile: async file => {
+  failed = await runTestFiles({files, compileTimeoutMs: TEST_FILE_TIMEOUT_MS, compile: async file => {
     const bundle = join(out, `${file}.cjs`);
     await build({
       entryPoints: [join(here, file)],
@@ -38,9 +38,9 @@ try {
       alias: testAliases(file,root,here),
     });
     return bundle;
-  }, run: async (file, bundle) => {
+  }, run: async (file, bundle, next) => {
     console.log(`\n=== ${file} ===`);
-    return runBundle(bundle, testEnvironment(process.env), process.execPath, {timeoutMs: TEST_FILE_TIMEOUT_MS, label: file});
+    return runBundle(bundle, testEnvironment(process.env), process.execPath, {timeoutMs: TEST_FILE_TIMEOUT_MS, label: file, diagnose: () => `next compile ${next()}`});
   }});
 } finally {
   rmSync(out, { recursive: true, force: true });

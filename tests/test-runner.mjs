@@ -1,17 +1,46 @@
 import {spawn} from 'node:child_process';
+import {readdirSync, readFileSync} from 'node:fs';
+
+/**
+ * The most one test file may run, and the most its compilation may take: past it the file is named as a failure
+ * (C4-20261106-2550-C5-151: on #2790 and #2820 the verify job sat 47 minutes after one file with no output until the
+ * job's own cancellation, which names nothing). Ten minutes: about six times the slowest file in two full CI verify
+ * logs (contract-admission-ack, 53.9 s and 100.8 s), and well under the job's 50 minutes
+ * (.github/workflows/product-checks.yml).
+ */
+export const TEST_FILE_TIMEOUT_MS = 600_000;
+
+/**
+ * @template T
+ * @param {Promise<T>} work @param {number | undefined} ms @param {string} what
+ * @returns {Promise<T>}
+ */
+function within(work, ms, what) {
+  if (ms === undefined) return work;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
+  const late = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`TIMEOUT: ${what} did not finish in ${ms / 1000} s`)), ms); });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+}
 
 /**
  * Keep each test process isolated and serial; prepare only the next bundle.
+ * A run is told, by its third argument, whether the next file's compilation has settled ("resolved", "pending",
+ * or "none" after the last file), for a timeout's diagnostic line. With compileTimeoutMs, a compilation that has
+ * not settled by then fails naming its file, instead of leaving the runner waiting (C4-20261106-2600-C5-152).
  * @template T
- * @param {{files: string[], compile: (file: string) => Promise<T>, run: (file: string, bundle: T) => Promise<number | null>}} options
+ * @param {{files: string[], compile: (file: string) => Promise<T>, run: (file: string, bundle: T, next: () => string) => Promise<number | null>, compileTimeoutMs?: number}} options
  */
-export async function runTestFiles({files, compile, run}) {
+export async function runTestFiles({files, compile, run, compileTimeoutMs}) {
   if (!files.length) return 0;
+  /** @type {"resolved" | "pending" | "none"} */
+  let nextState = 'none';
   // Attach rejection handling when compilation starts, even while a test runs.
   /** @param {string} file @returns {Promise<{ok: true, bundle: T} | {ok: false, error: unknown}>} */
   const prepare = async file => {
     try { return {ok: true, bundle: await compile(file)}; }
     catch (error) { return {ok: false, error}; }
+    finally { nextState = 'resolved'; }
   };
   /** @type {ReturnType<typeof prepare> | null} */
   let pending = prepare(files[0]);
@@ -19,44 +48,66 @@ export async function runTestFiles({files, compile, run}) {
   try {
     for (let index = 0; index < files.length; index += 1) {
       if (!pending) throw new Error('Missing compiled test');
-      const prepared = await pending;
+      const prepared = await within(pending, compileTimeoutMs, `compiling ${files[index]}`);
       pending = null;
       if (!prepared.ok) throw prepared.error;
-      if (index + 1 < files.length) pending = prepare(files[index + 1]);
-      if (await run(files[index], prepared.bundle) !== 0) failed += 1;
+      nextState = 'none';
+      if (index + 1 < files.length) { nextState = 'pending'; pending = prepare(files[index + 1]); }
+      if (await run(files[index], prepared.bundle, () => nextState) !== 0) failed += 1;
     }
     return failed;
   } finally {
     // Do not remove the temporary directory while esbuild is still writing it.
-    // prepare always fulfills, so a secondary error cannot hide the first one.
-    await pending;
+    // prepare always fulfills, so a secondary error cannot hide the first one; a compilation that never settles is
+    // waited for no longer than its limit.
+    if (pending) await within(pending, compileTimeoutMs, 'the last compilation').catch(() => undefined);
   }
 }
 
 /**
- * The most one test file may run: past it the file is killed and counted as a failure that names it (C4-20261106-2550-C5-151:
- * on #2790 and #2820 the verify job sat 47 minutes in one file with no output until the job's own cancellation, which
- * names nothing). Ten minutes: about six times the slowest file in two full CI verify logs (contract-admission-ack,
- * 53.9 s and 100.8 s), and well under the job's 50 minutes (.github/workflows/product-checks.yml).
+ * What /proc says of a process, for a timeout's diagnostic line: its State and each thread's wchan (what it waits in).
+ * Only reads; "proc=unreadable" where /proc is not there or the process is gone.
+ * @param {number} pid
  */
-export const TEST_FILE_TIMEOUT_MS = 600_000;
+export function procState(pid) {
+  try {
+    const state = readFileSync(`/proc/${pid}/status`, 'utf8').match(/^State:\s*(.+)$/m)?.[1]?.trim() ?? '?';
+    const threads = readdirSync(`/proc/${pid}/task`).map(task => {
+      let wchan = '?';
+      try { wchan = readFileSync(`/proc/${pid}/task/${task}/wchan`, 'utf8').trim() || '0'; } catch { /* unreadable */ }
+      return `${task}:${wchan}`;
+    });
+    return `state=${state} wchan=${threads.join(',')}`;
+  } catch { return 'proc=unreadable'; }
+}
 
 /**
  * @param {string} bundle @param {NodeJS.ProcessEnv} env @param {string} [executable]
- * @param {{timeoutMs?: number, label?: string}} [limit] with timeoutMs, a process still running then is killed and counted as failed
+ * @param {{timeoutMs?: number, label?: string, diagnose?: () => string}} [limit] with timeoutMs, a process still
+ *   running then is described (whether exit came, /proc, and what diagnose adds), killed and counted as failed
  * @returns {Promise<number>}
  */
 export function runBundle(bundle, env, executable = process.execPath, limit = {}) {
   return new Promise(resolve => {
     const child = spawn(executable, [bundle], {stdio: 'inherit', env});
     let settled = false;
+    /** @type {{code: number | null, signal: NodeJS.Signals | null} | null} */
+    let exited = null;
     /** @param {number} code */
     const finish = code => { if (!settled) { settled = true; clearTimeout(timer); resolve(code); } };
+    child.once('exit', (code, signal) => { exited = {code, signal}; });
     const timer = limit.timeoutMs === undefined ? undefined : setTimeout(() => {
-      console.error(`TIMEOUT: ${limit.label ?? bundle} did not finish in ${limit.timeoutMs / 1000} s; killed and counted as a failure.`);
+      const seen = exited ? `exit seen (code ${exited.code}, signal ${exited.signal})` : 'exit not seen';
+      const proc = child.pid === undefined ? 'pid=none' : procState(child.pid);
+      let extra = '';
+      try { extra = limit.diagnose ? `; ${limit.diagnose()}` : ''; } catch { /* the line goes out without it */ }
+      console.error(`TIMEOUT: ${limit.label ?? bundle} did not finish in ${(limit.timeoutMs ?? 0) / 1000} s; ${seen}; ${proc}${extra}; killed and counted as a failure.`);
+      // Already gone (close never came): nothing to kill, it fails now.
+      if (exited) return finish(1);
       child.kill('SIGKILL');
-      // Settle on exit, not on close: a process it started may still hold the inherited output open.
       child.once('exit', () => finish(1));
+      // Should no exit follow the kill (a process never reaped), the file still fails, and the run goes on.
+      setTimeout(() => finish(1), 5_000).unref();
     }, limit.timeoutMs);
     // spawnSync returned a null status on launch errors: count the failure
     // and keep running the other test files, rather than dropping coverage.

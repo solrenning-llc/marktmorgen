@@ -4,6 +4,8 @@ import { apiReadUnits, codeMakeWork, codeStopWork, codesWork } from "@/lib/api-r
 import { CODE_FIELDS, codeOut, refusalWords } from "@/lib/api-codes";
 import { createCode, listCodes, stopCode } from "@/lib/discount";
 import { readCodeAsked } from "@/lib/discount-input";
+import { SCHEDULE_PROBLEMS } from "@/lib/discount-schedule-rules";
+import { dropSchedule } from "@/lib/discount-schedule";
 import { setHasDiscounts, storeRef, type Store } from "@/lib/store";
 import { canSell } from "@/lib/store-checkout";
 
@@ -81,6 +83,10 @@ export async function DELETE(request: Request) {
     const before = await listCodes(account);
     if (before.state !== "ok") return unreadable();
     if (!before.codes.some((c) => c.id === id)) return apiError(404, "not_found", "No discount code of this store has that id.");
+    // A code waiting for its start loses its schedule first, so the five-minute job never switches it back on.
+    const dropped = await dropSchedule(store, id);
+    if (dropped === "busy") return apiError(409, "busy", SCHEDULE_PROBLEMS.busy);
+    if (dropped !== "done") return unreadable();
     if (!(await stopCode(account, id))) return apiError(502, "unavailable", "The code could not be switched off on Stripe just now. Try again in a moment.");
     // Listed again, so the answer is what Stripe says now; the checkout's box stays only while a code is live.
     const after = await listCodes(account);

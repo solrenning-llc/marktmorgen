@@ -92,7 +92,9 @@ async function main() {
     let tellAnswers: (boolean | "throw")[] = [];
     const deps = {
       findStore: async (sid: string) => (sid === SID ? shop : null),
-      markDiscounts: async () => {},
+      // Merge of the #3006 review fix (M1, rule 23): the stand-in box answers `true`, the only answer that
+      // confirms the checkout's code box is on; no assertion changes.
+      markDiscounts: async () => true,
       tell: async (_store: typeof shop, entry: { id: string; code: string }) => {
         const answer = tellAnswers.shift() ?? true;
         if (answer === "throw") throw Error("synthetic send failure");

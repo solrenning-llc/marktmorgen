@@ -28,9 +28,13 @@ for (const [label, mutate] of [
   ["extra slot", (r: unknown[]) => [...r, null]],
   ["hole", () => new Array(4)],
   ["undefined hold", (r: unknown[]) => [r[0], undefined, r[2], r[3]]],
+  ["object listed record", (r: unknown[]) => [{}, r[1], r[2], r[3]]],
+  ["invalid listed JSON", (r: unknown[]) => ["broken", r[1], r[2], r[3]]],
   ["numeric hold", (r: unknown[]) => [r[0], 0, r[2], r[3]]],
   ["unknown hold text", (r: unknown[]) => [r[0], "unread", r[2], r[3]]],
   ["object team", (r: unknown[]) => [r[0], r[1], r[2], {}]],
+  ["numeric last use", (r: unknown[]) => [r[0], r[1], 0, r[3]]],
+  ["invalid last use", (r: unknown[]) => [r[0], r[1], "unread", r[3]]],
   ["invalid team JSON", (r: unknown[]) => [r[0], r[1], r[2], "broken"]],
   ["invalid rule type", (r: unknown[]) => [r[0], r[1], r[2], '{"members":[],"invites":[],"requireTwoStep":"true"}']],
 ] as const) {
@@ -58,6 +62,34 @@ for (const [label, mutate] of [
     } finally { redis.pipeline = original; }
   });
 }
+
+for (const bad of [-1, 2, "1"]) {
+  test(`a one-key deletion receipt of ${typeof bad}:${bad} cannot confirm revocation`, async () => {
+    const made = await key();
+    redis.pipeline = async (commands) => commands.length === 4 && commands[0]?.[0] === "DEL" ? [bad, 1, 0, 0] : original(commands);
+    let gone: boolean;
+    try { gone = await revokeKey(sid, made.made.id); } finally { redis.pipeline = original; }
+    assert.equal(gone, false);
+    assert.equal((await resolveKey(made.key))?.sid, sid);
+    assert.equal(await revokeKey(sid, made.made.id), true);
+    assert.equal(await resolveKey(made.key), null);
+  });
+}
+
+test("an applied revocation with a lost receipt stays unconfirmed without automatic replay", async () => {
+  const made = await key();
+  let applied = 0;
+  redis.pipeline = async (commands) => {
+    const reply = await original(commands);
+    if (commands.length === 4 && commands[0]?.[0] === "DEL") { applied += 1; return []; }
+    return reply;
+  };
+  let gone: boolean;
+  try { gone = await revokeKey(sid, made.made.id); } finally { redis.pipeline = original; }
+  assert.equal(gone, false);
+  assert.equal(applied, 1);
+  assert.equal(await resolveKey(made.key), null, "the write really landed; its missing receipt proves neither outcome");
+});
 
 test("unknown initial lookup is unavailable; confirmed missing key remains unauthorized", async () => {
   const made = await key();

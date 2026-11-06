@@ -48,9 +48,9 @@ async function main() {
       const definition = (await pipeline([['HGET', formsKey, form.id]]))[0];
       const healthy = scenario === 'healthy';
       const definitionUnknown = scenario === 'unknown-definition' || scenario === 'definition-outage';
-      is('status follows confirmed evidence', response.status, definitionUnknown ? 503 : 303);
-      is('location describes only the evidenced outcome', definitionUnknown ? location === null : healthy ? location?.includes(`/form/${form.id}?`) : location?.includes(`status=${scenario === 'missing' ? 'closed' : 'error'}`), true);
-      is('successful redirect is offered only after a confirmed keep', location?.includes(`/form/${form.id}?`) ?? false, healthy);
+      is('status follows confirmed evidence', response.status, 303);
+      is('location describes only the evidenced outcome', definitionUnknown ? location === `https://example.com/@${shop.handle}/form/${form.id}?status=unavailable&p=page000001&f=funnel0001` : healthy ? location?.includes(`/form/${form.id}?`) : location?.includes(`status=${scenario === 'missing' ? 'closed' : 'error'}`), true);
+      is('successful redirect is offered only after a confirmed keep', location ? new URL(location).pathname === `/@${shop.handle}/form/${form.id}` && !new URL(location).searchParams.has('status') : false, healthy);
       is('actual response storage agrees with success', saved, healthy ? 1 : 0);
       is('the form record remains unchanged', definition, scenario === 'missing' ? null : JSON.stringify(storedForm));
       is('selected unknown reply occurs exactly once', injected, definitionUnknown || scenario === 'unknown-keep' ? 1 : 0);

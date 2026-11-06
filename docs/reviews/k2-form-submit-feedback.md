@@ -101,3 +101,52 @@ Completed local checks after those fixture repairs:
 - Actual package-lock.json blob: 4e0ca0fae6880008b6180e52c22829d519b43738, using Node v24.22.1 and the parent's isolated recovered dependency installation.
 
 The earlier PENDING paragraph describes the pre-loss checkpoint; these local checks now supersede that checkpoint. This remains RED evidence, not a green product validation. No inherited identity RED suite, old 61-check test, whole test suite, provider, browser journey or CI was executed in this phase. The parent retains all GitHub/ref/commit operations and the production repair gate.
+
+## Authorized G7 repair and GREEN phase
+
+The parent durably published the typed RED at 4490711fcd3e6044ea4027494556a576c6cb61a3, tree 4e94dbb0f500161c9bd93af15d379e90aac36d37, preserving ebccb867 as its parent. After explicit product GO, the own checkout fetched that branch, confirmed the working content exactly matched 4490711, and switched cleanly to detached 4490711 without reset or force. This phase is local WIP for the parent to publish and request review; it does not move PR #2857 or any CI head.
+
+Only the two reserved product paths and three transport expectations in the old test changed:
+
+- The early unknown-definition POST now returns the existing no-store 303 response to the dedicated status=unavailable result route. Only a page found in that store's sitePages and the existing validated funnel marker are retained; answers and success/result query values are absent.
+- The result page validates form-id syntax and store/suspension before its strict string status branch. That branch renders the exact existing localized error text in an alert, preserves main#content, provides safe same-store return navigation, and performs no definition, product, score or funnel work. Metadata uses the same existing error text for this valid unavailable state, while retaining noindex/nofollow and normal metadata behavior.
+- The old 61-check test changes exactly HTTP status, the dedicated destination and the success classifier. Its actual storage, unknown injection, subsequent-command, admission, enrollment, funnel, join and provider assertions are byte-for-byte unchanged. The success classifier now excludes error status even when a failure shares the result pathname.
+
+The same standalone command now passes all 71 POST checks and all 166 SSR checks (237/237). Unknown and transport-outage POSTs each perform exactly one selected HGET, one injection, zero later commands, zero saved responses and zero admission/enrollment/funnel/join effects. Healthy remains five application commands and one response; confirmed missing remains one command and no response. Provider-fetch count remains zero. All seven SSR locales render the error state without reading the persistently unavailable definition, and the unchanged compatibility/navigation controls pass.
+
+The linked existing tests also pass: k-form-submit-unknown.test.ts has 61/61 checks, including unknown-keep, and k-form-public-unavailable.test.ts has 9/9 node:test cases. The latter retains normal-route unknown/transport propagation, confirmed-missing 404, readable form rendering and the no-form-block zero-read control. No unrelated editor test, inherited identity RED, global suite, global build, browser or CI was rerun.
+
+Scoped TypeScript with actual repository tsconfig and real imports reports zero diagnostics for the two product files, old 61-check test and the three new test/world roots. ESLint on the three changed product/test paths exits zero. Final git diff --check exits zero, and the full public-data scan reports 4,139 tracked files with zero files requiring correction. The earlier local validation checkpoints remain historical rather than claims that these product bytes were already present there.
+
+| Changed source | Local Git blob after repair |
+| --- | --- |
+| app/api/store/form/route.ts | b095af8014913c8aa49ea2bbbb01c270b92754a4 |
+| app/[handle]/form/[form]/page.tsx | fa0a8eb5ab9d228ec89108096232403419ad7d79 |
+| tests/k-form-submit-unknown.test.ts | fb521dc140026fc88fde80cc88f6247a6a5c1765 |
+
+The 237-check reproduction command above is unchanged. For the two linked files only, the following bounded command uses the same repository alias/environment source as the canonical runner, preserving their real implementations and MemoryRedis:
+
+~~~sh
+node --input-type=module <<'NODE'
+import { build } from 'esbuild';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { testAliases, testEnvironment } from './tests/test-config.mjs';
+const root = process.cwd(), here = join(root, 'tests');
+const out = mkdtempSync('/dev/shm/k2-feedback-linked-');
+let failed = 0;
+try {
+  for (const file of ['k-form-submit-unknown.test.ts', 'k-form-public-unavailable.test.ts']) {
+    const bundle = join(out, file + '.cjs');
+    await build({ entryPoints: [join(here, file)], bundle: true, platform: 'node', format: 'cjs', outfile: bundle, logLevel: 'error', alias: testAliases(file, root, here) });
+    const result = spawnSync(process.execPath, [bundle], { cwd: root, env: testEnvironment(process.env), stdio: 'inherit', timeout: 120000, killSignal: 'SIGKILL' });
+    if (result.error) console.error(result.error);
+    if (result.status !== 0) failed++;
+  }
+} finally { rmSync(out, { recursive: true, force: true }); }
+process.exitCode = failed ? 1 : 0;
+NODE
+~~~
+
+This evidence is server-side rendering and handler execution. The marker remains forgeable informational feedback, not a receipt or an existence claim. It establishes no browser hydration journey, provider delivery, publication, accessibility conformance or final CI status. Independent review and the parent's publication/merge gates still apply.

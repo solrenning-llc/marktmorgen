@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
     go(page ? `/@${store.handle}/${page.slug}?form=${formId}&status=${status}${mark ? `&f=${mark}` : ""}#form-${formId}` : `/@${store.handle}`);
 
   const def = store.suspended ? null : await readForm(store.statsId, formId).catch(() => undefined);
-  if (def === undefined) return new Response("unavailable", { status: 503, headers: { "Cache-Control": "no-store" } });
+  if (def === undefined) return go(`/@${store.handle}/form/${formId}?status=unavailable${page ? `&p=${page.id}` : ""}${mark ? `&f=${mark}` : ""}`);
   if (!def || !store.statsId) return back("closed");
   // Before it opens or after it closes, nothing is taken (639 [GL7](26)).
   if (formOpen(def, Math.floor(Date.now() / 1000)) !== "open") return back("closed");

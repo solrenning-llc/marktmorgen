@@ -7,7 +7,7 @@ import { speech } from "@/lib/buyer-words";
 import { formWords } from "@/lib/buyer-words/form";
 import { funnelWords } from "@/lib/buyer-words/funnel";
 import { readForm } from "@/lib/form-store";
-import { branches, readScoreQuery } from "@/lib/forms";
+import { FORM_ID, branches, readScoreQuery } from "@/lib/forms";
 import { readListing } from "@/lib/catalog";
 import { productPath } from "@/components/store-product";
 import { funnelMark } from "@/lib/page-funnel";
@@ -21,11 +21,14 @@ type Params = {
 
 const pick = (value: string | string[] | undefined) => (typeof value === "string" ? value : "");
 
-export async function generateMetadata({ params }: Params): Promise<Metadata> {
-  const { handle } = await params;
+export async function generateMetadata({ params, searchParams }: Params): Promise<Metadata> {
+  const { handle, form: formId } = await params;
+  const query = await searchParams;
   const decoded = decodeURIComponent(handle);
   const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)).catch(() => null) : null;
-  return { title: `${formWords(store?.language).doneHeading} — ${store?.name ?? "Marktmorgen"}`, robots: { index: false, follow: false } };
+  const w = formWords(store?.language);
+  const unavailable = pick(query.status) === "unavailable" && FORM_ID.test(formId) && store && !store.suspended;
+  return { title: `${unavailable ? w.errors.error : w.doneHeading} — ${store?.name ?? "Marktmorgen"}`, robots: { index: false, follow: false } };
 }
 
 /**
@@ -44,13 +47,33 @@ export default async function FormDonePage({ params, searchParams }: Params) {
   const { handle, form: formId } = await params;
   const query = await searchParams;
   const decoded = decodeURIComponent(handle);
-  if (!decoded.startsWith("@")) notFound();
+  if (!decoded.startsWith("@") || !FORM_ID.test(formId)) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store || store.suspended) notFound();
-  const form = await readForm(store.statsId, formId);
-  if (!form) notFound();
   const w = formWords(store.language);
   const { lang } = speech(store);
+  // Informational feedback, not a receipt: it must survive the definition outage that caused it.
+  if (pick(query.status) === "unavailable") {
+    const page = store.sitePages.find((p) => p.id === pick(query.p)) ?? null;
+    const mark = funnelMark(pick(query.f));
+    const back = page ? `/@${store.handle}/${page.slug}${mark ? `?f=${mark}` : ""}#form-${formId}` : `/@${store.handle}`;
+    return (
+      <div lang={lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
+        <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
+          <div className="st-card p-7 sm:p-10">
+            <div role="alert">
+              <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{w.errors.error}</h1>
+            </div>
+            <div className="mt-8">
+              <Link href={back} className="st-footer-link text-sm font-semibold">{w.backTo(store.name)}</Link>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+  const form = await readForm(store.statsId, formId);
+  if (!form) notFound();
   const outcome = form.outcomes.find((o) => o.id === pick(query.r)) ?? null;
   const score = readScoreQuery(form, outcome, pick(query.s), pick(query.c));
   const whole = !branches(form);

@@ -1,0 +1,1089 @@
+===== /tmp/g1927-e4f-erasure-race.log =====
+G_HISTORY_AFTER_REMOVAL {"control":false,"boundary":1,"saved":true,"removed":true,"forgotten":true,"deletedBeforeResume":0,"definitions":[],"history":["Original subject"],"afterSecondForget":1,"charged":"400"}
+  ok    real save completed through the admitted workflow writer
+  ok    real concurrent removal and forgetting completed
+  ok    the history was absent before the paused save resumed
+  ok    the exact history boundary was reached when raced
+  ok    the real workflow definitions stay removed
+  FAIL  a removed workflow cannot regain retained history
+        expected 0
+        got      1
+  FAIL  a later full workflow forget leaves no orphaned history
+        expected 0
+        got      1
+
+7 checks, 2 failing.
+
+
+===== /tmp/g1927-e4f-erasure-control.log =====
+G_HISTORY_AFTER_REMOVAL {"control":true,"boundary":0,"saved":true,"removed":true,"forgotten":true,"deletedBeforeResume":0,"definitions":[],"history":[],"afterSecondForget":0,"charged":null}
+  ok    real save completed through the admitted workflow writer
+  ok    real concurrent removal and forgetting completed
+  ok    the history was absent before the paused save resumed
+  ok    the exact history boundary was reached when raced
+  ok    the real workflow definitions stay removed
+  ok    a removed workflow cannot regain retained history
+  ok    a later full workflow forget leaves no orphaned history
+
+7 checks, all passing.
+
+
+===== /tmp/g1927-1743-red.log =====
+G2_HISTORY_RECOUNT_RACE {"entries":3,"charged":1104,"required":2240}
+✔ control: sequential history writes retain and charge the complete list (8.422245ms)
+✖ recount after a refused old push cannot shrink the room of a newer third push (2.216733ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 1
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 21.424219
+
+✖ failing tests:
+
+test at ../codex-g-proof-TFcjDt/proof.cjs:4139:27
+✖ recount after a refused old push cannot shrink the room of a newer third push (2.216733ms)
+  AssertionError [ERR_ASSERTION]: the stale recount released storage still holding the newest version
+      at TestContext.<anonymous> (/tmp/codex-g-proof-TFcjDt/proof.cjs:4167:27)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+G_HISTORY_AFTER_REMOVAL {"control":false,"boundary":1,"saved":true,"removed":true,"forgotten":true,"deletedBeforeResume":0,"definitions":[],"history":["Original subject"],"afterSecondForget":1,"charged":"400"}
+  ok    real save completed through the admitted workflow writer
+  ok    real concurrent removal and forgetting completed
+  ok    the history was absent before the paused save resumed
+  ok    the exact history boundary was reached when raced
+  ok    the real workflow definitions stay removed
+  FAIL  a removed workflow cannot regain retained history
+        expected 0
+        got      1
+  FAIL  a later full workflow forget leaves no orphaned history
+        expected 0
+        got      1
+
+7 checks, 2 failing.
+G2_HISTORY_RECOUNT_RACE {"entries":3,"charged":2240,"required":2240}
+✔ control: sequential history writes retain and charge the complete list (9.765925ms)
+✔ recount after a refused old push cannot shrink the room of a newer third push (2.99252ms)
+✖ after a refused push, nothing reads the list again, so no recount can go stale (4.566587ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 2
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 25.969495
+
+✖ failing tests:
+
+test at ../codex-g-proof-TFcjDt/proof.cjs:4172:27
+✖ after a refused push, nothing reads the list again, so no recount can go stale (4.566587ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   'LRANGE'
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (/tmp/codex-g-proof-TFcjDt/proof.cjs:4193:27)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+
+===== /tmp/g1927-e4f-original-byte-id.log =====
+✔ control: sequential history writes retain and charge the complete list (15.669573ms)
+✖ recount after a refused old push cannot shrink the room of a newer third push (2.520711ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 1
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 34.136756
+
+✖ failing tests:
+
+test at ../codex-g-proof-c9YSBL/proof.cjs:4402:27
+✖ recount after a refused old push cannot shrink the room of a newer third push (2.520711ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 2
+  
+      at TestContext.<anonymous> (/tmp/codex-g-proof-c9YSBL/proof.cjs:4427:27)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+
+===== /tmp/g1927-1743-original-byte-id.log =====
+G2_HISTORY_RECOUNT_RACE {"entries":3,"charged":1104,"required":2240}
+✔ control: sequential history writes retain and charge the complete list (7.11567ms)
+✖ recount after a refused old push cannot shrink the room of a newer third push (29.090122ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 1
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 87.015164
+
+✖ failing tests:
+
+test at ../codex-g-proof-Udktij/proof.cjs:4139:27
+✖ recount after a refused old push cannot shrink the room of a newer third push (29.090122ms)
+  AssertionError [ERR_ASSERTION]: the stale recount released storage still holding the newest version
+      at TestContext.<anonymous> (/tmp/codex-g-proof-Udktij/proof.cjs:4167:27)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+
+===== /tmp/g1927-e4f-focal.log =====
+G2_HISTORY_RECOUNT_RACE {"entries":3,"charged":2240,"required":2240}
+✔ control: sequential history writes retain and charge the complete list (7.707149ms)
+✔ recount after a refused old push cannot shrink the room of a newer third push (51.907462ms)
+✔ after a refused push, nothing reads the list again, so no recount can go stale (70.149671ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 142.573442
+G2_HISTORY_RECOUNT_RACE {"entries":3,"charged":2240,"required":2240}
+✔ control: sequential history writes retain and charge the complete list (8.257436ms)
+✔ recount after a refused old push cannot shrink the room of a newer third push (2.118966ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 18.378155
+✔ control: confirmed history is readable and accounted (35.499807ms)
+an email action failed FlowVersionsUnavailable: A workflow's earlier versions could not be read
+    at readFlowVersions (/tmp/codex-g-proof-nNBOl0/proof.cjs:13183:21)
+    at async POST (/tmp/codex-g-proof-nNBOl0/proof.cjs:65659:24)
+    at async Object.post (/tmp/codex-g-proof-nNBOl0/proof.cjs:65786:15)
+    at async TestContext.<anonymous> (/tmp/codex-g-proof-nNBOl0/proof.cjs:65802:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+G2_UNKNOWN_HISTORY {"status":503,"body":{"ok":false,"error":"flow_versions_unavailable"}}
+✔ unknown history read is never a confirmed empty version list (8.442767ms)
+G2_HISTORY_UNDERCOUNT {"entries":1,"required":384,"charged":"384"}
+✔ unknown held history cannot make the next version unaccounted (5.382415ms)
+G2_DELETE_RELEASE {"required":384,"charged":"384"}
+✔ unknown unapplied delete cannot release room while history survives (14.10312ms)
+G2_RESTORE_FULL {"ok":false,"current":"Subject B","history":["Subject A"]}
+✔ a full history budget must not silently destroy the version promised as undoable (6.518513ms)
+G2_RESTORE_PAUSE_RACE {"paused":true,"result":true,"active":false}
+✔ restoration cannot reactivate a workflow paused while its history was being read (5.848586ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 86.265989
+
+A save that changes what it does keeps the one before
+  ok    a new workflow has no earlier version
+  ok    one earlier version: the first subject
+  ok    saving it unchanged keeps none
+  ok    switching it on keeps none
+
+The route lists them, newest first
+  ok    name, trigger and steps of each, newest first
+  ok    an unknown workflow
+
+Putting one back
+  ok    its content is back, and it stays on
+  ok    the version it replaced is kept, so it can be undone
+  ok    undone the same way
+  ok    an unknown version is refused
+
+At most ten, and they go with the workflow
+  ok    only the newest 10
+  ok    a removed workflow's versions are gone
+
+A store deleted takes every workflow's versions with it (Codex Reviewer 2 on #1927)
+  ok    a version is kept before the store goes
+  ok    and gone with it
+
+The studio
+  ok    a named section that says what is kept and how putting one back works
+  ok    it says it is reading, in a status
+  ok    each version has a button whose name starts with its visible words
+  ok    and its accessible name adds the date after them
+  ok    the workflow list opens it with a toggle that says whether it is open
+  ok    putting one back is a sequence write, so an unconfirmed one is said as such
+
+20 checks, all passing.
+
+
+===== /tmp/g1927-e4f-linked.log =====
+✔ SES network bridge keeps the in-flight observer and never invents acceptance (37.169001ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 120.806157
+✔ inactive diagnostic observations retain their existing absolute one-day expiry (1.501548ms)
+✔ every family of the registry says what becomes of it when its store closes, and nothing more is said (2.735824ms)
+✔ what each says fits how the registry bounds it (3.325831ms)
+✔ a key belongs to its longest family, and the walk takes only what names a closing store (0.57232ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 21.85313
+
+The words
+  ok    a sequence on a call starts when someone books it; any other product, when someone gets it
+  ok    the trigger's choice says it covers booking a call, only when the store has one
+  ok    the store's calls are handed to the studio
+
+Nothing else changes
+  ok    the trigger is still the product's
+  ok    a paid order, a call included, starts the sequences of its product
+
+5 checks, all passing.
+
+Read and kept
+  ok    another of the store's sequences, never one that is not
+  ok    never the workflow itself
+  ok    saved, and the stored list reads it back
+
+Taken out where they are
+  ok    Ana waits in the nurture sequence for its first email
+  ok    taken out: nothing of hers waits in it
+  ok    its history says it ended, and by what
+  ok    joining again does not start her on it again: each person goes through a sequence once
+  ok    no email of it went
+  ok    someone not in it is told so, in the step's history
+
+Waiting under an address the store had before
+  ok    an entry made before the store changed its address
+  ok    is taken out too
+
+Due in the same minute: the stop really cancels the email
+  ok    the stop, done first in the batch, keeps the email from going, and nothing of that sequence is left queued for her
+  ok    both histories say so: taken out, not put off for later
+
+A step under way when the stop lands
+  ok    the email under way goes, nothing after it is queued, and the run ends, saying why
+  ok    every place a run is queued again after its step goes through the lease check
+
+Waiting for room to send when the stop lands
+  ok    taken out: ended there, said why; still in it: the wait as it was
+  ok    both places a step is put off use it, and a wait taken out is not counted as later
+
+A condition that sends them on, when the stop lands first
+  ok    the conditional sequence is saved
+  ok    taken out before the condition is read: nothing of that sequence is queued for him, and his run stays ended
+
+Out of time in the same batch, after the stop
+  ok    his DS step is not put back in the queue, no email of it goes, and his run stays ended
+
+When the sequence is gone
+  ok    the workflow's review says so
+
+Said in words
+  ok    the studio's choice and what it does
+  ok    the map says it
+
+23 checks, all passing.
+
+Read and kept
+  ok    a step of its own, with nothing to choose
+  ok    saved
+  ok    the stored list reads it back
+
+Shared evenly
+  ok    each open deal goes to whoever had the fewest: two each in the end
+  ok    someone with no open deal: no deal is made for them
+
+Who is never chosen, and who is kept
+  ok    a deal held by someone who left the team goes to whoever on it has the fewest
+  ok    a deal held by someone still on the team keeps them
+
+A teammate who can no longer see orders, and a tie
+  ok    a deal held by someone who can no longer see orders goes to someone who can: only the owner now
+  ok    with only the owner left, the workflow's review says every deal goes to them
+
+Never over what the creator did meanwhile
+  ok    a write over a copy the board changed meanwhile writes nothing
+  ok    the store's data room counts the record as the board left it, never the copy read before
+  ok    and what the creator typed stays
+  ok    over the record as it is now, it is written
+  ok    a deal that is gone is never made again by a write over it
+  ok    a write that lost the race sizes the room from the script's answer, without reading the deal again
+
+One run shares at a time
+  ok    while another run shares, nobody is given the deal
+  ok    once it let go, the deal is shared
+
+Said in words
+  ok    offered with a deals board and someone besides the owner, or where a step already has it, and what it does
+  ok    the map says it
+
+19 checks, all passing.
+creator: deletes $0.0025, followers $0.0018, its whole export after its plan ended $0.0037, last steps $0.0015: $0.0095, once for the store; each order $0.000002 for its buyers' library entries
+pro: deletes $0.0067, followers $0.0088, its whole export after its plan ended $0.0080, last steps $0.0015: $0.0249, once for the store; each order $0.000002 for its buyers' library entries
+scale: deletes $0.0118, followers $0.0158, its whole export after its plan ended $0.0123, last steps $0.0015: $0.0413, once for the store; each order $0.000002 for its buyers' library entries
+a free trial's store: $0.0090, in the share of stores that pay nothing
+a walk reads a million keys for $0.0044; at one a day, $0.136 a month for every million keys
+✔ a closing's worst cost, part by part, for each plan and for a free trial (29.615672ms)
+✔ what a unit writes is paid for to its end by the window that writes it, so nothing that goes by itself is priced again (2.58686ms)
+✔ a buyer's library entry: its order pays for its whole life, which ends by itself (0.366972ms)
+✔ an export a paying store takes from its studio figure costs no more than the units it takes, Stripe's pages included (0.482596ms)
+✔ once a plan has ended, its whole exports are its own: counted for the store, never refused for want of a figure or a place, and priced in its closing (4.599497ms)
+✔ the walk, the company's: what it costs a walk for every million keys the database holds (0.354723ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 49.33355
+
+Sequence mutation read guards
+  ok    save refuses an unknown list
+  ok    save makes no sequence write
+  ok    save preserves stored bytes
+  ok    remove refuses an unknown list
+  ok    remove makes no sequence write
+  ok    remove preserves stored bytes
+  ok    starters refuses an unknown list
+  ok    starters makes no sequence write
+  ok    starters preserves stored bytes
+  ok    keep refuses an unknown list
+  ok    keep makes no sequence write
+  ok    keep preserves stored bytes
+  ok    save refuses an unknown list
+  ok    save makes no sequence write
+  ok    save preserves stored bytes
+  ok    remove refuses an unknown list
+  ok    remove makes no sequence write
+  ok    remove preserves stored bytes
+  ok    starters refuses an unknown list
+  ok    starters makes no sequence write
+  ok    starters preserves stored bytes
+  ok    keep refuses an unknown list
+  ok    keep makes no sequence write
+  ok    keep preserves stored bytes
+  ok    save refuses an unknown list
+  ok    save makes no sequence write
+  ok    save preserves stored bytes
+  ok    remove refuses an unknown list
+  ok    remove makes no sequence write
+  ok    remove preserves stored bytes
+  ok    starters refuses an unknown list
+  ok    starters makes no sequence write
+  ok    starters preserves stored bytes
+  ok    keep refuses an unknown list
+  ok    keep makes no sequence write
+  ok    keep preserves stored bytes
+  ok    save refuses an unknown list
+  ok    save makes no sequence write
+  ok    save preserves stored bytes
+  ok    remove refuses an unknown list
+  ok    remove makes no sequence write
+  ok    remove preserves stored bytes
+  ok    starters refuses an unknown list
+  ok    starters makes no sequence write
+  ok    starters preserves stored bytes
+  ok    keep refuses an unknown list
+  ok    keep makes no sequence write
+  ok    keep preserves stored bytes
+  ok    save refuses an unknown list
+  ok    save makes no sequence write
+  ok    save preserves stored bytes
+  ok    remove refuses an unknown list
+  ok    remove makes no sequence write
+  ok    remove preserves stored bytes
+  ok    starters refuses an unknown list
+  ok    starters makes no sequence write
+  ok    starters preserves stored bytes
+  ok    keep refuses an unknown list
+  ok    keep makes no sequence write
+  ok    keep preserves stored bytes
+  ok    save refuses an unknown list
+  ok    save makes no sequence write
+  ok    save preserves stored bytes
+  ok    remove refuses an unknown list
+  ok    remove makes no sequence write
+  ok    remove preserves stored bytes
+  ok    starters refuses an unknown list
+  ok    starters makes no sequence write
+  ok    starters preserves stored bytes
+  ok    keep refuses an unknown list
+  ok    keep makes no sequence write
+  ok    keep preserves stored bytes
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    lost acknowledgement does not claim success
+  ok    unconfirmed response does not imply rollback
+  ok    valid creation succeeds
+  ok    creation preserves both existing sequences
+  ok    valid editing succeeds
+  ok    editing preserves the other sequence
+  ok    valid removal succeeds
+  ok    removal preserves remaining sequences
+  ok    confirmed absent list permits creation
+
+97 checks, all passing.
+
+Halves
+  ok    the same person, the same half, whatever the capitals
+  ok    about even across many people
+  ok    and not the same split in every sequence
+
+A condition on a half
+  ok    read as one
+  ok    holds for the first half only
+
+Telling the store's webhooks
+  ok    read as an action
+  ok    an event an address can listen for
+
+7 checks, all passing.
+
+An action, read strictly
+  ok    a label needs words; another sequence must be the store's
+
+Saved, and checked when saved
+  ok    a sequence that starts with a label, its label trimmed
+  ok    a label trigger with no label is refused
+  ok    a sequence that is not the store's is refused
+  ok    so is a sequence starting itself
+  ok    a condition on the email before needs an email right before it
+  ok    a welcome that gives a label and starts another sequence
+
+Carried out for the people it is for
+  ok    the welcome goes to all three
+  ok    the label, only for who has not bought, and only where there is room
+  ok    being given the label starts the offer at once, for Ana alone
+  ok    and the offer's next step takes the label off again, whatever its capitals
+  ok    starting the offer again starts nobody twice: Ana had it, the others now get it
+  ok    and the welcome goes on to its last email
+
+Two sequences that start each other
+  ok    each once, however many times they start each other
+
+Counted
+  ok    the actions that changed something, beside the emails sent
+
+A label never written over a newer change
+  ok    the unsubscribe stays, and the label is written over the contact as it now is
+
+16 checks, all passing.
+
+A condition reads what the list keeps
+  ok    having a product, or not
+  ok    having paid: a product sold for money, or first agreeing at a checkout
+  ok    a label, whatever its capitals and spaces
+  ok    the end: one product, or anything paid for
+  ok    a condition on a product the store does not have is refused
+  ok    an end that would come before the first email is refused
+
+Saved, and checked when saved
+  ok    a condition on a product that is not the store's
+  ok    an end that would come first
+  ok    kept as asked: the label trimmed, the others skipping unless told to leave
+
+Sent only to those it is for
+  ok    the first email: not to Ben, who already has what it sells
+  ok    the second, for those who have not bought: Ana; Cleo skips it
+  ok    and Cleo's next one waits its day, counted from the one she skipped
+  ok    the third, for the label: Cleo, a day after the one she skipped; Ana leaves
+  ok    the last: nobody — Ana left, Cleo now has the course
+  ok    counted: who started, what went, who left by buying, what was skipped
+
+A paid order on the list, once
+  ok    put on the list by whichever comes first, and not again
+  ok    with everything the order handed over
+  ok    somebody who did not check the box and is not on the list is added to nothing
+  ok    a buyer who never reached the thanks page is on the list, with what they bought
+  ok    and the job does not do it twice
+  ok    and the store is in that buyer's library (lib/buyer-library.ts)
+
+Which links somebody used, only if they allowed it
+  ok    allowed only by somebody's own check, with their yes to the list
+  ok    a condition on the email before cannot be on the first
+  ok    only Gus's links carry his key, and only his email says how to stop it
+  ok    the key is not the unsubscribe code
+  ok    a page opened through his link notes it; a made-up key notes nothing
+  ok    the email for those who used a link: Gus only
+  ok    the one for those who did not use the email before's link: both, as neither used one there
+
+Taken back in one press, and by leaving
+  ok    the stop page knows it is on
+  ok    stopped: what was counted is deleted, the permission gone, his key leads nowhere, and he is still on the list
+  ok    checking it again after leaving the list asks again: coming back without it, it stays off
+  ok    a buyer who checked both boxes at checkout
+
+32 checks, all passing.
+
+Strict saved sequence list
+  ok    confirmed empty array remains empty
+  ok    valid saved flow is preserved
+  ok    empty steps remain editable diagnostics
+  ok    invalid business wait stays editable
+  ok    valid condition has
+  ok    valid condition lacks
+  ok    valid condition tag
+  ok    valid condition untagged
+  ok    valid condition started
+  ok    valid condition unstarted
+  ok    valid condition finished
+  ok    valid condition unfinished
+  ok    valid condition buyer
+  ok    valid condition lead
+  ok    valid condition clicked
+  ok    valid condition unclicked
+  ok    valid condition half-a
+  ok    valid condition half-b
+  ok    valid action tag
+  ok    valid action untag
+  ok    valid action start
+  ok    valid action field
+  ok    valid action deal
+  ok    valid action note
+  ok    valid action notify
+  ok    valid action webhook
+  ok    malformed list null
+  ok    malformed list {}
+  ok    malformed list ""
+  ok    malformed list [null]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}]},{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"},{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":"true","createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"unknown","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":2,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":null}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":null}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample","when":"clicked"}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample","when":{"if":"has"}}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample","action":{"do":"field"}}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}],"goal":{"any":false}}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}],"goal":"purchase"}]
+  ok    valid product goal is preserved
+  ok    valid purchase goal is preserved
+  ok    store without a list is confirmed empty
+  ok    no storage read without a list
+  ok    only selected list is read
+  ok    valid list read
+  ok    only selected list is read
+  ok    confirmed missing key is empty
+  ok    only selected list is read
+  ok    confirmed stored empty list
+  ok    only selected list is read
+  ok    failed read is not an empty list []
+  ok    only selected list is read
+  ok    failed read is not an empty list [null,null]
+  ok    only selected list is read
+  ok    failed read is not an empty list null
+  ok    only selected list is read
+  ok    failed read is not an empty list {}
+  ok    only selected list is read
+  ok    failed read is not an empty list [null]
+  ok    only selected list is read
+  ok    failed read is not an empty list [""]
+  ok    only selected list is read
+  ok    failed read is not an empty list ["bad json"]
+  ok    only selected list is read
+  ok    failed read is not an empty list ["{}"]
+  ok    only selected list is read
+  ok    failed read is not an empty list ["[null]"]
+  ok    only selected list is read
+  ok    failed read is not an empty list ["[{\"id\":\"flow1\",\"name\":\"Welcome\",\"trigger\":\"joined\",\"productId\":null,\"active\":false,\"createdAt\":1,\"steps\":null}]"]
+  ok    only selected list is read
+  ok    storage failure remains unknown
+
+74 checks, all passing.
+
+Saved automation references
+  ok    ordinary sequence stays quiet
+  ok    missing product trigger
+  ok    changed course trigger
+  ok    missing form trigger
+  ok    missing end goal
+  ok    missing course condition names step
+  ok    missing started sequence
+  ok    paused sequence target
+  ok    active sequence target
+  ok    missing field
+  ok    missing stage
+  ok    changed number field names incompatible value
+  ok    valid number value stays quiet
+  ok    invalid calendar date is flagged
+  ok    removed choice value is flagged
+  ok    clear-field action remains valid
+  ok    unknown field format is not claimed valid
+  ok    empty sequence needs a step
+  ok    empty email needs content
+  ok    empty subject needs completion
+  ok    action step does not need email content
+  ok    template subject identifies the affected step
+  ok    template body needs completion
+  ok    action note placeholder is reviewed too
+  ok    ordinary brackets are not template placeholders
+  ok    invalid wait identifies step
+  ok    blank wait cannot become immediate
+  ok    text wait cannot become immediate
+  ok    negative wait is rejected
+  ok    fractional hour is rejected
+  ok    fractional day with whole hours remains valid
+  ok    immediate step remains valid
+  ok    maximum wait remains valid
+  ok    overlong wait is rejected
+  ok    clicked on first step is flagged
+  ok    clicked after an action is flagged
+  ok    clicked after an email remains valid
+  ok    unclicked on first step is flagged
+  ok    unclicked after an action is flagged
+  ok    unclicked after an email remains valid
+  ok    a non-click condition can follow an action
+  ok    purchase trigger cannot end at any purchase
+  ok    product trigger cannot end at the same product
+  ok    product trigger can end at another product
+  ok    finished trigger cannot end at the same product
+  ok    finished trigger can end at another product
+  ok    joined trigger can end at a purchase
+  ok    purchase trigger without a goal remains valid
+  ok    product trigger without a goal remains valid
+  ok    product paid entry conflicts with any purchase ending
+  ok    product free entry can end at a later purchase
+  ok    product unrelated paid product does not change entry
+  ok    product missing paid context does not invent a conflict
+  ok    finished paid entry conflicts with any purchase ending
+  ok    finished free entry can end at a later purchase
+  ok    finished unrelated paid product does not change entry
+  ok    finished missing paid context does not invent a conflict
+  ok    joined entry is not a purchase even with paid context
+  ok    paid entry with no ending remains valid
+
+59 checks, all passing.
+
+Read strictly
+  ok    words and whole days from 0 to the most
+  ok    anything else refused
+  ok    cleaned as the deals board cleans it
+
+Kept and read back
+  ok    saved with its step
+  ok    the stored list reads it back
+  ok    a stored step without its days, or past the limits, is not read
+
+Run on the person's open deal only
+  ok    the open deal gets the next action and the day it is due, in UTC
+  ok    everything else on the deal is kept
+  ok    someone with no open deal: no deal is made for them
+  ok    a won deal is not an open one, so it is left as it was
+
+A deal that already has it
+  ok    a second workflow with the same step saves
+  ok    the same next action and due date: confirmed, not written again
+
+Said in words
+  ok    the studio's choice, its two fields and what it does
+  ok    the map says it, and the day it runs for 0
+  ok    the hint is read with both fields, and names the board's own filters
+  ok    an empty number of days is sent as none, never as today
+
+16 checks, all passing.
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3022
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (60.027552ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (302.659231ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (43.012627ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.592389ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.264458ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.176265ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.606202ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (72.506416ms)
+✔ every store figure taken in the code is a kind a line prices (60.220362ms)
+✔ every email sent names a meter, and each file only the meters it may use (99.890143ms)
+✔ the units a figure is taken in cost at least what they stand for (11.542807ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (2.61388ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.255514ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.364868ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.134743ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.121202ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.387623ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.974405ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.119219ms)
+✔ Path push fits its reserved studio requests (0.080972ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.083205ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.091568ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.122784ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (47.29718ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 720.662334
+
+Read and saved strictly
+  ok    a field and a value it keeps; a stage the board has; a note with words
+  ok    a form that asks for no address cannot start a sequence
+  ok    a sequence that starts with the form, its steps kept
+
+Started by the form, for people on the list
+  ok    the field is set for those on the list, not for somebody who is not
+  ok    Ana gets a new deal in the stage; Ben's open deal moves there
+  ok    a note on her page, saying where it came from
+  ok    the owner told once, with both of them
+  ok    and the email goes to each, once
+
+A sign-up asked from a form remembers it
+  ok    the confirmation link uses the service route and knows the form
+
+A workflow for one quiz result (added 17 October 2026)
+  ok    a result the quiz does not have is refused
+  ok    one of its results is kept on the workflow
+  ok    only the person who got that result starts it
+  ok    a sign-up asked from a quiz keeps the service route, form and result
+
+13 checks, all passing.
+creator: room 18 MB; outside it 121.4 MB on average, 294.0 MB at once
+pro: room 135 MB; outside it 288.1 MB on average, 802.6 MB at once
+scale: room 250 MB; outside it 704.4 MB on average, 2468.9 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (115.726525ms)
+✔ each family is bounded one way at least, and what it says can be checked (86.299076ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (10.866099ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.980257ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.42566ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (13.391462ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.292379ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 249.102535
+
+The community: emailing every member and deleting wait
+  ok    set up by the full session
+  ok    an announcement emailed to every member is refused
+  ok    a post deleted is refused, and the post is still there
+  ok    a comment deleted is refused
+  ok    a post that emails nobody is not
+  ok    emptying the chat room is refused
+  ok    taking a chat message out is refused
+  ok    a reported post deleted from the studio is refused
+
+Events: canceling, deleting and moving one emails everyone coming
+  ok    made by the full session
+  ok    canceling it is refused
+  ok    deleting it is refused
+  ok    moving it is refused
+  ok    renaming it, at the same time, is not
+
+The course: what takes a lesson, a file or students' work away waits
+  ok    a lesson added from the locked session: adding stays open
+  ok    "lesson-remove" is refused
+  ok    "module-remove" is refused
+  ok    "media-remove" is refused
+  ok    taking an assignment off, with the work handed in, is refused
+  ok    taking a quiz off is refused
+  ok    sending a purchase email again, which carries the thank-you note, is refused
+  ok    withdrawing a student's certificate is refused
+  ok    deleting a lesson comment from the studio is refused
+  ok    a new video over the lesson's old one is refused
+  ok    and the lesson keeps it
+  ok    deleting it from the lesson page is refused too, and it is still there
+
+The product: its file, picture, page, keys and the rest
+  ok    a link put over the file, which deletes it, is refused
+  ok    and the product keeps its file
+  ok    a link on a product with no file is not
+  ok    marked coming soon by the full session
+  ok    launching it, one email in the creator's words to everyone waiting, is refused
+  ok    and it is still coming soon, its list unspent
+changing a waitlist failed Error: `after` was called outside a request scope. Read more: https://nextjs.org/docs/messages/next-dynamic-api-wrong-context
+    at after10 (/tmp/codex-g-proof-jXUJ8Z/proof.cjs:2500:15)
+    at POST16 (/tmp/codex-g-proof-jXUJ8Z/proof.cjs:144489:32)
+    at async main (/tmp/codex-g-proof-jXUJ8Z/proof.cjs:150546:33)
+  ok    taking the mark off, which emails nobody waiting and gives paid pre-orders the fixed delivery email, is not
+  ok    taking the file off is refused
+  ok    a new file over it is refused
+  ok    and the product still keeps its file
+  ok    a link put over a price option's file is refused
+  ok    and the option keeps its file
+  ok    a new file over a price option's file is refused
+  ok    taking a price option's file off is refused
+  ok    and the option still keeps it
+  ok    removing the price option, with its file, is refused
+  ok    and the option is still there with its file
+  ok    a link on a price option with no file is not refused
+  ok    removing the picture is refused
+  ok    a new picture over it is refused
+  ok    and the product keeps its picture
+  ok    its alt text is not
+  ok    a page saved without a picture it showed is refused
+  ok    and the page still shows it
+  ok    removing an episode, with its audio, is refused
+  ok    and the episode is still there
+  ok    product: remove is refused
+  ok    keys: clear is refused
+  ok    bundle: clear is refused
+  ok    option: remove is refused
+  ok    podcast: remove is refused
+  ok    page-funnels: remove is refused
+  ok    stream/captions: remove is refused
+  ok    and the product is still there
+
+The store's pages
+  ok    a site page saved without a picture it showed is refused
+  ok    a new link picture over the old one is refused
+  ok    and the link keeps its picture
+  ok    turning the link into a heading, which lets its picture go, is refused
+  ok    and the link keeps its picture and its address
+  ok    editing the link's title is not refused
+  ok    removing the store photo is refused
+  ok    a new store photo over it is refused
+  ok    forms: {"action":"remove","id":"x"} is refused
+  ok    site-page: {"action":"remove","id":"pagepage01"} is refused
+  ok    saved-blocks: {"action":"remove","id":"x"} is refused
+  ok    links: {"action":"remove","id":"3836a23019"} is refused
+  ok    link-image: {"action":"remove","id":"3836a23019"} is refused
+  ok    short-links: {"action":"remove","code":"x"} is refused
+  ok    blog: {"action":"delete","id":"x"} is refused
+  ok    answers: {"clear":true} is refused
+  ok    assistant-settings: {"clear":true} is refused
+  ok    and after all of them the link is still there with its picture
+  ok    and the site page still shows its picture
+  ok    saving a form is not
+
+Notes, tasks, deals, pitches, segments, drafts and review photos
+  ok    person: unnote is refused
+  ok    person-tasks: remove is refused
+  ok    crm: undeal is refused
+  ok    crm: unpipeline is refused
+  ok    notes: remove is refused
+  ok    spend: remove is refused
+  ok    outreach: drop is refused
+  ok    mail: segment-remove is refused
+  ok    mail: draft-remove is refused
+  ok    reviews: photo is refused
+
+The store's own fields about each person
+  ok    two fields saved by the full session
+  ok    saved without one of them, which takes its answers off every person, is refused
+  ok    and both are still there
+  ok    saving them with a new one, taking none away, is not
+
+A passkey change from a locked session does not spend the owner's
+  ok    the locked session removes nothing at once: it may only ask for a wait, on a count of its own
+  ok    and the owner's own change is not refused for the hour
+  ok    31 lists from a locked session are told locked
+  ok    and the owner can still list their passkeys
+
+Said the same way everywhere, and true
+  ok    app/signin/code/page.tsx says the one list
+  ok    app/signin/lost/page.tsx says the one list
+  ok    app/studio/page.tsx says the one list
+  ok    lib/two-step.ts says the one list
+  ok    lib/recovery-address.ts says the one list
+  ok    lib/help-content.ts says the one list
+  ok    lib/feature-pages.ts says the one list
+  ok    the list names imports, passkeys, two-step login, email to members and deleting for good
+  ok    and starts a sentence with a capital
+
+Every route that deletes or sends is held
+  ok    every route that deletes is named here (a new one has to say how it is held)
+  ok    and none named here is gone
+  ok    each one held the way it says
+  ok    every route that deletes a file has a request above that reads the file still there
+  ok    and no action is named for one route only by its path
+  ok    and every action LOCKED_ACTIONS names is one a route here uses (the in-route ones are asked through lockedFor)
+
+Every action of a route that deletes or sends is named, held or open with a reason
+  ok    every action of a route that deletes or sends is in the table (a new one has to say how it is held)
+  ok    and none in the table is gone from its route
+  ok    each one held, or open, the way it says
+
+115 checks, all passing.
+
+Strict sequence activity
+  ok    confirmed empty hash means zero
+  ok    valid counters retain values
+  ok    absent counters in a confirmed hash are zero
+  ok    future metadata is ignored
+  ok    malformed hash null
+  ok    malformed hash undefined
+  ok    malformed hash {}
+  ok    malformed hash ""
+  ok    malformed hash ["sent"]
+  ok    malformed hash [12,"1"]
+  ok    malformed hash ["sent","1","sent","2"]
+  ok    invalid counter 
+  ok    invalid counter  
+  ok    invalid counter no
+  ok    invalid counter -1
+  ok    invalid counter -1
+  ok    invalid counter 1.5
+  ok    invalid counter 1.5
+  ok    invalid counter Infinity
+  ok    invalid counter Infinity
+  ok    invalid counter NaN
+  ok    invalid counter true
+  ok    invalid counter null
+  ok    invalid counter [object Object]
+  ok    invalid counter 
+  ok    invalid counter 9007199254740992
+  ok    invalid counter 1e2
+  ok    safe maximum remains exact
+  ok    empty list needs no read
+  ok    no read for empty list
+  ok    only requested sequence keys are read
+  ok    confirmed empty sequence is present
+  ok    second sequence keeps its own activity
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable []
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable [[]]
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable [[],[],[]]
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable null
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable {}
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable [[],null]
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable [[],["sent","bad"]]
+  ok    only requested sequence keys are read
+  ok    storage failure stays unavailable
+
+49 checks, all passing.
+
+
+===== /tmp/g1927-e4f-tsc.log =====
+
+
+===== /tmp/g1927-e4f-lint.log =====
+
+
+===== /tmp/g1927-e4f-unknown-delete.log =====
+forgetting a removed workflow's versions failed Error: a workflow's earlier versions could not be confirmed deleted
+    at dropFlowVersions (/tmp/codex-g-proof-lhR6Tp/proof.cjs:5957:11)
+    at async removeFlow (/tmp/codex-g-proof-lhR6Tp/proof.cjs:47523:3)
+    at async main (/tmp/codex-g-proof-lhR6Tp/proof.cjs:47699:21)
+G_HISTORY_UNKNOWN_DELETE {"control":false,"initial":1,"injected":1,"unconfirmed":false,"definitions":[],"remaining":1}
+  ok    fixture has real retained history before removing it
+  ok    the actual unapplied history delete was intercepted
+  FAIL  unknown delete is reported as unconfirmed, healthy removal completes
+        expected true
+        got      false
+  ok    the removal does not restore the active workflow
+  FAIL  later full forgetting finds and deletes any retained history
+        expected 0
+        got      1
+
+5 checks, 2 failing.
+
+
+===== /tmp/g1927-e4f-unknown-control.log =====
+G_HISTORY_UNKNOWN_DELETE {"control":true,"initial":1,"injected":0,"unconfirmed":false,"definitions":[],"remaining":0}
+  ok    fixture has real retained history before removing it
+  ok    the actual unapplied history delete was intercepted
+  ok    unknown delete is reported as unconfirmed, healthy removal completes
+  ok    the removal does not restore the active workflow
+  ok    later full forgetting finds and deletes any retained history
+
+5 checks, all passing.
+
+
+===== /tmp/g1927-1743-unknown-delete.log =====
+forgetting a removed workflow's versions failed Error: a workflow's earlier versions could not be confirmed deleted
+    at dropFlowVersions (/tmp/codex-g-proof-XNHW17/proof.cjs:5691:94)
+    at async removeFlow (/tmp/codex-g-proof-XNHW17/proof.cjs:47214:3)
+    at async main (/tmp/codex-g-proof-XNHW17/proof.cjs:47389:21)
+G_HISTORY_UNKNOWN_DELETE {"control":false,"initial":1,"injected":1,"unconfirmed":false,"definitions":[],"remaining":1}
+  ok    fixture has real retained history before removing it
+  ok    the actual unapplied history delete was intercepted
+  FAIL  unknown delete is reported as unconfirmed, healthy removal completes
+        expected true
+        got      false
+  ok    the removal does not restore the active workflow
+  FAIL  later full forgetting finds and deletes any retained history
+        expected 0
+        got      1
+
+5 checks, 2 failing.

@@ -3,6 +3,7 @@ import { discardTwoStep, moveTwoStep } from "@/lib/two-step";
 import { moveRecoveryAddress } from "@/lib/recovery-address";
 import { originFrom } from "@/lib/request-origin";
 import {
+  SessionsUnknownError,
   endAllSessions,
   endMoving,
   clearBrokenMove,
@@ -15,7 +16,7 @@ import {
 } from "@/lib/auth";
 import { moveAccount, storeForEmail } from "@/lib/store";
 import { moveMemberships } from "@/lib/team";
-import { discardPasskeys, movePasskeys, pendingRemoval } from "@/lib/passkeys";
+import { MoveSplitError, discardPasskeys, movePasskeys, pendingRemoval } from "@/lib/passkeys";
 import { holdsSecondStep } from "@/lib/second-step-gate";
 import { repairMove } from "@/lib/move-repair";
 import { movePhoneDevices } from "@/lib/phone-alerts";
@@ -126,8 +127,12 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
     } else if (appCopy) {
       ok = (await step("forgetting a copy of two-step login", () => discardTwoStep(to))) && ok;
     }
-    ok = (await step("logging out after an undone move", () => endAllSessions(from))) && ok;
+    // Sessions that could not be read are not logged out (audit SG2): the move is then left marked to repair.
+    ok = (await step("logging out after an undone move", async () => {
+      if ((await endAllSessions(from)) === null) throw new Error("the sessions could not be read");
+    })) && ok;
     if (!ok) broke();
+    return ok;
   };
   try {
     await movePasskeys(from, to);
@@ -137,11 +142,19 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
     appMoved = true;
   } catch (error) {
     console.error("moving the ways in refused", error);
-    await undo();
+    // Passkeys that could not be put back cleanly: the move is kept marked until it is repaired.
+    if (error instanceof MoveSplitError) broke();
+    const undone = await undo();
+    // The new address's sessions could not be read (lib/two-step.ts moveTwoStep; review of #2556 at df8030300):
+    // it holds no way in of its own, so that is never what the person is told. Put back cleanly, the account
+    // stays where it was; otherwise it is kept marked to repair, said as a move that did not finish.
+    if (error instanceof SessionsUnknownError) return away(undone ? "/signin?status=move-unread" : "/signin?status=move-error");
     return away("/signin?status=move-has-login");
   }
 
   let sessionId: string;
+  // Whether every session both addresses had open was closed; never said as closed when it could not be read.
+  let closed = true;
   try {
     const result = await moveAccount(from, to);
     if (!result.ok) {
@@ -158,9 +171,11 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
     // Phones follow once the memberships have: an owner's stay the owner's,
     // a team member's become the new address's (lib/phone-alerts.ts).
     await movePhoneDevices(from, to).catch((error) => console.error("moving phone devices failed", error));
-    await endAllSessions(from);
+    // Sessions that could not be read are not closed (lib/auth.ts endAllSessions answers null; review of #2556):
+    // the move stands, as the store and its ways in are all at `to`, and the studio says so, not "every session closed".
+    closed = (await endAllSessions(from)) !== null;
     // And whatever the new address had open before: nothing opened there earlier stays open into this account.
-    await endAllSessions(to);
+    closed = (await endAllSessions(to)) !== null && closed;
     sessionId = await openSession(to);
     // Passkeys set to be removed moved with the rest (lib/passkeys.ts movePasskeys); a removal whose days are over is applied at every login.
     await pendingRemoval(to).catch((error) => console.error("applying a passkey removal failed", error));
@@ -178,7 +193,7 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
     return away("/signin?status=move-error");
   }
 
-  const response = away("/studio?address=moved");
+  const response = away(closed ? "/studio?address=moved" : "/studio?address=moved-sessions-open");
   response.headers.append("Set-Cookie", sessionCookie(sessionId));
   return response;
 }

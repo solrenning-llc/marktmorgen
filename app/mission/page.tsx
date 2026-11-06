@@ -12,6 +12,9 @@ import { ASSISTANT_ON_SALE, PLANS_ON_SALE } from "@/lib/opening";
 import { ASSISTANT_MESSAGES_MONTHLY, ASSISTANT_NAME, ASSISTANT_PRICE_CENTS } from "@/lib/store-assistant-rules";
 import { isDomainsConfigured } from "@/lib/domains";
 import { feeWords } from "@/lib/fee-words";
+import { hostSyncOn } from "@/lib/meet-providers";
+import { calendarEventsMissionLine } from "@/lib/host-sync-words";
+import { paypalAtCheckout, paypalCheckoutLine } from "@/lib/public-explanations";
 
 export const metadata: Metadata = {
   title: "Our mission — Marktmorgen",
@@ -174,9 +177,12 @@ const ASSISTANT_CLOSED_LINE = `The ${ASSISTANT_NAME}: an AI chat on every page o
 const DOMAIN_LINE =
   "Your store on your own domain, on Studio: type it in the studio, add the one record we show you, and the certificate is handled for you";
 
+/*
+ * PayPal at checkout (paypalCheckoutLine, by the PayPal client) and writing
+ * every booking as an event (calendarEventsMissionLine, by hostSyncOn) are
+ * placed by the component, from the state this deployment is in.
+ */
 const NOT_BUILT = [
-  "PayPal at checkout: Stripe offers it only to accounts in the EU (except Hungary), the UK, Switzerland, Norway and Liechtenstein, and does not support it for the direct charges every sale here is made with",
-  "Writing every booking into your calendar as an event: only calls set to Google Meet are written there, other bookings come as a feed you subscribe to, and calendars are read for busy times",
   "Paying affiliates with no PayPal account of your own: they are paid from your PayPal, in one press or on your payday, never from money we hold",
   "A thank-you page of your own: after paying, the store's own page hands over what was bought, with your note and, in a funnel, a button to the next step",
   "Automatic replies on Instagram",
@@ -200,7 +206,7 @@ const RELEASES: { date: string; items: string }[] = [
   { date: "September 26, 2026", items: "Up to 200 products with pictures and pages of their own, questions at checkout, pay what you want, free trials and fixed-length memberships, group calls and live sessions with reminders and self-serve moves, a confirmation email for every purchase, every store installable as its own app, 43 Stripe countries, and one reminder after an unpaid checkout. Then a community for your buyers, funnels of offers after paying, an affiliate program, calendar sync, webhooks, course quizzes and certificates, license keys, stamped PDFs, longer windows and exports for your numbers, and memberships whose access ends when they do." },
   { date: "September 27, 2026", items: "Up to 2,000 products, a private video room for each booking, up to five stores in one account and a team with roles for each, passkeys, 15 currencies and more ways to pay, sales and landing pages, reviews only buyers can write, Mailchimp, Kit, beehiiv and MailerLite built in, and notifications on your phone. Then live events in the community, bundles, drafts, moving your list, products and past buyers from another platform, and Google Meet links made on your own Google Calendar." },
   { date: "October 5, 2026", items: "The demo store became an ordinary store, made and drawn by the same code as every creator's, and product pictures reach a phone at the phone's own size. Then Outreach: one short email to a business that could sponsor you, sell for you or buy from you, written from what you say and opened as a draft in your own mailbox." },
-  { date: "October 18, 2026", items: "A store whose plan ends closes after 30 days and three emails, with its whole store downloadable as one file first: its files, the renewals of what it sold and every record it kept go, and only a compressed record of its sales is kept for tax, for seven years." },
+  { date: "October 18, 2026", items: "A store whose plan ends closes after 30 days and three emails, with its main data (products, courses, posts, forms, contacts and orders) downloadable as one file first: its files, the renewals of what it sold and every record it kept go, and only a compressed record of its sales is kept for tax, for seven years." },
 ];
 
 /* Facts a creator can check before trusting us with a store. */
@@ -220,8 +226,11 @@ export default function MissionPage() {
   const billingReached = isBillingConfigured();
   const billing = billingReached && PLANS_ON_SALE;
   const domains = isDomainsConfigured();
+  const paypal = paypalAtCheckout();
+  const calendarSync = hostSyncOn();
   const built = [
     ...BUILT,
+    ...(paypal ? [paypalCheckoutLine(true)] : []),
     ...(domains ? [DOMAIN_LINE] : []),
     ...(ready ? [STRIPE_LINE, CHECKOUT_LINE, ORDERS_LINE] : []),
     ...(billing ? [BILLING_LINE] : []),
@@ -232,6 +241,8 @@ export default function MissionPage() {
     ...(ready ? [] : [STRIPE_LINE, CHECKOUT_LINE, ORDERS_LINE]),
     ...(billing ? [] : [billingReached ? BILLING_CLOSED_LINE : BILLING_LINE]),
     ...(billing && ASSISTANT_ON_SALE ? [] : [ASSISTANT_CLOSED_LINE]),
+    ...(paypal ? [] : [paypalCheckoutLine(false)]),
+    calendarEventsMissionLine(calendarSync),
     ...NOT_BUILT,
   ];
   return (

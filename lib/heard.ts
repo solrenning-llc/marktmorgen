@@ -23,6 +23,7 @@
  *   day record h:<answer>     answers; hc:<answer> the money of their sales
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { countHeard, saleChannel } from "@/lib/stats";
@@ -65,8 +66,16 @@ export async function recordHeard(store: Store, sessionId: unknown, answer: unkn
   const created = typeof session.created === "number" ? session.created : 0;
   const paid = session.status === "complete" && (session.payment_status === "paid" || session.payment_status === "no_payment_required");
   if (!paid || !saleHandles(store).has(meta.store ?? "") || created < now / 1000 - ANSWER_WITHIN_SECONDS) return "invalid";
-  const [claimed] = await redisPipeline([["SET", doneKey(sessionId), "1", "NX", "EX", ANSWER_WITHIN_SECONDS]]);
-  if (claimed === null) return "already";
+  // Read exactly (CX-123 rule 24): counted only on a mark that is ours; one that cannot be read is not counted now.
+  const mine = claimValue();
+  const claimed = await claimMark(doneKey(sessionId), ANSWER_WITHIN_SECONDS, mine);
+  if (claimed === "taken") return "already";
+  if (claimed === "unknown") {
+    // A mark this run may have written is let go only while it holds this run's value, so the next try counts it
+    // (Claude 3 on #2723); another's is never touched.
+    await releaseMark(doneKey(sessionId), mine);
+    return "unavailable";
+  }
   const currency = typeof session.currency === "string" ? session.currency.toLowerCase() : "";
   const cents = currency === store.currency && typeof session.amount_total === "number" ? session.amount_total : 0;
   // With no channel on the sale, the answer is the only trace of where it came from (lib/attribution-rules.ts).

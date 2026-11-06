@@ -300,6 +300,13 @@ export type LookColours = {
    * on it all still read.
    */
   band: string;
+  /**
+   * The colour of a link on that band (274 [AX1]; C1-20261106-0100-TODOS-1): black or white, whichever reads more
+   * on it, so it keeps 7:1 (WCAG 1.4.6) whatever accent the creator picked; it is always underlined (app/globals.css).
+   * The band keeps the page's text at 7:1, and that text is near black or near white, so one of the two always does
+   * better than it (tests/band-link-contrast.test.ts).
+   */
+  bandLink: string;
   dark: boolean;
 };
 
@@ -366,6 +373,7 @@ export function lookColours(look: LookPaint): LookColours {
     accentSoft,
     accent2,
     band,
+    bandLink: contrast(BLACK, band) >= contrast(WHITE, band) ? BLACK : WHITE,
     dark: palette.dark,
   };
 }
@@ -388,6 +396,7 @@ export function lookStyle(look: LookPaint): Record<string, string> {
     "--st-accent-soft": c.accentSoft,
     "--st-accent-2": c.accent2,
     "--st-band": c.band,
+    "--st-band-link": c.bandLink,
     ...fontStyle(look.font),
     ...backdropStyle(look.backdrop),
     colorScheme: c.dark ? "dark" : "light",

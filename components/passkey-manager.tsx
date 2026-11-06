@@ -20,11 +20,18 @@ const MESSAGES: Record<string, string> = {
   server_error: "Something went wrong on our side. Try again in a moment.",
   rate_limited: "That is a lot of passkey changes in an hour. Try again later.",
   busy: "Your passkeys are being changed by another request right now. Try again in a moment.",
+  unsent: "We could not send the email that tells your account about this, so nothing was set. Try again in a moment.",
   reauth: "Adding a passkey needs a login from the last 15 minutes. Log in again below, then add it.",
   second_step: "Your account already has a passkey or an authenticator app, so adding another needs a login with one of them. Log in again with your passkey or your app's code, then add it here.",
 };
 
-type Answer = { ok?: boolean; error?: string; options?: unknown; passkeys?: PasskeyRow[]; removeOn?: number };
+type Answer = { ok?: boolean; error?: string; options?: unknown; passkeys?: PasskeyRow[]; removeOn?: number; loggedOut?: boolean };
+
+/** Said inline when a removal is set but the browsers the passkey let in could not be logged out (review of #2556). */
+export const SET_NOT_LOGGED_OUT = "The removal is set, but the browsers that logged in with this passkey could not be logged out just now. Choose “Log out of all devices” at the bottom of your studio.";
+
+/** Said inline when a passkey is removed but the browsers it let in could not be logged out (audit SG2, finding 6). */
+export const REMOVED_NOT_LOGGED_OUT = "The passkey is removed, but the browsers that logged in with it could not be logged out just now. Choose “Log out of all devices” at the bottom of your studio.";
 
 const onDay = removalWhen;
 
@@ -204,11 +211,15 @@ export function PasskeyManager({
       const at = done.removeOn;
       setBlocked(true);
       setWaiting((rows) => ({ ...rows, [row.id]: at }));
-      toast(`“${row.name}” will be removed on ${onDay(at)}.`);
+      // Something to act on stays inline, never in a toast that goes (components/toast.tsx).
+      if (done.loggedOut === false) setError(`“${row.name}” will be removed on ${onDay(at)}. ${SET_NOT_LOGGED_OUT}`);
+      else toast(`“${row.name}” will be removed on ${onDay(at)}.`);
       return;
     }
     setList((rows) => rows.filter((r) => r.id !== row.id));
-    toast("Passkey removed.");
+    // Something to act on stays inline, never in a toast that goes (components/toast.tsx).
+    if (done.loggedOut === false) setError(REMOVED_NOT_LOGGED_OUT);
+    else toast("Passkey removed.");
   }
 
   /** Calls off a removal that waits: any session may, as keeping a passkey takes nothing away. */

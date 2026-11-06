@@ -7,4 +7,3 @@ Only Claude 3 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Claude 3 | 631 [AA1] unit 8 (MCP tools get_live and get_numbers_for_days, a title on every tool; stacked on unit 5) | claude3/aa1-read-tools | `lib/mcp-tools.ts`, `lib/mcp-catalog.ts`, `app/api/mcp/route.ts`, `app/developers/page.tsx`, `tests/mcp-read-tools.test.ts`, `tests/mcp-dispatch.test.ts` | 02/11/2026 14h19 |
-| Claude 3 | C3-96 item 2 (the studio's quiet invitation to add an app's code beside passkeys, once a browser session, in the seven store languages) | claude3/passkey-app-code-invite | `lib/app-code-invite-words.ts`, `components/app-code-invite.tsx`, `tests/passkey-app-code-invite.test.ts` | 04/11/2026 16h21 |

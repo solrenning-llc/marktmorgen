@@ -1,5 +1,5 @@
 // G identified same-byte assertion variant: DEL addresses ONE key, so count2 is an impossible receipt. Only this unapplied reply changes from null to2.
-// G identified adversarial: same real late save, only the definition DEL returns a null receipt without application. No stored data or counters forged.
+// Based on G original null-receipt proof; here the unapplied one-key DEL returns count2. No stored data or counters forged.
 import { saveFlow, removeFlow, forgetStoreWorkflows, readFlows } from '@/lib/flows';
 import { readFlowVersions } from '@/lib/flow-versions';
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail } from '@/lib/store';
@@ -36,7 +36,7 @@ async function main() {
       faulty++;
       const result: unknown[] = [];
       for (const c of commands) {
-        if (c[0] === 'DEL' && c[1] === `nl:mail:flows:${shop.listId}`) result.push(2); // only this DEL unapplied, unknown own slot
+        if (c[0] === 'DEL' && c[1] === `nl:mail:flows:${shop.listId}`) { if (c.length !== 2) throw Error('The overcount proof requires DEL of exactly one key'); result.push(2); } // only this DEL unapplied, unknown own slot
         else result.push((await base([c]))[0]);
       }
       return result;

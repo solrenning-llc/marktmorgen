@@ -1125,6 +1125,7 @@ export function ProductCard({
   cart = false,
   sold = null,
   grid = false,
+  stockUnknown = false,
 }: {
   store: Store;
   product: Listing;
@@ -1156,6 +1157,11 @@ export function ProductCard({
   sold?: string | null;
   /** It stands in the store page's grid, two to a row on a computer (Encanto 3): its cover is described at that width. */
   grid?: boolean;
+  /**
+   * Its count could not be read (lib/stock.ts stockLeft threw): the page passes `remaining` 0, so it is drawn as a
+   * sold-out one is, with no way to buy, and this says why in words of its own rather than "Sold out".
+   */
+  stockUnknown?: boolean;
 }) {
   const href = productPath(store, product);
   const { w, num } = speech(store);
@@ -1222,7 +1228,7 @@ export function ProductCard({
       ) : null}
       {remaining !== null && !soon ? (
         <p className="mt-2 text-sm font-bold" style={{ color: "var(--st-accent-text)" }}>
-          {soldOut ? w.soldOut : w.left(remaining, num(remaining))}
+          {soldOut ? (stockUnknown ? w.stockUnknown : w.soldOut) : w.left(remaining, num(remaining))}
         </p>
       ) : null}
       <BuyBox

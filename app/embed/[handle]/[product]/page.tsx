@@ -160,15 +160,19 @@ export default async function EmbedCard({ params, searchParams }: Params) {
   const selling = canSell(store);
   const [coming, stock, noKeys, related, summary] = await Promise.all([
     soonOne(store, product.id).catch(() => ({ soon: false, day: null })),
-    stockLeft(store, product).catch(() => null),
+    // A count that cannot be read is undefined, never null: null is a product nobody limited (rule 24).
+    stockLeft(store, product).catch(() => undefined),
     outOfKeys(store, product).catch(() => false),
     product.bumps.length ? readListings(store, bumpTargets(product)).catch(() => []) : Promise.resolve([]),
     summaryOf(store.statsId, product.id).catch(() => null),
   ]);
   const soon = coming.soon;
-  const count = noKeys ? 0 : stock;
+  // Unknown is drawn as sold out is (no button), and says why in words of its own.
+  const count = noKeys || stock === undefined ? 0 : stock;
   const remaining = count !== null && canSellProduct(store, product) ? count : null;
-  const computed = pageAction(store, product, remaining, selling, related, soon, preorderDay(store, product, coming.soon, coming.day));
+  const stockUnknown = remaining === 0 && !noKeys && stock === undefined;
+  const reckoned = pageAction(store, product, remaining, selling, related, soon, preorderDay(store, product, coming.soon, coming.day));
+  const computed = stockUnknown && reckoned.action.kind === "none" && reckoned.action.text === speech(store).w.soldOutStop ? { action: { kind: "none" as const, text: speech(store).w.stockUnknown }, label: "" } : reckoned;
   const page = tag(productPath(store, product));
   // A card the script opened on a site the creator did not list, past the
   // store's visits or past the opens one connection gets, and one pasted

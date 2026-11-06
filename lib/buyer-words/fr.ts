@@ -132,6 +132,7 @@ export const fr: BuyerWords = {
   noDates: "Aucune date en vente pour le moment.",
   notOnSale: "Pas encore en vente.",
   soldOutStop: "Épuisé.",
+  stockUnknown: "Le stock n'a pas pu être vérifié pour le moment. Réessayez dans quelques minutes.",
   cannotTakePayments: "Cette boutique ne peut pas encore accepter de paiements.",
   joinWaitlist: "Rejoindre la liste d'attente",
   getItFree: "L'obtenir gratuitement",

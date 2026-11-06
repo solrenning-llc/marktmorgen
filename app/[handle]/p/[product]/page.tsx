@@ -177,10 +177,11 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  * is what the page itself offers: a free product while it can be given
  * (canGiveProduct), a paid one while Stripe or the creator's PayPal takes it.
  */
-function productData(store: Store, product: Listing, description: string, soldOut: boolean, summary: Summary | null, soon = false, preorder = false, sellable = false) {
+function productData(store: Store, product: Listing, description: string, soldOut: boolean | null, summary: Summary | null, soon = false, preorder = false, sellable = false) {
   const url = `${SITE_URL}${productPath(store, product)}`;
   const options = sellableOptions(product);
-  const availability = `https://schema.org/${preorder ? "PreOrder" : soon ? "OutOfStock" : soldOut ? "SoldOut" : "InStock"}`;
+  // soldOut null: a count that could not be read, told as nothing: schema.org has no "unknown", and InStock or SoldOut would be a guess.
+  const availability = soldOut === null && !preorder && !soon ? undefined : `https://schema.org/${preorder ? "PreOrder" : soon ? "OutOfStock" : soldOut ? "SoldOut" : "InStock"}`;
   // A call with several lengths (lib/call-lengths.ts): each length's own price, as its checkout charges it.
   const lengths = product.call ? listedLengths(product.call, product.priceCents) : [];
   const offers = !sellable || product.recurring
@@ -306,7 +307,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
     ) : null;
   const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts] = await Promise.all([
     product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""),
-    stockLeft(store, product).catch(() => null),
+    // A count that cannot be read is undefined, never null: null is a product nobody limited (rule 24).
+    stockLeft(store, product).catch(() => undefined),
     outOfKeys(store, product).catch(() => false),
     pageOf(store, product),
     summaryOf(store.statsId, product.id).catch(() => null),
@@ -359,9 +361,11 @@ export default async function ProductPage({ params, searchParams }: Params) {
   // The reviews the creator picked to show first, on a page built from blocks (lib/sales-page.ts, ReviewsBlock).
   const pickedFirst = page.blocks.find((block) => block.kind === "reviews")?.first ?? [];
   const reviews = summary && summary.visible > 0 ? await visibleReviews(store.statsId, product.id, 0, REVIEWS_ON_PAGE, pickedFirst).catch(() => []) : [];
-  const count = noKeys ? 0 : stock;
+  // Unknown is drawn as sold out is (no way to buy, no gift), and says why in words of its own.
+  const count = noKeys || stock === undefined ? 0 : stock;
   const blocks = aboutBlocks(about);
   const remaining = count !== null && canSellProduct(store, product) ? count : null;
+  const stockUnknown = remaining === 0 && !noKeys && stock === undefined;
   // Bought for somebody else, where it can be: on sale, not coming soon, not sold out (lib/gift-rules.ts).
   const giftable = selling && !soon && remaining !== 0 && bundleReady && canSellProduct(store, product) && canGift(product);
   // And for several people at once, where a gift can be and nothing is limited (lib/group-rules.ts).
@@ -416,7 +420,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
       ) : null}
       {remaining !== null ? (
         <p className="mt-1 text-sm font-bold" style={{ color: "var(--st-accent-text)" }}>
-          {remaining === 0 ? w.soldOut : w.left(remaining, num(remaining))}
+          {remaining === 0 ? (stockUnknown ? w.stockUnknown : w.soldOut) : w.left(remaining, num(remaining))}
         </p>
       ) : null}
       {product.preview > 0 && product.file && previewable(product.file) ? (
@@ -519,7 +523,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
 
   // Where the buy box is and what its button says, for the page's own blocks
   // and for the bar held at the bottom of a phone's screen (components/sticky-buy.tsx).
-  const { action, label } = pageAction(store, product, remaining, selling, related, soon, preorder);
+  const computed = pageAction(store, product, remaining, selling, related, soon, preorder);
+  const { action, label } = stockUnknown && computed.action.kind === "none" && computed.action.text === w.soldOutStop ? { action: { kind: "none" as const, text: w.stockUnknown }, label: "" } : computed;
   const sticky =
     action.kind === "none" ? null : (
       <StickyBuy target={free ? "get" : "buy"} label={label} price={<PriceTag store={store} product={product} />} />
@@ -533,7 +538,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
       className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`}
       style={lookStyle(store.look) as React.CSSProperties}
     >
-      <JsonLd data={productData(store, product, description, remaining === 0, summary, soon, Boolean(preorder), free ? canGiveProduct(store, product) : canSellProduct(store, product) || byPayPal)} />
+      <JsonLd data={productData(store, product, description, stockUnknown ? null : remaining === 0, summary, soon, Boolean(preorder), free ? canGiveProduct(store, product) : canSellProduct(store, product) || byPayPal)} />
       <JsonLd data={breadcrumbData({ name: store.name, url: `${SITE_URL}/@${store.handle}` }, { title: product.title, url: `${SITE_URL}${productPath(store, product)}` })} />
       {faq ? <JsonLd data={faq} /> : null}
       <ExitOfferSlot store={store} except={product.id} />

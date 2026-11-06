@@ -132,15 +132,19 @@ export default async function CollectionPage({ params }: Params) {
     store.reviewed ? summaries(store.statsId).catch(() => new Map()) : Promise.resolve(new Map()),
     Promise.all(
       products.map(async (product) => {
-        const [stock, out] = await Promise.all([stockLeft(store, product).catch(() => null), outOfKeys(store, product).catch(() => false)]);
+        // A count that cannot be read is undefined, never null: null is a product nobody limited (rule 24).
+        const [stock, out] = await Promise.all([stockLeft(store, product).catch(() => undefined), outOfKeys(store, product).catch(() => false)]);
         return out ? 0 : stock;
       }),
     ),
   ]);
   const soon = coming.soon;
   const left = new Map<string, number>();
+  // Drawn as sold out is (0 left), with words of their own saying the count could not be checked.
+  const unread = new Set<string>();
   products.forEach((product, i) => {
-    if (counts[i] !== null) left.set(product.id, counts[i] as number);
+    if (counts[i] === undefined) unread.add(product.id);
+    if (counts[i] !== null) left.set(product.id, counts[i] ?? 0);
   });
   const inCart = cartOn ? products.filter((p) => cartable(p) && canSellProduct(store, p) && !soon.has(p.id) && left.get(p.id) !== 0).map((p) => p.id) : [];
 
@@ -195,6 +199,7 @@ export default async function CollectionPage({ params }: Params) {
               soon={soon.has(product.id)}
               preorder={preorderDay(store, product, soon.has(product.id), coming.days.get(product.id) ?? null)}
               cart={inCart.includes(product.id)}
+              stockUnknown={unread.has(product.id)}
             />
           ))}
         </ul>

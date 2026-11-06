@@ -256,7 +256,8 @@ export default async function StorePage({ params, searchParams }: Params) {
   const counts = await Promise.all(
     listings.map(async (product) => {
       const [stock, out] = await Promise.all([
-        stockLeft(store, product).catch(() => null),
+        // A count that cannot be read is undefined, never null: null is a product nobody limited (rule 24).
+        stockLeft(store, product).catch(() => undefined),
         outOfKeys(store, product).catch(() => false),
       ]);
       return out ? 0 : stock;
@@ -269,9 +270,12 @@ export default async function StorePage({ params, searchParams }: Params) {
   const coming = await soonState(store).catch(() => ({ soon: new Set<string>(), days: new Map<string, string>() }));
   const soon = coming.soon;
   const left = new Map<string, number>();
+  // Drawn as sold out is (0 left), with words of their own saying the count could not be checked.
+  const unread = new Set<string>();
   listings.forEach((product, i) => {
     const count = counts[i];
-    if (count !== null) left.set(product.id, count);
+    if (count === undefined) unread.add(product.id);
+    if (count !== null) left.set(product.id, count ?? 0);
   });
 
   // Which parts of the page have something to show (lib/store-order.ts): only those are drawn.
@@ -460,6 +464,7 @@ export default async function StorePage({ params, searchParams }: Params) {
                             cart={cartOn && !soon.has(product.id) && cartable(product)}
                             sold={soldLine(soldCounts?.byProduct[product.id])}
                             grid
+                            stockUnknown={unread.has(product.id)}
                           />
                         ))}
                       </ul>

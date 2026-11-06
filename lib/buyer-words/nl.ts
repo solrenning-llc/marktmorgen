@@ -123,6 +123,7 @@ export const nl: BuyerWords = {
   noDates: "Er zijn nu geen data te koop.",
   notOnSale: "Nog niet te koop.",
   soldOutStop: "Uitverkocht.",
+  stockUnknown: "De voorraad kon nu niet worden gecontroleerd. Probeer het over een paar minuten opnieuw.",
   cannotTakePayments: "Deze winkel kan nog geen betalingen ontvangen.",
   joinWaitlist: "Op de wachtlijst",
   getItFree: "Gratis ontvangen",

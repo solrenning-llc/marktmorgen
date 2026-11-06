@@ -142,6 +142,8 @@ export const en = {
   noDates: "No dates on sale right now.",
   notOnSale: "Not on sale yet.",
   soldOutStop: "Sold out.",
+  // A limited product whose count could not be read (lib/stock.ts stockLeft threw): never drawn as one nobody limited.
+  stockUnknown: "Stock could not be checked right now. Please try again in a few minutes.",
   cannotTakePayments: "This store cannot take payments yet.",
   joinWaitlist: "Join the waitlist",
   getItFree: "Get it free",

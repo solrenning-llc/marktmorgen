@@ -37,6 +37,8 @@ const world = {
   moreCharges: false,
   /** An exact stand-in answer for the paid-invoice list; undefined keeps the normal list. */
   invoiceListReply: undefined as unknown | undefined,
+  /** One exact list/search response used to prove that partial history rows stay unknown. */
+  historyReply: null as { path: "/charges" | "/charges/search" | "/customers/search"; customer?: string; data: unknown[] } | null,
   /** A customer's Stripe balance (negative: a credit), 0 when not set. */
   balance: new Map<string, number>(),
   calls: 0,
@@ -70,6 +72,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return page(world.invoices.filter((i) => i.subscription === q.get("subscription") && i.status === q.get("status")).sort((a, b) => Number(b.created) - Number(a.created)));
   }
   if (path === "/charges") {
+    if (world.historyReply?.path === path && (!world.historyReply.customer || world.historyReply.customer === q.get("customer"))) {
+      return page(world.historyReply.data);
+    }
     const lt = Number(q.get("created[lt]") ?? Infinity);
     const rows = world.charges.filter((c) => c.customer === q.get("customer") && c.created < lt).sort((a, b) => b.created - a.created).map((c) => ({ ...c, balance_transaction: "txn_unexpanded" })).slice(0, Number(q.get("limit") ?? 10));
     return page(rows, world.moreCharges);
@@ -87,12 +92,14 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return row ? json(row) : json({ error: { message: "No such charge" } }, 404);
   }
   if (path === "/charges/search") {
+    if (world.historyReply?.path === path) return searchPage(world.historyReply.data);
     const query = q.get("query") ?? "";
     const fp = query.match(/fingerprint:"(\w+)"/)?.[1];
     const lt = Number(query.match(/created<(\d+)/)?.[1] ?? Infinity);
     return searchPage(world.charges.filter((c) => (c.payment_method_details as { card: { fingerprint: string } }).card.fingerprint === fp && c.status === "succeeded" && c.created < lt));
   }
   if (path === "/customers/search") {
+    if (world.historyReply?.path === path) return searchPage(world.historyReply.data);
     const email = (q.get("query") ?? "").match(/email:"([^"]+)"/)?.[1];
     return searchPage([...world.customers].filter(([, e]) => e === email).map(([id, e]) => ({ id, email: e })));
   }
@@ -260,6 +267,23 @@ async function main() {
     is("an unreadable paid-invoice list is unknown, never no payment", (await unreadablePaid.read()).refund, { kind: "unknown", reason: "unreadable" });
   }
   world.invoiceListReply = undefined;
+
+  part("Partial history rows are unknown, never proof that nobody paid before");
+  const partialHistory = await shop();
+  pay(partialHistory, { at: NOW - 3 * DAY });
+  for (const data of [[{}], [{ id: "cus_partial0001" }]]) {
+    world.historyReply = { path: "/customers/search", data };
+    is("a customer search row needs its identity and address", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  }
+  for (const data of [[{}], [{ id: "ch_partial0001" }]]) {
+    world.historyReply = { path: "/charges/search", data };
+    is("a card search row needs its identity, state and time", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  }
+  for (const data of [[{}], [{ id: "ch_partial0001", status: "succeeded", paid: true }]]) {
+    world.historyReply = { path: "/charges", customer: partialHistory.customer, data };
+    is("a charge history row needs its identity, state and time", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  }
+  world.historyReply = null;
   world.down = true;
   is("Stripe failing: unknown", (await a.read()).refund, { kind: "unknown", reason: "stripe_unread" });
   world.down = false;

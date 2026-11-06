@@ -71,6 +71,8 @@ const REDIS_SCORE = /^[1-9]\d{0,11}$/;
  * KEYS[1] the address's imported purchases, KEYS[2] its payments for the product; ARGV[1] the product, ARGV[2] the
  * refunded payment's job, ARGV[3..] the other payments already read as not keeping it. A payment that came in since
  * (one not in ARGV), or a record that is now another's, answers 0 and nothing is taken; 1 is taken, 2 was already gone.
+ * Billed as the EVAL plus each redis.call (Upstash): at most 4 commands a take-back (EVAL, SMEMBERS, HGET, HDEL),
+ * against the 1 HDEL it replaced, for at most the 25 due orders a store's watch reads a run (Revisor 1 on #2809).
  */
 const PAYPAL_REVOKE = `-- marktmorgen:paypal-revoke:v1
 local known = {}

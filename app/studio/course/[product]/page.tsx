@@ -34,7 +34,7 @@ import { isBillingConfigured } from "@/lib/billing";
 import { can } from "@/lib/team-roles";
 import { parseLanguage } from "@/lib/store-language";
 import { CourseWorkStudio, type StudioWork } from "@/components/course-work-studio";
-import { submissionsOf, waitingWork } from "@/lib/assignment";
+import { isUnreadSubmission, submissionsOf, waitingWork } from "@/lib/assignment";
 
 
 export const metadata: Metadata = {
@@ -108,8 +108,10 @@ export default async function StudioCoursePage({
   const workRows: StudioWork[] = work.rows.flatMap((row, i) => {
     const submission = handed[i];
     const title = titles.get(row.lessonId);
-    return submission && title !== undefined ? [{ lessonId: row.lessonId, lessonTitle: title, who: row.who, email: addresses[i] ?? "", submission }] : [];
+    return submission && !isUnreadSubmission(submission) && title !== undefined ? [{ lessonId: row.lessonId, lessonTitle: title, who: row.who, email: addresses[i] ?? "", submission }] : [];
   });
+  // Work that is there but whose record does not read is said in the list, never left out of it (CX-123 rule 24).
+  const unreadWork = work.rows.filter((row, i) => isUnreadSubmission(handed[i]) && titles.has(row.lessonId)).length;
   const byId = new Map(recent.comments.map((c) => [c.id, c]));
   const shownComments: StudioComment[] = recent.comments
     .filter((c) => titles.has(c.lesson))
@@ -210,6 +212,7 @@ export default async function StudioCoursePage({
           <CourseWorkStudio
             productId={product.id}
             rows={workRows}
+            unread={unreadWork}
             total={work.total}
             showing={showingWork}
             hrefs={{ waiting: `${studioPath(store, "", `course/${product.id}`)}#work`, all: `${studioPath(store, "work=all", `course/${product.id}`)}#work` }}

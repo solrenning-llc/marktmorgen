@@ -70,6 +70,7 @@ async function main(): Promise<void> {
   is("a 200 whose list is not a list: retry, nothing sent", await forwardUnder(200, { object: "list", data: "none" }), ["retry", 0]);
   is("a 200 that is not JSON: retry, nothing sent", await forwardUnder(200, "<html>oops</html>"), ["retry", 0]);
   is("a 200 with null: retry, nothing sent", await forwardUnder(200, "null"), ["retry", 0]);
+  is("a 200 whose list holds an entry that is not an object: retry, nothing sent", await forwardUnder(200, { object: "list", data: [null] }), ["retry", 0]);
 
   part("And once Resend answers again, the message goes on with its file");
   is("sent, with receipt.pdf", [await forwardUnder(200, ONE_FILE), sent.at(-1)?.attachments?.map((a) => a.filename)], [["sent", 1], ["receipt.pdf"]]);

@@ -1,3 +1,29 @@
+# PONTO VIGENTE — 05/11/2026, retorno nominal ACK e três pareceres S
+
+Checkpoint613d8cb3824afb487d65791a36160076e1d49b0b lido COMPLETO, main/caixaCodex emce89c4d6eae45abbb6889fb2b983beb48dffc125 e canalnovo lidos. Esta execução NÃO foi descartada por mera recência docheckpoint. Nada de heads/REDs/WIP/retentativas consumidas mudou; histórico integral abaixo.
+
+CINCO próprias permanecem EXACTAMENTE:2602/75617eb5757d950feaddfb9b1386abca82ca94b3;2615/fc5d371c5375e0ee2f06a26e81b3871cbec2ba2e;2739/14ce1adb045772eec896494d5c9ce623e34773df;2740/410e68747b30edea76d02f184874189f954ef085;2741/806c11f8211e636c1b5fcca79f85573a91adc7f9. Nenhuma sexta, merge, retry, headmove ou nova junção main. Snapshot jáintegrado ba887611 UMAvez cada preservado; WIPb096ancestral2602. Nunca trazerce89porchurn.
+
+NOVIDADE S2741: parecer formal5794737821 SEMACHADO/MAYMERGE no806cEXATO, confirmado API+canal. Agora asTRÊS novas2739/2740/2741têmindependenteSsemachado. UMAconsulta motivadaporesseparecer no2741 revelou8success+1in_progress, runativo42145628087; os9IDs anteriores são osmesmos. Nãoé9success, não merge. Não voltei aosCIs2602/2615/2739/2740nemsondei2741depois; nenhum repoll emrodadas. Próximo: novidade terminal→reler9/head/reviews/merge-treeclean→NORMALexpected_head_sha. 2602duasfinanceirasE2/C2 e2615Qaplicáveis permanecem. Retentativas2484verify127130387972,2615verify127143841589/mac127144213372 CONSUMIDAS para sempre, jamais repetir.
+
+## Retorno2724 concluído — original53GREEN, residual count2RED
+
+C6pedido22h54 delta115f71d3..2832cd1ef741c45113208daa217e8001ae7b6eec(ACK/registry). Atualfonte58aa1d7995ff5ff9d5f6ce532197d90603de801f incluiQpagamentoidnão-vazio. AnúncioANTESexecução37a456ef4cb0d3ddaf20eaea0d73b9e64aaac47a; reserva adicional sóevidênciaprópria ec74711c8faf6e90e9cbad3091510563756efa58. QmantémcamposStripe eprimeira, nãodupliquei.
+ProvaINALTERADA z2724-write-ack53/53: missingACK fechado. Delta completo4files lido, registryagoranomeiaSISMEMBER/reads, notaestruturalfechada, nenhumaalegaçãodefinanciamentocompany/USD.
+ResidualMESMAfronteira: countOfqualquerinteiro>=0 aceitoemHDELumcampo(gifts315–319,preorders486–490), mas domínioexato0/1. Nova tests/z2724-single-count.proof.ts cópia53casesapenasundefined→2+comentários: sóHDELalvonãoexecuta,resposta2impossível, demaisfixtureexecutam. Ambasjornadasreportamrevoked1/acessopersiste/seen1/anchoravança;saudávelretry0/acessopersiste.53checks/8falhascausais/45controles, amboslocaisatingidos. TambémreconciliardomíniosHSET/SADDumitem/EXPIRE, nãointeirogenérico.
+ParecerCOMMENT **5795016677**, 58aaEXATO, **1MÉDIO residual/NÃO LIBERADO**. Prova+relatório duráveis **codex/z-review-2724-paid-access@93ac644d499f6b14249342f5063cf6f73b72922a**, tree01a5852abcefd0b0228e6ff36c1edababb13e445, tests/z2724-single-count.proof.ts + docs/reviews/z-2724-paid-access.md. Originais53e40intactas. Autor77+33+31+22+17+100+24+7=311ligadosPASS, scopedTSCincluindoprovas0/lint0/scanner3807/0/diff/treeigual; newproofintencionalRED. No nativeRedis/browser/realprovider/payment/globalbuild/CIalheio/merge. AutorcorrigenoMESMO2724; próximaação sócorretivoNOMINAL do domínioACK; MESMAprova53precisapassar, nãooutroreviewintegral.
+Localdetachednovo z-return-2724-ack@58aa semediçãoproduto, node_modulessymlinkdonor776. Ownlocalc293f39ad difereassinaturaremota93ac, árvoreigual, nãoempurrarnativeporengano. Logs/tmp/z2724-single-{count,linked,types,lint,scanner}.log (countem/tmp/z2724-single-count.log); originalGREEN/tmp/z2724-ack-final.log. Config/tmp/z2724-single-types.json. Primeiracomandoshellpsfalhoufatal librarylookup;ls/gitseguintesnormais, nada de execução duplicada inferida.
+
+## Aplicabilidade2709 solicitada Q, concluída
+
+Qanuncioumain-only3452609da586d0a60128a7f3b27c647e1361e96a. Confirmeipaisdf8c+ba887611, bloblibstoreforgeta462336e/testeautor0abf6b8aIDÊNTICOS, ownattributionSTORE_FORGET_MONTH_READ_COMMANDSinalterada; registryapenasacréscimomainCHECKOUT_TROUBLE_READ. Parecer **5795021479** qualifica5794179820 AO345EXATO(CX122.8), MAYMERGEsó9novos/normalcleanpeloQ. Não repeti suitesidênticas,nãoproduçãofundingwiringcertificada. Prova anterior eebdb70cintacta.
+
+## Parada e vigia
+
+Vigiaúnica lançadaMESMOflock/tmp/codex-z-main-watch.lock, /tmp/z-main-watch.sh sessão12669, fetch60s,sóinbox/main,prazo3500s; semautenticaçãoCLIparaCI, nãoalegarwatch9CIs. RespeitarS/ Qrevisõesanunciadas; nãoabrirsextoproduto. AchadosS store-export75–84/api-numbers68–83 sãoLEITURAdele, donoC1atribui; nãoabsorverduplicado. Nenhuma hipóteseestáticadeZvirouachadosemprova. Próximopermitido: retornoautoralACK2724/retornoownouCIterminal, seguindoordemusuário. Publicar≤30min/pontoexatocanal. BloqueiotemporárioCI/capacidade,nãofimdaauditoria. Histórico completo abaixo.
+
+---
+
 # Novidade de posse — 05/11/2026 22h52 Fortaleza
 
 Codex S ANUNCIOU e assumiu #2741/head806c11f8211e636c1b5fcca79f85573a91adc7f9, canal confirmado antes do ponto de parada. Revisão EM ANDAMENTO, não final. NÃO pedir/iniciar revisão concorrente. #2739 e #2740 já SEM ACHADO S; CI nove de cada QUEUED na consulta causal por parecer, demais estado abaixo. Nenhum produto/head/check/retentativa mudou por esta nota.

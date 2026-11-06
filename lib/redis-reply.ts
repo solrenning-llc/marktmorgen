@@ -30,7 +30,8 @@ export function repliesFor(replies: unknown, commands: number): unknown[] | null
   const exact: unknown[] = [];
   for (let i = 0; i < commands; i += 1) {
     const slot = Object.getOwnPropertyDescriptor(replies, i);
-    if (!slot || !("value" in slot)) return null;
+    // Its own data value only: `in` would also find a `value` inherited from a polluted Object.prototype (G, a586f20d).
+    if (!slot || !Object.hasOwn(slot, "value")) return null;
     exact.push(slot.value);
   }
   return exact;

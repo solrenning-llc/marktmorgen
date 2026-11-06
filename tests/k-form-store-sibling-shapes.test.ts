@@ -26,7 +26,7 @@ async function main() {
       redis.pipeline = async batch => {
         if (commands + batch.length > 20) throw Error('Twenty application commands per case is the ceiling');
         commands += batch.length;
-        if (!injected && batch[0][0] === scenario.command) { injected++; return reply; }
+        if (!injected && batch[0][0] === scenario.command && (scenario.name !== 'keep receipt' || String(batch[0][1]).startsWith('-- marktmorgen:form-keep:'))) { injected++; return reply; }
         if (injected) after += batch.length;
         return pipeline(batch);
       };

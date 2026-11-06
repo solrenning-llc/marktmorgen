@@ -85,12 +85,13 @@ async function main(): Promise<void> {
   for (const [label, value] of [["negative", -1], ["fractional", 1.5], ["unsafe", Number.MAX_SAFE_INTEGER + 1]] as const) {
     is(`${label} cached visits are unknown, never shown as a count`, await withReply([JSON.stringify({ [broadcast]: value })], () => readMailVisits(creator, [broadcast])), null);
   }
-  const newer = "broadcast_MailRevenueNewer";
+  const cached = "a1";
+  const newer = "b2";
   const fresh = Array.from({ length: 90 }, (_, day) => day === 89 ? [5, 0, 0, 7, 0, 0] : [0, 0, 0, 0, 0, 0]);
   is(
     "a valid cache missing a newer email is read afresh rather than hiding every count",
-    await withReplies([[JSON.stringify({ [broadcast]: 3 })], fresh, ["OK"]], () => readMailVisits(creator, [broadcast, newer])),
-    { value: { [broadcast]: 5, [newer]: 7 }, calls: 3 },
+    await withReplies([[JSON.stringify({ [cached]: 3 })], fresh, ["OK"]], () => readMailVisits(creator, [cached, newer])),
+    { value: { [cached]: 5, [newer]: 7 }, calls: 3 },
   );
 
   done();

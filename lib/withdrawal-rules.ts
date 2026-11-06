@@ -126,13 +126,15 @@ export function acknowledgement(
   store: string,
   submittedMs: number,
   w: WithdrawalWords = WITHDRAWAL_WORDS.en,
+  /** Whether the statement reached the store: only then does the acknowledgement say it was passed on. */
+  told = true,
 ): { subject: string; text: string; when: string } {
   const when = utcMoment(submittedMs);
   return {
     when,
     subject: w.ackSubject(product),
     text: [
-      w.ackReceived(when, store),
+      told ? w.ackReceived(when, store) : w.ackReceivedUntold(when, store),
       "",
       w.ackWhatYouSent,
       `${w.ackName}: ${statement.name}`,

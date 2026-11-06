@@ -361,6 +361,8 @@ export type Purchase = {
    * withdrawal function (lib/withdrawal-rules.ts, 588 [KB9]).
    */
   consent?: KeptConsent | null;
+  /** Shipped by the creator (the checkout's metadata ship=yes): its withdrawal period runs from a receipt not known here. */
+  shipped?: boolean;
   /** Paid for with PayPal, into the creator's own PayPal account (lib/paypal-sales.ts). */
   paidWith?: "paypal";
   /** Given by the creator's own tools, through the API (lib/api-write.ts): no payment, and not brought over either. */
@@ -636,6 +638,7 @@ async function purchaseFromSession(
       reference: id,
       kind: "sale",
       consent: readConsentMeta(meta),
+      shipped: meta.ship === "yes",
       title: product.title,
       option: null,
       paidAt: typeof session.created === "number" ? session.created : 0,
@@ -662,6 +665,7 @@ async function purchaseFromSession(
       reference: id,
       kind: "sale",
       consent: readConsentMeta(meta),
+      shipped: meta.ship === "yes",
       title: ordersWords(store.language).packageTitle(product.title, bought.total),
       option: null,
       paidAt: typeof session.created === "number" ? session.created : 0,
@@ -690,6 +694,7 @@ async function purchaseFromSession(
         reference: id,
         kind: "sale",
         consent: readConsentMeta(meta),
+        shipped: meta.ship === "yes",
         title: product.title,
         option: null,
         paidAt: typeof session.created === "number" ? session.created : 0,
@@ -725,6 +730,7 @@ async function purchaseFromSession(
     reference: id,
     kind: "sale",
     consent: readConsentMeta(meta),
+    shipped: meta.ship === "yes",
     title: product.title,
     option,
     paidAt: typeof session.created === "number" ? session.created : 0,
@@ -784,6 +790,7 @@ async function purchaseFromIntent(store: Store, intent: Row, find: Finder, lines
     reference: id,
     kind: "upsell",
     consent: readConsentMeta(meta),
+    shipped: meta.ship === "yes",
     title: product.title,
     option: null,
     paidAt: typeof intent.created === "number" ? intent.created : 0,

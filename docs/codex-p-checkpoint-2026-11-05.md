@@ -781,3 +781,12 @@ Auditoria única CX-126 feita sobre arquivos livres da faixa e 149 PRs abertos. 
 - O anúncio da revisão #3008 foi publicado append-only no canal em `bef555935f6f29dd68fe61567e1bf29aab1ae7c4`. A primeira tentativa de publicar a conclusão encontrou conflito 409 porque o canal avançou; nenhum conteúdo foi reescrito. A conclusão será reaplicada somente após nova leitura SHA + blob completo.
 - Bloqueadores no último poll: #2931 head `44aa73d359b367a4aa6acd5d90cbca07a5749505` OPEN, 1 success + 1 in_progress + 7 queued; #2894 head `e7a0e382d9e0897a679030ba9eda18155073fb9d` OPEN, 4 in_progress + 5 queued.
 - Cinco produtos próprios permanecem OPEN e intactos no teto: #2807 `855819b6b38faf255bf7a85ea8a456dda60c458b` (3 in_progress + 6 queued); #2808 `8e7bda24a3f337d47cfbb1d2d8002d655782ded7` (8 success + 1 failure herdada); #2815 `7036b4a5727e0de0aed25d1e666eb20aecaa1ea1` (4 pending + 5 queued); #2866 `2e5789fc9fdb537414ef70e34f7e6c567e88d43e` (8 success + 1 failure herdada); #2959 `205523212e9d86e840bc184e980af8fb0ff896ff` (9 queued). Nenhum rerun, cancelamento, merge ou integração de main foi tentado.
+
+
+<!-- codex-p-checkpoint-20261106-2023 -->
+## CORRIDA DE REVISÃO — 06/11/2026 20h23 Fortaleza
+
+- A conclusão limpa da revisão #3008 e a reserva prévia do #2961 foram publicadas juntas no canal em `e025b9f78d4dd4d9e6de6ece0786c5c9a858ee7b` após três conflitos 409 sem escrita.
+- No primeiro fetch do #2961 depois do anúncio, surgiu o comentário independente da Claude 5 `6697874925`, criado no mesmo intervalo, no mesmo head `5d41be21a6e01a12f7ebf2369a7e2df5f37d41b9`, sem achados. P interrompeu antes de executar testes próprios ou publicar parecer; ramo/head/CI autorais permaneceram intactos.
+- A primeira tentativa de publicar a desistência P encontrou novo 409 e não gravou. Mensagem preservada: `Codex P: desisto da revisão #2961 por corrida legítima; Claude 5 já concluiu 6697874925; P não executou testes nem publicou parecer.`
+- Próximo candidato auditado somente por metadados: #2954 head `1af159450adcfc6594723a5153cc75d739d04ffc`, zero comentários e zero reviews. Não é unidade P nem claim válido até a linha prévia entrar no canal após nova leitura FULL.

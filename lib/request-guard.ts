@@ -133,22 +133,42 @@ async function sha256Hex(value: string): Promise<string> {
  * provider or data work. Same existing counter/key/TTL; uncertainty consumes
  * any committed increment and never authorizes a retry or readback. */
 export async function withinEssentialLimit(scope: string, who: string, limit: number, windowSeconds: number): Promise<boolean> {
+  return (await essentialLimitState(scope, who, limit, windowSeconds)) === "within";
+}
+
+/** What an essential limit's counter says: room, no room, or not known. */
+export type LimitState = "within" | "exceeded" | "unknown";
+
+/**
+ * The same counter, key and TTL as withinEssentialLimit, with three answers,
+ * so a caller can answer "past the limit" (429) apart from "the count is not
+ * known" (503) and never tell someone to slow down when the counter could not
+ * be read (VR; Codex Z on #2773). "unknown" for Redis not configured or not
+ * answering, a reply in any other shape, or a limit or window that is not a
+ * positive whole number; an increment that may have been committed is spent,
+ * never retried or read back.
+ */
+export async function essentialLimitState(scope: string, who: string, limit: number, windowSeconds: number): Promise<LimitState> {
   if (!isRedisConfigured() || !Number.isSafeInteger(limit) || limit <= 0 ||
-      !Number.isSafeInteger(windowSeconds) || windowSeconds <= 0) return false;
+      !Number.isSafeInteger(windowSeconds) || windowSeconds <= 0) return "unknown";
+  let reply: unknown;
   try {
     const key = `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
-    const reply: unknown = await redisPipeline([
+    reply = await redisPipeline([
       ["SET", key, "0", "EX", windowSeconds, "NX"],
       ["INCR", key],
     ]);
-    if (!Array.isArray(reply)) return false;
-    const length = Object.getOwnPropertyDescriptor(reply, "length");
-    if (!length || !Object.hasOwn(length, "value") || length.value !== 2) return false;
-    const set = Object.getOwnPropertyDescriptor(reply, "0"), count = Object.getOwnPropertyDescriptor(reply, "1");
-    if (!set || !Object.hasOwn(set, "value") || (set.value !== null && set.value !== "OK") ||
-        !count || !Object.hasOwn(count, "value") || !Number.isSafeInteger(count.value) || count.value <= 0) return false;
-    return count.value <= limit;
-  } catch { return false; }
+  } catch {
+    return "unknown";
+  }
+  let count: number | null;
+  try {
+    count = counterReply(reply);
+  } catch {
+    return "unknown";
+  }
+  if (count === null) return "unknown";
+  return count <= limit ? "within" : "exceeded";
 }
 
 export async function withinLimit(scope: string, who: string, limit: number, windowSeconds: number): Promise<boolean> {

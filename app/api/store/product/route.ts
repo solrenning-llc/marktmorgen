@@ -281,8 +281,12 @@ export async function POST(request: NextRequest) {
       // options holds one file per option as well as its own.
       // A course's handed-in work is read before the product goes (Revisor 1 on #2810): a read that fails answers 503
       // and removes nothing, so the work, its files and the room they take stay findable for the next try.
-      const before = await readListing(guarded.store, id).catch(() => null);
-      const beforeCourse = before?.course ? await readCourse(before.course.id).catch(() => null) : null;
+      // A product or course that cannot be read is unknown, never "not a course" (Revisor 1 on #2810).
+      const UNREAD = Symbol("unread");
+      const before = await readListing(guarded.store, id).catch((error: unknown) => (console.error("could not read a product before removing it", error), UNREAD));
+      if (before === UNREAD) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      const beforeCourse = before?.course ? await readCourse(before.course.id).catch((error: unknown) => (console.error("could not read a course before removing its product", error), UNREAD)) : null;
+      if (beforeCourse === UNREAD) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
       const taskDrops = beforeCourse
         ? await readCourseTaskDrops(beforeCourse).catch((error: unknown) => (console.error("could not read a course's handed-in work", error), null))
         : [];

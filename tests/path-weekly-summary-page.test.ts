@@ -23,7 +23,8 @@ test("actual Path page summarizes only saved dates, keeps the current streak and
   assert.match(summary, /Your week in Path/);
   assert.match(summary, /2 saved check-in days this week/);
   assert.match(summary, /America\/New_York/);
-  assert.match(summary, /Current streak: 1 check-in day\./);
+  // Existing streakOf keeps all three saved days across its two allowed rest days and Sunday.
+  assert.match(summary, /Current streak: 3 check-in days\./);
   assert.match(summary, /0 rest days left this week\./);
   assert.ok(hasDay(summary, "2026-11-02") && hasDay(summary, "2026-11-08"));
   assert.match(summary, /Recorded through/);

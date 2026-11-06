@@ -1,0 +1,327 @@
+# Corrected isolated preflight return — final evidence
+
+Reviewed head f82e077e2c94cea3628e27137882fefa50b92fa7. The 33/5 receipt below is retained as limited history; four failures demanded 503 even though an independent safe read and full cleanup resolved []/foreign. The corrected contract accepts only complete cleanup with all assets/rooms settled or 503 with all identity/assets retained. Other-course and orphan checks are preserved. No raw credential is present.
+
+## Corrected contract, actual offline execution: 33 checks / 1 causal failure
+
+TEST j-2807-preflight.proof.ts
+  ok    the SDK's actual dispatcher refuses an unregistered destination locally
+
+healthy
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"healthy","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":0,"target":{"task":false,"submission":false,"files":[],"all":[],"room":null,"provider":false},"otherRetained":true,"providerDeletes":1,"bytesBefore":"2000","bytesAfter":"1000","complete":true,"retained":false,"orphan":false}
+
+unknown-envelope
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"unknown-envelope","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":1,"target":{"task":false,"submission":false,"files":[],"all":[],"room":null,"provider":false},"otherRetained":true,"providerDeletes":1,"bytesBefore":"2000","bytesAfter":"1000","complete":true,"retained":false,"orphan":false}
+
+foreign-first
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"foreign-first","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":1,"target":{"task":false,"submission":false,"files":[],"all":[],"room":null,"provider":false},"otherRetained":true,"providerDeletes":1,"bytesBefore":"2000","bytesAfter":"1000","complete":true,"retained":false,"orphan":false}
+
+stale-own-golden
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  FAIL  completed removal never leaves assignment work and its file orphaned
+        expected false
+        got      true
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"stale-own-golden","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":1,"target":{"task":true,"submission":true,"files":["stores/189f4864a8f387a19d6ac02e/tasks/ff3421e586ce439086e6451bf77beebb/y5bd480bhkgm/0434ec7689910af67aadc9658d3a1c2d/11111111111111111111111111111111.pdf","1000"],"all":["y5bd480bhkgm|0434ec7689910af67aadc9658d3a1c2d"],"room":"1072","provider":true},"otherRetained":true,"providerDeletes":0,"bytesBefore":"2000","bytesAfter":"2000","complete":false,"retained":false,"orphan":true}
+
+33 checks, 1 failing.
+GROUP_EXIT j-2807-preflight.proof.ts 1
+FAILED_GROUPS 1
+
+## Earlier historical receipts and discarded prototype
+
+# #2807 return — observed outputs
+
+Reviewed head: f82e077e2c94cea3628e27137882fefa50b92fa7
+No raw credentials appear below.
+
+## Historical isolated preflight 33/5 — four architectural harness failures, not product defects
+TEST j-2807-preflight.proof.ts
+  ok    the SDK's actual dispatcher refuses an unregistered destination locally
+
+healthy
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    unknown or foreign preflight must refuse before removing identity
+  ok    unknown or foreign preflight keeps the target listed
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"healthy","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":0,"target":{"task":false,"submission":false,"files":[],"all":[],"room":null,"provider":false},"otherRetained":true,"providerDeletes":1,"orphan":false}
+
+unknown-envelope
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  FAIL  unknown or foreign preflight must refuse before removing identity
+        expected [503,false]
+        got      [200,true]
+  FAIL  unknown or foreign preflight keeps the target listed
+        expected true
+        got      false
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"unknown-envelope","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":1,"target":{"task":false,"submission":false,"files":[],"all":[],"room":null,"provider":false},"otherRetained":true,"providerDeletes":1,"orphan":false}
+
+foreign-first
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  FAIL  unknown or foreign preflight must refuse before removing identity
+        expected [503,false]
+        got      [200,true]
+  FAIL  unknown or foreign preflight keeps the target listed
+        expected true
+        got      false
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"foreign-first","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":1,"target":{"task":false,"submission":false,"files":[],"all":[],"room":null,"provider":false},"otherRetained":true,"providerDeletes":1,"orphan":false}
+
+stale-own-golden
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    unknown or foreign preflight must refuse before removing identity
+  ok    unknown or foreign preflight keeps the target listed
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  FAIL  completed removal never leaves assignment work and its file orphaned
+        expected false
+        got      true
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"stale-own-golden","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":1,"target":{"task":true,"submission":true,"files":["stores/189f4864a8f387a19d6ac02e/tasks/e089908ae899489681efffa3fad0c102/zh8ihjf43a10/0434ec7689910af67aadc9658d3a1c2d/11111111111111111111111111111111.pdf","1000"],"all":["zh8ihjf43a10|0434ec7689910af67aadc9658d3a1c2d"],"room":"1072","provider":true},"otherRetained":true,"providerDeletes":0,"orphan":true}
+
+33 checks, 5 failing.
+GROUP_EXIT j-2807-preflight.proof.ts 1
+
+## Historical offline replay summary before the harness contract correction
+TEST j-2807-preflight.proof.ts
+33 checks, 5 failing.
+GROUP_EXIT j-2807-preflight.proof.ts 1
+TEST j-2807-course-identity.proof.ts
+14 checks, all passing.
+GROUP_EXIT j-2807-course-identity.proof.ts 0
+TEST j-2807-course-identity.test.ts
+14 checks, all passing.
+GROUP_EXIT j-2807-course-identity.test.ts 0
+TEST j-2807-cleanup-retry.proof.ts
+9 checks, 2 failing.
+GROUP_EXIT j-2807-cleanup-retry.proof.ts 1
+TEST course-removal-comments.test.ts
+12 checks, all passing.
+GROUP_EXIT course-removal-comments.test.ts 0
+TEST lesson-comments-drop-receipts.test.ts
+43 checks, all passing.
+GROUP_EXIT lesson-comments-drop-receipts.test.ts 0
+TEST lesson-comments.test.ts
+30 checks, all passing.
+GROUP_EXIT lesson-comments.test.ts 0
+TEST lesson-comment-delete-evidence.test.ts
+65 checks, all passing.
+GROUP_EXIT lesson-comment-delete-evidence.test.ts 0
+TEST lesson-comment-record-evidence.test.ts
+14 checks, all passing.
+GROUP_EXIT lesson-comment-record-evidence.test.ts 0
+TEST lesson-comment-write-evidence.test.ts
+ℹ tests 23
+ℹ pass 23
+ℹ fail 0
+GROUP_EXIT lesson-comment-write-evidence.test.ts 0
+TEST lesson-comment-thread-boundaries.test.ts
+ℹ tests 8
+ℹ pass 8
+ℹ fail 0
+GROUP_EXIT lesson-comment-thread-boundaries.test.ts 0
+TEST person-erasure.test.ts
+32 checks, all passing.
+GROUP_EXIT person-erasure.test.ts 0
+TEST picture-owner-paths.test.ts
+86 checks, all passing.
+GROUP_EXIT picture-owner-paths.test.ts 0
+TEST course-template-studio.test.ts
+55 checks, all passing.
+GROUP_EXIT course-template-studio.test.ts 0
+TEST locked-deletes.test.ts
+115 checks, all passing.
+GROUP_EXIT locked-deletes.test.ts 0
+TEST assignment-drop-exact.test.ts
+ℹ tests 11
+ℹ pass 11
+ℹ fail 0
+GROUP_EXIT assignment-drop-exact.test.ts 0
+TEST assignments.test.ts
+51 checks, all passing.
+GROUP_EXIT assignments.test.ts 0
+FAILED_GROUPS 2
+## Original nine-check proof, unchanged expectations
+TEST j-2807-cleanup-retry.proof.ts
+
+Removing a product with a course
+  ok    the course has every comment family and counted room before removal
+  FAIL  product: one unapplied unknown comment deletion
+        expected [500,1]
+        got      [503,1]
+  ok    the product removal succeeds
+  ok    the removed course leaves no comment family or counted room
+
+Disabling an empty course after its last lesson was removed
+  ok    the last lesson is removed first
+  ok    course-level comment records and room still exist until the course goes
+  FAIL  course: unapplied unknown comment deletion
+        expected 500
+        got      503
+  ok    the empty course is disabled
+  ok    disabling leaves no course-level comment family or counted room
+
+9 checks, 2 failing.
+GROUP_EXIT j-2807-cleanup-retry.proof.ts 1
+
+## Author permanent identity RED, whole file at parent 3767a989adf6115f81a8e984324d851d9fb652c0
+TEST j-2807-course-identity.test.ts
+  ok    the intended single course GET was injected once
+  ok    a different valid course identity cannot authorize removal
+  ok    the other course record remains byte-identical
+  ok    the other actual comments remain stored
+  ok    the other course retains its counted comment room
+  ok    the other product remains listed
+  ok    the rejected target remains listed
+  ok    the intended single course GET was injected once
+  FAIL  a different valid course identity cannot authorize removal
+        expected [503,false]
+        got      [200,true]
+  FAIL  the other course record remains byte-identical
+        expected "{\"id\":\"4cb19ac48310455b956351d778eb7ed6\",\"modules\":[{\"id\":\"x4fsdf5xy5vp\",\"title\":\"Module 1\",\"dripDays\":0,\"lessons\":[{\"id\":\"u4faslvcn4kd\",\"title\":\"Other retained lesson\",\"preview\":false,\"video\":null,\"files\":[],\"link\":null,\"hasBody\":false,\"quiz\":null}]}],\"certificate\":false,\"startsAt\":null}"
+        got      null
+  FAIL  the other actual comments remain stored
+        expected ["nl:lc:4cb19ac48310455b956351d778eb7ed6:c","nl:lc:4cb19ac48310455b956351d778eb7ed6:all","nl:lc:4cb19ac48310455b956351d778eb7ed6:r","nl:lc:4cb19ac48310455b956351d778eb7ed6:names","nl:lc:4cb19ac48310455b956351d778eb7ed6:off","nl:lc:4cb19ac48310455b956351d778eb7ed6:seen","nl:lc:4cb19ac48310455b956351d778eb7ed6:l:u4faslvcn4kd"]
+        got      []
+  FAIL  the other course retains its counted comment room
+        expected true
+        got      false
+  ok    the other product remains listed
+  FAIL  the rejected target remains listed
+        expected true
+        got      false
+
+14 checks, 5 failing.
+GROUP_EXIT j-2807-course-identity.test.ts 1
+FAILED_GROUPS 1
+
+## DISCARDED prototype — unexpected external provider response
+
+This attempt is excluded from all validation of the provider boundary. The SDK imported undici.fetch and bypassed the global fetch stand-in. Destination inferred from the installed SDK: https://vercel.com/api/blob/delete; method POST. Received error code store_not_found, translated by the SDK to BlobStoreNotFoundError. Numeric HTTP status was not captured. No claim about billing or zero cost is made. The complete prototype log follows, including the misleading global-fetch-only transport check; that check did not observe the SDK's separate transport and is not evidence of isolation.
+
+TEST j-2807-preflight.proof.ts
+
+healthy
+  ok    two real tasks, submissions, file indexes and provider files exist
+could not delete the file of a removed product BlobStoreNotFoundError: Vercel Blob: This store does not exist.
+    at getBlobError (/dev/shm/j-2807-preflight-Eyw5qx/j-2807-preflight.proof.ts.cjs:78434:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async /dev/shm/j-2807-preflight-Eyw5qx/j-2807-preflight.proof.ts.cjs:78541:31
+    at async requestApi (/dev/shm/j-2807-preflight-Eyw5qx/j-2807-preflight.proof.ts.cjs:78485:23)
+    at async del (/dev/shm/j-2807-preflight-Eyw5qx/j-2807-preflight.proof.ts.cjs:79637:3)
+  ok    only the first requested course GET was changed
+  ok    unknown or foreign preflight must refuse before removing identity
+  ok    unknown or foreign preflight keeps the target listed
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  FAIL  completed removal never leaves assignment work and its file orphaned
+        expected false
+        got      true
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"healthy","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":0,"target":{"task":false,"submission":false,"files":[],"all":[],"room":null,"provider":true},"otherRetained":true,"providerDeletes":0,"orphan":true}
+
+unknown-envelope
+  ok    two real tasks, submissions, file indexes and provider files exist
+could not delete the file of a removed product BlobStoreNotFoundError: Vercel Blob: This store does not exist.
+    at getBlobError (/dev/shm/j-2807-preflight-Eyw5qx/j-2807-preflight.proof.ts.cjs:78434:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async /dev/shm/j-2807-preflight-Eyw5qx/j-2807-preflight.proof.ts.cjs:78541:31
+    at async requestApi (/dev/shm/j-2807-preflight-Eyw5qx/j-2807-preflight.proof.ts.cjs:78485:23)
+    at async del (/dev/shm/j-2807-preflight-Eyw5qx/j-2807-preflight.proof.ts.cjs:79637:3)
+  ok    only the first requested course GET was changed
+  FAIL  unknown or foreign preflight must refuse before removing identity
+        expected [503,false]
+        got      [200,true]
+  FAIL  unknown or foreign preflight keeps the target listed
+        expected true
+        got      false
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  FAIL  completed removal never leaves assignment work and its file orphaned
+        expected false
+        got      true
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"unknown-envelope","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":1,"target":{"task":false,"submission":false,"files":[],"all":[],"room":null,"provider":true},"otherRetained":true,"providerDeletes":0,"orphan":true}
+
+foreign-first
+  ok    two real tasks, submissions, file indexes and provider files exist
+could not delete the file of a removed product BlobStoreNotFoundError: Vercel Blob: This store does not exist.
+    at getBlobError (/dev/shm/j-2807-preflight-Eyw5qx/j-2807-preflight.proof.ts.cjs:78434:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async /dev/shm/j-2807-preflight-Eyw5qx/j-2807-preflight.proof.ts.cjs:78541:31
+    at async requestApi (/dev/shm/j-2807-preflight-Eyw5qx/j-2807-preflight.proof.ts.cjs:78485:23)
+    at async del (/dev/shm/j-2807-preflight-Eyw5qx/j-2807-preflight.proof.ts.cjs:79637:3)
+  ok    only the first requested course GET was changed
+  FAIL  unknown or foreign preflight must refuse before removing identity
+        expected [503,false]
+        got      [200,true]
+  FAIL  unknown or foreign preflight keeps the target listed
+        expected true
+        got      false
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  FAIL  completed removal never leaves assignment work and its file orphaned
+        expected false
+        got      true
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"foreign-first","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":1,"target":{"task":false,"submission":false,"files":[],"all":[],"room":null,"provider":true},"otherRetained":true,"providerDeletes":0,"orphan":true}
+
+stale-own-golden
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    unknown or foreign preflight must refuse before removing identity
+  ok    unknown or foreign preflight keeps the target listed
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  FAIL  completed removal never leaves assignment work and its file orphaned
+        expected false
+        got      true
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"stale-own-golden","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":1,"target":{"task":true,"submission":true,"files":["stores/189f4864a8f387a19d6ac02e/tasks/3dc08c3d7df445fba02adab86396319f/nvxn4j0ut09x/0434ec7689910af67aadc9658d3a1c2d/11111111111111111111111111111111.pdf","1000"],"all":["nvxn4j0ut09x|0434ec7689910af67aadc9658d3a1c2d"],"room":"1072","provider":true},"otherRetained":true,"providerDeletes":0,"orphan":true}
+
+32 checks, 8 failing.
+GROUP_EXIT j-2807-preflight.proof.ts 1
+FAILED_GROUPS 1

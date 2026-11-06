@@ -228,16 +228,17 @@ export async function readDirectory(): Promise<DirectoryRow[]> {
       // Read again below.
     }
   }
-  const sids: string[] = [];
+  // SSCAN may return a member more than once, in a page or across pages: each store is one row (Codex T on #2921).
+  const sids = new Set<string>();
   let cursor = "0";
   do {
     const page = await listedStores(cursor, 200);
-    sids.push(...page.sids);
+    for (const sid of page.sids) sids.add(sid);
     cursor = page.next;
-  } while (cursor !== "0" && sids.length < MAX_ROWS);
+  } while (cursor !== "0" && sids.size < MAX_ROWS);
   // A store read that failed is not a program that is not there: the read fails
   // and nothing is kept, and the page says the list could not be checked.
-  const stores = await Promise.all(sids.slice(0, MAX_ROWS).map((sid) => storeForId(sid)));
+  const stores = await Promise.all([...sids].slice(0, MAX_ROWS).map((sid) => storeForId(sid)));
   // A failed numbers read still shows the row without numbers, but that page is
   // not kept for the next visitors.
   let partial = false;

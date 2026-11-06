@@ -123,6 +123,7 @@ async function main(): Promise<void> {
     ["an event whose time is not a number", shaped(74, {}, { created: "now" })],
     ["an event without its dispute", { ...closing(75, "lost", "pi_tb14shape00000075"), data: { object: null } }],
     ["a payment that is neither an id, an object nor nothing", shaped(76, { payment_intent: 42 })],
+    ["a payment object whose id is empty", shaped(81, { payment_intent: { id: "" } })],
   ] as [string, Record<string, unknown>][]) {
     closings = [event];
     is(`${label}: the read is incomplete, so nothing moves past it`, (await lostDisputesSince("acct_1TestTb14Lost01", NOW - 600)).complete, false);
@@ -171,6 +172,13 @@ async function main(): Promise<void> {
   const [anchorAfter] = await redis.pipeline([["GET", preorderAnchor]]);
   is("a valid event from the other stream must not advance past unknown refunds", anchorAfter, anchorBefore);
   refundsMalformed = false;
+
+  part("Adversarial: an empty expanded payment id cannot be completed and passed over");
+  closings = [shaped(52, { payment_intent: { id: "" } })];
+  refunds = [];
+  await revokeRefundedPreorders(store, Date.now() + 10_000, drop);
+  is("the anchor stays before a lost dispute whose payment id is unknown", (await redis.pipeline([["GET", preorderAnchor]]))[0], anchorBefore);
+  await redis.pipeline([anchorBefore === null ? ["DEL", preorderAnchor] : ["SET", preorderAnchor, String(anchorBefore)]]);
 
   part("Adversarial: a refund without the status that decides success is unknown");
   refunds = [{

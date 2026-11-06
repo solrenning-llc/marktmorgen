@@ -22,8 +22,9 @@ import { cleanLine, cleanText } from "@/lib/community-text";
 import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { bundleFromMeta } from "@/lib/bundle-rules";
 import { onAccount } from "@/lib/stripe-account";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { confirmLostRead, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { formatMoney } from "@/lib/money";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
@@ -84,6 +85,28 @@ function parseKeptGift(raw: string, id: string): Gift | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Whether a gift is given, read exactly, for a run that found another run's
+ * giving mark (Codex CX1 on #2726; CX-123 rule 24): one reply, the record as
+ * text, JSON of this gift, and `given` a positive whole number of seconds
+ * (true) or absent (false). Anything else is unknown and throws, so nothing
+ * is said as given that is not.
+ */
+async function givenExactly(id: string): Promise<boolean> {
+  const raw = repliesFor(await redisPipeline([["GET", giftKey(id)]]), 1)?.[0];
+  let record: unknown = null;
+  try {
+    record = typeof raw === "string" ? JSON.parse(raw) : null;
+  } catch {
+    record = null;
+  }
+  if (!record || typeof record !== "object" || Array.isArray(record) || (record as { id?: unknown }).id !== id) throw new UnknownReplyError("a gift's record");
+  const given = (record as { given?: unknown }).given;
+  if (given === undefined) return false;
+  if (typeof given === "number" && Number.isSafeInteger(given) && given > 0) return true;
+  throw new UnknownReplyError("a gift's record");
 }
 
 /** Writes a gift down; true only when Redis answered the write in its exact shape ("OK"). */
@@ -158,8 +181,19 @@ export async function deliverGift(input: {
   const gift = await readGift(id);
   if (!gift || gift.s !== store.statsId || gift.p !== product.id) return "skip";
   if (gift.given) return "already";
-  const [claimed] = await redisPipeline([["SET", `${giftKey(id)}:giving`, "1", "NX", "EX", 300]]);
-  if (claimed === null) return "already";
+  // The mark read exactly (lib/claim-mark.ts; CX-123 rules 24 and 25): somebody else's is "already"; an unknown one
+  // gives nothing and says so, as when Redis does not answer, so no "sent" mark is kept and the next run tries again.
+  const mark = `${giftKey(id)}:giving`;
+  const value = claimValue();
+  const claimed = await claimMark(mark, 300, value);
+  if (claimed === "taken") {
+    // Another run holds the mark. "already" only once the gift is given (Claude 4 on #2726): confirmGift
+    // (lib/purchase-email.ts) keeps its "sent" mark on "already", so said while the other run may still fail, the
+    // paid gift would never be given. Thrown, no "sent" mark is kept and the next run tries again.
+    if (await givenExactly(id)) return "already";
+    throw new Error("another run is giving this gift right now");
+  }
+  if (claimed === "unknown") throw new UnknownReplyError("a gift's giving mark");
 
   const sessionId = typeof session.id === "string" ? session.id : "";
   const pi = typeof session.payment_intent === "string" ? session.payment_intent : "";
@@ -176,8 +210,9 @@ export async function deliverGift(input: {
   await redisPipeline([
     ...(pi ? [["SET", piKey(pi), gift.id, "EX", GIFT_KEPT_SECONDS] as (string | number)[]] : []),
     ["SET", anyKey(gift.s), "1"],
-    ["DEL", `${giftKey(id)}:giving`],
   ]);
+  // Let go only while it still holds this run's value: one whose time ran out may be another run's now.
+  await releaseMark(mark, value);
 
   const g = givingWords(store.language);
   const who = gift.from || g.someone;

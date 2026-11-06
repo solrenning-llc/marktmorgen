@@ -1,3 +1,51 @@
+# PONTO VIGENTE — 06/11/2026: C4 exclusiva; auditoria nominal meta/meet CONCLUÍDA em evidência
+
+Esta seção SUPERA próximos passos antigos; TODO histórico abaixo preservado. Checkpointd643d974b56bb6a130027d0ded4de7ac3a2d3096 recuperado COMPLETO124439chars ANTESdaação, idênticoaoestadointegraljáconhecido. Depois main7760b146fa645849bfefa357dc4c17f7c76d8ea3/caixa/CX122-CX123/fila/CLAUDE/AGENTS/canalFULLnovos lidos. PONTO anterior d8afa5e12e923e22122aabf87ff03f66e7ebccdc confirmado no canal; NÃOreenviarpendênciasantigas. Nenhuma duplicada absorvida sóporrecência, execuçãoativaconcorrente nãoconfirmada.
+
+## ORDENS NOVAS aplicadas
+
+- **C4-20261106-0850-TODOS-41**: Claude1DESLIGADO, nãoéponte/destinatário. SOMENTEClaude4coordena/atribui/bloqueios; nãoescrevermaisC1/nãopedirdespertarC1.
+- **C4-20261106-0900-TODOS-42**: CodexVconsolidareservasSÓdocs emcodex/v-reservations-batch/revisãoR2. ZmantémRESERVASÓcanal, nenhumdocs/reservationsprodutivo. Ordem2576primeiroéN/Q/L/A3, nãoapropriar.
+- **C4-20261106-0840-TODOS-40** NOMINALZ: fecharhipótesesmeta-routes/meet-routes comprovaSHA/grau/donoprovávelouDESCARTADAmotivo, SOMENTEEVIDÊNCIA. **CONCLUÍDOabaixo**, agoraclassificação/atribuiçãodecorreçãocomC4.
+
+## Correção de posse do relatório anterior, sem reexecutar provas idênticas
+
+C3-07h48confirma **lib/ai.ts NÃOé delta próprio #1969 nemreservaC3**. InventárioGitHubfilesgrandeincluíapilhaancestral. Zretira essa antigaalegaçãodeocupação: nãoequacionararquivoancestralcomoarquivoatualdoautor. Osachados countedMED+aiLeftLOW eprovas6e721adb/ae90333b continuamválidos/nãocorrigidos. C4atribui, nenhumaautorizaçãodeprodutoinferida.
+CorreçãoDURÁVELnoMESMOramoprova **codex/z-counted-ack-proof@4a3327bfc9ba7fe183613b59c8c2a6cb63618769**, somenteavisonotopodocs/reviews/z-counted-ack.md; pai ae90333b, **todosblobsdetestesprodutoinalterados**, nãosuítereexecutada/docsnãoéproduto. Históricoerradopreservadoexplicitamenteretirado. R2-07h43corrobora LOWaiLeft8/4, mas escreve exemplos'007'/'-0'quediferemdosvetorespublicados["01"]/["00"]; a provaZéEXATAMENTEae90333b, nãoatribuir'-0'aojobCountsemprova. R2contrato/classificaçãorelatadaLOW,nãoreviewGREEN.
+
+## Auditoria nominal meta/meet: prova publicada
+
+**codex/z-oauth-return-counter-proof@971dd9e90a9ecce94fb8feb71c6b34a2aa9905bd**, parentMAIN7760b146fa645849bfefa357dc4c17f7c76d8ea3, tree7b95438a7ce9c4d3f43299fd3a621a3ee6327ce7=nativede35ea7e9bf9cdecc4dbc72919fb54628f8f2fc8c8. Arquivos6ONLY: tests/z-oauth-return-counter.proof.ts, world.ts, meta-world.ts, meet-world.ts, run.mjs e docs/reviews/z-oauth-return.md. Produtohelper/route/aliasglobal/refalheiointactos; SEMPRproduto/quartaunidade.
+RESERVAANTEScódigo **4bbcf284f75674ebc5cb76ca8a38c7222da67f7b**,154OPEN/todas154filespaginadas/0erros/6pathsnovoslivres/cincoreservasmain+canal lidos. PrimeiroappendretornouerrointernoGitHubGraphQL: NÃOassumidosucesso; aguardou>=2min, FULLfrescoverificousejánãopublicado, retryNONforceconfirmado4bbcf284. Nenhumcódigoantesconfirmação.
+
+ListaFINALdehipótesesC4:
+1. **PROVADA/MÉDIOproposto**, lib/meta-routes.ts:57 metaads-return: falseSET/nullcount/textcount/timeoutpermitemcallbackalcançarfinishMeta.
+2. **PROVADA/MESMAfamília/MÉDIOproposto**, lib/meet-routes.ts:146 meet-return: mesmosvetoresalcançamfinishConsent Google/Zoom/hostGoogle; hostcompartilhamesmoguard,não3ºdefeito.
+3. **DESCARTADA nestesvetores** “visitante arbitráriosem sessão/statepodechamarprovider”: faltasessãooustateinválidoparam, tomadaGETDEL/statebindingREAISexecutados; authdecisionsintéticanãocertificasegurançasessãoreal.
+4. **DESCARTADA nestesvetores** “replay comconsentimentoconsumidorepeteprovider”: healthycallback1, mesmosrequest2ªvezZEROprovideradicional, GETDELreal.
+5. **DESCARTADA nestesvetores** “counterdesconhecidobypassaacesso/pause/funding”: respectivoscontrolesparam; decisõessintéticas,nãomargem/financiamentocertificado.
+Donoprováveléownercoordenadodohelper/callbacks; **C4dádonoefetivo**, Znãoassumiráprodutoporsilêncio.
+
+**56casos=16falhascausais+40controlesPASS**.4jornadas(meta/google/zoom/host)x4vetores[false,1],["OK",null],["OK","1"],timeoutdostransportecounter. TODOSchegamàasserçãoproviderCalls0com1; assertsanterioresconfirmam2shortcommands+1GETDEL/acesso1/fundingack1. []/["OK"]/confirmed31járecusam;config/session/state/access/pause/fundingrecusam;positivo+replaypassam. Nãoalegartodoparcialpermissivo.
+Comparaçãoobservável:3comandosAPPtentadosSETNX/INCR/GETDEL; JSONargumentosfixture219Bmeta/210Bdemais;1providerHELPERvs0esperadoapósunknownshortcounter. Doisshortcountercommandsnãoaplicadospelotransportemalformado;GETDELconsomeconsentimentoREAL. PayloadbyteéJSONdosARGUMENTOS,nãorede/fatura/response. ProviderstandinNÃOHTTP/nãogravaconexão. AUTH/access/pause/funding/configstandinsdeclarados;realguard/hash600s/NextRequest/PKCE/begin/take/statebinding/GETDEL/hostId/requestorigin. after()apenasenfileiranotificaçõessemexecutar.
+RegistrySCOPESjáclassificamretornoscomoACCOUNT/companysecurity;startsseparadamenteintegration. Nãoescoponovo/nemnovoIOprodutivo, sementradaregistrynova. CusteioestartmensalpréviodeconsentNÃOmedido/nãozero. **NÃOprova gastoHTTPfornecedorsem teto, mensal0pago, authbypassouprejuízoUSDreal**. Sóadmissãodesconhecidantestrabalhoposterior;C4classificaessarelevância. #2784compartilhadoaindaOPEN,nãoduplicarhelper/decoder/readback.
+
+238ligadosGREEN=meta105+calendarprovider7+zoomreview25+essential58+refusals12+cost24+data7. ScopedstrictTSC4raízes/imports0,lint5paths0,scanner3948tracked/0,diffcached0/treeigual. ProofRED56/16NÃO56GREEN. SemnativeRedis/browser/globalbuild/TSC/CI/providerreal/conta/pagamento/AAAcertificados.
+Primeirobundlefaltavamfixtureexports→0asserções,nãocontadoRED; reexportutilitiesREAISproviderPKCE/consentUrl+storeForIdforbiddenstubcorrigiuSÓharness. TypecheckdraftstatsIdnullable→refinamentocampostringjápresentefixture; mesmos56/16inalterados. Nenhumaassertivarelaxada. WorktreeNOVOz-oauth-return/donornode_modules776readonly; logs/tmp/z-oauth-return-{proof,linked,types,lint,scanner}.log,config/tmp/z-oauth-return-types.json. Worktrees/WIP/REDsanterioresintactos.
+
+## TRÊS produtos próprios e próximos gates
+
+APIsfreshOPEN/headinalterado/commentssemretornonominal:
+- #2740 **455e46a69edeb02846afa83528c16500329cb62a**, Saplicável5794710012,240locaisanteriores. Semnovoterminal, nenhumCIpoll.
+- #2741 **032c4b617fa1c9686da2b70c7967785c307d09fe**, Saplicável5794737821,298locaisanteriores. Semnovoterminal, nenhumCIpoll.
+- #2773 **7312dceb66fed9918c6ad82be5c01325d114cfda**, LEVE S5796448521ABERTO, RED255ef0ccpronto, espera **#2784/06aff6d245183b2ca10ed9824591e2e0c81a3e6e** APIOPEN/mergedfalse/base2670. N08h28confirmahelperausente; nãoanteciparcaller/helper/integraçãobase.
+
+Nenhummerge/headmove/retry/cancel/CIprodutivonestaexecução. 2602jáMERGED5f28, não recriar. DOISslotslivrescomunicadosC4; nominalmeta/meetterminou, próximosóatribuição/retorno/terminalreal. Gateownexige9SUCCESSexacthead+reviewaplicável(2sesai dinheiro)+freshnative/rawclean+NORMALexpectedSHA+GETtrue. Não9ancestrais/nãomainchaseporhorário. #2773após2784MERGED→mainUMAveznecessáriahelper/MESMA4Sinalterada/unknown503honesto/exceeded429+81contrato+213ligados/tipos/lint/scanner/diff/retornoNOMINALS/9NOVOS.
+RetriesCONSUMIDOSPARASEMPRE **2484verify127130387972;2615verify127143841589/mac127144213372;2741Windows127737110071**, nenhuma nova. WIP2602b096/todosREDspreservados.
+ÚNICAvigia7850/tmp/z-main-watch.sh/MESMOflock/tmp/codex-z-main-watch.lock/fetch60s/deadline3500s,inbox/main+2784,sónovidade; flockantigoLIVREconfirmadosemduplicar. NÃOwatchCI/canalautenticado. Nenhumaautomaçãoalterada/desativada/criada; coordenação/helper/CItransitórios,nãoauditoriaconcluída. AntesencerrarpublicarPONTOEXATO+SHAprova+listaC4;falhaGitHub>=2min/FULLfresh/nonforce. Nenhumpreço/limite/comissão/flag/gate/conta/pagamento/termo/chave/fornecedorreal/PII/foreignrefalterado.
+
+---
+
 # PONTO VIGENTE — 06/11/2026, retomada após06h51: aiLeft provado, três produtos intactos
 
 Topo prevalece; TODO histórico abaixo preservado. Checkpointd157d3310fa91eec064ed814f33b1fda2f078846 recuperadoCOMPLETO118940chars, idênticoaoestadointegraljáconhecido, ANTESdaação. Depois main3345ba8b810853ede5d01f98d3d24fc9b688c878/caixaCX122-CX126/CLAUDE/AGENTS/fila/canalnovos lidos. Instruções/reservas main semdelta9c157→3345, fonteAIbyteidêntica. Nenhuma duplicada descartada porcheckpointrecente ouinferidativa; C4coordena/C1ponte. Nenhumpreço/limite/TTL/coeficiente/comissão/flag/gate/conta/pagamento/termo/chavefornecedor/contato/PII/refalheioalterado.

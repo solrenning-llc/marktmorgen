@@ -1001,7 +1001,14 @@ export default async function StudioPage({
   const momentWords = (ms: number) => `${new Date(ms).toLocaleString("en-US", { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" })} UTC`;
   // The list is shown once there is something that fills it, or once it holds
   // anybody — a creator who stops giving things away still owns what came in.
-  const list = store && may("export") ? await listSize(store) : null;
+  // A size that could not be read is said as such, never shown as an empty list (lib/free.ts listSize, sweep A2).
+  const list =
+    store && may("export")
+      ? await listSize(store).catch((error: unknown) => {
+          console.error("could not read a list's size", error);
+          return "unread" as const;
+        })
+      : null;
   const givesAway = store ? sellsAny(store, "free") : false;
   // Booked calls are read from the creator's Stripe account, the ledger, and
   // only asked for when the store sells calls at all.
@@ -2063,7 +2070,17 @@ export default async function StudioPage({
                 people who may take the list away as a file may hand one out. */}
             {apiKeys ? <ApiKeyEditor keys={apiKeys} /> : null}
 
-            {list && (givesAway || list.total > 0) ? (
+            {list === "unread" ? (
+              <div className="card mt-8 p-6 sm:p-8">
+                <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
+                  Your list
+                </p>
+                <p className="mt-2 text-ink-soft">
+                  We could not count your list just now. Reload this page in a
+                  moment to see it and download it.
+                </p>
+              </div>
+            ) : list && (givesAway || list.total > 0) ? (
               <div className="card mt-8 p-6 sm:p-8">
                 <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
                   Your list

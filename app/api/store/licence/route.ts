@@ -58,12 +58,15 @@ export async function GET(request: NextRequest) {
 
   try {
     const store = await storeForHandle(handle);
-    const product = (store ? await readListing(store, productId) : null);
+    if (!store) return answer(404, { error: "No such product with license keys." });
+    // One of the store's public requests for its window (lib/traffic.ts), taken
+    // before the product or the key is read (4 November 2026): refused, nothing
+    // of the store's is read.
+    if (!(await takePublicRequest(store, "buyer"))) return answer(429, { error: "Too many checks for this store right now. Try again later." });
+    const product = await readListing(store, productId);
     // Checked whether or not the product still hands out keys: a product that
     // stopped still answers for the keys it gave, which stay valid.
-    if (!store || !product) return answer(404, { error: "No such product with license keys." });
-    // One of the store's public requests for its window (lib/traffic.ts).
-    if (!(await takePublicRequest(store, "buyer"))) return answer(429, { error: "Too many checks for this store right now. Try again later." });
+    if (!product) return answer(404, { error: "No such product with license keys." });
     const status = await checkKey(store, product, key);
     return answer(200, { valid: status === "valid", status });
   } catch (error) {

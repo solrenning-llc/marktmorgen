@@ -76,6 +76,11 @@ async function main() {
     // Revisor 1 and Codex C2 on #2722: the invoice's own list of payments must be read whole too.
     { handle: "no-payments", customer: "cus_NoPay0001", invoice: "in_NoPay0001", payment: "pi_nopay", refunds: { object: "list", data: [], has_more: false }, payments: null },
     { handle: "more-payments", customer: "cus_MorePay01", invoice: "in_MorePay01", payment: "pi_morepay", refunds: { object: "list", data: [], has_more: false }, payments: "more" },
+    // Codex C2 on #2722: only a payment whose refunds can be read counts. A payment record (paid outside Stripe's
+    // charges), a type not known, or a type that does not name its own reference earns nothing and fails the store.
+    { handle: "record-payment", customer: "cus_Record001", invoice: "in_Record001", payment: "pi_record", refunds: { object: "list", data: [], has_more: false }, row: { type: "payment_record", payment_record: "prec_1" } },
+    { handle: "odd-payment", customer: "cus_OddType01", invoice: "in_OddType01", payment: "pi_oddtype", refunds: { object: "list", data: [], has_more: false }, row: { type: "bank_wire_new", payment_intent: "pi_oddtype" } },
+    { handle: "mixed-payment", customer: "cus_Mixed0001", invoice: "in_Mixed0001", payment: "pi_mixed", refunds: { object: "list", data: [], has_more: false }, row: { type: "charge", payment_intent: "pi_mixed" } },
   ];
   for (const c of cases) {
     const made = await claimHandle(`${c.handle}@example.com`, c.handle, c.handle, "");
@@ -86,6 +91,7 @@ async function main() {
     const row = invoice(c.invoice, c.customer, c.payment);
     if ("payments" in c && c.payments === null) delete row.payments;
     if ("payments" in c && c.payments === "more") row.payments = { object: "list", data: [{ payment: { type: "payment_intent", payment_intent: c.payment } }], has_more: true };
+    if ("row" in c) row.payments = { object: "list", data: [{ payment: c.row }], has_more: false };
     refundAnswerByPayment.set(c.payment, c.refunds);
   }
 
@@ -99,6 +105,10 @@ async function main() {
   is("an invoice whose payments were not expanded earns nothing", redis.run(["GET", creditKey("in_NoPay0001")]), null);
   is("an invoice whose payments say there are more earns nothing", redis.run(["GET", creditKey("in_MorePay01")]), null);
   is("and neither is posted", [postedCredits.includes("in_NoPay0001"), postedCredits.includes("in_MorePay01")], [false, false]);
+  for (const id of ["in_Record001", "in_OddType01", "in_Mixed0001"]) {
+    is(`${id}: a payment whose refunds cannot be read earns nothing and is not posted`, [redis.run(["GET", creditKey(id)]), postedCredits.includes(id)], [null, false]);
+  }
+  is("and the run fails each of those stores", run.failed >= 6, true);
   is("a confirmed full refund earns nothing", [refunded.state, postedCredits.includes("in_Refunded01")], ["none", false]);
   is("a confirmed empty refund list earns its clean payment once", [clean.state, postedCredits.filter((id) => id === "in_Clean0001").length], ["done", 1]);
   done();

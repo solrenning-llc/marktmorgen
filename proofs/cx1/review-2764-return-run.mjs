@@ -1,0 +1,12 @@
+import {build} from '../../node_modules/esbuild/lib/main.js';
+import {testAliases,testEnvironment} from '../../tests/test-config.mjs';
+import {mkdirSync} from 'node:fs';
+import {join,dirname} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {spawnSync} from 'node:child_process';
+const root=join(dirname(fileURLToPath(import.meta.url)),'../..');
+const out=join(root,'node_modules/.cache/cx1-reviews');mkdirSync(out,{recursive:true});
+const file='cx1-review-2764-invoice.proof.ts',bundle=join(out,file+'.cjs');
+await build({entryPoints:[join(root,'tests',file)],bundle:true,platform:'node',format:'cjs',outfile:bundle,alias:testAliases(file,root,join(root,'tests')),logLevel:'error'});
+const run=spawnSync(process.execPath,[bundle],{cwd:root,env:testEnvironment(process.env),stdio:'inherit'});
+process.exit(run.status??1);

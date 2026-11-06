@@ -69,11 +69,15 @@ async function main(): Promise<void> {
     return html((await ProductPage({ params: Promise.resolve({ handle: "@a8stockproof", product: segment }), searchParams: Promise.resolve({}) } as never)) as React.ReactElement);
   };
 
+  /** The availability the page's structured data states, compared whole (never as a substring of a URL). */
+  const availability = (html: string) => /"availability":"([^"]*)"/.exec(html)?.[1] ?? null;
+  const IN_STOCK = "https://schema.org/InStock";
+
   part("Control: a whole reading");
   is("three left, read exactly", await stockLeft(store, listing), 3);
   const healthy = await page();
   is("the page says how many are left", healthy.includes(w.left(3, "3")), true);
-  is("and search engines are told it is in stock, which is true here", healthy.includes("https://schema.org/InStock"), true);
+  is("and search engines are told it is in stock, which is true here", availability(healthy) === IN_STOCK, true);
 
   const cases: [string, () => unknown[] | Promise<unknown[]>][] = [
     ["holds answered with a string", () => ["x"]],
@@ -86,7 +90,7 @@ async function main(): Promise<void> {
     inject = reply;
     is("stockLeft says the reading is unknown", await stockLeft(store, listing).then(() => "known", () => "unknown"), "unknown");
     const shown = await page();
-    is("the page never tells search engines it is in stock", shown.includes("https://schema.org/InStock"), false);
+    is("the page never tells search engines it is in stock", availability(shown) === IN_STOCK, false);
     is("nor draws it as a product nobody limited (no count, no sold out, a buy button)", !shown.includes(w.soldOut) && !/\d+ left/.test(shown) && /type="submit"/.test(shown), false);
     inject = null;
   }

@@ -851,3 +851,10 @@ Main exato `6e01c123b31d890bb5a7100d0bce8ef498988b20` integrado uma vez nos quat
 
 - #2438 segue congelado em `6da1a24763a718e88e157703542c24957bfc6123`; #2576 segue OPEN em `d8d8c3d557166cb32b4ae87084dd88c48ded2ce4`. Ambos intocados.
 - Próxima ação apenas por novidade causal: retorno formal R2 do #2535, vermelho causal ou conclusão terminal dos nove novos. Só incorporar produto próprio OPEN com revisão aplicável, 9/9 SUCCESS exact-head e REST raw true/clean.
+
+
+### Fotografia final de CI — 16h05 Fortaleza
+
+- #2535 `993dc83e`, #2709 `7add83c5`, #2729 `b96252c5` e #2731 `4a350f69`: cada head tem exatamente 1 SUCCESS, 7 IN_PROGRESS e 1 QUEUED; zero falha. Nenhum pendente conta como verde.
+- Revisor 2 ainda não publicou qualificação formal exata do #2535. Nenhum retry, cancelamento, head move ou merge.
+- Ponto exato publicado no canal no commit `c0c55fbf94b99718984faf17d50748db04ff2906`, blob `5200c384362dc0ec2f45353069dd4af557e3585f`. Próximo gatilho causal: retorno R2 ou estado terminal/achado dos nove novos; AV12 sem vigia por tempo.

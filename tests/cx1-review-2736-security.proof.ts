@@ -48,12 +48,18 @@ async function main() {
   is('code consumes its own link control', await takeSignInLink(good.token), null);
 
   const uncertain = await ask('cx1reply@review.example');
+  const uncertainLink = `nl:auth:link:${createHash('sha256').update(`nimbus-auth-link:${uncertain.token}`).digest('hex').slice(0, 40)}`;
+  const uncertainRecord = `nl:auth:code:${createHash('sha256').update(`nimbus-auth-code:${uncertain.request}`).digest('hex').slice(0, 40)}`;
   const normal = redis.pipeline.bind(redis);
   let malformed = 0;
   redis.pipeline = async commands => {
-    // Execute the real atomic delete. Change only its returned envelope.
+    // Execute the real consume (or its corrective script). Change exactly
+    // one returned outer envelope; the command's effect remains real.
     const reply = await normal(commands);
-    if (commands.length === 1 && commands[0][0] === 'GETDEL' && String(commands[0][1]).startsWith('nl:auth:link:')) {
+    const consuming = commands.length === 1 && (
+      (commands[0][0] === 'GETDEL' && commands[0][1] === uncertainLink) ||
+      (commands[0][0] === 'EVAL' && commands[0].slice(1).some(value => value === uncertainLink || value === uncertainRecord)));
+    if (malformed === 0 && consuming) {
       malformed++;
       return [...reply, null];
     }

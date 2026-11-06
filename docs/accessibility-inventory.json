@@ -1187,6 +1187,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/students/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/students",
+      "parameters": []
+    },
+    {
       "source": "app/studio/team/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/team",
@@ -1558,6 +1564,7 @@
     "components/store-tip-box.tsx",
     "components/store-tracking.tsx",
     "components/structured-data.tsx",
+    "components/students-bulk.tsx",
     "components/studio-app.tsx",
     "components/studio-header.tsx",
     "components/studio-help.tsx",
@@ -1892,6 +1899,7 @@
     "app/api/store/stores/route.ts",
     "app/api/store/stream/captions/route.ts",
     "app/api/store/stream/route.ts",
+    "app/api/store/students/route.ts",
     "app/api/store/tax/route.ts",
     "app/api/store/team/route.ts",
     "app/api/store/thanks-note/route.ts",
@@ -2023,6 +2031,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 137
+    "pageTemplates": 139
   }
 }

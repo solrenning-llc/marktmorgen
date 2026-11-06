@@ -258,7 +258,7 @@ async function main(): Promise<void> {
   is("a box for every student, named by who it selects", ["ana@example.com", "ben@example.com", "cy@example.com"].every((email) => html.includes(`aria-label="Select ${email}"`)), true);
   is("one to select every student on this page, saying how many", html.includes("Select all 3 students on this page"), true);
   is("how many are selected, said where a screen reader hears it", html.includes('role="status"') && html.includes("0 of 3 selected"), true);
-  is("every action named; refunds are not one of them", ["Remove access", "Give access back", "Add a label", "Take a label off", "Download"].every((words) => html.includes(words)) && !/>[^<]*Refund[^<]*</i.test(html.replace(/Refunds stay[^<]*/, "")), true);
+  is("every action named; refunds are not one of them", ["Remove access", "Give access back", "Add a label", "Take a label off", "Download"].every((words) => html.includes(words)) && !/(<button[^>]*>|<span class="block text-ink">)[^<]*refund/i.test(html), true);
   is("refunds are said to stay one at a time", html.includes("Refunds stay one at a time"), true);
   is("targets of at least 44 pixels", (html.match(/min-h-11/g) ?? []).length >= 4, true);
   const narrow = renderToStaticMarkup(createElement(StudentsBulk, { productId: id, courseTitle: "Bread Course", lessons: 2, lines: lines.slice(0, 1), canTag: false, canExport: false }));

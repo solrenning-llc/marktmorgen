@@ -1,0 +1,208 @@
+=== red ===
+=== agent-book-durable.test.ts ===
+  FAIL  empty before, read back as []: never answered done; the mark kept, said as not confirmed; the text unchanged
+        expected [1,"BookWriteUnconfirmed",false,true,"Agent 24aa40fdc0"]
+        got      [1,"",true,true,"Agent 24aa40fdc0"]
+  FAIL  empty before, read back as [17]: never answered done; the mark kept, said as not confirmed; the text unchanged
+        expected [1,"BookWriteUnconfirmed",false,true,"Agent 54b887b757"]
+        got      [1,"",true,true,"Agent 54b887b757"]
+  FAIL  empty before, read back as [{}]: never answered done; the mark kept, said as not confirmed; the text unchanged
+        expected [1,"BookWriteUnconfirmed",false,true,"Agent e5922b1203"]
+        got      [1,"",true,true,"Agent e5922b1203"]
+52 checks, 3 failing.
+=== g-1856-exact-readback-transport.proof.ts ===
+G confirmation boundary throw-before  { value: 'Agent 98bf646853', waiting: 0, history: 1 }
+G confirmation boundary empty-before  { value: 'Agent 2bbbcfd75c', waiting: 0, history: 1 }
+G confirmation boundary empty-after  { value: 'Agent f60e3b48c4', waiting: 0, history: 1 }
+G restore reply throw-before {
+G restore reply empty-after {
+G restore reply throw-after {
+G empty readback missing-slot {
+  FAIL  missing-slot: success only for a verified actual restoration
+        expected false
+        got      true
+G empty readback number-slot {
+  FAIL  number-slot: success only for a verified actual restoration
+        expected false
+        got      true
+G empty readback object-slot {
+  FAIL  object-slot: success only for a verified actual restoration
+        expected false
+        got      true
+G empty readback throw-read {
+G empty readback exact-after {
+G empty readback applied-absent {
+G empty readback extra-slot {
+  FAIL  extra-slot: success only for a verified actual restoration
+        expected false
+        got      true
+G empty readback hole {
+  FAIL  hole: success only for a verified actual restoration
+        expected false
+        got      true
+G empty readback bool-slot {
+  FAIL  bool-slot: success only for a verified actual restoration
+        expected false
+        got      true
+G empty readback nested-slot {
+  FAIL  nested-slot: success only for a verified actual restoration
+        expected false
+        got      true
+G empty readback not-array {
+G empty readback null-envelope {
+G expired lease {
+65 checks, 7 failing.
+=== g-1856-empty-readback.proof.ts ===
+G confirmation boundary throw-before  { value: 'Agent f1202e3c71', waiting: 0, history: 1 }
+G confirmation boundary empty-before  { value: 'Agent eb70792176', waiting: 0, history: 1 }
+G confirmation boundary empty-after  { value: 'Agent 3f13db3b22', waiting: 0, history: 1 }
+G restore reply throw-before {
+G restore reply empty-after {
+G restore reply throw-after {
+G empty readback missing-slot {
+  FAIL  missing-slot: success only for a verified actual restoration
+        expected false
+        got      true
+G empty readback number-slot {
+  FAIL  number-slot: success only for a verified actual restoration
+        expected false
+        got      true
+G empty readback object-slot {
+  FAIL  object-slot: success only for a verified actual restoration
+        expected false
+        got      true
+G empty readback throw-read {
+G empty readback exact-after {
+G empty readback applied-absent {
+G expired lease {
+47 checks, 3 failing.
+
+=== green ===
+=== agent-book-durable.test.ts ===
+52 checks, all passing.
+=== g-1856-exact-readback-transport.proof.ts ===
+G confirmation boundary throw-before  { value: 'Agent 4e685f6017', waiting: 0, history: 1 }
+G confirmation boundary empty-before  { value: 'Agent a64a7bd7b7', waiting: 0, history: 1 }
+G confirmation boundary empty-after  { value: 'Agent 5cc04a9455', waiting: 0, history: 1 }
+G restore reply throw-before {
+G restore reply empty-after {
+G restore reply throw-after {
+G empty readback missing-slot {
+G empty readback number-slot {
+G empty readback object-slot {
+G empty readback throw-read {
+G empty readback exact-after {
+G empty readback applied-absent {
+G empty readback extra-slot {
+G empty readback hole {
+G empty readback bool-slot {
+G empty readback nested-slot {
+G empty readback not-array {
+G empty readback null-envelope {
+G expired lease {
+65 checks, all passing.
+=== g-1856-empty-readback.proof.ts ===
+G confirmation boundary throw-before  { value: 'Agent 16b5896647', waiting: 0, history: 1 }
+G confirmation boundary empty-before  { value: 'Agent 0a11ad0b6b', waiting: 0, history: 1 }
+G confirmation boundary empty-after  { value: 'Agent 013910452a', waiting: 0, history: 1 }
+G restore reply throw-before {
+G restore reply empty-after {
+G restore reply throw-after {
+G empty readback missing-slot {
+G empty readback number-slot {
+G empty readback object-slot {
+G empty readback throw-read {
+G empty readback exact-after {
+G empty readback applied-absent {
+G expired lease {
+47 checks, all passing.
+
+=== linked ===
+=== agent-book.test.ts ===
+13 checks, all passing.
+=== agent-confirm.test.ts ===
+24 checks, all passing.
+=== agent-coverage.test.ts ===
+13 checks, all passing.
+=== agent-keys.test.ts ===
+23 checks, all passing.
+=== agent-proposal-rules.test.ts ===
+37 checks, all passing.
+=== agent-propose.test.ts ===
+10 checks, all passing.
+=== agentic-catalog.test.ts ===
+ℹ tests 3
+ℹ pass 3
+ℹ fail 0
+ℹ skipped 0
+=== agentic-feed.test.ts ===
+ℹ tests 3
+ℹ pass 3
+ℹ fail 0
+ℹ skipped 0
+=== data-recount.test.ts ===
+13 checks, all passing.
+=== llms-txt.test.ts ===
+17 checks, all passing.
+=== mcp-channel-coverage.test.ts ===
+29 checks, all passing.
+=== mcp-course-tools.test.ts ===
+10 checks, all passing.
+=== mcp-dispatch.test.ts ===
+26 checks, all passing.
+=== mcp-oauth-rules.test.ts ===
+42 checks, all passing.
+=== mcp-page-test-tools.test.ts ===
+10 checks, all passing.
+=== mcp-page-tools.test.ts ===
+12 checks, all passing.
+=== mcp-page-versions.test.ts ===
+8 checks, all passing.
+=== mcp-read-tools.test.ts ===
+18 checks, all passing.
+=== mcp-saved-blocks.test.ts ===
+7 checks, all passing.
+=== mcp-tools.test.ts ===
+5 checks, all passing.
+=== plan-cost-registry.test.ts ===
+ℹ tests 19
+ℹ pass 19
+ℹ fail 0
+ℹ skipped 0
+=== store-data-registry.test.ts ===
+ℹ tests 7
+ℹ pass 7
+ℹ fail 0
+ℹ skipped 0
+=== store-data.test.ts ===
+33 checks, all passing.
+=== g-1856-undo-lost-ack.proof.ts ===
+G confirmation boundary throw-before  { value: 'Agent 3879a2245c', waiting: 0, history: 1 }
+G confirmation boundary empty-before  { value: 'Agent 7a705cb536', waiting: 0, history: 1 }
+G confirmation boundary empty-after  { value: 'Agent 28d5d5ce1d', waiting: 0, history: 1 }
+G restore reply throw-before {
+G restore reply empty-after {
+G restore reply throw-after {
+G expired lease {
+29 checks, all passing.
+=== g-1856-book-effects-eval.proof.ts ===
+G confirmation boundary throw-before  { value: 'Agent ec5a5ef20e', waiting: 0, history: 1 }
+G confirmation boundary empty-before  { value: 'Agent 6a368450a8', waiting: 0, history: 1 }
+G confirmation boundary empty-after  { value: 'Agent cb6594ceda', waiting: 0, history: 1 }
+G expired lease {
+20 checks, all passing.
+=== g-1856-about-reconcile-race.proof.ts ===
+G actual about room {
+4 checks, all passing.
+=== g-1856-about-room.proof.ts ===
+G actual about room {
+3 checks, all passing.
+
+=== types ===
+
+
+=== lint ===
+
+
+=== scan ===
+Public data check: 3275 tracked files; 0 file(s) require correction.

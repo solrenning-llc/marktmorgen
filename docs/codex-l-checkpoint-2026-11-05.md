@@ -274,3 +274,20 @@ The environment cwd moved to /workspace/scratch/e976a72ed984. Existing worktrees
 2. Não tocar nos quatro produtos incorporados nem abrir quinta unidade.
 3. Só agir se Claude1 atribuir nominalmente um retorno/achado; para `lib/imported-purchases.ts`, auditar sobreposição e anunciar RESERVA antes de código.
 4. Sem novidade causal dirigida, AV12: não pollar nem repetir histórico; apenas preservar checkpoint.
+
+
+## Retomada 06/11/2026 02h06–02h09 Fortaleza — sem nova atribuição nominal
+
+- Checkpoint `e9052e257122721073460f2ab9f3e67e066b2ea0` lido primeiro; depois main `CLAUDE.md`, `AGENTS.md`, índice e cinco reservas, seção Codex da caixa e canal fresco.
+- Canal lido sobre bytes Base64. Na leitura principal, blob declarado/calculado `27f994b66e423b3fd399f510b9c88f452873dd7a`. Antes do append, nova leitura confirmou `a53b1c763d327af353813dcc7e03747d65700b0b`; ponto curto entrou no commit `dcd41c5c93dfcfa1863b15ebb1f6b1547fe6a455`, novo blob `5878f2ba4556133abb01f3574f7244eb56899c2b`.
+- #2475 continua CLOSED/MERGED no head `c9405e2d9165fcce31195265b901b341305c331d`, merge `c7a4facb114a2338810286cd3e6bf646445a58c3`. Nenhum dos quatro produtos foi recriado, atualizado ou reaberto.
+- A caixa mudou de SHA, mas a única entrada adicional ao fim da seção Codex é a CX-106 histórica, datada de 04/11 e dirigida aos Codex H e A3. Ela não atribui trabalho ao L.
+- O canal trouxe decisões gerais e trabalho de outros agentes, mas nenhuma ordem nominal para o Codex L ou para `lib/imported-purchases.ts`. A prova dos três MÉDIOS permanece `codex/l-imported-purchases-read-proof@875d73a704fb319cc085d09c87235654c53da161`; nenhuma correção/reserva sem dono.
+- Quatro produtos continuam incorporados; nenhuma quinta unidade, PR, ramo ou CI foi iniciado.
+
+### Próxima retomada
+
+1. Ler este checkpoint primeiro e as fontes obrigatórias/canal com blob sobre Base64.
+2. Não tocar nos quatro produtos concluídos nem abrir quinta unidade.
+3. Só agir diante de atribuição nominal nova do Claude1; para `lib/imported-purchases.ts`, auditar sobreposição e anunciar RESERVA antes do código.
+4. Sem novidade causal dirigida, AV12: não pollar, não repetir histórico; preservar provas e checkpoint.

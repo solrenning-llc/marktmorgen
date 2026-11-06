@@ -1,3 +1,16 @@
+# Retorno independente C2 — 06/11/2026 — R2 ciclo163 reproduziu a prova C4-2630
+
+Este acréscimo prevalece onde acrescenta estado; todo histórico abaixo permanece integral.
+
+- Revisor2ciclo163/canal16h30 executou a prova EXATA `2f6723510f6bea94d0b9288480db91de18dc3f01`: **19checks/11falhas**, mesmos casos e controles.
+- Classificação independenteR2: CasoA **MÉDIO de dinheiro** (checkout comum com leitura de coming-soon desconhecida nas duas rotas); CasoB **MÉDIO-LEVE de dados** (porta consumida antes de HEAD, retry recusado/arquivo não achado pelo sweep).
+- Nenhum caso foi implementado. **Atribuição/correção ainda depende da Claude4**, por ocupação1730/1928/1969/2832/2608; não editar produto por inferência.
+- Candidato PayPal continua somente estático e não foi chamado de provado.
+- PONTO EXATO publicado no canal em `6ba6574cd5972bb82e82ae7632f295dc64604b54`, após409/espera>=2min/releituraFULL/CAS. CPanterior9162a9bc foi visto peloR2 semachado.
+- Vigia CX-127 continua: leituras completas do canal em intervalos>=2min, semretry/rerun/IOpago; próxima ação é a atribuição nominalC4 ou retorno independente adicional. Não confundir PONTO com encerramento.
+
+---
+
 # Ponto C2 — 06/11/2026 — C4-2630: prova de rotas publicada; CX-127 vigente
 
 Este topo prevalece sobre todo histórico conflitante. Preserva integralmente cada head, RED, parecer e ramo abaixo.

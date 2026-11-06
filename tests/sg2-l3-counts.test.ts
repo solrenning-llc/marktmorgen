@@ -9,6 +9,13 @@
  *     INCR of sign-in emails as "under the limit" when it was null, missing,
  *     negative or text, and a sign-in email went out. An unknown count is now
  *     "over the limit".
+ *   - isFreshSession (lib/auth.ts) took EXISTS answered as text "1" as a fresh
+ *     login. Only the whole 1 is now.
+ *   - noteSignIn (lib/auth.ts) read an unknown SISMEMBER or SCARD as "a new
+ *     browser, none before": the browser was noted and no email went out. An
+ *     unknown SISMEMBER now notes nothing and sends nothing; a browser surely
+ *     new (0) with an unknown count is told about once, in the doubt, and
+ *     not noted (Claude 4, second review of #2717).
  *   - requestCourseLink (lib/learn.ts) read its two hourly counts the same
  *     way and emailed a course link. An unknown count is now "limited".
  *   - openCourseLink (lib/learn.ts) read the opens of an emailed link as
@@ -20,8 +27,10 @@
  *     bring in as 0, failed the import as "rows let go" and deleted them; read
  *     an unknown LLEN of the report as an empty report; read an unknown SCARD
  *     of the addresses to email as "nobody left" and finished the import, or
- *     started the mail ramp at 0. Each now leaves the job as it was, to start
- *     again from the last saved place.
+ *     started the mail ramp at 0; and read a batch (LINDEX) of another shape as
+ *     empty, passed it over and at the end failed the import and deleted its
+ *     rows (Claude 4, second review of #2717). Each now leaves the job as it
+ *     was, to start again from the last saved place.
  *   - studentPage (lib/learn.ts) also read a page of rows of another shape
  *     (no list, an odd list, a row that is not a kept row) as fewer or no
  *     students, a done list of another shape as 0 lessons, and an unknown
@@ -38,7 +47,7 @@
  * The exact replies keep working as before.
  */
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { withinAddressLimit, withinRateLimit } from "@/lib/auth";
+import { isFreshSession, noteSignIn, withinAddressLimit, withinRateLimit } from "@/lib/auth";
 import { forgetLearnerPerson, lastSeenMany, openCourseLink, requestCourseLink, studentDates, studentPage } from "@/lib/learn";
 import { addRows, finishUpload, readJob, runImport, startImport } from "@/lib/imports";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -139,6 +148,49 @@ void (async () => {
   is("withinRateLimit: the real counter still lets the first in", await withinRateLimit("203.0.113.8"), true);
   is("withinAddressLimit: the real counter still lets the first in", await withinAddressLimit("first@sg2-l3.example"), true);
 
+  part("isFreshSession: only EXISTS's whole 1 is a fresh login");
+  const sessionId = "b".repeat(64);
+  const exists = (commands: (string | number)[][]) => commands.length === 1 && commands[0]?.[0] === "EXISTS" && String(commands[0]?.[1]).startsWith("nl:auth:fresh:");
+  for (const [label, reply] of [["text", ["1"]], ["true", [true]], ["two", [2]], ["null", [null]], ["an empty reply", []], ["a second reply", [1, 1]], ["not a list", { result: 1 }]] as [string, unknown][]) {
+    rule = { when: exists, reply };
+    is(`isFreshSession, ${label}: not fresh`, await outcome(() => isFreshSession(sessionId)), false);
+  }
+  rule = { when: exists, reply: [1] };
+  is("isFreshSession: 1 is fresh", await isFreshSession(sessionId), true);
+  rule = { when: exists, reply: [0] };
+  is("isFreshSession: 0 is not", await isFreshSession(sessionId), false);
+  rule = null;
+
+  part("noteSignIn: a browser is noted and told about only on exact replies; a new one in doubt is told about once");
+  const devices = (commands: (string | number)[][]) => commands.length === 2 && commands[0]?.[0] === "SISMEMBER" && commands[1]?.[0] === "SCARD" && String(commands[0]?.[1]).startsWith("nl:auth:devices:");
+  const noted: string[] = [];
+  const watchSadd = (commands: (string | number)[][]) => {
+    for (const c of commands) if (c[0] === "SADD" && String(c[1]).startsWith("nl:auth:devices:")) noted.push(String(c[2]));
+  };
+  const signIn = async (reply: unknown) => {
+    rule = { when: devices, reply };
+    const before = mails.length;
+    noted.length = 0;
+    const saved = redis.pipeline;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      watchSadd(commands);
+      return saved(commands);
+    }) as typeof redis.pipeline;
+    const cookie = await outcome(() => noteSignIn("owner@sg2-l3.example", "c".repeat(64), "link", "Mozilla/5.0"));
+    redis.pipeline = saved;
+    rule = null;
+    return { cookie: typeof cookie === "string" && cookie.startsWith("nl_device="), emails: mails.length - before, noted: noted.length };
+  };
+  for (const [label, reply] of [["text", ["0", 3]], ["two", [2, 3]], ["null", [null, 3]], ["true", [true, 3]], ["a reply one short", [0]], ["not a list", { result: 1 }]] as [string, unknown][]) {
+    is(`noteSignIn, a SISMEMBER that is ${label}: the login goes on, nothing noted, no email`, await signIn(reply), { cookie: true, emails: 0, noted: 0 });
+  }
+  for (const [label, count] of [["null", null], ["text", "3"], ["negative", -1], ["fractional", 0.5]] as [string, unknown][]) {
+    is(`noteSignIn, a new browser with a count that is ${label}: told about once, not noted`, await signIn([0, count]), { cookie: true, emails: 1, noted: 0 });
+  }
+  is("noteSignIn: the account's first browser is noted, no email", await signIn([0, 0]), { cookie: true, emails: 0, noted: 1 });
+  is("noteSignIn: a new browser beside others is noted and told about", await signIn([0, 2]), { cookie: true, emails: 1, noted: 1 });
+  is("noteSignIn: a browser already known is neither noted nor told about", await signIn([1, 2]), { cookie: true, emails: 0, noted: 0 });
+
   part("requestCourseLink: a course link is emailed only on whole counts under the limits");
   const store = await shop("sg2-l3-course@example.com", "sg2-l3-course");
   const product = { id: "p_course", title: "A course", course: { modules: [] } } as never;
@@ -238,6 +290,24 @@ void (async () => {
     await outcome(() => runImport(id, Date.now() + 30_000));
     const job = await readJob(id);
     is(`runImport, the report's length ${label}: the step is not saved as done`, [job?.done, job?.counts.errors], [0, 0]);
+  }
+  const lindex = (commands: (string | number)[][]) => commands.length === 1 && commands[0]?.[0] === "LINDEX" && String(commands[0]?.[1]) === `nl:import:${id}:rows`;
+  for (const [label, bad] of [
+    ["a number", [7]],
+    ["null", [null]],
+    ["true", [true]],
+    ["not JSON", ["{"]],
+    ["JSON that is not a list", [JSON.stringify({ rows: [] })]],
+    ["a list of rows that are not lists", [JSON.stringify(["a", "b"])]],
+    ["a row holding a number", [JSON.stringify([["2", 7]])]],
+    ["an empty reply", []],
+    ["a second reply", [JSON.stringify([]), 1]],
+  ] as [string, unknown][]) {
+    rule = { when: lindex, reply: bad };
+    for (let i = 0; i < 3; i += 1) await outcome(() => runImport(id, Date.now() + 30_000));
+    const [kept] = await pipeline([["LLEN", `nl:import:${id}:rows`]]);
+    const job = await readJob(id);
+    is(`runImport, a batch that is ${label}: not passed over, not failed, rows kept`, [job?.state, job?.cursor.batch, job?.done, kept], ["queued", 0, 0, 1]);
   }
   rule = null;
   const finished = await runImport(id, Date.now() + 30_000);

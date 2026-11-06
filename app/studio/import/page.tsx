@@ -106,12 +106,8 @@ export default async function StudioImportPage({ searchParams }: Params) {
       ? query.what
       : "contacts";
   const canFunnel = can(access.role, "page") && can(access.role, "products");
-  const [read, counts, moved, listings] = await Promise.all([
-    // Imports that could not be read are said so, never shown as "None yet" (lib/imports.ts storeImports, sweep A3).
-    storeImports(store).catch((error: unknown) => {
-      console.error("reading a store's imports failed", error);
-      return null;
-    }),
+  const [jobs, counts, moved, listings] = await Promise.all([
+    storeImports(store).catch(() => []),
     listCounts(store.listId).catch(() => null),
     kind === "members" ? moveCounts(store).catch(() => null) : Promise.resolve(null),
     // One read of every product's name and price; what kind each is, from the store's own index.
@@ -135,8 +131,6 @@ export default async function StudioImportPage({ searchParams }: Params) {
         ];
       })
     : [];
-  const unread = read === null;
-  const jobs = read ?? [];
   const running = jobs.find((job) => job.state === "receiving" || job.state === "queued" || job.state === "running" || job.state === "mailing") ?? null;
   const past = jobs.filter((job) => job.id !== running?.id);
   const tab = TABS.find((t) => t.kind === kind)!;
@@ -260,7 +254,7 @@ export default async function StudioImportPage({ searchParams }: Params) {
                     </>
                   )}
                 </section>
-                <PastImports past={past} unread={unread} />
+                <PastImports past={past} />
               </div>
             </section>
           ) : null}
@@ -316,7 +310,7 @@ export default async function StudioImportPage({ searchParams }: Params) {
               </div>
             </section>
 
-            <PastImports past={past} unread={unread} />
+            <PastImports past={past} />
           </div>
             </>
           ) : null}
@@ -327,17 +321,13 @@ export default async function StudioImportPage({ searchParams }: Params) {
 }
 
 /** The store's last imports, each with its counts and report. */
-function PastImports({ past, unread }: { past: ImportJob[]; unread: boolean }) {
+function PastImports({ past }: { past: ImportJob[] }) {
   return (
     <aside className="card min-w-0 p-5 sm:p-6" aria-labelledby="past-title">
       <h2 id="past-title" className="text-base font-semibold text-ink">
         Your last imports
       </h2>
-      {unread ? (
-        <p role="status" className="mt-2 text-sm text-ink-soft">
-          Your imports could not be read just now. Reload this page in a minute to see them and any import that is running.
-        </p>
-      ) : past.length === 0 ? (
+      {past.length === 0 ? (
         <p className="mt-2 text-sm text-ink-soft">None yet. Each one is listed here for two weeks, with its report.</p>
       ) : (
         <ul className="mt-3 space-y-4">

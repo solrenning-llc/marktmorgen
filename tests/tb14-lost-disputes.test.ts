@@ -14,13 +14,19 @@
  *   - a dispute won takes nothing back, nor does a refund of part of the price;
  *   - a read of the closing events that fails keeps everything, keeps the
  *     place, and the next run takes it back;
- *   - a lost dispute read again takes nothing back twice.
+ *   - a lost dispute read again takes nothing back twice;
+ *   - a booked call (lib/calls.ts, callFromRow) whose charge Stripe marks as
+ *     disputed is asked about, and a lost dispute frees its time as a full
+ *     refund does; a won one, one Stripe cannot be asked about, and one past
+ *     the reading's DISPUTE_READS_PER_READING keep it; a charge not marked
+ *     disputed costs no request.
  */
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Listing, type Store } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { deliverGift, readGift, revokeRefundedGifts, startGift } from "@/lib/gifts";
 import { importedFor, importedKey } from "@/lib/imported-purchases";
 import { confirmPreorder, readPreorder, revokeRefundedPreorders } from "@/lib/preorders";
+import { paidCall, paidCalls } from "@/lib/calls";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -31,6 +37,12 @@ let refunds: Record<string, unknown>[] = [];
 let closings: Record<string, unknown>[] = [];
 let eventsFail = false;
 let eventReads = 0;
+/** The store's completed checkouts, newest first, as Stripe lists them with their payment's latest charge. */
+let sessions: Record<string, unknown>[] = [];
+/** A charge's disputes, by charge id; a charge listed in `disputesFail` cannot be asked about. */
+const disputes: Record<string, { status: string }[]> = {};
+const disputesFail = new Set<string>();
+let disputeReads = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -44,6 +56,14 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const after = url.searchParams.get("starting_after");
     const from = after ? closings.findIndex((e) => e.id === after) + 1 : 0;
     return answer({ object: "list", data: closings.slice(from, from + 100), has_more: from + 100 < closings.length });
+  }
+  if (path === "/checkout/sessions") return answer({ object: "list", data: sessions, has_more: false });
+  if (path.startsWith("/checkout/sessions/")) return answer(sessions.find((row) => row.id === path.split("/")[3]) ?? { error: { message: "no such session" } }, sessions.some((row) => row.id === path.split("/")[3]) ? 200 : 404);
+  if (path === "/disputes") {
+    disputeReads += 1;
+    const charge = url.searchParams.get("charge") ?? "";
+    if (disputesFail.has(charge)) return answer({ error: { message: "rate limited" } }, 429);
+    return answer({ object: "list", data: disputes[charge] ?? [], has_more: false });
   }
   if (path.startsWith("/payment_intents/")) return answer({ id: path.split("/")[2], object: "payment_intent", latest_charge: { object: "charge", refunded: false, amount: 2500, amount_refunded: 0 } });
   return answer({ error: { message: `no stand-in for ${init?.method ?? "GET"} ${path}` } }, 404);
@@ -157,6 +177,35 @@ async function main(): Promise<void> {
   eventsFail = false;
   is("the next run takes it back", await revokeRefundedGifts(store, Date.now() + 10_000, drop), 1);
   is("gone", await holds(gifts[2].to), false);
+
+  part("Booked calls: a lost dispute frees the booking's time, as a full refund does");
+  const call = (n: number, disputed: boolean) => ({
+    id: `cs_test_tb14call${String(n).padStart(8, "0")}`,
+    object: "checkout.session",
+    created: NOW - 3600,
+    status: "complete",
+    payment_status: "paid",
+    amount_total: 9000,
+    currency: "usd",
+    metadata: { kind: "call", store: "tb14shop", product: "p_call", title: "A call", start: String((NOW + 86_400 * n) * 1000), end: String((NOW + 86_400 * n + 1800) * 1000) },
+    customer_details: { email: `caller${n}@tb14.example`, name: `Caller ${n}` },
+    payment_intent: { id: `pi_tb14call${String(n).padStart(8, "0")}`, object: "payment_intent", latest_charge: { object: "charge", id: `ch_tb14call${String(n).padStart(8, "0")}`, refunded: false, amount: 9000, amount_refunded: 0, disputed } },
+  });
+  const sessionsOf = (rows: { session: string }[]) => rows.map((row) => row.session).sort();
+  sessions = [call(1, true), call(2, true), call(3, true), call(4, false)];
+  disputes["ch_tb14call00000001"] = [{ status: "lost" }];
+  disputes["ch_tb14call00000002"] = [{ status: "won" }];
+  disputesFail.add("ch_tb14call00000003");
+  disputeReads = 0;
+  is("the lost one no longer holds its time; the won one, the one Stripe could not be asked about, and the undisputed one do", sessionsOf(await paidCalls(store)), [call(2, true).id, call(3, true).id, call(4, false).id].sort());
+  is("three questions, one a disputed charge; none for the undisputed one", disputeReads, 3);
+  is("read alone, the lost one is not a paid booking", await paidCall(store, call(1, true).id), null);
+  is("and the won one is", (await paidCall(store, call(2, true).id))?.session, call(2, true).id);
+  sessions = Array.from({ length: 7 }, (_, i) => call(10 + i, true));
+  for (let i = 0; i < 7; i += 1) disputes[`ch_tb14call${String(10 + i).padStart(8, "0")}`] = [{ status: "lost" }];
+  disputeReads = 0;
+  const left = await paidCalls(store);
+  is("past the reading's five questions, a disputed booking keeps its time (never more questions)", [disputeReads, left.length], [5, 2]);
 
   done();
 }

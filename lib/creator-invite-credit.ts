@@ -64,7 +64,7 @@ type Invoice = {
   created?: unknown;
   status_transitions?: { paid_at?: unknown } | null;
   parent?: { type?: unknown } | null;
-  payments?: { data?: { payment?: { type?: unknown; payment_intent?: unknown; charge?: unknown } | null }[] } | null;
+  payments?: { object?: unknown; has_more?: unknown; data?: { payment?: { type?: unknown; payment_intent?: unknown; charge?: unknown } | null }[] } | null;
 };
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
@@ -82,7 +82,17 @@ async function customerFor(store: Store): Promise<string | null> {
 /** What was given back on one invoice's payments: refunds made or on their way. */
 async function refundedOn(invoice: Invoice): Promise<number> {
   let total = 0;
-  for (const row of invoice.payments?.data ?? []) {
+  // The invoice's own payments read whole first (Revisor 1 and Codex C2 on #2722): Stripe's list with every row, each
+  // a payment of a known shape. Missing, cut short or odd is not "no payment": the store fails this run.
+  const payments = invoice.payments as unknown;
+  const list = payments && typeof payments === "object" ? (payments as { object?: unknown; data?: unknown; has_more?: unknown }) : null;
+  if (!list || list.object !== "list" || list.has_more !== false || !Array.isArray(list.data) || list.data.length > 100) {
+    throw new UnknownReplyError("invite credits: the payments of an invoice");
+  }
+  for (const row of list.data as { payment?: { type?: unknown; payment_intent?: unknown; charge?: unknown } | null }[]) {
+    const known = row && typeof row === "object" && row.payment && typeof row.payment === "object" && typeof row.payment.type === "string";
+    const ref = (v: unknown) => v === undefined || v === null || typeof v === "string";
+    if (!known || !ref(row.payment!.payment_intent) || !ref(row.payment!.charge)) throw new UnknownReplyError("invite credits: a payment of an invoice");
     const payment = row.payment;
     const intent = typeof payment?.payment_intent === "string" ? payment.payment_intent : "";
     const charge = typeof payment?.charge === "string" ? payment.charge : "";

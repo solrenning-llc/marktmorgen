@@ -58,7 +58,7 @@ async function main(): Promise<void> {
     id: "in_BeaFirst01", object: "invoice", status: "paid", amount_paid: 2900, post_payment_credit_notes_amount: 0, currency: "usd",
     created: nowS - PAST * DAY, status_transitions: { paid_at: nowS - PAST * DAY },
     parent: { type: "subscription_details", subscription_details: { subscription: "sub_x" } },
-    payments: { data: [{ payment: { type: "payment_intent", payment_intent: "pi_bea_first" } }] },
+    payments: { object: "list", data: [{ payment: { type: "payment_intent", payment_intent: "pi_bea_first" } }], has_more: false },
   }]);
 
   part("The credit's record is written, then the write that lists it as owed fails once");

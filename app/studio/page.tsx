@@ -1385,6 +1385,10 @@ export default async function StudioPage({
                 ...(may("stats") && sellsMemberships(store)
                   ? [{ href: studioPath(store, "", "memberships"), title: "Membership numbers", text: "Monthly recurring revenue, churn and trials that became paying.", icon: "chart" as const }]
                   : []),
+                // Twelve months by source and currency, one of the day's two sales readings (lib/earnings-read.ts).
+                ...(may("stats") && readsSales(store)
+                  ? [{ href: studioPath(store, "", "earnings"), title: "Earnings by month", text: "Twelve months of sales, renewals, refunds and disputes, by Stripe and PayPal and by currency.", icon: "chart" as const }]
+                  : []),
                 // One page per buyer, read from the creator's own Stripe account (lib/buyer-profile.ts).
                 ...(may("orders")
                   ? [

@@ -102,6 +102,9 @@ async function draw(shop: Store): Promise<string> {
 const words = (html: string) =>
   html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/\s+/g, " ");
 const times = (text: string, part: string) => text.split(part).length - 1;
+/** An amount as lib/money.ts writes it ("$65", round amounts without ".00"), and no longer amount that starts the same. */
+const shows = (text: string, money: string) => new RegExp(money.replace(/[$.]/g, "\\$&") + "(?![\\d,]|\\.\\d)").test(text);
+const ZERO = /[$€]0(?![\d,]|\.\d)|[$€]0\.00/;
 
 /** What NE1 forbids: ranking, rating or projecting the creator by revenue. */
 const NE1_FORBIDDEN = /best month|worst month|growth|\bgrew\b|growing|projection|projected|forecast|on track|record month|\brank|badge|\blevel\b|top seller|\bincrease|\bdecrease|[+-]\d+(\.\d+)?%|\bstatus\b/i;
@@ -123,15 +126,15 @@ async function main(): Promise<void> {
     is("one page view takes exactly one of the day's heavy readings", [before.heavyLeft, after.heavyLeft], [2, 1]);
     is("titled Earnings by month", /<h1[^>]*>Earnings by month<\/h1>/.test(html), true);
     is("twelve months, the current one marked so far, the oldest July 2030", [text.includes("June 2031, so far"), text.includes("July 2030"), text.includes("June 2030")], [true, true, false]);
-    is("Stripe in dollars in June: sales $70.00, refunds $5.00, left $65.00", [text.includes("$70.00"), text.includes("$5.00"), text.includes("$65.00")], [true, true, true]);
-    is("euros on their own line, never added to dollars ($70.00 + €30.00 is never shown as 100)", [text.includes("€30.00"), /\$?100\.00|€100\.00/.test(text)], [true, false]);
+    is("Stripe in dollars in June: sales $70, refunds $5, left $65", [shows(text, "$70"), shows(text, "$5"), shows(text, "$65")], [true, true, true]);
+    is("euros on their own line, never added to dollars ($70 + €30 is never shown as 100)", [shows(text, "€30"), /[$€]100(?![\d,]|\.\d)/.test(text)], [true, false]);
     is("each currency named on its own row header", /<th scope="row"[^>]*>[^<]*Stripe[^<]*US dollars/.test(html) && /<th scope="row"[^>]*>[^<]*Stripe[^<]*euros/i.test(html), true);
-    is("PayPal in June: $40.00 on its own row", /<th scope="row"[^>]*>[^<]*PayPal[^<]*US dollars/.test(html) && text.includes("$40.00"), true);
-    is("June's dollars from every source together, within one currency only: $105.00", text.includes("$105.00"), true);
+    is("PayPal in June: $40.00 on its own row", /<th scope="row"[^>]*>[^<]*PayPal[^<]*US dollars/.test(html) && shows(text, "$40"), true);
+    is("June's dollars from every source together, within one currency only: $105", shows(text, "$105"), true);
     is("PayPal disputes said as left out", text.includes("PayPal disputes are not read"), true);
     is("a month read in full with nothing in it says so", text.includes("Nothing recorded"), true);
     is("the oldest month's Stripe renewals are not proved, so it says Could not be read, never $0", text.includes("Could not be read"), true);
-    is("no amount of zero anywhere: an empty month is words, an unknown one is words", /[$€]0\.00/.test(text), false);
+    is("no amount of zero anywhere: an empty month is words, an unknown one is words", ZERO.test(text), false);
     is("nothing typed by the creator is shown: Entered by you does not exist yet", /entered by you/i.test(text), false);
     is("before fees and taxes, and not profit", [/before .*fees/i.test(text), /not profit/i.test(text)], [true, true]);
     is("currencies are never added together, said in words", /never added together/i.test(text), true);
@@ -148,14 +151,14 @@ async function main(): Promise<void> {
     clock = NOW + (READING_FRESH_SECONDS - 60) * 1000;
     const again = words(await draw(shop));
     is("no Stripe page read, still one heavy reading left", [stripeCalls - calls, (await readingsLeft(shop, NOW)).heavyLeft], [0, 1]);
-    is("the same months shown", again.includes("$65.00"), true);
+    is("the same months shown", shows(again, "$65"), true);
 
     part("The day's readings used: the kept copy, with the time it was read");
     clock = NOW + 2 * 3600_000;
     await takeStoreReading(shop, clock, true);
     const used = words(await draw(shop));
     is("no Stripe page read", stripeCalls - calls, 0);
-    is("the kept months, said as read at 12:00 UTC", [used.includes("$65.00"), used.includes("12:00 UTC")], [true, true]);
+    is("the kept months, said as read at 12:00 UTC", [shows(used, "$65"), used.includes("12:00 UTC")], [true, true]);
     is("and when the readings come back", /used/i.test(used) && used.includes("00:00 UTC"), true);
   }
 
@@ -179,9 +182,9 @@ async function main(): Promise<void> {
     await paypalSale(shop, "PAYPALORDERPG02", Date.UTC(2031, 5, 7), 4000);
     const text = words(await draw(shop));
     is("twelve Stripe months say Could not be read", times(text, "Could not be read") >= 12, true);
-    is("PayPal still shown on its own line", text.includes("$40.00"), true);
-    is("no total for a month with a source not read: $40.00 is never called the month's whole", /All sources[^$€]*\$40\.00/.test(text), false);
-    is("no $0", /[$€]0\.00/.test(text), false);
+    is("PayPal still shown on its own line", shows(text, "$40"), true);
+    is("no total for a month with a source not read: $40 is never called the month's whole", /All sources[^$€]*\$40(?![\d,]|\.\d)/.test(text), false);
+    is("no $0", ZERO.test(text), false);
   }
 
   part("A store selling through neither: nothing is read and no reading is taken");

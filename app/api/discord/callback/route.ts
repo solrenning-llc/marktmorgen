@@ -4,7 +4,8 @@ import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { noticeCreator } from "@/lib/account-notice";
 import { exchange, isDiscordConfigured, leaveServer, whoIs } from "@/lib/discord";
 import { joinServer } from "@/lib/discord-access";
-import { forgetServer, readServer, saveServer, takeTrip } from "@/lib/discord-store";
+import { forgetServer, readServerOrThrow, saveServer, takeTrip } from "@/lib/discord-store";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { storeKey } from "@/lib/learn";
 import { logTeam } from "@/lib/team";
 import { PERMISSION_WORDS } from "@/lib/team-roles";
@@ -62,11 +63,27 @@ export async function GET(request: NextRequest) {
   const granted = await exchange(code, trip.redirect);
   if (!granted?.serverId) return back("discord=error");
   const room = storeKey(store);
-  const before = await readServer(room);
-  // Another server than the one connected: the old one is let go, with whoever it gave roles to.
+  // Read exactly: an unknown reply is not "no server", so a new server is never written over an old one whose
+  // people and buyers' address links would then never be forgotten (review of #3017, rule 30). Nothing changes here.
+  let before: Awaited<ReturnType<typeof readServerOrThrow>>;
+  try {
+    before = await readServerOrThrow(room);
+  } catch (error) {
+    if (error instanceof UnknownReplyError) return back("discord=unavailable");
+    throw error;
+  }
+  // Another server than the one connected: the old one is let go, with whoever it gave roles to. As on "Disconnect
+  // the server" (app/api/store/discord/route.ts): the bot leaves first, and the old server's people are forgotten
+  // only once Discord confirmed it left; every step that does not finish keeps the old server, its people and
+  // their address links, and trying again finishes the switch (Discord then answers 404, read as "it is out").
   if (before && before.id !== granted.serverId) {
-    await forgetServer(room, store.sid);
-    await leaveServer(before.id).catch(() => false);
+    if (!(await leaveServer(before.id))) return back("discord=old_server");
+    try {
+      await forgetServer(room, store.sid);
+    } catch (error) {
+      if (error instanceof UnknownReplyError) return back("discord=not_finished");
+      throw error;
+    }
   }
   await saveServer(room, {
     id: granted.serverId,

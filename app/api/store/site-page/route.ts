@@ -5,11 +5,10 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { MAX_BLOCKS, emptyBlock, oversized, pageProblem, parsePage, picturePaths, type PageBlock } from "@/lib/sales-page";
-import { claimPictures, dropPage, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
+import { claimNewPictures, dropPage, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
-import { takePictureDoor } from "@/lib/picture-door";
 import { hasPlaceholder } from "@/lib/mail-body";
 import { MAX_SITE_PAGES, SITE_KINDS, SITE_PAGE_ID, SITE_STARTERS, type SitePage, outFrom, siteKey, siteTitle, slugFrom, slugProblem } from "@/lib/site-page-rules";
 
@@ -129,13 +128,9 @@ export async function POST(request: NextRequest) {
         for (const path of fresh) {
           if (!ownsImagePath(path, folder) || !(await isStoredPicture(path))) return refuse("pictures");
         }
-        const taken = await claimPictures(statsId, key, fresh);
-        if (taken.length) {
-          await releasePictures(statsId, key, fresh);
-          return refuse("pictures");
-        }
-        // Now on this page: no failed request elsewhere may delete it as a fresh upload (lib/picture-door.ts).
-        await takePictureDoor(fresh);
+        // Fresh from the picture door or already this page's, never a product's, a link's or another page's picture
+        // from the shared folder (lib/sales-page-store.ts, claimNewPictures).
+        if (!(await claimNewPictures(statsId, key, fresh))) return refuse("pictures");
       }
       await writePage(statsId, key, page, store);
       // When it is out, kept on the list so the menu reads nothing more (lib/site-page-rules.ts).

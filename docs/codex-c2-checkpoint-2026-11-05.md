@@ -1,3 +1,23 @@
+# Atualização C2 — após checkpoint de 06/11/2026 03h15 (Fortaleza) — #2692 recovery-note
+
+Esta atualização é aditiva e prevalece somente para o WIP de recovery-note do #2692. Todo estado, head, RED, parecer e limitação do checkpoint imediatamente abaixo permanece preservado.
+
+## #2692 — MÉDIO D2 corrigido no WIP; PRIMARY/PR/CI permanecem intocados
+
+- PRIMARY e PR head continuam EXATAMENTE `35e670e3cf35a9997821bd5e47bb104afb9f6453`; o outage de display em A3/#2020 segue aberto. Nenhum workflow foi iniciado e este WIP NÃO é merge candidate.
+- O D2 bloqueou o WIP anterior `3a61b5bc8a8ebbeae37746be07024e3ef999225d` no comentário `6675937365`: `p` PRESENTE mas inválido era projetado como ausência, permitindo que um refund de uma dívida parecesse liquidar duas.
+- RED permanente publicado ANTES do produto: `472d53ea280ca542e2f5c5b0a233461d03e2288a`, tree `519545301ef5ad78e5d92f052c41ca8b681317c5`. O teste do autor tem12 subtestes e2 falhas causais (runner node:test reporta3 incluindo o parent): nota `p:[null]` e `p:[valid,null]` cancelavam a assinatura.
+- WIP final EXATO: `8c2eeb29aa85397d412318416401fd1912527483`, tree `32e8529622ee3f52bfd1fa7a126a335ceecbd549`. Ausência legítima do campo `p` mantém o legado; campo `p` presente/inválido vira estado desconhecido, retido byte-idêntico, sem lookup de liquidação, DELETE de assinatura, HDEL, segundo refund ou email.
+- GREEN: teste permanente12/12; MESMA prova D2 imutável `fbbb56fb7f22ff4418389cc3cff3f0b7810a8e1d`, blob `668ddda25c6396e7e5f89402d80000244c40916f`,12/12; ligados407/407 (95+28+15+22+41+114+13+67+12); strict TS dirigido0, lint0, diff-check0, scanner3799/0. Synthetic MemoryRedis/Stripe apenas, zero IO real.
+- PR comentário `6678174401`; canal de conclusão commit `dfee17cbcef52be37591c63befbaf6a557c5015d`. D2 deve repetir a MESMA prova e dar o retorno nominal da primeira financeira. H2 deve revisar somente `3a61b5bc..8c2eeb29` e declarar a aplicabilidade da segunda financeira. Não promover WIP antes dos retornos e do fechamento separado do display.
+
+## Próxima ação causal adicional
+
+- Tratar apenas retorno nominal D2/H2 deste WIP. Não sondar CI nem mover PRIMARY.
+- Permanecem cinco próprias abertas; não iniciar HZ3.
+
+---
+
 # Ponto de parada C2 — 06/11/2026 03h15 (Fortaleza)
 
 Esta seção é a mais recente e prevalece onde acrescenta ou substitui o histórico abaixo. Todo head, RED, parecer e limitação anterior continua preservado.

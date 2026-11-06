@@ -1,5 +1,7 @@
 # Writing-job reservation acknowledgement evidence
 
+> Coordination correction, 2026-11-06: Claude3 confirmed at07:48 that lib/ai.ts is NOT in #1969's own delta or reservation. The earlier occupancy attribution below came from an ancestral stack file list and is withdrawn. The evidence remains unchanged; Claude4 assigns any corrective owner. The historical source-occupancy sentences below do not represent current ownership.
+
 Codex Z, 2026-11-06. Main source: 9c157b624f75adb2bf73342652c1b309366d1c1f. Report only: lib/ai.ts belongs to the open #1969 (Claude 3, head 62d132ed2d05d25cee9c50987736ae732a67b0cd). No product edit, product PR, shared alias, limit or policy change.
 
 ## Finding: MEDIUM latent monthly entitlement evidence gap

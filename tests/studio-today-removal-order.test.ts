@@ -6,6 +6,9 @@
  *
  * The real page, a real store and a real passkey set to be removed seven days and a minute ago (its removal record
  * written as lib/passkeys.ts writes one whose notice went out). What Today hands its passkey managers must not hold that passkey.
+ *
+ * And the banner over Today about two-step login (Claude 4's C4-2980 on #2900): when the person's two-step login could
+ * not be read, the page says so plainly, rather than reading it as "no request to turn it off" and showing nothing.
  */
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
@@ -23,6 +26,22 @@ process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 const hex = (value: string) => createHash("sha256").update(value).digest("hex");
 
 /** Every list of passkeys handed to a component anywhere in the page's tree (the managers' `initial`). */
+/** Every string shown anywhere in the page's tree. */
+function words(node: unknown, found: string[] = [], seen = new Set<unknown>()): string[] {
+  if (typeof node === "string") {
+    found.push(node);
+    return found;
+  }
+  if (!node || typeof node !== "object" || seen.has(node)) return found;
+  seen.add(node);
+  if (Array.isArray(node)) {
+    for (const child of node) words(child, found, seen);
+    return found;
+  }
+  if (isValidElement(node)) words((node.props as { children?: unknown }).children, found, seen);
+  return found;
+}
+
 function passkeyLists(node: unknown, found: string[][] = [], seen = new Set<unknown>()): string[][] {
   if (!node || typeof node !== "object" || seen.has(node)) return found;
   seen.add(node);
@@ -98,6 +117,41 @@ async function main(): Promise<void> {
   is("the page still hands its passkey managers a list", faultLists.length > 0, true);
   is("the removed passkey is in none of them", faultLists.map((ids) => ids.includes("cred-fault-due")), faultLists.map(() => false));
   is("and the removal was applied by the second-step checks", (await listPasskeys(SECOND)).map((p) => p.id), ["cred-fault-kept"]);
+
+  // Two-step login on, with a request to turn it off without a code waiting three days (lib/two-step.ts askReset).
+  const THIRD = "today-two-step@example.com";
+  await claimHandle(THIRD, "todaytwostep", "Today two-step", "");
+  await ensureStatsId(THIRD);
+  const recordKey = `nl:2fa:${hex(`nimbus-2fa:${THIRD}`).slice(0, 40)}`;
+  const reset = Date.now() + 3 * 86_400_000;
+  await redis.pipeline([["SET", recordKey, JSON.stringify({ s: "synthetic-secret", since: Date.now() - 86_400_000, codes: [], last: -1, reset, backup: "" })]]);
+  const thirdSession = await openSession(THIRD);
+  const render = async (fault: boolean): Promise<string> => {
+    const kept = redis.pipeline;
+    if (fault)
+      redis.pipeline = async (commands) => {
+        if (commands.some((c) => c[0] === "GET" && c[1] === recordKey)) throw new Error("SYNTHETIC_TWO_STEP_READ_FAULT");
+        return kept.call(redis, commands);
+      };
+    answering(new NextRequest("https://marktmorgen.com/studio", { headers: { cookie: `${SESSION_COOKIE}=${thirdSession}` } }));
+    try {
+      return words(await StudioPage({ searchParams: Promise.resolve({}) })).join(" ");
+    } finally {
+      redis.pipeline = kept;
+      answering(null);
+    }
+  };
+  part("Today, with a request to turn two-step login off, read");
+  const read = await render(false);
+  is("the warning says two-step login is set to turn off", read.includes("Two-step login is set to turn off"), true);
+  is("and does not say it could not be read", read.includes("Two-step login could not be read just now"), false);
+
+  part("Today, when the person's two-step login cannot be read");
+  const unread = await render(true);
+  is("the page says plainly it could not be read", unread.includes("Two-step login could not be read just now"), true);
+  is("and that a request to turn it off may be waiting", unread.includes("cannot tell whether somebody asked to turn your two-step login off"), true);
+  is("the warning is not shown as fact", unread.includes("Two-step login is set to turn off"), false);
+  is("the request is still there", JSON.parse(String((await redis.pipeline([["GET", recordKey]]))[0])).reset, reset);
   done();
 }
 

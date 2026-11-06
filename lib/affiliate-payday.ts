@@ -131,6 +131,21 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
       ].join("\n"),
     };
   }
+  if (paid.reason === "unknown") {
+    return {
+      subject: "Check your PayPal: your affiliates' payment may have gone",
+      text: [
+        "Hello,",
+        "",
+        "It is your affiliate payday, and you asked us to pay by ourselves. We sent the batch to PayPal, but PayPal's answer did not reach us, so we do not know whether it was paid.",
+        "",
+        "Nobody in it will be paid again by us while this is not known: they show as on their way on your affiliate page. Look at your PayPal activity to see whether the payment went.",
+        studio,
+        "",
+        "— Marktmorgen",
+      ].join("\n"),
+    };
+  }
   const why: Record<string, string> = {
     funds: "your PayPal balance did not cover it. Add money to your PayPal balance",
     refused: "PayPal refused the app you connected. Connect it again, with Payouts switched on",

@@ -47,6 +47,7 @@ import { revokeRefundedGroups } from "@/lib/group-buy";
 import { sweepPayPal } from "@/lib/paypal-delivery";
 import { dropEnrollment } from "@/lib/learn";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { onAccount, platformKey } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { CONFIRM_WITHIN_SECONDS, type SessionRecord, canConfirm, confirmPurchase, confirmationKey } from "@/lib/purchase-email";
@@ -410,7 +411,9 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       store.stripeAccountId as string,
       `/checkout/sessions?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
     );
-    const rows = Array.isArray(listed.data) ? (listed.data as SessionRecord[]) : [];
+    // A page that is not a list is not "no checkouts" (CX-123 rule 24, L6): it stops this store's sweep, said as failed.
+    if (!Array.isArray(listed.data) || (listed.has_more !== true && listed.has_more !== false)) throw new UnknownReplyError("a page of checkouts");
+    const rows = listed.data as SessionRecord[];
 
     // Asked in one round trip: which of the paid ones were already confirmed.
     const paid = rows.filter((row) => isSettled(row) && typeof row.id === "string");
@@ -464,11 +467,20 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       await noteSales(store, paid).catch((error) => console.error("telling about sales failed", store.handle, error));
     }
     const confirming = canConfirm(store);
+    // Which confirmations already went: one exact answer per order, 0 or 1 (CX-123 rule 24, L6). Anything else is
+    // unknown, and that order waits for the next run's whole reading rather than being sent on a guess.
     const marks = paid.length && confirming
-      ? await redisPipeline(paid.map((row) => ["EXISTS", confirmationKey(row.id as string)]))
+      ? repliesFor(await redisPipeline(paid.map((row) => ["EXISTS", confirmationKey(row.id as string)])), paid.length)
       : [];
     for (let i = 0; confirming && i < paid.length && Date.now() < deadline; i += 1) {
-      if (Number(marks[i]) === 1) continue;
+      const mark = marks ? countOf(marks[i]) : null;
+      // Unknown is said as failed (Claude 3 on #2714): past the confirmation window the order is not read again, so a
+      // silent skip would be a confirmation never sent and never noticed.
+      if (mark === null || mark > 1) {
+        counts.failed += 1;
+        continue;
+      }
+      if (mark !== 0) continue;
       const outcome = await confirmPurchase(store, paid[i].id as string, paid[i]);
       if (outcome === "sent") counts.confirmed += 1;
       if (outcome === "failed") counts.failed += 1;
@@ -620,8 +632,9 @@ async function startAbandonedWorkflows(store: Store, rows: SessionRecord[]): Pro
     if (!handles.has(meta.store ?? "") || !meta.product || !flows.some((f) => f.productId === meta.product)) continue;
     const email = typeof row.customer_details?.email === "string" ? row.customer_details.email : typeof row.customer_email === "string" ? row.customer_email : "";
     if (!email || typeof row.id !== "string") continue;
-    const [fresh] = await redisPipeline([["SET", `nl:wf:abandoned:${row.id}`, "1", "NX", "EX", 2 * 86_400]]);
-    if (fresh === null) continue;
+    // Handed on only on an exact OK (CX-123 rule 24, L6): taken by an earlier run, or unknown, starts nothing.
+    const fresh = repliesFor(await redisPipeline([["SET", `nl:wf:abandoned:${row.id}`, "1", "NX", "EX", 2 * 86_400]]), 1);
+    if (!fresh || fresh[0] !== "OK") continue;
     await enroll(store, email, { joined: false, abandoned: meta.product });
   }
 }

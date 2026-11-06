@@ -31,6 +31,8 @@ import { coursesWords } from "@/lib/buyer-words/courses";
 import { productSegment } from "@/lib/product-slug";
 import { noteIfOpened } from "@/lib/course-finish";
 import { exampleTitlesLeft } from "@/lib/course-templates";
+import { SESSION_COOKIE } from "@/lib/auth";
+import { seesDrafts } from "@/lib/draft-view";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -71,10 +73,15 @@ export default async function CoursePage({ params, searchParams }: Params) {
 
   const query = await searchParams;
   const notice = w.linkNotices[typeof query.link === "string" ? query.link : ""] ?? null;
-  const access = await courseAccess(store, product, await cookies());
+  const jar = await cookies();
+  const access = await courseAccess(store, product, jar);
   // A signed-in student whose access is not open: their places in this course's videos go from their device (650 [WG10]).
   const forgetKey = access.state !== "open" && access.learner && !access.learner.owner ? devicePlaceKey(course.id, access.learner.email) : null;
   const open = access.state === "open";
+  // A draft is left off the store and its own page (lib/catalog.ts): its front
+  // door, title, price and outline are for its students and for the store's
+  // owner and team, signed in, never for whoever only knows its id (MM-SA-30).
+  if (product.hidden && !open && !(await seesDrafts(store, jar.get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
   const start = open ? access.start : null;
   const studying = open && !access.learner.owner;
   // A course still holding a ready structure's example titles is hidden and shown to its owner only (540 [CU1]).

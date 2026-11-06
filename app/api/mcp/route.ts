@@ -12,7 +12,15 @@ import {
   funnelTool,
   insightsTool,
   membershipsTool,
+  productTextTool,
   productsTool,
+  readCourseTool,
+  readLessonTool,
+  readPageReadingTool,
+  readPageTestTool,
+  readPageVersionsTool,
+  readSalesPageTool,
+  savedBlocksTool,
   windowOf,
 } from "@/lib/mcp-tools";
 
@@ -129,6 +137,49 @@ export async function POST(request: Request) {
     if (params.name === "get_memberships") return answer(await membershipsTool(store, charge));
     if (params.name === "get_emails") return answer(await emailsTool(store, { charge, hold }));
     if (params.name === "get_affiliates") return answer(await affiliatesTool(store, charge));
+    // The store's pages and courses (631 [AA1] (a)): each takes what it reads, at its most, before reading (lib/api-read-rules.ts).
+    const unknownProduct = { error: "There is no product with that id in this store. Use list_products for the ids." };
+    const productArg = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
+    if (params.name === "get_product_description" || params.name === "get_sales_page") {
+      if (!productArg) return result(id, said(unknownProduct, true));
+      const found = await (params.name === "get_sales_page" ? readSalesPageTool(store, productArg, charge) : productTextTool(store, productArg, charge));
+      if (found instanceof Response) return refusedWith(found);
+      return result(id, found ? said(found, "error" in found) : said(unknownProduct, true));
+    }
+    if (params.name === "get_course_outline" || params.name === "get_lesson") {
+      const lesson = typeof params.arguments?.lesson === "string" ? params.arguments.lesson.slice(0, 40) : "";
+      const missing = { error: params.name === "get_lesson" ? "There is no such lesson in this store's courses. Use get_course_outline for the ids." : "There is no course with that id in this store. Use list_products for the ids." };
+      if (!productArg || (params.name === "get_lesson" && !lesson)) return result(id, said(missing, true));
+      const found = params.name === "get_lesson" ? await readLessonTool(store, productArg, lesson, charge) : await readCourseTool(store, productArg, charge);
+      if (found instanceof Response) return refusedWith(found);
+      return result(id, found ? said(found) : said(missing, true));
+    }
+    if (params.name === "get_page_test") {
+      if (!productArg) return result(id, said(unknownProduct, true));
+      const tested = await readPageTestTool(store, productArg, charge);
+      if (tested instanceof Response) return refusedWith(tested);
+      return result(id, tested.found ? said(tested.value) : said({ error: tested.error }, true));
+    }
+    if (params.name === "get_page_reading") {
+      if (!productArg) return result(id, said(unknownProduct, true));
+      const reading = await readPageReadingTool(store, productArg, charge);
+      if (reading instanceof Response) return refusedWith(reading);
+      return result(id, reading ? said(reading, "error" in reading) : said(unknownProduct, true));
+    }
+    if (params.name === "get_page_versions") {
+      const raw = params.arguments?.version;
+      const version = raw === undefined || raw === null ? null : Number.isInteger(raw) && (raw as number) >= 0 && (raw as number) < 100 ? (raw as number) : -1;
+      if (version === -1) return result(id, said({ error: "version is a whole number from the list, 0 for the newest." }, true));
+      if (!productArg) return result(id, said(unknownProduct, true));
+      const found = await readPageVersionsTool(store, productArg, version, hold);
+      if (found instanceof Response) return refusedWith(found);
+      return result(id, found.found ? said(found.value) : said({ error: found.error }, true));
+    }
+    if (params.name === "list_saved_blocks") {
+      const listed = await savedBlocksTool(store, hold);
+      if (listed instanceof Response) return refusedWith(listed);
+      return result(id, said(listed, listed.sections === null));
+    }
     if (params.name === "list_products") {
       const cursor = typeof params.arguments?.cursor === "string" ? params.arguments.cursor.slice(0, 200) : null;
       return answer(await products(store, cursor, charge));

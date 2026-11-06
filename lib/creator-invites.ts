@@ -34,7 +34,7 @@
  *   nl:ref:mine:<sid>     the credits owed to this store, by when earned
  *   nl:ref:owed           credits earned and not yet on anyone's plan
  */
-import { randomBytes } from "node:crypto";
+import { randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { normaliseEmail } from "@/lib/auth";
 import { type Store, storeForId } from "@/lib/store";
@@ -112,8 +112,8 @@ export async function inviteCode(sid: string): Promise<string | null> {
   const [have] = await redisPipeline([["GET", myCodeKey(sid)]]);
   if (typeof have === "string" && INVITE_CODE_PATTERN.test(have)) return have;
   for (let tries = 0; tries < 5; tries += 1) {
-    const bytes = randomBytes(8);
-    const code = Array.from(bytes, (b) => INVITE_CODE_ALPHABET[b % INVITE_CODE_ALPHABET.length]).join("");
+    // randomInt draws each letter evenly; a byte taken modulo the alphabet would favour its first letters.
+    const code = Array.from({ length: 8 }, () => INVITE_CODE_ALPHABET[randomInt(INVITE_CODE_ALPHABET.length)]).join("");
     const [took] = await redisPipeline([["SET", codeKey(code), sid, "NX"]]);
     if (took === null) continue;
     const [mine] = await redisPipeline([["SET", myCodeKey(sid), code, "NX"]]);

@@ -1,0 +1,17 @@
+# K2 read-only buyer podcast grant audit
+
+Source main ba310cc2c9021032f745d801c1e2fee989f19c16, lib/podcast-access.ts blob28adee54cc60bd3f40478f149993cafa85ce8df3. Product occupied by N's #2608, headcefbf115d08efc6c77d3ed322ef73f8490fa9f96. Its readFeedToken implementation was read and is text-identical; the owner source has other email changes. No author ref/product/CI edits. All182 open PRs' paginated file lists, reservations and current channel checked before own proof reservation f89d9106d04bf505196be08134dde1b0c5a47fbb. No sixth product.
+
+## MEDIUM — incomplete or ambiguous feed identity becomes a confirmed grant
+
+lib/podcast-access.ts:71–81 destructures the first Redis result without requiring exactly one slot, then JSON.parse + three string checks return the original object. It never validates h. Missing/non-string h, empty s/p/e, conflicting duplicates s/h/p/e (including escaped e), extra pipeline results and arbitrary additional properties therefore survive as a FeedGrant. This is the same exact-evidence class as the already-closed K2 ordersGrant and waitlist-grant findings; those old findings are not reopened.
+
+The actual feed and play routes pass grant.h to storeForHandle and use s/p/e for product and current-holder checks. The buyer page also exposes its feed link after only s/p match. These consumers were read. This proof exercises the actual readFeedToken only: no HTTP route, real membership, signed media, token forgery, full authorization journey or exploitation is certified. The demonstrated defect is the reader confirming malformed/ambiguous identity evidence, not proof of a public access bypass.
+
+Permanent opt-in proof:16tests,12causal failures,4passing controls. Exact valid grant remains unchanged; confirmed null remains absent; malformed/incomplete JSON stays refused; invalid token performs zero reads. Stub accepts only ONE GET under the expected hashed token key per read, and any provider/write boundary or global fetch throws. No Redis/provider I/O occurs. The extra-properties test requires only the minimal known grant to be returned, preserving copy semantics; duplicates/invalid routing/envelope must refuse. No caller or original assertion modified.
+
+Run `node proofs/k2/podcast-grant-run.mjs` from the repository root: exit1,16/4pass/12fail. Source is unmodified. These files live outside canonical *.test.ts discovery and are deliberately RED, not a product PR. The existing podcast.test.ts suite passed32/32 separately with the repository's actual aliases/environment.
+
+Directed TypeScript with actual product/proof imports0; focused ESLint0; final tracked scanner3833/0 including this report; diff0. No global build/types, browser/native Redis/provider, production publication, complete journey, user/device or AAA validation. No price/limit/commission/flag/gate/account/payment/term/key/contact or paid-operation behavior changes. Cost unknown, never zero; proof makes no paid calls.
+
+Static same-pattern inventory, not additional confirmed findings: feedReadAllowed uses Number and catches to true in the same occupied file (C4's numeric-reader scope); readLetterGrant uses JSON.parse+cast in lib/letter-access.ts, occupied by #2655/#2464/#1969. No proof or product correction was attempted in those paths. C1 assigns ownership; N controls any #2608 correction and needs causal RED, linked checks and exact-head nine successes before merging.

@@ -344,8 +344,15 @@ export async function openMove(
     return { ok: false, reason: "refused" };
   }
   if (live) {
-    await noteKept(store, invite.e, productId, now);
-    await release();
+    // Moved, whatever the note says (Claude 4 A5 on #2690): a note that fails to be written is written by the next
+    // press, the thanks page or the sweep, and the mark is let go either way, never left "opening" for a day.
+    try {
+      await noteKept(store, invite.e, productId, now);
+    } catch (error) {
+      console.error("noting a moved membership as kept failed", store.handle, error);
+    } finally {
+      await release();
+    }
     return { ok: false, reason: "done" };
   }
   let asked = false;
@@ -357,9 +364,13 @@ export async function openMove(
     if (!held.ok) {
       // Refused before Stripe was asked (no unit left, or the hold not taken): nothing made. A hold not recorded
       // after the checkout was made keeps the mark, so a second is not made while the first may be open.
-      if (!asked || held.reason === "soldout") await release();
-      else await keepUnknown();
-      return { ok: false, reason: "unavailable" };
+      if (!asked || held.reason === "soldout") {
+        await release();
+        return { ok: false, reason: "unavailable" };
+      }
+      // The checkout may exist: said as a try still being checked, as every later press says it.
+      await keepUnknown();
+      return { ok: false, reason: "checking" };
     }
     // The mark lives as long as Stripe keeps this checkout open, and a minute (B2): a checkout on a store with
     // reminders closes in an hour, a held unit's in half an hour. Its closing time not read: the longest.
@@ -380,7 +391,8 @@ export async function openMove(
     // The box to start access at once was not checked: said beside it, nothing opened.
     if (error instanceof DigitalConsentMissing) return { ok: false, reason: "consent" };
     console.error("opening a moved member's checkout failed", store.handle, error);
-    return { ok: false, reason: "refused" };
+    // Nothing made: try again. Not known: the same words every later press shows (Claude 4 on #2690).
+    return { ok: false, reason: nothingMade ? "refused" : "checking" };
   }
 }
 

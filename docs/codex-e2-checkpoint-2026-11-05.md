@@ -178,3 +178,33 @@ New default rule24 audit (announced388829a3f0b3980fbff0d893516866b5ca2cf528): li
 Durable proof ONLY, no product PR: codex/e2-llc-proxy-completeness-red@750fd98cdda0d8a9a436c671ff30868a417b5130; docs/reviews/e2-llc-proxy-completeness.md. Runner node proofs/e2/run-llc-proxy.mjs. Five checks / TWO CAUSAL FAILURES + three controls; failing proof is not a green product test. Scoped strictTSC0, ESLint0, linked llc12+commercialLLC5+customer-base7+cost-envelope3=27pass, scanner3853tracked/0, diff0. Source was not modified. Report/proof types/runner persisted in own branch. A top-level comment on1969 reports this MAIN audit; not a full review or current-head qualification of1969.
 
 Ownership audit:177 open PRs, all file pages. Initial three-page cap on1969 was insufficient (744files); pages4-8 then completed it and found BOTH lib/llc-fixed-costs.ts and tests/llc-fixed-costs.test.ts occupied. No product edit/reservation was made for that occupied scope. Claude1/B2/C2 must coordinate corrective owner. The proof files alone were reserved in channel, no reservations document touched. NEXT EXACT: post finding and this durable checkpoint in channel; await nominal coordination/corrective candidate for occupied1969, replay unchanged proof after correction. With five previous own units now merged, capacity is available for the next genuinely free MR2 unit after fresh unit-specific ownership audit. Do not call all MR2 complete: authenticated source ingestion, automatic scheduling and actual owner delivery remain deferred and real costs unknown. PR2523 nominal review5795271577 remains closed; preserve original proofs. No unrequested duplicate review or automation creation.
+
+
+## SUPERSEDING CHECKPOINT — 2026-11-06 02:00 Fortaleza: publication verified, no product change
+
+Read this section first. All five products2403/2494/2605/2636/2646 remain MERGED; zero own product PRs from that group. Never recreate older2311/2419/2351. No new head, product, CI retry, reservation document or other agent's branch was changed this run.
+
+Main frozen for this audit: b8c951f7e5b0492a8cd1e9f4437125d2ea6d747b. CLAUDE/AGENTS/reservations/inbox read from this exact source. Queue AV/MQ was read through native Git because the large queue contents response previously returned empty. Current channel had rotated: read the FULL current file (108902 characters at initial fetch), plus FULL archive canal-arquivo/docs-arquivo/messages-ate-2026-11-06-0425.md (406213 characters). No E2 corrective assignment or reply to fixed-cost proof was found there. General new C1 decisions concern D11/test mode/Encanto and C2's Upstash/Hazelsong research; do not infer these as E2 product assignments.
+
+## Published-source evidence
+
+The old deployment of merge08bb2b0a has GitHub Vercel status FAILURE. Initial build-event query without dpl_ prefix returned404; corrected query dpl_HWSzyd133kTssvpTD7JrDFck6dGG returned an empty event list. That is NOT a diagnosed root cause or evidence of zero errors. No redeploy/cancel/configuration action was taken.
+
+Read-only Vercel get_deployment(marktmorgen.com, withGitRepoInfo=true) returned:
+- deployment dpl_9ymUyuWfQKvn1FxCegzQcVWgUXHc, READY, production;
+- git source main b8c951f7e5b0492a8cd1e9f4437125d2ea6d747b;
+- source message docs(reservations): clear Codex rows whose branches merged (CX-120) (#2768);
+- public URL marktmorgen-ofe7ebhvk-viniciussucupira.vercel.app; aliases include marktmorgen.com;
+- ready timestamp1793940966423; no alias error.
+
+Native git merge-base confirms ALL five own merge commits are ancestors of this READY source, and all16 reviewed own product/test/docs blobs are byte-identical to08bb2b0a. Domain HEAD returned HTTP200 at2026-11-06T05:00:31Z (02:00:31 Fortaleza). This confirms published code containing the five units, not a real customer journey, runtime error window, accounting evidence, automatic delivery or real profit. Current no-caller/pure report modules do not become an enabled monthly reporting service from publication alone. No manual deployment or paid provider operation.
+
+Reading/publication acknowledged in channel be270fd7b7b95aaff1e693ea87aee316bcf3e2a4. Five prior merge and review/CI details remain in the previous section, not repeated/re-executed.
+
+## Rule24 audit extension
+
+Read current net-margin-rules, reviewed-receiving, reviewed-resource-envelope, contract-protocol-cost, protocolInfrastructureMicroUsd in spend-cost-table, and backup-cost. No additional causal unknown-to-zero/success finding was confirmed in this static pass. The resource-envelope area is already associated with C2's2601; do not duplicate a focal review or invent a product unit. Existing backup assumptions and unknowns stay explicitly unknown; nothing was approved as a fixed-cost ceiling. No new tests were written, no green CI or complete validation claimed for this read-only extension.
+
+The confirmed fixed-cost MEDIUM remains open and UNASSIGNED in the sources checked. Preserve original proof codex/e2-llc-proxy-completeness-red@750fd98cdda0d8a9a436c671ff30868a417b5130,5checks/2failures+3controls. PR1969 comment6676558372 is still the only matching reply in the fetched two-comment discussion. No corrective candidate has been identified; do not re-run the unchanged proof just to produce the same failure. Both product/test paths were occupied by1969 in the177-PR file audit, including its744files/8pages. No authorization to change that occupied product scope is inferred.
+
+NEXT EXACT: publish this checkpoint and precise stop in the fresh channel. Claude1/owner1969 must coordinate the corrective scope or supply a candidate before product editing there. On a genuine candidate, replay the SAME original proof and linked tests/types/lint/scanner; do not certify a stale head. Capacity is available for a genuinely free MR2 unit after its unit-specific inventory/RESERVA/RED; no synthetic new unit or duplicate review just to fill slots. Source ingestion/authentication, scheduling and real owner delivery remain absent/deferred; real costs unknown. Continue only from fresh instructions, an actual corrective delta or useful scoped audit, with AV12 and no unchanged CI polling.

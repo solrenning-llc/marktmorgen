@@ -525,8 +525,16 @@ export async function syncView(store: Store): Promise<SyncView> {
   const ids = log as string[];
   const jobs = ids.length ? exactOwnArray(await redisPipeline(ids.map((id) => ["GET", jobKey(id)])), ids.length) : [];
   if (!jobs) throw new Error("The email platform view is unavailable");
-  const parsedJobs = jobs.map(parseJob);
-  if (parsedJobs.some((job) => job === null)) throw new Error("The email platform view is unavailable");
+  const parsedJobs: Job[] = [];
+  for (const raw of jobs) {
+    // Job records expire after seven days while their ids may remain in the
+    // bounded log. A missing GET is therefore known absence, not a broken
+    // batch; every present value must still be a complete job.
+    if (raw === null) continue;
+    const parsed = parseJob(raw);
+    if (!parsed) throw new Error("The email platform view is unavailable");
+    parsedJobs.push(parsed);
+  }
   let problem: { message: string; at: number } | null = null;
   try {
     const value = typeof rawBad === "string" ? (JSON.parse(rawBad) as { message?: unknown; at?: unknown }) : null;
@@ -554,7 +562,7 @@ export async function syncView(store: Store): Promise<SyncView> {
           problem,
         }
       : null,
-    log: (parsedJobs as Job[])
+    log: parsedJobs
       .map((job) => ({
         id: job.id,
         email: job.email,

@@ -62,6 +62,11 @@ async function main(): Promise<void> {
   part("A complete view remains readable");
   is("an exact empty log is connected and empty", await view([config, null, []]), { provider: "kit", jobs: [] });
   is("every requested job is returned", await view([config, null, ids], ids.map(job)), { provider: "kit", jobs: ids });
+  is("an expired requested job is known absence", await view([config, null, [ids[0]]], [null]), { provider: "kit", jobs: [] });
+  is("an expired row does not hide a present job", await view([config, null, ids], [null, job(ids[1])]), {
+    provider: "kit",
+    jobs: [ids[1]],
+  });
 
   part("The three-part view envelope must be exact and own");
   is("a short envelope is unknown, never disconnected or empty", await view([config]), "unknown");

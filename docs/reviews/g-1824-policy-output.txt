@@ -1,0 +1,121 @@
+=== translation-red ===
+=== g1824-translation-red.proof.ts ===
+  FAIL  German policy is German
+        expected "Wer verkauft"
+        got      "Who sells"
+  FAIL  European Portuguese policy is Portuguese
+        expected "Quem vende"
+        got      "Who sells"
+  FAIL  no seller name produces no invented seller
+        expected []
+        got      [{"id":"seller","title":"Who sells","sentences":["This store is the seller. Each sale is a contract between This store and the buyer.","Marktmorgen provides the store and its checkout. It is not a party to the sale and is not the merchant of record.","Payments go into This store's own Stripe account."]},{"id":"cancel","title":"Canceling within 14 days","sentences":["In the European Union, the United Kingdom and some other places, a consumer who buys online usually has 14 days to cancel.","For digital content, such as a file, a link, a course or a private podcast, that right ends once access starts only if you agreed at checkout that it may start within the 14 days, said you understood you would lose the right, and received a confirmation of both."]}]
+4 checks, 3 failing.
+
+=== translation-green ===
+=== g1824-translation-red.proof.ts ===
+4 checks, all passing.
+
+=== unknown-catalog ===
+=== g1824-unknown-catalog.proof.ts ===
+G_POLICY_RESULT {"mode":"empty envelope","hits":1,"result":"{\"digital\":false,\"memberships\":false,\"sections\":[\"seller\"]}"}
+  FAIL  empty envelope: unknown catalog never generates incomplete policy
+        expected "unknown"
+        got      "{\"digital\":false,\"memberships\":false,\"sections\":[\"seller\"]}"
+G_POLICY_RESULT {"mode":"null records","hits":1,"result":"{\"digital\":false,\"memberships\":false,\"sections\":[\"seller\"]}"}
+  FAIL  null records: unknown catalog never generates incomplete policy
+        expected "unknown"
+        got      "{\"digital\":false,\"memberships\":false,\"sections\":[\"seller\"]}"
+G_POLICY_RESULT {"mode":"malformed JSON","hits":1,"result":"{\"digital\":false,\"memberships\":false,\"sections\":[\"seller\"]}"}
+  FAIL  malformed JSON: unknown catalog never generates incomplete policy
+        expected "unknown"
+        got      "{\"digital\":false,\"memberships\":false,\"sections\":[\"seller\"]}"
+G_POLICY_RESULT {"mode":"non-listing JSON","hits":1,"result":"{\"digital\":false,\"memberships\":false,\"sections\":[\"seller\"]}"}
+  FAIL  non-listing JSON: unknown catalog never generates incomplete policy
+        expected "unknown"
+        got      "{\"digital\":false,\"memberships\":false,\"sections\":[\"seller\"]}"
+G_POLICY_RESULT {"mode":"throw","hits":1,"result":"unknown"}
+13 checks, 4 failing.
+
+=== unknown-catalog-typed ===
+=== g1824-unknown-catalog-typed.proof.ts ===
+G_POLICY_RESULT {"mode":"empty envelope","hits":1,"result":"{\"digital\":false,\"memberships\":false,\"sections\":[\"seller\"]}"}
+  FAIL  empty envelope: unknown catalog never generates incomplete policy
+        expected "unknown"
+        got      "{\"digital\":false,\"memberships\":false,\"sections\":[\"seller\"]}"
+G_POLICY_RESULT {"mode":"null records","hits":1,"result":"{\"digital\":false,\"memberships\":false,\"sections\":[\"seller\"]}"}
+  FAIL  null records: unknown catalog never generates incomplete policy
+        expected "unknown"
+        got      "{\"digital\":false,\"memberships\":false,\"sections\":[\"seller\"]}"
+G_POLICY_RESULT {"mode":"malformed JSON","hits":1,"result":"{\"digital\":false,\"memberships\":false,\"sections\":[\"seller\"]}"}
+  FAIL  malformed JSON: unknown catalog never generates incomplete policy
+        expected "unknown"
+        got      "{\"digital\":false,\"memberships\":false,\"sections\":[\"seller\"]}"
+G_POLICY_RESULT {"mode":"non-listing JSON","hits":1,"result":"{\"digital\":false,\"memberships\":false,\"sections\":[\"seller\"]}"}
+  FAIL  non-listing JSON: unknown catalog never generates incomplete policy
+        expected "unknown"
+        got      "{\"digital\":false,\"memberships\":false,\"sections\":[\"seller\"]}"
+G_POLICY_RESULT {"mode":"throw","hits":1,"result":"unknown"}
+13 checks, 4 failing.
+
+=== green ===
+=== store-policy-page.test.ts ===
+14 checks, all passing.
+=== store-policy-words.test.ts ===
+49 checks, all passing.
+=== store-policy-facts.test.ts ===
+17 checks, all passing.
+=== accessibility-statement.test.ts ===
+  ok    creators' stores: what the studio checks, and that their content is theirs
+77 checks, all passing.
+=== accessibility-inventory.test.ts ===
+  FAIL  generator keeps the checked inventory current
+        expected "{\n  \"schemaVersion\": 1,\n  \"sourceRevision\": \"222fd9cd0bb99772d97392044a69d30b77fa800a\",\n  \"brief\": \"User attachment bcc471cb-e0ea-4bd0-9b09-26c1d19e0ed5,19 October2026\", [large generated JSON omitted; exact difference routeInventory.pageTemplates132→134]
+        got      "{\n  \"schemaVersion\": 1,\n  \"sourceRevision\": \"222fd9cd0bb99772d97392044a69d30b77fa800a\",\n  \"brief\": \"User attachment bcc471cb-e0ea-4bd0-9b09-26c1d19e0ed5,19 October2026\", [large generated JSON omitted; exact difference routeInventory.pageTemplates132→134]
+16 checks, 1 failing.
+=== site-pages.test.ts ===
+12 checks, all passing.
+=== platform-us-english.test.ts ===
+42 checks, all passing.
+
+=== linked ===
+=== catalog-reads.test.ts ===
+ℹ tests 9
+ℹ pass 9
+ℹ fail 0
+ℹ skipped 0
+=== catalog-ceiling.test.ts ===
+ℹ tests 5
+ℹ pass 5
+ℹ fail 0
+ℹ skipped 0
+=== digital-consent.test.ts ===
+93 checks, all passing.
+=== site-page-append.test.ts ===
+ℹ tests 12
+ℹ pass 12
+ℹ fail 0
+ℹ skipped 0
+=== plan-cost-registry.test.ts ===
+ℹ tests 19
+ℹ pass 19
+ℹ fail 0
+ℹ skipped 0
+=== store-data-registry.test.ts ===
+ℹ tests 7
+ℹ pass 7
+ℹ fail 0
+ℹ skipped 0
+=== agent-coverage.test.ts ===
+13 checks, all passing.
+
+=== types-final ===
+
+
+=== lint ===
+
+
+=== lint-typed ===
+
+
+=== scan ===
+Public data check: 3268 tracked files; 0 file(s) require correction.

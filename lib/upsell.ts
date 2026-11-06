@@ -453,7 +453,7 @@ async function afterPaid(store: Store, session: string, target: Listing, pi: Rec
 }
 
 /** One offer's charge for this order, found among the customer's payments. */
-async function findCharge(
+export async function findOfferCharge(
   store: Store,
   session: string,
   slot: string,
@@ -481,7 +481,7 @@ async function settleOne(store: Store, session: string, slot: string, record: Up
     if (record.pi) {
       pi = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(record.pi)}`);
     } else if (record.customer) {
-      pi = await findCharge(store, session, slot, record.customer);
+      pi = await findOfferCharge(store, session, slot, record.customer);
       if (!pi) {
         // Not there after long enough: the request never reached Stripe.
         if (Date.now() - record.at > LOST_ANSWER_MS) {

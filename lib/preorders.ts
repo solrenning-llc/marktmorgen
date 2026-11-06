@@ -41,6 +41,8 @@ export const piKey = (pi: string) => `nl:pre:pi:${pi}`;
 const anyKey = (sid: string) => `nl:pre:${sid}:any`;
 const anchorKey = (sid: string) => `nl:pre:${sid}:refunds`;
 const seenKey = (sid: string) => `nl:pre:${sid}:seen`;
+/** Marks a row of the refunds job read; true only when Redis answered the SADD with a count. */
+const markRead = async (sid: string, id: string): Promise<boolean> => countOf(repliesFor(await redisPipeline([["SADD", seenKey(sid), id]]), 1)?.[0]) !== null;
 const giveKey = (session: string) => `nl:pre:give:${session}`;
 const JOBS = "nl:pre:jobs";
 /** How long a pre-order is kept after it was last changed: past any refund window, as a gift is. */
@@ -440,7 +442,7 @@ export async function revokeRefundedPreorders(
     newest = Math.max(newest, created);
     if (dispute && id && !pi) {
       // No payment to look up: nothing of this store can be told from it, so it is read, and never holds the place back.
-      await redisPipeline([["SADD", seenKey(sid), id]]);
+      if (!(await markRead(sid, id))) unsure = true;
       continue;
     }
     if (!id || !pi || !(dispute ? rowGivesBack(refund) : refund.status === "succeeded" && charge?.refunded === true)) continue;
@@ -479,16 +481,26 @@ export async function revokeRefundedPreorders(
             }
           })();
           if (job === `pre:${session}`) {
-            await redisPipeline([["HDEL", importedKey(sid, entry.to), productId]]);
+            // Each write confirmed in its exact shape before the next (Codex Z, review 5794703899; CX-123 rule 24):
+            // a write left unknown marks nothing taken back or read and keeps the anchor, so the next run does it again.
+            const removed = repliesFor(await redisPipeline([["HDEL", importedKey(sid, entry.to), productId]]), 1);
+            if (countOf(removed?.[0]) === null) {
+              unsure = true;
+              continue;
+            }
             await dropStart(entry.to, productId);
           }
         }
-        await redisPipeline([["HSET", entriesKey(sid, productId), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, productId)]);
+        const saved = repliesFor(await redisPipeline([["HSET", entriesKey(sid, productId), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, productId)]), 2);
+        if (countOf(saved?.[0]) === null || countOf(saved?.[1]) === null) {
+          unsure = true;
+          continue;
+        }
         revoked += 1;
       }
     }
     // Marked read once handled: a run that stops halfway leaves it to the next, which does the same again.
-    await redisPipeline([["SADD", seenKey(sid), id]]);
+    if (!(await markRead(sid, id))) unsure = true;
   }
   // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead), and the
   // anchor with it: the closing events are read from the anchor, so it waits while they are not all read.

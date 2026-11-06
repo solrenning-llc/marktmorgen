@@ -60,6 +60,8 @@ export const giftKeys = (id: string, pi: string): string[] => [...(id ? [giftKey
 const anyKey = (sid: string) => `nl:gift:${sid}:any`;
 const anchorKey = (sid: string) => `nl:gift:${sid}:refunds`;
 const seenKey = (sid: string) => `nl:gift:${sid}:seen`;
+/** Marks a row of the refunds job read; true only when Redis answered the SADD with a count. */
+const markRead = async (sid: string, id: string): Promise<boolean> => countOf(repliesFor(await redisPipeline([["SADD", seenKey(sid), id]]), 1)?.[0]) !== null;
 const now = () => Math.floor(Date.now() / 1000);
 
 export function newGiftId(): string {
@@ -82,8 +84,9 @@ function parseKeptGift(raw: string, id: string): Gift | null {
   }
 }
 
-async function saveGift(gift: Gift, seconds: number): Promise<void> {
-  await redisPipeline([["SET", giftKey(gift.id), JSON.stringify(gift), "EX", seconds]]);
+/** Writes a gift down; true only when Redis answered the write in its exact shape ("OK"). */
+async function saveGift(gift: Gift, seconds: number): Promise<boolean> {
+  return repliesFor(await redisPipeline([["SET", giftKey(gift.id), JSON.stringify(gift), "EX", seconds]]), 1)?.[0] === "OK";
 }
 
 export type GiftInput = { to: unknown; from: unknown; message: unknown };
@@ -273,7 +276,7 @@ export async function revokeRefundedGifts(
     newest = Math.max(newest, created);
     if (dispute && id && !pi) {
       // No payment to look up: nothing of this store can be told from it, so it is read, and never holds the place back.
-      await redisPipeline([["SADD", seenKey(sid), id]]);
+      if (!(await markRead(sid, id))) unsure = true;
       continue;
     }
     if (!id || !pi || !(dispute ? rowGivesBack(refund) : refund.status === "succeeded" && charge?.refunded === true)) continue;
@@ -309,14 +312,23 @@ export async function revokeRefundedGifts(
             return [];
           }
         })();
-        await redisPipeline([["HDEL", importedKey(sid, gift.to), gift.p]]);
+        // Each write confirmed in its exact shape before the next (Codex Z, review 5794703899; CX-123 rule 24): a
+        // write left unknown marks nothing taken back or read and keeps the anchor, so the next run does it again.
+        const removed = repliesFor(await redisPipeline([["HDEL", importedKey(sid, gift.to), gift.p]]), 1);
+        if (countOf(removed?.[0]) === null) {
+          unsure = true;
+          continue;
+        }
         for (const productId of [gift.p, ...items]) await dropStart(gift.to, productId);
-        await saveGift({ ...gift, revoked: now() }, GIFT_KEPT_SECONDS);
+        if (!(await saveGift({ ...gift, revoked: now() }, GIFT_KEPT_SECONDS))) {
+          unsure = true;
+          continue;
+        }
         revoked += 1;
       }
     }
     // Marked read once handled: a run that stops halfway leaves it to the next, which does the same again.
-    await redisPipeline([["SADD", seenKey(sid), id]]);
+    if (!(await markRead(sid, id))) unsure = true;
   }
   // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead), and the
   // anchor with it: the closing events are read from the anchor, so it waits while they are not all read.

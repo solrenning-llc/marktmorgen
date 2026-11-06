@@ -32,6 +32,17 @@ async function withReply<T>(reply: unknown[], read: () => Promise<T>): Promise<T
   }
 }
 
+async function withReplies<T>(replies: unknown[][], read: () => Promise<T>): Promise<{ value: T; calls: number }> {
+  const original = redis.pipeline;
+  let calls = 0;
+  redis.pipeline = (async () => replies[calls++] ?? []) as Pipeline;
+  try {
+    return { value: await read(), calls };
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
 async function paid(reply: unknown[]): Promise<{ value: Awaited<ReturnType<typeof readMailRevenuePaid>>; before: number }> {
   let before = 0;
   const value = await withReply(reply, () => readMailRevenuePaid(creator, async () => {
@@ -74,6 +85,13 @@ async function main(): Promise<void> {
   for (const [label, value] of [["negative", -1], ["fractional", 1.5], ["unsafe", Number.MAX_SAFE_INTEGER + 1]] as const) {
     is(`${label} cached visits are unknown, never shown as a count`, await withReply([JSON.stringify({ [broadcast]: value })], () => readMailVisits(creator, [broadcast])), null);
   }
+  const newer = "broadcast_MailRevenueNewer";
+  const fresh = Array.from({ length: 90 }, (_, day) => day === 89 ? [5, 0, 0, 7, 0, 0] : [0, 0, 0, 0, 0, 0]);
+  is(
+    "a valid cache missing a newer email is read afresh rather than hiding every count",
+    await withReplies([[JSON.stringify({ [broadcast]: 3 })], fresh, ["OK"]], () => readMailVisits(creator, [broadcast, newer])),
+    { value: { [broadcast]: 5, [newer]: 7 }, calls: 3 },
+  );
 
   done();
 }

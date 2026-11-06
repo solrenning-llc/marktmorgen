@@ -385,6 +385,19 @@ void (async () => {
     }) as typeof redis.pipeline;
     is(`studentPage, ${label}: unknown, never "not blocked" or 0 lessons`, await outcome(() => studentPage(course, "0", 10, async () => true)), null);
   }
+  // A page with no rows asks nothing more, whatever is blocked (Codex G, review 5793946540): an empty course with a
+  // blocked student, and an exact page of no rows with a cursor that goes on, are read as they are.
+  for (const [label, page, want] of [
+    ["an empty course with one student blocked", ["0", []], { students: [], total: 0, next: "0" }],
+    ["an empty page whose cursor goes on", ["37", []], { students: [], total: 0, next: "37" }],
+  ] as [string, unknown[], unknown][]) {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (studentsPage(commands)) return [page, 0, 1] as unknown[];
+      if (second(commands)) throw new Error("a second read was asked for a page with no rows");
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    is(`studentPage, ${label}: read as it is, nothing more asked`, await outcome(() => studentPage(course, "0", 10, async () => true)), want);
+  }
   // Past BLOCKED_READ_MAX, one SISMEMBER a row: only 0 or 1.
   for (const [label, answer] of [["null", null], ["text", "1"], ["two", 2], ["true", true]] as [string, unknown][]) {
     let call = 0;

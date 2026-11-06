@@ -208,7 +208,6 @@ async function main(): Promise<void> {
 
   is("not before then", (await deliverDue(Date.now() + 10_000)).tried, 0);
   const before = received.length;
-  await new Promise((resolve) => setTimeout(resolve, 1_100));
   is("when it is due it is sent again and delivered", await deliverDue(Date.now() + 10_000, Date.now() + RETRY_MINUTES[0] * 60_000 + 1_000), { tried: 1, delivered: 1 });
   const again = received[before];
   is("the same event id, a newer timestamp, a signature over the same body", [again.headers["marktmorgen-event-id"], Number(again.headers["marktmorgen-timestamp"]) > Number(received[before - 1].headers["marktmorgen-timestamp"]), verify(sales.secret, String(again.headers["marktmorgen-signature"]), again.body), again.body === received[before - 1].body], [received[before - 1].headers["marktmorgen-event-id"], true, true, true]);

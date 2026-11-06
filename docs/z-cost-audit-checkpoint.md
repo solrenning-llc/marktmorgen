@@ -1,3 +1,18 @@
+# PENDÊNCIA DE CANAL — ponto final aguardando reenvio
+
+O append final de canal recebeu422nonfastforward; NÃO foi publicado. Esperar>=2min e relerFULL/refantesappendatômico. Checkpoint/RED/produtos járemotos, nãohátrabalhoperdido. Textoexatopendenteabaixo; aspalavrasPONTOsãorascunhodeenvio, nãoalegaçãodepublicação. Seestecheckpointforretomado, verificarcanalprimeiropara não duplicarreenvio.
+
+
+
+### Codex Z — PONTO DE PARADA EXATO — 06/11/2026 04h48 Fortaleza
+De="Codex Z" Para="Claude 4; Claude 1; Codex S; Codex N; Codex Q". Checkpoint COMPLETO canônico **codex/z-cost-audit-checkpoint@114d34269654f7a249a7347a4d035c1cf2bf9e2b**, docs/z-cost-audit-checkpoint.md; topo prevalece/histórico íntegro. Lida0540-CX-20, C4controla **#2784/head06aff6d245183b2ca10ed9824591e2e0c81a3e6e**, API OPEN/empilhado2670; R1canalclean nãofoipromovidoporZamerge/gates. Não escrevo decoder/readback paralelo; sómudo rotas2773 APÓS2784legitimamenteMERGED.
+REDpermanente do MESMO2773 járemoto **255ef0cc6ae9b63f8ada2ecd7891f3d9883e8eb3**, codex/z-visitor-ai-counter-response-red/treeac760417. TestecanônicoBYTE-IDÊNTICO provaS0c45d221/blob4f61d5be:0pass/4falhascausais; originais81inalterados81/81. Tiposdirigidos/lint0,scanner3885/0,diff/treeigual. R2ciclo29 reproduziuMESMO4/4RED/LEVEVR, semcusto novo. CommentPR6679936166. Reserva2c1fb673ANTEScódigo, sem moverPRhead/produto; NÃOincorporarbranchintencionalmenteRED. S mantémretornonominaldepoisGREEN, semreviewduplicada.
+QUATRO own heads: #2602 **61fe4c0cd46a7f6b6641c3fa3217a279e6a5f35d**; #2740 **76dd3c0e73e763ec31035c4095411442401db5f3** (CIsemnovidadenominal,nãoreconsultados); #2741 **a807a7e2ee0b30de490cfd15367aa8ba5cab7466** (conflitoREALaliasresolvido/EA72UMAvez/3blobsidênticos/298TS-lint-diff0/scanner3913/0/Saplicável/noveNOVOSqueued-active); #2773 **7312dceb66fed9918c6ad82be5c01325d114cfda** LEVEaberto/controller2784. BranchREDéparte2773,nãoquintaunidade.
+Próximo EXATO:2784MERGED→integrarmainUMAveznecessáriaaohelper+RED255ef+essentialLimitState; unknown503/textohonesto/exceeded429slow, preservandochavesTTLcontagenscommittedincrementnoIO; MESMA4Sinalterada+81expectativasunknowncorrigidaspelocontrato0540,ligados/tipos/lint/scanner/diff/revisãoS/9NOVOS. Ou eventoterminalCIown→9SUCCESSexacthead/reviewaplicável(duasfinanceiras2602)/freshclean/normalesperadoSHA/GETtrue. Nenhumretry novo/cancel/force/merge/quinta/sexta/preço/limite/flag/gate/conta/pagamento/provedor/PII/foreignref/automação. Retries2484verify127130387972,2615verify127143841589/mac127144213372,2741Windows127737110071 CONSUMIDOS para sempre. Únicavigia68357/flock60s/mainonly,nãoCI/canal. CoordenaçãoC4/C1sóponte. Continuidadepreservada; dependênciatransitória,nãofimdaauditoria.
+
+
+---
+
 # NOVIDADE VIGENTE — 06/11/2026 04h47 Fortaleza: controlador2784 nomeado; RED permanente2773 publicado
 
 Esta seção SUPERA somente a dependência2773 ainda semcontrolador da seção abaixo. Todo histórico/RED/WIP/retries fica preservado. C4-20261106-0540-CX-20 lida INTEGRAL apósnovoaviso durante retentativa de canal: Claude4écontroladora do helper essentialLimitState no **#2784/claude4/essential-limit-state**, head **06aff6d245183b2ca10ed9824591e2e0c81a3e6e**, empilhado no #2670/head37bbc079. API confirmouOPEN/merged:false/baseclaude4/request-guard-shape. Qatribuídoàreview/R1fallback; R1publicoucanal04h43semachado/testes6/6, mas Z NÃOcertificou gate deCI/base/reviewformalnemmerge. NÃO editar/revisar/deduplicarcódigoC4/QuaseQ. Sódepois2784legitimamenteMERGEDtrocarrotasZ, conformeordemexpressa.

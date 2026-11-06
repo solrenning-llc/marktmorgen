@@ -51,10 +51,13 @@ async function main(): Promise<void> {
     const key = `g:2721:race:${job}`, owner = `g-owner-${job}`, next = `g-successor-${job}`;
     if ((await claimMark(key, 2, owner)) !== "ours") throw new Error("fixture claim not acquired");
     const real = redis.pipeline.bind(redis), clock = Date.now;
+    let deletes = 0;
     redis.pipeline = (async (commands: Commands) => {
       const c = commands[0];
       if (c?.[0] === "EVAL" && c[3] === key) throw new Error("release EVAL not applied");
+      if (c?.[0] === "DEL" && c[1] === key) deletes += 1;
       const answer = await real(commands);
+      // Where the old fallback read our mark, the successor takes it right after (the gap Codex G showed).
       if (c?.[0] === "GET" && c[1] === key && answer[0] === owner) {
         const future = clock() + 2001;
         Date.now = () => future;
@@ -64,11 +67,16 @@ async function main(): Promise<void> {
     }) as typeof redis.pipeline;
     try {
       await releaseMark(key, owner);
+      is(`${job}: after the failed script, no DEL is sent`, deletes, 0);
+      // The mark is left to run out at its own expiry; the next run takes it then, and nothing of ours removes it.
+      const future = clock() + 2001;
+      Date.now = () => future;
+      await redis.pipeline([["SET", key, next, "NX", "EX", 300]]);
+      is(`${job}: the successor's mark, taken once ours ran out, survives`, redis.run(["GET", key]), next);
     } finally {
       redis.pipeline = real;
       Date.now = clock;
     }
-    is(`${job}: the successor's mark survives the old release`, redis.run(["GET", key]), next);
   }
 
   part("A hold whose script fails says the lock is not held, and extends nothing");

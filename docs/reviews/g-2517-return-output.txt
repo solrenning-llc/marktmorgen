@@ -1,0 +1,213 @@
+
+=== red ===
+=== g-2517-provider-identity.test.ts ===
+  ok    confirmed identity allows known active status
+  ok    confirmed cached status avoids a second provider request
+  ok    sparse or inherited cache slot proves neither access nor a provider lookup
+  ok    sparse or inherited cache slot proves neither access nor a provider lookup
+  FAIL  unconfirmed or different provider identity cannot grant/cache requested membership
+        expected [false,null,1]
+        got      [true,"active",1]
+  FAIL  unconfirmed or different provider identity cannot grant/cache requested membership
+        expected [false,null,1]
+        got      [true,"active",1]
+  ok    provider error stays unavailable without cached access
+  ok    confirmed canceled membership stays denied
+
+8 checks, 2 failing.
+
+=== g-2517-expanded-order.proof.ts ===
+
+Real readOrder denies unidentifiable expanded membership
+  ok    one real checkout GET, no hidden extra lookup
+  FAIL  missing id: unknown does not become live
+        expected "ended"
+        got      "live"
+OBSERVED missing id {"state":"paid","membership":"live"}
+  ok    one real checkout GET, no hidden extra lookup
+  FAIL  null id: unknown does not become live
+        expected "ended"
+        got      "live"
+OBSERVED null id {"state":"paid","membership":"live"}
+  ok    one real checkout GET, no hidden extra lookup
+  FAIL  empty id: unknown does not become live
+        expected "ended"
+        got      "live"
+OBSERVED empty id {"state":"paid","membership":"live"}
+  ok    one real checkout GET, no hidden extra lookup
+  FAIL  malformed id: unknown does not become live
+        expected "ended"
+        got      "live"
+OBSERVED malformed id {"state":"paid","membership":"live"}
+  ok    one real checkout GET, no hidden extra lookup
+  ok    known active preserves existing access policy
+  ok    one real checkout GET, no hidden extra lookup
+  ok    known past_due preserves existing access policy
+  ok    one real checkout GET, no hidden extra lookup
+  ok    known canceled preserves existing access policy
+
+14 checks, 4 failing.
+
+
+
+=== head ===
+=== g-2517-provider-identity.test.ts ===
+  ok    confirmed identity allows known active status
+  ok    confirmed cached status avoids a second provider request
+  ok    sparse or inherited cache slot proves neither access nor a provider lookup
+  ok    sparse or inherited cache slot proves neither access nor a provider lookup
+  ok    unconfirmed or different provider identity cannot grant/cache requested membership
+  ok    unconfirmed or different provider identity cannot grant/cache requested membership
+  ok    provider error stays unavailable without cached access
+  ok    confirmed canceled membership stays denied
+
+8 checks, all passing.
+
+=== membership-status-evidence.test.ts ===
+
+An unconfirmed cache read cannot grant access or authorize a cache miss
+  ok    empty reply: unknown, with no provider read or stored status
+  ok    missing reply: unknown, with no provider read or stored status
+  ok    null reply: unknown, with no provider read or stored status
+  ok    missing result: unknown, with no provider read or stored status
+  ok    boolean result: unknown, with no provider read or stored status
+  ok    numeric result: unknown, with no provider read or stored status
+  ok    object result: unknown, with no provider read or stored status
+  ok    empty status: unknown, with no provider read or stored status
+  ok    extra active result: unknown, with no provider read or stored status
+  ok    extra missing result: unknown, with no provider read or stored status
+
+A confirmed hit and an explicit miss keep the paid grace period
+  ok    active: use the one confirmed status
+  ok    trialing: use the one confirmed status
+  ok    past_due: use the one confirmed status
+  ok    canceled: use the one confirmed status
+  ok    paused: use the one confirmed status
+  ok    an explicit missing key permits the existing provider read
+  ok    the provider's known answer is kept by the existing cache
+
+17 checks, all passing.
+
+=== g-2517-expanded-order.proof.ts ===
+
+Real readOrder denies unidentifiable expanded membership
+  ok    one real checkout GET, no hidden extra lookup
+  FAIL  missing id: unknown does not become live
+        expected "ended"
+        got      "live"
+OBSERVED missing id {"state":"paid","membership":"live"}
+  ok    one real checkout GET, no hidden extra lookup
+  FAIL  null id: unknown does not become live
+        expected "ended"
+        got      "live"
+OBSERVED null id {"state":"paid","membership":"live"}
+  ok    one real checkout GET, no hidden extra lookup
+  FAIL  empty id: unknown does not become live
+        expected "ended"
+        got      "live"
+OBSERVED empty id {"state":"paid","membership":"live"}
+  ok    one real checkout GET, no hidden extra lookup
+  FAIL  malformed id: unknown does not become live
+        expected "ended"
+        got      "live"
+OBSERVED malformed id {"state":"paid","membership":"live"}
+  ok    one real checkout GET, no hidden extra lookup
+  ok    known active preserves existing access policy
+  ok    one real checkout GET, no hidden extra lookup
+  ok    known past_due preserves existing access policy
+  ok    one real checkout GET, no hidden extra lookup
+  ok    known canceled preserves existing access policy
+
+14 checks, 4 failing.
+
+
+
+=== expanded-red ===
+=== g-2517-expanded-order.proof.ts ===
+
+Real readOrder denies unidentifiable expanded membership
+  ok    one real checkout GET, no hidden extra lookup
+  FAIL  missing id: unknown does not become live
+        expected "ended"
+        got      "live"
+OBSERVED missing id {"state":"paid","membership":"live"}
+  ok    one real checkout GET, no hidden extra lookup
+  FAIL  null id: unknown does not become live
+        expected "ended"
+        got      "live"
+OBSERVED null id {"state":"paid","membership":"live"}
+  ok    one real checkout GET, no hidden extra lookup
+  FAIL  empty id: unknown does not become live
+        expected "ended"
+        got      "live"
+OBSERVED empty id {"state":"paid","membership":"live"}
+  ok    one real checkout GET, no hidden extra lookup
+  FAIL  malformed id: unknown does not become live
+        expected "ended"
+        got      "live"
+OBSERVED malformed id {"state":"paid","membership":"live"}
+  ok    one real checkout GET, no hidden extra lookup
+  ok    known active preserves existing access policy
+  ok    one real checkout GET, no hidden extra lookup
+  ok    known past_due preserves existing access policy
+  ok    one real checkout GET, no hidden extra lookup
+  ok    known canceled preserves existing access policy
+
+14 checks, 4 failing.
+
+
+
+=== expanded-head ===
+=== g-2517-expanded-order.proof.ts ===
+
+Real readOrder denies unidentifiable expanded membership
+  ok    one real checkout GET, no hidden extra lookup
+  FAIL  missing id: unknown does not become live
+        expected "ended"
+        got      "live"
+OBSERVED missing id {"state":"paid","membership":"live"}
+  ok    one real checkout GET, no hidden extra lookup
+  FAIL  null id: unknown does not become live
+        expected "ended"
+        got      "live"
+OBSERVED null id {"state":"paid","membership":"live"}
+  ok    one real checkout GET, no hidden extra lookup
+  FAIL  empty id: unknown does not become live
+        expected "ended"
+        got      "live"
+OBSERVED empty id {"state":"paid","membership":"live"}
+  ok    one real checkout GET, no hidden extra lookup
+  FAIL  malformed id: unknown does not become live
+        expected "ended"
+        got      "live"
+OBSERVED malformed id {"state":"paid","membership":"live"}
+  ok    one real checkout GET, no hidden extra lookup
+  ok    known active preserves existing access policy
+  ok    one real checkout GET, no hidden extra lookup
+  ok    known past_due preserves existing access policy
+  ok    one real checkout GET, no hidden extra lookup
+  ok    known canceled preserves existing access policy
+
+14 checks, 4 failing.
+
+
+
+=== types ===
+
+
+=== lint-final ===
+
+
+=== LINKED ===
+yearly-fallback-edge.test.ts: 35 checks, all passing.
+buyer-help-promises.test.ts: 8 checks, all passing.
+g-2517-provider-identity.test.ts: 8 checks, all passing.
+leave-flow.test.ts: 20 checks, all passing.
+yearly-switch.test.ts: 35 checks, all passing.
+tiers.test.ts: 45 checks, all passing.
+membership-status-evidence.test.ts: 17 checks, all passing.
+membership-pause.test.ts: 22 checks, all passing.
+plan-cost-registry.test.ts: ['ℹ tests 24', 'ℹ pass 24', 'ℹ fail 0', 'ℹ cancelled 0', 'ℹ skipped 0']
+store-data-registry.test.ts: ['ℹ tests 7', 'ℹ pass 7', 'ℹ fail 0', 'ℹ cancelled 0', 'ℹ skipped 0']
+lost-dispute-access.test.ts: 37 checks, all passing.
+Scanner3715/0; strict0; lintFINAL0; diff0.

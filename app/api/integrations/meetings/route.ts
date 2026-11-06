@@ -5,6 +5,7 @@ import { isMeetProvider } from "@/lib/call-setup";
 import { ACCOUNT_NAMES, NotConnected, disconnect, logProblem, meetView } from "@/lib/meet-connect";
 import { ProviderError, isConfigured } from "@/lib/meet-providers";
 import { makeTest, moveTest, removeTest, TestMeetingUnavailable } from "@/lib/meet-test";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { guardStoreWrite } from "@/lib/store-request";
 import { MEETING_TEST_PAUSED_WORDS, integrationPauseWord } from "@/lib/integration-pause";
 
@@ -60,6 +61,11 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, test: null });
     } catch (error) {
       if (error instanceof TestMeetingUnavailable) return Response.json({ ok: false, error: "unavailable", message: error.message }, { status: 503 });
+      // Its record could not be read as written (lib/meet-test.ts): nothing was made, moved or deleted on that account.
+      if (error instanceof UnknownReplyError) {
+        console.error("a test meeting's record could not be read", error);
+        return Response.json({ ok: false, error: "unavailable", message: new TestMeetingUnavailable().message }, { status: 503 });
+      }
       if (error instanceof NotConnected) return Response.json({ ok: false, error: "not_connected" }, { status: 400 });
       const why = error instanceof ProviderError ? error.message : "it could not be reached";
       console.error("a test meeting failed", error);

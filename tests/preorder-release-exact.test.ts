@@ -40,7 +40,7 @@ function seed(pids: string[] = [PID]) {
 const jobs = () => redis.run(["SMEMBERS", "nl:pre:jobs"]) as string[];
 const given = (pid: string, session = SESSION) => Boolean(JSON.parse(String(redis.run(["HGET", entriesKey(pid), session]))).given);
 
-type Opts = { hgetall?: (r: unknown) => unknown; product?: (pid: string) => Promise<Listing | null>; store?: Store | null };
+type Opts = { hgetall?: (r: unknown) => unknown; product?: (store: Store, pid: string) => Promise<Listing | null>; store?: Store | null };
 async function release(opts: Opts = {}): Promise<number> {
   const real = redis.pipeline.bind(redis);
   redis.pipeline = (async (c: (string | number)[][]) => {
@@ -50,7 +50,7 @@ async function release(opts: Opts = {}): Promise<number> {
   const errors = console.error;
   console.error = () => {};
   try {
-    return await runPreorderReleases(async () => (opts.store === undefined ? store : opts.store), opts.product ?? (async (_s, pid) => listing(pid)), () => deps, Date.now() + 10_000);
+    return await runPreorderReleases(async () => (opts.store === undefined ? store : opts.store), opts.product ?? (async (_s: Store, pid: string) => listing(pid)), () => deps, Date.now() + 10_000);
   } finally {
     redis.pipeline = real;
     console.error = errors;

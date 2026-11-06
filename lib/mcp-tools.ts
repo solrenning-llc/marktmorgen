@@ -27,10 +27,10 @@ import { readAbout } from "@/lib/product-about";
 import { type Course, findLesson, readBody, readCourse } from "@/lib/course";
 import { readQuizFor } from "@/lib/quiz";
 import { readTaskFor } from "@/lib/assignment";
-import { countVersions, readPage, readVersions } from "@/lib/sales-page-store";
-import { countSections, readSections } from "@/lib/saved-block-store";
+import { MAX_VERSIONS, countVersions, readPageExact, readVersionsExact } from "@/lib/sales-page-store";
+import { countSections, readSectionsExact } from "@/lib/saved-block-store";
 import type { PageBlock } from "@/lib/sales-page";
-import { type SalesPage, declaredMeasure, runningTest } from "@/lib/sales-page";
+import { EMPTY_PAGE, type SalesPage, declaredMeasure, runningTest } from "@/lib/sales-page";
 import { expectedShareB, readCounts } from "@/lib/headline-test";
 import { type Counts, testState } from "@/lib/headline-test-rules";
 import { reachShares, readDepth } from "@/lib/page-depth";
@@ -45,6 +45,7 @@ import { type Charge, type Hold, chargeBook } from "@/lib/api-read";
 import {
   EMAILS_BROADCASTS, EMAILS_PROBE_WORK, MEMBERSHIPS_COLD_WORK, addWork, apiReadUnits, boughtNextWork, courseOutlineWork, emailsWork, lessonWork, listingsWork, mailRevenueColdWork,
   membershipsWork, pageReadingWork, pageTestWork, pageVersionsWork, productTextWork, salesPageWork, savedBlocksWork, settledUnits,
+  COUNT_REPLY_BYTES, SAVED_SECTIONS_MAX, type ReadWork,
 } from "@/lib/api-read-rules";
 import { paypalCounts } from "@/lib/paypal-sales";
 import { insightsFrom } from "@/lib/insights";
@@ -526,7 +527,10 @@ export async function readSalesPageTool(store: Store, id: string, charge: Charge
   if (refused) return refused;
   const listing = await readListing(store, id);
   if (!listing) return null;
-  return salesPageTool(listing.id, listing.title, await readPage(store.statsId, listing.id));
+  // Read exactly: an answer that is not known is "unavailable", never an empty page (Codex J on #1821).
+  const kept = store.statsId ? await readPageExact(store.statsId, listing.id).catch(() => undefined) : { page: null, bytes: 0 };
+  if (kept === undefined) return { error: "The sales page could not be read just now. Try again in a moment." };
+  return salesPageTool(listing.id, listing.title, kept.page ?? { ...EMPTY_PAGE, blocks: [] });
 }
 
 /**
@@ -607,7 +611,10 @@ export async function readPageTestTool(store: Store, id: string, charge: Charge)
   if (refused) return refused;
   const listing = await readListing(store, id);
   if (!listing) return { found: false, error: "There is no product with that id in this store. Use list_products for the ids." };
-  const page = await readPage(store.statsId, listing.id);
+  // Read exactly: an answer that is not known is "unavailable", never a page with no test.
+  const kept = store.statsId ? await readPageExact(store.statsId, listing.id).catch(() => undefined) : { page: null, bytes: 0 };
+  if (kept === undefined) return { found: false, error: "The page could not be read just now. Try again in a moment." };
+  const page = kept.page ?? { ...EMPTY_PAGE, blocks: [] };
   const test = runningTest(page);
   if (!test) return { found: false, error: "This product's page is not running a test." };
   const counts = await readCounts(store.statsId, listing.id, test);
@@ -621,7 +628,10 @@ export async function readPageReadingTool(store: Store, id: string, charge: Char
   if (refused) return refused;
   const listing = await readListing(store, id);
   if (!listing) return null;
-  const [page, depth] = await Promise.all([readPage(store.statsId, listing.id), readDepth(store.statsId, listing.id)]);
+  // The page read exactly: an answer that is not known is "unavailable", never a page with no blocks.
+  const [kept, depth] = await Promise.all([store.statsId ? readPageExact(store.statsId, listing.id).catch(() => undefined) : { page: null, bytes: 0 }, readDepth(store.statsId, listing.id)]);
+  if (kept === undefined) return { error: "The page could not be read just now. Try again in a moment." };
+  const page = kept.page ?? { ...EMPTY_PAGE, blocks: [] };
   // While a whole second version is tested, each visitor reads one of two pages: no single depth means anything.
   const reach = page.variant ? null : reachShares(page.blocks.map((b) => b.id), depth.stopped, depth.visitors);
   return {
@@ -640,46 +650,83 @@ export async function readPageReadingTool(store: Store, id: string, charge: Char
  * counted as on get_sales_page. What an agent shows as "before" when it
  * prepares a change, and how a creator can ask to bring one back.
  */
-export async function readPageVersionsTool(store: Store, id: string, version: number | null, charge: Charge) {
-  const listing0 = listingsToRead(store, [id]);
-  // How many versions are kept is counted first, exactly, so the reading is paid for before it is made.
-  const kept = store.statsId ? await countVersions(store.statsId, id) : 0;
-  if (kept === null) return { found: false as const, error: "The page's versions could not be read just now. Try again in a moment." };
-  const refused = await charge(apiReadUnits(addWork(listingsWork(listing0), pageVersionsWork(kept, version !== null))));
-  if (refused) return refused;
+export async function readPageVersionsTool(store: Store, id: string, version: number | null, hold: Hold) {
+  // Set aside at its most before anything is read: the listing and every version the page may keep. Counted and read
+  // afterwards, and settled at the larger of that ceiling for what was read and what was really read and sent, so a
+  // version saved between the count and the read is paid for (Codex J on #1821).
+  const listings = listingsWork(listingsToRead(store, [id]));
+  const most = apiReadUnits(addWork(listings, pageVersionsWork(MAX_VERSIONS, version !== null)));
+  const settle = await hold(most);
+  if (settle instanceof Response) return settle;
+  const unavailable = { found: false as const, error: "The page's versions could not be read just now. Try again in a moment." };
   const listing = await readListing(store, id);
-  if (!listing) return { found: false as const, error: "There is no product with that id in this store. Use list_products for the ids." };
-  const versions = await readVersions(store.statsId, listing.id);
-  if (version === null) {
-    return {
-      found: true as const,
-      value: {
-        product: listing.id,
-        note: "Newest first. at is when that version was saved over, in milliseconds since 1970 (UTC). Read one with version.",
-        versions: versions.map((v, index) => ({ version: index, at: v.at, blocks: v.page.blocks.length, headline: v.page.blocks[0]?.kind === "hero" ? v.page.blocks[0].headline : "" })),
-      },
-    };
+  if (!listing) {
+    const refused = await settle(settledUnits(listings, most));
+    return refused ?? { found: false as const, error: "There is no product with that id in this store. Use list_products for the ids." };
   }
-  const one = versions[version];
-  if (!one) return { found: false as const, error: "There is no such version. Read the list first, without version." };
-  return { found: true as const, value: { ...salesPageTool(listing.id, listing.title, one.page), version, at: one.at } };
+  const kept = store.statsId ? await countVersions(store.statsId, listing.id) : 0;
+  if (kept === null || !store.statsId) {
+    // Nothing of the versions was read: only the listing and the count are kept.
+    const refused = await settle(settledUnits(addWork(listings, pageVersionsWork(0, false)), most));
+    return refused ?? unavailable;
+  }
+  const read = await readVersionsExact(store.statsId, listing.id).catch(() => null);
+  // Read but not known: how much was read is not known either, so all that was set aside is kept (Codex J on #1821).
+  if (!read) return (await settle(most)) ?? unavailable;
+  const { versions } = read;
+  let value: unknown;
+  let answer: { found: true; value: unknown } | { found: false; error: string };
+  if (version === null) {
+    value = {
+      product: listing.id,
+      note: "Newest first. at is when that version was saved over, in milliseconds since 1970 (UTC). Read one with version.",
+      versions: versions.map((v, index) => ({ version: index, at: v.at, blocks: v.page.blocks.length, headline: v.page.blocks[0]?.kind === "hero" ? v.page.blocks[0].headline : "" })),
+    };
+    answer = { found: true as const, value };
+  } else {
+    const one = versions[version];
+    value = one ? { ...salesPageTool(listing.id, listing.title, one.page), version, at: one.at } : null;
+    answer = one ? { found: true as const, value } : { found: false as const, error: "There is no such version. Read the list first, without version." };
+  }
+  const ceiling = addWork(listings, pageVersionsWork(versions.length, version !== null));
+  const sent = Buffer.byteLength(JSON.stringify(answer.found ? answer.value : { error: answer.error }, null, 2) ?? "", "utf8");
+  const refused = await settle(settledUnits(atLeast(ceiling, { bytes: COUNT_REPLY_BYTES + read.bytes, sent }), most));
+  return refused ?? answer;
 }
 
 /**
  * The creator's saved sections, the blocks kept to reuse on any page (631
  * [AA1] (a), unit 14), newest change first, testimonials counted.
  */
-export async function savedBlocksTool(store: Store, charge: Charge) {
-  // How many sections the library holds is counted first, exactly, so the reading is paid for before it is made.
+export async function savedBlocksTool(store: Store, hold: Hold) {
+  // Set aside at its most before anything is read: every section a library may hold. Counted and read afterwards, and
+  // settled at the larger of that ceiling for what was read and what was really read and sent, so sections saved
+  // between the count and the read are paid for (Codex J on #1821).
+  const most = apiReadUnits(savedBlocksWork(SAVED_SECTIONS_MAX));
+  const settle = await hold(most);
+  if (settle instanceof Response) return settle;
+  const unavailable = { sections: null, note: "The saved sections could not be read just now. Try again in a moment." };
   const held = await countSections(store.statsId);
-  if (held === null) return { sections: null, note: "The saved sections could not be read just now. Try again in a moment." };
-  const refused = await charge(apiReadUnits(savedBlocksWork(held)));
-  if (refused) return refused;
-  const sections = await readSections(store.statsId);
-  return {
+  if (held === null || held > SAVED_SECTIONS_MAX || !store.statsId) {
+    // Nothing of the sections was read: only the count is kept.
+    const refused = await settle(settledUnits(savedBlocksWork(0), most));
+    return refused ?? unavailable;
+  }
+  const read = await readSectionsExact(store.statsId).catch(() => null);
+  // Read but not known, or more than a library holds: how much was read is not known, so all that was set aside is kept.
+  if (!read || read.sections.length > SAVED_SECTIONS_MAX) return (await settle(most)) ?? unavailable;
+  const value = {
     note: "Sections the creator saved to reuse on any page, newest change first. updated_at is in seconds since 1970 (UTC). Testimonials are counted, not quoted.",
-    sections: [...sections]
+    sections: [...read.sections]
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .map((section) => ({ id: section.id, name: section.name, updated_at: section.updatedAt, blocks: section.blocks.map(blockForAgent) })),
   };
+  const sent = Buffer.byteLength(JSON.stringify(value, null, 2) ?? "", "utf8");
+  const refused = await settle(settledUnits(atLeast(savedBlocksWork(read.sections.length), { bytes: COUNT_REPLY_BYTES + read.bytes, sent }), most));
+  return refused ?? value;
+}
+
+/** A work's ceiling, raised to what was really read and sent where that came to more. */
+function atLeast(work: ReadWork, measured: { bytes: number; sent: number }): ReadWork {
+  return { ...work, bytes: Math.max(work.bytes, measured.bytes), sent: Math.max(work.sent, measured.sent) };
 }

@@ -184,7 +184,7 @@ export async function POST(request: Request) {
       if (!productArg) return result(id, said(unknownProduct, true));
       const found = await (params.name === "get_sales_page" ? readSalesPageTool(store, productArg, charge) : productTextTool(store, productArg, charge));
       if (found instanceof Response) return refusedWith(found);
-      return result(id, found ? said(found) : said(unknownProduct, true));
+      return result(id, found ? said(found, "error" in found) : said(unknownProduct, true));
     }
     if (params.name === "get_course_outline" || params.name === "get_lesson") {
       const lesson = typeof params.arguments?.lesson === "string" ? params.arguments.lesson.slice(0, 40) : "";
@@ -204,18 +204,22 @@ export async function POST(request: Request) {
       if (!productArg) return result(id, said(unknownProduct, true));
       const reading = await readPageReadingTool(store, productArg, charge);
       if (reading instanceof Response) return refusedWith(reading);
-      return result(id, reading ? said(reading) : said(unknownProduct, true));
+      return result(id, reading ? said(reading, "error" in reading) : said(unknownProduct, true));
     }
     if (params.name === "get_page_versions") {
       const raw = params.arguments?.version;
       const version = raw === undefined || raw === null ? null : Number.isInteger(raw) && (raw as number) >= 0 && (raw as number) < 100 ? (raw as number) : -1;
       if (version === -1) return result(id, said({ error: "version is a whole number from the list, 0 for the newest." }, true));
       if (!productArg) return result(id, said(unknownProduct, true));
-      const found = await readPageVersionsTool(store, productArg, version, charge);
+      const found = await readPageVersionsTool(store, productArg, version, hold);
       if (found instanceof Response) return refusedWith(found);
       return result(id, found.found ? said(found.value) : said({ error: found.error }, true));
     }
-    if (params.name === "list_saved_blocks") return answer(await savedBlocksTool(store, charge));
+    if (params.name === "list_saved_blocks") {
+      const listed = await savedBlocksTool(store, hold);
+      if (listed instanceof Response) return refusedWith(listed);
+      return result(id, said(listed, listed.sections === null));
+    }
     if (params.name === "list_products") {
       const cursor = typeof params.arguments?.cursor === "string" ? params.arguments.cursor.slice(0, 200) : null;
       return answer(await products(store, cursor, charge));

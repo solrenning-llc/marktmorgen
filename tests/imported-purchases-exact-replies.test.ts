@@ -9,6 +9,7 @@ import {
 } from "@/lib/imported-purchases";
 import { paidCourses } from "@/lib/learn";
 import { addProduct, claimHandle, ensureStatsId, setPastBuyers, setProductCourse, storeForEmail } from "@/lib/store";
+import type { DataStore } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
 
 let passed = 0;
@@ -51,7 +52,7 @@ const valid = (job = "0123456789abcdef01234567") => JSON.stringify({
   option: null,
 });
 
-const ROOM = { sid: "import-exact", statsId: "a".repeat(24), handle: "import-exact" } as const;
+const ROOM = { sid: "import-exact", statsId: "a".repeat(24), handle: "import-exact" } as DataStore;
 
 async function main(): Promise<void> {
   await check("control: an exact imported-buyer hash is read", async () => {

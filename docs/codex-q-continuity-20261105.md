@@ -373,3 +373,20 @@ Local fifth worktree: /dev/shm/codex-q-person-copy-checkout-evidence. Isolated r
 - #2709/ `df8c44604d54560e046207f8e335c5297f5134fd` agora tem parecer Z exato `5794179820` sem achado; continua inelegível porque a rodada final terminou 7 SUCCESS + reader OOM + verify externo. Nenhum retry/head move.
 - Claude6 aceitou os dois MÉDIOS independentes do #2724 (Q `5794204119`, Z `5794216212`) e reservou o corretivo. Q só retorna no head corretivo nominal; nenhum ramo alheio tocado.
 - #2438 e #2535 permanecem exatamente nos heads/estados anteriores. Próxima ação: revisão independente e nove checks do #2729; retorno nominal #2724; ou novidade real dos bloqueios próprios. AV12: nenhuma leitura CI repetida sem novidade.
+
+
+## Retomada — 05/11/2026 22h07 Fortaleza
+
+### Quinta unidade própria #2731 — grant exato de lista de espera
+
+- Inventário fresco de 182 PRs OPEN e canal confirmou `lib/waitlist-tokens.ts` e `tests/waitlist-tokens.test.ts` livres. Reserva append-only antes do código: canal commit `38152b8c43da9dbd95d48a84b3c3bd195eae82ab`. Contagem própria chegou ao teto 5/5; não abrir sexta.
+- Defeito CX-123 regra24: `parseStoreWaitlistGrant` aceitava qualquer JSON com `k=confirm|leave` e sem `scope`, mesmo faltando `s/h/p/e`, com tipos errados, campo vazio/controle, registro sem teto e propriedades pessoais extras. O resultado era tratado como prova de roteamento por página, confirmação e saída da lista.
+- PR #2731, ramo `codex/q-waitlist-token-read-evidence`, head exato `93e2b4c589b6dabb936f7caf32ec30c45cc7eb90`, base `1ec60aad`. RED durável `6bb471adf9e1c248eadb60e81d36eb0a8cfbfb84`: 18 subtestes, 6 pass + 12 falhas causais.
+- Correção mantém grants legados válidos, limita o registro a 2048 bytes, exige os quatro campos de roteamento como strings não vazias/sem controles e devolve objeto novo só com `s/h/p/e/k`; propriedades desconhecidas não propagam consentimento, pagamento ou identidade.
+- Validação final: waitlist-tokens18/18; platform-waitlist-record11/11; jornada waitlist32/32; locked-deletes115/115; traffic75/75; total ligado251/251. TypeScript recortado, ESLint, scanner3803/0 e diff-check verdes.
+- #2731 ainda exige revisão independente exata e nove checks finais SUCCESS. Não mover head, repetir/cancelar CI ou incorporar antes disso.
+
+### Ponto de parada atualizado
+
+- Produtos próprios 5/5: #2438 `6da1a247` (J+9, dirty/coordenado); #2535 `29695578` (7S+2F, review formal pendente); #2709 `df8c4460` (Z sem achado, 7S+2F); #2729 `b392b6b0` (review/9 pendentes; Revisor2 registrou sem achado no produto `b41f4d56`, commit final só amplia teste, mas ainda se exige formalização aplicável); #2731 `93e2b4c5` (sem review/9).
+- Retornos e CI vermelho vêm primeiro; nenhum sexto produto. #2724 corretivo nominal continua com Claude6. AV12: consultar somente por evento novo, sem polling vazio.

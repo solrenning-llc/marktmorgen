@@ -1,0 +1,55 @@
+/** Independent opt-in: shelf edit coexists with main certificate/cohort/video fields and paid data admission. */
+import { readShelf,shelfFor,MAX_SHELF } from "@/lib/course-shelf-rules";
+import { editCourse,emptyCourse,parseCourse,saveCourse,readCourse,type Course } from "@/lib/course";
+import { dataKey } from "@/lib/store-data";
+import { dataBytes } from "@/lib/store-data-rules";
+import { ROOM } from "./data-room";
+import { store as redis } from "./redis-stub";
+import { done,is,part } from "./check";
+globalThis.fetch=(async()=>{throw Error("unexpected network in pure course review");}) as typeof fetch;
+async function main(){
+ const ids=Array.from({length:8},(_,i)=>`prod000${i+1}`);
+ part("Pure choices and unknown ownership");
+ for(const bad of [null,undefined,true,3,"prod0001",{},JSON.parse('{"__proto__":{"0":"prod0001","length":1}}')])is("non-array choice stays empty",readShelf(bad),[]);
+ is("six valid unique choices preserve order",readShelf([ids[1],ids[1],"__proto__",{},null,...ids]),[ids[1],ids[0],ids[2],ids[3],ids[4],ids[5]]);
+ is("own course excluded before the six-item cap",readShelf(["course01",...ids],"course01"),ids.slice(0,MAX_SHELF));
+ const sparse:string[]=[];sparse[3]=ids[2];is("sparse holes do not become ids",readShelf(sparse),[ids[2]]);
+ const listed=new Set(ids.slice(0,6));
+ is("unknown ownership never recommends",shelfFor(ids,listed,null,"course01"),[]);
+ is("known owned/draft/course excluded in order",shelfFor(["course01",ids[5],ids[2],ids[0],ids[7]],new Set([...listed,"course01"]),new Set([ids[2]]),"course01"),[ids[5],ids[0]]);
+ is("all owned recommends none",shelfFor(ids,listed,new Set(ids),"course01"),[]);
+ part("Manual junction keeps all independent course settings");
+ const course:Course={...emptyCourse(),certificate:true,certificateMonths:24,stampVideo:true,startsAt:1790000000};
+ const before=JSON.stringify(course);const set=editCourse(course,{op:"shelf",products:[ids[1],"course01",ids[0],ids[1]],courseProductId:"course01"});
+ if(!set.ok)throw Error("shelf edit refused");
+ const fields=(c:Course|null)=>c&&[c.certificate,c.certificateMonths,c.stampVideo,c.startsAt,c.shelf];
+ is("shelf added without losing certificate/cohort/video",fields(set.course),[true,24,true,1790000000,[ids[1],ids[0]]]);
+ is("input course unchanged",JSON.stringify(course),before);
+ is("JSON round trip keeps all fields",fields(parseCourse(JSON.stringify(set.course))),fields(set.course));
+ const months=editCourse(set.course,{op:"certificate-months",months:36});
+ is("certificate edit keeps shelf/cohort/video",months.ok?fields(months.course):null,[true,36,true,1790000000,[ids[1],ids[0]]]);
+ const clear=editCourse(set.course,{op:"shelf",products:[],courseProductId:"course01"});
+ is("clear removes only shelf",clear.ok?["shelf" in clear.course,clear.course.certificateMonths,clear.course.stampVideo,clear.course.startsAt]:null,[false,24,true,1790000000]);
+ const legacy=parseCourse(JSON.stringify(emptyCourse()));
+ is("legacy course gains no optional flags",legacy&&["shelf" in legacy,"certificateMonths" in legacy,"stampVideo" in legacy],[false,false,false]);
+ const withProto=JSON.stringify({...set.course,...JSON.parse('{"__proto__":{"g1932Marker":true}}')});
+ is("JSON prototype-named field changes no settings",fields(parseCourse(withProto)),fields(set.course));
+ is("JSON prototype-named field pollutes no object",({} as Record<string,unknown>).g1932Marker,undefined);
+ part("Real save reserves the complete JSON before it writes");
+ const room={...ROOM,sid:"g1932-junction"};const key=`nl:course:${course.id}`,slot=`co:${course.id}`;const native=redis.pipeline.bind(redis);const events:string[]=[];let chargedBeforeSet:unknown=null;
+ redis.pipeline=(async cs=>{for(const c of cs){if(c[0]==="EVAL")events.push("reserve");if(c[0]==="SET"&&c[1]===key){events.push("save");chargedBeforeSet=redis.run(["HGET",dataKey(room)!,slot]);}}return native(cs);}) as typeof redis.pipeline;
+ await saveCourse(set.course,room);
+ is("reservation precedes SET",events,["reserve","save"]);
+ is("complete JSON counted before SET",Number(chargedBeforeSet),dataBytes([JSON.stringify(set.course)],1));
+ is("real save/read preserves merged fields",fields(await readCourse(course.id)),fields(set.course));
+ const kept=(await native([["GET",key]]))[0];let saves=0;
+ redis.pipeline=(async cs=>{if(cs.some(c=>c[0]==="EVAL"&&String(c[1]).startsWith("-- marktmorgen:store-data:")))throw Error("synthetic unknown admission");saves+=cs.filter(c=>c[0]==="SET"&&c[1]===key).length;return native(cs);}) as typeof redis.pipeline;
+ let refused=false;try{await saveCourse({...set.course,shelf:[ids[2]]},room);}catch{refused=true;}
+ is("unknown admission refuses with zero course SET",[refused,saves],[true,0]);
+ is("unknown admission retains old bytes",(await native([["GET",key]]))[0],kept);
+ redis.pipeline=native;
+ await saveCourse({...set.course,shelf:[ids[2]]},room);
+ is("exact retry changes only the requested shelf",fields(await readCourse(course.id)),[true,24,true,1790000000,[ids[2]]]);
+ done();
+}
+void main();

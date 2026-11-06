@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
       if (!step && (await hasSecondStep(email))) return Response.json({ ok: false, error: "second_step" }, { status: 403 });
       const maker = makerFor(store.sid, role, email, step);
       const made = await makeKey(store.sid, text(body.name, MAX_KEY_NAME * 2), Date.now(), write, "none", maker);
-      if (!made.ok) return Response.json({ ok: false, error: made.reason }, { status: made.reason === "unavailable" ? 503 : 400 });
+      if (!made.ok) return Response.json({ ok: false, error: made.reason }, { status: made.reason === "unavailable" || made.reason === "make_unconfirmed" ? 503 : 400 });
       // Checked again once written: the door let them in a moment before (owner C3-100).
       const paused = await afterMake(store, made.made.id, maker, email, write);
       return Response.json(

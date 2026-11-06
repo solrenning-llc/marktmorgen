@@ -183,7 +183,7 @@ export async function listKeys(sid: string): Promise<ApiKey[]> {
   return (await keyRecords(sid, true)).map(({ id, name, hint, madeAt, usedAt, write, agent }) => ({ id, name, hint, madeAt, usedAt, write, agent })).sort((a, b) => b.madeAt - a.madeAt);
 }
 
-export type MakeResult = { ok: true; key: string; made: ApiKey } | { ok: false; reason: "full" | "name" | "unavailable" };
+export type MakeResult = { ok: true; key: string; made: ApiKey } | { ok: false; reason: "full" | "name" | "unavailable" | "make_unconfirmed" };
 
 /**
  * Makes a key and returns it — the only time it is ever seen whole. `agent`
@@ -216,7 +216,8 @@ export async function makeKey(sid: string, rawName: unknown, now = Date.now(), w
   // went over, or if the count cannot be read, so the limit is the limit.
   const afterCount = countOf(after);
   if (afterCount === null || afterCount > MAX_KEYS) {
-    await redisPipeline([["DEL", lookupKey(hash)], ["HDEL", listKey(sid), id]]);
+    const undone = repliesFor(await redisPipeline([["DEL", lookupKey(hash)], ["HDEL", listKey(sid), id]]).catch(() => null), 2);
+    if (!undone || undone.some((reply) => reply !== 0 && reply !== 1)) return { ok: false, reason: "make_unconfirmed" };
     return { ok: false, reason: afterCount === null ? "unavailable" : "full" };
   }
   return { ok: true, key, made: { id, name, hint: stored.hint, madeAt: stored.madeAt, usedAt: 0, write, agent } };

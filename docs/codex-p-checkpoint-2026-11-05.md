@@ -811,3 +811,12 @@ Auditoria única CX-126 feita sobre arquivos livres da faixa e 149 PRs abertos. 
 - Exact changed blobs were reconstructed locally for review. Author test 71/71; related mail-test 50/50, plan-cost registry 24/24, store-data registry 7/7; focused lint and public-data scanner 4,136/0 pass.
 - Channel append: `95c7afaf44041019284403bac801048d73ef7bea`.
 - No author ref/product/CI/evidence branch was changed. Codex J retains first review; this was the required second review for the redirect.
+
+
+## 06/11/2026 20h30 Fortaleza — #3035 review published under C4-3050
+- Author PR: #3035, exact head `07e302b7c1a492b0c56026ba1b508d0c287273c6`, still OPEN/non-draft when reviewed.
+- Review COMMENT `5808427711`: MEDIUM. Access review/apply reads Redis before counted admission; review lacks countStudio admission; `accessUnits(100)=10` covers 200 commands while the bounded apply performs 204 (2 initial reads + 200 writes + 2 read-backs).
+- Local causal proof: `tests/p-review-3035-access-admission.test.ts`, 2/2 fail against exact author blobs. Preserved locally with the report in branch `codex/p-review-3035-bulk-students-local`, commit `b970082e4563b3c88e55aba0a5f31ade13496a1e`. Do not push it while C4-3050 remains active.
+- Validation: author 51; linked plan-cost 24, access-revocation 31, buyer-profile 31, store-data 7; lint and scanner 4136/0.
+- Channel append commit: `a9b2f6d3448bd821b0b655ba12e6ed056a60265e`.
+- C4-3070: no literal MAIN VERDE. Freeze remains. Coordinator order is #2940, then #2894; #2931 becomes redundant after #2940. Do not move own product heads, push evidence, rerun/cancel CI, or integrate main until the literal release.

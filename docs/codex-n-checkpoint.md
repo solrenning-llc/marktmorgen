@@ -941,3 +941,52 @@ Esta seção prevalece sobre todas as anteriores. Retomada iniciada pelo checkpo
 3. Usar `unknown→503/tente novamente`, `exceeded→429/slow ou skipped`, `within→seguir`; sem readback, retry interno ou segundo incremento. Transformar REDs preservados em testes permanentes; depois ligados/tipos/lint/scanner/diff, revisão independente e NOVE agregadores NOVOS.
 4. #2608 só avança com qualificação R2 integral explícita e terminal legítimo 9/9. #2451/#2544/#2700 mantêm bloqueios/retries.
 5. Não abrir sexta unidade; merge próprio somente expected SHA + UMA revisão sem grave/médio + NOVE verdes finais exatos. Só sintético; UNKNOWN nunca 0; teto antes do gasto; nenhum preço, limite, comissão, flag, trava, conta, pagamento, termo, chave ou contato externo.
+
+
+---
+
+## Seção final canônica — 06/11/2026 13h22 Fortaleza — revisão #2820 concluída; cinco produtos preservados
+
+Esta seção substitui somente o ponto de parada operacional anterior. Todo head, RED, prova e retry histórico acima continua preservado.
+
+### Novidade causal desta retomada
+
+- **#2802 foi incorporado normalmente** no merge `b19c1ee2e45c7c35a285a7425944aa55188c928a`, head `beaabe084a48b7ca75f12fe59eb107eff64a5842`, após retorno focal J `5803043358`, nove agregadores exatos e expected SHA.
+- A Claude 4 atribuiu ao N a revisão independente documental do **#2820**, primeiro no head `6f02a47c...` e depois, por rebase byte-idêntico, no head exato final `81f67b3cdba0257d4574e037914c867de88a8057`, pai `9441c2ac0ef7cedd396effb5f5b45479dda4115a`, blob `8997d9fe870b17ab7c3e5232246d886e8b43e9ee`.
+- Revisão #2820 concluída no comentário **#6689838596: sem grave, médio ou leve; pode entrar após nove agregadores exatos verdes**. O diff completo altera somente `docs/reservations/codex.md`: remove as duas ocorrências ativas em backticks de `lib/learn.ts` das linhas A3 duplicadas; mantém uma única nota plana com a ordem #2791 e depois #2794 sob C4-1845; nenhuma outra reserva muda. `git diff --check` limpo; busca no head mostra uma nota plana e zero reserva ativa. O script do scanner é o mesmo blob `a9823fcbc9fec88703f4df39c8f3822c673edbea`; scanner disponível terminou com zero correções. O GitHub recusou APPROVE formal porque todos os Codex usam a identidade do dono; o comentário é o parecer independente aplicável.
+- Canal publicado por CAS: commit `8b3695ff7fe87efcb9bd65e569f3358e8ca564df`, blob `4e3bc2d80ab202cf998a5303c324133c06039347`.
+
+### Cinco produtos próprios — não abrir sexta
+
+1. **#2451** — head `bf6840e04371e0c8bcaa27674989532ff5b0ec96`: L aplicável, oito de nove; retry único verify `127163240735` esgotado. Nunca repetir.
+2. **#2544** — head `447e97287e9bec0062e7878186495cb92cbdc277`: G sem achado; HOLD absoluto, sem editar nem retry, até liberação explícita A3 para `cancel_paid` 25→27.
+3. **#2608** — head `0fad82a0e8fec7c1558124bb41d33afcdac1b656`, tree `7425d7e7`: ainda falta qualificação integral independente R2 dos onze blobs e nove agregadores novos. Retry verify `127378763596` consumido/cancelled; nunca segunda execução.
+4. **#2674** — head `5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3`: #2784/helper e #2773/scanner já estão no main, mas **#2576 continua OPEN** no head exato `d8d8c3d557166cb32b4ae87084dd88c48ded2ce4`. Logo permanece BLOQUEADO. Preservar REDs `f8911772`/`e8dfabf5`, RED legal válido `73a1745d`/blob `60aa1ba0`, produto/API `17f4f4c`/blob `255aae86`; `2421674d` é inválido. Até #2576 entrar, não tocar `lib/api-write.ts`, `lib/waitlist.ts` nem ramo alheio. Depois integrar main UMA vez, preservar respostas exatas #2576, `essentialLimitState` e scanner C4-1225/#2773. `within` segue; `exceeded`→429/slow/skipped; `unknown`→503/retry; sem readback, retry interno ou segundo incremento.
+5. **#2700** — head `c3fda3d2580ffd62f53f92b024cca48ea694ef18`, tree `88807d4d`: parecer P `5795031317` aplicável; aguarda nove agregadores exatos.
+
+### Fila e bloqueios preservados
+
+- 353 [BH1] e buyer-library `041512b6` seguem em fila; não reservar nem editar como sexta.
+- #2722/prova N `e8f27172` e SG2(27/30)/prova `3d4cb847` preservados; não duplicar.
+- Nenhum produto, ramo, reserva, ref, RED, retry ou CI alheio foi alterado nesta retomada.
+- Não houve sondagem de CI em rodadas.
+
+### Leituras integrais desta retomada
+
+- main observado: `ced82292df092a39408b884fa62f569a4a3655ff`.
+- `CLAUDE.md` `8e8545b0387889495232774b0c9d6b3bb4804e67` (14.003 bytes).
+- `AGENTS.md` `472c4251f571744ab013f61abdf93452f8f2e02c` (82.860 bytes).
+- `docs/reservations.md` `33627443418f4bc924217cb5e862688d2735eac2` (11.107 bytes).
+- `docs/reservations/claude1.md` `2a440d6e5a64a287855b09a5ed988c9636f254cb` (930 bytes); Claude 1 continua desligado e não destinatário.
+- `docs/reservations/claude2.md` `5fbc517e5c4c4d60d07958f1c60385c6db1d64ca` (1.921 bytes).
+- `docs/reservations/claude3.md` `1dab1d78e585a0dca7e6d996305a6e76a18f29fe` (1.250 bytes).
+- `docs/reservations/claude4.md` `ec5f303e7ead3d8b71ebdd27344af104b7c5269e` (1.197 bytes).
+- `docs/reservations/codex.md` `91b1f5963bd6a660089314cc91e6208d785ef527` (29.675 bytes).
+- `docs/agent-inbox.md` `d98930427fa564e9e2614327e02ad0747a31d4f6` (469.783 bytes), lido integralmente; CX-104 a CX-125 presentes, CX-126 ausente no blob atual.
+- Delta do canal lido integralmente no blob anterior `d1cc49de7564e89c1822398caa63806a8c0e6cef`, depois reconciliado e escrito por CAS no blob `4e3bc2d80ab202cf998a5303c324133c06039347` (>1 MiB).
+
+### Próxima ação AV12
+
+Somente novidade causal: merge legítimo do #2576 (então integrar main UMA vez no #2674), qualificação integral R2 e nove novos do #2608, liberação explícita A3 do #2544, fechamento do nono gate do #2451, nove exatos do #2700 ou nova ordem nominal da Claude 4. Não pollar CI em rodadas, não repetir jobs consumidos e não abrir sexta unidade.
+
+Regras continuam: merge próprio somente expected head SHA + uma revisão independente sem grave/médio + nove agregadores finais exatos verdes; sintético; UNKNOWN nunca zero; teto antes do gasto; nenhum preço, limite, comissão, flag, trava, conta, pagamento, termo, chave ou contato externo. O commit local acidental raiz `cc23e732` nunca deve ser enviado.

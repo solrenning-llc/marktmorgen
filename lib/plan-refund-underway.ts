@@ -9,11 +9,31 @@
  */
 import { redisPipeline } from "@/lib/redis";
 import { ENDING_KEY, flowKeyOf } from "@/lib/plan-refund-flow";
+import { UnknownReplyError } from "@/lib/redis-reply";
+
+function exactBinaryPair(reply: unknown): readonly [0 | 1, 0 | 1] {
+  if (!Array.isArray(reply) || Object.getPrototypeOf(reply) !== Array.prototype) {
+    throw new UnknownReplyError("the state of a plan refund");
+  }
+  const keys = Reflect.ownKeys(reply);
+  const length = Object.getOwnPropertyDescriptor(reply, "length");
+  const first = Object.getOwnPropertyDescriptor(reply, "0");
+  const second = Object.getOwnPropertyDescriptor(reply, "1");
+  const binary = (slot: PropertyDescriptor | undefined): slot is PropertyDescriptor & { value: 0 | 1 } =>
+    !!slot && "value" in slot && (slot.value === 0 || slot.value === 1);
+  if (
+    keys.length !== 3 || keys[0] !== "0" || keys[1] !== "1" || keys[2] !== "length" ||
+    !length || !("value" in length) || length.value !== 2 || !binary(first) || !binary(second)
+  ) {
+    throw new UnknownReplyError("the state of a plan refund");
+  }
+  return [first.value, second.value];
+}
 
 export async function refundUnderway(sid: string): Promise<boolean> {
-  const [noted, running] = await redisPipeline([
+  const [noted, running] = exactBinaryPair(await redisPipeline([
     ["HEXISTS", ENDING_KEY, sid],
     ["EXISTS", flowKeyOf(sid)],
-  ]);
-  return Number(noted) === 1 || Number(running) === 1;
+  ]));
+  return noted === 1 || running === 1;
 }

@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { applyTaskDrop, dropTask, readTaskDrop } from "@/lib/assignment";
+import { applyTaskDrop, dropTask, readCourseTaskDrops, readTaskDrop } from "@/lib/assignment";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 
@@ -72,3 +72,22 @@ for (const [label, alter] of SHAPES) {
     assert.equal(redis.run(["HLEN", filesKey]), 2, `${label}: nothing deleted`);
   });
 }
+
+test("a product's course: every assignment read before the product goes (Revisor 1 on #2810)", async () => {
+  await seed();
+  const course = { id: COURSE, modules: [{ lessons: [{ id: LESSON, task: { prompt: "x" } }, { id: "lsn_none" }] }] };
+  assert.equal((await readCourseTaskDrops(course)).length, 1, "one assignment, one reading");
+  await seed();
+  const original = redis.pipeline.bind(redis);
+  redis.pipeline = (async (batch: (string | number)[][]) => (batch[0]?.[0] === "HGETALL" ? [null] : original(batch))) as typeof redis.pipeline;
+  try {
+    await assert.rejects(readCourseTaskDrops(course), UnknownReplyError, "an unread assignment stops the removal");
+  } finally {
+    redis.pipeline = original;
+  }
+  const route = readFileSync("app/api/store/product/route.ts", "utf8");
+  const read = route.indexOf("await readCourseTaskDrops(beforeCourse)");
+  const remove = route.indexOf("const removed = await removeProduct(ref, id);");
+  assert.ok(read > 0 && remove > read, "the product route reads the course's work before it removes the product");
+  assert.ok(route.slice(read, remove).includes('error: "unavailable" }, { status: 503 }'), "and answers 503 when it cannot");
+});

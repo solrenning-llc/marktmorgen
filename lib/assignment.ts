@@ -419,17 +419,29 @@ export async function tellCreatorNow(courseId: string): Promise<boolean> {
 }
 
 /** Forgets every assignment of a course that is going, and returns their files to delete. */
-export async function dropCourseTasks(course: { id: string; modules: { lessons: { id: string; task?: unknown }[] }[] }, room: string | null, data: DataStore): Promise<string[]> {
+type CourseTasks = { id: string; modules: { lessons: { id: string; task?: unknown }[] }[] };
+
+/** Every assignment of a course read for removal (readTaskDrop), before the course goes; throws on any unread. */
+export async function readCourseTaskDrops(course: CourseTasks): Promise<TaskDrop[]> {
+  const drops: TaskDrop[] = [];
+  if (!isRedisConfigured()) return drops;
+  for (const unit of course.modules) for (const lesson of unit.lessons) if (lesson.task) drops.push(await readTaskDrop(course.id, lesson.id));
+  return drops;
+}
+
+/** Forgets what readCourseTaskDrops read, then the course's lists of work. Returns the files to delete. */
+export async function applyCourseTaskDrops(course: CourseTasks, drops: TaskDrop[], room: string | null, data: DataStore): Promise<string[]> {
   const files: string[] = [];
-  for (const unit of course.modules) {
-    for (const lesson of unit.lessons) {
-      if (lesson.task) files.push(...(await dropTask(course.id, lesson.id, room, data)));
-    }
-  }
+  for (const drop of drops) files.push(...(await applyTaskDrop(drop, room, data)));
   if (files.length || course.modules.some((m) => m.lessons.some((l) => l.task))) {
     await redisPipeline([["DEL", waitingKey(course.id), allKey(course.id)]]);
   }
   return files;
+}
+
+/** A course's assignments all forgotten, each read first. Returns the files to delete. */
+export async function dropCourseTasks(course: CourseTasks, room: string | null, data: DataStore): Promise<string[]> {
+  return applyCourseTaskDrops(course, await readCourseTaskDrops(course), room, data);
 }
 
 /**

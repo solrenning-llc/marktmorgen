@@ -15,6 +15,12 @@
  * its link, and the copy fails whole rather than leave a part out. Controls: a
  * healthy reply and a confirmed empty one. Synthetic stores; one reply
  * injected per case; no network. Turned from the proof on #2910.
+ *
+ * The same rule for its sibling read (rule 30): whether the store's own list
+ * holds the address, knows() in lib/erasure-request.ts, read HEXISTS as
+ * `Number(held) === 1`, so a missing or out-of-shape reply was "not on the
+ * list" and a one-store ask was dropped in silence, and a string "1" was read
+ * as on it. Only an exact 0 or 1 is an answer; anything else is logged.
  */
 import { NextRequest } from "next/server";
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
@@ -30,10 +36,12 @@ import { done, is, part } from "./check";
 type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
 let inject: (() => unknown) | null = null;
+let injectList: (() => unknown) | null = null;
 /** Only the library's SUNION (its keys start nl:lib:), never another module's. */
 const isLibraryRead = (batch: Command[]) => batch.some((c) => c[0] === "SUNION" && String(c[1]).startsWith("nl:lib:"));
 redis.pipeline = (async (batch: Command[]) => {
   if (inject && isLibraryRead(batch)) return inject();
+  if (injectList && batch.some((c) => c[0] === "HEXISTS" && String(c[1]).startsWith("nl:store:leads:"))) return injectList();
   return real(batch);
 }) as typeof redis.pipeline;
 
@@ -154,6 +162,26 @@ async function main(): Promise<void> {
     await ask(unlisted.shift()!, shop.handle);
     is("asked from the store for an address not on its list, nothing is sent and the unknown is logged", [sent.length - from, logged.length > before], [0, true]);
     inject = null;
+  }
+
+  // The store's own list (knows() in lib/erasure-request.ts), with a healthy library read: the controls are the
+  // one-store asks above (an address on the list is emailed, one that is not is sent nothing).
+  const hexists: [string, () => unknown][] = [
+    ["the list answered as a string", () => ["1"]],
+    ["the list answered with a count that is not 0 or 1", () => [2]],
+    ["the list answered null", () => [null]],
+    ["no reply at all", () => []],
+  ];
+  for (const [index, [name, reply]] of hexists.entries()) {
+    part(`Unknown store list: ${name}`);
+    const asked = `list-unknown-${index}@example.com`;
+    await redis.pipeline([["HSET", leadsKey(shop.listId!), asked, JSON.stringify({ at: 1_790_000_000 })]]);
+    injectList = reply;
+    from = sent.length;
+    before = logged.length;
+    await ask(asked, shop.handle);
+    injectList = null;
+    is("asked from the store, nothing is sent on an unknown list reading and the unknown is logged", [sent.length - from, logged.length > before], [0, true]);
   }
 
   done();

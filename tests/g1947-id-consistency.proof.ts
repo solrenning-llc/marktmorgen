@@ -8,7 +8,7 @@ import { done, is } from './check';
 globalThis.fetch = async () => { throw Error('No external provider'); };
 const stats = 'g'.repeat(16);
 const value = { campaign: 'known', headline: 'Known headline', sub: 'Kept words', button: '' };
-const caught = async (work: () => Promise<unknown>) => work().then(value => ({ok:true,value}), error => ({ok:false,error:String(error),incomplete:error instanceof PageDropIncomplete}));
+const caught = async (work: () => Promise<unknown>) => work().then(value => ({ok:true as const,value}), error => ({ok:false as const,error:String(error),incomplete:error instanceof PageDropIncomplete}));
 async function main() {
   for (const id of ['normal-id', 'bad:child', 'x'.repeat(49)]) {
     redis.clear();

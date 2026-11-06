@@ -32,6 +32,8 @@ import { activeIntro } from "@/lib/intro-price";
 import { firstChargeAt, linkSeconds, reminderAt } from "@/lib/move-rules";
 import { giveData, needData } from "@/lib/store-data";
 import { repliesFor } from "@/lib/redis-reply";
+import { takePublicRequest } from "@/lib/traffic";
+import { AFFILIATE_STRIPE_PAGES_PER_UNIT } from "@/lib/public-read-rules";
 import { dataBytes } from "@/lib/store-data-rules";
 
 const invitesKey = (statsId: string) => `nl:mv:${statsId}`;
@@ -338,6 +340,13 @@ export async function openMove(
   const keepUnknown = () => redisPipeline([["SET", key, OPEN_UNKNOWN, "XX", "EX", OPEN_SECONDS]]).catch(() => {});
   // Paid already in a checkout the thanks page and the sweep never saw (B4): Stripe shows the membership live, so
   // the link opens nothing more and says it was moved. Not read whole: nothing opened, the next press asks again.
+  // Every Stripe page this press may read is counted before the first (Codex C2 on #2685): the customer records, one
+  // subscription page each, and the checkout's closing time when its creation leaves it out, each a public request
+  // unit at AFFILIATE_STRIPE_PAGES_PER_UNIT. Not counted (the store's month is used): nothing read, nothing opened.
+  if (!(await takePublicRequest(store, "buyer", now, Math.ceil(MOVE_STRIPE_PAGES / AFFILIATE_STRIPE_PAGES_PER_UNIT)))) {
+    await release();
+    return { ok: false, reason: "unavailable" };
+  }
   const live = await liveMembership(store, invite.e, productId);
   if (live === null) {
     await release();
@@ -410,6 +419,11 @@ async function checkoutCloses(store: Store, sessionId: string): Promise<number |
   }
 }
 
+/** Customer records under one address read for an invitation's press; more than this is not read whole (Codex C2 on #2685). */
+export const MOVE_CUSTOMERS_READ = 5;
+/** Stripe pages one press may read: the customer records, one subscription page each, and the checkout's closing time. */
+export const MOVE_STRIPE_PAGES = 1 + MOVE_CUSTOMERS_READ + 1;
+
 /**
  * Whether Stripe shows this address a live membership to this product, read whole (B4): true or false only from
  * complete lists in their exact shape; anything else (an error, a list cut short, a reply that is not a list) is
@@ -423,14 +437,16 @@ async function checkoutCloses(store: Store, sessionId: string): Promise<number |
 async function liveMembership(store: Store, email: string, productId: string): Promise<boolean | null> {
   const account = store.stripeAccountId;
   if (!account || !EMAIL_PATTERN.test(email)) return null;
-  const whole = (page: Record<string, unknown>): unknown[] | null => (Array.isArray(page.data) && page.has_more === false ? page.data : null);
+  const whole = (page: Record<string, unknown>, limit: number): unknown[] | null =>
+    Array.isArray(page.data) && page.has_more === false && page.data.length <= limit ? page.data : null;
   try {
-    const customers = whole(await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: "100" })}`));
+    // At most MOVE_CUSTOMERS_READ records under the address: more is not read whole, so nothing opens (the cost bound).
+    const customers = whole(await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: String(MOVE_CUSTOMERS_READ) })}`), MOVE_CUSTOMERS_READ);
     if (!customers) return null;
     for (const customer of customers) {
       const id = customer && typeof customer === "object" ? (customer as { id?: unknown }).id : undefined;
       if (typeof id !== "string" || !/^cus_[A-Za-z0-9]+$/.test(id)) return null;
-      const subs = whole(await onAccount("GET", account, `/subscriptions?customer=${id}&status=all&limit=100`));
+      const subs = whole(await onAccount("GET", account, `/subscriptions?customer=${id}&status=all&limit=100`), 100);
       if (!subs) return null;
       for (const sub of subs) {
         if (!sub || typeof sub !== "object") return null;

@@ -1,3 +1,54 @@
+# Ponto de parada C2 — 06/11/2026 00h05 (Fortaleza)
+
+## Fontes e autoridade
+
+- Esta seção é a mais recente e prevalece sobre o histórico abaixo.
+- Regras atuais relidas no `main`; blob integral fresco de `para-claude-1/messages.md` relido antes das ações.
+- `main` observado: `560c0f5ca07c0c0bfb42d107d8101a695d7de4d1`.
+- Preservados todos os ramos, heads, REDs, PRs e a automação horária C2. Nenhum CI inteiro foi cancelado/repetido e nenhum head saudável foi movido para perseguir o `main`.
+
+## #2742 — corretivo dos fixtures publicado; aguarda dois pareceres e nove novos verdes
+
+- PR próprio financeiro: `#2742`, ramo `codex/c-tx2-plan-refund-list-evidence`.
+- Novo head EXATO: `1a1f7c171b8692cf06c9fc60eb56468caf9da146`; tree EXATA: `5defc8208695a2e9d86ddd9b4c0e937073b2b40b`.
+- O head anterior `7e93e170b9993a6046973851305da95dc768d233` e seus oito verdes não valem para incorporação.
+- Novidade causal do Revisor 2: os fixtures em `tests/plan-refund-stripe-world.ts` e `tests/plan-refund-write.test.ts` ainda devolviam `object:list` às rotas Stripe Search; isso quebrava os testes ligados depois que o produto passou a exigir `search_result`.
+- Reserva dos dois fixtures publicada antes da edição: canal `aa629f7ba9e72caa62c306037136f17fe75f05a2`.
+- Reproduzido no head anterior: falhas determinísticas nos testes de write/route. Correção restrita aos dois fixtures: `/charges/search` e `/customers/search` agora devolvem envelope `search_result`; produto, RED permanente e política financeira permanecem byte-idênticos.
+- GREEN final: 223/223 ligados (44 read + 67 rules + 47 flow + 28 route + 15 page + 22 write), TS dirigido 0, lint 0, scanner 3806/0, diff limpo.
+- Relatório e pedidos nominais publicados no canal: `a781f37b65c16fd1cf87ff73ede51c7009b369cf`; Revisor 2 deve retornar só ao delta `7e93e170..1a1f7c17`; Codex G2 deve fazer a segunda revisão financeira.
+- NÃO incorporar antes de DOIS pareceres financeiros independentes aplicáveis ao head exato e NOVE workflows novos `completed/success`. AV12: não fazer poll vazio, retry, cancelamento ou head move.
+
+## Regra 24/MR2 — prova opt-in no #2722 ocupado; produto intocado
+
+- Auditoria de PRs abertos, reservas e canal confirmou que `lib/creator-invite-credit.ts` está ocupado pelo PR `#2722`/Codex L9. Nenhum arquivo de produto, teste canônico, ramo, PR ou CI alheio foi editado.
+- Achado MÉDIO: `refundedOn` percorre `(list.data ?? [])`; envelope de reembolsos incompleto/ilegível vira lista vazia e pode conceder crédito de plano com base em pagamento que talvez já esteja integralmente reembolsado.
+- Reserva somente da prova opt-in publicada no canal: `620e87d3b14ceb0b2c6cc0965c13eb6087ced43f`.
+- Prova durável: ramo `codex/c-review-invite-credit-refund-list-evidence`, head EXATO `2ab544426e53bb98e522ba4fd796727046011c30`, tree `cc9ff692b883b0df63876259b2ea18f54ffd4dc4`.
+- Arquivos novos apenas: `proofs/c2/creator-invite-refund-list.proof.ts` e `proofs/c2/run-creator-invite-refund-list.mjs`.
+- Resultado: 3 checks / 1 falha causal + 2 controles verdes; TS dirigido 0, lint 0, diff limpo, scanner 3820/0. A prova é opt-in e não pertence à descoberta canônica.
+- Relatório no canal: `5cbc458215dfd08652e2fba6c4b6009a720ceb9a`; comentário no PR `#2722`: `6675712958`.
+- O controlador nominal deve exigir envelope Stripe List exato, lista limitada e linhas/status/amount estritos, repetir a mesma prova e ligados, e obter duas revisões financeiras. C2 aguarda atribuição/retorno nominal; não duplicar L9.
+
+## Estados preservados sem vigia vazia
+
+- `#2601` head `702cf9a8af4d8a0f33764720b446ccb211b210b4`, tree `4c35...`: nove workflows novos inicialmente em fila; parecer N6654503257 aplicável. Não foi polado nesta passagem; merge só com nove sucessos exatos.
+- `#2695` head `33bbd1fd...`: última leitura causal 6 success + 3 in progress; retries individuais macOS/WebKit já consumidos; sem poll/retry/cancel/headmove.
+- `#2692` PRIMARY `35e670e3...` intacto; recovery-note `3a61b5bc` tem D2 primeira + H2 segunda financeira; outage da homepage continua bloqueado por A3/`#2020`; primary não movido.
+- `#2685` head `24ce714e...`: review C2 `5794771068` fechou o MÉDIO de custo; LOW de wording do R1 e CI permanecem com C4.
+- `#1969` prova `88ac828c...`: produto pertence a B2/Claude1; sem edição ou atribuição C1.
+- `#2654` head `fec0...`: MÉDIO continua aberto.
+- `lib/commercial-margin.ts` permanece com J; `lib/tax-threshold.ts`/prova2325 continuam proibidos sem atribuição explícita de Claude1.
+
+## Próxima ação causal
+
+1. Tratar retorno nominal dos revisores do `#2742` e qualquer CI terminal causal no head exato, sem repetir CI inteira.
+2. Incorporar `#2742` somente com dois pareceres aplicáveis e 9/9 sucessos exatos.
+3. Tratar retorno nominal do controlador de `#2722`; não editar o produto ocupado.
+4. Só acordar vigias de `#2601/#2695/#2692` diante de novidade causal; continuar item livre TX2/TX3/MR2 após auditoria completa e RESERVA no canal.
+
+---
+
 ## Latest checkpoint — 2026-11-05 23:23 Fortaleza / 2026-11-06 02:23 UTC
 
 This section supersedes only the affected facts below. Active work was confirmed and the duplicate continuation was absorbed. All prior heads, REDs, branches, PRs and the existing hourly automation remain preserved.

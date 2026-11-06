@@ -25,7 +25,7 @@ import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { onAccount } from "@/lib/stripe-account";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { confirmLostRead, givenBack, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { canSell } from "@/lib/store-checkout";
 import { type Listing, type Store, saleHandles, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
@@ -124,25 +124,54 @@ export async function preorderViews(store: Store, productIds: string[]): Promise
   return out;
 }
 
-/** How many of a product's pre-orders wait to be handed over. */
+/**
+ * A product's pre-orders as kept, read exactly (CX-123 rule 24): one reply, a list of texts, each one a pre-order.
+ * Anything else (no reply, a number, text, a member that is not text or not a pre-order) is unknown and throws,
+ * never "nobody waits": a removal, a release of an empty product and the hand-over job decide on it.
+ */
+function exactPreorders(replies: unknown): Preorder[] {
+  const values = stringList(repliesFor(replies, 1)?.[0]);
+  if (!values) throw new UnknownReplyError("a product's pre-orders");
+  return values.map((value) => {
+    const entry = parsePreorder(value);
+    if (!entry) throw new UnknownReplyError("a product's pre-orders");
+    return entry;
+  });
+}
+
+/**
+ * How many of a product's pre-orders wait to be handed over. An unknown read throws UnknownReplyError: the product
+ * route keeps the product (503), the waitlist route keeps an empty product coming soon (sweep APP3).
+ */
 export async function waitingCount(store: Store, productId: string): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["HVALS", entriesKey(store.statsId, productId)]]);
-  return preorderCounts((Array.isArray(raw) ? raw : []).map(parsePreorder).filter((e): e is Preorder => e !== null)).waiting;
+  return preorderCounts(exactPreorders(await redisPipeline([["HVALS", entriesKey(store.statsId, productId)]]))).waiting;
 }
 
 /**
  * The product went on sale: its expected day is let go, and its pre-orders
  * still waiting are queued for the five-minute job to hand over
- * (runPreorderReleases).
+ * (runPreorderReleases). A count that cannot be read queues the job all the
+ * same, never "nobody waits": the job reads the pre-orders again and keeps
+ * itself in line until it can (sweep APP3). The job's SADD answered in
+ * another shape throws, so the caller says it was not done.
  */
 export async function queueRelease(store: Store, productId: string): Promise<void> {
   if (!store.statsId || !isRedisConfigured()) return;
-  const waiting = await waitingCount(store, productId);
-  await redisPipeline([
+  let waiting: number;
+  try {
+    waiting = await waitingCount(store, productId);
+  } catch (error) {
+    if (!(error instanceof UnknownReplyError)) throw error;
+    console.error("could not read a product's pre-orders going on sale; its hand-over job is queued to read them again", error);
+    waiting = Number.POSITIVE_INFINITY;
+  }
+  const queue = waiting > 0;
+  const replies = await redisPipeline([
     ["HDEL", dayKey(store.statsId), productId],
-    ...(waiting > 0 ? [["SADD", JOBS, `${store.statsId}|${productId}|${store.handle}`]] : []),
+    ...(queue ? [["SADD", JOBS, `${store.statsId}|${productId}|${store.handle}`]] : []),
   ]);
+  if (queue && !oneWrite(repliesFor(replies, 2)?.[1])) throw new UnknownReplyError("a pre-order hand-over job");
 }
 
 // ------------------------------------------------------------------ one pre-order
@@ -399,13 +428,19 @@ export async function runPreorderReleases(
       await redisPipeline([["SREM", JOBS, member]]);
       continue;
     }
-    const [raw] = await redisPipeline([["HGETALL", entriesKey(sid, pid)]]);
+    // Read exactly (sweep APP3): an unknown reply hands nothing over and keeps the job in line for the next run,
+    // never "nobody waits", which would take the job out of line with buyers who paid still waiting.
+    const fields = stringList(repliesFor(await redisPipeline([["HGETALL", entriesKey(sid, pid)]]), 1)?.[0]);
     const pairs: [string, Preorder][] = [];
-    if (Array.isArray(raw)) {
-      for (let i = 0; i + 1 < raw.length; i += 2) {
-        const entry = parsePreorder(raw[i + 1]);
-        if (entry) pairs.push([String(raw[i]), entry]);
-      }
+    let known = fields !== null && fields.length % 2 === 0;
+    for (let i = 0; known && fields && i < fields.length; i += 2) {
+      const entry = parsePreorder(fields[i + 1]);
+      if (entry) pairs.push([fields[i], entry]);
+      else known = false;
+    }
+    if (!known) {
+      console.error("could not read a product's pre-orders to hand over; the job stays in line", store.handle);
+      continue;
     }
     const waiting = pairs.filter(([, e]) => !e.given && !e.revoked);
     const deps = depsFor(store);

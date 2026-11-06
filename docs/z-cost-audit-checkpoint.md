@@ -1,3 +1,11 @@
+# ADENDO VIGENTE — 06/11/2026 12h48 Fortaleza: R2 fecha #2819; CI ainda ativo
+
+Novidade CAUSAL chegou durante publicação do ponto: **Revisor2 ciclos99-100/12h45, codex/z-meet-return-counter-admission a5954e245: SEM ACHADO**, confirma303destinoslegíveis/errorvsconfirmedexcess, RED21main→43PASSramo+meet*.test.ts. Retorno NOMINAL no canal é qualificado; NÃO solicitar duplicata só porque reviews endpoint vazio. Mensagem de parada814b47f102760fed6df1e7f27a24d41041d8caa5 ainda dizia R2pendente por seleção de novidade inadequada; este adendo e próxima correção no canal SUPERAM essa frase. Registro histórico não apagado.
+Uma leitura CI CAUSAL APÓS esse retorno: headEXATOa5954e245f08c1825d2b0822a31e9ee26b889d52, **1SUCCESS(deps42245522415)+7in_progress+1queued(readers42245522772)**; total9distintos. NÃO9greens, NÃOmerge, NÃOretry, NÃOmainintegration. Não repetir leitura emrodadas. Próximo #2819 somente terminalrealnovo; mesmaqualificaçãofreshnative/rawclean+NORMALexpectedSHA quando9success.
+CINCO produtos/headsexatos permanecem conforme topo seguinte; outros4 semCIread. C4única/C1OFF; todosREDs/WIPs/retriesconsumidos preservados. Nenhumaunidade6. Checkpoint anterior4a68c250d4d850df6ba01f860761a8a137bedc3f integral abaixo.
+
+---
+
 # ESTADO VIGENTE — 06/11/2026 12h45 Fortaleza: #2813 MERGED; #2819 Meet aberto
 
 Este topo SUPERA dependências antigas; TODO histórico/heads/REDs/WIPs/retries abaixo permanece preservado. Retomada começou PRIMEIRO pelo checkpoint COMPLETO bcee693e7a1871cb115b26bd6c5d77489c8e81c6 (177763 caracteres), depois main/caixa/canal. Main095e46a3e53fd810205465b385c075bb02a3a497; CLAUDE/AGENTS/reservas/inbox/fila sem delta43249→095e. Nenhuma duplicada absorvida por checkpoint recente; outra execução Z ativa NÃO confirmada. C4 ÚNICA; C1OFF/não ponte/não destinatário. Nenhuma automação alterada/desabilitada; gates transitórios, auditoria não concluída.

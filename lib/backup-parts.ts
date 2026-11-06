@@ -218,7 +218,10 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
       if (replies.length !== 2 * names.length) return fail("unreadable");
       for (let i = 0; i < names.length; i += 1) {
         const dump = replies[2 * i];
-        const ends = Number(replies[2 * i + 1]);
+        // Read exactly (CX-123 rule 24, Codex Q): PEXPIRETIME answers an integer; anything else (nil, a text, a list)
+        // is unknown and refused below, never read as 0 ("ended long ago") and the key left out of the backup.
+        const reply = replies[2 * i + 1];
+        const ends = typeof reply === "number" ? reply : Number.NaN;
         // Gone between the walk and its copy, or ended by the time of the copy: left out, never copied empty.
         if (dump === null || ends === -2 || (ends !== -1 && ends <= now)) continue;
         if (typeof dump !== "string" || !dump || !BASE64.test(dump) || Buffer.from(dump, "base64").toString("base64") !== dump || !Number.isSafeInteger(ends) || ends < -1) return fail("unreadable");

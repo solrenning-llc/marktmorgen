@@ -17,6 +17,7 @@
  * id, for three days; never who bought.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { boundedAiRequest } from "@/lib/ai-request-rules";
 import { aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
@@ -86,16 +87,34 @@ export function nextOfferShown(store: Store, now = Date.now()): boolean {
 
 type Kept = { s: string; p: string; r: NextReason; w: string; x?: 1 };
 
-async function readKept(store: Store, session: string): Promise<Kept | null> {
-  const [raw] = await redisPipeline([["GET", keptKey(session)]]);
-  if (typeof raw !== "string") return null;
+/** A kept record as `keep` writes it, or null for any other string. */
+function keptOf(raw: string, statsId: string | null): Kept | null {
+  let value: Kept;
   try {
-    const value = JSON.parse(raw) as Kept;
-    if (!value || value.s !== store.statsId || typeof value.p !== "string" || !REASONS.includes(value.r)) return null;
-    return { s: value.s, p: value.p, r: value.r, w: typeof value.w === "string" ? readReason(value.w) : "", ...(value.x === 1 ? { x: 1 as const } : {}) };
+    value = JSON.parse(raw) as Kept;
   } catch {
     return null;
   }
+  if (!value || typeof value !== "object" || Array.isArray(value) || !statsId || value.s !== statsId || typeof value.p !== "string" || !REASONS.includes(value.r)) return null;
+  return { s: value.s, p: value.p, r: value.r, w: typeof value.w === "string" ? readReason(value.w) : "", ...(value.x === 1 ? { x: 1 as const } : {}) };
+}
+
+/**
+ * The order's kept choice, read in its exact shape (CX-123 rule 24): null only
+ * for a confirmed absent key. Any other reply — not one reply, not a string,
+ * or a string that is not this store's kept record — throws, so the page does
+ * not choose again (no model call, no reply of the pool, the buyer's "no
+ * thanks" not overwritten), a dismissal says not done and the email carries
+ * nothing. Every caller already answers a throw with nothing shown.
+ */
+async function readKept(store: Store, session: string): Promise<Kept | null> {
+  const replies = repliesFor(await redisPipeline([["GET", keptKey(session)]]), 1);
+  if (!replies) throw new UnknownReplyError("the order's kept next product");
+  const [raw] = replies;
+  if (raw === null) return null;
+  const kept = typeof raw === "string" ? keptOf(raw, store.statsId) : null;
+  if (!kept) throw new UnknownReplyError("the order's kept next product");
+  return kept;
 }
 
 async function keep(store: Store, session: string, kept: Kept): Promise<void> {

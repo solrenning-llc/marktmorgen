@@ -64,10 +64,18 @@ export function priorRefund(list: unknown, intent: string, invoice: string, curr
   const field = (value: unknown, key: string): unknown =>
     value && typeof value === "object" && !Array.isArray(value) ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined;
   const rows = field(list, "data");
-  if (!Array.isArray(rows) || field(list, "has_more") !== false) return "unknown";
+  if (field(list, "object") !== "list" || !Array.isArray(rows) || field(list, "has_more") !== false) return "unknown";
   for (const row of rows) {
+    // Every row must read as a refund with its own id and metadata (an object, or null for none): a row that does not
+    // read could be this invoice's, so the list is unknown and nothing is sent (Codex G on #2699).
+    if (!row || typeof row !== "object" || Array.isArray(row) || field(row, "object") !== "refund") return "unknown";
+    const id = field(row, "id");
     const meta = field(row, "metadata");
-    if (field(meta, "closing_refund") !== invoice) continue;
+    if (typeof id !== "string" || !REFUND_ID.test(id)) return "unknown";
+    if (meta !== null && (!meta || typeof meta !== "object" || Array.isArray(meta))) return "unknown";
+    const mark = field(meta, "closing_refund");
+    if (mark !== undefined && typeof mark !== "string") return "unknown";
+    if (mark !== invoice) continue;
     const amount = field(row, "amount");
     if (!Number.isSafeInteger(amount) || (amount as number) <= 0) return "unknown";
     const state = refundState(row, intent, amount as number, currency);

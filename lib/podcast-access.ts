@@ -70,11 +70,21 @@ export async function feedToken(store: Store, productId: string, email: string):
 
 export async function readFeedToken(token: string): Promise<FeedGrant | null> {
   if (!FEED_TOKEN.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", tokenKey(token)]]);
+  const reply = await redisPipeline([["GET", tokenKey(token)]]);
+  if (!Array.isArray(reply) || reply.length !== 1) return null;
+  const [raw] = reply;
   if (typeof raw !== "string") return null;
   try {
-    const g = JSON.parse(raw) as FeedGrant;
-    return typeof g.s === "string" && typeof g.p === "string" && typeof g.e === "string" ? g : null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    // JSON.parse discards duplicate members and normalises escaped member names. Only its exact canonical text proves
+    // that no competing routing evidence was lost while decoding. Extra non-routing claims may remain in storage,
+    // but are stripped from the returned grant below.
+    if (raw !== JSON.stringify(parsed)) return null;
+    const row = parsed as Record<string, unknown>;
+    if (![row.s, row.h, row.p, row.e].every((value) => typeof value === "string" && value.length > 0)) return null;
+    const grant: FeedGrant = { s: row.s as string, h: row.h as string, p: row.p as string, e: row.e as string };
+    return grant;
   } catch {
     return null;
   }

@@ -1,3 +1,32 @@
+# ESTADO VIGENTE — 05/11/2026 após2632MERGED e publicação dos5heads
+
+#2632CONFIRMADOMERGED NORMALba887611b8b101dfc84b14fb4fc07a7eec3b9ff8, headcda3, C3/V/9greens reportadoscanal. Congelado snapshotmainba887611 apósUMfetchcausal. IntegreiUMAvez CADAuma das5unidades;0conflitos. NÃO integrar main de novo sóporqueoutrosPRsentraram. Não usarchecksancestrais.
+
+| PR | ramo | headFINAL remoto | tree | checks locais |
+| --- | --- | --- | --- | --- |
+|2602|codex/z-service-counter-admission|75617eb5757d950feaddfb9b1386abca82ca94b3|530e3bf007cdb4b20ef3c8366e3b1befa5506104|226|
+|2615|codex/z-preview-counter-admission|fc5d371c5375e0ee2f06a26e81b3871cbec2ba2e|e556af30f3d79c64381646eab09ce779b8223295|121|
+|2739 NOVO|codex/z-ai-report-counter-admission|14ce1adb045772eec896494d5c9ce623e34773df|7c25dcb3b66b8871c58388b2738739905362a234|264|
+|2740 NOVO|codex/z-assistant-counter-admission|410e68747b30edea76d02f184874189f954ef085|06ebe0b911fc180e6d57a10d630482ddf08147b2|240|
+|2741 NOVO|codex/z-chat-counter-admission|806c11f8211e636c1b5fcca79f85573a91adc7f9|6cb829ef2071dc1941ea7451ab7021e5737cd618|298|
+
+CINCOunidades, 3SEMPRanterioresagoratêmPRs. Nãoabrirsexta. CADA scopedTSC0/lint0/scanner3808/0/diffcheck0, árvoreGitData=nativa. 38grupos(7+6+9+7+9), total1149checksverdes. CORREÇÃOEDITORIAL do canal8e0785ce: escrito27grupos, correto38; contagensporunidade estavamcertas. Não refazer testes porcorreção de soma/texto.
+Produto+testes próprios BYTE-IDÊNTICOS antes/depois junção; sómain+aliasesprópriosno test-config. Semdocs/reservations no delta. Sourceguard/limites/TTL/keys/preços/flagsinalterados. Semanticamensal/auth/dataproviders sintéticasexplicadasnosPRs; nenhumnativeRedis/browser/fornecedor/pagamentoreal/globalbuildcertificado.
+2602 foiintegradoaPARTIR WIPREMOTOb096e3ee7991b4c56f0bd9c10f7478f4e81ee09d preservado,parentnovoheadb096+main; parecesE2/C2duasfinanceirasaplicáveisblobsiguais,CX122(8). 2615Qcleanaplicável. NOVOS2739/2740/2741 pedidaUMArevisãoG2/Revisor2/oupeerlivre no canal8e0785ce05b7743e21037f78e1862ba82315d1b6. R2LEVEunknown→slow429dereports/assistant anotadonocorpo, nãofingirfechamento. Nenhummergeantesgates.
+RETENTATIVAS2484verify127130387972 e2615verify127143841589/mac127144213372 CONTINUAMCONSUMIDAS. Nada derepetirporheadnovo. PreservadosRED140b3eb1/d0b4fc11/b9f9677b/f2503692/90c72baf; detalhes completos anteriores.
+
+## CI NOVA — primeira observação apenas
+DetectadosNOVEworkflowsNOVOS emCADAheadfinal acima, todosqueued naúnicaconsultainicial. Não há9verdes nem conclusão. IDs:
+[{"unit":"z-service-final","head":"75617eb5757d950feaddfb9b1386abca82ca94b3","runs":[42145545334,42145545316,42145545580,42145545644,42145545442,42145545372,42145545557,42145545524,42145545330]},{"unit":"z-preview-final","head":"fc5d371c5375e0ee2f06a26e81b3871cbec2ba2e","runs":[42145551586,42145551651,42145551606,42145551688,42145551584,42145551709,42145551661,42145551620,42145551663]},{"unit":"z-ai-reports","head":"14ce1adb045772eec896494d5c9ce623e34773df","runs":[42145622140,42145622127,42145621997,42145622018,42145622061,42145622006,42145621941,42145622057,42145622060]},{"unit":"z-assistant","head":"410e68747b30edea76d02f184874189f954ef085","runs":[42145626254,42145626296,42145626360,42145626325,42145626159,42145626181,42145626249,42145626161,42145626146]},{"unit":"z-chat-admission","head":"806c11f8211e636c1b5fcca79f85573a91adc7f9","runs":[42145628205,42145628103,42145628077,42145628067,42145628028,42145628109,42145628087,42145628063,42145628045]}]
+Não consultaremrodadas. Vigiashellúnica acompanhaCodexinbox/main; não existecredencialCLIcanal disponível, nãoalegarCIwatchAPI autenticada. Retomar comnovidade/revisãoterminal; antesmerge reler9exact-head eformalreview, gitmerge-treeclean, NORMALexpectedhead. mergeablefalse normalizado no createPR NÃOéconflictconfirmado e NÃOmanda mainchase.
+LocalorigemROOT695ccontinuainalterada. Finalserviceworktreez-service-final (canonicalWIPb096), previewz-preview-final; outros3worktreesnomesanteriores. Locaiscommitsassinaturasdiferentesremoto, árvoresiguais. Scripts /tmp/z-validate-integrated.py e /tmp/z-target-tests.mjs(mkdtempisolado) logs/tmp/z-merged-*.json/log. Nãoresetarlocaisantigos: HEADsantigos guardados nosprópriosramos, sourceactualpublicada éremota.
+
+## Próxima ação
+Enquanto5CI/revisõesesperam, retornar NOMINALPR2724pedidoC6 (headcff798b3;agora39a8e4f9main-only). MesmoQprimeira/Zsegunda, sóvetorZseen-beforelookup; preservarlocalprova638de1d3, não copiarcorreçãoalheia nemduplicarQlistfinding. Anunciarheadexatoantesnovaexecução/reporte. #2709fechado5794179820,eebdb70c;nãoreabrirsemnovodelta.
+Nada de mergesalheios, fornecedor/chaves/preços/limites/flags. Publicar<=30min ePONTOexato aoencerrar; estecheckpointSUPERAtodasnotasdebloqueiopré2632 abaixo.
+
+---
+
 Publicação final de canal CONFIRMADA: 16f9638018a298dbbc50f8eb0f6337e4811491f4 empara-claude-1/messages.md. Supera a nota de appendPENDENTE abaixo; NÃO repetir a mesma mensagem. Inclui#2724MED/report638de1d3, fechamento2709 ePONTOexato5heads. Vigia91766confirmadaaindarodando, #2632/cda3emCI segundo coordenação, semnova sondagem oumudançaprodutiva.
 
 # Atualização causal compartilhada — 05/11/2026 21h49 Fortaleza

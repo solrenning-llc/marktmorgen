@@ -7,6 +7,7 @@ import {
   type CreatorAnswer,
 } from "@/lib/creator-research";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 
 import { RESPONSES_KEY } from "@/lib/creator-research-store";
@@ -135,11 +136,17 @@ export async function POST(request: NextRequest) {
   };
 
   try {
-    const [, count] = await redisPipeline([
-      ["SET", rateKey, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-      ["INCR", rateKey],
-    ]);
-    if (Number(count) > RATE_LIMIT) return fail(429, "rate_limited");
+    const both = repliesFor(
+      await redisPipeline([
+        ["SET", rateKey, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
+        ["INCR", rateKey],
+      ]),
+      2,
+    );
+    // A count not read in its exact shape keeps nothing and is never said as too many (CX-123 rule 24).
+    const count = both && (both[0] === "OK" || both[0] === null) ? countOf(both[1]) : null;
+    if (count === null || count < 1) throw new UnknownReplyError("the creator research count");
+    if (count > RATE_LIMIT) return fail(429, "rate_limited");
 
     const [saved] = await redisPipeline([["LPUSH", RESPONSES_KEY, JSON.stringify(answer)]]);
     if (typeof saved !== "number" || !Number.isSafeInteger(saved) || saved < 1) {

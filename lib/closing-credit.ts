@@ -35,9 +35,15 @@ export async function takeCredit(folder: string, n: number): Promise<boolean> {
   return false;
 }
 
-/** Puts back what was taken for emails that did not go. */
+/**
+ * Puts back what was taken for emails that did not go: once. When INCRBY's
+ * total is not a whole number it is not known whether it ran, so it is
+ * logged and never sent again (a second one could give back twice).
+ */
 export async function returnCredit(folder: string, n: number): Promise<void> {
-  if (n > 0) await redisPipeline([["INCRBY", creditKey(folder), n]]);
+  if (n <= 0) return;
+  const replies = repliesFor(await redisPipeline([["INCRBY", creditKey(folder), n]]), 1);
+  if ((replies ? signedOf(replies[0]) : null) === null) console.error(`giving back ${n} of a closing's email credit answered in an unknown shape; not tried again`);
 }
 
 /** Let go once the store is closed or runs on. */

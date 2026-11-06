@@ -86,6 +86,7 @@ import { VIDEO_RECORD_BYTES } from "@/lib/stream-rules";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { STREAM_PEEK_TIMEOUT_MS, STREAM_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { type DataStore, giveData } from "@/lib/store-data";
 import { type CaptionProblem, type CaptionTrack, MAX_CAPTION_TRACKS, captionLabel, toVtt } from "@/lib/captions";
 import {
@@ -261,12 +262,30 @@ async function collectionFor(config: Config, folder: string): Promise<string | n
   const id = field(made.data, "guid");
   if (made.status !== 200 || typeof id !== "string" || !STREAM_ID_PATTERN.test(id)) return null;
   // Two uploads starting at once would each make one: the first written is
-  // kept, and the other is taken away again.
-  const [first] = await redisPipeline([["SET", collectionKey(folder), id, "NX"]]);
-  if (first !== null) return id;
-  await ask(config, "DELETE", `/collections/${id}`);
-  const [kept] = await redisPipeline([["GET", collectionKey(folder)]]);
-  return typeof kept === "string" && STREAM_ID_PATTERN.test(kept) ? kept : null;
+  // kept, and the other is taken away again. Read exactly (CX-123 rule 24):
+  // "OK" is ours and nil is the other's; any other answer is read back, and
+  // ours is used only when the key holds it.
+  const first = await redisPipeline([["SET", collectionKey(folder), id, "NX"]]).then(
+    (reply) => repliesFor(reply, 1),
+    () => null,
+  );
+  if (first && first[0] === "OK") return id;
+  const lost = first !== null && first[0] === null;
+  if (lost) await ask(config, "DELETE", `/collections/${id}`);
+  const read = await redisPipeline([["GET", collectionKey(folder)]]).then(
+    (reply) => repliesFor(reply, 1),
+    () => null,
+  );
+  const kept = read ? read[0] : undefined;
+  if (kept === id) return id;
+  if (typeof kept !== "string" || !STREAM_ID_PATTERN.test(kept)) {
+    // Unreadable: no upload now. Ours is kept when it may be the one written;
+    // nothing is put in it while that cannot be told.
+    return null;
+  }
+  // Another upload's is the one kept: ours goes, if it has not gone already.
+  if (!lost) await ask(config, "DELETE", `/collections/${id}`);
+  return kept;
 }
 
 /**

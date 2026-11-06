@@ -1,0 +1,91 @@
+=== bffd-original ===
+  FAIL  missing: unknown discovery must fail erasure
+        expected true
+        got      false
+  FAIL  undefined: unknown discovery must fail erasure
+        expected true
+        got      false
+  FAIL  null: unknown discovery must fail erasure
+        expected true
+        got      false
+  FAIL  wrong-type: unknown discovery must fail erasure
+        expected true
+        got      false
+  FAIL  sparse: unknown discovery must fail erasure
+        expected true
+        got      false
+  FAIL  unparseable: unknown discovery must fail erasure
+        expected true
+        got      false
+19 checks, 6 failing.
+
+=== 048-original ===
+19 checks, all passing.
+
+=== 048-adversarial ===
+35 checks, all passing.
+9 checks, all passing.
+46 checks, all passing.
+
+=== bffd-canonical ===
+46 checks, all passing.
+
+=== 048-linked ===
+17 checks, all passing.
+26 checks, all passing.
+13 checks, all passing.
+6 checks, all passing.
+11 checks, all passing.
+30 checks, all passing.
+6 checks, all passing.
+29 checks, all passing.
+ℹ tests 4
+ℹ pass 4
+ℹ fail 0
+ℹ skipped 0
+13 checks, all passing.
+ℹ tests 8
+ℹ pass 8
+ℹ fail 0
+ℹ skipped 0
+11 checks, all passing.
+12 checks, all passing.
+19 checks, all passing.
+17 checks, all passing.
+ℹ tests 5
+ℹ pass 5
+ℹ fail 0
+ℹ skipped 0
+30 checks, all passing.
+11 checks, all passing.
+10 checks, all passing.
+ℹ tests 15
+ℹ pass 15
+ℹ fail 0
+ℹ skipped 0
+17 checks, all passing.
+21 checks, all passing.
+49 checks, all passing.
+23 checks, all passing.
+11 checks, all passing.
+19 checks, all passing.
+32 checks, all passing.
+30 checks, all passing.
+32 checks, all passing.
+ℹ tests 24
+ℹ pass 24
+ℹ fail 0
+ℹ skipped 0
+ℹ tests 7
+ℹ pass 7
+ℹ fail 0
+ℹ skipped 0
+
+=== 048-types ===
+
+
+=== 048-lint ===
+
+
+=== 048-scan ===
+Public data check: 3757 tracked files; 0 file(s) require correction.

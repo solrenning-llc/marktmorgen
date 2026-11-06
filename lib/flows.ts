@@ -484,7 +484,8 @@ function queuedOf(store: Store, flow: Pick<Flow, "id">, emails: string[]): (stri
 
 /**
  * Confirms a pipeline of deletions (DEL, ZREM) was answered in full, each
- * command with its own count, a whole number from zero, read without running
+ * command with its own count, a whole number from zero up to the keys (DEL)
+ * or members (ZREM) it named, read from the reply's own place without running
  * a getter: anything else (a missing, null or other reply in any place) is not
  * an erasure, and throws (Codex G and Revisor 2 on #1927: a null in the place
  * of the workflows' DEL was taken for done).
@@ -495,9 +496,12 @@ async function erase(commands: (string | number)[][]): Promise<void> {
     const reply: unknown = await redisPipeline(chunk);
     if (!Array.isArray(reply) || reply.length !== chunk.length) throw new FlowWriteUnconfirmed();
     for (let j = 0; j < chunk.length; j += 1) {
+      // The descriptor's own value only (an inherited `value` on a polluted prototype is not one), never a getter.
       const place = Object.getOwnPropertyDescriptor(reply, String(j));
-      const count: unknown = place && "value" in place ? place.value : undefined;
-      if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) throw new FlowWriteUnconfirmed();
+      const count: unknown = place && Object.hasOwn(place, "value") ? place.value : undefined;
+      // No more than what the command named: a DEL counts at most its keys, a ZREM at most its members.
+      const most = chunk[j][0] === "ZREM" ? chunk[j].length - 2 : chunk[j].length - 1;
+      if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0 || count > most) throw new FlowWriteUnconfirmed();
     }
   }
 }

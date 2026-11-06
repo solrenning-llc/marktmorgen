@@ -180,11 +180,19 @@ export class CardUnreadable extends Error {
  * readCreatorCard, where a card that cannot be read is simply off.
  */
 export async function readCreatorCardForEditing(statsId: string | null): Promise<CreatorCard> {
-  if (!statsId || !isRedisConfigured()) return NO_CARD;
+  return (await readCreatorCardHeld(statsId)).card;
+}
+
+/**
+ * The card as readCreatorCardForEditing reads it, and whether a record is still kept at all: a removal is done only
+ * when none is (`held` false), never because what is kept looks empty (Codex G on #1963).
+ */
+export async function readCreatorCardHeld(statsId: string | null): Promise<{ card: CreatorCard; held: boolean }> {
+  if (!statsId || !isRedisConfigured()) return { card: NO_CARD, held: false };
   const reply: unknown = await redisPipeline([["GET", cardKey(statsId)]]);
   if (!Array.isArray(reply) || reply.length !== 1) throw new CardUnreadable();
   const [raw] = reply;
-  if (raw === null) return NO_CARD;
+  if (raw === null) return { card: NO_CARD, held: false };
   if (typeof raw !== "string" || !raw || raw.length > MAX_STORED_CARD_BYTES) throw new CardUnreadable();
   let parsed: unknown;
   try {
@@ -193,10 +201,18 @@ export async function readCreatorCardForEditing(statsId: string | null): Promise
     throw new CardUnreadable();
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new CardUnreadable();
-  const read = readCard(parsed as Record<string, unknown>);
+  // A kept card is written whole (saveCreatorCard): its seven fields, `on` a boolean and the rest text. A record
+  // missing one, or with one of another type, is not a card as saved, so it is never read as one the creator would
+  // then save over with empty fields (Codex G and Revisor 2 on #1963).
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.on !== "boolean" || CARD_TEXT_FIELDS.some((field) => !Object.hasOwn(record, field) || typeof record[field] !== "string")) throw new CardUnreadable();
+  const read = readCard(record);
   if (!read.ok) throw new CardUnreadable();
-  return read.card;
+  return { card: read.card, held: true };
 }
+
+/** The text fields a kept card always has (CreatorCard, besides `on`). */
+const CARD_TEXT_FIELDS = ["name", "title", "email", "phone", "website", "note"] as const;
 
 /** A card save whose answer could not be confirmed: it may or may not have been written. */
 export class CardSaveUnconfirmed extends Error {

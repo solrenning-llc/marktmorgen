@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { CARD_REFUSALS, CardSaveUnconfirmed, CardUnreadable, MAX_CARD_EMAIL, MAX_CARD_NAME, MAX_CARD_NOTE, MAX_CARD_TITLE, dropCreatorCard, readCreatorCardForEditing, saveCreatorCard } from "@/lib/creator-card";
+import { CARD_REFUSALS, CardSaveUnconfirmed, CardUnreadable, MAX_CARD_EMAIL, MAX_CARD_NAME, MAX_CARD_NOTE, MAX_CARD_TITLE, dropCreatorCard, readCreatorCardForEditing, readCreatorCardHeld, saveCreatorCard } from "@/lib/creator-card";
 import { StoreFullError } from "@/lib/store";
 import { guardStoreWrite } from "@/lib/store-request";
 import { jsonAccess } from "@/lib/studio-route";
@@ -46,7 +46,9 @@ export async function POST(request: NextRequest) {
     }
     if (body.action === "remove") {
       await dropCreatorCard(statsId, store);
-      return Response.json({ ok: true, card: await readCreatorCardForEditing(statsId) }, { headers: NO_STORE });
+      // Removed only when no card is kept now; a card saved meanwhile is kept and said so (`removed: false`).
+      const after = await readCreatorCardHeld(statsId);
+      return Response.json({ ok: true, removed: !after.held, card: after.card }, { headers: NO_STORE });
     }
     return Response.json({ ok: false, error: "unknown" }, { status: 400 });
   } catch (error) {

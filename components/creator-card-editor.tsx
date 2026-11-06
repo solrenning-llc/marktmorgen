@@ -43,6 +43,14 @@ export function confirmedCard(status: number, answer: unknown): CreatorCard | nu
 /** What the screen says when an answer did not confirm what happened: never "saved", never "nothing changed". */
 export const CARD_UNCONFIRMED = "We could not confirm what happened to your card. Your words are still below. Reload the page to see what is kept, then try again.";
 
+/** What the screen says when a deletion's answer shows a card still kept: it was not deleted, and Delete stays. */
+export const CARD_NOT_DELETED = "Your card was not deleted: a card is still kept, perhaps saved from another tab. Your words are still below. Reload the page to see what is kept, then delete it again if you want.";
+
+/** A deletion is confirmed only when the server says none is kept and the card it sends back is empty in every field. */
+export function confirmedRemoval(answer: { card: CreatorCard; removed: unknown }): boolean {
+  return answer.removed !== false && !answer.card.on && TEXT_FIELDS.every((key) => answer.card[key] === "");
+}
+
 export function CreatorCardEditor({ initial, handle, storeName, words, address, look }: { initial: CreatorCard; handle: string; storeName: string; words: ContactWords["card"]; address: string; look: { className: string; style: React.CSSProperties; lang: string } }) {
   const [card, setCard] = useState(initial);
   const [kept, setKept] = useState(initial.on || Boolean(initial.name));
@@ -56,7 +64,7 @@ export function CreatorCardEditor({ initial, handle, storeName, words, address, 
     setCard(change);
   };
 
-  async function send(body: Record<string, unknown>): Promise<CreatorCard | null> {
+  async function send(body: Record<string, unknown>): Promise<{ card: CreatorCard; removed: unknown } | null> {
     setBusy(true);
     setError("");
     setSaid("");
@@ -64,7 +72,7 @@ export function CreatorCardEditor({ initial, handle, storeName, words, address, 
       const response = await fetch("/api/store/creator-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const answer: unknown = await response.json().catch(() => null);
       const confirmed = confirmedCard(response.status, answer);
-      if (confirmed) return confirmed;
+      if (confirmed) return { card: confirmed, removed: (answer as { removed?: unknown }).removed };
       // A refusal the server explains (a field, a full data room) is said as it is; anything else is not known.
       const refusal = answer && typeof answer === "object" ? (answer as { ok?: unknown; error?: unknown; message?: unknown }) : null;
       const refused = response.status >= 400 && response.status < 500 && refusal?.ok === false;
@@ -82,8 +90,9 @@ export function CreatorCardEditor({ initial, handle, storeName, words, address, 
   async function save(event: React.FormEvent) {
     event.preventDefault();
     const sentAt = edits.current;
-    const saved = await send({ action: "save", ...card });
-    if (!saved) return;
+    const answer = await send({ action: "save", ...card });
+    if (!answer) return;
+    const saved = answer.card;
     setKept(true);
     if (edits.current !== sentAt) {
       // Changed while it was saving: what was typed since stays on the screen, not yet saved.
@@ -99,9 +108,10 @@ export function CreatorCardEditor({ initial, handle, storeName, words, address, 
   async function remove() {
     const left = await send({ action: "remove" });
     if (!left) return;
-    // Deleted only when the card the server now keeps is none: off, with no name.
-    if (left.on || left.name) {
-      setError(CARD_UNCONFIRMED);
+    // Deleted only when the server keeps no card at all: not merely off with no name, since a card kept with hidden
+    // words (an email, a note) is still kept (Codex G on #1963). Otherwise Delete stays and the words below are untouched.
+    if (!confirmedRemoval(left)) {
+      setError(CARD_NOT_DELETED);
       return;
     }
     setKept(false);

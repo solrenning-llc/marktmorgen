@@ -1,0 +1,61 @@
+
+LOG g2756-costs.log SHA256 225a700c4d150bcceadc011db6ff2cba0f18ee5eebabee2b52214666efd93082
+8 checks, all passing.
+{
+  "basis": "EXACT historical repository exports, hypothetical known components only, not measured product/provider or complete worst cost",
+  "buyer": 0.00029449092741935475,
+  "studio": 0.00007204444444444444,
+  "poll": 0.000005133333333333333,
+  "grant": 0.00004567333333333333,
+  "tenMinutes": 0.0006616733333333334,
+  "visit": 0.0002637645833333333,
+  "A": 5.935695511971326,
+  "B": 3.1380317014874555,
+  "visits": 11700,
+  "VISITS_INCLUDED": {
+    "creator": 3400,
+    "pro": 10000,
+    "scale": 40000
+  },
+  "buyerAllowance": [
+    200,
+    1000,
+    3000
+  ]
+}
+  ok    study known model A rounds to its stated figure
+  ok    study known model B rounds to its stated figure
+  ok    study live visit debit arithmetic
+  ok    study model A buyer action arithmetic
+  ok    study model B buyer action arithmetic
+  ok    study buyer-action price agrees within shown precision
+  ok    study ten-minute price agrees within shown precision
+  ok    study actual buyer allowance constants
+
+8 checks, all passing.
+
+
+LOG g2756-linked.log SHA256 0cd752b1898aaecff580c0303c0008fde2a62a05fcb98a62e3c187119538e44f
+63 checks, all passing.
+75 checks, all passing.
+ℹ tests 24
+ℹ pass 24
+ℹ fail 0
+ℹ skipped 0
+Initial command exits1 AFTER three files completed successfully because guessed chat-pace.test.ts does not exist. Remaining two actual files ran separately.
+
+LOG g2756-linked-extra.log SHA256 24b4f66d5b4f5996c83da65476181ea97be4d7cba9d7ac68fb14832e3425754c
+35 checks, all passing.
+28 checks, all passing.
+
+LOG g2756-types.log SHA256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+EMPTY: True
+
+LOG g2756-lint.log SHA256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+EMPTY: True
+
+LOG g2756-scan.log SHA256 918783349a520b3c2417c4bdf5c09c734d8200dc60c292ee838c239db728c6f2
+Public data check: 3831 tracked files; 0 file(s) require correction.
+Own proof scanner []

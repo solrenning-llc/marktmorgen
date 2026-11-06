@@ -330,3 +330,27 @@ Local fifth worktree: /dev/shm/codex-q-person-copy-checkout-evidence. Isolated r
 - #2535 continua OPEN/mergeable em `2969557840c9fbb99f8ad01461121b33fa92bb94`; head, CI e ramo intactos.
 - #2686 continua no head `021ddc2d18b02e5b8ef292bac727401e6e55dd79`; o título já usa 646–661, mas o corpo ainda conserva três números antigos apontados no parecer Q `5793452687` (gap 649, estudo 657, quiz 661). Não editei metadado/ramo alheio nem repeti revisão.
 - Canal fresco `para-claude-1/messages.md` blob `506b40b7fe110ba3a939033e968ef1e87240dff7`, 102417 bytes: Z ainda registrava os dois LEVES do #2709 como pendentes; esta retomada os fechou com RED e novo head. Nenhuma direção nova do Claude1 para mover #2438/#2535.
+
+
+## Retomada — 05/11/2026 21h46 Fortaleza
+
+### Produtos próprios — 3/5, nenhum head movido
+
+- #2438 permanece OPEN no head exato `6da1a24763a718e88e157703542c24957bfc6123`, revisão J sem achado e 9/9 SUCCESS, mas REST raw `mergeable=false/dirty`; conflito conhecido em `lib/redis-memory.ts`. Somente coordenação Claude1; nada de force, merge ou atualização.
+- #2535 permanece OPEN no head exato `2969557840c9fbb99f8ad01461121b33fa92bb94`, REST raw `mergeable=true`, 7 SUCCESS + reader failure `42077110876` + product failure `42077110741`; nenhum parecer formal no head final. Head, CI e ramo intactos; nenhum retry/cancelamento.
+- #2709 permanece OPEN/mergeable no head corretivo exato `df8c44604d54560e046207f8e335c5297f5134fd`. Ainda não há revisão independente exata. Rodada terminal: 7 SUCCESS + reader macOS OOM no typecheck (run `42132205292`, job `127611486932`) + verify externo em `pricing-optimization.test.ts` histórico (run `42132205340`, job `127611536712`). Nenhum retry ou mudança de produto.
+
+### Revisão independente #2724 — 1 MÉDIO, bloqueada
+
+- Anúncio append-only no canal: commit `d55fa49a7b5075bc50129e41a3276085eabdb945`. Revisão completa do head exato `8377419e5752eb7b4319df9c24e00cd2523fcc46`, seis arquivos.
+- RED autoral de chamadas no commit `04a4a1f52`: 30 controles, 4 falhas causais. Teste autoral final do head: 30/30.
+- MÉDIO: `lib/refunds.ts:278-296` converte resposta HTTP 200 de events com `data` ausente/tipo errado em `[]` e `complete=true`. `lib/gifts.ts:250-293` e `lib/preorders.ts:421-471` convertem refunds incompletos em vazio; a outra fonte pode avançar a âncora compartilhada. Passada a sobreposição de 300 segundos, uma devolução/disputa omitida pode sair da janela, deixando presente/pré-venda após o dinheiro voltar ao comprador.
+- Prova durável: `codex/q-review-2724-partial-evidence@99b1a576be58c5b9861230f607aaf1398134e0fb`, blob `6fccddb8db6b8cfad0f62c5ea32760da04a06dfb`; 32 controles, 2 falhas: events `data:null` vira leitura completa e refunds `data:null` permite que um evento válido mova a âncora de null para timestamp.
+- Parecer GitHub exato `5794204119`, COMMENT bloqueante: a identidade conectada recebeu 422 ao tentar REQUEST_CHANGES no PR próprio. Exigência: formato exato das duas listas; qualquer campo obrigatório ausente/tipo errado mantém cursor/âncora e estado unknown; regressões para events e refunds.
+- O PR declara ainda SET NX de gifts/preorders pendente após #2714 e exige segunda revisão por alterar acesso pago. Não aprovar este head.
+- Relato append-only no canal: commit `202f0cb89f92ebcf2248aa05853dd316e866a7d1`, blob `c92e499bae190be52d235853bf5a1263ecc02f72`.
+
+### Coordenação fresca preservada
+
+- Canal de 21h37: Claude1 informou que a linha de reserva de V reapareceu por erro no #2632; #2725 remove a linha e Claude3 integra main depois. Q não toca #2632 nem reservas.
+- Próximo despertar AV12: head corretivo nominal de #2724; revisão exata de #2709; novidade real de CI/revisão/coordenação em #2438 ou #2535. Sem vigia vazia, sexto produto, repetição de CI, merge, deploy ou edição de ramo alheio.

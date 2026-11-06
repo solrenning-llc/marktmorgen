@@ -64,9 +64,8 @@ async function main(): Promise<void> {
     await assert.rejects(() => withReplies([[ ["buyer@example.com", "not-a-time"] ]], () => importedBuyers("a".repeat(24))));
   });
 
-  await check("a legible buyer survives beside an unknown buyer", async () => {
-    const buyers = await withReplies([[ ["good@example.com", "1793293200", "bad@example.com", "not-a-time"] ]], () => importedBuyers("a".repeat(24)));
-    assert.deepEqual([...buyers], [["good@example.com", 1_793_293_200]]);
+  await check("a partial buyer list is unknown before the closing notice can advance", async () => {
+    await assert.rejects(() => withReplies([[ ["good@example.com", "1793293200", "bad@example.com", "not-a-time"] ]], () => importedBuyers("a".repeat(24))));
   });
 
   await check("control: an exact imported purchase is admitted", () => {

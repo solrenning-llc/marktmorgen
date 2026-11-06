@@ -11,7 +11,10 @@ TMPDIR=/dev/shm node proofs/c2/api-read-decision.mjs
 TMPDIR=/dev/shm node proofs/c2/api-read-decision.mjs --linked
 ```
 
-The first command deliberately exits 1: **19 checks, 11 causal failures, 8 passing controls**.
+The original command deliberately exited 1 with **19 checks, 11 causal failures,
+8 passing controls**. The C4-assigned implementation reservation then added the
+PayPal sibling without changing the original assertions: the same command now
+exits 1 with **24 checks, 14 causal failures, 10 passing controls**.
 The second runs seven existing suites with their canonical aliases: **264/264**
 (cart19, cart-physical28, digital-consent93, preorders31, waitlist32, assignments51,
 task-room-unknown10). Initial fixture errors (Request without NextRequest cookies;
@@ -24,12 +27,13 @@ these results. They are not product RED evidence.
 | --- | --- | --- |
 | `app/api/store/cart/route.ts:282` → real `soonState` | exception, `[null, []]`, or `[]` | one real checkout-writer POST to synthetic Stripe per case; 303 to its checkout URL; `metadata[cart]=yes`; no preorder metadata |
 | `app/api/store/checkout/route.ts:163` → real `soonOne` | exception, `[null, null]`, or `[]` | one real checkout-writer POST to synthetic Stripe per case; 303 to its checkout URL; no preorder metadata |
+| `app/api/store/paypal/checkout/route.ts:50` → real `isSoon` | exception, `[null]`, or `[]` | one real order-writer POST to synthetic PayPal per case; 303 to its approval URL |
 
 Every affected fixture was first marked coming soon by the real `setSoon` writer.
 With a valid reply, the same routes refuse checkout (cart=changed / #waitlist).
-With a confirmed empty set, each opens exactly one checkout, preserving the
-positive controls. In all six failing cases the one read is intercepted at the
-MemoryRedis pipeline, not by replacing the reader or checkout writer.
+With a confirmed empty set, each opens exactly one checkout/order, preserving
+the positive controls. In all nine failing cases the one read is intercepted at
+the MemoryRedis pipeline, not by replacing the reader or checkout/order writer.
 
 The route catch maps rejection to `soon:false` / an empty set. Additionally,
 `lib/preorders.ts:64–74` accepts a short envelope or null members as not coming
@@ -37,10 +41,11 @@ soon; merely removing the route catch does not cover malformed successful replie
 Cart's product-count check at :283 correctly refuses a missing product; it does
 not protect the independent pre-sale state.
 
-This proves unauthorized *ordinary checkout creation* for a pre-sale fixture,
-not an actual charge, completed payment, customer loss, or remote exploit against
-the provider transport. No provider was contacted. Existing plan and payment
-gates are not changed or certified by this proof. Claude 4 assigns severity/owner.
+This proves unauthorized *ordinary checkout/order creation* for a pre-sale
+fixture, not an actual charge, completed payment, customer loss, or remote
+exploit against the provider transport. No provider was contacted. Existing
+plan and payment gates are not changed or certified by this proof. Claude 4
+assigns severity/owner.
 
 Ownership conflicts observed in the 140-open-PR audit: cart is occupied by
 #1730/#1928 and the stacked #1969; checkout by #2832 (page-display scope) and
@@ -79,8 +84,6 @@ severity and ownership.
 
 ## Rule 30 triage — not additional proven findings
 
-- `app/api/store/paypal/checkout/route.ts:50`: analogous `isSoon(...).catch(() => false)`.
-  Static candidate only; this proof does not execute a PayPal checkout.
 - `app/api/billing/checkout/route.ts:102`: accountStores failure becomes `[]`
   before funding/checkout. Not proven harmful here; no money/flag/policy experiment.
 - `app/api/store/kit/route.ts:53` and numbers-links:40: readVerified failure can
@@ -102,7 +105,7 @@ Focused ESLint and launcher syntax: 0 errors. Public-data scanner and diff are
 recorded in the publication message after the report is indexed.
 
 Real route/reader/checkout writer/assignment writer code; canonical MemoryRedis,
-synthetic Stripe fetch, synthetic file store, next/headers request fixture and
+synthetic Stripe and PayPal fetches, synthetic file store, next/headers request fixture and
 next/server after fixture (after callbacks held) are explicit. No native Redis,
 browser/production deployment, real provider, email delivery, actual charge,
 paid IO or global CI/TSC certification. No global alias or product modification.

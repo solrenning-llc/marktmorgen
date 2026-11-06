@@ -2,8 +2,9 @@
 import { NextRequest } from "next/server";
 import { POST as payCart } from "@/app/api/store/cart/route";
 import { POST as paySingle } from "@/app/api/store/checkout/route";
+import { POST as payPayPal } from "@/app/api/store/paypal/checkout/route";
 import { POST as submitTask } from "@/app/api/store/course/task/route";
-import { addProduct, claimHandle, ensureStatsId, setProductCourse, setProductLink, setStripeAccount, setSubscription, storeFolder, storeForEmail, storeRef, type Store } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setPayPalSeller, setProductCourse, setProductLink, setStripeAccount, setSubscription, storeFolder, storeForEmail, storeRef, type Store } from "@/lib/store";
 import { setSoon } from "@/lib/waitlist";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { emailKey, mintPass, passCookieName, recordEnrollment } from "@/lib/learn";
@@ -20,7 +21,12 @@ const pipeline = redis.pipeline.bind(redis);
 const originalFetch = globalThis.fetch;
 const originalHas = files.has.bind(files);
 const sent: URLSearchParams[] = [];
+let paypalOrders = 0;
 process.env.STRIPE_SECRET_KEY = "sk_test_c2_route_evidence_only";
+process.env.PAYPAL_PARTNER_CLIENT_ID = "partner_client_test";
+process.env.PAYPAL_PARTNER_SECRET = "partner_secret_test";
+process.env.PAYPAL_PARTNER_MERCHANT_ID = "PARTNER00001";
+process.env.PAYPAL_BN_CODE = "marktmorgen_test_bn";
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.stripe.com" && url.pathname === "/v1/checkout/sessions" && init?.method === "POST") {
@@ -28,6 +34,12 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return Response.json({id:"cs_test_c2Evidence0000000001",url:"https://checkout.stripe.com/c/pay/cs_test_c2Evidence0000000001"});
   }
   if (url.hostname === "api.stripe.com") return Response.json({object:"list",data:[],has_more:false});
+  if (url.hostname === "api-m.paypal.com" && url.pathname === "/v1/oauth2/token") return Response.json({access_token:"synthetic_paypal_token",expires_in:3600});
+  if (url.hostname === "api-m.paypal.com" && url.pathname === "/v2/checkout/orders" && init?.method === "POST") {
+    paypalOrders++;
+    const id=`ORDER${String(paypalOrders).padStart(6,"0")}`;
+    return Response.json({id,links:[{rel:"approve",href:`https://www.paypal.com/checkoutnow?token=${id}`}]});
+  }
   return Response.json({}, {status:404});
 }) as typeof fetch;
 
@@ -38,6 +50,7 @@ async function shop(handle: string, withLink = true): Promise<{owner:string;stor
   await ensureStatsId(owner);
   await setStripeAccount(owner,"acct_C2Evidence0001",true);
   await setSubscription(owner,{customerId:`cus_${handle}00001`,subscriptionId:`sub_${handle}00001`,active:true,tier:"creator",period:paidPeriod()});
+  await setPayPalSeller(owner,"SELLER000001");
   const made = await addProduct(owner,"Evidence guide","A synthetic guide","19",null);
   if(!made.ok) throw new Error("fixture could not add product");
   if(withLink) await setProductLink(owner,made.product.id,"https://example.test/guide");
@@ -91,6 +104,28 @@ async function single(mode: "empty"|"coming"|"throw"|"null"|"short") {
   return result;
 }
 
+async function paypal(mode: "empty"|"coming"|"throw"|"null"|"short") {
+  redis.clear();redis.pipeline=pipeline;paypalOrders=0;
+  const w=await shop(`c2paypal${mode}`);
+  if(mode!=="empty") await setSoon(w.store,w.product,true);
+  let reads=0;
+  redis.pipeline=async(commands:(string|number)[][])=>{
+    if(commands[0]?.[0]==="SISMEMBER"&&commands[0][1]===`nl:wl:${w.store.statsId}:soon`){
+      reads++;
+      if(mode==="throw") throw new Error("synthetic PayPal pre-sale outage");
+      if(mode==="null") return [null];
+      if(mode==="short") return [];
+    }
+    return pipeline(commands);
+  };
+  const form=withConsent(new URLSearchParams({handle:w.store.handle,product:w.product}));
+  const response=await payPayPal(new NextRequest("https://marktmorgen.test/api/store/paypal/checkout",{method:"POST",headers:{host:"marktmorgen.test",origin:"https://marktmorgen.test","content-type":"application/x-www-form-urlencoded"},body:form.toString()}));
+  const result={status:response.status,location:response.headers.get("location"),reads,orders:paypalOrders};
+  console.log("PayPal observation",mode,JSON.stringify(result));
+  redis.pipeline=pipeline;
+  return result;
+}
+
 type Work={store:Store;product:string;course:string;lesson:string;cookie:string;path:string};
 async function work(handle:string):Promise<Work>{
   redis.clear();redis.pipeline=pipeline;files.clear();deleted.length=0;files.has=originalHas;
@@ -140,6 +175,15 @@ async function main(){
   for(const mode of ["throw","null","short"] as const){
     const result=await single(mode);
     is(`single ${mode}: unknown pre-sale read must not create an ordinary checkout`,[result.reads,result.checkouts],[1,0]);
+  }
+  part("Rule 30 sibling: PayPal checkout");
+  const paypalEmpty=await paypal("empty");
+  is("control: known non-pre-sale product opens one PayPal order",[paypalEmpty.status,paypalEmpty.orders],[303,1]);
+  const paypalComing=await paypal("coming");
+  is("control: known coming-soon product opens no PayPal order",[paypalComing.orders,paypalComing.location?.includes("#waitlist")],[0,true]);
+  for(const mode of ["throw","null","short"] as const){
+    const result=await paypal(mode);
+    is(`PayPal ${mode}: unknown pre-sale read must not open an order`,[result.status,result.reads,result.orders],[503,1,0]);
   }
   part("Assignment: file-store outage must not consume the only upload receipt");
   const healthy=await work("c2taskcontrol");

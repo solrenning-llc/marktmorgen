@@ -26,6 +26,7 @@ import { deliveryWords, priceWords } from "@/lib/answers";
 import { readListing, readListings, readProduct, visibleIds } from "@/lib/catalog";
 import { isHouseStore } from "@/lib/house-store";
 import { onAccount } from "@/lib/stripe-account";
+import { ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { isSettled } from "@/lib/instant-pay";
 import { bundleFromMeta, deliveredIds } from "@/lib/bundle-rules";
 import { importedFor } from "@/lib/imported-purchases";
@@ -129,12 +130,22 @@ async function shownOf(store: Store, kept: Kept): Promise<NextOffer | null> {
   return { product, ai: kept.r === "ai", why: kept.r === "ai" ? kept.w : "" };
 }
 
+/** A row whose metadata is an object (or null): one whose metadata says nothing cannot say what it handed over. */
+const metadataKnown = (row: Record<string, unknown>) => {
+  const meta = ownField(row, "metadata");
+  return meta === null || plainObject(meta);
+};
+
 /**
  * Every product this address has from this store, by id: what its completed
  * checkouts handed over (each box ticked and each bundle's products too, a
  * gift or a place bought for others included: they chose it), what it added
  * in one click after paying, and what the creator brought over or gave it.
  * Null when that cannot be read in full: nothing is offered on a guess.
+ * Each Stripe list is read in its exact shape (CX-123 rule 24,
+ * lib/stripe-list.ts): a page that is not one throws, and a row without its
+ * id or with metadata that is not an object, or more pages than are read,
+ * leave what is owned unknown, never "nothing".
  */
 export async function ownedHere(store: Store, email: string): Promise<Set<string> | null> {
   const account = store.stripeAccountId;
@@ -148,9 +159,9 @@ export async function ownedHere(store: Store, email: string): Promise<Set<string
   try {
     for (const variant of [...new Set([email.trim(), normaliseEmail(email)])]) {
       const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
-      const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as { data?: unknown; has_more?: unknown };
-      if (listed.has_more === true) return null;
-      for (const session of Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : []) {
+      const listed = readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`), metadataKnown);
+      if (listed.hasMore || listed.unreadable) return null;
+      for (const session of listed.rows as Record<string, unknown>[]) {
         const meta = (session.metadata ?? {}) as Record<string, string>;
         if (!handles.has(meta.store ?? "") || !isSettled(session)) continue;
         add(meta.product);
@@ -161,9 +172,9 @@ export async function ownedHere(store: Store, email: string): Promise<Set<string
     }
     if (customers.size > 3) return null;
     for (const customer of customers) {
-      const listed = (await onAccount("GET", account, `/payment_intents?${new URLSearchParams({ customer, limit: "50" })}`)) as { data?: unknown; has_more?: unknown };
-      if (listed.has_more === true) return null;
-      for (const intent of Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : []) {
+      const listed = readStripePage(await onAccount("GET", account, `/payment_intents?${new URLSearchParams({ customer, limit: "50" })}`), metadataKnown);
+      if (listed.hasMore || listed.unreadable) return null;
+      for (const intent of listed.rows) {
         const meta = (intent.metadata ?? {}) as Record<string, string>;
         if (meta.kind !== "upsell" || !handles.has(meta.store ?? "") || intent.status !== "succeeded") continue;
         add(meta.product);

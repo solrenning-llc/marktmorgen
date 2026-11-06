@@ -228,7 +228,10 @@ export async function memberHealth(store: Store, fresh = false, now = Date.now()
     const [cached] = await redisPipeline([["GET", cacheKey(store)]]);
     if (typeof cached === "string") {
       try {
-        return JSON.parse(cached) as Health;
+        const health = JSON.parse(cached) as Health;
+        // Copies written before omitted rows were counted cannot certify that
+        // their zeroes are complete. Read the source again instead.
+        if (natural(health.unscored)) return health;
       } catch {
         // Read again below.
       }

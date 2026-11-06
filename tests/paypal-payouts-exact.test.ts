@@ -13,7 +13,7 @@
  * Synthetic only: a stand-in for PayPal's API on api-m.paypal.com, the Redis stub.
  */
 import { connectPayPal, onTheirWay, payWithPayPal, paysAutomatically, readPayPal, setAutoPay, settleAllPayPal, settlePayPal } from "@/lib/paypal-payouts";
-import { readBook } from "@/lib/affiliates";
+import { addPayout, readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -101,7 +101,35 @@ async function main(): Promise<void> {
   console.error = () => {};
   const store = shop();
 
-  // ---- 2. SET NX on a paid item ----
+  // ---- 2. Booking a paid item: once, whatever is lost on the way (rule 24; Revisor 1's GRAVE on 7bd48a58) ----
+  const owedTo = async () => (await readBook(store)).rows.find((r) => r.affiliate.id === "aaaaaaaaaaaa")?.payable ?? -1;
+  const payoutsWrite = (c: Commands) => c.some((cmd) => (cmd[0] === "HSET" || cmd[0] === "HSETNX") && cmd[1] === `nl:aff:${STATS}:payouts`);
+  const sentOnce = async (): Promise<void> => {
+    is("the next settle leaves nothing on its way", (await settlePayPal(store)).waiting, 0);
+    is("booked exactly once", await paidTo(store), 3000);
+    is("nothing owed again", await owedTo(), 0);
+    const again = await payWithPayPal(store);
+    is("and no second PayPal batch is sent", [again.ok ? "sent" : again.reason, created.length], ["nothing", 1]);
+  };
+  const sentAndPaid = async (): Promise<void> => {
+    await seed(store);
+    const paid = await payWithPayPal(store);
+    if (!paid.ok) throw new Error(`not sent: ${paid.reason}`);
+    itemStatus = { aaaaaaaaaaaa: "SUCCESS" };
+  };
+
+  part("Revisor 1, repro 1: the item's mark is written and its answer is lost");
+  await sentAndPaid();
+  is("that settle is not said as done", await intercepted(itemSet, async (c) => { await real(c); return [undefined]; }, () => rejects(() => settlePayPal(store))), true);
+  await sentOnce();
+
+  part("Revisor 1, repro 2: the mark would be written, and writing the payout into the book fails (a full data room)");
+  await sentAndPaid();
+  is("that settle is not said as done", await intercepted(payoutsWrite, async () => { throw new Error("Synthetic DataRoomError: the store's data room is full"); }, () => rejects(() => settlePayPal(store))), true);
+  is("nothing is in the book yet", await paidTo(store), 0);
+  is("and it is still on its way, never owed", [...(await onTheirWay(store))], ["aaaaaaaaaaaa"]);
+  await sentOnce();
+
   const malformedNx: [string, () => unknown[]][] = [
     ["no reply at all", () => []],
     ["undefined", () => [undefined]],
@@ -112,38 +140,37 @@ async function main(): Promise<void> {
     ["two replies", () => ["OK", "OK"]],
   ];
   for (const [label, reply] of malformedNx) {
-    part(`Another settling already booked the item, and SET NX answers ${label}: never booked twice`);
-    await seed(store);
-    const paid = await payWithPayPal(store);
-    if (!paid.ok) throw new Error(`not sent: ${paid.reason}`);
-    itemStatus = { aaaaaaaaaaaa: "SUCCESS" };
-    // The other settling wrote the item first; this call's SET NX truly answers null, but garbled.
-    await real([["SET", "nl:pp:item:ITEMBATCH1ABC0", "BATCH1ABC"]]);
-    const failed = await intercepted(itemSet, async (c) => { await real(c); return reply(); }, () => rejects(() => settlePayPal(store)));
-    is("settling does not say it settled", failed, true);
-    is("the book is not written by this call", await paidTo(store), 0);
+    part(`Booked before (by its reference, as before ids were derived), and the mark answers ${label}: never booked twice`);
+    await sentAndPaid();
+    await addPayout(store, { aff: "aaaaaaaaaaaa", cents: 3000, currency: "usd", date: "2026-11-01", reference: "PayPal ITEMBATCH1ABC0" });
+    is("settling does not say it settled", await intercepted(itemSet, async (c) => { await real(c); return reply(); }, () => rejects(() => settlePayPal(store))), true);
+    is("the book is not written again", await paidTo(store), 3000);
+    await sentOnce();
 
-    part(`The item is new, and SET NX answers ${label}: nothing booked, still on its way`);
-    await seed(store);
-    const again = await payWithPayPal(store);
-    if (!again.ok) throw new Error(`not sent: ${again.reason}`);
-    itemStatus = { aaaaaaaaaaaa: "SUCCESS" };
-    const failedNew = await intercepted(itemSet, async () => reply(), () => rejects(() => settlePayPal(store)));
-    is("settling does not say it settled", failedNew, true);
-    is("nothing booked", await paidTo(store), 0);
-    is("still on its way, for the next run", [...(await onTheirWay(store))], ["aaaaaaaaaaaa"]);
-    is("the next healthy run books it once", await settlePayPal(store), { paid: 1, released: 0, waiting: 0 });
-    is("paid once", await paidTo(store), 3000);
-    is("asked again, never twice", [(await settlePayPal(store)).paid, await paidTo(store)], [0, 3000]);
+    part(`The item is new, and the mark answers ${label}: booked once, never twice`);
+    await sentAndPaid();
+    is("settling does not say it settled", await intercepted(itemSet, async () => reply(), () => rejects(() => settlePayPal(store))), true);
+    is("booked once, before the mark", await paidTo(store), 3000);
+    await sentOnce();
   }
 
-  part("Control: SET NX answering exactly null (another settling wrote it) books nothing and settles");
-  await seed(store);
-  await payWithPayPal(store);
-  itemStatus = { aaaaaaaaaaaa: "SUCCESS" };
+  part("Control: the mark already there and the payout in the book: nothing booked again");
+  await sentAndPaid();
+  await addPayout(store, { aff: "aaaaaaaaaaaa", cents: 3000, currency: "usd", date: "2026-11-01", reference: "PayPal ITEMBATCH1ABC0" });
   await real([["SET", "nl:pp:item:ITEMBATCH1ABC0", "BATCH1ABC"]]);
   is("not booked here, nothing left on its way", await settlePayPal(store), { paid: 0, released: 0, waiting: 0 });
-  is("this call wrote nothing into the book", await paidTo(store), 0);
+  is("in the book once", await paidTo(store), 3000);
+
+  part("A mark with no payout in the book (left by a failure before this change) is booked, once");
+  await sentAndPaid();
+  await real([["SET", "nl:pp:item:ITEMBATCH1ABC0", "BATCH1ABC"]]);
+  is("booked by this settle", await settlePayPal(store), { paid: 1, released: 0, waiting: 0 });
+  await sentOnce();
+
+  part("Control: a healthy settle books it once");
+  await sentAndPaid();
+  is("booked", await settlePayPal(store), { paid: 1, released: 0, waiting: 0 });
+  await sentOnce();
 
   // ---- 1. The daily job ----
   const SID = "0123456789abcdef0123456789abcdef";

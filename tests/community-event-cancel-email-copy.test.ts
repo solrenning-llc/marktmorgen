@@ -22,7 +22,7 @@ const EXPECTED: Record<LanguageCode, string> = {
 async function main(): Promise<void> {
   part("All seven languages keep cancellation certain and make the email attempt conditional");
   for (const language of LANGUAGE_CODES) {
-    is(`${language}: cancelled event notice`, communityWords(language).canceledByCreator("Harbor Kitchen"), EXPECTED[language]);
+    is(`${language}: canceled event notice`, communityWords(language).canceledByCreator("Harbor Kitchen"), EXPECTED[language]);
   }
 
   part("The real cancellation flow does not prove that every RSVP was emailed");
@@ -33,7 +33,7 @@ async function main(): Promise<void> {
   const startJob = mail.slice(mail.indexOf("async function startJob"), mail.indexOf("/** The creator moved or cancelled"));
   const advance = mail.slice(mail.indexOf("export async function advanceEventJob"), mail.indexOf("type Due ="));
 
-  is("the buyer page selects the notice from the persisted cancelled state", page.includes("event.cancelled ?") && page.includes("w.canceledByCreator(store.name)"), true);
+  is("the buyer page selects the notice from the persisted canceled state", page.includes("event.cancelled ?") && page.includes("w.canceledByCreator(store.name)"), true);
   is("the route confirms cancellation before queueing its notice", cancel.indexOf("await cancelEvent") < cancel.indexOf("await queueEventNotice"), true);
   is("a cancellation still returns success after only handing the job to after", cancel.includes("notify(await queueEventNotice") && cancel.includes("return Response.json({ ok: true })"), true);
   is("a missing job makes notify return without changing cancellation success", route.includes("if (!job) return;") && route.includes("const notify ="), true);

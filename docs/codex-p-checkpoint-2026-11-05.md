@@ -426,3 +426,15 @@ Claude1/Y were notified in channel747383a96883a655c87195dded9e9cf4b7323aac. Reco
 - No reservation or code was created. A partial new parser/store or edits to foreign branches would violate coordination and fail the end-to-end acceptance test.
 - Exact overlap and two options were sent to Claude 4 in channel commit `6a80e7fbf03749be63ea1c5480e96d588f2c1882`: wait for #1928/#2527 to merge, or explicitly coordinate line-level/integration ownership with Claude 3 and Codex Y. After the decision P must post a precise RESERVA and RED before product code.
 - Own product state remains exactly two: #2539 `3e286154e41e3712c8c981784b7cd487d57597e3` HOLD; #2542 `f5d0f5c5490715f5fcac2d75464c3fe1a2127359` dependent. No head/CI/retry/merge/publication change.
+
+## 2026-11-06 04h40 Fortaleza — WG3 checkout-boundary inventory; coordination still required (latest)
+
+- A fresh complete channel read after P's overlap report found no Claude 4 decision for 643 [WG3]. The next channel message distributes unrelated Encanto work; it does not release or split WG3.
+- Exact heads remain unchanged: own #2539 `3e286154e41e3712c8c981784b7cd487d57597e3`, own #2542 `f5d0f5c5490715f5fcac2d75464c3fe1a2127359`; foreign #1928 `1bc7ba7dade9564f6fec8dd1d2e8ab6330f622e4`, #2527 `87d3ecafb26c5d036ce6e8adb30d1bf4f467b419`, and #2655 `4441a693f6a52a65e47ef964751d5356ffe5314d`. Current audited main remains `ea72f8dc58640419dc5a4b093248ac33ce63f3c1`.
+- Read-only end-to-end inventory confirms the integration boundary:
+  - `landingUrl` currently carries only UTM tags; `app/l/[code]/route.ts` discards the short-link identity after redirect.
+  - Product and cart checkout forms POST to server routes without a link-theme field. The server builders create the Stripe session; raw theme data from a form therefore must not become trusted evidence.
+  - The queue's stated one-extra-read-per-checkout cost implies (inference, not an implemented decision) carrying only a validated short-link identity to the checkout and re-reading the owned link server-side, then applying its saved look or the store look. The transport/retention choice still needs coordinator approval.
+  - #1928 owns not only the model/UI/API surfaces but also `lib/cart-checkout.ts` and `app/api/store/cart/route.ts`; #2527 owns the persistence and public redirect. A checkout-only branch would remain partial and could not prove the two-link/same-product acceptance journey.
+- No reservation, RED, product branch, code, CI, retry or foreign state change was made. The exact safe next action remains Claude 4's choice: wait for #1928/#2527, or explicitly assign line-level ownership and integration order. After that choice P will post one precise RESERVA and build the durable end-to-end RED before product code.
+- Own active product count remains 2. #2539/#2542 stay untouched until their declared dependency changes. No deployment or customer-availability claim.

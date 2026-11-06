@@ -10,7 +10,7 @@ import { isSenderConfigured } from "@/lib/email";
 import { canSell } from "@/lib/store-checkout";
 import { AffiliateStudio } from "@/components/affiliate-studio";
 import { PayPalPayouts } from "@/components/paypal-payouts";
-import { onTheirWay, payableLines, readPayPal, settlePayPal } from "@/lib/paypal-payouts";
+import { onTheirWay, payableLines, paypalChecks, readPayPal, settlePayPal } from "@/lib/paypal-payouts";
 import { batchTotal } from "@/lib/affiliate-payouts";
 import { codeOwners } from "@/lib/affiliate-codes";
 import { offerWords, waitingFor } from "@/lib/partner-invites";
@@ -43,7 +43,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
 
   // What PayPal paid since the last look is written into the book first (lib/paypal-payouts.ts).
   await settlePayPal(store).catch((error) => console.error("settling PayPal payouts failed", error));
-  const [paypal, away, owners, codeList] = await Promise.all([
+  const [paypal, away, owners, codeList, checks] = await Promise.all([
     readPayPal(store).catch(() => null),
     onTheirWay(store).catch(() => null),
     codeOwners(store).catch(() => new Map<string, string>()),
@@ -52,6 +52,8 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
     store.hasDiscounts && store.stripeAccountId
       ? listCodes(store.stripeAccountId).catch(() => ({ state: "error" as const }))
       : Promise.resolve({ state: "unavailable" as const }),
+    // Payments whose answer from PayPal is not known (lib/paypal-payouts.ts): counted, never guessed.
+    paypalChecks(store).catch(() => null),
   ]);
   // Partnerships other creators here have offered this one, waiting to be
   // accepted or declined (lib/partner-invites.ts). Read for the person signed
@@ -178,13 +180,15 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
           codes={codes}
           codeOwners={Object.fromEntries(owners)}
           payPanel={
-            book && away !== null ? (
+            book && away !== null && checks !== null ? (
               <PayPalPayouts
                 initial={paypal}
                 people={payableLines(book, away).length}
                 cents={batchTotal(payableLines(book, away))}
                 currency={store.currency}
                 onTheirWay={away.size}
+                checking={checks.checking}
+                manualCheck={checks.manual}
                 payday={store.affiliates.payday}
               />
             ) : null

@@ -30,7 +30,7 @@ import { readListings } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type Grant, MANAGE_TOKEN_PATTERN, grantOf, subsOf } from "@/lib/membership-manage";
 import { dueNow, productOfSub } from "@/lib/tier-rules";
-import { previewBody, switchBody, PREVIEW_SECONDS } from "@/lib/tier-switch";
+import { previewBody, switchBody, switchReply, PREVIEW_SECONDS } from "@/lib/tier-switch";
 import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
 import { formatMoney } from "@/lib/money";
 import { membershipLine } from "@/lib/buyer-words";
@@ -218,9 +218,16 @@ export async function switchYearly(store: Store, token: string, subscription: st
       const account = found.grant.a;
       const price = await yearlyPrice(store, found.product, found.choice.cents);
       const body = switchBody(found.itemId, price, at);
+      const kept = digital && validConsent(consent) ? consentMetaValue(consent, consentKind(found.product)) : "";
       if (digital && validConsent(consent)) keepConsentOn(body, consent, consentKind(found.product));
       const updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body);
-      if (updated.pending_update) {
+      // Read exactly, as a switch between tiers reads it (lib/tier-switch.ts, switchReply; Codex CX1 on #2764).
+      const answered = switchReply(updated, subscription, price, kept);
+      if (answered === "unknown") {
+        console.error("a move to yearly's reply was not one this code knows", subscription);
+        return { ok: false, reason: "error" };
+      }
+      if (answered === "pending") {
         const invoice = updated.latest_invoice as { id?: unknown; status?: unknown } | null;
         if (invoice && typeof invoice.id === "string" && invoice.status === "open") {
           await onAccount("POST", account, `/invoices/${encodeURIComponent(invoice.id)}/void`, new URLSearchParams()).catch((error) =>
@@ -236,7 +243,7 @@ export async function switchYearly(store: Store, token: string, subscription: st
         `/subscriptions/${encodeURIComponent(subscription)}`,
         new URLSearchParams({ "metadata[every]": "year", "metadata[yearly_from]": "month", "metadata[yearly_at]": String(now) }),
       ).catch((error) => console.error("recording a move to yearly failed", error));
-      await tell(store, account, found, updated, digital && validConsent(consent) ? consentMetaValue(consent, consentKind(found.product)) : "");
+      await tell(store, account, found, updated, kept);
       return { ok: true, title: found.product.title };
     });
   } catch (error) {

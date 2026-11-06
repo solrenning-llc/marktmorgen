@@ -81,7 +81,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       return json(
         declined
           ? { id: "sub_Member0001", pending_update: { expires_at: 1 }, latest_invoice: { id: "in_Declined0001", status: "open", total: 1240 } }
-          : { id: "sub_Member0001", pending_update: null, latest_invoice: { id: "in_Paid0001", status: "paid", total: 1240, amount_paid: 1240, currency: "usd" } },
+          : // Applied: Stripe answers the subscription as it now is, on the new price and with the yes sent (lib/tier-switch.ts, switchReply).
+            { id: "sub_Member0001", pending_update: null, items: { data: [{ id: "si_Member0001", price: { id: body.get("items[0][price]") } }] }, metadata: body.get("metadata[dc]") ? { dc: body.get("metadata[dc]") } : {}, latest_invoice: { id: "in_Paid0001", status: "paid", total: 1240, amount_paid: 1240, currency: "usd" } },
       );
     }
     return json({ id: "sub_Member0001" });

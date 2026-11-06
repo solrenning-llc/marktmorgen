@@ -129,6 +129,32 @@ export function previewBody(customer: string, subscription: string, itemId: stri
   });
 }
 
+/**
+ * What Stripe answered to the update that charges, read exactly (CX-123 rule
+ * 24; Codex CX1 on #2764): "applied" only for this subscription, with no
+ * update left pending, its first item on the new price and, when a yes was
+ * sent, that yes kept on it; "pending" for this subscription with an update
+ * left pending (declined, or the bank asked for a step); anything else
+ * "unknown", never a switch made: no record, no receipt, no ok.
+ */
+export function switchReply(updated: unknown, subscription: string, price: string, consent: string): "applied" | "pending" | "unknown" {
+  if (!updated || typeof updated !== "object" || Array.isArray(updated)) return "unknown";
+  const reply = updated as Record<string, unknown>;
+  if (reply.id !== subscription) return "unknown";
+  const pending = reply.pending_update;
+  if (pending && typeof pending === "object" && !Array.isArray(pending)) return "pending";
+  if (pending !== null) return "unknown";
+  const items = (reply.items as { data?: unknown } | null | undefined)?.data;
+  const first = Array.isArray(items) ? (items[0] as { price?: unknown } | undefined) : undefined;
+  const priceId = first?.price && typeof first.price === "object" ? (first.price as { id?: unknown }).id : first?.price;
+  if (priceId !== price) return "unknown";
+  if (consent) {
+    const meta = reply.metadata;
+    if (!meta || typeof meta !== "object" || (meta as Record<string, unknown>).dc !== consent) return "unknown";
+  }
+  return "applied";
+}
+
 /** The switch itself, at the same second: charged at once, and made only if it is paid. */
 export function switchBody(itemId: string, price: string, at: number): URLSearchParams {
   const body = new URLSearchParams({
@@ -259,9 +285,16 @@ export async function switchTier(store: Store, token: string, subscription: stri
       const account = found.grant.a;
       const price = await tierPrice(store, found.to);
       const body = switchBody(found.itemId, price, at);
+      const kept = digital && validConsent(consent) ? consentMetaValue(consent, consentKind(found.to)) : "";
       if (digital && validConsent(consent)) keepConsentOn(body, consent, consentKind(found.to));
       const updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body);
-      if (updated.pending_update) {
+      const answered = switchReply(updated, subscription, price, kept);
+      if (answered === "unknown") {
+        // Not known to be made: nothing more is written or sent, and the member is told it did not go through.
+        console.error("a tier switch's reply was not one this code knows", subscription);
+        return { ok: false, reason: "error" };
+      }
+      if (answered === "pending") {
         // Declined, or the bank asked for a step the member was not there to
         // take: nothing changed. The invoice left open is voided so nothing is owed.
         const invoice = updated.latest_invoice as { id?: unknown; status?: unknown } | null;
@@ -280,7 +313,7 @@ export async function switchTier(store: Store, token: string, subscription: stri
         `/subscriptions/${encodeURIComponent(subscription)}`,
         new URLSearchParams({ "metadata[product]": found.to.id, "metadata[option]": "", "metadata[switched_from]": found.from.id }),
       ).catch((error) => console.error("recording a tier switch failed", error));
-      await tell(store, account, found, updated, digital && validConsent(consent) ? consentMetaValue(consent, consentKind(found.to)) : "");
+      await tell(store, account, found, updated, kept);
       return { ok: true, title: found.to.title };
     });
   } catch (error) {

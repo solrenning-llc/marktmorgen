@@ -35,6 +35,8 @@ import { type Together, parseTogether, togetherFrom } from "@/lib/also-bought";
 import { keepPaths, pathsFrom } from "@/lib/next-bought";
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount } from "@/lib/stripe-account";
 import type { Listing, Store } from "@/lib/store";
 import { listingFinder, productIds, recordListings } from "@/lib/catalog";
@@ -660,8 +662,16 @@ async function readLife(store: Store, now: number): Promise<(WindowStats & { sin
   };
 
   if (!text("filled")) {
-    const [mine] = await redisPipeline([["SET", lifeLockKey(statsId), "1", "NX", "EX", 60]]);
-    if (mine !== null) {
+    // The fill lock read exactly (lib/claim-mark.ts; CX-123 rule 24): another read's means that read fills it. An
+    // unknown one fills nothing and is let go only while it holds this read's value; the throw leaves the all-time
+    // record unread this time (readStats), never filled twice.
+    const mine = claimValue();
+    const claimed = await claimMark(lifeLockKey(statsId), 60, mine);
+    if (claimed === "unknown") {
+      await releaseMark(lifeLockKey(statsId), mine);
+      throw new UnknownReplyError("the all-time record's fill lock");
+    }
+    if (claimed === "ours") {
       const today = dayKey(now);
       const started = /^\d{4}-\d{2}-\d{2}$/.test(text("started")) ? text("started") : today;
       const created = /^\d{4}-\d{2}-\d{2}/.test(store.createdAt) ? store.createdAt.slice(0, 10) : "";

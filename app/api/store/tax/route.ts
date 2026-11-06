@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { setTax, storeForEmail } from "@/lib/store";
 import { taxStatus } from "@/lib/tax";
 import { guardStoreWrite } from "@/lib/store-request";
@@ -46,6 +47,8 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: true, tax: result.store.tax });
   } catch (error) {
     console.error("saving the tax setting failed", error);
+    // A count read in no shape Redis gives (lib/call-series-open.ts, runningSeries): nothing changed, try again.
+    if (error instanceof UnknownReplyError) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }
 }

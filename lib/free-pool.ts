@@ -16,7 +16,7 @@ import { FREE_POOL_BASE_STORES, PAYING_INDEX, freePoolSize } from "@/lib/free-po
 import { type PlanFields, standingOf } from "@/lib/plan-standing";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark } from "@/lib/claim-mark";
-import { repliesFor } from "@/lib/redis-reply";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 
 const KEEP_SECONDS = 40 * 86_400;
 const REFUSED_SECONDS = 3_600;
@@ -53,7 +53,14 @@ export async function poolPlace(store: PoolStore, now = Date.now()): Promise<"in
     const n = Number(taken);
     // A reply that is not a count says nothing about the places: unknown, and no refusal is written down.
     if (!Number.isSafeInteger(n) || n < 1) return "unknown";
-    const fits = Number.isSafeInteger(n) && n >= 1 && n <= freePoolSize(Number(paying) || 0);
+    // The paying stores read exactly (CX-123 rule 24): unknown, the pool is no smaller than its base, so a place within
+    // the base is still one; past it, nothing is decided, the place counted is given back and no refusal is written.
+    const payingCount = countOf(paying);
+    const fits = Number.isSafeInteger(n) && n >= 1 && n <= (payingCount === null ? FREE_POOL_BASE_STORES : freePoolSize(payingCount));
+    if (!fits && payingCount === null) {
+      await redisPipeline([["DECR", countKey(month)]]);
+      return "unknown";
+    }
     // A place not handed out is not counted, so a ceiling that grows later has it free.
     if (!fits && Number.isSafeInteger(n) && n >= 1) await redisPipeline([["DECR", countKey(month)]]);
     // A place held lasts the month; a refusal an hour, so a store asks again when places grow.

@@ -28,4 +28,14 @@ O objetivo deste ramo é manter RED reproduzível para decisão da C4. A correç
 
 ## Verificação
 
-Primeira execução causal final: 25 checks, 22 aprovados, três falhas D10, exit 1. Tipos, lint, scanner, diff e dirigidos pendentes após preservação inicial da prova.
+Prova preservada inicialmente no commit `17df1bc47e430e8590705da2fc0ba0e339b4e49a`, tree `e30447cce3354daf4366c3e135fdcac8997abc07`, ramo `codex/j-d10-confirmed-lead-proof`, somente os três caminhos próprios. Verificações após essa preservação:
+
+- Prova causal: 25 checks, 22 aprovados, três falhas D10, exit 1; a repetição final usa os mesmos bytes da prova/runner preservados.
+- TypeScript semântico do subgrafo importado pela prova, opções do tsconfig canônico, sem emissão/incremental: zero diagnósticos. Não é typegen nem TSC global.
+- ESLint dos dois arquivos próprios executáveis: exit 0.
+- Dirigidos com aliases e ambiente canônicos, cada um em subprocesso isolado: `store-join.test.ts` 35/35, `path-facts.test.ts` 39/39, `path-campaign.test.ts` 27/27; três arquivos, zero falhas. A mensagem de refunds na prova de Path é o erro sintético esperado do caso de paginação incompleta; o arquivo encerra aprovado.
+- Scanner oficial: 4.104 arquivos rastreados, zero achados. Como os novos caminhos não pertencem ao índice local compartilhado, `findings` do mesmo script também é aplicado explicitamente aos três arquivos próprios; zero achados.
+- Diff-check explícito dos três arquivos novos contra `/dev/null`, sem alterar o índice compartilhado; nenhum erro de whitespace.
+- Conferência da fonte congelada: HEAD local igual a `2bfa8ade8f59555b8d57aa03e554a99092a1285b`; nenhum diff em `lib/`, `app/` ou nos aliases/fixtures utilizados. Os bytes dos dois arquivos executáveis próprios continuam iguais aos do commit inicial; apenas este relatório recebe o resultado dos checks.
+
+Não foram executados suíte integral, CI, navegador, servidor Next hospedado, Redis nativo ou provedor real. Nenhum produto corrigido ou pronto é declarado.

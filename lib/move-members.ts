@@ -244,11 +244,15 @@ export async function reminderEmail(store: Store, field: string, now = Date.now(
 export async function keptAlready(store: Store, email: string, productId: string): Promise<boolean> {
   const account = store.stripeAccountId;
   if (!account || !EMAIL_PATTERN.test(email)) return false;
+  // CX-123 rule 24 (rule 30 of Claude 4's sweep, C4-2890): a list without its data is unknown, never "not kept": it
+  // throws, and sendMoveReminders puts the reminder back an hour instead of emailing someone who kept it.
   const customers = await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: "10" })}`);
-  for (const customer of (Array.isArray(customers.data) ? customers.data : []) as { id?: unknown }[]) {
+  if (!Array.isArray(customers.data)) throw new Error("a member's customers did not read");
+  for (const customer of customers.data as { id?: unknown }[]) {
     if (typeof customer.id !== "string") continue;
     const subs = await onAccount("GET", account, `/subscriptions?customer=${customer.id}&status=all&limit=100`);
-    const list = (Array.isArray(subs.data) ? subs.data : []) as { status?: unknown; metadata?: Record<string, string> | null }[];
+    if (!Array.isArray(subs.data)) throw new Error("a member's subscriptions did not read");
+    const list = subs.data as { status?: unknown; metadata?: Record<string, string> | null }[];
     if (list.some((s) => LIVE.has(String(s.status)) && s.metadata?.product === productId)) return true;
   }
   return false;

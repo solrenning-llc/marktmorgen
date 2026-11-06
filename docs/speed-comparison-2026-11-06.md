@@ -129,9 +129,23 @@ Third-party measurement services were not used:
   request latency does not show reliably in `responseStart` (it ranged from 11 to 507 ms
   across the 15 runs although 562.5 ms was set), so TTFB from these runs would be wrong and is left out.
 
-The script (`measure.cjs`) and the synthetic database server were kept outside the
-repository, as asked; they can be added under `scripts/` if a later item needs to repeat
-this measurement.
+### Raw data and script (traceability)
+
+Measured commit: `main` at `5c07315505e1d53ee6401021601cd688fa98ecda`. Run window from the
+run log: 2026-11-06T21:33:44Z to 2026-11-06T21:35:50Z. The raw results and the measuring
+script are committed next to this document, byte-identical to the files used in the run:
+
+| File | sha256 |
+| --- | --- |
+| `docs/speed-comparison-2026-11-06/results.json` (every run of every page, plus the Chromium version, network, CPU and device settings) | `4d6e6f74aa0d05bb03abd93f61df60f3a667f54fb820fd9ddcea20e9a56c8094` |
+| `docs/speed-comparison-2026-11-06/measure.cjs.txt` (the script; stored as `.txt` so the repository's lint does not run on it, content unchanged) | `361f9127864368df7c2de2f2cb656d259422a62ae94f930b1b3e4552d2af244b` |
+
+Check with `sha256sum docs/speed-comparison-2026-11-06/*`. To repeat: copy the script to
+`measure.cjs` and run `node measure.cjs <out.json> <url> [url...]` with Playwright installed.
+The synthetic database server used for the local build is not committed (it is a large
+test double, not part of the measurement), so the figures remain author-reported local
+measurements: the raw data lets anyone recompute the medians, but no one else has
+re-run the measurement.
 
 ## What these numbers do not show
 

@@ -289,6 +289,12 @@ export async function startPitch(
   // the model is never asked on a state read before it. One round trip, with the stop lists of the domain the reader
   // was sent on to when it is another one, all in the same exact shape.
   // The same three reads as before the page, in the same order, then the other domain's two when there is one.
+  // Cost (rule MR; Codex G's LEVE on #2697): this round trip is 3 commands, 5 when the reader was sent on to another
+  // domain. It runs once per draft attempt that got past the checks above and read the page, and draft attempts are held
+  // by the store's "ai" limit (AI_PER_MINUTE, app/api/store/outreach/route.ts), not by FINDS_PER_DAY (find only) nor by
+  // PITCHES_PER_DAY (drafts kept, not attempts refused here). Ceiling: 6 × 1,440 = 8,640 attempts × 5 = 43,200 commands
+  // a store a day, $0.0864 at Upstash's advertised $0.20 per 100,000 (docs/pack-cost-decomposition-2026-10-18.md),
+  // about $2.68 in a 31-day month, on top of the page read each attempt already makes. The common case is a handful.
   const elsewhere: (string | number)[][] = domain === pageDomain ? [] : [["SISMEMBER", key(store.statsId, "stop"), domain], ["SISMEMBER", STOP_ALL, domain]];
   const fresh = repliesFor(
     await redisPipeline([

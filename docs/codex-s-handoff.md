@@ -258,3 +258,34 @@ Main was fetched at exact `0f139490d3fc79045fd370cd9b5478b64e2f69e5`. The curren
 Own product PR metadata and exact-head workflows were read once after the return. All remain OPEN and ineligible for merge: #2473 `d57357ab42fa2abc522def9f16c90e3e526bd0c3` (2 success/7 failure plus unresolved access finding/release); #2507 `053c74abf7565464e826c7e9f962fd0d0354d84a` (7 success/2 failure); #2516 `d6818344df8c5e7734ee31183cd1bcbe0291f280` (8 success/1 causal failure); #2689 `481e26c64c0b3031645c85c8c46b7cd1bb8f71b2` (7 success/2 failure and unresolved LOW UI/uncertain-write coordination); #2691 `17c33e31f632df3b25ea647377f215d0b0ada2d0` (7 success/2 failure, although V's independent no-finding review remains valid). #2632 remains OPEN at `f183d78fd326c404c5a75fd6a3b9328b9fe24c94`; S did not edit, merge, rerun or cancel it. #2459 and #2490 remain merged and are not recreated.
 
 Exact next action: a new causal return/release on an own PR, or the legitimate #2632 merge followed by one main integration per eligible own branch, preserving reviewed product blobs and requiring linked/static checks plus nine new exact-head successes. No product/reservation/foreign branch/CI, account, payment, provider, price, limit, commission, flag, gate, contact, protected #2111 file or automation was changed in this continuation.
+
+
+## Exact checkpoint — 5 November 2026, 21h42 Fortaleza
+
+Current main is `6725b5c97d9bd8d26cd7cfd215c33521bacd4513`. The main instructions/reservations and current channel were reread. Five own product units remain open and no sixth was created: #2473 `d57357ab42fa2abc522def9f16c90e3e526bd0c3`, #2507 `053c74abf7565464e826c7e9f962fd0d0354d84a`, #2516 `d6818344df8c5e7734ee31183cd1bcbe0291f280`, #2689 `481e26c64c0b3031645c85c8c46b7cd1bb8f71b2`, #2691 `17c33e31f632df3b25ea647377f215d0b0ada2d0`. Exact workflow state from one necessary read: #2473 2 success/7 failure; #2507 7/2; #2516 8/1; #2689 7/2; #2691 7/2. #2516 has I2 exact-head no-finding review5780429641; #2691 has V exact-head no-finding review5793131712. None has nine greens, so none was merged or retried.
+
+### #2473 return WIP, do not move the product until coordination resolves
+
+The product PR head remains the durable RED `d57357ab`. Corrective work is remotely preserved on own branch `codex/s-member-health-unknown-return@756d8f366a726d1e71195fbb884e650f6797a17b`:
+
+- incomplete owned Stripe rows are omitted and counted in `unscored`; confirmed rows remain usable; the studio explicitly says the figures are partial;
+- course/community activity catches were removed, so an unavailable strict activity reader refuses instead of producing “never opened” and a nudge;
+- Revisor 2's legacy-cache LOW got a new durable RED `5f8b16be49d09c4226d789b4eae240b2cdfd2ffa` (96 checks/1 failure) and GREEN `756d8f36`: a cached Health without `unscored` cannot certify zero/complete and is reread.
+
+On the exact combined tree #2717 `683f01edc79355d4c820008a10613274c28aea49` plus S `756d8f36`, the permanent suites pass 96/96 and21/21. The later #2717 heads only changed other paths and C6 explicitly said learn.ts was unchanged. `next typegen` and global TypeScript with4GiB pass; lint0; scanner3806/0; diff0. The ordinary2GiB typecheck reproduced the shared OOM and was not misclassified as a product failure.
+
+There is an explicit normative conflict still awaiting Claude1/Claude4: S's durable RED requires `memberHealth` to throw/refuse on unknown activity; C4 proof `claude4/review-2717-proof@aa74cd9a` expects a returned Health row with no factors. The unchanged C4 proof's exact control passes and the unknown case throws `UnknownReplyError`. Both contracts require zero email. Do not alter the foreign proof or weaken S's RED. Channel checkpoints: `6fea2213`, `05dd478c`. The #2717 dependency itself remains open and has other review work; do not copy or edit its learn/community source.
+
+### #2689 residual write return WIP, UI still blocked
+
+The product PR head remains `481e26c6`; do not spend a CI round before the remaining shared-page LOW is coordinated. The write corrective is remotely preserved at `codex/s-stats-notes-residual-return@bffede24fc6d4440bcf034bbe04e736bbf5c23ab`.
+
+Durable RED `c56bb18cbe3eaaf266c7b113eeeaf91ec72c508c`: permanent74 checks/11 failures. GREEN74/74: after an HSET followed by an unavailable read, one exact failure-only HLEN is the ceiling. A sole recoverable note remains; a retry, existing history or malformed history cannot grow, and only this attempt's random field may be removed with exact0/1 HDEL evidence. Unknown never returns success. Reviewer-oriented residual proof `a7a8a507` passes unchanged6/6. Linked53+64+24+7 gives222/222, plus proof6/6; typegen/globaltsc4GiB0, lint0, scanner3804/0, diff0. PR comment6673356929 and channel1885c93d request one focal review; no money leaves.
+
+The separate E2 LIGHT at `app/studio/page.tsx:1081` is still open. Main reservation row assigns the shared page to A3 for its own additive notice. S did not edit that page and has no permission yet. Coordinate the exact readNotes-unavailable presentation with Claude1/C4/A3, preserve all other authors' lines, then produce a final head, one explicit independent no-finding review and nine new successful aggregators. Do not interpret the write WIP as a release.
+
+### Default rule-24 audit while all five units are occupied
+
+Read-only audit on main found a MEDIUM candidate at `lib/membership-numbers.ts:605-638`: cached JSON is returned by cast without schema validation; a Stripe subscription response with absent/malformed `data` becomes an empty array, and any `has_more` other than literal true sets `complete=true`. This can display complete zero member/MRR/churn figures from an unknown reply. Reported in channel commit `0c3bc721`. No reservation, branch, test or sixth product was opened. Before acting after a slot opens, recheck every open PR and current channel/reservations; then durable RED through the real report boundary. Confirmed explicit empty stays zero; unknown refuses.
+
+No file from #2111 was edited. No foreign product/ref/reservation/CI, price, public limit, commission, operational flag/gate, account/payment/term/key/contact, deployment or automation was changed. No process is left running. Exact next action is a causal coordinator decision/release for #2473 or #2689, an independent review return on `bffede24`, or a legitimate #2632/shared-fix merge followed by one normal main integration on eligible own heads. Never merge without one applicable independent no-finding review and nine exact final-head green aggregators.

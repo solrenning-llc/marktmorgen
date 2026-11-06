@@ -31,12 +31,12 @@
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
-import { askPlace, openGroup, readGroup, revokeRefundedGroups, settleGroup, startGroup, takePlace } from "@/lib/group-buy";
+import { askPlace, revokeRefundedGroups, settleGroup, startGroup, takePlace } from "@/lib/group-buy";
 import { importedFor } from "@/lib/imported-purchases";
 import { createCheckout } from "@/lib/store-checkout";
 import { emptyCourse, editCourse, saveCourse } from "@/lib/course";
 import { courseAccess, dropEnrollment, recordEnrollment, mintPass, passCookieName, forgetPaid } from "@/lib/learn";
-import { advance, store as redis } from "./redis-stub";
+import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 

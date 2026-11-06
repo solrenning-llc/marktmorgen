@@ -625,12 +625,21 @@ export async function revokeRefundedGroups(
             job = named;
           }
           if (job !== groupJob(group.id)) continue;
+          // The access first, then the record that says the place holds it (Codex G on #2781): a failure between the
+          // two leaves the record, so the next run takes the access away again (dropStart is idempotent); a reply
+          // lost on the record's removal leaves nothing to find, and the access is already gone.
+          try {
+            for (const productId of [group.p, ...(group.items ?? [])]) await dropStart(member.e, productId);
+          } catch (error) {
+            console.error("taking a refunded place's access away failed; tried again next run", error);
+            unread = true;
+            continue;
+          }
           const removed = repliesFor(await redisPipeline([["HDEL", importedKey(sid, member.e), group.p]]), 1);
           if (!oneWrite(removed?.[0])) {
             unread = true;
             continue;
           }
-          for (const productId of [group.p, ...(group.items ?? [])]) await dropStart(member.e, productId);
           revoked += 1;
         }
         if (unread) return false;

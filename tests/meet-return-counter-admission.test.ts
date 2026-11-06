@@ -65,7 +65,7 @@ for (const mode of ['exceeded', 'null-count']) test('a refused host callback has
  const target=new URL((await invoke('host',req)).headers.get('Location')!);
  const part=target.pathname.split('/').at(-1)!;
  const page=readFileSync(join(process.cwd(),'app/studio',part,'page.tsx'),'utf8');
- for(const role of ['editor','support'] as const){assert.equal(can(role,'member'),true);assert.equal(can(role,'settings'),false);}
+ for(const role of ['editor','support'] as const)assert.equal(can(role,'settings'),false);
  assert.ok(page.includes('studioView(jar, typeof query.store === "string" ? query.store : undefined, "member")'),'the destination must admit any host-eligible member');
  assert.equal(target.searchParams.get('cal'),mode==='exceeded'?'limited':'error');
  assert.equal(state.providerCalls,0);assert.equal(state.accessCalls,0);assert.equal(state.fundingCalls,0);

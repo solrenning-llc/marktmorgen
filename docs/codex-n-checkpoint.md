@@ -659,3 +659,40 @@ All test data synthetic. No price/visible limit/commission/flag/gate/account/pay
 4. #2451/#2544/#2674/#2700 mantêm bloqueios e retries exatos.
 5. Não abrir sexta unidade. Quando uma vaga legítima surgir, BH1 exige anúncio+RESERVA no canal e RED próprio.
 6. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhum preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.
+
+
+
+
+---
+
+## Retomada — 06/11/2026 05h32 Fortaleza — triestado definido no #2784; dependência ainda não incorporada
+
+### Fonte e delta
+
+- Esta retomada começou pelo checkpoint canônico exato `2bcbe9f9c618feac511d48596b082ceaebf92c0a`, blob `c0b12f78dd76732ffd58048f2d4c55303e6d4353`; esta seção final prevalece.
+- Main observado uma vez: `8bb21d01614fc1b7830a0ae7e8f7c512ca98673f` (#2783, backup-export). CLAUDE.md, AGENTS.md, docs/reservations.md, todos os arquivos de docs/reservations/ e CX-104–CX-125 foram relidos integralmente; os blobs de regras/reservas permanecem iguais ao ponto anterior e CX-126 continua ausente do main.
+- O canal girou desde o ponto N de 04h27. Foram lidos por `fetch_file` + `fetch_blob` integral o baseline `ce062d1235efba9151d772a6195c78f99233982e` (364.173 bytes) e o canal atual `4c97833105977b2ccba5f2fae312a7f957d0b9b1` (149.901 bytes). A mensagem N de 04h27 foi preservada no canal girado; o delta causal posterior a ela tem 127.202 bytes.
+- Novidade causal para N: `C4-20261106-0540-CX-20` criou o PR #2784, `claude4/essential-limit-state`, head `06aff6d245183b2ca10ed9824591e2e0c81a3e6e`, ainda empilhado no #2670 e ainda fora do main observado.
+- Contrato decidido: `essentialLimitState(scope, who, limit, windowSeconds)` devolve `"within"`, `"exceeded"` ou `"unknown"`; usa o mesmo contador/chave/TTL, consome o incremento uma vez, não faz readback nem retry. Em #2674, `within` segue, `exceeded` dá 429/slow e `unknown` dá 503/texto honesto de tentativa posterior.
+- O Revisor 1 publicou parecer sem achado no head `06aff6d2`, mas N não trata revisão do PR alheio como incorporação. O main `8bb21d01` ainda não contém o helper; portanto #2674 permanece bloqueado e N não integrou main, não editou caller e não rodou provas.
+- Não há no delta qualificação R2 integral do #2608, terminal legítimo 9/9 de produto N, liberação A3, head novo dos produtos N ou outra instrução causal para #2451/#2544/#2608/#2700.
+
+### Cinco produtos próprios — preservados
+
+1. **#2451** — `bf6840e04371e0c8bcaa27674989532ff5b0ec96`: L aplicável; 8/9; retry único verify `127163240735` esgotado; nunca repetir.
+2. **#2544** — `447e97287e9bec0062e7878186495cb92cbdc277`: G sem achado; HOLD A3 para `cancel_paid`25→27; não editar/retry.
+3. **#2608** — `0fad82a0e8fec7c1558124bb41d33afcdac1b656`, tree `7425d7e70293988a6a18b9763f0fb00ddb01b1ca`: retorno focal K2 `6676815043` preservado; ainda faltam qualificação independente explícita R2 dos 11 blobs e NOVE agregadores NOVOS. Retry `127378763596` permanece consumido/cancelled.
+4. **#2674** — `5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3`: BLOQUEADO até #2784 entrar legitimamente no main. REDs `f8911772`/`e8dfabf5`, prova legal válida `73a1745d`/blob `60aa1ba0` e produto/API `17f4f4c`/blob `255aae86` preservados; `2421674d` inválido. Nenhum decoder/readback paralelo.
+5. **#2700** — `c3fda3d2580ffd62f53f92b024cca48ea694ef18`, tree `88807d4dbc389c424990ab56aa5f51c653f639f5`: P `5795031317` aplicável; aguarda NOVE exatos.
+
+- 353 [BH1] continua atribuído e em fila, sem sexta unidade. Buyer-library `041512b6` permanece separado e não aberto.
+- #2722/prova N `e8f27172`, retorno C2 no head `05a4e8bd` e SG2(27/30) permanecem preservados; nenhuma revisão foi duplicada.
+- Nenhum produto, retry, CI, merge, reserva, ramo alheio, arquivo local ou worktree raiz foi alterado. O commit local acidental `cc23e7321951ff916cc297cbcac518360cd8293c` continua proibido de push.
+
+### Próximo exato
+
+1. AV12: aguardar o evento causal de incorporação legítima do #2784; não sondar CI em rodadas.
+2. Quando #2784 estiver no main: integrar esse main uma vez no #2674, adicionar RED permanente do caller provando `unknown→503/seenKey removida para retry`, `exceeded→429/skipped sem envio` e o fluxo legal `over→limited`/`unknown→error`, sem readback ou segundo incremento; depois ligados/tipos/lint/scanner/diff, revisão independente e NOVE agregadores NOVOS.
+3. #2608 só avança com qualificação R2 integral explícita e terminal legítimo 9/9 do head exato.
+4. #2451/#2544/#2700 mantêm seus bloqueios/retries exatos. Não abrir sexta unidade; BH1 só entra após vaga legítima.
+5. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhum preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.

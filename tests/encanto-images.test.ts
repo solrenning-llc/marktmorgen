@@ -7,8 +7,9 @@
  *     smaller copy made at upload (lib/product-image.ts, SMALL_LONG_SIDE) with the width it is drawn at, so a 56 px
  *     slot no longer takes the full picture;
  *   - only the first card's picture is fetched at once; every one below it waits until it is near (loading="lazy");
- *   - on a computer, where the cards go two to a row (Encanto 3), a card's cover is described at the width it is
- *     drawn, so the browser does not fetch more than it shows.
+ *   - on a computer, where the store page's cards go two to a row (Encanto 3), a card's cover there is described at
+ *     the width it is drawn, so the browser does not fetch more than it shows; a one-column list (a collection) keeps
+ *     the column's width (Codex K2 on #2786).
  */
 import { readFileSync } from "node:fs";
 import { IMAGE_SIZES } from "@/lib/product-image";
@@ -34,7 +35,13 @@ is("the store page: eager only for the first", store.includes("eager={(position.
 is("a collection: eager only for the first", collection.includes("eager={i < 1}"), true);
 
 part("A card's cover is described at the width it is drawn");
-is("two to a row from 1024 px, one column below", IMAGE_SIZES.cover.startsWith("(min-width: 64rem) 25rem, "), true);
-is("a phone keeps its own width", IMAGE_SIZES.cover.includes("(max-width: 36rem) calc(100vw - 2rem)"), true);
+// Codex K2 on #2786: only the store page's grid is two to a row; a collection and every other one-column list keep
+// the column's width, or the browser would pick a copy narrower than it draws.
+is("the store's grid: two to a row from 1024 px, the phone's own width below", IMAGE_SIZES.grid, "(min-width: 64rem) 25rem, (max-width: 36rem) calc(100vw - 2rem), 34rem");
+is("a one-column list keeps the column's width", IMAGE_SIZES.cover, "(max-width: 36rem) calc(100vw - 2rem), 34rem");
+const card = read("components/store-product.tsx");
+is("a card says the grid's width only when it stands in the grid", /sizes=\{image\.small \? \(style === "preview" \? \(grid \? IMAGE_SIZES\.grid : IMAGE_SIZES\.cover\) : IMAGE_SIZES\.thumb\) : undefined\}/.test(card), true);
+is("the store page's cards stand in the grid", /<ProductCard[\s\S]*?\bgrid\b[\s\S]*?\/>/.test(store), true);
+is("a collection's do not", /<ProductCard[\s\S]*?\bgrid\b[\s\S]*?\/>/.test(collection), false);
 
 done();

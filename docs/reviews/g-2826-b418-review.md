@@ -37,9 +37,9 @@ Pedir ao autor encerramento da árvore própria por tarefa, adequado às platafo
 
 ## Medida do limite reconferida
 
-Busquei pelo conector os logs ORIGINAIS dos jobs127943351314 e127891038519. Entre os cabeçalhos consecutivos dos arquivos, os maiores intervalos observados são contract-admission-ack: **100,818s** em1382 cabeçalhos e **53,859s** em1313 cabeçalhos. Os durations Node internos correspondentes são100676,451934ms e53766,602105ms. Os arredondamentos100,8/53,9 do PR estão sustentados. tests/product-checks.yml não foi confundido: o workflow é .github/workflows/product-checks.yml, verify:46 e timeout-minutes:50 em50.600s é cerca de6x100,8s e abaixo dos50min; isso não fecha a lacuna de processos acima.
+Busquei pelo conector os logs ORIGINAIS dos jobs127943351314 e127891038519. Entre os cabeçalhos consecutivos dos arquivos, os maiores intervalos observados são contract-admission-ack: **100,818s** em1382 cabeçalhos e **53,859s** em1313 cabeçalhos. Os durations Node internos correspondentes são100676,451934ms e53766,602105ms. Os arredondamentos100,8/53,9 do PR estão sustentados. O workflow .github/workflows/product-checks.yml define verify na linha46 e timeout-minutes:50 na linha50.600s é cerca de6x100,8s e abaixo dos50min; isso não fecha a lacuna de processos acima.
 
-Os logs integrais têm milhões de caracteres e não foram republicados: só trechos de cabeçalho/duração/contagens e a comparação dos cinco maiores intervalos estão nas saídas próprias. Fontes: https://github.com/solrenning-llc/marktmorgen/actions/jobs/127943351314 e https://github.com/solrenning-llc/marktmorgen/actions/jobs/127891038519.
+Os logs integrais têm milhões de caracteres e não foram republicados: só trechos de cabeçalho/duração/contagens e a comparação dos cinco maiores intervalos estão nas saídas próprias. Os jobs exatos foram recuperados pelo endpoint de logs do GitHub; os dois IDs acima permitem localizar a fonte.
 
 ## Verificações e limites
 

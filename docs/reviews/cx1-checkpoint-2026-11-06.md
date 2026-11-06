@@ -1,5 +1,21 @@
 # Continuidade canônica — Codex CX1
 
+## ENCERRADO POR ORDEM DO DONO — 06/11/2026, 04h39 Fortaleza
+
+**NÃO RETOMAR AUTOMATICAMENTE O CX1 DO TERMINAL.** A ordem `C1-20261106-0400-C4-1`, publicada no canal às 04h00, determina: "O CX1 termina o ciclo de revisão atual (ramo codex/cx1-review-2770-return) e para; depois disso, só os do navegador." A mensagem `C4-20261106-0420-CX-1` confirma que CX1 termina o ciclo e que a Claude 4 passou a coordenar os Codex; Claude 1 fica como ponte.
+
+A ordem de encerramento passou despercebida na leitura parcial do canal e só foi identificada às 04h39, depois de já publicados os retornos e a revisão de segurança #2736 descritos abaixo. A leitura integral dessas duas mensagens foi feita agora. O CX1 encerra sem iniciar outra unidade. Nenhuma revisão, teste, CI ou merge novo será feito para esperar correções. O vigia anterior terminou e não será religado; nenhuma automação ou configuração do Windows foi alterada. Retomada deste terminal somente por nova ordem expressa do dono.
+
+**Ponto final para a Claude 4 e um revisor do navegador:**
+
+- #2736: três MÉDIOS abertos no head `6fa03a4818dce8fb4244f5c9b60a2cc16d5ecaaf`, parecer `5797086532`, prova estável `2b2e8c10f968e28889dfdfd50ad65a6bec6128df` (8 checks/3 falhas/5 controles). Relatório publicado `138dee3e0661418b20ad998f3bc2b27e80bb2136`. Transferir eventual retorno com a MESMA prova. O caso offline exige leitura do banco; não confundir com exploração apenas pela rota pública nem com bypass da segunda etapa.
+- #2761: API revelou head novo `34b0edfacfa1d8ee20f4cb65d0919d2cb6f6b9be`. **NÃO revisto nem anunciado por CX1.** O LEVE anterior de inglês (`5796077438`) aguarda retorno por outro revisor. Não o encerrar por esta anotação.
+- #2723: MÉDIO de reconciliação ainda aberto no head `30023e192ae12adc1433de2c7e0ec603a0a6d3f9`, prova `645c15b1cf1ffcc5f2d0d687e712c6803ef289c0` (7/5 falhas). #2747: LEVE documental ainda no head `5c2c9ba89478495a874c79e7d81fa0044afbf906`, prova `5aa19ca924742c082d838da314f790662f26c9b3` (3/1 falha documental). Ambos sem corretivo na última fotografia.
+- #2770: caso demonstrado fechado no `93df1511ba2ce9508387422d2b9df378fa8ddbba`, parecer `5796718641`, MESMA prova4/4 e ligados250/250; ressalva R2 de schema/autenticação **não encerrada**. #2759: dois MÉDIOS CX1 fechados no `5dc6cd9264d587c2e54d2dce42c3e0e8316af39d`, parecer `5796674125`, MESMA prova50/50 e ligados422/422; primeira C4/LEVE de custo permanecem com ela. #2742 e #2764 também dependem de pareceres finais separados e nove checks; detalhes abaixo.
+- #2726 MERGED pela C6, confirmado na API (`9bea20a3b164374ade2d1df8accdebfc4f9823ce`); #2748 e #2750 também MERGED confirmados. Não reabrir. #2777 tem parecer CX1 sem achado `5796487213`; estado atual de incorporação não foi reconferido para este encerramento.
+
+Não há PR de produto CX1 aberto. Todos os ramos de prova/relatório descritos foram publicados; árvore de trabalho limpa antes desta atualização. Nenhum produto, ramo ou CI de outro autor, preço, limite, comissão, flag, gate, conta ou credencial real foi alterado. As instruções antigas abaixo para continuar o inventário são histórico de trabalho e **não autorizam retomar após esta ordem**.
+
 Pasta única autorizada: `C:/Users/vinic/Projects/marktmorgen-cx1`. Função: **revisor independente**, ordem `C1-20261106-0021-CX-CX1-1`. Ramos próprios `codex/cx1-*`. Esta é a primeira continuidade consolidada CX1; atualizar este arquivo e ramo, sem criar outro checkpoint.
 
 Antes de retomar, ler o último ponto CX1 no canal e este arquivo inteiro; depois `git fetch origin main`, própria seção Codex em `docs/agent-inbox.md` e mensagens novas. AGENTS.md, CLAUDE.md, cross-product-handoff e CX-122/123 já foram lidos. Não editar a caixa. Confirmar mensagens novas pelo canal. Manter o vigia de caixa de 30 segundos, máximo de dois minutos por ciclo; não usar isso para polling de CI.

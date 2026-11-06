@@ -304,14 +304,29 @@ export const MAX_DESCRIBED_BYTES = 3_500_000;
  * carries (lib/sales-page.ts, Picture.alt), in the store's language. Only
  * what can be seen: no guess at a brand, a person's name or a result, and
  * any words in the picture only as written. One of the month's jobs.
+ *
+ * `bytes` may be the picture itself or how to read it (6 November 2026): a
+ * picture read from the file store is read only once the job is taken, so a
+ * store with no allowance left (Creator's is 0) never spends a paid read on a
+ * request that is refused. A picture that cannot be read then, or is empty or
+ * too large, gives the job back, since nothing was asked of the model: the
+ * same release `counted` makes for a job over the allowance.
  */
 export async function describePicture(
   store: Store,
-  input: { bytes: Uint8Array; mediaType: "image/webp" | "image/jpeg"; productTitle: string; language: string },
+  input: { bytes: Uint8Array | (() => Promise<Uint8Array | null>); mediaType: "image/webp" | "image/jpeg"; productTitle: string; language: string },
   now = Date.now(),
-): Promise<AiResult<string>> {
-  if (input.bytes.length === 0 || input.bytes.length > MAX_DESCRIBED_BYTES) return { ok: false, reason: "notes" };
-  return counted(store, now, async () => {
+): Promise<AiResult<string> | { ok: false; reason: "invalid" }> {
+  const fits = (bytes: Uint8Array) => bytes.length > 0 && bytes.length <= MAX_DESCRIBED_BYTES;
+  if (typeof input.bytes !== "function" && !fits(input.bytes)) return { ok: false, reason: "notes" };
+  const read = input.bytes;
+  const unread: { reason: "invalid" | "notes" | null } = { reason: null };
+  const done = await counted(store, now, async () => {
+    const bytes = typeof read === "function" ? await read().catch(() => null) : read;
+    if (!bytes || !fits(bytes)) {
+      unread.reason = bytes ? "notes" : "invalid";
+      return null;
+    }
     const system = [
       "You describe a picture on a creator's sales page for someone who cannot see it.",
       `Write in ${input.language}. One plain sentence of at most twenty words. Begin with what is shown, not with 'An image of' or 'A picture of'.`,
@@ -319,13 +334,18 @@ export async function describePicture(
       "Return only the sentence.",
     ].join("\n\n");
     const content = [
-      { type: "image", source: { type: "base64", media_type: input.mediaType, data: Buffer.from(input.bytes).toString("base64") } },
+      { type: "image", source: { type: "base64", media_type: input.mediaType, data: Buffer.from(bytes).toString("base64") } },
       { type: "text", text: `The product this picture is on the page of: ${input.productTitle}` },
     ];
     const answer = await askModel(store, system, content, 200, model());
     const sentence = answer ? line(answer.replace(/^["“]|["”]$/g, ""), 150) : "";
     return sentence || null;
   });
+  if (unread.reason === null) return done;
+  // Taken, then nothing started: given back. A release that fails leaves the job counted, never more than was used.
+  const key = monthKey(store, new Date(now));
+  if (key) await redisPipeline([["DECRBY", key, 1]]).catch(() => {});
+  return { ok: false, reason: unread.reason };
 }
 
 /** The JSON object in an answer, whatever the model put around it. */

@@ -185,10 +185,13 @@ export async function POST(request: NextRequest) {
     const path = text(body.path, 200);
     const folder = await imageFolder(guarded.ref);
     if (!path || !ownsImagePath(path, folder)) return fail("invalid");
-    const found = await get(path, { access: "private" }).catch(() => null);
-    if (!found || found.statusCode !== 200 || !found.stream) return fail("invalid");
-    const bytes = new Uint8Array(await new Response(found.stream).arrayBuffer());
-    return answer(describePicture(store, { bytes, mediaType: imageType(path), productTitle: product.title, language: LANGUAGES[store.language].english }));
+    // Read only once the month's job is taken (lib/ai.ts, describePicture): a store with no allowance left never
+    // spends a paid file-store read on a request it is then refused.
+    const read = async () => {
+      const found = await get(path, { access: "private" });
+      return found && found.statusCode === 200 && found.stream ? new Uint8Array(await new Response(found.stream).arrayBuffer()) : null;
+    };
+    return answer(describePicture(store, { bytes: read, mediaType: imageType(path), productTitle: product.title, language: LANGUAGES[store.language].english }));
   }
   if (body.kind === "translate") {
     // The page as it stands in the editor, every word of it into one of the

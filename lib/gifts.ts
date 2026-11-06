@@ -23,6 +23,7 @@ import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { bundleFromMeta } from "@/lib/bundle-rules";
 import { onAccount } from "@/lib/stripe-account";
 import { confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { formatMoney } from "@/lib/money";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
@@ -68,7 +69,11 @@ export function newGiftId(): string {
 export async function readGift(id: string): Promise<Gift | null> {
   if (!GIFT_ID.test(id) || !isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GET", giftKey(id)]]);
-  if (typeof raw !== "string") return null;
+  return typeof raw === "string" ? parseKeptGift(raw, id) : null;
+}
+
+/** A kept gift's record, when it is one and is this id's. */
+function parseKeptGift(raw: string, id: string): Gift | null {
   try {
     const g = JSON.parse(raw) as Gift;
     return g && g.id === id ? g : null;
@@ -248,12 +253,15 @@ export async function revokeRefundedGifts(
   const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
   query.append("expand[]", "data.charge");
   const listed = await onAccount("GET", store.stripeAccountId, `/refunds?${query}`);
-  const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+  // The refunds in their exact shape (Codex Q on #2724; CX-123 rule 24): a list of rows each with its id and time.
+  // Anything else leaves the read unsure, so the anchor does not move past refunds that could not be read.
+  const refundsKnown = Array.isArray(listed.data) && (listed.data as unknown[]).every((row) => !!row && typeof row === "object" && typeof (row as { id?: unknown }).id === "string" && typeof (row as { created?: unknown }).created === "number");
+  const refunds = refundsKnown ? (listed.data as Record<string, unknown>[]) : [];
   // A dispute closed as lost takes a gift back as a full refund does, whatever its amount (lib/refunds.ts, the
   // owner's rule of 4 November 2026; queue 388 [TB14]): read from Stripe's closing events, as lib/call-meetings.ts
   // does. A read that fails or does not reach the end keeps the place, so it is read again next run.
   const lost = await lostDisputesOrRetry(store.stripeAccountId, since, deadline, lostCursorKey("gift", sid));
-  let unsure = !lost.complete;
+  let unsure = !lost.complete || !refundsKnown;
   for (const refund of [...lost.rows, ...refunds]) {
     if (Date.now() >= deadline) return revoked;
     const id = typeof refund.id === "string" ? refund.id : "";
@@ -268,23 +276,46 @@ export async function revokeRefundedGifts(
       continue;
     }
     if (!id || !pi || !(dispute ? rowGivesBack(refund) : refund.status === "succeeded" && charge?.refunded === true)) continue;
-    const [fresh, giftId] = await redisPipeline([["SADD", seenKey(sid), id], ["GET", piKey(pi)]]);
-    if (Number(fresh) !== 1 || typeof giftId !== "string") continue;
-    const gift = await readGift(giftId);
-    if (!gift || gift.revoked || gift.s !== sid) continue;
-    const [rawGiven] = await redisPipeline([["HGET", importedKey(sid, gift.to), gift.p]]);
-    const items = (() => {
-      try {
-        const v = JSON.parse(String(rawGiven)) as { items?: unknown };
-        return Array.isArray(v.items) ? (v.items as string[]) : [];
-      } catch {
-        return [];
+    // Read before anything is marked (Codex Z on #2724; CX-123 rule 24): whether this row was handled, the payment's
+    // gift and the gift itself, each in its exact shape. Unknown leaves the row unread and the read unsure, and the
+    // next run asks again; nothing is marked read until it was handled.
+    const looked = repliesFor(await redisPipeline([["SISMEMBER", seenKey(sid), id], ["GET", piKey(pi)]]), 2);
+    const handled = countOf(looked?.[0]);
+    const giftId = looked?.[1];
+    if (!looked || handled === null || handled > 1 || (giftId !== null && typeof giftId !== "string")) {
+      unsure = true;
+      continue;
+    }
+    if (handled === 1) continue;
+    if (typeof giftId === "string") {
+      const kept = GIFT_ID.test(giftId) ? repliesFor(await redisPipeline([["GET", giftKey(giftId)]]), 1)?.[0] : null;
+      if (kept !== null && typeof kept !== "string") {
+        unsure = true;
+        continue;
       }
-    })();
-    await redisPipeline([["HDEL", importedKey(sid, gift.to), gift.p]]);
-    for (const id of [gift.p, ...items]) await dropStart(gift.to, id);
-    await saveGift({ ...gift, revoked: now() }, GIFT_KEPT_SECONDS);
-    revoked += 1;
+      const gift = typeof kept === "string" ? parseKeptGift(kept, giftId) : null;
+      if (gift && !gift.revoked && gift.s === sid) {
+        const given = repliesFor(await redisPipeline([["HGET", importedKey(sid, gift.to), gift.p]]), 1)?.[0];
+        if (given !== null && typeof given !== "string") {
+          unsure = true;
+          continue;
+        }
+        const items = (() => {
+          try {
+            const v = JSON.parse(String(given)) as { items?: unknown };
+            return Array.isArray(v.items) ? (v.items as string[]) : [];
+          } catch {
+            return [];
+          }
+        })();
+        await redisPipeline([["HDEL", importedKey(sid, gift.to), gift.p]]);
+        for (const productId of [gift.p, ...items]) await dropStart(gift.to, productId);
+        await saveGift({ ...gift, revoked: now() }, GIFT_KEPT_SECONDS);
+        revoked += 1;
+      }
+    }
+    // Marked read once handled: a run that stops halfway leaves it to the next, which does the same again.
+    await redisPipeline([["SADD", seenKey(sid), id]]);
   }
   // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead), and the
   // anchor with it: the closing events are read from the anchor, so it waits while they are not all read.

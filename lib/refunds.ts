@@ -276,7 +276,13 @@ export async function lostDisputesSince(
     const query = new URLSearchParams({ type: "charge.dispute.closed", limit: "100", "created[gte]": String(Math.max(0, Math.floor(since))) });
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", account, `/events?${query}`);
-    const events = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // The page in its exact shape (Codex Q on #2724; CX-123 rule 24): a list, a has_more, and each event with its id.
+    // Anything else is unknown, never an empty page that completes the read: the read stops here as incomplete, so
+    // the place stays before this page and the caller keeps its anchor.
+    if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return leave(false);
+    const page = listed.data as unknown[];
+    if (page.some((event) => !event || typeof event !== "object" || typeof (event as { id?: unknown }).id !== "string")) return leave(false);
+    const events = page as Record<string, unknown>[];
     for (const event of events) {
       const dispute = ((event.data as { object?: unknown } | null)?.object ?? null) as Record<string, unknown> | null;
       if (typeof event.id !== "string" || !dispute || dispute.status !== "lost") continue;

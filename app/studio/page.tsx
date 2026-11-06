@@ -236,6 +236,8 @@ import { readLinks } from "@/lib/short-links";
 import { storeBase } from "@/lib/purchase-email";
 import { feeWords } from "@/lib/fee-words";
 import { NewTab } from "@/components/new-tab";
+import { Suspense } from "react";
+import { StudioTodaySkeleton } from "@/components/page-skeletons";
 
 /** "October 19": a day of a window, for the studio. */
 const windowDay = (ms: number) => new Date(ms).toLocaleDateString("en-US", { timeZone: "UTC", month: "long", day: "numeric" });
@@ -803,6 +805,26 @@ export default async function StudioPage({
   // asked for, else the one last chosen, else the person's own first store.
   const found = await studioView(cookieStore, typeof params.store === "string" ? params.store : undefined, null);
   if (!found.ok && found.reason === "signed_out") redirect("/signin");
+  // Who is signed in is read, and the redirect made, before the skeleton
+  // (components/page-skeletons.tsx): inside the <Suspense> a redirect could
+  // only be a meta refresh on a timer. The rest of Today is read behind it.
+  return (
+    <Suspense fallback={<StudioTodaySkeleton />}>
+      <StudioToday cookieStore={cookieStore} params={params} found={found} />
+    </Suspense>
+  );
+}
+
+/** Today itself, drawn once its numbers are read, with the skeleton standing in until then. */
+async function StudioToday({
+  cookieStore,
+  params,
+  found,
+}: {
+  cookieStore: Awaited<ReturnType<typeof cookies>>;
+  params: { [key: string]: string | string[] | undefined };
+  found: Awaited<ReturnType<typeof studioView>>;
+}) {
   const view = found.ok ? found.view : null;
   // A team that requires two-step sign-in held this session at its door
   // (lib/team.ts teamTwoStepBlocks): what to do next, in place of starting a store.

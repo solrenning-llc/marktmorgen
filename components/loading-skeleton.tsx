@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 /**
- * The pieces a loading skeleton (app/**\/loading.tsx) is drawn with: grey
+ * The pieces a loading skeleton (components/page-skeletons.tsx) is drawn with: grey
  * shapes where the page's title, text and cards will stand, so that when the
  * page arrives nothing on the screen moves (651 [WG11]).
  *

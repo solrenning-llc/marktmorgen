@@ -1212,36 +1212,16 @@
   ],
   "boundaryTemplates": [
     {
-      "source": "app/[handle]/course/[product]/loading.tsx",
-      "status": "AAA review not completed"
-    },
-    {
       "source": "app/[handle]/not-found.tsx",
       "status": "not yet reviewed for this programme"
-    },
-    {
-      "source": "app/[handle]/p/[product]/loading.tsx",
-      "status": "AAA review not completed"
     },
     {
       "source": "app/error.tsx",
       "status": "not yet reviewed for this programme"
     },
     {
-      "source": "app/library/loading.tsx",
-      "status": "AAA review not completed"
-    },
-    {
       "source": "app/not-found.tsx",
       "status": "not yet reviewed for this programme"
-    },
-    {
-      "source": "app/studio/inbox/loading.tsx",
-      "status": "AAA review not completed"
-    },
-    {
-      "source": "app/studio/loading.tsx",
-      "status": "AAA review not completed"
     }
   ],
   "componentSources": [
@@ -1434,6 +1414,7 @@
     "components/page-editor.tsx",
     "components/page-funnel-editor.tsx",
     "components/page-order-editor.tsx",
+    "components/page-skeletons.tsx",
     "components/page-style-picker.tsx",
     "components/pairs-editor.tsx",
     "components/passkey-manager.tsx",

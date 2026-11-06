@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { AllTimeSales, Ranked, RangeKey, StatsData, Today } from "@/lib/stats";
 import { StoreField } from "@/components/studio-store-pin";
+import { AccountingExportForm } from "@/components/accounting-export-form";
 import { dashboardPaidComplete, dashboardProducts } from "@/lib/dashboard-coverage";
 import { ledgerPaymentsComplete } from "@/lib/payment-ledger-coverage";
 import { paidFiguresComplete } from "@/lib/paid-coverage";
@@ -1435,6 +1436,8 @@ export function StatsPanel({
             </button>
           </form>
         </div>
+        {/* The same sales for Xero or QuickBooks (queue item 37 [F6]): only for a role that may take sales out. */}
+        {salesKnown && canExport ? <AccountingExportForm /> : null}
         {canExport ? (
           <div className="mt-4 border-t border-line pt-4">
             <p className="text-sm font-bold text-ink">Your buyers, for ad audiences</p>

@@ -27,7 +27,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   ACCOUNTING_CONTACT,
-  IMPORT_LIMITS,
+  APP_IMPORT_CAPS,
   QUICKBOOKS_HEADER,
   XERO_HEADER,
   accountingFile,
@@ -125,13 +125,13 @@ async function main(): Promise<void> {
   part("Each app's limits for one import: refused, never cut short");
   const many = (n: number, days = 1): AccountingSale[] =>
     Array.from({ length: n }, (_, i) => ({ at: day1 + (i % days) * 86_400, product: `p${i}`, title: `Product ${i}`, currency: "usd", net: 100, tax: 0 }));
-  is("the limits used", IMPORT_LIMITS, { xero: { rows: 500, invoices: 500 }, quickbooks: { rows: 1000, invoices: 100 } });
-  is("Xero: 500 lines go, 501 are refused with the count", [accountingFile("xero", accountingLines(many(500)), { account: "", tax: "" }).ok, accountingFile("xero", accountingLines(many(501)), { account: "", tax: "" })], [true, { ok: false, rows: 501, invoices: 1 }]);
+  is("the limits used", APP_IMPORT_CAPS, { xero: { rows: 500, invoices: 500 }, quickbooks: { rows: 1000, invoices: 100 } });
+  is("Xero: 500 lines go, 501 are refused with the count", [accountingFile("xero", accountingLines(many(500)), { account: "", tax: "" }).ok, accountingFile("xero", accountingLines(many(501)), { account: "", tax: "" })], [true, { ok: false, reason: "too_big", rows: 501, invoices: 1 }]);
   is("QuickBooks: 1,000 lines go, 1,001 are refused", [accountingFile("quickbooks", accountingLines(many(1000)), { account: "", tax: "" }).ok, accountingFile("quickbooks", accountingLines(many(1001)), { account: "", tax: "" }).ok], [true, false]);
   const fourCurrencies: AccountingSale[] = [];
   for (const currency of ["usd", "eur", "gbp", "cad"]) for (let d = 0; d < 26; d += 1) fourCurrencies.push({ at: sec(Date.UTC(2026, 9, 1 + d, 12)), product: "p", title: "P", currency, net: 100, tax: 0 });
-  is("QuickBooks: more than 100 invoices are refused", accountingFile("quickbooks", accountingLines(fourCurrencies), { account: "", tax: "" }), { ok: false, rows: 104, invoices: 104 });
-  is("a sale with an amount that cannot be written makes no file", accountingFile("xero", [{ ...lines[0], net: -5 }], { account: "", tax: "" }), { ok: false, rows: 1, invoices: 1 });
+  is("QuickBooks: more than 100 invoices are refused", accountingFile("quickbooks", accountingLines(fourCurrencies), { account: "", tax: "" }), { ok: false, reason: "too_big", rows: 104, invoices: 104 });
+  is("a sale with an amount that cannot be written makes no file", accountingFile("xero", [{ ...lines[0], net: -5 }], { account: "", tax: "" }), { ok: false, reason: "amount", rows: 1, invoices: 1 });
 
   part("What the creator may type for the accounting app");
   is("an account code: letters and digits, up to ten", [cleanAccountCode("200"), cleanAccountCode(" 4000 "), cleanAccountCode(""), cleanAccountCode("=1+1"), cleanAccountCode("-200"), cleanAccountCode("12345678901")], ["200", "4000", "", null, null, null]);
@@ -235,7 +235,7 @@ async function main(): Promise<void> {
   const counted = route.indexOf("count > EXPORTS_PER_WINDOW");
   const accounting = route.indexOf("readAccountingSales(");
   is("the route reads the accounting file only after the window is counted, with the export permission", [counted > 0, accounting > counted, /what === "sales" \|\| what === "store" \? "export"/.test(route)], [true, true, true]);
-  is("a refusal never hands over a partial file", [/too_many/.test(route), /unreadable/.test(route), /-partial/.test(route.slice(accounting, accounting + 4000))], [true, true, false]);
+  is("a refusal never hands over a partial file", [/too_many/.test(route), /unreadable/.test(route), /-partial/.test(route.slice(accounting, route.indexOf("salesCsv(store", accounting)))], [true, true, false]);
   const panel = readFileSync(join(process.cwd(), "components/stats-panel.tsx"), "utf8");
   is("the studio offers it beside the sales file, to a role that may export", [/AccountingExportForm/.test(panel), /canExport \? <AccountingExportForm|canExport \? \(\s*<AccountingExportForm/.test(panel)], [true, true]);
   const form = readFileSync(join(process.cwd(), "components/accounting-export-form.tsx"), "utf8");

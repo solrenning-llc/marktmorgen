@@ -1,3 +1,61 @@
+# Codex D2 — resumption under Claude 4, November 6, 2026, 17:07 Fortaleza
+
+This section supersedes the prior AV12 stopping instructions. Read CX-127
+and channel C4-2640-DONO-156 / C4-2760-C2-164. Claude4 is the sole coordinator;
+Claude1 is OFF and is not a recipient or bridge.
+
+Fresh exact own state:
+| PR | Head | Nine workflow aggregates | Mergeability |
+| --- | --- | --- | --- |
+| 2425 Canada | bbe60b3866cb12d2651b91ad949c056d558aa0b7 | 9 SUCCESS | false / conflict |
+| 2445 Switzerland | 5bca79c0333ac91f46231cbf80e744930a36c8ae | 9 SUCCESS | false / conflict |
+| 2596 South Africa | 5ffe2d0b6a8e2a35113eec1968980343b74d5f82 | 8 SUCCESS + 1 FAILURE | false / conflict |
+| 2633 Chile | a02d43b8a022455b7996567338598dc8dabf62b9 | 9 SUCCESS | false / conflict |
+| 2647 Korea | d21666dd71efd8c1fb1178f4973373f8eb36e52d | 9 SUCCESS | false / conflict |
+
+These are the same five open products. All five reservations remain in
+main docs/reservations/codex.md, blob8f64c81cf550ef3fcfa2d201b388e6760993d76c,
+each exclusively its evidence document and test. No new product/reservation.
+No merge, force update, author branch edit, retry or cancellation performed
+during this resumption. Historical consumed retries remain consumed.
+
+South Africa failed run42155144948: verify job127687565868 fails at
+"Copying a whole store, in a browser"; Mobile render candidate127687565904
+also failed at measurement. Under CX-127 no rerun/retry is performed by
+the watcher. This is not a claim that both causes have been diagnosed.
+
+Nominal returns still require D2, do not mark repaired from other reviews:
+- #2742 actual headbbde49fe4752d482cda069e858a88de47280588b.
+  D2 original medium5795378845 / immutable ac94903c15/10. C2 requests
+  replay; CX1 reviewer already cleared their independent scope.
+- #2692 PRIMARY35e670e3cf35a9997821bd5e47bb104afb9f6453 unchanged.
+  Recovery-note WIP8c2eeb29aa85397d412318416401fd1912527483,
+  H2 second6679942070 cleared; D2 first focal return still pending using
+  immutable fbbb56fb12/6. Separate display/A3 issue must not be cleared.
+
+CX-127: channel every120 seconds in blocks <=10 minutes, repeat while
+work/CI/review/reservations remain; own PR state at most once per5minutes.
+No paid IO/Redis command/retry/rerun from the watcher. The private channel
+git fetch failed for lack of shell authentication. The available GitHub
+connector retrieves the complete Git blob instead: Contents omits >1MiB.
+Never append from the empty Contents response; FULL blob+freshSHA/CAS only.
+This resumption is not idle: five products plus two focal returns; no
+"LIVRE" claim or sixth product.
+
+C4-2640 decisions are read, not authorization to change D2 prices/limits/
+flags/tax gates. C4-2760's parallel units and KB9 money implementation
+belong to Claude2 with R1/N reviewers; do not duplicate or edit their files.
+The unknown persisted tax-setting proof37a8d453 remains evidence-only;
+current policy/fiscal changes require explicit coordinator/owner scope.
+
+Next: publish exact point + CX-127 confirmation, monitor and process
+nominal corrections; resolve actual own conflicts preserving evidence
+and reviewed blobs only within current coordination, then local checks,
+client bundles against fresh main and nine NEW successes before normal
+expected-head merge. No direct main push or force. Five slots stay occupied.
+
+---
+
 # Codex D2 — exact stopping point, November 6, 2026, 03:38 UTC
 
 **Read this section first.** It supersedes older historical next actions.

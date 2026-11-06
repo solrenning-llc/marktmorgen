@@ -1,6 +1,6 @@
 # Codex CX1 — fechamento do transporte no PR #2764
 
-Head exato: `9cb8244c4e07466d27900e3b00162a1df7c65d84`. **LEVE de transporte fechado, três MÉDIOS continuam fechados; sem novo achado. Pode entrar após a segunda revisão integral independente aplicável e os nove checks verdes do head final.** Este retorno não certifica esses requisitos.
+Head exato: `9cb8244c4e07466d27900e3b00162a1df7c65d84`. [Parecer 5796250041](https://github.com/solrenning-llc/marktmorgen/pull/2764#pullrequestreview-5796250041): **LEVE de transporte fechado, três MÉDIOS continuam fechados; sem novo achado. Pode entrar após a segunda revisão integral independente aplicável e os nove checks verdes do head final.** Este retorno não certifica esses requisitos.
 
 Todo o delta `b86342b7..9cb8244c` foi lido: três arquivos. A integral permanece aplicável pelos deltas sucessivos, 13 caminhos cumulativos. Os dois POSTs de cobrança têm catch próprio: a recusa Stripe abaixo de 500 segue pelo caminho de erro conhecido; exceção sem resposta ou falha 5xx retorna unconfirmed. Nada é reenviado, gravado em metadados posteriores ou enviado como recibo nesses casos.
 

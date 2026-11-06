@@ -656,3 +656,27 @@ Main exato `6e01c123b31d890bb5a7100d0bce8ef498988b20` integrado uma vez nos quat
 
 - Cinco ocupadas: #2438 coordenado/dirty e intocado, mais quatro acima; nenhuma sexta. Nenhum merge/retry/cancelamento; sem fotografia pós-publicação.
 - Próximo somente por novidade causal: decisão C4 sobre #2576, R2 formal #2535, achado ou terminal dos nove. Merge próprio só OPEN+review aplicável+9/9 exact-head+raw true/clean.
+
+
+## Retomada — 06/11/2026 08h50 Fortaleza
+
+### Coordenação fresca e fotografia terminal
+
+- Checkpoint anterior blob `edd15713255d22c0fb0d7402783f12425b75857a` foi lido antes das demais fontes; main, regras, reservas, caixa Codex e canal append-only foram conferidos frescos.
+- A coordenação válida é exclusivamente da Claude 4 por C4-20261106-0850-TODOS-41; Claude 1 está desligado e não é destinatário. C4-20261106-0900-TODOS-42 definiu que #2576 entra primeiro e que o Codex V consolida reservas.
+- #2576 continua OPEN no head `d8d8c3d557166cb32b4ae87084dd88c48ded2ce4`. Portanto #2438 permanece congelado no head `6da1a24763a718e88e157703542c24957bfc6123`: nenhum arquivo, head, CI ou reserva foi tocado. Depois de #2576 entrar, Q fará a junção coordenada em `lib/contacts.ts`, preservando os dois contratos com novos testes.
+- Fotografia única dos quatro produtos independentes: #2535 e #2729 tinham 9/9 SUCCESS; #2709 tinha 8/9, com falha apenas em `Mobile render (candidate)`; #2731 tinha 8/9, com falha em `Mobile render (candidate)` e o `verify` compartilhado cancelado. Nenhum job foi repetido ou cancelado. #2535 continua sem parecer formal GitHub do Revisor 2.
+
+### Integração única do main
+
+- Main exato `7760b146fa645849bfefa357dc4c17f7c76d8ea3` foi integrado uma vez nos quatro produtos independentes. Os merge-trees nativos coincidem exatamente com as árvores GitData publicadas; refs usaram `expected_sha` e `force=false`. Os 12 blobs próprios foram lidos de volta no GitHub e permanecem byte-idênticos.
+- #2535: head `1a071d83811ce96d4a178c6eaadbb71d6ce79755`, tree `1d05f3d85a18d1dafa58a12cddfdcebff4ea7dba`, comentário `6684148699`. OPEN/mergeable=true na fotografia; exige parecer formal R2 exato e nove novos checks.
+- #2709: head `9fa274edead2fa59e268f208b2b1a600a401d13b`, tree `ff4e458ca85e24c45d7d4dfb67d5d892b8758fa9`, comentário `6684148994`. Parecer Z `5796340546` permanece aplicável; exige nove novos checks.
+- #2729: head `b78cc995fa9f5d85b81aa1172cdf0303023a8e7b`, tree `1c86a1970f12bd6bc59195f2aa87dcf5325548bc`, comentário `6684149637`. Pareceres existentes permanecem aplicáveis; exige nove novos checks.
+- #2731: head `baf2acc21f9696d68f1cd17d2a1efafd052cc232`, tree `06a6ff5afef277fba89e2c6a13c1fcf8c92eb6ac`, comentário `6684149339`. K2/R2 permanecem aplicáveis; exige nove novos checks.
+
+### Ponto exato
+
+- Cinco produtos continuam ocupados: #2438 congelado pela ordem #2576-first e os quatro heads novos acima. Nenhuma sexta unidade foi aberta.
+- Nenhum produto Q foi incorporado. Não houve fotografia de CI após os novos heads; checks anteriores não contam.
+- Próxima ação somente por novidade causal AV12: #2576 MERGED para a junção #2438, retorno formal R2 de #2535, achado, ou conclusão terminal dos nove novos. Merge próprio somente OPEN + revisão aplicável + 9/9 SUCCESS exact-head + raw true/clean.

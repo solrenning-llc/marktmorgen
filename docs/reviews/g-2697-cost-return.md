@@ -10,7 +10,7 @@ The incorrect FINDS_PER_DAY premise is corrected: draft uses the ai gate, AI_PER
 
 ## LOW: arbitrary day can intersect two partial minute windows
 
-`lib/outreach.ts:295–297`, plus PR cost paragraph, calls8640 attempts/43200 commands a per-day ceiling. The actual limiter in `lib/request-guard.ts:143–161` uses SET NX EX60 anchored to first use, not UTC minute/day buckets.
+`lib/outreach.ts:295–297`, plus PR cost paragraph, calls8640 attempts/43200 commands a per-day ceiling. The actual limiter in `lib/request-guard.ts` (`withinEssentialLimit`) uses SET NX EX60 anchored to first use, not UTC minute/day buckets.
 
 New deterministic proof calls the real POST route and real withinEssentialLimit, with existing synthetic auth/startPitch route boundaries and real MemoryRedis counters. One legitimate draft at23:59:01 creates the TTL key. Five remaining requests at00:00:00 still fit it. At00:00:01 it expires.1440 full windows of six admitted requests then fit before24:00:00 (last23:59:01). No reset, manual key write/delete, changed limit or malformed reply. Each window's seventh request is refused.
 

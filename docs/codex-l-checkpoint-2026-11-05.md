@@ -335,3 +335,26 @@ The environment cwd moved to /workspace/scratch/e976a72ed984. Existing worktrees
 - O item 643 não foi assumido; nenhuma quinta unidade foi aberta.
 - Três MÉDIOS de `lib/imported-purchases.ts` seguem somente na prova `codex/l-imported-purchases-read-proof@875d73a704fb319cc085d09c87235654c53da161`, sem atribuição/reserva/correção.
 - Próximo despertar válido: atribuição nominal da Claude 4. Antes de código: auditoria fresca de reservas/PRs/canal e linha `RESERVA:`. AV12: sem polling vazio.
+
+
+## Retomada — 06/11/2026 06h27 (Fortaleza) — C4 atribuiu os três MÉDIOS; PR #2794 aberto
+
+- Checkpoint lido primeiro no commit `9f52dc10e52e0efe339ea9b5333e13efad3206ce`, blob `30430d7748c7143c9b6491d3639f585f52ca039d`.
+- Main obrigatório relido: `CLAUDE.md` `8e8545b0387889495232774b0c9d6b3bb4804e67`; `AGENTS.md` `472c4251f571744ab013f61abdf93452f8f2e02c`; índice de reservas `33627443418f4bc924217cb5e862688d2735eac2`; reservas Claude 1/2/3/4/Codex `2a440d6`/`5fbc517`/`1dab1d7`/`ec5f303`/`a9e59b6`; caixa Codex `d989304`.
+- Canal fresco conferido por bytes Base64: blob declarado/calculado `cbd305e965fda794c259797819f5e20c02cc796f`. A ordem nominal `C4-20261106-0705-L-28` atribuiu ao Codex L os três MÉDIOS de `lib/imported-purchases.ts`, exigindo prova permanente, regra 30 nos chamadores e duas revisões independentes.
+- Auditoria fresca de sobreposição: #2781 no head `d77a5788b369b7e217dc801710cbd740b9ae3094` altera somente `lib/group-buy.ts` e dois testes Stripe; #2791 no head `7df9dbb1fbde6490ca0fc5a838565be158631c9c` não toca `lib/imported-purchases.ts`. Nenhuma reserva do main ocupava os dois caminhos planejados.
+- RESERVA publicada antes do código para `codex/l-imported-purchases-exact-replies`, `lib/imported-purchases.ts` e `tests/imported-purchases-exact-replies.test.ts`: commit de canal `038db97c0ada0d3e495b94d6407708beeb4424a8`, blob `5576137d1314b702ce2d762511e377cc80a28d77`.
+- RED remoto `79a70cd5f2666260c8e69ef161e253b1d458c39e`: 16 controles, 10 falhas e 6 passes. As falhas reproduzem leitura parcial/malformada virando ausência/sucesso, acknowledgements string/parciais e o chamador real `paidCourses` abrindo acesso com estado desconhecido.
+- Implementação final no PR #2794, head exato `ef8050297c705b007578f80249ee6daa9d38d230`: envelopes exatos; qualquer resposta parcial ou tipo desconhecido lança `UnknownReplyError`; um “sim” legível sobrevive a vizinho malformado; “não/nada” só nasce de leitura completa e legível; nenhuma leitura extra, readback ou teto maior.
+- GREEN: regressão 16/16; ligados 206/206 (`api-write` 26, `person-erasure` 32, `buyer-library` 10, `paypal-numbers` 13, `group-buy` 61, `preorders` 31, `gifts` 33). ESLint, `scripts/check_public_data.py` 3803/0 e `git diff --check` verdes.
+- O TSC global local não é alegado verde: restaram apenas seis erros preexistentes de `LayoutProps` gerado em quatro layouts; nenhum erro nos arquivos alterados.
+- Blobs finais remotos/localmente idênticos: `lib/imported-purchases.ts` `31968f19404443dffa22447e3dcd59506a60c439`; teste `d0a57faa6afc1aa0a27926d51755f97b232f6bbe`.
+- Pedido de revisão independente a Revisor 1 e Revisor 2 publicado no canal após nova verificação Base64: commit `a43aab5d109a3bed9da625d028f8ed031de5541e`, blob resultante `147fa1008595f46a1ddc5cf134daf743a35015e2`; ID `L-20261106-0626-PR-1`.
+- Nenhum dos quatro produtos concluídos foi reaberto. Nenhum merge, cancelamento, rerun, alteração de head durante CI, documento de reserva ou produto alheio foi tocado.
+
+### Próxima retomada
+
+1. Ler este checkpoint primeiro e as fontes obrigatórias/canal fresco com SHA Git calculado sobre bytes Base64 antes de append.
+2. PR #2794: confirmar head exato `ef8050297c705b007578f80249ee6daa9d38d230`; não mover durante CI ativa e não pollar em rodadas.
+3. Aguardar Revisor 1 e Revisor 2. Corrigir qualquer achado com teste RED antes; sem achado grave/médio, ainda exigir os nove agregadores `success` do head exato e mergeabilidade fresca antes de incorporação.
+4. Os quatro produtos antigos permanecem MERGED (#2350 `8806d4a8`, #2383 `25b24e48`, #2526 `5e7b3f72`, #2475 `c7a4facb`); não recriar nem reabrir.

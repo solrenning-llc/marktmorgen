@@ -1,0 +1,220 @@
+=== g2175-export-expiry.proof.ts ===
+
+Normal export actually seals, opens and restores all three keys
+  ok    all keys round-trip
+
+Invalid finite JSON numbers must not be classified as expired
+  ok    -3: one reply replaced and source still exists
+  FAIL  -3: whole export refuses unknown expiry
+        expected [false,"unreadable"]
+        got      [true,2]
+ARTIFACT {"expiry":-3,"count":2,"present":false,"source":"value-1","restored":null}
+  FAIL  -3: never verify a complete-looking artifact missing a live source key
+        expected false
+        got      true
+  ok    -0.5: one reply replaced and source still exists
+  FAIL  -0.5: whole export refuses unknown expiry
+        expected [false,"unreadable"]
+        got      [true,2]
+ARTIFACT {"expiry":-0.5,"count":2,"present":false,"source":"value-1","restored":null}
+  FAIL  -0.5: never verify a complete-looking artifact missing a live source key
+        expected false
+        got      true
+  ok    1.5: one reply replaced and source still exists
+  FAIL  1.5: whole export refuses unknown expiry
+        expected [false,"unreadable"]
+        got      [true,2]
+ARTIFACT {"expiry":1.5,"count":2,"present":false,"source":"value-1","restored":null}
+  FAIL  1.5: never verify a complete-looking artifact missing a live source key
+        expected false
+        got      true
+  ok    -9007199254740992: one reply replaced and source still exists
+  FAIL  -9007199254740992: whole export refuses unknown expiry
+        expected [false,"unreadable"]
+        got      [true,2]
+ARTIFACT {"expiry":-9007199254740992,"count":2,"present":false,"source":"value-1","restored":null}
+  FAIL  -9007199254740992: never verify a complete-looking artifact missing a live source key
+        expected false
+        got      true
+
+Legitimate sentinel and timestamp controls keep their semantics
+  ok    gone: exported row count
+  ok    gone: retention
+  ok    persistent: exported row count
+  ok    persistent: retention
+  ok    epoch: exported row count
+  ok    epoch: retention
+  ok    past: exported row count
+  ok    past: retention
+  ok    capture: exported row count
+  ok    capture: retention
+  ok    future: exported row count
+  ok    future: retention
+  ok    largest safe: exported row count
+  ok    largest safe: retention
+
+Existing refusals remain refusals
+  ok    null (object): unreadable
+  ok     (string): unreadable
+  ok     (object): unreadable
+  ok    true (boolean): unreadable
+  ok    false (boolean): unreadable
+  ok    01 (string): unreadable
+  ok    1793948400000 (string): unreadable
+  ok    NaN (number): unreadable
+  ok    Infinity (number): unreadable
+  ok    9007199254740992 (number): unreadable
+
+37 checks, 8 failing.
+
+=== backup-export-expiry-exact.test.ts ===
+
+Control: exact endings export every key
+  ok    every key exported
+
+An ending in another shape is unknown: the export is refused, the key never left out
+  ok    PEXPIRETIME answering nil: refused as unreadable, never an export without the key
+  ok    PEXPIRETIME answering an empty text: refused as unreadable, never an export without the key
+  ok    PEXPIRETIME answering a list: refused as unreadable, never an export without the key
+  ok    PEXPIRETIME answering true: refused as unreadable, never an export without the key
+  ok    PEXPIRETIME answering false: refused as unreadable, never an export without the key
+  FAIL  PEXPIRETIME answering -3: refused as unreadable, never an export without the key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  PEXPIRETIME answering -0.5: refused as unreadable, never an export without the key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  PEXPIRETIME answering 1.5: refused as unreadable, never an export without the key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  PEXPIRETIME answering -Infinity: refused as unreadable, never an export without the key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  PEXPIRETIME answering an unsafe negative integer: refused as unreadable, never an export without the key
+        expected [false,"unreadable"]
+        got      [true,5]
+
+11 checks, 5 failing.
+
+=== g2175-export-expiry.proof.ts ===
+
+Normal export actually seals, opens and restores all three keys
+  ok    all keys round-trip
+
+Invalid finite JSON numbers must not be classified as expired
+  ok    -3: one reply replaced and source still exists
+  ok    -3: whole export refuses unknown expiry
+ARTIFACT {"expiry":-3,"count":-1,"present":false,"source":"value-1","restored":null}
+  ok    -3: never verify a complete-looking artifact missing a live source key
+  ok    -0.5: one reply replaced and source still exists
+  ok    -0.5: whole export refuses unknown expiry
+ARTIFACT {"expiry":-0.5,"count":-1,"present":false,"source":"value-1","restored":null}
+  ok    -0.5: never verify a complete-looking artifact missing a live source key
+  ok    1.5: one reply replaced and source still exists
+  ok    1.5: whole export refuses unknown expiry
+ARTIFACT {"expiry":1.5,"count":-1,"present":false,"source":"value-1","restored":null}
+  ok    1.5: never verify a complete-looking artifact missing a live source key
+  ok    -9007199254740992: one reply replaced and source still exists
+  ok    -9007199254740992: whole export refuses unknown expiry
+ARTIFACT {"expiry":-9007199254740992,"count":-1,"present":false,"source":"value-1","restored":null}
+  ok    -9007199254740992: never verify a complete-looking artifact missing a live source key
+
+Legitimate sentinel and timestamp controls keep their semantics
+  ok    gone: exported row count
+  ok    gone: retention
+  ok    persistent: exported row count
+  ok    persistent: retention
+  ok    epoch: exported row count
+  ok    epoch: retention
+  ok    past: exported row count
+  ok    past: retention
+  ok    capture: exported row count
+  ok    capture: retention
+  ok    future: exported row count
+  ok    future: retention
+  ok    largest safe: exported row count
+  ok    largest safe: retention
+
+Existing refusals remain refusals
+  ok    null (object): unreadable
+  ok     (string): unreadable
+  ok     (object): unreadable
+  ok    true (boolean): unreadable
+  ok    false (boolean): unreadable
+  ok    01 (string): unreadable
+  ok    1793948400000 (string): unreadable
+  ok    NaN (number): unreadable
+  ok    Infinity (number): unreadable
+  ok    9007199254740992 (number): unreadable
+
+37 checks, all passing.
+
+=== backup-export-expiry-exact.test.ts ===
+
+Control: exact endings export every key
+  ok    every key exported
+
+An ending in another shape is unknown: the export is refused, the key never left out
+  ok    PEXPIRETIME answering nil: refused as unreadable, never an export without the key
+  ok    PEXPIRETIME answering an empty text: refused as unreadable, never an export without the key
+  ok    PEXPIRETIME answering a list: refused as unreadable, never an export without the key
+  ok    PEXPIRETIME answering true: refused as unreadable, never an export without the key
+  ok    PEXPIRETIME answering false: refused as unreadable, never an export without the key
+  ok    PEXPIRETIME answering -3: refused as unreadable, never an export without the key
+  ok    PEXPIRETIME answering -0.5: refused as unreadable, never an export without the key
+  ok    PEXPIRETIME answering 1.5: refused as unreadable, never an export without the key
+  ok    PEXPIRETIME answering -Infinity: refused as unreadable, never an export without the key
+  ok    PEXPIRETIME answering an unsafe negative integer: refused as unreadable, never an export without the key
+
+11 checks, all passing.
+
+=== g2783-batched-expiry.proof.ts ===
+  FAIL  -3: refused after the second batch, not a partial snapshot
+        expected {"ok":false,"reason":"unreadable","commands":9}
+        got      {"ok":true,"snapshot":{"version":1,"capturedAt":1793948400000,"rows":[{"key":"nl:g:batched:0","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjAifQ==","expiresAt":null},{"key":"nl:g:batched:1","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjEifQ==","expiresAt":null},{"key":"nl:g:batched:3","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjMifQ==","expiresAt":null},{"key":"nl:g:batched:4","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjQifQ==","expiresAt":null},{"key":"nl:g:batched:5","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjUifQ==","expiresAt":null},{"key":"nl:g:batched:6","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjYifQ==","expiresAt":null}]},"commands":15,"scans":1}
+  FAIL  -3: no later batch or source mutation
+        expected [4,["v0","v1","v2","v3","v4","v5","v6"]]
+        got      [7,["v0","v1","v2","v3","v4","v5","v6"]]
+  FAIL  -0.5: refused after the second batch, not a partial snapshot
+        expected {"ok":false,"reason":"unreadable","commands":9}
+        got      {"ok":true,"snapshot":{"version":1,"capturedAt":1793948400000,"rows":[{"key":"nl:g:batched:0","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjAifQ==","expiresAt":null},{"key":"nl:g:batched:1","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjEifQ==","expiresAt":null},{"key":"nl:g:batched:3","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjMifQ==","expiresAt":null},{"key":"nl:g:batched:4","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjQifQ==","expiresAt":null},{"key":"nl:g:batched:5","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjUifQ==","expiresAt":null},{"key":"nl:g:batched:6","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjYifQ==","expiresAt":null}]},"commands":15,"scans":1}
+  FAIL  -0.5: no later batch or source mutation
+        expected [4,["v0","v1","v2","v3","v4","v5","v6"]]
+        got      [7,["v0","v1","v2","v3","v4","v5","v6"]]
+  FAIL  -Infinity: refused after the second batch, not a partial snapshot
+        expected {"ok":false,"reason":"unreadable","commands":9}
+        got      {"ok":true,"snapshot":{"version":1,"capturedAt":1793948400000,"rows":[{"key":"nl:g:batched:0","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjAifQ==","expiresAt":null},{"key":"nl:g:batched:1","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjEifQ==","expiresAt":null},{"key":"nl:g:batched:3","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjMifQ==","expiresAt":null},{"key":"nl:g:batched:4","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjQifQ==","expiresAt":null},{"key":"nl:g:batched:5","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjUifQ==","expiresAt":null},{"key":"nl:g:batched:6","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjYifQ==","expiresAt":null}]},"commands":15,"scans":1}
+  FAIL  -Infinity: no later batch or source mutation
+        expected [4,["v0","v1","v2","v3","v4","v5","v6"]]
+        got      [7,["v0","v1","v2","v3","v4","v5","v6"]]
+  FAIL  -1152921504606847000: refused after the second batch, not a partial snapshot
+        expected {"ok":false,"reason":"unreadable","commands":9}
+        got      {"ok":true,"snapshot":{"version":1,"capturedAt":1793948400000,"rows":[{"key":"nl:g:batched:0","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjAifQ==","expiresAt":null},{"key":"nl:g:batched:1","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjEifQ==","expiresAt":null},{"key":"nl:g:batched:3","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjMifQ==","expiresAt":null},{"key":"nl:g:batched:4","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjQifQ==","expiresAt":null},{"key":"nl:g:batched:5","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjUifQ==","expiresAt":null},{"key":"nl:g:batched:6","dump":"AE1NRFVNUDF7InQiOiJzdHJpbmciLCJ2IjoidjYifQ==","expiresAt":null}]},"commands":15,"scans":1}
+  FAIL  -1152921504606847000: no later batch or source mutation
+        expected [4,["v0","v1","v2","v3","v4","v5","v6"]]
+        got      [7,["v0","v1","v2","v3","v4","v5","v6"]]
+
+8 checks, 8 failing.
+
+=== g2783-batched-expiry.proof.ts ===
+  ok    -3: refused after the second batch, not a partial snapshot
+  ok    -3: no later batch or source mutation
+  ok    -0.5: refused after the second batch, not a partial snapshot
+  ok    -0.5: no later batch or source mutation
+  ok    -Infinity: refused after the second batch, not a partial snapshot
+  ok    -Infinity: no later batch or source mutation
+  ok    -1152921504606847000: refused after the second batch, not a partial snapshot
+  ok    -1152921504606847000: no later batch or source mutation
+
+8 checks, all passing.
+
+21 checks, all passing.
+27 checks, all passing.
+11 checks, all passing.
+22 checks, all passing.
+26 checks, all passing.
+41 checks, all passing.
+11 checks, all passing.
+96 checks, all passing.
+32 checks, all passing.
+Public data check: 3914 tracked files; 0 file(s) require correction.

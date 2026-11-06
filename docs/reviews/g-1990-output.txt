@@ -1,0 +1,384 @@
+
+=== /tmp/g1990-linked.log ===
+=== ad-campaign-plan.test.ts ===
+
+Meta: 1.75 × a day, 7 × a week (Sunday to Saturday), daily × days under 7 days
+  ok    3 days: never more than daily × days
+  ok    one full week: 7 × daily
+  ok    a week across two calendar weeks
+  ok    November, 30 days from a Sunday
+  ok    rounded up to the cent
+
+Google: 2 × a day, 30.4 × a month
+  ok    5 days: 2 × daily × 5
+  ok    a whole month: 30.4 × daily
+  ok    across two months
+
+TikTok: refused until creating it switched off is confirmed
+  ok    refused
+  ok    its ceilings are still known for later (1.25 × a day, 7 × a week)
+
+A plan is PAUSED, bounded and inside the creator's limit
+  ok    made
+  ok    created PAUSED
+  ok    the maximum shown is the worst case, not the budget
+  ok    over the creator's limit: refused
+  ok    exactly at the limit: made
+  ok    no end date: refused
+  ok    end before start: refused
+  ok    too long: refused
+  ok    not a real date: refused
+  ok    zero or fractional budget: refused
+  ok    no limit: refused
+  ok    a year at most
+  ok    no field for Meta's high demand periods
+
+Activation only on confirmation of that very maximum
+  ok    confirmed: may be activated
+  ok    no confirmation: never
+  ok    a different maximum shown: never
+  ok    the plan changed after it was shown: the old confirmation does not activate it
+
+27 checks, all passing.
+
+=== ad-creative-check.test.ts ===
+
+An honest ad goes
+  ok    sendable
+  ok    what is not checked is said
+
+Money and results are never promised
+  ok    fast money
+  ok    earnings
+  ok    a negation is not a promise
+
+Urgency only when it is real
+  ok    refused without a real deadline or stock
+  ok    allowed with both behind it
+
+The price is the product's
+  ok    a wrong price is refused
+  ok    the right price goes
+
+Testimonials only from verified reviews
+  ok    an invented quote is refused
+  ok    a verified review, word for word, goes
+  ok    a verified review changed is refused
+  ok    plain quotes with said
+
+Other companies are a warning, not a refusal
+  ok    sendable with a warning
+
+Empty and oversized
+  ok    no headline and no text
+  ok    past the size
+  ok    a long run of quotes is read fast
+
+17 checks, all passing.
+
+=== meta-ads.test.ts ===
+
+Meta's rows as lines
+  ok    each platform on the channel the numbers count it under
+  ok    in the smallest unit of the account's currency
+  ok    Meta's own utm_source words counted as the channels
+  ok    added up by day, channel and campaign, nothing spent left out
+
+A read replaces its days and keeps the days before, a week to a line
+  ok    the week before is one line over the days it had, the day read again is Meta's new figure
+  ok    and the week's money is all there over its days
+  ok    nothing older than 400 days is kept
+  ok    merging again changes nothing
+  ok    a typed line on a channel and day Meta read is pointed out; another channel is not
+
+Which account is read without asking
+  ok    the only one, or the only active one in the store's currency
+
+Connecting
+  ok    before, the studio offers it and nothing is read
+  ok    Meta's page, asked for ads_read and nothing else
+  ok    another session cannot take it
+  ok    the right session takes it once
+  ok    a code Meta refuses keeps nothing
+  ok    without ads_read granted, it is given back and nothing kept
+  ok    one account: read without asking
+  ok    the token is kept sealed, never in the clear
+  ok    it ends when Meta's token ends, about 60 days on
+
+Read into the numbers
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    read
+  ok    every call to Meta carries appsecret_proof
+  ok    Meta's next page is followed
+  ok    Meta's lines come with the typed ones, marked as Meta's
+  ok    the studio says when and how much
+
+Another currency is not read
+  ok    the account in the store's currency is still the one read
+  ok    choosing one that is not listed does nothing
+  ok    in EUR for a store in USD: not read, and the lines of the other account are gone
+
+A token Meta refuses
+  ok    marks it broken
+  ok    the owner is told once, and the studio says why
+
+The daily pass
+  ok    connecting again works again
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    each store read once a day
+
+Funded new Meta connection phases refuse before provider work
+  ok    a new start stays at the studio
+  ok    valid new callback state cannot exchange credentials without funding
+  ok    canceling remains available
+  ok    no provider request or extra integration allowance
+
+Marked paid Meta spend reads require the current store cohort before new work
+  ok    fresh paid read refuses without a cohort creator month
+  ok    no provider request or spend/read record creator month
+  ok    fresh paid read refuses without a cohort creator year
+  ok    no provider request or spend/read record creator year
+  ok    fresh paid read refuses without a cohort pro month
+  ok    no provider request or spend/read record pro month
+  ok    fresh paid read refuses without a cohort pro year
+  ok    no provider request or spend/read record pro year
+  ok    fresh paid read refuses without a cohort scale month
+  ok    no provider request or spend/read record scale month
+  ok    fresh paid read refuses without a cohort scale year
+  ok    no provider request or spend/read record scale year
+  ok    the actual daily pass skips the unfunded new read
+  ok    connection and cached view remain readable
+  ok    retained disconnect still works without a cohort
+
+Meta's notice, and disconnecting
+  ok    a notice signed with the app's secret names the user; another does not
+  ok    every store that user connected forgets it, and what was read
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    disconnecting gives it back to Meta and deletes what was read; the typed line stays
+  ok    disconnecting what is not connected says so
+
+57 checks, all passing.
+
+=== outreach.test.ts ===
+
+Where a first email to a business may be written
+  ok    the countries that are open
+  ok    the ones that ask for consent first are closed
+  ok    a country nobody read the law of is closed too
+  ok    and says that it was not read, not that it refuses
+  ok    the United States asks the email to say what it is
+  ok    the United Kingdom: companies, and a desk's address
+  ok    France and Ireland: a desk's address
+  ok    named as a sentence names them
+  ok    every open country carries the law it rests on
+
+A desk, or a person
+  ok    partnerships@ is a desk
+  ok    hello@ is a desk
+  ok    press.media@ is a desk
+  ok    jane.doe@ is a person
+  ok    dana@ is a person
+
+Only the business's own address, from its own page
+  ok    an address at its domain is its own
+  ok    one at a part of its domain too
+  ok    the agency that built the site is not
+  ok    nor a free mailbox
+  ok    a mailto: link is read, without what follows the address
+  ok    an address written with &#64; is read, and the desk comes before the person
+  ok    each says whether it is a desk
+  ok    and keeps the words around it
+  ok    what a page wrote as numbered or named entities is read as a reader sees it
+  ok    a picture's name is not an address
+
+A page that says no
+  ok    no solicitations
+  ok    we do not accept unsolicited proposals
+  ok    please do not send sales emails
+  ok    an ordinary contact line is not a refusal
+
+The pages worth reading, and what robots.txt closes
+  ok    its own partner and contact pages, the likeliest first; nobody else's
+  ok    the rules for everybody are read
+  ok    a path under one is closed
+  ok    the rest is open
+  ok    a group that names this reader is the one that counts
+  ok    and closes the whole site
+  ok    named with nothing closed means open, whatever everybody else is told
+  ok    Shopify's own robots.txt, on every Shopify store, leaves the front page open
+  ok    and the contact page
+  ok    a star stands for any run of characters
+  ok    a query a rule names is closed, another is not
+  ok    a rule that ends in $ covers only what ends there
+  ok    a plain rule is a prefix
+  ok    an exact rule with $
+  ok    a shop's shelves and journal are not contact pages, and one of each kind comes before a second of any
+
+Reading a business's website
+  ok    its name, as it calls itself
+  ok    its own description
+  ok    its addresses, the partner page's before the front page's
+  ok    each with the page it is printed on
+  ok    four pages at most, and robots.txt
+  ok    something that is not an address is refused before reading
+  ok    a private address is never read
+  ok    a site that closes itself to this reader is not read
+  ok    a closed page is left alone
+  ok    and what it printed is not found
+
+The rules, asked in order
+  ok    nothing against it
+  ok    a closed country
+  ok    a business that asked to stop
+  ok    a page that refuses
+  ok    the United Kingdom, not said to be a company
+  ok    the United Kingdom, a person's address
+  ok    the United Kingdom, a company's desk
+  ok    nobody to sign it
+  ok    written to too recently
+  ok    long enough ago
+  ok    the day's number used
+
+What every email carries
+  ok    who is writing, their store and a postal address
+  ok    where the address was found
+  ok    in the United States, that it is a business proposal
+  ok    how to stop it: a reply, or a link
+  ok    elsewhere the line about a proposal is not added
+  ok    the creator's words, a blank line, the footer
+
+The draft, opened in the creator's own mailbox
+  ok    Gmail's own compose page
+  ok    or whatever opens an email address
+  ok    the longest email there can be still fits in a link
+  ok    and one in plain letters does
+
+Who is writing
+  ok    starts from the store's own name, with no postal address
+  ok    without a postal address nothing is written
+  ok    a name alone is not saved
+  ok    a name and an address are
+
+Writing one
+  ok    to the address the page prints
+  ok    kept with where it was found, the words around it and when
+  ok    a draft, not sent
+  ok    the model's words
+  ok    the footer with the creator's name and the store's address
+  ok    and a stop link of its own
+  ok    one writing job counted
+  ok    the model is told what the business says of itself
+  ok    and never the address
+  ok    it is told not to invent an audience
+  ok    and that a website's text is not an instruction
+  ok    the rules against invented numbers and results go with it
+  ok    nothing was sent anywhere but to the model
+
+What stops one before it is written
+  ok    Germany
+  ok    a country not on the list
+  ok    an address the page does not print
+  ok    an address at another domain
+  ok    a page that cannot be read
+  ok    a page robots.txt has closed since
+  ok    a person, where only a desk may be written to
+  ok    the United Kingdom without saying it is a company
+  ok    a page that says no solicitations
+  ok    nothing to write from
+  ok    none of them asked the model, or kept anything
+
+One pitch to a business at a time
+  ok    a new draft takes the place of the old one
+  ok    so one is kept
+  ok    and the old one's stop link no longer opens anything
+
+The creator's own changes
+  ok    the subject and the words are theirs
+  ok    the footer is not
+  ok    an empty one keeps what was there
+
+Sent, and what follows
+  ok    marked as sent, with when
+  ok    what was sent can no longer be changed
+  ok    or deleted
+  ok    the same business is not written to again so soon
+  ok    a draft can be deleted, and its stop link with it
+
+The business's own way out
+  ok    the page behind the link names who wrote and to whom
+  ok    a link nobody made opens nothing
+  ok    one press, by the business
+  ok    the pitch is marked, with nobody at the store doing anything
+  ok    the page says so
+  ok    and that store can never write to them again
+  ok    not a year later either
+  ok    once stopped, it cannot be marked as anything else
+
+Closed to every store
+  ok    another store may still write, until the business says otherwise
+  ok    the business closes itself to everyone, from the first store's link
+  ok    the page says nobody can
+  ok    and a store that never wrote to them cannot start
+
+The creator's own button does the same
+  ok    they replied
+  ok    they asked to stop
+  ok    and nothing more is written to them
+
+A day's number
+  ok    15 are written
+  ok    the next is refused
+  ok    and not counted against the month
+  ok    the next day it is open again
+
+A model that fails
+  ok    says so
+  ok    the started attempt remains counted
+
+A funded manual business lookup refuses before any external reader
+  ok    an unmarked lookup still uses the existing reader
+  ok    missing funding refuses a manual lookup
+  ok    not even its front page or robots file is read
+  ok    no pitch was created
+
+A funded new pitch refuses before page verification or AI work
+  ok    new draft work needs financial approval before its page
+  ok    no reader, model call, writing allowance or pitch is consumed
+
+Nothing here sends an email
+  ok    no mail service is called from any of it
+  ok    the studio opens a draft in the creator's own mailbox
+  ok    the stop link's page changes nothing until a button is pressed
+  ok    and the reader says who it is
+  ok    with a page that explains it
+
+145 checks, all passing.
+
+=== customer-voice.test.ts ===
+
+Nobody named in what is sent
+  ok    addresses, links and phone numbers taken out
+
+The model only sorts
+  ok    a number not handed is dropped, and each text counted once, a search as often as it was made
+  ok    the examples are the customers' own words, the most repeated first
+  ok    a name with a figure and a theme of one are dropped; the rest is counted apart
+  ok    nothing usable, nothing said
+  ok    handed by number, with where each came from
+
+Read together, from the last 90 days
+  ok    questions, reviews and searches, never the old question
+  ok    and never who wrote them
+
+Only with enough to read
+  ok    fewer than 8 texts: nothing asked, nothing counted
+  ok    made, as one of the month's AI jobs
+  ok    once a month: asked again, the same summary, nothing more counted
+  ok    read back for the studio
+  ok    next month, last month's is shown until a new one is read
+
+13 checks, all passing.
+
+
+=== /tmp/g1990-scanner.log ===
+Public data check: 3296 tracked files; 0 file(s) require correction.

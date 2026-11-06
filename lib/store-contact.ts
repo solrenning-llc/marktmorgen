@@ -17,7 +17,7 @@ import { createHash } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured } from "@/lib/redis";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { isHouseStore } from "@/lib/house-store";
 import type { Store } from "@/lib/store";
 import { fileContact } from "@/lib/inbox";
@@ -51,8 +51,8 @@ export async function sendContact(input: { store: Store; name: string; email: st
   const email = normaliseEmail(raw);
   const name = line(input.name, MAX_NAME);
   const who = store.statsId ?? store.handle;
-  if (!(await withinLimit("contact-ip", `${who}:${input.ip}`, 3, 3_600))) return "limited";
-  if (!(await withinLimit("contact-store", who, MAX_PER_DAY, 86_400))) return "limited";
+  if (!(await withinEssentialLimit("contact-ip", `${who}:${input.ip}`, 3, 3_600))) return "limited";
+  if (!(await withinEssentialLimit("contact-store", who, MAX_PER_DAY, 86_400))) return "limited";
   const from = name || email;
   const sent = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,

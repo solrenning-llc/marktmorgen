@@ -49,8 +49,8 @@ test("the form cannot be turned on somebody's inbox, or run up a bill", () => {
   assert.ok(ASKS_PER_STORE_DAY * 0.0009 < 0.25);
   assert.equal(ASK_AFTER_SECONDS, 3600, "the same hour the other reminder waits");
   const src = code("lib/checkout-ask.ts");
-  assert.match(src, /withinLimit\("remind-ask", ip, ASKS_PER_ADDRESS_HOUR, 3600\)/);
-  assert.match(src, /withinLimit\("remind-store", statsId, ASKS_PER_STORE_DAY, 86_400\)/);
+  assert.match(src, /withinEssentialLimit\("remind-ask", ip, ASKS_PER_ADDRESS_HOUR, 3600\)/);
+  assert.match(src, /withinEssentialLimit\("remind-store", statsId, ASKS_PER_STORE_DAY, 86_400\)/);
   // A product's ask and a cart's go through the one place those limits are.
   assert.equal((src.match(/return keep\(store, /g) ?? []).length, 2);
 });

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinEssentialLimit } from "@/lib/request-guard";
 import { readListing } from "@/lib/catalog";
 import { askPlace, readGroup } from "@/lib/group-buy";
 import { GROUP_ID } from "@/lib/group-rules";
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
   if (honeypot.trim()) return away("sent");
   // Each press may send an email, so it is counted like the other forms that
   // send one: per connection and purchase here, per purchase in askPlace.
-  if (!(await withinLimit("group-place", `${clientAddress(request)}|${id}`, 10, 600))) return away("slow");
+  if (!(await withinEssentialLimit("group-place", `${clientAddress(request)}|${id}`, 10, 600))) return away("slow");
   if (!canConfirm(store)) return away("unavailable");
   try {
     const group = await readGroup(id);

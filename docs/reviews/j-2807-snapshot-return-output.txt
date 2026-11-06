@@ -1,0 +1,996 @@
+
+===== COMPLETE AUTHOR RED f917 — unchanged33 + identical permanent33 =====
+SOURCE f91703c3623b45510bdab4eba2ebe365f0657e6e
+
+=== j-2807-preflight.proof.ts ===
+NETWORK GUARDS PASS before graph
+  ok    the SDK's actual dispatcher refuses an unregistered destination locally
+
+healthy
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"healthy","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":0,"target":{"task":false,"submission":false,"files":[],"all":[],"room":null,"provider":false},"otherRetained":true,"providerDeletes":1,"bytesBefore":"2000","bytesAfter":"1000","complete":true,"retained":false,"orphan":false}
+
+unknown-envelope
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"unknown-envelope","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":1,"target":{"task":false,"submission":false,"files":[],"all":[],"room":null,"provider":false},"otherRetained":true,"providerDeletes":1,"bytesBefore":"2000","bytesAfter":"1000","complete":true,"retained":false,"orphan":false}
+
+foreign-first
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"foreign-first","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":1,"target":{"task":false,"submission":false,"files":[],"all":[],"room":null,"provider":false},"otherRetained":true,"providerDeletes":1,"bytesBefore":"2000","bytesAfter":"1000","complete":true,"retained":false,"orphan":false}
+
+stale-own-golden
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  FAIL  completed removal never leaves assignment work and its file orphaned
+        expected false
+        got      true
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"stale-own-golden","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":1,"target":{"task":true,"submission":true,"files":["stores/189f4864a8f387a19d6ac02e/tasks/c4eb41bb87cc403c816163fd8c643b90/bse6czzk1xz0/0434ec7689910af67aadc9658d3a1c2d/11111111111111111111111111111111.pdf","1000"],"all":["bse6czzk1xz0|0434ec7689910af67aadc9658d3a1c2d"],"room":"1072","provider":true},"otherRetained":true,"providerDeletes":0,"bytesBefore":"2000","bytesAfter":"2000","complete":false,"retained":false,"orphan":true}
+
+33 checks, 1 failing.
+GROUP_EXIT j-2807-preflight.proof.ts 1
+
+=== j-2807-preflight.test.ts ===
+NETWORK GUARDS PASS before graph
+  ok    the SDK's actual dispatcher refuses an unregistered destination locally
+
+healthy
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"healthy","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":0,"target":{"task":false,"submission":false,"files":[],"all":[],"room":null,"provider":false},"otherRetained":true,"providerDeletes":1,"bytesBefore":"2000","bytesAfter":"1000","complete":true,"retained":false,"orphan":false}
+
+unknown-envelope
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"unknown-envelope","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":1,"target":{"task":false,"submission":false,"files":[],"all":[],"room":null,"provider":false},"otherRetained":true,"providerDeletes":1,"bytesBefore":"2000","bytesAfter":"1000","complete":true,"retained":false,"orphan":false}
+
+foreign-first
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"foreign-first","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":1,"target":{"task":false,"submission":false,"files":[],"all":[],"room":null,"provider":false},"otherRetained":true,"providerDeletes":1,"bytesBefore":"2000","bytesAfter":"1000","complete":true,"retained":false,"orphan":false}
+
+stale-own-golden
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  FAIL  completed removal never leaves assignment work and its file orphaned
+        expected false
+        got      true
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"stale-own-golden","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":1,"target":{"task":true,"submission":true,"files":["stores/189f4864a8f387a19d6ac02e/tasks/16fc0909567a4b05a5f37015dd97f54d/7uvj89rmof15/0434ec7689910af67aadc9658d3a1c2d/11111111111111111111111111111111.pdf","1000"],"all":["7uvj89rmof15|0434ec7689910af67aadc9658d3a1c2d"],"room":"1072","provider":true},"otherRetained":true,"providerDeletes":0,"bytesBefore":"2000","bytesAfter":"2000","complete":false,"retained":false,"orphan":true}
+
+33 checks, 1 failing.
+GROUP_EXIT j-2807-preflight.test.ts 1
+
+===== EXACT FINAL855 — unchanged33 + permanent33 + assignment11 =====
+SOURCE 855819b6b38faf255bf7a85ea8a456dda60c458b
+
+=== j-2807-preflight.proof.ts ===
+NETWORK GUARDS PASS before graph
+  ok    the SDK's actual dispatcher refuses an unregistered destination locally
+
+healthy
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"healthy","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":0,"target":{"task":false,"submission":false,"files":[],"all":[],"room":null,"provider":false},"otherRetained":true,"providerDeletes":1,"bytesBefore":"2000","bytesAfter":"1000","complete":true,"retained":false,"orphan":false}
+
+unknown-envelope
+  ok    two real tasks, submissions, file indexes and provider files exist
+could not read a product or its course before removing it UnknownReply: Redis answered the course being removed with a reply it was not asked for; its outcome is unknown
+    at exactReplies (/dev/shm/j-2807-snapshot-nELqvi/j-2807-preflight.proof.ts.cjs:32910:48)
+    at readCourseExact (/dev/shm/j-2807-snapshot-nELqvi/j-2807-preflight.proof.ts.cjs:33630:17)
+    at async POST2 (/dev/shm/j-2807-snapshot-nELqvi/j-2807-preflight.proof.ts.cjs:119769:28)
+    at async scenario (/dev/shm/j-2807-snapshot-nELqvi/j-2807-preflight.proof.ts.cjs:120040:16)
+    at async main (/dev/shm/j-2807-snapshot-nELqvi/j-2807-preflight.proof.ts.cjs:120088:122)
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"unknown-envelope","status":503,"body":{"ok":false,"error":"unavailable"},"listed":true,"reads":1,"injections":1,"target":{"task":true,"submission":true,"files":["stores/086abc39c4aaaf7e6dba080b/tasks/a13b60945d2e4ed589b3fbda3b0cd21b/fqllevz3wku1/0434ec7689910af67aadc9658d3a1c2d/11111111111111111111111111111111.pdf","1000"],"all":["fqllevz3wku1|0434ec7689910af67aadc9658d3a1c2d"],"room":"1072","provider":true},"otherRetained":true,"providerDeletes":0,"bytesBefore":"2000","bytesAfter":"2000","complete":false,"retained":true,"orphan":false}
+
+foreign-first
+  ok    two real tasks, submissions, file indexes and provider files exist
+could not read a product or its course before removing it UnknownReply: Redis answered the course being removed with a reply it was not asked for; its outcome is unknown
+    at readCourseExact (/dev/shm/j-2807-snapshot-nELqvi/j-2807-preflight.proof.ts.cjs:33633:42)
+    at async POST2 (/dev/shm/j-2807-snapshot-nELqvi/j-2807-preflight.proof.ts.cjs:119769:28)
+    at async scenario (/dev/shm/j-2807-snapshot-nELqvi/j-2807-preflight.proof.ts.cjs:120040:16)
+    at async main (/dev/shm/j-2807-snapshot-nELqvi/j-2807-preflight.proof.ts.cjs:120088:122)
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"foreign-first","status":503,"body":{"ok":false,"error":"unavailable"},"listed":true,"reads":1,"injections":1,"target":{"task":true,"submission":true,"files":["stores/c34b1fa84679cc5689ec8a0f/tasks/37722cf39f2c486bb8143bb68c4a0b2c/r2y01xp6o3lz/0434ec7689910af67aadc9658d3a1c2d/11111111111111111111111111111111.pdf","1000"],"all":["r2y01xp6o3lz|0434ec7689910af67aadc9658d3a1c2d"],"room":"1072","provider":true},"otherRetained":true,"providerDeletes":0,"bytesBefore":"2000","bytesAfter":"2000","complete":false,"retained":true,"orphan":false}
+
+stale-own-golden
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"stale-own-golden","status":503,"body":{"ok":false,"error":"unavailable"},"listed":true,"reads":2,"injections":1,"target":{"task":true,"submission":true,"files":["stores/189f4864a8f387a19d6ac02e/tasks/4f4981642f814e969e7912f7cc666b58/q03e2nl622ua/0434ec7689910af67aadc9658d3a1c2d/11111111111111111111111111111111.pdf","1000"],"all":["q03e2nl622ua|0434ec7689910af67aadc9658d3a1c2d"],"room":"1072","provider":true},"otherRetained":true,"providerDeletes":0,"bytesBefore":"2000","bytesAfter":"2000","complete":false,"retained":true,"orphan":false}
+
+33 checks, all passing.
+GROUP_EXIT j-2807-preflight.proof.ts 0
+
+=== j-2807-preflight.test.ts ===
+NETWORK GUARDS PASS before graph
+  ok    the SDK's actual dispatcher refuses an unregistered destination locally
+
+healthy
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"healthy","status":200,"body":{"ok":true,"product":null},"listed":false,"reads":2,"injections":0,"target":{"task":false,"submission":false,"files":[],"all":[],"room":null,"provider":false},"otherRetained":true,"providerDeletes":1,"bytesBefore":"2000","bytesAfter":"1000","complete":true,"retained":false,"orphan":false}
+
+unknown-envelope
+  ok    two real tasks, submissions, file indexes and provider files exist
+could not read a product or its course before removing it UnknownReply: Redis answered the course being removed with a reply it was not asked for; its outcome is unknown
+    at exactReplies (/dev/shm/j-2807-snapshot-nELqvi/j-2807-preflight.test.ts.cjs:32910:48)
+    at readCourseExact (/dev/shm/j-2807-snapshot-nELqvi/j-2807-preflight.test.ts.cjs:33630:17)
+    at async POST2 (/dev/shm/j-2807-snapshot-nELqvi/j-2807-preflight.test.ts.cjs:119769:28)
+    at async scenario (/dev/shm/j-2807-snapshot-nELqvi/j-2807-preflight.test.ts.cjs:120040:16)
+    at async main (/dev/shm/j-2807-snapshot-nELqvi/j-2807-preflight.test.ts.cjs:120088:122)
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"unknown-envelope","status":503,"body":{"ok":false,"error":"unavailable"},"listed":true,"reads":1,"injections":1,"target":{"task":true,"submission":true,"files":["stores/086abc39c4aaaf7e6dba080b/tasks/86b3186555c1433eaeb2672a5c341869/kkys0l7p7dl6/0434ec7689910af67aadc9658d3a1c2d/11111111111111111111111111111111.pdf","1000"],"all":["kkys0l7p7dl6|0434ec7689910af67aadc9658d3a1c2d"],"room":"1072","provider":true},"otherRetained":true,"providerDeletes":0,"bytesBefore":"2000","bytesAfter":"2000","complete":false,"retained":true,"orphan":false}
+
+foreign-first
+  ok    two real tasks, submissions, file indexes and provider files exist
+could not read a product or its course before removing it UnknownReply: Redis answered the course being removed with a reply it was not asked for; its outcome is unknown
+    at readCourseExact (/dev/shm/j-2807-snapshot-nELqvi/j-2807-preflight.test.ts.cjs:33633:42)
+    at async POST2 (/dev/shm/j-2807-snapshot-nELqvi/j-2807-preflight.test.ts.cjs:119769:28)
+    at async scenario (/dev/shm/j-2807-snapshot-nELqvi/j-2807-preflight.test.ts.cjs:120040:16)
+    at async main (/dev/shm/j-2807-snapshot-nELqvi/j-2807-preflight.test.ts.cjs:120088:122)
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"foreign-first","status":503,"body":{"ok":false,"error":"unavailable"},"listed":true,"reads":1,"injections":1,"target":{"task":true,"submission":true,"files":["stores/c34b1fa84679cc5689ec8a0f/tasks/2876267181ba45cfbd704bc5945f81e7/5h4yhpxwexc1/0434ec7689910af67aadc9658d3a1c2d/11111111111111111111111111111111.pdf","1000"],"all":["5h4yhpxwexc1|0434ec7689910af67aadc9658d3a1c2d"],"room":"1072","provider":true},"otherRetained":true,"providerDeletes":0,"bytesBefore":"2000","bytesAfter":"2000","complete":false,"retained":true,"orphan":false}
+
+stale-own-golden
+  ok    two real tasks, submissions, file indexes and provider files exist
+  ok    only the first requested course GET was changed
+  ok    fallback resolves every target asset or refuses with every target asset retained
+  ok    a refusal retains identity and only a completed removal detaches it
+  ok    the other course remains byte-identical
+  ok    the other course's real work and provider file remain unchanged
+  ok    completed removal never leaves assignment work and its file orphaned
+  ok    only the synthetic Blob delete transport was requested
+OBSERVED {"mode":"stale-own-golden","status":503,"body":{"ok":false,"error":"unavailable"},"listed":true,"reads":2,"injections":1,"target":{"task":true,"submission":true,"files":["stores/189f4864a8f387a19d6ac02e/tasks/5a13e345b936424b8923cc4fe45776f7/uh0g58p3lkw3/0434ec7689910af67aadc9658d3a1c2d/11111111111111111111111111111111.pdf","1000"],"all":["uh0g58p3lkw3|0434ec7689910af67aadc9658d3a1c2d"],"room":"1072","provider":true},"otherRetained":true,"providerDeletes":0,"bytesBefore":"2000","bytesAfter":"2000","complete":false,"retained":true,"orphan":false}
+
+33 checks, all passing.
+GROUP_EXIT j-2807-preflight.test.ts 0
+
+=== assignment-drop-exact.test.ts ===
+NETWORK GUARDS PASS before graph
+✔ a healthy read returns every file and forgets the list (6.690513ms)
+✔ a file handed in after the reading stays listed, never lost (Revisor 1 on #2810) (0.736248ms)
+✔ the course route reads the work before it saves the course without the assignment (0.379762ms)
+✔ files: no reply: unknown, and the list of files is kept (0.348404ms)
+✔ files: null: unknown, and the list of files is kept (0.24558ms)
+✔ files: odd list: unknown, and the list of files is kept (0.342285ms)
+✔ files: a size not a whole number: unknown, and the list of files is kept (0.325289ms)
+✔ files: a name not text: unknown, and the list of files is kept (0.415224ms)
+✔ work list: null: unknown, and the list of files is kept (0.322365ms)
+✔ records: one reply missing: unknown, and the list of files is kept (0.783488ms)
+✔ a product's course: every assignment read before the product goes (Revisor 1 on #2810) (0.798501ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 21.533119
+GROUP_EXIT assignment-drop-exact.test.ts 0
+
+===== FROZEN IDENTITY14 AND HISTORICAL9 =====
+SOURCE 855819b6b38faf255bf7a85ea8a456dda60c458b
+
+=== j-2807-course-identity.proof.ts ===
+NETWORK GUARDS PASS before graph
+  ok    the intended single course GET was injected once
+  ok    a different valid course identity cannot authorize removal
+  ok    the other course record remains byte-identical
+  ok    the other actual comments remain stored
+  ok    the other course retains its counted comment room
+  ok    the other product remains listed
+  ok    the rejected target remains listed
+  ok    the intended single course GET was injected once
+  ok    a different valid course identity cannot authorize removal
+  ok    the other course record remains byte-identical
+  ok    the other actual comments remain stored
+  ok    the other course retains its counted comment room
+  ok    the other product remains listed
+  ok    the rejected target remains listed
+
+14 checks, all passing.
+GROUP_EXIT j-2807-course-identity.proof.ts 0
+
+=== j-2807-cleanup-retry.proof.ts ===
+NETWORK GUARDS PASS before graph
+
+Removing a product with a course
+  ok    the course has every comment family and counted room before removal
+  FAIL  product: one unapplied unknown comment deletion
+        expected [500,1]
+        got      [503,1]
+  ok    the product removal succeeds
+  ok    the removed course leaves no comment family or counted room
+
+Disabling an empty course after its last lesson was removed
+  ok    the last lesson is removed first
+  ok    course-level comment records and room still exist until the course goes
+  FAIL  course: unapplied unknown comment deletion
+        expected 500
+        got      503
+  ok    the empty course is disabled
+  ok    disabling leaves no course-level comment family or counted room
+
+9 checks, 2 failing.
+GROUP_EXIT j-2807-cleanup-retry.proof.ts 1
+
+===== THIRTEEN RELATED GROUPS =====
+SOURCE 855819b6b38faf255bf7a85ea8a456dda60c458b
+
+=== lesson-comments.test.ts ===
+NETWORK GUARDS PASS before graph
+
+On until the creator says otherwise
+  ok    on for a new course
+  ok    off when switched off
+
+A name, chosen once
+  ok    without a name nothing is written
+  ok    the name is kept, trimmed
+  ok    and used next time without asking
+  ok    no address anywhere in what is kept
+  ok    nothing written is refused
+
+Answers
+  ok    the creator needs no name
+  ok    the answer knows its comment
+  ok    an answer to an answer is refused: one level
+  ok    an answer from another lesson is refused
+
+Threads, as each reader sees them
+  ok    newest thread first
+  ok    answers in the order written
+  ok    hidden: another student no longer sees it, nor its answers
+  ok    whoever wrote it still does
+  ok    and so does the creator
+
+Who is emailed
+  ok    the student the creator answered
+  ok    with the answer and the way back to it
+  ok    from the store, via Marktmorgen
+  ok    not twice in an hour for the same lesson
+  ok    not when another student answers
+  ok    and so still one email
+
+Deleting
+  ok    a comment goes with its answers
+  ok    what is left
+  ok    a second lesson
+  ok    a lesson deleted takes its comments
+
+The studio
+  ok    the newest comments of the course
+  ok    and how many came since it last looked
+  ok    counted for the list of courses too
+  ok    none once seen
+
+30 checks, all passing.
+GROUP_EXIT lesson-comments.test.ts 0
+
+=== lesson-comment-delete-evidence.test.ts ===
+NETWORK GUARDS PASS before graph
+
+Complete thread evidence before destructive work
+  ok    parent-missing: an unknown thread never certifies completed deletion
+  ok    parent-missing: no destructive command or storage adjustment after unknown evidence
+  ok    parent-missing: both stored comments stay available for a confirmed retry
+  ok    parent-extra: an unknown thread never certifies completed deletion
+  ok    parent-extra: no destructive command or storage adjustment after unknown evidence
+  ok    parent-extra: both stored comments stay available for a confirmed retry
+  ok    parent-invalid: an unknown thread never certifies completed deletion
+  ok    parent-invalid: no destructive command or storage adjustment after unknown evidence
+  ok    parent-invalid: both stored comments stay available for a confirmed retry
+  ok    parent-mismatch: an unknown thread never certifies completed deletion
+  ok    parent-mismatch: no destructive command or storage adjustment after unknown evidence
+  ok    parent-mismatch: both stored comments stay available for a confirmed retry
+  ok    parent-getter: an unknown thread never certifies completed deletion
+  ok    parent-getter: no destructive command or storage adjustment after unknown evidence
+  ok    parent-getter: both stored comments stay available for a confirmed retry
+  ok    parent-inherited: an unknown thread never certifies completed deletion
+  ok    parent-inherited: no destructive command or storage adjustment after unknown evidence
+  ok    parent-inherited: both stored comments stay available for a confirmed retry
+  ok    index-missing: an unknown thread never certifies completed deletion
+  ok    index-missing: no destructive command or storage adjustment after unknown evidence
+  ok    index-missing: both stored comments stay available for a confirmed retry
+  ok    index-extra: an unknown thread never certifies completed deletion
+  ok    index-extra: no destructive command or storage adjustment after unknown evidence
+  ok    index-extra: both stored comments stay available for a confirmed retry
+  ok    index-invalid: an unknown thread never certifies completed deletion
+  ok    index-invalid: no destructive command or storage adjustment after unknown evidence
+  ok    index-invalid: both stored comments stay available for a confirmed retry
+  ok    index-duplicate: an unknown thread never certifies completed deletion
+  ok    index-duplicate: no destructive command or storage adjustment after unknown evidence
+  ok    index-duplicate: both stored comments stay available for a confirmed retry
+  ok    index-sparse: an unknown thread never certifies completed deletion
+  ok    index-sparse: no destructive command or storage adjustment after unknown evidence
+  ok    index-sparse: both stored comments stay available for a confirmed retry
+  ok    index-overflow: an unknown thread never certifies completed deletion
+  ok    index-overflow: no destructive command or storage adjustment after unknown evidence
+  ok    index-overflow: both stored comments stay available for a confirmed retry
+  ok    rows-missing: an unknown thread never certifies completed deletion
+  ok    rows-missing: no destructive command or storage adjustment after unknown evidence
+  ok    rows-missing: both stored comments stay available for a confirmed retry
+  ok    rows-short: an unknown thread never certifies completed deletion
+  ok    rows-short: no destructive command or storage adjustment after unknown evidence
+  ok    rows-short: both stored comments stay available for a confirmed retry
+  ok    rows-extra: an unknown thread never certifies completed deletion
+  ok    rows-extra: no destructive command or storage adjustment after unknown evidence
+  ok    rows-extra: both stored comments stay available for a confirmed retry
+  ok    rows-sparse: an unknown thread never certifies completed deletion
+  ok    rows-sparse: no destructive command or storage adjustment after unknown evidence
+  ok    rows-sparse: both stored comments stay available for a confirmed retry
+  ok    rows-invalid: an unknown thread never certifies completed deletion
+  ok    rows-invalid: no destructive command or storage adjustment after unknown evidence
+  ok    rows-invalid: both stored comments stay available for a confirmed retry
+  ok    rows-mismatch: an unknown thread never certifies completed deletion
+  ok    rows-mismatch: no destructive command or storage adjustment after unknown evidence
+  ok    rows-mismatch: both stored comments stay available for a confirmed retry
+  ok    rows-wrong-lesson: an unknown thread never certifies completed deletion
+  ok    rows-wrong-lesson: no destructive command or storage adjustment after unknown evidence
+  ok    rows-wrong-lesson: both stored comments stay available for a confirmed retry
+  ok    a reply getter is never executed as deletion evidence
+
+Confirmed data keeps the ordinary behavior
+  ok    the real reader retains both comments in order
+  ok    a complete confirmed thread deletes its parent and reply
+  ok    both records are actually removed
+  ok    a repeated confirmed deletion is empty
+  ok    a confirmed absent record remains absent
+  ok    a confirmed empty lesson remains readable
+  ok    an explicit null row is distinct from an incomplete reply
+
+65 checks, all passing.
+GROUP_EXIT lesson-comment-delete-evidence.test.ts 0
+
+=== lesson-comment-record-evidence.test.ts ===
+NETWORK GUARDS PASS before graph
+
+Known records retain their exact meaning
+  ok    a current public comment
+  ok    a current hidden reply
+  ok    legacy optional fields remain absent defaults
+
+Malformed stored fields refuse the whole record
+  ok    missing time
+  ok    text time
+  ok    fractional time
+  ok    negative time
+  ok    unsafe time
+  ok    invalid parent
+  ok    non-text parent
+  ok    non-text name
+  ok    non-boolean visibility
+
+Corruption cannot promote or disclose a thread
+  ok    a reply with an unreadable parent is not a top-level thread
+  ok    an unreadable hidden flag is not shown as public
+
+14 checks, all passing.
+GROUP_EXIT lesson-comment-record-evidence.test.ts 0
+
+=== lesson-comment-write-evidence.test.ts ===
+NETWORK GUARDS PASS before graph
+✔ a known write stores a creator's answer under the real lesson (8.545421ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=false, missing (1.098502ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=false, short (3.15235ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=false, extra (3.380023ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=false, hash not inserted (0.747935ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=false, lesson index not inserted (1.036308ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=false, course index not inserted (0.463667ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=false, negative trim count (0.70476ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=false, reply count not incremented (0.658951ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=false, text result (0.823919ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=false, inherited slots (3.479883ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=false, getter slot (0.528054ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=true, missing (0.464859ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=true, short (0.596868ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=true, extra (0.503958ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=true, hash not inserted (0.371399ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=true, lesson index not inserted (0.499772ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=true, course index not inserted (0.638681ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=true, negative trim count (0.337357ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=true, reply count not incremented (0.351418ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=true, text result (0.343056ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=true, inherited slots (0.441935ms)
+✔ an unknown answer-write acknowledgement cannot certify success: applied=true, getter slot (0.339831ms)
+ℹ tests 23
+ℹ suites 0
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 39.218275
+GROUP_EXIT lesson-comment-write-evidence.test.ts 0
+
+=== lesson-comment-thread-boundaries.test.ts ===
+NETWORK GUARDS PASS before graph
+✔ confirmed whole-thread deletion removes both records and releases their room once (12.258793ms)
+✔ unconfirmed unapplied delete cannot certify removal or release room [] (1.575279ms)
+✔ unconfirmed unapplied delete cannot certify removal or release room [0] (0.798812ms)
+✔ an applied deletion with a lost receipt is retained as unknown and never releases room twice (1.48311ms)
+✔ malformed stored parent reference cannot be normalized into a complete deletable thread (0.812983ms)
+✔ reply accepted after the deletion snapshot cannot survive as an orphan after confirmed success (3.081122ms)
+✔ two deletions with the same snapshot cannot release room belonging to an unrelated thread (1.607377ms)
+✔ replies above the lesson reader window do not block creator moderation (268.151124ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 362.964902
+GROUP_EXIT lesson-comment-thread-boundaries.test.ts 0
+
+=== person-erasure.test.ts ===
+NETWORK GUARDS PASS before graph
+
+A person in every part of a store, deleted
+  ok    the person is in many parts of the store
+  ok    and their seeding changed many keys, so the comparison below means something
+  ok    the store finds them for every-store requests
+  ok    asking sends a link
+  ok    the email carries a link that works
+  ok    asking about an address no store knows sends nothing, and says the same
+  ok    the link names the address and the store
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth (/dev/shm/j-2807-snapshot-qXtGQ5/person-erasure.test.ts.cjs:43939:9)
+    at async requestApi (/dev/shm/j-2807-snapshot-qXtGQ5/person-erasure.test.ts.cjs:44108:16)
+    at async del (/dev/shm/j-2807-snapshot-qXtGQ5/person-erasure.test.ts.cjs:45287:3)
+  ok    the link deletes them
+  ok    it sent no more commands than it took units for (240 of 602)
+  ok    and moved no more bytes (60703 of 396850)
+  ok    the units it takes cover that work
+  ok    the link works once
+  ok    the store's owner is told, not asked
+  (left as allowed: nl:allow:email:…:2026-10-27, nl:allow:studio:…:2026-10-27, nl:allow:transactional:…:2026-10-27, nl:data:…, nl:data:room-test-store, nl:erased:…, nl:health:…, nl:mail:flowstats:9c436a425866aac3, nl:rl:erase-address:…, nl:rl:erase-address:…, nl:rl:erase-ip:…, nl:rl:erase-ip:…, nl:rsum:ver:…:2c6561bd57, nl:sender:2026-11, nl:stats:…:ledger, nl:tasks:doors, nl:wf:day:…:2026-11-06, nl:wl:…:2c6561bd57:send)
+  ok    everything is as it was before them, but what is allowed to change
+  ok    no key or value names them, by address or by any key made from it
+  ok    only a fingerprint is kept, under the store's list
+  ok    which cannot be read back to the address
+  ok    the other person is untouched
+  ok    the store knows the address was deleted
+  ok    an import leaves them out
+  ok    a purchase without their own yes notes the purchase, not a yes
+  ok    their own yes, given again, puts them back and lifts the fingerprint
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth (/dev/shm/j-2807-snapshot-qXtGQ5/person-erasure.test.ts.cjs:43939:9)
+    at async requestApi (/dev/shm/j-2807-snapshot-qXtGQ5/person-erasure.test.ts.cjs:44108:16)
+    at async del (/dev/shm/j-2807-snapshot-qXtGQ5/person-erasure.test.ts.cjs:45287:3)
+  ok    the studio deletes them
+  ok    what the studio's door keeps: what an import gave them, by a one-way hash; nothing else names them
+  ok    their review stays, without their address (a store may not take reviews down)
+  ok    and everything else is as it was before them
+  ok    the activity log says a person was deleted, never who
+
+What it takes covers what it costs
+  ok    the base units cover the request itself and Discord
+  ok    units cover 550 commands and 310000 bytes
+  ok    units cover 1272 commands and 1709000 bytes
+  ok    units cover 39130 commands and 20115000 bytes
+  ok    the least a deletion takes is what the help says
+
+32 checks, all passing.
+GROUP_EXIT person-erasure.test.ts 0
+
+=== course-template-studio.test.ts ===
+NETWORK GUARDS PASS before graph
+
+The words
+  ok    a structure by its id; anything else is none
+  ok    opening on the first day, in the editor's words
+  ok    opening later, with the email that day
+  ok    the editor beside each module says the same
+  ok    the draft is counted, said to be unsaved, and said to stay hidden
+  ok    the certificate is said
+  ok    one module is one module
+  ok    from scratch adds nothing, and says so
+  ok    no example title left: nothing said
+  ok    some left: counted as examples (the quiz titles do not say "your title here"), and why it matters
+  ok    the quiz structure's quiz lessons wait for their questions, one per module
+  ok    a quiz lesson given an assignment instead is not counted (it cannot take a quiz too)
+  ok    a quiz written takes that lesson off
+  ok    said with what to press, and that until then it is an ordinary lesson
+  ok    the button it names is the quiz editor's own
+  ok    none waiting: nothing said
+
+Saved by the route, all at once
+  ok    a course is made
+  ok    from scratch: answered, nothing written
+  ok    applied: exactly what the structure gives, in one write
+  ok    the course sent back is the one kept
+  ok    the product counts its lessons
+  ok    every title is still an example, and said
+  ok    the product is taken off the store, so no buyer sees an example title
+  ok    the module-opening emails know the course now that modules open later (registerDrip)
+
+Published only once every example title is replaced
+  ok    publishing with example titles left: refused, still hidden
+  ok    said where it is published, in the product editor's words
+  ok    the titles replaced, the opening days kept
+  ok    then it publishes
+  ok    the public page shows a hidden course with example titles to its owner only
+  ok    the studio says it is hidden, not that Stripe is missing
+
+Refused, nothing changed
+  ok    a second press, now that the course has modules: refused
+  ok    a course whose module the creator renamed: refused
+  ok    an id that is no structure: refused as invalid
+  ok    a product that is not a course: refused
+  ok    another store's course cannot be reached, and stays as it was
+  ok    signed out: refused
+
+The picker and the editor
+  ok    offered only on a new course
+  ok    a radio group with a legend, one per structure
+  ok    the draft said in a live region before anything is saved
+  ok    the draft shows each module's opening in the editor's words
+  ok    only the id is sent; the server applies it
+  ok    no model is asked, nothing is fetched but the save
+  ok    the editor says the example titles left and takes the focus there after applying
+  ok    keeping an empty course moves the focus to the first module's name, not to the page's top
+  ok    after the quiz structure, its first quiz lesson opens
+  ok    not_new is said in the structures' own words
+  ok    no funnel is offered that a sold course cannot fill
+  ok    a stale page, its course changed further down, refuses and puts the structures away
+  ok    "Start from scratch" has its own button
+  ok    the draft is made once per pick (its ids stay put while the page draws again)
+  ok    no structure in a course already made changes anything (the route refuses before it writes)
+
+Drawn as the creator sees it
+  ok    a new course: the structures as one group with a legend, a radio for each
+  ok    the live region is there before anything is picked, and silent
+  ok    nothing saved yet: no example line, no save button
+  ok    a course a structure was given: no structures, the example line there to take the focus
+
+55 checks, all passing.
+GROUP_EXIT course-template-studio.test.ts 0
+
+=== locked-deletes.test.ts ===
+NETWORK GUARDS PASS before graph
+
+The community: emailing every member and deleting wait
+  ok    set up by the full session
+  ok    an announcement emailed to every member is refused
+  ok    a post deleted is refused, and the post is still there
+  ok    a comment deleted is refused
+  ok    a post that emails nobody is not
+  ok    emptying the chat room is refused
+  ok    taking a chat message out is refused
+  ok    a reported post deleted from the studio is refused
+
+Events: canceling, deleting and moving one emails everyone coming
+  ok    made by the full session
+  ok    canceling it is refused
+  ok    deleting it is refused
+  ok    moving it is refused
+  ok    renaming it, at the same time, is not
+
+The course: what takes a lesson, a file or students' work away waits
+  ok    a lesson added from the locked session: adding stays open
+  ok    "lesson-remove" is refused
+  ok    "module-remove" is refused
+  ok    "media-remove" is refused
+  ok    taking an assignment off, with the work handed in, is refused
+  ok    taking a quiz off is refused
+  ok    sending a purchase email again, which carries the thank-you note, is refused
+  ok    withdrawing a student's certificate is refused
+  ok    deleting a lesson comment from the studio is refused
+  ok    a new video over the lesson's old one is refused
+  ok    and the lesson keeps it
+  ok    deleting it from the lesson page is refused too, and it is still there
+
+The product: its file, picture, page, keys and the rest
+  ok    a link put over the file, which deletes it, is refused
+  ok    and the product keeps its file
+  ok    a link on a product with no file is not
+  ok    marked coming soon by the full session
+  ok    launching it, one email in the creator's words to everyone waiting, is refused
+  ok    and it is still coming soon, its list unspent
+changing a waitlist failed Error: `after` was called outside a request scope. Read more: https://nextjs.org/docs/messages/next-dynamic-api-wrong-context
+    at after10 (/dev/shm/j-2807-snapshot-qXtGQ5/locked-deletes.test.ts.cjs:2500:15)
+    at POST16 (/dev/shm/j-2807-snapshot-qXtGQ5/locked-deletes.test.ts.cjs:145871:32)
+    at async main (/dev/shm/j-2807-snapshot-qXtGQ5/locked-deletes.test.ts.cjs:151966:33)
+  ok    taking the mark off, which emails nobody waiting and gives paid pre-orders the fixed delivery email, is not
+  ok    taking the file off is refused
+  ok    a new file over it is refused
+  ok    and the product still keeps its file
+  ok    a link put over a price option's file is refused
+  ok    and the option keeps its file
+  ok    a new file over a price option's file is refused
+  ok    taking a price option's file off is refused
+  ok    and the option still keeps it
+  ok    removing the price option, with its file, is refused
+  ok    and the option is still there with its file
+  ok    a link on a price option with no file is not refused
+  ok    removing the picture is refused
+  ok    a new picture over it is refused
+  ok    and the product keeps its picture
+  ok    its alt text is not
+  ok    a page saved without a picture it showed is refused
+  ok    and the page still shows it
+  ok    removing an episode, with its audio, is refused
+  ok    and the episode is still there
+  ok    product: remove is refused
+  ok    keys: clear is refused
+  ok    bundle: clear is refused
+  ok    option: remove is refused
+  ok    podcast: remove is refused
+  ok    page-funnels: remove is refused
+  ok    stream/captions: remove is refused
+  ok    and the product is still there
+
+The store's pages
+  ok    a site page saved without a picture it showed is refused
+  ok    a new link picture over the old one is refused
+  ok    and the link keeps its picture
+  ok    turning the link into a heading, which lets its picture go, is refused
+  ok    and the link keeps its picture and its address
+  ok    editing the link's title is not refused
+  ok    removing the store photo is refused
+  ok    a new store photo over it is refused
+  ok    forms: {"action":"remove","id":"x"} is refused
+  ok    site-page: {"action":"remove","id":"pagepage01"} is refused
+  ok    saved-blocks: {"action":"remove","id":"x"} is refused
+  ok    links: {"action":"remove","id":"9341a51647"} is refused
+  ok    link-image: {"action":"remove","id":"9341a51647"} is refused
+  ok    short-links: {"action":"remove","code":"x"} is refused
+  ok    blog: {"action":"delete","id":"x"} is refused
+  ok    answers: {"clear":true} is refused
+  ok    assistant-settings: {"clear":true} is refused
+  ok    and after all of them the link is still there with its picture
+  ok    and the site page still shows its picture
+  ok    saving a form is not
+
+Notes, tasks, deals, pitches, segments, drafts and review photos
+  ok    person: unnote is refused
+  ok    person-tasks: remove is refused
+  ok    crm: undeal is refused
+  ok    crm: unpipeline is refused
+  ok    notes: remove is refused
+  ok    spend: remove is refused
+  ok    outreach: drop is refused
+  ok    mail: segment-remove is refused
+  ok    mail: draft-remove is refused
+  ok    reviews: photo is refused
+
+The store's own fields about each person
+  ok    two fields saved by the full session
+  ok    saved without one of them, which takes its answers off every person, is refused
+  ok    and both are still there
+  ok    saving them with a new one, taking none away, is not
+
+A passkey change from a locked session does not spend the owner's
+  ok    the locked session removes nothing at once: it may only ask for a wait, on a count of its own
+  ok    and the owner's own change is not refused for the hour
+  ok    31 lists from a locked session are told locked
+  ok    and the owner can still list their passkeys
+
+Said the same way everywhere, and true
+  ok    app/signin/code/page.tsx says the one list
+  ok    app/signin/lost/page.tsx says the one list
+  ok    app/studio/page.tsx says the one list
+  ok    lib/two-step.ts says the one list
+  ok    lib/recovery-address.ts says the one list
+  ok    lib/help-content.ts says the one list
+  ok    lib/feature-pages.ts says the one list
+  ok    the list names imports, passkeys, two-step login, email to members and deleting for good
+  ok    and starts a sentence with a capital
+
+Every route that deletes or sends is held
+  ok    every route that deletes is named here (a new one has to say how it is held)
+  ok    and none named here is gone
+  ok    each one held the way it says
+  ok    every route that deletes a file has a request above that reads the file still there
+  ok    and no action is named for one route only by its path
+  ok    and every action LOCKED_ACTIONS names is one a route here uses (the in-route ones are asked through lockedFor)
+
+Every action of a route that deletes or sends is named, held or open with a reason
+  ok    every action of a route that deletes or sends is in the table (a new one has to say how it is held)
+  ok    and none in the table is gone from its route
+  ok    each one held, or open, the way it says
+
+115 checks, all passing.
+GROUP_EXIT locked-deletes.test.ts 0
+
+=== lesson-comments-drop-receipts.test.ts ===
+NETWORK GUARDS PASS before graph
+
+Unknown DEL receipts never release the course comments slot
+  ok    missing reply: the drop remains unknown
+  ok    missing reply: no data-room release is attempted
+  ok    missing reply: the keys remain available for a safe retry
+  ok    short reply: the drop remains unknown
+  ok    short reply: no data-room release is attempted
+  ok    short reply: the keys remain available for a safe retry
+  ok    extra reply: the drop remains unknown
+  ok    extra reply: no data-room release is attempted
+  ok    extra reply: the keys remain available for a safe retry
+  ok    undefined receipt: the drop remains unknown
+  ok    undefined receipt: no data-room release is attempted
+  ok    undefined receipt: the keys remain available for a safe retry
+  ok    numeric text receipt: the drop remains unknown
+  ok    numeric text receipt: no data-room release is attempted
+  ok    numeric text receipt: the keys remain available for a safe retry
+  ok    negative receipt: the drop remains unknown
+  ok    negative receipt: no data-room release is attempted
+  ok    negative receipt: the keys remain available for a safe retry
+  ok    fractional receipt: the drop remains unknown
+  ok    fractional receipt: no data-room release is attempted
+  ok    fractional receipt: the keys remain available for a safe retry
+  ok    two-key receipt for one-key DEL: the drop remains unknown
+  ok    two-key receipt for one-key DEL: no data-room release is attempted
+  ok    two-key receipt for one-key DEL: the keys remain available for a safe retry
+  ok    unsafe receipt: the drop remains unknown
+  ok    unsafe receipt: no data-room release is attempted
+  ok    unsafe receipt: the keys remain available for a safe retry
+  ok    sparse receipt: the drop remains unknown
+  ok    sparse receipt: no data-room release is attempted
+  ok    sparse receipt: the keys remain available for a safe retry
+  ok    inherited receipt: the drop remains unknown
+  ok    inherited receipt: no data-room release is attempted
+  ok    inherited receipt: the keys remain available for a safe retry
+  ok    getter receipt: the drop remains unknown
+  ok    getter receipt: no data-room release is attempted
+  ok    getter receipt: the keys remain available for a safe retry
+  ok    a receipt getter is never used as deletion evidence
+
+An applied deletion with a lost receipt is not certified
+  ok    the lost receipt remains unknown after the keys were deleted
+  ok    the unknown result releases no room
+  ok    the applied deletion is not retried inside the call
+
+Exact receipts retain the existing successful behavior
+  ok    a later exact retry releases the slot once
+  ok    ordinary exact 1 receipts release the slot once
+  ok    ordinary exact deletion removes every course-comment key
+
+43 checks, all passing.
+GROUP_EXIT lesson-comments-drop-receipts.test.ts 0
+
+=== course-removal-comments.test.ts ===
+NETWORK GUARDS PASS before graph
+
+Removing a product with a course
+  ok    the course has every comment family and counted room before removal
+  ok    product: an unknown comment deletion refuses removal
+  ok    the product removal succeeds
+  ok    the removed course leaves no comment family or counted room
+
+Removing a product after its course record is already absent
+could not read a product or its course before removing it UnknownReply: Redis answered the course being removed with a reply it was not asked for; its outcome is unknown
+    at exactReplies (/dev/shm/j-2807-snapshot-qXtGQ5/course-removal-comments.test.ts.cjs:14033:48)
+    at readCourseExact (/dev/shm/j-2807-snapshot-qXtGQ5/course-removal-comments.test.ts.cjs:14749:17)
+    at async POST2 (/dev/shm/j-2807-snapshot-qXtGQ5/course-removal-comments.test.ts.cjs:119705:28)
+    at async removeProduct2 (/dev/shm/j-2807-snapshot-qXtGQ5/course-removal-comments.test.ts.cjs:119905:22)
+    at async main (/dev/shm/j-2807-snapshot-qXtGQ5/course-removal-comments.test.ts.cjs:119970:28)
+  ok    an incomplete course read keeps the product for a later try
+  ok    confirmed course absence does not leave the product impossible to remove
+  ok    the missing course's indexed lesson comments and counted room are removed
+
+Disabling an empty course after its last lesson was removed
+  ok    the last lesson is removed first
+  ok    course-level comment records and room still exist until the course goes
+  ok    course: an unknown comment deletion refuses disable
+  ok    the empty course is disabled
+  ok    disabling leaves no course-level comment family or counted room
+
+12 checks, all passing.
+GROUP_EXIT course-removal-comments.test.ts 0
+
+=== assignments.test.ts ===
+NETWORK GUARDS PASS before graph
+
+An assignment and its switches
+  ok    an assignment with no prompt is refused
+  ok    the prompt is trimmed, its line ends made plain
+  ok    a switch is on only when it is true
+  ok    a file's name loses what could break a download
+
+A student's file is theirs, for that lesson, of a kind taken
+  ok    a fresh name in their own folder
+  ok    another student's folder
+  ok    a kind that is not taken
+  ok    a folder inside it
+  ok    a way out of it
+  ok    a Word file is taken
+  ok    a web page is not
+  ok    nor anything that only looks like a key
+
+The lesson carries the switches, and a quiz or an assignment
+  ok    the switches are on the lesson
+  ok    taking it off leaves no trace on the lesson
+
+A must-finish assignment holds the rest shut until it is done
+  ok    the next lesson waits on it
+  ok    and the one after
+  ok    the lesson itself is open
+
+Reviewed: waiting, another try, approved
+  ok    the prompt is kept apart from the outline
+  ok    handed in, it waits for the creator
+  ok    and is in the creator's list
+  ok    the lesson is not done yet
+  ok    the next lesson still waits
+  ok    another try asked for
+  ok    nothing waits any more
+  ok    work already answered is not answered twice
+  ok    the old file is handed back to be deleted
+  ok    the second try is counted
+  ok    and the old answer is cleared with it
+  ok    the same file kept is not deleted
+  ok    approved
+  ok    approving finishes the lesson
+  ok    and opens the lessons after it
+
+Not reviewed: handing in is enough
+  ok    done at once
+  ok    the lesson is marked done
+  ok    nothing waits for the creator
+  ok    everything handed in, newest first
+
+What a store's students keep is held to its figure
+  ok    room up to the figure
+  ok    no room past it
+  ok    room given back is room again
+
+Removing an assignment forgets the work and returns its files
+  ok    every file still kept for it, to delete: the replaced one went when it was replaced
+  ok    the student's work is forgotten
+  ok    and the assignment
+
+Uploads never handed in, and doors used once
+  ok    the old one is found, the new one left
+  ok    a door is used
+  ok    once
+
+Who hears about it
+  ok    the creator is told
+  ok    not again within the hour
+  ok    at the store's address
+  ok    the student's email is in the store's language
+  ok    with what the creator wrote, and the way back
+
+AI needs something to go on
+  ok    a file alone, with nothing said about it, is not enough
+
+51 checks, all passing.
+GROUP_EXIT assignments.test.ts 0
+
+=== assignment-room-exact.test.ts ===
+NETWORK GUARDS PASS before graph
+✔ an unknown assignment-room read never becomes zero free usage (3.329016ms)
+✔ known assignment-room counts retain their exact boundary (0.370818ms)
+✔ the route says an unread room as unavailable, never as full (2.893611ms)
+✔ the upload route asks the room reader before signing storage IO (0.380372ms)
+✔ a counter below zero is nothing used, never a store locked out (Revisor 1 on #2655) (8.645158ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 32.827721
+GROUP_EXIT assignment-room-exact.test.ts 0
+
+=== assignment-drop-exact.test.ts ===
+NETWORK GUARDS PASS before graph
+✔ a healthy read returns every file and forgets the list (7.205635ms)
+✔ a file handed in after the reading stays listed, never lost (Revisor 1 on #2810) (0.565631ms)
+✔ the course route reads the work before it saves the course without the assignment (1.437903ms)
+✔ files: no reply: unknown, and the list of files is kept (0.293972ms)
+✔ files: null: unknown, and the list of files is kept (0.415484ms)
+✔ files: odd list: unknown, and the list of files is kept (0.314093ms)
+✔ files: a size not a whole number: unknown, and the list of files is kept (0.259711ms)
+✔ files: a name not text: unknown, and the list of files is kept (0.874865ms)
+✔ work list: null: unknown, and the list of files is kept (0.290426ms)
+✔ records: one reply missing: unknown, and the list of files is kept (3.175254ms)
+✔ a product's course: every assignment read before the product goes (Revisor 1 on #2810) (1.854859ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 33.170907
+GROUP_EXIT assignment-drop-exact.test.ts 0
+
+===== ACTUAL STRICT TYPES — exit0 =====
+
+===== FOCAL LINT — exit0 =====
+
+===== OFFICIAL SCANNER — exit0 =====
+Public data check: 4080 tracked files; 0 file(s) require correction.

@@ -20,6 +20,7 @@ import {
   MAX_IMAGE_BYTES,
   type ProductImage,
   type SmallCopy,
+  TONE_PATTERN,
   imagePaths,
   isDisplayStyle,
   ownsImagePath,
@@ -146,7 +147,9 @@ export async function POST(request: NextRequest) {
           await dropFresh([smallPath]);
         }
       }
-      image = { path, width, height, alt, bytes: found.size, small };
+      // The picture's colour (Encanto 5b): kept only exactly #rrggbb; anything else is not written.
+      const tone = typeof body.tone === "string" && TONE_PATTERN.test(body.tone) ? body.tone : null;
+      image = { path, width, height, alt, bytes: found.size, small, ...(tone ? { tone } : {}) };
       // Copied to the pictures' own bucket when it is on (313 [CV1] unit 4b); off, nothing is read. A failed copy
       // never refuses the picture: it is kept where it always was, unmarked.
       const mirrored = await copyAttachedPicture(imagePaths(image)).catch(() => false);

@@ -1,6 +1,9 @@
 "use client";
 
-import { IMAGE_LONG_SIDE, MAX_IMAGE_BYTES } from "@/lib/product-image";
+import { IMAGE_LONG_SIDE, MAX_IMAGE_BYTES, toneOf } from "@/lib/product-image";
+
+/** The side of the sample the picture's colour is read from (lib/product-image.ts, toneOf). */
+const TONE_SAMPLE = 16;
 
 /**
  * Shrinks a picture in the browser: never more than `longSide` on its long
@@ -15,7 +18,7 @@ export async function shrink(
   maxBytes: number = MAX_IMAGE_BYTES,
   /** JPEG whatever the browser can write: for a picture in an email, which Outlook on Windows shows only so. */
   jpegOnly = false,
-): Promise<{ blob: Blob; width: number; height: number }> {
+): Promise<{ blob: Blob; width: number; height: number; tone: string | null }> {
   const url = URL.createObjectURL(file);
   try {
     const image = new Image();
@@ -56,11 +59,29 @@ export async function shrink(
         quality -= 0.12;
         blob = await encode(type, quality);
       }
-      if (blob && blob.size <= maxBytes) return { blob, width, height };
+      if (blob && blob.size <= maxBytes) return { blob, width, height, tone: sampleTone(canvas) };
       scale *= 0.75;
     }
     throw new Error("too_big");
   } finally {
     URL.revokeObjectURL(url);
+  }
+}
+
+/**
+ * The picture's average colour, from a 16 px sample of the canvas it was drawn on (lib/product-image.ts, toneOf):
+ * null for a picture with any transparency, or where the browser will not read the canvas back.
+ */
+function sampleTone(source: HTMLCanvasElement): string | null {
+  try {
+    const sample = document.createElement("canvas");
+    sample.width = TONE_SAMPLE;
+    sample.height = TONE_SAMPLE;
+    const context = sample.getContext("2d");
+    if (!context) return null;
+    context.drawImage(source, 0, 0, TONE_SAMPLE, TONE_SAMPLE);
+    return toneOf(context.getImageData(0, 0, TONE_SAMPLE, TONE_SAMPLE).data);
+  } catch {
+    return null;
   }
 }

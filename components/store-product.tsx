@@ -1181,7 +1181,8 @@ export function ProductCard({
       fetchPriority={first ? "high" : undefined}
       decoding="async"
       className={style === "preview" ? "st-cover" : style === "callout" ? "st-callout-img" : "st-thumb"}
-      style={style === "preview" ? { aspectRatio: `${image.width} / ${image.height}` } : undefined}
+      // The picture's colour under it while it loads (Encanto 5b), when it has one.
+      style={style === "preview" || image.tone ? { ...(style === "preview" ? { aspectRatio: `${image.width} / ${image.height}` } : {}), ...(image.tone ? { backgroundColor: image.tone } : {}) } : undefined}
     />
   ) : null;
 

@@ -1,6 +1,7 @@
 import { EmailField } from "@/components/email-field";
 import { servedImageUrl, servedSrcSet } from "@/lib/picture-served";
 import { packageSaving } from "@/lib/call-package-rules";
+import { fromPrice, lengthList, listedLengths } from "@/lib/call-lengths";
 import { saleClock, saleOff, salePrice } from "@/lib/store-sale";
 import { activeIntro } from "@/lib/intro-price";
 import { activeYearly, yearlySaving } from "@/lib/yearly-price";
@@ -20,7 +21,7 @@ import { RatingLine } from "@/components/review-list";
 import type { Summary } from "@/lib/review-summary";
 import { MIN_BUNDLE_ITEMS, bundleReady, picks } from "@/lib/bundle-rules";
 import { payPalPrice, paypalReady } from "@/lib/paypal-sales";
-import { comparable, startingOption } from "@/lib/product-option";
+import { comparable, optionsInPickOrder } from "@/lib/product-option";
 import { DEFAULT_PEOPLE, MAX_PEOPLE, MIN_PEOPLE } from "@/lib/group-rules";
 import { givableOptions } from "@/lib/gift-rules";
 import { productSegment } from "@/lib/product-slug";
@@ -35,6 +36,7 @@ import { consentKind, deliversDigitally } from "@/lib/digital-consent";
 import { assistReminderOffered } from "@/lib/assistant-reminder";
 import { type AskWhen, isAskWhen } from "@/lib/ask-when";
 import { type UnitLine, unitLines } from "@/lib/option-units";
+import { hasDateOnSale } from "@/lib/call-on-sale";
 
 /**
  * How many price options are drawn as cards before they become a list to pick
@@ -62,6 +64,9 @@ export function pricePill(store: Store, product: Listing): string {
   if (activePwyw(product)) return `${money(product.priceCents)}+`;
   const options = sellableOptions(product);
   const every = product.recurring ? ` ${w.every(product.recurring.interval)}` : "";
+  // A call with several lengths (lib/call-lengths.ts): from the lowest of their prices.
+  const lengths = product.call ? listedLengths(product.call, product.priceCents) : [];
+  if (lengths.length) return w.fromPrice(money(fromPrice(lengths) as number));
   const price = `${money(fromPriceCents(product))}${every}`;
   return options.length > 1 ? w.fromPrice(price) : price;
 }
@@ -139,8 +144,8 @@ export function SaleNote({ store, product }: { store: Store; product: Listing })
 }
 
 /** What a card says about a call: one person, a group, or dated live sessions. */
-function callLine(store: Store, call: NonNullable<Listing["call"]>, now = Date.now()): string {
-  const { w } = speech(store);
+function callLine(store: Store, call: NonNullable<Listing["call"]>, priceCents: number, now = Date.now()): string {
+  const { w, lang } = speech(store);
   // In person (lib/call-place.ts): no call and nothing online; the address is on its booking page.
   const inPerson = Boolean(call.place);
   if (call.kind === "live") {
@@ -149,14 +154,14 @@ function callLine(store: Store, call: NonNullable<Listing["call"]>, now = Date.n
     return inPerson ? w.inPersonLive(coming) : w.callLive(coming);
   }
   if (call.seats > 1) return inPerson ? w.inPersonGroup(call.minutes, call.seats) : w.callGroup(call.minutes, call.seats);
+  // Several lengths (lib/call-lengths.ts): each one said, "30 or 60 minutes".
+  const lengths = listedLengths(call, priceCents);
+  if (lengths.length) return inPerson ? w.inPersonLengths(lengthList(lengths, lang.locale)) : w.callLengths(lengthList(lengths, lang.locale));
   return inPerson ? w.inPersonOne(call.minutes) : w.callOne(call.minutes);
 }
 
-/** Whether a call can still be booked: always for weekly hours, and for dated sessions while one is before its notice. */
-export function hasDateOnSale(call: NonNullable<Listing["call"]>, now = Date.now()): boolean {
-  if (call.kind !== "live") return true;
-  return call.sessions.some((s) => s.start - call.noticeHours * 3600_000 > now);
-}
+/** Whether a call can still be booked (lib/call-on-sale.ts). */
+export { hasDateOnSale };
 
 /**
  * The line under the title that says what the pill cannot: the length of a
@@ -189,7 +194,7 @@ export function ProductFacts({
   } else if (inside) {
     facts.push(w.bundleOf(inside.length, worthLine(store, inside, product.priceCents)));
   }
-  if (product.call) facts.push(callLine(store, product.call));
+  if (product.call) facts.push(callLine(store, product.call, product.priceCents));
   if (product.podcast && product.podcast.episodes > 0) {
     facts.push(w.podcast(product.podcast.episodes));
   }
@@ -261,18 +266,22 @@ export function PackageOffer({ store, product }: { store: Store; product: Listin
 
 /**
  * Which of a product's prices is being bought for somebody else: a list to
- * pick from, each with its price, opened on the creator's pick. Nothing for
+ * pick from, each with its price, the creator's pick listed first and none
+ * chosen for the buyer (487 [IT4]): the form asks for a choice. Nothing for
  * a product sold at one price. The price charged is read on the server from
  * the option's id, never from this list.
  */
 function GivenOptionPicker({ store, product, each = false }: { store: Store; product: Listing; each?: boolean }) {
-  const options = givableOptions(product);
+  const options = optionsInPickOrder(givableOptions(product));
   if (options.length === 0) return null;
   const { w, money } = speech(store);
   return (
     <label className="block">
       <span className="st-label">{w.whichOne}</span>
-      <select className="st-field mt-2" name="option" required defaultValue={(startingOption(options) ?? options[0]).id}>
+      <select className="st-field mt-2" name="option" required defaultValue="">
+        <option value="" disabled>
+          {w.chooseOne}
+        </option>
         {options.map((option) => (
           <option key={option.id} value={option.id}>
             {w.priced(option.label, `${money(option.priceCents)}${each ? w.perPerson : ""}`)}
@@ -654,7 +663,8 @@ export function BuyBox({
     return (
       <>
         <Link prefetch={false} href={`/@${store.handle}/book/${product.id}`} className="btn st-btn btn-block mt-4">
-          {w.priced(product.call.kind === "live" ? w.pickSession : w.pickTime, money(product.priceCents))}
+          {/* Several lengths (lib/call-lengths.ts): from the lowest of their prices, as the card says it. */}
+          {w.priced(product.call.kind === "live" ? w.pickSession : w.pickTime, listedLengths(product.call, product.priceCents).length ? pricePill(store, product) : money(product.priceCents))}
         </Link>
         <PackageOffer store={store} product={product} />
       </>
@@ -710,7 +720,7 @@ export function BuyBox({
   // checked, where only an added product does (beside a shipped one). Its
   // form also carries the PayPal button, so one box serves both.
   const formId = `buy-${place}${product.id}`;
-  const digitalHere = deliversDigitally(product, startingOption(options)?.id ?? null);
+  const digitalHere = deliversDigitally(product, null);
   const digitalAdded = !digitalHere && extras.some((extra) => deliversDigitally(extra.target));
   return (
     <>
@@ -741,8 +751,11 @@ export function BuyBox({
         */
         <div className="mb-4">
           <label htmlFor={`os-${product.id}`} className="st-label">{w.chooseOptionFor(product.title)}</label>
-          <select id={`os-${product.id}`} name="option" defaultValue={startingOption(options)?.id} className="st-field mt-2">
-            {options.map((option) => (
+          <select id={`os-${product.id}`} name="option" required defaultValue="" className="st-field mt-2">
+            <option value="" disabled>
+              {w.chooseOne}
+            </option>
+            {optionsInPickOrder(options).map((option) => (
               <option key={option.id} value={option.id}>
                 {`${w.priced(option.label, `${money(option.priceCents)}${every}`)}${units.get(option.id) ? ` (${unitWords(units.get(option.id)!)})` : ""}${planAt(option.id) ? ` · ${w.orPlan(planAt(option.id)!)}` : ""}${option.best ? w.recommendedAfter : ""}`}
               </option>
@@ -755,11 +768,13 @@ export function BuyBox({
           {/*
             With what each includes written down, the cards stand side by side
             on a wide screen so the buyer can compare them; on a phone they
-            stack. The creator's pick opens chosen and says so, in the
-            creator's voice: "Recommended", never a claim about other buyers.
+            stack. The creator's pick is listed first and says so, in the
+            creator's voice: "Recommended", never a claim about other buyers;
+            nothing is chosen for the buyer, and the form asks for a choice
+            (487 [IT4]).
           */}
           <div className={comparable(options) ? `st-compare st-compare-${Math.min(options.length, 3)}` : "space-y-2"}>
-            {options.map((option) => (
+            {optionsInPickOrder(options).map((option) => (
               <label key={option.id} htmlFor={`o-${option.id}`} className={comparable(options) ? "st-option st-option-card" : "st-option"}>
                 <span className="flex items-center gap-3">
                   <input
@@ -767,7 +782,7 @@ export function BuyBox({
                     type="radio"
                     name="option"
                     value={option.id}
-                    defaultChecked={option.id === startingOption(options)?.id}
+                    required
                     className="h-4 w-4"
                   />
                   <span className="font-bold">{option.label}</span>

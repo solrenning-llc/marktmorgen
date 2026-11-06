@@ -26,6 +26,13 @@ export default async function ReportPage({ searchParams }: Params) {
         . Everything you write is sent to the creator in substance if we take their content down, and your name and email
         may be passed on with a counter-notice, as the law requires.
       </p>
+      <p>
+        How many notices we received and acted on, year by year:{" "}
+        <Link href="/transparency" className="text-black underline underline-offset-2 hover:no-underline">
+          Notices about content
+        </Link>
+        .
+      </p>
       <div className="not-prose mt-8">
         <ReportForm url={url} />
       </div>

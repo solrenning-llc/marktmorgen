@@ -17,6 +17,19 @@ const sectionsKey = (statsId: string) => `nl:sblocks:${statsId}`;
 export const sectionUsesKey = (statsId: string, id: string) => `nl:sblock:uses:${statsId}:${id}`;
 
 /** Every section of a store, newest change first. Throws when the list cannot be read, so an empty list is never a guess. */
+/**
+ * How many sections the library holds, read exactly (HLEN), so a reading of
+ * them is paid for before it is made (lib/mcp-tools.ts savedBlocksTool);
+ * null when Redis answered in another shape.
+ */
+export async function countSections(statsId: string | null): Promise<number | null> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const replies: unknown = await redisPipeline([["HLEN", sectionsKey(statsId)]]);
+  if (!Array.isArray(replies) || replies.length !== 1) return null;
+  const n = replies[0];
+  return typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : null;
+}
+
 export async function readSections(statsId: string | null): Promise<SavedSection[]> {
   if (!statsId || !isRedisConfigured()) throw new Error("Saved sections unavailable");
   const replies = await redisPipeline([["HVALS", sectionsKey(statsId)]]);

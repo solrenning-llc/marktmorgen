@@ -33,7 +33,8 @@ import { redirect } from "next/navigation";
 import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite as crossSite } from "@/lib/request-guard";
 import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
-import { LOCKED_NEEDS, lockedUntil } from "@/lib/two-step";
+import { LOCKED_MESSAGE } from "@/lib/locked-words";
+import { lockedOut, lockedUntil } from "@/lib/two-step";
 import { type Store, STORE_ID_PATTERN, accountStores, ensureStoreId, storeForEmail, storeForId, storeRef } from "@/lib/store";
 import { type Permission, type Role, PERMISSION_WORDS, can } from "@/lib/team-roles";
 import { logTeam, memberStores, roleIn, teamTwoStepBlocks } from "@/lib/team";
@@ -110,10 +111,13 @@ export function studioPath(store: Pick<Store, "sid">, query = "", page = ""): st
  * cannot open, the answer is "gone", never another store. `remembered` is the
  * switcher's cookie, only a preference: when it no longer fits, the person's
  * own first store is used, then their first store as one of a team.
+ * `session` is the session asking: a team that requires two-step sign-in
+ * reads how it was opened (lib/team.ts teamTwoStepBlocks); left out, a member
+ * of such a team is held, never let through.
  */
 export async function resolveAccess(
   email: string,
-  wanted: { pinned?: string | null; remembered?: string | null },
+  wanted: { pinned?: string | null; remembered?: string | null; session?: string },
   need: Need | null,
 ): Promise<{ ok: true; access: Access } | { ok: false; reason: Refusal; store?: Store }> {
   const pick = async (sid: string): Promise<Access | null> => {
@@ -147,9 +151,10 @@ export async function resolveAccess(
   }
   if (!access) return { ok: false, reason: "no_store" };
   // 612 [WP11]: the owner may require two-step sign-in of the whole team; a
-  // member without an authenticator app or a passkey opens nothing of this
-  // store until they set one up (their own account settings stay open).
-  if (await teamTwoStepBlocks(access.store, email, access.role)) return { ok: false, reason: "two_step", store: access.store };
+  // member opens nothing of this store unless this session was opened with a
+  // second step (the app's code, a recovery code or a passkey), whatever the
+  // account owns; the studio page says how to log in again or set one up.
+  if (await teamTwoStepBlocks(access.store, email, access.role, wanted.session)) return { ok: false, reason: "two_step", store: access.store };
   if (need && need !== "member" && !can(access.role, need)) return { ok: false, reason: "forbidden", store: access.store };
   return { ok: true, access };
 }
@@ -173,10 +178,10 @@ export async function studioAccess(
   const email = await emailForSession(session);
   if (!email) return { ok: false, reason: "signed_out" };
   // Let in without the second step: what moves money or data out waits (lib/two-step.ts).
-  if (LOCKED_NEEDS.includes(need) && (await lockedUntil(session)) > 0) return { ok: false, reason: "locked" };
+  if (lockedOut(need, action) && (await lockedUntil(session)) > 0) return { ok: false, reason: "locked" };
   const result = await resolveAccess(
     email,
-    { pinned: pinnedStore(request), remembered: request.cookies.get(STORE_COOKIE)?.value ?? null },
+    { pinned: pinnedStore(request), remembered: request.cookies.get(STORE_COOKIE)?.value ?? null, session },
     need,
   );
   if (!result.ok) return result;
@@ -217,7 +222,7 @@ export async function studioAccess(
  * a page drawn. What the owner needs to leave or pay is taken from a small
  * daily figure instead, so it is never shut out by the month's.
  */
-export async function countStudio(store: Store, need: Need | null, units = 1): Promise<{ ok: true; store?: Store } | { ok: false; reason: "used" | "unknown" | "pool" | "daily"; message: string }> {
+export async function countStudio(store: Store, need: Need | null, units = 1): Promise<{ ok: true; store?: Store } | { ok: false; reason: "used" | "unknown" | "pool" | "daily"; message: string; left?: number; reset?: string }> {
   if (need && ESSENTIAL_NEEDS.includes(need)) {
     return (await withinEssentialLimit("studio-essential", store.sid || store.handle, ESSENTIAL_PER_DAY, 86_400))
       ? { ok: true }
@@ -226,7 +231,7 @@ export async function countStudio(store: Store, need: Need | null, units = 1): P
   // A paying store whose billing month is not known has it read from Stripe first (lib/billing-sync.ts).
   const current = await refreshPeriod(store);
   const taken = await takeAllowance(current, "studio", units);
-  if (!taken.ok) return { ok: false, reason: taken.reason, message: taken.message };
+  if (!taken.ok) return { ok: false, reason: taken.reason, message: taken.message, left: taken.left, reset: taken.reset };
   return current === store ? { ok: true } : { ok: true, store: current };
 }
 
@@ -244,7 +249,7 @@ export function refusedJson(reason: Refusal, message = ""): Response {
     case "gone":
       return Response.json({ ok: false, error: "store_gone" }, { status: 409 });
     case "locked":
-      return Response.json({ ok: false, error: "locked" }, { status: 403 });
+      return Response.json({ ok: false, error: "locked", message: LOCKED_MESSAGE }, { status: 403 });
     case "two_step":
       return Response.json({ ok: false, error: "two_step_required" }, { status: 403 });
   }
@@ -311,14 +316,15 @@ export async function studioView(
   | { ok: true; view: StudioView; fellBack: boolean }
   | { ok: false; reason: Refusal; email: string | null; store?: Store }
 > {
-  const email = await emailForSession(cookies.get(SESSION_COOKIE)?.value);
+  const session = cookies.get(SESSION_COOKIE)?.value;
+  const email = await emailForSession(session);
   if (!email) return { ok: false, reason: "signed_out", email: null };
 
   const pinned = typeof asked === "string" && STORE_ID_PATTERN.test(asked) ? asked : null;
-  let result = await resolveAccess(email, { pinned, remembered: cookies.get(STORE_COOKIE)?.value ?? null }, need);
+  let result = await resolveAccess(email, { pinned, remembered: cookies.get(STORE_COOKIE)?.value ?? null, session }, need);
   let fellBack = false;
   if (!result.ok && result.reason === "gone") {
-    result = await resolveAccess(email, { remembered: cookies.get(STORE_COOKIE)?.value ?? null }, need);
+    result = await resolveAccess(email, { remembered: cookies.get(STORE_COOKIE)?.value ?? null, session }, need);
     fellBack = true;
   }
   if (!result.ok) return { ok: false, reason: result.reason, email, store: result.store };

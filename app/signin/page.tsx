@@ -16,7 +16,7 @@ import { INVITE_PROGRAM_OPEN, INVITE_BONUS_CENTS, INVITE_HOLD_DAYS } from "@/lib
 import { newAddressProblem, normaliseHandle } from "@/lib/store";
 
 /** Somebody who came back to a store they have: by Log in, or sent here to log in again. */
-const RETURNING_STATUSES = new Set(["reauth", "out", "out-everywhere"]);
+const RETURNING_STATUSES = new Set(["reauth", "out", "out-everywhere", "out-everywhere-unknown"]);
 function isReturning(params: { [key: string]: string | string[] | undefined }): boolean {
   return params.to === "login" || (typeof params.status === "string" && RETURNING_STATUSES.has(params.status));
 }
@@ -61,6 +61,19 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
   "move-taken": {
     title: "That address already has a store",
     body: "An account cannot be moved on top of another one. Nothing was changed.",
+  },
+  "move-busy": {
+    title: "Your account is in the middle of a move",
+    body: "Its sign-in address is being changed, so logging in with only the emailed link waits until that is over. Log in with your passkey, or with the emailed link and the code from your authenticator app. Without either, try again in a few minutes; if it still says this, reply to any email from us and we finish the move for you.",
+  },
+  "move-has-login": {
+    title: "That address has its own passkeys or two-step login",
+    body: "An account cannot be moved onto an address that already has its own passkeys, authenticator app or recovery codes. Nothing was changed. Remove them from that address first, or move to another address.",
+  },
+  // A move refused because what the new address had open could not be read (app/api/auth/move; review of #2556).
+  "move-unread": {
+    title: "We could not finish the move just now",
+    body: "Your account was not moved, and it stays at its old address. Log in, then try the move again in a minute.",
   },
   "move-error": {
     title: "The move did not finish",
@@ -125,6 +138,11 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
   "invite-slow": {
     title: "Too many tries",
     body: "Nothing was changed. Wait a little, then open the invitation again.",
+  },
+  // Log out of all devices when the other sessions could not be read (audit SG2, rule 27): never said as done.
+  "out-everywhere-unknown": {
+    title: "Your other devices may still be logged in",
+    body: "This browser is logged out, but we could not log out your other devices just now. Log in again in a moment and choose “Log out of all devices” once more.",
   },
 };
 

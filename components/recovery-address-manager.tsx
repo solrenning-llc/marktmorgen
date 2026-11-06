@@ -15,6 +15,7 @@ const MESSAGES: Record<string, string> = {
   wrong: "That code is not right. Type the six digits in the email we sent there.",
   locked: "You got in through your recovery address, so this waits until the date at the top of your studio.",
   reauth: "This needs a login from the last 15 minutes. Log in again, then come back here.",
+  second_step: "Your account has a passkey or two-step login, so changing the recovery address needs a login with one of them. Log in again with your passkey or your app's code, then come back here.",
   rate_limited: "That is a lot of changes in an hour. Try again later.",
   signed_out: "Your session ended. Log in again.",
   server_error: "Something went wrong on our side. Try again in a moment.",

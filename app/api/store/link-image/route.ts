@@ -5,6 +5,9 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { ownsImagePath } from "@/lib/product-image";
 import { LINK_IMAGE_SIDE, type LinkImage } from "@/lib/store-link";
 import { checkUploadedImage } from "@/lib/uploaded-image";
+import { dropTakenPictures, takePictureDoor } from "@/lib/picture-door";
+import { refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 
 /**
  * A link's own small picture (lib/store-link.ts, LinkImage): put on after
@@ -28,31 +31,52 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   }
 
+  // Pictures this request took from the door (lib/picture-door.ts): the only ones a failure here may delete.
+  // A path the browser names may be another product's, link's or page's picture in the same folder.
+  let fresh = new Map<string, number>();
+  const dropFresh = (path: string) => dropTakenPictures(fresh, [path]);
   try {
     let image: LinkImage | null = null;
     if (action === "attach") {
-      if (!(await storeForEmail(ref))) return Response.json({ ok: false, error: "none" }, { status: 400 });
+      const store = await storeForEmail(ref);
+      if (!store) return Response.json({ ok: false, error: "none" }, { status: 400 });
+      const link = store.links.find((each) => each.id === id);
+      // A new picture deletes the one there: not from a session let in without its second step (lib/two-step.ts).
+      if ((await lockedFor(request, "page", "replace")) && link?.image) return refusedJson("locked");
       const path = text(body.path, 200);
       if (!ownsImagePath(path, await imageFolder(ref))) {
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       }
+      fresh = await takePictureDoor([path]);
       const side = (n: unknown) => (typeof n === "number" && Number.isInteger(n) && n > 0 && n <= LINK_IMAGE_SIDE ? n : 0);
       const width = side(body.width);
       const height = side(body.height);
       if (!width || !height) {
-        await del(path).catch(() => {});
+        await dropFresh(path);
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       }
       const checked = await checkUploadedImage(path);
       if (!checked.ok) {
+        await dropFresh(path);
         return Response.json({ ok: false, error: checked.error }, { status: checked.error === "too_big" ? 413 : 400 });
+      }
+      // A name in the shared folder that is neither fresh from the door nor this link's own may be a product's,
+      // another link's, a page's, a buyer's review photo or an email's picture: refused and kept, so taking this
+      // link or its picture off later can never delete it (lib/picture-door.ts). A link that is not there says so.
+      if (!link) {
+        // No such link: nothing to put the picture on, so a fresh one is dropped and the answer says so (Claude 4 on #2156).
+        await dropFresh(path);
+        return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+      }
+      if (!fresh.has(path) && link.image?.path !== path) {
+        return Response.json({ ok: false, error: "in_use" }, { status: 400 });
       }
       image = { path, width, height, bytes: checked.bytes };
     }
 
     const result = await setLinkImage(ref, id, image);
     if (!result.ok) {
-      if (image) await del(image.path).catch(() => {});
+      if (image) await dropFresh(image.path);
       return Response.json({ ok: false, error: result.reason }, { status: result.reason === "unknown" ? 404 : 400 });
     }
     // Best effort, and deliberately after the write.

@@ -97,6 +97,17 @@ export function parseBook(raw: unknown): Book | null {
   return { waiting: waiting as Proposal[], history: history as Done[] };
 }
 
+/** How many bytes the store's book holds now (an exact STRLEN), so a tool that reads it pays for it first; null when that is not known. */
+export async function bookBytes(statsId: string): Promise<number | null> {
+  if (!STATS_ID.test(statsId) || !isRedisConfigured()) return null;
+  try {
+    const reply: unknown = await redisPipeline([["STRLEN", bookKey(statsId)]]);
+    return Array.isArray(reply) && reply.length === 1 && Number.isSafeInteger(reply[0]) && (reply[0] as number) >= 0 ? (reply[0] as number) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The store's book now, tidied (expired proposals and old history gone). Throws when it cannot be read. */
 export async function readBook(statsId: string, now = Date.now()): Promise<Book> {
   if (!STATS_ID.test(statsId) || !isRedisConfigured()) throw new Error("the agent book is not available");

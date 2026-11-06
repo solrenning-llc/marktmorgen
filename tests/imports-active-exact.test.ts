@@ -10,9 +10,11 @@
  *     addresses queued, and is marked done only once the queue is empty.
  *   - startImport: an unknown answer to the slot's SET NX is not "claimed"; nothing starts, so one store never runs
  *     two imports at once.
+ *   - storeImports (the studio's list, rule 30): an unknown list, or an import on it answering in an unknown shape,
+ *     throws rather than tell the creator no import is running and "None yet".
  */
 import { claimHandle, ensureListId, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
-import { addRows, advanceImports, finishUpload, readJob, runImport, startImport, type ImportJob } from "@/lib/imports";
+import { addRows, advanceImports, finishUpload, readJob, runImport, startImport, storeImports, type ImportJob } from "@/lib/imports";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -85,7 +87,8 @@ async function main(): Promise<void> {
   is("the pass throws UnknownReplyError", unread, { threw: "UnknownReplyError" });
   is("still on the active list, still queued, nothing done", [await active(second), (await readJob(second))?.state, (await readJob(second))?.done], [1, "queued", 0]);
   const later = await advanceImports(Date.now() + 30_000);
-  is("read again later, it advances and finishes", [later.finished, (await readJob(second))?.state, (await readJob(second))?.counts.added, await active(second)], [1, "done", 3, 0]);
+  // The same three people as the first import: each is looked at and found already on the list.
+  is("read again later, it advances and finishes", [later.finished, (await readJob(second))?.state, (await readJob(second))?.done, (await readJob(second))?.counts.already, await active(second)], [1, "done", 3, 3, 0]);
 
   part("An unknown list of running imports takes nothing off it");
   // Each part from here starts with the store's slot free, so a part that failed does not hold the next one.
@@ -115,6 +118,28 @@ async function main(): Promise<void> {
   is("no second import was made", (await real([["LLEN", `nl:imports:list:${sid}`]]))[0], before);
   await runImport(running, Date.now() + 30_000);
   is("the running one is not disturbed", (await readJob(running))?.state, "done");
+
+  part("Healthy control: the studio lists the store's imports");
+  const listed = await storeImports(store);
+  is("every import made here, newest first", [listed.length, listed[0]?.id], [4, running]);
+
+  part("An unknown list of the store's imports is not \"None yet\"");
+  oddly((command) => command[0] === "LRANGE" && command[1] === `nl:imports:list:${sid}`);
+  const unlistedStore = await outcome(storeImports(store));
+  redis.pipeline = real;
+  is("storeImports throws UnknownReplyError", unlistedStore, { threw: "UnknownReplyError" });
+
+  part("An import on the list answering in an unknown shape is not left out");
+  redis.pipeline = (async (commands: Command[]) => {
+    const replies = await real(commands);
+    return commands.length > 1 && commands.every((command) => command[0] === "GET" && String(command[1]).startsWith("nl:import:")) ? [{ unexpected: true }, ...replies.slice(1)] : replies;
+  }) as typeof redis.pipeline;
+  const oneUnread = await outcome(storeImports(store));
+  redis.pipeline = real;
+  is("storeImports throws UnknownReplyError", oneUnread, { threw: "UnknownReplyError" });
+  const gonePast = "a".repeat(24);
+  await real([["LPUSH", `nl:imports:list:${sid}`, gonePast]]);
+  is("healthy control: an import that is truly gone is left out", (await storeImports(store)).map((job) => job.id).includes(gonePast), false);
 
   part("Healthy control: the emails of an import are done only when its queue is empty");
   const mailing = (id: string): ImportJob => ({

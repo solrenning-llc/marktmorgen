@@ -8,12 +8,15 @@
  * read: the caller treats that as underway, never as settled.
  */
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { ENDING_KEY, flowKeyOf } from "@/lib/plan-refund-flow";
 
 export async function refundUnderway(sid: string): Promise<boolean> {
-  const [noted, running] = await redisPipeline([
+  const reply = repliesFor(await redisPipeline([
     ["HEXISTS", ENDING_KEY, sid],
     ["EXISTS", flowKeyOf(sid)],
-  ]);
-  return Number(noted) === 1 || Number(running) === 1;
+  ]), 2);
+  // Each exactly 0 or 1 (rule 24): any other answer throws, which the callers take as underway, never as settled.
+  if (!reply || reply.some((n) => n !== 0 && n !== 1)) throw new UnknownReplyError("whether a plan refund is underway");
+  return reply[0] === 1 || reply[1] === 1;
 }

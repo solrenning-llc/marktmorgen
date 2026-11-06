@@ -33,6 +33,7 @@ import { paidPeriod } from "./billing-period-fixture";
 
 const NOW = Math.floor(Date.now() / 1000);
 let refunds: Record<string, unknown>[] = [];
+let refundsMalformed = false;
 /** Closing events of disputes, newest first, as Stripe lists them. */
 let closings: Record<string, unknown>[] = [];
 let eventsFail = false;
@@ -49,7 +50,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname === "api.resend.com") return new Response(JSON.stringify({ id: "email_1" }));
   const path = url.pathname.replace(/^\/v1/, "");
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-  if (path === "/refunds") return answer({ object: "list", data: refunds, has_more: false });
+  if (path === "/refunds") return answer(refundsMalformed ? { object: "list", data: null, has_more: false } : { object: "list", data: refunds, has_more: false });
   if (path === "/events") {
     eventReads += 1;
     if (eventsFail) return answer({ error: { message: "rate limited" } }, 429);
@@ -119,6 +120,16 @@ async function main(): Promise<void> {
   const has = async (email: string) => typeof (await redis.pipeline([["HGET", importedKey(store.statsId!, email), product.id]]))[0] === "string";
   const dropped: string[] = [];
   const drop = async (email: string, id: string) => void dropped.push(`${email}|${id}`);
+
+  part("Adversarial: an incomplete refunds list cannot move the shared anchor");
+  const preorderAnchor = `nl:pre:${store.statsId}:refunds`;
+  const [anchorBefore] = await redis.pipeline([["GET", preorderAnchor]]);
+  refundsMalformed = true;
+  closings = [closing(50, "lost", "pi_tb14unrelated00000001")];
+  await revokeRefundedPreorders(store, Date.now() + 10_000, drop);
+  const [anchorAfter] = await redis.pipeline([["GET", preorderAnchor]]);
+  is("a valid event from the other stream must not advance past unknown refunds", anchorAfter, anchorBefore);
+  refundsMalformed = false;
 
   // Ana's bank took part of the price back through an exchange rate: still the whole order (the owner's rule).
   closings = [closing(2, "won", session(2, "").payment_intent), closing(1, "lost", session(1, "").payment_intent, 2311)];

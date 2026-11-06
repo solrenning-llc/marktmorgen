@@ -26,7 +26,17 @@ export default async function JoinPage({
   const params = await searchParams;
   const token = typeof params.token === "string" ? params.token : "";
   if (!/^[0-9a-f]{64}$/.test(token)) redirect("/signin?status=invite-expired");
-  const invite = await peekInvite(token).catch(() => null);
+  // A read that failed or answered in an unknown shape is "Joining did not finish", as app/api/auth/join says it,
+  // never "That invitation no longer works" (CX-123 rule 24).
+  const peeked = await peekInvite(token).then(
+    (invite) => ({ invite }),
+    (error: unknown) => {
+      console.error("reading an invitation failed", error);
+      return null;
+    },
+  );
+  if (!peeked) redirect("/signin?status=invite-error");
+  const { invite } = peeked;
   if (!invite) redirect("/signin?status=invite-expired");
   const role = ROLE_NAMES[invite.role];
 

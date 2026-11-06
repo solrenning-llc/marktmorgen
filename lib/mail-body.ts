@@ -145,11 +145,13 @@ export function buttonHrefOk(href: string): boolean {
   return /^https:\/\/[^\s<>"')]+$/.test(href.trim());
 }
 
-/** Keep readable store colors; derive a darker fill only when neither ink reaches 7:1. */
+/** Keep readable store colors only when their edge is also visible on the white card. */
 function buttonColours(accent: string): { fill: string; ink: string } {
   const fill = /^#[0-9a-f]{6}$/i.test(accent) ? accent : "#4c1d95";
-  if (contrast(fill, "#ffffff") >= 7) return { fill, ink: "#ffffff" };
-  if (contrast(fill, "#1c1917") >= 7) return { fill, ink: "#1c1917" };
+  const whiteContrast = contrast(fill, "#ffffff");
+  const visibleEdge = whiteContrast >= 3;
+  if (visibleEdge && whiteContrast >= 7) return { fill, ink: "#ffffff" };
+  if (visibleEdge && contrast(fill, "#1c1917") >= 7) return { fill, ink: "#1c1917" };
   const colors = lookColours({ theme: "light", accent: fill });
   return { fill: colors.accent, ink: colors.onAccent };
 }

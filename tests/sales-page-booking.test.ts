@@ -29,6 +29,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { type BlockContext, BlockView } from "@/components/sales-blocks";
 import { BLOCK_GROUPS } from "@/components/block-picker";
+import { MESSAGES as EDITOR_MESSAGES, kindLabel } from "@/components/page-editor";
+import { NOT_IN_SECTIONS, readSectionInput } from "@/lib/saved-blocks";
 import { KIND_ICONS } from "@/lib/sales-page-icons";
 import { SITE_KINDS } from "@/lib/site-page-rules";
 import { fastMoneyOnPage } from "@/lib/terms-check-rules";
@@ -101,6 +103,21 @@ part("A translation that makes its heading too long keeps the block, untranslate
   is("read again on its own, the longer heading would drop the block", parsePage(longer).blocks.some((b) => b.kind === "booking"), false);
   const kept = keepEveryBlock(page, longer);
   is("kept: the booking block as it was, in its place, counted, the other block translated", [kept.page.blocks.map((b) => b.kind), kept.page.blocks[0], kept.page.blocks[1].kind === "text" ? kept.page.blocks[1].heading : "", kept.untranslated], [["booking", "text"], page.blocks[0], "Why talk (translated)", 1]);
+}
+
+part("A second version the translation makes the same as the first counts none of its blocks (inbox C4-19 (a))");
+{
+  // A and B differ only in words the translation makes the same; B is dropped when the page is read, so the creator is
+  // told of the one block left untranslated on the page, not of two.
+  const twoVersions = parsePage({
+    blocks: [booking({ heading: "x".repeat(95) }), { id: "text0001", kind: "text", heading: "Start today", body: "" }],
+    variant: { id: "", blocks: [booking({ heading: "x".repeat(95) }), { id: "text0001", kind: "text", heading: "Begin today", body: "" }] },
+  });
+  if (!twoVersions.variant) throw new Error("no second version");
+  const same = (w: string) => (/today/.test(w) ? "Empieza hoy" : `${w} (translated)`);
+  const translated = withWords(twoVersions, pageWords(twoVersions).map(same));
+  const kept = keepEveryBlock(twoVersions, translated);
+  is("the second version is dropped, and only the shown page's block is counted", [kept.page.variant, kept.untranslated], [null, 1]);
 }
 
 part("A copy into another store maps the call, or leaves the block out");
@@ -245,7 +262,12 @@ is("not in the block list", BLOCK_KINDS.some((k) => k.kind === "booking"), false
 is("not in the gallery", BLOCK_GROUPS.some((g) => g.kinds.includes("booking")), false);
 is("not on a store's own pages yet", SITE_KINDS.includes("booking"), false);
 is("but it has an icon, like every kind", KIND_ICONS.booking, "calendar");
-const editor = readFileSync("components/page-editor.tsx", "utf8");
-is("the editor names one already on a page and tells back why one was not saved", [editor.includes('kind === "booking" ? "Booking"'), /\n {2}booking: `A page holds one booking block/.test(editor)], [true, true]);
+is("the editor names one already on a page", kindLabel("booking"), "Booking");
+is("and tells back, in words, why one was not saved", /^A page holds one booking block, with one of your calls chosen/.test(EDITOR_MESSAGES.booking ?? ""), true);
+{
+  // Refused for its kind, not for a shape the page would drop (review of #2178).
+  const asked = readSectionInput("Calls", [booking()]);
+  is("a saved section never holds one (inbox C4-19 (b))", [NOT_IN_SECTIONS.includes("booking"), asked.ok, asked.ok ? "" : asked.error], [true, false, "kind"]);
+}
 
 done();

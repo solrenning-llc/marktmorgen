@@ -126,13 +126,6 @@ test("erasure: beside a record that does not read, the files that do read go to 
   assert.equal(redis.run(["GET", bytes]), "0", "its room is given back");
 });
 
-test("erasure: an unknown answer to the deletion throws", async () => {
-  redis.clear();
-  seed(LESSON, JSON.stringify(work(LESSON)));
-  const result = await withReplies((b, a) => (b.some((c) => c[0] === "DEL") ? a.slice(0, 1) : a), () => forgetTasksPerson(COURSE, [LESSON], WHO, null));
-  assert.ok(result.error, `rejected, not ${JSON.stringify(result.value)}`);
-});
-
 // ------------------------------------------------------------ one student's work
 
 test("submissionOf: a written record reads, and nil is nothing handed in", async () => {

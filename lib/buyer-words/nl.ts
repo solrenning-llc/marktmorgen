@@ -184,6 +184,8 @@ export const nl: BuyerWords = {
     `Zodra hij live is, wordt de betaling door Stripe geïnd op de eigen rekening van ${store}: Marktmorgen houdt het geld nooit vast en neemt er niets van.`,
   paidBy: (takers, store) =>
     `De betaling wordt door ${takers} geïnd op de eigen rekening van ${store}. Marktmorgen houdt het geld nooit vast en neemt er niets van.`,
+  whoAnswers: (store) =>
+    `${store} is de verkoper en is verantwoordelijk voor wat je koopt, voor terugbetalingen en voor een eventueel herroepingsrecht. Marktmorgen host de winkel en de betaalpagina en is geen partij bij de verkoop.`,
   noPaymentsTitle: "Deze winkel kan nog geen betalingen ontvangen.",
   noPaymentsBody: (store) => `De prijzen hierboven zijn echt, maar hier kan nog geen kaart worden belast. Wil je kopen, schrijf dan rechtstreeks naar ${store}.`,
   noPaymentsBodyOne: (store) => `De prijs hierboven is echt, maar hier kan nog geen kaart worden belast. Wil je kopen, schrijf dan rechtstreeks naar ${store}.`,

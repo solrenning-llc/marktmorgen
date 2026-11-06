@@ -265,6 +265,7 @@ export default async function BookPage({ params, searchParams }: Params) {
         </div>
 
         <p className="st-muted mt-6 text-center text-sm">{w.paidBy(w.takenBy(true, false), store.name)}</p>
+        <p className="st-muted mt-2 text-center text-sm">{w.whoAnswers(store.name)}</p>
     </Shell>
   );
 }

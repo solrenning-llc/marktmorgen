@@ -519,7 +519,10 @@ export default async function StorePage({ params, searchParams }: Params) {
                       <strong>{w.testModeTitle}</strong> {w.testModeBody} {w.testModeLater(store.name)}
                     </p>
                   ) : selling || byPayPal ? (
-                    <p className="st-muted mt-6 text-center text-sm">{w.paidBy(w.takenBy(selling, byPayPal), store.name)}</p>
+                    <>
+                      <p className="st-muted mt-6 text-center text-sm">{w.paidBy(w.takenBy(selling, byPayPal), store.name)}</p>
+                      <p className="st-muted mt-2 text-center text-sm">{w.whoAnswers(store.name)}</p>
+                    </>
                   ) : (
                     <p className="st-note mt-6 text-sm">
                       <strong>{w.noPaymentsTitle}</strong> {w.noPaymentsBody(store.name)}

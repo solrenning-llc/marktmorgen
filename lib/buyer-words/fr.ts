@@ -193,6 +193,8 @@ export const fr: BuyerWords = {
     `Une fois en service, le paiement sera encaissé par Stripe sur le propre compte de ${store}${S}: Marktmorgen ne détient jamais l'argent et n'en prend rien.`,
   paidBy: (takers, store) =>
     `Le paiement est encaissé par ${takers} sur le propre compte de ${store}. Marktmorgen ne détient jamais l'argent et n'en prend rien.`,
+  whoAnswers: (store) =>
+    `${store} est le vendeur et répond de ce que vous achetez, des remboursements et de tout droit de rétractation dont vous disposez. Marktmorgen héberge la boutique et sa page de paiement, et n'est pas partie à la vente.`,
   noPaymentsTitle: "Cette boutique ne peut pas encore accepter de paiements.",
   noPaymentsBody: (store) => `Les prix ci-dessus sont réels, mais rien ici ne peut débiter une carte. Pour acheter, écrivez directement à ${store}.`,
   noPaymentsBodyOne: (store) => `Le prix ci-dessus est réel, mais rien ici ne peut débiter une carte. Pour acheter, écrivez directement à ${store}.`,

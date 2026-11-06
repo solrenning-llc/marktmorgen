@@ -206,6 +206,9 @@ export const en = {
     `Once it goes live, payment is taken by Stripe on ${store}'s own account: Marktmorgen never holds the money and takes none of it.`,
   paidBy: (takers: string, store: string) =>
     `Payment is taken by ${takers} on ${store}'s own account. Marktmorgen never holds the money and takes none of it.`,
+  /** Who answers for what, said before paying (Directive 2011/83/EU art. 6a(1)(d)); it repeats the Terms, section 3, and the Refund Policy, section 7. */
+  whoAnswers: (store: string) =>
+    `${store} is the seller and answers for what you buy, for refunds and for any right you have to cancel. Marktmorgen hosts the store and its checkout and is not part of the sale.`,
   noPaymentsTitle: "This store cannot take payments yet.",
   noPaymentsBody: (store: string) => `The prices above are real, but nothing here can charge a card. To buy, write to ${store} directly.`,
   noPaymentsBodyOne: (store: string) => `The price above is real, but nothing here can charge a card. To buy, write to ${store} directly.`,

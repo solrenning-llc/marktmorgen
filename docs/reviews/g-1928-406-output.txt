@@ -1,0 +1,526 @@
+=== focal ===
+G_WEIGHT_ENVELOPE {"mode":"extra","injected":1,"reads":24,"bytes":446390,"debits":[4,123],"paidBeforeFirst":127,"capacity":6350000,"listed":24}
+  ok    the exact weight boundary was reached
+  ok    the builder reads and offers its bounded 24 existing products
+  ok    an unknown outer envelope charges the conservative per-record ceiling
+  ok    actual listing bytes fit all admission completed before the first read
+
+4 checks, all passing.
+G_WEIGHT_ENVELOPE {"mode":"race","injected":1,"reads":24,"bytes":1934390,"debits":[4,39],"paidBeforeFirst":43,"capacity":2150000,"listed":24}
+  ok    the exact weight boundary was reached
+  ok    the builder reads and offers its bounded 24 existing products
+  ok    actual listing bytes fit all admission completed before the first read
+
+3 checks, all passing.
+G_WEIGHT_ENVELOPE {"mode":"race","injected":1,"reads":24,"bytes":1934390,"debits":[4,39],"paidBeforeFirst":43,"capacity":2150000,"listed":24}
+  ok    the exact weight boundary was reached
+  ok    the builder reads and offers its bounded 24 existing products
+  ok    actual listing bytes fit all admission completed before the first read
+
+3 checks, all passing.
+CART_LINK_SETTLE {"debits":[10,29],"paidBeforeRead":10,"bytes":1934390,"listed":24}
+  ok    the records grew between their measure and their read, beyond what was taken before it
+  ok    the builder still lists the 24 products
+  ok    what was really read is taken in all, the difference after the read
+  ok    the figure now counts past its limit, what was really spent
+  ok    the next opening is refused as usual, with nothing read
+
+5 checks, all passing.
+
+=== healthy ===
+G_WEIGHT_ENVELOPE {"mode":"healthy","injected":1,"reads":24,"bytes":446390,"debits":[4,19],"paidBeforeFirst":23,"capacity":1150000,"listed":24}
+  ok    the exact weight boundary was reached
+  ok    the builder reads and offers its bounded 24 existing products
+  ok    actual listing bytes fit all admission completed before the first read
+
+3 checks, all passing.
+G_WEIGHT_ENVELOPE {"mode":"healthy","injected":1,"reads":24,"bytes":1934390,"debits":[4,49],"paidBeforeFirst":53,"capacity":2650000,"listed":24}
+  ok    the exact weight boundary was reached
+  ok    the builder reads and offers its bounded 24 existing products
+  ok    actual listing bytes fit all admission completed before the first read
+
+3 checks, all passing.
+
+=== unknown-weight ===
+G_WEIGHT_ENVELOPE {"mode":"unknown","injected":1,"reads":24,"bytes":446390,"debits":[4,123],"paidBeforeFirst":127,"capacity":6350000,"listed":24}
+  ok    the exact weight boundary was reached
+  ok    the builder reads and offers its bounded 24 existing products
+  ok    an unknown outer envelope charges the conservative per-record ceiling
+  ok    actual listing bytes fit all admission completed before the first read
+
+4 checks, all passing.
+
+=== force-healthy-final ===
+CART_LINK_SETTLE {"debits":[10,29],"paidBeforeRead":10,"bytes":1934390,"listed":24}
+  ok    the records grew between their measure and their read, beyond what was taken before it
+  ok    the builder lists only after confirmation of the final debit
+  ok    the final debit was reached once after reading
+  ok    the real counter reflects an applied debit, never a fabricated one
+  ok    the next opening is refused
+  ok    no listing GET occurs in the refused next opening
+G_FORCE_ACK {"ackMode":"healthy","forced":1,"forceApplied":true,"listed":24,"readsAfterSecond":0,"after":5029,"figure":5000,"bytes":1934390}
+
+6 checks, all passing.
+
+=== force-lost-final ===
+CART_LINK_SETTLE {"debits":[10],"paidBeforeRead":10,"bytes":1934390,"listed":0}
+  ok    the records grew between their measure and their read, beyond what was taken before it
+  ok    the builder lists only after confirmation of the final debit
+  ok    the final debit was reached once after reading
+  ok    the real counter reflects an applied debit, never a fabricated one
+  ok    the next opening is refused
+  ok    no listing GET occurs in the refused next opening
+G_FORCE_ACK {"ackMode":"lost","forced":1,"forceApplied":true,"listed":0,"readsAfterSecond":0,"after":5029,"figure":5000,"bytes":1934390}
+
+6 checks, all passing.
+
+=== force-unapplied-final ===
+CART_LINK_SETTLE {"debits":[10],"paidBeforeRead":10,"bytes":1934390,"listed":0}
+  ok    the records grew between their measure and their read, beyond what was taken before it
+  ok    the builder lists only after confirmation of the final debit
+  ok    the final debit was reached once after reading
+  ok    the real counter reflects an applied debit, never a fabricated one
+G_FORCE_UNAPPLIED_EXPOSURE {"bytes":1934390,"after":5000,"figure":5000,"forceApplied":false}
+G_FORCE_ACK {"ackMode":"unapplied","forced":1,"forceApplied":false,"listed":0,"readsAfterSecond":0,"after":5000,"figure":5000,"bytes":1934390}
+
+4 checks, all passing.
+
+=== related ===
+  ok    live link code is applied at cart checkout
+
+1 checks, all passing.
+
+A code from a link
+  ok    a live code of the creator's is applied, with no box beside it
+  ok    one Stripe does not know leaves the box, as before
+  ok    no code: the box, as before
+
+One discount at a time
+  ok    a sale already taken off: no code and no box
+  ok    a store with no codes: nothing applied
+
+Refused for this cart
+a code from a link did not fit this cart; opened with the box instead StripeError: Stripe request failed (400 invalid_request_error): This promotion code cannot be redeemed because the order does not meet its minimum amount.
+    at onAccount (/tmp/codex-g-proof-8rr8XI/proof.cjs:34390:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async createCartCheckout (/tmp/codex-g-proof-8rr8XI/proof.cjs:37491:23)
+    at async main (/tmp/codex-g-proof-8rr8XI/proof.cjs:37611:18) {
+  status: 400,
+  code: 'invalid_request_error',
+  stripeMessage: 'This promotion code cannot be redeemed because the order does not meet its minimum amount.'
+}
+  ok    tried with the code, then opened with the box instead
+
+The route
+  ok    the cart reads the code from the same cookie as one product
+
+The studio's link builder
+  ok    two products and a code
+  ok    read back as the store page and the checkout read them
+  ok    no code is fine
+  ok    one product, more than a cart holds, or a code of the wrong shape: no link
+  ok    a named section, a list of products with a legend, a labeled code field with its help
+  ok    it says what to do before the link exists, in a live region
+  ok    nothing with fewer than two products to choose
+  ok    shown in the studio where a cart is offered, from the products a cart takes
+
+15 checks, all passing.
+G2_CART_LINK_COST {"reads":0,"bytes":0,"debits":[4],"paidBeforeFirst":null,"units":4}
+✔ ready-cart listing reads must fit the actual studio page admission before their reads (47.60466ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 57.1415
+✔ control: an exact complete successful link is confirmed (0.940584ms)
+✔ an explicit error beside otherwise complete success is unknown (0.167833ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6.062466
+✔ MEDIUM 1: a short link is shown only on a full confirmation of the link asked for (1.353826ms)
+✔ MEDIUM 1: a refusal is believed only in full; everything else is not known (0.341914ms)
+✔ MEDIUM 2: an answer is read against what was asked when it was sent (1.364862ms)
+✔ the builder says when only the first products are listed (10.181289ms)
+✔ MEDIUM 3: a studio request's shape is the cost registry's (7.673327ms)
+✔ MEDIUM 3: listings past the head are weighed and paid for before any is read, and at most CART_LINK_CHOICES (177.38354ms)
+✔ MEDIUM 3: a weight Redis did not answer exactly is the ceiling (62.820099ms)
+✔ MEDIUM 3: studio requests used up read nothing and offer nothing (38.948784ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 306.661106
+G_WEIGHT_ENVELOPE {"mode":"extra","injected":1,"reads":24,"bytes":446390,"debits":[4,123],"paidBeforeFirst":127,"capacity":6350000,"listed":24}
+  ok    the exact weight boundary was reached
+  ok    the builder reads and offers its bounded 24 existing products
+  ok    an unknown outer envelope charges the conservative per-record ceiling
+  ok    actual listing bytes fit all admission completed before the first read
+
+4 checks, all passing.
+
+A cart as where a link goes
+  ok    two of the store's products, and a code in capitals
+  ok    no code is fine
+  ok    refused: one product, the same twice, too many, another store's, or a code of the wrong shape
+  ok    it opens the store with the cart and the code, tagged with the post
+
+Through the real redirect
+  ok    sent to the store with the cart and the code
+
+The studio
+  ok    the list says where it goes and keeps it as its own choice
+  ok    the builder offers a short link with a labeled name and place
+  ok    and says the result in a status, or why not in an alert
+
+8 checks, all passing.
+
+Names, places and where a link goes
+  ok    a post's name as a utm_campaign is counted
+  ok    a place from the list, or somewhere else
+  ok    a product only when the store has it
+  ok    it opens the page tagged with where it was posted and the post's name
+
+Making links
+  ok    six letters nobody misreads
+  ok    one link to a name
+  ok    a product of another store is refused
+  ok    the store's links, the newest first
+
+Opening a link
+  ok    sent to the store, tagged, kept by the CDN for five minutes
+  ok    typed in capitals it still opens
+  ok    a code that never was opens the page that says so
+
+Changing where it goes, and ending it
+  ok    the same link now opens the product
+  ok    another store cannot change it
+  ok    nor end it
+  ok    ended, it opens the page that says so and leaves the list
+
+A hundred links at most
+  ok    the hundred and first is refused
+
+16 checks, all passing.
+
+A store with a head
+  ok    every product: counted as read
+  ok    some, in another order: counted as read
+  ok    ids the store does not have: counted as read
+  ok    ids asked twice: counted as read
+  ok    nothing: counted as read
+
+A store without a head
+  ok    every product: counted as read
+  ok    some, in another order: counted as read
+  ok    ids the store does not have: counted as read
+  ok    ids asked twice: counted as read
+  ok    nothing: counted as read
+
+A store inline
+  ok    every product: counted as read
+  ok    some, in another order: counted as read
+  ok    ids the store does not have: counted as read
+  ok    ids asked twice: counted as read
+  ok    nothing: counted as read
+
+A store with no catalog to read from
+  ok    every product: counted as read
+  ok    some, in another order: counted as read
+  ok    ids the store does not have: counted as read
+  ok    ids asked twice: counted as read
+  ok    nothing: counted as read
+  ok    the head is not read again
+  ok    an inline store reads none
+
+22 checks, all passing.
+✔ an index entry is bounded at all, which is what makes a ceiling possible (1.306614ms)
+✔ the published ceiling fits in the record, with the head and everything else (13.350826ms)
+✔ there is real headroom, not a number that only just fits (1.19016ms)
+✔ what the record could actually hold, written down so nobody has to guess again (0.261353ms)
+✔ the ceiling is enforced where a product is added, not only published (0.715055ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 23.410562
+✔ no page draws itself by reading every product in the store (424.987763ms)
+✔ the one route that still reads everything says why, and it is not a page (0.49199ms)
+✔ the hash is kept in step with the product, on both edges (0.291218ms)
+✔ the card carries exactly what the index cannot answer, and nothing more (0.396667ms)
+✔ a store written before the hash heals itself instead of staying slow (0.353081ms)
+✔ an entry for a product that no longer exists is never handed back (0.250696ms)
+✔ a store on the old inline layout costs no read at all (0.185429ms)
+✔ every picker that cannot be answered from the index is bounded (0.369766ms)
+✔ the search in the studio is a question about names, so it costs one command (0.386651ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 436.029456
+
+Actual paid resource allowance requires confirmed finite consumption
+  ok    uncertain reply refuses: lost
+  ok    exactly one two-command admission: lost
+  ok    committed use retained: lost
+  ok    next confirmation counts both uses: lost
+  ok    uncertain reply refuses: short
+  ok    exactly one two-command admission: short
+  ok    committed use retained: short
+  ok    next confirmation counts both uses: short
+  ok    uncertain reply refuses: string count
+  ok    exactly one two-command admission: string count
+  ok    committed use retained: string count
+  ok    next confirmation counts both uses: string count
+  ok    uncertain reply refuses: boolean count
+  ok    exactly one two-command admission: boolean count
+  ok    committed use retained: boolean count
+  ok    next confirmation counts both uses: boolean count
+  ok    uncertain reply refuses: unknown SET
+  ok    exactly one two-command admission: unknown SET
+  ok    committed use retained: unknown SET
+  ok    next confirmation counts both uses: unknown SET
+  ok    uncertain reply refuses: infinite
+  ok    exactly one two-command admission: infinite
+  ok    committed use retained: infinite
+  ok    next confirmation counts both uses: infinite
+  ok    uncertain reply refuses: fractional
+  ok    exactly one two-command admission: fractional
+  ok    committed use retained: fractional
+  ok    next confirmation counts both uses: fractional
+  ok    uncertain reply refuses: zero
+  ok    exactly one two-command admission: zero
+  ok    committed use retained: zero
+  ok    next confirmation counts both uses: zero
+  ok    uncertain reply refuses: extra member
+  ok    exactly one two-command admission: extra member
+  ok    committed use retained: extra member
+  ok    next confirmation counts both uses: extra member
+  ok    uncertain reply refuses: inherited
+  ok    exactly one two-command admission: inherited
+  ok    committed use retained: inherited
+  ok    next confirmation counts both uses: inherited
+  ok    uncertain reply refuses: accessor
+  ok    exactly one two-command admission: accessor
+  ok    committed use retained: accessor
+  ok    next confirmation counts both uses: accessor
+  ok    uncertain reply refuses: extra property
+  ok    exactly one two-command admission: extra property
+  ok    committed use retained: extra property
+  ok    next confirmation counts both uses: extra property
+  ok    uncertain reply refuses: symbol
+  ok    exactly one two-command admission: symbol
+  ok    committed use retained: symbol
+  ok    next confirmation counts both uses: symbol
+  ok    no getter invoked
+
+53 checks, all passing.
+an email was not sent: the store's transactional figure (used)
+✔ a figure is taken whole or refused, and a refused use takes nothing (13.06139ms)
+✔ a paying store whose billing month is not known is let in to nothing (0.636206ms)
+✔ stores that pay nothing share the month's places, which grow with the stores that pay (2.855283ms)
+✔ an email counted against a store's figure is not sent past it, and the provider is never asked (147.104824ms)
+✔ the studio counts a page as several requests, and never shuts the owner out of paying, leaving or taking their data (35.888589ms)
+✔ a store's public side rests at its requests as at its visits, and what buyers have goes on to the whole figure (3.791911ms)
+✔ a plan's figures are published from the same numbers (0.335675ms)
+✔ the billing month is written down with the plan, forgotten when it stops, and the stores that pay are kept in line (4.684644ms)
+✔ the daily job writes a store down again when only its billing month moved (4.346811ms)
+✔ funded store-metered emails require paid proof before counters or provider dispatch (3.033517ms)
+✔ funded owner platform calls refuse without approval while consent reduction and disconnect remain available (7.657475ms)
+✔ marked paid webhook attempts need their cohort without blocking general maintenance allowances (3.44127ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 238.471758
+✔ a monthly plan's window is its billing period, whatever day it began (4.080796ms)
+✔ a yearly plan's months start on the day of the month its year began, clamped like Stripe's (5.937027ms)
+✔ past a renewing period's end the next window is used for a short grace, then nothing (0.23242ms)
+✔ unknown is closed: a paying store with no period, a broken one, or a clock that is not one, has no window (0.832732ms)
+✔ a free trial is one window from the day it began; no plan, an ended plan and a plan with nothing behind it keep the calendar (0.276035ms)
+✔ the period is read from Stripe's subscription, on the item first, and none while trialing (0.689576ms)
+✔ the words a refusal ends with say the day it opens again (4.986087ms)
+✔ a funded paid period never infers the next allowance during legacy renewal grace (0.627754ms)
+✔ a funded annual period keeps twelve anchored months and no thirteenth window (5.708013ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 38.518659
+
+Essential allowance requires its own finite committed acknowledgement
+  ok    unknown committed allowance refuses 0
+  ok    no retry or readback 0
+  ok    the committed count stays consumed 0
+  ok    unknown committed allowance refuses 1
+  ok    no retry or readback 1
+  ok    the committed count stays consumed 1
+  ok    unknown committed allowance refuses 2
+  ok    no retry or readback 2
+  ok    the committed count stays consumed 2
+  ok    unknown committed allowance refuses 3
+  ok    no retry or readback 3
+  ok    the committed count stays consumed 3
+  ok    unknown committed allowance refuses 4
+  ok    no retry or readback 4
+  ok    the committed count stays consumed 4
+  ok    unknown committed allowance refuses 5
+  ok    no retry or readback 5
+  ok    the committed count stays consumed 5
+  ok    unknown committed allowance refuses 6
+  ok    no retry or readback 6
+  ok    the committed count stays consumed 6
+  ok    unknown committed allowance refuses 7
+  ok    no retry or readback 7
+  ok    the committed count stays consumed 7
+  ok    unknown committed allowance refuses 8
+  ok    no retry or readback 8
+  ok    the committed count stays consumed 8
+  ok    unknown committed allowance refuses 9
+  ok    no retry or readback 9
+  ok    the committed count stays consumed 9
+  ok    unknown committed allowance refuses 10
+  ok    no retry or readback 10
+  ok    the committed count stays consumed 10
+  ok    unknown committed allowance refuses 11
+  ok    no retry or readback 11
+  ok    the committed count stays consumed 11
+  ok    computed count never executes
+  ok    essential failure refuses
+  ok    ordinary public guard behavior remains
+  ok    only first ten confirmed increments pass 1
+  ok    only first ten confirmed increments pass 2
+  ok    only first ten confirmed increments pass 3
+  ok    only first ten confirmed increments pass 4
+  ok    only first ten confirmed increments pass 5
+  ok    only first ten confirmed increments pass 6
+  ok    only first ten confirmed increments pass 7
+  ok    only first ten confirmed increments pass 8
+  ok    only first ten confirmed increments pass 9
+  ok    only first ten confirmed increments pass 10
+  ok    only first ten confirmed increments pass 11
+  ok    invalid limit refuses
+  ok    invalid limit refuses
+  ok    invalid limit refuses
+  ok    invalid limit refuses
+  ok    invalid limit refuses
+  ok    actual essential studio admission refuses lost ACK
+  ok    actual essential admission never retries
+  ok    actual essential studio admission accepts next confirmed count
+
+58 checks, all passing.
+✔ no page types a number of emails a month (166.274949ms)
+✔ the pages that state the allowance read it from the limit (3.22492ms)
+✔ the two numbers are the ones the margin was worked out against (0.303727ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 176.058401
+  ok    a paid store's window is its own, not the calendar month
+
+Past what is left in the plan's window
+  ok    thirty people, ten emails left: refused before it starts
+  ok    and nothing was written
+
+Inside it
+  ok    forty left: made, whatever the calendar month's count says
+  ok    and written where broadcasts are kept, so the check above looked in the right place
+
+5 checks, all passing.
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $1.3022
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (40.105556ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (109.434652ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (45.267836ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.90301ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.26568ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.159871ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.694524ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (146.351702ms)
+✔ every store figure taken in the code is a kind a line prices (103.531204ms)
+✔ every email sent names a meter, and each file only the meters it may use (200.407127ms)
+✔ the units a figure is taken in cost at least what they stand for (10.162167ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (2.726559ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.21938ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.524268ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.157407ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.129605ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.563518ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (1.376359ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.109415ms)
+✔ Path push fits its reserved studio requests (0.059429ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.127131ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.22636ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.279911ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (62.503938ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 740.742366
+
+=== types ===
+
+=== lint ===
+
+/tmp/g1928-return-406/tests/g1928-force-ack.proof.ts
+  10:28  warning  'cartLinkUnits' is defined but never used   @typescript-eslint/no-unused-vars
+  90:9   warning  'total' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+✖ 2 problems (0 errors, 2 warnings)
+
+
+=== parent3daf-force-quota ===
+CART_LINK_SETTLE {"debits":[10,29],"paidBeforeRead":10,"bytes":1934390,"listed":0}
+  ok    the records grew between their measure and their read, beyond what was taken before it
+  FAIL  the builder still lists the 24 products
+        expected 24
+        got      0
+  ok    what was really read is taken in all, the difference after the read
+  FAIL  the figure now counts past its limit, what was really spent
+        expected true
+        got      false
+  ok    the next opening is refused as usual, with nothing read
+
+5 checks, 2 failing.

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { EmailField } from "@/components/email-field";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { speech } from "@/lib/buyer-words";
@@ -148,7 +149,7 @@ export default async function WithdrawPage({ params, searchParams }: Params) {
               </div>
               <div>
                 <label htmlFor="withdraw-email" className="st-label">{w.emailLabel}</label>
-                <input id="withdraw-email" name="email" type="email" required maxLength={254} autoComplete="email" defaultValue={found.email} aria-describedby="withdraw-email-hint" className="st-field" />
+                <EmailField id="withdraw-email" name="email" className="st-field" required autoComplete="email" defaultValue={found.email} describedBy="withdraw-email-hint" language={store.language} />
                 <p id="withdraw-email-hint" className="st-muted mt-1 text-sm">{w.emailHint}</p>
               </div>
               <button type="submit" className="btn st-btn btn-block">{w.confirm}</button>

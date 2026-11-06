@@ -42,6 +42,9 @@ import { ENDED_STORE_EXPORTS } from "@/lib/plan-closing-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
+// A synthetic stand-in key, so the letter link reaches "sent" now that mail with no route says error (main, 8aa1f20a); see tests/resend-fixture-credentials.ts.
+process.env.RESEND_API_KEY ??= "re_test_a_stand_in_key_for_tests_only";
+
 type Command = (string | number)[];
 
 /** Which pipeline is the counter's, the reply it gets instead of the real one ("throw": it never answers), and what came after it. */

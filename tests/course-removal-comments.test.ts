@@ -118,6 +118,24 @@ async function main(): Promise<void> {
   is("the product removal succeeds", [removed.status, removed.body.ok], [200, true]);
   is("the removed course leaves no comment family or counted room", [present(firstKeys), roomSlot(first.courseId)], [[], 0]);
 
+  part("Removing a product after its course record is already absent");
+  const absent = await makeCourse("Course record already absent");
+  const absentLesson = await addLesson(absent.id, absent.courseId, "A lesson whose course record is gone");
+  await seedComments(absent.courseId, absentLesson);
+  const absentKeys = commentKeys(absent.courseId, [absentLesson]);
+  redis.run(["DEL", `nl:course:${absent.courseId}`]);
+  const removedAbsent = await removeProduct(absent.id);
+  is(
+    "confirmed course absence does not leave the product impossible to remove",
+    [removedAbsent.status, removedAbsent.body.ok],
+    [200, true],
+  );
+  is(
+    "the missing course's indexed lesson comments and counted room are removed",
+    [present(absentKeys), roomSlot(absent.courseId)],
+    [[], 0],
+  );
+
   part("Disabling an empty course after its last lesson was removed");
   const second = await makeCourse("Course disabled after comments");
   const secondLesson = await addLesson(second.id, second.courseId, "Last lesson");

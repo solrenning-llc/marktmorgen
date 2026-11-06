@@ -1,0 +1,293 @@
+
+===== /tmp/g2826-859-red-e194.log =====
+✔ one next bundle overlaps the running test; every process stays serial and every failure counts (2.954681ms)
+✔ a rejected next build is observed immediately but propagates only after the current process closes (2.33496ms)
+✔ a process launch failure drains its in-flight build before cleanup and preserves the original error (0.342705ms)
+✔ empty inventory does no work (0.176596ms)
+✔ real isolated child processes inherit the supplied environment, flush before advancing and keep nonzero exits (356.620669ms)
+✔ a test process that never ends is killed at its time limit and counted as a failure that names the file (508.143009ms)
+✔ a test process that ends in time is not touched by the limit (231.04824ms)
+✔ every file in tests/run.mjs runs under the limit, generous over the slowest file measured in CI and well under the job (1.001386ms)
+✔ a timeout first prints what /proc and the runner say: the file, whether exit came, the process state, each thread's wchan and the next compilation (508.284244ms)
+✔ a next compilation that never settles fails naming the file at the limit, and the runner does not hang on it (602.570862ms)
+✔ a run is told whether the next file's compilation has settled, and that there is none after the last (0.715155ms)
+✔ a timed-out file's descendants in its process group go with it, a throwing diagnose still counts the failure, and the next file runs (1289.838103ms)
+✔ once the runner has finished, nothing it started holds its output open (1302.91879ms)
+✖ a timeout says the file's process group was ended, and no test file starts a process outside its group (409.495398ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 13
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5223.395856
+
+✖ failing tests:
+
+test at ../g2826-canonical-9Hklk9/test.cjs:548:30
+✖ a timeout says the file's process group was ended, and no test file starts a process outside its group (409.495398ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /killed with its process group/. Input:
+  
+  'TIMEOUT: never.test.ts did not finish in 0.4 s; exit not seen; proc=unreadable; killed with its process tree and counted as a failure.'
+  
+      at TestContext.<anonymous> (/tmp/g2826-canonical-9Hklk9/test.cjs:568:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'TIMEOUT: never.test.ts did not finish in 0.4 s; exit not seen; proc=unreadable; killed with its process tree and counted as a failure.',
+    expected: /killed with its process group/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+
+===== /tmp/g2826-859-canonical.log =====
+✔ one next bundle overlaps the running test; every process stays serial and every failure counts (8.317626ms)
+✔ a rejected next build is observed immediately but propagates only after the current process closes (2.160728ms)
+✔ a process launch failure drains its in-flight build before cleanup and preserves the original error (4.69545ms)
+✔ empty inventory does no work (0.235785ms)
+✔ real isolated child processes inherit the supplied environment, flush before advancing and keep nonzero exits (695.220033ms)
+✔ a test process that never ends is killed at its time limit and counted as a failure that names the file (517.589314ms)
+✔ a test process that ends in time is not touched by the limit (241.616491ms)
+✔ every file in tests/run.mjs runs under the limit, generous over the slowest file measured in CI and well under the job (0.892482ms)
+✔ a timeout first prints what /proc and the runner say: the file, whether exit came, the process state, each thread's wchan and the next compilation (508.233392ms)
+✔ a next compilation that never settles fails naming the file at the limit, and the runner does not hang on it (618.919788ms)
+✔ a run is told whether the next file's compilation has settled, and that there is none after the last (2.357428ms)
+✔ a timed-out file's descendants in its process group go with it, a throwing diagnose still counts the failure, and the next file runs (1380.134431ms)
+✔ once the runner has finished, nothing it started holds its output open (1318.18009ms)
+✔ a timeout says the file's process group was ended, and no test file starts a process outside its group (1111.810368ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6461.812336
+
+
+===== /tmp/g2826-859-lifecycle.log =====
+PASS ordinary normal completion: executor status preserved
+G_LIFECYCLE_STATE {"name":"ordinary normal completion","exit":{"code":0,"signal":null},"closed":true,"descendantAlive":false,"output":"G_LIFECYCLE_READY\nG_LIFECYCLE_RESULT 0\n"}
+PASS ordinary normal completion: output released after executor exit
+PASS ordinary normal completion: no executing descendant remains
+G_LIFECYCLE_CLEANUP {"name":"ordinary normal completion","owned":[{"pid":31,"present":false},{"pid":39,"present":false}]}
+PASS SIGINT stops runner: interrupt preserved
+G_LIFECYCLE_STATE {"name":"SIGINT stops runner","exit":{"code":null,"signal":"SIGINT"},"closed":true,"descendantAlive":false,"output":"G_LIFECYCLE_READY\n"}
+PASS SIGINT stops runner: output released after executor exit
+PASS SIGINT stops runner: no executing descendant remains
+G_LIFECYCLE_CLEANUP {"name":"SIGINT stops runner","owned":[{"pid":55,"present":false},{"pid":63,"present":false}]}
+PASS SIGTERM stops runner: interrupt preserved
+G_LIFECYCLE_STATE {"name":"SIGTERM stops runner","exit":{"code":null,"signal":"SIGTERM"},"closed":true,"descendantAlive":false,"output":"G_LIFECYCLE_READY\n"}
+PASS SIGTERM stops runner: output released after executor exit
+PASS SIGTERM stops runner: no executing descendant remains
+G_LIFECYCLE_CLEANUP {"name":"SIGTERM stops runner","owned":[{"pid":79,"present":false},{"pid":87,"present":false}]}
+PASS detached descendant timeout: executor status preserved
+G_LIFECYCLE_STATE {"name":"detached descendant timeout","exit":{"code":0,"signal":null},"closed":false,"descendantAlive":true,"output":"G_LIFECYCLE_READY\nTIMEOUT: lifecycle.test.ts did not finish in 1.2 s; exit not seen; proc=unreadable; killed with its process group and counted as a failure.\nG_LIFECYCLE_RESULT 1\n"}
+FAIL detached descendant timeout: output released after executor exit {"got":"open","want":"closed"}
+FAIL detached descendant timeout: no executing descendant remains {"got":true,"want":false}
+G_LIFECYCLE_CLEANUP {"name":"detached descendant timeout","owned":[{"pid":103,"present":false},{"pid":111,"present":false}]}
+PASS detached descendant normal completion: executor status preserved
+G_LIFECYCLE_STATE {"name":"detached descendant normal completion","exit":{"code":0,"signal":null},"closed":false,"descendantAlive":true,"output":"G_LIFECYCLE_READY\nG_LIFECYCLE_RESULT 0\n"}
+FAIL detached descendant normal completion: output released after executor exit {"got":"open","want":"closed"}
+FAIL detached descendant normal completion: no executing descendant remains {"got":true,"want":false}
+G_LIFECYCLE_CLEANUP {"name":"detached descendant normal completion","owned":[{"pid":127,"present":false},{"pid":135,"present":false}]}
+15 checks, 4 failures
+
+
+===== /tmp/g2826-859-linked.log =====
+
+Off three ways today, and nothing is sent while off
+  ok    no reviewed cost ceiling exists yet
+  ok    no review: off, nothing sent
+  ok    no store: off, nothing sent
+  ok    no key: off, nothing sent
+  ok    the key: none without the setting
+  ok    the key: not 32 bytes, none
+  ok    the key: 32 bytes from base64
+  ok    the default run, with a key but no review or bucket, is off and sends nothing
+  ok    the default store: none without the bucket settings
+
+A review counts only with its date, its source, a retention and a storage ceiling the copies cannot pass
+  ok    the synthetic review is whole
+  ok    a cap behind a getter: refused, off, nothing sent, the getter never run
+  ok    a review inherited from another object: refused, nothing sent
+  ok    a field added to Object.prototype is never read into the copy
+  ok    a retention of 3 days is admitted
+  ok    a revoked proxy: refused as a result, never an exception
+  ok    no date: refused, off, nothing sent
+  ok    a date that is not one: refused, off, nothing sent
+  ok    no source: refused, off, nothing sent
+  ok    no retention: refused, off, nothing sent
+  ok    a retention of 1 day: refused, off, nothing sent
+  ok    a retention of 2 days: refused, off, nothing sent
+  ok    a storage ceiling the kept copies could pass: refused, off, nothing sent
+  ok    a storage ceiling one byte short of retention + 2 sets: refused, off, nothing sent
+  ok    no room for the run's own commands: refused, off, nothing sent
+  ok    a cap that is not a count: refused, off, nothing sent
+  ok    more parts than a set may have: refused, off, nothing sent
+  ok    parts whose stored weight the ceiling cannot hold: refused, off, nothing sent
+
+With all three, a copy is made, written once and read back the same
+  ok    done, with the keys copied (its own day count and lock among them), one part and its manifest
+  ok    a second run the same day is refused before anything is written
+  ok    the good copy's time and its manifest are kept, and survive that refusal
+  ok    the last good copy's mark is kept for good: it names the copy never deleted to make room
+
+Failures say which step, and keep the last good copy's time
+  ok    a copy that does not read back the same is a failure
+  ok    its reason is kept, with its time
+  ok    a failure's note expires by itself
+  ok    one failed day after a good one: a good copy is still under 48 hours old
+  ok    a cap reached is a failure that says which
+  ok    the reason kept is the latest
+  ok    no good copy for over 48 hours: seen
+  ok    the database failing during the export: a result, not an exception
+  ok    and its reason is kept
+  ok    a refused day mark: the run stops before copying, as a result
+  ok    a good copy whose outcome could not be written is still reported done
+  ok    with nothing ever kept, the report says there is no good copy
+
+At most one run a day and one new try after a failure, counted before any cost (inbox C4-49)
+  ok    the day's first run fails
+  ok    one new try the same day runs, and is done
+  ok    a third call that day: refused at the day's count, four commands (the lock; the count; the lock let go only if it is its own, in one script), nothing listed or written
+  ok    a day whose first run is done
+  ok    no new try after a good run: refused, four commands, nothing written
+  ok    two failures in a day: the second was the new try
+  ok    and nothing more that day
+  ok    the count of the day expires by itself
+
+A walk past its pages is a failure that says so, never a partial copy (inbox C4-46)
+  ok    refused at the walk's page cap, nothing written
+  ok    and the owner's report says so
+
+Write first, then delete past the retention; under the ceiling a failed delete never costs the day's copy (inbox C4-53)
+  ok    the normal case: written, then the copy older than 30 days deleted, the one of exactly 30 days and the younger kept
+  ok    a delete that fails under the ceiling: the day's copy is still written, done
+  ok    and the owner's report says the deletion failed
+  ok    the good copy's time is the new one
+  ok    the next run deletes what was left past the retention
+
+At the ceiling, the oldest go first, never the last verified copy; a failed delete there writes nothing (inbox C4-53)
+  ok    at the ceiling, a delete that fails: nothing written, said so
+  ok    the day's new try makes room from the oldest, keeps the last verified copy, and writes
+  ok    and the bucket stays within the review's ceiling
+
+The last verified copy is known for sure before any copy is deleted to make room (Codex G on e95705e66)
+  ok    an empty answer from the database: no copy deleted to make room, nothing written, said so
+  ok    two answers for one command: no copy deleted to make room, nothing written, said so
+  ok    a value that is not text: no copy deleted to make room, nothing written, said so
+  ok    a value that is not the kept shape: no copy deleted to make room, nothing written, said so
+  ok    an old mark with a time and no manifest: no copy deleted to make room, nothing written, said so
+  ok    no mark at all, with copies in the bucket: no copy deleted to make room, nothing written, said so
+
+The bucket's rule outlives the retention, and a last good copy lost to it never stops the backup (Reviewer 1 on e81007570)
+  ok    the bucket's lifecycle rule to set: 60 days, longer than the 30-day retention
+  ok    30 days more than the retention
+  ok    the last good copy was taken by the bucket's rule
+  ok    the first good run after it writes again
+  ok    and the report says the last good copy was lost
+  ok    the run's own note: last good copy lost
+  ok    only objects with no valid manifest were deleted to make room
+
+A failed day deletes nothing after it: the last good copy stays past the retention while new ones fail (Codex G on e95705e66)
+  ok    day 4, the first write refused: a failure, nothing deleted, the good copy of day 0 whole
+  ok    the next good copy is written, and only then is the old one, past the retention, deleted
+
+When even deleting every other copy leaves no room, nothing is written
+  ok    the others deleted, the last verified copy kept, and still no room: room_error, nothing written
+
+A listing longer than the ceiling allows: nothing written, said so
+  ok    more than its 1 page: refused as room_pages after one page, nothing written or deleted
+
+Two calls at once: one runs, the other is refused before anything costly (inbox C4-53)
+  ok    one is done, the other refused as busy; one set written
+  ok    the busy call left the day's new try untouched
+
+The lock: only its own run lets it go, it outlives the run's cutoff, and a busy call is reported
+  ok    the lock lives longer than the cutoff and the admission's two requests, with a minute to spare
+  ok    held, while writing, for at least the cutoff
+  ok    a lock taken by another run since is never let go by this one
+  ok    a call that finds the lock: busy, and the owner's report says so
+
+What the code proves: never past the review's ceiling in objects, and the last verified copy always kept
+  ok    never more than the review's 36199424 bytes (seen 21696)
+  ok    objects are what limits here: 64 reached, never passed, one listing page of 1
+  ok    the last verified copy is never deleted
+  ok    after each run whose deletion finished, none of its own copies older than 30 days
+  ok    the ceiling in sets: retention + 2 = 32
+
+The same 90 days with copies that weigh more than half a set each: bytes are what limits
+  ok    never more than the review's 36199424 bytes as listed (seen 35633871)
+  ok    and fewer objects than the 64 the count allows (seen 63)
+  ok    the last verified copy is never deleted
+
+A run that passes its cutoff stops before its manifest (independent review of #2175)
+  ok    the run's cutoff: 800 s, under a day (the retention's proof needs it)
+  ok    past the cutoff: refused as such, its part left unreferenced, no manifest written
+
+With the shortest retention, the report says no good copy before the last one can be deleted
+  ok    two failed days: the good copy is still there, and the report already says no good copy for 48 hours
+
+Nothing schedules it
+  ok    vercel.json names no backup route
+
+96 checks, all passing.
+
+Off until the owner's own settings exist, and never on the sold files' bucket or keys
+  ok    no settings: off
+  ok    the sold files' bucket: off
+  ok    the sold files' key: off
+  ok    a malformed account: off
+  ok    its own bucket and key: on
+  ok    a bucket in the EU jurisdiction: its own address
+  ok    an unknown jurisdiction: off
+
+Written once, read back whole, through the read-back the backup needs
+  ok    one object, under backups/, named by its id
+  ok    create-only, and signed with it
+  ok    every request signed, the body's hash the body's
+  ok    the round trip never deletes
+
+It lists its own objects and deletes one by its id (inbox C4-49: the run's retention)
+  ok    one page under backups/, signed, at most 1,000 names
+  ok    only its own objects, each with the time the bucket wrote it and its size; another name is never offered for deletion
+  ok    a long listing goes on from where it stopped
+  ok    not a listing: refused, never read as an empty bucket
+  ok    a truncated listing with nowhere to go on: refused, never read as an empty bucket
+  ok    a time that is not one: refused, never read as an empty bucket
+  ok    no size: refused, never read as an empty bucket
+  ok    a count that does not match: refused, never read as an empty bucket
+  ok    a delete: of that object only, signed
+  ok    an id that is not one: refused before any request
+  ok    a delete answered 403: refused, never taken as done
+
+What is never taken as a backup
+  ok    an id that is not one: refused before any request
+  ok    a second write under the same id: refused (412), the first kept
+  ok    a read past its cap: refused
+  ok    and so when the store states no length, counted as it streams
+  ok    a cap that is not a count of bytes: refused
+  ok    an answer of 303: refused, never taken as written or read
+  ok    an answer of 409: refused, never taken as written or read
+  ok    an answer of 503: refused, never taken as written or read
+  ok    a missing object: refused
+  ok    an unreachable store: refused
+
+32 checks, all passing.
+G_LINKED_ACTUAL_RUNNER_FAILED 0
+
+
+===== /tmp/g2826-859-tsc.log =====
+
+
+===== /tmp/g2826-859-lint.log =====
+
+
+===== /tmp/g2826-859-public.log =====
+Public data check: 4068 tracked files; 0 file(s) require correction.
+

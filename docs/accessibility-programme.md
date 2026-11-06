@@ -152,3 +152,56 @@ Muted words on store pages (dates, notes, hints, "Unsaved" and similar) are smal
 - **Why it cannot be fixed on our side:** a page cannot listen to keys inside a frame of another origin. Running our script in the frame is not possible either, because it is the provider's page.
 - **The equivalent we offer:** this is not a keyboard trap (2.1.2). One Shift+Tab from the player's first control reaches Close, which is labeled "Close", is at least 44 × 44 px and is always visible at the top of the window. Close is also the first thing focused when the window opens.
 - **Not checked:** a real screen reader with each provider's real player.
+
+## Resource-page interface captures (6 November 2026)
+
+Encanto 9 adds dated captures to `/platform/store-page` and
+`/platform/sales-pages`. These show the actual application with isolated,
+fictional Harbor Kitchen content. They are not testimonials, customer outcomes,
+or a replacement for the page's live heading, description, capability details,
+and closed-plan notice. Captions identify the fictional content, capture date,
+and substitute font. No text is placed over the captured pixels.
+
+### SC 1.4.9 assessment and alternatives
+
+The purpose is to show the interface arrangement: a creator profile above
+product cards, and a product list beside an editor with Build/Preview tabs and
+a page-coach panel. The surrounding card structure, spacing, selection and
+control placement convey visual information in addition to the text. Rendering
+a marketing paragraph as pixels is not this purpose. The capture's particular
+presentation is the evidence of how the application looked at the recorded
+revision; it does not establish the current state of a customer's store.
+
+The [W3C explanation of SC 1.4.9](https://www.w3.org/WAI/WCAG22/Understanding/images-of-text-no-exception.html),
+reviewed on November 6, 2026 (page updated September 16, 2025), distinguishes
+screenshots conveying significant other visual information from an image that
+simply styles text. Classification depends on what an individual image conveys,
+not on its file extension or the word "screenshot". This is the scoped basis
+for using these two informative interface captures; independent review must
+confirm it before merge. It is not a blanket exemption for text in future images.
+
+Each image has a specific text alternative describing its visible arrangement.
+The store alternative identifies the profile, three product cards, titles and
+price badges; the editor alternative identifies the product list, editor tabs
+and page-coach score. The latter does not claim a phone preview outside the
+captured area. Dates and provenance are live text in a visible `figcaption`.
+Page explanations and availability remain live, adjustable HTML text; these
+images introduce no separate product promise, price or testimonial.
+
+### Evidence and remaining limits
+
+Captures are 1280 by 820 pixels, with explicit intrinsic dimensions, lazy loading
+and asynchronous decoding. Static inline WebP payloads are 37,746 and 54,842
+bytes; the 100,000-byte per-capture publication ceiling was checked before
+creating them. There is no optimizer, external image host or runtime capture.
+The source revision, timestamps and SHA-256 digests are recorded with the images.
+
+The capture run used real Next server-rendered UI, local synthetic services and
+a substitute font. JavaScript was disabled to avoid automatic visit analytics;
+no hydration, editing interaction, production font fidelity or screen-reader
+journey is claimed. Isolated component checks at 390 and 1440 pixels confirm
+image decoding, readable live captions, no overflow and no violations in the
+selected automated accessibility rules. Full page integration is checked in the
+associated PR. Neither these checks nor this record certify whole-product AAA,
+all access needs, real devices, LCP/CLS or production behavior. Review of the
+image purpose and text alternatives remains part of independent PR review.

@@ -13,12 +13,14 @@ const require = createRequire(join(root, "package.json"));
 const { build } = require("esbuild");
 const temporary = mkdtempSync(join(root, ".git-feature-capture-"));
 if (process.argv.includes("--verify-component")) {
+  const pageSlug = process.env.T_VERIFY_PAGE;
+  if (pageSlug && !["store-page", "sales-pages"].includes(pageSlug)) throw Error("Unsupported resource page");
   // Independent rendering of our new component while the shared hero remains reserved.
   // No integration/hydration/global AAA claim follows from this isolated check.
   let previewBrowser;
   try {
     const entry = join(temporary, "component.cjs");
-    await build({ stdin: { contents: `import {renderToStaticMarkup} from 'react-dom/server';import {FeatureCapture,hasFeatureCapture} from './components/feature-captures';import {FEATURE_CAPTURES} from './lib/feature-captures';console.log(JSON.stringify({html:renderToStaticMarkup(<main>{FEATURE_CAPTURES.map(c=><FeatureCapture key={c.slug} slug={c.slug}/>)}</main>),unknown:renderToStaticMarkup(<FeatureCapture slug="crm"/>),known:FEATURE_CAPTURES.map(c=>hasFeatureCapture(c.slug)),unknownKnown:hasFeatureCapture('crm')}));`, resolveDir: root, loader: "tsx" }, bundle: true, jsx: "automatic", platform: "node", format: "cjs", packages: "external", outfile: entry, alias: { "@": root }, logLevel: "error" });
+    await build({ stdin: { contents: (pageSlug ? `import {renderToStaticMarkup} from 'react-dom/server';import {TopicPageView} from './components/topic-page';import {findPage} from './lib/site-pages';import {FeatureCapture,hasFeatureCapture} from './components/feature-captures';console.log(JSON.stringify({html:renderToStaticMarkup(<TopicPageView page={findPage("platform",${JSON.stringify(pageSlug)})}/>),unknown:renderToStaticMarkup(<FeatureCapture slug="crm"/>),known:[hasFeatureCapture("store-page"),hasFeatureCapture("sales-pages")],unknownKnown:hasFeatureCapture("crm")}));` : `import {renderToStaticMarkup} from 'react-dom/server';import {FeatureCapture,hasFeatureCapture} from './components/feature-captures';import {FEATURE_CAPTURES} from './lib/feature-captures';console.log(JSON.stringify({html:renderToStaticMarkup(<main>{FEATURE_CAPTURES.map(c=><FeatureCapture key={c.slug} slug={c.slug}/>)}</main>),unknown:renderToStaticMarkup(<FeatureCapture slug="crm"/>),known:FEATURE_CAPTURES.map(c=>hasFeatureCapture(c.slug)),unknownKnown:hasFeatureCapture('crm')}));`), resolveDir: root, loader: "tsx" }, bundle: true, jsx: "automatic", platform: "node", format: "cjs", packages: "external", outfile: entry, alias: { "@": root }, logLevel: "error", banner: { js: 'globalThis.fetch=async()=>{throw Error("Nonlocal resource SSR fetch refused")};' }, plugins: [{name:"synthetic-font-only",setup(plugin){plugin.onLoad({filter:/\/components\/morning-fonts\.tsx?$/},()=>({contents:'export const MORNING_FONTS="";',loader:"ts"}));}}] });
     const rendered = spawnSync(process.execPath, [entry], { cwd: root, encoding: "utf8", maxBuffer: 4_000_000 });
     assert.equal(rendered.status, 0, rendered.stderr);
     const fixture = JSON.parse(rendered.stdout);
@@ -28,7 +30,7 @@ if (process.argv.includes("--verify-component")) {
     const { compile } = require("@tailwindcss/node");
     const compiler = await compile(readFileSync(join(root, "app/globals.css"), "utf8"), { base: root, onDependency() {} });
     const classes = [...fixture.html.matchAll(/class="([^"]*)"/g)].flatMap(m => m[1].split(/\s+/));
-    const css = compiler.build(classes);
+    const css = compiler.build(classes) + (pageSlug ? readFileSync(join(root,"app/home.css"),"utf8") + readFileSync(join(root,"app/platform/[slug]/focus-scroll.css"),"utf8") : "");
     previewBrowser = await require("playwright-core").chromium.launch({ headless: true });
     for (const width of [390, 1440]) {
       const context = await previewBrowser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
@@ -38,9 +40,10 @@ if (process.argv.includes("--verify-component")) {
         const page = await context.newPage();
         await page.setContent('<!doctype html><html lang="en"><head><style>' + css + '</style></head><body>' + fixture.html + '</body></html>');
         const figures = page.locator("figure[data-feature-capture]");
-        assert.equal(await figures.count(), 2);
+        assert.equal(await figures.count(), pageSlug ? 1 : 2);
         for (const figure of await figures.all()) {
           const image = figure.locator("img");
+          await image.scrollIntoViewIfNeeded();
           await image.evaluate(node => node.decode());
           assert.deepEqual(await image.evaluate(node => [node.naturalWidth, node.naturalHeight]), [1280, 820]);
           const text = await figure.locator("figcaption").innerText();
@@ -52,13 +55,14 @@ if (process.argv.includes("--verify-component")) {
         }
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
         await page.addScriptTag({ content: readFileSync(require.resolve("axe-core/axe.min.js"), "utf8") });
-        const audit = await page.locator("main").evaluate(async node => {
+        const audit = await (pageSlug ? figures.first() : page.locator("main")).evaluate(async node => {
           const result = await window.axe.run(node, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag2aaa", "wcag21aa", "wcag22aa"] } });
           return { violations: result.violations.map(v => ({ id: v.id, targets: v.nodes.map(n => n.target) })), incomplete: result.incomplete.map(v => v.id) };
         });
         assert.deepEqual(audit.violations, []);
         assert.equal(refused, 0);
-        console.log(JSON.stringify({ scope: "isolated real capture component, actual CSS, system font; not shared hero integration or global AAA", width, decodedCaptures: 2, unknownSlug: "empty", refused, ...audit }));
+        if (pageSlug && process.env.T_CAPTURE_DIRECTORY) { mkdirSync(process.env.T_CAPTURE_DIRECTORY,{recursive:true}); await figures.first().screenshot({path:join(process.env.T_CAPTURE_DIRECTORY,pageSlug+"-"+width+".png")}); }
+        console.log(JSON.stringify({ scope: pageSlug ? "actual TopicPageView SSR and actual CSS; capture figure axe scope; no Next hydration or global AAA" : "isolated real capture component, actual CSS, system font; not shared hero integration or global AAA", pageSlug, width, decodedCaptures: pageSlug ? 1 : 2, unknownSlug: "empty", refused, ...audit }));
       } finally { await context.close(); }
     }
   } finally { await previewBrowser?.close(); rmSync(temporary, { recursive: true, force: true }); }

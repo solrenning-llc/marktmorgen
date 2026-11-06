@@ -272,12 +272,13 @@ for (const [label, reply] of mgetReplies) {
     await withReply((c) => c[0] === "MGET", reply, () => assert.rejects(() => readPayPalSales(sid, 0, 100)));
   });
 }
-test("a sale whose record does not read, or is gone, makes the list partial, never complete without it", async () => {
+test("a sale whose record does not read makes the list partial, never complete without it; one whose record ended is gone", async () => {
   const [b] = await twoSales();
   const broken = await withReply((c) => c[0] === "MGET", () => [[JSON.stringify(b), "{"]], () => readPayPalSales(sid, 0, 100));
   assert.deepEqual(broken, { sales: [b], partial: true });
+  // GET/MGET null is Redis's own word that the record ended (kept 400 days, as the list is): a known absence.
   const gone = await withReply((c) => c[0] === "MGET", () => [[JSON.stringify(b), null]], () => readPayPalSales(sid, 0, 100));
-  assert.deepEqual(gone, { sales: [b], partial: true });
+  assert.deepEqual(gone, { sales: [b], partial: false });
 });
 test("controls: the sales read exactly, none is none, and more than the limit is partial", async () => {
   const both = await twoSales();

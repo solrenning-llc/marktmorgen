@@ -55,16 +55,16 @@ async function main(): Promise<void> {
   is("weeks start on Monday", [mondayOf(Date.UTC(2026, 9, 13)), mondayOf(Date.UTC(2026, 9, 12)), mondayOf(Date.UTC(2026, 9, 18, 23))], ["2026-10-12", "2026-10-12", "2026-10-12"]);
   const NOW = Date.UTC(2026, 9, 14, 12);
   for (let i = 0; i < MIN_STORES; i += 1) {
-    await recordSample({ statsId: `store${i}`, email: `o${i}@example.com`, suspended: "" }, data(1_000, 50, 10 + i, 1, 12, 3), NOW - 7 * 86_400_000);
+    await recordSample({ statsId: `store${i}`, email: `o${i}@example.com`, suspended: "", handle: `h-${`store${i}`}`, previousHandles: [], releasedHandles: [] }, data(1_000, 50, 10 + i, 1, 12, 3), NOW - 7 * 86_400_000);
   }
   // One store's numbers changed this week: its latest sample is the one used.
-  await recordSample({ statsId: "store0", email: "o0@example.com", suspended: "" }, data(1_000, 50, 40, 1, 12, 3), NOW);
-  await recordSample({ statsId: "demo", email: HOUSE_OWNER, suspended: "" }, data(1_000, 50, 50, 0, 20, 10), NOW);
-  await recordSample({ statsId: "gone", email: "x@example.com", suspended: "2026-10-01" }, data(1_000, 50, 50, 0, 20, 10), NOW);
+  await recordSample({ statsId: "store0", email: "o0@example.com", suspended: "", handle: `h-${"store0"}`, previousHandles: [], releasedHandles: [] }, data(1_000, 50, 40, 1, 12, 3), NOW);
+  await recordSample({ statsId: "demo", email: HOUSE_OWNER, suspended: "", handle: `h-${"demo"}`, previousHandles: [], releasedHandles: [] }, data(1_000, 50, 50, 0, 20, 10), NOW);
+  await recordSample({ statsId: "gone", email: "x@example.com", suspended: "2026-10-01", handle: `h-${"gone"}`, previousHandles: [], releasedHandles: [] }, data(1_000, 50, 50, 0, 20, 10), NOW);
   const kept = await refreshRanges(NOW);
   is("ten stores, a store's latest sample each, the demo and the suspended left out", kept?.stores, MIN_STORES);
   is("the range uses this week's figure for the store that changed", (await readRanges())?.ranges.a?.converted?.high, percentile([0.011, 0.012, 0.013, 0.014, 0.015, 0.016, 0.017, 0.018, 0.019, 0.04], 0.75));
-  await recordSample({ statsId: "store0", email: "o0@example.com", suspended: "" }, data(100, 5, 1, 0, 1, 0), NOW);
+  await recordSample({ statsId: "store0", email: "o0@example.com", suspended: "", handle: `h-${"store0"}`, previousHandles: [], releasedHandles: [] }, data(100, 5, 1, 0, 1, 0), NOW);
   const after = await refreshRanges(NOW);
   is("a store that no longer qualifies is taken out, last week's sample of it too, and nine stores show no range", [after?.stores, after?.ranges.a], [MIN_STORES - 1, undefined]);
 

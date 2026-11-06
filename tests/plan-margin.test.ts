@@ -108,6 +108,8 @@ import { CLOSING_DAYS, KEEP_NOTHING_FROM, WARN_WEEK_DAYS, keptRoomFor } from "@/
 import { LONGEST_PAUSE_MONTHS, PAID_MONTHS_BEFORE_PAUSE } from "@/lib/plan-pause-rules";
 import { SETUP_VISITS, TRIAL_VISITS, VISITS_INCLUDED, VISIT_CENTS_PER_THOUSAND_OVER } from "@/lib/traffic-rules";
 import { visitCost } from "./traffic-cost";
+import { allUnits, evaluate, roomKept } from "./margin-alignment-table";
+import { ASSISTANT_ON_SALE, PLANS_ON_SALE } from "@/lib/opening";
 import { ORDERS_INCLUDED, ORDER_CENTS_PER_THOUSAND_OVER, TRIAL_ORDERS, freeCopiesLimitFor } from "@/lib/order-rules";
 import { coveredByShare } from "@/lib/orders";
 import { SHARE_PROVED_IN_TEST_MODE, shareOf } from "@/lib/platform-share";
@@ -206,15 +208,17 @@ for (const [schedule, prices] of SCHEDULES) for (const tier of TIERS) {
   });
 }
 
-test("Scale keeps more than Pro does in its own worst month, monthly and yearly, where neither takes a share", () => {
-  // The dearest plan is the one a heavy sender is on, so it is the last one
-  // that may be allowed to be the thinnest. With a share of each sale the
-  // comparison is not like for like — Studio is paid a share on top of what
-  // is counted here and Scale is not — so it holds for the prices without.
-  for (const cycle of ["month", "year"] as const) {
-    const prices = PRICES_WITHOUT_COMMISSION;
-    const kept = (tier: Tier) => (netOf(tier, cycle, prices) - worstCost(tier)) / netOf(tier, cycle, prices);
-    assert.ok(kept("scale") >= kept("pro"), `${cycle}: Scale keeps ${(kept("scale") * 100).toFixed(1)}% and Pro ${(kept("pro") * 100).toFixed(1)}%`);
+test("net profit > 0 with the spend floor's room on every unit, monthly and yearly", () => {
+  // The MR rule (owner, 27 October 2026): every unit, alone at full use in
+  // its worst month, makes a profit after every cost and tax, with the room
+  // the spend floor keeps. It replaces "Scale keeps more than Pro does in its
+  // own worst month" (Claude 1, C2-63, 4 November 2026; 465 [MR2]): which
+  // plan keeps the larger share was never the owner's rule.
+  const units = allUnits(PLANS_ON_SALE, ASSISTANT_ON_SALE);
+  for (const tier of ["creator", "pro", "scale"] as const) for (const cycle of ["month", "year"] as const) assert.ok(units.some((unit) => unit.id.startsWith(`${tier}-${cycle}-`)), `${tier} ${cycle} is a unit`);
+  for (const unit of units) {
+    const withRoom = evaluate({ ...unit, usageCents: unit.usageCents + roomKept(unit) });
+    assert.ok(withRoom.netCents > 0, `${unit.id}: ${withRoom.netCents} cents net with ${roomKept(unit)} cents of room`);
   }
 });
 

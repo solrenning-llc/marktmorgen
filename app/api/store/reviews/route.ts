@@ -5,7 +5,7 @@ import { refreshStoreQuotes } from "@/lib/store-quotes";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_REPLY_TEXT, REVIEW_ID_PATTERN, isHideReason, markSeen, setHidden, setReply, setReviewPhoto } from "@/lib/reviews";
 import { dropReviewPhoto } from "@/lib/review-photo";
-import { MAX_ASK_DAYS, MIN_ASK_DAYS } from "@/lib/review-ask";
+import { MAX_ASK_DAYS, MIN_ASK_DAYS, readAgain } from "@/lib/review-ask";
 import { parseReviewElsewhere } from "@/lib/review-elsewhere";
 import { canWrite } from "@/lib/mail";
 
@@ -20,6 +20,7 @@ const PRODUCT_ID = /^[a-z0-9]{6,40}$/;
  *   { action: "seen", items | all }           take reviews out of the queue of new ones
  *   { action: "ask", days }                   the review-request email: 3 to 30 days, or 0 for off
  *   { action: "ask", days, elsewhere }        and the creator's public review page, "" for none
+ *   { action: "ask", days, again }            and one reminder 3 to 14 days after it, 0 for none (636 [GL4](a))
  *
  * There is no action that changes what a buyer wrote or the stars they gave,
  * and none that deletes a review: only its buyer can (lib/reviews.ts). A
@@ -54,7 +55,14 @@ export async function POST(request: NextRequest) {
           elsewhere = page;
         }
       }
-      await setReviewAsk(guarded.ref, elsewhere ? { days, elsewhere } : { days });
+      // One reminder, or none: absent keeps what was chosen, anything out of range is refused.
+      let again = store.reviewAsk.again ?? 0;
+      if ("again" in body) {
+        const asked = Number(body.again);
+        if (asked !== 0 && readAgain(asked) === 0) return Response.json({ ok: false, error: "again" }, { status: 400 });
+        again = asked;
+      }
+      await setReviewAsk(guarded.ref, { days, ...(elsewhere ? { elsewhere } : {}), ...(again ? { again } : {}) });
       return Response.json({ ok: true });
     }
 

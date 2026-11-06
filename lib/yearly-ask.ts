@@ -19,6 +19,8 @@
  *   nl:yearask:cursor                         where the last run stopped
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { types } from "node:util";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { platformKey } from "@/lib/stripe-account";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
@@ -46,6 +48,22 @@ const PER_RUN = 200;
 const sentKey = (statsId: string, sub: string) => `nl:yearask:${statsId}:${sub}`;
 const countKey = (statsId: string, month: string) => `nl:yearask:count:${statsId}:${month}`;
 const monthOf = (ms: number) => new Date(ms).toISOString().slice(0, 7);
+
+/** Snapshot only the exact inert replies the existing commands requested. */
+function offerReplies(value: unknown, count: number): unknown[] | null {
+  try {
+    if (types.isProxy(value) || !Array.isArray(value) || Object.getOwnPropertySymbols(value).length) return null;
+    const size = Object.getOwnPropertyDescriptor(value, "length");
+    if (!size || !Object.hasOwn(size, "value") || size.value !== count || Object.getOwnPropertyNames(value).length !== count + 1) return null;
+    const replies: unknown[] = [];
+    for (let i = 0; i < count; i++) {
+      const item = Object.getOwnPropertyDescriptor(value, String(i));
+      if (!item || !Object.hasOwn(item, "value")) return null;
+      replies.push(item.value);
+    }
+    return replies;
+  } catch { return null; }
+}
 
 /** The email, pure: what a member reads. */
 export function yearlyAskEmail(input: { storeName: string; title: string; monthly: string; yearly: string; saving: string; url: string; language?: LanguageCode }): { subject: string; body: string } {
@@ -89,8 +107,9 @@ export async function askStore(store: Store, deadline: number, now = Date.now())
   if (!fits.length) return 0;
   const statsId = store.statsId;
   // Those already written to are skipped before anything else is asked.
-  const seen = await redisPipeline(fits.map((f) => ["EXISTS", sentKey(statsId, f.sub)]));
-  const fresh = fits.filter((_, i) => Number(seen[i]) !== 1).slice(0, PER_RUN);
+  const seen = offerReplies(await redisPipeline(fits.map((f) => ["EXISTS", sentKey(statsId, f.sub)])), fits.length);
+  if (!seen || seen.some(value => value !== 0 && value !== 1)) throw new UnknownReplyError("yearly offer history");
+  const fresh = fits.filter((_, i) => seen[i] === 0).slice(0, PER_RUN);
   if (!fresh.length) return 0;
   // Only those who agreed to hear from the creator and have not left the list.
   const tokens = await tokensFor(store.listId, [...new Set(fresh.map((f) => f.email))], store.handle);
@@ -103,7 +122,9 @@ export async function askStore(store: Store, deadline: number, now = Date.now())
     if (!unsub) continue;
     const key = sentKey(statsId, row.sub);
     // Five years, counted as for good in the store's room (lib/order-data.ts).
-    const [claimed] = await orderWrite(store, [["SET", key, String(now), "NX", "EX", SENT_SECONDS]]);
+    const claim = offerReplies(await orderWrite(store, [["SET", key, String(now), "NX", "EX", SENT_SECONDS]]), 1);
+    if (!claim || (claim[0] !== null && claim[0] !== "OK")) throw new UnknownReplyError("a yearly offer claim");
+    const claimed = claim[0];
     if (claimed === null) continue;
     try {
       const token = await mintYearlyLink(store, row.customer, row.sub);
@@ -157,10 +178,14 @@ export async function yearlyAsksThisMonth(store: Store, now = Date.now()): Promi
 export async function sendYearlyAsks(deadline: number): Promise<{ stores: number; sent: number }> {
   const counts = { stores: 0, sent: 0 };
   if (!isRedisConfigured() || !platformKey() || !isSenderConfigured()) return counts;
-  const [saved] = await redisPipeline([["GET", CURSOR_KEY]]);
-  const [savedCursor, savedDone] = typeof saved === "string" ? saved.split("|") : ["0", "0"];
-  let cursor = /^\d+$/.test(savedCursor ?? "") ? savedCursor : "0";
-  let skip = Number(savedDone) || 0;
+  const reply = offerReplies(await redisPipeline([["GET", CURSOR_KEY]]), 1);
+  if (!reply) throw new UnknownReplyError("the yearly offer cursor");
+  // A confirmed absent key means this job has never kept a resume point.
+  const saved = reply[0] === null ? "0|0" : reply[0];
+  const match = typeof saved === "string" ? /^(0|[1-9][0-9]*)\|(0|[1-9][0-9]*)$/.exec(saved) : null;
+  if (!match || !Number.isSafeInteger(Number(match[2]))) throw new UnknownReplyError("the yearly offer cursor");
+  let cursor = match[1];
+  let skip = Number(match[2]);
   while (Date.now() < deadline) {
     const { stores, next } = await storesAfter(cursor);
     let done = 0;

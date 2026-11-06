@@ -1,9 +1,11 @@
+import "./orders-list-actions.mjs";
 import {createRequire} from "node:module";
 import {spawn} from "node:child_process";
 import {readFileSync,mkdtempSync,rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {build} from "esbuild";
 import {startServices} from "./services.mjs";
+import {prepareReviewedMailApp} from "./reviewed-mail-app.mjs";
 import {resolve,join} from "node:path";
 const root=resolve(".");
 const require=createRequire(join(root,"package.json"));
@@ -22,6 +24,7 @@ const env = {
   UPSTASH_REDIS_REST_URL: FAKE,
   UPSTASH_REDIS_REST_TOKEN: "local",
   RESEND_API_KEY: "re_local_only_a_stand_in",
+  RESEND_READ_API_KEY: "re_local_only_a_stand_in",
   RESEND_API_BASE: FAKE,
   ANTHROPIC_API_KEY: "sk-ant-local_only_"+"x".repeat(30),
   ANTHROPIC_API_BASE: FAKE,
@@ -42,13 +45,15 @@ try{
  ids=JSON.parse(seeded.trim().split("\n").at(-1)).ids;
  if(!ids?.["Weeknight Dinners"])throw Error("Synthetic product missing");
 }catch(error){await services.close();throw error;}finally{rmSync(folder,{recursive:true,force:true});}
-const app=spawn(process.execPath,[join(root,"node_modules/next/dist/bin/next"),"start","-p",String(port)],{env,stdio:["ignore","pipe","pipe"]});
-let output="";for(const stream of [app.stdout,app.stderr])stream.on("data",chunk=>output=(output+chunk).slice(-6000));
+let app,reviewedApp,output="";
 let browser,cases=0,audits=0,failed=0,libraryLink=null;const gaps=[];
 const redact=value=>String(value).replace(/token=[^&\s"']+/g,"token=redacted");
 const localLink=value=>String(value).replace("https://marktmorgen.com",origin);
 try{
- let up=false;for(let n=0;n<120;n++){if(app.exitCode!==null)throw Error("Local app exited");try{up=(await fetch(origin)).ok;}catch{}if(up)break;await new Promise(r=>setTimeout(r,500));}
+ reviewedApp=await prepareReviewedMailApp(root,env);
+ app=spawn(process.execPath,[join(reviewedApp.root,"node_modules/next/dist/bin/next"),"start","-H","127.0.0.1","-p",String(port)],{cwd:reviewedApp.root,env,stdio:["ignore","pipe","pipe"]});
+ for(const stream of [app.stdout,app.stderr])stream.on("data",chunk=>output=(output+chunk).slice(-6000));
+ let up=false;for(let n=0;n<120;n++){if(app.exitCode!==null)throw Error("Local app exited");try{up=(await fetch(origin,{signal:AbortSignal.timeout(5_000)})).ok;}catch{}if(up)break;await new Promise(r=>setTimeout(r,500));}
  if(!up)throw Error("Local app did not start");
  browser=await driver.launch();console.log("BUYER_MATRIX_ENGINE:"+JSON.stringify({requested:engine,actual:driver.name(),version:browser.version()}));
  for(const width of [320,390,768,1280,1920])for(const mode of ["baseline","text-spacing","reduced-motion","forced-colors","reflow-320",...(process.env.AX2_PUBLIC_STANDARD==="true"?["dark"]:[])]){
@@ -164,7 +169,34 @@ try{
   }catch(error){failed++;console.error("BUYER_MATRIX_FAILURE:"+JSON.stringify({engine,width,mode,phase,error:redact(error)}));}
   finally{cases++;await context.close();}
  }
+ // 656 [WG16]: a store with nothing on it (tests/e2e/seed.ts, freshshop) shows the empty state: a heading and one
+ // sentence, no dead button, nothing blank, axe AAA. Its blog, with no posts, has no page at all (404), never a blank one.
+ // Baseline at 320 and 1280 px only; its time is printed so the cost it adds to this job is measured, never taken as zero.
+ const emptyStarted=Date.now();let emptyCases=0;
+ for(const width of [320,1280]){
+  const blog=await fetch(origin+"/@freshshop/blog",{headers:{"x-forwarded-for":"198.51.100."+(40+width%7)},signal:AbortSignal.timeout(30_000)});
+  if(blog.status!==404){failed++;console.error("EMPTY_STATE_FAILURE:"+JSON.stringify({engine,width,path:"/@freshshop/blog",error:"A store with no posts has a blog page: HTTP "+blog.status}));}
+ }
+ for(const width of [320,1280])for(const path of ["/@freshshop"]){
+  const context=await browser.newContext({viewport:{width,height:900},serviceWorkers:"block",extraHTTPHeaders:{"x-forwarded-for":"198.51.100."+(10+emptyCases)}});
+  try{
+   const page=await context.newPage();const errors=[];page.on("pageerror",error=>errors.push(redact(error)));
+   await context.route("**/*",route=>{const url=new URL(route.request().url());if(url.origin!==origin&&url.origin!==FAKE)return route.abort();if(url.pathname==="/api/store/hit")return route.fulfill({status:204,body:""});if(!["GET","HEAD"].includes(route.request().method()))return route.abort();return route.continue();});
+   const response=await page.goto(origin+path,{waitUntil:"networkidle",timeout:60000});
+   if(response?.status()!==200)throw Error("HTTP "+response?.status());
+   const empty=await page.evaluate(()=>[...document.querySelectorAll("[data-empty-state]")].map(node=>({heading:node.querySelector("h2")?.textContent?.trim()??"",sentence:node.querySelector("p")?.textContent?.trim()??"",actions:[...node.querySelectorAll("a,button")].map(a=>({tag:a.tagName,href:a.getAttribute("href")})),visible:node.getBoundingClientRect().height>0})));
+   if(empty.length!==1||!empty[0].heading||!empty[0].sentence||!empty[0].visible)throw Error("Empty state missing or blank "+JSON.stringify(empty));
+   if(empty[0].actions.some(a=>a.tag!=="A"||!/^\/(?!\/)/.test(a.href??"")))throw Error("Dead or foreign action in the empty state "+JSON.stringify(empty[0].actions));
+   await page.addScriptTag({content:axe});
+   const result=await page.evaluate(async()=>{const root=document.documentElement,run=await window.axe.run(document,{rules:{"color-contrast-enhanced":{enabled:true}}});return {scroll:root.scrollWidth,client:root.clientWidth,violations:run.violations.map(v=>({id:v.id,nodes:v.nodes.length})),incomplete:run.incomplete.map(v=>v.id)};});
+   audits++;console.log("EMPTY_STATE_AUDIT:"+JSON.stringify({engine,width,path,empty:empty[0],...result}));
+   if(result.scroll>result.client||result.violations.length||errors.length)throw Error("Empty state accessibility/overflow/page failure "+JSON.stringify({violations:result.violations,errors}));
+   if(result.incomplete.length)gaps.push({width,mode:"baseline",state:"empty "+path,manualReview:result.incomplete});
+  }catch(error){failed++;console.error("EMPTY_STATE_FAILURE:"+JSON.stringify({engine,width,path,error:redact(error)}));}
+  finally{emptyCases++;cases++;await context.close();}
+ }
+ console.log("EMPTY_STATE_COST:"+JSON.stringify({engine,cases:emptyCases,milliseconds:Date.now()-emptyStarted}));
  console.log("BUYER_MATRIX_OPEN_GAPS:"+JSON.stringify(gaps));
  console.log("BUYER_MATRIX_SUMMARY:"+JSON.stringify({engine,cases,audits,failed,scope:"Real local app checkout against fake Stripe paid return; local captured inbox/library/orders. No real checkout/payment/provider/message/account or external download."}));
-}finally{await browser?.close();app.kill("SIGTERM");await services.close();}
+}finally{await browser?.close();if(app&&app.exitCode===null){const closed=new Promise(resolve=>app.once("exit",resolve));const forced=setTimeout(()=>app.kill("SIGKILL"),5_000);app.kill("SIGTERM");await closed;clearTimeout(forced);}await services.close();if(reviewedApp)await reviewedApp.cleanup();}
 process.exitCode=failed?1:0;

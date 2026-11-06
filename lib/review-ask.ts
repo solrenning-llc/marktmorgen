@@ -26,7 +26,27 @@ export type ReviewAsk = {
    * after the store's own link (lib/review-elsewhere.ts); absent is none.
    */
   elsewhere?: ReviewElsewhere;
+  /**
+   * One reminder (636 [GL4](a)): this many days after the first email, only
+   * to a buyer who has not reviewed yet; absent or 0 is none, as for every
+   * store before it existed. Never a second one.
+   */
+  again?: number;
 };
+
+/** The shortest and longest wait between the email and its one reminder. */
+export const MIN_AGAIN_DAYS = 3;
+export const MAX_AGAIN_DAYS = 14;
+
+/** When the one reminder for an order paid at `paidAt` is due. */
+export function againDueAt(paidAt: number, days: number, again: number): number {
+  return paidAt + (days + again) * 86_400;
+}
+
+/** A reminder setting as kept: 3 to 14 days, anything else none. */
+export function readAgain(raw: unknown): number {
+  return typeof raw === "number" && Number.isInteger(raw) && raw >= MIN_AGAIN_DAYS && raw <= MAX_AGAIN_DAYS ? raw : 0;
+}
 
 export const MIN_ASK_DAYS = 3;
 export const MAX_ASK_DAYS = 30;
@@ -47,7 +67,8 @@ export function parseReviewAsk(raw: unknown): ReviewAsk {
   const stored = (raw as { elsewhere?: unknown }).elsewhere;
   const elsewhere = parseReviewElsewhere(stored && typeof stored === "object" ? (stored as { url?: unknown }).url : stored);
   const on = typeof days === "number" && Number.isInteger(days) && days >= MIN_ASK_DAYS && days <= MAX_ASK_DAYS ? days : 0;
-  return elsewhere ? { days: on, elsewhere } : { days: on };
+  const again = readAgain((raw as { again?: unknown }).again);
+  return { days: on, ...(elsewhere ? { elsewhere } : {}), ...(again ? { again } : {}) };
 }
 
 /** One entry on the list, as it is kept. */

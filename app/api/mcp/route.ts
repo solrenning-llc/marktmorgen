@@ -1,10 +1,9 @@
-import { apiStore } from "@/lib/api-guard";
+import { apiStore, holdMoreApi, takeMoreApi } from "@/lib/api-guard";
 import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
-import { readNumbers, summaryOf } from "@/lib/stats-report";
+import { apiNumbers } from "@/lib/api-numbers";
+import { summaryOf } from "@/lib/stats-report";
 import type { StatsData } from "@/lib/stats";
-import { readTitles } from "@/lib/catalog";
-import { rangeProblem, readLive, readRange, readToday } from "@/lib/stats";
 import {
   affiliatesTool,
   buyersTool,
@@ -12,19 +11,16 @@ import {
   emailsTool,
   funnelTool,
   insightsTool,
-  liveTool,
   membershipsTool,
   productTextTool,
   productsTool,
-  rangeTool,
   readCourseTool,
   readLessonTool,
   readPageReadingTool,
   readPageTestTool,
   readPageVersionsTool,
-  savedBlocksTool,
   readSalesPageTool,
-  readFullNumbers,
+  savedBlocksTool,
   windowOf,
 } from "@/lib/mcp-tools";
 
@@ -104,74 +100,85 @@ export async function POST(request: Request) {
   const params = (message.params ?? {}) as { name?: unknown; arguments?: Record<string, unknown> };
   try {
     if (params.name === "get_store") return result(id, said(storeInfo(store)));
-    if (params.name === "get_numbers") {
-      const data = await readNumbers(store);
-      return result(id, data ? said(summaryOf(data)) : said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
-    }
+    // Every other tool takes what it reads past the door before reading it (lib/api-read-rules.ts);
+    // refused, the refusal's own sentence, as the door's.
+    const charge = (more: number, taken?: number) => takeMoreApi(store, more, taken);
+    const hold = (most: number) => holdMoreApi(store, most);
+    const refusedWith = async (refusal: Response) => {
+      const words = (await refusal.json().catch(() => null)) as { message?: unknown } | null;
+      return failure(id, -32001, typeof words?.message === "string" ? words.message : "That could not be read just now. Try again in a moment.");
+    };
+    const answer = async (read: unknown) => (read instanceof Response ? refusedWith(read) : result(id, said(read)));
     const days = windowOf(params.arguments?.days);
     const windowed: Record<string, (data: StatsData) => unknown | Promise<unknown>> = {
+      get_numbers: (data) => summaryOf(data),
       get_revenue_by_channel: (data) => channelsTool(data, days),
       get_funnel: (data) => funnelTool(data, days),
-      get_product_numbers: (data) => productsTool(store, data, days),
+      get_product_numbers: (data) => productsTool(store, data, days, { hold, charge }),
       get_buyers: (data) => buyersTool(data, days),
       get_worth_knowing: (data) => insightsTool(data, days),
     };
     const tool = typeof params.name === "string" && Object.hasOwn(windowed, params.name) ? windowed[params.name] : undefined;
     if (typeof tool === "function") {
-      const data = await readFullNumbers(store);
-      return result(id, data ? said(await tool(data)) : said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
+      // The numbers, from the copy kept an hour or read anew, paid for first (lib/api-numbers.ts); get_numbers without the products' listings, as /api/v1/stats.
+      const read = await apiNumbers(store, params.name === "get_numbers" ? "plain" : "full", charge, hold);
+      if (read instanceof Response) return refusedWith(read);
+      if (!read) return result(id, said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
+      const value = {
+        ...((await tool(read.data)) as Record<string, unknown>),
+        asOf: read.asOf,
+        ...(read.listed ? {} : { products_note: "The products' names were not read: your store's API requests left did not cover them." }),
+      };
+      const answer = said(value);
+      // What the answer sends is settled before it is sent.
+      const refused = await read.settle(Buffer.byteLength(answer.content[0].text));
+      return refused ? refusedWith(refused) : result(id, answer);
     }
-    if (params.name === "get_live") {
-      const [live, today] = await Promise.all([readLive(store), readToday(store).catch(() => null)]);
-      return result(id, said(liveTool(live, today)));
-    }
-    if (params.name === "get_numbers_for_days") {
-      const from = typeof params.arguments?.from === "string" ? params.arguments.from.slice(0, 10) : "";
-      const to = typeof params.arguments?.to === "string" ? params.arguments.to.slice(0, 10) : "";
-      const problem = rangeProblem(from, to);
-      if (problem) {
-        const words = { dates: "Send from and to as YYYY-MM-DD.", order: "from must not be after to.", future: "to must not be after today (UTC).", kept: "Days are kept for 400 days; start later." } as const;
-        return result(id, said({ error: words[problem] }, true));
-      }
-      const [range, titles] = await Promise.all([readRange(store, from, to), readTitles(store).catch(() => new Map<string, string>())]);
-      return result(id, range ? said(rangeTool(range, titles)) : said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
-    }
+    if (params.name === "get_memberships") return answer(await membershipsTool(store, charge));
+    if (params.name === "get_emails") return answer(await emailsTool(store, { charge, hold }));
+    if (params.name === "get_affiliates") return answer(await affiliatesTool(store, charge));
+    // The store's pages and courses (631 [AA1] (a)): each takes what it reads, at its most, before reading (lib/api-read-rules.ts).
+    const unknownProduct = { error: "There is no product with that id in this store. Use list_products for the ids." };
+    const productArg = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
     if (params.name === "get_product_description" || params.name === "get_sales_page") {
-      const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
-      const found = product ? await (params.name === "get_sales_page" ? readSalesPageTool(store, product) : productTextTool(store, product)) : null;
-      return result(id, found ? said(found) : said({ error: "There is no product with that id in this store. Use list_products for the ids." }, true));
+      if (!productArg) return result(id, said(unknownProduct, true));
+      const found = await (params.name === "get_sales_page" ? readSalesPageTool(store, productArg, charge) : productTextTool(store, productArg, charge));
+      if (found instanceof Response) return refusedWith(found);
+      return result(id, found ? said(found) : said(unknownProduct, true));
     }
     if (params.name === "get_course_outline" || params.name === "get_lesson") {
-      const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
       const lesson = typeof params.arguments?.lesson === "string" ? params.arguments.lesson.slice(0, 40) : "";
-      const found = !product ? null : params.name === "get_lesson" ? (lesson ? await readLessonTool(store, product, lesson) : null) : await readCourseTool(store, product);
-      return result(id, found ? said(found) : said({ error: params.name === "get_lesson" ? "There is no such lesson in this store's courses. Use get_course_outline for the ids." : "There is no course with that id in this store. Use list_products for the ids." }, true));
+      const missing = { error: params.name === "get_lesson" ? "There is no such lesson in this store's courses. Use get_course_outline for the ids." : "There is no course with that id in this store. Use list_products for the ids." };
+      if (!productArg || (params.name === "get_lesson" && !lesson)) return result(id, said(missing, true));
+      const found = params.name === "get_lesson" ? await readLessonTool(store, productArg, lesson, charge) : await readCourseTool(store, productArg, charge);
+      if (found instanceof Response) return refusedWith(found);
+      return result(id, found ? said(found) : said(missing, true));
     }
-    if (params.name === "get_page_test" || params.name === "get_page_reading") {
-      const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
-      const unknown = { error: "There is no product with that id in this store. Use list_products for the ids." };
-      if (params.name === "get_page_reading") {
-        const reading = product ? await readPageReadingTool(store, product) : null;
-        return result(id, reading ? said(reading) : said(unknown, true));
-      }
-      const tested = product ? await readPageTestTool(store, product) : { found: false as const, error: unknown.error };
+    if (params.name === "get_page_test") {
+      if (!productArg) return result(id, said(unknownProduct, true));
+      const tested = await readPageTestTool(store, productArg, charge);
+      if (tested instanceof Response) return refusedWith(tested);
       return result(id, tested.found ? said(tested.value) : said({ error: tested.error }, true));
     }
+    if (params.name === "get_page_reading") {
+      if (!productArg) return result(id, said(unknownProduct, true));
+      const reading = await readPageReadingTool(store, productArg, charge);
+      if (reading instanceof Response) return refusedWith(reading);
+      return result(id, reading ? said(reading) : said(unknownProduct, true));
+    }
     if (params.name === "get_page_versions") {
-      const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
       const raw = params.arguments?.version;
       const version = raw === undefined || raw === null ? null : Number.isInteger(raw) && (raw as number) >= 0 && (raw as number) < 100 ? (raw as number) : -1;
       if (version === -1) return result(id, said({ error: "version is a whole number from the list, 0 for the newest." }, true));
-      const found = product ? await readPageVersionsTool(store, product, version) : { found: false as const, error: "There is no product with that id in this store. Use list_products for the ids." };
+      if (!productArg) return result(id, said(unknownProduct, true));
+      const found = await readPageVersionsTool(store, productArg, version, charge);
+      if (found instanceof Response) return refusedWith(found);
       return result(id, found.found ? said(found.value) : said({ error: found.error }, true));
     }
-    if (params.name === "list_saved_blocks") return result(id, said(await savedBlocksTool(store)));
-    if (params.name === "get_memberships") return result(id, said(await membershipsTool(store)));
-    if (params.name === "get_emails") return result(id, said(await emailsTool(store)));
-    if (params.name === "get_affiliates") return result(id, said(await affiliatesTool(store)));
+    if (params.name === "list_saved_blocks") return answer(await savedBlocksTool(store, charge));
     if (params.name === "list_products") {
       const cursor = typeof params.arguments?.cursor === "string" ? params.arguments.cursor.slice(0, 200) : null;
-      return result(id, said(await products(store, cursor)));
+      return answer(await products(store, cursor, charge));
     }
     return result(id, said({ error: `There is no tool called ${String(params.name).slice(0, 40)}.` }, true));
   } catch (error) {

@@ -14,7 +14,7 @@ import { PLANS_ON_SALE } from "@/lib/opening";
 import { PLAN_TITLES } from "@/lib/plan";
 
 /** The studio's own words. */
-export const REVIEWS_WORDS = { tool: "Reviews", all: "Every review", reply: "Reply", edit: "Edit your reply", post: "Post the reply", ask: "Asking for reviews", askBox: "Email buyers once to ask for a review", save: "Save" } as const;
+export const REVIEWS_WORDS = { tool: "Reviews", all: "Every review", reply: "Reply", edit: "Edit your reply", post: "Post the reply", ask: "Asking for reviews", askBox: "Email buyers to ask for a review", save: "Save" } as const;
 
 export function reviewsBeginnerQuestions(onSale = PLANS_ON_SALE): { q: string; a: string }[] {
   const w = REVIEWS_WORDS;

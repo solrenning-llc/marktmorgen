@@ -26,6 +26,7 @@
  * function that draws the email.
  */
 import { MAX_MAIL_PICTURES, readPicture, withoutPictures } from "@/lib/mail-picture-rules";
+import { contrast, lookColours } from "@/lib/store-look";
 
 export const MAX_MAIL_HEADING = 120;
 export const MAX_MAIL_BUTTON = 60;
@@ -88,7 +89,7 @@ export function parseMailBlocks(body: string): MailBlock[] {
         continue;
       }
       const button = line.match(BUTTON);
-      if (button) {
+      if (button && button[1].trim()) {
         out.push({ kind: "button", label: button[1].trim(), href: button[2] });
         continue;
       }
@@ -144,21 +145,24 @@ export function buttonHrefOk(href: string): boolean {
   return /^https:\/\/[^\s<>"')]+$/.test(href.trim());
 }
 
-/** Black or white, whichever reads on a colour. */
-function textOn(hex: string): string {
-  const m = /^#([0-9a-f]{6})$/i.exec(hex);
-  if (!m) return "#ffffff";
-  const [r, g, b] = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.4 ? "#1c1917" : "#ffffff";
+/** Keep readable store colors only when their edge is also visible on the white card. */
+function buttonColours(accent: string): { fill: string; ink: string } {
+  const fill = /^#[0-9a-f]{6}$/i.test(accent) ? accent : "#4c1d95";
+  const whiteContrast = contrast(fill, "#ffffff");
+  const visibleEdge = whiteContrast >= 3;
+  if (visibleEdge && whiteContrast >= 7) return { fill, ink: "#ffffff" };
+  if (visibleEdge && contrast(fill, "#1c1917") >= 7) return { fill, ink: "#1c1917" };
+  const colors = lookColours({ theme: "light", accent: fill });
+  return { fill: colors.accent, ink: colors.onAccent };
 }
 
 /**
  * The creator's text as HTML: headings, paragraphs, lists, links, buttons,
  * lines across and the pictures kept for it, nothing else. `accent` is the
- * colour of a button, the store's own.
+ * starting colour of a button, adjusted only when its text cannot reach 7:1.
  */
 export function bodyHtml(body: string, goesTo?: (href: string) => string, accent = "#4c1d95"): string {
-  const color = /^#[0-9a-f]{6}$/i.test(accent) ? accent : "#4c1d95";
+  const colors = buttonColours(accent);
   const out: string[] = [];
   let pictures = 0;
   for (const block of parseMailBlocks(body)) {
@@ -169,7 +173,7 @@ export function bodyHtml(body: string, goesTo?: (href: string) => string, accent
       case "button": {
         const href = goesTo ? goesTo(block.href) : block.href;
         out.push(
-          `<p style="margin:8px 0 24px"><a href="${escape(href)}" style="display:inline-block;padding:12px 22px;border-radius:999px;background:${color};color:${textOn(color)};font-weight:700;text-decoration:none">${escape(block.label)}</a></p>`,
+          `<p style="margin:8px 0 24px"><a href="${escape(href)}" style="display:inline-block;padding:12px 22px;border-radius:999px;background:${colors.fill};color:${colors.ink};font-weight:700;text-decoration:none">${escape(block.label)}</a></p>`,
         );
         break;
       }
@@ -305,6 +309,44 @@ export const MAIL_TEMPLATES: { id: string; label: string; hint: string; blocks: 
       { kind: "heading", text: "⟦The product's name⟧" },
       { kind: "text", text: "⟦Why you made it, and the problem it solves.⟧" },
       { kind: "button", label: "⟦See it⟧", href: "https://" },
+    ],
+  },
+  // Seasonal (624 [SZ8](29)): the occasion is the creator's to name, and only
+  // what is true is asked for: the real prices, an end date only if the sale
+  // has one. Nothing in them hurries the reader (tests/mail-body.test.ts).
+  {
+    id: "sale",
+    label: "A sale (Black Friday, a season's end)",
+    hint: "What is on sale, its price before and during the sale, and the day it ends if you set one.",
+    blocks: [
+      { kind: "heading", text: "⟦What is on sale⟧" },
+      { kind: "text", text: "⟦Why there is a sale now: Black Friday, a birthday, the end of a season.⟧" },
+      { kind: "list", items: ["⟦A product, its sale price and its usual price⟧", "⟦Another product, its sale price and its usual price⟧"] },
+      { kind: "text", text: "⟦The day the sale ends, as set in your store. Leave this out if it has no end.⟧" },
+      { kind: "button", label: "⟦See the sale⟧", href: "https://" },
+    ],
+  },
+  {
+    id: "year-end",
+    label: "End of the year",
+    hint: "A thank-you, what you made this year, and what comes next. No sale needed.",
+    blocks: [
+      { kind: "heading", text: "⟦Thank you for this year⟧" },
+      { kind: "text", text: "⟦What you made or learned this year, in a few sentences.⟧" },
+      { kind: "list", items: ["⟦Something you are glad you made⟧", "⟦Something readers asked for, and what you did⟧"] },
+      { kind: "text", text: "⟦What comes next year, if you know.⟧" },
+      { kind: "button", label: "⟦Read more⟧", href: "https://" },
+    ],
+  },
+  {
+    id: "back-to-school",
+    label: "Back to learning",
+    hint: "For a new school year or season: what they can learn with you, and where to start.",
+    blocks: [
+      { kind: "heading", text: "⟦A new season to learn something⟧" },
+      { kind: "text", text: "⟦Who this is for, and what they can learn with you.⟧" },
+      { kind: "list", items: ["⟦A course or guide, and what it teaches⟧", "⟦Another one, and what it teaches⟧"] },
+      { kind: "button", label: "⟦Where to start⟧", href: "https://" },
     ],
   },
 ];

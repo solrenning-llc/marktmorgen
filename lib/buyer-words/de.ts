@@ -52,9 +52,11 @@ export const de: BuyerWords = {
   callLive: (dates) => `Live-Session, online, ${dates} ${plural(dates, "Termin", "Termine")} geplant`,
   callGroup: (minutes, seats) => `Gruppengespräch, ${minutes} Minuten, bis zu ${seats} Personen, online`,
   callOne: (minutes) => `${minutes}-minütiges Gespräch, online`,
+  callLengths: (list) => `Gespräch von ${list} Minuten, online`,
   inPersonLive: (dates) => `Live-Session, vor Ort, ${dates} ${plural(dates, "Termin", "Termine")} geplant`,
   inPersonGroup: (minutes, seats) => `${minutes} Minuten, bis zu ${seats} Personen, vor Ort`,
   inPersonOne: (minutes) => `${minutes} Minuten, vor Ort`,
+  inPersonLengths: (list) => `${list} Minuten, vor Ort`,
   inPersonLiveNone: "Live-Session, vor Ort, keine Termine geplant",
   bundleOf: (count, worth) => `Paket mit ${count} Produkten${worth ? ` · ${worth}` : ""}`,
   worth: (worth, price) => `Produkte im Wert von ${worth} für ${price}`,
@@ -84,7 +86,7 @@ export const de: BuyerWords = {
   buyAsGift: "Als Geschenk kaufen",
   buyAsGiftFor: (price) => `Als Geschenk kaufen — ${price}`,
   giftNote: (store) =>
-    `Sie bezahlen auf der Seite von Stripe. Direkt danach erhält die beschenkte Person eine einzige E-Mail von ${store} mit Ihrem Namen, Ihrer Nachricht und einem Link, um es mit der eigenen Adresse zu öffnen. Sie erhalten die Quittung, keine Kopie.`,
+    `Sie bezahlen auf der Seite von Stripe. Nach der Zahlung gehört das Geschenk zu ihrer Adresse. Falls die einzige E-Mail von ${store} sie erreicht, enthält sie Ihren Namen, Ihre Nachricht und einen Link zum Öffnen. Sie erhalten die Quittung, keine Kopie.`,
   giftProblems: {
     email: "Das sieht nicht nach einer E-Mail-Adresse aus. Prüfen Sie die Adresse der beschenkten Person und versuchen Sie es erneut.",
     option: "Wählen Sie, was Sie verschenken möchten, und versuchen Sie es erneut. Es wurde nichts berechnet.",
@@ -134,7 +136,8 @@ export const de: BuyerWords = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store) => `Blog von ${store}`,
-  blogEmpty: "Hier gibt es noch nichts.",
+  blogPastEnd: "Keine Beiträge auf dieser Seite",
+  blogPastEndBody: "Diese Seite liegt hinter dem letzten Beitrag.",
   blogMinutes: (n) => `${n} Min. Lesezeit`,
   blogNewer: "Neuere Beiträge",
   blogOlder: "Ältere Beiträge",
@@ -147,6 +150,7 @@ export const de: BuyerWords = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent) => `Sie sparen ${percent}\u00a0%`,
   chooseOptionFor: (title) => `Wählen Sie eine Option für ${title}`,
+  chooseOne: "Bitte wählen",
   recommended: "Empfohlen",
   recommendedAfter: " (empfohlen)",
   howToPayFor: (title) => `Zahlungsweise für ${title}`,
@@ -304,4 +308,9 @@ export const de: BuyerWords = {
   cardTestMode: "Testmodus: Es wird keine echte Karte belastet.",
   cardCheckout: "Sichere Zahlung über Stripe, in einem neuen Tab.",
   cardOpens: (store) => `Öffnet sich im Shop von ${store}, in einem neuen Tab.`,
+
+  // ---- Email cards (lib/mail-product-price.ts)
+  orMore: (price) => `${price} oder mehr`,
+  plusTax: "plus anfallende Steuern",
+  salePriceUntil: (price, when) => `Aktionspreis: ${price}, bis ${when}`,
 };

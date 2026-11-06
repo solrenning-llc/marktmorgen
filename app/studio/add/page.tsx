@@ -14,6 +14,7 @@ import { sellsMemberships } from "@/lib/membership-manage";
 import { idsOfKind } from "@/lib/catalog";
 import { isBillingConfigured } from "@/lib/billing";
 import { PRO_ON_SALE, hasPro } from "@/lib/plan";
+import { PLANS_ON_SALE } from "@/lib/opening";
 
 export const metadata: Metadata = {
   title: "Add to your store — Marktmorgen",
@@ -64,6 +65,7 @@ export default async function StudioAddPage({ searchParams }: Params) {
       pro: store.subscriptionActive && hasPro(store.tier),
       planHref: billingReady && may("billing") ? `${studioPath(store)}#billing` : null,
       billing: may("billing"),
+      onSale: PLANS_ON_SALE,
     },
     (segment) => studioPath(store, "", segment),
   );

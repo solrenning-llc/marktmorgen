@@ -121,6 +121,8 @@ export type GalleryContext = {
   planHref: string | null;
   /** Whether this person may change the store's plan. */
   billing: boolean;
+  /** Whether paid plans are on sale at all (lib/opening.ts, PLANS_ON_SALE). */
+  onSale: boolean;
 };
 
 type CardBase = { id: string; title: string; text: string; icon: IconName };
@@ -139,7 +141,14 @@ export function shows(entry: StudioModule, ctx: GalleryContext): boolean {
 export function cardFor(entry: StudioModule, ctx: GalleryContext, href: (segment: string) => string): GalleryCard {
   const base = { id: entry.id, title: entry.title, text: entry.text, icon: entry.icon };
   if (entry.plan === "pro" && !ctx.pro) {
-    const note = ctx.planHref ? null : ctx.billing ? "Paid plans are not on sale yet." : "The store's owner chooses its plan.";
+    // Why there is no link, said truly: who chooses the plan, plans not on sale yet, or billing not set up here.
+    const note = ctx.planHref
+      ? null
+      : !ctx.billing
+        ? "The store's owner chooses its plan."
+        : !ctx.onSale
+          ? "Paid plans are not on sale yet."
+          : "The plan can't be changed from here right now.";
     return { ...base, state: "plan", plan: PLAN_TITLES.pro, href: ctx.planHref, note };
   }
   return { ...base, state: "open", href: href(entry.segment) };

@@ -190,6 +190,11 @@ export function testAliases(file,root,here){
   for(const name of ['studio-header','studio-store-pin','email-studio'])aliases['@/components/'+name]=join(here,'form-response-unavailable-world.tsx');
  }
  if(file==='k-form-submit-unknown.test.ts')for(const name of ['metered-limits','request-origin','request-guard','store','flows','store-join','affiliate-leads','page-funnel-store','visit'])aliases['@/lib/'+name]=join(here,'k-form-submit-world.ts');
+ if(file==='k-form-public-unavailable.test.ts'){
+  for(const name of ['next/headers','next/navigation','next/link'])aliases[name]=join(here,'k-form-public-world.tsx');
+  for(const name of ['store','sales-page-store','catalog','store-join','page-funnel-store'])aliases['@/lib/'+name]=join(here,'k-form-public-world.tsx');
+  for(const name of ['sales-blocks','store-product','picture-viewer','store-tracking','store-pages-nav','store-beacon'])aliases['@/components/'+name]=join(here,'k-form-public-world.tsx');
+ }
  return aliases;
 }
 export function testEnvironment(env){return{...env,DEMO_STUDIO_ADMIN:'operator@example.test',STRIPE_DEMO_ACCOUNT_ID:'acct_fixtureDemo',NIMBUS_DATA_KEY:env.NIMBUS_DATA_KEY??'tests-only-not-a-real-deployment-secret'};}

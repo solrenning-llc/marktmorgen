@@ -247,10 +247,22 @@ export async function readPageExact(statsId: string, productId: string): Promise
   const raw = reply[0];
   if (raw === null) return { page: null, bytes: 0 };
   if (typeof raw !== "string" || !raw || raw.length > MAX_STORED_PAGE_BYTES) throw new Error("the page could not be read");
+  return { page: pageRecordExact(raw, "the page could not be read"), bytes: Buffer.byteLength(raw, "utf8") };
+}
+
+/** A kept page record decoded: an object with its list of blocks, before the forgiving normalization; anything else throws (Codex J on #1821: JSON null or [] is not an empty page). */
+function pageRecordExact(json: string, what: string): SalesPage {
+  let decoded: unknown;
   try {
-    return { page: parsePage(JSON.parse(raw)), bytes: Buffer.byteLength(raw, "utf8") };
+    decoded = JSON.parse(json);
   } catch {
-    throw new Error("the page could not be read");
+    throw new Error(what);
+  }
+  if (typeof decoded !== "object" || decoded === null || Array.isArray(decoded) || !Array.isArray((decoded as { blocks?: unknown }).blocks)) throw new Error(what);
+  try {
+    return parsePage(decoded);
+  } catch {
+    throw new Error(what);
   }
 }
 
@@ -272,11 +284,7 @@ export async function readVersionsExact(statsId: string, productId: string): Pro
     const cut = entry.indexOf("\n");
     const at = Number(entry.slice(0, cut));
     if (cut < 1 || !Number.isFinite(at)) throw new Error("the page's versions could not be read");
-    try {
-      versions.push({ at, page: parsePage(JSON.parse(entry.slice(cut + 1))) });
-    } catch {
-      throw new Error("the page's versions could not be read");
-    }
+    versions.push({ at, page: pageRecordExact(entry.slice(cut + 1), "the page's versions could not be read") });
   }
   return { versions, bytes };
 }

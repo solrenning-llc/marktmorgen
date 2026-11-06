@@ -248,6 +248,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "GET store/stats": row("numbers", tool("get_numbers")),
   "GET store/stats/range": row("numbers", read),
   "POST store/store-copy": row("settings", execute, "Copies the whole store into another one."),
+  "POST store/students": row("courses", draft, "Removing or giving back many students' access at once: reviewed with its exact count, confirmed by the creator, and undone right after; it sends no email."),
   "POST store/stores": row("access", never(ACCESS)),
   "POST store/stream": row("files", draft),
   "POST store/stream/captions": row("courses", draft, "Captions typed or uploaded by the creator; the paid automatic captions (action \"auto\") are never: money."),

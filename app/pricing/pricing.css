@@ -18,6 +18,8 @@
   align-items: center;
   justify-content: center;
   min-height: 44px;
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 6px;
   border-radius: .5rem;
   font-size: .875rem;

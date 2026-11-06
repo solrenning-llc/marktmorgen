@@ -1,0 +1,20 @@
+[
+  "flow-lease-effect.test.ts",
+  "flow-lease-completion.test.ts",
+  "flow-lease-take.test.ts",
+  "crm-page-mark.test.ts",
+  "crm-deal-conflict.test.ts",
+  "crm-deal-writes.test.ts",
+  "crm-person-room.test.ts",
+  "crm-contact-writes.test.ts",
+  "form-opportunity.test.ts",
+  "form-opportunity-links.test.ts",
+  "mail-report-events.test.ts",
+  "redis-memory-arity.test.ts",
+  "plan-cost-registry.test.ts",
+  "store-data-registry.test.ts",
+  "limits-proposal.test.ts",
+  "margin-alignment.test.ts",
+  "pricing-optimization.test.ts",
+  "pricing-usage-proposal.test.ts"
+]

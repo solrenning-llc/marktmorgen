@@ -2,6 +2,8 @@ import {renderToReadableStream} from "react-dom/server";
 import SwitchPage from "@/app/[handle]/manage/switch/page";
 import {membershipWords} from "@/lib/buyer-words/membership";
 let jPreviewUnknown=false;
+/** Codex J, return on 669e541d: a preview whose lines say more follow (has_more), read as unknown. */
+let jPreviewPartial = false;
 /**
  * A monthly member moving to the same membership's yearly price, and the one
  * email that offers it (lib/yearly-switch-rules.ts, lib/yearly-switch.ts,
@@ -85,12 +87,15 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (method === "POST" && path === "/prices") return json({ id: "price_Yearly000001" });
   if (method === "POST" && path === "/invoices/create_preview") {
     if(jPreviewUnknown)return json({});
+    if (jPreviewPartial) return json({currency:"usd",starting_balance:0,lines:{object:"list",has_more:true,data:[{amount:0,proration:true,period:{start:Number(body.get("subscription_details[proration_date]"))}}]}});
     const at = Number(body.get("subscription_details[proration_date]"));
     // The month's unused part back, and the year from now.
     return json({
       currency: "usd",
       starting_balance: 0,
       lines: {
+        object: "list",
+        has_more: false,
         data: [
           { amount: -667, parent: { subscription_item_details: { proration: true } }, period: { start: at } },
           { amount: 20000, parent: { subscription_item_details: { proration: false } }, period: { start: at } },
@@ -241,6 +246,11 @@ async function main(): Promise<void> {
   const chargedAfterUnknown=await switchYearly(store,offer,"sub_Dana00000001",unknownPreview.ok?unknownPreview.preview.at:Math.floor(Date.now()/1000),TEST_CONSENT);
   is("yearly valid-consent control reaches one charging update",[chargedAfterUnknown.ok,calls.filter(c=>c.method==="POST"&&c.body.has("items[0][price]")).length-priorCharges],[true,1]);
   jPreviewUnknown=false;
+  jPreviewPartial = true;
+  const partialPreview = await previewYearly(store, offer, "sub_Dana00000001");
+  const partialHtml = await new Response(await renderToReadableStream(await SwitchPage({params:Promise.resolve({handle:"@harbor"}),searchParams:Promise.resolve({token:offer,sub:"sub_Dana00000001",to:YEARLY_TARGET,from:"offer"})}))).text();
+  jPreviewPartial = false;
+  is("yearly lines said to go on (has_more) never say nothing is charged today", [partialPreview.ok, partialHtml.includes(membershipWords("en").nothingToday)], [false, false]);
   part("The email");
   is("refused without an address", (await setYearlyAsk(OWNER, { on: true, address: "" })).ok, false);
   is("saved with one", (await setYearlyAsk(OWNER, { on: true, address: "1 Main St, Portland, OR 97201" })).ok, true);

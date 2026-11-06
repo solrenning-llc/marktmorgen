@@ -1,6 +1,8 @@
 import {renderToStaticMarkup} from "react-dom/server";
 import SwitchPage from "@/app/[handle]/manage/switch/page";
 let jPreviewUnknown = false;
+/** Codex J, return on 669e541d: a preview whose lines say more follow (has_more), read as unknown. */
+let jPreviewPartial = false;
 /**
  * Membership tiers: a member switching up or down, on their own.
  *
@@ -18,7 +20,7 @@ let jPreviewUnknown = false;
  */
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStoreTiers, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { canTier, currentMeta, direction, dueNow, parseTiers, productOfSub } from "@/lib/tier-rules";
-import { choicesFor, liveTiers, previewSwitch, switchTier } from "@/lib/tier-switch";
+import { choicesFor, liveTiers, previewKnown, previewSwitch, switchTier } from "@/lib/tier-switch";
 import { membershipsFor, requestManageLink } from "@/lib/membership-manage";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { redisPipeline } from "@/lib/redis";
@@ -67,6 +69,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (method === "POST" && path === "/prices") return json({ id: "price_Tier00000001" });
   if (method === "POST" && path === "/invoices/create_preview") {
     if (jPreviewUnknown) return json({});
+    if (jPreviewPartial) return json({currency:"usd",starting_balance:0,lines:{object:"list",has_more:true,data:[{amount:0,proration:true,period:{start:Number(body.get("subscription_details[proration_date]"))}}]}});
     // Stripe's next invoice: the switch's prorations, and the renewal at the period's end.
     const at = Number(body.get("subscription_details[proration_date]"));
     return json({
@@ -74,6 +77,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       currency: "usd",
       starting_balance: 0,
       lines: {
+        object: "list",
+        has_more: false,
         data: [
           { amount: -500, parent: { subscription_item_details: { proration: true } }, period: { start: at } },
           { amount: 1740, parent: { subscription_item_details: { proration: true } }, period: { start: at } },
@@ -247,6 +252,19 @@ async function main(): Promise<void> {
   is("valid consent control still reaches exactly one charging update", [chargedAfterUnknown.ok,calls.filter(c=>c.method==="POST" && c.body.has("items[0][price]")).length-priorCharges], [true,1]);
   jPreviewUnknown = false;
   is("an unreadable preview refuses to certify the amount shown to the member", unknownPreview.ok, false);
+  part("J: a preview whose lines are not all there is not a known zero charge");
+  jPreviewPartial = true;
+  const partialPreview = await previewSwitch(store, token, "sub_Member0001", b.product.id);
+  const partialHtml = renderToStaticMarkup(await SwitchPage({params:Promise.resolve({handle:"@harbor"}),searchParams:Promise.resolve({token,sub:"sub_Member0001",to:b.product.id})}));
+  jPreviewPartial = false;
+  is("lines said to go on (has_more) never tell the buyer nothing is charged today", [partialPreview.ok, partialHtml.includes(membershipWords("en").nothingToday)], [false, false]);
+  // Stripe sends has_more on every list: a list without it is not known to be whole either.
+  const line = { amount: 0, proration: true, period: { start: 1_800_000_000 } };
+  is("lines are whole only when they say so (has_more false)", [
+    previewKnown({ currency: "usd", lines: { object: "list", has_more: false, data: [line] } }),
+    previewKnown({ currency: "usd", lines: { object: "list", data: [line] } }),
+    previewKnown({ currency: "usd", lines: { object: "list", has_more: "false", data: [line] } }),
+  ], [true, false, false]);
   part("Afterward");
   priceMeta = { product: b.product.id };
   const after = (await membershipsFor(store, token))!;

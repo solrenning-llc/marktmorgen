@@ -9,15 +9,20 @@
  *
  * And the banner over Today about two-step login (Claude 4's C4-2980 on #2900): when the person's two-step login could
  * not be read, the page says so plainly, rather than reading it as "no request to turn it off" and showing nothing.
+ * Nor does Two-step login below, or the invitation to add an app's code, take that unread login for "off": they offer
+ * no way to turn it on over it, and say it could not be read (CX-123 rule 24, lib/redis-reply.ts).
  */
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
-import { isValidElement, type ReactNode } from "react";
+import { createElement, isValidElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { answering } from "./security/next-headers";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { REMOVAL_DAYS, listPasskeys } from "@/lib/passkeys";
 import { claimHandle, ensureStatsId } from "@/lib/store";
 import StudioPage from "@/app/studio/page";
+import { AppCodeInvite } from "@/components/app-code-invite";
+import { TwoStepManager } from "@/components/two-step-manager";
 import { makePasskey } from "./passkey-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -56,6 +61,27 @@ function passkeyLists(node: unknown, found: string[][] = [], seen = new Set<unkn
     for (const value of Object.values(props)) passkeyLists(value as ReactNode, found, seen);
   }
   return found;
+}
+
+/** The props of every element of one component anywhere in the page's tree. */
+function propsOf(node: unknown, type: unknown, found: Record<string, unknown>[] = [], seen = new Set<unknown>()): Record<string, unknown>[] {
+  if (!node || typeof node !== "object" || seen.has(node)) return found;
+  seen.add(node);
+  if (Array.isArray(node)) {
+    for (const child of node) propsOf(child, type, found, seen);
+    return found;
+  }
+  if (isValidElement(node)) {
+    const props = node.props as Record<string, unknown>;
+    if (node.type === type) found.push(props);
+    for (const value of Object.values(props)) propsOf(value as ReactNode, type, found, seen);
+  }
+  return found;
+}
+
+/** What each Two-step login on the page shows, drawn as the browser first gets it. */
+function twoStepShown(tree: unknown): string[] {
+  return propsOf(tree, TwoStepManager).map((props) => renderToStaticMarkup(createElement(TwoStepManager, props as Parameters<typeof TwoStepManager>[0])));
 }
 
 async function main(): Promise<void> {
@@ -122,11 +148,13 @@ async function main(): Promise<void> {
   const THIRD = "today-two-step@example.com";
   await claimHandle(THIRD, "todaytwostep", "Today two-step", "");
   await ensureStatsId(THIRD);
+  // A passkey too, so the page would invite them to add an app's code if it took their two-step login for "off".
+  await makePasskey(THIRD, "cred-today-two-step").keep();
   const recordKey = `nl:2fa:${hex(`nimbus-2fa:${THIRD}`).slice(0, 40)}`;
   const reset = Date.now() + 3 * 86_400_000;
   await redis.pipeline([["SET", recordKey, JSON.stringify({ s: "synthetic-secret", since: Date.now() - 86_400_000, codes: [], last: -1, reset, backup: "" })]]);
   const thirdSession = await openSession(THIRD);
-  const render = async (fault: boolean): Promise<string> => {
+  const render = async (fault: boolean): Promise<unknown> => {
     const kept = redis.pipeline;
     if (fault)
       redis.pipeline = async (commands) => {
@@ -135,23 +163,44 @@ async function main(): Promise<void> {
       };
     answering(new NextRequest("https://marktmorgen.com/studio", { headers: { cookie: `${SESSION_COOKIE}=${thirdSession}` } }));
     try {
-      return words(await StudioPage({ searchParams: Promise.resolve({}) })).join(" ");
+      return await StudioPage({ searchParams: Promise.resolve({}) });
     } finally {
       redis.pipeline = kept;
       answering(null);
     }
   };
   part("Today, with a request to turn two-step login off, read");
-  const read = await render(false);
+  const readTree = await render(false);
+  const read = words(readTree).join(" ");
   is("the warning says two-step login is set to turn off", read.includes("Two-step login is set to turn off"), true);
   is("and does not say it could not be read", read.includes("Two-step login could not be read just now"), false);
 
   part("Today, when the person's two-step login cannot be read");
-  const unread = await render(true);
+  const unreadTree = await render(true);
+  const unread = words(unreadTree).join(" ");
   is("the page says plainly it could not be read", unread.includes("Two-step login could not be read just now"), true);
   is("and that a request to turn it off may be waiting", unread.includes("cannot tell whether somebody asked to turn your two-step login off"), true);
   is("the warning is not shown as fact", unread.includes("Two-step login is set to turn off"), false);
   is("the request is still there", JSON.parse(String((await redis.pipeline([["GET", recordKey]]))[0])).reset, reset);
+
+  part("Two-step login below, read");
+  const readShown = twoStepShown(readTree);
+  is("the page shows Two-step login", readShown.length > 0, true);
+  is("it says two-step login is on", readShown.map((html) => html.includes("On. Logging in with the emailed link also asks")), readShown.map(() => true));
+  is("and offers to cancel the request", readShown.map((html) => html.includes("Cancel: keep two-step login on")), readShown.map(() => true));
+  is("no invitation to add an app's code: it is on", propsOf(readTree, AppCodeInvite).length, 0);
+
+  part("Two-step login below, when it cannot be read");
+  const unreadShown = twoStepShown(unreadTree);
+  is("the page still shows Two-step login", unreadShown.length > 0, true);
+  is("where the banner's link goes", unreadShown.map((html) => html.includes('id="two-step"')), unreadShown.map(() => true));
+  is("it says it could not be read", unreadShown.map((html) => html.includes("Two-step login could not be read just now")), unreadShown.map(() => true));
+  is("it is not said to be off", unreadShown.map((html) => html.includes("After the emailed link, ask for a six-digit code")), unreadShown.map(() => false));
+  is("it offers no way to turn it on over it", unreadShown.map((html) => html.includes("Turn on two-step login")), unreadShown.map(() => false));
+  is("nor asks to log in again to turn it on", unreadShown.map((html) => html.includes("Turning this on needs a login")), unreadShown.map(() => false));
+  is("nor any other button or form, on a state it does not know", unreadShown.map((html) => /<button|<form/.test(html)), unreadShown.map(() => false));
+  is("no invitation to add an app's code", propsOf(unreadTree, AppCodeInvite).length, 0);
+  is("and the record is untouched", JSON.parse(String((await redis.pipeline([["GET", recordKey]]))[0])).s, "synthetic-secret");
   done();
 }
 

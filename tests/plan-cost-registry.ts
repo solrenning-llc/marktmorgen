@@ -353,6 +353,12 @@ export const BLOB_TRANSFER_PER_BYTE = 0.1 / 1e9;
  */
 export const BLOB_ADVANCED_OP = 5 / 1e6;
 export const BLOB_SIMPLE_OP = 0.4 / 1e6;
+/**
+ * The puts one upload request may send: @vercel/blob tries a failed put again up to VERCEL_BLOB_RETRIES times (10 unless
+ * set; dist getRetries), and no official page says a put tried again, or refused, is not billed. Unknown is never zero:
+ * 1 + 10 (Revisor 1 on #2803; tests/picture-upload-costs.test.ts reads the installed SDK's default).
+ */
+export const BLOB_PUT_TRIES = 11;
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */
@@ -859,14 +865,14 @@ export const COST_LINES: CostLine[] = [
   {
     id: "picture-thumbnails",
     feature: "The thumbnail copy of a product picture: its Blob put and the checks of its name and bytes (Encanto 5b-2, 6 November 2026)",
-    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * (BLOB_ADVANCED_OP + 3 * BLOB_SIMPLE_OP + MAX_THUMB_BYTES * BLOB_TRANSFER_PER_BYTE),
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * (BLOB_PUT_TRIES * BLOB_ADVANCED_OP + 3 * BLOB_SIMPLE_OP + MAX_THUMB_BYTES * BLOB_TRANSFER_PER_BYTE),
     sources: [
       { file: "app/api/store/image/upload/route.ts", names: ["studioAccess", "notePictureDoor"] },
       { file: "lib/studio-route.ts", names: ["countStudio"] },
       { file: "lib/product-image.ts", names: ["MAX_THUMB_BYTES"] },
       { file: "app/api/store/image/route.ts", names: ["head(thumbPath)", "firstBytes(thumbPath)"] },
     ],
-    basis: "Every thumbnail copy is put through its own upload request, a studio request (studioAccess, countStudio), so there are at most the plan's studio figure of them a month, a hard ceiling. Each is counted at its dearest: one put (an Advanced Operation), three Simple Operations (the head that checks its name is free, and a head and a read when it is attached) and the read of its whole bytes (MAX_THUMB_BYTES) at the dearer Blob transfer rate kept here. Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026. It adds no read on a public page: it replaces a larger copy in the same picture request (lib/picture-served.ts), already counted with the page. The Blob operations of the picture and its smaller copy, uploaded before this, are not counted by this line: that is reported apart (they are not a cost of the thumbnail).",
+    basis: "Every thumbnail copy is put through its own upload request, a studio request (studioAccess, countStudio), so there are at most the plan's studio figure of them a month, a hard ceiling. Each is counted at its dearest: its put (an Advanced Operation) with every try again the Blob SDK may send (BLOB_PUT_TRIES), three Simple Operations (the head that checks its name is free, and a head and a read when it is attached) and the read of its whole bytes (MAX_THUMB_BYTES) at the dearer Blob transfer rate kept here. Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026. It adds no read on a public page: it replaces a larger copy in the same picture request (lib/picture-served.ts), already counted with the page. The Blob operations of the picture and its smaller copy, uploaded before this, are not counted by this line: that is reported apart (they are not a cost of the thumbnail).",
   },
   {
     id: "free-delivery",

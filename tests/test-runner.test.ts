@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {setImmediate} from 'node:timers/promises';
-import {existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {spawn} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {join} from 'node:path';
@@ -257,7 +257,7 @@ async function gone(pid: number, ms = 3000): Promise<boolean> {
   return !running(pid);
 }
 
-test('a timed-out file\'s descendants go with it, a throwing diagnose still counts the failure, and the next file runs', async () => {
+test('a timed-out file\'s descendants in its process group go with it, a throwing diagnose still counts the failure, and the next file runs', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'runner-tree-'));
   const owned: number[] = [];
   try {
@@ -317,4 +317,29 @@ test('once the runner has finished, nothing it started holds its output open', a
     if (executor && executor.exitCode === null) { try { executor.kill('SIGKILL'); } catch { /* already gone */ } }
     rmSync(root, {recursive: true, force: true});
   }
+});
+
+// Codex G on #2826 (5805374280, LOW): the runner reaches a test file's own process group, not a process the file starts
+// in a group of its own (detached: true, or setsid), which only the system's own tools could follow. It says so, and it
+// holds what it says: no test file it runs starts one.
+test('a timeout says the file\'s process group was ended, and no test file starts a process outside its group', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'runner-group-'));
+  const worker = join(directory, 'never.cjs'), pidFile = join(directory, 'pid');
+  writeFileSync(worker, `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`);
+  const lines: string[] = [];
+  const write = console.error;
+  console.error = (...args: unknown[]) => { lines.push(args.map(String).join(' ')); };
+  try {
+    assert.equal(await (runBundle as (...args: unknown[]) => Promise<number>)(worker, process.env, process.execPath, {timeoutMs: 400, label: 'never.test.ts'}), 1);
+  } finally {
+    console.error = write;
+    try { process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL'); } catch { /* already gone */ }
+    rmSync(directory, {recursive: true, force: true});
+  }
+  const line = lines.find(text => text.includes('TIMEOUT')) ?? '';
+  assert.match(line, /killed with its process group/);
+  assert.doesNotMatch(line, /process tree/);
+  const files = readdirSync('tests').filter(name => name.endsWith('.test.ts') && name !== 'test-runner.test.ts');
+  const starting = files.filter(name => /detached\s*:\s*true|\bsetsid\b/.test(readFileSync(join('tests', name), 'utf8')));
+  assert.deepEqual(starting, [], 'no test file starts a process in a group of its own');
 });

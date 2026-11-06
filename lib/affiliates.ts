@@ -2470,10 +2470,77 @@ function exactPairs(reply: unknown, what: string): [string, string][] {
   return out;
 }
 
+/** One stored record behind a program's public numbers: a JSON object, or UnknownReplyError. */
+function exactRecord(raw: string, what: string): Record<string, unknown> {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new UnknownReplyError(what);
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new UnknownReplyError(what);
+  return value as Record<string, unknown>;
+}
+
+const wholeFromZero = (x: unknown): boolean => typeof x === "number" && Number.isSafeInteger(x) && x >= 0;
+/** A field older writers may have left out (read by the shared parser's default), or else exactly `ok`. */
+const absentOr = (x: unknown, ok: (x: unknown) => boolean): boolean => x === undefined || ok(x);
+const currencyCode = (x: unknown): boolean => typeof x === "string" && /^[a-z]{3}$/.test(x);
+const isBoolean = (x: unknown): boolean => typeof x === "boolean";
+const AFFILIATE_STATUSES: readonly unknown[] = ["pending", "approved", "declined", "removed"];
+const REFERRAL_HOWS: readonly unknown[] = ["click", "code", "buyer", "partner", "contact"];
+
 /**
- * Throws UnknownReplyError when a reply is not in its exact shape, so the
- * directory shows the program without numbers, never with zeros
- * (lib/affiliate-directory.ts, readDirectory).
+ * An affiliate as writeAffiliate writes it, for the public numbers only: the
+ * fields they read (status, decidedAt) exactly, or UnknownReplyError. Never
+ * dropped, never "pending" from a status no writer gives.
+ */
+function exactAffiliate(raw: string): Affiliate {
+  const what = "a program's affiliate record";
+  const value = exactRecord(raw, what);
+  const affiliate = parseAffiliate(raw);
+  if (!affiliate || !AFFILIATE_STATUSES.includes(value.status) || !wholeFromZero(value.decidedAt)) throw new UnknownReplyError(what);
+  return affiliate;
+}
+
+/**
+ * A sale as writeReferral writes it, for the public numbers only: base and
+ * rate exactly, never a 0 from a missing or other value. Older writers' sales
+ * keep reading as before: no `how` (a click), `byCode` (a code), no currency
+ * (US dollars).
+ */
+function exactReferral(raw: string): Referral {
+  const what = "a program's sale record";
+  const value = exactRecord(raw, what);
+  const referral = parseReferral(raw);
+  if (
+    !referral ||
+    !wholeFromZero(value.base) ||
+    !(typeof value.rate === "number" && Number.isFinite(value.rate) && value.rate >= 0) ||
+    !absentOr(value.how, (how) => REFERRAL_HOWS.includes(how)) ||
+    !absentOr(value.byCode, isBoolean) ||
+    !absentOr(value.self, isBoolean) ||
+    !absentOr(value.currency, currencyCode)
+  ) {
+    throw new UnknownReplyError(what);
+  }
+  return referral;
+}
+
+/** A payment as addPayout writes it, for the public numbers only: whole cents from zero up; no currency is US dollars. */
+function exactPayout(raw: string): Payout {
+  const what = "a program's payment record";
+  const value = exactRecord(raw, what);
+  const payout = parsePayout(raw);
+  if (!payout || !wholeFromZero(value.cents) || !absentOr(value.currency, currencyCode)) throw new UnknownReplyError(what);
+  return payout;
+}
+
+/**
+ * Throws UnknownReplyError when a reply, or a record inside it, is not in its
+ * exact shape, so the directory shows the program without numbers, never with
+ * zeros (lib/affiliate-directory.ts, readDirectory). The shared parsers and
+ * their other callers are unchanged.
  */
 export async function programNumbers(store: Store): Promise<ProgramNumbers | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
@@ -2497,13 +2564,11 @@ export async function programNumbers(store: Store): Promise<ProgramNumbers | nul
   });
   const sales = exactPairs(replies[2], "a program's sales");
   const payouts = exactPairs(replies[3], "a program's payments");
-  const approved = people
-    .map(([, raw]) => parseAffiliate(raw))
-    .filter((a): a is Affiliate => a !== null && a.status === "approved");
+  const approved = people.map(([, raw]) => exactAffiliate(raw)).filter((a) => a.status === "approved");
   const currency = store.currency.toLowerCase();
   const referrals = sales
-    .map(([, raw]) => parseReferral(raw))
-    .filter((r): r is Referral => r !== null && !r.self && (r.currency || "usd").toLowerCase() === currency);
+    .map(([, raw]) => exactReferral(raw))
+    .filter((r) => !r.self && (r.currency || "usd").toLowerCase() === currency);
   const earned = (r: Referral) => commissionOn(r.base, r.rate);
   const byClick = referrals.filter((r) => r.how === "click");
   return {
@@ -2514,8 +2579,8 @@ export async function programNumbers(store: Store): Promise<ProgramNumbers | nul
     sales: referrals.length,
     earnedCents: referrals.reduce((sum, r) => sum + earned(r), 0),
     paidCents: payouts
-      .map(([, raw]) => parsePayout(raw))
-      .filter((p): p is Payout => p !== null && (p.currency || "usd").toLowerCase() === currency)
+      .map(([, raw]) => exactPayout(raw))
+      .filter((p) => (p.currency || "usd").toLowerCase() === currency)
       .reduce((sum, p) => sum + p.cents, 0),
     since: approved.reduce((first, a) => (first === 0 || (a.decidedAt > 0 && a.decidedAt < first) ? a.decidedAt : first), 0),
   };

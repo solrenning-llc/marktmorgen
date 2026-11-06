@@ -31,6 +31,7 @@
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark } from "@/lib/claim-mark";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { isSettled } from "@/lib/instant-pay";
 import { alertCreator } from "@/lib/phone-alerts";
 import { queuePerson } from "@/lib/email-sync";
@@ -157,11 +158,14 @@ export async function noteSales(store: Store, records: SaleRecord[]): Promise<nu
     (r): r is SaleRecord & { id: string } => typeof r.id === "string" && isSettled(r) && handles.has(r.metadata?.store ?? ""),
   );
   if (!paid.length) return 0;
-  // One round trip for which of them were told already.
-  const marks = await redisPipeline(paid.map((r) => ["EXISTS", toldKey(r.id)]));
+  // One round trip for which of them were told already: exactly 0 or 1 for each (CX-123 rule 24). Anything else
+  // is unknown, and the whole reading waits for the next pass rather than telling a sale again on a guess: the
+  // chat line and the recent purchases have no mark but this one.
+  const marks = repliesFor(await redisPipeline(paid.map((r) => ["EXISTS", toldKey(r.id)])), paid.length)?.map(countOf);
+  if (!marks || marks.some((mark) => mark !== 0 && mark !== 1)) throw new UnknownReplyError("which sales were told");
   let told = 0;
   for (let i = 0; i < paid.length; i += 1) {
-    if (Number(marks[i]) === 1) continue;
+    if (marks[i] === 1) continue;
     await tell(store, paid[i], paid[i].id);
     await redisPipeline([["SET", toldKey(paid[i].id), "1", "EX", TOLD_SECONDS]]);
     told += 1;

@@ -71,6 +71,7 @@ import { type Dunning, DEFAULT_DUNNING, parseDunning } from "@/lib/dunning-rules
 import { type LeaveSetting, NO_LEAVE, parseLeave } from "@/lib/leave-rules";
 import { NO_NUDGE, type Nudge, parseNudge } from "@/lib/member-health-rules";
 import { type Anniversary, NO_ANNIVERSARY, parseAnniversary } from "@/lib/anniversary-rules";
+import { NO_STORE_DATES, type StoreDates, parseStoreDates } from "@/lib/store-dates-rules";
 import { NO_YEARLY_ASK, type YearlyAsk, parseYearlyAsk } from "@/lib/yearly-switch-rules";
 import { type WinBack, NO_WINBACK, parseWinBack } from "@/lib/winback";
 import { type WelcomeOffer, NO_WELCOME_OFFER, parseWelcomeOffer } from "@/lib/welcome-offer";
@@ -555,6 +556,11 @@ export type Store = {
    * Off for every store until its creator turns it on, with a postal address.
    */
   anniversary: Anniversary;
+  /**
+   * The store's own dates, each with its email, made once a year on its day
+   * (lib/store-dates-rules.ts, 283 [HG2] unit 2). Off with none until its creator adds one.
+   */
+  storeDates: StoreDates;
   /** Whether the weekly email opens with a few sentences written by AI from the week's numbers (lib/numbers-ask.ts). Off until turned on. */
   weeklyAi: boolean;
   /**
@@ -1025,6 +1031,7 @@ function parseStore(raw: unknown): Store | null {
       nudge: parseNudge(value.nudge),
       yearlyAsk: parseYearlyAsk(value.yearlyAsk),
       anniversary: parseAnniversary(value.anniversary),
+      storeDates: parseStoreDates(value.storeDates),
       weeklyAi: value.weeklyAi === true,
       adsServer: parseAdsServer(value.adsServer),
       attributionDays: parseAttributionDays(value.attributionDays),
@@ -1346,6 +1353,7 @@ async function freshStore(fields: {
     nudge: { ...NO_NUDGE },
     yearlyAsk: { ...NO_YEARLY_ASK },
     anniversary: { ...NO_ANNIVERSARY },
+    storeDates: { ...NO_STORE_DATES, dates: [] },
     weeklyAi: false,
     adsServer: [],
     attributionDays: DEFAULT_ATTRIBUTION_DAYS,
@@ -2719,6 +2727,16 @@ export async function setAnniversary(email: string, raw: unknown): Promise<{ ok:
   if (asked.on === true && !anniversary.on) return { ok: false, reason: "address" };
   const next = await patchStore(email, () => ({ anniversary }));
   return next ? { ok: true, store: next } : { ok: false, reason: "none" };
+}
+
+/**
+ * Saves the store's own dates (lib/store-dates-rules.ts, 283 [HG2] unit 2), as
+ * already checked whole (lib/store-dates-send.ts, saveStoreDates): read again here
+ * so nothing but whole dates is ever kept.
+ */
+export async function setStoreDates(email: string, raw: unknown): Promise<Store | null> {
+  const storeDates = parseStoreDates(raw);
+  return patchStore(email, () => ({ storeDates }));
 }
 
 /** Saves the one email offering monthly members the yearly price (lib/yearly-ask.ts). */

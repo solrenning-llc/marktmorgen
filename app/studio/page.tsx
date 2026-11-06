@@ -125,6 +125,9 @@ import { NudgeEditor } from "@/components/nudge-editor";
 import { nudgesThisMonth } from "@/lib/member-nudge";
 import { AnniversaryEditor } from "@/components/anniversary-editor";
 import { anniversariesThisMonth } from "@/lib/anniversary-send";
+import { StoreDatesEditor } from "@/components/store-dates-editor";
+import { type DateResult, readStoreDateResults } from "@/lib/store-dates-send";
+import { monthlyAllowance } from "@/lib/mail";
 import { YearlyAskEditor } from "@/components/yearly-ask-editor";
 import { readVoice } from "@/lib/customer-voice";
 import { readMarks } from "@/lib/auto-marks";
@@ -2039,6 +2042,16 @@ export default async function StudioPage({
                     suggestedAddress={store.mail?.address || store.nudge.address || store.winback.address || store.recovery.address || ""}
                     sent={await anniversariesThisMonth(store).catch(() => 0)}
                     connected={Boolean(current?.stripeAccountId)}
+                  />
+                ) : null}
+
+                {may("settings") ? (
+                  <StoreDatesEditor
+                    setting={store.storeDates}
+                    results={Object.fromEntries([...(await readStoreDateResults(store).catch(() => new Map<string, DateResult>()))].map(([key, r]) => [key, { year: r.year, outcome: r.outcome, total: r.total }]))}
+                    mailReady={Boolean(store.mail && store.listId)}
+                    emailInPlan={monthlyAllowance(store) > 0}
+                    now={todayNow()}
                   />
                 ) : null}
 

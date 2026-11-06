@@ -60,8 +60,10 @@ export const giftKeys = (id: string, pi: string): string[] => [...(id ? [giftKey
 const anyKey = (sid: string) => `nl:gift:${sid}:any`;
 const anchorKey = (sid: string) => `nl:gift:${sid}:refunds`;
 const seenKey = (sid: string) => `nl:gift:${sid}:seen`;
-/** Marks a row of the refunds job read; true only when Redis answered the SADD with a count. */
-const markRead = async (sid: string, id: string): Promise<boolean> => countOf(repliesFor(await redisPipeline([["SADD", seenKey(sid), id]]), 1)?.[0]) !== null;
+/** A write of one item (HDEL, HSET, EXPIRE or SADD of one field, member or key) answers 0 or 1; anything else is unknown (Codex Z). */
+const oneWrite = (reply: unknown): boolean => reply === 0 || reply === 1;
+/** Marks a row of the refunds job read; true only when Redis answered the SADD of one member with 0 or 1. */
+const markRead = async (sid: string, id: string): Promise<boolean> => oneWrite(repliesFor(await redisPipeline([["SADD", seenKey(sid), id]]), 1)?.[0]);
 const now = () => Math.floor(Date.now() / 1000);
 
 export function newGiftId(): string {
@@ -315,7 +317,7 @@ export async function revokeRefundedGifts(
         // Each write confirmed in its exact shape before the next (Codex Z, review 5794703899; CX-123 rule 24): a
         // write left unknown marks nothing taken back or read and keeps the anchor, so the next run does it again.
         const removed = repliesFor(await redisPipeline([["HDEL", importedKey(sid, gift.to), gift.p]]), 1);
-        if (countOf(removed?.[0]) === null) {
+        if (!oneWrite(removed?.[0])) {
           unsure = true;
           continue;
         }

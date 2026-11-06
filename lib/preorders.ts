@@ -41,8 +41,10 @@ export const piKey = (pi: string) => `nl:pre:pi:${pi}`;
 const anyKey = (sid: string) => `nl:pre:${sid}:any`;
 const anchorKey = (sid: string) => `nl:pre:${sid}:refunds`;
 const seenKey = (sid: string) => `nl:pre:${sid}:seen`;
-/** Marks a row of the refunds job read; true only when Redis answered the SADD with a count. */
-const markRead = async (sid: string, id: string): Promise<boolean> => countOf(repliesFor(await redisPipeline([["SADD", seenKey(sid), id]]), 1)?.[0]) !== null;
+/** A write of one item (HDEL, HSET, EXPIRE or SADD of one field, member or key) answers 0 or 1; anything else is unknown (Codex Z). */
+const oneWrite = (reply: unknown): boolean => reply === 0 || reply === 1;
+/** Marks a row of the refunds job read; true only when Redis answered the SADD of one member with 0 or 1. */
+const markRead = async (sid: string, id: string): Promise<boolean> => oneWrite(repliesFor(await redisPipeline([["SADD", seenKey(sid), id]]), 1)?.[0]);
 const giveKey = (session: string) => `nl:pre:give:${session}`;
 const JOBS = "nl:pre:jobs";
 /** How long a pre-order is kept after it was last changed: past any refund window, as a gift is. */
@@ -484,7 +486,7 @@ export async function revokeRefundedPreorders(
             // Each write confirmed in its exact shape before the next (Codex Z, review 5794703899; CX-123 rule 24):
             // a write left unknown marks nothing taken back or read and keeps the anchor, so the next run does it again.
             const removed = repliesFor(await redisPipeline([["HDEL", importedKey(sid, entry.to), productId]]), 1);
-            if (countOf(removed?.[0]) === null) {
+            if (!oneWrite(removed?.[0])) {
               unsure = true;
               continue;
             }
@@ -492,7 +494,7 @@ export async function revokeRefundedPreorders(
           }
         }
         const saved = repliesFor(await redisPipeline([["HSET", entriesKey(sid, productId), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, productId)]), 2);
-        if (countOf(saved?.[0]) === null || countOf(saved?.[1]) === null) {
+        if (!oneWrite(saved?.[0]) || !oneWrite(saved?.[1])) {
           unsure = true;
           continue;
         }

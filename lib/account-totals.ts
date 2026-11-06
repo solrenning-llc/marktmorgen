@@ -22,6 +22,8 @@ export type StoreRead =
   | { state: "no_access" }
   /** That store's studio allowance for the month is used up. */
   | { state: "paused" }
+  /** None of its numbers is kept and its readings for the UTC day are used (lib/store-readings.ts, ReadingsUsed). */
+  | { state: "used" }
   | { state: "error" };
 
 export type StoreFigures = { sid: string; name: string; handle: string; read: StoreRead };
@@ -106,5 +108,7 @@ export const LEFT_WORDS: Record<AccountTotals["left"][number]["why"], string> = 
   no_access: "your role there does not include its numbers",
   paused: "its studio is paused for the rest of the month",
   error: "its numbers could not be read just now",
+  // The page adds when, at 00:00 UTC and on the reader's own clock (inbox C4-33 (3)).
+  used: "its numbers were read as often as a day allows; they update again at 00:00 UTC",
   no_numbers: "it has no numbers yet",
 };

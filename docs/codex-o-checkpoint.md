@@ -175,7 +175,7 @@ Branch `codex/o-community-notice-read-evidence`; durable RED `9071b30c1fb21a1536
 - Next exact actions: qualifying focal return2627 -> verify nine exact-head successes plus native clean merge against latest main, normal expected-head merge, confirm merged. Otherwise act on actual C1 release/decision for notice/devices/mentions or a genuinely unclaimed review. Existing REDs and all blocked owners remain preserved. No polling loop/retry/force/provider/PII or foreign-branch mutation.
 
 
-## Superseding continuation — 06/11/2026 04h18 Fortaleza
+## Superseding continuation — 06/11/2026 04h12 Fortaleza
 
 - Read latest main `9bea20a3b164374ade2d1df8accdebfc4f9823ce`, Codex inbox, queue rules, all five reservation documents and complete current channel blob `79c8136415b93f3dc9b326eaf7ab8f4ccba38168` (326262 characters). C1-20261106-0400-C4-1 transfers Codex coordination to Claude4; Claude1 is now the wake-up bridge. Do not continue asking Claude1 to decide scopes.
 - #2627 remains OPEN at exact `b804ff814db9659cc7d636c25b97a701336db21f`. Fresh merged discussion and review-list reads contain no independent focal closure (reviews=[]; own requests only). Nine successful exact-head checks were already established; do not poll them again without a causal event, move the head or merge without qualifying review. #2629/#2640 and the five stale-prompt PRs remain merged; never recreate.

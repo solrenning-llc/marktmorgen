@@ -37,6 +37,7 @@ export function CommunityPushToggle({
   const [state, setState] = useState<"unknown" | "off" | "on" | "denied" | "unsupported" | "homescreen">("unknown");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   const [count, setCount] = useState(devices);
   const scope = `/@${handle}/community/`;
 
@@ -71,6 +72,7 @@ export function CommunityPushToggle({
     if (busy) return;
     setBusy(true);
     setError(null);
+    setNote(null);
     try {
       const allowed = await Notification.requestPermission();
       if (allowed !== "granted") {
@@ -117,17 +119,23 @@ export function CommunityPushToggle({
   }
 
   /**
-   * Off only when both ends are done: the server forgot this device and the
-   * browser dropped its subscription. The server goes first and the browser
-   * is unsubscribed only once it answered { ok: true }, so a failed request
-   * never leaves a device row behind (counted toward the member's devices)
-   * for a browser that no longer listens. Anything else keeps the switch on,
-   * says so, and Turn off can be pressed again (forgetting is idempotent).
+   * Off once the server forgot this device: it answers { ok: true } only after
+   * forgetting it, and notifications go only to the devices it keeps, so
+   * nothing more reaches this one. The server goes first and the browser is
+   * unsubscribed only after it, so a failed request never leaves a device row
+   * behind (counted toward the member's devices) for a browser that no longer
+   * listens; anything short of the server's ok keeps the switch on, says so,
+   * and Turn off can be pressed again (forgetting is idempotent). A browser
+   * that keeps its subscription after the ok is asked once more, quietly; if
+   * it still keeps it, the switch is off all the same (true: nothing is sent)
+   * with a note that the browser may still list the site.
    */
   async function turnOff() {
     if (busy) return;
     setBusy(true);
     setError(null);
+    setNote(null);
+    let forgotten = false;
     try {
       const registration = await navigator.serviceWorker.getRegistration(scope);
       const subscription = await registration?.pushManager.getSubscription();
@@ -140,16 +148,21 @@ export function CommunityPushToggle({
         });
         const data = (await response.json().catch(() => null)) as { ok?: unknown; devices?: unknown } | null;
         if (!response.ok || data?.ok !== true) throw new Error("the device was not forgotten");
-        const gone = await subscription.unsubscribe();
-        if (gone !== true) throw new Error("the browser kept the subscription");
+        forgotten = true;
         setCount(typeof data?.devices === "number" ? data.devices : Math.max(0, count - 1));
+        const letGo = () => subscription.unsubscribe().then((gone) => gone === true, () => false);
+        if (!(await letGo()) && !(await letGo())) setNote(t.offBrowserKept);
       } else {
         setCount(Math.max(0, count - 1));
       }
       setState("off");
     } catch {
-      setError(t.offFailed);
-      setState("on");
+      if (forgotten) {
+        setState("off");
+      } else {
+        setError(t.offFailed);
+        setState("on");
+      }
     } finally {
       setBusy(false);
     }
@@ -191,6 +204,7 @@ export function CommunityPushToggle({
         </div>
       )}
 
+      {note ? <p className="mt-2" role="status">{note}</p> : null}
       {error ? <p className="mt-2 font-semibold" style={{ color: "var(--st-text)" }} role="alert">{error}</p> : null}
     </div>
   );

@@ -17,7 +17,8 @@
  * would not wait for those parts.
  *
  * What fails here:
- *   - more than 12 steps, or more than 0.8 s, at 40 ms a trip;
+ *   - more than 12 steps one after another at 40 ms a trip (the time is printed, not checked: a clock on a busy
+ *     machine measures the machine, while the steps are counted from the order of the trips);
  *   - more than 66 trips in all: each trip is a request to Upstash, so more of them is more cost per visit (MR). The
  *     whole tree takes one trip more than the page alone, the reminder's own read (components/path-studio-reminder.tsx),
  *     which was always there: 66 on step 1, rendered whole;
@@ -27,7 +28,7 @@ import { isValidElement } from "react";
 import { NextRequest } from "next/server";
 import { answering } from "./security/next-headers";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, claimHandle, ensureStatsId } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import StudioPage from "@/app/studio/page";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -35,7 +36,6 @@ import { done, is, part } from "./check";
 const DELAY_MS = 40;
 const MAX_STEPS = 12;
 const MAX_TRIPS = 66;
-const MAX_MS = 800;
 
 /**
  * Renders the tree a server component returned, as React does on the server: a promise is waited for, an async
@@ -103,8 +103,28 @@ async function main(): Promise<void> {
   part(`Today at ${DELAY_MS} ms a Redis trip`);
   is("the page loads for its owner", loaded, true);
   is(`at most ${MAX_STEPS} steps one after another`, steps <= MAX_STEPS, true);
-  is(`at most ${MAX_MS} ms`, ms <= MAX_MS, true);
   is(`no more than ${MAX_TRIPS} trips in all`, trips <= MAX_TRIPS, true);
+
+  // Codex M on #2900: with the store's cached titles gone (a cold or old cache), the parts that read the cards side by
+  // side must not each repair it. Read in order, the page repaired it once.
+  part("Today with the store's cached titles gone");
+  const catalog = (await storeForEmail(OWNER))?.catalog.id;
+  if (!catalog) throw new Error("setup: catalog");
+  const titles = `nl:catalog:${catalog}:t`;
+  await original([["DEL", titles]]);
+  let repairs = 0;
+  redis.pipeline = async (commands) => {
+    if (commands.some((command) => command[0] === "HSET" && command[1] === titles)) repairs += 1;
+    return original(commands);
+  };
+  try {
+    answering(request());
+    await open();
+  } finally {
+    redis.pipeline = original;
+    answering(null);
+  }
+  is("the titles are repaired once", repairs, 1);
   done();
 }
 

@@ -40,6 +40,7 @@ import {
   propose,
   recordDone,
   recordUndone,
+  sameValue,
   tidy,
 } from "@/lib/agent-proposal-rules";
 
@@ -257,7 +258,19 @@ export async function confirmProposals(
     const book = await readBook(store.statsId, now);
     const plan = planConfirm(book, ids, kinds, current, now);
     let next = book;
-    result = { done: [], refused: [...plan.refused] };
+    result = { done: [], refused: [] };
+    for (const refusal of plan.refused) {
+      // Already carried out by an earlier confirmation whose history could not be written (Codex G on #1856): the store
+      // holds exactly what the proposal asked for, so it is recorded as done, never carried out again. Not for a kind
+      // that acts outside the store (scope "execute"), whose effect the store does not hold.
+      const proposal = refusal.why === "changed_since" ? tidy(book, now).waiting.find((p) => p.id === refusal.id) : undefined;
+      const kind = proposal ? kinds.get(proposal.kind) : undefined;
+      if (proposal && kind && kind.scope !== "execute" && sameValue(current(proposal), proposal.after)) {
+        next = recordDone(next, proposal, kind, who, now);
+        result.done.push(proposal.id);
+        applied.push(proposal);
+      } else result.refused.push(refusal);
+    }
     for (const proposal of plan.apply) {
       const done = await apply(proposal);
       if (done === true) {
@@ -280,7 +293,15 @@ export async function confirmProposals(
   return result;
 }
 
-/** Puts back a confirmed change, through `restore`, when the rules allow it. */
+/**
+ * Puts back a confirmed change, through `restore`, when the rules allow it.
+ * The history says undone first (Codex G on #1856): the change is put back
+ * only once that is written as ours, so a book that cannot be written never
+ * hides a restore. A restore that did not happen takes the mark back, on the
+ * book as it is now; where even that cannot be written, the history says
+ * undone though nothing was put back (BookWriteUnconfirmed), never the
+ * other way round.
+ */
 export async function undoDone(
   store: DataStore & { statsId: string },
   id: string,
@@ -290,23 +311,39 @@ export async function undoDone(
   now = Date.now(),
 ): Promise<{ ok: true } | { ok: false; error: UndoRefusal | "failed" }> {
   const held = await holdBook(store.statsId);
+  let answer: { ok: true } | { ok: false; error: UndoRefusal | "failed" };
   try {
     const book = await readBook(store.statsId, now);
     const plan = planUndo(book, id, current, now);
     if (!plan.ok) return plan;
-    const restored = await restore(plan.done, plan.restore);
-    // Changed again between the check and the write: refused as the rules refuse it, nothing put back.
-    if (restored === "changed") return { ok: false, error: "changed_since" };
-    if (!restored) return { ok: false, error: "failed" };
-    if ((await writeBook(store, held, recordUndone(book, id, who, now), now).catch(() => "unknown" as const)) === "written") return { ok: true };
+    const marked = await writeBook(store, held, recordUndone(book, id, who, now), now).catch(() => "unknown" as const);
+    if (marked === "lost") return { ok: false, error: "failed" };
+    if (marked === "written") {
+      const restored = await restore(plan.done, plan.restore).catch(() => false as const);
+      if (restored === true) return { ok: true };
+      // Changed again between the check and the write: refused as the rules refuse it, nothing put back.
+      answer = { ok: false, error: restored === "changed" ? "changed_since" : "failed" };
+    } else answer = { ok: false, error: "failed" };
   } finally {
     await releaseLock(held);
   }
-  // Put back, but the book was not written as ours: the history says so on the book as it is now.
-  await recordAgain(
-    store,
-    (book) => (book.history.some((d) => d.id === id && !d.undone) ? recordUndone(book, id, who, now) : book),
-    now,
-  );
-  return { ok: true };
+  // Nothing was put back: this undo's own mark is taken back where the book holds it (a mark that was never written
+  // is read as absent, and nothing is written).
+  await recordAgain(store, (book) => withoutUndone(book, id, who, now), now);
+  return answer;
+}
+
+/** The book without this undo's own mark on `id` (the same book when it does not hold it). */
+function withoutUndone(book: Book, id: string, who: string, at: number): Book {
+  const entry = book.history.find((d) => d.id === id);
+  if (!entry?.undone || entry.undone.who !== who || entry.undone.at !== at) return book;
+  return {
+    ...book,
+    history: book.history.map((d) => {
+      if (d.id !== id) return d;
+      const kept: Done = { ...d };
+      delete kept.undone;
+      return kept;
+    }),
+  };
 }

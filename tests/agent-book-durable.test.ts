@@ -57,15 +57,37 @@ async function main(){
   is(mode+": the book write was reached once",injected,1);
   is(mode+": the change is applied and in the history, once, and no longer waiting",[r.error,value,book.history.filter(x=>x.id===p).length,book.waiting.some(x=>x.id===p)],["","Agent "+id,1,false]);
  }
- part("An undo whose book write fails is recorded again");
- {
+ part("An undo is marked in the history before anything is put back: a mark that cannot be written puts nothing back");
+ for(const mode of ["throw","zero","empty"] as const){
   const f=await fixture(),p=f.proposals[0],id=f.ids[0];await confirmFor(f.store,f.owner,[p],f.owner);let injected=0;
-  redis.pipeline=(async commands=>{if(injected===0&&isBookWrite(commands,f.book)){injected++;throw Error("undo book write failed");}return base(commands);}) as typeof redis.pipeline;
+  redis.pipeline=(async commands=>{if(injected===0&&isBookWrite(commands,f.book)){injected++;if(mode==="throw")throw Error("undo book write failed");return mode==="zero"?[0]:[];}return base(commands);}) as typeof redis.pipeline;
   let u:Awaited<ReturnType<typeof outcome>>;
   try{u=await outcome(()=>undoFor(f.store,f.owner,p,f.owner));}finally{redis.pipeline=base;}
-  const value=await readAbout(f.statsId,id),book=await readBook(f.statsId);
-  is("the undo's book write was reached",injected,1);
-  is("restored and marked undone",[u.error,value,Boolean(book.history.find(x=>x.id===p)?.undone)],["","Original "+id,true]);
+  is(mode+": the mark's write was reached once, and nothing written after it",injected,1);
+  is(mode+": nothing put back and the history does not say undone",[u.error===""&&(u.value as {ok:boolean}|null)?.ok===true,await readAbout(f.statsId,id),Boolean((await readBook(f.statsId)).history.find(x=>x.id===p)?.undone)],[false,"Agent "+id,false]);
+  const again=await outcome(()=>undoFor(f.store,f.owner,p,f.owner));
+  is(mode+": tried again, it is put back and marked undone",[(again.value as {ok:boolean}|null)?.ok===true,await readAbout(f.statsId,id),Boolean((await readBook(f.statsId)).history.find(x=>x.id===p)?.undone)],[true,"Original "+id,true]);
+ }
+ part("Every write of the book failing: an undo never leaves the text put back without the history saying so");
+ {
+  const f=await fixture(),p=f.proposals[0],id=f.ids[0];await confirmFor(f.store,f.owner,[p],f.owner);let injected=0;
+  redis.pipeline=(async commands=>{if(isBookWrite(commands,f.book)){injected++;throw Error("book unwritable");}return base(commands);}) as typeof redis.pipeline;
+  let u:Awaited<ReturnType<typeof outcome>>;
+  try{u=await outcome(()=>undoFor(f.store,f.owner,p,f.owner));}finally{redis.pipeline=base;}
+  is("the write was tried",injected>=1,true);
+  is("not done, the text as the history says",[u.error===""&&(u.value as {ok:boolean}|null)?.ok===true,await readAbout(f.statsId,id),Boolean((await readBook(f.statsId)).history.find(x=>x.id===p)?.undone)],[false,"Agent "+id,false]);
+ }
+ part("Every write of the book failing after a confirmation carried out: confirmed again, it is recorded once, never carried out twice");
+ {
+  const f=await fixture(),p=f.proposals[0],id=f.ids[0];let applies=0;
+  redis.pipeline=(async commands=>{if(isBookWrite(commands,f.book))throw Error("book unwritable");if(commands.length===1&&commands[0][0]==="EVAL"&&String(commands[0][1]).startsWith("-- marktmorgen:about-write-if:"))applies++;return base(commands);}) as typeof redis.pipeline;
+  let r:Awaited<ReturnType<typeof outcome>>;
+  try{r=await outcome(()=>confirmFor(f.store,f.owner,[p],f.owner));}finally{redis.pipeline=base;}
+  const stuck=await readBook(f.statsId);
+  is("carried out, said as not confirmed, still waiting in the book",[r.error!=="",await readAbout(f.statsId,id),stuck.waiting.some(x=>x.id===p)],[true,"Agent "+id,true]);
+  const again=await confirmFor(f.store,f.owner,[p],f.owner);
+  const book=await readBook(f.statsId);
+  is("confirmed again: recorded as done, once, not waiting, and not carried out a second time",[again.done,book.history.filter(x=>x.id===p).length,book.waiting.some(x=>x.id===p),applies],[[p],1,false,1]);
  }
  part("A slow confirmation whose lock ran out never writes over a successor's book");
  {

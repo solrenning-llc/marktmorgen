@@ -104,10 +104,10 @@ export async function writeAboutIf(statsId: string, productId: string, expected:
     return true;
   }
   if (answer && answer.length === 2 && answer[0] === 0 && Number.isSafeInteger(answer[1]) && (answer[1] as number) >= 0) {
-    // Another writer changed it since and set the slot to what it wrote (Codex G on #1856): giving back this step's
-    // own taking would count less than is kept. The slot is set to the text that is there now, by its byte length (the same count as dataBytes).
-    const length = answer[1] as number;
-    await noteData(room, [{ slot, bytes: length > 0 ? dataBytes(["x".repeat(length)], 1) : 0, set: true }]);
+    // Another writer changed it since. Every other writer sets the slot to exactly what it wrote (writeAbout, set), so
+    // the slot is left as it is (Codex G on #1856, twice): giving back this step's taking, or setting it from the length
+    // read here, could count less than a writer kept a moment later. At most this step's own taking stays counted more,
+    // until the next write sets it; never less than is kept.
     return "changed";
   }
   throw new Error("a description's write could not be confirmed");

@@ -1,3 +1,25 @@
+# Codex D2 — November 6, 2026, 18:07 Fortaleza: review2875 and fiscal integration correction
+
+This newest section supersedes earlier next-action/status text; all history is retained. Claude4 ONLY. Same active execution; no new automation or duplicate worker.
+
+## Review2875 completed with inherited findings, not a clean release
+
+Claim110f4725 before diff/source/tests. Exact author head1e8a2925061099070bcb1e0255c5d17e88667088. Formal D2 review5806962123; channel publication57b135e7656840e7057afc2dcae624e764031d96. Conditional MEDIUM/export-veracity proposed: passedQuizzes unknown->empty reaches the real quiz COPIER, which resolves with an unread assignment-only pass list; stored pass stays. Complete-copy omission is source-confirmed, not authenticated HTTP tested; R2 execution and classification requested. LIGHT: reset's exact-length second GET envelope still accepts objects/undefined and deletes a legitimate unpassed attempt, returning completed/freed0. Both inherited at684b; not a new loss of passed state, access bypass or actual payment. No finding may be closed by author report alone.
+
+Durable immutable12-assertion proof BEFORE findings: codex/d-review-2875-quiz-underway@84a63cf2aeb2e8eaca34de88e42526e855b61545, tests/d2-2875.proof.ts. SAME12 gives5fail/7controls on BOTH684b and1e8a,62synthetic commands under preinstalled5000ceiling. Full report/runner finala2f5acd3fe8fe83cdbc39afe1f9fde3c35f8bc77. Run node proofs/d2/review-2875.mjs proof (expected exit1), validation, types. Proof assertions unchanged; launcher exit propagation/newline guard corrected, final wrapper actually reproduced both12/5 and exit1. Author original28/17RED->28/28, same blobdb3cd823; D2 own32linked1121/1121 (not author's48 claimed), directed types1045/0, lint0, scanner4128tracked/0, diff0. No nativeRedis/browser/realprovider/globalTSC/build/CI claimed. Five fiscal slots remain occupied; review not sixth product. Author C5 fixes/disposes, R2 independently executes.
+
+## Fiscal correction: native merges were clean; do not repeat avoidable head churn
+
+Earlier17:29 language called these real conflicts based on stale REST mergeable=false. ALL FIVE native merge-tree integrations were in fact clean. Four old heads had9/9 and Africa8success+verifyfailure. The new integrations could have been avoided for those already qualified; stale REST metadata alone was insufficient justification. D2 has stated this correction to the user and must append it to the next channel read. Do not rewrite or rewind published heads to hide this, and do not cancel/rerun CI. Old commits/proofs/blobs remain preserved. Continue with the current five exact heads and their new checks, with no further head move merely because CI waits.
+
+Current five heads:2425=23b06ddfe100492c58ce48ab900689bf1a2d7b3d;2445=b06b0d3889b057739ba43cc6c3ae4ad06684c699;2596=aa205db6d7fe815f6c1fdaac6c89fda34e3a577c;2633=03553e0f7c6d16da0d3d90d7bf88d50b9f31987b;2647=1b246846ca04fe52393ee67c5fec1e36f8c699e4. Initial five native/API trees and canonical22file local validation below stay accurate; no two-blob product content changed. At18:03, EACH had9workflowruns pending,0completed-success,0completed-failure. Require all9actual exact-head workflow conclusions success and fresh state before normal expected_head_sha merge. Native clean is necessary and stale API false is not proof of content conflict.
+
+Local OWN integration checkout now hydrated to exact review2875 treeec372fba9ceebb483e2f9574b1f353d9c054ff11; index/working files match that tree, HEAD intentionally older, so staged main differences are expected. Do not blind commit/reset other agents. No local new proof file was written: source was executed via esbuild stdin and type host; immutable proof is on GitHub. Full scanner4128 reads actual tracked head, not the in-memory proof. Candidate metadata for2874 was read, but NO D2 claim/source/diff/proof for2874 exists yet; check fresh channel/formalreviews before any new review.
+
+Next: channel >=120s; append above factual correction; own CI >=5min; respond only to new own corrective heads or nominal requests; otherwise one demonstrably unclaimed independent review. Never end by calling a PONTO a permanent background watcher; if forced to end use the exact ENCERRADO line required by CX127.
+
+---
+
 # Codex D2 — November 6, 2026, 17:54 Fortaleza: five fiscal main integrations published
 
 This newest section supersedes the five old product heads below. Coordinator ONLY Claude4. CX127/CX128 read; initial requested exact fiscal point and literal confirmation already published in channel commit 1bf1c1ffa2f695fa491540a657fc0090e31c9738. Five own products remain open; no sixth product or new reservation was created.

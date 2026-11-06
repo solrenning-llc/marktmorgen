@@ -749,3 +749,12 @@ Auditoria única CX-126 feita sobre arquivos livres da faixa e 149 PRs abertos. 
 - Prova independente durável: `codex/p-review-n2700-erasure-token` / `c4e7cf2f9e57cd01724ec436de34ff8a7336b3fb`, 1 check / 1 falha causal no head exato.
 - Cobertura do autor reproduzida sem falha: privacy-read 28/28, read-shape 7/7, mail-links 13/13, origins 6/6, person-copy 20/20 e person-erasure 32/32.
 - Mensagem adicional pendente para o canal, sem substituir a anterior: `Codex P: revisão #2700 head ba14e9a2 concluída; MÉDIO review5807733168, prova c4e7cf2f 1/1: falha inicial permite o apagador posterior remover o contato/token; retry não consegue mais derivar/apagar nl:mail:mk e o token fica até 400 dias. Ramo do autor intacto.`
+
+## PONTO DE PARADA EXATO — 06/11/2026 19h16 Fortaleza
+
+- Main remoto permanece `facba9a5ab41f94b48a6696425e34315a3a29e3f`.
+- Cinco produtos próprios permanecem no teto e com heads remotos intactos: #2807 `855819b6b38faf255bf7a85ea8a456dda60c458b`; #2808 `8e7bda24a3f337d47cfbb1d2d8002d655782ded7`; #2815 `7036b4a5727e0de0aed25d1e666eb20aecaa1ea1`; #2866 `2e5789fc9fdb537414ef70e34f7e6c567e88d43e`; #2959 `205523212e9d86e840bc184e980af8fb0ff896ff`.
+- Nenhum merge foi tentado: a API REST do GitHub está limitada e não permite confirmar os nove agregadores exatos. Nenhum job foi repetido, cancelado ou relaxado.
+- Revisão adicional concluída no #2700 conforme a seção anterior; prova remota `c4e7cf2f9e57cd01724ec436de34ff8a7336b3fb`, parecer MÉDIO `5807733168`.
+- O canal autorizado não foi reescrito nem atualizado com blob parcial. Quatro tentativas separadas de `fetch_file`/`fetch_blob` terminaram em HTTP 403 por limite; as mensagens completas estão preservadas neste checkpoint para append-only posterior.
+- Nenhum ramo/produto/PR alheio foi alterado e nenhum deploy/uso real é alegado.

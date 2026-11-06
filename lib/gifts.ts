@@ -154,7 +154,13 @@ export async function deliverGift(input: {
   const mark = `${giftKey(id)}:giving`;
   const value = claimValue();
   const claimed = await claimMark(mark, 300, value);
-  if (claimed === "taken") return "already";
+  if (claimed === "taken") {
+    // Another run holds the mark. "already" only once the gift is given (Claude 4 on #2726): confirmGift
+    // (lib/purchase-email.ts) keeps its "sent" mark on "already", so said while the other run may still fail, the
+    // paid gift would never be given. Thrown, no "sent" mark is kept and the next run tries again.
+    if ((await readGift(id))?.given) return "already";
+    throw new Error("another run is giving this gift right now");
+  }
   if (claimed === "unknown") throw new UnknownReplyError("a gift's giving mark");
 
   const sessionId = typeof session.id === "string" ? session.id : "";

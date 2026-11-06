@@ -563,7 +563,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
                 height={product.image.height}
                 fetchPriority="high"
                 className="st-hero-img"
-                style={{ aspectRatio: `${product.image.width} / ${product.image.height}` }}
+                style={{ aspectRatio: `${product.image.width} / ${product.image.height}`, ...(product.image.tone ? { backgroundColor: product.image.tone } : {}) }}
               />
             </div>
           ) : null}

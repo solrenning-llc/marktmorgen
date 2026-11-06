@@ -14,6 +14,7 @@ import { forgetGrantPerson } from "@/lib/chat-grant";
 import { forgetVoicePerson, keptMonths } from "@/lib/customer-voice";
 import { allKey, certificateCount } from "@/lib/certificate";
 import { roomSize } from "@/lib/community-chat";
+import { forgetAccessPerson } from "@/lib/community-access";
 import { store as redis } from "./redis-stub";
 
 const sid = "synthetic-num-erasure";
@@ -67,6 +68,29 @@ for (const [label, replies] of [
     await assert.rejects(() => withReplies(replies, () => forgetVoicePerson(sid, now)));
   });
 }
+
+for (const [label, replies] of [
+  ["text first count", ["1", 0]],
+  ["null second count", [1, null]],
+  ["fraction first count", [0.5, 0]],
+  ["one reply of two", [1]],
+] as [string, unknown[]][]) {
+  test(`the community access answers: a ${label} throws, never counts as 0`, async () => {
+    await assert.rejects(() => withReplies(replies, () => forgetAccessPerson("c-synthetic", email, ["s1"], ["p1"])));
+  });
+}
+
+test("the community access answers: healthy and confirmed absence", async () => {
+  redis.clear();
+  assert.equal(await forgetAccessPerson("c-synthetic", email, ["s1"], ["p1"]), 0, "nothing kept: 0, as Redis answers it");
+  const original = redis.pipeline;
+  redis.pipeline = async (commands) => (commands.length === 2 && commands[0][0] === "DEL" && commands[1][0] === "HDEL" ? [2, 1] : original.call(redis, commands));
+  try {
+    assert.equal(await forgetAccessPerson("c-synthetic", email, ["s1"], ["p1"]), 3, "what DEL and HDEL said they removed");
+  } finally {
+    redis.pipeline = original;
+  }
+});
 
 test("healthy: each step counts what it really deleted", async () => {
   redis.clear();

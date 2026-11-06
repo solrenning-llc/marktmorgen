@@ -282,10 +282,17 @@ async function main(): Promise<void> {
   const worst = await withCartStockHolds(costly, cart4, async () => ({ id: "cs_test_cartstockcost0001" }));
   const opening = commands;
   commands = 0;
+  // The hand-over's failure path, in one count: four other products in the same state as the opening's (each with one unit
+  // left beside its holds that ran out), so the cart opens and its hand-over fails, never a refusal for sold out (measured
+  // by mistake until the review of #1732, 6 November 2026).
+  const fail4 = ["f1", "f2", "f3", "f4"].map((id) => limited(id, 6));
+  for (const id of ["f1", "f2", "f3", "f4"]) await lapse(id, MAX_LAPSED);
+  const closedBefore = expired.length;
   redis.pipeline = async (batch) => (batch.length === 1 && batch[0][0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:stock-bind:v1\n") ? (await counting(batch), []) : counting(batch));
-  await withCartStockHolds(costly, cart4, async () => ({ id: "cs_test_cartstockcost0002" }));
+  const failed4 = await withCartStockHolds(costly, fail4, async () => ({ id: "cs_test_cartstockcost0002" }));
   const failing = commands;
   redis.pipeline = original;
+  is("the failure path measured is the hand-over's: opened, closed at Stripe, nobody sent to it", [failed4, expired.slice(closedBefore)], [{ ok: false, reason: "busy" }, ["cs_test_cartstockcost0002"]]);
   const most = handedBack + Math.max(opening, failing) + cart4.length * (tries - 1);
   is("the order's stock work at its worst stays inside its declared commands", [worst.ok, most <= CART_STOCK_COMMANDS_MOST], [true, true]);
   is("and those commands inside their declared share of an order's compute", CART_STOCK_COMMANDS_MOST * COMMAND <= CART_STOCK_SHARE_OF_ORDER_COMPUTE * ORDER_COMPUTE, true);

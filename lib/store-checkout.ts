@@ -274,7 +274,7 @@ export async function createCheckout(
   } = {},
   /** Internal integration dependency; never populated from HTTP or environment flags. */
   confirmationRuntime: ConfirmationOriginRuntime = {},
-): Promise<{ url: string; id: string }> {
+): Promise<{ url: string; id: string; expiresAt?: number }> {
   if (!store.stripeAccountId) throw new Error("This store has no account");
   if (extras.gift) extras = { ...extras, bumps: [], plan: false, upsellKey: undefined, group: undefined };
   if (extras.preorder) {
@@ -837,7 +837,9 @@ export async function createCheckout(
   if (typeof session.url !== "string" || !session.url || typeof session.id !== "string") {
     throw new Error("Stripe did not return a checkout URL");
   }
-  return { url: session.url, id: session.id };
+  // When Stripe closes it (seconds), only from an exact whole number; otherwise left out, never guessed (#2685 A3).
+  const closes = session.expires_at;
+  return { url: session.url, id: session.id, ...(typeof closes === "number" && Number.isSafeInteger(closes) && closes > 0 ? { expiresAt: closes } : {}) };
 }
 
 /** A product added at checkout, as an order hands it over. */

@@ -24,9 +24,19 @@ import {
   calendarMonthOfUse,
 } from "@/lib/funnel-share-rules";
 import { SITE_URL } from "@/lib/site-url";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { STORE_ID_PATTERN, type Store, accountStores, storeRef } from "@/lib/store";
 
 const refuse = (error: string, status = 400, extra: Record<string, unknown> = {}) => Response.json({ ok: false, error, ...extra }, { status });
+
+/**
+ * A part of the funnel (the funnel, a page or a form) whose read did not come
+ * back in a known shape (lib/funnel-bundle-store.ts collectBundle): nothing
+ * was shared, copied or downloaded from it, and the creator is told so rather
+ * than "gone" or a server error (CX-123 rule 24). `counted` when the try was
+ * already counted toward a monthly figure, which it keeps, as any other failed try.
+ */
+const unread = (counted: boolean) => refuse(counted ? "funnel_unread_counted" : "funnel_unread", 503);
 
 /** A share entry as the studio sees it: never the hash of its code. */
 const shown = (entry: { id: string; name: string; funnelId: string; createdAt: number; expiresAt: number; hint: string }) => ({
@@ -264,6 +274,8 @@ export async function POST(request: NextRequest) {
 
     return refuse("invalid");
   } catch (error) {
+    // Only a copy in this store reads the funnel before counting anything; every other action counted first.
+    if (error instanceof UnknownReplyError) return unread(action !== "clone");
     console.error("sharing or bringing in a funnel failed", error);
     return refuse("server_error", 500);
   }
@@ -292,6 +304,7 @@ export async function GET(request: NextRequest) {
     const slug = collected.funnel.slug || "funnel";
     return new Response(json, { headers: fileHeaders("application/json; charset=utf-8", `${slug}.marktmorgen-funnel.json`) });
   } catch (error) {
+    if (error instanceof UnknownReplyError) return unread(true);
     console.error("exporting a funnel failed", error);
     return refuse("server_error", 500);
   }

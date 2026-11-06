@@ -6,13 +6,15 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readListings, readProduct } from "@/lib/catalog";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
-import { cartPrice, createCartCheckout } from "@/lib/cart-checkout";
+import { cartPriceFor, createCartCheckout } from "@/lib/cart-checkout";
+import { cartClaimHolds, cartMemberCookie, cartMemberHeader, cartMemberValue, readCartMember } from "@/lib/cart-member";
+import { type MemberProof, memberOffProved, memberProofFor } from "@/lib/member-price";
 import { MAX_CART, cartable, dealOff, readCartIds } from "@/lib/cart-rules";
 import { bestBundleSwap } from "@/lib/cart-bundle";
 import { cartPicks } from "@/lib/store-collections";
 import { readSoldCounts } from "@/lib/sold-count";
 import { cartWords } from "@/lib/buyer-words/cart";
-import type { Store } from "@/lib/store";
+import type { Listing, Store } from "@/lib/store";
 import { salePrice } from "@/lib/store-sale";
 import { soonState } from "@/lib/preorders";
 import { outOfKeys } from "@/lib/licence-keys";
@@ -57,11 +59,17 @@ export async function GET(request: NextRequest) {
   const locale = LANGUAGES[store.language].locale;
   const [listings, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => ({ soon: new Set<string>() }))]);
   const selling = canSell(store);
+  // A member price (lib/cart-member.ts, 620 [SZ4]): one proof for the whole
+  // cart, read only when a rule covers something in it; unknown is the
+  // normal price. Every price this answer shows is from it, so a bundle or a
+  // product it offers is said at what the cart would charge for it.
+  const proof = selling ? await memberProofFor(store, listings, request.cookies).catch(() => null) : null;
+  const price = priceIn(store, country, proof);
   const sw = shippingWords(store.language);
   const items = ids.flatMap((id) => {
     const product = listings.find((p) => p.id === id);
     if (!product) return [];
-    const { cents } = cartPrice(store, product, country);
+    const { cents } = price(product);
     // A product the creator ships: its own line about when it ships, as its page says it (lib/shipping.ts).
     const shipped = activeShipping(product);
     const ships = shipped ? [shipped.cents > 0 ? sw.cost(formatMoney(shipped.cents, store.currency, locale)) : sw.free, shipped.note].filter(Boolean).join(" · ") : null;
@@ -125,8 +133,16 @@ export async function GET(request: NextRequest) {
     const listing = listings.find((p) => p.id === item.id);
     return listing ? [{ id: item.id, title: item.title, pairs: listing.pairs ?? [] }] : [];
   });
-  const suggest = await suggestions(store, inCart, ids, coming.soon, country, locale).catch(() => []);
-  const bundle = bundleSwap(store, payable, ids, coming.soon, country, locale);
+  const suggest = await suggestions(store, inCart, ids, coming.soon, price, locale).catch(() => []);
+  const bundle = bundleSwap(store, payable, ids, coming.soon, price, locale);
+  // What this cart showed at a member price, kept in this browser so paying
+  // charges it only if it is still what is proved then (lib/cart-member.ts).
+  const shown = cartMemberValue(ids.flatMap((id) => {
+    const product = listings.find((p) => p.id === id);
+    return product && proof ? [[id, memberOffProved(store.memberPrices, product, proof)] as const] : [];
+  }));
+  const headers = new Headers({ "Cache-Control": "private, no-store" });
+  if (shown || request.cookies.get(cartMemberCookie(store))) headers.append("Set-Cookie", cartMemberHeader(store, shown, request.nextUrl.protocol === "https:"));
   return Response.json(
     {
       ok: true,
@@ -140,8 +156,17 @@ export async function GET(request: NextRequest) {
       suggest,
       bundle,
     },
-    { headers: { "Cache-Control": "private, no-store" } },
+    { headers },
   );
+}
+
+/**
+ * What a product is charged in this cart (lib/cart-checkout.ts, cartPriceFor):
+ * the largest of the store's sale, the fair price for the country and the
+ * member price this proof gives, never two.
+ */
+function priceIn(store: Store, country: string, proof: MemberProof | null) {
+  return (product: Listing) => cartPriceFor(store, product, country, proof ? memberOffProved(store.memberPrices, product, proof) : 0);
 }
 
 /**
@@ -154,7 +179,7 @@ function bundleSwap(
   payable: { id: string; title: string; cents: number }[],
   ids: string[],
   soon: Set<string>,
-  country: string,
+  price: (product: Listing) => { cents: number },
   locale: string,
 ) {
   if (payable.length === 0 || !canSell(store)) return null;
@@ -164,7 +189,7 @@ function bundleSwap(
   if (offers.length === 0) return null;
   const swap = bestBundleSwap(
     payable.map((line) => ({ id: line.id, cents: line.cents })),
-    offers.map((product) => ({ id: product.id, cents: cartPrice(store, product, country).cents, items: product.bundle ?? [] })),
+    offers.map((product) => ({ id: product.id, cents: price(product).cents, items: product.bundle ?? [] })),
     store.cartDeal,
   );
   if (!swap) return null;
@@ -176,7 +201,7 @@ function bundleSwap(
     id: product.id,
     title: product.title,
     href: `/@${store.handle}/p/${productSegment(product)}`,
-    price: formatMoney(cartPrice(store, product, country).cents, store.currency, locale),
+    price: formatMoney(price(product).cents, store.currency, locale),
     holds: words.bundleHolds(held, swap.more),
     save: words.bundleSave(formatMoney(swap.before - swap.after, store.currency, locale)),
     replaces: swap.replaces,
@@ -194,7 +219,7 @@ async function suggestions(
   inCart: { id: string; title: string; pairs: string[] }[],
   ids: string[],
   soon: Set<string>,
-  country: string,
+  price: (product: Listing) => { cents: number },
   locale: string,
 ): Promise<Suggestion[]> {
   if (inCart.length === 0 || ids.length >= MAX_CART || !canSell(store)) return [];
@@ -227,7 +252,7 @@ async function suggestions(
       id: want.id,
       title: product.title,
       href: `/@${store.handle}/p/${productSegment(product)}`,
-      price: formatMoney(cartPrice(store, product, country).cents, store.currency, locale),
+      price: formatMoney(price(product).cents, store.currency, locale),
       why: want.why,
       kind: want.kind,
       count: want.count,
@@ -289,6 +314,14 @@ export async function POST(request: NextRequest) {
     if (out) return away(`/@${store.handle}?cart=changed#cart`);
   }
 
+  // A member price (lib/cart-member.ts, 620 [SZ4]): proved again, once for the
+  // whole cart, and charged only when every line is what the cart showed;
+  // otherwise back to the cart, which reads it again, with nothing opened.
+  const proof = await memberProofFor(store, products, request.cookies).catch(() => null);
+  const proved = new Map(products.map((product) => [product.id, proof ? memberOffProved(store.memberPrices, product, proof) : 0]));
+  if (!cartClaimHolds(ids, readCartMember(request.cookies.get(cartMemberCookie(store))?.value), proved)) return away(`/@${store.handle}?cart=changed#cart`);
+  const member = proof && [...proved.values()].some((percent) => percent > 0) ? { email: proof.email, percents: proved } : null;
+
   try {
     const via = await attributionFor(store, products[0].id, {
       via: request.cookies.get(viaCookieName(store.handle))?.value,
@@ -310,6 +343,7 @@ export async function POST(request: NextRequest) {
       via,
       digitalConsent,
       offers: upsell && offerFrom ? { upsellKey: upsell.fingerprint, from: offerFrom.id } : null,
+      member,
     });
     if (reminding) await keepAssistReminder({ store, session: opened.id, email: remindEmail, version: remindVersion });
     for (const product of products) after(() => countHit(request, store, { kind: "checkout", id: product.id }));

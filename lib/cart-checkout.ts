@@ -23,7 +23,8 @@ import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admi
 import type { Product, Store } from "@/lib/store";
 import { KIND, readListings } from "@/lib/catalog";
 import { BUMP_KEYS, MIN_BUNDLE_ITEMS, bundleMeta, deliverableItems } from "@/lib/bundle-rules";
-import { type SaleCandidate, saleOff, salePrice } from "@/lib/store-sale";
+import { type SaleCandidate, saleOff, salePrice, saleable } from "@/lib/store-sale";
+import { isMemberPercent } from "@/lib/member-price-rules";
 import { fairOff } from "@/lib/fair-price";
 import { commissionRate } from "@/lib/affiliate-setting";
 import { applyTax, applyTaxDocuments, refusedTaxDocuments, withoutTaxDocuments } from "@/lib/tax";
@@ -71,10 +72,28 @@ export function offersCart(store: Store): boolean {
 
 /** What one product in a cart is charged, in the store currency's smallest unit, and what was taken off. */
 export function cartPrice(store: Pick<Store, "sale" | "fair">, product: SaleCandidate, country: string, nowSeconds = Math.floor(Date.now() / 1000)): { cents: number; off: number } {
+  const { cents, off } = cartPriceFor(store, product, country, 0, nowSeconds);
+  return { cents, off };
+}
+
+/**
+ * The same, with the member price this buyer's address was proved to get on
+ * it (lib/member-price.ts, 620 [SZ4]; 0 for none): the largest of the sale,
+ * the fair price and the member price, never two, as on one product
+ * (lib/store-checkout.ts). `member` says the member price is the one taken.
+ */
+export function cartPriceFor(
+  store: Pick<Store, "sale" | "fair">,
+  product: SaleCandidate,
+  country: string,
+  member: number,
+  nowSeconds = Math.floor(Date.now() / 1000),
+): { cents: number; off: number; member: boolean } {
   const sale = saleOff(store.sale, product, nowSeconds);
   const fair = fairOff(store.fair, product, country);
-  const off = Math.max(sale, fair);
-  return { cents: salePrice(product.priceCents, off), off };
+  const asMember = isMemberPercent(member) && saleable(product) ? member : 0;
+  const off = Math.max(sale, fair, asMember);
+  return { cents: salePrice(product.priceCents, off), off, member: asMember > Math.max(sale, fair) };
 }
 
 /** Opens one checkout for every product in a cart, in its order. The caller has checked each can go in one. */
@@ -102,6 +121,13 @@ export async function createCartCheckout(
      * set in this browser, and the cart product whose funnel they come from.
      */
     offers?: { upsellKey: string; from: string } | null;
+    /**
+     * Member prices (lib/cart-member.ts, 620 [SZ4]): each line's percentage
+     * and the address it was proved for, proved again by the route and equal
+     * to what the cart showed before they are passed here. The checkout opens
+     * with that address fixed when a line is charged at a member price.
+     */
+    member?: { email: string; percents: ReadonlyMap<string, number> } | null;
   } = {},
 ): Promise<{ url: string; id: string }> {
   if (!store.stripeAccountId) throw new Error("This store has no account");
@@ -150,6 +176,8 @@ export async function createCartCheckout(
   const deal = dealOff(store.cartDeal, products.length);
   if (deal > 0) body.set("metadata[cart_deal]", String(deal));
   let discounted = deal > 0;
+  // The largest member percentage charged on a line, for the order's own note of it.
+  let asMember = 0;
   const lines: { key: string | null; cents: number; id: string }[] = [];
   for (const [i, product] of products.entries()) {
     const key = i === 0 ? null : BUMP_KEYS[i - 1];
@@ -159,10 +187,11 @@ export async function createCartCheckout(
       if (items.length < MIN_BUNDLE_ITEMS) throw new Error("A bundle in the cart holds too little right now");
       for (const [name, value] of Object.entries(bundleMeta(key ? `${key}_bundle` : "bundle", items.map((p) => p.id)))) body.set(`metadata[${name}]`, value);
     }
-    const shown = cartPrice(store, product, country);
+    const shown = cartPriceFor(store, product, country, extras.member?.email ? (extras.member.percents.get(product.id) ?? 0) : 0);
     const cents = salePrice(shown.cents, deal);
     const off = shown.off;
     if (off > 0) discounted = true;
+    if (shown.member) asMember = Math.max(asMember, off);
     body.set(`line_items[${i}][quantity]`, "1");
     body.set(`line_items[${i}][price_data][currency]`, store.currency);
     body.set(`line_items[${i}][price_data][unit_amount]`, String(cents));
@@ -175,6 +204,14 @@ export async function createCartCheckout(
       body.set(`metadata[${key}_cents]`, String(cents));
     }
     lines.push({ key, cents, id: product.id });
+  }
+
+  // A line at a member price (lib/cart-member.ts): written on the order, as on
+  // one product, and the member's own purchase, so Stripe's page opens with
+  // the proved address, which the buyer cannot change.
+  if (asMember > 0 && extras.member?.email) {
+    body.set("metadata[member]", String(asMember));
+    body.set("customer_email", extras.member.email);
   }
 
   // Shipped by the creator: one address, and the shipping as its own line (lib/cart-shipping.ts).

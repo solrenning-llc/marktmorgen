@@ -95,6 +95,16 @@ export function qualifyingFor(setting: MemberPrices | undefined, product: SaleCa
   return [...new Set(memberRulesFor(setting, product).flatMap((rule) => rule.by))];
 }
 
+/**
+ * Every product whose holder would pay less for anything in the store, once
+ * each, while the setting is on: what one proof for a whole cart reads
+ * (lib/member-price.ts, memberProofFor), never more than MAX_MEMBER_QUALIFYING.
+ */
+export function allQualifying(setting: MemberPrices | undefined): string[] {
+  if (!setting?.on) return [];
+  return [...new Set(setting.rules.flatMap((rule) => rule.by))].slice(0, MAX_MEMBER_QUALIFYING);
+}
+
 /** The percentage off this product for someone proved to hold `held`: the largest rule they meet, never a sum; 0 for none. */
 export function memberOffFrom(setting: MemberPrices | undefined, product: SaleCandidate, held: ReadonlySet<string>): number {
   let best = 0;

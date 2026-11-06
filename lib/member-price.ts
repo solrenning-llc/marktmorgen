@@ -48,9 +48,10 @@ import { importedFrom, importedRead } from "@/lib/imported-purchases";
 import { TOKEN_PATTERN, learnerFrom, passCookieName } from "@/lib/learn";
 import { memberState } from "@/lib/membership-access";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
-import { isMemberPercent, memberOffFrom, qualifyingFor } from "@/lib/member-price-rules";
+import { type MemberPrices, allQualifying, isMemberPercent, memberOffFrom, memberRulesFor, qualifyingFor } from "@/lib/member-price-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { onAccount } from "@/lib/stripe-account";
+import type { SaleCandidate } from "@/lib/store-sale";
 import { STRIPE_LIST_VERSION, plainObject, readStripePage } from "@/lib/stripe-list";
 import { currentMeta } from "@/lib/tier-rules";
 import { type Listing, type Store, saleHandles } from "@/lib/store";
@@ -163,41 +164,84 @@ async function heldHere(store: Store, email: string, kinds: ReadonlyMap<string, 
 }
 
 /**
+ * What one proof found for this browser's address: the qualifying products
+ * it holds, whether every row that could prove more was read, and the
+ * qualifying products that exist. Nothing is kept past the request.
+ */
+export type MemberProof = { email: string; held: ReadonlySet<string>; complete: boolean; known: ReadonlySet<string> };
+
+/**
+ * Proves this browser's address against these qualifying products: "none"
+ * when there is nobody to prove or nothing to hold, "unknown" when it could
+ * not be read. Counted before anything about the buyer is read, once,
+ * whatever it is asked for (at most MAX_MEMBER_QUALIFYING listings and
+ * MEMBER_PRICE_STRIPE_CALLS calls).
+ */
+async function prove(store: Store, qualifying: string[], cookies: CookieJar): Promise<MemberProof | "none" | "unknown"> {
+  if (qualifying.length === 0 || !store.stripeAccountId) return "none";
+  // Nobody to prove without a pass in its shape or a session: nothing is read or counted.
+  if (!TOKEN_PATTERN.test(cookies.get(passCookieName(store))?.value ?? "") && !cookies.get(SESSION_COOKIE)?.value) return "none";
+  if (!(await takeBuyerRead(store, MEMBER_PRICE_REQUEST_UNITS))) return "unknown";
+  const learner = await learnerFrom(store, cookies).then(
+    (found) => found,
+    () => undefined,
+  );
+  if (learner === undefined) return "unknown";
+  // Only an inbox proved (a link's pass, or signed in), and never the creator, signed in or by a link to their own address.
+  if (!learner || learner.owner || learner.scope !== "all" || normaliseEmail(learner.email) === normaliseEmail(store.email)) return "none";
+  let listings: Listing[];
+  try {
+    listings = await readListings(store, qualifying);
+  } catch (error) {
+    console.error("reading the products a member price asks for failed", error);
+    return "unknown";
+  }
+  const kinds = new Map<string, QualifyingKind>();
+  for (const listing of listings) kinds.set(listing.id, { recurring: listing.recurring !== null });
+  if (kinds.size === 0) return "none";
+  const found = await heldHere(store, learner.email, kinds);
+  if (found === null) return "unknown";
+  return { email: learner.email, held: found.held, complete: found.complete, known: new Set(kinds.keys()) };
+}
+
+/**
+ * The percentage a proof gives this product: 0 for none, and 0 when a larger
+ * rule may rest on a purchase not read (unknown, never a guess). Pure.
+ */
+export function memberOffProved(setting: MemberPrices | undefined, product: SaleCandidate, proof: MemberProof): number {
+  const percent = memberOffFrom(setting, product, proof.held);
+  // A larger rule may rest on a purchase not read: unknown, never no.
+  if (percent < memberOffFrom(setting, product, proof.known) && !proof.complete) return 0;
+  return percent;
+}
+
+/**
  * The member price this browser's proved address gets on this product now:
  * "none" (the normal price), "member" with the percentage, or "unknown"
  * when it could not be proved (the normal price too). The page and the
  * checkout both ask this.
  */
 export async function memberPriceFor(store: Store, product: Listing, cookies: CookieJar): Promise<MemberCheck> {
-  const qualifying = qualifyingFor(store.memberPrices, product);
-  if (qualifying.length === 0 || !store.stripeAccountId) return NONE;
-  // Nobody to prove without a pass in its shape or a session: nothing is read or counted.
-  if (!TOKEN_PATTERN.test(cookies.get(passCookieName(store))?.value ?? "") && !cookies.get(SESSION_COOKIE)?.value) return NONE;
-  if (!(await takeBuyerRead(store, MEMBER_PRICE_REQUEST_UNITS))) return UNKNOWN;
-  const learner = await learnerFrom(store, cookies).then(
-    (found) => found,
-    () => undefined,
-  );
-  if (learner === undefined) return UNKNOWN;
-  // Only an inbox proved (a link's pass, or signed in), and never the creator, signed in or by a link to their own address.
-  if (!learner || learner.owner || learner.scope !== "all" || normaliseEmail(learner.email) === normaliseEmail(store.email)) return NONE;
-  let listings: Listing[];
-  try {
-    listings = await readListings(store, qualifying);
-  } catch (error) {
-    console.error("reading the products a member price asks for failed", error);
-    return UNKNOWN;
-  }
-  const kinds = new Map<string, QualifyingKind>();
-  for (const listing of listings) kinds.set(listing.id, { recurring: listing.recurring !== null });
-  if (kinds.size === 0) return NONE;
-  const found = await heldHere(store, learner.email, kinds);
-  if (found === null) return UNKNOWN;
-  const percent = memberOffFrom(store.memberPrices, product, found.held);
+  const proof = await prove(store, qualifyingFor(store.memberPrices, product), cookies);
+  if (proof === "none") return NONE;
+  if (proof === "unknown") return UNKNOWN;
+  const percent = memberOffFrom(store.memberPrices, product, proof.held);
   // A larger rule may rest on a purchase not read: said as unknown, never as no.
-  const most = memberOffFrom(store.memberPrices, product, new Set(kinds.keys()));
-  if (percent < most && !found.complete) return UNKNOWN;
-  return percent > 0 ? { state: "member", percent, email: learner.email } : NONE;
+  if (percent < memberOffFrom(store.memberPrices, product, proof.known) && !proof.complete) return UNKNOWN;
+  return percent > 0 ? { state: "member", percent, email: proof.email } : NONE;
+}
+
+/**
+ * One proof for several products at once (a cart, unit 4): read only when a
+ * rule covers one of them, against every qualifying product of the store, so
+ * any product's member price follows from it (memberOffProved) with nothing
+ * more read. Null when there is nobody to prove, nothing held, or it could
+ * not be read: the normal price everywhere.
+ */
+export async function memberProofFor(store: Store, products: readonly SaleCandidate[], cookies: CookieJar): Promise<MemberProof | null> {
+  if (!products.some((product) => memberRulesFor(store.memberPrices, product).length > 0)) return null;
+  const proof = await prove(store, allQualifying(store.memberPrices), cookies);
+  return typeof proof === "string" ? null : proof;
 }
 
 /** The percentage a product page's form says it showed as the member price; 0 for none or anything else. */

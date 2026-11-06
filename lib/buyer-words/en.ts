@@ -101,7 +101,7 @@ export const en = {
   buyAsGift: "Buy as a gift",
   buyAsGiftFor: (price: string) => `Buy as a gift — ${price}`,
   giftNote: (store: string) =>
-    `You pay on Stripe's page. Right after, they get one email from ${store} with your name, your message and a link to open it on their own address. You get the receipt, not a copy.`,
+    `You pay on Stripe's page. After payment, the gift belongs to their address. If the one email from ${store} reaches them, it has your name, your message and a link to open it. You get the receipt, not a copy.`,
   giftProblems: {
     email: "That does not look like an email address. Check the recipient's address and try again.",
     option: "Choose which one to give, then try again. Nothing was charged.",
@@ -153,7 +153,8 @@ export const en = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store: string) => `The ${store} blog`,
-  blogEmpty: "Nothing here yet.",
+  blogPastEnd: "No posts on this page",
+  blogPastEndBody: "This page is past the last post.",
   blogMinutes: (n: number) => `${n} min read`,
   blogNewer: "Newer posts",
   blogOlder: "Older posts",
@@ -166,6 +167,7 @@ export const en = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent: number) => `save ${percent}%`,
   chooseOptionFor: (title: string) => `Choose an option for ${title}`,
+  chooseOne: "Choose one",
   recommended: "Recommended",
   recommendedAfter: " (recommended)",
   howToPayFor: (title: string) => `How to pay for ${title}`,

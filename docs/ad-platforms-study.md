@@ -17,6 +17,17 @@ Study for 632 [AA2] step (a), 2 November 2026, read only: no account created, no
 
 Gaps kept (NOT FOUND or DIVERGENT): Meta version end dates and its ad policy texts; whether an ad set left without a status starts ACTIVE (so PAUSED is always sent); Google's yearly version life and whether a campaign total budget needs an end date, and country rules for financial services; TikTok scope names, review time, rate limits and the status field at creation.
 
+### Gaps closed on 4 November 2026 (official pages, after the network allowed them)
+
+Read by Claude 3 on 4 November 2026 from the official pages below; each point is CONFIRMED (quoted or closely paraphrased), NOT FOUND or NOT READABLE. Nothing is filled from memory.
+
+- **Meta versions** ([versions](https://developers.facebook.com/docs/graph-api/changelog/versions), no date shown): the page has two tables. Graph API: v24.0 until 18 February 2028, v25.0 until 29 July 2028, v26.0 "TBD". **Marketing API: v24.0 expired on 6 October 2026, v25.0 "TBD", and no v26 row** ("Marketing API version auto-upgrade will release on July 29, 2026"). CONFIRMED. `lib/meta-ads.ts` reads spend with `v26.0` by default and `lib/ad-events.ts` uses `v25.0`; whether a Marketing API call answers on v26.0 is NOT FOUND, reported to Claude 1 (nothing changed here).
+- **Meta ad set created without a status** ([ad campaign reference](https://developers.facebook.com/docs/marketing-api/reference/ad-campaign/)): the default when `status` is left out is NOT FOUND; "Only `ACTIVE` and `PAUSED` are valid for creation", and every example sends `status=PAUSED` (CONFIRMED). The rule stays: always send `PAUSED`.
+- **Meta Advertising Standards** (transparency.meta.com): NOT READABLE (the network refuses the host). Health and before-and-after, guaranteed returns and the AI label for ordinary ads stay gaps.
+- **Google Ads API versions** ([sunset dates](https://developers.google.com/google-ads/api/docs/sunset-dates), last updated 30 October 2026): major versions live about 12 months and minor ones 10; v26 was released on 14 October 2026 with sunset planned for November 2027; at least 20 weeks of overlap before a sunset. CONFIRMED. The page says "at most four" major versions in its summary and "at most five" in its body (DIVERGENT; nothing in the code depends on it).
+- **Google total budget** ([CampaignBudget](https://developers.google.com/google-ads/api/reference/rpc/latest/CampaignBudget), [BudgetPeriod](https://developers.google.com/google-ads/api/reference/rpc/latest/BudgetPeriodEnum.BudgetPeriod), [Campaign](https://developers.google.com/google-ads/api/reference/rpc/latest/Campaign), last updated 28 October 2026): `total_amount_micros` is "the budget cap for the campaign's lifetime", only with the `CUSTOM_PERIOD` period, and excludes `amount_micros`; `period` defaults to `DAILY` and cannot change; a campaign's `end_date_time` "defaults to running indefinitely". CONFIRMED. Whether a total budget needs an end date: NOT FOUND (the reference neither requires nor forbids it), so the studio will always ask for the end date with a total budget.
+- **TikTok API for Business v1.3** ([portal](https://business-api.tiktok.com/portal/docs)): NOT READABLE (the pages load their text only by script). Scope names, the review time, the call limits and `operation_status` stay gaps; nothing in the code may assume them.
+
 ### The first version, from search summaries (history)
 
 ## Meta Marketing API

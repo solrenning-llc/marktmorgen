@@ -53,3 +53,9 @@ Unavailable inventory and email configuration use `role=status` and plain recove
 ## Coordination
 
 Reservations are channel-only; no reservation document is changed. Fresh inventories found no public-page PR overlap. #1969 no longer changes Studio Forms/Email; #2287 only changes enrollment comments outside the definition read; #1965 workflow flags and #2314 health table lines remain intact. U was notified of form-only public catches; its page-storage/metadata work remains separate. C5 empty-state design follows the Forms repair. All original heads and REDs are preserved.
+
+## Final frozen-main integration
+
+Frozen main91d6bb50d98c20990c28d7efc8f09a0c17bfee92 integrated once before review. Native product union73cd899f3585cf7a382ceb8d945881a7760ffab5 is identical to the GitData tree. All18 other own blobs are identical to complete source1dafbf5b; only shared test-config gained the main's independent mappings. Main-only and union client graphs both pass271/271. The main-only graph used actual archived app/components/lib/config and the exact client-bundles script, with the same installed dependencies; no source/polyfill stub.
+
+On the union: same16canonical files,452custom+31Nodepass; actual17-root TypeScript/imports0; directed source/test lint0 and union-wiring lint0; public-data scanner4129/0. PR-relative diff-check against frozen main is clean. A broad cached diff against historical local HEAD738 reports an inherited contact/page.tsx EOF blank line; that foreign blob is unchanged from main and is not edited or presented as a globally clean historical diff. No full CI/browser/nativeRedis/production result is claimed until those checks actually finish on the final PR head.

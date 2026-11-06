@@ -11,6 +11,6 @@ export function reset(reply?: unknown[]) { store.clear(); calls.length=0; inject
 export async function redisPipeline(commands: (string | number)[][]): Promise<unknown[]> {
  calls.push(...commands);
  // Malformed replies do not apply the reservation; healthy controls use MemoryRedis.
- if(substitute && commands[0]?.[0]==='INCRBY') return injected!;
+ if(substitute && ['INCRBY','GET'].includes(String(commands[0]?.[0]))) return injected!;
  return normal(commands);
 }

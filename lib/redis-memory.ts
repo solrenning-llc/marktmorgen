@@ -221,6 +221,15 @@ export class MemoryRedis {
           this.run(["EXPIRE", ledger, seconds]); return 1;
         }
 
+        // lib/redis-lock.ts releaseLock and holdLock: the lock deleted, or made to last, only while it holds the token.
+        if (key.startsWith("-- marktmorgen:release:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, lock, token] = args;
+          return this.run(["GET", lock]) === token ? this.run(["DEL", lock]) : 0;
+        }
+        if (key.startsWith("-- marktmorgen:extend:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, lock, token, seconds] = args;
+          return this.run(["GET", lock]) === token ? this.run(["EXPIRE", lock, seconds]) : 0;
+        }
         // The fenced writes of lib/redis-lock.ts that never fall back: modeled step for step.
         if (key.startsWith("-- marktmorgen:fenced-set:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, target, token, value] = args;

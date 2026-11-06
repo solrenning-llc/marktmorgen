@@ -44,6 +44,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type DataStore, giveData, needData, takeData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
@@ -337,12 +338,19 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
   if (!STATS_ID_PATTERN.test(statsId) || !PRODUCT_ID_PATTERN.test(input.productId) || rating === null) return { state: "invalid" };
   const id = reviewId(statsId, input.productId, input.email);
   const result = await locked(statsId, input.productId, async (): Promise<SaveResult> => {
-    const [raw, size] = await redisPipeline([
+    const replies = repliesFor(await redisPipeline([
       ["HGET", productKey(statsId, input.productId), id],
       ["HLEN", productKey(statsId, input.productId)],
-    ]);
+    ]), 2);
+    // Only in their exact shape (audit SG2, CX-123 rule 24): the buyer's
+    // review as text, or null when they have none yet, and the count of the
+    // product's reviews as a whole number. Anything else lets no review past
+    // the ceiling: thrown, and the review page says nothing was changed.
+    const raw = replies?.[0];
+    const size = countOf(replies?.[1]);
+    if (!replies || (raw !== null && typeof raw !== "string") || size === null) throw new UnknownReplyError("a product's reviews or their count");
     const before = parseReview(raw);
-    if (!before && Number(size) >= MAX_REVIEWS_PER_PRODUCT) return { state: "full" };
+    if (!before && size >= MAX_REVIEWS_PER_PRODUCT) return { state: "full" };
     const review: Review = {
       id,
       productId: input.productId,

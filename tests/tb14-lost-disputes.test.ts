@@ -198,6 +198,50 @@ async function main(): Promise<void> {
   is("the next run takes it back", await revokeRefundedGifts(store, Date.now() + 10_000, drop), 1);
   is("gone", await holds(gifts[2].to), false);
 
+  part("An unknown lookup of the payment's gift or pre-order marks nothing read (Codex Z, review 5794216212)");
+  // Only the GET of the payment's gift or pre-order answers in an unknown shape; the next run is healthy.
+  const realPipeline = redis.pipeline;
+  const hideLookup = (key: string) => {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const answers = await realPipeline(commands);
+      return answers.map((answer, at) => (commands[at]?.[0] === "GET" && commands[at]?.[1] === key ? undefined : answer));
+    }) as typeof redis.pipeline;
+  };
+  is("pre-order 5 handed over", await confirmPreorder(store, session(5, "eve@tb14.example") as never, product, deps), "given");
+  closings = [closing(60, "lost", session(5, "").payment_intent), ...closings];
+  refunds = [];
+  hideLookup(`nl:pre:pi:${session(5, "").payment_intent}`);
+  try {
+    is("pre-orders: nothing taken back while its lookup is unknown", await revokeRefundedPreorders(store, Date.now() + 10_000, drop), 0);
+  } finally {
+    redis.pipeline = realPipeline;
+  }
+  is("Eve keeps hers meanwhile", await has("eve@tb14.example"), true);
+  is("the next run, with the lookup answered, takes it back", await revokeRefundedPreorders(store, Date.now() + 10_000, drop), 1);
+  is("Eve's is gone", await has("eve@tb14.example"), false);
+  const late = await startGift(store, product as Listing, { to: "friend4@tb14.example", from: "Ana", message: "" });
+  if (!late.ok) throw new Error("no gift");
+  const latePi = "pi_tb14gift00000004";
+  is("gift 4 given", await deliverGift({
+    store,
+    session: { id: "cs_test_tb14gift00000004", created: NOW - 600, amount_total: 2500, currency: "usd", payment_intent: latePi, metadata: { store: "tb14shop", product: product.id, gift: late.gift.id }, customer_details: { email: "buyer@tb14.example" } } as never,
+    product: product as Listing,
+    base: deps.base,
+    from: deps.from,
+    recordStart: async () => {},
+    ordersLink: async () => null,
+  }), "given");
+  closings = [closing(61, "lost", latePi), ...closings];
+  hideLookup(`nl:gift:pi:${latePi}`);
+  try {
+    is("gifts: nothing taken back while its lookup is unknown", await revokeRefundedGifts(store, Date.now() + 10_000, drop), 0);
+  } finally {
+    redis.pipeline = realPipeline;
+  }
+  is("the fourth recipient keeps it meanwhile", await holds("friend4@tb14.example"), true);
+  is("the next run, with the lookup answered, takes it back", await revokeRefundedGifts(store, Date.now() + 10_000, drop), 1);
+  is("gone", await holds("friend4@tb14.example"), false);
+
   part("Booked calls: a lost dispute frees the booking's time, as a full refund does");
   const call = (n: number, disputed: boolean) => ({
     id: `cs_test_tb14call${String(n).padStart(8, "0")}`,

@@ -71,18 +71,23 @@ async function main() {
   is('sequential replacement control', (await send(previous.request, previous.code)).error, 'code_expired');
 
   const older = await ask('cx1race@review.example');
+  const olderLink = `nl:auth:link:${createHash('sha256').update(`nimbus-auth-link:${older.token}`).digest('hex').slice(0, 40)}`;
+  const olderRecord = `nl:auth:code:${createHash('sha256').update(`nimbus-auth-code:${older.request}`).digest('hex').slice(0, 40)}`;
   const holder: { newest?: Awaited<ReturnType<typeof ask>> } = {};
   let armed = true;
   redis.pipeline = async commands => {
-    // All returned fields are the exact committed values read by the real
-    // pipeline. A newer real issuance completes after this snapshot, before
-    // the old request resumes and consumes its link. No malformed reply here.
-    const reply = await normal(commands);
-    if (armed && commands.length === 7 && commands[4][0] === 'HINCRBY') {
+    // A newer real issuance completes immediately BEFORE the old link's
+    // consume. Every reply is exact. Also support a corrective atomic EVAL
+    // that checks the latest record together with its consume: that script
+    // must see the newer record. This does not require the old counter shape.
+    const consumesOld = commands.some(command =>
+      (command[0] === 'GETDEL' && command[1] === olderLink) ||
+      (command[0] === 'EVAL' && command.slice(1).some(value => value === olderLink || value === olderRecord)));
+    if (armed && consumesOld) {
       armed = false;
       holder.newest = await ask('cx1race@review.example');
     }
-    return reply;
+    return normal(commands);
   };
   let raced: Awaited<ReturnType<typeof send>>;
   try { raced = await send(older.request, older.code); }

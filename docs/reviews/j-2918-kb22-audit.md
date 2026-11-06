@@ -37,3 +37,37 @@ Não foi refeita uma varredura global de PRs. As branches citadas no documento e
 **Execução:** nenhuma rota, teste, provider, build, TypeScript, lint, browser ou scanner de produto foi executado nesta atividade. Nenhum RED/GREEN/CI foi alegado. A atividade interrompida #2933 não foi retomada nem sua sessão consultada. O HEAD local antigo, os proofs, refs e logs anteriores não foram alterados por esta revisão.
 
 Uma consulta posterior de fonte/status via exec_command não iniciou: o executor retornou “No such file or directory” ao criar o processo. Não foi repetida nem substituída por outro executor. Por isso não há recibo novo de status local nem scanner CLI. O relatório foi checado apenas como texto em memória para whitespace e padrões de dados públicos antes de publicar o único arquivo por API. Essa checagem documental não executa código de produto e não equivale ao scanner CLI oficial.
+
+
+---
+
+# Focal documentary return — exact da55d3091050d5b7417e92f6248e6c54accc07e2
+
+This receipt supersedes only the four documentary LOW findings in J5807614184 at03cf63f2. The complete earlier report above, its scope limitations and original cee10c3 commit remain preserved. Root's new channel claim58b85bb9 preceded the corrective delta review; root retains the formal GitHub opinion.
+
+**Conclusion: D1–D4 CLOSED. No new GRAVE, MEDIUM or LOW documentary finding observed in the complete corrective delta. PODE ENTRAR as documentation only, after the nine exact final SUCCESS checks, fresh clean gates and the author's normal expected-SHA merge.** This is not implementation readiness, a cost authorization, legal/fiscal advice, feature activation or proof that a customer journey works.
+
+The entire03cf63f2..da55d309 delta is one commit changing only docs/reviews/c5-kb22-audit.md, final blob315df3d123edae12229f18060fe24b34632f1f36. The final document, all18 rows, all13 proposed units and its stated unknowns were read in full.
+
+| Original finding | Exact documentary correction | Focal disposition |
+| --- | --- | --- |
+| D1 — existing client events omitted | Item14 now cites existing page-view initialization and checkout-start calls in components/store-pixels.tsx, the state-on consent boundary and the checkout submit handler. U9 narrows future work to product view/add-to-cart and explicitly preserves existing page-view/checkout-start paths. Source-only/browser-not-verified language remains. | CLOSED: existing source is acknowledged without promising verified browser delivery or duplicating those existing calls. |
+| D2 — class1 confused with ready/cleared | Class1 is now explicitly a technical candidate, NOT cleared implementation; every unit still needs worst-case cost/MR and applicable owner wording. Item17/U13 is explicitly class3 until the owner gives wording. The cost unknown remains unknown, never zero; absence of a new supplier is not cost clearance. | CLOSED: no permission to implement, change a gate/flag, spend or bypass owner/MR prerequisites is created by the correction. |
+| D3 — tax CSV column left unknown/replanned | Item3 and U4 now identify the existing tax column, total_details.amount_tax read/write and export route. Generic tax-column work is removed; the remaining proposal is a separately defined regional summary, with source/coverage still requiring verification. | CLOSED: source baseline is corrected without claiming a tested fiscal report, tax treatment or legal compliance. |
+| D4 — KB15 overlap and invented HTTP feed surface | Item18 now cross-references594[KB15], describes acpFeedBatch as an internal partial-upsert object/null helper, and identifies storeRobots plus its real route/proxy mapping. U8 no longer requires an invented feed404 or supplier submission; it stays a future robots-setting candidate coordinated with KB15. | CLOSED: the nonexistent-HTTP acceptance requirement is removed; no endpoint, publication, default change or new supplier action is authorized. |
+
+## Static source reconfirmation and limits
+
+Reconfirmation stayed on frozen main5c07315505e1d53ee6401021601cd688fa98ecda, matching the author's stated audit baseline:
+
+- components/store-pixels.tsx blob8e23d7c8: Meta PageView, Google config, checkout events and submit handler are present; the initialization/submit listener is behind state === "on". These are function-call/source observations, not provider delivery, tracking success or browser assertions.
+- components/store-cart.tsx blob442659b6 was read for the narrowed add-to-cart proposal. Its actual browser event/storage/cart behavior was not executed.
+- lib/stats.ts blob23f64960 and export route blobd01c2acf contain the cited tax/buyer_country columns, amount_tax formatting and salesCsv route. Presence does not validate amounts or regional tax semantics in runtime.
+- lib/agentic-feed.ts blobb4c31848 declares internal partial upsert and returns object/null; tests/agentic-feed.test.ts blob048023cd imports it. storeRobots in lib/store-sitemap.ts blob9e6773da, store-robots route blobc3c25bd0 and proxy blob8fc2ffa9 establish the actual robots surface.
+- The complete queue blob12c016ae20b80ed5dbe9344bb44a38f30a42983f was read after the contents endpoint returned only its SHA. Its594[KB15] text at21672 does include per-page search/AI robots control; an empty contents response was not mistaken for empty source.
+
+No new repository-wide caller/route absence proof was made in this return. The author's “not found”/only-test-caller statements remain bounded by its disclosed static method and the earlier audit, not a blanket certification that every possible runtime surface was searched or tested. The important D4 correction is choosing an identified robots contract and removing the invented feed-HTTP acceptance step.
+
+The existing caveats are retained: greps show presence, not behavior; OPEN PRs were not enumerated by the original author; supplier account configuration, worst-case PDF/Redis costs, permissions, owner wording and implementation file ownership still require their own fresh checks. The unchanged note that U4/U5/U6 may run in parallel is not a fresh reservation/inventory approval from J.
+
+**Execution in this return: NONE.** No route, product test, RED/GREEN, TypeScript, lint, scanner CLI, build, browser, provider, account, payment or CI was run or certified. Source retrieval and exact textual comparison used GitHub reads only. The author document, product, author refs and CI were not edited. Only this existing own report is updated, in English, through its normal expected-blob update.

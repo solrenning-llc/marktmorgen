@@ -97,17 +97,6 @@ export function parseBook(raw: unknown): Book | null {
   return { waiting: waiting as Proposal[], history: history as Done[] };
 }
 
-/** How many bytes the store's book holds now (an exact STRLEN), so a tool that reads it pays for it first; null when that is not known. */
-export async function bookBytes(statsId: string): Promise<number | null> {
-  if (!STATS_ID.test(statsId) || !isRedisConfigured()) return null;
-  try {
-    const reply: unknown = await redisPipeline([["STRLEN", bookKey(statsId)]]);
-    return Array.isArray(reply) && reply.length === 1 && Number.isSafeInteger(reply[0]) && (reply[0] as number) >= 0 ? (reply[0] as number) : null;
-  } catch {
-    return null;
-  }
-}
-
 /** The store's book now, tidied (expired proposals and old history gone). Throws when it cannot be read. */
 export async function readBook(statsId: string, now = Date.now()): Promise<Book> {
   if (!STATS_ID.test(statsId) || !isRedisConfigured()) throw new Error("the agent book is not available");
@@ -161,6 +150,17 @@ async function writeBook(store: DataStore & { statsId: string }, held: Held, nex
   return "unknown";
 }
 
+/** The book's read was not admitted: the caller's requests did not cover what it weighs, or it could not be measured. Nothing of it was read. */
+export class BookReadRefused extends Error {
+  constructor() {
+    super("the agent book's read was not admitted");
+    this.name = "BookReadRefused";
+  }
+}
+
+/** Decides, once the book is measured under its lock, whether a read of that many bytes may be made (an agent's requests pay for it first). */
+export type AdmitBook = (bytes: number) => Promise<boolean>;
+
 /**
  * Changes the book under the store's lock: `change` gets the book as it is
  * and answers the new one (or null to keep it) and a result. The new book
@@ -168,9 +168,15 @@ async function writeBook(store: DataStore & { statsId: string }, held: Held, nex
  * Nothing outside the book is changed here, so a write that is not
  * confirmed is said as such (BookWriteUnconfirmed) and nothing else is done.
  */
-export async function changeBook<T>(store: DataStore & { statsId: string }, change: (book: Book) => Promise<{ book: Book | null; result: T }> | { book: Book | null; result: T }, now = Date.now()): Promise<T> {
+export async function changeBook<T>(store: DataStore & { statsId: string }, change: (book: Book) => Promise<{ book: Book | null; result: T }> | { book: Book | null; result: T }, now = Date.now(), admit?: AdmitBook): Promise<T> {
   const held = await holdBook(store.statsId);
   try {
+    // Measured under the lock, where no other change can make it grow, and admitted before it is read (an agent pays first).
+    if (admit) {
+      const reply: unknown = await redisPipeline([["STRLEN", bookKey(store.statsId)]]);
+      const size = Array.isArray(reply) && reply.length === 1 ? reply[0] : null;
+      if (typeof size !== "number" || !Number.isSafeInteger(size) || size < 0 || !(await admit(size))) throw new BookReadRefused();
+    }
     const book = await readBook(store.statsId, now);
     const { book: next, result } = await change(book);
     if (next && (await writeBook(store, held, next, now)) !== "written") throw new BookWriteUnconfirmed();
@@ -219,6 +225,7 @@ export function addProposal(
   kind: ProposalKind,
   input: { target: string; before: Json; after: Json; asked: Asked },
   now = Date.now(),
+  admit?: AdmitBook,
 ): Promise<{ ok: true; proposal: Proposal; replaced: string | null } | { ok: false; error: ProposeError }> {
   type Made = { ok: true; proposal: Proposal; replaced: string | null } | { ok: false; error: ProposeError };
   return changeBook<Made>(
@@ -228,6 +235,7 @@ export function addProposal(
       return made.ok ? { book: made.book, result: { ok: true as const, proposal: made.proposal, replaced: made.replaced } } : { book: null, result: made };
     },
     now,
+    admit,
   );
 }
 

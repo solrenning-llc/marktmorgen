@@ -580,21 +580,20 @@ export function savedBlocksWork(sections: number): ReadWork {
 export const PROPOSAL_ENTRY_BYTES = 1_024;
 
 /**
- * propose_product_description (631 [AA1] (c)): the book of proposals measured
- * first (STRLEN), then the product's current description and the book read,
- * the book written back whole with the new proposal in it, and the lock and
+ * propose_product_description (631 [AA1] (c)): the product's current
+ * description read, the store's lock on its book of proposals taken, the book
+ * measured under it (STRLEN, where no other change can make it grow), read,
+ * and written back whole with the new proposal in it, the lock let go, and
  * the data room around it. The listing, read three times (to find the
  * product, to check its words and with its description), is counted apart
- * (listingsWork). One proposal's growth more is read and written than was
- * measured, for one made by another key between the count and the read.
+ * (listingsWork). `bookBytes` 0 is what is taken before the book is measured.
  */
 export function proposeWork(bookBytes: number, kindMaxBytes: number): ReadWork {
   const book = Math.max(bookBytes, 0);
-  const growth = kindMaxBytes + PROPOSAL_ENTRY_BYTES;
   return {
     commands: 10,
-    bytes: COUNT_REPLY_BYTES + ABOUT_BYTES + book + growth,
-    sent: book + 2 * growth + TOOL_NOTE_BYTES,
+    bytes: COUNT_REPLY_BYTES + ABOUT_BYTES + book,
+    sent: book + kindMaxBytes + PROPOSAL_ENTRY_BYTES + TOOL_NOTE_BYTES,
     stripePages: 0,
     roundTrips: 8,
   };

@@ -8,14 +8,14 @@ import type { Store } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { MAX_ABOUT_LENGTH, cleanAbout } from "@/lib/product-about";
 import { DataRoomError } from "@/lib/store-data";
-import { BookBusy, addProposal } from "@/lib/agent-book";
+import { type AdmitBook, BookBusy, BookReadRefused, addProposal } from "@/lib/agent-book";
 import { PRODUCT_DESCRIPTION } from "@/lib/agent-kinds";
 
 type Answer = { content: { type: "text"; text: string }[]; isError: boolean };
 const answer = (value: unknown, isError = false): Answer => ({ content: [{ type: "text", text: JSON.stringify(value, null, 2) }], isError });
 
 /** propose_product_description: a new long description for one product, waiting for the creator. */
-export async function proposeDescription(store: Store, keyId: string, args: Record<string, unknown>): Promise<Answer> {
+export async function proposeDescription(store: Store, keyId: string, args: Record<string, unknown>, admit?: AdmitBook): Promise<Answer> {
   const product = typeof args.product === "string" ? args.product.slice(0, 40) : "";
   const raw = typeof args.description === "string" ? args.description : null;
   if (!product || raw === null) return answer({ error: "Send product (from list_products) and description (the whole new text)." }, true);
@@ -28,7 +28,7 @@ export async function proposeDescription(store: Store, keyId: string, args: Reco
   if (refused) return answer({ error: `${refused} Nothing was proposed.` }, true);
   try {
     const before = await PRODUCT_DESCRIPTION.current(store, product);
-    const made = await addProposal({ ...store, statsId: store.statsId }, PRODUCT_DESCRIPTION, { target: product, before, after, asked: { by: "mcp", who: keyId } });
+    const made = await addProposal({ ...store, statsId: store.statsId }, PRODUCT_DESCRIPTION, { target: product, before, after, asked: { by: "mcp", who: keyId } }, Date.now(), admit);
     if (!made.ok) {
       const words = { no_change: "That is already the product's description: nothing to propose.", too_big: "That description is too long to propose.", too_many: "Fifty proposals are already waiting for the creator. Ask them to look at those first.", bad_kind: "That cannot be proposed." } as const;
       return answer({ error: words[made.error] }, true);
@@ -41,6 +41,8 @@ export async function proposeDescription(store: Store, keyId: string, args: Reco
       replaced: made.replaced,
     });
   } catch (error) {
+    // Not admitted: the caller says why (the store's API requests), with nothing of the book read.
+    if (error instanceof BookReadRefused) throw error;
     if (error instanceof DataRoomError) return answer({ error: "The store has no room for this proposal right now." }, true);
     if (error instanceof BookBusy) return answer({ error: "Another change is being made to the proposals right now. Try again in a moment." }, true);
     console.error("proposing a description failed", error);

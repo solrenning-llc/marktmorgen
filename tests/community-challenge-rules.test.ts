@@ -79,7 +79,7 @@ async function main(): Promise<void> {
     ["a plain object", {}],
     ["a Date object", new Date(1000)],
     ["a boxed number", Object(1000)],
-    ["a bigint", 1000n],
+    ["a bigint", BigInt(1000)],
     ["a symbol", Symbol("synthetic time")],
     ["a positive fraction", 1000.5],
     ["a negative fraction", -1000.5],

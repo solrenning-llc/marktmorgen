@@ -1243,6 +1243,7 @@
     }
   ],
   "componentSources": [
+    "components/accounting-export-form.tsx",
     "components/ad-spend-editor.tsx",
     "components/add-gallery.tsx",
     "components/affiliate-campaign-links.tsx",
@@ -2022,6 +2023,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 137
+    "pageTemplates": 138
   }
 }

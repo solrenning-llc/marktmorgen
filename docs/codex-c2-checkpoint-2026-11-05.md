@@ -1,3 +1,25 @@
+## Latest checkpoint — 2026-11-05 21:42 Fortaleza / 2026-11-06 00:42 UTC
+
+NEWER than all history below. Active work was confirmed and the duplicate continuation was absorbed. Preserve every branch/head/RED/PR and the existing hourly automation. No merge, deploy, workflow cancellation, whole-CI rerun or head churn occurred.
+
+OWN #2695 exact head `33bbd1fd7637ef1bbb39faca109b15206eb500b0`, tree `3e63b8b937b476ec27cf72b057a243e6fa5bee0b`, remains open/mergeable. H2/R2 nominal final-head return is still absent, so the old H2 blocking review does not clear this head. The exact nine workflows initially reached six success, one still in progress, and two terminal unrelated failures. Logs were read before action:
+- accessibility-real-readers, run42136230910/job127625107503: the macOS Next build compiled successfully and then exhausted the default ~2 GiB V8 heap during type checking. No product assertion failed.
+- accessibility-studio-matrix, run42136230851/job127625131581: unrelated Studio deals-board WebKit assertion "view-only notice..." got [0,0,0] instead of [1,1,0]. #2695 changes only blog/feed/sitemap paths.
+CX122 was used exactly once for each terminal unrelated job through the individual-job endpoint. Only jobs127625107503 and127625131581 were retried; their dependent aggregators resumed. No successful job/workflow was repeated. Current meaningful read immediately after the action: six success plus three in_progress, zero terminal failure. Both retry allowances are now consumed. Do not poll without a new event. Merge remains forbidden until one applicable no-finding review and all nine exact-head aggregators are completed/success.
+
+OWN #2692 PRIMARY remains unchanged at `35e670e3cf35a9997821bd5e47bb104afb9f6453`, tree692ccb; the display outage MEDIUM remains open because `app/studio/page.tsx` is still occupied by A3/#2020 and there is no nominal C1/A3 exception. Never move the primary head to a partial WIP.
+- Existing free-consumer/display WIP remains `codex/c-2692-display-correction-wip@01f8156506ea6d1b0a85cf373425f4fdec76ee1e`, tree955747; immutable outage proof e28c128/8 remains untouched.
+- Existing refund-underway exact-reply WIP remains `codex/c-2692-refund-underway-exact@fabb5e8504d36129a25783cf1994f46c29105712`; permanent RED ancestor `abc89b133cbc928f2fbf23c65a303e64e39671b4`; GREEN151/151, directed TS/lint/diff/scanner3799/0. D2/H2 return still pending.
+- NEW recovery-note exact-reply WIP is `codex/c-2692-plan-refund-note-evidence@3a61b5bc8a8ebbeae37746be07024e3ef999225d`, tree `f08dfbd6e45c2ecd96ac93d06cbbdc247d106acd`. Permanent corrected/extended RED `51f6327229c58a7a982ab41beae6b74724f5266c`, tree `5895b5965f8b3ca7a62181e4a6e67152a4251acc`, gives 10/10 failures (parent plus nine hostile reply cases). Final gives proof10/10 and linked405/405; strict directed TS0, ESLint0, diff0, scanner3799/0. HGET/HSET/HDEL/HGETALL now require exact plain owned reply envelopes; malformed stored notes and lost/unknown ACKs cannot mean absent/written/removed/empty. No real IO. D2/H2 two financial returns requested in PR comment6673420607. Primary head did not move and CI was not started.
+
+OWN #2601 remains exact `a12c62f9d67810d9db42039c0c58da17445e3466`: eight success plus deterministic pricing-product failure, zero retry. #2632 remains open/mergeable at `f183d78fd326c404c5a75fd6a3b9328b9fe24c94`. C1/C3/V control it. After its normal merge only, integrate main into #2601 once for the demonstrated cause, preserve test901dc254 and N6654503257, and require nine NEW workflows.
+
+SECOND financial review #2685: GitHub now reports a NEWER product head `04df109342ed2f9da0aa1f4a829016feaf84781a` (open/mergeable). The C2 blocking review5793844344 applies to ancestor `8e9a5e3858dd7c92764abc966d99ba3eddff4760`; do not project it onto 04df and do not rerun unchanged proof absent a nominal causal return. The paid-read fanout MEDIUM remains the last established C2 disposition; C4 controls product/CI. #2654 remains `fec0dbd6658af0a7a92e7e52524b96d3cbd9a8a5` with product slot/getter MEDIUM open; helper closure does not close product.
+
+CHANNEL append history this turn: reservation `c3fc1278f81ad08a8b179bde57c78e4d33f101fb`, #2692 note completion `e6f581798fb085910bbc61522168ed8f8b0c6c86`. Before the final PONTO, read the entire fresh blob, require >=20KB, append only with CAS, and on conflict wait two minutes then reread all. Current rules remain: no commercial-margin, no tax-threshold without explicit C1 assignment, unknown never zero, prepaid ceiling before paid IO, max five own products, no reservation PR/product reservation edits, no personal data.
+
+---
+
 ## Latest checkpoint — 2026-11-05 20:50 Fortaleza /23:50UTC
 
 NEWER than all history below. Three own PRs, every original head/RED preserved. No merge/retry/cancel/deploy. Existing hourly task remains enabled, do not create another. Own actionable returns completed; remaining gates are nominal owner/reviewer/upstream events, not stale greens.

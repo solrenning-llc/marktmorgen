@@ -1,0 +1,343 @@
+
+FILE g2791-6cc-canonical-red.log
+=== g2791-paid-record-envelope.test.ts ===
+  FAIL  G: unknown receipt keeps this order on the watch
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":1,"purchases":["Sourdough Guide"],"dropped":[]}
+  FAIL  G: healthy retry removes the refunded purchase
+62 checks, 2 failing.
+
+FILE g2791-6cc-focal.log
+=== g2791-paid-record-envelope.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|53f7e2f65e"]}
+62 checks, all passing.
+=== g2791-paid-record-envelope.test.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|bc7fc25cbd"]}
+62 checks, all passing.
+=== g2791-ownership-pair.test.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|8f95e65b20"]}
+62 checks, all passing.
+=== g2791-paypal-record-envelope.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|c98673f0b7"]}
+62 checks, all passing.
+
+FILE g2791-6cc-linked.log
+=== access-revocation.test.ts ===
+31 checks, all passing.
+=== api-read-units.test.ts ===
+54 checks, all passing.
+=== assignments.test.ts ===
+51 checks, all passing.
+=== bought-for-others.test.ts ===
+12 checks, all passing.
+=== buyer-affiliates.test.ts ===
+25 checks, all passing.
+=== buyer-profile.test.ts ===
+31 checks, all passing.
+=== cashflow-reading.test.ts ===
+9 checks, all passing.
+=== certificate-pdf-ceiling.test.ts ===
+13 checks, all passing.
+=== community-points.test.ts ===
+29 checks, all passing.
+=== community-reward-evidence.test.ts ===
+60 checks, all passing.
+=== course-finish-claim.test.ts ===
+70 checks, all passing.
+=== course-paid-legacy-isolation.test.ts ===
+ℹ tests 1
+ℹ fail 0
+ℹ skipped 0
+=== course-triggers.test.ts ===
+12 checks, all passing.
+=== cx1-review-2726-readback.test.ts ===
+10 checks, all passing.
+=== demo-store.test.ts ===
+84 checks, all passing.
+=== digital-consent.test.ts ===
+93 checks, all passing.
+=== discord.test.ts ===
+35 checks, all passing.
+=== drop-enrollment-exact.test.ts ===
+14 checks, all passing.
+=== erasure-request-asked.test.ts ===
+4 checks, all passing.
+=== erasure-request-full.test.ts ===
+21 checks, all passing.
+=== gifts.test.ts ===
+34 checks, all passing.
+=== group-buy.test.ts ===
+61 checks, all passing.
+=== intro-price.test.ts ===
+39 checks, all passing.
+=== lesson-comments.test.ts ===
+30 checks, all passing.
+=== letter-members.test.ts ===
+67 checks, all passing.
+=== lost-dispute-access.test.ts ===
+37 checks, all passing.
+=== mail-from.test.ts ===
+ℹ tests 10
+ℹ fail 0
+ℹ skipped 0
+=== member-health.test.ts ===
+19 checks, all passing.
+=== next-offer.test.ts ===
+49 checks, all passing.
+=== order-confirmation-paid.test.ts ===
+ℹ tests 16
+ℹ fail 0
+ℹ skipped 0
+=== order-data.test.ts ===
+15 checks, all passing.
+=== orders-page-bounds.test.ts ===
+ℹ tests 21
+ℹ fail 0
+ℹ skipped 0
+=== payment-requests.test.ts ===
+64 checks, all passing.
+=== paypal-numbers.test.ts ===
+13 checks, all passing.
+=== paypal-sales-shape.test.ts ===
+12 checks, all passing.
+=== paypal-sales.test.ts ===
+67 checks, all passing.
+=== pick-bundle.test.ts ===
+13 checks, all passing.
+=== preorder-email-copy.test.ts ===
+17 checks, all passing.
+=== preorders.test.ts ===
+32 checks, all passing.
+=== public-explanations.test.ts ===
+ℹ tests 4
+ℹ fail 0
+ℹ skipped 0
+=== read-ceilings.test.ts ===
+77 checks, all passing.
+=== ses-sender.test.ts ===
+831 checks, all passing.
+=== sg2-l3-counts.test.ts ===
+186 checks, all passing.
+=== shipping.test.ts ===
+182 checks, all passing.
+=== single-digital-confirmation.test.ts ===
+ℹ tests 6
+ℹ fail 0
+ℹ skipped 0
+=== store-closing-fair.test.ts ===
+103 checks, all passing.
+=== tb14-claim-marks.test.ts ===
+21 checks, all passing.
+=== tb14-lost-disputes.test.ts ===
+93 checks, all passing.
+=== thanks-note.test.ts ===
+14 checks, all passing.
+=== watch.test.ts ===
+64 checks, all passing.
+=== yearly-price.test.ts ===
+18 checks, all passing.
+
+FILE g2791-6cc-lint.log
+
+/tmp/g2791-return-6cc/tests/g2791-other-paid.proof.ts
+  25:23  warning  'ensureStoreId' is defined but never used            @typescript-eslint/no-unused-vars
+  38:3   warning  'readPaid' is defined but never used                 @typescript-eslint/no-unused-vars
+  51:10  warning  'NextRequest' is defined but never used              @typescript-eslint/no-unused-vars
+  52:10  warning  'openSession' is defined but never used              @typescript-eslint/no-unused-vars
+  52:23  warning  'SESSION_COOKIE' is defined but never used           @typescript-eslint/no-unused-vars
+  53:17  warning  'returnPayPalSeller' is defined but never used       @typescript-eslint/no-unused-vars
+  71:5   warning  'paypalRequests' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/tmp/g2791-return-6cc/tests/g2791-ownership-pair.test.ts
+  26:23  warning  'ensureStoreId' is defined but never used            @typescript-eslint/no-unused-vars
+  39:3   warning  'readPaid' is defined but never used                 @typescript-eslint/no-unused-vars
+  52:10  warning  'NextRequest' is defined but never used              @typescript-eslint/no-unused-vars
+  53:10  warning  'openSession' is defined but never used              @typescript-eslint/no-unused-vars
+  53:23  warning  'SESSION_COOKIE' is defined but never used           @typescript-eslint/no-unused-vars
+  54:17  warning  'returnPayPalSeller' is defined but never used       @typescript-eslint/no-unused-vars
+  72:5   warning  'paypalRequests' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/tmp/g2791-return-6cc/tests/g2791-paid-record-envelope.test.ts
+  26:23  warning  'ensureStoreId' is defined but never used            @typescript-eslint/no-unused-vars
+  39:3   warning  'readPaid' is defined but never used                 @typescript-eslint/no-unused-vars
+  52:10  warning  'NextRequest' is defined but never used              @typescript-eslint/no-unused-vars
+  53:10  warning  'openSession' is defined but never used              @typescript-eslint/no-unused-vars
+  53:23  warning  'SESSION_COOKIE' is defined but never used           @typescript-eslint/no-unused-vars
+  54:17  warning  'returnPayPalSeller' is defined but never used       @typescript-eslint/no-unused-vars
+  72:5   warning  'paypalRequests' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/tmp/g2791-return-6cc/tests/g2791-paid-schema.proof.ts
+  25:23  warning  'ensureStoreId' is defined but never used            @typescript-eslint/no-unused-vars
+  38:3   warning  'readPaid' is defined but never used                 @typescript-eslint/no-unused-vars
+  51:10  warning  'NextRequest' is defined but never used              @typescript-eslint/no-unused-vars
+  52:10  warning  'openSession' is defined but never used              @typescript-eslint/no-unused-vars
+  52:23  warning  'SESSION_COOKIE' is defined but never used           @typescript-eslint/no-unused-vars
+  53:17  warning  'returnPayPalSeller' is defined but never used       @typescript-eslint/no-unused-vars
+  71:5   warning  'paypalRequests' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+✖ 28 problems (0 errors, 28 warnings)
+
+
+
+FILE g2791-6cc-other-empty.log
+=== g2791-other-paid.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647107","5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":0,"purchases":[],"dropped":["buyer@example.com|089b5c1db6"]}
+67 checks, all passing.
+
+FILE g2791-6cc-other-extra.log
+=== g2791-other-paid.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647107","5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":0,"purchases":[],"dropped":["buyer@example.com|81d9980273"]}
+67 checks, all passing.
+
+FILE g2791-6cc-other-json.log
+=== g2791-other-paid.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647107","5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":0,"purchases":[],"dropped":["buyer@example.com|62da548e94"]}
+67 checks, all passing.
+
+FILE g2791-6cc-other-missing.log
+=== g2791-other-paid.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647107","5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":0,"purchases":[],"dropped":["buyer@example.com|f20098dd09"]}
+67 checks, all passing.
+
+FILE g2791-6cc-other-queued.log
+=== g2791-other-paid.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647107","5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":0,"purchases":[],"dropped":["buyer@example.com|ce8030a3d4"]}
+67 checks, all passing.
+
+FILE g2791-6cc-paid-control.log
+=== g2791-paid-record-envelope.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"control","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":0,"purchases":[],"dropped":["buyer@example.com|fd353ba2a5"]}
+62 checks, all passing.
+
+FILE g2791-6cc-paid-empty.log
+=== g2791-paid-record-envelope.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"empty","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|d87165b68d"]}
+62 checks, all passing.
+
+FILE g2791-6cc-paid-queued.log
+=== g2791-paid-record-envelope.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"queued","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|39689ac87a"]}
+62 checks, all passing.
+
+FILE g2791-6cc-paid-red-empty.log
+=== g2791-paid-record-envelope.proof.ts ===
+  FAIL  G: unknown receipt keeps this order on the watch
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"empty","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":1,"purchases":["Sourdough Guide"],"dropped":[]}
+  FAIL  G: healthy retry removes the refunded purchase
+62 checks, 2 failing.
+
+FILE g2791-6cc-paid-red.log
+=== g2791-paid-record-envelope.proof.ts ===
+  FAIL  G: unknown receipt keeps this order on the watch
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":1,"purchases":["Sourdough Guide"],"dropped":[]}
+  FAIL  G: healthy retry removes the refunded purchase
+62 checks, 2 failing.
+
+FILE g2791-6cc-pair-no-empty.log
+=== g2791-ownership-pair.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"empty","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|f9c0b6de43"]}
+62 checks, all passing.
+
+FILE g2791-6cc-pair-no-extra.log
+=== g2791-ownership-pair.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|04f841ebdf"]}
+62 checks, all passing.
+
+FILE g2791-6cc-pair-yes-control.log
+=== g2791-ownership-pair.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"control","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":0,"purchases":[],"dropped":["buyer@example.com|76b84328d0"]}
+62 checks, all passing.
+
+FILE g2791-6cc-pair-yes-empty.log
+=== g2791-ownership-pair.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"empty","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|e915d69629"]}
+62 checks, all passing.
+
+FILE g2791-6cc-pair-yes-extra.log
+=== g2791-ownership-pair.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|7b5b5e324e"]}
+62 checks, all passing.
+
+FILE g2791-6cc-pair-yes-members.log
+=== g2791-ownership-pair.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"members","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|66ebc15ee7"]}
+62 checks, all passing.
+
+FILE g2791-6cc-pair-yes-missing.log
+=== g2791-ownership-pair.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"missing","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|36c9db47c2"]}
+62 checks, all passing.
+
+FILE g2791-6cc-pair-yes-queued.log
+=== g2791-ownership-pair.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"queued","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|4532216851"]}
+62 checks, all passing.
+
+FILE g2791-6cc-scan.log
+Public data check: 3921 tracked files; 0 file(s) require correction.
+
+
+FILE g2791-6cc-schema-array.log
+=== g2791-paid-schema.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"array","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|bf21033c01"]}
+62 checks, all passing.
+
+FILE g2791-6cc-schema-attext.log
+=== g2791-paid-schema.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"attext","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|9c76ba19c4"]}
+62 checks, all passing.
+
+FILE g2791-6cc-schema-captureempty.log
+=== g2791-paid-schema.proof.ts ===
+  FAIL  G: unknown receipt keeps this order on the watch
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"captureempty","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":1,"purchases":["Sourdough Guide"],"dropped":[]}
+  FAIL  G: healthy retry removes the refunded purchase
+62 checks, 2 failing.
+
+FILE g2791-6cc-schema-control.log
+=== g2791-paid-schema.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"control","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":0,"purchases":[],"dropped":["buyer@example.com|4a30d06d14"]}
+62 checks, all passing.
+
+FILE g2791-6cc-schema-emailempty.log
+=== g2791-paid-schema.proof.ts ===
+  FAIL  G: unknown receipt keeps this order on the watch
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"emailempty","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":1,"purchases":["Sourdough Guide"],"dropped":[]}
+  FAIL  G: healthy retry removes the refunded purchase
+62 checks, 2 failing.
+
+FILE g2791-6cc-schema-json.log
+=== g2791-paid-schema.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"json","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|a3820e7417"]}
+62 checks, all passing.
+
+FILE g2791-6cc-schema-missingcapture.log
+=== g2791-paid-schema.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"missingcapture","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|cd61ab2f1f"]}
+62 checks, all passing.
+
+FILE g2791-6cc-schema-nulljson.log
+=== g2791-paid-schema.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"nulljson","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|6621d030c6"]}
+62 checks, all passing.
+
+FILE g2791-6cc-schema-parent-captureempty.log
+=== g2791-paid-schema.proof.ts ===
+  FAIL  G: unknown receipt keeps this order on the watch
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"captureempty","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":1,"purchases":["Sourdough Guide"],"dropped":[]}
+  FAIL  G: healthy retry removes the refunded purchase
+62 checks, 2 failing.
+
+FILE g2791-6cc-schema-productempty.log
+=== g2791-paid-schema.proof.ts ===
+  FAIL  G: unknown receipt keeps this order on the watch
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"productempty","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":1,"purchases":["Sourdough Guide"],"dropped":[]}
+  FAIL  G: healthy retry removes the refunded purchase
+62 checks, 2 failing.
+
+FILE g2791-6cc-schema-wrongorder.log
+=== g2791-paid-schema.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"wrongorder","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106","5O190127TN3647107"],"imported":0,"purchases":[],"dropped":["buyer@example.com|a810e739e7"]}
+62 checks, all passing.
+
+FILE g2791-6cc-types.log
+

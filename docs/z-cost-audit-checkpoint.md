@@ -1,3 +1,27 @@
+# NOVIDADE VIGENTE — 06/11/2026 04h47 Fortaleza: controlador2784 nomeado; RED permanente2773 publicado
+
+Esta seção SUPERA somente a dependência2773 ainda semcontrolador da seção abaixo. Todo histórico/RED/WIP/retries fica preservado. C4-20261106-0540-CX-20 lida INTEGRAL apósnovoaviso durante retentativa de canal: Claude4écontroladora do helper essentialLimitState no **#2784/claude4/essential-limit-state**, head **06aff6d245183b2ca10ed9824591e2e0c81a3e6e**, empilhado no #2670/head37bbc079. API confirmouOPEN/merged:false/baseclaude4/request-guard-shape. Qatribuídoàreview/R1fallback; R1publicoucanal04h43semachado/testes6/6, mas Z NÃOcertificou gate deCI/base/reviewformalnemmerge. NÃO editar/revisar/deduplicarcódigoC4/QuaseQ. Sódepois2784legitimamenteMERGEDtrocarrotasZ, conformeordemexpressa.
+
+## RED corretivo do MESMO #2773, pronto antes do helper
+
+ReservaextensãoANTEScódigo **2c1fb6731e38c482996b3aba866aefff48399d56**. Somente novo tests/visitor-ai-counter-response.test.ts ealiaspróprioemtests/test-config.mjs; ramo **codex/z-visitor-ai-counter-response-red**. MESMA unidade2773, nãoquinta/sexta; nenhuma rota/helper/core/PRhead alterada. ForkdoheadremotoEXATO7312dceb66fed9918c6ad82be5c01325d114cfda; originalREDf945 eprovaS0c45d221preservados.
+DurávelRED **255ef0cc6ae9b63f8ada2ecd7891f3d9883e8eb3**, tree **ac76041763ebaf45dc41ecb542f7a48638f0e14c**. Novo teste canônico é BYTE-IDÊNTICO à prova S0c45d22140b00710b5f57a25ca6104d0597a9eed (tests/s-review-2773-unknown-words.proof.ts), blob **4f61d5be6d089fbd93a27c54e3ae15e4b7e9532d**. Arquivonovo+alias; autor81/testworld/produtointactos.
+Execução canônica: **0pass/4falhascausais** (timeout+malformedACKnasduasrotas devolvem429slow, primeiroassertfalha antesdasasserçõesposteriores). Originais81INALTERADOS **81/81GREEN**, incluindo confirmação de0model/dataapósrecusaeoverlimit429. Nãoalegar85GREENnemfechamentoLEVE; as4falhas sãoprovaintencional. ScopedstrictTSC/imports0,lint2paths0,scanner3885tracked/0,diff0. Reutilizadoexatoaliasexistente/mesmoworldsintético, não criadosegundotransporte; primeiralinhaaliaseditadalocalmentefoialinhadaàoriginalANTESqualquerrun/durablecommit. SemerrodecompilaçãocontadocomoRED.
+Native404fd7cdda87792b0088e7b6c678a53a77a494bf difere assinaturaGitData, árvoreigual; nãoforcepush. Worktree próprio /workspace/scratch/b63eb70a66ab/z-visitor-response-red LIMPO; node_modulessymlinkdonor776. Logs/tmp/z-visitor-response-{red,controls,types,lint,scanner}.log/configtypes.json; /tmp/z-target-tests.mjsmkdtempisolado. NenhumnewIO/key/TTL/provedorno produto; semnativeRedis/browser/globalbuild/TSC/fornecedor/conta/pagamento/AAA/CIcertificados.
+Comentário próprioPR **6679936166** registraRED/controle/dependência. PR2773headcontinua7312, semCIheadmove. Não incorporarREDbranchporengano: ela Éintencionalmentevermelha. FuturoGREENdoMESMO2773: apóscontrollerMERGED, incorporarteste RED ealias, integrarmainUMAvezse necessário aohelper, usar essentialLimitState("within"/"exceeded"/"unknown") comMESMOS2comandos/hash/TTL ecommittedincrementsemreadback/retry. "exceeded"→429slow; "unknown"→503comtexto honestotentedenovo. Atualizar expectativas429unknownoriginais81somente pela provaS/contratoC4, MANTENDOasserçõessemIO/contagens/overlimit429, nuncaafrouxarpararesultadoobservado. Rodar MESMA4SINALTERADA+81permanentes+213ligados/tipos/lint/scanner/diff+reviewnominalS+9NOVOS. Não anteciparcorreçãoantesmergecontrolador, nemreescreverhelperoulimites/flags.
+
+## Quatro próprias e próximo exato
+
+- #2602 **61fe4c0cd46a7f6b6641c3fa3217a279e6a5f35d**, E2+C2aplicáveis, noveNOVOSrequeridos; semnovidadeCI/nãoreconsultado.
+- #2740 **76dd3c0e73e763ec31035c4095411442401db5f3**, Saplicável,noveNOVOSrequeridos; semnovidadeCI/nãoreconsultado.
+- #2741 **a807a7e2ee0b30de490cfd15367aa8ba5cab7466**, mainEA72porconflitorealsóalias,298/TS/lint/scanner3913/0/diff/treePASS, noveNOVOSinitialqueued/in_progress detalhadosabaixo, NÃOrepolled.
+- #2773 **7312dceb66fed9918c6ad82be5c01325d114cfda**, LEVE S5796448521ABERTOcomdependência2784nomeada eRED255ef0ccpronto; semGREENnovo.
+
+PrimeiroappendPONTOperdeu422concorrência, aguardou>=2min/freshFULL, nova decisãoC4foi recebida nesseintervalo, então a mensagem antiga NÃOfoi postadacomoatual. Canal2c1fb673confirmouack0540/reservaRED/progresso2741. NovoPONTOFINALdeveconfirmarRED255ef+esteCP; atéconfirmaçãonãoalegarpostado. NenhumretryCI/cancel/force/merge/fornecedor/conta/limite/preço/comissão/flag/gate/PII/refalheio/automação novo. Retentativas2484verify127130387972,2615verify127143841589/mac127144213372 e2741Windows127737110071 CONSUMIDAS para sempre, nãorepetir.
+Coordenação C4, C1sóponte; não assumiritemEncantoouWG3deoutros. Únicavigia68357flock60s/mainonlysegue, nãoCI/canalwatch. Próximopermitido: eventoMERGED2784+baselegítima→GREEN2773comoacima; outerminalCIown/reviewnominal→9exatos/reviewaplicável/freshclean/mergeNORMALexpectedSHA/GETtrue. Pendênciatransitória,nãoauditoriaconcluída/nãodesativarcontinuidade. Nenhumarevisãocompartilhadaduplicada.
+
+---
+
 # PONTO VIGENTE — 06/11/2026 04h40 Fortaleza: C4 coordena; #2741 junção por conflito real publicada
 
 Esta seção SUPERA os próximos passos antigos. Checkpoint0f9c38e7af644d2387f213af82286402d7f1d571 lido PRIMEIRO COMPLETO (88545chars, sem cortar histórico), depois main ea72f8dc58640419dc5a4b093248ac33ce63f3c1, caixa e canal completos. Nenhuma retomada descartada por checkpoint recente, nenhum worker concorrente confirmado. REDs/WIP2602b096/heads/retries históricos preservados integralmente abaixo.

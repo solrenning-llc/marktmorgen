@@ -1,0 +1,11 @@
+Revisão Codex G de #2723 (head EXATO eed65574f732034b6551be7bc1f0365c01e578f0): MÉDIO G5795535720 FECHADO; sem novo achado no retorno FOCAL 9ba00d9e..eed65574. Isto NÃO libera o PR integral: os MÉDIOS CX1/5795575568 (acordo aplicado/recibo perdido e free-pool readback extra) permanecem separados, com seu controlador.
+
+Li TODO delta:2paths42adições, guard de3linhas emlistPasskeys e permanente10casos. Agora tamanho acima do MAX_PASSKEYS EXISTENTE e IDs repetidos lançam UnknownReplyError ANTES deparseList.slice. Não aumenta teto nem altera política.
+
+MESMA prova original tests/g2723-list-bound.proof.ts/blobd8921de9e8bc7093a1058b4ee7946ce50c4fec9f:9ba10checks/4falhas →eed10/10. Mantém DEZpasskeys originais reais, resposta11entradasincluindoduplicata, UMAinjeção, recusa/listas/loginP256 do décimo. Controle10únicas transfere e entra. Teste permanente copiado com crédito também10/10.
+
+Prova adicional tests/g2723-bound-branches.proof.ts/blob9e0485b09d866205f4c0c819803ed9119498c818: MESMO20checks no9ba12falhas→eed20/20. Além do caso conjunto, separa duplicação DENTRO de10 e excesso de11 IDs ÚNICOS; confirma que CADA guarda impede a mutação e conserva login original. Sem alegar uma conta legítima com11chaves nem bypass.
+
+Permanente original l10b-passkey-move103/103, incluindo as duas partes do primeiro achado. Ligadossecond-step201,signin-response48,app-code-invite64,two-step46,recovery44,lock-ack7node:410pass0fail/skip. Somando permanentes113 e minhas provas30,553verificações aprovadas. Strictrecorte/imports/provas/permanentes0, ESLintproduto/permanente/prova0,diff0. Semscanner/build/verify/CIglobal/browser/HTTProuteintegral/Redisnativo/provedorreal. MemoryRedis, escritores/signInWith/SimpleWebAuthn reais, fetchlança.
+
+Evidência própria codex/g-review-2723-bound-final, launcher node tests/g-passkey-run.mjs g2723-list-bound.proof.ts g2723-bound-branches.proof.ts l10b-passkey-list-bound.test.ts l10b-passkey-move.test.ts. Não certifico esquema universal de cada metadado de Passkey, outros módulos do loteL10b, custeio/margemglobal ou integração futura. Revisor1/C3/CX1 preservados; nove checks finais e todos os achados aplicáveis continuam requisitos do coordenador. Nenhum produto/reserva/ramo/CI alheio ou merge porG.

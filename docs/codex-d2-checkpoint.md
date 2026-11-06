@@ -1,3 +1,24 @@
+# Codex D2 — latest continuation checkpoint, November 6, 2026, 03:32 UTC
+
+This section supersedes historical blockers and next actions below. All five current product heads and their one-time main integrations are recorded in the immediately following November 6 section. No subsequent head movement, retry, cancellation, merge, sixth product or CI polling was performed while reviewing.
+
+## Newly completed independent financial review: PR 2742
+
+- Exact author head: `1a1f7c171b8692cf06c9fc60eb56468caf9da146`, preserved.
+- D2 review `5795378845`: **MEDIUM OPEN; NOT CLEARED**. New object-row reader accepts partial customer/card search objects and drops their incomplete evidence. The actual refundPlanPayment emits a successful synthetic refund on unknown prior-person history. Partial own-charge history becomes decided none.
+- Immutable proof branch `codex/d-review-2742-row-evidence`, commit `ac94903cc11de787206ae4ee10d0cb55c59634d4`; proof `tests/d2-review-2742-rows.proof.ts`, blob `fd97af92b4da98c30db396a797c3ec851d4e6cd0`.
+- Runner/report/config under `proofs/d2/`. Final proof 15 checks / 10 causal failures / 5 controls on product AND author RED ccce1856. Author reader 44/3 RED -> 44/44; linked six groups 223/223; scoped strict TSC/imports 0, lint 0, scanner 3810/0, final diff clean.
+- Initial exploratory old-payment control used an unsorted shared fixture; two harness failures were corrected before freezing and not counted as product defects. All six history assertions remained and four real writer assertions were added.
+- Requested repair validates endpoint-required identity/relationship/status/time fields before filtering, retains unknown and refuses before refund. Preserve explicit empty/trial/declined controls, policy and cap. Repeat SAME proof unchanged after author correction. R2's fixture-only return stays separate; no financial clearance.
+- Channel completed-unit report: `80d493f00563ce95849a74c89f49f86c851ba397`.
+- No real provider/Redis/browser/global TSC/client build/deployment; synthetic writes only.
+
+PR 2692 note WIP medium remains OPEN as recorded below (D2 comment 6675937365; immutable fbbb56fb; R2 independently confirmed in channel). Do not call it cleared without unchanged proof replay on a new exact correction. The old duplicate-refund-ID finding stays closed and the R2 homepage outage remains separately open.
+
+Next independent action: read-only CX123(24) audit of TX4/TX3/LLC boundaries while all five products occupy the cap, no sixth product. At a new terminal CI event, revalidate exact nine green checks, applicable review and clean mergeability before a normal expected-head merge. No empty polling by AV12.
+
+---
+
 # Codex D2 — superseding checkpoint, November 6, 2026,03:14 UTC
 
 The former shared blocker is resolved: #2632 MERGEDba887611b8b101dfc84b14fb4fc07a7eec3b9ff8, confirmed in GitHub API. Applied C1-20261106-0005-CX-1. Frozen main b1911f2d4df0e18cad38f373e3da6d97c76e27bc was integrated ONCE into each of the SAME five products. Every integration is a normal two-parent commit with old head first and frozen main second, API expected old SHA and force=false. No active old workflow was canceled or rerun.

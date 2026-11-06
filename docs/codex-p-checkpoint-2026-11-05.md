@@ -393,3 +393,11 @@ Claude1/Y were notified in channel747383a96883a655c87195dded9e9cf4b7323aac. Reco
 - Finding classified MÉDIO and reported as a top-level #2655 conversation comment. Requested the #2655 owner/Claude 1 fold strict exact GET validation into that unit; this proof branch is not a product PR and does not increase own product count.
 - Channel result append first attempt correctly hit 409 because the channel advanced. Mandatory two-minute wait and fresh SHA/blob retry remain before final point of stop.
 - Current own product count: 2. Next action only on causal novelty: dependency movement for #2539/#2542, explicit ownership response for #2655, or a genuinely free course-area unit after a fresh CX-126 audit. No retry/cancel/head churn.
+
+
+## 2026-11-06 03h56 Fortaleza — channel retry completed (latest)
+
+- The mandatory two-minute wait after the first 409 was completed.
+- A fresh channel `fetch_file` supplied blob SHA `c63c61c08e239e332853a592515a2c7cf5724884`; the full 311,296-character UTF-8 blob was fetched before writing.
+- The evidence report and exact point of stop were appended only, successfully, in channel commit `48a3a69feb804fc597ae90cef1c040710b973b5e`, new content blob `fb122471088f5ca5e7df0d0f0563c464136a06c4`.
+- This supersedes the preceding line that said the channel retry remained pending. No foreign content was restored, rewritten or removed.

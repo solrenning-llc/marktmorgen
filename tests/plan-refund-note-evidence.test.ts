@@ -16,6 +16,7 @@ const original = redis.pipeline.bind(redis);
 const isNote = (commands: Command[], name: string) => commands.length === 1 && commands[0][0] === name && commands[0][1] === ENDING_KEY;
 
 async function reset(): Promise<void> {
+  process.env.STRIPE_SECRET_KEY = "sk_test_a_stand_in_key_for_tests_only";
   redis.pipeline = original;
   redis.clear();
   world.calls = [];
@@ -34,15 +35,17 @@ async function rejectsWithoutRefund(run: () => Promise<unknown>, refunds: () => 
   assert.equal(refunds().length, 0, "unknown note evidence must stop before the refund POST");
 }
 
-test("a missing HGET pipeline reply is not an absent recovery note", async () => {
+test("plan refund note replies stay exact", async (t) => {
+await t.test("a missing HGET pipeline reply is not an absent recovery note", async () => {
   await reset();
   const shop = await paidShop();
   const store = await shop.store();
   redis.pipeline = async (commands) => isNote(commands, "HGET") ? [] : original(commands);
+  assert.deepEqual(await redisPipeline([["HGET", ENDING_KEY, store.sid]]), [], "the hostile reply reaches the production reader");
   await rejectsWithoutRefund(() => refundAndEndPlan(store, NOW), shop.refunds);
 });
 
-test("an unreadable stored note is preserved and stops another refund", async () => {
+await t.test("an unreadable stored note is preserved and stops another refund", async () => {
   await reset();
   const shop = await paidShop();
   const store = await shop.store();
@@ -51,7 +54,7 @@ test("an unreadable stored note is preserved and stops another refund", async ()
   assert.equal((await redisPipeline([["HGET", ENDING_KEY, store.sid]]))[0], "{", "an unreadable prior note is never overwritten");
 });
 
-test("a lost initial HSET answer stops before the refund", async () => {
+await t.test("a lost initial HSET answer stops before the refund", async () => {
   await reset();
   const shop = await paidShop();
   const store = await shop.store();
@@ -68,7 +71,7 @@ test("a lost initial HSET answer stops before the refund", async () => {
   assert.equal(typeof (await original([["HGET", ENDING_KEY, store.sid]]))[0], "string", "a note whose ACK was lost remains recoverable");
 });
 
-test("the exact charge note is acknowledged before money moves", async () => {
+await t.test("the exact charge note is acknowledged before money moves", async () => {
   await reset();
   const shop = await paidShop();
   const store = await shop.store();
@@ -86,7 +89,7 @@ test("the exact charge note is acknowledged before money moves", async () => {
   assert.equal(noteWrites, 2, "the second write binds the exact charges before money moves");
 });
 
-test("an unconfirmed HDEL cannot claim the finished recovery note is gone", async () => {
+await t.test("an unconfirmed HDEL cannot claim the finished recovery note is gone", async () => {
   await reset();
   const shop = await paidShop();
   const store = await shop.store();
@@ -96,7 +99,7 @@ test("an unconfirmed HDEL cannot claim the finished recovery note is gone", asyn
   assert.equal(typeof (await original([["HGET", ENDING_KEY, store.sid]]))[0], "string", "an unconfirmed deletion keeps the recovery note");
 });
 
-test("an unknown HGETALL is not an empty recovery job", async () => {
+await t.test("an unknown HGETALL is not an empty recovery job", async () => {
   await reset();
   const shop = await paidShop();
   const store = await shop.store();
@@ -104,4 +107,5 @@ test("an unknown HGETALL is not an empty recovery job", async () => {
   redis.pipeline = async (commands) => isNote(commands, "HGETALL") ? [] : original(commands);
   await assert.rejects(() => finishPlanRefunds(Date.now() + 10_000, NOW + 60));
   assert.equal(typeof (await original([["HGET", ENDING_KEY, store.sid]]))[0], "string", "an unknown note list is not reported as an empty job");
+});
 });

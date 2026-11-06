@@ -44,6 +44,7 @@ import { type PaidPeriod, REFUNDS_PER_REQUEST, stillToGive, totalsOf, unusedOf }
 import { paidPeriods, savePaidPeriod, takeCalls, workKey } from "@/lib/closing-holds";
 
 const INTENT_ID = /^pi_[A-Za-z0-9]{6,64}$/;
+const REFUND_ID = /^re_[A-Za-z0-9]{3,252}$/;
 const lockKey = (folder: string) => `nl:closing:refund:${folder}`;
 const LOCK_SECONDS = 120;
 
@@ -53,10 +54,36 @@ export type UnusedRow = { sub: string; paid: PaidPeriod; unused: number };
  * requires_action), "failed" (failed or canceled), or "unknown" for anything that is not a refund of this payment for
  * this amount in one of Stripe's own states.
  */
-export function refundState(refund: unknown, intent: string, amount: number): "done" | "pending" | "failed" | "unknown" {
+/**
+ * The refund made here before under this invoice, from Stripe's list read exactly: null when the whole list holds
+ * none that stands (failed and canceled ones do not), or "unknown" when the list is not whole or a row under this
+ * invoice does not read as a refund of this payment.
+ */
+export function priorRefund(list: unknown, intent: string, invoice: string, currency: string): { state: "done" | "pending"; amount: number } | null | "unknown" {
+  if (!list || typeof list !== "object" || Array.isArray(list)) return "unknown";
+  const field = (value: unknown, key: string): unknown =>
+    value && typeof value === "object" && !Array.isArray(value) ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined;
+  const rows = field(list, "data");
+  if (!Array.isArray(rows) || field(list, "has_more") !== false) return "unknown";
+  for (const row of rows) {
+    const meta = field(row, "metadata");
+    if (field(meta, "closing_refund") !== invoice) continue;
+    const amount = field(row, "amount");
+    if (!Number.isSafeInteger(amount) || (amount as number) <= 0) return "unknown";
+    const state = refundState(row, intent, amount as number, currency);
+    if (state === "unknown") return "unknown";
+    if (state === "failed") continue;
+    return { state, amount: amount as number };
+  }
+  return null;
+}
+
+export function refundState(refund: unknown, intent: string, amount: number, currency: string): "done" | "pending" | "failed" | "unknown" {
   if (!refund || typeof refund !== "object" || Array.isArray(refund)) return "unknown";
   const own = (key: string): unknown => Object.getOwnPropertyDescriptor(refund, key)?.value;
-  if (own("object") !== "refund" || own("payment_intent") !== intent || own("amount") !== amount || !Number.isSafeInteger(amount)) return "unknown";
+  const id = own("id");
+  if (own("object") !== "refund" || typeof id !== "string" || !REFUND_ID.test(id) || own("payment_intent") !== intent) return "unknown";
+  if (own("amount") !== amount || !Number.isSafeInteger(amount) || own("currency") !== currency.toLowerCase()) return "unknown";
   const status = own("status");
   if (status === "succeeded") return "done";
   if (status === "pending" || status === "requires_action") return "pending";
@@ -264,13 +291,15 @@ export async function giveBackUnused(
         // One made here before, under this invoice: never a second.
         count();
         const made = await onAccount("GET", account, `/refunds?${new URLSearchParams({ payment_intent: intent, limit: "100" })}`);
-        const ours = (Array.isArray(made.data) ? (made.data as Record<string, unknown>[]) : []).find(
-          (r) => (r.metadata as Record<string, string> | null)?.closing_refund === row.paid.inv && r.status !== "failed" && r.status !== "canceled",
-        );
-        if (ours) {
-          await settle(ours.status === "pending" ? "pending" : "done", Number(ours.amount) || undefined);
-          if (ours.status === "pending") out.pending += 1;
-          else out.done.push({ sub: row.sub, amount: Number(ours.amount) || 0, cur: row.paid.cur });
+        // Read exactly (Codex G on #2699): a refund made here before counts only as a whole refund of this payment, in
+        // its currency, in one of Stripe's own states; a list that is not whole, or a row under this invoice that does
+        // not read, is unknown, and nothing is sent, so a second refund is never made on a guess.
+        const prior = priorRefund(made, intent, row.paid.inv, row.paid.cur);
+        if (prior === "unknown") throw new Error("the refunds already made for this payment could not be read whole");
+        if (prior) {
+          await settle(prior.state, prior.amount);
+          if (prior.state === "pending") out.pending += 1;
+          else out.done.push({ sub: row.sub, amount: prior.amount, cur: row.paid.cur });
           continue;
         }
         const refunded = typeof charge.amount_refunded === "number" ? charge.amount_refunded : 0;
@@ -318,7 +347,7 @@ export async function giveBackUnused(
         // requires_action is made and waiting; failed or canceled gave nothing back and the member stays to be
         // reconciled; any other answer is unknown, never "done", and is tried again under the same idempotency key, so
         // Stripe answers with the same refund instead of making a second one.
-        const state = refundState(refund, intent, give);
+        const state = refundState(refund, intent, give, row.paid.cur);
         if (state === "unknown") throw new Error("a closing refund's answer was not one this payment's refund gives");
         if (state === "failed") {
           console.error("a closing refund was refused by Stripe; the member stays to be reconciled");

@@ -5,6 +5,7 @@ import { Icon, iconFor } from "@/components/icons";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteNav } from "@/components/site-nav";
 import { FeatureVisual } from "@/components/feature-visuals";
+import { FeatureCapture, hasFeatureCapture } from "@/components/feature-captures";
 import { JsonLd } from "@/components/structured-data";
 import { PAGES, type Block, type TopicPage } from "@/lib/site-pages";
 import { PUBLISHED_PLAN_PRICES as PLAN_PRICES, PLAN_TITLES, TRIAL_DAYS } from "@/lib/plan";
@@ -573,7 +574,11 @@ export function TopicPageView({ page }: { page: TopicPage }) {
             </div>
             {page.visual ? (
               <div className="flex min-w-0 justify-center lg:justify-end">
-                <FeatureVisual visual={page.visual} tone={light ? "light" : "dark"} />
+                {page.section === "platform" && hasFeatureCapture(page.slug) ? (
+                  <FeatureCapture slug={page.slug} />
+                ) : (
+                  <FeatureVisual visual={page.visual} tone={light ? "light" : "dark"} />
+                )}
               </div>
             ) : heroStore ? (
               /*

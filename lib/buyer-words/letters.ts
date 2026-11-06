@@ -40,6 +40,7 @@ const en = {
   } as Record<string, { title: string; body: string }>,
   linkSubject: (subject: string) => `Read “${subject}”`,
   linkGone: "This link has expired or was already used too many times. Open the email's page and ask for a new one.",
+  linkBusy: "We couldn't open this link just now. Try it again in a moment.",
   linkBody: (subject: string, link: string, store: string) =>
     [
       `Here is your way to read “${subject}”:`,
@@ -88,6 +89,7 @@ const es: LetterWords = {
   },
   linkSubject: (subject) => `Lee «${subject}»`,
   linkGone: "Este enlace caducó o ya se usó demasiadas veces. Abre la página del email y pide uno nuevo.",
+  linkBusy: "No pudimos abrir este enlace ahora. Vuelve a intentarlo en un momento.",
   linkBody: (subject, link, store) =>
     [
       `Este es tu acceso para leer «${subject}»:`,
@@ -134,6 +136,7 @@ const fr: LetterWords = {
   },
   linkSubject: (subject) => `Lire « ${subject} »`,
   linkGone: "Ce lien a expiré ou a déjà été utilisé trop de fois. Ouvrez la page de l'e-mail et demandez-en un nouveau.",
+  linkBusy: "Nous n'avons pas pu ouvrir ce lien pour le moment. Réessayez dans un instant.",
   linkBody: (subject, link, store) =>
     [
       `Voici votre accès pour lire « ${subject} » :`,
@@ -180,6 +183,7 @@ const de: LetterWords = {
   },
   linkSubject: (subject) => `„${subject}“ lesen`,
   linkGone: "Dieser Link ist abgelaufen oder wurde schon zu oft benutzt. Öffnen Sie die Seite der E-Mail und fordern Sie einen neuen an.",
+  linkBusy: "Wir konnten diesen Link gerade nicht öffnen. Versuchen Sie es gleich noch einmal.",
   linkBody: (subject, link, store) =>
     [
       `So lesen Sie „${subject}“:`,
@@ -226,6 +230,7 @@ const it: LetterWords = {
   },
   linkSubject: (subject) => `Leggi «${subject}»`,
   linkGone: "Questo link è scaduto o è già stato usato troppe volte. Apri la pagina dell'email e chiedine uno nuovo.",
+  linkBusy: "Non siamo riusciti ad aprire questo link in questo momento. Riprova tra un attimo.",
   linkBody: (subject, link, store) =>
     [
       `Ecco come leggere «${subject}»:`,
@@ -272,6 +277,7 @@ const nl: LetterWords = {
   },
   linkSubject: (subject) => `Lees ‘${subject}’`,
   linkGone: "Deze link is verlopen of al te vaak gebruikt. Open de pagina van de e-mail en vraag een nieuwe aan.",
+  linkBusy: "We konden deze link nu niet openen. Probeer het zo meteen opnieuw.",
   linkBody: (subject, link, store) =>
     [
       `Zo lees je ‘${subject}’:`,
@@ -318,6 +324,7 @@ const pt: LetterWords = {
   },
   linkSubject: (subject) => `Leia “${subject}”`,
   linkGone: "Este link expirou ou já foi usado vezes demais. Abra a página do email e peça um novo.",
+  linkBusy: "Não conseguimos abrir este link agora. Tente de novo em um instante.",
   linkBody: (subject, link, store) =>
     [
       `Aqui está seu acesso para ler “${subject}”:`,

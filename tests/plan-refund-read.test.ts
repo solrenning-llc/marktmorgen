@@ -35,6 +35,8 @@ const world = {
   down: false,
   /** The customer's charge list says there is more. */
   moreCharges: false,
+  /** An exact stand-in answer for the paid-invoice list; undefined keeps the normal list. */
+  invoiceListReply: undefined as unknown | undefined,
   /** A customer's Stripe balance (negative: a credit), 0 when not set. */
   balance: new Map<string, number>(),
   calls: 0,
@@ -63,6 +65,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json({ ...row, customer: q.getAll("expand[]").includes("customer") ? { id: customer, email: world.customers.get(customer) ?? "", balance: world.balance.get(customer) ?? 0 } : customer });
   }
   if (path === "/invoices") {
+    if (world.invoiceListReply !== undefined) return json(world.invoiceListReply);
     return page(world.invoices.filter((i) => i.subscription === q.get("subscription") && i.status === q.get("status")).sort((a, b) => Number(b.created) - Number(a.created)));
   }
   if (path === "/charges") {
@@ -249,6 +252,13 @@ async function main() {
   is("an amount owed on the balance (not a credit): the guarantee as before", (await cr.read()).refund, { kind: "guarantee", cents: 6_900 });
   world.balance.set(cr.customer, Number.NaN);
   is("a balance that cannot be read: unknown", (await cr.read()).refund, { kind: "unknown", reason: "unreadable" });
+  const unreadablePaid = await shop();
+  pay(unreadablePaid, { at: NOW - 3 * DAY });
+  for (const answer of [{ object: "list", has_more: false }, { object: "list", data: null, has_more: false }, { object: "list", data: [null], has_more: false }]) {
+    world.invoiceListReply = answer;
+    is("an unreadable paid-invoice list is unknown, never no payment", (await unreadablePaid.read()).refund, { kind: "unknown", reason: "unreadable" });
+  }
+  world.invoiceListReply = undefined;
   world.down = true;
   is("Stripe failing: unknown", (await a.read()).refund, { kind: "unknown", reason: "stripe_unread" });
   world.down = false;

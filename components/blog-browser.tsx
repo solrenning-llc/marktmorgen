@@ -41,7 +41,7 @@ export function BlogBrowser({
   return (
     <div>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 sm:flex-wrap sm:overflow-visible lg:min-w-0 lg:flex-1" role="group" aria-label="Filter articles by category">
+        <div className="-mx-1 flex flex-wrap gap-1.5 px-1 pb-1 lg:min-w-0 lg:flex-1" role="group" aria-label="Filter articles by category">
           {options.map((option) => {
             const active = option === category;
             return (

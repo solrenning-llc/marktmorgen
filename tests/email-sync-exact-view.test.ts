@@ -1,10 +1,21 @@
-import { syncView } from "@/lib/email-sync";
+import http from "node:http";
+import https from "node:https";
+import net from "node:net";
+import { connect, disconnect, saveSettings, syncView, testConnection } from "@/lib/email-sync";
+import { setPlatformHooksForTests } from "@/lib/email-platforms";
+import { seal } from "@/lib/secret-box";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 const statsId = "exactemailsyncview000000000001";
-const store = { statsId } as Store;
+const store = {
+  statsId,
+  handle: "exact-view",
+  email: "exact-view@example.test",
+  sid: "11111111111111111111111111111111",
+  extra: false,
+} as Store;
 const config = JSON.stringify({
   handle: "exact-view",
   provider: "kit",
@@ -39,12 +50,30 @@ const job = (id: string) => JSON.stringify({
 type Pipeline = (commands: (string | number)[][]) => Promise<unknown[]>;
 const original = redis.pipeline.bind(redis) as Pipeline;
 
+const server = http.createServer((request, response) => {
+  response.setHeader("Content-Type", "application/json");
+  if (request.url === "/v4/account") response.end("{}");
+  else if (request.url?.startsWith("/v4/forms?")) response.end(JSON.stringify({ forms: [{ id: "audience", name: "First" }, { id: "second", name: "Second" }] }));
+  else {
+    response.statusCode = 404;
+    response.end("{}");
+  }
+});
+class LocalAgent extends https.Agent {
+  constructor(private port: number) {
+    super({ keepAlive: false });
+  }
+  createConnection(): net.Socket {
+    return net.connect(this.port, "127.0.0.1");
+  }
+}
+
 async function view(top: unknown[], rows: unknown[] = []): Promise<unknown> {
   let call = 0;
   (redis as unknown as { pipeline: Pipeline }).pipeline = async () => (call++ === 0 ? top : rows);
   try {
     const found = await syncView(store);
-    return { provider: found.connected?.provider ?? null, jobs: found.log.map((item) => item.id) };
+    return { provider: found.connected?.provider ?? null, jobs: found.log?.map((item) => item.id) ?? "unread" };
   } catch {
     return "unknown";
   } finally {
@@ -56,6 +85,14 @@ function sparse<T>(length: number, entries: [number, T][]): T[] {
   const value = new Array<T>(length);
   for (const [index, item] of entries) value[index] = item;
   return value;
+}
+
+async function attempt<T>(run: () => Promise<T>): Promise<T | "threw"> {
+  try {
+    return await run();
+  } catch {
+    return "threw";
+  }
 }
 
 async function main(): Promise<void> {
@@ -76,13 +113,42 @@ async function main(): Promise<void> {
   inheritedPrototype[1] = null;
   Object.setPrototypeOf(inherited, inheritedPrototype);
   is("an inherited envelope cell is unknown", await view(inherited), "unknown");
-  is("a non-list log reply is unknown", await view([config, null, "not-a-list"]), "unknown");
+  is("a non-list log reply marks only the log unread", await view([config, null, "not-a-list"]), { provider: "kit", jobs: "unread" });
 
   part("The job batch must match every requested log row");
-  is("a short job batch is unknown, never a partial log", await view([config, null, ids], [job(ids[0])]), "unknown");
-  is("a sparse job batch is unknown", await view([config, null, ids], sparse(2, [[0, job(ids[0])]])), "unknown");
-  is("an extra job row is unknown", await view([config, null, [ids[0]]], ids.map(job)), "unknown");
-  is("a malformed requested job is unknown, never silently omitted", await view([config, null, [ids[0]]], ["not-json"]), "unknown");
+  is("a short job batch marks the log unread, never partial", await view([config, null, ids], [job(ids[0])]), { provider: "kit", jobs: "unread" });
+  is("a sparse job batch marks the log unread", await view([config, null, ids], sparse(2, [[0, job(ids[0])]])), { provider: "kit", jobs: "unread" });
+  is("an extra job row marks the log unread", await view([config, null, [ids[0]]], ids.map(job)), { provider: "kit", jobs: "unread" });
+  is("a malformed requested job marks the log unread, never silently omitted", await view([config, null, [ids[0]]], ["not-json"]), { provider: "kit", jobs: "unread" });
+
+  part("An unread log never blocks the four settings actions");
+  redis.clear();
+  process.env.NIMBUS_DATA_KEY = "synthetic-email-sync-exact-view-key-2026";
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as net.AddressInfo).port;
+  setPlatformHooksForTests({
+    resolve: async () => [{ address: "93.184.216.34", family: 4 }],
+    agent: new LocalAgent(port) as never,
+  });
+  const key = "kit_synthetic_exact_view_key_123456";
+  const held = JSON.parse(config) as Record<string, unknown>;
+  held.key = seal(key, `email-sync|${statsId}|kit`);
+  redis.run(["SET", `nl:esync:cfg:${statsId}`, JSON.stringify(held)]);
+  redis.run(["LPUSH", `nl:esync:log:${statsId}`, ids[0]]);
+  redis.run(["SET", `nl:esync:j:${ids[0]}`, "not-json"]);
+  try {
+    const connected = await attempt(() => connect(store, "kit", key));
+    is("connect succeeds and marks only its log unread", connected !== "threw" && connected.ok ? [connected.view.connected?.provider, connected.view.log] : connected, ["kit", null]);
+    const saved = await attempt(() => saveSettings(store, { target: "second", free: true, buyers: "all", products: [], tags: {} }));
+    is("choosing a destination succeeds and marks only its log unread", saved !== "threw" && saved.ok ? [saved.view.connected?.target?.id, saved.view.log] : saved, ["second", null]);
+    const tested = await attempt(() => testConnection(store));
+    is("testing succeeds and marks only its log unread", tested === "threw" ? tested : [tested.ok, tested.view.connected?.target?.id, tested.view.log], [true, "second", null]);
+    const removed = await attempt(() => disconnect(store));
+    is("disconnecting succeeds without reading the malformed job", removed === "threw" ? removed : [removed.connected, removed.log], [null, null]);
+  } finally {
+    setPlatformHooksForTests(undefined);
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
 
   done();
 }

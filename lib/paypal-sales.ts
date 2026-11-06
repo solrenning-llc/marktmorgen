@@ -830,6 +830,12 @@ export async function watchPayPal(
     let kept: Paid | null = null;
     let unread = false;
     for (const other of others as string[]) {
+      // An id that is not an order id is not "no payment": unknown, so the access stays and the order is looked at
+      // again (Codex G on #2791).
+      if (!ORDER_ID.test(other)) {
+        unread = true;
+        continue;
+      }
       const read = await readPaidExact(other);
       if (read === "unknown") {
         unread = true;

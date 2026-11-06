@@ -36,6 +36,7 @@ const files=()=>`nl:course:${COURSE}:task:${lessonId}:files`;
 const sub=()=>`nl:course:${COURSE}:task:${lessonId}:sub:${WHO}`;
 const room=()=>Number(redis.run(['GET',`nl:tasks:bytes:${ROOMKEY}`])??0);
 const logged=console.error;console.error=(...args)=>console.log('EXPECTED SYNTHETIC FAILURE:',String(args[0]),String(args[1]));
+async function main(){
 try{
  part('Healthy control: real course POST, actual removal and metering');await seed();
  let result=await request();is('HTTP success',result.status,200);is('payload ok',result.body.ok,true);is('provider deletion invoked once',providerCalls,1);is('provider file absent',provider.has(PATH),false);is('file inventory removed',redis.run(['HLEN',files()]),0);is('meter released after actual healthy deletion',room(),0);
@@ -46,21 +47,24 @@ try{
  is('failed deletion does not say complete success',result.body.ok===true,false);
  is('retry keeps ability to invoke provider',await request().then(()=>providerCalls>1),true);
  part('Redis destructive batch applied, response LOST: preserve disposal path before throwing');await seed();let lost=false;
- redis.pipeline=(async(batch:(string|number)[][])=>{const reply=await original(batch);if(!lost&&batch.some(c=>c[0]==='HDEL'&&c[1]===files())){lost=true;throw Error('synthetic Redis response LOST after batch application');}return reply;}) as typeof redis.pipeline;
+ redis.pipeline=(async(batch:(string|number)[][])=>{const reply=await original(batch);if(!lost&&batch.some(c=>c[0]==='DEL'&&c[1]===`nl:course:${COURSE}:task:${lessonId}`)){lost=true;throw Error('synthetic Redis response LOST after batch application');}return reply;}) as typeof redis.pipeline;
  result=await request();redis.pipeline=original;
  console.log('OBSERVATION applied-lost',JSON.stringify({result,lost,providerStillHas:provider.has(PATH),providerCalls,room:room(),files:redis.run(['HGETALL',files()]),taskInCourse:!!(await readCourse(COURSE))?.modules[0].lessons[0].task,data:await dataUsed(ROOM)}));
  is('lost-response reaches server_error control',result.status,500);is('provider still retains file control',provider.has(PATH),true);
  is('lost-response preserves file inventory or disposal work',redis.run(['HGET',files(),PATH]),String(BYTES));
  await request();is('healthy retry reaches orphan provider file',provider.has(PATH),false);
- part('Destructive write ACK absent and NOT applied: no release on unknown write');await seed();let missing=false;
- redis.pipeline=(async(batch:(string|number)[][])=>{if(!missing&&batch.some(c=>c[0]==='HDEL'&&c[1]===files())){missing=true;return [];}return original(batch);}) as typeof redis.pipeline;
+ part('Destructive write ACK absent and NOT applied: no release on unknown write');await seed();let missing=false, countedBeforeSkippedDelete=0;
+ redis.pipeline=(async(batch:(string|number)[][])=>{if(!missing&&batch.some(c=>c[0]==='DEL'&&c[1]===`nl:course:${COURSE}:task:${lessonId}`)){missing=true;countedBeforeSkippedDelete=Number(redis.run(['HGET',`nl:data:${ROOMKEY}`,'#']));return [];}return original(batch);}) as typeof redis.pipeline;
  result=await request();redis.pipeline=original;
  console.log('OBSERVATION no-apply/missing-ACK',JSON.stringify({result,missing,providerCalls,subKept:redis.run(['GET',sub()])!==null,room:room(),data:await dataUsed(ROOM)}));
  is('unknown write does not report success',result.body.ok===true,false);
- is('unknown write does not release room for retained data',room(),BYTES);
+ is('unknown write does not uncount retained Redis records',(await dataUsed(ROOM))?.used,countedBeforeSkippedDelete);
+ is('provider actually deleted file, so physical file room can be zero',room(),0);
  part('Healthy read fault control: no mutation on malformed preflight');await seed();
  redis.pipeline=(async(batch:(string|number)[][])=>batch[0]?.[0]==='HGETALL'?[null]:original(batch)) as typeof redis.pipeline;
  const unknown=await dropTask(COURSE,lessonId,ROOMKEY,ROOM).then(()=>false,()=>true);redis.pipeline=original;
  is('unknown files throws',unknown,true);is('unknown preflight keeps provider bytes charged',room(),BYTES);is('unknown preflight keeps file inventory',redis.run(['HGET',files(),PATH]),String(BYTES));is('unknown preflight never calls provider',providerCalls,0);
 }finally{redis.pipeline=original;console.error=logged;}
 done();
+}
+main().catch(error=>{console.error(error);process.exitCode=1;});

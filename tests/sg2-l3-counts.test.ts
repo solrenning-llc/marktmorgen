@@ -388,8 +388,8 @@ void (async () => {
   // A page with no rows asks nothing more, whatever is blocked (Codex G, review 5793946540): an empty course with a
   // blocked student, and an exact page of no rows with a cursor that goes on, are read as they are.
   for (const [label, page, want] of [
-    ["an empty course with one student blocked", ["0", []], { students: [], total: 0, next: "0" }],
-    ["an empty page whose cursor goes on", ["37", []], { students: [], total: 0, next: "37" }],
+    ["an empty course with one student blocked", ["0", []], { total: 0, next: "0", students: [] }],
+    ["an empty page whose cursor goes on", ["37", []], { total: 0, next: "37", students: [] }],
   ] as [string, unknown[], unknown][]) {
     redis.pipeline = (async (commands: (string | number)[][]) => {
       if (studentsPage(commands)) return [page, 0, 1] as unknown[];

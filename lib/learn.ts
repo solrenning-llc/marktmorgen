@@ -632,7 +632,8 @@ export async function studentPage(
   // an unknown one is never 0 lessons or "not blocked", it leaves the whole page unknown.
   const done = rows.map((_, i) => stringList(replies[i]));
   if (done.some((list) => list === null)) return null;
-  const blockedList = blockedAll > 0 && whole ? stringList(replies[rows.length]) : [];
+  // A page with no rows asked nothing more (Codex G, review 5793946540): nothing is waited on for it.
+  const blockedList = rows.length && blockedAll > 0 && whole ? stringList(replies[rows.length]) : [];
   if (!blockedList) return null;
   const answers = blockedAll > 0 && !whole ? rows.map((_, i) => countOf(replies[rows.length + i])) : [];
   if (answers.some((n) => n === null || n > 1)) return null;

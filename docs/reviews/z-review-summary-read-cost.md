@@ -2,7 +2,7 @@
 
 Proposed severity: **MEDIUM, MR admission/byte coverage**, subject to Claude 4 classification. Not a provider-budget bypass or demonstrated whole-company loss.
 
-Frozen main: `738a7124c3fd75cdbcf1b3fed4e544cf7d5a8575`. Cause: `lib/review-ai-summary.ts:202-203` reads the summary and up to 60 complete review records before `counted` at line 230. The route admits one ordinary studio request first (`app/api/store/review-summary/route.ts:14-20`). When no writing job is available it still reads those records and only afterwards returns 429/used.
+Frozen main: `738a7124c3fd75cdbcf1b3fed4e544cf7d5a8575`. Cause: `lib/review-ai-summary.ts:201-202` reads the summary and up to 60 complete review records before `counted` at line 225. The route admits one ordinary studio request first (`app/api/store/review-summary/route.ts:14-20`). When no writing job is available it still reads those records and only afterwards returns 429/used.
 
 Reservation before evidence code: channel `0dd8e86b7462a45c719e8a05907c8e697d5badc7`. Only three new own evidence paths; no product edit, author branch, foreign CI, quota or price change. #1969 contains the route ancestrally, so Claude 4 assigns any implementation after coordinating ownership; this evidence is not a fifth product unit.
 

@@ -10,7 +10,9 @@ const { build } = require("esbuild");
 const { testAliases, testEnvironment } = await import(pathToFileURL(join(sourceRoot, "tests/test-config.mjs")).href);
 const files = process.argv.includes("--linked")
   ? ["api.test.ts", "api-key-second-step.test.ts"]
-  : ["q-api-key-revoke.proof.ts"];
+  : process.argv.includes("--resolve")
+    ? ["q-api-key-resolve.proof.ts"]
+    : ["q-api-key-revoke.proof.ts"];
 for (const file of files) {
   const proof = file.endsWith(".proof.ts");
   const result = await build({

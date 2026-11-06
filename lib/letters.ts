@@ -12,6 +12,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 import { dataBytes } from "@/lib/store-data-rules";
 import { takeData } from "@/lib/store-data";
@@ -31,6 +32,13 @@ const recordKey = (id: string) => `nl:letters:i:${id}`;
  */
 export function listScore(publishedAt: number, members: boolean): number {
   return Math.floor(publishedAt) + (members ? 0.5 : 0);
+}
+
+/** Whether a ZSCORE reply is exact: absent (null), or a number Redis wrote, as a number or its text. */
+function scoreOrNone(reply: unknown): boolean {
+  if (reply === null) return true;
+  if (typeof reply === "number") return Number.isFinite(reply);
+  return typeof reply === "string" && reply.trim() !== "" && Number.isFinite(Number(reply));
 }
 
 /** Whether a place in the list is one of an email kept for members. */
@@ -84,12 +92,20 @@ export async function publishLetter(store: Store, broadcast: Broadcast, now = Da
   try {
     // Entries whose copy has gone by itself leave the count first; the copy
     // already there is read only to keep its products.
-    const [, count, already, before] = await redisPipeline([
+    const commands: (string | number)[][] = [
       ["ZREMRANGEBYSCORE", listKey(store.sid), "-inf", String(now - LETTER_KEEP_DAYS * DAY)],
       ["ZCARD", listKey(store.sid)],
       ["ZSCORE", listKey(store.sid), id],
       ...(keep ? [["GET", recordKey(id)]] : []),
-    ]);
+    ];
+    // Read exactly (Codex J on #2762): one reply for each command, the counts whole, the score absent or a number,
+    // the copy absent or text. Anything else is not "not published" or "not kept": it is refused below and nothing
+    // is written, so an email kept for members is never opened to everyone on a read that could not be trusted.
+    const replies = repliesFor(await redisPipeline(commands), commands.length);
+    if (!replies || countOf(replies[0]) === null || countOf(replies[1]) === null || !scoreOrNone(replies[2]) || (keep && replies[3] !== null && typeof replies[3] !== "string")) {
+      throw new UnknownReplyError("publishing an email: its place and its copy");
+    }
+    const [, count, already, before] = replies;
     let kept: string[] = [];
     let keptPreview: number | undefined;
     if (!keep && ids.length === 0 && !open && keptByScore(already)) {

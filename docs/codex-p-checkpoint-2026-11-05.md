@@ -593,12 +593,12 @@ Coordenação vigente: somente Claude 4. Claude 1 está desligado e não é dest
 
 ### Unidades próprias abertas (4/5)
 
-1. #2807 `codex/p-lesson-url-normalize`
+1. #2807 `codex/p-lesson-comments-drop-receipts`
    - head exato: `6ae8ca5280c8087b2895ab5e50af2e815ed978a1`
    - nove agregadores exatos: 9/9 `completed/success`
    - bloqueio restante: revisão independente qualificada final.
 
-2. #2808 `codex/p-video-stamp-descriptor`
+2. #2808 `codex/p-certificate-copy-evidence`
    - head exato: `53cd71a18ad6bdcdbc68c3ba0adfb64141c4b89a`
    - nove agregadores exatos: 9/9 `completed/success`
    - bloqueio restante: revisão independente qualificada final.
@@ -615,7 +615,7 @@ Coordenação vigente: somente Claude 4. Claude 1 está desligado e não é dest
    - RED durável: `codex/p-quiz-draft-choice-indices-red@01c876556f999b35be02faf4f7473d3641abab7b`, 15 checks / 1 falha causal no main
    - GREEN: 15/15; 139 checks ligados; tipos recortados, lint, scanner 4017/0 e diff verdes; TSC global local esgotou 2 GB sem diagnóstico de tipo
    - Revisor 2, ciclo 89, revisou o head exato e declarou fechado o achado do ciclo 88, sem novo achado
-   - quatro agregadores exatos `completed/success` e cinco `in_progress`; nenhuma falha.
+   - cinco agregadores exatos `completed/success` e quatro `in_progress`; nenhuma falha.
 
 ### Quinta unidade
 

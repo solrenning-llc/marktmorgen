@@ -99,6 +99,38 @@ async function main(): Promise<void> {
   const incomplete = await lostDisputesSince("acct_1TestTb14Lost01", NOW - 600);
   is("the caller must keep its cursor and anchor", incomplete.complete, false);
   eventsMalformed = false;
+
+  part("Adversarial: a closing event without the status that decides lost or won is unknown");
+  closings = [{
+    id: "evt_tb14missingstatus0001",
+    created: NOW - 5,
+    data: { object: { id: "dp_tb14missingstatus0001", payment_intent: "pi_tb14missingstatus0001" } },
+  }];
+  const eventWithoutStatus = await lostDisputesSince("acct_1TestTb14Lost01", NOW - 600);
+  is("the caller must not advance past an event whose outcome is missing", eventWithoutStatus.complete, false);
+  closings = [];
+
+  part("Adversarial: every field that decides a closing is read in its exact shape");
+  const shaped = (n: number, change: Record<string, unknown>, top: Record<string, unknown> = {}): Record<string, unknown> => {
+    const event = closing(n, "lost", `pi_tb14shape${String(n).padStart(8, "0")}`);
+    return { ...event, ...top, data: { object: { ...(event.data as { object: Record<string, unknown> }).object, ...change } } };
+  };
+  for (const [label, event] of [
+    ["an outcome Stripe does not have", shaped(70, { status: "something_new" })],
+    ["an outcome that is not text", shaped(71, { status: 1 })],
+    ["a lost dispute without its charge", shaped(72, { charge: null })],
+    ["a lost dispute whose charge is not a charge's id", shaped(73, { charge: "not-a-charge" })],
+    ["an event whose time is not a number", shaped(74, {}, { created: "now" })],
+    ["an event without its dispute", { ...closing(75, "lost", "pi_tb14shape00000075"), data: { object: null } }],
+    ["a payment that is neither an id, an object nor nothing", shaped(76, { payment_intent: 42 })],
+  ] as [string, Record<string, unknown>][]) {
+    closings = [event];
+    is(`${label}: the read is incomplete, so nothing moves past it`, (await lostDisputesSince("acct_1TestTb14Lost01", NOW - 600)).complete, false);
+  }
+  closings = [shaped(77, { status: "warning_closed" }), closing(78, "won", "pi_tb14shape00000078"), shaped(79, { payment_intent: null }), closing(80, "lost", "pi_tb14shape00000080")];
+  const knownOutcomes = await lostDisputesSince("acct_1TestTb14Lost01", NOW - 600);
+  is("known outcomes read as they are: complete, each lost one a row", [knownOutcomes.complete, knownOutcomes.rows.map((row) => row.id)], [true, ["evt_closed0000000079", "evt_closed0000000080"]]);
+  closings = [];
   const made = await addProduct("owner@tb14.example", "Bread Course", "", "25", null);
   if (!made.ok) throw new Error("no product");
   await setProductLink("owner@tb14.example", made.product.id, "https://example.com/course");
@@ -139,6 +171,40 @@ async function main(): Promise<void> {
   const [anchorAfter] = await redis.pipeline([["GET", preorderAnchor]]);
   is("a valid event from the other stream must not advance past unknown refunds", anchorAfter, anchorBefore);
   refundsMalformed = false;
+
+  part("Adversarial: a refund without the status that decides success is unknown");
+  refunds = [{
+    id: "re_tb14missingstatus0001",
+    created: NOW - 4,
+    payment_intent: "pi_tb14missingstatus0001",
+    charge: { refunded: true },
+  }];
+  closings = [closing(51, "lost", "pi_tb14unrelated00000002")];
+  await revokeRefundedPreorders(store, Date.now() + 10_000, drop);
+  const [anchorAfterMissingStatus] = await redis.pipeline([["GET", preorderAnchor]]);
+  is("the other stream must not move the anchor past a refund with no outcome", anchorAfterMissingStatus, anchorBefore);
+  const fullRefund = { created: NOW - 4, status: "succeeded", payment_intent: "pi_tb14refundshape0001", charge: { object: "charge", refunded: true } };
+  let r = 0;
+  for (const [label, change] of [
+    ["an outcome Stripe does not have", { status: "something_new" }],
+    ["an outcome that is not text", { status: true }],
+    ["a charge left as an id, though it was asked for in full", { charge: "ch_tb14refundshape0001" }],
+    ["a charge without whether it was refunded", { charge: { object: "charge" } }],
+    ["a payment that is neither an id nor nothing", { payment_intent: 7 }],
+  ] as [string, Record<string, unknown>][]) {
+    r += 1;
+    refunds = [{ id: `re_tb14shape${String(r).padStart(8, "0")}`, ...fullRefund, ...change }];
+    closings = [closing(80 + r, "lost", `pi_tb14unrelated${String(r + 10).padStart(8, "0")}`)];
+    await revokeRefundedPreorders(store, Date.now() + 10_000, drop);
+    is(`pre-orders, a refund with ${label}: the anchor stays`, (await redis.pipeline([["GET", preorderAnchor]]))[0], anchorBefore);
+  }
+  // The control: every field known, one refund that failed and one charged without a payment, and the anchor moves.
+  refunds = [{ id: "re_tb14shape00000090", ...fullRefund, status: "failed", charge: { object: "charge", refunded: false } }, { id: "re_tb14shape00000091", ...fullRefund, payment_intent: null, charge: null }];
+  closings = [];
+  await revokeRefundedPreorders(store, Date.now() + 10_000, drop);
+  is("pre-orders, every field known: the anchor moves", (await redis.pipeline([["GET", preorderAnchor]]))[0] !== anchorBefore, true);
+  await redis.pipeline([anchorBefore === null ? ["DEL", preorderAnchor] : ["SET", preorderAnchor, String(anchorBefore)]]);
+  refunds = [];
 
   // Ana's bank took part of the price back through an exchange rate: still the whole order (the owner's rule).
   closings = [closing(2, "won", session(2, "").payment_intent), closing(1, "lost", session(1, "").payment_intent, 2311)];
@@ -197,6 +263,20 @@ async function main(): Promise<void> {
   eventsFail = false;
   is("the next run takes it back", await revokeRefundedGifts(store, Date.now() + 10_000, drop), 1);
   is("gone", await holds(gifts[2].to), false);
+
+  part("Gifts: a refund without the fields that decide it cannot move the anchor");
+  const giftAnchor = `nl:gift:${store.statsId}:refunds`;
+  const [giftAnchorBefore] = await redis.pipeline([["GET", giftAnchor]]);
+  refunds = [{ id: "re_tb14giftshape0001", created: NOW - 3, payment_intent: "pi_tb14giftshape0001", charge: { object: "charge", refunded: true } }];
+  const keptClosings = closings;
+  closings = [closing(95, "won", "pi_tb14giftshape0002")];
+  await revokeRefundedGifts(store, Date.now() + 10_000, drop);
+  is("gifts, a refund with no outcome: the anchor stays", (await redis.pipeline([["GET", giftAnchor]]))[0], giftAnchorBefore);
+  refunds = [{ id: "re_tb14giftshape0002", created: NOW - 3, status: "succeeded", payment_intent: "pi_tb14giftshape0001", charge: "ch_tb14giftshape0001" }];
+  await revokeRefundedGifts(store, Date.now() + 10_000, drop);
+  is("gifts, a charge left as an id: the anchor stays", (await redis.pipeline([["GET", giftAnchor]]))[0], giftAnchorBefore);
+  refunds = [];
+  closings = keptClosings;
 
   part("An unknown lookup of the payment's gift or pre-order marks nothing read (Codex Z, review 5794216212)");
   // Only the GET of the payment's gift or pre-order answers in an unknown shape; the next run is healthy.

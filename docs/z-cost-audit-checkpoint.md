@@ -1,3 +1,47 @@
+# PONTO VIGENTE — 06/11/2026 03h47 Fortaleza: #2776 MERGED; quatro próprias, retorno2773 depende C4
+
+Lido PRIMEIRO COMPLETO checkpoint2f4284a3b217ee4361204581c9b298e9aff440bd (80663chars), depois mainffbfb57416650d441946a8ebb0ed787b43ac3aab/caixaCX122/CX123/canal integral. Não absorvida duplicada por recência; nenhuma execução concorrente inferida por checkpoint/vigia. Histórico abaixo INTEGRALMENTE preservado, WIP2602b096 e REDs intactos. Nenhum preço/limite/comissão/flag/gate/conta/pagamento/fornecedor/termo/contato/PII/ramo alheio alterado.
+
+## #2776 incorporado legitimamente
+
+Revisão integral P5796471755 EXATA aa08e809bfc52be0dcb8660eea75c754dccaaa0b SEMHIGH/MED/LOW/PODEENTRAR lida API, além de canal. NOVE workflows distintos completed/success EXATOS42172185040/85013/85110/85001/85063/85226/85005/85038/85016 (prefixo421721); nenhum skipped promovido. Native merge-tree contra mainffbfb574 CLEAN treeaaf4b946dc261ebf69ccf955b2dde6172fb9c6d3; API imediatamente antes true/clean. Merge NORMAL expected_head_sha aa08… confirmado GETmerged:true: **6e01c123b31d890bb5a7100d0bce8ef498988b20**. Nenhum retry/bypass/force/deploy alegado; não reabrir.
+P esclarece ordenação REAL config→counter→signature→helpers, preservada; não repetir anúncio equivocado de assinatura antes do contador. R2 reproduziu RED9falhas e graduou risco BAIXO por depender de assinatura válida; grau inicial ZMÉDIO fica qualificado por essa ressalva, sem custo ilimitado nem fornecedor real certificados. P reproduziu20/9RED→20/20+318ligados=338.
+
+## Quatro produtos próprios restantes — não usar heads antigos
+
+|PR|head remoto ATUAL|estado/próximo|
+|---|---|---|
+|2602|61fe4c0cd46a7f6b6641c3fa3217a279e6a5f35d|main6e01 integração por conflito REAL alias;226locais/TS/lint/scanner3898/0/diff;E2+C2aplicáveis;9NOVOS inicialmentein_progress|
+|2740|76dd3c0e73e763ec31035c4095411442401db5f3|main6e01 integração por conflito REAL alias;240locais/TS/lint/scanner3898/0/diff;S5794710012aplicável;9NOVOS inicialmentein_progress|
+|2741|3f29ea4d8c03bcbed9c5d4d5df04e02ffab89e39|8SUCCESS+realreaderWindowsFAIL; ÚNICA repetiçãojob127737110071 ACEITA/CONSUMIDA nesta vez, aguarda evento terminal sempoll|
+|2773|7312dceb66fed9918c6ad82be5c01325d114cfda|LEVE S5796448521 ABERTO, NÃOclean; sharedtristate depende C4/2670, sem duplicar decoder/readback; source/head preservados|
+
+Fotografia terminal ÚNICA da triagem após novos retornosP/S:2602head5bb…/2740head1a06… tinham9SUCCESScada,2741 tinha8SUCCESS+failure42170472958. Merge-tree REAL dos dois verdes contra6e01 encontrou SOMENTE conflito tests/test-config.mjs (aliasstream dePR recémincorporado versus própriosaliases). Não incorporados comconflito. Anúncio canal rAnn confirmado antes código. Integrei snapshot6e01 UMAvez em CADAum dos MESMOS PRs, testes/produto própriosBYTEIDÊNTICOS (gitdiff3paths vazio), configuração exatamentemain+aliaspróprio, docs/reservations semdelta. Não perseguir novo main; checks antigos não valem para headsnovos.
+2602 tree4886a1c20cf5679b585e5cc9ef0a52cfe477f24c, native daa33f1be49b493d60edf69623f494b57d48aebd;2740 tree0b917c16c19af29e3bd1fb9955d4783dc8f448fe,native858a45cc49f794dd6a1c2b97da7fe4e24afb9c89. PublicadosGitData árvoresIGUAIS, paisoldhead+6e01, update_refnonforce. ScopedstrictTSC/imports0,lint4paths0,scanner3898/0,diff0 emcada. E25781926272+C25782305772/correção5782374463 duasfinanceiras eS5794710012 são deblobsprópriosidênticos, CX122.8, semrevisãoinútil. Primeiros gitdiff emitiram badobject antesfetch terminar, descartados; depoisfetch ecomparaçõesvaziasconfirmados; não foram conflitos deproduto nem RED.
+Novos worktrees próprios /workspace/scratch/b63eb70a66ab/z-service-2776 e z-assistant-2776, ramos locais codex/z-service-2776-integration e z-assistant-2776-integration. /tmp/z-2776-integrations.json manifesta paths/parents/tree/tests; logs/tmp/z2776-{service,assistant}-{tests,types,lint,scanner,diff}.log/configtypes.json. Donornode_modules776somenteleitura. Old2765worktrees/remoteancestorsWIP preservados.
+CI NOVA apenasUMAconsulta inicial, CADA9in_progress:
+2602:42176545706,42176545310,42176545424,42176545308,42176545462,42176545391,42176545389,42176545399,42176545433.
+2740:42176549758,42176549716,42176549790,42176549855,42176549934,42176549743,42176549779,42176549861,42176549895.
+Nenhum mergeantes9NEWsuccess exacthead+pareceraplicável+freshnativeclean/rawtrue+NORMALexpectedhead+GETtrue. Não reutilizar9oldverdes.
+
+## #2741 falha alheia diagnosticada; nova retentativa única consumida
+
+Run42170472958 head3f29…: mac127737110067SUCCESS, Windows127737110071FAIL, agregador127739989908 consequenteFAIL, demais8workflowsSUCCESS. Log decodificado lido: janela foreground='search' em10tentativas; NVDA foreground window did not match the synthetic page title (after preparation), navigate-to-content.mjs35/63, entry-pilot59; build/install/preflight passaram. Fora dos quatro paths dePR. CorreçãoV2755 jáincorporada em main, mas NÃO integrarei/churnmain sópara repetir job. CX122.15: usei SOMENTE rerun_workflow_job127737110071, ferramentaSUCESSO; agoraCONSUMIDA para sempre, não repetir nemagregadoràparte. Sem nova consulta resultado depoisrerun. Nenhum CI/arquivo alheio alterado.
+Retentativasantigas #2484verify127130387972 e#2615verify127143841589/mac127144213372 CONTINUAMCONSUMIDAS; NÃO confundir famíliasdiferentesnemresetarcontagem porheadnovo.
+
+## #2773 retorno próprio: LEVE confirmado, coordenação compartilhada pendente
+
+S revisão integral5796448521 no7312… tem1LEVE/NÃOclean: booleanwithinEssentialLimitcolapsaACKunknown/timeout ecountconfirmadoexcedido; ask52/guide43 respondem429slow como se teto conhecido. MESMA prova S0c45d22140b00710b5f57a25ca6104d0597a9eed, tests/s-review-2773-unknown-words.proof.ts reproduzidaINALTERADA contraown7312:0pass/4falhascausais. Primeiroassert429falha antesdasasserçõesposteriores; zeroIOposterior écertificado pela81suiteanterior/relatórioS,não peloassertinatingido da reprodução. Nenhumtesteafrouxado nem alegaçãofechamento.
+Mainffbfb574 sourceguard sótemboolean. API#2670 OPEN/head37bbc079d0bce1954c1bc49788391f7496368f8f, files lib/request-guard.ts e tests/request-guard-shape.test.ts: OCUPADOS C4. Emcanal pedi C4/C1 controlador/atribuição de resultado triestado mantendoMESMOS2comandos/hash/TTL/consumedincrement; wrapperbooleancompatível paraoutros. N2674 jáaguardatriestado; não duplicardecoder em novohelper nemeditarC4. Corretivocallerpretendido apóscontrolador: unknown502/503tente-denovo, exceeded429slow, allowedcontinua; sem readback/retry nem preçolimiteflag.
+Comentário próprioPR **6678988356** registra aceitação/prova/dependência. S mantémnominalreturn, não pedioutrorevisor. Sem headmove/produto/modificação do teste anterior enquanto helperindisponível. Srule30 irmãos ai/help/numbers-ask/outreach/path/preview/review-summary/voice/studio-route reportados, NÃO adjudicadosZ; C1dádono.
+
+## Ponto de continuidade e AV12
+
+Primeiro pedido2776/canal anterior CONFIRMADO782f60ec06753ece20e67f14416346bc48ad7891; supersede pending antigo. Novo anúncio rAnn nesta execução confirmou merge2776/dependênciaC4/integraçõesnecessárias. Publicar PONTOEXATO comestecheckpoint nofim, reappendfresh se409/422 após2min. Nenhuma reserva nova nemquintaunidade nesta vez; quatroaguardam helper/reviews/novosCI. Isso não é conclusão auditoria nem bloqueiodefinitivo; continuidadeexistente preservada, nenhuma automação alterada/desabilitada/criada.
+Vigiaantiga22240 nãoinferidaativa porrecência; flock estava LIVRE nestaexecução, nova ÚNICA /tmp/z-main-watch.sh MESMOflock, sessão57323,fetch60s,sómain/inboxevent,prazo3500s. NÃOCI/canalwatchautenticado; nãoiniciaroutra. Ordem:retornos2773/controllerC4; evento2741retry ou2602/2740novos9; merge sógatesexatos. Sevierrespostacoordenação, avançarsemperguntaóbvia. Outras faixasocupadas/estáticas não viramunidadeartificial; próxima livre requerinventárioatual+RESERVA antescódigo+RED e≤5.
+
+---
+
 # PONTO VIGENTE — 06/11/2026 03h06 Fortaleza: CINCO unidades, #2776 pronto, retorno Q fechado
 
 Esta seção SUPERA pendências antigas; histórico COMPLETO abaixo preservado. Checkpoint7bb05bee35f179caaf964c8805ee648fd02a3da2 publicado nesta execução após leitura integral79f7cb53. Não absorver retomada duplicada só por checkpoint recente; só execução ativa CONFIRMADA. Nenhuma sexta unidade, nenhum retry/cancel/force/mainchase. #2484 verify127130387972 e #2615 verify127143841589/mac127144213372 CONSUMIDOS para sempre. #2632/#2765 já legitimamente MERGED, não recriar espera/correção compartilhada.

@@ -66,3 +66,42 @@ Follow-up observations must be coordinated with their existing owners. Nothing h
 ## Validation correction
 
 The first formal review sentence prematurely stated a clean public-data scan while that process was still running. The completed scan flagged one overly realistic synthetic provider-account identifier in this proof, not in author code. The fixture now uses a short clearly synthetic identifier accepted by the same production validator. All five cases were replayed on head and base after this fixture-only change; the same two controls and three inherited observations remain. The actual subsequent scanner result is recorded with the final publication receipt. No behavioral assertion or author source was changed.
+
+## Focal return: fdca45a209ad4d97525dee17a87371213b25c9e0
+
+Return claimed before reading the delta in PR comment `6697830548`; channel acknowledgment/reservation `4cfb546bbd5908a808c823ffd914f8fc803a0db5`. Exact original reviewed head: `07e820ed0368a1bfb611b99508fe25110fcddd54`. Exact return head: `fdca45a209ad4d97525dee17a87371213b25c9e0`. The previous report, validation correction, and original immutable proof are preserved above.
+
+**Both original LOW findings are CLOSED at this exact return head. No new focal finding was demonstrated.** The author now deduplicates store IDs with a Set before reading/formatting/caching rows, counting unique IDs toward the existing maximum. The index reader rejects empty or nondigit cursor strings. This is a focused return, not a global certificate for external store/statistics readers or a certification of hosted checks/merge.
+
+The exact same five-case proof and runner from `14a69275ba955339b3c996d950fef7c0f51fda27` were replayed without changing a case, assertion, fixture or ceiling. Runner SHA-256: `7fcb7959abf24b1f97450a6fe3ce55a95d9daa41675f681889e4282e83864b41`. Proof SHA-256: `45007c1829e3dff3fcdaae482b307c14a44040a5d6cb2d1f8a5c3642362e1d9c`.
+
+| Verification | Actual result | Synthetic commands |
+| --- | --- | --- |
+| Same independent five cases at original head | 2 pass / 3 fail | 200 |
+| Same independent five cases at return head | 4 pass / 1 outside-scope dependency fails | 198 |
+| Author's new immutable RED `7533bf454574e5802d6c6c9304d30692a72ae953` | 50 checks / 14 failures | 267 |
+| Same author test at return head | 50/50 pass | 255 |
+| Existing index consent/invalidation suite | 11/11 pass | 37 |
+| Existing public affiliate directory suite | 24/24 pass | 440 |
+
+The author test has identical blob `31f8739fbf863213184b00258bb5b201b90ad71f` in the new RED and return head; that delta changes only the two production modules. The original-to-return diff adds the focused author cases and makes only the two requested production repairs. The five-case proof shows the same eligible store on two SSCAN pages now produces **one row and one cached row**; an invalid cursor now throws on the first scan and keeps **no cache**. Valid sparse nonterminal pages and confirmed-null stale mappings retain their passing controls.
+
+The one remaining proof failure is exactly the already documented `storeForId` unknown-mapping dependency: the underlying reader still turns missing acknowledgment into null and the directory caches empty. It fails equally before and after this delta, is owned outside this PR, and is not relabeled as a new blocker or a failure to close either LOW. `programNumbers` record/reply work likewise remains a separate owned dependency. The independent proof's intentional exit 1 therefore does not mean this focal return failed.
+
+Reproduce with the unchanged runner:
+
+```sh
+node scripts/t-review-2921.mjs 07e820ed0368a1bfb611b99508fe25110fcddd54 t-2921-directory.proof.ts
+node scripts/t-review-2921.mjs fdca45a209ad4d97525dee17a87371213b25c9e0 t-2921-directory.proof.ts
+node scripts/t-review-2921.mjs fdca45a209ad4d97525dee17a87371213b25c9e0 directory-index.test.ts
+```
+
+The original runner intentionally remains unchanged and its local canonical test is the earlier 35-check version. The author's full new **50-check** test and the 24-check directory suite were separately compiled from their exact Git blobs in an ephemeral wrapper with the same canonical aliases/environment, exact production snapshots and a pre-command ceiling. No author test file was replaced on disk and no assertion was omitted to fit a budget.
+
+Before this return's execution: at most 60 cases per process, 5,000 synthetic commands counted before execution, 120 seconds and 256 KiB captured output; the unchanged runner retained its tighter 128-KiB ceiling. No provider HTTP was performed. The five-case proof reports zero fetch attempts. No browser, full suite, real account/payment, author ref, CI retry or source mutation occurred.
+
+Actual **ES2017 strict TypeScript passed with no diagnostics** using an isolated checkout of the return source, both changed production roots, the full 50-check author test, the original own proof and their real imported dependency closure. The temporary config extended the actual repository config with strict/noEmit and incremental disabled; it was removed afterward. ESLint passed on the two production files and the author test; the return source diff check passed. Lock-matched read-only versions: TypeScript 5.9.3, esbuild 0.28.2, ESLint 9.39.5, eslint-config-next 16.4.2.
+
+The completed return scanner passed: **4,136 tracked files, zero files requiring correction**, including this appended report and the original corrected synthetic fixture. Staged `git diff --check` passed. This is the actual completed result, not a pending-process assumption.
+
+Return logs: `/tmp/t-2921-return-{old,new,linked,canonical-red,canonical-green,directory-linked,types}.log`; the type log is empty. No formal return review was submitted by this worker. The coordinator will verify publication before reporting the exact qualified return; the author must separately confirm applicable prerequisites and all nine successful final-head checks before merge.

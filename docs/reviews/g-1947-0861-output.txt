@@ -1,0 +1,996 @@
+
+=== g1947-b1b7-frozen.log ===
+G2_PARTIAL_LANDING {"outcome":"saved","before":"[{\"campaign\":\"original\",\"headline\":\"Known headline\",\"sub\":\"Known subheading\",\"button\":\"Read more\"},{\"campaign\":\"unconfirmed-existing\",\"headline\":\"Known headline\",\"sub\":null,\"button\":\"Read more\"}]","after":"[{\"campaign\":\"original\",\"headline\":\"Known headline\",\"sub\":\"Known subheading\",\"button\":\"Read more\"},{\"campaign\":\"new\",\"headline\":\"Known headline\",\"sub\":\"Known subheading\",\"button\":\"Read more\"}]"}
+G2_DROP_ACK {"throughPage":false,"completed":true,"recordRetained":true}
+G2_DROP_ACK {"throughPage":true,"completed":true,"recordRetained":true}
+G2_LANDING_RESURRECTION {"result":"saved","record":"[{\"campaign\":\"stale-request\",\"headline\":\"Known headline\",\"sub\":\"Known subheading\",\"button\":\"Read more\"}]","slot":"240"}
+✔ control: a valid campaign survives another save and a confirmed deletion removes all (6.438795ms)
+✖ a malformed campaign inside a JSON array is not permission to discard it on the next save (2.14134ms)
+✖ an unapplied unknown delete must not report completed cleanup false (0.730149ms)
+✖ an unapplied unknown delete must not report completed cleanup true (2.270625ms)
+✖ an older save must not recreate campaign data after the page deletion completes (1.010119ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 1
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19.502966
+
+✖ failing tests:
+
+test at ../codex-g-proof-m82jMX/proof.cjs:4702:27
+✖ a malformed campaign inside a JSON array is not permission to discard it on the next save (2.14134ms)
+  AssertionError [ERR_ASSERTION]: the save erased a pre-existing campaign it could not confirm
+  + actual - expected
+  
+  + '[{"campaign":"original","headline":"Known headline","sub":"Known subheading","button":"Read more"},{"campaign":"new","headline":"Known headline","sub":"Known subheading","button":"Read more"}]'
+  - '[{"campaign":"original","headline":"Known headline","sub":"Known subheading","button":"Read more"},{"campaign":"unconfirmed-existing","headline":"Known headline","sub":null,"button":"Read more"}]'
+  
+      at TestContext.<anonymous> (/tmp/codex-g-proof-m82jMX/proof.cjs:4714:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '[{"campaign":"original","headline":"Known headline","sub":"Known subheading","button":"Read more"},{"campaign":"new","headline":"Known headline","sub":"Known subheading","button":"Read more"}]',
+    expected: '[{"campaign":"original","headline":"Known headline","sub":"Known subheading","button":"Read more"},{"campaign":"unconfirmed-existing","headline":"Known headline","sub":null,"button":"Read more"}]',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../codex-g-proof-m82jMX/proof.cjs:4717:68
+✖ an unapplied unknown delete must not report completed cleanup false (0.730149ms)
+  AssertionError [ERR_ASSERTION]: the deletion resolved successfully with its campaign record still present
+  
+  true !== false
+  
+      at TestContext.<anonymous> (/tmp/codex-g-proof-m82jMX/proof.cjs:4740:27)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../codex-g-proof-m82jMX/proof.cjs:4717:68
+✖ an unapplied unknown delete must not report completed cleanup true (2.270625ms)
+  AssertionError [ERR_ASSERTION]: the deletion resolved successfully with its campaign record still present
+  
+  true !== false
+  
+      at TestContext.<anonymous> (/tmp/codex-g-proof-m82jMX/proof.cjs:4740:27)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../codex-g-proof-m82jMX/proof.cjs:4745:27
+✖ an older save must not recreate campaign data after the page deletion completes (1.010119ms)
+  AssertionError [ERR_ASSERTION]: the older request recreated campaign data after deletion
+  + actual - expected
+  
+  + '[{"campaign":"stale-request","headline":"Known headline","sub":"Known subheading","button":"Read more"}]'
+  - null
+  
+      at TestContext.<anonymous> (/tmp/codex-g-proof-m82jMX/proof.cjs:4769:27)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '[{"campaign":"stale-request","headline":"Known headline","sub":"Known subheading","button":"Read more"}]',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+=== g1947-0861-frozen.log ===
+G2_PARTIAL_LANDING {"outcome":"Error: The landing pages could not be read just now, so nothing was saved. Try again in a moment.","before":"[{\"campaign\":\"original\",\"headline\":\"Known headline\",\"sub\":\"Known subheading\",\"button\":\"Read more\"},{\"campaign\":\"unconfirmed-existing\",\"headline\":\"Known headline\",\"sub\":null,\"button\":\"Read more\"}]","after":"[{\"campaign\":\"original\",\"headline\":\"Known headline\",\"sub\":\"Known subheading\",\"button\":\"Read more\"},{\"campaign\":\"unconfirmed-existing\",\"headline\":\"Known headline\",\"sub\":null,\"button\":\"Read more\"}]"}
+G2_DROP_ACK {"throughPage":false,"completed":false,"recordRetained":true}
+G2_DROP_ACK {"throughPage":true,"completed":false,"recordRetained":true}
+G2_LANDING_RESURRECTION {"result":"Error: This page was deleted, so its landing pages were not saved.","record":null,"slot":null}
+✔ control: a valid campaign survives another save and a confirmed deletion removes all (11.773313ms)
+✔ a malformed campaign inside a JSON array is not permission to discard it on the next save (1.515769ms)
+✔ an unapplied unknown delete must not report completed cleanup false (0.656467ms)
+✔ an unapplied unknown delete must not report completed cleanup true (4.613266ms)
+✔ an older save must not recreate campaign data after the page deletion completes (1.048636ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 30.055918
+
+=== g1947-b1b7-product-recovery-final.log ===
+  ok    the real writers created campaign content and a counted slot
+  ok    the actual campaign deletion was reached
+  ok    the product itself really left the catalog (a fresh store snapshot)
+  ok    unknown unapplied deletion retains exactly the prior bytes
+  ok    retained content stays counted, a confirmed/applied deletion frees its slot
+  FAIL  retained cleanup is not silently acknowledged as complete
+        expected false
+        got      true
+  FAIL  an ordinary healthy retry can finish previously unconfirmed campaign cleanup
+        expected null
+        got      "[{\"campaign\":\"synthetic\",\"headline\":\"Synthetic course\",\"sub\":\"Known campaign content\",\"button\":\"Read more\"}]"
+  ok    a direct confirmed internal cleanup with the known id remains recoverable
+G_PRODUCT_LANDING_CLEANUP {"mode":"unapplied","attempted":1,"result":{"status":200,"body":{"ok":true,"product":null}},"again":{"status":404,"body":{"ok":false,"error":"unknown"}},"retained":"[{\"campaign\":\"synthetic\",\"headline\":\"Synthetic course\",\"sub\":\"Known campaign content\",\"button\":\"Read more\"}]","afterRetry":"[{\"campaign\":\"synthetic\",\"headline\":\"Synthetic course\",\"sub\":\"Known campaign content\",\"button\":\"Read more\"}]","slotBefore":"240","slotAfter":"240","manualRecoveryRecord":null}
+
+8 checks, 2 failing.
+
+=== g1947-0861-product-recovery-final.log ===
+a removed page's records could not all be confirmed gone; what is left stays counted in the store's room PageDropIncomplete [Error]: The page was deleted, but some of its records could not be confirmed gone; they stay counted until they are.
+    at dropPage (/tmp/codex-g-proof-ekIALM/proof.cjs:85296:23)
+    at async POST (/tmp/codex-g-proof-ekIALM/proof.cjs:114934:28)
+    at async remove (/tmp/codex-g-proof-ekIALM/proof.cjs:115080:22)
+    at async main (/tmp/codex-g-proof-ekIALM/proof.cjs:115101:14) {
+  pictures: [],
+  kept: LandingsDropUnconfirmed [Error]: We could not confirm the landing pages were deleted. They stay counted in the store's room until they are.
+      at dropLandings (/tmp/codex-g-proof-ekIALM/proof.cjs:85122:9)
+      at async dropPage (/tmp/codex-g-proof-ekIALM/proof.cjs:85293:20)
+      at async POST (/tmp/codex-g-proof-ekIALM/proof.cjs:114934:28)
+      at async remove (/tmp/codex-g-proof-ekIALM/proof.cjs:115080:22)
+      at async main (/tmp/codex-g-proof-ekIALM/proof.cjs:115101:14)
+}
+  ok    the real writers created campaign content and a counted slot
+  ok    the actual campaign deletion was reached
+  ok    the product itself really left the catalog (a fresh store snapshot)
+  ok    unknown unapplied deletion retains exactly the prior bytes
+  ok    retained content stays counted, a confirmed/applied deletion frees its slot
+  FAIL  retained cleanup is not silently acknowledged as complete
+        expected false
+        got      true
+  FAIL  an ordinary healthy retry can finish previously unconfirmed campaign cleanup
+        expected null
+        got      "[{\"campaign\":\"synthetic\",\"headline\":\"Synthetic course\",\"sub\":\"Known campaign content\",\"button\":\"Read more\"}]"
+  ok    a direct confirmed internal cleanup with the known id remains recoverable
+G_PRODUCT_LANDING_CLEANUP {"mode":"unapplied","attempted":3,"result":{"status":200,"body":{"ok":true,"product":null}},"again":{"status":404,"body":{"ok":false,"error":"unknown"}},"retained":"[{\"campaign\":\"synthetic\",\"headline\":\"Synthetic course\",\"sub\":\"Known campaign content\",\"button\":\"Read more\"}]","afterRetry":"[{\"campaign\":\"synthetic\",\"headline\":\"Synthetic course\",\"sub\":\"Known campaign content\",\"button\":\"Read more\"}]","slotBefore":"240","slotAfter":"240","manualRecoveryRecord":null}
+
+8 checks, 2 failing.
+
+=== g1947-0861-product-control-recovery-final.log ===
+  ok    the real writers created campaign content and a counted slot
+  ok    the actual campaign deletion was reached
+  ok    the product itself really left the catalog (a fresh store snapshot)
+  ok    unknown unapplied deletion retains exactly the prior bytes
+  ok    retained content stays counted, a confirmed/applied deletion frees its slot
+  ok    retained cleanup is not silently acknowledged as complete
+  ok    an ordinary healthy retry can finish previously unconfirmed campaign cleanup
+  ok    a direct confirmed internal cleanup with the known id remains recoverable
+G_PRODUCT_LANDING_CLEANUP {"mode":"healthy","attempted":1,"result":{"status":200,"body":{"ok":true,"product":null}},"again":{"status":404,"body":{"ok":false,"error":"unknown"}},"retained":null,"afterRetry":null,"slotBefore":"240","slotAfter":null,"manualRecoveryRecord":null}
+
+8 checks, all passing.
+
+=== g1947-0861-product-applied-lost-recovery-final.log ===
+a removed page's records could not all be confirmed gone; what is left stays counted in the store's room PageDropIncomplete [Error]: The page was deleted, but some of its records could not be confirmed gone; they stay counted until they are.
+    at dropPage (/tmp/codex-g-proof-3Kk6NH/proof.cjs:85296:23)
+    at async POST (/tmp/codex-g-proof-3Kk6NH/proof.cjs:114934:28)
+    at async remove (/tmp/codex-g-proof-3Kk6NH/proof.cjs:115080:22)
+    at async main (/tmp/codex-g-proof-3Kk6NH/proof.cjs:115101:14) {
+  pictures: [],
+  kept: LandingsDropUnconfirmed [Error]: We could not confirm the landing pages were deleted. They stay counted in the store's room until they are.
+      at dropLandings (/tmp/codex-g-proof-3Kk6NH/proof.cjs:85122:9)
+      at async dropPage (/tmp/codex-g-proof-3Kk6NH/proof.cjs:85293:20)
+      at async POST (/tmp/codex-g-proof-3Kk6NH/proof.cjs:114934:28)
+      at async remove (/tmp/codex-g-proof-3Kk6NH/proof.cjs:115080:22)
+      at async main (/tmp/codex-g-proof-3Kk6NH/proof.cjs:115101:14)
+}
+  ok    the real writers created campaign content and a counted slot
+  ok    the actual campaign deletion was reached
+  ok    the product itself really left the catalog (a fresh store snapshot)
+  ok    unknown unapplied deletion retains exactly the prior bytes
+  ok    retained content stays counted, a confirmed/applied deletion frees its slot
+  ok    retained cleanup is not silently acknowledged as complete
+  ok    an ordinary healthy retry can finish previously unconfirmed campaign cleanup
+  ok    a direct confirmed internal cleanup with the known id remains recoverable
+G_PRODUCT_LANDING_CLEANUP {"mode":"lost","attempted":3,"result":{"status":200,"body":{"ok":true,"product":null}},"again":{"status":404,"body":{"ok":false,"error":"unknown"}},"retained":null,"afterRetry":null,"slotBefore":"240","slotAfter":null,"manualRecoveryRecord":null}
+
+8 checks, all passing.
+
+=== g1947-0861-canonical.log ===
+
+=== campaign-landing-races.test.ts ===
+✔ a first save, read back (87.68205ms)
+✔ a read answered empty never erases a campaign already saved (Codex G and J) (1.19652ms)
+✔ a read answered undefined never erases a campaign already saved (Codex G and J) (0.302245ms)
+✔ a read answered malformed-json never erases a campaign already saved (Codex G and J) (69.597754ms)
+✔ a write whose answer is not the expected one is never said saved (Codex G) (89.612082ms)
+✔ a write answered [true,null] is never said saved, nor full (Codex J) (1.239004ms)
+✔ a write answered [1,null] is never said saved, nor full (Codex J) (0.607304ms)
+✔ a write answered [1,false] is never said saved, nor full (Codex J) (8.094392ms)
+✔ a write answered [1,-1] is never said saved, nor full (Codex J) (1.21074ms)
+✔ a write answered [1,0.5] is never said saved, nor full (Codex J) (0.706312ms)
+✔ a write answered [1,9007199254740992] is never said saved, nor full (Codex J) (0.314042ms)
+✔ a write answered ["1",5] is never said saved, nor full (Codex J) (0.676908ms)
+✔ a write answered [0,null] is never said saved, nor full (Codex J) (0.279039ms)
+✔ a write answered [3,0,1] is never said saved, nor full (Codex J) (0.218529ms)
+✔ a write answered [2,5] is never said saved, nor full (Codex J) (0.490257ms)
+✔ a delete whose answer is not the expected one gives no room back while the record is kept (Codex G) (3.126472ms)
+✔ a large save held while a small one lands never leaves the record larger than its slot (Codex G and J) (67.735152ms)
+✔ a removal frees only what it deleted, in the same step (1.558443ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 391.651279
+
+G_FILE_EXIT campaign-landing-races.test.ts 0
+
+=== campaign-landing-store.test.ts ===
+
+One landing per campaign
+  ok    a product with none
+  ok    saved
+  ok    read back whole
+  ok    saving the same campaign again replaces it
+  ok    another campaign beside it
+  ok    a campaign with no landing
+  ok    a tag that is not one is never looked up
+  ok    another product's landings are its own
+  ok    no store: nothing
+
+At most 10 a product
+  ok    ten kept
+  ok    an eleventh campaign is refused
+  ok    one already there can still change
+  ok    the store says full, and keeps the ten
+
+Room in the store's data room, taken first
+  ok    what is kept is counted
+  ok    a save that does not fit is refused as a full store
+  ok    and nothing is kept
+
+Taken off
+  ok    one campaign's landing removed
+  ok    removing one that is gone is fine
+  ok    the last one removed takes the record with it
+
+Gone with the product's page
+  ok    the record is deleted
+  ok    and its room given back
+  ok    dropLandings alone does the same
+
+As kept: whatever is stored is checked again
+  ok    broken entries, repeated campaigns and words too long dropped
+  ok    a missing button keeps the page's own
+  ok    not a list
+  ok    a record that cannot be read is none
+  ok    every kept tag is one the numbers count
+
+A save rewrites only a record it reads whole (Codex G2, #1947)
+  ok    a campaign twice: the save is refused
+  ok    a campaign twice: and the record is as it was
+  ok    a campaign twice: removing one is refused too
+  ok    an entry it cannot read: the save is refused
+  ok    an entry it cannot read: and the record is as it was
+  ok    an entry it cannot read: removing one is refused too
+  ok    more than 10: the save is refused
+  ok    more than 10: and the record is as it was
+  ok    more than 10: removing one is refused too
+  ok    the page still shows what it can read
+
+Dropped with the page: closed to saves, in the same step (Codex G2, #1947)
+  ok    a save after the drop is refused
+  ok    and writes nothing
+  ok    the mark lasts LANDINGS_GONE_SECONDS
+  ok    and then lapses
+
+A drop is done only on its exact answer (Codex G2, #1947)
+  ok    answered []: not done
+  ok    answered []: tried three times
+  ok    answered [[1]]: not done
+  ok    answered [[1]]: tried three times
+  ok    answered [[1,-1]]: not done
+  ok    answered [[1,-1]]: tried three times
+  ok    answered [[true,0]]: not done
+  ok    answered [[true,0]]: tried three times
+  ok    answered [[1,0],[1,0]]: not done
+  ok    answered [[1,0],[1,0]]: tried three times
+  ok    answered [[2,0]]: not done
+  ok    answered [[2,0]]: tried three times
+  ok    the landings and their room are kept
+  ok    dropPage says so: PageDropIncomplete
+a removed page's records could not all be confirmed gone; what is left stays counted in the store's room PageDropIncomplete [Error]: The page was deleted, but some of its records could not be confirmed gone; they stay counted until they are.
+    at dropPage (/tmp/codex-g-proof-te8i4I/proof.cjs:4839:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async main (/tmp/codex-g-proof-te8i4I/proof.cjs:4985:18) {
+  pictures: [],
+  kept: LandingsDropUnconfirmed [Error]: We could not confirm the landing pages were deleted. They stay counted in the store's room until they are.
+      at dropLandings (/tmp/codex-g-proof-te8i4I/proof.cjs:4770:9)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async dropPage (/tmp/codex-g-proof-te8i4I/proof.cjs:4836:20)
+      at async main (/tmp/codex-g-proof-te8i4I/proof.cjs:4985:18)
+}
+  ok    with the pictures it released, which the routes still delete
+a removed page's records could not all be confirmed gone; what is left stays counted in the store's room Error: down
+    at main (/tmp/codex-g-proof-te8i4I/proof.cjs:4991:62)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+  ok    another failure hands back none
+  ok    a confirmed drop then takes them, and gives back their room
+
+58 checks, all passing.
+
+G_FILE_EXIT campaign-landing-store.test.ts 0
+
+=== campaign-landing.test.ts ===
+
+Only words that passed the ad check, each fitting its place
+  ok    the ad passes the check
+  ok    the landing words
+  ok    an ad the check refuses makes no page
+  ok    a campaign name that is not a tag
+  ok    the tag is the numbers' own shape
+  ok    a headline too long is refused, never cut
+  ok    no headline
+
+The sales page, with the ad's words where a visitor reads first
+  ok    the top block says the ad's headline and line
+  ok    the button says the ad's words
+  ok    everything else is the page's own, in its order
+  ok    a countdown already past is left out, one ahead is kept
+  ok    nothing is added
+  ok    no headline or page test runs on it
+  ok    the published page is untouched
+  ok    no button words keeps the page's own
+  ok    a page with no top block is refused
+
+16 checks, all passing.
+
+G_FILE_EXIT campaign-landing.test.ts 0
+
+=== landing-store-evidence.test.ts ===
+G2_PARTIAL_LANDING {"outcome":"Error: The landing pages could not be read just now, so nothing was saved. Try again in a moment.","before":"[{\"campaign\":\"original\",\"headline\":\"Known headline\",\"sub\":\"Known subheading\",\"button\":\"Read more\"},{\"campaign\":\"unconfirmed-existing\",\"headline\":\"Known headline\",\"sub\":null,\"button\":\"Read more\"}]","after":"[{\"campaign\":\"original\",\"headline\":\"Known headline\",\"sub\":\"Known subheading\",\"button\":\"Read more\"},{\"campaign\":\"unconfirmed-existing\",\"headline\":\"Known headline\",\"sub\":null,\"button\":\"Read more\"}]"}
+G2_DROP_ACK {"throughPage":false,"completed":false,"recordRetained":true}
+G2_DROP_ACK {"throughPage":true,"completed":false,"recordRetained":true}
+G2_LANDING_RESURRECTION {"result":"Error: This page was deleted, so its landing pages were not saved.","record":null,"slot":null}
+✔ control: a valid campaign survives another save and a confirmed deletion removes all (5.85121ms)
+✔ a malformed campaign inside a JSON array is not permission to discard it on the next save (1.049969ms)
+✔ an unapplied unknown delete must not report completed cleanup false (0.454935ms)
+✔ an unapplied unknown delete must not report completed cleanup true (2.224124ms)
+✔ an older save must not recreate campaign data after the page deletion completes (0.919723ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16.83674
+
+G_FILE_EXIT landing-store-evidence.test.ts 0
+
+=== sales-page-row.test.ts ===
+
+One, two or three columns
+  ok    1 column(s): kept as sent
+  ok    2 column(s): kept as sent
+  ok    3 column(s): kept as sent
+  ok    no columns: not a row, and told back
+  ok    four columns: not a row, and told back
+  ok    a column that is not a list: not a row, and told back
+  ok    no columns at all: not a row, and told back
+  ok    an empty column is kept: it places the others
+
+How many elements
+  ok    a column keeps at most 8, and more is told back
+  ok    a row keeps at most 12, in reading order
+  ok    and more is told back
+  ok    exactly 12 is fine
+  ok    a list of more than 8 points is told back
+
+Each element
+  ok    heading: kept
+  ok    subheading: kept
+  ok    paragraph: kept
+  ok    list: kept
+  ok    icon: kept
+  ok    button: kept
+  ok    link: kept
+  ok    image: kept
+  ok    video: kept
+  ok    window: kept
+  ok    an unknown kind: refused
+  ok    a heading with no words: refused
+  ok    a subheading that is not text: refused
+  ok    an empty paragraph: refused
+  ok    a list with no points: refused
+  ok    an icon not on the list: refused
+  ok    a button to javascript:: refused
+  ok    a button to data:: refused
+  ok    a button to plain http: refused
+  ok    a button to this machine: refused
+  ok    a button with a link and no words: refused
+  ok    a picture from elsewhere: refused
+  ok    a picture with no description: refused
+  ok    a video from elsewhere: refused
+  ok    a video in a window from elsewhere: refused
+  ok    a video in a window with no button words: refused
+  ok    a video in a window with no video: refused
+  ok    not an object: refused
+  ok    a decorative picture needs no description, and keeps none
+  ok    every icon on the list is one
+  ok    text is trimmed to its limit
+  ok    a button's address is kept as the https it is
+  ok    only the fields of its shape are kept
+  ok    a page sent with a refused element is told back, not saved
+
+Pictures count with the page's
+  ok    a row's pictures are the page's, kept with it
+  ok    a picture already on the page is not shown twice, and is told back
+  ok    an earlier version brought back loses a picture no longer kept
+  ok    a copy for another product leaves the pictures out, and counts them
+  ok    the page coach does not ask a decorative picture for a description
+  ok    and counts a described one as described
+
+Drawn on the page
+  ok    every element is drawn
+  ok    in reading order: column one, then two, then three
+  ok    three columns side by side once there is room
+  ok    no table for the layout
+  ok    a heading is a section heading, a subheading under it is one level down
+  ok    a subheading with no heading before it does not skip a level
+  ok    an icon without words is decoration
+  ok    an icon with words says them
+  ok    a picture is drawn from our own address with its description and size
+  ok    a decorative picture is hidden from screen readers
+  ok    a link button opens its checked address, and says it opens a new tab
+  ok    a button with no address is the page's own
+  ok    buttons use the theme's button, at least 44 pixels high
+  ok    in the studio's preview a link button does nothing
+  ok    a video is the lazy player, loading nothing before play
+  ok    a video in a window is kept as sent
+  ok    the window scrolls to the player's controls when a long title takes its room (400% zoom; review of #2135)
+  ok    the Close button keeps its words at 7:1 under the pointer: its own darker hover
+  ok    a theme button, at least 44 pixels high, that says it opens a video
+  ok    its window is closed and empty until pressed: no player, nothing loaded
+  ok    in the studio's preview the button is drawn and does nothing
+  ok    the mark is said in the page's language
+  ok    the player waits for its own play button for a visitor who asked for less motion
+  ok    the window: native modal dialog (page inert, Escape closes), focus in on open and back on close, frame only while open, named by its title
+  ok    a tag typed is drawn as text, never as markup
+  ok    a row with nothing in it is not drawn
+  ok    and takes no band of its own
+
+Offered on a product's page, now that its editor exists
+  ok    in the block list
+  ok    in the gallery, once
+  ok    not on the store's own pages
+  ok    but it has an icon, like every kind
+  ok    an empty one is two empty columns
+
+85 checks, all passing.
+
+G_FILE_EXIT sales-page-row.test.ts 0
+
+=== sales-page-row-words.test.ts ===
+
+A row's words are the page's words
+  ok    every word a reader reads, in reading order, never the address
+  ok    a promise of easy money in a row is found by the Terms check
+  ok    a translation puts each word back in its place
+  ok    into the same parts, the address and the video untouched
+  ok    a decorative picture and an icon with no words give no words
+  ok    a video in a window gives its button words, then its title
+  ok    and a translation puts each back, the video untouched
+  ok    a copy into another store keeps it whole, nothing left out
+
+A copy into another store leaves a row's pictures out
+  ok    the picture is left out and counted
+  ok    everything else is kept, in order
+  ok    the page copied from is left as it was
+
+Words that would be cut short are told back, not saved shorter
+  ok    a heading too long: told back
+  ok    a smaller heading too long: told back
+  ok    words too long: told back
+  ok    a list point too long: told back
+  ok    an icon's words too long: told back
+  ok    a button's words too long: told back
+  ok    a video title too long: told back
+  ok    a video window's title too long: told back
+  ok    a video window's button words too long: told back
+  ok    a picture's description too long: told back
+  ok    a picture's line too long: told back
+  ok    spaces trimmed are not a cut
+
+Empty list lines are left out before points are counted
+  ok    8 points and blank lines: kept whole
+  ok    9 points: told back
+
+25 checks, all passing.
+
+G_FILE_EXIT sales-page-row-words.test.ts 0
+
+=== sales-page-booking.test.ts ===
+
+Kept whole, or refused and told back
+  ok    a call's id and a heading: kept exactly as sent
+  ok    the heading is optional
+  ok    a heading of exactly the limit is kept whole
+  ok    nothing else sent is kept with it
+  ok    it may show only on phones, like any block
+  ok    no call chosen: not kept, and told back
+  ok    no call at all: not kept, and told back
+  ok    a call's id that is not an id: not kept, and told back
+  ok    a call's id that is not a word: not kept, and told back
+  ok    a heading that would be cut short: not kept, and told back
+  ok    a heading that is not words: not kept, and told back
+  ok    one booking block a page
+  ok    a second one is not kept, and told back
+  ok    a second version of the page has its own one
+  ok    and no more than one either
+  ok    an empty one has no call and no heading
+
+Its words are its heading, and only its heading
+  ok    every word a reader reads, never the call's id
+  ok    a promise of easy money in its heading is found by the Terms check
+  ok    a translation puts the heading back, the call untouched
+  ok    no heading, no words
+
+A translation that makes its heading too long keeps the block, untranslated (review of #2145)
+  ok    read again on its own, the longer heading would drop the block
+  ok    kept: the booking block as it was, in its place, counted, the other block translated
+
+A copy into another store maps the call, or leaves the block out
+  ok    its call becomes the call's copy, with no tie to a saved section
+  ok    a call that is not copied (and calls are not, today): the block is left out and counted
+  ok    the page copied from is left as it was
+
+The card: the call's own name, length and place
+  ok    a call on weekly hours, online: its name, the booking page's own line, a link to its page
+  ok    which says how long and where
+  ok    a private video room is said as one
+  ok    a meeting on the creator's Zoom is said as one
+  ok    no link yet: online
+  ok    in person: the address, as the booking page says it
+  ok    a group call: never how many seats or people
+  ok    dated sessions: picked as a session, with a link
+  ok    none left before its notice: said in words, no link to an empty page
+  ok    a draft: nothing
+  ok    not a call: nothing
+  ok    not on sale: nothing
+  ok    in es, the store's own words
+  ok    in fr, the store's own words
+  ok    in de, the store's own words
+  ok    in it, the store's own words
+  ok    in nl, the store's own words
+  ok    in pt, the store's own words
+
+The cards come from the listings the store already holds
+  ok    a store that cannot take payments: no card at all
+  ok    only a call on sale: not a draft, not a free call yet (551 [FB1]), not a product, not a subscription, not one past the first page
+  ok    only the calls the page asks for
+  ok    a store switched off after notices: none
+  ok    read at once, with no request
+  ok    made with no database command and no request out
+
+Drawn on the page
+  ok    the creator's heading, then the call's name and line
+  ok    a link to the call's own booking page, whose name says where it leads (WCAG 2.4.9)
+  ok    the theme's button, at least 44 pixels high (WCAG 2.5.5)
+  ok    no heading: the call's name is the heading
+  ok    a call with no card (gone, a draft, not a call, not on sale): nothing drawn
+  ok    an empty one: nothing drawn
+  ok    no date on sale: said in words, with no link
+  ok    in the studio's preview the link does nothing
+  ok    a tag typed is drawn as text, never as markup
+  ok    no hurry, no count of seats or bookings
+
+Not offered until its picker and editor exist
+  ok    not in the block list
+  ok    not in the gallery
+  ok    not on a store's own pages yet
+  ok    but it has an icon, like every kind
+  ok    the editor names one already on a page and tells back why one was not saved
+
+64 checks, all passing.
+
+G_FILE_EXIT sales-page-booking.test.ts 0
+
+=== page-versions.test.ts ===
+
+What each save keeps
+  ok    a page never saved has none
+  ok    the first save has nothing before it
+  ok    the second keeps the first, read back whole
+  ok    with when it was saved over
+  ok    a save that changes nothing keeps nothing
+  ok    5 at most, newest first
+
+How long they are kept
+  ok    kept as long as the page is
+  ok    another product's page keeps its own
+  ok    and they go with the product
+
+Pictures, when a version comes back
+  ok    only the pictures still kept
+  ok    words beside a deleted picture stay, without it
+  ok    and how many were lost is said
+  ok    nothing lost when every picture is kept
+
+13 checks, all passing.
+
+G_FILE_EXIT page-versions.test.ts 0
+
+=== site-pages.test.ts ===
+
+Addresses
+  ok    every page a store already has is an address a page cannot take
+  ok    made from a title
+  ok    only lowercase words with dashes, nothing reserved, each once
+  ok    a stored list is cleaned: a bad address, a repeat, more than the most
+  ok    only blocks that mean something without a product of the page's own
+
+The menu
+  ok    out now, out later, not out
+  ok    when a page is out, from its blocks
+
+On the store's own domain
+  ok    one word or words with dashes is a page; the site's own pages and the store's other parts are not
+
+Buttons that lead to a product
+  ok    not to a product the store does not have
+  ok    to one it has
+  ok    and the store is given the id its pages' blocks are kept under
+  ok    the product removed, the page leads to the store
+
+12 checks, all passing.
+
+G_FILE_EXIT site-pages.test.ts 0
+
+=== site-page-append.test.ts ===
+✔ appending uses the latest pages and preserves their contents (20.334935ms)
+✔ two concurrent appends preserve both additions (5.749547ms)
+✔ concurrent appends share the last page slot (3.352031ms)
+✔ a full store does not truncate existing pages to fit additions (7.657571ms)
+✔ an address taken since the request snapshot cannot be duplicated (2.503114ms)
+✔ an existing identity cannot be replaced by an append (2.320851ms)
+✔ a multi-page conflict appends none of the proposed pages (2.77955ms)
+✔ invalid or oversized append lists are refused without partial parsing (2.274956ms)
+✔ a new page cannot claim a reserved route (3.437579ms)
+✔ existing reserved addresses remain intact (9.882612ms)
+✔ a removed or unknown product target cannot be attached (6.693751ms)
+✔ a missing store cannot be recreated by appending pages (1.049989ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 75.16122
+
+G_FILE_EXIT site-page-append.test.ts 0
+
+=== store-data.test.ts ===
+
+What a room is, by plan
+  ok    a paid store's room is its plan's
+  ok    a free trial's, and an ended plan's
+  ok    what a store keeps may fill it up to two windows of its orders from the top
+  ok    bytes are UTF-8 and every entry counts, rounded up
+  ok    an order takes what it hands over
+  ok    a bundle hands over each of its items
+
+Taken before it is written, refused past the room
+  ok    a write that fits is taken, with its own field
+  ok    one past the room is refused with what it is
+  ok    and the creator is told in plain words
+  ok    nothing of it was written
+  ok    needData says it as a full store, so every studio route answers it
+  ok    a buyer is told it is the store's room, not theirs
+  ok    deleting gives the room back, field and all
+  ok    and never below nothing
+
+What expires by itself comes off with its month
+  ok    a record kept until December is counted until then
+  ok    in the room
+  ok    and gone once its month is over
+  ok    a cache that does not fit is not kept
+
+An order is never refused once paid
+  ok    what an order leaves is added whatever the room holds, at what it really adds
+  ok    so the room may be passed by what was paid for
+
+A checkout is held only while the room has space for its order
+  ok    an empty room admits a checkout
+  ok    a room with space for one more order admits one
+  ok    room made, sales go on
+  ok    a store is known by its id
+
+Unknown is not zero
+  ok    a room that cannot be read takes nothing
+  ok    and is an ordinary failure, to try again, not a full store
+  ok    a change that is not a number is refused before anything
+
+Counts that never grow a hash past its most
+  ok    new names fill the hash to its most
+  ok    what does not fit is counted under ~, and a name there always counts
+  ok    counting names that all fit runs its length once and a count each
+  ok    near its most, one read more says which are there
+  ok    the same hash named twice is refused, and nothing is written
+  ok    and the same names again, past it, as many
+
+33 checks, all passing.
+
+G_FILE_EXIT store-data.test.ts 0
+
+=== store-data-registry.test.ts ===
+creator: room 18 MB; outside it 119.1 MB on average, 291.7 MB at once
+pro: room 135 MB; outside it 285.7 MB on average, 800.3 MB at once
+scale: room 250 MB; outside it 701.6 MB on average, 2466.1 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (318.824765ms)
+✔ each family is bounded one way at least, and what it says can be checked (64.792157ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (5.968044ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (3.399582ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.572581ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (22.178433ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.26584ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 436.193949
+
+G_FILE_EXIT store-data-registry.test.ts 0
+
+=== plan-cost-registry.test.ts ===
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $1.3022
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (31.64122ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (127.723502ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (39.891697ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.235291ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.254162ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.279991ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.468445ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (58.56715ms)
+✔ every store figure taken in the code is a kind a line prices (62.781618ms)
+✔ every email sent names a meter, and each file only the meters it may use (102.508295ms)
+✔ the units a figure is taken in cost at least what they stand for (11.072571ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (2.423043ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.235053ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.386261ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.138828ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.134532ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.460893ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (1.021216ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.140561ms)
+✔ Path push fits its reserved studio requests (0.09929ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.083645ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.116605ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.180481ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (60.102353ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 516.718214
+
+G_FILE_EXIT plan-cost-registry.test.ts 0
+
+=== closing-families.test.ts ===
+✔ inactive diagnostic observations retain their existing absolute one-day expiry (1.830843ms)
+✔ every family of the registry says what becomes of it when its store closes, and nothing more is said (4.979107ms)
+✔ what each says fits how the registry bounds it (3.904491ms)
+✔ a key belongs to its longest family, and the walk takes only what names a closing store (0.847465ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 29.989576
+
+G_FILE_EXIT closing-families.test.ts 0
+
+=== closing-cost.test.ts ===
+creator: deletes $0.0025, followers $0.0018, its whole export after its plan ended $0.0037, last steps $0.0015: $0.0094, once for the store; each order $0.000002 for its buyers' library entries
+pro: deletes $0.0066, followers $0.0088, its whole export after its plan ended $0.0080, last steps $0.0015: $0.0249, once for the store; each order $0.000002 for its buyers' library entries
+scale: deletes $0.0118, followers $0.0158, its whole export after its plan ended $0.0123, last steps $0.0015: $0.0413, once for the store; each order $0.000002 for its buyers' library entries
+a free trial's store: $0.0090, in the share of stores that pay nothing
+a walk reads a million keys for $0.0044; at one a day, $0.136 a month for every million keys
+✔ a closing's worst cost, part by part, for each plan and for a free trial (46.172021ms)
+✔ what a unit writes is paid for to its end by the window that writes it, so nothing that goes by itself is priced again (2.423594ms)
+✔ a buyer's library entry: its order pays for its whole life, which ends by itself (0.30588ms)
+✔ an export a paying store takes from its studio figure costs no more than the units it takes, Stripe's pages included (0.443177ms)
+✔ once a plan has ended, its whole exports are its own: counted for the store, never refused for want of a figure or a place, and priced in its closing (3.681736ms)
+✔ the walk, the company's: what it costs a walk for every million keys the database holds (0.285339ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 61.81978
+
+G_FILE_EXIT closing-cost.test.ts 0
+
+=== locked-deletes.test.ts ===
+
+The community: emailing every member and deleting wait
+  ok    set up by the full session
+  ok    an announcement emailed to every member is refused
+  ok    a post deleted is refused, and the post is still there
+  ok    a comment deleted is refused
+  ok    a post that emails nobody is not
+  ok    emptying the chat room is refused
+  ok    taking a chat message out is refused
+  ok    a reported post deleted from the studio is refused
+
+Events: canceling, deleting and moving one emails everyone coming
+  ok    made by the full session
+  ok    canceling it is refused
+  ok    deleting it is refused
+  ok    moving it is refused
+  ok    renaming it, at the same time, is not
+
+The course: what takes a lesson, a file or students' work away waits
+  ok    a lesson added from the locked session: adding stays open
+  ok    "lesson-remove" is refused
+  ok    "module-remove" is refused
+  ok    "media-remove" is refused
+  ok    taking an assignment off, with the work handed in, is refused
+  ok    taking a quiz off is refused
+  ok    sending a purchase email again, which carries the thank-you note, is refused
+  ok    withdrawing a student's certificate is refused
+  ok    deleting a lesson comment from the studio is refused
+  ok    a new video over the lesson's old one is refused
+  ok    and the lesson keeps it
+  ok    deleting it from the lesson page is refused too, and it is still there
+
+The product: its file, picture, page, keys and the rest
+  ok    a link put over the file, which deletes it, is refused
+  ok    and the product keeps its file
+  ok    a link on a product with no file is not
+  ok    marked coming soon by the full session
+  ok    launching it, one email in the creator's words to everyone waiting, is refused
+  ok    and it is still coming soon, its list unspent
+changing a waitlist failed Error: `after` was called outside a request scope. Read more: https://nextjs.org/docs/messages/next-dynamic-api-wrong-context
+    at after10 (/tmp/codex-g-proof-TDZEat/proof.cjs:2500:15)
+    at POST16 (/tmp/codex-g-proof-TDZEat/proof.cjs:144094:32)
+    at async main (/tmp/codex-g-proof-TDZEat/proof.cjs:150052:33)
+  ok    taking the mark off, which emails nobody waiting and gives paid pre-orders the fixed delivery email, is not
+  ok    taking the file off is refused
+  ok    a new file over it is refused
+  ok    and the product still keeps its file
+  ok    a link put over a price option's file is refused
+  ok    and the option keeps its file
+  ok    a new file over a price option's file is refused
+  ok    taking a price option's file off is refused
+  ok    and the option still keeps it
+  ok    removing the price option, with its file, is refused
+  ok    and the option is still there with its file
+  ok    a link on a price option with no file is not refused
+  ok    removing the picture is refused
+  ok    a new picture over it is refused
+  ok    and the product keeps its picture
+  ok    its alt text is not
+  ok    a page saved without a picture it showed is refused
+  ok    and the page still shows it
+  ok    removing an episode, with its audio, is refused
+  ok    and the episode is still there
+  ok    product: remove is refused
+  ok    keys: clear is refused
+  ok    bundle: clear is refused
+  ok    option: remove is refused
+  ok    podcast: remove is refused
+  ok    page-funnels: remove is refused
+  ok    stream/captions: remove is refused
+  ok    and the product is still there
+
+The store's pages
+  ok    a site page saved without a picture it showed is refused
+  ok    a new link picture over the old one is refused
+  ok    and the link keeps its picture
+  ok    turning the link into a heading, which lets its picture go, is refused
+  ok    and the link keeps its picture and its address
+  ok    editing the link's title is not refused
+  ok    removing the store photo is refused
+  ok    a new store photo over it is refused
+  ok    forms: {"action":"remove","id":"x"} is refused
+  ok    site-page: {"action":"remove","id":"pagepage01"} is refused
+  ok    saved-blocks: {"action":"remove","id":"x"} is refused
+  ok    links: {"action":"remove","id":"604593599a"} is refused
+  ok    link-image: {"action":"remove","id":"604593599a"} is refused
+  ok    short-links: {"action":"remove","code":"x"} is refused
+  ok    blog: {"action":"delete","id":"x"} is refused
+  ok    answers: {"clear":true} is refused
+  ok    assistant-settings: {"clear":true} is refused
+  ok    and after all of them the link is still there with its picture
+  ok    and the site page still shows its picture
+  ok    saving a form is not
+
+Notes, tasks, deals, pitches, segments, drafts and review photos
+  ok    person: unnote is refused
+  ok    person-tasks: remove is refused
+  ok    crm: undeal is refused
+  ok    crm: unpipeline is refused
+  ok    notes: remove is refused
+  ok    spend: remove is refused
+  ok    outreach: drop is refused
+  ok    mail: segment-remove is refused
+  ok    mail: draft-remove is refused
+  ok    reviews: photo is refused
+
+The store's own fields about each person
+  ok    two fields saved by the full session
+  ok    saved without one of them, which takes its answers off every person, is refused
+  ok    and both are still there
+  ok    saving them with a new one, taking none away, is not
+
+A passkey change from a locked session does not spend the owner's
+  ok    the locked session removes nothing at once: it may only ask for a wait, on a count of its own
+  ok    and the owner's own change is not refused for the hour
+  ok    31 lists from a locked session are told locked
+  ok    and the owner can still list their passkeys
+
+Said the same way everywhere, and true
+  ok    app/signin/code/page.tsx says the one list
+  ok    app/signin/lost/page.tsx says the one list
+  ok    app/studio/page.tsx says the one list
+  ok    lib/two-step.ts says the one list
+  ok    lib/recovery-address.ts says the one list
+  ok    lib/help-content.ts says the one list
+  ok    lib/feature-pages.ts says the one list
+  ok    the list names imports, passkeys, two-step login, email to members and deleting for good
+  ok    and starts a sentence with a capital
+
+Every route that deletes or sends is held
+  ok    every route that deletes is named here (a new one has to say how it is held)
+  ok    and none named here is gone
+  ok    each one held the way it says
+  ok    every route that deletes a file has a request above that reads the file still there
+  ok    and no action is named for one route only by its path
+  ok    and every action LOCKED_ACTIONS names is one a route here uses (the in-route ones are asked through lockedFor)
+
+Every action of a route that deletes or sends is named, held or open with a reason
+  ok    every action of a route that deletes or sends is in the table (a new one has to say how it is held)
+  ok    and none in the table is gone from its route
+  ok    each one held, or open, the way it says
+
+115 checks, all passing.
+
+G_FILE_EXIT locked-deletes.test.ts 0
+
+=== g1947-0861-types-final.log ===
+
+=== g1947-0861-lint.log ===
+
+=== g1947-0861-proof-lint-final.log ===
+
+=== EXCLUDED FIXTURE ATTEMPTS, NOT PRODUCT EVIDENCE ===
+Initial NextRequest omitted Host despite Origin: actual CSRF guard correctly returned403, target not reached. Host added consistently with the canonical authenticated fixtures. Next, readListing on the old Store snapshot still showed its old cached product: replaced with a fresh storeForEmail snapshot, retaining the null expectation. Only the final recovery-final logs above are used. No product guard was bypassed or mocked.

@@ -64,7 +64,7 @@ function walk(html: string): Walk {
 }
 
 const BODY =
-  "## Fresh this week\n\nA new sourdough guide is out. Read it at https://example.com/guide today.\n\n- Rye\n- Spelt\n\n[Read the guide](https://example.com/guide)\n\n---\n\nSee you soon.";
+  "# Fresh this week\n\nA new sourdough guide is out. Read it at https://example.com/guide today.\n\n- Rye\n- Spelt\n\n[Read the guide](https://example.com/guide)\n\n---\n\nSee you soon.";
 const PHOTO = "0123456789abcdef0123456789abcdef";
 
 function storeWith(look: Partial<StoreLook>, photoId: string | null = null): Store {
@@ -153,7 +153,7 @@ part("The logo is the store's own photo, served from where it already is, with i
 part("The text version does not change");
 {
   const before =
-    "## Fresh this week\n\nA new sourdough guide is out. Read it at https://example.com/guide today.\n\n- Rye\n- Spelt\n\nRead the guide: https://example.com/guide\n\n—\n\nSee you soon.\n\n—\nYou are getting this because you told Oven Notes you wanted to hear from them.\nUnsubscribe in one click: https://marktmorgen.com/unsubscribe?t=tok\n\nOven Notes · 1 Main St, Springfield\nSent with Marktmorgen.";
+    "Fresh this week\n\nA new sourdough guide is out. Read it at https://example.com/guide today.\n\n- Rye\n- Spelt\n\nRead the guide: https://example.com/guide\n\n—\n\nSee you soon.\n\n—\nYou are getting this because you told Oven Notes you wanted to hear from them.\nUnsubscribe in one click: https://marktmorgen.com/unsubscribe?t=tok\n\nOven Notes · 1 Main St, Springfield\nSent with Marktmorgen.";
   is("the text version is what it was before the email took the store's look", render(storeWith({ accent: "#ffdd00", font: "editorial" }, PHOTO), "New loaf", BODY, "tok").text, before);
   is("a dark store's text version is the same words", render(storeWith({ theme: "night", accent: "#e5533d" }), "New loaf", BODY, "tok").text, before);
 }

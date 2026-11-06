@@ -67,7 +67,9 @@ const sendOn = between("function focusItemAfterRemoval(", "\n}\n");
 is("the focus waits for the list to be drawn again, then goes where itemFocusAfterRemoval says", /itemFocusAfterRemoval\(base, at, count\)/.test(sendOn) && /document\.getElementById\(gone\) \? null : document\.getElementById\(focus\)/.test(sendOn), true);
 
 part("Clearing the page keeps the focus, then moves it (WCAG 2.4.3)");
-const yes = editor.slice(editor.lastIndexOf("<button", editor.indexOf("Yes, clear it")), editor.indexOf("Yes, clear it"));
+// The button's own words, after its question: the refusal for a Clear (SIGNED_OUT_CLEARING) names "Yes, clear it" too.
+const yesAt = editor.indexOf("Yes, clear it", editor.indexOf("Back to the plain page?"));
+const yes = editor.slice(editor.lastIndexOf("<button", yesAt), yesAt);
 is("Yes, clear it is never turned off under the focus", /(?<![-\w])disabled=\{/.test(yes), false);
 is("it says it cannot clear now, and stays focusable", yes.includes("aria-disabled={busy || undefined}"), true);
 is("a press while it cannot clear does nothing", /function clearNow\(\) \{\s*if \(busy\) return;/.test(main), true);

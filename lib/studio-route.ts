@@ -38,7 +38,7 @@ import { lockedOut, lockedUntil } from "@/lib/two-step";
 import { type Store, STORE_ID_PATTERN, accountStores, ensureStoreId, storeForEmail, storeForId, storeRef } from "@/lib/store";
 import { type Permission, type Role, PERMISSION_WORDS, can } from "@/lib/team-roles";
 import { logTeam, memberStores, roleIn, teamTwoStepBlocks } from "@/lib/team";
-import { withinEssentialLimit } from "@/lib/request-guard";
+import { essentialLimitState, essentialTakeBelow, type LimitState } from "@/lib/request-guard";
 import { takeAllowance } from "@/lib/store-allowance";
 import { refreshPeriod } from "@/lib/billing-sync";
 import { ESSENTIAL_NEEDS, ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
@@ -218,13 +218,33 @@ export async function studioAccess(
 }
 
 /**
+ * Takes one of the store's ESSENTIAL_PER_DAY requests of the day: the small
+ * daily figure what the owner needs to leave or pay is counted on (countStudio
+ * below, and the plan's invoices, lib/plan-invoices.ts), with its three
+ * answers. One key for all of them, so none can drift onto another counter.
+ */
+export function takeEssential(store: Pick<Store, "sid" | "handle">): Promise<LimitState> {
+  return essentialLimitState("studio-essential", store.sid || store.handle, ESSENTIAL_PER_DAY, 86_400);
+}
+
+/**
+ * One of the same requests for a use that is not leaving or paying, taken
+ * only while fewer than `below` of them were taken in the window (one
+ * script on the same key, lib/request-guard.ts essentialTakeBelow), so the
+ * rest always stays for what the owner needs to leave or pay.
+ */
+export function takeEssentialBelow(store: Pick<Store, "sid" | "handle">, below: number): Promise<LimitState> {
+  return essentialTakeBelow("studio-essential", store.sid || store.handle, Math.min(below, ESSENTIAL_PER_DAY), 86_400);
+}
+
+/**
  * One studio request for a store, taken from its window: `units` of them for
  * a page drawn. What the owner needs to leave or pay is taken from a small
  * daily figure instead, so it is never shut out by the month's.
  */
 export async function countStudio(store: Store, need: Need | null, units = 1): Promise<{ ok: true; store?: Store } | { ok: false; reason: "used" | "unknown" | "pool" | "daily"; message: string; left?: number; reset?: string }> {
   if (need && ESSENTIAL_NEEDS.includes(need)) {
-    return (await withinEssentialLimit("studio-essential", store.sid || store.handle, ESSENTIAL_PER_DAY, 86_400))
+    return (await takeEssential(store)) === "within"
       ? { ok: true }
       : { ok: false, reason: "daily", message: "Too many of these today. Try again tomorrow, or write to support." };
   }

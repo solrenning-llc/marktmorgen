@@ -108,7 +108,7 @@ import { assistantLeft, assistantMissed } from "@/lib/store-assistant";
 import { assistantRefusal, syncAssistant } from "@/lib/assistant-billing";
 import { assistantWindow } from "@/lib/store-assistant-rules";
 import { STORE_PAGE, answersAllowance, answersUsed, missedQuestions } from "@/lib/answers";
-import { readCards, readTitles } from "@/lib/catalog";
+import { readCards } from "@/lib/catalog";
 import { TaxEditor } from "@/components/tax-editor";
 import { StoreLanguageEditor } from "@/components/store-language-editor";
 import { RecoveryEditor } from "@/components/recovery-editor";
@@ -758,8 +758,8 @@ async function saleCandidates(store: Store): Promise<{ id: string; title: string
  * "Goes well with" can pick (lib/store-collections.ts). One read of the
  * cards, whatever the store's size (lib/catalog.ts, readCards).
  */
-async function publishedChoices(store: Store): Promise<{ id: string; title: string }[]> {
-  const cards = await readCards(store).catch(() => new Map<string, { title: string }>());
+async function publishedChoices(store: Store, cardsRead: Promise<Map<string, { title: string }>>): Promise<{ id: string; title: string }[]> {
+  const cards = await cardsRead;
   return store.catalog.items
     .filter((item) => (item.kind & KIND.hidden) === 0)
     .map((item) => ({ id: item.id, title: cards.get(item.id)?.title ?? "" }))
@@ -1258,6 +1258,11 @@ export default async function StudioPage({
   // before the add-on's month is read again from Stripe and written (the assistant), so they never wait on each
   // other's store lock in one visit. Set while the page's JSX is built, before either part awaits anything.
   const serverWrite: { done: Promise<unknown> } = { done: Promise.resolve() };
+  // The store's cards, read once for the parts that show them (the short links' titles, the product editor's pairs,
+  // the cards and the welcome offer), when the first of them asks: read side by side, each would repair a cold cache again (Codex M on
+  // #2900). Read in order as before, the later two found it repaired.
+  const cardsOnce: { read: Promise<Awaited<ReturnType<typeof readCards>>> | null } = { read: null };
+  const storeCards = (shop: Store) => (cardsOnce.read ??= early(readCards(shop).catch(() => new Map())));
   return (
     <div className="min-h-screen bg-paper text-ink">
       {store && view ? (
@@ -1532,7 +1537,7 @@ export default async function StudioPage({
                 <div className="mt-4">
                   <SharePanel url={storeBase(store)} title={store.name} what="store" />
                   {may("page") && store.statsId ? (async () => {
-                    const titles = readTitles(store).catch(() => new Map<string, string>());
+                    const titles = storeCards(store).then((cards) => new Map([...cards].map(([id, card]) => [id, card.title] as const)));
                     return (
                       <ShortLinks
                         links={await readLinks(store.statsId).catch(() => [])}
@@ -1713,7 +1718,7 @@ export default async function StudioPage({
                   const newComments = early(newCommentsFor(shelf?.products ?? []));
                   const waitlists = waitlistViews(store, (shelf?.products ?? []).map((p) => p.id)).catch(() => ({}));
                   const preorders = preorderViews(store, (shelf?.products ?? []).map((p) => p.id)).catch(() => ({}));
-                  const pairChoices = early(publishedChoices(store));
+                  const pairChoices = early(publishedChoices(store, storeCards(store)));
                   return (
                     <ProductEditor
                       products={shelf?.products ?? []}
@@ -2023,7 +2028,7 @@ export default async function StudioPage({
                 })() : null}
 
                 {(async () => {
-                  const cardsRead = readCards(store).catch(() => new Map());
+                  const cardsRead = storeCards(store);
                   // The answers' month and the assistant's need only the store: they are sent with the cards, and each
                   // is still shown where it was, under the same condition.
                   const answers = may("page") && aiAvailableFor(store) ? { used: answersUsed(store).catch(() => 0), missed: missedQuestions(store).catch(() => []) } : null;
@@ -2114,7 +2119,7 @@ export default async function StudioPage({
                   return (
                     <WelcomeOfferEditor
                       offer={store.welcomeOffer}
-                      products={[...(await readCards(store).catch(() => new Map()))].map(([, c]) => c).filter((c) => c.priceCents > 0).map((c) => ({ id: c.id, title: c.title }))}
+                      products={[...(await storeCards(store))].map(([, c]) => c).filter((c) => c.priceCents > 0).map((c) => ({ id: c.id, title: c.title }))}
                       connected={Boolean(current?.stripeAccountId)}
                       suggestedAddress={store.winback.address || store.recovery.address || store.mail?.address || ""}
                       offered={await offered}

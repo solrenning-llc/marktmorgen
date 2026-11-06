@@ -1,3 +1,9 @@
+# Codex J — fechamento operacional — 2026-11-06 06:04 UTC
+
+Checkpoint abaixo integral e autoritativo. O append409 descrito no delta seguinte foi RESOLVIDO: após>=2min, fetch_fileSÓSHA+fetch_blobFULL225119/prefixo confirmado/novidades pertinentes lidas; ponto final J publicado com sucesso **canal commitc0bde5e484a59d1f17777df3ab23bfaba599d781/blob e3043f1f2a7ad00b3f90f3a7e5c8eab92cb1bc6e**. NÃO reappend/recriar anúncio. Ler TODASnovas desdeesse ponto, nunca restaurar histórico. AutomaçãoEXISTENTE updateconfirmadosuccess:true/ativa. OWN0produtos, #2762MEDaberto e #2769doisLEVESaguardamnovoheadnominal; nenhuma nova atribuiçãoJ nas novidades. AV12main-onlyvigia32529nãoéCI/canalwatch. Demais estados/provas/regras no delta abaixo.
+
+---
+
 # Codex J — delta autoritativo — 2026-11-06 06:03 UTC
 
 Todo histórico abaixo preservado integralmente; este delta prevalece. Checkpoint2b89aaa8 COMPLETO lido antes de qualquer ação.

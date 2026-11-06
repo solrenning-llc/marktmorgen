@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "lib/paypal-sales.ts",
+    "lib/learn.ts",
+    "tests/g2791-refund-order.test.ts",
+    "tests/g2791-final-reassign-receipt.test.ts",
+    "tests/g2791-final-revoke-receipt.test.ts",
+    "tests/g2791-refund-score.proof.ts",
+    "tests/g2791-job-mismatch-srem.proof.ts",
+    "tests/g2791-refund-score.test.ts",
+    "tests/g2791-refund-score-overflow.proof.ts",
+    "tests/g2791-refund-score-overflow.test.ts",
+    "tests/g2791-real-refund-score.proof.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

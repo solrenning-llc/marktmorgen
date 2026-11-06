@@ -91,7 +91,7 @@ test("a product's course: every assignment read before the product goes (Revisor
   assert.ok(read > 0 && remove > read, "the product route reads the course's work before it removes the product");
   assert.ok(route.slice(read, remove).includes('error: "unavailable" }, { status: 503 }'), "and answers 503 when it cannot");
   const lookup = route.indexOf("before = await readListing(guarded.store, id);");
-  const course = route.indexOf("beforeCourse = await readCourse(before.course.id);");
-  const refuse = route.indexOf('error: "unavailable" }, { status: 503 }', course);
-  assert.ok(lookup > 0 && course > lookup && refuse > course && refuse < read, "a product or course that cannot be read answers 503 too, never \"not a course\"");
+  const courseRead = route.indexOf("beforeCourse = await readCourse(before.course.id);");
+  const refuse = route.indexOf('error: "unavailable" }, { status: 503 }', courseRead);
+  assert.ok(lookup > 0 && courseRead > lookup && refuse > courseRead && refuse < read, "a product or course that cannot be read answers 503 too, never \"not a course\"");
 });

@@ -203,3 +203,51 @@ test("the creation endpoint never says nothing changed after an unknown rollback
   assert.deepEqual(await response.json(), { ok: false, error: "make_unconfirmed" });
   assert.equal((await original([["HLEN", `nl:api:keys:${store.sid}`]]))[0], 1, "the record remains, so a no-change claim would be false");
 });
+
+for (const outcome of ["healthy", "set unapplied", "set acknowledgement lost", "record unapplied", "record acknowledgement lost", "extra slot", "boolean SET", "string HSET", "out-of-range HSET"] as const) {
+  test(`creation needs both exact write receipts: ${outcome}`, async () => {
+    redis.clear();
+    let writes = 0;
+    let commandsCounted = 0;
+    let externalCalls = 0;
+    const fetchBefore = globalThis.fetch;
+    globalThis.fetch = async () => { externalCalls += 1; throw new Error("External calls are forbidden in this synthetic proof"); };
+    redis.pipeline = async (commands) => {
+      commandsCounted += commands.length;
+      assert.ok(commandsCounted <= 2000, "command ceiling is counted before executing");
+      if (commands.length !== 3 || commands[0]?.[0] !== "SET" || commands[1]?.[0] !== "HSET" || commands[2]?.[0] !== "HLEN") return original(commands);
+      writes += 1;
+      if (outcome === "set unapplied") {
+        const rest = await original(commands.slice(1));
+        return [null, rest[0], rest[1]];
+      }
+      if (outcome === "record unapplied") {
+        const rest = await original([commands[0], commands[2]]);
+        return [rest[0], null, rest[1]];
+      }
+      const reply = await original(commands);
+      if (outcome === "set acknowledgement lost") return [null, reply[1], reply[2]];
+      if (outcome === "record acknowledgement lost") return [reply[0], null, reply[2]];
+      if (outcome === "extra slot") return [...reply, 0];
+      if (outcome === "boolean SET") return [true, reply[1], reply[2]];
+      if (outcome === "string HSET") return [reply[0], "1", reply[2]];
+      if (outcome === "out-of-range HSET") return [reply[0], 2, reply[2]];
+      return reply;
+    };
+    let made: Awaited<ReturnType<typeof makeKey>>;
+    try { made = await makeKey(sid, "Synthetic receipt evidence"); }
+    finally { redis.pipeline = original; globalThis.fetch = fetchBefore; }
+    assert.equal(externalCalls, 0);
+    assert.equal(writes, 1, "an unconfirmed write is never replayed");
+    if (outcome === "healthy") {
+      assert.equal(made.ok, true);
+      if (!made.ok) throw new Error("Healthy creation was refused");
+      assert.equal((await resolveKey(made.key))?.sid, sid);
+    } else {
+      if (outcome === "set unapplied" || outcome === "record unapplied") {
+        assert.equal(made.ok && (await resolveKey(made.key)) !== null, false, "the unconfirmed write really left no usable key");
+      }
+      assert.deepEqual(made, { ok: false, reason: "make_unconfirmed" }, "a key is not announced as made without both write receipts");
+    }
+  });
+}

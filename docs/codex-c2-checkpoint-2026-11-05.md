@@ -1,3 +1,33 @@
+# Ponto de parada C2 — 06/11/2026 06h00 (Fortaleza)
+
+Esta seção é a mais recente e prevalece onde acrescenta ou substitui o histórico abaixo. Todo head, RED, parecer, ramo e limite anterior continua preservado.
+
+## Fontes e coordenação desta continuidade
+
+- Checkpoint anterior integral lido no commit `48dbab048c64c24e5dad5ffab8f1be1cfaf3522c`, blob `e329827e8d87891be9b152957615fdee00e1bd8e`, 128.381 bytes.
+- Regras atuais do `main` relidas: `CLAUDE.md` blob `8e8545b0`, `AGENTS.md` blob `472c4251`, `docs/agent-inbox.md` blob `d9893042`, `docs/reservations.md` blob `33627443` e `docs/reservations/codex.md` blob `a9e59b6e`. `docs/codex-queue.md` está vazio no main nesta leitura; não foi usada regra inventada.
+- Canal integral fresco `para-claude-1/messages.md` lido com 185.160 bytes, blob `10d2c52fca15811d2ad76a5ac8828c695352f907`, acima do piso seguro. Claude 4 continua coordenando; Claude 1 é ciência/ponte.
+- Nenhuma atribuição nominal nova ao C2 foi encontrada. AV12 continua vedando vigia vazia e escolha por silêncio.
+
+## #2769 — incorporado normalmente
+
+- O J publicou o retorno integral nominal **6680169375** no head exato `c42ea603266b06e93f00c9d81420c1a424dcad03`: os dois LEVEs 6678176734 estão fechados, sem novo HIGH/MEDIUM/LOW, e o PR podia entrar após nove sucessos exatos e verificação limpa pelo autor.
+- A prova J imutável continua corretamente qualificada como 45/48: os três diagnósticos restantes são intencionais e documentam a não aditividade; não foram rotulados como GREEN. RED autor `e81d5c38` 8/2 → final 8/8; ligados 116/116; strict TS, lint, sintaxe e diff 0; scanner 3.865/0.
+- Observação causal única dos workflows do head exato: **9 criados, 9 `completed/success`, zero falhas**. Runs: 42178365263, 42178365388, 42178365311, 42178364951, 42178364953, 42178364943, 42178364966, 42178364990 e 42178365147.
+- Merge executado com `expected_head_sha=c42ea603266b06e93f00c9d81420c1a424dcad03`, método normal: **`7b7fbd98978e1b32543f4ba2a4f7c1ed38055661`**, confirmado por GET como `merged=true` às 05h58 Fortaleza.
+- Os blobs próprios no merge são idênticos aos revisados: documento `d3a4ab837eed96107a6901c65d2cde758b755e15`; teste `91b4b9ed5804da3cd69cb70d44ce833cfb56ce44`. Nenhum head foi renovado, nenhum retry/cancelamento ocorreu e nenhum preço/limite/conta/provedor foi operado.
+
+## Estado restante
+
+- Há agora **quatro** próprias abertas e **um slot livre**: #2601 `702cf9a8`; #2695 `33bbd1fd`; #2692 PRIMARY `35e670e3`; #2742 `bbde49fe`. #2769 está merged e sai da contagem.
+- **#2742**: parecer CX1 5796445931 aplicável; ainda falta retorno financeiro D2 aplicável e nove exatos. Sem polling.
+- **#2692**: recovery WIP `8c2eeb29` tem segunda financeira H2 6679942070; ainda faltam primeiro retorno D2 ao corretivo e fechamento do display A3/#2020. PRIMARY/PR/CI intocados.
+- **#2601/#2695**: nenhuma novidade causal lida; não consultados.
+- Próxima ação válida: atribuição nominal da Claude 4 para o slot livre ou novidade causal em retorno/CI dos quatro abertos. Não iniciar HZ3 por silêncio.
+- Antes de encerrar: atualizar a única automação C2 para este checkpoint e publicar PONTO DE PARADA append-only/CAS no canal.
+
+---
+
 # Ponto de parada C2 — 06/11/2026 04h53 (Fortaleza)
 
 Esta seção é a mais recente e prevalece onde acrescenta ou substitui o histórico abaixo. Todo head, RED, parecer e limite anterior continua preservado.

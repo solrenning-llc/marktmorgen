@@ -505,7 +505,8 @@ export type SyncView = {
     /** The last problem with the key or the audience, until a send works again. */
     problem: { message: string; at: number } | null;
   } | null;
-  log: JobView[];
+  /** Null means the settings were read exactly but the recent-send history was not. */
+  log: JobView[] | null;
 };
 
 export async function syncView(store: Store): Promise<SyncView> {
@@ -521,19 +522,27 @@ export async function syncView(store: Store): Promise<SyncView> {
   const [rawConfig, rawBad, rawLog] = view;
   const config = parseConfig(rawConfig);
   const log = exactOwnArray(rawLog);
-  if (!log || log.some((id) => typeof id !== "string" || !JOB_ID.test(id))) throw new Error("The email platform view is unavailable");
-  const ids = log as string[];
-  const jobs = ids.length ? exactOwnArray(await redisPipeline(ids.map((id) => ["GET", jobKey(id)])), ids.length) : [];
-  if (!jobs) throw new Error("The email platform view is unavailable");
-  const parsedJobs: Job[] = [];
-  for (const raw of jobs) {
-    // Job records expire after seven days while their ids may remain in the
-    // bounded log. A missing GET is therefore known absence, not a broken
-    // batch; every present value must still be a complete job.
-    if (raw === null) continue;
-    const parsed = parseJob(raw);
-    if (!parsed) throw new Error("The email platform view is unavailable");
-    parsedJobs.push(parsed);
+  let parsedJobs: Job[] | null = null;
+  if (log && log.every((id) => typeof id === "string" && JOB_ID.test(id))) {
+    const ids = log as string[];
+    const jobs = ids.length ? exactOwnArray(await redisPipeline(ids.map((id) => ["GET", jobKey(id)])), ids.length) : [];
+    if (jobs) {
+      const parsed: Job[] = [];
+      let unread = false;
+      for (const raw of jobs) {
+        // Job records expire after seven days while their ids may remain in
+        // the bounded log. A missing GET is therefore known absence, not a
+        // broken batch; every present value must still be complete.
+        if (raw === null) continue;
+        const job = parseJob(raw);
+        if (!job) {
+          unread = true;
+          break;
+        }
+        parsed.push(job);
+      }
+      if (!unread) parsedJobs = parsed;
+    }
   }
   let problem: { message: string; at: number } | null = null;
   try {
@@ -562,8 +571,7 @@ export async function syncView(store: Store): Promise<SyncView> {
           problem,
         }
       : null,
-    log: parsedJobs
-      .map((job) => ({
+    log: parsedJobs?.map((job) => ({
         id: job.id,
         email: job.email,
         title: job.title,
@@ -575,7 +583,7 @@ export async function syncView(store: Store): Promise<SyncView> {
         note: job.note,
         lastAt: job.lastAt,
         createdAt: job.createdAt,
-      })),
+      })) ?? null,
   };
 }
 

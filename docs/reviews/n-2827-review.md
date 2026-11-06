@@ -42,3 +42,10 @@ Credit Revisor 1's shipped-item finding: the paid+74-day fallback can close the 
 - No full TypeScript build, browser, email transport, storage, budget, national-law or complete unit 1b certification is claimed by this pure-rule review.
 
 Conclusion: official-text/hash verification is clean. Unit 1a is not clean pending the proposed medium delayed-supply issue and the existing shipped-item finding. Unit 1b still requires a separate final review.
+
+
+## Focal return — ffb7e9f6a8ed9a2512aacb40d84eab2ec8117fc2
+
+The original scheduled-release medium #6693397520 is CLOSED in the pure rules. The exact immutable five-check proof now passes 5/5. Its discovered permanent copy, tests/n-2827-withdrawal-rules.test.ts, is byte-identical (SHA-256 9aaba8130737f669f174ba42700d996a05d2dd8e4c565e42a236e83f5a0f109d) and passes 5/5. Revised author rules pass38/38, buyer flow5/5 and digital-consent93/93. The four-file focal delta was read; diff-check is clean. Actual supply now closes an eligible pre-order; its scheduled day no longer shortens the ordinary period. The shipped-item pure rule now keeps until:null while receipt is unknown, closing the first review's 74-day fallback issue in this pure helper.
+
+This is NOT approval of the combined PR: unit1b recovery review5805840139 remains open, and Revisor1's separate finding that factsOf/Purchase do not propagate shipped remains open. The actual withdrawal helper is byte-identical between70244c2c andffb7e9f6 (blob c42da3aad8daedcf042069cbd770658cad51f764). A corrected rules function does not close those caller/delivery issues. No author product/ref/CI was changed.

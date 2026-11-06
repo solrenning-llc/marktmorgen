@@ -836,6 +836,11 @@ export default async function StudioPage({
   // in came to connect Zoom (lib/zoom-arrival.ts): it is offered here too,
   // and the way to it is said at the top of the studio.
   const arrivedZoom = cameForZoom(cookieStore) && isConfigured("zoom");
+  // Passkeys whose wait has run out are removed first (lib/passkeys.ts pendingRemoval, a write under the account's
+  // lock), so the list of the person's passkeys read afterwards is what is left, as before this unit
+  // (tests/studio-today-removal-order.test.ts).
+  const removing = email ? early(pendingRemoval(email).catch(() => null)) : null;
+  const afterRemoval = <T,>(read: () => Promise<T>): Promise<T> => early((removing ?? Promise.resolve(null)).then(read));
   const firstReads = {
     folder: early(store ? storeFolder(ref) : Promise.resolve("")),
     pictures: early(store ? imageFolder(ref) : Promise.resolve("")),
@@ -846,10 +851,11 @@ export default async function StudioPage({
     callProducts: store ? early(readKind(store, "call")) : null,
     meet: store && meetOn && (may("products") || may("orders")) ? early(meetView(store.statsId, store, arrivedZoom).catch(() => null)) : null,
     shelf: store ? early(studioShelf(store, params)) : null,
-    removing: email ? early(pendingRemoval(email).catch(() => null)) : null,
+    removing,
+    // These two apply the same removal themselves, under the account's lock, before they read (lib/second-step-gate.ts).
     mayAdd: email ? early(mayAddSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => false)) : null,
     liveStep: email ? early(liveSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => null)) : null,
-    person: early(
+    person: afterRemoval(() =>
       Promise.all([
         email ? listPasskeys(email).catch(() => []) : Promise.resolve([]),
         store?.sid && may("team") ? readTeam(store.sid).catch(() => null) : Promise.resolve(null),
@@ -1196,8 +1202,8 @@ export default async function StudioPage({
   // Adding a passkey needs a login from the last fifteen minutes (lib/auth.ts).
   // Passkeys whose wait to be removed has run out go first, so the list below is what is left; and
   // whether this session may add a passkey or an app (lib/second-step-gate.ts), so the managers say so.
-  const removing = firstReads.removing ? await firstReads.removing : null;
-  const passkeyRemovals: Record<string, number> = removing ? removing.atOf : {};
+  const removed = firstReads.removing ? await firstReads.removing : null;
+  const passkeyRemovals: Record<string, number> = removed ? removed.atOf : {};
   const needsStep = firstReads.mayAdd ? !(await firstReads.mayAdd) : false;
   const canKeep = firstReads.liveStep ? mayKeepPasskey(await firstReads.liveStep) : false;
   const [passkeys, team, freshLogin, lockedTill, twoStep, recoveryShown] = await firstReads.person;

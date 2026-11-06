@@ -103,6 +103,13 @@ is("Ctrl+Z and Ctrl+Shift+Z press the same buttons", main.includes('document.get
 const undoRedo = between('aria-label="Undo and redo"', "</div>");
 is("Undo and Redo are never turned off under the focus", /(?<![-\w])disabled=\{/.test(undoRedo), false);
 is("they say when there is nothing to do, and stay focusable", (undoRedo.match(/aria-disabled=\{/g) ?? []).length, 2);
+// Off, they take the signs of an off button (.icon-btn, app/globals.css): the sand surface, the dashed
+// --line-off edge and GrayText in forced colors. Told off by --ink-mute beside --ink-soft alone, they
+// were 1.07:1 from a Redo that works, and forced colors drew both in ButtonText (WCAG 1.4.1, 1.4.11).
+const undoRedoClasses = [...undoRedo.matchAll(/className="([^"]*)"/g)].map((m) => m[1]);
+is("Undo and Redo, found", undoRedoClasses.length, 2);
+is("off, each carries the off signs of an off button (icon-btn)", undoRedoClasses.every((c) => /(^| )icon-btn( |$)/.test(c)), true);
+is("neither is told off by a near-identical gray alone", undoRedoClasses.some((c) => /aria-disabled:(text-ink-mute|hover:)/.test(c)), false);
 
 part("A move that cannot be made says why (WCAG 4.1.3)");
 const top = (i: number) => i === 0;

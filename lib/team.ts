@@ -31,7 +31,7 @@
  * second would write back the team it read before the first, and a person
  * just taken off could be back on it.
  */
-import { type PipelineAccessCopy, copyPipelineAccess, forgetPipelineAccess, undoPipelineAccessCopy } from "@/lib/pipeline-access";
+import { type PipelineAccessCopy, PipelineAccessCopyUnconfirmed, copyPipelineAccess, forgetPipelineAccess, undoPipelineAccessCopy, undoUnconfirmedCopy } from "@/lib/pipeline-access";
 import { type AccessLog, parseAccessLog } from "@/lib/pipeline-access-rules";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -704,6 +704,9 @@ export async function moveMemberships(from: string, to: string): Promise<void> {
         console.error("copying pipeline access or the maker of their API keys failed; the membership stays on the old address", error);
         // A copy that landed goes back too, with its room: the new address keeps only what it had (Codex N, #2036).
         if (copied) await undoPipelineAccessCopy(store, after, copied).catch((undo: unknown) => console.error("putting back the new address's pipeline access failed", undo));
+        // One whose write may have landed with its answer lost goes back the same way, from what the copy read under
+        // this lock; its room is given back only once that is confirmed (Codex G, #2036).
+        else if (error instanceof PipelineAccessCopyUnconfirmed) await undoUnconfirmedCopy(store, after, error).catch((undo: unknown) => console.error("putting back the new address's pipeline access failed", undo));
         stayed.push(sid);
         return null;
       }

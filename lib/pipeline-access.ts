@@ -141,8 +141,9 @@ export async function copyPipelineAccess(store: DataStore, from: string, to: str
     // No restriction to carry: a field the new address had from before (someone else's, long gone) must not
     // restrict them, so it goes, and gives its room back.
     if (weight(old) === 0) return UNCHANGED;
-    const deleted = oneAnswer(await redisPipeline([["HDEL", accessKey(statsId), after]]));
-    if (deleted === null) throw new Error("clearing the new address's pipeline access could not be confirmed");
+    const deleted = oneAnswer(await redisPipeline([["HDEL", accessKey(statsId), after]]).catch(() => null));
+    // Not confirmed: it may have landed, so what the new address held is carried, for the caller to put it back.
+    if (deleted === null) throw new PipelineAccessCopyUnconfirmed({ prior: old, now: null }, 0);
     if (deleted === 0) return UNCHANGED;
     await giveData(store, [{ slot: ACCESS_SLOT, bytes: weight(old) }]);
     return { prior: old, now: null };
@@ -166,8 +167,11 @@ export async function copyPipelineAccess(store: DataStore, from: string, to: str
   }
   // The exact answer of that one command, before the membership moves: an extra answer, or one of another kind, is
   // not a copy (Codex D and G2, #2036: [1, 1] for a write that never landed moved a restricted teammate unrestricted).
-  const written = oneAnswer(await redisPipeline([["HSET", accessKey(statsId), after, String(raw)]]));
-  if (written === null) throw new Error("copying a teammate's pipeline access could not be confirmed");
+  // A write whose answer never came back (a lost connection, a timeout) is the same: it may have landed.
+  const written = oneAnswer(await redisPipeline([["HSET", accessKey(statsId), after, String(raw)]]).catch(() => null));
+  // Not confirmed: the write may have landed with its answer lost (Codex G, #2036), so what the new address held
+  // before, read under the same lock, and the room taken for it go with the error, for the caller to put it back.
+  if (written === null) throw new PipelineAccessCopyUnconfirmed({ prior: old, now: String(raw) }, Math.max(0, grown));
   if (grown < 0) await giveData(store, [{ slot: ACCESS_SLOT, bytes: -grown }]);
   return { prior: old, now: String(raw) };
 }
@@ -175,6 +179,35 @@ export async function copyPipelineAccess(store: DataStore, from: string, to: str
 /** What a copy found at the new address (`prior`) and left there (`now`): null for no record. */
 export type PipelineAccessCopy = { prior: string | null; now: string | null };
 const UNCHANGED: PipelineAccessCopy = { prior: null, now: null };
+
+/**
+ * A copy whose write could not be confirmed: it may have landed. It carries
+ * what the new address held before (read under the team's lock) and the room
+ * the copy took, so the caller puts the new address back as it was
+ * (undoUnconfirmedCopy) whether or not the write landed.
+ */
+export class PipelineAccessCopyUnconfirmed extends Error {
+  constructor(readonly copy: PipelineAccessCopy, readonly taken: number) {
+    super("copying a teammate's pipeline access could not be confirmed");
+    this.name = "PipelineAccessCopyUnconfirmed";
+  }
+}
+
+/**
+ * Puts the new address back as it was before a copy that could not be
+ * confirmed: what it held is written back (or its field deleted), which is
+ * right whether or not the copy landed, and the room the copy took is given
+ * back only once that is confirmed. Run under the same team lock as the copy.
+ */
+export async function undoUnconfirmedCopy(store: DataStore, to: string, unconfirmed: PipelineAccessCopyUnconfirmed): Promise<void> {
+  const statsId = store.statsId;
+  if (!statsId || !isRedisConfigured()) return;
+  const after = normaliseEmail(to);
+  const prior = unconfirmed.copy.prior;
+  const put = oneAnswer(await redisPipeline([prior ? ["HSET", accessKey(statsId), after, prior] : ["HDEL", accessKey(statsId), after]]));
+  if (put === null) throw new Error("putting back the new address's pipeline access could not be confirmed");
+  if (unconfirmed.taken > 0) await giveData(store, [{ slot: ACCESS_SLOT, bytes: unconfirmed.taken }]);
+}
 
 /**
  * A move that failed after copyPipelineAccess (lib/team.ts, moveMemberships:

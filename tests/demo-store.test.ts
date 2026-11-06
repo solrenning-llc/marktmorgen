@@ -262,7 +262,7 @@ async function main(): Promise<void> {
   const editor = withoutComments(read("components/product-image-editor.tsx"));
   is("the studio makes the copy when a picture is added, and sends it with the picture", /await shrink\(file, SMALL_LONG_SIDE\)/.test(editor) && /\.\.\.\(small \? \{ small \} : \{\}\)/.test(editor), true);
   const attach = withoutComments(read("app/api/store/image/route.ts"));
-  is("what is attached is checked as the picture is, and deleted with it", /smallWidth < width/.test(attach) && /copyKind === copy\.contentType/.test(attach) && /del\(imagePaths\(result\.removed\)\)/.test(attach), true);
+  is("what is attached is checked as the picture is, and deleted with it", /smallWidth < width/.test(attach) && /copyKind === copy\.contentType/.test(attach) && /const replaced = imagePaths\(result\.removed\)/.test(attach) && /del\(replaced\)/.test(attach), true);
 
   part("Its checkout is the real one, on the demo's own account and key");
   is("the demo's account is asked with the demo's key", keyFor(DEMO_CONNECTED_ACCOUNT), DEMO_KEY);

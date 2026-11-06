@@ -39,7 +39,7 @@ test("PAYG monthly and twelve-worst-month Redis components stay explicit for eve
     "| Studio | month | $4.990522 | $0.718050 | $0.110816 | **$5.819388** |",
     "| Studio | 12 worst months | $59.886261 | $8.616606 | $1.329794 | **$69.832660** |",
     "| Scale | month | $8.203842 | $0.820725 | $0.249999 | **$9.274567** |",
-    "| Scale | 12 worst months | $98.446101 | $9.848694 | $2.999992 | **$111.294799** |",
+    "| Scale | 12 worst months | $98.446101 | $9.848706 | $2.999992 | **$111.294799** |",
   ]) assert.ok(text.includes(row), row);
 
   for (const [month, year] of [[3.905581523, 46.866978271], [5.819388373, 69.832660474], [9.274566588, 111.29479906]])
@@ -48,8 +48,8 @@ test("PAYG monthly and twelve-worst-month Redis components stay explicit for eve
 
 test("separately zeroed rates are described as conservative sensitivities, not exact attribution", () => {
   const text = decision();
-  assert.match(text, /conservative sum of separate rate sensitivities/i);
-  assert.match(text, /not disjoint supplier components/i);
+  assert.match(text, /conservative sum of separate rate\s+sensitivities/i);
+  assert.match(text, /not\s+disjoint supplier components/i);
   assert.doesNotMatch(text, /approximately [\d,]+[\s\S]*modeled commands per worst month/i);
 });
 

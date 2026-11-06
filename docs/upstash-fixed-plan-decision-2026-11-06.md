@@ -81,29 +81,32 @@ $200/month per database, but this document neither selects nor changes it.
 
 The repository deliberately prices PAYG Redis without taking the shared first
 1 GB of storage or first 200 GB of bandwidth as a per-store credit. That is the
-safe marginal reading when many stores share one database. To isolate Redis
-from the full plan model, the same model was evaluated three times with only
-one canonical Upstash rate set to zero: commands, transferred bytes, then
-GB-months. The difference is the corresponding Redis component. No product
-constant was changed.
+safe marginal reading when many stores share one database. To bound Redis's
+contribution to the full plan model, the same model was evaluated three times
+with only one canonical Upstash rate set to zero: commands, transferred bytes,
+then GB-months. Each difference is a separate rate sensitivity. They are **not
+disjoint supplier components** because zeroing a rate can change which
+competing operation a `Math.max` selects and therefore change its other
+resource costs. Their displayed total is a **conservative sum of separate rate
+sensitivities**, not exact attribution. No product constant was changed.
 
 Current canonical rates are $0.20/100,000 commands, $0.03/GB transferred past
 the shared allowance, and $0.25/GB-month stored past the shared allowance.
 
-| Customer plan | Interval | Commands | Transfer | Storage | Modeled PAYG Redis total |
+| Customer plan | Interval | Command-rate sensitivity | Transfer-rate sensitivity | Storage-rate sensitivity | Conservative sensitivity sum |
 | --- | --- | ---: | ---: | ---: | ---: |
 | Store | month | $3.208618 | $0.659180 | $0.037784 | **$3.905582** |
 | Store | 12 worst months | $38.503413 | $7.910156 | $0.453409 | **$46.866978** |
 | Studio | month | $4.990522 | $0.718050 | $0.110816 | **$5.819388** |
 | Studio | 12 worst months | $59.886261 | $8.616606 | $1.329794 | **$69.832660** |
 | Scale | month | $8.203842 | $0.820725 | $0.249999 | **$9.274567** |
-| Scale | 12 worst months | $98.446101 | $9.848694 | $2.999992 | **$111.294799** |
+| Scale | 12 worst months | $98.446101 | $9.848706 | $2.999992 | **$111.294799** |
 
-These are Redis supplier components of one isolated store using all modeled
-rights, not its complete plan cost, an invoice forecast, a company total, or a
-60% margin certification. They correspond to approximately 1,604,309,
-2,495,261, and 4,101,921 modeled commands per worst month, respectively. A
-monthly count does not establish a peak-per-second bound.
+These sensitivities bound one isolated store using all modeled rights. They
+are not its complete plan cost, an invoice forecast, a company total, a 60%
+margin certification, or an exact attribution of commands, transfer and
+storage. In particular, a dollar sensitivity cannot establish either a
+monthly command count or a peak-per-second bound.
 
 ## Fixed-plan comparison for one isolated full store
 

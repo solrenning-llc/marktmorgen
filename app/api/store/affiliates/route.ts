@@ -2,8 +2,9 @@ import type { NextRequest } from "next/server";
 import { StoreFullError, setAffiliateSetting, storeForEmail, storeForId } from "@/lib/store";
 import { readMoney } from "@/lib/money";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { MAX_COMMISSION, MIN_COMMISSION, commissionRate, parseAffiliateSetting, readBonuses } from "@/lib/affiliate-setting";
-import { parsePartnerShare, shareProblem } from "@/lib/partner-share";
+import { MAX_COMMISSION, MIN_COMMISSION, parseAffiliateSetting, readBonuses } from "@/lib/affiliate-setting";
+import { parsePartnerShare } from "@/lib/partner-share";
+import { readTermEnd } from "@/lib/partner-terms-rules";
 import { readListings } from "@/lib/catalog";
 import { answerInvite, waitingOne } from "@/lib/partner-invites";
 import {
@@ -12,24 +13,25 @@ import {
   acceptPartnership,
   addPayout,
   MAX_BULK_DECISIONS,
-  decide,
+  decideWhy,
   decideMany,
   setRatesMany,
   undoMany,
   undoRates,
   invitePartner,
-  listPartners,
   readAffiliate,
   releaseHold,
   removePayout,
   setAffiliateRate,
-  setPartnerShare,
+  proposePartnerShare,
+  sharePromiseProblem,
 } from "@/lib/affiliates";
 import { PROMO_ID_PATTERN, giveCode, takeCodeBack } from "@/lib/affiliate-codes";
 import { leadProblem } from "@/lib/affiliate-lead-rules";
 import { planTerms, readNoticeDays } from "@/lib/affiliate-notice";
 import { idleProblem, readIdleDays } from "@/lib/affiliate-idle-rules";
 import { MAX_LEAD_DECISIONS, decideLeads } from "@/lib/affiliate-leads";
+import { LockBusyError } from "@/lib/redis-lock";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -181,8 +183,14 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, undone: await undoRates(store, before, rate) });
     }
     if (action === "approve" || action === "decline" || action === "remove" || action === "restore") {
-      const done = await decide(store, text(body.id, 20), action);
-      return done ? Response.json({ ok: true }) : fail("unknown");
+      // A partner whose dated share is still in force is not taken out by the store alone (lib/partner-terms-rules.ts):
+      // decided under the partner's lock, so the studio says to ask for a change, which the partner must accept, or
+      // to wait for the end date, however close the two requests came.
+      const done = await decideWhy(store, text(body.id, 20), action);
+      if (done.ok) return Response.json({ ok: true });
+      // Letting back in a partner whose share still runs is checked against the cap as it is written (decideWhy).
+      if (done.reason === "busy") return fail("busy", 409);
+      return fail(done.reason === "term" ? "share_term_held" : done.reason === "cap" ? `share_${done.problem}` : "unknown");
     }
     if (action === "payout") {
       // In the store's currency, which is what the payout is written down in.
@@ -222,7 +230,7 @@ export async function POST(request: NextRequest) {
         return fail("gone");
       }
       const made = await acceptPartnership(from, guarded.email, invite.share);
-      if (!made.ok) return fail(made.reason === "full" ? "full" : "unavailable");
+      if (!made.ok) return fail(made.reason === "full" ? "full" : made.reason === "cap" ? "invite_cap" : "unavailable");
       await answerInvite(guarded.email, invite.id);
       return Response.json({ ok: true, accepted: true });
     }
@@ -230,16 +238,13 @@ export async function POST(request: NextRequest) {
       // A partner the creator brings from outside: they need no account here,
       // only an address that can receive PayPal. Checked against the same cap
       // as any other share, before the email goes out.
-      const share = parsePartnerShare({ percent: body.percent, products: body.products });
+      // An end date, when the creator chose one (630 [HN6](39)); empty is until revoked.
+      const now = Math.floor(Date.now() / 1000);
+      const end = readTermEnd(body.ends, now);
+      if (!end.ok) return fail("share_ends");
+      const share = parsePartnerShare({ percent: body.percent, products: body.products, until: end.until ?? undefined });
       if (!share) return fail(Array.isArray(body.products) && body.products.length ? "share_percent" : "share_products");
-      const others: Record<string, number[]> = {};
-      for (const other of await listPartners(store)) {
-        if (other.status !== "approved" || !other.share) continue;
-        for (const product of other.share.products) (others[product] ??= []).push(other.share.percent);
-      }
-      const affiliatePercent: Record<string, number> = {};
-      for (const product of share.products) affiliatePercent[product] = commissionRate(store.affiliates, product);
-      const problem = shareProblem({ percent: share.percent, products: share.products, others, affiliatePercent });
+      const problem = await sharePromiseProblem(store, null, share, now);
       if (problem) return fail(`share_${problem}`);
 
       // Only the products being shared in, never the whole catalogue: a store
@@ -258,32 +263,36 @@ export async function POST(request: NextRequest) {
       return fail(sent === "email" ? "invite_email" : sent);
     }
     if (action === "share") {
+      // A partner's share changes only under lib/partner-terms-rules.ts
+      // (630 [HN6](39)): a new one starts at once, ending one that runs until
+      // revoked applies at once, anything else waits for the partner's yes on
+      // their own page. Nothing already earned is touched either way.
       const id = text(body.id, 20);
       const affiliate = await readAffiliate(store, id);
       if (!affiliate) return fail("unknown");
-      // Clearing it: nothing already earned is touched.
+      // Only someone approved in the program holds a share, as only they are credited (notePartners): a share given to
+      // somebody waiting, declined or removed would read as running while nothing is paid.
+      if (affiliate.status !== "approved") return fail("share_not_approved");
+      const now = Math.floor(Date.now() / 1000);
       if (body.share === null || body.percent === "" || body.percent === null) {
-        return (await setPartnerShare(store, id, null)) ? Response.json({ ok: true }) : fail("unknown");
+        const ended = await proposePartnerShare(store, id, null, now);
+        return ended.ok ? Response.json({ ok: true, state: ended.state }) : fail("unknown");
       }
-      const share = parsePartnerShare({ percent: body.percent, products: body.products });
+      const end = readTermEnd(body.ends, now);
+      if (!end.ok) return fail("share_ends");
+      const share = parsePartnerShare({ percent: body.percent, products: body.products, until: end.until ?? undefined });
       if (!share) return fail(Array.isArray(body.products) && body.products.length ? "share_percent" : "share_products");
 
       // The cap counts everything promised on each of these products at once:
-      // the other partners' shares and the affiliate commission, which rides
-      // on the same sale (lib/partner-share.ts).
-      const others: Record<string, number[]> = {};
-      for (const other of await listPartners(store)) {
-        if (other.id === id || other.status !== "approved" || !other.share) continue;
-        for (const product of other.share.products) {
-          (others[product] ??= []).push(other.share.percent);
-        }
-      }
-      const affiliatePercent: Record<string, number> = {};
-      for (const product of share.products) affiliatePercent[product] = commissionRate(store.affiliates, product);
-
-      const problem = shareProblem({ percent: share.percent, products: share.products, others, affiliatePercent });
+      // the other partners' shares still running and the affiliate commission,
+      // which rides on the same sale (lib/partner-share.ts). Checked again when
+      // the partner says yes to a change that waits.
+      const problem = await sharePromiseProblem(store, id, share, now);
       if (problem) return fail(`share_${problem}`);
-      return (await setPartnerShare(store, id, share)) ? Response.json({ ok: true }) : fail("unknown");
+      // Checked once more as it is written, against every partner as they stand then (lib/affiliates.ts changeAffiliate).
+      const saved = await proposePartnerShare(store, id, share, now);
+      if (saved.ok) return Response.json({ ok: true, state: saved.state });
+      return fail(saved.reason === "cap" ? `share_${saved.problem}` : "unknown");
     }
     if (action === "code") {
       const promo = text(body.promo, 90);
@@ -302,6 +311,8 @@ export async function POST(request: NextRequest) {
     return fail("unknown");
   } catch (error) {
     if (error instanceof StoreFullError) return fail("store_full", 409);
+    // Another change to the same affiliate held its lock past our wait (lib/affiliates.ts withPerson).
+    if (error instanceof LockBusyError) return fail("busy", 409);
     console.error("changing the affiliate programme failed", error);
     return fail("server_error", 500);
   }

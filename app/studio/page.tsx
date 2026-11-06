@@ -868,7 +868,8 @@ export default async function StudioPage({
         // Whether this browser got in without its second step, and until when what matters is locked (lib/two-step.ts).
         lockedUntil(cookieStore.get(SESSION_COOKIE)?.value).catch(() => 0),
         // The person's two-step login (lib/two-step.ts), beside their passkeys.
-        email ? twoStepStatus(email).catch(() => ({ on: false, since: 0, codesLeft: 0, reset: 0, backup: "" })) : Promise.resolve({ on: false, since: 0, codesLeft: 0, reset: 0, backup: "" }),
+        // null when it could not be read: never taken for "no request to turn it off" (Claude 4, C4-2980 on #2900).
+        email ? twoStepStatus(email).catch(() => null) : Promise.resolve({ on: false, since: 0, codesLeft: 0, reset: 0, backup: "" }),
         // The person's recovery address, partly hidden (lib/recovery-address.ts).
         email ? recoveryAddress(email).then((a) => (a ? hideAddress(a) : "")).catch(() => "") : Promise.resolve(""),
       ]),
@@ -1211,7 +1212,9 @@ export default async function StudioPage({
   const passkeyRemovals: Record<string, number> = removed ? removed.atOf : {};
   const needsStep = firstReads.mayAdd ? !(await firstReads.mayAdd) : false;
   const canKeep = firstReads.liveStep ? mayKeepPasskey(await firstReads.liveStep) : false;
-  const [passkeys, team, freshLogin, lockedTill, twoStep, recoveryShown] = await firstReads.person;
+  const [passkeys, team, freshLogin, lockedTill, twoStepRead, recoveryShown] = await firstReads.person;
+  // What the managers below are handed when it could not be read, as before; the banner over Today says it could not be read.
+  const twoStep = twoStepRead ?? { on: false, since: 0, codesLeft: 0, reset: 0, backup: "" };
   const connectReady = isConnectConfigured();
   const billingReadyForSteps = isBillingConfigured();
   // The first steps of a store, each ticked from what the store really has.
@@ -1297,6 +1300,16 @@ export default async function StudioPage({
             <p className="mt-1 text-sm text-ink-soft">
               {`You got in through your recovery address or without your second step, so ${LOCKED_LIST} wait until then. Everything else is open: your products, pages, buyers, numbers and drafts. On that day nothing is locked any more, and you can move your sign-in address to an inbox you have. Logging in with your sign-in email, a passkey or your app's code before then opens everything at once.`}
             </p>
+          </div>
+        ) : twoStepRead === null ? (
+          <div className="notice notice-warn mt-6" role="status">
+            <p className="font-bold text-ink">Two-step login could not be read just now</p>
+            <p className="mt-1 text-sm text-ink-soft">
+              So this page cannot tell whether somebody asked to turn your two-step login off. Open this page again in a moment to see. If a request is waiting and it was not you, press Cancel under Two-step login, and change your email password.
+            </p>
+            <a href="#two-step" className="mt-2 inline-flex min-h-11 items-center text-sm font-bold text-ink underline underline-offset-4">
+              Go to Two-step login
+            </a>
           </div>
         ) : twoStep.reset > 0 ? (
           <div className="notice notice-warn mt-6" role="status">

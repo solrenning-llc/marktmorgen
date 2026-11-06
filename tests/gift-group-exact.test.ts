@@ -268,6 +268,19 @@ async function main(): Promise<void> {
   const unread = await outcome(ask(id, "gil@example.com"));
   restore();
   is("nothing sent: no link for gil written, and not 'sent'", [unread === "sent", links.some((l) => l.includes("gil@example.com"))], [false, false]);
+
+  part("5. settleGroup: another run holds the settling mark and this run's SET NX answers in an unknown shape (C4-3000)");
+  const p5 = await startGroup(store, product, "2");
+  if (!p5.ok) throw new Error("no group");
+  const p5Session = paidSession({ group: p5.group.id, people: "2" });
+  const p5Mark = `nl:grp:${p5.group.id}:settling`;
+  await real([["SET", p5Mark, "another-run", "EX", 300]]);
+  const p5Emails = emails.length;
+  unknownFor(isSet(p5Mark), false);
+  const p5First = await outcome(settleGroup({ ...deps, session: p5Session }));
+  restore();
+  is("not settled a second time beside the other run: it throws, no receipt", [p5First, emails.length - p5Emails], ["threw", 0]);
+  is("the other run's mark is left alone", await get(p5Mark), "another-run");
   done();
 }
 

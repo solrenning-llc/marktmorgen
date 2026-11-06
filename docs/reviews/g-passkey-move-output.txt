@@ -1,0 +1,1224 @@
+
+=== /tmp/g-passkey-proof.log ===
+=== g-passkey-move.proof.ts ===
+
+Applied index reply lost: one/two credentials, failure before/after persistence
+  ok    1/before-throw: exact injection hit
+  ok    1/before-throw: refused
+  ok    1/before-throw: source list retained
+  ok    1/before-throw: destination empty
+  ok    1/before-throw: every owner restored
+  ok    1/before-throw: real signature sign-in retained
+  ok    1/after-throw: exact injection hit
+  ok    1/after-throw: refused
+  ok    1/after-throw: source list retained
+  ok    1/after-throw: destination empty
+  ok    1/after-throw: every owner restored
+  ok    1/after-throw: real signature sign-in retained
+  ok    1/after-empty: exact injection hit
+  ok    1/after-empty: refused
+  ok    1/after-empty: source list retained
+  ok    1/after-empty: destination empty
+  ok    1/after-empty: every owner restored
+  ok    1/after-empty: real signature sign-in retained
+  ok    1/after-null: exact injection hit
+  ok    1/after-null: refused
+  ok    1/after-null: source list retained
+  ok    1/after-null: destination empty
+  ok    1/after-null: every owner restored
+  ok    1/after-null: real signature sign-in retained
+  ok    1/after-false: exact injection hit
+  ok    1/after-false: refused
+  ok    1/after-false: source list retained
+  ok    1/after-false: destination empty
+  ok    1/after-false: every owner restored
+  ok    1/after-false: real signature sign-in retained
+  ok    2/before-throw: exact injection hit
+  ok    2/before-throw: refused
+  ok    2/before-throw: source list retained
+  ok    2/before-throw: destination empty
+  ok    2/before-throw: every owner restored
+  ok    2/before-throw: real signature sign-in retained
+  ok    2/after-throw: exact injection hit
+  ok    2/after-throw: refused
+  ok    2/after-throw: source list retained
+  ok    2/after-throw: destination empty
+  ok    2/after-throw: every owner restored
+  ok    2/after-throw: real signature sign-in retained
+  ok    2/after-empty: exact injection hit
+  ok    2/after-empty: refused
+  ok    2/after-empty: source list retained
+  ok    2/after-empty: destination empty
+  ok    2/after-empty: every owner restored
+  ok    2/after-empty: real signature sign-in retained
+  ok    2/after-null: exact injection hit
+  ok    2/after-null: refused
+  ok    2/after-null: source list retained
+  ok    2/after-null: destination empty
+  ok    2/after-null: every owner restored
+  ok    2/after-null: real signature sign-in retained
+  ok    2/after-false: exact injection hit
+  ok    2/after-false: refused
+  ok    2/after-false: source list retained
+  ok    2/after-false: destination empty
+  ok    2/after-false: every owner restored
+  ok    2/after-false: real signature sign-in retained
+  ok    intact move transfers list
+  ok    intact move transfers actual sign-in
+
+62 checks, all passing.
+
+
+=== /tmp/g-passkey-old-proof-final.log ===
+=== g-passkey-move.proof.ts ===
+
+Applied index reply lost: one/two credentials, failure before/after persistence
+  ok    1/before-throw: exact injection hit
+  ok    1/before-throw: refused
+  ok    1/before-throw: source list retained
+  ok    1/before-throw: destination empty
+  ok    1/before-throw: every owner restored
+  ok    1/before-throw: real signature sign-in retained
+  ok    1/after-throw: exact injection hit
+  ok    1/after-throw: refused
+  ok    1/after-throw: source list retained
+  ok    1/after-throw: destination empty
+  FAIL  1/after-throw: every owner restored
+        expected ["g-source@example.test"]
+        got      ["g-dest@example.test"]
+  FAIL  1/after-throw: real signature sign-in retained
+        expected ["g-source@example.test"]
+        got      [null]
+  ok    1/after-empty: exact injection hit
+  ok    1/after-empty: refused
+  ok    1/after-empty: source list retained
+  ok    1/after-empty: destination empty
+  FAIL  1/after-empty: every owner restored
+        expected ["g-source@example.test"]
+        got      ["g-dest@example.test"]
+  FAIL  1/after-empty: real signature sign-in retained
+        expected ["g-source@example.test"]
+        got      [null]
+  ok    1/after-null: exact injection hit
+  ok    1/after-null: refused
+  ok    1/after-null: source list retained
+  ok    1/after-null: destination empty
+  FAIL  1/after-null: every owner restored
+        expected ["g-source@example.test"]
+        got      ["g-dest@example.test"]
+  FAIL  1/after-null: real signature sign-in retained
+        expected ["g-source@example.test"]
+        got      [null]
+  ok    1/after-false: exact injection hit
+  ok    1/after-false: refused
+  ok    1/after-false: source list retained
+  ok    1/after-false: destination empty
+  FAIL  1/after-false: every owner restored
+        expected ["g-source@example.test"]
+        got      ["g-dest@example.test"]
+  FAIL  1/after-false: real signature sign-in retained
+        expected ["g-source@example.test"]
+        got      [null]
+  ok    2/before-throw: exact injection hit
+  ok    2/before-throw: refused
+  ok    2/before-throw: source list retained
+  ok    2/before-throw: destination empty
+  ok    2/before-throw: every owner restored
+  ok    2/before-throw: real signature sign-in retained
+  ok    2/after-throw: exact injection hit
+  ok    2/after-throw: refused
+  ok    2/after-throw: source list retained
+  ok    2/after-throw: destination empty
+  FAIL  2/after-throw: every owner restored
+        expected ["g-source@example.test","g-source@example.test"]
+        got      ["g-source@example.test","g-dest@example.test"]
+  FAIL  2/after-throw: real signature sign-in retained
+        expected ["g-source@example.test","g-source@example.test"]
+        got      ["g-source@example.test",null]
+  ok    2/after-empty: exact injection hit
+  ok    2/after-empty: refused
+  ok    2/after-empty: source list retained
+  ok    2/after-empty: destination empty
+  FAIL  2/after-empty: every owner restored
+        expected ["g-source@example.test","g-source@example.test"]
+        got      ["g-source@example.test","g-dest@example.test"]
+  FAIL  2/after-empty: real signature sign-in retained
+        expected ["g-source@example.test","g-source@example.test"]
+        got      ["g-source@example.test",null]
+  ok    2/after-null: exact injection hit
+  ok    2/after-null: refused
+  ok    2/after-null: source list retained
+  ok    2/after-null: destination empty
+  FAIL  2/after-null: every owner restored
+        expected ["g-source@example.test","g-source@example.test"]
+        got      ["g-source@example.test","g-dest@example.test"]
+  FAIL  2/after-null: real signature sign-in retained
+        expected ["g-source@example.test","g-source@example.test"]
+        got      ["g-source@example.test",null]
+  ok    2/after-false: exact injection hit
+  ok    2/after-false: refused
+  ok    2/after-false: source list retained
+  ok    2/after-false: destination empty
+  FAIL  2/after-false: every owner restored
+        expected ["g-source@example.test","g-source@example.test"]
+        got      ["g-source@example.test","g-dest@example.test"]
+  FAIL  2/after-false: real signature sign-in retained
+        expected ["g-source@example.test","g-source@example.test"]
+        got      ["g-source@example.test",null]
+  ok    intact move transfers list
+  ok    intact move transfers actual sign-in
+
+62 checks, 16 failing.
+
+
+=== /tmp/g-passkey-unknown-final.log ===
+=== g-passkey-move.proof.ts ===
+
+Known occupied destination and thrown source read refuse unchanged
+  ok    known-occupied: refuses
+  ok    known-occupied: source retained
+  ok    known-occupied: destination retained
+  ok    known-occupied: source sign-in retained
+  ok    thrown-read: refuses
+  ok    thrown-read: source retained
+  ok    thrown-read: destination retained
+  ok    thrown-read: source sign-in retained
+
+Unknown source/destination list must refuse before deleting or overwriting
+  ok    source/empty: exact injection hit
+  FAIL  source/empty: unknown refuses move
+        expected "refused"
+        got      "moved"
+  FAIL  source/empty: source retained
+        expected ["g-source-key"]
+        got      []
+  ok    source/empty: destination retained
+  FAIL  source/empty: source still signs in
+        expected "g-source@example.test"
+        got      null
+  ok    source/wrong-type: exact injection hit
+  FAIL  source/wrong-type: unknown refuses move
+        expected "refused"
+        got      "moved"
+  FAIL  source/wrong-type: source retained
+        expected ["g-source-key"]
+        got      []
+  ok    source/wrong-type: destination retained
+  FAIL  source/wrong-type: source still signs in
+        expected "g-source@example.test"
+        got      null
+  ok    source/wrong-json: exact injection hit
+  FAIL  source/wrong-json: unknown refuses move
+        expected "refused"
+        got      "moved"
+  FAIL  source/wrong-json: source retained
+        expected ["g-source-key"]
+        got      []
+  ok    source/wrong-json: destination retained
+  FAIL  source/wrong-json: source still signs in
+        expected "g-source@example.test"
+        got      null
+  ok    destination/empty: exact injection hit
+  FAIL  destination/empty: unknown refuses move
+        expected "refused"
+        got      "moved"
+  FAIL  destination/empty: source retained
+        expected ["g-source-key"]
+        got      []
+  FAIL  destination/empty: destination retained
+        expected ["g-dest-key"]
+        got      ["g-source-key"]
+  FAIL  destination/empty: source still signs in
+        expected "g-source@example.test"
+        got      "g-dest@example.test"
+  FAIL  destination/empty: destination still signs in
+        expected "g-dest@example.test"
+        got      null
+  ok    destination/wrong-type: exact injection hit
+  FAIL  destination/wrong-type: unknown refuses move
+        expected "refused"
+        got      "moved"
+  FAIL  destination/wrong-type: source retained
+        expected ["g-source-key"]
+        got      []
+  FAIL  destination/wrong-type: destination retained
+        expected ["g-dest-key"]
+        got      ["g-source-key"]
+  FAIL  destination/wrong-type: source still signs in
+        expected "g-source@example.test"
+        got      "g-dest@example.test"
+  FAIL  destination/wrong-type: destination still signs in
+        expected "g-dest@example.test"
+        got      null
+  ok    destination/wrong-json: exact injection hit
+  FAIL  destination/wrong-json: unknown refuses move
+        expected "refused"
+        got      "moved"
+  FAIL  destination/wrong-json: source retained
+        expected ["g-source-key"]
+        got      []
+  FAIL  destination/wrong-json: destination retained
+        expected ["g-dest-key"]
+        got      ["g-source-key"]
+  FAIL  destination/wrong-json: source still signs in
+        expected "g-source@example.test"
+        got      "g-dest@example.test"
+  FAIL  destination/wrong-json: destination still signs in
+        expected "g-dest@example.test"
+        got      null
+
+41 checks, 24 failing.
+
+
+=== /tmp/g-passkey-old-unknown-final.log ===
+=== g-passkey-move.proof.ts ===
+
+Known occupied destination and thrown source read refuse unchanged
+  ok    known-occupied: refuses
+  ok    known-occupied: source retained
+  ok    known-occupied: destination retained
+  ok    known-occupied: source sign-in retained
+  ok    thrown-read: refuses
+  ok    thrown-read: source retained
+  ok    thrown-read: destination retained
+  ok    thrown-read: source sign-in retained
+
+Unknown source/destination list must refuse before deleting or overwriting
+  ok    source/empty: exact injection hit
+  FAIL  source/empty: unknown refuses move
+        expected "refused"
+        got      "moved"
+  FAIL  source/empty: source retained
+        expected ["g-source-key"]
+        got      []
+  ok    source/empty: destination retained
+  FAIL  source/empty: source still signs in
+        expected "g-source@example.test"
+        got      null
+  ok    source/wrong-type: exact injection hit
+  FAIL  source/wrong-type: unknown refuses move
+        expected "refused"
+        got      "moved"
+  FAIL  source/wrong-type: source retained
+        expected ["g-source-key"]
+        got      []
+  ok    source/wrong-type: destination retained
+  FAIL  source/wrong-type: source still signs in
+        expected "g-source@example.test"
+        got      null
+  ok    source/wrong-json: exact injection hit
+  FAIL  source/wrong-json: unknown refuses move
+        expected "refused"
+        got      "moved"
+  FAIL  source/wrong-json: source retained
+        expected ["g-source-key"]
+        got      []
+  ok    source/wrong-json: destination retained
+  FAIL  source/wrong-json: source still signs in
+        expected "g-source@example.test"
+        got      null
+  ok    destination/empty: exact injection hit
+  FAIL  destination/empty: unknown refuses move
+        expected "refused"
+        got      "moved"
+  FAIL  destination/empty: source retained
+        expected ["g-source-key"]
+        got      []
+  FAIL  destination/empty: destination retained
+        expected ["g-dest-key"]
+        got      ["g-source-key"]
+  FAIL  destination/empty: source still signs in
+        expected "g-source@example.test"
+        got      "g-dest@example.test"
+  FAIL  destination/empty: destination still signs in
+        expected "g-dest@example.test"
+        got      null
+  ok    destination/wrong-type: exact injection hit
+  FAIL  destination/wrong-type: unknown refuses move
+        expected "refused"
+        got      "moved"
+  FAIL  destination/wrong-type: source retained
+        expected ["g-source-key"]
+        got      []
+  FAIL  destination/wrong-type: destination retained
+        expected ["g-dest-key"]
+        got      ["g-source-key"]
+  FAIL  destination/wrong-type: source still signs in
+        expected "g-source@example.test"
+        got      "g-dest@example.test"
+  FAIL  destination/wrong-type: destination still signs in
+        expected "g-dest@example.test"
+        got      null
+  ok    destination/wrong-json: exact injection hit
+  FAIL  destination/wrong-json: unknown refuses move
+        expected "refused"
+        got      "moved"
+  FAIL  destination/wrong-json: source retained
+        expected ["g-source-key"]
+        got      []
+  FAIL  destination/wrong-json: destination retained
+        expected ["g-dest-key"]
+        got      ["g-source-key"]
+  FAIL  destination/wrong-json: source still signs in
+        expected "g-source@example.test"
+        got      "g-dest@example.test"
+  FAIL  destination/wrong-json: destination still signs in
+        expected "g-dest@example.test"
+        got      null
+
+41 checks, 24 failing.
+
+
+=== /tmp/g-passkey-linked.log ===
+=== second-step-gate.test.ts ===
+  ok    the passkey wait is the app's wait
+
+An account with a passkey: the emailed link adds nothing
+  ok    the link opened a fresh session
+  ok    the account has a second step
+  ok    no new passkey from it
+  ok    nor an answer slipped past the options
+  ok    no authenticator app from it
+  ok    nor from a session older than the mark
+
+The same account, logged in with its passkey
+  ok    adds a passkey
+
+An account with neither still adds its first from the link
+  ok    a passkey
+  ok    or an app
+
+A lost passkey: removing it from the link waits, with an email
+  ok    answered with the day, not removed
+  ok    the account is told at once
+  ok    asking again does not move the day
+  ok    still no passkey from the link meanwhile
+  ok    logging in with that very passkey within the days works
+  ok    but does not keep it: the removal still waits
+  ok    and nothing says it stays
+  ok    logging in with another passkey does not call it off either
+  ok    “Keep it” from that session does
+  ok    and says so
+  ok    once its days are over, it does not log in
+  ok    it is gone
+  ok    then the link adds a new one
+
+From a session with the step, removing is at once
+  ok    removed now
+  ok    the session that removed it stays, without its mark
+
+A team member is never offered a passkey whose days are over
+  ok    the way offered is to set one up, and the passkey is gone
+
+A session opened with a passkey set to be removed has no second step
+  ok    P is asked to go
+  ok    P still logs in within its days
+  ok    but its session has no second step
+  ok    (b) it adds no passkey
+  ok    (b) it turns on no app either
+  ok    (c) removing Q from it only waits, Q is not removed at once
+  ok    (a) it cannot keep P
+  ok    nor press Cancel under Two-step login
+  ok    both still wait
+
+Two passkeys set to be removed never keep each other
+  ok    Q logs in, with no second step
+  ok    and calls nothing off: P and Q both still wait
+  ok    nor says another passkey kept them
+
+Once the days are over: nothing is called off, and the old session does nothing
+  ok    a removal whose days are over cannot be kept
+  ok    the session P opened before is logged out with it
+  ok    and used by the API it removes nothing and adds nothing
+
+Keep it: the owner's rule (C3-95)
+  ok    no second step, no Keep it; another passkey or the app's code may
+
+The app's code does not call a removal off
+  ok    asked from a session without the step
+  ok    logging in with a recovery code leaves the removal waiting
+
+What a removed passkey or a turned-off app opened goes with it
+  ok    three sessions, each marked with its passkey
+  ok    removing the first logs out what it opened
+  ok    and leaves the other passkey's session as it was
+  ok    two sessions opened with the app
+  ok    turning the app off
+  ok    logs out the other session it opened, and leaves this one logged in without its mark
+  ok    a passkey's session is not touched
+
+Lost the app and the passkey, with no recovery inbox: the two waits run together
+  ok    let in without the second step, locked
+  ok    it still adds nothing
+  ok    but it may ask for the passkey's removal, which waits as long as the lock
+  ok    and the account is told
+  ok    on that day both are gone
+
+The account's lock: a removal and a sign-in never write over each other
+  ok    a removal asked while the lock is held waits for it
+  ok    and is written once it is let go
+  ok    the sign-in's cancellation waits too: the removal is still asked
+  ok    a passkey removed while its sign-in was checked opens nothing
+  ok    and is not written back
+
+A removal asked through the recovery address stays when the owner's full login closes that session
+  ok    the recovery address opened a locked session
+  ok    which asks for the passkey's removal
+  ok    the owner's login with the sign-in inbox logs it out
+  ok    but its removal stays: no login calls one off
+  ok    the notice that what the recovery address opened was closed, and none that the passkey stays
+  ok    a removal asked by a session that stays open is not called off by another login
+  ok    “Keep it” from a session without a second step is refused (owner C3-95)
+  ok    from a session opened with another passkey, “Keep it” calls it off
+
+Asking again within the hour is not emailed again
+  ok    once in the first hour
+  ok    again an hour later
+  ok    the email says when, with the time and the time zone spelled out
+  ok    its only passkey, no app: the email says the truth, nothing can stop it, and what to do on the day
+  ok    the confirmed recovery address is told too (MM-SA-19)
+  ok    with another passkey and the app: when, and what to do if it was not them; only Keep it stops it
+
+A stolen passkey stays set to go, whatever the owner logs in with (review of 3467adf6d)
+  ok    the thief's session with P had a second step
+  ok    the owner asks for P's removal from a session without the step
+  ok    the thief's session is logged out at once
+  ok    the owner logs in with Q
+  ok    P is still set to go
+  ok    the owner logs in with the app's code
+  ok    P is still set to go
+  ok    a new session with P has no second step
+  ok    and removes Q only after the wait, not at once
+  ok    Keep it from the owner's own session keeps Q
+
+The record waits with no expiry until it is applied, and moves with the account
+  ok    no expiry on the removal record
+  ok    after a move, P is set to go at the new address, with the same moment
+
+Checked again under the lock: a session whose passkey is set to go keeps and removes nothing
+  ok    Keep it of P from Q's session is refused under the lock
+  ok    removing R at once from it is refused under the lock
+
+The app's mark holds only while the app is on
+  ok    a session marked by the app on an account without it has no second step
+
+A code is used once, even at the same moment, and never brings back a record turned off
+  ok    two logins with the same code at once: one passes
+  ok    two with the same recovery code at once: one passes
+  ok    an app code and recovery code A at the same moment: both pass
+  ok    and A never comes back, even once its one-use mark is gone
+  ok    new recovery codes made while a leaked code is checked: the old code never works after
+  ok    turning it off while a code is checked and Cancel is pressed: it stays off
+
+A move never joins another address's ways in to the account (review of da5191515)
+  ok    asked by a session opened only by the emailed link, on an account with a passkey: refused
+  ok    asked with the passkey, onto an address with its own passkey: refused
+  ok    the tap itself refuses an address with its own passkey
+  ok    nothing joined: the account keeps only its passkey, the attacker's session gets no second step on it
+  ok    an address with its own app and codes: refused
+  ok    an address with a passkey removal waiting, even one already due: refused
+  ok    and the account's passkey did not fall
+  ok    onto an address with nothing of its own, it moves, with the passkey
+  ok    and whatever that address had open before is logged out
+
+Small checks from the same review
+  ok    a team member whose only passkey is set to go is not told to log in with it
+  ok    work tied to a passkey set to go does not run
+  ok    work tied to a passkey not set to go runs
+  ok    a removal whose lock ran out writes nothing: both passkeys stay
+
+Each passkey waits its own days, and each new one is told (review of 693f44f0b)
+  ok    a passkey asked a minute before another's day waits its own full days
+  ok    each new passkey asked is emailed, even within the hour
+  ok    the second email lists both, each with its own day, and points to a passkey not on the list
+  ok    on the first one's day only it goes; the second stays set to go
+  ok    the account still has a second step, so the emailed link adds nothing
+  ok    when every passkey left is set to go and there is no app, the email says nothing can stop it
+  ok    a second passkey asked five minutes later is emailed too; the same one asked again is not
+
+The recovery address needs the second step to change, and its old address is told
+  ok    an emailed link alone cannot change it
+  ok    nor take it away
+  ok    with the passkey it starts
+  ok    and is confirmed
+  ok    the old address is told it was replaced
+  ok    and when it is taken away, the address it had is told
+
+A move refused halfway leaves everything where it was
+  ok    refused
+  ok    the store and the passkey stay with the old address, and its sessions are logged out
+
+Asking to move does not tell which addresses have passkeys
+  ok    a session that is not fresh is told to log in again, not that the address has passkeys
+
+A fenced write never falls back when its script cannot run
+  ok    nothing is written: both passkeys stay
+
+No gap while a move runs (review of 8b4ddf6ee)
+  ok    in the gap the old address counts as having a second step: no add, options refused
+  ok    the move fails
+  ok    undone: the store and only the owner's passkey are back, nothing left at the new address
+  ok    and every session of the old address is logged out
+  ok    the move's marks are gone
+
+Adding is asked again under the lock, just before the write
+  ok    an account with no second step gets the options
+  ok    a passkey that landed between the route's check and the lock: the link's add is refused under the lock
+
+Two moves of one address at once: the second is refused, and only a move's own mark is taken away
+  ok    the first move marks both
+  ok    a second move of the same address is refused, and its other address is left unmarked
+  ok    another move's token takes nothing away
+  ok    its own token does
+  ok    with nothing in the way, the same answer adds it
+  ok    turning the app on asks again under its lock
+
+A failed step after the store moved never undoes the move
+  ok    it says the move did not finish
+  ok    but the store and the passkey stay together at the new address: nothing is split
+
+Locks lost midway leave nothing on two addresses
+  ok    the lock of the new address runs out midway: refused
+  ok    everything is back where it was
+  ok    two-step login whose old record could not be taken away: refused, and the copy is gone
+
+A passkey already off the list still has its sessions closed when its day comes
+  ok    its session is logged out
+
+Asking to move to many addresses is limited per account
+  ok    five an hour, then limited
+
+A move that can be neither finished nor undone stays marked until it is repaired (review of 1daa9131e)
+  ok    the move fails, and so does putting the passkeys back
+  ok    both addresses stay marked after the move returns
+  ok    so nothing is added to the old address, even with the passkey away
+  ok    a login with the emailed link is refused while it cannot be repaired
+  ok    the next login repairs it: the passkey is back with the store, and the login goes on
+  ok    and the address the ways in came back from is logged out
+  ok    a store left on both addresses
+  ok    both are marked until the next login
+  ok    which settles it by where the store's handle points: the copy at the new address goes, the passkey comes back, the login goes on
+
+A broken move that cannot be told apart is left for a person, with a support script
+  ok    with no store on either address, a login by the emailed link is refused
+  ok    the support script shows the state
+  ok    and clears it only with the address typed again
+  ok    never while the store is on one address and its passkey on the other: that would let the emailed link in
+  ok    the support script is there
+
+Undoing a move forgets two-step login the old address gained midway, and gives back the owner's
+  ok    the planted record is gone, the owner's ten codes are back on the old address, nothing at the new one, nothing left broken
+
+While an address is in a move, the app's code still lets its owner in; nothing else does
+  ok    the emailed link waits for the app's code
+  ok    and the code lets the owner in
+  ok    the recovery address's link is refused for an address in a move
+  ok    the link that turns the app off does nothing for an address in a move
+
+The move's record is written before anything moves (a process that dies midway leaves it)
+  ok    in the gap, the record is already there
+  ok    and cleared once the move is done
+
+When moving two-step login refuses and its copy could not be taken back, the undo takes it
+  ok    refused, the app stays on the old address, and its copy at the new one is gone
+
+A passkey login repairs a broken move before any session opens (review of 682c8d6bd)
+  ok    the first try repairs it and asks to try again: no session on the copy
+  ok    the next one lands on the address with the store
+
+A store left on both addresses goes back with its other stores, unless one copy was edited
+  ok    the store is on both, and its other store was rewritten for the new address
+  ok    the repair keeps the address the handle points to, with its other store back under it
+  ok    an edited copy is never deleted: the login waits, and the record stays for a person
+
+A request to turn the app off never ends during a move
+  ok    its days are over, yet the emailed link still waits for the code and the app stays on
+  ok    nor does the studio's look at it turn it off meanwhile
+
+The recovery address's link waits for the app's code during a move, as the emailed link does
+  ok    it goes to the code page
+
+A session logged out while its request waited for the lock keeps and removes nothing (C3-110)
+  ok    “Keep it” from the thief's session, logged out meanwhile: refused, P stays set to go
+  ok    removing Q at once from it: refused, Q stays
+  ok    a session marked by the app, on an account whose app is off, keeps nothing
+
+A removal nobody was told about is never set (C3-110)
+  ok    the provider is down: the request answers as such, and nothing waits to be removed
+  ok    with the email going out, it is set
+
+Two requests for the same removal while its first notice goes out: never a success on an unconfirmed notice (C3-113)
+  ok    the provider fails the first: the second, asked meanwhile, answers busy, never success; the first unsent; nothing waits
+  ok    the provider delivers the first: the second, asked meanwhile, still answers busy; the first is set, told once
+  ok    asked again once the notice was delivered: answered set, keeping its moment, and not emailed again within the hour
+
+A request that stopped before its notice was confirmed never has its passkey removed (C3-115)
+  ok    while it sends, the passkey waits as asked
+  ok    past its day, the untold removal is not applied: taken off the record, both passkeys kept
+  ok    the stopped request, ending late, changes nothing it no longer holds
+
+Moving passkeys whose last answer was lost keeps them at the new address (C3-110)
+  ok    the passkey is at the new address, nowhere lost
+
+Moving passkeys whose index write was applied and its answer lost: the index goes back (C3-117)
+  ok    the move is refused and the passkey stays where its list is, its index with it
+  ok    and it still logs in
+  ok    the repair points an index left on an address with no list back at the list's
+
+An old list gone while the new index write was not applied is never a finished move (C3-120)
+  ok    refused, and nothing is left at the new address: never said to be moved
+
+Small items of C3-110
+  ok    “Keep it” is told to the recovery address too
+  ok    clearing by hand waits for a move that is running
+  ok    asking again for the same removal does not log the owner out again
+
+A passkey removed, or the app turned off, just as a login opens its session
+  ok    a passkey removed as its session opens: no session
+  ok    none left behind
+  ok    the app turned off as its code's session opens: back to log in
+  ok    and the session is closed
+
+A lock held too long is said as busy, never a bare error
+  ok    keeping it while the lock is held elsewhere
+  ok    logging in with the passkey meanwhile
+
+201 checks, all passing.
+(node:45) ExperimentalWarning: The supports Web Crypto API method is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:45) ExperimentalWarning: The ML-DSA-44 Web Crypto API algorithm is an experimental feature and might change at any time
+moving the ways in refused Error: the new address holds passkeys of its own
+    at /tmp/g-2681-proof-cGxMhu/0.cjs:48773:47
+    at async withLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9063:12)
+    at async withLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9063:12)
+    at async movePasskeys (/tmp/g-2681-proof-cGxMhu/0.cjs:48770:3)
+    at async finishMove (/tmp/g-2681-proof-cGxMhu/0.cjs:50787:5)
+    at async POST8 (/tmp/g-2681-proof-cGxMhu/0.cjs:50747:12)
+    at async main (/tmp/g-2681-proof-cGxMhu/0.cjs:51433:22)
+address move failed Error: store lock busy (made up)
+    at store.pipeline (/tmp/g-2681-proof-cGxMhu/0.cjs:51480:13)
+    at async takeLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9010:21)
+    at async withStore (/tmp/g-2681-proof-cGxMhu/0.cjs:17752:12)
+    at async moveAccount (/tmp/g-2681-proof-cGxMhu/0.cjs:17876:18)
+    at async finishMove (/tmp/g-2681-proof-cGxMhu/0.cjs:50802:20)
+    at async POST8 (/tmp/g-2681-proof-cGxMhu/0.cjs:50747:12)
+    at async main (/tmp/g-2681-proof-cGxMhu/0.cjs:51484:20)
+address move failed Error: down for a moment
+    at store.pipeline (/tmp/g-2681-proof-cGxMhu/0.cjs:51542:13)
+    at redisPipeline (/tmp/g-2681-proof-cGxMhu/0.cjs:8968:41)
+    at openSession (/tmp/g-2681-proof-cGxMhu/0.cjs:18306:9)
+    at async finishMove (/tmp/g-2681-proof-cGxMhu/0.cjs:50815:17)
+    at async POST8 (/tmp/g-2681-proof-cGxMhu/0.cjs:50747:12)
+    at async main (/tmp/g-2681-proof-cGxMhu/0.cjs:51550:20)
+a failed move left in an unknown state { from: 'tmv-from@example.com', to: 'tmv-dest@example.com' }
+address move failed Error: store lock busy (made up)
+    at store.pipeline (/tmp/g-2681-proof-cGxMhu/0.cjs:51629:13)
+    at redisPipeline (/tmp/g-2681-proof-cGxMhu/0.cjs:8968:41)
+    at takeLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9010:27)
+    at withStore (/tmp/g-2681-proof-cGxMhu/0.cjs:17752:18)
+    at async moveAccount (/tmp/g-2681-proof-cGxMhu/0.cjs:17876:18)
+    at async finishMove (/tmp/g-2681-proof-cGxMhu/0.cjs:50802:20)
+    at async POST8 (/tmp/g-2681-proof-cGxMhu/0.cjs:50747:12)
+    at async main (/tmp/g-2681-proof-cGxMhu/0.cjs:51634:22)
+taking passkeys off the new address failed LockBusyError: busy
+    at takeLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9015:45)
+    at async withLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9061:16)
+    at async /tmp/g-2681-proof-cGxMhu/0.cjs:48799:9
+    at async withLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9063:12)
+    at async withLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9063:12)
+    at async movePasskeys (/tmp/g-2681-proof-cGxMhu/0.cjs:48770:3)
+    at async step (/tmp/g-2681-proof-cGxMhu/0.cjs:50757:5)
+    at async undo (/tmp/g-2681-proof-cGxMhu/0.cjs:50772:12)
+    at async finishMove (/tmp/g-2681-proof-cGxMhu/0.cjs:50820:33)
+    at async POST8 (/tmp/g-2681-proof-cGxMhu/0.cjs:50747:12)
+moving passkeys back failed MoveSplitError: moving passkeys could not be put back
+    at /tmp/g-2681-proof-cGxMhu/0.cjs:48809:28
+    at async withLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9063:12)
+    at async withLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9063:12)
+    at async movePasskeys (/tmp/g-2681-proof-cGxMhu/0.cjs:48770:3)
+    at async step (/tmp/g-2681-proof-cGxMhu/0.cjs:50757:5)
+    at async undo (/tmp/g-2681-proof-cGxMhu/0.cjs:50772:12)
+    at async finishMove (/tmp/g-2681-proof-cGxMhu/0.cjs:50820:33)
+    at async POST8 (/tmp/g-2681-proof-cGxMhu/0.cjs:50747:12)
+    at async main (/tmp/g-2681-proof-cGxMhu/0.cjs:51634:22)
+taking passkeys off the new address failed LockBusyError: busy
+    at takeLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9015:45)
+    at async withLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9061:16)
+    at async /tmp/g-2681-proof-cGxMhu/0.cjs:48799:9
+    at async withLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9063:12)
+    at async withLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9063:12)
+    at async movePasskeys (/tmp/g-2681-proof-cGxMhu/0.cjs:48770:3)
+    at async repairMove (/tmp/g-2681-proof-cGxMhu/0.cjs:50020:7)
+    at async finishProvenSignIn (/tmp/g-2681-proof-cGxMhu/0.cjs:50201:56)
+    at async main (/tmp/g-2681-proof-cGxMhu/0.cjs:51640:80)
+repairing a broken move failed MoveSplitError: moving passkeys could not be put back
+    at /tmp/g-2681-proof-cGxMhu/0.cjs:48809:28
+    at async withLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9063:12)
+    at async withLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9063:12)
+    at async movePasskeys (/tmp/g-2681-proof-cGxMhu/0.cjs:48770:3)
+    at async repairMove (/tmp/g-2681-proof-cGxMhu/0.cjs:50020:7)
+    at async finishProvenSignIn (/tmp/g-2681-proof-cGxMhu/0.cjs:50201:56)
+    at async main (/tmp/g-2681-proof-cGxMhu/0.cjs:51640:80)
+address move failed Error: down for a moment
+    at store.pipeline (/tmp/g-2681-proof-cGxMhu/0.cjs:51660:81)
+    at redisPipeline (/tmp/g-2681-proof-cGxMhu/0.cjs:8968:41)
+    at /tmp/g-2681-proof-cGxMhu/0.cjs:17909:13
+    at async withStore (/tmp/g-2681-proof-cGxMhu/0.cjs:17767:12)
+    at async moveAccount (/tmp/g-2681-proof-cGxMhu/0.cjs:17876:18)
+    at async finishMove (/tmp/g-2681-proof-cGxMhu/0.cjs:50802:20)
+    at async POST8 (/tmp/g-2681-proof-cGxMhu/0.cjs:50747:12)
+    at async main (/tmp/g-2681-proof-cGxMhu/0.cjs:51663:23)
+a failed move left in an unknown state { from: 'both-from@example.com', to: 'both-dest@example.com' }
+address move failed Error: store lock busy (made up)
+    at store.pipeline (/tmp/g-2681-proof-cGxMhu/0.cjs:51710:13)
+    at async takeLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9010:21)
+    at async withStore (/tmp/g-2681-proof-cGxMhu/0.cjs:17752:12)
+    at async moveAccount (/tmp/g-2681-proof-cGxMhu/0.cjs:17876:18)
+    at async finishMove (/tmp/g-2681-proof-cGxMhu/0.cjs:50802:20)
+    at async POST8 (/tmp/g-2681-proof-cGxMhu/0.cjs:50747:12)
+    at async main (/tmp/g-2681-proof-cGxMhu/0.cjs:51714:3)
+moving the ways in refused Error: moving two-step login lost its lock
+    at /tmp/g-2681-proof-cGxMhu/0.cjs:48261:15
+    at async withLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9063:12)
+    at async withLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9063:12)
+    at async moveTwoStep (/tmp/g-2681-proof-cGxMhu/0.cjs:48250:3)
+    at async finishMove (/tmp/g-2681-proof-cGxMhu/0.cjs:50790:5)
+    at async POST8 (/tmp/g-2681-proof-cGxMhu/0.cjs:50747:12)
+    at async main (/tmp/g-2681-proof-cGxMhu/0.cjs:51788:22)
+address move failed Error: down for a moment
+    at store.pipeline (/tmp/g-2681-proof-cGxMhu/0.cjs:51816:80)
+    at redisPipeline (/tmp/g-2681-proof-cGxMhu/0.cjs:8968:41)
+    at /tmp/g-2681-proof-cGxMhu/0.cjs:17909:13
+    at async withStore (/tmp/g-2681-proof-cGxMhu/0.cjs:17767:12)
+    at async withStores (/tmp/g-2681-proof-cGxMhu/0.cjs:17775:17)
+    at async withStore (/tmp/g-2681-proof-cGxMhu/0.cjs:17767:12)
+    at async moveAccount (/tmp/g-2681-proof-cGxMhu/0.cjs:17876:18)
+    at async finishMove (/tmp/g-2681-proof-cGxMhu/0.cjs:50802:20)
+    at async POST8 (/tmp/g-2681-proof-cGxMhu/0.cjs:50747:12)
+    at async main (/tmp/g-2681-proof-cGxMhu/0.cjs:51819:3)
+a failed move left in an unknown state { from: 'exf-from@example.com', to: 'exf-dest@example.com' }
+address move failed Error: down for a moment
+    at store.pipeline (/tmp/g-2681-proof-cGxMhu/0.cjs:51838:80)
+    at redisPipeline (/tmp/g-2681-proof-cGxMhu/0.cjs:8968:41)
+    at /tmp/g-2681-proof-cGxMhu/0.cjs:17909:13
+    at async withStore (/tmp/g-2681-proof-cGxMhu/0.cjs:17767:12)
+    at async moveAccount (/tmp/g-2681-proof-cGxMhu/0.cjs:17876:18)
+    at async finishMove (/tmp/g-2681-proof-cGxMhu/0.cjs:50802:20)
+    at async POST8 (/tmp/g-2681-proof-cGxMhu/0.cjs:50747:12)
+    at async main (/tmp/g-2681-proof-cGxMhu/0.cjs:51841:3)
+a failed move left in an unknown state { from: 'edf-from@example.com', to: 'edf-dest@example.com' }
+putting a passkey's index back failed LockBusyError: busy
+    at fencedSet (/tmp/g-2681-proof-cGxMhu/0.cjs:48326:54)
+    at async /tmp/g-2681-proof-cGxMhu/0.cjs:48804:11
+    at async withLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9063:12)
+    at async withLock (/tmp/g-2681-proof-cGxMhu/0.cjs:9063:12)
+    at async movePasskeys (/tmp/g-2681-proof-cGxMhu/0.cjs:48770:3)
+    at async main (/tmp/g-2681-proof-cGxMhu/0.cjs:52031:19)
+
+
+=== /tmp/g-passkey-linked-extra.log ===
+=== g-passkey-move.proof.ts ===
+
+Applied index reply lost: one/two credentials, failure before/after persistence
+  ok    1/before-throw: exact injection hit
+  ok    1/before-throw: refused
+  ok    1/before-throw: source list retained
+  ok    1/before-throw: destination empty
+  ok    1/before-throw: every owner restored
+  ok    1/before-throw: real signature sign-in retained
+  ok    1/after-throw: exact injection hit
+  ok    1/after-throw: refused
+  ok    1/after-throw: source list retained
+  ok    1/after-throw: destination empty
+  ok    1/after-throw: every owner restored
+  ok    1/after-throw: real signature sign-in retained
+  ok    1/after-empty: exact injection hit
+  ok    1/after-empty: refused
+  ok    1/after-empty: source list retained
+  ok    1/after-empty: destination empty
+  ok    1/after-empty: every owner restored
+  ok    1/after-empty: real signature sign-in retained
+  ok    1/after-null: exact injection hit
+  ok    1/after-null: refused
+  ok    1/after-null: source list retained
+  ok    1/after-null: destination empty
+  ok    1/after-null: every owner restored
+  ok    1/after-null: real signature sign-in retained
+  ok    1/after-false: exact injection hit
+  ok    1/after-false: refused
+  ok    1/after-false: source list retained
+  ok    1/after-false: destination empty
+  ok    1/after-false: every owner restored
+  ok    1/after-false: real signature sign-in retained
+  ok    2/before-throw: exact injection hit
+  ok    2/before-throw: refused
+  ok    2/before-throw: source list retained
+  ok    2/before-throw: destination empty
+  ok    2/before-throw: every owner restored
+  ok    2/before-throw: real signature sign-in retained
+  ok    2/after-throw: exact injection hit
+  ok    2/after-throw: refused
+  ok    2/after-throw: source list retained
+  ok    2/after-throw: destination empty
+  ok    2/after-throw: every owner restored
+  ok    2/after-throw: real signature sign-in retained
+  ok    2/after-empty: exact injection hit
+  ok    2/after-empty: refused
+  ok    2/after-empty: source list retained
+  ok    2/after-empty: destination empty
+  ok    2/after-empty: every owner restored
+  ok    2/after-empty: real signature sign-in retained
+  ok    2/after-null: exact injection hit
+  ok    2/after-null: refused
+  ok    2/after-null: source list retained
+  ok    2/after-null: destination empty
+  ok    2/after-null: every owner restored
+  ok    2/after-null: real signature sign-in retained
+  ok    2/after-false: exact injection hit
+  ok    2/after-false: refused
+  ok    2/after-false: source list retained
+  ok    2/after-false: destination empty
+  ok    2/after-false: every owner restored
+  ok    2/after-false: real signature sign-in retained
+  ok    intact move transfers list
+  ok    intact move transfers actual sign-in
+
+62 checks, all passing.
+
+=== passkey-signin-response.test.ts ===
+
+Passkey success requires an HTTP success and explicit boolean
+  ok    malformed or contradictory answer is refused
+  ok    malformed or contradictory answer is refused
+  ok    malformed or contradictory answer is refused
+  ok    malformed or contradictory answer is refused
+  ok    malformed or contradictory answer is refused
+  ok    malformed or contradictory answer is refused
+  ok    malformed or contradictory answer is refused
+  ok    malformed or contradictory answer is refused
+  ok    malformed or contradictory answer is refused
+  ok    failed HTTP cannot approve a prompt or redirect
+  ok    known refusal preserved
+  ok    known refusal preserved
+  ok    known refusal preserved
+  ok    known refusal preserved
+  ok    unknown error stays readable
+  ok    unknown error stays readable
+  ok    unknown error stays readable
+  ok    malformed or contradictory answer is refused
+  ok    malformed or contradictory answer is refused
+  ok    malformed or contradictory answer is refused
+  ok    malformed or contradictory answer is refused
+  ok    malformed or contradictory answer is refused
+  ok    malformed or contradictory answer is refused
+  ok    malformed or contradictory answer is refused
+  ok    malformed or contradictory answer is refused
+  ok    malformed or contradictory answer is refused
+  ok    failed HTTP cannot approve a prompt or redirect
+  ok    known refusal preserved
+  ok    known refusal preserved
+  ok    known refusal preserved
+  ok    known refusal preserved
+  ok    unknown error stays readable
+  ok    unknown error stays readable
+  ok    unknown error stays readable
+
+Options and destination belong to the expected stage
+  ok    successful options remain available to WebAuthn validation
+  ok    missing or malformed options never opens prompt
+  ok    missing or malformed options never opens prompt
+  ok    missing or malformed options never opens prompt
+  ok    missing or malformed options never opens prompt
+  ok    missing or malformed options never opens prompt
+  ok    unrecognized destination cannot navigate
+  ok    unrecognized destination cannot navigate
+  ok    unrecognized destination cannot navigate
+  ok    unrecognized destination cannot navigate
+  ok    unrecognized destination cannot navigate
+  ok    unrecognized destination cannot navigate
+  ok    route success opens the studio
+  ok    route success opens the studio
+
+48 checks, all passing.
+
+=== passkey-app-code-invite.test.ts ===
+
+Who is invited
+  ok    passkeys and no app: invited
+  ok    several passkeys and no app: invited
+  ok    passkeys and the app already on: never invited
+  ok    the app on and no passkey: never invited
+  ok    no passkey and no app: never invited
+  ok    a locked session has its own notice and is not invited
+
+At most once a browser session
+  ok    first page of the session shows it
+  ok    and remembers it under its own key
+  ok    a later page of the same session does not
+  ok    nor a third
+  ok    a new session shows it again
+  ok    storage that cannot be reached never hides it
+  ok    storage that refuses to keep it never hides it
+
+Nothing is drawn on the server, so the server never guesses the session or the language
+  ok    server markup holds only the focus anchor
+
+Every language a store speaks has every word, written by hand
+  ok    one entry for each store language, no more
+  ok    en: every word present
+  ok    en: the reason names the email being taken over and the app
+  ok    en: no urgency or fear words
+  ok    es: every word present
+  ok    es: not the English copied over
+  ok    es: the reason names the email being taken over and the app
+  ok    es: no urgency or fear words
+  ok    fr: every word present
+  ok    fr: not the English copied over
+  ok    fr: the reason names the email being taken over and the app
+  ok    fr: no urgency or fear words
+  ok    de: every word present
+  ok    de: not the English copied over
+  ok    de: the reason names the email being taken over and the app
+  ok    de: no urgency or fear words
+  ok    it: every word present
+  ok    it: not the English copied over
+  ok    it: the reason names the email being taken over and the app
+  ok    it: no urgency or fear words
+  ok    nl: every word present
+  ok    nl: not the English copied over
+  ok    nl: the reason names the email being taken over and the app
+  ok    nl: no urgency or fear words
+  ok    pt: every word present
+  ok    pt: not the English copied over
+  ok    pt: the reason names the email being taken over and the app
+  ok    pt: no urgency or fear words
+  ok    English link says its purpose
+  ok    no generic link text in any language
+
+Language of the browser, or English
+  ok    pt-BR is Portuguese
+  ok    the first language a store speaks wins
+  ok    upper case tags are read
+  ok    none of them: English
+  ok    nothing at all: English
+  ok    empty list: English
+
+The studio draws it from what it already reads, and links to the app's own section
+  ok    rendered only under the rule, from the passkeys and two-step status already loaded
+  ok    drawn nowhere else on the page
+  ok    no server read or fetch of its own
+  ok    the link goes to Two-step login
+  ok    Two-step login has that anchor
+  ok    the once-a-session mark is kept in sessionStorage
+
+Accessibility
+  ok    a region named by its heading
+  ok    its language is marked (3.1.2)
+  ok    never live, never takes the focus
+  ok    close button has an accessible name
+  ok    close button is at least 44 by 44 px
+  ok    the link is at least 44 px high
+  ok    closing puts the focus where the note was
+  ok    information is in words, not color
+
+64 checks, all passing.
+
+=== two-step.test.ts ===
+
+The codes
+  ok    RFC 6238's own values, for its own secret
+  ok    base32 there and back
+  ok    now, and a step either side
+  ok    not two steps away
+  ok    never a step already used
+
+Turning it on
+  ok    the recovery address has to be another inbox
+  ok    a code is emailed to the recovery address
+  ok    the app reads a secret and an address
+  ok    a wrong code does not turn it on
+  ok    another session cannot finish it
+  ok    not without the recovery address's code
+  ok    on, with ten recovery codes shown once
+
+Logging in
+  ok    the link opens no session: it leads to the code page
+  ok    a wrong code: back to the page, saying so
+  ok    a right code opens the session
+  ok    and the waiting login is spent
+  ok    after five wrong codes, the waiting login is over, even for a right one
+  ok    a recovery code logs in, written in capitals or not
+  ok    and is spent
+  ok    the same recovery code does not work twice
+
+Moving the address, and turning it off
+  ok    it goes with the address
+  ok    a wrong code does not turn it off
+  ok    a recovery code does
+  ok    without it, the link opens the session as it always did
+
+Lost the phone and the codes: back in at once through the recovery address
+  ok    the recovery address is shown without giving it away
+  ok    a link goes to the recovery address, not the sign-in one
+  ok    opening it logs in at once, and two-step login is off
+  ok    and it works once
+  ok    the sign-in address is told
+
+Lost the recovery inbox too: in at once, with what matters locked
+  ok    in at once, from the code page
+  ok    with what matters locked for a week
+  ok    payments, the plan, the team, deleting, exports, settings, sending, imports and erasing a person wait
+  ok    products, pages, orders, numbers, drafts and reviews do not
+  ok    deleting a person and everything kept about them waits
+  ok    removing a product waits; adding and editing one do not
+  ok    the erase route itself refuses it, before anything is read or deleted
+  ok    and the owner's passkey is not taken away at once: the removal only waits
+  ok    two-step login cannot be changed from it
+  ok    getting in again does not move the day
+  ok    before the week is out, the link still asks for the code first
+  ok    a login with a recovery code calls it off
+  ok    and logs out every browser let in without it
+  ok    Cancel in the studio does too
+  ok    not a day early
+  ok    after the week, it turns off, and nothing is locked
+  ok    and the emailed link logs in on its own
+
+46 checks, all passing.
+
+=== recovery-address.test.ts ===
+
+Setting it
+  ok    not the sign-in address itself
+  ok    a code goes to it
+  ok    a wrong code keeps nothing
+  ok    the right one keeps it
+
+Asking for a way in
+  ok    an address with no account: the same answer, and nobody emailed
+  ok    an account with one: the link goes to the recovery address, and the sign-in address is told
+
+In at once, with what matters locked
+  ok    in, at the studio
+  ok    locked for a week
+  ok    exports and payments wait; products do not
+  ok    the link works once
+
+The sign-in inbox answers
+  ok    logging in with it logs the locked session out
+  ok    and the next recovery login starts a new week
+
+A week unanswered
+  ok    still locked a day before
+  ok    after it, the recovery address opens everything
+
+With two-step login on
+  ok    the address confirmed while turning it on is the account's recovery address
+  ok    the link leads to the code page
+  ok    which cannot send it to the recovery address again
+  ok    and a right code opens everything
+
+Moving the sign-in address
+  ok    the recovery address goes with it
+  ok    moved onto the recovery address itself, there is none left
+
+The security warning tells only what the sender confirmed
+  ok    accepted: no result exposes the account or provider outcome
+  ok    accepted: one recovery POST and one security warning, without retries
+  ok    accepted: both existing subjects stay unchanged
+  ok    accepted: the warning is accepted even when recovery acceptance is unknown
+  ok    accepted: the existing UTC warning time stays present
+  ok    accepted: exact security message, with the old accepted text unchanged
+  ok    accepted: one original token remains, with its original fifteen-minute TTL
+  ok    accepted: no token is deleted or replaced after a refused or uncertain send
+  ok    refused: no result exposes the account or provider outcome
+  ok    refused: one recovery POST and one security warning, without retries
+  ok    refused: both existing subjects stay unchanged
+  ok    refused: the warning is accepted even when recovery acceptance is unknown
+  ok    refused: the existing UTC warning time stays present
+  ok    refused: exact security message, with the old accepted text unchanged
+  ok    refused: one original token remains, with its original fifteen-minute TTL
+  ok    refused: no token is deleted or replaced after a refused or uncertain send
+  ok    unknown: no result exposes the account or provider outcome
+  ok    unknown: one recovery POST and one security warning, without retries
+  ok    unknown: both existing subjects stay unchanged
+  ok    unknown: the warning is accepted even when recovery acceptance is unknown
+  ok    unknown: the existing UTC warning time stays present
+  ok    unknown: exact security message, with the old accepted text unchanged
+  ok    unknown: one original token remains, with its original fifteen-minute TTL
+  ok    unknown: no token is deleted or replaced after a refused or uncertain send
+
+44 checks, all passing.
+email rejected 400
+
+=== lock-acknowledgment.test.ts ===
+✔ lock admission requires explicit OK and never grants ownership on unknown storage response (8.373902ms)
+✔ unknown stock lock acknowledgment cannot open checkout (64.111786ms)
+✔ malformed lock receipt never grants ownership or retries an uncertain acquisition (5.251787ms)
+✔ strict fenced CAS never downgrades an ambiguous EVAL to separate reads or writes (2.566609ms)
+✔ strict fenced CAS refuses unsafe or over-budget inputs before any IO (0.806402ms)
+✔ strict release cannot turn an ambiguous EVAL into a GET/DEL race (1.240014ms)
+✔ strict release rejects unknown ownership without reading executable fields (0.606312ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 116.615507
+
+=== move-members.test.ts ===
+
+Renewal dates as other platforms export them
+  ok    the year first
+  ok    with the month's name
+  ok    day and month that can only be read one way
+  ok    one that could be April or May is not guessed
+  ok    but read as the creator chose for the file
+  ok    and one that does not fit that choice is refused, not swapped
+  ok    the month in letters, in the stores' seven languages, whole or cut short
+  ok    and in other months
+  ok    letters that could start two months are not guessed
+  ok    a file's other dates say which way it writes them
+  ok    a day that does not exist, and no date at all
+
+Never charged before the renewal date
+  ok    a renewal far enough away is the first charge
+  ok    one too close for Stripe to wait for is charged later, never earlier
+  ok    one already passed is due, and taken at checkout
+  ok    the reminder goes three days before
+  ok    and not at all when there is no time for one
+
+Bringing members over
+  ok    nothing starts until the creator says they will stop the old renewals
+  ok    finished
+  ok    three members invited, one repeated row left out, six rows that cannot move
+  ok    each invited member emailed once
+  ok    the subject names the membership and the store
+  ok    a member whose renewal is ahead hears nothing is charged before it
+  ok    and that one reminder may follow
+  ok    a member whose renewal has passed hears the payment is due
+  ok    and that nothing more is sent
+  ok    each says who sent it for whom
+
+The link
+  ok    it is Ada's, for this membership
+  ok    it opens nothing for another product
+  ok    and nothing with a token made up
+  ok    without the box to start the membership before the 14 days end (lib/digital-consent.ts), no checkout opens
+  ok    the checkout opens
+  ok    for her address only
+  ok    first charged on the renewal date
+  ok    with no free trial on top
+  ok    marked as moved, on the payment and on the subscription
+  ok    a payment already due is taken at checkout
+
+One reminder, never to somebody who kept it
+  ok    nothing before its day
+  ok    Ada is reminded; Hal, who kept it, is not
+  ok    the reminder says it is the only one
+  ok    and it is sent once
+  ok    the studio counts who was invited and who kept it
+
+41 checks, all passing.
+

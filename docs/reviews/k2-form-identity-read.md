@@ -54,3 +54,12 @@ The runner measured these blobs locally. The parent independently fetched the sa
 The initial virtual-module alias attempt failed to compile before the handler or selected HGET ran. The runner was corrected to resolve the two original boundary imports directly; assertions and scenarios were unchanged. That mounting failure is not counted as product evidence.
 
 Verification: runner syntax check passes; directed ESLint of the test and runner reports zero; scoped TypeScript of the actual proof root plus real imports reports zero. Direct public-data scanning of all three new proof files reports zero corrections; whitespace and final-newline checks pass. Full proof output: `/dev/shm/k2-identity-read.log` (transient); the three repository files are the reproducible evidence. No browser, provider, native Redis, production journey or global accessibility claim is made.
+
+
+## Permanent regression prepared, product still frozen
+
+Evidence head 4f32949ea06fb041ccea57ad264e8da7d9e1acf9 preserves the original b0657bfbb proof as its parent. It adds tests/form-identity-binding.test.ts, copied byte-for-byte from the original proof (both Git blob d880938c88e2da433727a94f40ff4fc6891b2326), a dedicated synthetic owner-boundary world, and only that test's store/store-request aliases. The canonical runner executes the same 29 expectations against the unchanged product source and reproduces the same five causal failures. This is a test-only RED, not a repair or a changed product head.
+
+Revisor 2 cycle 232 confirmed the conditional MEDIUM by source reading. Actual independent execution of the 29-check proof was requested explicitly and remains pending at this checkpoint; a reading confirmation is not recorded as an executed reproduction.
+
+An in-memory esbuild candidate, with no productive file written, first distinguishes confirmed null, then rejects confirmedForm(raw).id !== requested id. The unchanged original expectations pass 29/29 under that isolated candidate; its virtual TypeScript check with real imports reports zero diagnostics. This is candidate evaluation only, not a product GREEN, approval, independent reproduction, or authorization to merge. The local productive lib/form-store.ts remains e9571c04bd61c27fa34a6a1ac9e4e6e3e1a9a23d and #2857 remains 85e32750eba464a392874a6d0234766ef1768fb5.

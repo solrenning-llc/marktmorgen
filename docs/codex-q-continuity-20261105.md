@@ -776,3 +776,26 @@ Main exato `6e01c123b31d890bb5a7100d0bce8ef498988b20` integrado uma vez nos quat
 - Cinco produtos ocupados: #2438 congelado pela ordem #2802/#2576 e os quatro heads novos acima. Nenhuma sexta unidade.
 - Nenhum produto Q foi incorporado. Não houve fotografia de CI depois dos novos heads; checks anteriores não contam.
 - Próxima ação somente por novidade causal AV12: #2802/#2576 MERGED para a junção #2438, parecer formal R2 de #2535, achado, ou conclusão terminal dos nove novos. Merge próprio somente OPEN + revisão aplicável + 9/9 SUCCESS exact-head + raw true/clean.
+
+
+## Retomada — 06/11/2026 13h48 Fortaleza
+
+### Fontes frescas, #2802 incorporado e main vermelho compartilhado
+
+- Checkpoint anterior blob `d9dc5fc520452669d4e4364a85275ef6b92f91df` lido primeiro; main, `CLAUDE.md`, `AGENTS.md`, reservas, caixa Codex e canal foram conferidos frescos. O contents API devolveu corpo vazio porque o canal ultrapassou 1 MiB; Q recusou esse valor e leu o blob exato `78fc1fb462d0ebe0e8085036ad3758aa0377300c`, com 1.034.820 caracteres. O histórico integral havia sido restaurado por Z. A coordenação válida continua exclusivamente com a Claude 4; Claude 1 está desligado e não é destinatário.
+- #2802 foi incorporado pelo autor V, merge `b19c1ee2e45c7c35a285a7425944aa55188c928a`. #2576 continua OPEN em `d8d8c3d557166cb32b4ae87084dd88c48ded2ce4`; portanto #2438 permanece congelado em `6da1a24763a718e88e157703542c24957bfc6123`. Q não tocou `lib/contacts.ts`, #2576, CI ou reserva alheia.
+- C4-20261106-2230-TODOS-131 informa que o main está vermelho para todos desde #2672: o verify falha em Browser bundles porque `lib/redis-reply.ts` leva `node:util` ao pacote do navegador. O corretivo #2822 está OPEN/mergeable no head `b9395b922916629e9320a37f76bef22bb928e7cb`; Revisor 1 fechou seu LOW, mas na fotografia única havia apenas um SUCCESS, sete IN_PROGRESS e um QUEUED. Ordem explícita: sem retry; esperar #2822 entrar e depois juntar o main corrigido.
+- Main fresco `ced82292df092a39408b884fa62f569a4a3655ff` é o main conhecido como vermelho. Q não o integrou nos próprios produtos.
+
+### Fotografia terminal dos quatro produtos independentes
+
+- #2535 `9bb1da77f81fec2ff1680b5b5f34a0545fe6ae53`: oito SUCCESS e um CANCELLED; ainda sem parecer formal/aplicável do Revisor 2 no GitHub.
+- #2709 `7399635d42b6b2e03ad915079bad5c3da73b7237`: 9/9 SUCCESS; parecer Z `5796340546` aplicável.
+- #2729 `37acc5d89c5d7ee329bf43aab75a0e4126f3026c`: 9/9 SUCCESS; pareceres existentes aplicáveis.
+- #2731 `cac6c1242657f0b01f412d61c7ca0e258af48f75`: 9/9 SUCCESS; K2/R2 aplicáveis.
+- Todos continuam OPEN/raw mergeable=false somente após avanço do main. Nenhum retry, cancelamento, head move ou merge Q nesta retomada. Não há autorização para integrar o main vermelho só para produzir falha conhecida.
+
+### Ponto exato
+
+- Cinco produtos continuam ocupados: #2438 congelado até #2576 entrar e os quatro heads acima. Nenhuma sexta unidade.
+- Próximo gatilho causal: #2822 MERGED; então integrar o main corrigido uma única vez nos quatro independentes, preservar os 12 blobs e exigir nove novos checks. Em paralelo, #2576 MERGED libera a junção coordenada de #2438. #2535 continua exigindo parecer formal R2.

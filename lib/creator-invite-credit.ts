@@ -109,13 +109,16 @@ export function paidOn(invoice: Invoice, refunded: number): number {
 }
 
 /**
- * Puts a credit already written, and still owed, back on the lists it is paid from: its inviter's credits and the
- * owed set. Both are sets, so a credit listed already is unchanged. The invited store's own bonus is relisted with
- * its first payment's credit, since both were listed by the same write. Never throws.
+ * Puts credits already written, and still owed, back on the lists they are paid from: their inviter's credits and
+ * the owed set. Both are sets, so a credit listed already is unchanged. The invited store's own bonus is relisted
+ * with them, since it was listed by the same write. One read and one write for all of them (Claude 4 on #2722).
+ * Never throws.
  */
-async function relist(id: string, sid: string): Promise<void> {
+async function relist(ids: string[], sid: string): Promise<void> {
+  if (!ids.length) return;
   try {
-    const read = repliesFor(await redisPipeline([["GET", creditKey(id)], ["GET", creditKey(`bonus_${sid}`)]]), 2);
+    const keys = [...ids, `bonus_${sid}`].map((id) => creditKey(id));
+    const read = repliesFor(await redisPipeline(keys.map((key) => ["GET", key])), keys.length);
     if (!read) return;
     const writes: (string | number)[][] = [];
     for (const raw of read) {
@@ -124,7 +127,7 @@ async function relist(id: string, sid: string): Promise<void> {
     }
     if (writes.length) await redisPipeline(writes);
   } catch (error) {
-    console.error("relisting an owed invite credit failed", id, error);
+    console.error("relisting owed invite credits failed", sid, error);
   }
 }
 
@@ -169,15 +172,12 @@ async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
   // Read exactly (CX-123 rule 24, L9): one reply per invoice, each 0 or 1; anything else waits for the next run.
   const seen = repliesFor(await redisPipeline(ordered.map((inv) => ["EXISTS", creditKey(String(inv.id))])), ordered.length);
   if (!seen) return 0;
+  // Written before: a credit still owed is put back on the lists it is paid from (both idempotent), so one whose
+  // listing failed after its record was written is never left unpaid (L9).
+  await relist(ordered.filter((_, i) => countOf(seen[i]) === 1).map((inv) => String(inv.id)), sid);
   for (let i = 0; i < ordered.length; i += 1) {
     const mark = countOf(seen[i]);
-    if (mark === null || mark > 1) continue;
-    if (mark === 1) {
-      // Written before: a credit still owed is put back on the lists it is paid from (both idempotent), so one
-      // whose listing failed after its record was written is never left unpaid (L9).
-      await relist(String(ordered[i].id), sid);
-      continue;
-    }
+    if (mark !== 0) continue;
     const inv = ordered[i];
     const id = String(inv.id);
     const paidAt = num(inv.status_transitions?.paid_at);

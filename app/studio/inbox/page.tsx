@@ -13,8 +13,6 @@ import { CONVERSATION_ID } from "@/lib/inbox-rules";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 import { MAX_FAQ } from "@/lib/store-faq";
-import { Suspense } from "react";
-import { InboxSkeleton } from "@/components/page-skeletons";
 
 export const metadata: Metadata = {
   title: "Inbox — Marktmorgen",
@@ -35,18 +33,7 @@ export default async function StudioInboxPage({ searchParams }: Params) {
     if (found.reason === "signed_out") redirect("/signin");
     redirect(found.store ? studioPath(found.store, "team=forbidden") : "/studio");
   }
-  // Who is signed in is read, and every redirect made, before the skeleton
-  // (components/page-skeletons.tsx): inside the <Suspense> a redirect could
-  // only be a meta refresh on a timer. The conversations are read behind it.
-  return (
-    <Suspense fallback={<InboxSkeleton />}>
-      <StudioInbox query={query} view={found.view} />
-    </Suspense>
-  );
-}
-
-/** The inbox itself, drawn once its conversations are read, with the skeleton standing in until then. */
-async function StudioInbox({ query, view }: { query: Awaited<Params["searchParams"]>; view: Extract<Awaited<ReturnType<typeof studioView>>, { ok: true }>["view"] }) {
+  const { view } = found;
   const { store } = view;
   const conversations = await readInbox(store.statsId);
   // When the list on the page was read: the inbox says it as its first check (484 [IT1]).

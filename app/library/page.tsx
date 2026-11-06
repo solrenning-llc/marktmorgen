@@ -9,8 +9,6 @@ import { photoUrl } from "@/lib/photo-limits";
 import { storeBase } from "@/lib/purchase-email";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
 import { libraryOwner, storesBoughtFrom } from "@/lib/buyer-library";
-import { Suspense } from "react";
-import { LibrarySkeleton } from "@/components/page-skeletons";
 
 export const metadata: Metadata = {
   title: "Your library — Marktmorgen",
@@ -34,17 +32,6 @@ const STATUS: Record<string, { tone: "ok" | "error"; text: string }> = {
  */
 export default async function LibraryPage({ searchParams }: Params) {
   const query = await searchParams;
-  // The shelves are read behind the skeleton (components/page-skeletons.tsx):
-  // reading every store the address bought from is the slow part.
-  return (
-    <Suspense fallback={<LibrarySkeleton />}>
-      <LibraryShelves query={query} />
-    </Suspense>
-  );
-}
-
-/** The library itself, drawn once every store's shelf is read, with the skeleton standing in until then. */
-async function LibraryShelves({ query }: { query: Awaited<Params["searchParams"]> }) {
   const token = typeof query.token === "string" ? query.token.slice(0, 80) : "";
   const status = typeof query.status === "string" ? STATUS[query.status] : undefined;
   const email = token ? await libraryOwner(token) : null;

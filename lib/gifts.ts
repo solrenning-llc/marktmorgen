@@ -22,7 +22,7 @@ import { cleanLine, cleanText } from "@/lib/community-text";
 import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { bundleFromMeta } from "@/lib/bundle-rules";
 import { onAccount } from "@/lib/stripe-account";
-import { confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
+import { confirmLostRead, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { formatMoney } from "@/lib/money";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
@@ -253,9 +253,10 @@ export async function revokeRefundedGifts(
   const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
   query.append("expand[]", "data.charge");
   const listed = await onAccount("GET", store.stripeAccountId, `/refunds?${query}`);
-  // The refunds in their exact shape (Codex Q on #2724; CX-123 rule 24): a list of rows each with its id and time.
-  // Anything else leaves the read unsure, so the anchor does not move past refunds that could not be read.
-  const refundsKnown = Array.isArray(listed.data) && (listed.data as unknown[]).every((row) => !!row && typeof row === "object" && typeof (row as { id?: unknown }).id === "string" && typeof (row as { created?: unknown }).created === "number");
+  // The refunds in their exact shape (Codex Q on #2724; CX-123 rule 24): a list of rows each as refundRowKnown()
+  // reads it, with every field that decides whether money went back. Anything else leaves the read unsure, so the
+  // anchor does not move past refunds that could not be read.
+  const refundsKnown = Array.isArray(listed.data) && (listed.data as unknown[]).every(refundRowKnown);
   const refunds = refundsKnown ? (listed.data as Record<string, unknown>[]) : [];
   // A dispute closed as lost takes a gift back as a full refund does, whatever its amount (lib/refunds.ts, the
   // owner's rule of 4 November 2026; queue 388 [TB14]): read from Stripe's closing events, as lib/call-meetings.ts

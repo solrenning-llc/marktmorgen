@@ -150,6 +150,19 @@ async function main(): Promise<void> {
     await assert.rejects(() => paidCourses(store, buyer));
   });
 
+  await check("a store without imported buyers does not parse a missing imported reply", async () => {
+    redis.clear();
+    const owner = "owner-without-imports@example.test";
+    const buyer = "buyer-without-imports@example.test";
+    assert.ok((await claimHandle(owner, "without-imports", "Without imports", "")).ok);
+    await ensureStatsId(owner);
+    const made = await addProduct(owner, "Ordinary course", "", "12", null);
+    assert.ok(made.ok);
+    await setProductCourse(owner, made.product.id, { id: "b".repeat(32), lessons: 1 });
+    const store = (await storeForEmail(owner))!;
+    assert.deepEqual(await paidCourses(store, buyer), new Map());
+  });
+
   console.log(`RESULT ${passed} passed, ${failed} failed`);
   if (failed) process.exitCode = 1;
 }

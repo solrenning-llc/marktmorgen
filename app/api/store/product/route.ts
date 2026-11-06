@@ -101,6 +101,7 @@ async function silenced(email: string, changedId: string): Promise<string[]> {
 const STATUS: Record<string, number> = {
   too_many: 409,
   unknown: 404,
+  unavailable: 503,
 };
 
 /**
@@ -280,7 +281,19 @@ export async function POST(request: NextRequest) {
       // The product comes back as it was, so the storage its files used can
       // be released once the removal is safely written. A product with price
       // options holds one file per option as well as its own.
-      const removed = await removeProduct(ref, id);
+      let course: Awaited<ReturnType<typeof readCourse>> = null;
+      const removed = await removeProduct(ref, id, async (going, store) => {
+        if (!going.course) return true;
+        const found = await readCourse(going.course.id).catch(() => null);
+        if (!found) return false;
+        course = found;
+        try {
+          await dropComments(found.id, lessonsInOrder(found).map(({ lesson }) => lesson.id), store);
+          return true;
+        } catch {
+          return false;
+        }
+      });
       result = removed.ok ? { ok: true, product: null } : removed;
       if (removed.ok) {
         const going = removed.product;
@@ -288,7 +301,6 @@ export async function POST(request: NextRequest) {
         // Its picture goes with it, and so does its long description.
         had.push(...imagePaths(going.image).map((pathname) => ({ pathname })));
         // A course takes its lessons with it: their records, and their files.
-        const course = going.course ? await readCourse(going.course.id).catch(() => null) : null;
         if (course) had.push(...filesInCourse(course));
         // And the work its students handed in for its assignments (lib/assignment.ts).
         if (course) {
@@ -312,7 +324,6 @@ export async function POST(request: NextRequest) {
         });
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));
         if (course) {
-          await dropComments(course.id, lessonsInOrder(course).map(({ lesson }) => lesson.id), removed.store);
           await dropCourse(course, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
         }
         for (const file of had) {

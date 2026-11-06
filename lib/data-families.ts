@@ -106,7 +106,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:store:delivery:over:", "nl:store:folder-owner:", "nl:store:handle:", "nl:store:id:", "nl:store:lock:",
   "nl:store:owner:", "nl:store:owner:*", "nl:store:photo:", "nl:stream:auto:", "nl:stream:autoowed:", "nl:stream:autoq",
   "nl:stream:col:", "nl:stream:due", "nl:stream:gone", "nl:stream:lock", "nl:stream:peek:",
-  "nl:rsum:", "nl:rsum:last:", "nl:rsum:lock:", "nl:rsum:ver:", "nl:stripe-check:last", "nl:stripe-check:lock", "nl:sweep:cursor", "nl:tasks:bytes:", "nl:tasks:doors",
+  "nl:rsum:", "nl:rsum:last:", "nl:rsum:lock:", "nl:rsum:ver:", "nl:stripe-check:last", "nl:stripe-check:lock", "nl:sweep:cursor", "nl:tasks:bytes:", "nl:tasks:doors", "nl:tasks:taken:",
   "nl:teams:state:", "nl:team:", "nl:team:invite:", "nl:team:lock:", "nl:team:log:", "nl:team:of:", "nl:tier:",
   "nl:traffic:c:", "nl:traffic:day:", "nl:traffic:folders:", "nl:traffic:n:", "nl:traffic:r:", "nl:traffic:x:", "nl:upd:job:",
   "nl:updq", "nl:upload-budget:v2:{", "nl:upload-budget:v2:{YYYY-MM}", "nl:upsell-slots:", "nl:upsell:",
@@ -343,7 +343,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:pinv:": Cr(30),
   "nl:pkg:": T("nl:pkg:s:"), "nl:pkg:s:": E, "nl:pkg:t:": T("nl:pkg:s:"),
   "nl:held:stores": I, "nl:held:retry:": Cr(2), "nl:held:month:": Cr(400), "nl:held:walk": C,
-  // Deleted stores whose webhooks and keys are tried again (lib/store-forget-retry.ts): the line, and each month's counts.
+  // Deleted stores whose webhooks, keys and assistant notes are tried again (lib/store-forget-retry.ts): the line, and each month's counts.
   "nl:forget:q": C, "nl:forget:kept": C, "nl:forget:month:": Cr(400),
   "nl:plan-disputes:seen": C, "nl:plan-refund:": C, "nl:plan-refund:ending": C, "nl:plan:closing:": Cr(400), "nl:plan:closing:after": C, "nl:plan:ended": I, "nl:plan:paying": I,
   "nl:plans:lock": C, "nl:plans:pending": I,
@@ -404,7 +404,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // ---------------------------------------------------------------- t-z
   // Consent state is token-keyed, encrypted, and expires after 600 seconds; the registry conservatively prices one day.
   "nl:teams:state:": X(1),
-  "nl:tasks:bytes:": E, "nl:tasks:doors": C,
+  "nl:tasks:bytes:": E, "nl:tasks:doors": C, "nl:tasks:taken:": X(1),
   "nl:team:": E, "nl:team:invite:": X(7), "nl:team:lock:": E, "nl:team:log:": E, "nl:team:of:": D("prepare"),
   "nl:tier:": X(1), "nl:tier:price:": E,
   "nl:traffic:c:": E, "nl:traffic:day:": E, "nl:traffic:folders:": I, "nl:traffic:n:": E, "nl:traffic:r:": E, "nl:traffic:x:": E,

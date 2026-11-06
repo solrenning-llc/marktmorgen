@@ -12,11 +12,12 @@ import { isResting } from "@/lib/traffic";
 import { StoreResting } from "@/components/store-resting";
 import { StoreTracking } from "@/components/store-tracking";
 import { LinkRequestForm } from "@/components/link-request-form";
+import { ArrivalNotice } from "@/components/arrival-notice";
 import { bodyHtml, parseMailBlocks } from "@/lib/mail-body";
 import { readLetter } from "@/lib/letters";
 import { membersOnly, previewOf } from "@/lib/letter-rules";
 import { letterReader } from "@/lib/letter-access";
-import { readListings } from "@/lib/catalog";
+import { hasProduct, readListings } from "@/lib/catalog";
 import { productSegment } from "@/lib/product-slug";
 
 type Params = {
@@ -53,7 +54,12 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  * the creator and to a proved address that holds one of its products now
  * (lib/letter-access.ts); everyone else sees its subject, the start the
  * creator chose to show everyone (previewOf; never the words after it), who
- * it is for and a way to prove their address.
+ * it is for and
+ * a way to prove their address. Two cases have no form, because it could
+ * not help: the creator's Stripe account could not be asked (the reader is
+ * asked to reload, never told they hold nothing), and every product the
+ * email was kept for is gone from the store (nobody but the creator can
+ * open it).
  */
 export default async function LetterPage({ params, searchParams }: Params) {
   const { handle, letter: id } = await params;
@@ -69,9 +75,17 @@ export default async function LetterPage({ params, searchParams }: Params) {
   const reader = kept ? await letterReader(store, letter, await cookies()) : ({ state: "public" } as const);
   const readable = reader.state === "public" || reader.state === "owner" || reader.state === "in";
   const products = kept ? await readListings(store, letter.products) : [];
+  // Which of its products the store still has, from the store's own record (the set lib/letter-access.ts asks about), not from the listings read for the page.
+  const known = kept ? (letter.products ?? []).filter((id) => hasProduct(store, id)) : [];
+  // A listing that did not read is not a product gone: the list says it is incomplete, and the form stays.
+  const incomplete = products.length < known.length;
+  // Nobody but the creator can open it once every product it was kept for is gone.
+  const gone = kept && !readable && known.length === 0;
   const query = kept ? await searchParams : {};
   const linkState = typeof query.link === "string" ? query.link : "";
-  const notice = kept && !readable ? w.linkNotices[linkState] : undefined;
+  // Only the four answers the form gives; anything else in the address ("constructor", "toString") draws nothing.
+  const notice = kept && !readable && !gone && Object.hasOwn(w.linkNotices, linkState) ? w.linkNotices[linkState] : undefined;
+  const pagePath = `/@${store.handle}/letters/${letter.id}`;
   // Only the start chosen for everyone, and only to somebody who cannot read the whole email.
   const preview = kept ? previewOf(letter) : "";
   return (
@@ -93,21 +107,25 @@ export default async function LetterPage({ params, searchParams }: Params) {
           ) : null}
           {kept ? (
             <section aria-labelledby="letter-for" className="mt-6">
-              <h2 id="letter-for" className="text-sm font-semibold">{readable ? w.forHolders : w.lockedLead}</h2>
-              {reader.state === "owner" ? <p className="st-muted mt-1 text-sm">{products.length ? (preview ? w.ownerPreviewNote(parseMailBlocks(preview).length) : w.ownerNote) : w.noneLeft}</p> : null}
-              <ul className="mt-2 space-y-1">
-                {products.map((p) => (
-                  <li key={p.id} className="[overflow-wrap:anywhere]">
-                    {p.hidden ? (
-                      <span className="inline-flex min-h-11 items-center font-semibold">{p.title}</span>
-                    ) : (
-                      <Link href={`/@${store.handle}/p/${productSegment(p)}`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
-                        {p.title}
-                      </Link>
-                    )}
-                  </li>
-                ))}
-              </ul>
+              <h2 id="letter-for" className="text-sm font-semibold">{readable ? w.forHolders : gone ? w.goneTitle : incomplete ? w.lockedLeadSome : w.lockedLead}</h2>
+              {reader.state === "owner" ? <p className="st-muted mt-1 text-sm">{known.length ? (preview ? w.ownerPreviewNote(parseMailBlocks(preview).length) : w.ownerNote) : w.noneLeft}</p> : null}
+              {gone ? <p className="mt-1 text-sm">{w.goneBody}</p> : null}
+              {products.length ? (
+                <ul className="mt-2 space-y-1">
+                  {products.map((p) => (
+                    <li key={p.id} className="[overflow-wrap:anywhere]">
+                      {p.hidden ? (
+                        <span className="inline-flex min-h-11 items-center font-semibold">{p.title}</span>
+                      ) : (
+                        <Link href={`/@${store.handle}/p/${productSegment(p)}`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
+                          {p.title}
+                        </Link>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {incomplete ? <p className="st-muted mt-2 text-sm">{w.notAllShown}</p> : null}
             </section>
           ) : null}
           {readable ? (
@@ -115,13 +133,22 @@ export default async function LetterPage({ params, searchParams }: Params) {
             <div className="mt-6 rounded-2xl bg-white p-6 text-[15px] leading-relaxed text-stone-900 [overflow-wrap:anywhere] sm:p-8" dangerouslySetInnerHTML={{ __html: bodyHtml(letter.body, undefined, store.look.accent) }} />
           ) : null}
         </article>
-        {kept && !readable ? (
+        {kept && !readable && !gone && reader.state === "unknown" ? (
+          <div className="st-note mt-6" role="status">
+            <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.unknownTitle}</p>
+            <p className="mt-1 text-sm">{w.unknownBody}</p>
+            <Link href={pagePath} className="mt-1 inline-flex min-h-11 items-center text-sm font-semibold underline underline-offset-4">
+              {w.checkAgain}
+            </Link>
+          </div>
+        ) : null}
+        {kept && !readable && !gone && reader.state !== "unknown" ? (
           <>
             {notice ? (
-              <div className="st-note mt-6" role="status">
+              <ArrivalNotice className="st-note mt-6">
                 <p className="font-bold" style={{ color: "var(--st-text)" }}>{notice.title}</p>
                 <p className="mt-1 text-sm">{notice.body}</p>
-              </div>
+              </ArrivalNotice>
             ) : null}
             {reader.state === "closed" ? (
               <div className="st-note mt-6" role="status">

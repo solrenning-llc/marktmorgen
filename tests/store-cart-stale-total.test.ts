@@ -30,6 +30,7 @@ const line = (id: string, price: string) => ({ id, title: `Product ${id}`, href:
 const ship = { label: "Shipping", amount: "$5.00", where: "Ships to: United States", notTo: "" };
 const both = { ok: true, items: [line("a", "$10.00"), line("b", "$20.00")], total: "$27.00", deal: { percent: 10, saved: "$3.00" }, next: null, suggest: [], bundle: null, shipping: null, apart: null, digital: true };
 const bothShipped = { ...both, total: "$32.00", shipping: ship };
+const bothNext = { ...both, deal: null, next: { more: 1, percent: 10 } };
 const onlyA = { ok: true, items: [line("a", "$10.00")], total: "$10.00", deal: null, next: { more: 1, percent: 10 }, suggest: [], bundle: null, shipping: null, apart: null, digital: true };
 
 type Tree = Parameters<typeof texts>[0];
@@ -105,6 +106,12 @@ async function main() {
   is("no old $32.00 anywhere", shipped.after.includes("$32.00"), false);
   is("no old shipping amount", shipped.after.includes("$5.00"), false);
   is("button says only \"Check out\"", shipped.button, [c.checkoutUnpriced]);
+
+  part("The second read fails with an \"add more\" row on screen");
+  const nexted = await cartAfterRemovingB(failures[1][1], bothNext);
+  is("first panel shows the \"add 1 more\" row", nexted.before.includes(c.dealNext(1, 10)), true);
+  is("no old \"add 1 more\" row (it was about two products)", nexted.after.includes(c.dealNext(1, 10)), false);
+  is("button says only \"Check out\"", nexted.button, [c.checkoutUnpriced]);
 
   part("A later read that answers puts the figures back");
   const back = await cartAfterRemovingB(failures[0][1], both, async () => new Response(JSON.stringify(onlyA), { status: 200 }));

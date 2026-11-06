@@ -157,10 +157,19 @@ export function CartButton({
   useEffect(() => {
     if (!open || !wanted) return;
     let live = true;
+    // A read that fails leaves no figure from the read before it on screen: the button then carries no amount and the
+    // panel says the prices could not be checked (Stripe's page shows the exact total before anything is paid).
+    const unpriced = () => {
+      setTotal("");
+      setDeal(null);
+      setNext(null);
+      setShipping(null);
+    };
     fetch(`/api/store/cart?${new URLSearchParams({ handle, ids: wanted })}`)
       .then((r) => r.json())
       .then((data: { ok?: boolean; items?: Line[]; total?: string; deal?: { percent: number; saved: string } | null; next?: { more: number; percent: number } | null; suggest?: Suggestion[]; bundle?: BundleSwap | null; shipping?: ShippingRow | null; apart?: Apart | null; digital?: boolean }) => {
-        if (!live || !data.ok) return;
+        if (!live) return;
+        if (!data.ok) return unpriced();
         setLines(data.items ?? []);
         setTotal(data.total ?? "");
         setDeal(data.deal ?? null);
@@ -172,7 +181,9 @@ export function CartButton({
         // Unknown is asked: a cart that does not say is treated as holding something digital.
         setDigital(data.digital !== false);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (live) unpriced();
+      });
     return () => {
       live = false;
     };
@@ -326,14 +337,18 @@ export function CartButton({
                       <p className="st-muted text-xs">{shipping.notTo ? `${shipping.where}. ${shipping.notTo}` : shipping.where}</p>
                     </div>
                   ) : null}
-                  <p className="flex justify-between text-sm font-semibold">
-                    <span>{c.total}</span>
-                    <span className="tabular-nums">{total}</span>
-                  </p>
+                  {total ? (
+                    <p className="flex justify-between text-sm font-semibold">
+                      <span>{c.total}</span>
+                      <span className="tabular-nums">{total}</span>
+                    </p>
+                  ) : (
+                    <p className="st-note text-sm" role="alert" data-cart-unpriced="">{c.unchecked}</p>
+                  )}
                   {remind ? <AssistReminderBox id={`r-cart-${handle}`} lang={lang} store={remind} /> : null}
                   {/* Asked when anything in the cart is handed over digitally; a cart of shipped products only has nothing to start at once. */}
                   {digital ? <DigitalConsentBox id={`dc-cart-${handle}`} lang={lang} refused={notice === "consent"} /> : null}
-                  <button type="submit" className="btn st-btn btn-block">{c.checkout(total)}</button>
+                  <button type="submit" className="btn st-btn btn-block">{total ? c.checkout(total) : c.checkoutUnpriced}</button>
                   <p className="st-muted text-xs">{c.note}</p>
                 </form>
               ) : null}

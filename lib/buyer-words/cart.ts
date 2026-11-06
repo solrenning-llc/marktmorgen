@@ -18,6 +18,10 @@ const en = {
   dealHint: (min: number, percent: number) => `${percent}% off when you buy ${min} or more together.`,
   total: "Total",
   checkout: (total: string) => `Check out · ${total}`,
+  /** The button when the prices could not be checked: no amount it cannot vouch for (Stripe's page shows the exact total). */
+  checkoutUnpriced: "Check out",
+  /** Said instead of the total when the cart's prices could not be read again. */
+  unchecked: "We could not check the prices just now, so no total is shown. The payment page shows the exact total before you pay.",
   note: "You pay once, on Stripe's secure page. Each product is handed over exactly as if you had bought it on its own.",
   empty: "Your cart is empty.",
   gone: "Not available in a cart right now: buy it from its own page.",
@@ -74,6 +78,10 @@ const es: CartWords = {
   dealHint: (min, percent) => `${percent}% de descuento si compras ${min} o más juntos.`,
   total: "Total",
   checkout: (total) => `Pagar · ${total}`,
+  /** The button when the prices could not be checked: no amount it cannot vouch for (Stripe's page shows the exact total). */
+  checkoutUnpriced: "Pagar",
+  /** Said instead of the total when the cart's prices could not be read again. */
+  unchecked: "No pudimos comprobar los precios ahora, así que no se muestra ningún total. La página de pago muestra el total exacto antes de que pagues.",
   note: "Pagas una sola vez, en la página segura de Stripe. Cada producto se entrega igual que si lo compraras por separado.",
   empty: "Tu carrito está vacío.",
   gone: "No está disponible en un carrito ahora mismo: cómpralo desde su propia página.",
@@ -123,6 +131,10 @@ const fr: CartWords = {
   dealHint: (min, percent) => `${percent}${S}% de remise dès ${min} achetés ensemble.`,
   total: "Total",
   checkout: (total) => `Payer · ${total}`,
+  /** The button when the prices could not be checked: no amount it cannot vouch for (Stripe's page shows the exact total). */
+  checkoutUnpriced: "Payer",
+  /** Said instead of the total when the cart's prices could not be read again. */
+  unchecked: "Nous n'avons pas pu vérifier les prix pour le moment, donc aucun total n'est affiché. La page de paiement affiche le total exact avant que vous payiez.",
   note: "Vous payez une seule fois, sur la page sécurisée de Stripe. Chaque produit est remis exactement comme s'il était acheté seul.",
   empty: "Votre panier est vide.",
   gone: `Pas disponible dans un panier pour l'instant${S}: achetez-le depuis sa propre page.`,
@@ -172,6 +184,10 @@ const de: CartWords = {
   dealHint: (min, percent) => `${percent}${S}% Rabatt, wenn Sie ${min} oder mehr zusammen kaufen.`,
   total: "Gesamt",
   checkout: (total) => `Zur Kasse · ${total}`,
+  /** The button when the prices could not be checked: no amount it cannot vouch for (Stripe's page shows the exact total). */
+  checkoutUnpriced: "Zur Kasse",
+  /** Said instead of the total when the cart's prices could not be read again. */
+  unchecked: "Wir konnten die Preise gerade nicht prüfen, daher wird keine Summe angezeigt. Die Zahlungsseite zeigt die genaue Summe, bevor Sie bezahlen.",
   note: "Sie bezahlen einmal, auf der sicheren Seite von Stripe. Jedes Produkt wird genau so übergeben, als hätten Sie es einzeln gekauft.",
   empty: "Ihr Warenkorb ist leer.",
   gone: "Gerade nicht im Warenkorb erhältlich: Kaufen Sie es auf seiner eigenen Seite.",
@@ -221,6 +237,10 @@ const it: CartWords = {
   dealHint: (min, percent) => `${percent}% di sconto comprandone ${min} o più insieme.`,
   total: "Totale",
   checkout: (total) => `Paga · ${total}`,
+  /** The button when the prices could not be checked: no amount it cannot vouch for (Stripe's page shows the exact total). */
+  checkoutUnpriced: "Paga",
+  /** Said instead of the total when the cart's prices could not be read again. */
+  unchecked: "Non è stato possibile controllare i prezzi in questo momento, quindi non è mostrato alcun totale. La pagina di pagamento mostra il totale esatto prima che tu paghi.",
   note: "Paghi una volta sola, sulla pagina sicura di Stripe. Ogni prodotto viene consegnato esattamente come se lo comprassi da solo.",
   empty: "Il tuo carrello è vuoto.",
   gone: "Al momento non disponibile in un carrello: compralo dalla sua pagina.",
@@ -270,6 +290,10 @@ const nl: CartWords = {
   dealHint: (min, percent) => `${percent}% korting als je er ${min} of meer samen koopt.`,
   total: "Totaal",
   checkout: (total) => `Afrekenen · ${total}`,
+  /** The button when the prices could not be checked: no amount it cannot vouch for (Stripe's page shows the exact total). */
+  checkoutUnpriced: "Afrekenen",
+  /** Said instead of the total when the cart's prices could not be read again. */
+  unchecked: "We konden de prijzen nu niet controleren, dus er wordt geen totaal getoond. De betaalpagina toont het exacte totaal voordat je betaalt.",
   note: "Je betaalt één keer, op de beveiligde pagina van Stripe. Elk product wordt precies zo geleverd als wanneer je het los koopt.",
   empty: "Je winkelwagen is leeg.",
   gone: "Nu niet beschikbaar in een winkelwagen: koop het op zijn eigen pagina.",
@@ -319,6 +343,10 @@ const pt: CartWords = {
   dealHint: (min, percent) => `${percent}% de desconto ao comprar ${min} ou mais em conjunto.`,
   total: "Total",
   checkout: (total) => `Pagar · ${total}`,
+  /** The button when the prices could not be checked: no amount it cannot vouch for (Stripe's page shows the exact total). */
+  checkoutUnpriced: "Pagar",
+  /** Said instead of the total when the cart's prices could not be read again. */
+  unchecked: "Não foi possível verificar os preços agora, por isso nenhum total é mostrado. A página de pagamento mostra o total exato antes de pagar.",
   note: "Paga uma única vez, na página segura da Stripe. Cada produto é entregue exatamente como se o comprasse em separado.",
   empty: "O seu carrinho está vazio.",
   gone: "Não está disponível num carrinho neste momento: compre-o na sua própria página.",

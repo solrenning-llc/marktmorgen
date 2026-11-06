@@ -1,6 +1,6 @@
 // Codex G's proof on #1963 (tests/g1963-reload-delete.proof.ts), kept as a discovered test with its assertions unchanged.
+// Unlike the proof, it writes no fixture file: that file only feeds the proof's browser companion.
 /** G review-only: actual authenticated page seeds after valid off/unnamed saves; no provider. */
-import {writeFileSync} from 'node:fs';
 import {NextRequest} from 'next/server';
 import StudioCardPage from '@/app/studio/card/page';
 import {CreatorCardEditor} from '@/components/creator-card-editor';
@@ -42,7 +42,6 @@ async function main(){
   is(c.label+' reader unchanged',await readCreatorCardForEditing(store.statsId),c.card);
   fixtures.push({label:c.label,initial,held:c.held,slot});
  }
- writeFileSync('/tmp/g1963-reload-delete-fixtures.json',JSON.stringify(fixtures,null,2));
  console.log('G_RELOAD_BACKEND_FIXTURES',JSON.stringify(fixtures));done();
 }
 void main();

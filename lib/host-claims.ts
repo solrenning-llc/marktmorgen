@@ -174,29 +174,79 @@ export async function claimHosts(input: {
   return { ok: false, reason: "invalid", host };
 }
 
+/** A pipeline's replies, exactly one per command, or null: a reply in another shape, or a request that failed, is unknown. */
+async function exactly(commands: (string | number)[][]): Promise<unknown[] | null> {
+  try {
+    return repliesFor(await redisPipeline(commands), commands.length);
+  } catch {
+    return null;
+  }
+}
+
+/** A PTTL reply: a whole number from -2 (no key) and -1 (no lifetime) up, or null. */
+const ttlOf = (reply: unknown): number | null => (typeof reply === "number" && Number.isSafeInteger(reply) && reply >= -2 ? reply : null);
+
+/** Whether the field holds exactly this paid value, read with an exact HGET (unknown is not). */
+async function holds(key: string, claim: string, value: string): Promise<boolean> {
+  const replies = await exactly([["HGET", key, claim]]);
+  return replies !== null && replies[0] === value;
+}
+
+/** Whether the list lives at least `keep` (less a minute for the time the reads took), read with an exact PTTL. */
+async function lasts(key: string, keep: number): Promise<boolean> {
+  const replies = await exactly([["PTTL", key]]);
+  const ttl = replies ? ttlOf(replies[0]) : null;
+  return ttl !== null && ttl >= keep - 60_000;
+}
+
 /**
  * A paid booking: its claim stays for good (until its time is past). Written
  * whatever is there, because the buyer has paid for this time: a claim that
  * ran out before they came back is written again rather than lost.
+ *
+ * A reply not exactly what was asked for is never taken for done or for not
+ * done: the field is read back with HGET, and if it does not hold the paid
+ * value, the same write is sent once more and read back again; the lifetime
+ * is read back with PTTL the same way. Only what is still not confirmed
+ * throws, and lib/calls.ts logs it.
  */
 export async function confirmClaim(ids: string[], claim: string, start: number, end: number, ref: string): Promise<void> {
   if (!ids.length || !isClaimId(claim) || !isRedisConfigured()) return;
   const keep = Math.max(3600_000, end - Date.now() + 172_800_000);
-  const commands = ids.flatMap((id) => [["HSET", claimsKey(id), claim, `${start}|${end}|0|${ref}`], ["PTTL", claimsKey(id)]]);
-  // Read exactly: an HSET or PTTL not answered as asked throws, so the booking's hosts are never taken for confirmed.
-  const replies = repliesFor(await redisPipeline(commands), commands.length);
-  if (!replies) throw new UnknownReplyError("a paid booking's host claims");
+  const value = `${start}|${end}|0|${ref}`;
+  const commands = ids.flatMap((id) => [["HSET", claimsKey(id), claim, value], ["PTTL", claimsKey(id)]]);
+  const replies = await exactly(commands);
   const short: string[] = [];
-  ids.forEach((id, i) => {
-    const ttl = replies[i * 2 + 1];
-    if (countOf(replies[i * 2]) === null || typeof ttl !== "number" || !Number.isSafeInteger(ttl) || ttl < -2) throw new UnknownReplyError("a paid booking's host claims");
+  for (const [i, id] of ids.entries()) {
+    const key = claimsKey(id);
+    const written = replies !== null && countOf(replies[i * 2]) !== null;
+    if (!written) {
+      console.error("a paid booking's host claim was not answered as asked; reading it back");
+      if (!(await holds(key, claim, value))) {
+        await exactly([["HSET", key, claim, value]]);
+        if (!(await holds(key, claim, value))) throw new UnknownReplyError("a paid booking's host claim");
+      }
+    }
+    // The PTTL read with the write counts only when the write was answered; otherwise it is read again.
+    let ttl = written ? ttlOf(replies[i * 2 + 1]) : null;
+    if (ttl === null) {
+      const again = await exactly([["PTTL", key]]);
+      ttl = again ? ttlOf(again[0]) : null;
+      if (ttl === null) throw new UnknownReplyError("a paid booking's host claims' lifetime");
+    }
     // Never shortened: a later booking on the same list may need it longer.
     if (ttl < keep) short.push(id);
-  });
+  }
   if (!short.length) return;
-  const expire = short.map((id) => ["PEXPIRE", claimsKey(id), keep]);
-  const set = repliesFor(await redisPipeline(expire), expire.length);
-  if (!set || set.some((r) => countOf(r) === null)) throw new UnknownReplyError("a paid booking's host claims' lifetime");
+  const set = await exactly(short.map((id) => ["PEXPIRE", claimsKey(id), keep]));
+  for (const [i, id] of short.entries()) {
+    if (set !== null && set[i] === 1) continue;
+    const key = claimsKey(id);
+    console.error("a paid booking's host claim's lifetime was not answered as set; reading it back");
+    if (await lasts(key, keep)) continue;
+    await exactly([["PEXPIRE", key, keep]]);
+    if (!(await lasts(key, keep))) throw new UnknownReplyError("a paid booking's host claims' lifetime");
+  }
 }
 
 /** Lets a claim go on every host it was taken for: a hold given back, or a booking refunded in full. */

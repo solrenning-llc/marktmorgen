@@ -60,7 +60,7 @@ controlledRemount().then((result) => {
   is("the harness records both requested and committed mount epochs", /requestedEpoch:\s*number/.test(harness) && /mountedEpoch:\s*number/.test(harness), true);
   is("mount publishes the requested epoch to the caller", /this\.requestedEpoch\s*\+=\s*1/.test(mount) && /return this\.requestedEpoch/.test(mount), true);
   is("the new board receives the same requested epoch", /<Board\s+key=\{[^}]+\}\s+epoch=\{this\.requestedEpoch\}\s*\/>/.test(mount), true);
-  is("the board publishes its epoch only from a layout effect", /useLayoutEffect\(\(\)\s*=>\s*\{\s*page\.harness\.mountedEpoch\s*=\s*epoch;\s*\},\s*\[epoch\]\)/.test(board), true);
+  is("the board publishes its epoch only from a layout effect", /useLayoutEffect\(\(\)\s*=>\s*\{[\s\S]*?page\.harness\.mountedEpoch\s*=\s*epoch;[\s\S]*?\},\s*\[epoch\]\)/.test(board), true);
 
   const layoutStart = board.indexOf("useLayoutEffect(() => {");
   const layoutEnd = board.indexOf("}, [epoch]);", layoutStart);

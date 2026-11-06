@@ -5,7 +5,7 @@
  * again from what the stand-in holds, as router.refresh() does in the studio.
  * Nothing leaves the page: no server, no store, no real person.
  */
-import { use, useEffect, useLayoutEffect, useState } from "react";
+import { use, useLayoutEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DealsBoard } from "@/components/deals-board";
 import type { CrmField, Deal, Pipeline } from "@/lib/crm-rules";
@@ -70,11 +70,9 @@ function Board({ epoch }: { epoch: number }) {
   const [loading, setLoading] = useState<Promise<void> | null>(null);
   if (loading) use(loading);
   useLayoutEffect(() => {
+    page.harness.refresh = () => setLoading(new Promise((resolve) => setTimeout(resolve, page.harness.refreshDelay)));
     page.harness.mountedEpoch = epoch;
   }, [epoch]);
-  useEffect(() => {
-    page.harness.refresh = () => setLoading(new Promise((resolve) => setTimeout(resolve, page.harness.refreshDelay)));
-  }, []);
   const w = page.harness.world;
   return <DealsBoard deals={[...w.deals]} versions={{ ...w.versions }} stages={w.pipelines.flatMap((p) => p.stages)} pipelines={w.pipelines} pipelineMax={3} viewOnly={w.viewOnly} fields={w.fields} currency="usd" assignees={["owner@example.test"]} today="2026-11-04" />;
 }

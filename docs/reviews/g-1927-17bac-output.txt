@@ -1,0 +1,1588 @@
+
+=== g1927-17bac-frozen.log ===
+G_UNKNOWN_DEFINITION_DELETE {"control":false,"paused":1,"faulty":1,"completed":false,"saved":true,"definitions":["c1a18b288b5b8766"],"history":["Original subject"],"indexed":["c1a18b288b5b8766"]}
+  ok    G: real save was paused at its history read
+  ok    G: only the actual definition DEL was made unknown without applying it
+  ok    G: the admitted real save completed
+  ok    G: unknown definition deletion cannot be reported as completed forgetting
+  ok    G: healthy confirmed forgetting prevents the old save retaining history
+  ok    G: a later confirmed retry removes both definitions and history
+
+6 checks, all passing.
+G_UNKNOWN_DEFINITION_DELETE {"control":false,"paused":1,"faulty":1,"completed":false,"saved":true,"definitions":["5811c868210997c8"],"history":["Original subject"],"indexed":["5811c868210997c8"]}
+  ok    G: real save was paused at its history read
+  ok    G: only the actual definition DEL was made unknown without applying it
+  ok    G: the admitted real save completed
+  ok    G: unknown definition deletion cannot be reported as completed forgetting
+  ok    G: healthy confirmed forgetting prevents the old save retaining history
+  ok    G: a later confirmed retry removes both definitions and history
+  ok    G: an accessor receipt never runs a getter
+G_DESCRIPTOR_RECEIPT {"poison":true,"polluted":true,"getterCalls":0,"completed":false,"definitions":1,"history":1}
+
+7 checks, all passing.
+G_UNKNOWN_DEFINITION_DELETE {"control":false,"paused":1,"faulty":1,"completed":false,"saved":true,"definitions":["53fd41d1d6175e22"],"history":["Original subject"],"indexed":["53fd41d1d6175e22"]}
+  ok    G: real save was paused at its history read
+  ok    G: only the actual definition DEL was made unknown without applying it
+  ok    G: the admitted real save completed
+  ok    G: unknown definition deletion cannot be reported as completed forgetting
+  ok    G: healthy confirmed forgetting prevents the old save retaining history
+  ok    G: a later confirmed retry removes both definitions and history
+
+6 checks, all passing.
+G_HISTORY_AFTER_REMOVAL {"control":false,"boundary":1,"saved":true,"removed":true,"forgotten":true,"deletedBeforeResume":0,"definitions":[],"history":[],"afterSecondForget":0,"charged":null}
+  ok    real save completed through the admitted workflow writer
+  ok    real concurrent removal and forgetting completed
+  ok    the history was absent before the paused save resumed
+  ok    the exact history boundary was reached when raced
+  ok    the real workflow definitions stay removed
+  ok    a removed workflow cannot regain retained history
+  ok    a later full workflow forget leaves no orphaned history
+
+7 checks, all passing.
+forgetting a removed workflow's versions failed Error: a workflow's earlier versions could not be confirmed deleted
+    at dropFlowVersions (/tmp/codex-g-proof-sy9v5F/proof.cjs:5967:11)
+    at async removeFlow (/tmp/codex-g-proof-sy9v5F/proof.cjs:47555:24)
+    at async main (/tmp/codex-g-proof-sy9v5F/proof.cjs:47744:21)
+G_HISTORY_UNKNOWN_DELETE {"control":false,"initial":1,"injected":1,"unconfirmed":true,"definitions":[],"remaining":0}
+  ok    fixture has real retained history before removing it
+  ok    the actual unapplied history delete was intercepted
+  ok    unknown delete is reported as unconfirmed, healthy removal completes
+  ok    the removal does not restore the active workflow
+  ok    later full forgetting finds and deletes any retained history
+
+5 checks, all passing.
+G_HISTORY_NESTED_ID {"control":false,"boundary":1,"saved":true,"removed":true,"forgotten":true,"deletedBeforeResume":0,"definitions":["260fba8379934040"],"history":[],"afterSecondForget":0,"charged":null}
+  ok    real save completed through the admitted workflow writer
+  ok    real concurrent removal and forgetting completed
+  ok    the history was absent before the paused save resumed
+  ok    the exact history boundary was reached when raced
+  ok    the removed workflow stays absent and the other stays live
+  ok    a removed workflow cannot regain retained history
+  ok    a later full workflow forget leaves no orphaned history
+
+7 checks, all passing.
+G_HISTORY_FINAL_ERASE_WINDOW {"control":false,"readBoundary":1,"finalBoundary":1,"beforeResume":0,"saved":true,"definitions":0,"history":[],"indexed":[],"afterSecondForget":0,"charged":"544"}
+  ok    the real save completed
+  ok    the exact pre-final-DEL window was reached
+  ok    the definitions are gone after full workflow forgetting completes
+  ok    full workflow forgetting leaves no late history
+  ok    a second workflow forget removes indexed remnants
+
+5 checks, all passing.
+
+=== g1927-17bac-delete-controls.log ===
+G_UNKNOWN_DEFINITION_DELETE {"control":true,"paused":1,"faulty":0,"completed":true,"saved":true,"definitions":[],"history":[],"indexed":[]}
+  ok    G: real save was paused at its history read
+  ok    G: only the actual definition DEL was made unknown without applying it
+  ok    G: the admitted real save completed
+  ok    G: unknown definition deletion cannot be reported as completed forgetting
+  ok    G: healthy confirmed forgetting prevents the old save retaining history
+  ok    G: a later confirmed retry removes both definitions and history
+
+6 checks, all passing.
+G_UNKNOWN_DEFINITION_DELETE {"control":true,"paused":1,"faulty":0,"completed":true,"saved":true,"definitions":[],"history":[],"indexed":[]}
+  ok    G: real save was paused at its history read
+  ok    G: only the actual definition DEL was made unknown without applying it
+  ok    G: the admitted real save completed
+  ok    G: unknown definition deletion cannot be reported as completed forgetting
+  ok    G: healthy confirmed forgetting prevents the old save retaining history
+  ok    G: a later confirmed retry removes both definitions and history
+
+6 checks, all passing.
+G_UNKNOWN_DEFINITION_DELETE {"control":true,"paused":1,"faulty":0,"completed":true,"saved":true,"definitions":[],"history":[],"indexed":[]}
+  ok    G: real save was paused at its history read
+  ok    G: only the actual definition DEL was made unknown without applying it
+  ok    G: the admitted real save completed
+  ok    G: unknown definition deletion cannot be reported as completed forgetting
+  ok    G: healthy confirmed forgetting prevents the old save retaining history
+  ok    G: a later confirmed retry removes both definitions and history
+  ok    G: an accessor receipt never runs a getter
+G_DESCRIPTOR_RECEIPT {"poison":true,"polluted":false,"getterCalls":0,"completed":true,"definitions":0,"history":0}
+
+7 checks, all passing.
+
+=== g1927-17bac-proto-control.log ===
+G_UNKNOWN_DEFINITION_DELETE {"control":false,"paused":1,"faulty":1,"completed":false,"saved":true,"definitions":["afeba5c3c5c3a6f4"],"history":["Original subject"],"indexed":["afeba5c3c5c3a6f4"]}
+  ok    G: real save was paused at its history read
+  ok    G: only the actual definition DEL was made unknown without applying it
+  ok    G: the admitted real save completed
+  ok    G: unknown definition deletion cannot be reported as completed forgetting
+  ok    G: healthy confirmed forgetting prevents the old save retaining history
+  ok    G: a later confirmed retry removes both definitions and history
+  ok    G: an accessor receipt never runs a getter
+G_DESCRIPTOR_RECEIPT {"poison":false,"polluted":false,"getterCalls":0,"completed":false,"definitions":1,"history":1}
+
+7 checks, all passing.
+
+=== g1927-17bac-race-controls-final.log ===
+G_HISTORY_AFTER_REMOVAL {"control":true,"boundary":0,"saved":true,"removed":true,"forgotten":true,"deletedBeforeResume":0,"definitions":[],"history":[],"afterSecondForget":0,"charged":null}
+  ok    real save completed through the admitted workflow writer
+  ok    real concurrent removal and forgetting completed
+  ok    the history was absent before the paused save resumed
+  ok    the exact history boundary was reached when raced
+  ok    the real workflow definitions stay removed
+  ok    a removed workflow cannot regain retained history
+  ok    a later full workflow forget leaves no orphaned history
+
+7 checks, all passing.
+G_HISTORY_UNKNOWN_DELETE {"control":true,"initial":1,"injected":0,"unconfirmed":false,"definitions":[],"remaining":0}
+  ok    fixture has real retained history before removing it
+  ok    the actual unapplied history delete was intercepted
+  ok    unknown delete is reported as unconfirmed, healthy removal completes
+  ok    the removal does not restore the active workflow
+  ok    later full forgetting finds and deletes any retained history
+
+5 checks, all passing.
+G_HISTORY_NESTED_ID {"control":true,"boundary":0,"saved":true,"removed":true,"forgotten":true,"deletedBeforeResume":0,"definitions":["19d1b0933807d426"],"history":[],"afterSecondForget":0,"charged":null}
+  ok    real save completed through the admitted workflow writer
+  ok    real concurrent removal and forgetting completed
+  ok    the history was absent before the paused save resumed
+  ok    the exact history boundary was reached when raced
+  ok    the removed workflow stays absent and the other stays live
+  ok    a removed workflow cannot regain retained history
+  ok    a later full workflow forget leaves no orphaned history
+
+7 checks, all passing.
+G_HISTORY_FINAL_ERASE_WINDOW {"control":true,"readBoundary":0,"finalBoundary":0,"beforeResume":-1,"saved":true,"definitions":0,"history":[],"indexed":[],"afterSecondForget":0,"charged":"544"}
+  ok    the real save completed
+  ok    the exact pre-final-DEL window was reached
+  ok    the definitions are gone after full workflow forgetting completes
+  ok    full workflow forgetting leaves no late history
+  ok    a second workflow forget removes indexed remnants
+
+5 checks, all passing.
+
+=== g1927-17bac-arity.log ===
+  ok    real writer created the run and its first history event
+  ok    the real two-key DEL ran once and legitimately removed both keys
+  ok    only the one-member ZREM was made unknown
+  ok    an overcount cannot confirm erasure; healthy arity accepts its actual receipts
+  ok    the unapplied index deletion remains observable
+  ok    a later confirmed retry removes the retained member
+G_ERASE_ARITY {"healthy":false,"dualDeletes":1,"dualCount":2,"intercepted":1,"completed":false,"remaining":["9df1ca5701ff1ffdef16b004ccfcd0ae"]}
+
+6 checks, all passing.
+
+=== g1927-17bac-arity-control.log ===
+  ok    real writer created the run and its first history event
+  ok    the real two-key DEL ran once and legitimately removed both keys
+  ok    only the one-member ZREM was made unknown
+  ok    an overcount cannot confirm erasure; healthy arity accepts its actual receipts
+  ok    the unapplied index deletion remains observable
+  ok    a later confirmed retry removes the retained member
+G_ERASE_ARITY {"healthy":true,"dualDeletes":1,"dualCount":2,"intercepted":0,"completed":true,"remaining":[]}
+
+6 checks, all passing.
+
+=== g1927-579-return-red.log ===
+G_UNKNOWN_DEFINITION_DELETE {"control":false,"paused":1,"faulty":1,"completed":true,"saved":true,"definitions":["9192a0d8368e939d"],"history":["Original subject"],"indexed":["9192a0d8368e939d"]}
+  ok    G: real save was paused at its history read
+  ok    G: only the actual definition DEL was made unknown without applying it
+  ok    G: the admitted real save completed
+  FAIL  G: unknown definition deletion cannot be reported as completed forgetting
+        expected false
+        got      true
+  ok    G: healthy confirmed forgetting prevents the old save retaining history
+  ok    G: a later confirmed retry removes both definitions and history
+
+6 checks, 1 failing.
+G_UNKNOWN_DEFINITION_DELETE {"control":false,"paused":1,"faulty":1,"completed":true,"saved":true,"definitions":["1683d9093438815c"],"history":["Original subject"],"indexed":["1683d9093438815c"]}
+  ok    G: real save was paused at its history read
+  ok    G: only the actual definition DEL was made unknown without applying it
+  ok    G: the admitted real save completed
+  FAIL  G: unknown definition deletion cannot be reported as completed forgetting
+        expected false
+        got      true
+  ok    G: healthy confirmed forgetting prevents the old save retaining history
+  ok    G: a later confirmed retry removes both definitions and history
+  ok    G: an accessor receipt never runs a getter
+G_DESCRIPTOR_RECEIPT {"poison":true,"polluted":true,"getterCalls":0,"completed":true,"definitions":1,"history":1}
+
+7 checks, 1 failing.
+  ok    real writer created the run and its first history event
+  ok    the real two-key DEL ran once and legitimately removed both keys
+  ok    only the one-member ZREM was made unknown
+  FAIL  an overcount cannot confirm erasure; healthy arity accepts its actual receipts
+        expected false
+        got      true
+  ok    the unapplied index deletion remains observable
+  ok    a later confirmed retry removes the retained member
+G_ERASE_ARITY {"healthy":false,"dualDeletes":1,"dualCount":2,"intercepted":1,"completed":true,"remaining":["9df1ca5701ff1ffdef16b004ccfcd0ae"]}
+
+6 checks, 1 failing.
+
+=== g1927-17bac-types-final.log ===
+
+=== g1927-17bac-lint.log ===
+
+/tmp/g1927-return-17bac/tests/flow-forget-descriptor-proto.test.ts
+  4:20  warning  'removeFlow' is defined but never used  @typescript-eslint/no-unused-vars
+  7:10  warning  'dataKey' is defined but never used     @typescript-eslint/no-unused-vars
+
+/tmp/g1927-return-17bac/tests/flow-forget-overcount.test.ts
+  4:20  warning  'removeFlow' is defined but never used  @typescript-eslint/no-unused-vars
+  7:10  warning  'dataKey' is defined but never used     @typescript-eslint/no-unused-vars
+
+/tmp/g1927-return-17bac/tests/g1927-forget-descriptor-proto.proof.ts
+  3:20  warning  'removeFlow' is defined but never used  @typescript-eslint/no-unused-vars
+  6:10  warning  'dataKey' is defined but never used     @typescript-eslint/no-unused-vars
+
+/tmp/g1927-return-17bac/tests/g1927-forget-overcount.proof.ts
+  3:20  warning  'removeFlow' is defined but never used  @typescript-eslint/no-unused-vars
+  6:10  warning  'dataKey' is defined but never used     @typescript-eslint/no-unused-vars
+
+✖ 8 problems (0 errors, 8 warnings)
+
+
+=== g1927-17bac-arity-lint.log ===
+
+=== g1927-17bac-canonical.log (36 files) ===
+
+=== erasure-grant-evidence.test.ts ===
+D2 incomplete grant preview { expired: false, retained: true }
+✔ an incomplete grant-read envelope does not relabel a retained live link expired (22.586334ms)
+D2 malformed grant observation { state: 'more', grantRetained: true, contactRemains: true }
+✔ a malformed scope from a grant read cannot become done/zero while its contact remains (14.752855ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 43.616959
+
+G_FILE_EXIT erasure-grant-evidence.test.ts 0
+
+=== erasure-request-full.test.ts ===
+  ok    the address is known to both stores
+
+(a) The first store has no room: the next one sends the link
+  ok    the link is sent
+  ok    to the address, naming both stores
+  ok    taken from the second store's share, nothing more from the first
+
+(b) Asked for every store, no store has room: the same answer as an unknown address
+a deletion link asked for every store was not emailed: full (stores 9e2acd581024491f9f1d389ca50d3e4c,883618d4cc8e41d7953d1032d764e4b5)
+  ok    nothing is sent
+  ok    the known address is told what an unknown one is: 'sent', no day
+  ok    and that page gives the privacy contact
+
+(c) Asked from one store that has no room: the page says so honestly, the same for every address
+  ok    nothing is sent
+  ok    the answer is that it is full, not an error
+  ok    with the first whole day the store's window has ended by
+  ok    the page says it cannot be emailed now
+  ok    and when
+  ok    and does not say to try again in a moment
+  ok    the contact it gives is the one the Privacy Policy publishes
+  ok    a day that cannot be read is left out, the rest is said
+  ok    an address the store does not know gets exactly the same answer
+
+The day shown is never one the store is still full on
+  ok    its window ends at 23:30 UTC
+  ok    it is shown as the day after it ends, the first whole day it is open
+  ok    a window ending at 00:00 UTC keeps its own day
+
+Buyers keep their reserved half
+  ok    a buyer's course link from a full store is still sent
+  ok    and the deletion links never went past a visitor's share of either store
+
+21 checks, all passing.
+
+G_FILE_EXIT erasure-request-full.test.ts 0
+
+=== erasure-request-scope-all.test.ts ===
+  ok    the known address is known to the store alone
+  ok    the stranger's address is known to no store
+
+The store has room: the known address gets the link, both get the same answer
+  ok    only the known address was emailed
+  ok    the same response for both (status, body, redirect)
+  ok    and that answer is 'sent'
+
+The store's share for visitors is spent: still the same answer for both
+a deletion link asked for every store was not emailed: full (stores 5e911b9f8099408099dd3b4d4d0b8bbe)
+  ok    nothing is sent
+  ok    the same response for both (status, body, redirect)
+  ok    both are told 'sent', with no day in the link
+
+The email provider fails: still the same answer for both
+a deletion link asked for every store was not emailed: error (stores 881740eb2a45424e8d62bf0d93b0f191)
+  ok    the same response for both (status, body, redirect)
+
+The page that answer opens always gives the privacy contact
+  ok    the contact is the one the Privacy Policy publishes, as a link and as text
+  ok    it does not promise the link will arrive
+
+11 checks, all passing.
+
+G_FILE_EXIT erasure-request-scope-all.test.ts 0
+
+=== erasure-request-timing.test.ts ===
+
+Asked for one store chosen
+  ok    the same answer for a known address and a stranger's
+  ok    and that answer is 'sent'
+  ok    nothing is emailed before the answer, for either
+  ok    neither waits for the slow email (400 ms)
+  ok    the known address is emailed after the answer, the stranger's never
+a deletion link asked from one store was not emailed: error (store da88a6ac01214d95931ba353076b7826)
+  ok    with the email provider down, still the same answer for both
+
+Asked for every store
+  ok    the same answer for a known address and a stranger's
+  ok    and that answer is 'sent'
+  ok    nothing is emailed before the answer, for either
+  ok    neither waits for the slow email (400 ms)
+  ok    the known address is emailed after the answer, the stranger's never
+a deletion link asked for every store was not emailed: error (stores da88a6ac01214d95931ba353076b7826)
+  ok    with the email provider down, still the same answer for both
+
+12 checks, all passing.
+
+G_FILE_EXIT erasure-request-timing.test.ts 0
+
+=== erasure-store-read-evidence.test.ts ===
+
+transport error
+  ok    the preview refuses an unconfirmed store instead of showing an empty scope
+  ok    unreadable store is still to do, never counted as deleted
+  ok    the grant still names the same store
+  ok    the person's contact still exists, proving deletion was not done
+  ok    the public confirmation offers another press and never claims done
+  ok    both preview and confirmation used the real store lookup
+
+missing reply
+  ok    the preview refuses an unconfirmed store instead of showing an empty scope
+  ok    unreadable store is still to do, never counted as deleted
+  ok    the grant still names the same store
+  ok    the person's contact still exists, proving deletion was not done
+  ok    the public confirmation offers another press and never claims done
+  ok    both preview and confirmation used the real store lookup
+
+undefined reply
+  ok    the preview refuses an unconfirmed store instead of showing an empty scope
+  ok    unreadable store is still to do, never counted as deleted
+  ok    the grant still names the same store
+  ok    the person's contact still exists, proving deletion was not done
+  ok    the public confirmation offers another press and never claims done
+  ok    both preview and confirmation used the real store lookup
+
+null reply
+  ok    the preview refuses an unconfirmed store instead of showing an empty scope
+  ok    unreadable store is still to do, never counted as deleted
+  ok    the grant still names the same store
+  ok    the person's contact still exists, proving deletion was not done
+  ok    the public confirmation offers another press and never claims done
+  ok    both preview and confirmation used the real store lookup
+
+wrong scalar
+  ok    the preview refuses an unconfirmed store instead of showing an empty scope
+  ok    unreadable store is still to do, never counted as deleted
+  ok    the grant still names the same store
+  ok    the person's contact still exists, proving deletion was not done
+  ok    the public confirmation offers another press and never claims done
+  ok    both preview and confirmation used the real store lookup
+
+A confirmed store can finish the same deletion
+  ok    the same link can be read after recovery
+  ok    real erasure finishes once its store can be read
+  ok    the contact really is removed
+  ok    the grant goes only after confirmed erasure
+  ok    the consumed link cannot delete again
+
+35 checks, all passing.
+
+G_FILE_EXIT erasure-store-read-evidence.test.ts 0
+
+=== flow-actions.test.ts ===
+
+An action, read strictly
+  ok    a label needs words; another sequence must be the store's
+
+Saved, and checked when saved
+  ok    a sequence that starts with a label, its label trimmed
+  ok    a label trigger with no label is refused
+  ok    a sequence that is not the store's is refused
+  ok    so is a sequence starting itself
+  ok    a condition on the email before needs an email right before it
+  ok    a welcome that gives a label and starts another sequence
+
+Carried out for the people it is for
+  ok    the welcome goes to all three
+  ok    the label, only for who has not bought, and only where there is room
+  ok    being given the label starts the offer at once, for Ana alone
+  ok    and the offer's next step takes the label off again, whatever its capitals
+  ok    starting the offer again starts nobody twice: Ana had it, the others now get it
+  ok    and the welcome goes on to its last email
+
+Two sequences that start each other
+  ok    each once, however many times they start each other
+
+Counted
+  ok    the actions that changed something, beside the emails sent
+
+A label never written over a newer change
+  ok    the unsubscribe stays, and the label is written over the contact as it now is
+
+16 checks, all passing.
+
+G_FILE_EXIT flow-actions.test.ts 0
+
+=== flow-books-call.test.ts ===
+
+The words
+  ok    a sequence on a call starts when someone books it; any other product, when someone gets it
+  ok    the trigger's choice says it covers booking a call, only when the store has one
+  ok    the store's calls are handed to the studio
+
+Nothing else changes
+  ok    the trigger is still the product's
+  ok    a paid order, a call included, starts the sequences of its product
+
+5 checks, all passing.
+
+G_FILE_EXIT flow-books-call.test.ts 0
+
+=== flow-conditions.test.ts ===
+
+A condition reads what the list keeps
+  ok    having a product, or not
+  ok    having paid: a product sold for money, or first agreeing at a checkout
+  ok    a label, whatever its capitals and spaces
+  ok    the end: one product, or anything paid for
+  ok    a condition on a product the store does not have is refused
+  ok    an end that would come before the first email is refused
+
+Saved, and checked when saved
+  ok    a condition on a product that is not the store's
+  ok    an end that would come first
+  ok    kept as asked: the label trimmed, the others skipping unless told to leave
+
+Sent only to those it is for
+  ok    the first email: not to Ben, who already has what it sells
+  ok    the second, for those who have not bought: Ana; Cleo skips it
+  ok    and Cleo's next one waits its day, counted from the one she skipped
+  ok    the third, for the label: Cleo, a day after the one she skipped; Ana leaves
+  ok    the last: nobody — Ana left, Cleo now has the course
+  ok    counted: who started, what went, who left by buying, what was skipped
+
+A paid order on the list, once
+  ok    put on the list by whichever comes first, and not again
+  ok    with everything the order handed over
+  ok    somebody who did not check the box and is not on the list is added to nothing
+  ok    a buyer who never reached the thanks page is on the list, with what they bought
+  ok    and the job does not do it twice
+  ok    and the store is in that buyer's library (lib/buyer-library.ts)
+
+Which links somebody used, only if they allowed it
+  ok    allowed only by somebody's own check, with their yes to the list
+  ok    a condition on the email before cannot be on the first
+  ok    only Gus's links carry his key, and only his email says how to stop it
+  ok    the key is not the unsubscribe code
+  ok    a page opened through his link notes it; a made-up key notes nothing
+  ok    the email for those who used a link: Gus only
+  ok    the one for those who did not use the email before's link: both, as neither used one there
+
+Taken back in one press, and by leaving
+  ok    the stop page knows it is on
+  ok    stopped: what was counted is deleted, the permission gone, his key leads nowhere, and he is still on the list
+  ok    checking it again after leaving the list asks again: coming back without it, it stays off
+  ok    a buyer who checked both boxes at checkout
+
+32 checks, all passing.
+
+G_FILE_EXIT flow-conditions.test.ts 0
+
+=== flow-forget-definition-ack.test.ts ===
+G_UNKNOWN_DEFINITION_DELETE {"control":false,"paused":1,"faulty":1,"completed":false,"saved":true,"definitions":["6008f456e05051cc"],"history":["Original subject"],"indexed":["6008f456e05051cc"]}
+  ok    G: real save was paused at its history read
+  ok    G: only the actual definition DEL was made unknown without applying it
+  ok    G: the admitted real save completed
+  ok    G: unknown definition deletion cannot be reported as completed forgetting
+  ok    G: healthy confirmed forgetting prevents the old save retaining history
+  ok    G: a later confirmed retry removes both definitions and history
+
+6 checks, all passing.
+
+G_FILE_EXIT flow-forget-definition-ack.test.ts 0
+
+=== flow-forget-descriptor-proto.test.ts ===
+G_UNKNOWN_DEFINITION_DELETE {"control":false,"paused":1,"faulty":1,"completed":false,"saved":true,"definitions":["6cf7be750cfeff30"],"history":["Original subject"],"indexed":["6cf7be750cfeff30"]}
+  ok    G: real save was paused at its history read
+  ok    G: only the actual definition DEL was made unknown without applying it
+  ok    G: the admitted real save completed
+  ok    G: unknown definition deletion cannot be reported as completed forgetting
+  ok    G: healthy confirmed forgetting prevents the old save retaining history
+  ok    G: a later confirmed retry removes both definitions and history
+  ok    G: an accessor receipt never runs a getter
+G_DESCRIPTOR_RECEIPT {"poison":true,"polluted":true,"getterCalls":0,"completed":false,"definitions":1,"history":1}
+
+7 checks, all passing.
+
+G_FILE_EXIT flow-forget-descriptor-proto.test.ts 0
+
+=== flow-forget-overcount.test.ts ===
+G_UNKNOWN_DEFINITION_DELETE {"control":false,"paused":1,"faulty":1,"completed":false,"saved":true,"definitions":["b163b7b03f642216"],"history":["Original subject"],"indexed":["b163b7b03f642216"]}
+  ok    G: real save was paused at its history read
+  ok    G: only the actual definition DEL was made unknown without applying it
+  ok    G: the admitted real save completed
+  ok    G: unknown definition deletion cannot be reported as completed forgetting
+  ok    G: healthy confirmed forgetting prevents the old save retaining history
+  ok    G: a later confirmed retry removes both definitions and history
+
+6 checks, all passing.
+
+G_FILE_EXIT flow-forget-overcount.test.ts 0
+
+=== flow-forget-retry.test.ts ===
+  ok    one earlier version is kept
+  ok    the first try says it could not finish, with the workflows already gone
+  ok    the history is still there, so it was not taken for deleted
+  ok    the next try finds it by the index and deletes it
+
+4 checks, all passing.
+
+G_FILE_EXIT flow-forget-retry.test.ts 0
+
+=== flow-halves.test.ts ===
+
+Halves
+  ok    the same person, the same half, whatever the capitals
+  ok    about even across many people
+  ok    and not the same split in every sequence
+
+A condition on a half
+  ok    read as one
+  ok    holds for the first half only
+
+Telling the store's webhooks
+  ok    read as an action
+  ok    an event an address can listen for
+
+7 checks, all passing.
+
+G_FILE_EXIT flow-halves.test.ts 0
+
+=== flow-history-after-removal.test.ts ===
+G_HISTORY_AFTER_REMOVAL {"control":false,"boundary":1,"saved":true,"removed":true,"forgotten":true,"deletedBeforeResume":0,"definitions":[],"history":[],"afterSecondForget":0,"charged":null}
+  ok    real save completed through the admitted workflow writer
+  ok    real concurrent removal and forgetting completed
+  ok    the history was absent before the paused save resumed
+  ok    the exact history boundary was reached when raced
+  ok    the real workflow definitions stay removed
+  ok    a removed workflow cannot regain retained history
+  ok    a later full workflow forget leaves no orphaned history
+
+7 checks, all passing.
+
+G_FILE_EXIT flow-history-after-removal.test.ts 0
+
+=== flow-history-final-forget-window.test.ts ===
+G_HISTORY_FINAL_ERASE_WINDOW {"control":false,"readBoundary":1,"finalBoundary":1,"beforeResume":0,"saved":true,"definitions":0,"history":[],"indexed":[],"afterSecondForget":0,"charged":"544"}
+  ok    the real save completed
+  ok    the exact pre-final-DEL window was reached
+  ok    the definitions are gone after full workflow forgetting completes
+  ok    full workflow forgetting leaves no late history
+  ok    a second workflow forget removes indexed remnants
+
+5 checks, all passing.
+
+G_FILE_EXIT flow-history-final-forget-window.test.ts 0
+
+=== flow-history-nested-id.test.ts ===
+G_HISTORY_NESTED_ID {"control":false,"boundary":1,"saved":true,"removed":true,"forgotten":true,"deletedBeforeResume":0,"definitions":["dcbb20f9c8a53982"],"history":[],"afterSecondForget":0,"charged":null}
+  ok    real save completed through the admitted workflow writer
+  ok    real concurrent removal and forgetting completed
+  ok    the history was absent before the paused save resumed
+  ok    the exact history boundary was reached when raced
+  ok    the removed workflow stays absent and the other stays live
+  ok    a removed workflow cannot regain retained history
+  ok    a later full workflow forget leaves no orphaned history
+
+7 checks, all passing.
+
+G_FILE_EXIT flow-history-nested-id.test.ts 0
+
+=== flow-history-refused-third-push-evidence.test.ts ===
+G2_HISTORY_RECOUNT_RACE {"entries":3,"charged":2384,"required":2240}
+✔ control: sequential history writes retain and charge the complete list (7.425381ms)
+✔ recount after a refused old push cannot shrink the room of a newer third push (1.917213ms)
+✔ after a refused push, nothing reads the list again, so no recount can go stale (2.831558ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19.016472
+
+G_FILE_EXIT flow-history-refused-third-push-evidence.test.ts 0
+
+=== flow-history-room-evidence.test.ts ===
+G2_HISTORY_RECOUNT_RACE {"entries":3,"charged":2384,"required":2240}
+✔ control: sequential history writes retain and charge the complete list (8.51149ms)
+✔ recount after a refused old push cannot shrink the room of a newer third push (1.478733ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16.316977
+
+G_FILE_EXIT flow-history-room-evidence.test.ts 0
+
+=== flow-history-unknown-removal.test.ts ===
+forgetting a removed workflow's versions failed Error: a workflow's earlier versions could not be confirmed deleted
+    at dropFlowVersions (/tmp/codex-g-proof-qKRcCa/proof.cjs:5967:11)
+    at async removeFlow (/tmp/codex-g-proof-qKRcCa/proof.cjs:47555:24)
+    at async main (/tmp/codex-g-proof-qKRcCa/proof.cjs:47744:21)
+G_HISTORY_UNKNOWN_DELETE {"control":false,"initial":1,"injected":1,"unconfirmed":true,"definitions":[],"remaining":0}
+  ok    fixture has real retained history before removing it
+  ok    the actual unapplied history delete was intercepted
+  ok    unknown delete is reported as unconfirmed, healthy removal completes
+  ok    the removal does not restore the active workflow
+  ok    later full forgetting finds and deletes any retained history
+
+5 checks, all passing.
+
+G_FILE_EXIT flow-history-unknown-removal.test.ts 0
+
+=== flow-list.test.ts ===
+
+Strict saved sequence list
+  ok    confirmed empty array remains empty
+  ok    valid saved flow is preserved
+  ok    empty steps remain editable diagnostics
+  ok    invalid business wait stays editable
+  ok    valid condition has
+  ok    valid condition lacks
+  ok    valid condition tag
+  ok    valid condition untagged
+  ok    valid condition started
+  ok    valid condition unstarted
+  ok    valid condition finished
+  ok    valid condition unfinished
+  ok    valid condition buyer
+  ok    valid condition lead
+  ok    valid condition clicked
+  ok    valid condition unclicked
+  ok    valid condition half-a
+  ok    valid condition half-b
+  ok    valid action tag
+  ok    valid action untag
+  ok    valid action start
+  ok    valid action field
+  ok    valid action deal
+  ok    valid action note
+  ok    valid action notify
+  ok    valid action webhook
+  ok    malformed list null
+  ok    malformed list {}
+  ok    malformed list ""
+  ok    malformed list [null]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}]},{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"},{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":"true","createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"unknown","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":2,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":null}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":null}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample","when":"clicked"}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample","when":{"if":"has"}}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample","action":{"do":"field"}}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}],"goal":{"any":false}}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}],"goal":"purchase"}]
+  ok    valid product goal is preserved
+  ok    valid purchase goal is preserved
+  ok    store without a list is confirmed empty
+  ok    no storage read without a list
+  ok    only selected list is read
+  ok    valid list read
+  ok    only selected list is read
+  ok    confirmed missing key is empty
+  ok    only selected list is read
+  ok    confirmed stored empty list
+  ok    only selected list is read
+  ok    failed read is not an empty list []
+  ok    only selected list is read
+  ok    failed read is not an empty list [null,null]
+  ok    only selected list is read
+  ok    failed read is not an empty list null
+  ok    only selected list is read
+  ok    failed read is not an empty list {}
+  ok    only selected list is read
+  ok    failed read is not an empty list [null]
+  ok    only selected list is read
+  ok    failed read is not an empty list [""]
+  ok    only selected list is read
+  ok    failed read is not an empty list ["bad json"]
+  ok    only selected list is read
+  ok    failed read is not an empty list ["{}"]
+  ok    only selected list is read
+  ok    failed read is not an empty list ["[null]"]
+  ok    only selected list is read
+  ok    failed read is not an empty list ["[{\"id\":\"flow1\",\"name\":\"Welcome\",\"trigger\":\"joined\",\"productId\":null,\"active\":false,\"createdAt\":1,\"steps\":null}]"]
+  ok    only selected list is read
+  ok    storage failure remains unknown
+
+74 checks, all passing.
+
+G_FILE_EXIT flow-list.test.ts 0
+
+=== flow-mutation-reads.test.ts ===
+
+Sequence mutation read guards
+  ok    save refuses an unknown list
+  ok    save makes no sequence write
+  ok    save preserves stored bytes
+  ok    remove refuses an unknown list
+  ok    remove makes no sequence write
+  ok    remove preserves stored bytes
+  ok    starters refuses an unknown list
+  ok    starters makes no sequence write
+  ok    starters preserves stored bytes
+  ok    keep refuses an unknown list
+  ok    keep makes no sequence write
+  ok    keep preserves stored bytes
+  ok    save refuses an unknown list
+  ok    save makes no sequence write
+  ok    save preserves stored bytes
+  ok    remove refuses an unknown list
+  ok    remove makes no sequence write
+  ok    remove preserves stored bytes
+  ok    starters refuses an unknown list
+  ok    starters makes no sequence write
+  ok    starters preserves stored bytes
+  ok    keep refuses an unknown list
+  ok    keep makes no sequence write
+  ok    keep preserves stored bytes
+  ok    save refuses an unknown list
+  ok    save makes no sequence write
+  ok    save preserves stored bytes
+  ok    remove refuses an unknown list
+  ok    remove makes no sequence write
+  ok    remove preserves stored bytes
+  ok    starters refuses an unknown list
+  ok    starters makes no sequence write
+  ok    starters preserves stored bytes
+  ok    keep refuses an unknown list
+  ok    keep makes no sequence write
+  ok    keep preserves stored bytes
+  ok    save refuses an unknown list
+  ok    save makes no sequence write
+  ok    save preserves stored bytes
+  ok    remove refuses an unknown list
+  ok    remove makes no sequence write
+  ok    remove preserves stored bytes
+  ok    starters refuses an unknown list
+  ok    starters makes no sequence write
+  ok    starters preserves stored bytes
+  ok    keep refuses an unknown list
+  ok    keep makes no sequence write
+  ok    keep preserves stored bytes
+  ok    save refuses an unknown list
+  ok    save makes no sequence write
+  ok    save preserves stored bytes
+  ok    remove refuses an unknown list
+  ok    remove makes no sequence write
+  ok    remove preserves stored bytes
+  ok    starters refuses an unknown list
+  ok    starters makes no sequence write
+  ok    starters preserves stored bytes
+  ok    keep refuses an unknown list
+  ok    keep makes no sequence write
+  ok    keep preserves stored bytes
+  ok    save refuses an unknown list
+  ok    save makes no sequence write
+  ok    save preserves stored bytes
+  ok    remove refuses an unknown list
+  ok    remove makes no sequence write
+  ok    remove preserves stored bytes
+  ok    starters refuses an unknown list
+  ok    starters makes no sequence write
+  ok    starters preserves stored bytes
+  ok    keep refuses an unknown list
+  ok    keep makes no sequence write
+  ok    keep preserves stored bytes
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    lost acknowledgement does not claim success
+  ok    unconfirmed response does not imply rollback
+  ok    valid creation succeeds
+  ok    creation preserves both existing sequences
+  ok    valid editing succeeds
+  ok    editing preserves the other sequence
+  ok    valid removal succeeds
+  ok    removal preserves remaining sequences
+  ok    confirmed absent list permits creation
+
+97 checks, all passing.
+
+G_FILE_EXIT flow-mutation-reads.test.ts 0
+
+=== flow-next-action.test.ts ===
+
+Read strictly
+  ok    words and whole days from 0 to the most
+  ok    anything else refused
+  ok    cleaned as the deals board cleans it
+
+Kept and read back
+  ok    saved with its step
+  ok    the stored list reads it back
+  ok    a stored step without its days, or past the limits, is not read
+
+Run on the person's open deal only
+  ok    the open deal gets the next action and the day it is due, in UTC
+  ok    everything else on the deal is kept
+  ok    someone with no open deal: no deal is made for them
+  ok    a won deal is not an open one, so it is left as it was
+
+A deal that already has it
+  ok    a second workflow with the same step saves
+  ok    the same next action and due date: confirmed, not written again
+
+Said in words
+  ok    the studio's choice, its two fields and what it does
+  ok    the map says it, and the day it runs for 0
+  ok    the hint is read with both fields, and names the board's own filters
+  ok    an empty number of days is sent as none, never as today
+
+16 checks, all passing.
+
+G_FILE_EXIT flow-next-action.test.ts 0
+
+=== flow-people.test.ts ===
+
+Read and saved strictly
+  ok    a field and a value it keeps; a stage the board has; a note with words
+  ok    a form that asks for no address cannot start a sequence
+  ok    a sequence that starts with the form, its steps kept
+
+Started by the form, for people on the list
+  ok    the field is set for those on the list, not for somebody who is not
+  ok    Ana gets a new deal in the stage; Ben's open deal moves there
+  ok    a note on her page, saying where it came from
+  ok    the owner told once, with both of them
+  ok    and the email goes to each, once
+
+A sign-up asked from a form remembers it
+  ok    the confirmation link uses the service route and knows the form
+
+A workflow for one quiz result (added 17 October 2026)
+  ok    a result the quiz does not have is refused
+  ok    one of its results is kept on the workflow
+  ok    only the person who got that result starts it
+  ok    a sign-up asked from a quiz keeps the service route, form and result
+
+13 checks, all passing.
+
+G_FILE_EXIT flow-people.test.ts 0
+
+=== flow-review.test.ts ===
+
+Saved automation references
+  ok    ordinary sequence stays quiet
+  ok    missing product trigger
+  ok    changed course trigger
+  ok    missing form trigger
+  ok    missing end goal
+  ok    missing course condition names step
+  ok    missing started sequence
+  ok    paused sequence target
+  ok    active sequence target
+  ok    missing field
+  ok    missing stage
+  ok    changed number field names incompatible value
+  ok    valid number value stays quiet
+  ok    invalid calendar date is flagged
+  ok    removed choice value is flagged
+  ok    clear-field action remains valid
+  ok    unknown field format is not claimed valid
+  ok    empty sequence needs a step
+  ok    empty email needs content
+  ok    empty subject needs completion
+  ok    action step does not need email content
+  ok    template subject identifies the affected step
+  ok    template body needs completion
+  ok    action note placeholder is reviewed too
+  ok    ordinary brackets are not template placeholders
+  ok    invalid wait identifies step
+  ok    blank wait cannot become immediate
+  ok    text wait cannot become immediate
+  ok    negative wait is rejected
+  ok    fractional hour is rejected
+  ok    fractional day with whole hours remains valid
+  ok    immediate step remains valid
+  ok    maximum wait remains valid
+  ok    overlong wait is rejected
+  ok    clicked on first step is flagged
+  ok    clicked after an action is flagged
+  ok    clicked after an email remains valid
+  ok    unclicked on first step is flagged
+  ok    unclicked after an action is flagged
+  ok    unclicked after an email remains valid
+  ok    a non-click condition can follow an action
+  ok    purchase trigger cannot end at any purchase
+  ok    product trigger cannot end at the same product
+  ok    product trigger can end at another product
+  ok    finished trigger cannot end at the same product
+  ok    finished trigger can end at another product
+  ok    joined trigger can end at a purchase
+  ok    purchase trigger without a goal remains valid
+  ok    product trigger without a goal remains valid
+  ok    product paid entry conflicts with any purchase ending
+  ok    product free entry can end at a later purchase
+  ok    product unrelated paid product does not change entry
+  ok    product missing paid context does not invent a conflict
+  ok    finished paid entry conflicts with any purchase ending
+  ok    finished free entry can end at a later purchase
+  ok    finished unrelated paid product does not change entry
+  ok    finished missing paid context does not invent a conflict
+  ok    joined entry is not a purchase even with paid context
+  ok    paid entry with no ending remains valid
+
+59 checks, all passing.
+
+G_FILE_EXIT flow-review.test.ts 0
+
+=== flow-rotate-action.test.ts ===
+
+Read and kept
+  ok    a step of its own, with nothing to choose
+  ok    saved
+  ok    the stored list reads it back
+
+Shared evenly
+  ok    each open deal goes to whoever had the fewest: two each in the end
+  ok    someone with no open deal: no deal is made for them
+
+Who is never chosen, and who is kept
+  ok    a deal held by someone who left the team goes to whoever on it has the fewest
+  ok    a deal held by someone still on the team keeps them
+
+A teammate who can no longer see orders, and a tie
+  ok    a deal held by someone who can no longer see orders goes to someone who can: only the owner now
+  ok    with only the owner left, the workflow's review says every deal goes to them
+
+Never over what the creator did meanwhile
+  ok    a write over a copy the board changed meanwhile writes nothing
+  ok    the store's data room counts the record as the board left it, never the copy read before
+  ok    and what the creator typed stays
+  ok    over the record as it is now, it is written
+  ok    a deal that is gone is never made again by a write over it
+  ok    a write that lost the race sizes the room from the script's answer, without reading the deal again
+
+One run shares at a time
+  ok    while another run shares, nobody is given the deal
+  ok    once it let go, the deal is shared
+
+Said in words
+  ok    offered with a deals board and someone besides the owner, or where a step already has it, and what it does
+  ok    the map says it
+
+19 checks, all passing.
+
+G_FILE_EXIT flow-rotate-action.test.ts 0
+
+=== flow-stats.test.ts ===
+
+Strict sequence activity
+  ok    confirmed empty hash means zero
+  ok    valid counters retain values
+  ok    absent counters in a confirmed hash are zero
+  ok    future metadata is ignored
+  ok    malformed hash null
+  ok    malformed hash undefined
+  ok    malformed hash {}
+  ok    malformed hash ""
+  ok    malformed hash ["sent"]
+  ok    malformed hash [12,"1"]
+  ok    malformed hash ["sent","1","sent","2"]
+  ok    invalid counter 
+  ok    invalid counter  
+  ok    invalid counter no
+  ok    invalid counter -1
+  ok    invalid counter -1
+  ok    invalid counter 1.5
+  ok    invalid counter 1.5
+  ok    invalid counter Infinity
+  ok    invalid counter Infinity
+  ok    invalid counter NaN
+  ok    invalid counter true
+  ok    invalid counter null
+  ok    invalid counter [object Object]
+  ok    invalid counter 
+  ok    invalid counter 9007199254740992
+  ok    invalid counter 1e2
+  ok    safe maximum remains exact
+  ok    empty list needs no read
+  ok    no read for empty list
+  ok    only requested sequence keys are read
+  ok    confirmed empty sequence is present
+  ok    second sequence keeps its own activity
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable []
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable [[]]
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable [[],[],[]]
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable null
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable {}
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable [[],null]
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable [[],["sent","bad"]]
+  ok    only requested sequence keys are read
+  ok    storage failure stays unavailable
+
+49 checks, all passing.
+
+G_FILE_EXIT flow-stats.test.ts 0
+
+=== flow-stop-action.test.ts ===
+
+Read and kept
+  ok    another of the store's sequences, never one that is not
+  ok    never the workflow itself
+  ok    saved, and the stored list reads it back
+
+Taken out where they are
+  ok    Ana waits in the nurture sequence for its first email
+  ok    taken out: nothing of hers waits in it
+  ok    its history says it ended, and by what
+  ok    joining again does not start her on it again: each person goes through a sequence once
+  ok    no email of it went
+  ok    someone not in it is told so, in the step's history
+
+Waiting under an address the store had before
+  ok    an entry made before the store changed its address
+  ok    is taken out too
+
+Due in the same minute: the stop really cancels the email
+  ok    the stop, done first in the batch, keeps the email from going, and nothing of that sequence is left queued for her
+  ok    both histories say so: taken out, not put off for later
+
+A step under way when the stop lands
+  ok    the email under way goes, nothing after it is queued, and the run ends, saying why
+  ok    every place a run is queued again after its step goes through the lease check
+
+Waiting for room to send when the stop lands
+  ok    taken out: ended there, said why; still in it: the wait as it was
+  ok    both places a step is put off use it, and a wait taken out is not counted as later
+
+A condition that sends them on, when the stop lands first
+  ok    the conditional sequence is saved
+  ok    taken out before the condition is read: nothing of that sequence is queued for him, and his run stays ended
+
+Out of time in the same batch, after the stop
+  ok    his DS step is not put back in the queue, no email of it goes, and his run stays ended
+
+When the sequence is gone
+  ok    the workflow's review says so
+
+Said in words
+  ok    the studio's choice and what it does
+  ok    the map says it
+
+23 checks, all passing.
+
+G_FILE_EXIT flow-stop-action.test.ts 0
+
+=== flow-stop-ses-network.test.ts ===
+✔ SES network bridge keeps the in-flight observer and never invents acceptance (18.476624ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 27.506242
+
+G_FILE_EXIT flow-stop-ses-network.test.ts 0
+
+=== flow-versions-evidence.test.ts ===
+✔ control: confirmed history is readable and accounted (43.445922ms)
+an email action failed FlowVersionsUnavailable: A workflow's earlier versions could not be read
+    at readFlowVersions (/tmp/codex-g-proof-hywGaa/proof.cjs:13193:21)
+    at async POST (/tmp/codex-g-proof-hywGaa/proof.cjs:65695:24)
+    at async Object.post (/tmp/codex-g-proof-hywGaa/proof.cjs:65822:15)
+    at async TestContext.<anonymous> (/tmp/codex-g-proof-hywGaa/proof.cjs:65838:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+G2_UNKNOWN_HISTORY {"status":503,"body":{"ok":false,"error":"flow_versions_unavailable"}}
+✔ unknown history read is never a confirmed empty version list (45.376053ms)
+G2_HISTORY_UNDERCOUNT {"entries":1,"required":384,"charged":"528"}
+✔ unknown held history cannot make the next version unaccounted (10.652739ms)
+G2_DELETE_RELEASE {"required":384,"charged":"528"}
+✔ unknown unapplied delete cannot release room while history survives (48.861595ms)
+G2_RESTORE_FULL {"ok":false,"current":"Subject B","history":["Subject A"]}
+✔ a full history budget must not silently destroy the version promised as undoable (411.285926ms)
+G2_RESTORE_PAUSE_RACE {"paused":true,"result":true,"active":false}
+✔ restoration cannot reactivate a workflow paused while its history was being read (22.657536ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 639.645994
+
+G_FILE_EXIT flow-versions-evidence.test.ts 0
+
+=== flow-versions.test.ts ===
+
+A save that changes what it does keeps the one before
+  ok    a new workflow has no earlier version
+  ok    one earlier version: the first subject
+  ok    saving it unchanged keeps none
+  ok    switching it on keeps none
+
+The route lists them, newest first
+  ok    name, trigger and steps of each, newest first
+  ok    an unknown workflow
+
+Putting one back
+  ok    its content is back, and it stays on
+  ok    the version it replaced is kept, so it can be undone
+  ok    undone the same way
+  ok    an unknown version is refused
+
+At most ten, and they go with the workflow
+  ok    only the newest 10
+  ok    a removed workflow's versions are gone
+
+A store deleted takes every workflow's versions with it (Codex Reviewer 2 on #1927)
+  ok    a version is kept before the store goes
+  ok    and gone with it
+
+The studio
+  ok    a named section that says what is kept and how putting one back works
+  ok    it says it is reading, in a status
+  ok    each version has a button whose name starts with its visible words
+  ok    and its accessible name adds the date after them
+  ok    the workflow list opens it with a toggle that says whether it is open
+  ok    putting one back is a sequence write, so an unconfirmed one is said as such
+
+20 checks, all passing.
+
+G_FILE_EXIT flow-versions.test.ts 0
+
+=== locked-deletes.test.ts ===
+
+The community: emailing every member and deleting wait
+  ok    set up by the full session
+  ok    an announcement emailed to every member is refused
+  ok    a post deleted is refused, and the post is still there
+  ok    a comment deleted is refused
+  ok    a post that emails nobody is not
+  ok    emptying the chat room is refused
+  ok    taking a chat message out is refused
+  ok    a reported post deleted from the studio is refused
+
+Events: canceling, deleting and moving one emails everyone coming
+  ok    made by the full session
+  ok    canceling it is refused
+  ok    deleting it is refused
+  ok    moving it is refused
+  ok    renaming it, at the same time, is not
+
+The course: what takes a lesson, a file or students' work away waits
+  ok    a lesson added from the locked session: adding stays open
+  ok    "lesson-remove" is refused
+  ok    "module-remove" is refused
+  ok    "media-remove" is refused
+  ok    taking an assignment off, with the work handed in, is refused
+  ok    taking a quiz off is refused
+  ok    sending a purchase email again, which carries the thank-you note, is refused
+  ok    withdrawing a student's certificate is refused
+  ok    deleting a lesson comment from the studio is refused
+  ok    a new video over the lesson's old one is refused
+  ok    and the lesson keeps it
+  ok    deleting it from the lesson page is refused too, and it is still there
+
+The product: its file, picture, page, keys and the rest
+  ok    a link put over the file, which deletes it, is refused
+  ok    and the product keeps its file
+  ok    a link on a product with no file is not
+  ok    marked coming soon by the full session
+  ok    launching it, one email in the creator's words to everyone waiting, is refused
+  ok    and it is still coming soon, its list unspent
+changing a waitlist failed Error: `after` was called outside a request scope. Read more: https://nextjs.org/docs/messages/next-dynamic-api-wrong-context
+    at after10 (/tmp/codex-g-proof-TXekTj/proof.cjs:2500:15)
+    at POST16 (/tmp/codex-g-proof-TXekTj/proof.cjs:144525:32)
+    at async main (/tmp/codex-g-proof-TXekTj/proof.cjs:150582:33)
+  ok    taking the mark off, which emails nobody waiting and gives paid pre-orders the fixed delivery email, is not
+  ok    taking the file off is refused
+  ok    a new file over it is refused
+  ok    and the product still keeps its file
+  ok    a link put over a price option's file is refused
+  ok    and the option keeps its file
+  ok    a new file over a price option's file is refused
+  ok    taking a price option's file off is refused
+  ok    and the option still keeps it
+  ok    removing the price option, with its file, is refused
+  ok    and the option is still there with its file
+  ok    a link on a price option with no file is not refused
+  ok    removing the picture is refused
+  ok    a new picture over it is refused
+  ok    and the product keeps its picture
+  ok    its alt text is not
+  ok    a page saved without a picture it showed is refused
+  ok    and the page still shows it
+  ok    removing an episode, with its audio, is refused
+  ok    and the episode is still there
+  ok    product: remove is refused
+  ok    keys: clear is refused
+  ok    bundle: clear is refused
+  ok    option: remove is refused
+  ok    podcast: remove is refused
+  ok    page-funnels: remove is refused
+  ok    stream/captions: remove is refused
+  ok    and the product is still there
+
+The store's pages
+  ok    a site page saved without a picture it showed is refused
+  ok    a new link picture over the old one is refused
+  ok    and the link keeps its picture
+  ok    turning the link into a heading, which lets its picture go, is refused
+  ok    and the link keeps its picture and its address
+  ok    editing the link's title is not refused
+  ok    removing the store photo is refused
+  ok    a new store photo over it is refused
+  ok    forms: {"action":"remove","id":"x"} is refused
+  ok    site-page: {"action":"remove","id":"pagepage01"} is refused
+  ok    saved-blocks: {"action":"remove","id":"x"} is refused
+  ok    links: {"action":"remove","id":"2ea89739f0"} is refused
+  ok    link-image: {"action":"remove","id":"2ea89739f0"} is refused
+  ok    short-links: {"action":"remove","code":"x"} is refused
+  ok    blog: {"action":"delete","id":"x"} is refused
+  ok    answers: {"clear":true} is refused
+  ok    assistant-settings: {"clear":true} is refused
+  ok    and after all of them the link is still there with its picture
+  ok    and the site page still shows its picture
+  ok    saving a form is not
+
+Notes, tasks, deals, pitches, segments, drafts and review photos
+  ok    person: unnote is refused
+  ok    person-tasks: remove is refused
+  ok    crm: undeal is refused
+  ok    crm: unpipeline is refused
+  ok    notes: remove is refused
+  ok    spend: remove is refused
+  ok    outreach: drop is refused
+  ok    mail: segment-remove is refused
+  ok    mail: draft-remove is refused
+  ok    reviews: photo is refused
+
+The store's own fields about each person
+  ok    two fields saved by the full session
+  ok    saved without one of them, which takes its answers off every person, is refused
+  ok    and both are still there
+  ok    saving them with a new one, taking none away, is not
+
+A passkey change from a locked session does not spend the owner's
+  ok    the locked session removes nothing at once: it may only ask for a wait, on a count of its own
+  ok    and the owner's own change is not refused for the hour
+  ok    31 lists from a locked session are told locked
+  ok    and the owner can still list their passkeys
+
+Said the same way everywhere, and true
+  ok    app/signin/code/page.tsx says the one list
+  ok    app/signin/lost/page.tsx says the one list
+  ok    app/studio/page.tsx says the one list
+  ok    lib/two-step.ts says the one list
+  ok    lib/recovery-address.ts says the one list
+  ok    lib/help-content.ts says the one list
+  ok    lib/feature-pages.ts says the one list
+  ok    the list names imports, passkeys, two-step login, email to members and deleting for good
+  ok    and starts a sentence with a capital
+
+Every route that deletes or sends is held
+  ok    every route that deletes is named here (a new one has to say how it is held)
+  ok    and none named here is gone
+  ok    each one held the way it says
+  ok    every route that deletes a file has a request above that reads the file still there
+  ok    and no action is named for one route only by its path
+  ok    and every action LOCKED_ACTIONS names is one a route here uses (the in-route ones are asked through lockedFor)
+
+Every action of a route that deletes or sends is named, held or open with a reason
+  ok    every action of a route that deletes or sends is in the table (a new one has to say how it is held)
+  ok    and none in the table is gone from its route
+  ok    each one held, or open, the way it says
+
+115 checks, all passing.
+
+G_FILE_EXIT locked-deletes.test.ts 0
+
+=== person-erasure.test.ts ===
+
+A person in every part of a store, deleted
+  ok    the person is in many parts of the store
+  ok    and their seeding changed many keys, so the comparison below means something
+  ok    the store finds them for every-store requests
+  ok    asking sends a link
+  ok    the email carries a link that works
+  ok    asking about an address no store knows sends nothing, and says the same
+  ok    the link names the address and the store
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth (/tmp/codex-g-proof-GXnkHm/proof.cjs:43225:9)
+    at async requestApi (/tmp/codex-g-proof-GXnkHm/proof.cjs:43394:16)
+    at async del (/tmp/codex-g-proof-GXnkHm/proof.cjs:44573:3)
+  ok    the link deletes them
+  ok    it sent no more commands than it took units for (239 of 602)
+  ok    and moved no more bytes (50653 of 396850)
+  ok    the units it takes cover that work
+  ok    the link works once
+  ok    the store's owner is told, not asked
+  (left as allowed: nl:allow:email:…:2026-10-27, nl:allow:studio:…:2026-10-27, nl:allow:transactional:…:2026-10-27, nl:data:…, nl:data:room-test-store, nl:erased:…, nl:health:…, nl:mail:flowstats:378c89d041952d00, nl:rl:erase-address:…, nl:rl:erase-address:…, nl:rl:erase-ip:…, nl:rl:erase-ip:…, nl:rsum:ver:…:c9451aa2f4, nl:sender:2026-11, nl:stats:…:ledger, nl:tasks:doors, nl:wf:day:…:2026-11-06, nl:wl:…:c9451aa2f4:send)
+  ok    everything is as it was before them, but what is allowed to change
+  ok    no key or value names them, by address or by any key made from it
+  ok    only a fingerprint is kept, under the store's list
+  ok    which cannot be read back to the address
+  ok    the other person is untouched
+  ok    the store knows the address was deleted
+  ok    an import leaves them out
+  ok    a purchase without their own yes notes the purchase, not a yes
+  ok    their own yes, given again, puts them back and lifts the fingerprint
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth (/tmp/codex-g-proof-GXnkHm/proof.cjs:43225:9)
+    at async requestApi (/tmp/codex-g-proof-GXnkHm/proof.cjs:43394:16)
+    at async del (/tmp/codex-g-proof-GXnkHm/proof.cjs:44573:3)
+  ok    the studio deletes them
+  ok    what the studio's door keeps: what an import gave them, by a one-way hash; nothing else names them
+  ok    their review stays, without their address (a store may not take reviews down)
+  ok    and everything else is as it was before them
+  ok    the activity log says a person was deleted, never who
+
+What it takes covers what it costs
+  ok    the base units cover the request itself and Discord
+  ok    units cover 550 commands and 310000 bytes
+  ok    units cover 1272 commands and 1709000 bytes
+  ok    units cover 39130 commands and 20115000 bytes
+  ok    the least a deletion takes is what the help says
+
+32 checks, all passing.
+
+G_FILE_EXIT person-erasure.test.ts 0
+
+=== store-data-registry.test.ts ===
+creator: room 18 MB; outside it 121.4 MB on average, 294.0 MB at once
+pro: room 135 MB; outside it 288.1 MB on average, 802.6 MB at once
+scale: room 250 MB; outside it 704.4 MB on average, 2468.9 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (395.507825ms)
+✔ each family is bounded one way at least, and what it says can be checked (110.426929ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (5.176314ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (7.136396ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.654504ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (20.617654ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.195394ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 560.447671
+
+G_FILE_EXIT store-data-registry.test.ts 0
+
+=== workflow-branching.test.ts ===
+
+Routes go forward only
+  ok    after a step: the next, or the end after the last
+  ok    IF/ELSE: yes goes to `next`, no to `jump`
+  ok    a good set of routes passes
+  ok    a jump back is refused
+  ok    a next to itself is refused
+  ok    a jump with no condition is refused
+  ok    a target that is not in the workflow is refused
+
+The preview is the job's path, decided only by the sample
+  ok    a lead: hello, skipped to the else branch, labeled, then the warm email
+  ok    and the label the workflow gave is carried to the end
+  ok    a buyer: the buyers' branch, then the warm condition ends the run
+  ok    the same sample gives the same path
+  ok    a label goal ends the run before the step after the label is given
+
+Limits, by plan
+  ok    active workflows: Store none, Studio 10, Scale 20, trial 3
+  ok    runs a day: Store none, Studio 18, Scale 29, trial 7
+  ok    over the limit after a move down, the oldest switched on keep starting people
+
+Saved, and checked when saved
+  ok    up to 20 steps
+  ok    a branch back is refused
+  ok    two steps with one id are refused
+  ok    an abandoned checkout needs a goal
+  ok    and is saved with one
+  ok    opening a course needs a course
+  ok    a deal owner must be on the team with orders
+  ok    the owner may own a deal
+  ok    a new workflow is saved paused, even when it is sent switched on
+  ok    paused, it starts nobody
+  ok    switching on is its own step
+
+One branch each, and the history of every step
+  ok    the welcome goes to both
+  ok    IF: only the buyer gets the buyers' email
+  ok    ELSE: the lead goes straight to the step for everyone else, after its own wait
+  ok    then the lead gets it, and the buyer skips past it to the last
+  ok    the step between the branches is never sent
+  ok    Ana's history: started, then each step attempted and confirmed, or skipped
+  ok    a label goal ends her run before the last email
+  ok    and her run says so
+
+A lost answer is held, never sent again by itself
+  ok    only somebody on the list is started
+  ok    the provider got it once, but said nothing back
+  ok    the run is held at that step, uncertain
+  ok    later runs do not send it again
+  ok    the store's held runs list it
+  ok    the creator says it went through: on to the next step
+  ok    a second answer for the same hold is refused
+  ok    the next step goes out, and the uncertain one was not repeated
+  ok    and the hold is gone
+
+An attempt left open by a run that stopped is held
+  ok    nothing is sent for it
+  ok    and the run is held for the creator
+  ok    trying it again is the creator's explicit choice
+  ok    then it goes out
+
+Runs a day
+  ok    counted before the ceiling
+  ok    past the ceiling nobody more starts today, and the refusal is counted
+  ok    and their start is given back for another day
+  ok    the next UTC day has its own empty run counter
+  ok    reading the next day does not reset the previous day's ceiling
+
+Active workflows
+  ok    Studio switches on ten at most; the eleventh is refused
+  ok    saving one switched on is refused the same way
+
+Erased: a person mid-run leaves nothing behind in any workflow
+  ok    mid-run: her first email went, the second is waiting, and her run is recorded
+  ok    before erasure, workflow keys hold her address
+  ok    erased from every workflow of the store
+  ok    afterward no key outside her list row holds her address
+  ok    nor her run key, start or held entry
+  ok    and her waiting step never goes out
+
+Erased: a workflow removed, and a store deleted
+  ok    a run is recorded for him
+  ok    removing the workflow erases its runs
+  ok    deleting the store erases every workflow, run, start and hold
+  ok    and no queued step of the store is left
+
+64 checks, all passing.
+
+G_FILE_EXIT workflow-branching.test.ts 0
+
+=== workflow-retries.test.ts ===
+
+When a waiting step is tried again
+  ok    the fixture uses one clock for timestamps and UTC day keys
+  ok    without a known end: 10 minutes, then three times longer each time, a day at the most
+  ok    the month's emails: once, a minute after the window turns
+  ok    a pause: a minute after it ends
+  ok    the day's room: just after the next UTC day begins
+  ok    near midnight the daily retry retains the ten-minute minimum
+  ok    after midnight the daily retry waits for the following day
+  ok    an unknown end falls back to the growing delay
+  ok    a list's portion: at least fifteen minutes
+  ok    a run may wait while it is within both bounds
+  ok    one wait past the most a run may
+  ok    a step waiting more than 35 days
+  ok    a count that cannot be read stops it: unknown is not room
+
+The worst case per run counts every wait and every retry
+  ok    start, every step and each retry of the creator's, and every wait
+  ok    and the commercial review captures the bounds
+
+Every way a run stops, listed
+  ok    the goal, each ending condition and end, the last step, and the engine's own
+  ok    the bounds are the code's numbers
+  ok    a workflow with no goal and no conditions still lists the engine's stops
+
+The preview writes nothing
+  ok    no database command and no key
+
+A run waits a bounded number of times, then stops
+  ok    the first daily wait honors the ten-minute minimum near UTC midnight
+  ok    after 3 waits it is still waiting, nothing sent, nothing written to its history
+  ok    one wait costs at most 32 database commands, the store's own reads included
+  ok    one wait more and the run stops, with nothing done at that step
+  ok    its history says why
+  ok    and it is no longer in the queue
+
+A wait for the month's emails is tried once, when the month turns
+  ok    queued for a minute after the store's window turns
+  ok    that wait cost at most 32 database commands too
+
+Trying a held step again is bounded
+  ok    a lost answer holds the run
+  ok    taken 1 times, then refused
+  ok    the run says how often it was tried again
+  ok    refused, it stays held for the creator's other choices
+
+31 checks, all passing.
+
+G_FILE_EXIT workflow-retries.test.ts 0
+
+=== workflow-run-history.test.ts ===
+
+Effects are counted four ways, and nothing unconfirmed counts as done
+  ok    four attempts: one confirmed, one failed, two uncertain
+  ok    the one marked as gone through by the creator stays uncertain, with their choice beside it
+  ok    an attempt with no outcome yet is uncertain and waiting, never done
+  ok    a full history is not trimmed
+  ok    a skipped step is not an effect
+  ok    a step tried again is two attempts: the first stays uncertain, the second is confirmed
+  ok    a history whose earliest events were let go says so, and still counts the outcome it kept
+
+Bounds by construction
+  ok    a workflow keeps at most the plan's runs a day for as long as a start is remembered
+  ok    after a choice, there is room for everything a run can still write
+
+A step that waits writes nothing new
+  ok    it waits: nothing was sent
+  ok    and its history is still just its start
+  ok    once there is room it goes out, written down once: attempted, then confirmed
+  ok    counted as one attempt, confirmed
+
+A held run's history stays bounded, whatever came before the creator's choice
+  ok    a lost answer holds the run
+  ok    trying it again is taken 1 time, then refused
+  ok    going on past it is the creator's word
+  ok    the choice keeps the latest 20 events, room for all that can follow
+  ok    the history says its earliest events were let go
+  ok    its last event is the creator's choice, and nothing it kept counts as confirmed
+
+19 checks, all passing.
+
+G_FILE_EXIT workflow-run-history.test.ts 0

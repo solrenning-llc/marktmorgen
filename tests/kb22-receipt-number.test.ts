@@ -25,7 +25,8 @@ import {
 } from "@/lib/receipt-number";
 import { RECEIPT_PDF_MAX_BYTES, RECEIPT_PDF_UNITS, receiptFrom, receiptTexts, receiptTitle } from "@/lib/receipt-pdf";
 import { claimHandle, ensureStatsId, setMailSettings, setStripeAccount, storeForEmail } from "@/lib/store";
-import { dataKey } from "@/lib/store-data";
+import { TAKE_DATA, dataKey } from "@/lib/store-data";
+import * as storeData from "@/lib/store-data";
 import { CLOSING, COUNTED_FAMILIES } from "@/lib/data-families";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { GET as receiptFile } from "@/app/api/store/receipt-pdf/route";
@@ -195,6 +196,27 @@ async function main(): Promise<void> {
     is(`${family} is erased with the store`, CLOSING[family], { how: "erase" });
   }
   is("the script reads first and writes only a sale not yet numbered", RECEIPT_NUMBER.indexOf("HGET', KEYS[2]") < RECEIPT_NUMBER.indexOf("INCR"), true);
+
+  part("A store idle for years: one numbering clears at most two expired months");
+  // Review of #3001 (M1): the data room's script cleared every expired month in one call, two commands each, and a
+  // workflow's run is kept well past 400 days (lib/flows.ts, runGoneBy), so a store idle long enough lists dozens of
+  // expired months: 13 measured 37 commands on a real Redis, past RECEIPT_NUMBER_COMMANDS. Forty listed here.
+  const idleRoom = dataKey(other)!;
+  const expired = Array.from({ length: 40 }, (_, i) => `${2020 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, "0")}`);
+  await redis.pipeline([["HSET", idleRoom, "#", String(expired.length * 164), "~", expired.join(","), ...expired.flatMap((m) => [`~${m}`, "100"])]]);
+  const listed = async () => (await redis.pipeline([["HGET", idleRoom, "~"]]))[0];
+  const fields = async (months: string[]) => Promise.all(months.map(async (m) => (await redis.pipeline([["HEXISTS", idleRoom, `~${m}`]]))[0]));
+  is("the idle store's next sale is numbered", await assignReceiptNumber(other, "cs_test_idlestore000000001"), { ok: true, number: "R-000002" });
+  is("only the two oldest expired months came off; the rest stay listed, and counted, for later calls", await listed(), expired.slice(2).join(","));
+  is("their own fields with them, the third's kept", await fields(expired.slice(0, 3)), [0, 0, 1]);
+  is("the room's total still counts what is left", Number((await redis.pipeline([["HGET", idleRoom, "#"]]))[0]) >= (expired.length - 2) * 164, true);
+  await assignReceiptNumber(other, "cs_test_idlestore000000002");
+  is("the next new number clears the next two", await listed(), expired.slice(4).join(","));
+  const cleared = (storeData as Record<string, unknown>).DATA_MONTHS_CLEARED_MOST;
+  is("the data room names how many expired months a call clears at the most", cleared, 2);
+  is("and its script clears no more than that", TAKE_DATA.includes(`cleared < ${String(cleared)}`), true);
+  // Measured with INFO commandstats on a real Redis (review of #3001): 10 commands with no expired month, 11 + 2 a month cleared.
+  is("RECEIPT_NUMBER_COMMANDS covers the most the script can bill", RECEIPT_NUMBER_COMMANDS >= 11 + 2 * Number(cleared), true);
 
   part("Its cost: inside the receipt's studio requests");
   const worst = request("step", 40 + RECEIPT_NUMBER_COMMANDS, 200_000 + 2 * RECEIPT_NUMBER_BYTES) + RECEIPT_PDF_MAX_BYTES * ORIGIN_PER_BYTE;

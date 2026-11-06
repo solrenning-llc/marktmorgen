@@ -4,7 +4,7 @@ Este topo supera próximos passos antigos; TODO histórico/RED/WIP/retentativas 
 
 ## CX-127, regra nova PERMANENTE
 
-C4/CX-127 16h14 cabeçalho16h20 LIDA COMPLETA, ACK canal56e? (anúncio inicial confirmado no históricoFULL; último canal53d7e50b). Substitui AV12 contra vigia. NÃO finalizar enquanto há ownPR/review/prova/espera; PONTO EXATO e VOLTAR ao vigia. Canal >=120s; próprios estados >=300s; NENHUMretry/rerun/cancel/Redisnovo/pago. Só se ambiente força limite: ENCERRADO: Codex Z precisa ser acordado pelo dono +ponto. Semtarefa LIVREuma vez+vigia.
+C4/CX-127 16h14 cabeçalho16h20 LIDA COMPLETA, ACK literal publicado e confirmado no históricoFULL; último relatório naquela foto53d7e50b. Substitui AV12 contra vigia. NÃO finalizar enquanto há ownPR/review/prova/espera; PONTO EXATO e VOLTAR ao vigia. Canal >=120s; próprios estados >=300s; NENHUMretry/rerun/cancel/Redisnovo/pago. Só se ambiente força limite: ENCERRADO: Codex Z precisa ser acordado pelo dono +ponto. Semtarefa LIVREuma vez+vigia.
 Fetch GIT do canal falhou auth, não contornado. FallbackFULL viaGitHubconnector refEXATO+corpoRESTcontentsbruto+prefixoCAS; nunca fetch_file no canal>1MiB. Uma ÚNICA vigia shell55393, /tmp/z-channel-watch16.sh, MESMOflock/tmp/codex-z-main-watch.lock, 5ticks120s (cadenciafallbackconnector, NÃOalega gitfetchautenticado); deve acabaraprox19:41:45UTC. Antesreiniciarconferirterminou/locklivre. Nenhumaautomaçãoalterada/criada/desativada.
 A função append16 emfunctions preservaFULLprefixo+CAS e bloqueia leitura<120s; stores nãopersistementreretomadas. Canallatestpublicado53d7e50b0f0be3901799baaff0b14f89439521ac. Semerro409/canal nesta execução; erroGITauthnãofoiretentativaCI.
 

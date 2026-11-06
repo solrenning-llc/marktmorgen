@@ -161,7 +161,10 @@ export async function scoreMembers(store: Store, rows: Raw[], now = Date.now()):
     if (course) byCourse.set(course, [...(byCourse.get(course) ?? []), m.email]);
   }
   for (const [course, emails] of byCourse) {
-    const seen = await lastSeenMany(course, [...new Set(emails)]).catch(() => new Map<string, number>());
+    // Unknown course activity is not proof that every member never opened it.
+    // Let the strict reader's error refuse the whole report, so the nudge job
+    // cannot turn an unavailable HMGET into a "course-never" email.
+    const seen = await lastSeenMany(course, [...new Set(emails)]);
     for (const [email, at] of seen) courseSeen.set(`${course}|${email}`, at);
   }
 

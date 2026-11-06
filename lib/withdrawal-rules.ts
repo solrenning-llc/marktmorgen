@@ -31,6 +31,7 @@
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import type { KeptConsent } from "@/lib/digital-consent";
+import { WITHDRAWAL_WORDS, type WithdrawalWords } from "@/lib/buyer-words/withdrawal";
 
 /** The function's label, in the words the law names (art. 11a(1)); other languages use an unambiguous equivalent. */
 export const WITHDRAW_FROM_CONTRACT = "Withdraw from contract here";
@@ -128,24 +129,33 @@ function utcMoment(ms: number): string {
 
 /**
  * The acknowledgement of receipt (art. 11a(4)): the statement's content and
- * the date and time it was submitted, to be sent by email (a durable medium).
- * It promises nothing about a refund: that is the creator's.
+ * the date and time it was submitted, to be sent by email (a durable medium),
+ * in the store's words (lib/buyer-words/withdrawal.ts; English by default).
+ * It promises nothing about a refund: that is the creator's. `when` is the
+ * moment as written, for the creator's notice.
  */
-export function acknowledgement(statement: WithdrawalStatement, product: string, store: string, submittedMs: number): { subject: string; text: string } {
+export function acknowledgement(
+  statement: WithdrawalStatement,
+  product: string,
+  store: string,
+  submittedMs: number,
+  w: WithdrawalWords = WITHDRAWAL_WORDS.en,
+): { subject: string; text: string; when: string } {
   const when = utcMoment(submittedMs);
   return {
-    subject: `Your withdrawal from “${product}” was received`,
+    when,
+    subject: w.ackSubject(product),
     text: [
-      `We received your withdrawal from this contract on ${when}, and passed it to ${store}, who sold it to you.`,
+      w.ackReceived(when, store),
       "",
-      "What you sent:",
-      `Name: ${statement.name}`,
-      `Order: ${statement.reference}`,
-      `Product: ${product}`,
-      `Email for this confirmation: ${statement.email}`,
-      `Sent on: ${when}`,
+      w.ackWhatYouSent,
+      `${w.ackName}: ${statement.name}`,
+      `${w.ackOrder}: ${statement.reference}`,
+      `${w.ackProduct}: ${product}`,
+      `${w.ackEmail}: ${statement.email}`,
+      `${w.ackSentOn}: ${when}`,
       "",
-      `${store} handles what happens next, including any refund owed to you. Keep this email: it shows that and when you withdrew.`,
+      w.ackNext(store),
     ].join("\n"),
   };
 }

@@ -13,6 +13,8 @@ import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { type BookedCall, type Purchase, OrdersBusy, callsFor, canRecover, olderOf, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
+import { windowOf } from "@/lib/withdrawal";
+import { withdrawalWords } from "@/lib/buyer-words/withdrawal";
 import { canMove, icsLink, moveLink } from "@/lib/calls";
 import { isVideoRoom, roomKind } from "@/lib/call-rooms";
 import { type Extras, askBundle, askOlder, cardOf, extrasFor, ordersShared } from "@/lib/purchase-cards";
@@ -281,6 +283,15 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                     ) : null}
                     {older.cursor ? <OlderPurchases older={older.cursor} left={words.olderNotChecked(older.count, older.added)} /> : null}
                   </OrdersSharedProvider>
+                  {/* The EU withdrawal function (lib/withdrawal.ts, 588 [KB9]): one link, the same size whatever the list holds (a line
+                      per purchase would outgrow ORDERS_PAGE_BYTES), to the page that lists the purchases still inside their period. */}
+                  {purchases.some((purchase) => windowOf(purchase).open) ? (
+                    <p className="mt-7">
+                      <Link href={`/@${store.handle}/orders/withdraw?${new URLSearchParams({ token })}`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
+                        {withdrawalWords(store.language).withdrawLink}
+                      </Link>
+                    </p>
+                  ) : null}
                   <p className="st-muted mt-6 text-sm">{words.worksFor24}</p>
                 </>
               )}

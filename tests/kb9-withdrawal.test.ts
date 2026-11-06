@@ -114,7 +114,16 @@ test("an order inside its period gets the function; content handed over after th
   const open = Object.fromEntries(purchases.map((p) => [p.reference.slice(8, 12), windowOf(p).open]));
   assert.deepEqual(open, { open: true, "yes0": false, "old0": false });
   const page = readFileSync("app/[handle]/orders/page.tsx", "utf8");
-  assert.ok(page.includes("windowOf(purchase).open") && page.includes("ww.withdrawLink"), "the list links each open purchase by the law's words");
+  assert.ok(page.includes("purchases.some((purchase) => windowOf(purchase).open)") && page.includes("withdrawalWords(store.language).withdrawLink"), "the list links the function, by the law's words, when a purchase is inside its period");
+});
+
+test("opened from the list with no order chosen, the page lists only the purchases inside their period", async () => {
+  const { product, token } = await shop();
+  sessions = [paid("open", product, NOW - 2 * DAY), paid("old", product, NOW - 20 * DAY)];
+  const html = await render({ token });
+  assert.ok(html.includes(`ref=${sessions[0].id}`), "the open one is offered");
+  assert.ok(!html.includes(`ref=${sessions[1].id}`), "the closed one is not");
+  assert.ok(!html.includes("Confirm withdrawal"), "nothing is confirmed before an order is chosen");
 });
 
 test("the page fills in the address and asks for a name; confirming records once, acknowledges and tells the creator", async () => {

@@ -47,6 +47,7 @@ import type { CallSetup } from "@/lib/call-setup";
 import { type BumpKey, bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { IMPORTED_REFERENCE, type ImportedPurchase, importedFor, importedFrom, importedKey, importedReference } from "@/lib/imported-purchases";
 import { ordersWords } from "@/lib/buyer-words/orders";
+import { type KeptConsent, readConsentMeta } from "@/lib/digital-consent";
 import { takePublicRequest } from "@/lib/traffic";
 import {
   ORDERS_LINK_READ_MS,
@@ -354,6 +355,12 @@ export type Purchase = {
   giftFrom?: string | null;
   /** A place in a purchase somebody made for several people (lib/group-buy.ts). */
   place?: boolean;
+  /**
+   * The buyer's yes to start during the cancellation period, as kept on the
+   * order (lib/digital-consent.ts, readConsentMeta), or null; read for the
+   * withdrawal function (lib/withdrawal-rules.ts, 588 [KB9]).
+   */
+  consent?: KeptConsent | null;
   /** Paid for with PayPal, into the creator's own PayPal account (lib/paypal-sales.ts). */
   paidWith?: "paypal";
   /** Given by the creator's own tools, through the API (lib/api-write.ts): no payment, and not brought over either. */
@@ -628,6 +635,7 @@ async function purchaseFromSession(
     return { customer: null, purchase: {
       reference: id,
       kind: "sale",
+      consent: readConsentMeta(meta),
       title: product.title,
       option: null,
       paidAt: typeof session.created === "number" ? session.created : 0,
@@ -653,6 +661,7 @@ async function purchaseFromSession(
     return { customer: null, purchase: {
       reference: id,
       kind: "sale",
+      consent: readConsentMeta(meta),
       title: ordersWords(store.language).packageTitle(product.title, bought.total),
       option: null,
       paidAt: typeof session.created === "number" ? session.created : 0,
@@ -680,6 +689,7 @@ async function purchaseFromSession(
       return { customer: null, purchase: {
         reference: id,
         kind: "sale",
+        consent: readConsentMeta(meta),
         title: product.title,
         option: null,
         paidAt: typeof session.created === "number" ? session.created : 0,
@@ -714,6 +724,7 @@ async function purchaseFromSession(
   return { customer, purchase: {
     reference: id,
     kind: "sale",
+    consent: readConsentMeta(meta),
     title: product.title,
     option,
     paidAt: typeof session.created === "number" ? session.created : 0,
@@ -772,6 +783,7 @@ async function purchaseFromIntent(store: Store, intent: Row, find: Finder, lines
   return {
     reference: id,
     kind: "upsell",
+    consent: readConsentMeta(meta),
     title: product.title,
     option: null,
     paidAt: typeof intent.created === "number" ? intent.created : 0,
@@ -979,11 +991,12 @@ async function within(key: string, limit: number): Promise<boolean | null> {
 }
 
 /** A name that can sit inside the quotes of an email's From line. */
-function displayName(name: string): string {
+export function displayName(name: string): string {
   return name.replace(/["\\<>\r\n]/g, "").trim().slice(0, 60) || "A store";
 }
 
-function senderAddress(): string {
+/** The address part of the sender (NIMBUS_FROM). */
+export function senderAddress(): string {
   const match = NIMBUS_FROM.match(/<([^>]+)>/);
   return (match ? match[1] : NIMBUS_FROM).trim();
 }

@@ -7,7 +7,7 @@ import { lookStyle } from "@/lib/store-look";
 import { speech } from "@/lib/buyer-words";
 import { withdrawalWords } from "@/lib/buyer-words/withdrawal";
 import { type Purchase, OrdersBusy, OrdersLate, findPurchase, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
-import { windowOf, withdrawnAt } from "@/lib/withdrawal";
+import { windowOf, withdrawalStanding } from "@/lib/withdrawal";
 
 // The longest one opening may run: findPurchase is bounded by DOWNLOAD_LOOKUP_MS.
 export const maxDuration = 30;
@@ -72,9 +72,14 @@ export default async function WithdrawPage({ params, searchParams }: Params) {
     }
   }
   let already = false;
+  // A recorded withdrawal whose acknowledgement or creator's notice is still owed offers the form again, so sending it
+  // once more tries what is owed (lib/withdrawal.ts); its first time stands.
+  let owed: "unsent" | "untold" | null = null;
   if (found) {
     try {
-      already = (await withdrawnAt(store, found.purchase.reference)) !== null;
+      const standing = await withdrawalStanding(store, found.purchase.reference);
+      owed = standing.owed;
+      already = standing.at !== null && owed === null;
     } catch {
       trouble = "error";
     }
@@ -86,14 +91,17 @@ export default async function WithdrawPage({ params, searchParams }: Params) {
       ? w.notices[trouble]
       : choices
         ? null
-        : already
+        : owed
+          ? w.notices[owed]
+          : already
           ? w.notices.already
           : found && window && !window.open
             ? w.notices.closed
             : !found
               ? w.notices.closed
               : null;
-  const showForm = Boolean(found && window?.open && !already && !trouble && state !== "done" && state !== "unsent");
+  // Owed means recorded in time already: the form is offered again whatever the period says now.
+  const showForm = Boolean(found && (owed || (window?.open && !already)) && !trouble && state !== "done" && state !== "already");
   const until = window?.open && window.until !== null ? new Intl.DateTimeFormat(said.lang.locale, { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" }).format(new Date(window.until * 1000)) : null;
 
   return (

@@ -217,3 +217,49 @@ test("an acknowledgement that did not go is sent again on the next statement, wi
   assert.equal(stateOf(await post({ handle: "mara", token, ref: never, name: "Ana", email: BUYER })), "already", "past the ceiling, no further try");
   assert.equal(refuseMail, left, "no email was tried past the ceiling");
 });
+
+test("a creator's notice refused by the inbox is owned up to, offered again, and tried at most three times", async () => {
+  // Codex N on #2827 (review 5806667541): a refused notice is never reported as passed on.
+  const { store, product, token } = await shop();
+  sessions = [paid("untolda", product, NOW - DAY), paid("untoldb", product, NOW - DAY), paid("untoldc", product, NOW - DAY)];
+  const [a, b, c] = sessions.map((s) => s.id as string);
+  const { withinLimit } = await import("@/lib/request-guard");
+  const { NEW_PER_DAY } = await import("@/lib/inbox-rules");
+  const fill = async () => {
+    for (let i = 0; i < NEW_PER_DAY + 1; i++) await withinLimit("inbox-new", store.statsId!, NEW_PER_DAY, 86_400);
+  };
+  // The limiter's own key (lib/request-guard.ts, withinLimit): gone, as a new day would leave it.
+  const room = async () => {
+    const { createHash } = await import("node:crypto");
+    await redis.pipeline([["DEL", `nl:rl:inbox-new:${createHash("sha256").update(`nimbus-inbox-new:${store.statsId}`).digest("hex").slice(0, 32)}`]]);
+  };
+  const notices = async (ref: string) =>
+    JSON.stringify(await Promise.all((await readInbox(store.statsId!)).map((conversation) => openConversation(store.statsId!, conversation.id)))).split(`order ${ref}`).length - 1;
+  const send = (ref: string) => post({ handle: "mara", token, ref, name: "Ana Souza", email: BUYER });
+  const acks = (ref: string) => mails.filter((m) => m.subject.includes("withdrawal") && m.text.includes(ref));
+
+  await fill();
+  assert.equal(stateOf(await send(a)), "untold");
+  const ack = acks(a)[0];
+  assert.ok(ack && !ack.text.includes("passed it") && ack.text.includes("could not pass it"), `the acknowledgement owns up: ${ack?.text}`);
+  assert.equal(await notices(a), 0);
+  const page = await render({ token, ref: a });
+  assert.ok(page.includes("Confirm withdrawal") && page.includes("could not pass it to the store"), "the page offers the form again and says why");
+  assert.equal(stateOf(await send(a)), "untold", "still refused: tried again, still owned up to");
+  assert.equal(acks(a).length, 1, "the acknowledgement already went: not sent again");
+
+  // The inbox has room again: the next statement passes it on, once.
+  assert.equal(stateOf(await send(b)), "untold");
+  await room();
+  assert.equal(stateOf(await send(b)), "done", "passed on once the inbox has room");
+  assert.equal(await notices(b), 1);
+  assert.equal(stateOf(await send(b)), "already");
+
+  // Three refusals in all, and the notice is no longer tried: the page no longer offers the form.
+  await fill();
+  for (let i = 0; i < 3; i++) assert.equal(stateOf(await send(c)), "untold");
+  await room();
+  assert.equal(stateOf(await send(c)), "already", "past three tries, nothing more is tried");
+  assert.equal(await notices(c), 0);
+  assert.ok(!(await render({ token, ref: c })).includes("Confirm withdrawal"));
+});

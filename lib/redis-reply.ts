@@ -20,9 +20,20 @@ export function countOf(reply: unknown): number | null {
   return typeof reply === "number" && Number.isSafeInteger(reply) && reply >= 0 ? reply : null;
 }
 
-/** A pipeline's replies, only when there is exactly one for each command sent. */
+/**
+ * A pipeline's replies, only when there is exactly one for each command sent, each held in the array's own data slot:
+ * a hole, a getter or a slot inherited from the prototype is unknown, never read (Codex G on #2806). Answers a plain
+ * copy, so nothing the caller reads afterwards can change under it.
+ */
 export function repliesFor(replies: unknown, commands: number): unknown[] | null {
-  return Array.isArray(replies) && replies.length === commands ? replies : null;
+  if (!Array.isArray(replies) || replies.length !== commands) return null;
+  const exact: unknown[] = [];
+  for (let i = 0; i < commands; i += 1) {
+    const slot = Object.getOwnPropertyDescriptor(replies, i);
+    if (!slot || !("value" in slot)) return null;
+    exact.push(slot.value);
+  }
+  return exact;
 }
 
 /** Thrown where a reply was not in its exact shape, so what depended on it is said as not done. */

@@ -32,6 +32,7 @@
  * as one step, as Redis does.
  */
 import { redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 
 const RELEASE = '-- marktmorgen:release:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end';
 const EXTEND = '-- marktmorgen:extend:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("EXPIRE", KEYS[1], ARGV[2]) else return 0 end';
@@ -50,8 +51,9 @@ export class LockBusyError extends Error {
 /** One script's answer: 1 when it ran and did what it says; 0 when it ran and did not, or could not run at all. */
 async function script(source: string, keys: string[], args: (string | number)[]): Promise<number> {
   try {
-    const [result] = await redisPipeline([["EVAL", source, keys.length, ...keys, ...args]]);
-    return result === 1 ? 1 : 0;
+    // Exactly one reply, in its own data slot, and exactly 1 (lib/redis-reply.ts): anything else did not confirm.
+    const replies = repliesFor(await redisPipeline([["EVAL", source, keys.length, ...keys, ...args]]), 1);
+    return replies?.[0] === 1 ? 1 : 0;
   } catch {
     return 0;
   }
@@ -66,9 +68,9 @@ export async function takeLock(key: string, ttlSeconds: number, waitMs: number):
   const token = crypto.randomUUID();
   const giveUpAt = Date.now() + waitMs;
   for (let wait = 20; ; wait = Math.min(wait * 2, 250)) {
-    const receipt = await redisPipeline([["SET", key, token, "NX", "EX", ttlSeconds]]);
-    // One acquisition command needs exactly one reply before work can start.
-    if (!Array.isArray(receipt) || receipt.length !== 1) throw new LockBusyError();
+    // One acquisition command needs exactly one reply, in its own data slot, before work can start.
+    const receipt = repliesFor(await redisPipeline([["SET", key, token, "NX", "EX", ttlSeconds]]), 1);
+    if (!receipt) throw new LockBusyError();
     const got: unknown = receipt[0];
     if (got === "OK") return { key, token, ttlSeconds };
     if (got !== null) throw new LockBusyError();
@@ -115,8 +117,8 @@ const FENCED_DEL_ONLY =
 
 async function strictScript(source: string, keys: string[], args: string[]): Promise<boolean> {
   try {
-    const [result] = await redisPipeline([["EVAL", source, keys.length, ...keys, ...args]]);
-    return result === 1;
+    const replies = repliesFor(await redisPipeline([["EVAL", source, keys.length, ...keys, ...args]]), 1);
+    return replies?.[0] === 1;
   } catch {
     return false;
   }

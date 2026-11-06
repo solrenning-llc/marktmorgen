@@ -1,4 +1,9 @@
 /** All shipping writes are intercepted; no live store, payment or email. */
+export function shippingForm(page,productId){
+ void productId;
+ return page.locator("form");
+}
+
 export async function checkShippingSave({browser,LOCAL,fixture,is}){
  const saved={cents:750,region:"na",countries:["US","CA"],note:"Ships tomorrow",sku:"Créateur-01"};
  const product={id:fixture.product,shipping:saved};
@@ -21,7 +26,7 @@ export async function checkShippingSave({browser,LOCAL,fixture,is}){
    is(name+" visibly reports shipping preparation",(await button.innerText()).trim(),beforeName);
    await button.dispatchEvent("click");
   }
-  is("shipping form stays closed before hydration",await initial.locator("form").count(),0);
+  is("shipping form stays closed before hydration",await shippingForm(initial,fixture.product).count(),0);
   is("shipping controls start no write before hydration",writes,0);
  }finally{await beforeReady.close();}
  const cases=[

@@ -445,8 +445,8 @@ export async function studentDates(courseId: string, email: string): Promise<{ s
   return { since: row.s, lastSeen: row.l };
 }
 
-/** A kept student row's times, only when the row is JSON with both times as whole seconds; otherwise null. */
-function studentTimes(raw: unknown): { s: number; l: number } | null {
+/** A kept student row's address (as kept) and times, only when the row is JSON with both times as whole seconds; otherwise null. */
+function studentTimes(raw: unknown): { e: unknown; s: number; l: number } | null {
   if (typeof raw !== "string") return null;
   let row: unknown;
   try {
@@ -455,8 +455,8 @@ function studentTimes(raw: unknown): { s: number; l: number } | null {
     return null;
   }
   if (!row || typeof row !== "object" || Array.isArray(row)) return null;
-  const { s, l } = row as Partial<StudentRow>;
-  return countOf(s) === null || countOf(l) === null ? null : { s: s as number, l: l as number };
+  const { e, s, l } = row as Partial<StudentRow>;
+  return countOf(s) === null || countOf(l) === null ? null : { e, s: s as number, l: l as number };
 }
 
 /**
@@ -608,14 +608,16 @@ export async function studentPage(
   const blockedAll = countOf(blockedCount);
   // HLEN and SCARD in their exact shape (CX-123 rule 24): an unknown number of students is never 0.
   const students = countOf(total);
-  if (!Array.isArray(reply) || reply.length < 2 || blockedAll === null || students === null) return null;
-  const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+  if (!Array.isArray(reply) || reply.length !== 2 || typeof reply[0] !== "string" || blockedAll === null || students === null) return null;
+  // The page in its exact shape (Codex G on #2717, CX-123 rule 24): field and row in pairs, each row a kept one with
+  // its address and whole times. A page of another shape is unknown, never fewer students.
+  const flat = stringList(reply[1]);
+  if (!flat || flat.length % 2 !== 0) return null;
   const rows: StudentRow[] = [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    try {
-      const row = JSON.parse(String(flat[i + 1])) as StudentRow;
-      if (typeof row?.e === "string") rows.push(row);
-    } catch {}
+  for (let i = 0; i < flat.length; i += 2) {
+    const row = studentTimes(flat[i + 1]);
+    if (!row || typeof row.e !== "string" || !row.e) return null;
+    rows.push({ e: row.e, s: row.s, l: row.l });
   }
   // Accepted race: the blocked list can grow between SCARD and SMEMBERS and be read past what was paid for,
   // bounded by how fast the store blocks students.
@@ -623,18 +625,28 @@ export async function studentPage(
   const whole = blockedAll <= BLOCKED_READ_MAX;
   const blockedReads: (string | number)[][] =
     blockedAll === 0 ? [] : whole ? [["SMEMBERS", blockedKey(course.id)]] : rows.map((row) => ["SISMEMBER", blockedKey(course.id), emailKey(row.e)]);
-  const replies = rows.length ? await redisPipeline([...rows.map((row) => ["SMEMBERS", doneKey(course.id, row.e)]), ...blockedReads]) : [];
-  const blockedSet = new Set(blockedAll > 0 && whole && Array.isArray(replies[rows.length]) ? (replies[rows.length] as string[]) : []);
+  const reads = rows.length ? [...rows.map((row) => ["SMEMBERS", doneKey(course.id, row.e)]), ...blockedReads] : [];
+  const replies = reads.length ? repliesFor(await redisPipeline(reads), reads.length) : [];
+  if (!replies) return null;
+  // Each done list a list of lesson ids, the blocked list a list of ids, each answer past it 0 or 1 (CX-123 rule 24):
+  // an unknown one is never 0 lessons or "not blocked", it leaves the whole page unknown.
+  const done = rows.map((_, i) => stringList(replies[i]));
+  if (done.some((list) => list === null)) return null;
+  const blockedList = blockedAll > 0 && whole ? stringList(replies[rows.length]) : [];
+  if (!blockedList) return null;
+  const answers = blockedAll > 0 && !whole ? rows.map((_, i) => countOf(replies[rows.length + i])) : [];
+  if (answers.some((n) => n === null || n > 1)) return null;
+  const blockedSet = new Set(blockedList);
   const lessonIds = new Set(lessonsInOrder(course).map(({ lesson }) => lesson.id));
   return {
     total: students,
-    next: String(reply[0]),
+    next: reply[0],
     students: rows.map((row, i) => ({
       email: row.e,
       since: row.s,
       lastSeen: row.l,
-      done: Array.isArray(replies[i]) ? (replies[i] as string[]).filter((id) => lessonIds.has(id)).length : 0,
-      blocked: blockedAll === 0 ? false : whole ? blockedSet.has(emailKey(row.e)) : Number(replies[rows.length + i]) === 1,
+      done: (done[i] as string[]).filter((id) => lessonIds.has(id)).length,
+      blocked: blockedAll === 0 ? false : whole ? blockedSet.has(emailKey(row.e)) : answers[i] === 1,
     })),
   };
 }

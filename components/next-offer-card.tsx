@@ -40,6 +40,7 @@ export function NextOfferView({ store, session, offer }: { store: Store; session
       see={w.see}
       dismiss={w.dismiss}
       dismissed={w.dismissed}
+      unsaved={w.unsaved}
       note={offer.ai ? w.aiNote(store.name) : ""}
     >
       {product.image ? (

@@ -8,6 +8,8 @@ import type { ReactNode } from "react";
  * (components/next-offer-card.tsx): what the server drew, the way to the
  * product's own page, and "No thanks", which hides it here and keeps it
  * from the page and the email for this order (app/api/store/assistant-next).
+ * Only a reply of `200 { ok: true }` is a kept no; any other reply keeps the
+ * box, says the answer was not saved, and leaves "No thanks" to try again.
  */
 export function NextOfferBox({
   handle,
@@ -16,6 +18,7 @@ export function NextOfferBox({
   see,
   dismiss,
   dismissed,
+  unsaved,
   note,
   children,
 }: {
@@ -25,23 +28,27 @@ export function NextOfferBox({
   see: string;
   dismiss: string;
   dismissed: string;
+  unsaved: string;
   note: string;
   children: ReactNode;
 }) {
-  const [state, setState] = useState<"shown" | "sending" | "gone">("shown");
+  const [state, setState] = useState<"shown" | "sending" | "gone" | "failed">("shown");
 
   async function hide() {
     setState("sending");
+    let kept = false;
     try {
-      await fetch("/api/store/assistant-next", {
+      const response = await fetch("/api/store/assistant-next", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ h: handle, s: session }),
       });
+      const reply = (await response.json().catch(() => null)) as { ok?: unknown } | null;
+      kept = response.ok && reply?.ok === true;
     } catch {
-      // Hidden here either way: the buyer said no.
+      // No reply: the no was not kept, so it is not confirmed.
     }
-    setState("gone");
+    setState(kept ? "gone" : "failed");
   }
 
   if (state === "gone") {
@@ -68,6 +75,11 @@ export function NextOfferBox({
             {dismiss}
           </button>
         </div>
+        {state === "failed" ? (
+          <p role="alert" className="mt-3 text-sm font-semibold">
+            {unsaved}
+          </p>
+        ) : null}
         {note ? <p className="st-muted mt-3 text-xs">{note}</p> : null}
       </div>
     </section>

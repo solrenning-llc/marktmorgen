@@ -202,8 +202,12 @@ async function files(id: string): Promise<{ sent: { filename: string; content: s
   const left: string[] = [];
   const listed = await read(`/emails/receiving/${id}/attachments?limit=100`);
   const entries = (listed.data as { data?: unknown } | null)?.data;
+  // An error status, or an answer with no list in it, says nothing about the
+  // files: never "no files". Thrown, so the message is tried again ("retry")
+  // instead of going on with the writer's files quietly left out.
+  if (!Array.isArray(entries)) throw new Error(`the list of files answered ${listed.status} without a list`);
   let total = 0;
-  for (const entry of Array.isArray(entries) ? (entries as FileEntry[]).slice(0, 100) : []) {
+  for (const entry of (entries as FileEntry[]).slice(0, 100)) {
     const name = headerText(typeof entry.filename === "string" && entry.filename ? entry.filename : "file", 150);
     const size = typeof entry.size === "number" && entry.size >= 0 ? entry.size : 0;
     const url = fileUrl(entry.download_url);

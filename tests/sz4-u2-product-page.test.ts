@@ -11,11 +11,11 @@
  *     larger than a sale or a fair price, shows the normal price;
  *   - it is offered only where the checkout takes it: the buyer's own
  *     purchase of this product alone, at one price, paid in full (no box to
- *     tick, no payment plan, no bundle to build), so the page never shows a
+ *     check, no payment plan, no bundle to build), so the page never shows a
  *     price Stripe will not charge;
  *   - the buy box sends the percentage it showed (the checkout proves it
  *     again) and its button says the member amount; the price is said in
- *     words and with the regular price beside it, never by colour alone;
+ *     words and with the regular price beside it, never by color alone;
  *   - the two answers the checkout sends back (?member=changed,
  *     ?member=alone) are said in plain words beside the buy box;
  *   - every sentence in the seven languages a store speaks;
@@ -84,10 +84,10 @@ async function main(): Promise<void> {
   is("not when sold out", memberPriceCanShow(store, product, { ...place, remaining: 0 }), false);
   is("not on a bundle not ready to hand over", memberPriceCanShow(store, product, { ...place, ready: false }), false);
   is("not on a membership (a rule never covers it)", memberPriceCanShow(store, clubNow, place), false);
-  is("not on a product with several prices", memberPriceCanShow(store, { ...product, options: [{ id: "o1", label: "Big", priceCents: 4000, details: [], best: false }] } as typeof product, place), false);
+  is("not on a product with several prices", memberPriceCanShow(store, { ...product, options: [{ id: "o1", label: "Big", priceCents: 4000, details: [], best: false }] } as unknown as typeof product, place), false);
   const shown = readFileSync("components/member-price.tsx", "utf8");
   const canShow = shown.slice(shown.indexOf("export function memberPriceCanShow"), shown.indexOf("export function memberShown"));
-  is("not with a payment plan, a box to tick or a bundle the buyer builds (the checkout refuses those)", ["activePlan(product)", "activeBumps(", "picks(product)"].every((piece) => canShow.includes(piece)), true);
+  is("not with a payment plan, a box to check or a bundle the buyer builds (the checkout refuses those)", ["activePlan(product)", "activeBumps(", "picks(product)"].every((piece) => canShow.includes(piece)), true);
 
   const now = Math.floor(Date.now() / 1000);
   await setStoreSale(OWNER, { name: "Spring", coupon: "spring30", percent: 30, starts: now - 60, ends: now + 3600, all: true, products: [] });
@@ -128,14 +128,14 @@ async function main(): Promise<void> {
   const alone = renderToStaticMarkup(createElement(MemberPriceBack, { store, back: "alone" }));
   is("changed: said, and nothing was charged", text(changed), MEMBER_PRICE_WORDS.en.changed);
   is("alone: said", text(alone), MEMBER_PRICE_WORDS.en.alone);
-  is("a note, not colour alone", [changed.includes('class="st-note'), alone.includes('class="st-note')], [true, true]);
+  is("a note, not color alone", [changed.includes('class="st-note'), alone.includes('class="st-note')], [true, true]);
 
   part("The page");
   const page = readFileSync("app/[handle]/p/[product]/page.tsx", "utf8");
   is("drawn for each request: it reads the visitor's cookies", page.includes("await cookies()"), true);
   is("never cached for everybody", ["export const revalidate", "force-static", "generateStaticParams", '"use cache"', "unstable_cache"].filter((piece) => page.includes(piece)), []);
   is("the server is asked only where a member price could show", /memberPriceCanShow\([^)]*\{[^}]*\}\)\s*\?\s*await memberPriceFor\(/.test(page), true);
-  is("an answer that fails is unknown: the normal price", /await memberPriceFor\([^)]*\)\.catch\(/.test(page), true);
+  is("an answer that fails is unknown: the normal price", /await memberPriceFor\([\s\S]*?\)\.catch\(/.test(page), true);
   is("the buy box is given the member price", /<BuyBox [^>]*member=\{member\}/.test(page), true);
   is("its note is drawn beside the buy box", page.includes("<MemberPriceNote"), true);
   is("the checkout's answer is read from the address", page.includes("readMemberBack(query.member)") && page.includes("<MemberPriceBack"), true);

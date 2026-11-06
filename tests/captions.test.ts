@@ -40,6 +40,16 @@ function main() {
     vtt("WEBVTT - my file\n\nNOTE made by a tool\n\nSTYLE\n::cue { color: red }\n\nREGION\nid:fred\n\n00:00:01.000 --> 00:00:02.000\nOnly this.\n"),
     "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nOnly this.\n",
   );
+  is(
+    "a cue whose start goes back before the previous cue is refused",
+    vtt("WEBVTT\n\n00:00:05.000 --> 00:00:07.000\nLater first.\n\n00:00:04.000 --> 00:00:06.000\nEarlier second.\n"),
+    "refused: format",
+  );
+  is(
+    "cues may start together",
+    vtt("WEBVTT\n\n00:00:05.000 --> 00:00:06.000\nFirst.\n\n00:00:05.000 --> 00:00:07.000\nSecond.\n"),
+    "WEBVTT\n\n00:00:05.000 --> 00:00:06.000\nFirst.\n\n00:00:05.000 --> 00:00:07.000\nSecond.\n",
+  );
 
   part("The words");
   is(

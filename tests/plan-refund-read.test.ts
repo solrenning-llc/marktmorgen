@@ -57,6 +57,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const path = url.pathname.replace(/^\/v1/, "");
   const q = url.searchParams;
   const page = (data: unknown[], more = false) => json({ object: "list", data, has_more: more });
+  const searchPage = (data: unknown[]) => json({ object: "search_result", data, has_more: false, next_page: null });
   const sub = path.match(/^\/subscriptions\/(sub_\w+)$/);
   if (sub) {
     const row = world.subs.get(sub[1]);
@@ -89,11 +90,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const query = q.get("query") ?? "";
     const fp = query.match(/fingerprint:"(\w+)"/)?.[1];
     const lt = Number(query.match(/created<(\d+)/)?.[1] ?? Infinity);
-    return page(world.charges.filter((c) => (c.payment_method_details as { card: { fingerprint: string } }).card.fingerprint === fp && c.status === "succeeded" && c.created < lt));
+    return searchPage(world.charges.filter((c) => (c.payment_method_details as { card: { fingerprint: string } }).card.fingerprint === fp && c.status === "succeeded" && c.created < lt));
   }
   if (path === "/customers/search") {
     const email = (q.get("query") ?? "").match(/email:"([^"]+)"/)?.[1];
-    return page([...world.customers].filter(([, e]) => e === email).map(([id, e]) => ({ id, email: e })));
+    return searchPage([...world.customers].filter(([, e]) => e === email).map(([id, e]) => ({ id, email: e })));
   }
   if (path === "/disputes") return page(world.disputes.filter((d) => d.charge === q.get("charge")));
   return json({ error: { message: `no stand-in for ${method} ${path}` } }, 404);

@@ -59,7 +59,10 @@ async function main(): Promise<void> {
     };
     return { ran: () => ran, undo: () => { redis.pipeline = original; } };
   };
-  const takes = (commands: (string | number)[][]) => commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:lesson-comments-take:");
+  const takes = (commands: (string | number)[][]) => commands[0]?.[0] === "EVAL" && [
+    "-- marktmorgen:lesson-comments-take:",
+    "-- marktmorgen:lesson-comment-thread-delete:",
+  ].some((mark) => String(commands[0][1]).startsWith(mark));
 
   part("An erasure between a comment's deletion reading it and taking it out: given back once");
   redis.clear();
@@ -129,7 +132,10 @@ async function main(): Promise<void> {
   is("and it stays gone", await readComment(COURSE, gone.id), null);
 
   part("An answer written while its comment's author is erased: nothing of it is kept");
-  const adds = (commands: (string | number)[][]) => commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:lesson-comments-add:");
+  const adds = (commands: (string | number)[][]) => commands[0]?.[0] === "EVAL" && [
+    "-- marktmorgen:lesson-comments-add:",
+    "-- marktmorgen:lesson-comment-reply:",
+  ].some((mark) => String(commands[0][1]).startsWith(mark));
   for (const [who, replier] of [["Ana herself", ana], ["Ben", ben]] as const) {
     redis.clear();
     const bens = await say(ben, "Where are the slides?", "Ben");

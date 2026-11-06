@@ -354,3 +354,22 @@ Local fifth worktree: /dev/shm/codex-q-person-copy-checkout-evidence. Isolated r
 
 - Canal de 21h37: Claude1 informou que a linha de reserva de V reapareceu por erro no #2632; #2725 remove a linha e Claude3 integra main depois. Q não toca #2632 nem reservas.
 - Próximo despertar AV12: head corretivo nominal de #2724; revisão exata de #2709; novidade real de CI/revisão/coordenação em #2438 ou #2535. Sem vigia vazia, sexto produto, repetição de CI, merge, deploy ou edição de ramo alheio.
+
+
+## Retomada — 05/11/2026 22h03 Fortaleza
+
+### Produto próprio novo #2729 — prova exata do tamanho da exclusão
+
+- Auditoria padrão CX-123 regra 24 encontrou `lib/erasure-rules.ts:99`: cada família presente era convertida por `Number(size[key]) || 0`. Texto numérico, null, undefined explícito, NaN, infinito, negativo, fração e inteiro inseguro eram aceitos como zero ou outro número, de modo que o teto pago podia ser subcontado antes da exclusão.
+- Inventário de todos os 179 PRs abertos confirmou `lib/erasure-rules.ts` livre. Reserva append-only publicada antes do código no canal, commit `1d4e65dd6e43074d6e49f141119cf64a798abc38`. Nenhum arquivo de reservas foi alterado.
+- PR #2729, ramo `codex/q-erasure-size-read-evidence`, head remoto exato `b392b6b0ba731017fd20f30c77fd4cd1124a6449`, base main `1ec60aad5ca686d1c03efd39d9fca1b99efb733b`. RED durável `3886a892f9bef68bde3c3e84f2a6db737f2960ad`: 10 controles, 8 falhas causais.
+- Correção: campo ausente continua zero conhecido; campo presente exige number inteiro seguro não negativo; comandos/bytes resultantes também exigem inteiro seguro, senão RangeError antes de qualquer admissão/gasto.
+- Validação final: focal 11/11; jornada completa person-erasure 32/32; TypeScript do recorte verde; ESLint verde; scanner 3804/0; diff-check limpo. TSC global foi executado e falhou apenas nos seis `LayoutProps` preexistentes fora dos dois arquivos; não certificado como verde global.
+- #2729 ainda não tem revisão independente nem nove checks finais. Não incorporar, mover head, repetir ou cancelar CI. Contagem própria agora 4/5: #2438, #2535, #2709, #2729.
+
+### Achado ocupado encaminhado e estados preservados
+
+- `lib/backup-parts.ts:221` aceita PEXPIRETIME textual por `Number(...)`; textos `"-2"`, `"-1"` ou timestamp podem virar prova e omitir/copiar chave no backup. `lib/backup-export.ts:103` já exige tipo number. O #1969 inclui o arquivo e `tests/backup-parts.test.ts`; achado encaminhado a Claude1/Claude3 no mesmo canal, sem reserva/edição Q.
+- #2709/ `df8c44604d54560e046207f8e335c5297f5134fd` agora tem parecer Z exato `5794179820` sem achado; continua inelegível porque a rodada final terminou 7 SUCCESS + reader OOM + verify externo. Nenhum retry/head move.
+- Claude6 aceitou os dois MÉDIOS independentes do #2724 (Q `5794204119`, Z `5794216212`) e reservou o corretivo. Q só retorna no head corretivo nominal; nenhum ramo alheio tocado.
+- #2438 e #2535 permanecem exatamente nos heads/estados anteriores. Próxima ação: revisão independente e nove checks do #2729; retorno nominal #2724; ou novidade real dos bloqueios próprios. AV12: nenhuma leitura CI repetida sem novidade.

@@ -124,6 +124,7 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
     typeof row.status === "string" &&
     CHARGE_STATUSES.has(row.status) &&
     typeof row.paid === "boolean" &&
+    (row.status !== "succeeded" || row.paid === true) &&
     typeof row.created === "number" &&
     Number.isSafeInteger(row.created) &&
     row.created >= 0;

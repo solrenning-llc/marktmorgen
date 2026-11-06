@@ -183,8 +183,19 @@ test("2.4.10: each purchase is a section heading under the page's h1, and each b
 
 /** Each link's accessible name as a screen reader computes it (accname 1.2, the parts this page uses): aria-labelledby, then aria-label, then its words. */
 function linkNames(html: string): { name: string; text: string }[] {
+  // Drops markup one character at a time (no single-pass regex), then decodes the five entities React writes.
+  const words = (text: string) => {
+    let out = "";
+    let inTag = false;
+    for (const ch of text) {
+      if (ch === "<") inTag = true;
+      else if (ch === ">") inTag = false;
+      else if (!inTag) out += ch;
+    }
+    return out;
+  };
   const decode = (text: string) =>
-    text.replace(/<[^>]*>/g, "").replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&#x27;", "'").replaceAll("&amp;", "&").replace(/\s+/g, " ").trim();
+    words(text).replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&#x27;", "'").replaceAll("&amp;", "&").replace(/\s+/g, " ").trim();
   const byId = (id: string) => {
     const open = new RegExp(`<([a-z0-9]+)\\b[^>]*\\bid="${id}"[^>]*>`).exec(html);
     assert.ok(open, `aria-labelledby names "${id}", which is on the page`);

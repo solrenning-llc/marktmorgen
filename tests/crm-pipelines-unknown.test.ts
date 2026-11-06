@@ -165,14 +165,18 @@ async function main(): Promise<void> {
   await upsertContact(list, "ana@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
   store = (await storeForEmail(OWNER))!;
   await enroll(store, "ana@example.com", { joined: true });
-  const at = Date.now() + 20_000;
+  const run = () => sendDueSteps((handle) => storeForHandle(handle), Date.now() + 20_000);
   faults.set(pipesKey, "{not json");
-  await sendDueSteps((handle) => storeForHandle(handle), at);
+  await run();
   faults.clear();
   const stages = await readStages(sid);
   is("while unknown: no deal written", (await readDeals(sid, stages)).filter((d) => d.email === "ana@example.com").length, 0);
-  // Deferred, not "failed: the stage was removed" nor "uncertain" (held, never tried again by itself): tried again later.
-  await sendDueSteps((handle) => storeForHandle(handle), at + 700_000);
+  // Deferred, not "failed: the stage was removed" nor "uncertain" (held, never tried again by itself): back in the
+  // queue for later. The wait is passed by making what is queued due now.
+  const [queued] = await redis.pipeline([["ZRANGEBYSCORE", "nl:mail:flowq", "-inf", "+inf"]]);
+  is("while unknown: the step is queued again, not ended", (queued as string[]).length, 1);
+  await redis.pipeline((queued as string[]).map((member) => ["ZADD", "nl:mail:flowq", 0, member]));
+  await run();
   is("once they read: the deal is made in the store's own stage", (await readDeals(sid, stages)).filter((d) => d.email === "ana@example.com").map((d) => d.stage), [WON]);
 
   done();

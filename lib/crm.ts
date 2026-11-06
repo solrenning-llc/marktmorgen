@@ -233,12 +233,15 @@ export async function allValues(statsId: string | null, fields: CrmField[]): Pro
 
 /**
  * The store's pipelines: the saved ones once the creator has changed one,
- * and until then the board it always had, as the first pipeline.
+ * and until then the board it always had, as the first pipeline. A reply in
+ * an unknown shape, or a saved record that does not read, throws
+ * CrmSchemaReadUnavailable, never the default pipeline in its place (CX-123
+ * rules 24 and 30): a teammate's access, a deal's stage or a workflow step
+ * is never decided against pipelines that are not the store's.
  */
 export async function readPipelines(statsId: string | null): Promise<Pipeline[]> {
   if (!statsId || !isRedisConfigured()) return [firstPipeline(DEFAULT_STAGES)];
-  const [pipes, legacy] = await redisPipeline([["GET", pipesKey(statsId)], ["GET", stagesKey(statsId)]]);
-  return parsePipelines(json(pipes)) ?? [firstPipeline(parseStages(json(legacy)) ?? DEFAULT_STAGES)];
+  return (await pipelineSnapshot(statsId)).pipelines;
 }
 
 /** Every stage of every pipeline, in order: what a deal's stage is read against. */
@@ -258,9 +261,14 @@ async function pipelineSnapshot(statsId: string): Promise<{ raw: string; pipelin
       if (!pipelines) throw new CrmSchemaReadUnavailable();
       return { raw: pipes, pipelines };
     }
-    // Before any pipeline was saved, the board's own stages, as the board has always read them.
-    if (legacy !== null && typeof legacy !== "string") throw new CrmSchemaReadUnavailable();
-    return { raw: "", pipelines: [firstPipeline(parseStages(json(legacy)) ?? DEFAULT_STAGES)] };
+    // Before any pipeline was saved, the board's own stages, as the board has always read them; the defaults only
+    // when that record was never saved either. A board record that does not read whole is unknown (rule 30).
+    if (legacy === null) return { raw: "", pipelines: [firstPipeline(DEFAULT_STAGES)] };
+    if (typeof legacy !== "string") throw new CrmSchemaReadUnavailable();
+    const board = json(legacy);
+    const stages = parseStages(board);
+    if (!Array.isArray(board) || !stages || stages.length !== board.length) throw new CrmSchemaReadUnavailable();
+    return { raw: "", pipelines: [firstPipeline(stages)] };
   } catch { throw new CrmSchemaReadUnavailable(); }
 }
 

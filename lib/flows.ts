@@ -737,7 +737,14 @@ async function actOnPeople(
   const statsId = store.statsId;
   if (!statsId) return each(emails, "failed", "This store has no records for people yet.");
   if (action.do === "field") {
-    const field = (await readFields(statsId)).find((f) => f.id === action.field);
+    let fields: Awaited<ReturnType<typeof readFields>>;
+    try {
+      fields = await readFields(statsId);
+    } catch {
+      // Nothing was written: tried again later, which is safe (never "uncertain", held for the creator, for a read).
+      return each(emails, "deferred", "Your fields could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "retry" as const }));
+    }
+    const field = fields.find((f) => f.id === action.field);
     if (!field) return each(emails, "failed", "The field was removed from your store.");
     const out: Acted[] = [];
     for (const email of emails) {
@@ -829,10 +836,13 @@ async function actOnDeals(
   at: { flow: Flow; step: FlowStep; index: number },
   held: Held | null,
 ): Promise<Acted[]> {
-  const pipelines = await readPipelines(statsId);
-  const stages = allStages(pipelines);
+  let pipelines: Awaited<ReturnType<typeof readPipelines>>;
+  let stages: ReturnType<typeof allStages>;
   let deals: Awaited<ReturnType<typeof readDeals>>;
   try {
+    // The store's own pipelines, or nothing: unknown ones are never read as the default stages (CX-123 rule 30).
+    pipelines = await readPipelines(statsId);
+    stages = allStages(pipelines);
     deals = await readDeals(statsId, stages);
   } catch {
     // Nothing was written: tried again later, which is safe.

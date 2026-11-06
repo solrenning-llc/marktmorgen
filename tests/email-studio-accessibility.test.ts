@@ -9,6 +9,8 @@
  * - 2.3.3 Animation from Interactions: no smooth scroll that ignores
  *   prefers-reduced-motion.
  * - 3.3.6 Error Prevention (All): removing a sequence asks first.
+ * - 2.2.5 Re-authenticating: a session that ends while writing says how to
+ *   log in again without leaving the page, so nothing written is lost.
  * - The email's HTML carries a title (its subject) and its character set.
  */
 import { readFileSync } from "node:fs";
@@ -84,6 +86,12 @@ async function main(): Promise<void> {
   part("3.3.6: removing a sequence asks first, as deleting a draft does");
   const removal = studio.slice(studio.lastIndexOf("onClick={async () => {", studio.indexOf('action: "flow-remove"')), studio.indexOf('action: "flow-remove"'));
   is("the removal asks before it calls the server", /window\.confirm\(/.test(removal), true);
+
+  part("2.2.5: a session that ends while writing loses nothing after logging in again");
+  const signedOut = studio.match(/signed_out: "([^"]*)"/)?.[1] ?? "";
+  is("the message says the email stays on the page and to log in again in a new tab", [/stays on this page/.test(signedOut), /new tab/.test(signedOut)], [true, true]);
+  const feedback = studio.slice(studio.indexOf("function Feedback("), studio.indexOf("\n}\n", studio.indexOf("function Feedback(")));
+  is("beside it, a link to log in that opens a new tab and says so", [/href="\/signin"/.test(feedback), /target="_blank"/.test(feedback), /<NewTab \/>/.test(feedback)], [true, true, true]);
 
   part("The list email's HTML: a title and a character set");
   redis.clear();

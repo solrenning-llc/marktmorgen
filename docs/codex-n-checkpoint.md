@@ -1254,3 +1254,40 @@ PREVALECE. C4 única/C1OFF. Prompt antigo ae008 não desfaz checkpoint0b75064edf
 5.#2700 c3fda3d2580ffd62f53f92b024cca48ea694ef18/tree88807d4d,P5795031317 ancestralnão resolveNOVOSMÉDIOSC4,agoraHOLD.
 
 MainCLAUDE/AGENTS/reservas/caixa porfetchfileSHA+blobFULL nesta execução: mesmasidentidades0b750; canalFULL1920972chars/blob b1b55d2bf0968e20d032465f2e631fa32d858fef e FULLnovonaantecedência4aa721, sódeltaapós17h50analisado. PrimeiraAPI403rate-limit recuperouapós>=2min; transitório,não desativarvigia/automação. Um409anúncioesperou>=2min+FULLfresco+CAS, aplicado db5e6d. NenhumCIpoll/retry/cancel/merge/headownmudado. Rootcc23e732NUNCApush. Sósyntético,UNKNOWNnunca0,tetoantesgasto; sempreço/limite/comissão/flags/travas/contas/pagamentos/termos/chaves/contato/refalheio. ProdutoNUNCAreservas;Vconsolida. MergeownexpectedSHA+reviewsemG/M+9finaisexatos(2dinheirosai). Provas/reportspublicados<=30min; checkpoint/canalexatosantesencerrar.
+
+
+## Seção final canônica — 06/11/2026 18h56 Fortaleza — corretivo #2700 publicado e revisão #2770 concluída
+
+PREVALECE. Claude4 única/C1OFF. Checkpoint anterior aa5a97ee134550a7c65332d3972589b537239a84/blob493464f82f5dd905f58b67b591366814b0b5f701 integral preservado. Pedido direto “trabalha” executado. Cinco produtos próprios, sem sexta.
+
+### #2700 — NOVO HEAD final próprio, ainda SEM aprovação independente/9finais
+
+- Ramo MESMO codex/n-mail-click-read-shape, head **ba14e9a2eb63bd3f73a02105f4da84ec49051c87**, fonteblob2621968b57af0e8d6826200591a4c7c7d44149e7. Anteriorc3fda3d preservado naancestralidade. RED1 **15c02184bdb598407e763f94b7cd9c2b0cda8446**:27testes/23falhascausais/4controles. GREEN389aa863d14c5aa7338e5b7e503210eb22f1aa51:27/27. RED2 **4ee1e1eb1de336ebff00610dd9f15baab71aee0e** adicionaltokenausente:28/1, anteriores27preservados. FINALba14: **28/28**, mesmoIO/retenção/TTL/custeio, nenhumareserva-doc.
+- usedLinkIn járecusavaP8C4undefined noc3f; controleexecutadoPASS, nãoalegarcorreçãonovaali. FonteoriginalNumber(x)doC4eranomain, superado27noownPR.
+- lib/mail-clicks.ts clicksOf agora exigeenvelope1, lista real strings/densa/IDs STEP_CAMPAIGN/distintos; vazioconfirmadopassa. forgetClicksPerson exigeenvelopeHGET1/nullouJSONobjetocomtstringválidoouexplicitamentevazio, antesDEL. Campoausente/valorinválidonãoprovaausênciaíndice. DELexigeenvelope1/inteiroseguro0..nkeys; unknownlança, nunca0completo. Cópia interrompe/eraser marca móduloincompleto pelosconsumidoresexistentes, nãoalterados. Confirmanullcontato excluiusedkeyconhecida;delete0idempotenteválido.
+- Arquivosnovos: tests/mail-click-privacy-read.test.ts; fonteúnica lib/mail-clicks.ts. Testeantigo7intacto, aliasnenhumalterado. Final28+old7+person-copy20+person-erasure32+mail-links13 todosverdes. TSdirigido2raízes/imports0/lint2paths0. Scanner scripts/check_public_data.py findings() sobrearchiveHEAD**3808rastreados/0**, 2blobsremotosBYTE-IDcomlocaltestado, diff0.
+- PrimeirocontroleusouSMEMBERSapósDEL:MemoryRedisrecriasetvazio e retrycontava1; issoeraHARNESS, alteradoparaEXISTSantesREDválido27/23. Nãoalegar24falhasprodutoiniciais. Nenhumaasserçãocausalafrouxada.
+- Exec-serverdesconectou apósRED2; sourceba14foipublicadoSEMafirmarGREEN, hostretomouemseguida, patchlocaligualremotoeMESMAS28/28+ligados+TS/lint/scanner foramrealmenteexecutados. NãoéWIPsemtestesagora. Pastassomenteprópriasantigas foramlimpasporespaço, nenhumaalheia.
+- Pedidoindependenteretornono389 foi6696600272/canal0ec034715d76e49112694bccfb08156c8176d709, SUPERADOporba14; atualizaçãoPR6696821937. **P/R2 devemrevisarba14agora**, reviewP5795031317ancestralnãoaprovacorreçãonova. PRbodyreescrito paraescopofinal/título"Reject unknown mail-click selection, copy and erasure evidence".
+- C4-2970: única consultametadata2931e2894 confirmouambosOPEN; NÃOintegrarmainatélegítimosmerges2931DEPOIS2894. DepoismainUMAvezcomconflitoreal eNOVEagregadoresnovosheadexato+parecersemG/M, expectedSHA. NenhumCIpoll/rerun/cancel/mergefeito. Nãoalegar9finaisverdes.
+- Reserva/anúnciocanal **cefb652efe7e7756d8b6a4b14fb7f725724c417f** precedeuqualquerediçãodecódigo. Duas409anterioresNÃOaplicadas, cada≥120s/FULLfresco/CAS. C4e912d71c/provaP8creditados; testepróprioampliareproduçãoemMemoryRedis/consumidoressemredeexterna.
+
+### Revisão nominal #2770 — N concluída, não duplicar
+
+- CodexS, head**7fa81525040f7712f063a72a367a20e506076a3c**, título"Reject unknown creator numbers cache replies". AnúncioANTESdiff/fonte/teste **c4ccff2b8520e44dff894e629e9171b5b517761a**, C4-2150/Snominal.
+- Parecerformal **N5807530402 SEM GRAVE/MÉDIO demonstrado**, qualificaesteheadnofonte. CréditoCX1originalM5796418480/retorno5796718641mantido; não rebatizeiacaso. NovoSvalidaStatsDataprofundoalémdigest/cabeçalhocanônico. Digestcontinua integridade,nãoautenticaçãodogravador.
+- MESMOtesteautorfinal17contra lib/api-numbers.ts93df1511: **17/4falhascausais(text/null/fraction/unsafe cents)+13controles**; final17/17. DadosvêmstudioStatsreal/aliassintéticos. Ligados api-reads-paused29+stats-report18+mcp-tools5+mcp-dispatch26 =**95totaisfinais**. Leiturasdesconhecidasnãoacionamfallbackpagonumaadivinhação; ausênciareal/expired/invalidknown seguemadmissãofriaexistente.
+- Tiposdirigidos2raízes/imports0/lint2paths0/scannerarchive3875/0/diff0. SnapshotENOSPCinicial eraHOST/setup,nãoachadoproduto; libapiantigoprintadonorootnãofoiusadoparatestar. ApenasoldNKB9remotamentepreservado67foilimpo; extraçãorefeitaeTODOS**3808arquivosextraídosBYTE-ID**conferidoscontraHEADantesexecuções. NENHUMfonte/ref/CI/testeSmodificado, nenhumrerun/merge/nineCIalegado. C4-2970e9novoscontinuaresponsabilidadeautor. Nãoexecutar3ªrevisão7faigual.
+
+### Outros4 próprios congelados / prioridades próximas
+1.#2451 **bf6840e04371e0c8bcaa27674989532ff5b0ec96**, L8/9/retry127163240735ESGOTADO,nunca repetir.
+2.#2544 **447e97287e9bec0062e7878186495cb92cbdc277**, G/HOLDA3cancel_paid25→27,nãoeditar/retry.
+3.#2608 **0fad82a0e8fec7c1558124bb41d33afcdac1b656**/tree7425d7e7,R2integral11blobs+9NOVOSfaltam,retry127378763596consumido.
+4.#2674 **5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3**, bloqueio2576d8d8c3d5; nãoapi-write/waitlistantesmergelegítimo,helper2784/scanner2773nomain. REDsf891/e8df,legal73a1745d/blob60aa1ba0,API17f4f4c/blob255aae86preservados;2421674dinválido. C4-2910waitlistlaunchP4éNmasbloqueiocontinua.
+5.#2700agoraba14acima,semmerge.
+
+KB9retornosN5807312305(d9)/N5807338784(9f)concluídos; não repetiriguais. CanalC2anunciou2827e67base-only; semnovarevisão/aplicabilidadeinferidapornestaleitura. R1prazo-contratou3/cotas/plenacoberturalegalaindapendentes. Fonteoficialart11a/hashJÁconfirmado,nãorepetir.
+
+C4-2930 próxima frentelivre N=varreduraSOMENTEprova lib/[g-l]*.ts RESTANTE; antesnovosarquivosRESERVAcanal/novobranchN. ExcluirC5gifts/group2872/imports2881/licence2868/hostclaims/inbound-files,inboxA3/importedL/course2560C4. Inbound203agoraC5,nãoduplicar. Nenhumscanamploaindafeito/nenhumitemnovoPR6. BH1/buyer-library/SG2(27/30) continuamfila/bloqueados.
+
+Mainregras/reservasprecedentesaplicadas; deltaFULLcanallidodesde18h42/início1988630chars/sha0958313fc8fe15765d88f28cc9e58440cb35fe27. PrefixoFULLguardadoantescadaCAS,<20KBrecusa,409≥2minreleituraFULL. ProdutoNUNCAreservas/Vconsolida. Provas/REDs/corretivospublicados≤30min, checkpoint/canalantesencerrar. C4única/C1OFF; sintético/UNKNOWNnunca0/tetoantesgasto; nenhumpreço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato/refalheio. Rootcc23e732NUNCApush. MergeexpectedSHA+reviewsemG/M+9finaisexatos(2dinheirosai).

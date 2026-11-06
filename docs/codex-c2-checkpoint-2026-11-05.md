@@ -1,3 +1,29 @@
+# Ponto de parada C2 — 06/11/2026 07h00 (Fortaleza)
+
+Esta seção é a mais recente e prevalece onde acrescenta ou substitui o histórico abaixo. Todo head, RED, parecer, ramo e limite anterior continua preservado.
+
+## Leitura fresca e decisão AV12
+
+- Checkpoint integral anterior lido no commit `e3adc2a2b78653348d175fe5b77c9a1b27a23655`, blob `ba0a58fe7966df88f442abd2d3efc459e46996c6`, 131.555 bytes.
+- Regras atuais do `main` foram relidas. Blobs relevantes permanecem `CLAUDE.md=8e8545b0`, `AGENTS.md=472c4251`, `agent-inbox=d9893042`, `reservations.md=33627443`; `docs/reservations/codex.md` avançou legitimamente para `16d39287` por trabalho de outro agente e não foi alterado pelo C2. `docs/codex-queue.md` continua vazio na API.
+- Canal integral fresco lido com **267.221 bytes**, blob `5a5bec86682e0c49ba4885d2a4292c8596d42cb2`, acima do piso de 20 KB.
+- Não há mensagem nominal nova para Codex C2, retorno nominal D2/J/H2 aplicável aos quatro abertos, nem atribuição C4 para o slot livre. Nenhum status de PR/CI foi consultado: AV12 impede polling vazio.
+- Nenhum código, reserva, ramo, PR, head, CI, retry, cancelamento, merge, deploy ou estado externo foi alterado nesta continuidade.
+
+## Estado exato preservado
+
+- #2769 permanece incorporado no merge normal `7b7fbd98978e1b32543f4ba2a4f7c1ed38055661`; não reabrir nem redeploy sem novidade.
+- Quatro próprias abertas, um slot livre:
+  - #2601 `702cf9a8`, N6654503257 aplicável, sem poll;
+  - #2695 `33bbd1fd`, retries individuais consumidos, sem poll;
+  - #2692 PRIMARY `35e670e3`, recovery `8c2eeb29` com H2 6679942070, ainda espera D2 primeiro e display A3/#2020;
+  - #2742 `bbde49fe`, CX1 5796445931 aplicável, ainda espera D2 e nove exatos.
+- Commercial-margin continua do J; threshold2325 continua proibido sem atribuição explícita.
+- Próximo despertar válido: atribuição nominal C4 ou novidade causal comprovada. Não iniciar HZ3/item por silêncio.
+- Antes de encerrar: apontar a única continuidade C2 para este checkpoint e publicar PONTO DE PARADA append-only/CAS.
+
+---
+
 # Ponto de parada C2 — 06/11/2026 06h00 (Fortaleza)
 
 Esta seção é a mais recente e prevalece onde acrescenta ou substitui o histórico abaixo. Todo head, RED, parecer, ramo e limite anterior continua preservado.

@@ -204,6 +204,60 @@ async function main(): Promise<void> {
     is(`${code}: the preview's heading and the creator's note`, ok, true);
     if (code !== "en") is(`${code}: in its own words`, w.previewHeading !== letterWords("en").previewHeading, true);
   }
+  part("J: unknown kept-record reads never open members-only words");
+  for (const mode of ["missing-slot", "boolean-slot", "empty-envelope", "control"] as const) {
+    await publishLetter(store, kept, now + 10, [club], false, 2);
+    const pipeline = redis.pipeline.bind(redis);
+    let injected = false;
+    redis.pipeline = async (commands) => {
+      const replies = await pipeline(commands);
+      if (!injected && commands.length === 4 && commands[3]?.[0] === "GET" && commands[3]?.[1] === `nl:letters:i:${letter.id}`) {
+        injected = true;
+        if (mode === "missing-slot") return replies.slice(0, 3);
+        if (mode === "boolean-slot") return [replies[0], replies[1], replies[2], false];
+        if (mode === "empty-envelope") return [];
+      }
+      return replies;
+    };
+    try {
+      await publishLetter(store, kept, now + 11);
+    } finally {
+      redis.pipeline = pipeline;
+    }
+    if (!injected) throw Error("kept-record read not reached");
+    const actual = await readLetter(store, letter.id);
+    is(`${mode}: original member products remain`, actual?.products, [club]);
+    const visitor = await render(store, letter.id);
+    is(`${mode}: visitor never sees the private recipe`, visitor.includes(SECRET), false);
+  }
+  // The same reader on the other path (Claude 2, with Codex J's finding): an empty choice that does not say open,
+  // over an email kept for members, is refused only if the list's score says so. An unknown score must refuse too.
+  part("Unknown list scores never open members-only words");
+  for (const mode of ["missing-score", "boolean-score", "word-score", "control"] as const) {
+    await publishLetter(store, kept, now + 20, [club], false, 2);
+    const pipeline = redis.pipeline.bind(redis);
+    let injected = false;
+    redis.pipeline = async (commands) => {
+      const replies = await pipeline(commands);
+      if (!injected && commands.length === 3 && commands[2]?.[0] === "ZSCORE") {
+        injected = true;
+        if (mode === "missing-score") return replies.slice(0, 2);
+        if (mode === "boolean-score") return [replies[0], replies[1], true];
+        if (mode === "word-score") return [replies[0], replies[1], "kept"];
+      }
+      return replies;
+    };
+    let r: Awaited<ReturnType<typeof publishLetter>>;
+    try {
+      r = await publishLetter(store, kept, now + 21, []);
+    } finally {
+      redis.pipeline = pipeline;
+    }
+    if (!injected) throw Error("score read not reached");
+    is(`${mode}: refused`, r.ok, false);
+    is(`${mode}: the products and the preview stay`, [(await readLetter(store, letter.id))?.products, (await readLetter(store, letter.id))?.preview], [[club], 2]);
+    is(`${mode}: a visitor never sees the private recipe`, (await render(store, letter.id)).includes(SECRET), false);
+  }
   done();
 }
 

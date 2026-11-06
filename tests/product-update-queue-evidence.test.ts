@@ -96,3 +96,177 @@ for (const presence of unknownPresenceReplies) test("Q: unknown recipient-list p
   assert.deepEqual({status:held?.status,done:held?.done,sent:held?.sent,mail:r.batches.flat().length,queued:redis.run(["SISMEMBER","nl:updq",r.job.id]),recipients:redis.run(["LRANGE",recipients,0,-1])},{status:"waiting",done:0,sent:0,mail:0,queued:1,recipients:[person]});
  }finally{redis.pipeline=r.original;}
 });
+
+
+/**
+ * Q / C5 SET NX regression: only confirmed ownership may create or advance an
+ * update. The existing claim-mark contract reads an ambiguous SET back; an
+ * exact own value is positive evidence, not a reason to reject healthy work.
+ * All stores, buyers, mail transport and Redis effects below are synthetic.
+ */
+type QUpdateClaimMode = {
+ name: string;
+ unknown: boolean;
+ applied: boolean;
+ readback: "real" | "unreadable" | "foreign";
+ outcome: "ours" | "taken" | "unknown";
+};
+import { nextUpdateAt as qNextUpdateAt, UPDATE_GAP_SECONDS as qUpdateGap } from "@/lib/product-updates";
+const qUpdateClaimModes: QUpdateClaimMode[] = [
+ {name:"healthy",unknown:false,applied:true,readback:"real",outcome:"ours"},
+ {name:"confirmed taken",unknown:false,applied:false,readback:"real",outcome:"taken"},
+ {name:"lost ACK with exact own readback",unknown:true,applied:true,readback:"real",outcome:"ours"},
+ {name:"unapplied lost ACK with confirmed absence",unknown:true,applied:false,readback:"real",outcome:"unknown"},
+ {name:"applied lost ACK with unreadable readback",unknown:true,applied:true,readback:"unreadable",outcome:"unknown"},
+ {name:"unapplied lost ACK with unreadable readback",unknown:true,applied:false,readback:"unreadable",outcome:"unknown"},
+ {name:"lost ACK with another owner's exact value",unknown:true,applied:false,readback:"foreign",outcome:"taken"},
+];
+const qUpdateOtherOwner = "0.000000001";
+
+async function qUpdateClaimSetup(starting: boolean) {
+ const r=await setup();
+ const mark="nl:upd:last:"+r.shop.statsId+":"+r.job.product;
+ const lock="nl:upd:job:"+r.job.id+":lock";
+ if(starting){
+  // Remove only this fixture's initial healthy job, keeping the real store,
+  // product, synthetic sales reader and allowance admission for the action.
+  await r.original([
+   ["DEL",mark,"nl:upd:job:"+r.job.id,"nl:upd:job:"+r.job.id+":to","nl:upd:latest:"+r.shop.statsId+":"+r.job.product],
+   ["SREM","nl:updq",r.job.id],
+  ]);
+ }
+ const product=(await readListing(r.shop,r.job.product))!;
+ assert.ok(product);
+ return {...r,mark,lock,product};
+}
+
+function qUpdateClaimWire(
+ r: Awaited<ReturnType<typeof qUpdateClaimSetup>>,
+ key: string,
+ mode: QUpdateClaimMode,
+ releaseUnavailable = false,
+) {
+ const state={attempts:0,readbacks:0,value:"",blindDeletes:0,releaseAttempts:0};
+ redis.pipeline=async commands=>{
+  if(commands.some(c=>c[0]==="DEL"&&c[1]===key))state.blindDeletes++;
+  if(commands.length===1&&commands[0][0]==="SET"&&commands[0][1]===key&&commands[0].includes("NX")){
+   state.attempts++;
+   state.value=String(commands[0][2]);
+   if(!mode.unknown)return r.original(commands);
+   if(mode.applied)await r.original(commands);
+   if(mode.readback==="foreign")await r.original([["SET",key,qUpdateOtherOwner,"EX",90]]);
+   return [];
+  }
+  if(state.attempts&&commands.length===1&&commands[0][0]==="GET"&&commands[0][1]===key){
+   state.readbacks++;
+   if(mode.readback==="unreadable")return [];
+  }
+  if(commands.length===1&&commands[0][0]==="EVAL"&&commands[0][3]===key&&String(commands[0][1]).startsWith("-- marktmorgen:release:v1")){
+   state.releaseAttempts++;
+   if(releaseUnavailable)return [];
+  }
+  return r.original(commands);
+ };
+ return state;
+}
+
+for(const mode of qUpdateClaimModes)test("Q NX start: "+mode.name,async()=>{
+ const priorFetch=globalThis.fetch;
+ const r=await qUpdateClaimSetup(true);
+ try{
+  if(mode.name==="confirmed taken")await r.original([["SET",r.mark,qUpdateOtherOwner,"EX",90]]);
+  const state=qUpdateClaimWire(r,r.mark,mode);
+  let answer: Awaited<ReturnType<typeof startUpdate>> | undefined;
+  let rejected=false;
+  const nowSeconds=Math.floor(Date.now()/1000);
+  try{answer=await startUpdate(r.shop,r.product,"Synthetic claim evidence",nowSeconds);}catch{rejected=true;}
+  const [queued,held]=await r.original([["SMEMBERS","nl:updq"],["GET",r.mark]]);
+  const count=Array.isArray(queued)?queued.length:-1;
+  console.log("Q NX observation",JSON.stringify({operation:"start",mode:mode.name,accepted:answer?.ok===true,rejected,queued:count,attempts:state.attempts,readbacks:state.readbacks}));
+  assert.equal(state.attempts,1,"the claim is attempted once, never replayed");
+  assert.equal(r.batches.length,0,"starting an update does not send mail itself");
+  if(mode.outcome==="ours"){
+   assert.deepEqual({accepted:answer?.ok===true,rejected,queued:count},{accepted:true,rejected:false,queued:1});
+   assert.equal(held,state.value);
+   if(mode.name==="healthy"){
+    const [ttl]=await r.original([["TTL",r.mark]]);
+    // The existing visible weekly interval is measured in seconds. A unique
+    // fractional suffix may identify the claim; milliseconds must not leak in.
+    assert.equal(Math.floor(await qNextUpdateAt(r.shop,r.job.product)),nowSeconds+qUpdateGap);
+    assert.ok(Number(held)>=nowSeconds&&Number(held)<nowSeconds+1);
+    assert.ok(typeof ttl==="number"&&ttl>0&&ttl<=qUpdateGap);
+   }
+   if(mode.unknown)assert.equal(state.readbacks,1,"lost ACK continues only after an exact own-value readback");
+  }else{
+   assert.deepEqual({accepted:answer?.ok===true,queued:count},{accepted:false,queued:0},"unowned claims never publish a job or recipient queue");
+   if(mode.outcome==="taken"){
+    assert.ok(answer&&!answer.ok);
+    assert.equal(answer.reason,"soon");
+    assert.equal(held,qUpdateOtherOwner,"another owner's mark survives");
+   }else{
+    if(answer&&!answer.ok)assert.notEqual(answer.reason,"soon","unknown is not a confirmed competing claim");
+    assert.equal(held,mode.applied?state.value:null,"no rollback of an uncertain applied claim");
+   }
+  }
+ }finally{redis.pipeline=r.original;globalThis.fetch=priorFetch;}
+});
+
+for(const mode of qUpdateClaimModes)test("Q NX worker: "+mode.name,async()=>{
+ const priorFetch=globalThis.fetch;
+ const r=await qUpdateClaimSetup(false);
+ try{
+  if(mode.name==="confirmed taken")await r.original([["SET",r.lock,qUpdateOtherOwner,"EX",90]]);
+  const [beforeJob,beforeRecipients]=await r.original([["GET","nl:upd:job:"+r.job.id],["LRANGE","nl:upd:job:"+r.job.id+":to",0,-1]]);
+  const beforeUsed=await usedThisMonth(r.shop.listId,windowId(r.shop));
+  const state=qUpdateClaimWire(r,r.lock,mode);
+  const answer=await advanceUpdate(r.job.id,storeForHandle,Date.now()+20000);
+  const [afterJob,afterRecipients,queued,held]=await r.original([["GET","nl:upd:job:"+r.job.id],["LRANGE","nl:upd:job:"+r.job.id+":to",0,-1],["SISMEMBER","nl:updq",r.job.id],["GET",r.lock]]);
+  const afterUsed=await usedThisMonth(r.shop.listId,windowId(r.shop));
+  console.log("Q NX observation",JSON.stringify({operation:"worker",mode:mode.name,status:answer?.status??null,mail:r.batches.flat().length,queued,attempts:state.attempts,readbacks:state.readbacks,blindDeletes:state.blindDeletes}));
+  assert.equal(state.attempts,1,"the worker claim is never replayed");
+  if(mode.outcome==="ours"){
+   assert.deepEqual([answer?.status,answer?.done,answer?.sent,r.batches.flat().length,queued,held],["sent",1,1,1,0,null]);
+   if(mode.unknown)assert.equal(state.readbacks,1,"lost ACK continues only after an exact own-value readback");
+  }else{
+   assert.deepEqual({answer,job:afterJob,recipients:afterRecipients,queued,mail:r.batches.flat().length,used:afterUsed},{answer:null,job:beforeJob,recipients:beforeRecipients,queued:1,mail:0,used:beforeUsed},"unknown or taken ownership preserves the real pending job without mail or allowance use");
+   assert.equal(state.blindDeletes,0,"an unowned worker must never delete the lock");
+   assert.equal(held,mode.outcome==="taken"?qUpdateOtherOwner:mode.applied?state.value:null);
+  }
+ }finally{redis.pipeline=r.original;globalThis.fetch=priorFetch;}
+});
+
+test("Q NX release: a timed-out worker never removes a real successor's lock",async()=>{
+ const priorFetch=globalThis.fetch;
+ const r=await qUpdateClaimSetup(false);
+ try{
+  const state=qUpdateClaimWire(r,r.lock,qUpdateClaimModes[0]);
+  let successors=0;
+  const load=async(handle:string)=>{
+   redis.advance(91_000);
+   assert.deepEqual(await r.original([["SET",r.lock,qUpdateOtherOwner,"NX","EX",90]]),["OK"],"a real successor acquires the expired lock");
+   successors++;
+   return storeForHandle(handle);
+  };
+  await advanceUpdate(r.job.id,load,Date.now()+20000);
+  const [held]=await r.original([["GET",r.lock]]);
+  console.log("Q NX observation",JSON.stringify({operation:"release successor",successors,held,blindDeletes:state.blindDeletes}));
+  assert.equal(successors,1);
+  assert.equal(held,qUpdateOtherOwner,"release compares ownership atomically and preserves the successor");
+  assert.equal(state.blindDeletes,0);
+ }finally{redis.pipeline=r.original;globalThis.fetch=priorFetch;}
+});
+
+test("Q NX release: an unreadable compare-release leaves the owned lock to expire",async()=>{
+ const priorFetch=globalThis.fetch;
+ const r=await qUpdateClaimSetup(false);
+ try{
+  const state=qUpdateClaimWire(r,r.lock,qUpdateClaimModes[0],true);
+  await advanceUpdate(r.job.id,storeForHandle,Date.now()+20000);
+  const [held,ttl]=await r.original([["GET",r.lock],["TTL",r.lock]]);
+  console.log("Q NX observation",JSON.stringify({operation:"release unknown",held,ttl,releaseAttempts:state.releaseAttempts,blindDeletes:state.blindDeletes}));
+  assert.equal(held,state.value,"an unavailable release never falls back to deleting the lock");
+  assert.equal(state.releaseAttempts,1);
+  assert.equal(state.blindDeletes,0);
+  assert.ok(typeof ttl==="number"&&ttl>0&&ttl<=90,"the existing lock expires without a new retention period");
+ }finally{redis.pipeline=r.original;globalThis.fetch=priorFetch;}
+});

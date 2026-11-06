@@ -20,6 +20,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { DELAYED_METHODS } from "@/lib/instant-pay";
 import { CURRENCIES, type Currency } from "@/lib/money";
 import type { Store } from "@/lib/store";
+import { STRIPE_LIST_VERSION, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 /** How each method is named in the studio, and the one thing worth knowing about it. */
 const METHODS: Record<string, { name: string; note?: string; group: WayGroup }> = {
@@ -258,30 +259,39 @@ export async function runningSubscriptions(store: Store): Promise<number | null>
   if (!account) return 0;
   const handles = saleHandles(store);
   let count = 0;
+  // A row not readable (lib/stripe-list.ts) may be one of this store's: the count is then "at least", never "none".
+  let unreadable = 0;
   try {
     for (const status of RUNNING) {
       let after = "";
       let done = false;
       for (let page = 0; page < RUNNING_PAGES; page += 1) {
-        const listed = await onAccount(
-          "GET",
-          account,
-          `/subscriptions?status=${status}&limit=100${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+        const read = readStripePage(
+          await onAccount(
+            "GET",
+            account,
+            `/subscriptions?status=${status}&limit=100${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+            undefined,
+            STRIPE_LIST_VERSION,
+          ),
+          (row) => plainObject(ownField(row, "metadata")),
         );
-        const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-        for (const row of rows) {
-          const meta = (row.metadata ?? {}) as Record<string, string>;
-          if (handles.has(meta.store ?? "")) count += 1;
+        unreadable += read.unreadable;
+        for (const row of read.rows) {
+          const soldBy = ownField(ownField(row, "metadata") as Record<string, unknown>, "store");
+          if (typeof soldBy === "string" && handles.has(soldBy)) count += 1;
         }
-        const last = rows[rows.length - 1];
-        if (listed.has_more !== true || !last || typeof last.id !== "string") {
+        if (!read.hasMore) {
           done = true;
           break;
         }
-        after = last.id;
+        // More pages, and no readable last row to read them from: not read whole.
+        if (!read.lastId) break;
+        after = read.lastId;
       }
       if (!done) return count > 0 ? count : null;
     }
+    if (unreadable) return count > 0 ? count : null;
     return count;
   } catch (error) {
     console.error("counting running memberships failed", error);

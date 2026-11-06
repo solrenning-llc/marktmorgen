@@ -249,6 +249,18 @@ function readRow(row: Record<string, unknown>): DiscountCode | null {
  * decide whether a code still works.
  */
 export async function listCodes(account: string): Promise<CodeList> {
+  const page = await readCodePage(account);
+  return page.state === "ok" ? { state: "ok", codes: page.codes } : page;
+}
+
+/**
+ * The codes on this creator's account, as listCodes reads them, and whether
+ * Stripe holds more than this one page of MAX_CODES (511 [CK3], unit 2), for
+ * the studio to say so plainly. Stripe's `has_more` decides; when it is
+ * absent, a full page is read as more, and in any other shape it is more, so
+ * the list is never said to be complete without proof.
+ */
+export async function readCodePage(account: string): Promise<{ state: "ok"; codes: DiscountCode[]; more: boolean } | { state: "error" }> {
   try {
     const page = await onAccount(
       "GET",
@@ -271,7 +283,10 @@ export async function listCodes(account: string): Promise<CodeList> {
       ids.add(entry.id);
       codes.push(entry);
     }
-    return { state: "ok", codes };
+    const said = Object.hasOwn(page, "has_more") ? page.has_more : undefined;
+    // Absent: a full page may have more behind it. In any shape but true or false: more.
+    const more = said === false ? false : said === undefined ? codes.length >= MAX_CODES : true;
+    return { state: "ok", codes, more };
   } catch (error) {
     console.error("listing discount codes failed", error);
     return { state: "error" };

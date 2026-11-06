@@ -189,6 +189,7 @@ async function main() {
     run = await sched.activateScheduledCodes(Date.now() + 10_000, start + HOUR, deps);
     is("nothing sent", told.length, 0);
     is("counted as unknown", run.notices.unknown, 1);
+    is("an unreadable record is moved on, never holding the front of the list", Number((await redis.pipeline([["ZSCORE", TELL, member("promo_BROKEN")]]))[0]), start + HOUR + NOTICE_RETRY_SECONDS);
     await redis.pipeline([["HSET", `nl:dsched:${STATS}`, "promo_OK", JSON.stringify({ c: "OK", s: start, e: end, t: 3, f: 0 })], ["ZADD", TELL, start, member("promo_OK")]]);
     await sched.activateScheduledCodes(Date.now() + 10_000, start + HOUR, deps);
     is("a code not failed is never told about", told.length, 0);

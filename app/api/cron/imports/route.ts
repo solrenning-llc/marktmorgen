@@ -20,7 +20,8 @@ export const maxDuration = 60;
  * import's own lock keeps the two from working on one import at once.
  * Then, for five seconds at most, what the stores' Meta ad accounts spent,
  * read once a day each (lib/meta-ads.ts); the welcome offers' reminders; the
- * discount codes set to start now (lib/discount-schedule.ts). What time is left goes to the one
+ * discount codes set to start now, and the email for one that could not be
+ * (lib/discount-schedule.ts). What time is left goes to the one
  * reminder each moved member is owed (lib/move-members.ts).
  */
 export async function GET(request: NextRequest) {
@@ -54,7 +55,8 @@ async function run(request: NextRequest): Promise<Response> {
       console.error("sending welcome offer reminders failed", error);
       return null;
     });
-    // Discount codes set to start now, switched on (511 [CK3], lib/discount-schedule.ts), three seconds at most.
+    // Discount codes set to start now, switched on (511 [CK3], lib/discount-schedule.ts), three seconds at most;
+    // for a code that could not be, it tells the creator by email, once (unit 2, lib/discount-schedule-notice.ts).
     const codes = await activateScheduledCodes(Math.min(started + 49_000, Date.now() + 3_000)).catch((error: unknown) => {
       console.error("switching scheduled discount codes on failed", error);
       return null;

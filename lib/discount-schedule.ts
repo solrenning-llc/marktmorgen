@@ -7,8 +7,10 @@
  * nothing from us. What is kept here is only what the five-minute job
  * (app/api/cron/imports) needs to switch it on at its start:
  *
- *   nl:dsched:<statsId>        hash: promotion code id -> {c code, s start, e end, t tries, f failed}
+ *   nl:dsched:<statsId>        hash: promotion code id -> {c code, s start, e end, t tries, f failed,
+ *                              n email tries, m email settled} (n and m written only once set)
  *   nl:dsched:due              sorted set: "<sid>|<statsId>|<promotion code id>" by when it is next tried
+ *   nl:dsched:tell             sorted set: the same members, failed codes whose email is due (unit 2)
  *   nl:dsched:lock:<statsId>   one store's schedules changed by one hand at a time, a minute at most
  *
  * At most MAX_SCHEDULED_CODES a store; each goes once switched on (Stripe
@@ -18,6 +20,13 @@
  * in all, then kept as failed for the studio to say so, the code still off.
  * Every Redis reply is read in its exact shape (lib/redis-reply.ts): an
  * unreadable one acts on nothing and leaves the entry for the next run.
+ *
+ * Unit 2: a code that reaches failed is put on the list to tell, and the same
+ * job emails the creator once (lib/discount-schedule-notice.ts). The email is
+ * marked settled in the code's record before it is sent, so a run that dies
+ * after sending never sends it again; a send that did not go is unmarked and
+ * tried again NOTICE_RETRY_SECONDS later, NOTICE_TRIES times in all, then
+ * never. A code canceled before its email takes its email with it.
  */
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { activateCode, createCode, stopCode, type DiscountCode } from "@/lib/discount";
@@ -25,21 +34,28 @@ import type { CodeAsked } from "@/lib/discount-input";
 import {
   ACTIVATION_TRIES,
   MAX_SCHEDULED_CODES,
+  NOTICE_RETRY_SECONDS,
+  NOTICE_TRIES,
   RETRY_SECONDS,
   type ScheduleEntry,
   type ScheduleWindow,
 } from "@/lib/discount-schedule-rules";
+import { tellActivationFailed } from "@/lib/discount-schedule-notice";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Store, setHasDiscounts, storeForId, storeRef } from "@/lib/store";
 
 export const DUE_KEY = "nl:dsched:due";
+/** Failed codes whose email to the creator is due (unit 2). */
+export const TELL_KEY = "nl:dsched:tell";
 const scheduleKey = (statsId: string) => `nl:dsched:${statsId}`;
 const lockKey = (statsId: string) => `nl:dsched:lock:${statsId}`;
 /** How long one change holds a store's schedules: inside a request's or a run's minute. */
 const LOCK_SECONDS = 60;
 /** Codes the job looks at in one run, at the most; the rest wait for the next. */
 export const DUE_PER_RUN = 25;
+/** Failed codes' emails the job tries in one run, at the most; the rest wait for the next. */
+export const TELL_PER_RUN = 5;
 const HEX32 = /^[0-9a-f]{32}$/;
 const PROMO_ID = /^[A-Za-z0-9_]{1,80}$/;
 
@@ -47,8 +63,11 @@ type Shop = Pick<Store, "sid" | "statsId" | "stripeAccountId">;
 
 const memberOf = (sid: string, statsId: string, id: string) => `${sid}|${statsId}|${id}`;
 
+/** A kept schedule, with what this file alone needs of its email: tries made, and settled (sent, being sent, or given up). */
+type Kept = ScheduleEntry & { notices: number; mailed: boolean };
+
 /** A kept schedule, read in its exact shape, or null. */
-function readRecord(id: string, raw: string): ScheduleEntry | null {
+function readRecord(id: string, raw: string): Kept | null {
   let value: unknown;
   try {
     value = JSON.parse(raw);
@@ -56,14 +75,26 @@ function readRecord(id: string, raw: string): ScheduleEntry | null {
     return null;
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const { c, s, e, t, f } = value as Record<string, unknown>;
+  const record = value as Record<string, unknown>;
+  const { c, s, e, t, f } = record;
   const int = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
   if (typeof c !== "string" || !c || !int(s) || !int(e) || e <= s || !int(t) || (f !== 0 && f !== 1)) return null;
-  return { id, code: c, start: s, end: e, tries: t, failed: f === 1 };
+  // Absent until the first email try; present, only in their own shape.
+  const n = Object.hasOwn(record, "n") ? record.n : 0;
+  const m = Object.hasOwn(record, "m") ? record.m : 0;
+  if (!int(n) || n > NOTICE_TRIES || (m !== 0 && m !== 1)) return null;
+  return { id, code: c, start: s, end: e, tries: t, failed: f === 1, notices: n, mailed: m === 1 };
 }
 
-const writeRecord = (entry: ScheduleEntry) =>
-  JSON.stringify({ c: entry.code, s: entry.start, e: entry.end, t: entry.tries, f: entry.failed ? 1 : 0 });
+const writeRecord = (entry: ScheduleEntry & Partial<Pick<Kept, "notices" | "mailed">>) =>
+  JSON.stringify({
+    c: entry.code, s: entry.start, e: entry.end, t: entry.tries, f: entry.failed ? 1 : 0,
+    ...(entry.notices ? { n: entry.notices } : {}),
+    ...(entry.mailed ? { m: 1 } : {}),
+  });
+
+/** What the studio is told of a kept schedule: nothing about the email. */
+const shown = ({ id, code, start, end, tries, failed }: Kept): ScheduleEntry => ({ id, code, start, end, tries, failed });
 
 /** Runs `work` holding the store's lock: "busy" when another hand holds it, "unknown" when that cannot be told. */
 async function holding<T>(statsId: string, work: () => Promise<T>): Promise<T | "busy" | "unknown"> {
@@ -145,7 +176,7 @@ export async function readSchedules(statsId: string | null): Promise<{ ok: true;
     for (let i = 0; i < flat.length; i += 2) {
       const entry = readRecord(flat[i], flat[i + 1]);
       if (!entry) return { ok: false };
-      schedules.push(entry);
+      schedules.push(shown(entry));
     }
     schedules.sort((a, b) => a.start - b.start || a.id.localeCompare(b.id));
     return { ok: true, schedules };
@@ -166,9 +197,11 @@ async function unkeep(shop: Shop, statsId: string, id: string): Promise<"done" |
   }
   if (held === null) return "none";
   if (typeof held !== "string") return "unknown";
+  // Its email, if one is due, goes with it.
   const gone = await counted([
     ["HDEL", scheduleKey(statsId), id],
     ["ZREM", DUE_KEY, memberOf(shop.sid, statsId, id)],
+    ["ZREM", TELL_KEY, memberOf(shop.sid, statsId, id)],
   ]);
   return gone ? "done" : "unknown";
 }
@@ -204,31 +237,38 @@ export async function dropSchedule(shop: Shop, id: string): Promise<"done" | "bu
 }
 
 type Outcome = "activated" | "retried" | "failed" | "dropped" | "unknown";
-export type ActivationCounts = Record<Outcome, number>;
+type NoticeOutcome = "told" | "untold" | "dropped" | "unknown";
+export type NoticeCounts = Record<NoticeOutcome, number>;
+export type ActivationCounts = Record<Outcome, number> & { notices: NoticeCounts };
 
 type Deps<S extends Shop> = {
   findStore: (sid: string) => Promise<S | null>;
   /** The checkout's code box, switched on once a code is live (lib/store.ts, hasDiscounts). */
   markDiscounts: (store: S) => Promise<unknown>;
+  /** The email that a code failed (lib/discount-schedule-notice.ts): true only when it went. */
+  tell?: (store: S, entry: ScheduleEntry, nowSeconds: number) => Promise<boolean>;
 };
 
 const DEFAULT_DEPS: Deps<Store> = {
   findStore: storeForId,
   markDiscounts: (store) => setHasDiscounts(storeRef(store), true),
+  tell: tellActivationFailed,
 };
 
-async function drop(member: string): Promise<void> {
-  await counted([["ZREM", DUE_KEY, member]]);
+async function drop(member: string, key = DUE_KEY): Promise<void> {
+  await counted([["ZREM", key, member]]);
 }
 
 /** A try that did not confirm: counted, and the next one set, or the code kept as failed. */
-async function missed(shop: Shop, statsId: string, entry: ScheduleEntry, nowSeconds: number, last = false): Promise<Outcome> {
+async function missed(shop: Shop, statsId: string, entry: Kept, nowSeconds: number, last = false): Promise<Outcome> {
   const tries = entry.tries + 1;
   const member = memberOf(shop.sid, statsId, entry.id);
   if (last || tries >= ACTIVATION_TRIES) {
+    // Failed: out of the list to switch on, onto the list to tell the creator, in this same run.
     const kept = await counted([
       ["HSET", scheduleKey(statsId), entry.id, writeRecord({ ...entry, tries, failed: true })],
       ["ZREM", DUE_KEY, member],
+      ["ZADD", TELL_KEY, nowSeconds, member],
     ]);
     return kept ? "failed" : "unknown";
   }
@@ -284,17 +324,128 @@ async function activateOne<S extends Shop>(shop: S, statsId: string, id: string,
 }
 
 /**
+ * One failed code's email, holding the store's lock. The record is marked
+ * settled, with the try counted, before the email is sent: a run that dies
+ * after sending leaves it settled, so it is never sent twice. A send that did
+ * not go is unmarked and set for NOTICE_RETRY_SECONDS later, until
+ * NOTICE_TRIES tries are made; then it stays settled and is never tried again.
+ */
+async function tellOne<S extends Shop>(shop: S, statsId: string, id: string, nowSeconds: number, tell: NonNullable<Deps<S>["tell"]>): Promise<NoticeOutcome> {
+  const member = memberOf(shop.sid, statsId, id);
+  const result = await holding<NoticeOutcome>(statsId, async () => {
+    let raw: unknown;
+    try {
+      const replies = repliesFor(await redisPipeline([["HGET", scheduleKey(statsId), id]]), 1);
+      if (!replies) return "unknown";
+      raw = replies[0];
+    } catch {
+      return "unknown";
+    }
+    // Canceled, or switched off by hand: nothing to tell.
+    if (raw === null) {
+      await drop(member, TELL_KEY);
+      return "dropped";
+    }
+    if (typeof raw !== "string") return "unknown";
+    const entry = readRecord(id, raw);
+    // Unreadable: never told about on a guess, and moved an hour on, so it never holds the
+    // front of the list (read lowest first) against the codes that can be told.
+    if (!entry) {
+      await counted([["ZADD", TELL_KEY, nowSeconds + NOTICE_RETRY_SECONDS, member]]);
+      return "unknown";
+    }
+    // Not failed, already told (or being told), or out of tries: never sent.
+    if (!entry.failed || entry.mailed || entry.notices >= NOTICE_TRIES) {
+      await drop(member, TELL_KEY);
+      return "dropped";
+    }
+    const notices = entry.notices + 1;
+    const settled = await counted([
+      ["HSET", scheduleKey(statsId), id, writeRecord({ ...entry, notices, mailed: true })],
+      ["ZREM", TELL_KEY, member],
+    ]);
+    if (!settled) return "unknown";
+    let sent = false;
+    try {
+      sent = await tell(shop, shown(entry), nowSeconds);
+    } catch (error) {
+      console.error("emailing that a scheduled discount code failed did not work", error);
+      sent = false;
+    }
+    if (sent === true) return "told";
+    // The last try: it stays settled, and is never tried again.
+    if (notices >= NOTICE_TRIES) return "untold";
+    // Not sent: unmarked, and tried again later. If this write is not confirmed it stays settled: never sent twice.
+    await counted([
+      ["HSET", scheduleKey(statsId), id, writeRecord({ ...entry, notices, mailed: false })],
+      ["ZADD", TELL_KEY, nowSeconds + NOTICE_RETRY_SECONDS, member],
+    ]);
+    return "untold";
+  });
+  return result === "busy" ? "unknown" : result;
+}
+
+/** The failed codes' emails now due: at most TELL_PER_RUN a run, and only until `deadline`. */
+async function tellFailedCodes<S extends Shop>(deadline: number, nowSeconds: number, deps: Deps<S>): Promise<NoticeCounts> {
+  const counts: NoticeCounts = { told: 0, untold: 0, dropped: 0, unknown: 0 };
+  const tell = deps.tell ?? (DEFAULT_DEPS.tell as unknown as NonNullable<Deps<S>["tell"]>);
+  let due: string[] | null = null;
+  try {
+    const replies = repliesFor(await redisPipeline([["ZRANGEBYSCORE", TELL_KEY, "0", String(nowSeconds), "LIMIT", "0", String(TELL_PER_RUN)]]), 1);
+    due = replies ? stringList(replies[0]) : null;
+  } catch {
+    due = null;
+  }
+  if (!due) {
+    counts.unknown += 1;
+    return counts;
+  }
+  for (const member of due) {
+    if (Date.now() >= deadline) break;
+    const parts = member.split("|");
+    if (parts.length !== 3 || !HEX32.test(parts[0]) || !HEX32.test(parts[1]) || !PROMO_ID.test(parts[2])) {
+      await drop(member, TELL_KEY);
+      counts.dropped += 1;
+      continue;
+    }
+    const [sid, statsId, id] = parts;
+    let shop: S | null;
+    try {
+      shop = await deps.findStore(sid);
+    } catch {
+      counts.unknown += 1;
+      continue;
+    }
+    if (!shop || shop.statsId !== statsId) {
+      await drop(member, TELL_KEY);
+      counts.dropped += 1;
+      continue;
+    }
+    counts[await tellOne(shop, statsId, id, nowSeconds, tell)] += 1;
+  }
+  return counts;
+}
+
+/**
  * The scheduled codes now due, switched on, from the five-minute job: at most
- * DUE_PER_RUN a run and only until `deadline`. Each code's tries were paid for
- * when it was scheduled (SCHEDULE_UNITS studio requests).
+ * DUE_PER_RUN a run and only until `deadline`; then the emails for codes that
+ * failed (unit 2). Each code's tries, and its email's, were paid for when it
+ * was scheduled (SCHEDULE_UNITS studio requests); the email itself is taken
+ * from the store's email figure as it goes.
  */
 export async function activateScheduledCodes<S extends Shop = Store>(
   deadline: number,
   nowSeconds = Math.floor(Date.now() / 1000),
   deps: Deps<S> = DEFAULT_DEPS as unknown as Deps<S>,
 ): Promise<ActivationCounts> {
-  const counts: ActivationCounts = { activated: 0, retried: 0, failed: 0, dropped: 0, unknown: 0 };
+  const counts: ActivationCounts = { activated: 0, retried: 0, failed: 0, dropped: 0, unknown: 0, notices: { told: 0, untold: 0, dropped: 0, unknown: 0 } };
   if (!isRedisConfigured()) return counts;
+  await switchDueCodesOn(counts, deadline, nowSeconds, deps);
+  counts.notices = await tellFailedCodes(deadline, nowSeconds, deps);
+  return counts;
+}
+
+async function switchDueCodesOn<S extends Shop>(counts: ActivationCounts, deadline: number, nowSeconds: number, deps: Deps<S>): Promise<void> {
   let due: string[] | null = null;
   try {
     const replies = repliesFor(await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, "0", String(nowSeconds), "LIMIT", "0", String(DUE_PER_RUN)]]), 1);
@@ -304,7 +455,7 @@ export async function activateScheduledCodes<S extends Shop = Store>(
   }
   if (!due) {
     counts.unknown += 1;
-    return counts;
+    return;
   }
   for (const member of due) {
     if (Date.now() >= deadline) break;
@@ -330,5 +481,4 @@ export async function activateScheduledCodes<S extends Shop = Store>(
     }
     counts[await activateOne(shop, statsId, id, nowSeconds, deps)] += 1;
   }
-  return counts;
 }

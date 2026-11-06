@@ -56,7 +56,7 @@ async function main() {
     part("The rules: bounded, and paid for before anything is spent");
     is("a store keeps at most a handful of scheduled codes", MAX_SCHEDULED_CODES > 0 && MAX_SCHEDULED_CODES <= 20, true);
     is("activation is tried a bounded number of times", ACTIVATION_TRIES >= 2 && ACTIVATION_TRIES <= 5, true);
-    is("each try is one studio request taken when the code is scheduled", SCHEDULE_UNITS, ACTIVATION_TRIES);
+    is("each try is one studio request taken when the code is scheduled (with the failure email's tries, unit 2)", SCHEDULE_UNITS, ACTIVATION_TRIES + rules.NOTICE_TRIES);
     is("retries wait for a later five-minute run", RETRY_SECONDS >= 300, true);
 
     part("The start and the end, read and refused in words");

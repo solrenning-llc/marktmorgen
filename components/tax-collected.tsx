@@ -12,7 +12,7 @@ function countryName(code: string): string {
 }
 /** "US-NY" as "United States, NY"; "DE" as "Germany". */
 function regionName(region: string): string {
-  if (!region) return "No address given";
+  if (!region) return "No address on the payment";
   const [country, state] = region.split("-");
   return state ? `${countryName(country)}, ${state}` : countryName(country);
 }

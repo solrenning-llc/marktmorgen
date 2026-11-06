@@ -37,8 +37,13 @@ const HANDLE = "pfsweepkiln";
 const sent: string[] = [];
 /** What Stripe answers to the list of an address's completed checkouts (paidSince). */
 let paidList: unknown = { object: "list", data: [], has_more: false };
+/** An address the stand-in mail service refuses (the send-failed control). */
+let refuseMailTo = "";
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
+  if (url.hostname === "api.resend.com" && refuseMailTo && String(init?.body).includes(refuseMailTo)) {
+    return Response.json({ name: "application_error", message: "a synthetic refusal" }, { status: 500 });
+  }
   if (url.hostname === "api.resend.com") {
     if (url.pathname === "/emails/batch") {
       const batch = JSON.parse(String(init?.body)) as { to: string | string[] }[];
@@ -294,5 +299,50 @@ test("F5: forgetting the once-a-week marks with a reply of another shape is unkn
     [async () => ({}), "DEL with no list"],
   ] as [(c: Commands, real: Pipe) => Promise<unknown>, string][]) {
     await t.test(label, () => assert.rejects(intercept(isForget, answer, () => forgetRecoveryPerson(store.statsId, [product], "gone@example.com")), UnknownReplyError, `forget: ${label}`));
+  }
+});
+
+/**
+ * CX-116 second money review of #2951, F1: the stop link is written after
+ * the checkout's "sending" claim and its once-a-week mark were taken. When
+ * that write is unknown, the reminder is not sent (F1 above) and both marks
+ * go, as on the send-failed path: otherwise the "sending" mark stays for
+ * 2 x ONCE_PER_SECONDS and every later pass skips the checkout, and the
+ * address hears nothing about the product for a week, silently.
+ */
+test("control: a send that failed leaves no claim behind, and the next pass sends", async () => {
+  const store = await shop();
+  const { id, email } = fresh();
+  refuseMailTo = email;
+  try {
+    assert.equal(await remindAbandoned(store, left(id, email)), "failed");
+  } finally {
+    refuseMailTo = "";
+  }
+  assert.equal(await markOf(id), null, "the send-failed path leaves no \"sending\" mark");
+  const before = sent.length;
+  assert.equal(await remindAbandoned(store, left(id, email)), "sent");
+  assert.deepEqual(sent.slice(before), [email]);
+});
+
+test("an unknown stop link write leaves no claim behind, and the next pass sends", async (t) => {
+  const cases: [(c: Commands, real: Pipe) => Promise<unknown>, string][] = [
+    [slotAs(0, null), "SET answered nothing"],
+    [slotAs(0, "QUEUED"), "SET answered QUEUED"],
+    [slotAs(1, "x"), "ZADD answered text"],
+    [async () => [], "no replies"],
+  ];
+  for (const [answer, label] of cases) {
+    await t.test(label, async () => {
+      const store = await shop();
+      const { id, email } = fresh();
+      const before = sent.length;
+      await assert.rejects(intercept(isLinkWrite, answer, () => remindAbandoned(store, left(id, email))), UnknownReplyError, `${label}: must be unknown`);
+      assert.deepEqual(sent.slice(before), [], `${label}: nothing goes on an unknown stop link`);
+      const mark = await markOf(id);
+      assert.equal(mark, null, `${label}: got the checkout's mark left at ${JSON.stringify(mark)}`);
+      assert.equal(await remindAbandoned(store, left(id, email)), "sent", `${label}: the next pass, read whole, sends (no once-a-week mark left either)`);
+      assert.deepEqual(sent.slice(before), [email], `${label}: once`);
+    });
   }
 });

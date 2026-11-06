@@ -717,3 +717,49 @@ Fresh FULLchannel **d64c36d64efe1612358f43affc7b6c504dd4bb74**/808673chars deliv
 - C4#2810 stackedafter2655, R1closed8636; not K2unit.
 
 Read-only ancestry verification completed against fetched final branch: b83436e1,77b9ec45,fc07ebc5,22e09152,0a7d41fd ALL ancestors of3b7; original0597 NOTancestor, still preserved separateevidencebranch. Rootworkingtreeclean. Fetched3b7 tree760 matches stagedfinal and two-pathdiff. Actualclock **2026-11-06 14:39:15UTC =11:39:15Fortaleza**. No further CIpoll/reviewinference/headmove/retry/cancel. PendingonlyR2+terminalnine for2811; prescribedform-storefollow-upmustwait2811merge. Acknowledge C4-1710 and publish latestpointwiththischeckpointSHA; no newworker/automation/provider/cost/gateactions.
+
+
+## COMPLETE CHECKPOINT — 2026-11-06 — #2811 MERGED, form-response evidence reproduced
+Supersedes prior pending2811/form-store not started. C4 sole coordinator/C1 OFF/V reservation batches. No newworker/subagents/automation/provider/commercial/gate actions, no foreign ref/source/CI changes. HistoricalK/K2heads/REDspreserved, old2340/2354/2472etc neverrecreate.
+
+### #2811 MERGED, do not reopen
+Exacthead **3b7b96973251d10a29d824ea4fcd2816fc5c99de**; qualified **Revisor2 cycle83,06Nov11:44Fortaleza** fullchannelreview: semachado, recent-sales-cache-read failsmain/passesbranch+recent-sales. This review was in channel and absent from PRreviews endpoint; endpointempty doesNOTmeanmissingreview. C4-1710 confirms R2nominal.
+Fresh exacthead NINEdistinctworkflows allcompletedSUCCESS:
+42235304718,42235304592,42235304961,42235304851,42235304587,42235304857,42235304943,42235304725,42235304625.
+Ready transition; freshRAWheadexact/ready/mergeabletrue/clean; nativepreparedmerge againstmaine72765235 **403c6a090008be704b134482407c29239d82fb53** CLEAN. NORMALmergeexpectedhead returned **ffb354bc30a15d05030998d363c53a642570d8bb**; separateRAWGET confirmsCLOSED/mergedtrue/sameSHA. No retry/headchase/cancel/bypass/force/deploy. All314localchecks/REDhistories frompreviouscheckpointremain. ZEROownproductOPENnow.
+
+T#2799 alsoMERGED e72765235 byT withK2clean5800680540+9; noK2duplication. T#2805 hasR2cycle52 LOWeditingrecovery; Tfoundoldchannelreviewnotendpoint, newREDf7506d2e andowncorrectiveworkunderway; notK2scope. C52790 priorreview5800721796 remainsclosed.
+
+### C4-1710 form-store follow-up: real-path proof COMPLETE, correction not yet implemented
+After2811merge fetchedmain **ffb354bc30a15d05030998d363c53a642570d8bb**. MandatoryCLAUDE/AGENTS/allreservations/inbox/queue compared050bf->ffb, NOdelta. FullfreshchannelreadthroughnewC4-1710/T/etc. 148openPRs, EVERYpaginatedfilelist read without errors, includinglargelegacyPRs; lib/form-store.ts andnewproof/report paths NOT inopenPRs. **app/studio/forms/page.tsx IS occupied by#1969**. No foreignedits.
+
+RESERVAbeforeproof **28d3c6015da9683beca0ca861ff57add1116b9e3**:
+- branch **codex/k-form-response-read-evidence**
+- **tests/k-form-response-read-evidence.test.ts** new
+- **docs/reviews/k2-form-response-read.md** new
+Onlyevidencepathsreserved; lib/form-store.ts NOTedited/reservedforproductyet. No reservationdocPR/edit.
+
+Durable proof **21ab57f4ea9dee51a5ac215ca1d5d43375112df3**, parentffb354bc, tree **45cafe91967d2b0b48b3a54e4efd3479f15be0a4** native=GitData, sameownbranchabove. Twofilesonly; no intentionallyREDproductPR/CI.
+**32checks,14causalfailures,18passingassertions/controls**, REALreadResponses+parseResponse, ONLYRedisreplysynthetic:
+16scenarios (2knownempty/answer+14unknown), one existingLRANGE/LLEN call each. Missing/extrareplies, null/false/objectlist, null/brokenJSON/mixedrow, null/false/text/negative/fractionalLLEN allreturnsuccessinsteadofUnknownReply. Missingresults/nullLRANGEactualknown:0:0; mixedactualknown:1:2. Bothknowncontrols pass.
+CeilingcheckedBEFOREpipeline:1batch/2commands/case, no write/provider/newIO. Countchecks16allpass +knowncontrols2pass;14unknownexpectationsfail. No data deletedorpersonaldataexposed, proposedLOWtruthfulness/availability. No realpage/route/PDF/CSVstatusassertionclaimed.
+
+Productsource **lib/form-store.ts** remainsbyte-ID **2ea0e6ea96f864b79b9a5f9752098827f40589c3**, readerlines144-153. ActualTSscopedtest+REALimports **0diagnostics**, directedESLint0, scanner **4026tracked/0corrections**, diff0. Threecanonicalfiles pass: forms19checks, form-response-filter(node:test), form-response-pdf17checks. No aggregateuniquecontrolclaim/entire-npmtest/browser/nativeRedis/actualprovider/production/globalAAAclaim.
+Local **k2-form-evidence** HEADffb/stagedtwofiles/tree45cafe, node_moduleslink, preservewithoutreset. Logs **/tmp/k2-form-red.log**, **-types.log**, **-linked.log**, **-lint.log**. Testisdiscovered*.test.ts/existingaliases, durableGitHubsource notscratchonly.
+
+Staticconsumertrace:
+- app/studio/forms/page.tsx62 passes readResponses total/latest intoSavedForm andcurrentlyhasNOlocalcatch.
+- app/api/store/forms/export/route.ts20 usesreturnedresponsesforCSV.
+- app/api/store/forms/response-pdf/route.ts26 looksupresponseandotherwise404saysno longerkept.
+- lib/person-copy.ts208,lib/store-export.ts123readresponses.
+TheseareSTATICdependencies, notexecutedUI/exportjourneyproof. Changingreadertothrowrequireshonestunavailablestateforconsumers, notjustsubstitutingunhandledpagefailureforfalsezero. StudioFormsfile isownedopen1969: noK2edit.
+Same-fileotherstaticcandidates readForms/readForm/responseCounts/addResponse/dropFormreceipts NOTseparatelyproved, reportedtoC4 notself-expandedunit. lib/flows.ts remainsClaude3after1927.
+
+Proposedcorrectivescope reportedFULLfreshCAS **e2c2ec32d933a5542e7c67dbcf21d163348fc6e9**:
+exact2replyenvelope,fullreadablelist,nativenonnegativeintegerLLEN; elseUnknownReply; preservevalid/legacyfields/order/IO/privacy/mutators. AskedC4coordinateconsumerunavailableboundarybecauseStudioFormsisoccupied1969BEFOREreadererrorcontractchange. DidNOTimplementcorrectiveormarkREDgreen; noPR/review/gatesfabricated. Proofnominalassignmentcomplete,reproducedasrequested; correctiondependsconcreteconsumercoordination, notuserpermission. No newaccount/payment/provider/term/key/price/limit/flag/contact/PIIactions.
+
+### Exact next action
+1.ApplyC4responseonfreecorrectivescope/consumercoordination, reserveproductpathsBEFOREcode, keep21abREDsameassertions, fixrealcause+testknownandunknownconsumers, linkedtypeslintscanner/diff,mainintegrationonlycausal,9exact+onequalifiedreview/NORMALmerge.
+2.No waiting2811CI/review anymore: itisMERGED. No repeated review ofunchanged2799/2790, noflowsedit/no1969authorfileedit.
+3.FutureC6nominalreviewonlyifactualrequest;2801/2803owner-costHOLDunchanged.
+4.BeforeendingpublishthischeckpointSHAandexactproof/dependencytoFULLfreshchannel. Gates/coordinationtransient; existingcontinuityretained,noautomationcreated/updated/disabled. No arbitrarynewproductbysilence; zeroownproductOPENandnominalproofpreserved.

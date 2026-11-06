@@ -21,15 +21,22 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { type Interval, isInterval } from "@/lib/product-recurring";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 
 const PENDING = "nl:plans:pending";
 const SESSION_ID = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 const ACCOUNT_ID = /^acct_[A-Za-z0-9]{8,64}$/;
 
-/** Written down when a plan's checkout opens, so it is settled either way. */
+/**
+ * Written down when a plan's checkout opens, so it is settled either way.
+ * Only a SADD that answers it added the plan counts: the checkout is new, so
+ * anything else (no reply, 0, a word) leaves it unknown whether the daily job
+ * will ever find it, and the throw keeps the buyer from being sent to pay.
+ */
 export async function rememberPlan(account: string, session: string): Promise<void> {
   if (!isRedisConfigured() || !ACCOUNT_ID.test(account) || !SESSION_ID.test(session)) return;
-  await redisPipeline([["SADD", PENDING, `${account}|${session}|${Math.floor(Date.now() / 1000)}`]]);
+  const replies = repliesFor(await redisPipeline([["SADD", PENDING, `${account}|${session}|${Math.floor(Date.now() / 1000)}`]]), 1);
+  if (!replies || countOf(replies[0]) !== 1) throw new UnknownReplyError("the payment plan's SADD");
 }
 
 /**
@@ -51,6 +58,19 @@ export function addPeriods(anchorSeconds: number, interval: Interval, n: number)
 
 export type PlanState = "done" | "open" | "gone";
 
+/** Stripe answered 200 in a shape that is not the documented one: what it holds is unknown, never "gone". */
+export class UnknownStripeReplyError extends Error {
+  constructor(what: string) {
+    super(`Stripe answered ${what} in an unknown shape`);
+    this.name = "UnknownStripeReplyError";
+  }
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+/** A moment as Stripe sends it: whole seconds after 1970. */
+const isMoment = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+const CHECKOUT_STATUSES = new Set(["open", "complete", "expired"]);
+
 /**
  * Gives a paid plan, or a membership that ends by itself, its end. "open"
  * means the checkout can still be paid; "gone" means it never will be, or is
@@ -65,14 +85,33 @@ export async function finishPlan(account: string, session: string): Promise<Plan
     if (error instanceof StripeError && error.status === 404) return "gone";
     throw error;
   }
-  const meta = (view.metadata ?? {}) as Record<string, string>;
+  // Read in its exact shape: only a checkout Stripe says is expired, or one
+  // that is neither a plan nor a membership with an end, is let go. Anything
+  // else throws, so the plan stays pending and is asked about again.
+  if (!isRecord(view) || view.object !== "checkout.session" || view.id !== session || !isRecord(view.metadata) || typeof view.status !== "string" || !CHECKOUT_STATUSES.has(view.status)) {
+    throw new UnknownStripeReplyError("a payment plan's checkout");
+  }
+  const meta = view.metadata as Record<string, string>;
   const isPlan = meta.kind === "plan";
   if (!isPlan && !meta.ends_after) return "gone";
   if (view.status === "open") return "open";
-  if (view.status !== "complete" || typeof view.subscription !== "string") return "gone";
+  if (view.status === "expired") return "gone";
+  if (typeof view.subscription !== "string" || !view.subscription) throw new UnknownStripeReplyError("a paid plan's checkout");
+  const subscriptionId = view.subscription;
 
-  const subscription = await onAccount("GET", account, `/subscriptions/${encodeURIComponent(view.subscription)}`);
-  if (typeof subscription.cancel_at === "number" && subscription.cancel_at > 0) return "done";
+  const subscription = await onAccount("GET", account, `/subscriptions/${encodeURIComponent(subscriptionId)}`);
+  if (
+    !isRecord(subscription) ||
+    subscription.object !== "subscription" ||
+    subscription.id !== subscriptionId ||
+    typeof subscription.status !== "string" ||
+    !isMoment(subscription.billing_cycle_anchor) ||
+    (subscription.trial_end != null && !isMoment(subscription.trial_end)) ||
+    (subscription.cancel_at != null && !isMoment(subscription.cancel_at))
+  ) {
+    throw new UnknownStripeReplyError("a payment plan's subscription");
+  }
+  if (isMoment(subscription.cancel_at)) return "done";
   if (subscription.status === "canceled") return "done";
   const payments = Number(isPlan ? meta.plan_payments : meta.ends_after);
   const named = isPlan ? meta.plan_interval : meta.ends_interval;
@@ -80,17 +119,23 @@ export async function finishPlan(account: string, session: string): Promise<Plan
   // After a free trial the first payment is taken when it ends. Stripe anchors
   // the cycle there; the trial's end is read too, so the count can never
   // start before the first payment whichever way Stripe reports it.
-  const cycle = typeof subscription.billing_cycle_anchor === "number" ? subscription.billing_cycle_anchor : 0;
-  const trialEnd = typeof subscription.trial_end === "number" ? subscription.trial_end : 0;
-  const anchor = Math.max(cycle, trialEnd);
-  if (!Number.isInteger(payments) || payments < 2 || !anchor) return "gone";
+  const anchor = Math.max(subscription.billing_cycle_anchor, isMoment(subscription.trial_end) ? subscription.trial_end : 0);
+  // The plan's own terms say it is not one: nothing to end, whatever Stripe says.
+  if (!Number.isInteger(payments) || payments < 2) return "gone";
 
-  await onAccount(
+  const end = addPeriods(anchor, interval, payments);
+  const written = await onAccount(
     "POST",
     account,
-    `/subscriptions/${encodeURIComponent(view.subscription)}`,
-    new URLSearchParams({ cancel_at: String(addPeriods(anchor, interval, payments)), proration_behavior: "none" }),
+    `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    new URLSearchParams({ cancel_at: String(end), proration_behavior: "none" }),
   );
+  // Done only when Stripe says the subscription now ends there; otherwise it
+  // stays pending, and the next run reads it again (the same end is written
+  // again, so a repeat changes nothing).
+  if (!isRecord(written) || written.object !== "subscription" || written.id !== subscriptionId || written.cancel_at !== end) {
+    throw new UnknownStripeReplyError("the end of a payment plan");
+  }
   return "done";
 }
 
@@ -101,8 +146,12 @@ export async function finishPlan(account: string, session: string): Promise<Plan
 export async function settlePlans(limit = 200): Promise<{ done: number; open: number; dropped: number; failed: number }> {
   const counts = { done: 0, open: 0, dropped: 0, failed: 0 };
   if (!isRedisConfigured()) return counts;
-  const [raw] = await redisPipeline([["SMEMBERS", PENDING]]);
-  const members = Array.isArray(raw) ? (raw as string[]).slice(0, limit) : [];
+  // A pending list of unknown shape is not an empty one: the job says so
+  // (app/api/cron/plans answers not ok) instead of settling nothing.
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", PENDING]]), 1);
+  const list = replies ? stringList(replies[0]) : null;
+  if (!list) throw new UnknownReplyError("the pending payment plans");
+  const members = list.slice(0, limit);
   const now = Math.floor(Date.now() / 1000);
   for (const member of members) {
     const [account, session, opened] = member.split("|");

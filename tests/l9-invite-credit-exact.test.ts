@@ -85,6 +85,24 @@ async function main(): Promise<void> {
   await settleInvites(Date.now() + 60_000, NOW);
   await settleInvites(Date.now() + 60_000, NOW);
   is("Ana's half of Bea's first payment reaches her plan, once", (balance.get("cus_Ana0001") ?? []).map((t) => t.amount), [-1450]);
+
+  part("The credits already written are read back together, not one trip each (Claude 4 on #2722)");
+  invoices.set("cus_Bea0001", [...(invoices.get("cus_Bea0001") ?? []), ...[2, 3, 4, 5].map((n) => ({
+    ...(invoices.get("cus_Bea0001") ?? [])[0], id: `in_BeaMore0${n}`, created: nowS - PAST * DAY + n, status_transitions: { paid_at: nowS - PAST * DAY + n },
+  }))]);
+  await settleInvites(Date.now() + 60_000, NOW);
+  const real2 = redis.pipeline.bind(redis);
+  let reads = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "GET" && c[1] === creditKey(`bonus_${bea.sid}`))) reads += 1;
+    return real2(commands);
+  }) as typeof redis.pipeline;
+  try {
+    await settleInvites(Date.now() + 60_000, NOW);
+  } finally {
+    redis.pipeline = real2;
+  }
+  is("one read for the five credits written before and the bonus", reads, 1);
   done();
 }
 

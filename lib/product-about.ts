@@ -103,8 +103,11 @@ export async function writeAboutIf(statsId: string, productId: string, expected:
     if (grown < 0) await giveData(room, [{ slot, bytes: -grown }]);
     return true;
   }
-  if (answer && answer.length === 2 && answer[0] === 0 && Number.isSafeInteger(answer[1])) {
-    if (grown > 0) await giveData(room, [{ slot, bytes: grown }]);
+  if (answer && answer.length === 2 && answer[0] === 0 && Number.isSafeInteger(answer[1]) && (answer[1] as number) >= 0) {
+    // Another writer changed it since and set the slot to what it wrote (Codex G on #1856): giving back this step's
+    // own taking would count less than is kept. The slot is set to the text that is there now, by its byte length (the same count as dataBytes).
+    const length = answer[1] as number;
+    await noteData(room, [{ slot, bytes: length > 0 ? dataBytes(["x".repeat(length)], 1) : 0, set: true }]);
     return "changed";
   }
   throw new Error("a description's write could not be confirmed");

@@ -20,6 +20,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type DataStore, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import {
@@ -108,31 +109,93 @@ export async function readBook(statsId: string, now = Date.now()): Promise<Book>
 }
 
 /**
+ * The book written only while this change still holds the store's lock, in
+ * one step (Codex G on #1856): a change whose lock ran out and was taken by
+ * another never writes over that one's book. 1 written, 0 not ours.
+ */
+export const AGENT_BOOK_WRITE = `-- marktmorgen:agent-book-write:v1
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[2], ARGV[2])
+return 1`;
+
+/** Waited for the lock when an applied change is written into the book again (recordAgain). */
+const RECORD_WAIT_MS = 2_000;
+/** Tries at writing an applied change into the book before it is said as not kept. */
+const RECORD_TRIES = 3;
+
+/** The store's lock, only on Redis's exact "OK" (lib/redis-lock.ts takeLock): an unknown answer is never ours. */
+async function holdBook(statsId: string, waitMs = 0): Promise<Held> {
+  try {
+    return await takeLock(lockKey(statsId), LOCK_SECONDS, waitMs);
+  } catch (error) {
+    if (error instanceof LockBusyError) throw new BookBusy();
+    throw error;
+  }
+}
+
+/** Writes `next` while `held` is still ours: "written", "lost" (not ours any more), or "unknown" (the answer was not exact). */
+async function writeBook(store: DataStore & { statsId: string }, held: Held, next: Book, now: number): Promise<"written" | "lost" | "unknown"> {
+  const json = JSON.stringify(next);
+  await needData(store, [{ slot: SLOT, bytes: dataBytes([json], 1), set: true }], now);
+  let reply: unknown;
+  try {
+    reply = await redisPipeline([["EVAL", AGENT_BOOK_WRITE, 2, held.key, bookKey(store.statsId), held.token, json]]);
+  } catch {
+    return "unknown";
+  }
+  if (!Array.isArray(reply) || reply.length !== 1) return "unknown";
+  if (reply[0] === 1) return "written";
+  if (reply[0] === 0) return "lost";
+  return "unknown";
+}
+
+/**
  * Changes the book under the store's lock: `change` gets the book as it is
  * and answers the new one (or null to keep it) and a result. The new book
  * takes its room first; one that does not fit is refused (DataRoomError).
+ * Nothing outside the book is changed here, so a write that is not
+ * confirmed is said as such (BookWriteUnconfirmed) and nothing else is done.
  */
 export async function changeBook<T>(store: DataStore & { statsId: string }, change: (book: Book) => Promise<{ book: Book | null; result: T }> | { book: Book | null; result: T }, now = Date.now()): Promise<T> {
-  const statsId = store.statsId;
-  const owner = randomBytes(8).toString("hex");
-  const [held] = await redisPipeline([["SET", lockKey(statsId), owner, "NX", "EX", LOCK_SECONDS]]);
-  if (held === null) throw new BookBusy();
+  const held = await holdBook(store.statsId);
   try {
-    const book = await readBook(statsId, now);
+    const book = await readBook(store.statsId, now);
     const { book: next, result } = await change(book);
-    if (next) {
-      const json = JSON.stringify(next);
-      await needData(store, [{ slot: SLOT, bytes: dataBytes([json], 1), set: true }], now);
-      // Kept only on Redis's exact "OK": anything else may not have been written, and is never answered as kept.
-      const written: unknown = await redisPipeline([["SET", bookKey(statsId), json]]);
-      if (!Array.isArray(written) || written.length !== 1 || written[0] !== "OK") throw new BookWriteUnconfirmed();
-    }
+    if (next && (await writeBook(store, held, next, now)) !== "written") throw new BookWriteUnconfirmed();
     return result;
   } finally {
     // Only our own hold is let go: one that ran out and was taken by another change is left to it.
-    const [mine] = await redisPipeline([["GET", lockKey(statsId)]]);
-    if (mine === owner) await redisPipeline([["DEL", lockKey(statsId)]]);
+    await releaseLock(held);
   }
+}
+
+/**
+ * A change already carried out on the store (a confirmation or an undo) whose
+ * book was not written as ours: it is written again, on the book as it is now,
+ * under a new hold of the lock (Codex G on #1856). `record` answers the book
+ * with the change in it, or the same book when it is there already (a write
+ * that landed though its answer was lost, or another change recorded it).
+ * Throws BookWriteUnconfirmed when it still cannot be written.
+ */
+async function recordAgain(store: DataStore & { statsId: string }, record: (book: Book) => Book, now: number): Promise<void> {
+  for (let attempt = 0; attempt < RECORD_TRIES; attempt += 1) {
+    let held: Held;
+    try {
+      held = await holdBook(store.statsId, RECORD_WAIT_MS);
+    } catch (error) {
+      if (error instanceof BookBusy) continue;
+      throw error;
+    }
+    try {
+      const book = await readBook(store.statsId, now);
+      const next = record(book);
+      if (next === book) return;
+      if ((await writeBook(store, held, next, now)) === "written") return;
+    } finally {
+      await releaseLock(held);
+    }
+  }
+  throw new BookWriteUnconfirmed();
 }
 
 /** A new proposal's id: 16 random hex characters. */
@@ -178,7 +241,7 @@ export type Confirmed = { done: string[]; refused: { id: string; why: ConfirmRef
  * waiting, for the creator to decline). All under the lock, so the same proposal is never carried out
  * twice.
  */
-export function confirmProposals(
+export async function confirmProposals(
   store: DataStore & { statsId: string },
   ids: string[],
   kinds: ReadonlyMap<string, ProposalKind>,
@@ -187,27 +250,38 @@ export function confirmProposals(
   who: string,
   now = Date.now(),
 ): Promise<Confirmed> {
-  return changeBook(
+  const held = await holdBook(store.statsId);
+  const applied: Proposal[] = [];
+  let result: Confirmed;
+  try {
+    const book = await readBook(store.statsId, now);
+    const plan = planConfirm(book, ids, kinds, current, now);
+    let next = book;
+    result = { done: [], refused: [...plan.refused] };
+    for (const proposal of plan.apply) {
+      const done = await apply(proposal);
+      if (done === true) {
+        next = recordDone(next, proposal, kinds.get(proposal.kind)!, who, now);
+        result.done.push(proposal.id);
+        applied.push(proposal);
+      } else result.refused.push({ id: proposal.id, why: done === "terms" ? "terms" : done === "changed" ? "changed_since" : "failed" });
+    }
+    if (!applied.length || (await writeBook(store, held, next, now).catch(() => "unknown" as const)) === "written") return result;
+  } finally {
+    await releaseLock(held);
+  }
+  // Carried out, but the book was not written as ours: each applied proposal still waiting on the book as it is now is
+  // recorded as done there, so the change and its history agree, and another change's history is kept.
+  await recordAgain(
     store,
-    async (book) => {
-      const plan = planConfirm(book, ids, kinds, current, now);
-      let next = book;
-      const result: Confirmed = { done: [], refused: [...plan.refused] };
-      for (const proposal of plan.apply) {
-        const applied = await apply(proposal);
-        if (applied === true) {
-          next = recordDone(next, proposal, kinds.get(proposal.kind)!, who, now);
-          result.done.push(proposal.id);
-        } else result.refused.push({ id: proposal.id, why: applied === "terms" ? "terms" : applied === "changed" ? "changed_since" : "failed" });
-      }
-      return { book: result.done.length ? next : null, result };
-    },
+    (book) => applied.reduce((b, p) => (b.waiting.some((w) => w.id === p.id) ? recordDone(b, p, kinds.get(p.kind)!, who, now) : b), book),
     now,
   );
+  return result;
 }
 
 /** Puts back a confirmed change, through `restore`, when the rules allow it. */
-export function undoDone(
+export async function undoDone(
   store: DataStore & { statsId: string },
   id: string,
   current: (done: Done) => Json,
@@ -215,17 +289,24 @@ export function undoDone(
   who: string,
   now = Date.now(),
 ): Promise<{ ok: true } | { ok: false; error: UndoRefusal | "failed" }> {
-  return changeBook<{ ok: true } | { ok: false; error: UndoRefusal | "failed" }>(
+  const held = await holdBook(store.statsId);
+  try {
+    const book = await readBook(store.statsId, now);
+    const plan = planUndo(book, id, current, now);
+    if (!plan.ok) return plan;
+    const restored = await restore(plan.done, plan.restore);
+    // Changed again between the check and the write: refused as the rules refuse it, nothing put back.
+    if (restored === "changed") return { ok: false, error: "changed_since" };
+    if (!restored) return { ok: false, error: "failed" };
+    if ((await writeBook(store, held, recordUndone(book, id, who, now), now).catch(() => "unknown" as const)) === "written") return { ok: true };
+  } finally {
+    await releaseLock(held);
+  }
+  // Put back, but the book was not written as ours: the history says so on the book as it is now.
+  await recordAgain(
     store,
-    async (book) => {
-      const plan = planUndo(book, id, current, now);
-      if (!plan.ok) return { book: null, result: plan };
-      const restored = await restore(plan.done, plan.restore);
-      // Changed again between the check and the write: refused as the rules refuse it, nothing put back.
-      if (restored === "changed") return { book: null, result: { ok: false as const, error: "changed_since" as const } };
-      if (!restored) return { book: null, result: { ok: false as const, error: "failed" as const } };
-      return { book: recordUndone(book, id, who, now), result: { ok: true as const } };
-    },
+    (book) => (book.history.some((d) => d.id === id && !d.undone) ? recordUndone(book, id, who, now) : book),
     now,
   );
+  return { ok: true };
 }

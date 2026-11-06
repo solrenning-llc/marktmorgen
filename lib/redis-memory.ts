@@ -113,6 +113,13 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/agent-book.ts AGENT_BOOK_WRITE: the agent book written only while the writer still holds the store's lock.
+        if (key.startsWith("-- marktmorgen:agent-book-write:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, lock, book, token, json] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(["SET", book, json]);
+          return 1;
+        }
         // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
           const [, about, expected, text] = args;

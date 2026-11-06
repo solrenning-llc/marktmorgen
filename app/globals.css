@@ -1480,8 +1480,20 @@ a.chip {
   outline-offset: 3px;
   box-shadow: 0 0 0 3px #fff;
 }
+/*
+ * A date or time field: its parts (month, day, hour, the calendar button) take
+ * the focus inside it, and on the calendar button the field no longer matches
+ * :focus-visible, so its bands went with it (WCAG 2.4.13, /studio/email
+ * scheduling). These keep them on for as long as the focus is anywhere in it.
+ */
+.field:is([type="date"], [type="time"], [type="datetime-local"]):focus {
+  outline: 3px solid var(--violet-deep);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 3px #fff;
+}
 @media (forced-colors: active) {
-  .field:focus-visible {
+  .field:focus-visible,
+  .field:is([type="date"], [type="time"], [type="datetime-local"]):focus {
     outline: 3px solid CanvasText;
     outline-offset: 3px;
     box-shadow: none;

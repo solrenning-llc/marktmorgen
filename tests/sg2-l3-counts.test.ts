@@ -9,6 +9,9 @@
  *     INCR of sign-in emails as "under the limit" when it was null, missing,
  *     negative or text, and a sign-in email went out. An unknown count is now
  *     "over the limit".
+ *   - the sign-in route (app/api/auth/request) said "a lot of tries, wait an
+ *     hour" when the count was unknown; it now says something went wrong on
+ *     our side, try again in a moment (Claude 4, second review of #2717).
  *   - isFreshSession (lib/auth.ts) took EXISTS answered as text "1" as a fresh
  *     login. Only the whole 1 is now.
  *   - noteSignIn (lib/auth.ts) read an unknown SISMEMBER or SCARD as "a new
@@ -47,6 +50,8 @@
  * The exact replies keep working as before.
  */
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { NextRequest } from "next/server";
+import { POST as signInPost } from "@/app/api/auth/request/route";
 import { isFreshSession, noteSignIn, withinAddressLimit, withinRateLimit } from "@/lib/auth";
 import { forgetLearnerPerson, lastSeenMany, openCourseLink, requestCourseLink, studentDates, studentPage } from "@/lib/learn";
 import { addRows, finishUpload, readJob, runImport, startImport } from "@/lib/imports";
@@ -147,6 +152,22 @@ void (async () => {
   rule = null;
   is("withinRateLimit: the real counter still lets the first in", await withinRateLimit("203.0.113.8"), true);
   is("withinAddressLimit: the real counter still lets the first in", await withinAddressLimit("first@sg2-l3.example"), true);
+
+  part("The sign-in route: an unknown count is said as our side's trouble, never as too many tries");
+  let net = 10;
+  const ask = (email: string) => signInPost(new NextRequest("https://marktmorgen.com/api/auth/request", {
+    method: "POST",
+    headers: { Host: "marktmorgen.com", Origin: "https://marktmorgen.com", "Content-Type": "application/json", "x-forwarded-for": `198.51.100.${net++}` },
+    body: JSON.stringify({ email }),
+  }));
+  const answer = async (res: Response) => [res.status, ((await res.json()) as { error?: string }).error ?? "ok"];
+  for (const [label, prefix] of [["the machine's count", "nl:rl:signin:"], ["the address's count", "nl:rl:address:"]] as [string, string][]) {
+    rule = { when: counter(prefix), reply: ["OK", null] };
+    is(`sign-in route, ${label} unknown: server_error, not rate_limited`, await answer(await ask("someone@sg2-l3.example")), [503, "server_error"]);
+    rule = { when: counter(prefix), reply: ["OK", 99] };
+    is(`sign-in route, ${label} over the limit: rate_limited`, await answer(await ask("someone@sg2-l3.example")), [429, "rate_limited"]);
+  }
+  rule = null;
 
   part("isFreshSession: only EXISTS's whole 1 is a fresh login");
   const sessionId = "b".repeat(64);

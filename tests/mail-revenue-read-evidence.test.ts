@@ -12,7 +12,7 @@ import { store as redis } from "./redis-stub";
 type Pipeline = typeof redis.pipeline;
 
 const creator = {
-  stripeAccountId: "acct_MailRevenueEvidence",
+  stripeAccountId: "synthetic-mail-revenue-evidence",
   statsId: "stats_MailRevenueEvidence",
   currency: "usd",
 } as Store;

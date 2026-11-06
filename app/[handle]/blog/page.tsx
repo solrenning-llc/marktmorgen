@@ -85,7 +85,8 @@ export default async function BlogPage({ params, searchParams }: Params) {
         </Link>
         <h1 className="font-display mt-8 text-center text-3xl font-semibold leading-tight sm:text-4xl">{w.blogOf(store.name)}</h1>
         {posts.length === 0 ? (
-          <EmptyState title={w.nothingYet} body={w.blogEmptyBody(store.name)} className="mt-8" />
+          // Reached only past the last page: a store with no posts has no blog at all (notFound above).
+          <EmptyState title={w.blogPastEnd} body={w.blogPastEndBody} action={{ href: base, label: w.blogAll }} className="mt-8" />
         ) : (
           <ol className="mt-8 space-y-4">
             {posts.map((post) => (

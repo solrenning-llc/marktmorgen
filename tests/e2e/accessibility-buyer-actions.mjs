@@ -169,11 +169,15 @@ try{
   }catch(error){failed++;console.error("BUYER_MATRIX_FAILURE:"+JSON.stringify({engine,width,mode,phase,error:redact(error)}));}
   finally{cases++;await context.close();}
  }
- // 656 [WG16]: a store with nothing on it and its blog with no posts (tests/e2e/seed.ts, freshshop) each show the empty
- // state: a heading and one sentence, no dead button, nothing blank, axe AAA. Baseline at 320 and 1280 px only; its time is
- // printed so the cost it adds to this job is measured, never taken as zero.
+ // 656 [WG16]: a store with nothing on it (tests/e2e/seed.ts, freshshop) shows the empty state: a heading and one
+ // sentence, no dead button, nothing blank, axe AAA. Its blog, with no posts, has no page at all (404), never a blank one.
+ // Baseline at 320 and 1280 px only; its time is printed so the cost it adds to this job is measured, never taken as zero.
  const emptyStarted=Date.now();let emptyCases=0;
- for(const width of [320,1280])for(const path of ["/@freshshop","/@freshshop/blog"]){
+ for(const width of [320,1280]){
+  const blog=await fetch(origin+"/@freshshop/blog",{headers:{"x-forwarded-for":"198.51.100."+(40+width%7)},signal:AbortSignal.timeout(30_000)});
+  if(blog.status!==404){failed++;console.error("EMPTY_STATE_FAILURE:"+JSON.stringify({engine,width,path:"/@freshshop/blog",error:"A store with no posts has a blog page: HTTP "+blog.status}));}
+ }
+ for(const width of [320,1280])for(const path of ["/@freshshop"]){
   const context=await browser.newContext({viewport:{width,height:900},serviceWorkers:"block",extraHTTPHeaders:{"x-forwarded-for":"198.51.100."+(10+emptyCases)}});
   try{
    const page=await context.newPage();const errors=[];page.on("pageerror",error=>errors.push(redact(error)));

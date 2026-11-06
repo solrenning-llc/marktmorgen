@@ -3,7 +3,9 @@
  * a heading, one sentence and, only where it works, one action. On the public
  * store it speaks to the buyer and draws no dead button: the store with nothing
  * on it and its blog with no posts each say what this is and what comes, in
- * every buyer language. The studio is unit 2 (app/studio/page.tsx is held by
+ * every buyer language. A store with no posts has no blog at all (its page is
+ * not found, and nothing links to it); the blog's empty state is a page past
+ * the last post, with a link to all posts. The studio is unit 2 (app/studio/page.tsx is held by
  * other work); the buyer's orders and library wait on #1969, which rewrites
  * those parts.
  */
@@ -34,14 +36,15 @@ part("The words, in every buyer language");
 for (const language of ["en", "es", "fr", "de", "it", "nl", "pt"] as const) {
   const w = wordsIn(language);
   is(`${language}: the empty store has a heading and a sentence`, Boolean(w.nothingYet && w.nothingYetBody("Harbor").includes("Harbor")), true);
-  is(`${language}: the empty blog says what comes, naming the store`, typeof (w as { blogEmptyBody?: unknown }).blogEmptyBody === "function" && (w as unknown as { blogEmptyBody: (s: string) => string }).blogEmptyBody("Harbor").includes("Harbor"), true);
+  is(`${language}: a blog page past the last post has a heading and a sentence`, Boolean(w.blogPastEnd && w.blogPastEndBody && w.blogAll), true);
 }
 
 part("The public pages use it, with no dead button");
 const store = readFileSync("app/[handle]/page.tsx", "utf8");
 is("the empty store: heading and sentence, no action", /<EmptyState title=\{w\.nothingYet\} body=\{w\.nothingYetBody\(store\.name\)\} \/>/.test(store), true);
 const blog = readFileSync("app/[handle]/blog/page.tsx", "utf8");
-is("the empty blog: heading and sentence, no action (the page already links back)", /<EmptyState title=\{w\.nothingYet\} body=\{w\.blogEmptyBody\(store\.name\)\} className="mt-8" \/>/.test(blog), true);
+is("a blog page past the last post: heading, sentence and the link to all posts", blog.includes('<EmptyState title={w.blogPastEnd} body={w.blogPastEndBody} action={{ href: base, label: w.blogAll }} className="mt-8" />'), true);
+is("a store with no posts still has no blog page", /const \{ posts, total \} = await publishedPosts\(store\.statsId, page\);\s*if \(total === 0\) notFound\(\);/.test(blog), true);
 is("no bare sentence left where the blog is empty", blog.includes("{w.blogEmpty}</p>"), false);
 
 done();

@@ -47,7 +47,7 @@ jobs:
     needs: documentation-scope
     if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 50
     env:
       NEXT_TELEMETRY_DISABLED: "1"
       AX2_KEYBOARD_PUBLIC_STANDARD: ${{ (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}

@@ -196,3 +196,9 @@ Branch `codex/o-community-notice-read-evidence`; durable RED `9071b30c1fb21a1536
 - #2787 requires ONE qualifying independent no-finding review and NINE exact-head workflow successes before merge. No browser/nativeRedis/provider/hosted/globalCI certified. No docs/reservations delta. Review request goes to C4/U/R2 through channel, one controller only.
 - #2627 remainsb804ff81, previously9SUCCESS, fresh discussion contains only own requests/no focal closure. Do not merge or move it; R2 owns return under C4. Other three units: notice proof9071b30c awaiting unknown-display coordination (1962 source blocker was obsolete); device work still occupied2576/1963; mentionproofcc994e9c awaiting callers1969/2672 coordination. Five occupied now, NO sixth. #2629/#2640 and oldfive merged, never recreate.
 - Next exact: act on nominal review/terminal own CI or C4 coordination. Fix real findings with RED first; otherwise preserve active head. With qualified review+nine exact successes, fresh native clean merge and normal expected-head merge followed by GET confirmation. No retries consumed or cancellations, foreign refs, payments/prices/limits/commissions/flags/gates/PII/provider/contact changes this continuation.
+
+
+### #2787 exact initial CI and review request
+
+- One initial snapshot: eight in_progress and one queued, IDs42186789575/42186789439/42186789418/42186789415/42186789574/42186789667/42186789706/42186789647/42186789565. No completed-success count claimed, no repeated poll/retry/head move.
+- Review requested in the PR; channel request/stop append met409. Mandatory>=2min wait and fresh-full reread before retry. If later channel confirms request/stop, that confirmation supersedes this pending note.

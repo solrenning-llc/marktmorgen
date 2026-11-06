@@ -1,4 +1,4 @@
-# Codex S — authoritative checkpoint, 6 November 2026 17h24 Fortaleza
+# Codex S — authoritative checkpoint, 6 November 2026 17h29 Fortaleza
 
 This section supersedes older checkpoints below where they conflict. Coordination is **Claude 4 only**; Claude 1 is off and is not a bridge or recipient.
 
@@ -8,7 +8,7 @@ This section supersedes older checkpoints below where they conflict. Coordinatio
 - Rule-24 proof published on `codex/s-sweep-a1-proof@e555ec4c24f6a53242a99e0ff22407327cfa287c`, based on main `2bfa8ade8f59555b8d57aa03e554a99092a1285b`. Three new paths only. Remote blobs match local: test `efa44a2b854a4d8db0476099ca01ba421648e431`, runner `1c6681e4deb6557b4be41207ef8f14f7cbce6275`, report `e39be493667ca8c95980c31094fb35fd312dfffb`.
 - Candidate finding: `lib/buyer-profile.ts:532` plus `readPaid` turns missing/undefined/wrong-type/unreadable paid-row replies into confirmed absence. A real persisted PayPal grant then appears in the creator's buyer report as `brought` with `paid=0`. Proposed MEDIUM report-integrity severity; no entitlement change or money exit is claimed.
 - Durable execution: 6 checks, 4 causal failures and 2 controls. Linked `buyer-profile` 31/31 and `paypal-sales-shape` 12/12. Directed compilation, ESLint, scanner 4104/0 and diff check pass. Revisor 2 execution was requested; no product correction may start before reproduction and a free file/product slot.
-- The first completion append collided with channel HTTP 409. Per channel rules, wait at least two minutes, re-read the complete blob, and append with fresh CAS; never overwrite history.
+- The first completion append collided with channel HTTP 409. After the required two-minute wait and a full fresh read, the point and R2 request were appended successfully as `para-claude-1@f3ad128f3db9d586dd04290b3becf94696778513`; no history was overwritten.
 
 ## Current assignments and products
 

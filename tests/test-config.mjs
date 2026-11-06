@@ -198,6 +198,12 @@ export function testAliases(file,root,here){
  }
  if(file==='assistant-counter-admission.test.ts')for(const name of ['redis','store','store-assistant','metered-limits'])aliases['@/lib/'+name]=join(here,'assistant-counter-admission-world.ts');
  if(file==='form-identity-binding.test.ts')for(const name of ['store-request','store'])aliases['@/lib/'+name]=join(here,'form-identity-binding-world.ts');
+ if(file==='k-form-submit-feedback.test.ts')for(const name of ['metered-limits','request-origin','request-guard','store','flows','store-join','affiliate-leads','page-funnel-store','visit'])aliases['@/lib/'+name]=join(here,'k-form-submit-world.ts');
+ if(file==='k-form-submit-feedback-render.test.ts'){
+  for(const name of ['next/navigation','next/link'])aliases[name]=join(here,'k-form-submit-feedback-world.tsx');
+  for(const name of ['store','form-store','catalog','page-funnel-store'])aliases['@/lib/'+name]=join(here,'k-form-submit-feedback-world.tsx');
+  for(const name of ['store-product','sales-blocks'])aliases['@/components/'+name]=join(here,'k-form-submit-feedback-world.tsx');
+ }
  return aliases;
 }
 export function testEnvironment(env){return{...env,DEMO_STUDIO_ADMIN:'operator@example.test',STRIPE_DEMO_ACCOUNT_ID:'acct_fixtureDemo',NIMBUS_DATA_KEY:env.NIMBUS_DATA_KEY??'tests-only-not-a-real-deployment-secret'};}

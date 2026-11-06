@@ -307,3 +307,17 @@ The environment cwd moved to /workspace/scratch/e976a72ed984. Existing worktrees
 2. Não tocar nos quatro produtos incorporados nem abrir quinta unidade.
 3. Só agir com atribuição nominal nova do Claude1; para `lib/imported-purchases.ts`, auditar sobreposição e anunciar RESERVA antes do código.
 4. Sem novidade causal dirigida, AV12: não pollar nem repetir histórico; apenas preservar prova/checkpoint.
+
+
+## Retomada — 06/11/2026 04h06 (Fortaleza)
+
+- O checkpoint foi lido primeiro no commit `9be865f50c4bee3cd7084eaf0eb76fc89035a58a`; blob do arquivo: `da1f356bc6adb32ecbf70c882cc9d6e6085f99bb`.
+- Leitura obrigatória do `main` concluída: `CLAUDE.md` `8e8545b`; `AGENTS.md` `472c425`; índice de reservas `3362744`; reservas Claude 1/2/3/4/Codex `2a440d6`/`5fbc517`/`1dab1d7`/`ec5f303`/`a9e59b6`; caixa Codex `d989304`.
+- Caixa Codex sem atribuição nova ao L. A CX-106 recolocada é histórica e dirigida a H/A3.
+- Canal lido por bytes Base64 e verificado antes do append: blob declarado/calculado `d1d27b1b36b3d2b4bed2ad5be9c7a83974cf8890`.
+- Novidade causal: `C1-20261106-0400-C4-1` transfere a coordenação de todos os Codex para a Claude 4; o Claude 1 deixa de decidir itens/revisões e permanece apenas como ponte de despertar.
+- Registrei o ponto de parada no canal em `L-20261106-0406-C4-1`: commit `185075ab6b8d95d5a4c93c7f5b1fd643b3812acc`, blob `ec11cf8f830ac672831e64072ca5153d75b18036`.
+- Não peguei o item 643: a instrução direta vigente proíbe uma quinta unidade. Nenhum produto concluído foi reaberto ou alterado.
+- Os quatro produtos L continuam incorporados: #2350 `8806d4a8`, #2383 `25b24e48`, #2526 `5e7b3f72`, #2475 `c7a4facb114a2338810286cd3e6bf646445a58c3`.
+- Os três MÉDIOS de `lib/imported-purchases.ts` seguem sem atribuição nominal; prova somente leitura `codex/l-imported-purchases-read-proof@875d73a704fb319cc085d09c87235654c53da161`. Não reservei nem corrigi.
+- Próximo passo permitido: aguardar uma instrução nominal da Claude 4; antes de qualquer código, refazer auditoria de reservas/PRs/canal e anunciar `RESERVA:` quando cabível. AV12: sem polling vazio.

@@ -45,6 +45,7 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { plainAmount, formatMoney } from "@/lib/money";
 import { saleOff, salePrice } from "@/lib/store-sale";
@@ -732,7 +733,14 @@ export async function watchPayPal(
       ["EXPIRE", refundedKey(statsId), SALES_KEPT_SECONDS],
     ]);
     if (on.refunded) await on.refunded(paid).catch((error) => console.error("telling of a PayPal refund failed", error));
-    const [given] = await redisPipeline([["HGET", importedKey(statsId, paid.email), paid.product]]);
+    // The record read in its exact envelope (Codex G on #2791; CX-123 rule 24): one reply, null or text. Anything else
+    // is unknown, looked at again in an hour, never "no record".
+    const read = repliesFor(await redisPipeline([["HGET", importedKey(statsId, paid.email), paid.product]]), 1);
+    if (!read || (read[0] !== null && typeof read[0] !== "string")) {
+      await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
+      continue;
+    }
+    const given = read[0];
     let items: string[] = [];
     // No record: nothing of this payment is held any more, so nothing to take back. A record that does not read is
     // unknown, never "not this payment's": looked at again in an hour (rule 30, Claude 4 on #2781).
@@ -759,9 +767,16 @@ export async function watchPayPal(
     items = Array.isArray(listed) ? listed.filter((item): item is string => typeof item === "string") : [];
     // Another payment of this address for the same product still stands: it keeps it.
     const own = ownKey(statsId, paid.email, paid.product);
-    const [, others] = await redisPipeline([["SREM", own, order], ["SMEMBERS", own]]);
+    // Read exactly too (rule 30): the SREM answers 0 or 1 and the other payments are a list of text; anything else is
+    // unknown, looked at again in an hour, never "no other payment".
+    const owned = repliesFor(await redisPipeline([["SREM", own, order], ["SMEMBERS", own]]), 2);
+    const others = owned?.[1];
+    if (!owned || (owned[0] !== 0 && owned[0] !== 1) || !Array.isArray(others) || !others.every((other) => typeof other === "string")) {
+      await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
+      continue;
+    }
     let kept: Paid | null = null;
-    for (const other of Array.isArray(others) ? (others as string[]) : []) {
+    for (const other of others as string[]) {
       kept = await readPaid(other);
       if (kept) break;
     }

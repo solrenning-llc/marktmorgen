@@ -1,3 +1,27 @@
+# Codex S — authoritative checkpoint, 6 November 2026 16h26 Fortaleza
+
+This section supersedes older checkpoints below where they conflict. Coordination is **Claude 4 only**; Claude 1 is off and is not a bridge or recipient.
+
+## Causal events completed this turn
+
+- **#2828** exact `1588b6350b04631a080929d42120102f58e301d3`: final unique S review **5805679567, no findings**. Durable RED `e46fce93df4093a46c6b3ec5d4fb2abb38262da0` reproduced 12 checks / 7 causal failures / 5 controls; final focal 12/12 and five linked `mail-draft*` groups 562/562. Full TypeScript, scoped ESLint, diff and scanner 4069/0 clean; exact-head hosted snapshot 9/9 SUCCESS. Unknown/sparse/inherited/extra/malformed/partial draft replies remain unavailable; confirmed absence makes no storage call. Foreign H2 PR: S does not merge.
+- **#2801** exact `4b7c9a48268e081d0716790bd78670800ace87e5`: money/cost review **5805761543, 1 HIGH MR, NOT CLEAN**. The formula at `tests/plan-cost-registry.ts:862` counts one Blob PUT, but the installed `@vercel/blob` 2.8.0 path used by the new `uploadPresigned` call allows ten retries beyond the initial request. The studio counter bounds upload requests, not attempts inside one request, and no source proves failed/rejected attempts free. Creator PUT retry exposure alone is US$0.10/month = US$1.20/year; author-measured US$65.4032 becomes US$66.6032, above the owner-decided US$66 ceiling, before retryable simple operations/bytes. Required: durable RED tied to actual retry bound; count every potentially billable attempt/byte or enforce/prove one attempt; regenerate reports/ceiling; stop for owner if still above US$66. No price/visible limit/commission/gate change.
+- #2801 functional side was otherwise clean: durable RED `9235bc3686` fails on missing contract; exact head focal 22/22 and 329/329 linked checks run; full TypeScript, diff and scanner 4072/0 clean; lint 0 errors and one base-identical pre-existing warning. Await an author correction/new exact head; do not call it clean.
+- **#2825** reconciled exact `b53cf63fd885f55c8f03e9e564b7a1fbc31f4f2a`: short S confirmation **5805801056, no findings**. Direct GitHub blob comparison proves runner `7a8bfca45447d0f175a24a50aa7c60d0b1fd4642` and test `87df9819370317d3d21346812b324ea6a3f881bb` are byte-identical to prior reviewed head `c2c0b4cb...`; parent `849cef1d...` retains original runner `9ac30c37...`. Last causal snapshot: 8/9 SUCCESS, one in progress. V owns normal merge only after 9/9 and a clean gate.
+- The local checkout could not materialize #2825 because the shared overlay is 100% full; it was interrupted without ref or branch change. The exact-head confirmation used GitHub blob identities and hosted workflow state instead.
+
+## Five own products — unchanged
+
+1. #2473 `d57357ab42fa2abc522def9f16c90e3e526bd0c3`: blocked on contract/shared-reader decision.
+2. #2516 `a8f0ff1c3bee1fe82db87b903df8be1a74b66967`: clean review; last causal state 8/9, shared Firefox failure outside S.
+3. #2689 `481e26c64c0b3031645c85c8c46b7cd1bb8f71b2`: blocked on occupied Studio UI/coordination.
+4. #2770 `7fa81525040f7712f063a72a367a20e506076a3c`: last causal state 9/9; explicit nominal R2 return still missing.
+5. #2798 `cb6673a982efb43e84c266bc95018d22b5909f77`: R2 clean; last causal state 8/9.
+
+Exact next events are causal: #2801 author correction/new head, #2825 ninth SUCCESS/normal V merge, a return on an own head, or another explicit unclaimed review. CX-127 is acknowledged in channel. Never retry CI, edit an author branch, open a sixth product, touch #2111/stats/store-readings, or turn unknown cost/data into zero/complete.
+
+---
+
 # Codex S — authoritative checkpoint, 6 November 2026 15h17 Fortaleza
 
 This section supersedes older checkpoints below where they conflict. Coordination is **Claude 4 only**; Claude 1 is off and is not a bridge or recipient.

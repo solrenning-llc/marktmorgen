@@ -43,6 +43,10 @@ const en = {
       title: "Something went wrong on our side",
       body: "Nothing was changed. Try again in a moment.",
     },
+    unconfirmed: {
+      title: "We could not confirm the switch",
+      body: "Stripe's answer did not say whether it went through. Look at your membership below before you try again: it shows the plan you are on now.",
+    },
     expired: {
       title: "This link has expired",
       body: "A link to your membership works for one hour. Ask for a new one below; it takes a few seconds.",
@@ -400,6 +404,10 @@ const es: MembershipWords = {
       title: "Algo salió mal por nuestra parte",
       body: "No se cambió nada. Vuelve a intentarlo en un momento.",
     },
+    unconfirmed: {
+      title: "No pudimos confirmar el cambio",
+      body: "La respuesta de Stripe no dijo si se hizo. Mira tu membresía abajo antes de intentarlo de nuevo: muestra el plan que tienes ahora.",
+    },
     expired: {
       title: "Este enlace ha expirado",
       body: "Un enlace a tu membresía funciona durante una hora. Pide uno nuevo abajo; tarda unos segundos.",
@@ -741,6 +749,10 @@ const fr: MembershipWords = {
     error: {
       title: "Un problème est survenu de notre côté",
       body: "Rien n'a été modifié. Réessayez dans un instant.",
+    },
+    unconfirmed: {
+      title: "Nous n'avons pas pu confirmer le changement",
+      body: `La réponse de Stripe ne disait pas s'il a été fait. Regardez votre abonnement ci-dessous avant de réessayer${S}: il montre la formule que vous avez maintenant.`,
     },
     expired: {
       title: "Ce lien a expiré",
@@ -1093,6 +1105,10 @@ const de: MembershipWords = {
     error: {
       title: "Bei uns ist etwas schiefgelaufen",
       body: "Es wurde nichts geändert. Versuchen Sie es gleich noch einmal.",
+    },
+    unconfirmed: {
+      title: "Wir konnten den Wechsel nicht bestätigen",
+      body: "Die Antwort von Stripe sagte nicht, ob er durchging. Sehen Sie sich Ihre Mitgliedschaft unten an, bevor Sie es noch einmal versuchen: Dort steht Ihr aktueller Tarif.",
     },
     expired: {
       title: "Dieser Link ist abgelaufen",
@@ -1457,6 +1473,10 @@ const it: MembershipWords = {
       title: "Qualcosa è andato storto da parte nostra",
       body: "Non è stato modificato nulla. Riprova tra un momento.",
     },
+    unconfirmed: {
+      title: "Non abbiamo potuto confermare il cambio",
+      body: "La risposta di Stripe non diceva se è andato a buon fine. Guarda la tua iscrizione qui sotto prima di riprovare: mostra il piano che hai adesso.",
+    },
     expired: {
       title: "Questo link è scaduto",
       body: "Un link al tuo abbonamento funziona per un'ora. Chiedine uno nuovo qui sotto; ci vogliono pochi secondi.",
@@ -1805,6 +1825,10 @@ const nl: MembershipWords = {
       title: "Er ging bij ons iets mis",
       body: "Er is niets gewijzigd. Probeer het zo opnieuw.",
     },
+    unconfirmed: {
+      title: "We konden de wissel niet bevestigen",
+      body: "Het antwoord van Stripe zei niet of die gelukt is. Kijk hieronder naar je lidmaatschap voordat je het opnieuw probeert: daar staat het abonnement dat je nu hebt.",
+    },
     expired: {
       title: "Deze link is verlopen",
       body: "Een link naar je lidmaatschap werkt een uur. Vraag hieronder een nieuwe aan; dat duurt een paar seconden.",
@@ -2149,6 +2173,10 @@ const pt: MembershipWords = {
     error: {
       title: "Algo correu mal do nosso lado",
       body: "Nada foi alterado. Tente novamente daqui a pouco.",
+    },
+    unconfirmed: {
+      title: "Não conseguimos confirmar a mudança",
+      body: "A resposta do Stripe não disse se ela foi feita. Veja a sua subscrição abaixo antes de tentar de novo: mostra o plano que tem agora.",
     },
     expired: {
       title: "Esta ligação expirou",

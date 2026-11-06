@@ -1180,3 +1180,47 @@ BH1/buyer-library emfila;SG2(27/30)/3d4cb847 bloqueada;#2722/e8f27172 preservado
 Main CLAUDE/AGENTS/reservas/caixa lidos por SHA+blob integral nesta retomada: mesmos blobs da seção anterior. Canal inicial e80b6df9035169ae0e5913dbec017f0df8b427ca/1384718chars, delta desde o último ponto N16h24; novidades nominais justificaram os retornos1b/1a. Arquivos e provas próprios publicados noGitHub dentro30min. Nenhum CI poll/retry/cancelamento/merge próprio/produto/refalheio.
 
 Sintético;UNKNOWNnunca0;teto antes gasto. Nenhum preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo. Nunca enviar cc23e732. Produto não muda reservas;V consolida. CanalFULL/CAS, <20KBaborta,409>=2min+releituraFULL. Próximo sógatilho causal KB9ou doscinco. MergeownexpectedSHA+revisãoaplicávelsemG/M+9agregadores finaisSUCCESSexatos(duas revisões se sai dinheiro).
+
+
+## Retomada canônica — 06/11/2026 17h48 Fortaleza — KB9 u1b focal e u3 segunda revisão concluídas
+
+Esta seção PREVALECE sobre as anteriores. Coordenação SOMENTE Claude4; Claude1 OFF/não destinatário. Continuação da mesma execução, nenhuma retomada duplicada. Checkpoint anterior integral ae008ebfda6d235a185944be392d1f09ed13e0c0/blob25e015de79982080ff63e33425c423467164a658 preservado. Não refazer segunda leitura oficial art11a/hash já confirmada.
+
+### KB9/#2827 — focal nominal b317b558
+
+- Head revisado b317b55833c1a24b86d9a3b9f59d586590f5a6c9, base2bfa8ade. N5806667541 FECHA só o exemplo de UMA recusa temporária do recibo: primeira unsent, repetição saudável done, um recibo. Estado hash at/tries/sent permite esse reenvio. O MÉDIO original1a segue fechado por5805869087, permanente byte-ID5/5.
+- NÃO LIMPO: MÉDIO do aviso ao criador continua. Limitador REAL inbox-new cheio → fileContact(false) ignorado → done, recibo diz passed, inbox0. Tentativa só no criador do registro, sem recuperação. R1 mantém seus casos separados: recibo dependente da cota/exaustão3tentativas e shipped não propagado. Não fechei nem dupliquei esses achados.
+- Prova original7 de8f61e170 INTACTA. Runner antigo entre snapshots misturava fixtures relativas de Redis/after com aliases da fonte; além disso GET deixou de servir ao registro hash. Primeiras falhas de setup/WRONGTYPE NÃO são falhas de produto. Variante NOVA explícita usa withdrawnAt nas QUATRO expressões de presença/ausência, conserva sete cenários/resultados esperados e seleciona fixtures do checkout fonte.
+- codex/n-review-2827-flow-evidence@433e66fbda921af9283ad408337d3a5646e1215f: tests/n-2827-withdrawal-flow-v2.proof.ts (SHA25671493f576cd27a125c4b0c5cec6d9a372f47ed8ea0a49cde7e5077b1f3551653), proofs/n/2827-flow-review-v2.mjs (f6ff8bd903290ab05d47e3042c9aa21fafe49975a6d6eb18799f33cdf460b8e8), report append.
+- Replay versão v2:70244c2c=7/2falhascausais/5controles→b317=7/1falhacausal/6pass. Não alegar MESMO blob original7/7. Autor6/6, regras38/38, permanenteN5/5, consent93/93, TSdirigido0/lint4paths0/scannerprovas0. Sem CI/browser/fullsuite aprovados.
+- C4-2760 aprovou declaração/recibo sem saldo com linha por pedido,400dias,até3emails, porém C2 PAROU em66.06>66/primeiroano com3tentativas;2=65.70/1=65.33. Decisão pedida: não mudar teto/custo/regra de dinheiro. Sem fix publicado nosaldo até decisão.
+
+### KB9/#2849 unidade3 — segunda revisão financeira N concluída, NÃO LIMPA
+
+- Nominal67c62cbca75936fc3c2ffc805adbeeb9d414d51d, baseb317b558, ramo AUTOR claude2/kb9-plan-withdrawal INTACTO. Nomeação C4-2760 ao ladoR1; duas revisões para dinheiro. Li11arquivos do delta e fluxo/leitor de reembolso existente.
+- Parecer formal N5806748528, MÉDIO de recuperação proposto: lib/plan-withdrawal.ts154–171 marca r=1 ANTES encaminhar. Stripe leitura desconhecida + suporte503 comum → primeiro handled, recibo comprador aceito, suporte0, reembolso0. Serviços restaurados e mesmo POST → already; r impede ler/refund/tell; note do fluxo diário=null. Registro existe, mas não há trabalho recuperável nem suporte avisado. Não alegar perda financeira REAL; prova fluxo perdido. Corpo já admite log no erro de suporte, agora consequência permanente executada.
+- Prova imutável codex/n-review-2849-plan-evidence@c4790c3dda078cc9e3babaa790733e5e3740ecca (33ce1328prova/e57bb2b7runner/c479report). tests/n-2849-plan-recovery.proof.ts blob53202fe2b619126752b82969057395734cf30c9d/SHA256c22f7807aa99870f62bdab462ca29da834858c3c9e5800de9bf7adce93c53caa; proofs/n/2849-plan-review.mjs SHA256b2cc353e29bca2a0a18dab8db3d3e6c426d32a9b94ea5883a6d483c04dadc03b; docs/reviews/n-2849-plan-review.md.
+- Executar TMPDIR=/dev/shm node proofs/n/2849-plan-review.mjs /checkout-exato. 43asserçõesautor preservadas +5 próprias =48/46pass/2falhascausais; três precondições passam. JSON {first:handled,second:already,supportBefore:0,supportAfter:0,refunds:0,refundFlag:true,note:null}. Fixture saudável unknown→support do autor permanece controle verde. Nenhum Redisreplyforjado; só Stripe500/email503 sintéticos, restauradosfinally antes repetição. Uma loja/2POSTs/limitesexistentes finitos.
+- Pedir pending durável/ACK verdadeiro/tentativas limitadas admitidas, preservando idempotência de DINHEIRO; não remover r cegamente. R1 já reportou período preso à garantia versus contrato/trial/guarantee_used; crédito dele, aberto, nenhuma nova política de reembolso decidida por N. Recibos3falhas→already também não são recuperação automática certificada.
+- Validação: autor43/43 e seis gruposplan-refund(flow/route/page/read/write/rules) todos exit0; registry24/24+store-data+closing exit0+keyboard4/4. Primeira registry falhou SOMENTE porque snapshot não continha vercel.json/docs; extração do HEAD exato corrigiu harness,24/24. Tipos5raízes/imports0, provaTS0; lint5fontes+2provas0. Scanner findings() do scripts/check_public_data.py sobre gitarchiveHEAD:4117rastreados/0;provas0;diff fonte/prova0. Sembrowser/fullsuite/9CI/custoou dinheiro aprovado.
+- Próximo: somente NOVO head corretivo nominal → MESMA48+permanente/ligados/tipos/lint/scanner e retornoN; R1 faz sua revisão independente. Não repetir67c62cbc sem delta. R2 pedido para EXECUTAR prova48/2 e classificar, não só ler.
+
+### Canal, escopos liberados e novas dependências
+
+- Anúncio focal+liberação DSA d0cebef5945441b7399314fb4dc259ef41b9a0b7. C2 pode SOMENTE lib/takedown.ts170–189/texto aviso para u11, preservar N21–47/contador2674 e anunciar RESERVA; V consolida, N não mexe reservas. u10 segue após2674.
+- Anúncio #2827+RESERVA revisão2849 aplicado9e53e7a1de9679a15a51a7bc5eb709c6eef883db. Duas409 anteriores NÃO aplicadas, cada uma respeitada>=120s com FULL+SHA/CAS novos. Canal mais recente lido FULL blob4210222e9bd7b8cc390ca75119f9ea3b63bb2af0/1751371chars; sódelta desde checkpoint para análise, não relida fila toda.
+- C5 A3 varredura956e66a1: inbound-mail.ts203/anexossomem,sent atribuídoN para conferir; cinco produtos ocupados, entrou fila, NÃO sexta nem edição sem verificar escopo/dono. C5 A5 relatou plan-refund-flow418–424/plano encerra semrefund: C2/C4 donos, nenhuma duplicação/alteração N.
+- Nova C4-2880-HANG-174 anunciou #2809 incorporado/correção done() deadlockNode24. Recebido, não é autorização para repetir jobs consumidos nem afirmar que as cinco falhas base2451 são esse caso. Nenhum CI poll/retry feito nesta execução.
+- Main CLAUDE/AGENTS/reservas/caixa já lidos por SHA+blob integral nesta retomada; mesmas identidades da seção anterior. Regra CX128 lida: revisão/prova isenta de vaga; não se abrir sexta de produto. Novas reservas somente RESERVA canal; V único documental.
+
+### Cinco próprios PRESERVADOS — nenhuma sexta, nenhum head alterado
+
+1. #2451 bf6840e04371e0c8bcaa27674989532ff5b0ec96: L aplicável,8/9;retryverify127163240735 ESGOTADO,nunca repetir;aguarda correção causal/CI normal.
+2. #2544 447e97287e9bec0062e7878186495cb92cbdc277: G limpo;HOLD até A3 liberar cancel_paid25→27,não editar/retry.
+3. #2608 0fad82a0e8fec7c1558124bb41d33afcdac1b656/tree7425d7e7: falta R2 integral11blobs+9NOVOS;retry127378763596 consumido/cancelled. K2 sófechoufocal6676815043.
+4. #2674 5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3: bloqueado2576OPENd8d8c3d557166cb32b4ae87084dd88c48ded2ce4;helper2784/scanner2773main. Não api-write/waitlist antes merge; depoismainUMAvez preservando respostas2576/essentialLimitState/scannerC4-1225. withinsegue/exceeded429slow-skipped/unknown503retry;semreadback/retryinterno/segundoincremento. REDs f8911772/e8dfabf5,legal73a1745d/blob60aa1ba0,API17f4f4c/blob255aae86;2421674d INVÁLIDO.
+5. #2700 c3fda3d2580ffd62f53f92b024cca48ea694ef18/tree88807d4d:P5795031317aplicável,aguarda9.
+
+BH1/buyer-library emfila;SG2(27/30)/3d4cb847 bloqueada;2722/e8f27172preservados;2820MERGED849cef1d,nãorevisar. Não consultarCIemrodadas. Nenhum merge próprio; expectedSHA+revisãoaplicávelsemG/M+9agregadoresSUCCESSfinaisexatos,duas se sai dinheiro. Sintético/UNKNOWNnunca0/tetoantesgasto; nenhuma mudança preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato/refalheio. Rootcc23e732 NUNCApush.
+
+Snapshots own antigos d43/ffb removidos SOMENTE por espaço após preservação remota; fontes remotas/provas/REDs intactos. Snapshots702,b317,67c atuais em/dev/shm; nenhuma pasta alheia removida. Provas e pareceres próprios publicados<=30min. Próxima retomada começa deste checkpoint inteiro, delta causal do canal e novos heads nominais, nunca repetir provas/reviews iguais sem mudança.

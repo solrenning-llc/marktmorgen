@@ -23,6 +23,7 @@ import type { ExtraNotes } from "@/lib/extras-notes";
 import type { BumpChoice, ProductPaging } from "@/lib/catalog";
 import { ProductUpdateBox } from "@/components/product-update-box";
 import { ShippingEditor } from "@/components/shipping-editor";
+import { PhysicalLegalEditor } from "@/components/physical-legal-editor";
 import { MAX_SHIPPING_SKU } from "@/lib/shipping";
 import { confirmsOptionWrite, OPTION_NOT_CONFIRMED, optionRefusalWords } from "@/lib/option-confirmation";
 import { CheckoutFieldsEditor } from "@/components/checkout-fields-editor";
@@ -2505,6 +2506,7 @@ export function ProductEditor({
                 {product.call || product.course || product.shipping ? null : <BundleToggle product={product} />}
                 {/* A physical product the creator ships (lib/shipping.ts), on one that hands over nothing else. */}
                 <ShippingEditor product={product} />
+                {product.shipping ? <PhysicalLegalEditor product={product} /> : null}
                 {/* Shipped at several prices: sizes or versions, each shipped the same way. */}
                 {product.shipping ? (
                   <OptionsBlock

@@ -22,7 +22,7 @@ import { listingOf, parseProduct, readProduct } from "@/lib/catalog";
 import { storeForEmail } from "@/lib/store";
 import { parseShipping } from "@/lib/shipping";
 import { safetyGaps } from "@/lib/physical-legal";
-import { checkLegalWrite, confirmsLegal, gapSummary, legalProblemMessage, readPhysicalLegal } from "@/lib/physical-legal-record";
+import { LEGAL_LABELS, checkLegalWrite, confirmsLegal, gapSummary, legalProblemMessage, readPhysicalLegal } from "@/lib/physical-legal-record";
 import { AGENT_COVERAGE } from "@/lib/agent-coverage";
 import { POST as legalRoute } from "@/app/api/store/physical-legal/route";
 import { store as redis } from "./redis-stub";
@@ -148,9 +148,10 @@ async function main(): Promise<void> {
   part("The studio block");
   is("the summary of what is missing", [gapSummary([]), gapSummary(["manufacturer-name", "picture", "warnings"])], ["", "Not shipped to the EU/EEA until these are filled: the manufacturer's name, a picture of the product and the warnings, or a check that it has none."]);
   const form = readFileSync("components/physical-legal-editor.tsx", "utf8");
-  for (const words of ["Product safety and manufacturer", "Net quantity", "California Proposition 65 warning (optional)", "This product has no warnings", "Manufacturer name", "EU responsible person", "aria-invalid", "aria-describedby", "role=\"alert\"", "min-h-11", "/api/store/physical-legal", "confirmsLegal", "checkLegalWrite", "gapSummary"]) {
+  for (const words of ["Product safety and manufacturer", "Net quantity", "California Proposition 65 warning (optional)", "LEGAL_LABELS", "EU responsible person", "aria-invalid", "aria-describedby", "role=\"alert\"", "min-h-11", "/api/store/physical-legal", "confirmsLegal", "checkLegalWrite", "gapSummary"]) {
     is(`the form has: ${words}`, form.includes(words), true);
   }
+  is("its labels, shared with the errors", [LEGAL_LABELS["manufacturer.name"], LEGAL_LABELS.noWarnings, LEGAL_LABELS.productType], ["Manufacturer name", "This product has no warnings", "Product type or model"]);
   is("the form never writes a warning for the creator", /WARNING:/.test(form), false);
   is("it never says the product complies", /\b(compliant|complies|compliance)\b/i.test(form), false);
   const editor = readFileSync("components/product-editor.tsx", "utf8");

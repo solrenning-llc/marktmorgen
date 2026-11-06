@@ -38,6 +38,7 @@
 import { MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
 export { MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
 import { type Shipping, parseShipping } from "@/lib/shipping";
+import { type PhysicalLegal, readPhysicalLegal } from "@/lib/physical-legal-record";
 import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
@@ -249,6 +250,13 @@ export type Product = {
    */
   shipping?: Shipping | null;
   /**
+   * The legal information the creator filled on a product they ship
+   * (lib/physical-legal-record.ts, 618 [SZ2]): EU product safety, a
+   * Proposition 65 text and the net quantity of each price. Absent or null is
+   * nothing filled. Kept on the full record only, never on the listing.
+   */
+  legal?: PhysicalLegal | null;
+  /**
    * A draft: kept in the studio and left off the store, its own page and its
    * checkout until the creator publishes it. What an import makes starts
    * here. A hidden product can still be part of a bundle.
@@ -261,7 +269,7 @@ export type Product = {
  * its own page, a download and most of the site need. Anything that takes a
  * Listing also takes a full Product.
  */
-export type Listing = Omit<Product, "fields" | "funnel">;
+export type Listing = Omit<Product, "fields" | "funnel" | "legal">;
 
 /**
  * One product as the store record lists it: its id, what kind of thing it is
@@ -371,6 +379,8 @@ export function parseProduct(entry: unknown): Product | null {
   // An unreadable physical record must not become a digital product or free shipping.
   // Leave the stored creator record intact and refuse to offer this product.
   if (value.shipping !== undefined && value.shipping !== null && !shipping) return null;
+  // Unreadable legal fields read as not filled, so every EU/EEA gap stays open; the product itself still reads.
+  const legal = readPhysicalLegal(value.legal);
   return {
     id: value.id,
     title: value.title.slice(0, MAX_TITLE_LENGTH),
@@ -411,6 +421,7 @@ export function parseProduct(entry: unknown): Product | null {
     yearly: parseYearly(value.yearly),
     note: value.note === true,
     shipping,
+    ...(legal ? { legal } : {}),
     hidden: value.hidden === true,
   };
 }
@@ -1025,12 +1036,23 @@ function byteLength(text: string): number {
   return new TextEncoder().encode(text).length;
 }
 
+/**
+ * The heavy rest of a product, kept beside its listing: its checkout
+ * questions, its funnel and, on a product the creator ships, its legal
+ * information (lib/physical-legal-record.ts). "" when it has none of them.
+ */
+function extrasOf(product: Product): string {
+  const legal = product.legal ?? null;
+  if (product.fields.length === 0 && product.funnel === null && legal === null) return "";
+  return JSON.stringify({ fields: product.fields, funnel: product.funnel, ...(legal ? { legal } : {}) });
+}
+
 /** The writes that put one product in its records. Refuses one past the ceiling. */
 export function productWrites(catalog: string, product: Product): Command[] {
   if (!SAFE_ID.test(product.id)) throw new Error("product id");
   const listing = JSON.stringify(listingOf(product));
-  const heavy = product.fields.length > 0 || product.funnel !== null;
-  const extras = heavy ? JSON.stringify({ fields: product.fields, funnel: product.funnel }) : "";
+  const extras = extrasOf(product);
+  const heavy = extras !== "";
   if (byteLength(listing) + byteLength(extras) > MAX_PRODUCT_BYTES) throw new StoreFullError();
   return [
     ["SET", listingKey(catalog, product.id), listing],
@@ -1045,9 +1067,9 @@ export function productWrites(catalog: string, product: Product): Command[] {
  * its own key or field.
  */
 export function productBytes(product: Product): number {
-  const heavy = product.fields.length > 0 || product.funnel !== null;
   const listing = JSON.stringify(listingOf(product));
-  const extras = heavy ? JSON.stringify({ fields: product.fields, funnel: product.funnel }) : "";
+  const extras = extrasOf(product);
+  const heavy = extras !== "";
   return dataBytes([listing, extras, product.id, cardValue(product)], heavy ? 3 : 2);
 }
 

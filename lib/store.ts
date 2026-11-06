@@ -4397,3 +4397,24 @@ export async function setExitOffer(email: string, productId: string | null): Pro
   });
   return result ?? { ok: false, reason: "none" };
 }
+
+export type LegalResult =
+  | { ok: true; store: Store; product: Product }
+  | { ok: false; reason: "none" | "unknown" | "ship_first" | "quantity_price" };
+
+/**
+ * Saves the legal information of a product the creator ships (618 [SZ2];
+ * lib/physical-legal-record.ts), already checked field by field, or clears it
+ * (null). On the product record, under the store's write: only while the
+ * product is shipped, and a net quantity only for a price it has now.
+ */
+export async function setProductLegal(email: string, id: string, legal: import("@/lib/physical-legal-record").PhysicalLegal | null): Promise<LegalResult> {
+  const done = await onProduct<"ship_first" | "quantity_price">(email, id, (product) => {
+    if (legal === null) return { ...product, legal: null };
+    if (!product.shipping) return { ok: false, reason: "ship_first" };
+    const prices = new Set(["", ...product.options.map((option) => option.id)]);
+    if (legal.quantities.some((quantity) => !prices.has(quantity.price))) return { ok: false, reason: "quantity_price" };
+    return { ...product, legal };
+  });
+  return done.ok ? { ok: true, store: done.store, product: done.product } : done;
+}

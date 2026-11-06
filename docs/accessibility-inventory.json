@@ -1466,6 +1466,7 @@
     "components/person-notes.tsx",
     "components/person-tasks.tsx",
     "components/phone-alerts-panel.tsx",
+    "components/physical-legal-editor.tsx",
     "components/pick-bundle-form.tsx",
     "components/picture-viewer.tsx",
     "components/pixel-editor.tsx",
@@ -1852,6 +1853,7 @@
     "app/api/store/person/route.ts",
     "app/api/store/phone/route.ts",
     "app/api/store/photo/route.ts",
+    "app/api/store/physical-legal/route.ts",
     "app/api/store/pixels/route.ts",
     "app/api/store/podcast/feed/[token]/route.ts",
     "app/api/store/podcast/link/route.ts",
@@ -2022,6 +2024,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 137
+    "pageTemplates": 138
   }
 }

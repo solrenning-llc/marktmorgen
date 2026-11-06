@@ -80,7 +80,8 @@ test("sales are added up by email, from email only, in the store's currency; ano
     "usd",
   );
   // The euro sale is from before the store changed its currency (22 [E5], unit 2d).
-  assert.deepEqual(by, { [c1]: { sales: 2, cents: 6600, elsewhere: 1 } });
+  // Rule 23: the record has no prototype now (a tag can be "__proto__"), so it is compared by its own keys.
+  assert.deepEqual({ ...by }, { [c1]: { sales: 2, cents: 6600, elsewhere: 1 } });
   assert.deepEqual(broadcastMoney({ by, partial: false }, "1".repeat(24)), { sales: 2, cents: 6600, elsewhere: 1 });
   // An email whose only sale was in another currency still shows it, as a count.
   const c3 = broadcastCampaign("3".repeat(24));

@@ -82,7 +82,9 @@ export function moneyByCampaign(
   sales: { source: string; campaign: string; cents: number; currency: string }[],
   currency: string,
 ): Record<string, MailMoney> {
-  const by: Record<string, MailMoney> = {};
+  // A tag comes from the buyer's own link (utm_campaign), so it can be "__proto__" or "constructor": the record has
+  // no prototype, and every tag, whatever its name, is only ever an own key (independent review of #2798).
+  const by = Object.create(null) as Record<string, MailMoney>;
   for (const sale of sales) {
     if (sale.source !== MAIL_SOURCE || !sale.campaign) continue;
     const row = (by[sale.campaign] ??= { sales: 0, cents: 0 });

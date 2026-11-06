@@ -205,6 +205,9 @@ export async function listPasskeys(email: string): Promise<Passkey[]> {
   }
   const whole = (p: unknown) => Boolean(p) && typeof p === "object" && !Array.isArray(p) && typeof (p as Passkey).id === "string" && typeof (p as Passkey).publicKey === "string";
   if (!Array.isArray(value) || !value.every(whole)) throw new UnknownReplyError("a passkey list");
+  // Never more than an account may hold, and each credential once (Codex G on #2723): a list past either is not one
+  // this code wrote, and is never cut down to fit, since what is cut would be lost on the next write.
+  if (value.length > MAX_PASSKEYS || new Set(value.map((p) => (p as Passkey).id)).size !== value.length) throw new UnknownReplyError("a passkey list");
   return parseList(raw);
 }
 

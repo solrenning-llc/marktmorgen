@@ -1277,6 +1277,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "buyer"] },
       { file: "lib/buyer-actions.ts", names: ["takeBuyerAction", "restingAway"] },
       { file: "app/api/store/community/route.ts", names: ["takeBuyerAction(store, owner ? \"owner\" : \"buyer\")", "UNCOUNTED"] },
+      // 543 [CM2]: a post or comment held for approval is the same action, a few commands lighter than one published, inside the community's and the member's ceilings.
+      { file: "lib/community-approval.ts", names: ["holdPost", "holdComment", "MAX_HELD", "MAX_MINE", "needData"] },
       { file: "app/api/store/community/rsvp/route.ts", names: ["takeBuyerAction(store)"] },
       { file: "app/api/store/community/chat/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/community/messages/route.ts", names: ["takeBuyerAction"] },

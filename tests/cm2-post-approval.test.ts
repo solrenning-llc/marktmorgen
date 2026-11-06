@@ -245,7 +245,8 @@ async function main(): Promise<void> {
   }
   is("English says it plainly", approvalWords("en").waiting, "Waiting for approval");
   is("the expiry the words promise is the code's", approvalWords("en").expired.includes(`${HELD_DAYS} days`), true);
-  is("the privacy policy names the 30 days", /waiting for approval[\s\S]{0,400}30 days/i.test(read("app/privacy/page.tsx")), true);
+  is("the wait is 30 days", HELD_DAYS, 30);
+  is("the privacy policy names the 30 days, from the code's own figure", /waiting for approval[\s\S]{0,400}\{HELD_DAYS\} days/i.test(read("app/privacy/page.tsx")) && /import \{[^}]*HELD_DAYS[^}]*\} from "@\/lib\/community-approval-rules"/.test(read("app/privacy/page.tsx")), true);
   is("the terms say the creator may hold posts", /waiting for approval/i.test(read("app/terms/page.tsx")), true);
   is("the creator is never held in the studio's words either", CREATOR, "creator");
 

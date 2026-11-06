@@ -28,6 +28,7 @@ import { NON_PAYING_DATA_ROOM_BYTES, dataRoomListWords, dataWords } from "@/lib/
 import { INVITE_PROGRAM_OPEN, INVITE_PAUSE_NOTICE, INVITE_BONUS_CENTS, INVITE_HOLD_DAYS, INVITE_SHARE_PERCENT } from "@/lib/creator-invite-rules";
 import { feeWords, planPriceWords } from "@/lib/fee-words";
 import { TASK_ROOM_BYTES } from "@/lib/assignment-rules";
+import { HELD_DAYS } from "@/lib/community-approval-rules";
 import { COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
 import { ASSISTANT_KEEP_SECONDS, ASSISTANT_MESSAGES_MONTHLY, ASSISTANT_NAME, ASSISTANT_PRICE_CENTS } from "@/lib/store-assistant-rules";
 
@@ -162,7 +163,11 @@ export default function TermsPage() {
           lead, its amount, hold, caps and budget are yours to set, approving
           or reversing each lead is your decision, and you must not use it to
           pay for sign-ups or bookings that people did not make themselves. If you run a community, what is posted in it is
-          yours to moderate, and the rules in section 4 apply to it.
+          yours to moderate, and the rules in section 4 apply to it. You may
+          choose to approve posts and comments before they are published; what
+          is waiting for approval is seen only by its author and you, its author
+          is told when you do not publish it, and it is not published if you do
+          not answer within {HELD_DAYS} days.
         </p>
         <p id="instant-access" className="scroll-mt-24">
           <strong className="text-black">Starting before the 14 days end.</strong>{" "}

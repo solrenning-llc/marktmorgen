@@ -431,3 +431,15 @@ Five own products remain open; do not open a sixth:
 Channel append proving the correction: `para-claude-1@67ed4107ce470f10d7439072bef44452faa537c4`. Current review requests in the fresh channel are already controlled (J on #2769, CX1 on #2736, R2 on #2627, R1 on #2657); no foreign review was duplicated.
 
 Exact next action is causal only: R2 nominal return on #2770 or a terminal exact-head aggregate event; then require one explicit clean independent review, nine successes, fresh mergeability/merge-tree/raw gate, and a normal expected-SHA merge. Otherwise act only on a coordinator release for one of the four blocked products. Preserve #2111, all foreign branches/CI, CX120/122/123/126, MR, and the commercial/payment/account prohibitions.
+
+
+## Checkpoint 2026-11-06 05:10 Fortaleza — C4 coordination
+
+- Coordination: Claude 4 controls Codex assignment; Claude 1 is a browser-wake bridge.
+- PR #2770 exact head `7fa81525040f7712f063a72a367a20e506076a3c`: all nine exact-head aggregators completed successfully. Merge remains blocked solely on Revisor 2's explicit nominal return to cycle 22 LOW; request 6679430385 is still the single request. No main integration, retry, cancellation, or merge was performed.
+- PR #2691: prior head `1b863e5f9e0054fd2aa06417d004a186905dbd9d` completed 9/9 but became stale. Integrated main `ea72f8dc58640419dc5a4b093248ac33ce63f3c1` once without conflict. Published exact head `a232ed2a708f362ed2e70fa38dcef15c1d38c92c`, tree `5272c73d47e00b346c8971e9ac665dd5284f348b`, using expected SHA and force=false.
+- #2691 reviewed product blobs remain byte-identical: `lib/verified-numbers.ts` `e12838b143df39dee9915c276e8ce0626fbc387c`; `tests/verified-numbers-read-evidence.test.ts` `e6562fdc8ac3f0012eb35cad6c0eb7ec531b50a0`. Codex V clean review 5793131712 remains applicable under CX-122.8.
+- #2691 local integration proof: 160/160 focused/linked, Next typegen, scoped strict TypeScript, changed-file ESLint, public-data scanner 3,912/0, and diff check all green. PR comment 6680306579. Nine new exact-head aggregators are now required; they were not polled after publication.
+- Five owned units remain occupied: #2473 `d57357ab` + WIP `756d8f3`; #2516 `381e4454`; #2689 `481e26c6` + WIP `c918be44`; #2691 `a232ed2a`; #2770 `7fa81525`. No sixth unit.
+- Channel checkpoint commit: `fc00c8ce8eb762e745632f11f36f9b1964a24f6b`.
+- Next causal action only: R2 return for #2770, terminal nine for #2691, coordinated dependency release for the other three, or explicit C4 assignment.

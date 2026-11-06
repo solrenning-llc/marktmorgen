@@ -24,11 +24,13 @@
  *   nl:course:<course>:certs:all  -> set of every certificate id issued, withdrawn ones too
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReply, exactReplies, plainList, replyCount } from "@/lib/redis-exact";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Course, lessonsInOrder } from "@/lib/course";
 import { requiredQuizLessons } from "@/lib/quiz";
 import { emailKey } from "@/lib/learn";
+import { randomLetters } from "@/lib/random-letters";
 
 export const CERT_ID_PATTERN = /^[a-z0-9]{16}$/;
 export const MIN_CERT_NAME = 2;
@@ -75,10 +77,7 @@ export function standingOf(c: Pick<Certificate, "withdrawnAt" | "validUntil">, n
 }
 
 export function newCertificateId(): string {
-  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
+  return randomLetters("abcdefghijklmnopqrstuvwxyz0123456789", 16);
 }
 
 /**
@@ -301,7 +300,9 @@ export async function withdrawCertificate(courseId: string, id: string): Promise
   const found = await readCertificate(id);
   if (!found || found.courseId !== courseId) return false;
   if (!found.withdrawnAt) {
-    await redisPipeline([["SET", certKey(id), JSON.stringify({ ...found, withdrawnAt: Math.floor(Date.now() / 1000) })]]);
+    // XX: only while it is still there, so a withdrawal racing the person's deletion never writes it back.
+    const [written] = await redisPipeline([["SET", certKey(id), JSON.stringify({ ...found, withdrawnAt: Math.floor(Date.now() / 1000) }), "XX"]]);
+    if (written === null) return false;
   }
   const who = emailKey(found.email);
   const [current] = await redisPipeline([["HGET", indexKey(courseId), who]]);
@@ -315,31 +316,80 @@ export async function withdrawCertificate(courseId: string, id: string): Promise
  * not found. Found by the student's own list, and, for certificates issued
  * before that list was kept, by reading the course's certificates when it
  * has LEGACY_SCAN or fewer; a standing one is always found by its slot.
+ * A reply that is not exactly what was asked for throws UnknownReply, and a
+ * certificate whose deletion is unknown keeps the references that find it.
  */
-export async function forgetCertificatesPerson(courseIds: string[], email: string): Promise<number> {
+export async function forgetCertificatesPerson(courseIds: string[], email: string, room?: DataStore): Promise<number> {
   if (!courseIds.length || !isRedisConfigured()) return 0;
   const who = emailKey(email);
   const address = email.trim().toLowerCase();
+  const what = "the deletion of a person's certificates";
+  // Every reply read exactly (lib/redis-exact.ts): one that is not what was
+  // asked for throws UnknownReply before any reference that finds a
+  // certificate is removed, so a retry still finds it.
+  const ids = (raw: unknown): string[] => {
+    const list = plainList(raw);
+    if (!list || !list.every((id) => typeof id === "string")) throw new UnknownReply(what);
+    return list as string[];
+  };
   let gone = 0;
   for (const courseId of courseIds) {
-    const [mine, current, size] = await redisPipeline([["SMEMBERS", byKey(courseId, who)], ["HGET", indexKey(courseId), who], ["SCARD", allKey(courseId)]]);
-    const [all] = Number(size) > 0 && Number(size) <= LEGACY_SCAN ? await redisPipeline([["SMEMBERS", allKey(courseId)]]) : [[]];
-    const ids = new Set<string>([...(Array.isArray(mine) ? mine.map(String) : []), ...(typeof current === "string" ? [current] : [])]);
-    const others = (Array.isArray(all) ? all.map(String) : []).filter((id) => CERT_ID_PATTERN.test(id) && !ids.has(id));
+    const [mine, current, size] = exactReplies(await redisPipeline([["SMEMBERS", byKey(courseId, who)], ["HGET", indexKey(courseId), who], ["SCARD", allKey(courseId)]]), 3, what);
+    if (current !== null && typeof current !== "string") throw new UnknownReply(what);
+    const known = new Set<string>([...ids(mine), ...(typeof current === "string" ? [current] : [])]);
+    const [all] = replyCount(size, what) > 0 && (size as number) <= LEGACY_SCAN ? exactReplies(await redisPipeline([["SMEMBERS", allKey(courseId)]]), 1, what) : [[]];
+    const others = ids(all).filter((id) => CERT_ID_PATTERN.test(id) && !known.has(id));
     for (let i = 0; i < others.length; i += 500) {
       const chunk = others.slice(i, i + 500);
-      const [rows] = await redisPipeline([["MGET", ...chunk.map(certKey)]]);
-      (Array.isArray(rows) ? rows : []).forEach((raw, j) => {
+      const [rows] = exactReplies(await redisPipeline([["MGET", ...chunk.map(certKey)]]), 1, what);
+      const values = plainList(rows);
+      if (!values || values.length !== chunk.length || !values.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReply(what);
+      values.forEach((raw, j) => {
         const record = certificateRecord(raw);
-        if (typeof record?.email === "string" && record.email.trim().toLowerCase() === address) ids.add(chunk[j]);
+        if (typeof record?.email === "string" && record.email.trim().toLowerCase() === address) known.add(chunk[j]);
       });
     }
-    const list = [...ids].filter((id) => CERT_ID_PATTERN.test(id));
-    await redisPipeline([
-      ["DEL", byKey(courseId, who), ...list.map(certKey)],
-      ["HDEL", indexKey(courseId), who],
-      ...(list.length ? [["SREM", allKey(courseId), ...list]] : []),
-    ]);
+    const list = [...known].filter((id) => CERT_ID_PATTERN.test(id));
+    // Each record taken out with GETDEL, so only the deletion that removed it
+    // gives back what it took when issued (the record as made, withdrawnAt 0):
+    // two deletions at once never give the same room back twice. Each reply
+    // must be the record or a confirmed none (null), one per certificate.
+    let freed = 0;
+    let unknown = false;
+    for (let i = 0; i < list.length; i += 500) {
+      const chunk = list.slice(i, i + 500);
+      const rows = plainList(await redisPipeline(chunk.map((id) => ["GETDEL", certKey(id)])));
+      if (!rows || rows.length !== chunk.length) {
+        unknown = true;
+        continue;
+      }
+      for (const raw of rows) {
+        if (raw === null) continue;
+        if (typeof raw !== "string") {
+          unknown = true;
+          continue;
+        }
+        try {
+          const value = JSON.parse(raw) as Record<string, unknown>;
+          if (value && typeof value === "object") freed += dataBytes([JSON.stringify({ ...value, withdrawnAt: 0 })], 3);
+        } catch {
+          // Unreadable: nothing is known of what it took, so nothing is given back for it.
+        }
+      }
+    }
+    // What was confirmed taken comes back now; a retry finds it gone and gives nothing again.
+    if (room && freed > 0) await giveData(room, [{ slot: CERTS_SLOT(courseId), bytes: freed }]);
+    // A certificate whose deletion is unknown keeps every reference to it, for the retry.
+    if (unknown) throw new UnknownReply(what);
+    exactReplies(
+      await redisPipeline([
+        ["DEL", byKey(courseId, who)],
+        ["HDEL", indexKey(courseId), who],
+        ...(list.length ? [["SREM", allKey(courseId), ...list]] : []),
+      ]),
+      list.length ? 3 : 2,
+      what,
+    ).forEach((n) => replyCount(n, what));
     gone += list.length;
   }
   return gone;

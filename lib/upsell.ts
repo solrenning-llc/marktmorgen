@@ -69,6 +69,7 @@ import { type BundleContents, contentsOf, offerableAfterPaying } from "@/lib/bun
 import { applyShareToPayment } from "@/lib/platform-share";
 import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliversDigitally, validConsent } from "@/lib/digital-consent";
 import { cartOfferFrom, ownedBeforeCart } from "@/lib/cart-offers";
+import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 export const UPSELL_COOKIE = "nl_upsell";
 export const UPSELL_WINDOW_SECONDS = 60 * 60;
@@ -452,36 +453,69 @@ async function afterPaid(store: Store, session: string, target: Listing, pi: Rec
   await noteOfferSale(store, target, pi).catch((error) => console.error("telling about an offer's sale failed", error));
 }
 
-/** One offer's charge for this order, found among the customer's payments. */
-async function findCharge(
+/**
+ * Pages of a hundred of the customer's payments read before "not there" is no longer known, per offer still waiting
+ * (Claude 4's cost note on #2759, rule MR). On the buyer's own page (settleUpsells, at most the first offer and 20 more
+ * that readAnswers keeps, 21 a visit) one page, as many requests as before this lot; in the five-minute job (settlePendingOffers, at most
+ * 50 offers a run, stopped earlier by its deadline) up to five. An offer not found within its pages stays waiting for
+ * the job, never closed: the worst case is OFFER_PAGES_ON_PAGE × 21 = 21 requests a visit and OFFER_PAGES_IN_JOB × 50
+ * = 250 a run, all reads on the creator's own Stripe account, none of them a charge.
+ */
+export const OFFER_PAGES_ON_PAGE = 1;
+export const OFFER_PAGES_IN_JOB = 5;
+
+/**
+ * One offer's charge for this order, found among the customer's payments, each page read in its exact shape
+ * (lib/stripe-list.ts) and pinned to one version. Found on any readable row is found. Null ("not there", after which
+ * the offer is closed as never charged) only when the payments were read to their end with every row readable;
+ * a page in another shape, a row not readable or more pages than are read throw, and the offer stays waiting.
+ */
+export async function findOfferCharge(
   store: Store,
   session: string,
   slot: string,
   customer: string,
+  pages: number = OFFER_PAGES_IN_JOB,
 ): Promise<Record<string, unknown> | null> {
-  const listed = await onAccount(
-    "GET",
-    store.stripeAccountId as string,
-    `/payment_intents?${new URLSearchParams({ customer, limit: "20" })}`,
-  );
-  const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-  return (
-    rows.find((pi) => {
-      const meta = pi.metadata as Record<string, string> | null;
-      return meta?.kind === "upsell" && meta?.parent === session && (meta?.step ?? "") === slot;
-    }) ?? null
-  );
+  let after = "";
+  let unreadable = 0;
+  for (let page = 0; page < pages; page += 1) {
+    const query = new URLSearchParams({ customer, limit: "100" });
+    if (after) query.set("starting_after", after);
+    const read = readStripePage(
+      await onAccount("GET", store.stripeAccountId as string, `/payment_intents?${query}`, undefined, STRIPE_LIST_VERSION),
+      (pi) => {
+        const meta = ownField(pi, "metadata");
+        return meta === null || plainObject(meta);
+      },
+    );
+    unreadable += read.unreadable;
+    const found = read.rows.find((pi) => {
+      const meta = ownField(pi, "metadata");
+      if (!plainObject(meta)) return false;
+      const step = ownField(meta, "step");
+      return ownField(meta, "kind") === "upsell" && ownField(meta, "parent") === session && (step === undefined ? "" : step) === slot;
+    });
+    if (found) return found;
+    if (!read.hasMore) {
+      if (unreadable) throw new StripeListUnreadable("a payment not readable");
+      return null;
+    }
+    if (!read.lastId) throw new StripeListUnreadable("more payments and no readable last one");
+    after = read.lastId;
+  }
+  throw new StripeListUnreadable("more payments than are read");
 }
 
 /** Settles one offer still waiting on an answer. Nothing is ever charged here. */
-async function settleOne(store: Store, session: string, slot: string, record: UpsellRecord): Promise<void> {
+async function settleOne(store: Store, session: string, slot: string, record: UpsellRecord, pages: number): Promise<void> {
   if (record.state !== "pending" || !store.stripeAccountId) return;
   try {
     let pi: Record<string, unknown> | null;
     if (record.pi) {
       pi = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(record.pi)}`);
     } else if (record.customer) {
-      pi = await findCharge(store, session, slot, record.customer);
+      pi = await findOfferCharge(store, session, slot, record.customer, pages);
       if (!pi) {
         // Not there after long enough: the request never reached Stripe.
         if (Date.now() - record.at > LOST_ANSWER_MS) {
@@ -524,7 +558,7 @@ async function settleOne(store: Store, session: string, slot: string, record: Up
 export async function settleUpsells(store: Store, session: string): Promise<void> {
   const records = await readAnswers(session);
   for (const [slot, record] of records) {
-    if (record.state === "pending") await settleOne(store, session, slot, record);
+    if (record.state === "pending") await settleOne(store, session, slot, record, OFFER_PAGES_ON_PAGE);
   }
 }
 
@@ -566,7 +600,7 @@ export async function settlePendingOffers(
         if (Date.now() - record.at > PENDING_WATCH_MS) await drop();
         continue;
       }
-      await settleOne(store, session, slot, record);
+      await settleOne(store, session, slot, record, OFFER_PAGES_IN_JOB);
       const after = await readUpsell(session, slot);
       if (!after || after.state !== "pending") {
         counts.settled += 1;

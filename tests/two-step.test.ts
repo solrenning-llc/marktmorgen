@@ -16,6 +16,7 @@
  *   - nobody is locked out: with nothing left, it turns off a week after it is
  *     asked for, and a login with a code, or Cancel, calls that off.
  */
+import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { base32Decode, base32Encode, codeAt, stepOf, STEP_SECONDS } from "@/lib/totp";
@@ -206,6 +207,14 @@ async function main(): Promise<void> {
   const back = await callback(post("https://marktmorgen.com/api/auth/callback", { token: await linkFor(LOST) }));
   is("and the emailed link logs in on its own", [back.headers.get("location"), cookieOf(back, "nl_session").length], ["https://marktmorgen.com/studio", 64]);
 
+  part("Codes drawn evenly");
+  // A random value taken modulo a million, or modulo the 31 letters, favours the low codes (CodeQL js/biased-cryptographic-random).
+  const source = readFileSync("lib/two-step.ts", "utf8");
+  is("the six digits and the recovery letters come from randomInt, never a random value modulo a length or a number", [/randomInt\(1_000_000\)/.test(source), /randomInt\(CODE_LETTERS\.length\)/.test(source), /%\s*(?:[\w.]+\.length\b|\d[\d_]*\b)/.test(source)], [true, true, false]);
+  const RECOVERY = /^[abcdefghjkmnpqrstuvwxyz23456789]{4}-[abcdefghjkmnpqrstuvwxyz23456789]{4}$/;
+  is("ten recovery codes, each four and four of the 31 letters nobody misreads", [finished.codes.length, finished.codes.every((c) => RECOVERY.test(c)), set2.codes.every((c) => RECOVERY.test(c))], [10, true, true]);
+  const confirmLine = /^Your code: .*$/m.exec([...mails].reverse().find((m) => m.to === "backup@example.org")?.text ?? "")?.[0] ?? "";
+  is("the recovery address's code is exactly six digits", /^Your code: \d{6}$/.test(confirmLine), true);
   done();
 }
 

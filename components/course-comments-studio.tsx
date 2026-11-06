@@ -91,8 +91,7 @@ export function CourseCommentsStudio({
       </div>
       <p className="mt-2 max-w-2xl text-ink-soft">
         Students ask questions and share what they made under each lesson, under a name they choose; their email address
-        is never shown. Only students of this course and you can read them. An answer from you here or on the lesson
-        appears as {storeName}, and the student gets an email with it.
+        is never shown. Only students of this course and you can read them. Your answers appear under the lesson as {storeName}.
       </p>
       <label className="mt-4 flex min-h-[44px] items-center gap-3 font-semibold text-ink">
         <input
@@ -137,7 +136,7 @@ export function CourseCommentsStudio({
 
               {c.answerTo === null && !c.fromCreator && !c.hidden ? (
                 answered.has(c.id) ? (
-                  <p className="mt-3 text-sm font-semibold text-ink" role="status">Answered. The student gets an email with your words.</p>
+                  <p className="mt-3 text-sm font-semibold text-ink" role="status">Answered. Your reply is under the lesson.</p>
                 ) : (
                   <form
                     className="mt-3 space-y-2"

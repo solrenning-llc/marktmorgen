@@ -66,7 +66,7 @@
  *   nl:2fa:lockedset:<hash>:kept when they last could not be logged out: those opened before stay locked
  *                         (the same mark under the name "any account": which accounts have one now, by tag)
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, SESSION_TTL_SECONDS, SessionsUnknownError, dropSecondStep, endSession, isMoving, normaliseEmail, openSession, sessionKeyOf } from "@/lib/auth";
 import { UnknownReplyError, countOf, stringList } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -219,8 +219,8 @@ async function read(email: string): Promise<TwoStep | null> {
 /** Ten recovery codes, "abcd-efgh", each from 31 letters and digits nobody misreads. */
 function newCodes(): string[] {
   return Array.from({ length: RECOVERY_CODES }, () => {
-    const bytes = randomBytes(8);
-    const text = Array.from(bytes, (b) => CODE_LETTERS[b % CODE_LETTERS.length]).join("");
+    // randomInt draws each letter evenly; a byte taken modulo 31 would favour the first eight.
+    const text = Array.from({ length: 8 }, () => CODE_LETTERS[randomInt(CODE_LETTERS.length)]).join("");
     return `${text.slice(0, 4)}-${text.slice(4)}`;
   });
 }
@@ -627,7 +627,7 @@ export async function twoStepOn(email: string): Promise<boolean> {
 
 /** A six-digit code for confirming the recovery address, and its hash. */
 function confirmCode(): { code: string; hash: string } {
-  const code = String(randomBytes(4).readUInt32BE(0) % 1_000_000).padStart(6, "0");
+  const code = String(randomInt(1_000_000)).padStart(6, "0");
   return { code, hash: sha(`nimbus-2fa-backup:${code}`) };
 }
 

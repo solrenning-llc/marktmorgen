@@ -80,6 +80,7 @@ import {
   BLOCK_SHOWS,
   MAX_PICKED_REVIEWS,
   HERO_LAYOUTS,
+  SPACE_SIZES,
   MAX_PRODUCT_NOTE,
   MAX_QUOTES,
   MAX_QUOTE,
@@ -155,7 +156,8 @@ export const MESSAGES: Record<string, string> = {
   hero_first: "The hero can only be the first block: it carries the page's main headline.",
   two_reviews: "Reviews can sit in one place on the page. Remove the second block of them.",
   video: "That video address is not one we can play. Paste a YouTube, Vimeo or Loom link.",
-  pictures: `A picture on the page could not be kept. A page holds up to ${MAX_PAGE_PICTURES} pictures, each shown once: remove the one that was added twice, or add it again.`,
+  // Also a new picture whose upload is no longer known (more than a day old, or one used elsewhere): lib/sales-page-store.ts.
+  pictures: `A picture on the page could not be kept. Add the picture again from your device, then save. A page holds up to ${MAX_PAGE_PICTURES} pictures, and each one is shown once, so remove any picture that is there twice.`,
   countdown: "Give the countdown the moment it runs to, no more than a year away, or remove the block.",
   quote_length: `A quotation exceeds the ${MAX_QUOTE}-character limit. Use a shorter, complete quotation from the source or remove it. Nothing was saved.`,
   quote_link: "Each thing said elsewhere needs the full https address of where it was said, so visitors can check it. Add it, or remove that one.",
@@ -1804,6 +1806,31 @@ export function PageEditor({
           />
         );
       }
+      case "divider":
+        return <p className="text-sm text-ink-soft">A thin line across your page, in your store&apos;s colors. Nothing to fill in: move it to where one part ends and the next begins.</p>;
+      case "space":
+        return (
+          <fieldset>
+            <legend className="field-label">How much room</legend>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {SPACE_SIZES.map((option) => {
+                const on = block.size === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => change(index, { size: option.value })}
+                    className={`inline-flex min-h-11 items-center rounded-full px-4 text-sm font-semibold ring-1 transition-colors motion-reduce:transition-none ${on ? "bg-lilac text-violet-ink ring-violet-brand/40" : "bg-white text-ink-soft ring-line hover:text-ink"}`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-xs text-ink-soft">Empty room between two parts of your page. Nothing to fill in.</p>
+          </fieldset>
+        );
       case "booking":
         return (
           <p className="text-sm text-ink-soft">
@@ -1953,6 +1980,10 @@ export function PageEditor({
         const titled = heading && heading.kind === "heading" ? `${heading.text} · ` : "";
         return `${titled}${block.columns.length} ${block.columns.length === 1 ? "column" : "columns"} · ${parts} ${parts === 1 ? "part" : "parts"}`;
       }
+      case "divider":
+        return "A line across the page";
+      case "space":
+        return `${SPACE_SIZES.find((s) => s.value === block.size)?.label ?? "Medium"} room`;
       case "booking": {
         const chosen = featurable.find((p) => p.id === block.product);
         return `${block.heading ? `${block.heading} · ` : ""}${chosen ? chosen.card.title : "A call from your store"}`;

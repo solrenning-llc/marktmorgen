@@ -2,6 +2,11 @@ import {join} from 'node:path';
 /** One wiring source for the repository runner and local parallel verification. */
 export function testAliases(file,root,here){
  const aliases={'@':root,'@/lib/redis':['range-traffic-coverage.test.ts','stats-traffic-coverage.test.ts'].includes(file)?join(root,'lib/redis.ts'):join(here,'redis-stub.ts')};
+ if(file==='review-summary-unavailable-page.test.ts'){
+  for(const name of ['catalog','studio-route','reviews','review-ai-summary','customer-voice','buyer-orders','purchase-email','ai','mail'])aliases['@/lib/'+name]=join(here,'review-summary-page-world.tsx');
+  for(const name of ['studio-header','studio-store-pin','ai-assist','review-studio','review-qr','review-themes','review-ai-summaries'])aliases['@/components/'+name]=join(here,'review-summary-page-world.tsx');
+  for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'review-summary-page-world.tsx');
+ }
  if(file==='blog-read-unavailable-page.test.ts'){
   for(const name of ['store','store-blog','studio-route','traffic','ai'])aliases['@/lib/'+name]=join(here,'blog-read-page-world.tsx');
   for(const name of ['studio-header','studio-store-pin','ai-assist','blog-editor','store-tracking'])aliases['@/components/'+name]=join(here,'blog-read-page-world.tsx');
@@ -171,6 +176,11 @@ export function testAliases(file,root,here){
  if(file==='ai-counter-admission.test.ts')for(const name of ['redis','store-request','ai'])aliases['@/lib/'+name]=join(here,'ai-counter-admission-world.ts');
  if(file==='visitor-ai-counter-response.test.ts'){for(const name of ['redis','store','store-checkout','catalog','product-about','sales-page-store','answers','store-guide','sales-page'])aliases['@/lib/'+name]=join(here,'visitor-ai-counter-admission-world.ts');aliases['@/components/store-product']=join(here,'visitor-ai-counter-admission-world.ts');}
  if(file==='visitor-ai-counter-admission.test.ts'){for(const name of ['redis','store','store-checkout','catalog','product-about','sales-page-store','answers','store-guide','sales-page'])aliases['@/lib/'+name]=join(here,'visitor-ai-counter-admission-world.ts');aliases['@/components/store-product']=join(here,'visitor-ai-counter-admission-world.ts');}
+ if(file==='meta-return-counter-admission.test.ts'){
+  for(const name of ['redis','auth','studio-route','store','integration-pause','contract-resource-window','account-notice','team','meet-providers','metered-limits'])aliases['@/lib/'+name]=join(here,'meta-return-counter-world.ts');
+  aliases['@/lib/meta-ads']=join(here,'meta-return-provider-world.ts');
+  aliases['next/server']=join(here,'next-server-after-world.ts');
+ }
  return aliases;
 }
 export function testEnvironment(env){return{...env,DEMO_STUDIO_ADMIN:'operator@example.test',STRIPE_DEMO_ACCOUNT_ID:'acct_fixtureDemo',NIMBUS_DATA_KEY:env.NIMBUS_DATA_KEY??'tests-only-not-a-real-deployment-secret'};}

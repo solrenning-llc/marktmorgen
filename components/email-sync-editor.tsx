@@ -481,11 +481,7 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
           <h2 id="log-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
             Last sends
           </h2>
-          {view.log === null ? (
-            <p className="notice notice-warn mt-3" role="status">
-              We could not read recent sends just now. Your connection and settings are still available; try again in a moment.
-            </p>
-          ) : view.log.length ? (
+          {view.log.length ? (
             <>
               <ul className="mt-3 divide-y divide-line text-sm">
                 {view.log.map((job) => {

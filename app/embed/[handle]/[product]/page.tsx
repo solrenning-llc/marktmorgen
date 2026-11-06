@@ -407,7 +407,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
         ) : (
           <p className="st-muted mt-3 text-center text-sm font-semibold">{action.text}</p>
         )}
-        {note ? <p className="st-muted mt-2 truncate text-center text-xs">{note}</p> : null}
+        {note ? <p className="st-muted mt-2 break-words text-center text-xs">{note}</p> : null}
       </article>
   );
 

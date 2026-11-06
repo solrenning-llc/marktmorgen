@@ -78,6 +78,7 @@ const context = (role: Role, over: Partial<GalleryContext> = {}): GalleryContext
   pro: true,
   planHref: PLAN_HREF,
   billing: can(role, "billing"),
+  onSale: false,
   ...over,
 });
 const cards = (ctx: GalleryContext) => galleryFor(ctx, href).flatMap((section) => section.cards);
@@ -113,6 +114,9 @@ is("a role that may not change the plan: no link at all", noBilling?.href, null)
 is("…and says who chooses the plan", noBilling?.state === "plan" ? noBilling.note : null, "The store's owner chooses its plan.");
 const notReady = cards(context("owner", { pro: false, planHref: null })).find((card) => card.id === "email");
 is("billing not set up here: no link, said plainly", notReady?.state === "plan" ? [notReady.href, notReady.note] : null, [null, "Paid plans are not on sale yet."]);
+// Claude 3 on #2727: "not on sale" only while paid plans are not on sale (lib/opening.ts PLANS_ON_SALE), as the FAQs say it.
+const onSaleNoBilling = cards(context("owner", { pro: false, planHref: null, onSale: true })).find((card) => card.id === "email");
+is("plans on sale but billing not set up here: never \"not on sale\"", onSaleNoBilling?.state === "plan" ? [onSaleNoBilling.href, onSaleNoBilling.note] : null, [null, "The plan can't be changed from here right now."]);
 is("empty groups are left out", galleryFor(context("support"), href).every((section) => section.cards.length > 0), true);
 
 part("the page as drawn");

@@ -25,7 +25,6 @@ import { done, is, part } from "./check";
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 const hex = (value: string) => createHash("sha256").update(value).digest("hex");
 
-/** Every list of passkeys handed to a component anywhere in the page's tree (the managers' `initial`). */
 /** Every string shown anywhere in the page's tree. */
 function words(node: unknown, found: string[] = [], seen = new Set<unknown>()): string[] {
   if (typeof node === "string") {
@@ -42,6 +41,7 @@ function words(node: unknown, found: string[] = [], seen = new Set<unknown>()): 
   return found;
 }
 
+/** Every list of passkeys handed to a component anywhere in the page's tree (the managers' `initial`). */
 function passkeyLists(node: unknown, found: string[][] = [], seen = new Set<unknown>()): string[][] {
   if (!node || typeof node !== "object" || seen.has(node)) return found;
   seen.add(node);

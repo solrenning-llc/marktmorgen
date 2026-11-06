@@ -270,6 +270,23 @@ async function main(): Promise<void> {
     is(`places ${JSON.stringify(bad)}: a healthy run takes the place back and lets the refund go`, [(await importedFor((await storeForEmail("lotthree@example.com"))!, email)).length, await seen(refundId), (await redis.pipeline([["HEXISTS", retryKey, refundId]]))[0]], [0, 1, 0]);
   }
 
+  part("group-buy.ts: one place that does not read never holds back the readable ones (Claude 4 on #2781, C4-20261106-0720-TODOS-30)");
+  {
+    await redis.pipeline([["DEL", anchorKey], ["DEL", `${anchorKey}:pass`], ["DEL", retryKey]]);
+    const both = await paidGroup("pi_C4TwoPlaces01", 20);
+    const email = "readable@example.com";
+    const sent = await askPlace({ store, id: both, email, product, base: "https://marktmorgen.com/@lotthree", from: '"Lot Three" <hello@marktmorgen.com>', ordersLink: async () => null });
+    const placeToken = mails.filter((m) => m.to[0] === email).at(-1)?.text.match(/\?take=([0-9a-f]{64})/)?.[1] ?? "";
+    const taken = await takePlace({ store, token: placeToken, recordStart: async () => {} });
+    is("a readable place was taken", [sent, taken.outcome], ["sent", "taken"]);
+    // A second place, written by hand in a shape that does not read.
+    await redis.pipeline([["HSET", `nl:grp:${both}:m`, "unreadable-place", "{not json"]]);
+    pages = [list([refund("re_C4TwoPlaces01", "pi_C4TwoPlaces01")])];
+    await revokeRefundedGroups((await storeForEmail("lotthree@example.com"))!, Date.now() + 30_000, async () => {});
+    is("the readable place is taken back in the same run", (await importedFor((await storeForEmail("lotthree@example.com"))!, email)).length, 0);
+    is("and the refund is not marked: it waits to be tried again for the one that did not read", [await seen("re_C4TwoPlaces01"), (await redis.pipeline([["HGET", retryKey, "re_C4TwoPlaces01"]]))[0]], [0, "pi_C4TwoPlaces01"]);
+  }
+
   part("group-buy.ts: an anchor in another shape starts no pass");
   await redis.pipeline([["DEL", retryKey], ["SET", anchorKey, "not a time"]]);
   reads.length = 0;

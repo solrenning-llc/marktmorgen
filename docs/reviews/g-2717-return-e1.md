@@ -1,0 +1,18 @@
+# #2717 — Codex G, retorno focal da página de alunos
+Head EXATOe1d3eeeca2916a834fe7d1974609cc3ae70a397e; anterior1473a8c680d24a08c46e0b3c836a6a20127e9faf. Anúncio6513fa8b antes do retorno. Li TODO delta de2caminhos105inserções/16exclusões (b10812d2/e1d3eeec), incluindo a reutilização de studentTimes e todos os casos novos.
+
+## Fechado o MÉDIO anterior
+Minha prova ORIGINAL FINAL311a59d0f7c15af9dc376cdd204454a770c64221, INALTERADA:1473a30/5falhas -> e1d30/30. Página incompleta, linha inválida e lista de bloqueados desconhecida agora são recusadas corretamente. MESMO autor final147verificações:1473a147/20falhas -> e1d147/147. Não certifico o LINDEX/aviso/texto da segunda revisãoC4 que C6 ainda está implementando em outro head.
+
+## MÉDIO NOVO de regressão — uma página vazia confirmada vira indisponível
+lib/learn.ts:628–636.
+Quando rows.length===0, reads=[] e replies=[], portanto nenhum SMEMBERS de bloqueados foi pedido. Se a contagem REAL de bloqueados é positiva e <=BLOCKED_READ_MAX, blockedList ainda tenta ler replies[0] e vira null. A função recusa a página confirmada; a rota real responde502.
+Reprodução SEM interceptar resposta alguma: crio loja/produto/curso pelos escritores reais; touchStudent registra um aluno; setBlocked o bloqueia; forgetLearnerPerson REAL apaga esse aluno. Estado REAL final HLEN=0/SCARDblocked=1. API autenticada do curso que agora está vazio responde502/unavailable no head; antes respondia200/{total:0,data:[],next:null}. Nem timeout, nem resposta parcial, nem exceção de provedor é necessária. Não se deve apagar o bloqueio como remendo para a leitura.
+Outro vetor da mesma decisão: uma página HSCAN exata ["37",[]] com HLEN1/SCARDblocked1 deve permitir prosseguir com next:"37", mas também devolve502. Neste segundo caso só HSCAN é substituído por uma página vazia não terminal; controles e contagens continuam reais. A documentação primária da famíliaSCAN confirma que zero elementos com cursor nãozero não é fim da iteração: https://redis.io/docs/latest/commands/scan/#number-of-elements-returned-at-every-scan-call (consultada06/11UTC). Não alego execução de Redis nativo neste ensaio nem que uma tabela pequena necessariamente produza o cursor37; é a fronteira de paginação aceita pelo protocolo. O primeiro vetor é nativo do MemoryRedis sem substituição de reply.
+Prova opt-in tests/g-2717-empty-page.proof.ts (commit615bc3b5): MESMO arquivo no antecessor1473a7/7 -> head e1d7/2falhas,5controles verdes. Controle curso vazio sem bloqueio200; aluno bloqueado visível; contagens reais após exclusão; injeção única do segundo cenário; controle final preserva aluno/bloqueio. Dois vetores de UM defeito. Corrigir a condição para não exigir uma resposta que nenhuma leitura pediu; manter a recusa dos desconhecidos quando houver linhas. Se optar por uma nova leitura, precisa da admissão/custeio correspondente antes; o caso vazio não exige ler toda a lista de bloqueados.
+
+## Verificação
+-35arquivos ligados ao leitor/API e consumidores:29grupos check/1055verificações +6grupos node:test/75testes, todos verdes. Incluem API paginada54, buyer-profile31, member-health19, person-copy e erasure-request-full21; os casos vazios acima eram ausentes.
+-Strict do recorte/imports/duas provas exit0; ESLint0; scanner3804rastreados/0; diff0. Não alterei asserções/provas antigas ou produto/CI/ramo alheio.
+-Sem browser, Redis nativo/Upstash, provedor real, buildglobal, hostedCI, mudança de preço/limite/flag ou certificação completa de margem.
+Resultado: bloqueio anterior FECHADO; um MÉDIO NOVO impede a liberação deste head. Claude4 mantém a segunda de sessão e seus outros apontamentos; nenhuma revisão/check futuro foi antecipado. G não incorpora.

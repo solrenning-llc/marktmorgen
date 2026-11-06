@@ -15,7 +15,7 @@ for(const item of imports){
  for(const el of item.importClause?.namedBindings?.elements??[])if(!el.isTypeOnly)exports.add(el.propertyName?.text??el.name.text);
 }
 const world=`import * as real from '${resolve(root,'lib/course.ts')}';\nconst w=()=>globalThis.__g2810;\n${[...exports].map(n=>n==='LockBusyError'?`export class LockBusyError extends Error{}`:n==='EMAIL_PATTERN'||n.endsWith('_PATTERN')?`export const ${n}=/./;`:n==='MAX_BODY_LENGTH'?`export const ${n}=100000;` :`export const ${n}=(...args)=>{if(w()?.['${n}'])return w()['${n}'](...args);if(real['${n}'])return real['${n}'](...args);throw new Error('unwired route dependency: ${n}');};`).join('\n')}`;
-const aliases=testAliases(input,root,resolve(root,'tests'));
+const aliases=testAliases(input.split('/').pop(),root,resolve(root,'tests'));
 const plugins=[{name:'g-route-boundary-only',setup(b){
  b.onResolve({filter:/^@\//},a=>a.importer===route&&!['@/lib/assignment','@/lib/store-data','@/lib/assignment-rules'].includes(a.path)?{path:'world',namespace:'g-world'}:undefined);
  b.onLoad({filter:/.*/,namespace:'g-world'},()=>({contents:world,loader:'ts',resolveDir:root}));

@@ -92,7 +92,9 @@ async function main() {
     let refused = false;
     try { await addNote(stats, "2026-11-05", "Added during the reading", now); } catch { refused = true; }
     is(`variant ${variant}: incomplete history refuses success`, refused, true);
-    is(`variant ${variant}: no cleanup is authorized`, commands.filter(c => c[0] === "HDEL").length, 0);
+    const cleanup = commands.filter(c => c[0] === "HDEL");
+    const originalIds = new Set(Array.from({ length: MAX_NOTES + 1 }, (_, i) => i.toString(16).padStart(8, "0")));
+    is(`variant ${variant}: cleanup is limited to the unconfirmed addition`, cleanup.length === 1 && cleanup[0].length === 3 && !originalIds.has(String(cleanup[0][2])), true);
     const [after] = await store.pipeline([["HGETALL", key]]);
     const kept = new Map<string, string>();
     const flat = after as string[];
@@ -117,7 +119,9 @@ async function main() {
     let refused = false;
     try { await addNote(stats, "2026-11-05", "Keep the history", now); } catch { refused = true; }
     is(`key variant ${variant}: unknown cleanup refuses success`, refused, true);
-    is(`key variant ${variant}: no note is deleted`, commands.filter(c => c[0] === "HDEL").length, 0);
+    const cleanup = commands.filter(c => c[0] === "HDEL");
+    const originalIds = new Set(Array.from({ length: MAX_NOTES + 1 }, (_, i) => i.toString(16).padStart(8, "0")));
+    is(`key variant ${variant}: cleanup is limited to the unconfirmed addition`, cleanup.length === 1 && cleanup[0].length === 3 && !originalIds.has(String(cleanup[0][2])), true);
     is(`key variant ${variant}: original oldest note remains`, await store.pipeline([["HGET", key, "00000000"]]), [value]);
   }
 
@@ -129,6 +133,26 @@ async function main() {
   is("confirmed overflow keeps the existing count", notes?.length, MAX_NOTES);
   is("confirmed overflow keeps the requested new note", notes?.some(n => n.text === "A confirmed new note"), true);
   is("confirmed overflow removes exactly the oldest note", await store.pipeline([["HLEN", key], ["HGET", key, "00000000"]]), [MAX_NOTES, null]);
+
+  part("A failed post-write reading cannot make retries duplicate or grow unknown history");
+  reset();
+  changeReading(() => []);
+  let firstRefused = false;
+  try { await addNote(stats, "2026-11-05", "The requested chart note", now); } catch { firstRefused = true; }
+  is("the first attempt reports the unavailable result", firstRefused, true);
+  is("the first unconfirmed write remains recoverable", await store.pipeline([["HLEN", key]]), [1]);
+  let retryRefused = false;
+  try { await addNote(stats, "2026-11-05", "The requested chart note", now); } catch { retryRefused = true; }
+  is("the retry still reports the unavailable result", retryRefused, true);
+  is("the retry does not duplicate the requested note", await store.pipeline([["HLEN", key]]), [1]);
+
+  reset();
+  await store.pipeline([["HSET", key, "00000001", "{"]]);
+  changeReading(() => []);
+  let malformedRefused = false;
+  try { await addNote(stats, "2026-11-05", "A new chart note", now); } catch { malformedRefused = true; }
+  is("malformed history refuses the addition", malformedRefused, true);
+  is("the unreadable hash does not grow", await store.pipeline([["HLEN", key]]), [1]);
   done();
 }
 main().catch(error => { console.error(error); process.exit(1); });

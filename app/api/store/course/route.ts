@@ -234,9 +234,13 @@ export async function POST(request: NextRequest) {
 
       if (action === "disable") {
         if (lessonCount(course) > 0) return Response.json({ ok: false, error: "not_empty" }, { status: 400 });
+        try {
+          await dropComments(course.id, [], store);
+        } catch {
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
         const result = await setProductCourse(ref, id, null);
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
-        await dropComments(course.id, [], store);
         await dropCourse(course, store);
         if (community) await unindexCourse(community, product.id, course).catch(() => {});
         await registerDrip(store, product, { ...course, modules: [] });

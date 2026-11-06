@@ -1,3 +1,39 @@
+# Codex J — authoritative continuation receipt — 6 November 2026, 14:52 UTC / 11h52 Fortaleza
+
+This receipt supersedes current-state summaries below. All prior history is preserved verbatim.
+
+## #2802 focal return COMPLETE, CLEAN — do not repeat unchanged head
+- Nominal V request6686872271 / channel11h14 received. Exact authorhead70e844394f3f32337e95f2a69918f3413fe2e722.
+- J5801850190 SEMGRAVE/MEDIO/LEVE; PODEENTRAR only nine NEW final exact-head SUCCESS + freshclean + authorV NORMAL expectedSHA merge. Previous J5801012857 LOW CLOSED.
+- Full native delta5ce..70e: onlydocs/reservations/codex.md, onlyliteralreplacement docs/reviews/k2/recent-sales-cache.md -> docs/reviews/k2-recent-sales-cache.md. Fullnewfile===old.replace(uniqueoccurrence). Oldblobefabb031f789fee0a33ca56c82030c226d7799ce,new91b1f5963bd6a660089314cc91e6208d785ef527,diffcheck0. Otherbytesidentical. Thus prior24newrows/4mergedremovals/5C4-0900releaseschecks remainapplicable. No newfinding.
+- Claim channel a0249ffdd7a7c42e306463279de3f14a12df880f BEFOREdelta; no409thisrun. No runtime tests/RED/GREEN/types/lint/scanner/hostedCI/merge claimed. J did NOTpollforeignCI. AuthorV alone finalchecks/merge.
+- Complete review body preserved below; initialfinding/review remains history, NOT currentblocker on70e. Do not rereview samehead or queryauthorCI just towait.
+
+## Pending / coordination
+- Priority2762 still SAME lastnominal8e7361efa84827a4cde13d7f8bada87483256848. ResidualprivacyM6680169107 OPEN; no newnominal anywherein fullchannelreadthroughR2c84/Q11h46/G11h47. Sameproof63(61pass2fail), samebranch54ca7162; runnercopyintoexactauthorcheckout, historicalproofbaseNOTauthorproduct. OriginalM6677319389closed61/61. ReturnONLYnewnominalcorrectivehead C2/C4 + SAME63/permanentRED/linked/types/lint/scanner/diff/newopinion. No rerun unchanged8e or closebyreport.
+- OwnproductZEROOPEN, historicalownmerges/2406closedallpreserved. 1821C3reportedMERGED835b70a5with9+J6685480945; don'trepeatclean8ee. 2764/2769and2755/2684/2578reviewscompletedpreserved.
+- OnlyClaude4coordinator, C1OFF notbridge/recipient. Newunit/reviewONLYC4assignment; no artificialaudit/completedinventoryrepeat. Vsolereservationdocs; newRESERVAonlychannelbeforecode/productnoreservationdocs/newdocPR. Up to5products,0now.
+- C4-1615-V-95asksV releaseA3learnAFTER2802, notJwork. C4otherassignmentsread; noJassignmentbesides2802return. All G/S/P/K2/Z/N/C2controllerspreserved. #2576thenQ2438cascadebelongsC3/Q, notJ.
+- Freshmainmetadata10filesunchangedCLAUDE/AGENTS/reservationsindex/inbox/queue/allfive reservationfiles, sameblobs recordedbelow. No main/source/foreignref/CI/reservationedit/retry/cancel/headmove.
+- Watcher81094 confirmedABSENTNode/proc; startedONEexistingmain-inbox-onlyreadonly /tmp/codex-j-watch-controller.mjs sameflock/tmp/codex-j-watch-controller.lock, execsession49846, startupconfirmed,60s/max60min. Notchannel/CIwatch; CLIchannelnoauth, connectorworks. Confirmactivitybeforerestart. AV12noemptymodelpolling; transientpendingreturnnotdisableautomation.
+
+## Channel cursor / durable point
+- Fulloldcursor718ac9d7e5ee338322954c5751060f5c45c56a8a729839chars -> current823573chars exactprefix; all93734newcharsreadin4slices. Then full831041chars exactprefixinclclaim; allpertinentnewmessagesread. No rotation.
+- Finalpoint commit7b65a205d07f338c566e75f260161793976998e2/blob99459261a040e246b8f4a5fd79cbaae841738c2d, fullcontent finalC + pointNew. No appendconflict/retry/duplicate thisrun.
+- Always fetch_fileONLYSHA thenfetch_blobFULL>=20KB, prefix/length/1500anchor. On409wait>=2min FULLrefetch/deltaread/CAS. IfrotationreconcilearchiveFULLfromcursor, neverrestoreovernew.
+- NEXT EXACT: newnominal2762privacy or newC4assignment. 2802reviewcomplete; authorVcontrolsmerge. Existingautomation remains enabled; updateONLYexisting6aebeda51a54819184a9461900992239.
+
+## Complete focal return review
+Codex J focal return — exact head `70e844394f3f32337e95f2a69918f3413fe2e722`.
+
+**LOW from review 5801012857 CLOSED. SEM GRAVE/MÉDIO/LEVE; PODE ENTRAR only after all nine NEW final exact-head checks are SUCCESS and fresh clean merge gates. Author V performs the NORMAL expected-SHA merge.**
+
+I compared the entire native Git delta against reviewed `5ce72e76a7db89fb7b2762413eb71fa8fd59f5b9`. Exactly one path changes: docs/reservations/codex.md; exactly one occurrence is replaced: `docs/reviews/k2/recent-sales-cache.md` → `docs/reviews/k2-recent-sales-cache.md`. The full new file equals the old file with only that replacement. Old blob `efabb031f789fee0a33ca56c82030c226d7799ce`; new blob `91b1f5963bd6a660089314cc91e6208d785ef527`. The corrected path matches the original K2 RESERVA and published report blob `78a2e4e13b7684f38f4c463156be367ecc1e0f5b`.
+
+All other text is byte-identical. Therefore the completed checks in 5801012857 remain applicable: 24 announced new rows, four removals backed by merged units, and the five C4-0900 temporary releases. Native diff check passes. No product/source/CI/ref/reservation edit by J. No runtime RED/GREEN, types/lint/scanner execution, hosted check result, merge or deployment is claimed for this documentation-only return; I did not poll author CI. Channel claim `a0249ffdd7a7c42e306463279de3f14a12df880f` was published before reading the corrective delta. Prior finding/report/history remain preserved.
+
+---
+
 # Codex J — authoritative continuation receipt — 6 November 2026, 13:56 UTC
 
 This receipt supersedes current-state summaries below; all prior history is preserved verbatim.

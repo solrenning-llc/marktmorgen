@@ -57,7 +57,7 @@ for (const applied of [false, true]) {
       const parent = await question(), original = redis.pipeline.bind(redis);
       let intercepted = 0, answerId = "", claimed = false, getterReads = 0;
       redis.pipeline = async (commands) => {
-        if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:lesson-comment-reply:v1\n")) {
+        if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:lesson-comments-add:v2\n")) {
           intercepted++;
           answerId = String(commands[0][9]);
           if (applied) await original(commands);
@@ -79,7 +79,7 @@ for (const applied of [false, true]) {
       } finally {
         redis.pipeline = original;
       }
-      assert.equal(intercepted, 1, "only the actual five-command answer write is intercepted; no retry");
+      assert.equal(intercepted, 1, "only the actual five-field answer write is intercepted; no retry");
       assert.equal((await readComment(course, answerId))?.text ?? null, applied ? "Unconfirmed answer" : null);
       assert.equal((await readComment(course, parent.id))?.text, "A question");
       assert.equal(claimed, false, "unknown write evidence cannot promise that the answer is under the lesson");

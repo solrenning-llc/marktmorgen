@@ -76,7 +76,7 @@ function oneReply(reply: unknown): unknown {
 }
 
 function confirmedCommentWrite(reply: unknown, hasParent: boolean): boolean {
-  const expected = hasParent ? 5 : 4;
+  const expected = 5;
   if (!Array.isArray(reply) || reply.length !== expected) return false;
   const values: number[] = [];
   try {
@@ -91,23 +91,53 @@ function confirmedCommentWrite(reply: unknown, hasParent: boolean): boolean {
   return values[0] === 1
     && values[1] === 1
     && values[2] === 1
-    && (!hasParent || values[4] >= 1);
+    && (hasParent ? values[4] >= 1 : values[4] === 0);
 }
 
-/** A reply is admitted and written with its still-present parent in one Redis turn. */
-const WRITE_REPLY = `-- marktmorgen:lesson-comment-reply:v1
-local raw = redis.call("HGET", KEYS[1], ARGV[1])
-if not raw then return {0, 0, 0, 0, 0} end
-local ok, parent = pcall(cjson.decode, raw)
-if not ok or type(parent) ~= "table" or parent.id ~= ARGV[1] or parent.l ~= ARGV[2] or (parent.r ~= nil and parent.r ~= cjson.null) then return {0, 0, 0, 0, 0} end
-local replies = tonumber(redis.call("HGET", KEYS[4], ARGV[1]) or "0")
-local most = tonumber(ARGV[6])
-if not replies or replies < 0 or replies >= most then return {0, 0, 0, 0, 0} end
+function confirmedCommentRefusal(reply: unknown): "parent" | "replies" | "full" | null {
+  if (!Array.isArray(reply) || reply.length !== 5) return null;
+  try {
+    const code = dataSlot(reply, 0);
+    if (![1, 2, 4].includes(typeof code === "number" ? code : 0)) return null;
+    for (let index = 1; index < 5; index += 1) if (dataSlot(reply, index) !== 0) return null;
+    return code === 1 ? "parent" : code === 2 ? "replies" : "full";
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Writes a comment with an exact receipt. A reply is admitted only while its
+ * canonical root parent is still under this lesson and below its answer cap;
+ * a root is admitted only while the lesson is below its own cap. Exact
+ * positive refusal codes mean that nothing was written: 1 parent gone, 2
+ * replies full, 4 lesson full. Every other non-write receipt is unknown.
+ */
+export const ADD_LESSON_COMMENT = `-- marktmorgen:lesson-comments-add:v2
+local parentId = ARGV[1]
+local lessonId = ARGV[2]
+local replies = 0
+if parentId ~= "" then
+  local raw = redis.call("HGET", KEYS[1], parentId)
+  if not raw then return {1, 0, 0, 0, 0} end
+  local ok, parent = pcall(cjson.decode, raw)
+  if not ok or type(parent) ~= "table" or parent.id ~= parentId or parent.l ~= lessonId or (parent.r ~= nil and parent.r ~= cjson.null) then return {3, 0, 0, 0, 0} end
+  replies = tonumber(redis.call("HGET", KEYS[4], parentId) or "0")
+  local mostReplies = tonumber(ARGV[6])
+  if not replies or replies < 0 or not mostReplies or mostReplies < 1 then return {3, 0, 0, 0, 0} end
+  if replies >= mostReplies then return {2, 0, 0, 0, 0} end
+else
+  local lessonCount = tonumber(redis.call("ZCARD", KEYS[2]))
+  local mostLesson = tonumber(ARGV[8])
+  if not lessonCount or lessonCount < 0 or not mostLesson or mostLesson < 1 then return {3, 0, 0, 0, 0} end
+  if lessonCount >= mostLesson then return {4, 0, 0, 0, 0} end
+end
 local kept = redis.call("HSET", KEYS[1], ARGV[3], ARGV[4])
 local lesson = redis.call("ZADD", KEYS[2], ARGV[5], ARGV[3])
 local newest = redis.call("ZADD", KEYS[3], ARGV[5], ARGV[3])
 local trimmed = redis.call("ZREMRANGEBYRANK", KEYS[3], 0, -tonumber(ARGV[7]) - 1)
-local count = redis.call("HINCRBY", KEYS[4], ARGV[1], 1)
+local count = 0
+if parentId ~= "" then count = redis.call("HINCRBY", KEYS[4], parentId, 1) end
 return {kept, lesson, newest, trimmed, count}`;
 
 /**
@@ -127,17 +157,17 @@ local function validId(value)
 end
 local function parsed(raw, expected)
   local ok, comment = pcall(cjson.decode, raw)
-  if not ok or type(comment) ~= "table" or comment.id ~= expected or comment.l ~= lesson or type(comment.b) ~= "string" or type(comment.t) ~= "string" then return nil, false end
+  if not ok or type(comment) ~= "table" or comment.id ~= expected or comment.l ~= lesson or type(comment.b) ~= "string" or type(comment.t) ~= "string" then return nil, false, false end
   local parent = comment.r
   if parent == cjson.null then parent = nil end
-  if parent ~= nil and not validId(parent) then return nil, false end
-  return parent, true
+  if parent ~= nil and not validId(parent) then return nil, false, false end
+  return parent, comment.h == true, true
 end
 local raw = redis.call("HGET", KEYS[1], target)
 if not raw then return {0, 0} end
-local parent, ok = parsed(raw, target)
+local parent, hidden, ok = parsed(raw, target)
 if not ok then return {-1, 0} end
-local gone = {{target, raw}}
+local gone = {{target, raw, hidden}}
 local known = {[target] = true}
 if parent == nil then
   local listed = redis.call("ZRANGE", KEYS[2], 0, most)
@@ -155,11 +185,11 @@ if parent == nil then
   for index, id in ipairs(listed) do
     local row = listedRows[index]
     if not row then return {-1, 0} end
-    local linked, rowOk = parsed(row, id)
+    local linked, rowHidden, rowOk = parsed(row, id)
     if not rowOk then return {-1, 0} end
     if linked == target and not known[id] then
       known[id] = true
-      table.insert(gone, {id, row})
+      table.insert(gone, {id, row, rowHidden})
     end
   end
 else
@@ -168,7 +198,9 @@ else
 end
 local freed = 0
 for _, row in ipairs(gone) do
-  freed = freed + math.floor((string.len(row[2]) + entry * 4 + step - 1) / step) * step
+  local bytes = string.len(row[2])
+  if row[3] then bytes = bytes - string.len(',"h":true') end
+  freed = freed + math.floor((bytes + entry * 4 + step - 1) / step) * step
 end
 for _, row in ipairs(gone) do
   redis.call("HDEL", KEYS[1], row[1])
@@ -249,25 +281,6 @@ export type AddResult =
   | { ok: false; reason: "empty" | "name" | "parent" | "replies" | "full" | "unknown" };
 
 /**
- * Writes a comment, and an answer only while the comment it answers is still
- * kept, in the same step, so an answer written while that comment is deleted
- * (by its author, the creator or a person's erasure) is never left kept,
- * counted and shown to nobody. KEYS: the comments, the lesson's comments, the
- * newest, the answer counts; ARGV: its id, what it is, when, the newest's last
- * rank to drop, the id it answers ("" for none). Answers "ok", or "gone" when
- * nothing was written.
- */
-export const ADD_LESSON_COMMENT = `-- marktmorgen:lesson-comments-add:v1
-local parent = ARGV[5]
-if parent ~= "" and redis.call("HEXISTS", KEYS[1], parent) == 0 then return "gone" end
-redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
-redis.call("ZADD", KEYS[2], ARGV[3], ARGV[1])
-redis.call("ZADD", KEYS[3], ARGV[3], ARGV[1])
-redis.call("ZREMRANGEBYRANK", KEYS[3], 0, ARGV[4])
-if parent ~= "" then redis.call("HINCRBY", KEYS[4], parent, 1) end
-return "ok"`;
-
-/**
  * Writes a comment. A student's name is the one they give now, or the one
  * they gave before; without either, nothing is written and "name" says why.
  */
@@ -319,15 +332,30 @@ export async function addComment(input: {
     parent: parent ? parent.id : null,
     hidden: false,
   };
-  await needData(input.room, [{ slot: COMMENTS_SLOT(input.courseId), bytes: commentBytes(comment) }]);
-  const written = parent
-    ? oneReply(await redisPipeline([["EVAL", WRITE_REPLY, 4, commentsKey(input.courseId), lessonKey(input.courseId, input.lessonId), allKey(input.courseId), repliesKey(input.courseId), parent.id, input.lessonId, comment.id, serializeComment(comment), now, MAX_REPLIES, RECENT_KEPT]]))
-    : await redisPipeline([
-        ["HSET", commentsKey(input.courseId), comment.id, serializeComment(comment)],
-        ["ZADD", lessonKey(input.courseId, input.lessonId), now, comment.id],
-        ["ZADD", allKey(input.courseId), now, comment.id],
-        ["ZREMRANGEBYRANK", allKey(input.courseId), 0, -RECENT_KEPT - 1],
-      ]);
+  const charged = [{ slot: COMMENTS_SLOT(input.courseId), bytes: commentBytes(comment) }];
+  await needData(input.room, charged);
+  const written = oneReply(await redisPipeline([[
+    "EVAL",
+    ADD_LESSON_COMMENT,
+    4,
+    commentsKey(input.courseId),
+    lessonKey(input.courseId, input.lessonId),
+    allKey(input.courseId),
+    repliesKey(input.courseId),
+    parent?.id ?? "",
+    input.lessonId,
+    comment.id,
+    serializeComment(comment),
+    now,
+    MAX_REPLIES,
+    RECENT_KEPT,
+    LESSON_KEPT,
+  ]]));
+  const refusal = confirmedCommentRefusal(written);
+  if (refusal) {
+    await giveData(input.room, charged);
+    return { ok: false, reason: refusal };
+  }
   if (!confirmedCommentWrite(written, parent !== null)) return { ok: false, reason: "unknown" };
   return { ok: true, comment, parent };
 }

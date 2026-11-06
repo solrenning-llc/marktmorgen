@@ -22,7 +22,8 @@ import { POST as mailRoute } from "@/app/api/store/mail/route";
 import { POST as formOpportunityRoute } from "@/app/api/store/form-opportunity/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { upsertContact } from "@/lib/contacts";
-import { readDeals, readPipelines, readStages } from "@/lib/crm";
+import { readDeals, readPipelines, readStages, readValues, writeFields } from "@/lib/crm";
+import { personKey } from "@/lib/person-key";
 import { DEFAULT_STAGES } from "@/lib/crm-rules";
 import { enroll, readFlows, saveFlow, sendDueSteps } from "@/lib/flows";
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
@@ -178,6 +179,33 @@ async function main(): Promise<void> {
   await redis.pipeline((queued as string[]).map((member) => ["ZADD", "nl:mail:flowq", 0, member]));
   await run();
   is("once they read: the deal is made in the store's own stage", (await readDeals(sid, stages)).filter((d) => d.email === "ana@example.com").map((d) => d.stage), [WON]);
+
+  // Review of #2981 (LEVE 2): the fields are read exactly where a step uses them, as writeFields already reads them.
+  part("A workflow's field step waits while the fields are unknown, and runs once they read");
+  const fieldsKey = `nl:crm:fields:${sid}`;
+  const TIER = { id: "fld001", name: "Tier", type: "text" as const, options: [] };
+  await writeFields(sid, [TIER]);
+  faults.set(fieldsKey, "{not json");
+  const onUnknownFields = { name: "Joined: field", trigger: "joined", active: true, steps: [{ delayHours: 0, subject: "", body: "", action: { do: "field", field: TIER.id, value: "gold" } }] };
+  is("saveFlow with the fields unknown: refused as unknown, never checked against no fields", await outcome(() => saveFlow(store, onUnknownFields, { activate: true })), "CrmSchemaReadUnavailable");
+  faults.clear();
+  const tiered = await saveFlow(store, onUnknownFields, { activate: true });
+  is("setup: a sequence with a field step on the store's own field", tiered.ok, true);
+  // Only the field sequence is on: the deal one is turned off, so the queue holds this step alone.
+  await saveFlow(store, { ...(await readFlows(list)).find((f) => f.name === "Joined: deal")!, active: false });
+  await upsertContact(list, "bea@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  store = (await storeForEmail(OWNER))!;
+  await enroll(store, "bea@example.com", { joined: true });
+  const bea = personKey(sid, "bea@example.com");
+  faults.set(fieldsKey, "{not json");
+  await run();
+  faults.clear();
+  is("while unknown: no value written", await readValues(sid, bea, [TIER]), {});
+  const [waiting] = await redis.pipeline([["ZRANGEBYSCORE", "nl:mail:flowq", "-inf", "+inf"]]);
+  is("while unknown: the step is queued again, not ended as \"The field was removed\"", (waiting as string[]).length, 1);
+  await redis.pipeline((waiting as string[]).map((member) => ["ZADD", "nl:mail:flowq", 0, member]));
+  await run();
+  is("once they read: the field is set", await readValues(sid, bea, [TIER]), { [TIER.id]: "gold" });
 
   done();
 }

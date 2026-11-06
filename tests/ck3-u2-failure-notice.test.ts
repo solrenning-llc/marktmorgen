@@ -190,8 +190,11 @@ async function main() {
     await redis.pipeline([["HSET", `nl:dsched:${STATS}`, "promo_BROKEN", "{not json"], ["ZADD", TELL, start, member("promo_BROKEN")]]);
     run = await sched.activateScheduledCodes(Date.now() + 10_000, start + HOUR, deps);
     is("nothing sent", told.length, 0);
-    is("counted as unknown", run.notices.unknown, 1);
-    is("an unreadable record is moved on, never holding the front of the list", Number((await redis.pipeline([["ZSCORE", TELL, member("promo_BROKEN")]]))[0]), start + HOUR + NOTICE_RETRY_SECONDS);
+    // Rule 23, #3006 review L1 sibling: an unreadable record used to be moved an hour on, for ever, at an unpaid
+    // cost each time; it now leaves the list to tell (counted dropped, not unknown), the record itself kept.
+    is("counted as dropped", [run.notices.dropped, run.notices.unknown], [1, 0]);
+    is("an unreadable record leaves the list to tell, never costing a run again", (await redis.pipeline([["ZSCORE", TELL, member("promo_BROKEN")]]))[0], null);
+    is("the unreadable record itself is kept", (await redis.pipeline([["HGET", `nl:dsched:${STATS}`, "promo_BROKEN"]]))[0], "{not json");
     await redis.pipeline([["HSET", `nl:dsched:${STATS}`, "promo_OK", JSON.stringify({ c: "OK", s: start, e: end, t: 3, f: 0 })], ["ZADD", TELL, start, member("promo_OK")]]);
     await sched.activateScheduledCodes(Date.now() + 10_000, start + HOUR, deps);
     is("a code not failed is never told about", told.length, 0);

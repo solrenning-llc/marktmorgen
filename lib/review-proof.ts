@@ -36,7 +36,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
-import { type LostRead, confirmLostRead, keptUnlessLost, lostCursorKey, lostDisputesOrRetry, refundedInFull, rowGivesBack } from "@/lib/refunds";
+import { type LostRead, confirmLostRead, keptUnlessLost, lostCursorKey, lostDisputesOrRetry, refundRowKnown, refundedInFull, rowGivesBack } from "@/lib/refunds";
 import { ordersGrant } from "@/lib/buyer-orders";
 import { DOWNLOAD_WINDOW_SECONDS } from "@/lib/store-checkout";
 import { REVIEW_STORES_KEY, markRefunded } from "@/lib/reviews";
@@ -304,11 +304,13 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
       query.append("expand[]", "data.charge");
       if (after) query.set("starting_after", after);
-      // The page in its exact shape (lib/stripe-list.ts): one in another shape, or a row not readable, keeps the
-      // anchor (unsure), so no refund on it is passed over; the readable rows are still marked.
+      // The page in its exact shape (lib/stripe-list.ts), each row by the refunds' own rule (refundRowKnown,
+      // lib/refunds.ts: its id, time, status, payment and charge.refunded as Stripe gives them). A page in another
+      // shape, or a row not readable, keeps the anchor (unsure), so no refund on it is passed over; the readable
+      // rows are still marked (Codex P on #2774).
       let listed: StripePage;
       try {
-        listed = readStripePage(await onAccount("GET", store.stripeAccountId, `/refunds?${query}`), (row) => typeof ownField(row, "status") === "string");
+        listed = readStripePage(await onAccount("GET", store.stripeAccountId, `/refunds?${query}`), refundRowKnown);
       } catch (error) {
         if (!(error instanceof StripeListUnreadable)) throw error;
         console.error("reading refunds for reviews: a page in another shape", error);

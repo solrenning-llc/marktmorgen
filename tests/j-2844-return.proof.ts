@@ -1,17 +1,17 @@
 /**
- * Independent J reproduction; settlement issue first reported by Revisor 1. Synthetic only.
- * Redis answers the PayPal payouts read in an unknown shape (rule 24): never
- * read as "this call wrote it", "not connected" or "store gone".
+ * Independent J return evidence on source
+ * 7b1baef666538d2a527afb22e3dca3ded947c3af. The original settlement issue
+ * was reported by Revisor 1; all transports and data here are synthetic.
  *
- *   - settling: a SET NX on a paid item that answers anything but "OK" or
- *     null books nothing, so the affiliate book is never counted twice, and
- *     the item stays on its way for the next run;
- *   - the daily job: a store whose record could not be read stays in the
- *     settle set (only a confirmed absent store leaves it);
- *   - the creator's PayPal link: an unknown answer is not "not connected"
- *     and not "auto-pay off".
+ * Six fault cases cover unknown replies before/after applying needData,
+ * the deterministic ledger HSETNX, and the item SET NX mark. The ledger is
+ * written BEFORE the mark: recovery must retain one payout, one synthetic
+ * provider batch, and a pending reservation until a known retry completes.
  *
- * Synthetic only: a stand-in for PayPal's API on api-m.paypal.com, the Redis stub.
+ * Additional checks cover concurrent settlement, healthy migration of a
+ * real legacy random-id payout, and unreadable legacy/deterministic ledger
+ * rows. Unreadable rows must remain unknown rather than proving a booking;
+ * the three ledger-reader failures remain RED on the reviewed source.
  */
 import { connectPayPal, onTheirWay, payWithPayPal, settlePayPal } from "@/lib/paypal-payouts";
 import { addPayout, bookedPayouts, readBook } from "@/lib/affiliates";

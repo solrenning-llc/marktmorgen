@@ -54,3 +54,17 @@ Antes de cada execução, um wrapper instala MockAgent.disableNetConnect no disp
 A cópia privada estava clean antes do checkout nominal. Seu symlink antigo de dependências estava quebrado: o primeiro runner parou por esbuild ausente, antes do produto. Somente o symlink privado foi substituído pelo destino compartilhado já autorizado; os módulos compartilhados não foram editados.
 
 Não rodei navegador, Redis nativo, fornecedor/conta real, pagamentos reais, publicação ou CI. Não alterei produto, ramo do autor, workflow, preço, limite, comissão, flag ou trava. A evidência não reutiliza o protótipo externo descartado da tarefa2807. Artefatos pertencem à branch própria existente; a publicação depende apenas da recuperação do limite da API.
+
+## Correção documental do cabeçalho da prova nova
+
+O commit de evidência executada **2e7eeb7ce8f4084f9fa35941976e5ae916cc5ec7** permanece preservado. Seu cabeçalho copiado das provas antigas dizia que uma resposta desconhecida do SET NX não lançava nada no livro; isso descrevia a ordem antiga e contradizia o comportamento book-first exercitado neste retorno. Somente esse comentário inicial foi corrigido para descrever as seis barreiras, lançamento anterior à marca, unicidade e leitor legado desconhecido. Nenhum byte depois do comentário inicial mudou.
+
+Fonte executada permanece **7b1baef666538d2a527afb22e3dca3ded947c3af**. Não houve reexecução das31 verificações, das345 verificações verdes ou de qualquer outra suíte por esta correção documental. O resultado31/3 pertence à prova executada no commit anterior; seu corpo é byte a byte idêntico no commit documental.
+
+Conferência com o TypeScript parser/printer usando removeComments e SHA-256, parent/final idênticos:
+
+- AST impresso sem comentários: `1b4075c22d55ae9c29510f59aeeba691217bed234c28eb460256fcc340d729cf`.
+- Todos os bytes após o comentário inicial: `3360551212e8a7a74c250d04093162f6074dc48366f3973e0f22c93b823050da`.
+- Corpo inteiro de main com as31 verificações: `a21ea8b7e58d8c834de8974a3243f9d2b852f1375e50c7879eab8a81864dba3c`.
+
+Esta correção não altera resultados, asserções, runner, provas originais20, produto ou CI.

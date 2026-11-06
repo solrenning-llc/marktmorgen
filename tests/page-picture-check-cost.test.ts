@@ -87,6 +87,21 @@ async function main(): Promise<void> {
   is("every save naming a picture the door never let in is refused", siteAnswers.every((a) => JSON.stringify(a) === JSON.stringify([400, "pictures"])), true);
   is(`the file store is asked about each picture let in through the door at most once (head and get), not once a save: ${checks()} calls for ${site.length} pictures over ${SAVES} saves`, checks() <= 2 * (site.length + 1), true);
 
+  part("A file the door let in that is not a picture: refused, let go of and deleted, and never put on unchecked later");
+  const notPicture = await upload({ productId: id });
+  files.set(notPicture, { bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37]), contentType: "image/jpeg", at: Date.now() + 1 });
+  calls.head = 0;
+  calls.get = 0;
+  is("a page with it: refused", await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0004", [notPicture]) }))), [400, "pictures"]);
+  is("checked once: a head and a get", [calls.head, calls.get], [1, 1]);
+  is("and deleted, since this save took it from the door and it is nobody else's", files.has(notPicture), false);
+  files.set(notPicture, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() + 1 });
+  is("the same name sent again, even with a picture there now: refused, it is neither fresh from the door nor this page's", await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0004", [notPicture]) }))), [400, "pictures"]);
+  const siteBad = await upload({ pageId: "pagepage01" });
+  files.set(siteBad, { bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37]), contentType: "image/jpeg", at: Date.now() + 1 });
+  is("the same on a store page: refused", await result(await sitePage(post("/api/store/site-page", session, { action: "save", id: "pagepage01", page: pictures("pics0005", [siteBad]) }))), [400, "pictures"]);
+  is("and deleted", files.has(siteBad), false);
+
   part("And a page saved as it should be still saves");
   const one = await upload({ productId: id });
   calls.head = 0;

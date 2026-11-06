@@ -27,6 +27,33 @@ test("every published fixed tier keeps price, capacity, throughput, and read-reg
     "| Fixed 100 GB | $800 | $400 | 100 GB | 10 TB | 16,000 |",
     "| Fixed 500 GB | $1,500 | $750 | 500 GB | 20 TB | 16,000 |",
   ]) assert.ok(text.includes(row), row);
+  for (const annual of ["$120", "$240", "$1,200", "$2,400", "$4,800", "$9,600", "$18,000"])
+    assert.ok(text.includes(annual), annual);
+});
+
+test("PAYG monthly and twelve-worst-month Redis components stay explicit for every customer plan", () => {
+  const text = decision();
+  for (const row of [
+    "| Store | month | $3.208618 | $0.659180 | $0.037784 | **$3.905582** |",
+    "| Store | 12 worst months | $38.503413 | $7.910156 | $0.453409 | **$46.866978** |",
+    "| Studio | month | $4.990522 | $0.718050 | $0.110816 | **$5.819388** |",
+    "| Studio | 12 worst months | $59.886261 | $8.616606 | $1.329794 | **$69.832660** |",
+    "| Scale | month | $8.203842 | $0.820725 | $0.249999 | **$9.274567** |",
+    "| Scale | 12 worst months | $98.446101 | $9.848694 | $2.999992 | **$111.294799** |",
+  ]) assert.ok(text.includes(row), row);
+
+  for (const [month, year] of [[3.905581523, 46.866978271], [5.819388373, 69.832660474], [9.274566588, 111.29479906]])
+    assert.ok(Math.abs(month * 12 - year) < 1e-8, `${month} × 12 = ${year}`);
+});
+
+test("the fixed comparison assigns the whole fixed fee to an isolated store and remains conditional", () => {
+  const text = decision();
+  for (const row of [
+    "| Store | $3.905582 | $46.866978 | Fixed 1 GB | $20 | $240 | PAYG is cheaper |",
+    "| Studio | $5.819388 | $69.832660 | Fixed 5 GB | $100 | $1,200 | PAYG is cheaper |",
+    "| Scale | $9.274567 | $111.294799 | Fixed 5 GB | $100 | $1,200 | PAYG is cheaper |",
+  ]) assert.ok(text.includes(row), row);
+  assert.match(text, /zero read regions[\s\S]*no Prod Pack[\s\S]*one full store/i);
 });
 
 test("the decision refuses to turn missing live aggregate evidence into zero", () => {

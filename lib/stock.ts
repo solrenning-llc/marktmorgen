@@ -411,7 +411,8 @@ export async function withCartStockHolds<T extends { id: string }>(
   // Nobody is sent to a checkout whose units are not proven its own: it is closed at Stripe, and only Stripe's "expired" lets its holds go.
   if (store.stripeAccountId) {
     const closed = await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(value.id)}/expire`, new URLSearchParams()).catch(() => null);
-    if (closed?.status === "expired") await redisPipeline(keys.flatMap((key) => [["HDEL", key, value.id], ["HDEL", key, pending]])).catch(() => {});
+    // One command a product, both fields at once, so the failure path stays inside CART_STOCK_COMMANDS_MOST (tests/cart-stock.test.ts).
+    if (closed?.status === "expired") await redisPipeline(keys.map((key) => ["HDEL", key, value.id, pending])).catch(() => {});
   }
   return { ok: false, reason: "busy" };
 }

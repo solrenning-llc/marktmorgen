@@ -18,43 +18,23 @@ test("unknown script acknowledgments never confirm a lease or fenced write", asy
   } finally { store.pipeline = original; }
 });
 
-test("fallback renewal and writes require explicit storage acknowledgment and known absence", async () => {
+// Rule 23 (Codex G on #2721, C4-20261106-1055-TODOS-59): this test once accepted a separate GET + EXPIRE / EXISTS + SET
+// when the script could not run, as long as storage acknowledged each step. Read then act as two steps leaves a gap in
+// which an expired lock can become another holder's, so the fallback is gone: with the script unavailable a hold is
+// never confirmed and a fenced write never lands, whatever the separate commands would have answered.
+test("when the script cannot run, no renewal or fenced write is confirmed and no separate command is sent", async () => {
   const original: typeof store.pipeline = store.pipeline.bind(store);
   const held: Held = { key: "synthetic:held", token: "owner", ttlSeconds: 15 };
-  let acknowledgment: unknown;
-  let existence: unknown = 0;
-  let writes = 0;
+  let separate = 0;
   store.pipeline = async commands => {
     if (commands[0]?.[0] === "EVAL") throw Error("Synthetic unsupported script");
-    return commands.map(command => {
-      if (command[0] === "GET") return held.token;
-      if (command[0] === "EXISTS") return existence;
-      if (command[0] === "EXPIRE") return acknowledgment;
-      if (command[0] === "SET") { writes += 1; return acknowledgment; }
-      throw Error("Unexpected synthetic command");
-    });
+    separate += 1;
+    return commands.map(command => (command[0] === "GET" ? held.token : command[0] === "EXISTS" ? 0 : command[0] === "EXPIRE" ? 1 : "OK"));
   };
   try {
-    for (const unknown of [undefined, null, false, true, 0, 2, "1", {}, []]) {
-      acknowledgment = unknown;
-      assert.equal(await holdLock(held), false);
-      assert.equal(await setIfHeld(held, "synthetic:record", "value"), false);
-    }
-    for (const unknownExistence of [undefined, null, false, true, 1, 2, "0", "1", {}, []]) {
-      existence = unknownExistence;
-      acknowledgment = "OK";
-      const before: number = writes;
-      assert.equal(await setIfHeld(held, "synthetic:record", "value", { absent: true }), false);
-      assert.equal(writes, before);
-    }
-    acknowledgment = 1;
-    assert.equal(await holdLock(held), true);
-    acknowledgment = "OK";
-    existence = 0;
-    assert.equal(await setIfHeld(held, "synthetic:record", "value", { absent: true }), true);
-    existence = 1;
-    const before: number = writes;
+    assert.equal(await holdLock(held), false);
+    assert.equal(await setIfHeld(held, "synthetic:record", "value"), false);
     assert.equal(await setIfHeld(held, "synthetic:record", "value", { absent: true }), false);
-    assert.equal(writes, before);
+    assert.equal(separate, 0);
   } finally { store.pipeline = original; }
 });

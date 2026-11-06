@@ -28,12 +28,14 @@ import { freeDaysSubs, giveFreeDays } from "@/lib/member-free-days";
 import { FREE_DAYS_WORDS } from "@/lib/buyer-words/free-days";
 import { MEMBERSHIP_WORDS } from "@/lib/buyer-words/membership";
 import { speechFor } from "@/lib/buyer-words";
+import { allowanceUsed } from "@/lib/store-allowance";
 import { POST } from "@/app/api/store/member-free-days/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_member_free_days_only";
-process.env.RESEND_API_KEY = "re_test_member_free_days_only";
+// One of the synthetic sender keys tests/resend-fixture-credentials.ts knows: never a live one.
+process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
 
 const DAY = 86_400;
 const NOW = Math.floor(Date.now() / 1000);
@@ -67,8 +69,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const url = new URL(String(input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "api.resend.com") {
-    const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
-    emails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text });
+    const body = JSON.parse(String(init?.body ?? "{}")) as { to?: string | string[]; subject?: string; text?: string };
+    if (init?.method === "POST" && url.pathname === "/emails") emails.push({ to: String([body.to].flat()[0]), subject: body.subject ?? "", text: body.text ?? "" });
     return answer({ id: `email_${emails.length}` });
   }
   const path = url.pathname.replace(/^\/v1/, "");
@@ -162,6 +164,7 @@ async function main(): Promise<void> {
 
   part("Giving the days");
   mode = "ok";
+  const emailsUsed = await allowanceUsed(store, "email");
   const given = await giveFreeDays(store, "member@example.com", "sub_live000001", 14, PERIOD_END, by);
   is("given, with the new next charge", given, { ok: true, nextCharge: PERIOD_END + 14 * DAY, emailed: true });
   const last = posted.at(-1)!;
@@ -174,6 +177,7 @@ async function main(): Promise<void> {
   const log = await readLog(store.sid);
   is("who gave it, when and how many days is in the activity log", [log.length, log[0]?.who, log[0]?.what.includes("14 free days"), typeof log[0]?.at === "string"], [1, owner, true, true]);
   is("the member is emailed once", [emails.length, emails[0]?.to], [1, "member@example.com"]);
+  is("and the email was taken from the store's own emails first", (await allowanceUsed(store, "email")) - emailsUsed, 1);
   const es = FREE_DAYS_WORDS.es;
   const date = speechFor("es", "usd").date((PERIOD_END + 14 * DAY) * 1000);
   is("in the store's language, with the new date", [emails[0]?.subject === es.subject("Days Store"), emails[0]?.text.includes(date), emails[0]?.text.includes(es.days(14))], [true, true, true]);

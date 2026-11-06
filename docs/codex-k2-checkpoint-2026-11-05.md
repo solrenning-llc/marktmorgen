@@ -920,3 +920,58 @@ FULLfreshchannelincluded **C4-20261106-2430-K2-143,06Nov14:31** andR2cycle127. S
 **K2ownsONEcompletefollow-up unit, ONLY AFTER #2821 MERGES**, samefile. BeginaddResponse/readForms, consumers503/localunavailable/nofalseSent/zero; adoptexisting9f8d9092ASpermanentRED, neverrecreateit. No siblingsourceedit/reservationforproductuntil2821merged; proof2pathsreservationalreadydone. Current2821still70dc/new9+R2completepending, no immediate siblingheadchange.
 R2cycle127reproduced29/5, independentlyconfirmsreadFormsprivacyupstreambypass, add/dropVR. Hislineabout#2818doesNOTauthorizeK2touchC6SigninPR; explicitC4-2430sequencingis#2821thenK2siblings. No newproduct/foreigncodebythatambiguousnumber. GradeddecisionC4prevales, creditR2factsretained.
 AcknowledgethisorderandpublishTHIScheckpointSHAinfinalchannelpoint, notold1c6only. PendingCI/reviewtransient,nocurrentautomationdisable. Continueonlegitimate2821return/terminalorothernominalnovelty; noemptyCIpoll.
+
+
+## COMPLETE CHECKPOINT — 2026-11-06 15:26 Fortaleza — R2 complete recovered; actual alias conflict resolved
+Supersedes old "R2completepending" andhead70dc/currentgates. C4sole/C1OFF/Vdocs. OneownOPEN2821, no siblingsourceedits/newproduct/foreignref/CIaction. AlloldKheads/REDs/mergedworkpreserved; noautomation/subagents/provider/financial/PIIactions.
+
+### Review existed: full-channel branch-name search, NOT only K2 or PR number
+Initialfullchannel **0044ab11ce8ce189e94a763dbe186c96926ee70f**,1,191,243chars. SearchingFULLtext for **k-form-response-unavailable|70dc67|5f2cd6|#2821** recovered:
+- **R2cycle109,06Nov13:32**, EXACT5f2cd6da: completeconsumerimplementationreview. Studio pageper-formcatch/totalnull/status/Edit andCSV/PDF/form-opportunity503; form*,k-form*,person-copy*,store-export* tests pass. Explicit missingcycle95notes **CLOSED**. Plaintextunavailable wording describedas"detalhesemrisco", NOTanopenfinding. Do NOTinventa mandatoryLOW/redoassertionfromthisoptionalwording.
+- **R2cycle125,14:25**, EXACT70dc, "semachado, sófusão do main". All12ownblobs5f→70BYTE-IDindependentlyverifiedpriorturn, socycle109qualificationappliesunderCX122.8.
+EarliercheckpointandchannelclaimscompleteR2wasmissingwereWRONGbecausefilterK2/PRnumbermissedR2callingus"K"withbranchname. Endpointreviews=[]doesNOToverrulechannelreview. Correctedpublicly **b83847a60a6c6c5a96db924fbd08a78db089551b** andPRcomment **6692222111**; doNOTaskduplicateR2/independentreviewagain.
+Thislessonisoperationalnotproductbug: inspect FULLchannelbybranch/head/names, don'trelyontail/header/endpointalone. C4-2430knownsiblingsremainsequencedafter2821, notanewblocker/reopenofqualifiedreadResponsesunit.
+
+### 70dc ALL NINE green but ACTUAL conflict prevents merge
+Fresh exact70dc lookup NINE DISTINCTworkflowscompletedSUCCESS:
+42261370040,42261370021,42261370115,42261369944,42261370271,42261370066,42261370303,42261370097,42261369959.
+No old5f substitution. No retry/cancel. Recoveredreview+9green wouldpermitmergeIFclean; nativepreparedmergeagainstfrozenmain **5d2c7bdc6f6ff1d33af3e9e70c292a47e0bea95e** returnedconflictONLY **tests/test-config.mjs**, tree **df33d9f01884034f3ae48ddf6063478cd129df96** containsmarkers. RAWafterready confirmsfalse/dirty. **NOmergeattemptinconflict**; readytransitionlegitimatebecausequalificationcomplete, stayedreadywhilecausalintegrationawaitsCI.
+Sourceofconflict: ourindependentform-responsealiasblockandmainTreview-summaryaliasblockinsertatSAMEtop. No productconflict.
+OneinitialworktreecreationattemptfailedBEFOREanyprocessbecausecwdpointedatthen-nonexistentnewdirectory; nofile/refchange/resultcounted. Correctedbyrunninggitworktreeaddfromrootrepo; created **k2-current-main-bundles** frozen5d detached, preservingallolderworktrees/stagedWIPs.
+
+### Causal conflict resolution, no future top-insertion churn
+ResolvedFULLmainconfig+ONLYourform-responseblock. MovedONLYourblockneartheexisting **return aliases**, so newmainaliasinsertionsattopwillnotcollidewithourprevioussameinsertionpoint. No foreignline/reordering/aliasdiscard. Both old/newblock are samefunctionbody; noassertion/timeout/productchange.
+Beforeownunionoverwrite, actualFROZENMAINclient-bundles **269/269/0fail**, satisfyingC4lessoncurrentmaincheck. Theninstalledown12pathsfromnativeconflictedmerge, configmarkersremoved/blockscombinedandONLYourblockrelocated.
+RealNodecomparison **testAliases** functions fromunion-before-relocationandresolvedfile for **ALL1429canonicalfilenames**(1426main+3own): **deepStrictEqualmaps1429/1429**, no runtimebehavior/fixturemappingchange. Scratchmodules **/tmp/k2-config-union.mjs**, **/tmp/k2-config-resolved.mjs**, log **/tmp/k2-alias-equivalence.log**. Reproduceunionfrom70dc+5d native merge-tree; striponlyconflictmarkers/retainbothblocks. Bothparents/publicheadimmutable; proofsnotsolelyconversation.
+Own11otherpathblobsEXACTBYTE-ID70dc; tests/test-config.mjsisONLYdifferentownpath. Nativeuniontree **acc0fe511cca24a672d40b887a3816c263eedba3**, GitDataEXACT. Basefrozenmaintree **71511beb87fe978673db35b440a63bd5203d23f9**.
+NORMALintegration commit **db4c763cc7b74737d66c8ec121982721d6aba557**, parents70dc+5d. Expectedref70dc→db4c,forceFALSE. No repeatedmainchase/CIcancellation/oldjobretry; headmovedforACTUALdirtymerge, neverjusttospinCI. No newindependentreviewrequired for main/configbookkeeping withmappingsprovedidentical.
+
+Postresolutionactualchecks:
+**269/269bundles**,9canonicalfiles **101customchecks+29NodetestsPASS**:
+k-form-response-read-evidence32; forms19; form-opportunity30; person-copy20;
+form-response-unavailable6Node;form-response-copy-evidence1Node;store-export-unknown-size9Node;blog-read-unavailable-page10Node;review-summary-unavailable-page3Node.
+Actual9source/testroots+REALtsconfig/imports **0diagnostics**; directedlint0; scanner **4073tracked/0corrections**; diff0. No rerunfullsuiteaftergreenunrelatedchecks. No browser/nativeRedis/provider/production/globalAAAclaim; oldhostedFF/WKsuccessbelongs70dc, notdb4cnewgate.
+Logs **/tmp/k2-current-main-bundles.log**, **/tmp/k2-forms-alias-merge-{linked,types,bundles,lint,scan}.log**. Local k2-current-main-bundles HEAD5d/STAGEDFULLownunionacc0, node_moduleslink; no reset/discard. RootrepoHEADhistoricbranchclean. Earlier k2-form-final HEAD4eb/MERGE_HEADec5/stagedsiblings80a remainsintact; don'taccidentallypushitovernewhead.
+
+### CURRENT OWN PR #2821 exact db4c, ready, waiting ONLY newCI + fresh final gates
+PR https://github.com/solrenning-llc/marktmorgen/pull/2821
+branchcodex/k-form-response-unavailable exact **db4c763cc7b74737d66c8ec121982721d6aba557** / treeacc0.
+LatestRAWOPEN, **draft=false/mergeable=true/blocked**. No9newsuccessclaim. PRbodyupdatedactualcurrenthead/recoveredreview/exactequivalence, comment6692222111.
+Singleinitialdb4cCIlookup: **7IN_PROGRESS+2QUEUED**, NINEdistinct:
+**42270267124,42270267190,42270267401,42270267335,42270267114,42270266964,42270267257,42270267243,42270267142**.
+PV8merge-source **cd19b5c7ede4f2e64793202d4b00a43b38da67fc** isnotownhead; wrapperqueryEXACTdb4c. NOsubsequentemptyCIpoll/headchurn/retry/cancel/merge.
+NextlegitimateeventterminalnewCI→ifNINEcompletedSUCCESSandfreshRAW/native/clientmainclean,NORMALexpectedSHAmerge/GET. QualifiedR2c109+c125contentcontinuesvalid; doNOTwaitduplicatereview. RealnewfindingrequiresREDbeforefix. Actualnewmergeconflictmayneedonecausalintegration; don'troutinelyheadchase. Movingownaliasawayfromtopaimstostopthatcollisionwithoutchanginganymapping.
+
+### Sequenced sibling unit remains AFTER2821 MERGES, existing proof not recreated
+C4-2430-K2-143stillapplies: MEDaddResponse/conditionalMEDreadForms/LOW-MEDdropForm/LOWreadForm-counts. Proof **codex/k-form-store-sibling-evidence@9f8d9092c5b6fcd1cfd14b0879eb37fb48894db8**,29/5, unchanged. No siblingproduct/sourceedit/newPR/reservationforrepairbefore2821merge.
+WhileCIwaits, performedONLYREADONLYcallgraphpreparation and reported **3eb64e4c82b27b47cb76a5cc348cdb2e946e9479**:
+- readForm: app/[handle]/[slug]/page.tsx164, app/[handle]/form/[form]/page.tsx50, app/api/store/form/route.ts60 allcatchnull (unknownlooksclosed/absent). OwnCSV/PDF/form-opportunity/CRUDformsotherdirectreadersneed503/localhoneststateswhenhelperstrict.
+- addResponse: publicPOSTform90 hascatchbackerror303; proveunknownkeepdoesNOTcontinueenroll/funneldone/Sent, notjusthelperunit. Permission/rate/MRboundsunchanged.
+- readForms: StudioForms44; StudioEmail301catch[] (N/C3coordinatebeforeediting); person-copy207; store-export84/123; store-copy165/212/343; funnel-bundle-store48/80.
+- flows287catchnullisC3; doNOTeditbyinference. Existingproof29 modulefactsdoesNOTclaimtheseHTTP/copy/email/roomconsumersnewlyexecuted.
+Thisisplanning/statictrace, NOTstartingnewcodeunitbeforegate. AskedC4advancecoordinationforfuturecompleteconsumerrecut, notuserpermission; no newreserve/foreignsource/proofassertionchange. After2821mergefreshinventory/reservepaths, adoptSAMEproofascanonicalRED, startaddResponse+readFormsandconsumers, onecompletefollow-upPR/typeslintscan/diff/9exact+qualifiedreview. No falseSent/zero,503/localunavailable, uncertainwritesroomreleaseonlyconfirmed; preserveallcost/retention/privacygates. ReadForm/count/dropfollowperclassification.
+
+### Other statuses unchanged / exact handoff
+#2790observer5803506092/368 CLOSED, doc/probe20dcec9durable; C5a1c93ee4main/configintegrationreported, optionalaliascheckdoesNOTrequireduplicateproductreview. C5controlsstackmerge, noforeignCI/refchanges. AlloldKmerged2340/2354/2472/2796/2811etcnotrecreated. #2801/#2803cost-ownerHOLDunchanged. Othercurrentnominals #2818J/C6,#2823Z,#2825S,etcarenotK2.
+BeforeendFULLsafechannelappendthischeckpointSHA/recoveredR2qualification/currentdb4c+9newpending/siblinggate; >1MiBfreshContentsSHA→exactgitblobdecodedFULL→guardlength→appendCASimmediate. DoNOTwriteemptyContentsvalue/restoreoldsnapshot. If409wait>=2minfreshFULLretry.
+AV12noemptypolling. ReviewisNOWfulfilled,newCItransient; currentcontinuitymustremain, noautomationscreated/updated/disabled. No prematuredeploy/production/completejourney/globalAAA/zero-costclaim. Lastclockverified18:24:58UTC=15:24:58Fortaleza.

@@ -1,0 +1,576 @@
+RED — complete parent b7f4456a
+
+
+=== plan-cost-registry.test.ts ===
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✖ every line has a unique id, a figure for every plan, and sources that hold what it names (11.350907ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (162.413836ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (47.131034ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.313859ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.260322ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.225188ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.552661ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (87.661502ms)
+✔ every store figure taken in the code is a kind a line prices (84.591723ms)
+✔ every email sent names a meter, and each file only the meters it may use (114.924979ms)
+✔ the units a figure is taken in cost at least what they stand for (9.186793ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (4.8415ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.167411ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.282515ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.096485ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.104477ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.336216ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (1.111892ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.116435ms)
+✔ Path push fits its reserved studio requests (0.056355ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.045288ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.052899ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.082073ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (50.85987ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 23
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 591.499463
+
+✖ failing tests:
+
+test at ../j-1969-bundle-p2Ivn1/current.cjs:120290:27
+✖ every line has a unique id, a figure for every plan, and sources that hold what it names (11.350907ms)
+  AssertionError [ERR_ASSERTION]: public-requests: app/library/page.tsx does not hold takePublicRequest(store, "buyer", Date.now(), LIBRARY_WAITING_UNITS)
+      at TestContext.<anonymous> (/dev/shm/j-1969-bundle-p2Ivn1/current.cjs:120301:62)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+GROUP_EXIT plan-cost-registry.test.ts 1
+FAILED_GROUPS 1
+
+
+FINAL — exact e2e4796bd
+
+
+=== library-waiting.test.ts ===
+
+In words
+  ok    nothing waiting, nothing said
+  ok    one of each
+  ok    several
+  ok    as many as one read lists: the number
+  ok    past it: more than that, never the limit as a total
+  ok    some could not be read: said
+  ok    nothing could be read: said, never as nothing waiting
+
+Eleven agreements waiting: said as more than ten (Codex J)
+  ok    the line says more than ten, not ten
+
+Each card pays for its read before it reads (Codex J)
+  ok    its waiting records are read
+  ok    only after the store's requests were taken
+  ok    and the card says what waits
+
+With the store's requests used up: nothing read, and the card says it shows again soon
+  ok    (the window used up)
+  ok    no waiting record read
+  ok    the card says it will show again soon
+
+An invalid library link reads nothing of what waits
+  ok    no waiting record read
+
+On the library
+  ok    the requests are taken before the read, at LIBRARY_WAITING_UNITS
+  ok    payment requests read only where they take payment
+  ok    said on the store's card, beside the way to open it
+  ok    no extra reading of the creator's Stripe account per store
+  ok    (the units are a whole number above nothing)
+
+20 checks, all passing.
+GROUP_EXIT library-waiting.test.ts 0
+
+=== buyer-waiting.test.ts ===
+
+Payment requests
+  ok    only those emailed to this address that still take payment (one whose email never went is not shown)
+  ok    soonest due first, undated after, oldest first
+  ok    with only what the page needs, and the currency it was made in
+  ok    a request keeps its own currency whatever the store sells in now
+  ok    all of them, for the count
+
+Proposals and agreements to sign
+  ok    only those sent to this address still taking a signature, the first to stop first
+  ok    a store whose lists cannot be read shows nothing and says it could not read them
+
+Read from the person's own records, whatever the store keeps
+  ok    ten shown, fourteen counted, all read
+  ok    three commands for a person with requests and no agreements: their two sets and their records
+  ok    the page says how many more there are
+reading a person's payment requests failed SyntaxError: Unexpected token 'o', "not a record" is not valid JSON
+    at JSON.parse (<anonymous>)
+    at /dev/shm/j-1969-bundle-8AGOU8/current.cjs:13380:67
+    at Array.forEach (<anonymous>)
+    at requestsOfPerson (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:13377:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async Promise.all (index 0)
+    at async waitingFor (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:13491:34)
+    at async main (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:13600:82)
+  ok    a record that does not read: the page says it could not read what waits
+  ok    where requests take no payment they are not read, so their failure says nothing
+
+An agreement's title comes from its record, never from reading its whole text
+  ok    shown with the title kept in the record
+  ok    its version's text is never read, only checked to be there
+  ok    one whose text is gone is not listed, and is said as not read
+
+On the orders page
+  ok    an opening with a link is opened by openOrders, which takes the store's buyer requests before anything is read
+  ok    without room, the page says it is busy and reads nothing
+  ok    the notice says only what is true: kept, try later, ask for a new link
+  ok    the busy notice in every language
+  ok    each request's amount in its own currency, never the store's now
+  ok    a named section with its heading, before the bookings
+  ok    each linked to the page that was emailed to them
+  ok    payment requests read and shown only where their page takes payment; a surprise failure is 'could not be read'
+  ok    a list that cannot be read is said, never 'nothing to open'
+  ok    the dates and amounts as their own pages say them
+  ok    buttons tall enough to tap
+
+Each link says by itself what it opens (WCAG 2.4.9)
+  ok    two payment requests never read the same
+  ok    in plain words, with the amount and the date
+  ok    two agreements never read the same
+  ok    in the link's own text, not only for screen readers
+  ok    a long title wraps inside its card
+
+In every language the store can speak
+  ok    each language has the words, with the amount, the date and the title in them
+  ok    and its own, not English
+
+33 checks, all passing.
+GROUP_EXIT buyer-waiting.test.ts 0
+
+=== buyer-library.test.ts ===
+
+What is kept
+  ok    the store's id, under the address whatever its capitals
+  ok    and the address itself is nowhere in the key
+  ok    a purchase handed over another way puts its store in too
+  ok    a purchase brought over from another platform does not
+  ok    kept in its quarter's set, which ends three years and at most a quarter on
+
+Signing in by email
+  ok    an address that bought nothing: the same answer, and no email
+  ok    not an address
+  ok    a buyer: a link to their library
+  ok    the link opens it for that address, and a made-up one for nobody
+  ok    a few times an hour per address, then no more
+
+10 checks, all passing.
+GROUP_EXIT buyer-library.test.ts 0
+
+=== public-read-admission-evidence.test.ts ===
+✔ G2 known license reservation precedes the actual cold product read (40.69394ms)
+✔ G2 a genuinely exhausted window refuses before any cold product read (9.383219ms)
+✔ G2 unknown unpaid reservation cannot authorize license product/key reads [true] (4.00332ms)
+✔ G2 unknown unpaid reservation cannot authorize license product/key reads [1,0] (4.062268ms)
+✔ G2 four legal bundles fit the actual two public requests paid before their readers (21.334219ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 86.651173
+GROUP_EXIT public-read-admission-evidence.test.ts 0
+
+=== public-reads-ceiling.test.ts ===
+
+The program's book is counted before it is worked out
+  ok    eight commands, none of which reads a record
+  ok    its size: every field of the program's records
+
+Fifty affiliates, ten loads each, in one period
+  ok    all five hundred admitted, each with its own figures
+  ok    the book worked out once: one read of each of its seven hashes
+  ok    and Stripe asked for it once (3 calls: its invoices, refunds and disputes)
+  ok    one charge in full (35), and every load its own part (2 each)
+  fifty affiliates loading ten times: 1035 requests, against 17500 when each load worked the book out
+
+What an affiliate sees is what their own book said
+  ok    affiliate aaaaaaaaaaaa: the same row, lines and payouts, as the page shows them
+  ok    and the slice of the whole book is the same
+  ok    affiliate bbbbbbbbbbb1: the same row, lines and payouts, as the page shows them
+  ok    and the slice of the whole book is the same
+  ok    affiliate bbbbbbbbbbb7: the same row, lines and payouts, as the page shows them
+  ok    and the slice of the whole book is the same
+
+One refresh at a time
+  ok    another load holds the refresh
+  ok    this load reads the last book kept, and works nothing out
+  ok    and pays only its own part
+  ok    the lock let go, the next load past a day works it out again, once
+
+An affiliate not approved sees no book
+  ok    admitted as a public page, no book, nothing of it read
+  ok    declined with nothing kept: no book
+  ok    removed with nothing kept: no book
+
+Removed, and still owed
+  ok    a removed affiliate with a balance sees it: five sales at $6.00
+  ok    the book out of date, they work it out once, as an approved affiliate would, paid the same
+  ok    a second load the same day reads the kept book and pays its own part
+  ok    a removed affiliate who never sold: no book, the page as it was, and no refresh though the book is out of date
+  ok    declined after being approved, and still owed: sees their own part, as one removed does
+
+Only what the page shows is kept, and deleting the person deletes it
+  ok    the lead's full address is not in the kept book; its masked form is
+  ok    nor any affiliate's own address
+  ok    the person deleted
+  ok    the kept book with them is gone; the next load works it out again
+  ok    worked out again, without the address
+
+A book written whole, or only its time
+  ok    a newer book replaces the older whole: no part of the old one stays behind
+  ok    a book that could not be kept still marks when it was worked out
+  ok    and leaves no draft behind
+  ok    so the next load that day does not refresh it for everybody: it works out its own book
+  ok    paid in full from its own connection's share of the day
+  ok    and the page promises no daily refresh for it: the figures are this load's own
+  ok    one removed and still owed, with no part kept, works out their own book the same way and sees what they are owed
+  ok    paid from their own connection's share: their load and the book
+  ok    one removed who never sold still sees no book
+
+An incomplete book is worked out again sooner, a few times
+reading refunds for the affiliate book failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:5678:11)
+    at async refundsSince (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:48903:20)
+    at async readBook (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49042:45)
+    at async refreshBook (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49473:16)
+    at async refreshFor (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116778:19)
+    at async bookFor (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116793:48)
+    at async admitAffiliatePage (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116825:34)
+    at async watched (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:120499:19)
+    at async main (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:120771:19) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+  ok    refunds not all read: in date for a quarter of an hour, and the page says so
+reading refunds for the affiliate book failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:5678:11)
+    at async refundsSince (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:48903:20)
+    at async readBook (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49042:45)
+    at async refreshBook (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49473:16)
+    at async refreshFor (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116778:19)
+    at async bookFor (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116793:48)
+    at async admitAffiliatePage (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116825:34)
+    at async main (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:120777:5) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+reading refunds for the affiliate book failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:5678:11)
+    at async refundsSince (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:48903:20)
+    at async readBook (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49042:45)
+    at async refreshBook (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49473:16)
+    at async refreshFor (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116778:19)
+    at async bookFor (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116793:48)
+    at async admitAffiliatePage (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116825:34)
+    at async main (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:120777:5) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+reading refunds for the affiliate book failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:5678:11)
+    at async refundsSince (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:48903:20)
+    at async readBook (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49042:45)
+    at async refreshBook (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49473:16)
+    at async refreshFor (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116778:19)
+    at async bookFor (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116793:48)
+    at async admitAffiliatePage (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116825:34)
+    at async main (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:120777:5) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+  ok    after 3 times running, once a day like any other
+reading refunds for the affiliate book failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:5678:11)
+    at async refundsSince (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:48903:20)
+    at async readBook (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49042:45)
+    at async refreshBook (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49473:16)
+    at async refreshFor (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116778:19)
+    at async bookFor (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116793:48)
+    at async admitAffiliatePage (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116825:34)
+    at async main (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:120782:18) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+  ok    still incomplete a day later (day 1): once a day, with no new run of short refreshes, and the page says once a day
+reading refunds for the affiliate book failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:5678:11)
+    at async refundsSince (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:48903:20)
+    at async readBook (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49042:45)
+    at async refreshBook (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49473:16)
+    at async refreshFor (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116778:19)
+    at async bookFor (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116793:48)
+    at async admitAffiliatePage (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116825:34)
+    at async main (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:120782:18) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+  ok    still incomplete a day later (day 2): once a day, with no new run of short refreshes, and the page says once a day
+reading refunds for the affiliate book failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:5678:11)
+    at async refundsSince (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:48903:20)
+    at async readBook (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49042:45)
+    at async refreshBook (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49473:16)
+    at async refreshFor (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116778:19)
+    at async bookFor (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116793:48)
+    at async admitAffiliatePage (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116825:34)
+    at async main (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:120782:18) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+  ok    still incomplete a day later (day 3): once a day, with no new run of short refreshes, and the page says once a day
+  ok    a complete book kept sets the count back
+reading refunds for the affiliate book failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:5678:11)
+    at async refundsSince (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:48903:20)
+    at async readBook (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49042:45)
+    at async refreshBook (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49473:16)
+    at async refreshFor (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116778:19)
+    at async bookFor (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116793:48)
+    at async admitAffiliatePage (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:116825:34)
+    at async main (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:120791:3) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+  ok    so a later incomplete one is worked out again soon once more
+
+One refresh's lock is its own
+  ok    a load whose lock ran out cannot let go of the next one's
+
+A kept book is measured in bytes, as Redis counts them
+  ok    a book of 2577390 such characters is under the cap by its length, over it by its bytes
+  ok    so it is not kept: only when it was worked out
+  ok    one just under the cap in bytes is kept, and its part's size is its bytes
+
+Two refreshes that overlap never share a draft or undo each other
+  ok    B, holding the lock, keeps its whole book
+  ok    A, whose lock ran out midway, keeps nothing
+  ok    the kept book is B's whole one: written by B, at B's time, with the affiliate A's left out
+  ok    and neither draft is left
+  ok    A letting go does not free B's lock
+  ok    a refresh whose rename failed after its lock ran out marks nothing
+  ok    the newer refresh's whole book stays, kept
+  ok    a draft a stopped refresh left is deleted by the next
+  ok    the read stops well inside the page's maxDuration, which the page declares, and the lock outlasts both
+
+A person deleted while the book is worked out is never kept in it
+  ok    the refresh read the address (masked in what it would keep)
+  ok    the person is deleted meanwhile
+  ok    so what it read is thrown away: nothing kept, no draft
+  ok    the load shows nothing it read before the deletion, and nothing is kept
+
+A deletion tried again after its first try stopped still deletes the book
+  ok    a book is kept
+  ok    the address is already off the lead: nothing more to take off it
+  ok    but the kept book is deleted all the same
+
+A Redis that cannot run the scripts writes nothing
+counting an affiliate book's refresh failed Error: ERR unknown command 'EVAL'
+    at store.pipeline (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:120902:54)
+    at redisPipeline (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:2137:41)
+    at script2 (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49371:23)
+    at beginAttempt (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49402:25)
+    at main (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:120906:32)
+keeping an affiliate book failed Error: ERR unknown command 'EVAL'
+    at store.pipeline (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:120902:54)
+    at redisPipeline (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:2137:41)
+    at script2 (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49371:23)
+    at markOnly (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49439:26)
+    at write (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49466:12)
+    at async writeSnapshot (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:49416:12)
+    at async main (/dev/shm/j-1969-bundle-8AGOU8/current.cjs:120907:26)
+  ok    no refresh is counted and nothing is written: the book stays as it was, no draft
+  ok    a deletion without them still raises the version and deletes the book, and fails so it is tried again
+  ok    the privacy line says how long it is really kept
+
+A refused load reads nothing
+  ok    the window used up
+  ok    refused, and no record of the program read
+  ok    somebody not signed in: the page rests with the store's others
+  ok    the page asks before it reads listings or codes, never works the book out itself, and says when its figures are from
+
+Only the affiliate book and the community archive's walk are counted outside a connection's share
+  ok    a closed list: the work done for everybody
+  ok    and the reading finds a call over several lines, { shared } from a variable, options passed whole and an alias, and not a plain call
+
+Working the book out is not held against one connection's share of the day
+  ok    a large program's book (428 requests) is more than one connection's day (300)
+  ok    worked out all the same, for every affiliate
+  ok    the same requests taken from the connection's own count would be refused
+
+A slow Stripe: the refresh stops in time, keeps a short book, and is paid once
+  ok    Stripe asked no longer than BOOK_READ_SECONDS (12 calls of 20 s, 240 s), where it would have taken 23 calls
+  ok    what it read is kept as an incomplete book, worked out again soon, and the page says so
+  ok    one charge: this load and the book
+  ok    a minute later: no second charge for the book, only the load's own part
+  ok    after the short wait, Stripe answering again: worked out once more, complete
+
+A refresh stopped before it writes still counts
+  ok    the refresh was paid for and stopped with nothing written
+  ok    counted before it read: one refresh without a complete book, begun then
+  ok    so the next load does not pay for it again before the short wait: the last book kept, its own part paid
+  ok    after it, once more, and a complete book sets the count back
+  ok    a refresh counted before its charge
+  ok    whose charge is refused takes its count back: nothing left of it
+
+No room for the book: the page promises no time
+  ok    none kept and no room to work it out: told so, not told to look again in minutes
+  ok    and the refresh refused is not counted against the next
+  ok    with room again, while another load works it out: the figures are not ready yet
+  ok    en: the words for no room promise no time, and the short refresh says only that it can
+  ok    es: the words for no room promise no time, and the short refresh says only that it can
+  ok    fr: the words for no room promise no time, and the short refresh says only that it can
+  ok    de: the words for no room promise no time, and the short refresh says only that it can
+  ok    it: the words for no room promise no time, and the short refresh says only that it can
+  ok    nl: the words for no room promise no time, and the short refresh says only that it can
+  ok    pt: the words for no room promise no time, and the short refresh says only that it can
+  ok    en: "not ready yet" promises no minutes, since a refresh that kept nothing can hold the next off for up to a day
+  ok    es: "not ready yet" promises no minutes, since a refresh that kept nothing can hold the next off for up to a day
+  ok    fr: "not ready yet" promises no minutes, since a refresh that kept nothing can hold the next off for up to a day
+  ok    de: "not ready yet" promises no minutes, since a refresh that kept nothing can hold the next off for up to a day
+  ok    it: "not ready yet" promises no minutes, since a refresh that kept nothing can hold the next off for up to a day
+  ok    nl: "not ready yet" promises no minutes, since a refresh that kept nothing can hold the next off for up to a day
+  ok    pt: "not ready yet" promises no minutes, since a refresh that kept nothing can hold the next off for up to a day
+  ok    in English, plainly
+  ok    in English: "can refresh again", as "at most once a day" says
+  ok    the page draws each in its own place
+
+The store's map
+  ok    counted with one command
+  ok    its size: three products the store record carries (nothing read for them) and two pages of posts
+  ok    the same map as before, every product, the blog and its posts
+  ok    it took 2 requests first, the size it reads
+  ok    and read no more pages of posts than were paid for
+  ok    its bytes (2193) stay inside what was priced
+
+A refused map reads nothing
+  ok    the window used up
+  ok    refused
+  ok    no listing and no post read (ZCARD GET INCRBY)
+  ok    the route answers a refusal with 503 and Retry-After, kept by no cache
+
+118 checks, all passing.
+GROUP_EXIT public-reads-ceiling.test.ts 0
+
+=== public-reads-ceiling-2.test.ts ===
+
+A license check pays before it reads
+  ok    with room: answered
+  ok    refused once the window is used: 429
+  ok    its request is taken before the product is read and before the key is checked
+
+A collection pays for its products before it reads them
+  ok    its products' requests come before their listings, and refused it rests
+
+4 checks, all passing.
+GROUP_EXIT public-reads-ceiling-2.test.ts 0
+
+=== plan-cost-registry.test.ts ===
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (29.572596ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (96.56686ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (32.975663ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.218596ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.215083ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.191788ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.519371ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (97.940975ms)
+✔ every store figure taken in the code is a kind a line prices (64.827176ms)
+✔ every email sent names a meter, and each file only the meters it may use (85.265517ms)
+✔ the units a figure is taken in cost at least what they stand for (8.669671ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (2.460229ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.19265ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.326811ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.140181ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.096895ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.3263ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.968987ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.111938ms)
+✔ Path push fits its reserved studio requests (0.082694ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.059099ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.079299ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.097126ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (43.480128ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 478.146244
+GROUP_EXIT plan-cost-registry.test.ts 0
+
+=== j-library-read.test.ts ===
+COUNT {"actual":11,"shown":10,"line":"Waiting for you: more than 10 proposals or agreements to sign."}
+REPEATED_PAGE {"waitingIndexReads":0,"waitingCommands":24,"commands":37,"trafficCounters":3,"externalCalls":0}
+GROUP_EXIT j-library-read.test.ts 0
+
+=== j-library-count-proof.test.ts ===
+Capped list preserves the larger counted total.
+GROUP_EXIT j-library-count-proof.test.ts 0
+FAILED_GROUPS 0
+
+
+STRICT_TYPES_EXIT 0
+LINT_EXIT 0
+SCANNER 4082 tracked / 0 corrections
+DIFF_CHECK_EXIT 0

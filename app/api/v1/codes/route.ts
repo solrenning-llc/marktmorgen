@@ -4,7 +4,8 @@ import { apiReadUnits, codeMakeWork, codeStopWork, codesWork } from "@/lib/api-r
 import { CODE_FIELDS, codeOut, refusalWords } from "@/lib/api-codes";
 import { createCode, listCodes, stopCode } from "@/lib/discount";
 import { readCodeAsked } from "@/lib/discount-input";
-import { setHasDiscounts, storeRef, type Store } from "@/lib/store";
+import { setDiscountBox } from "@/lib/discount-box";
+import { storeRef, type Store } from "@/lib/store";
 import { canSell } from "@/lib/store-checkout";
 
 /**
@@ -56,7 +57,11 @@ export async function POST(request: Request) {
         ? apiError(409, "taken", "Your Stripe account already has a code with these letters. Choose another.")
         : apiError(502, "unavailable", "The code could not be made on Stripe just now. Try again in a moment.");
     }
-    await setHasDiscounts(storeRef(store), true);
+    // Buyers can enter it only once the checkout's code box is on, read back on (lib/discount-box.ts): not confirmed,
+    // it is not said as made. No further Stripe call: the code stays as Stripe has it, and the words say how to switch it off.
+    if (!(await setDiscountBox(storeRef(store), true))) {
+      return apiError(503, "checkout_box", `The code ${made.code.code} is on in Stripe, but buyers cannot enter it yet: the code box at checkout could not be switched on just now. Open Discount codes in your studio to try again, or switch the code off with DELETE /api/v1/codes?id=${made.code.id}.`);
+    }
     return apiOk({ data: codeOut(made.code) });
   } catch (error) {
     console.error("api: making a code failed", error);
@@ -86,7 +91,11 @@ export async function DELETE(request: Request) {
     const after = await listCodes(account);
     // Switched off on Stripe already: said as done, with the codes not read back, and nothing written from them.
     if (after.state !== "ok") return apiOk({ stopped: id, listed: false, message: "The code was switched off. Your discount codes could not be read back from Stripe just now; read them again with GET /api/v1/codes." });
-    await setHasDiscounts(storeRef(store), after.codes.some((c) => c.active));
+    // Other codes still live with the box not confirmed on are not said as fine; with none live, a box left on only shows a field Stripe answers for.
+    const live = after.codes.some((c) => c.active);
+    if (!(await setDiscountBox(storeRef(store), live)) && live) {
+      return apiError(503, "checkout_box", "The code was switched off. Your other codes are on in Stripe, but buyers cannot enter them yet: the code box at checkout could not be switched on just now. Open Discount codes in your studio to try again.");
+    }
     return apiOk({ data: after.codes.map(codeOut) });
   } catch (error) {
     console.error("api: switching a code off failed", error);

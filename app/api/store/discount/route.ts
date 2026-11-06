@@ -1,11 +1,15 @@
 import type { NextRequest } from "next/server";
-import { setHasDiscounts, storeForEmail } from "@/lib/store";
+import { storeForEmail } from "@/lib/store";
+import { setDiscountBox } from "@/lib/discount-box";
 import { canSell } from "@/lib/store-checkout";
 import { createCode, listCodes, stopCode } from "@/lib/discount";
 import { readCodeAsked } from "@/lib/discount-input";
 import { guardStoreWrite, text } from "@/lib/store-request";
 
 const ACTIONS = new Set(["list", "add", "stop"]);
+
+/** A code live on Stripe while the checkout's code box could not be switched on (lib/discount-box.ts). */
+const boxNotOn = () => Response.json({ ok: false, error: "checkout_box" }, { status: 503 });
 
 /**
  * The creator's discount codes, which live on their own Stripe account.
@@ -55,7 +59,10 @@ export async function POST(request: NextRequest) {
           { status: made.reason === "taken" ? 409 : 502 },
         );
       }
-      await setHasDiscounts(ref, true);
+      // No buyer can enter the code until the checkout's box is on, read back
+      // on: not confirmed, it is not said as done (not even as "done, listed
+      // false" below), and the studio says why. The code stays as Stripe has it.
+      if (!(await setDiscountBox(ref, true))) return boxNotOn();
     } else if (action === "stop") {
       const id = text(body.id, 80);
       if (!id) {
@@ -76,10 +83,11 @@ export async function POST(request: NextRequest) {
       if (action !== "list") return Response.json({ ok: true, done: action, listed: false });
       return Response.json({ ok: false, error: "stripe" }, { status: 502 });
     }
-    await setHasDiscounts(
-      ref,
-      list.codes.some((entry) => entry.active),
-    );
+    // The box follows the list. A live code with the box not confirmed on is
+    // never shown as fine; with no live code, a box left on only shows a field
+    // Stripe answers for, so the list is said as Stripe has it.
+    const live = list.codes.some((entry) => entry.active);
+    if (!(await setDiscountBox(ref, live)) && live) return boxNotOn();
 
     return Response.json({ ok: true, codes: list.codes });
   } catch (error) {

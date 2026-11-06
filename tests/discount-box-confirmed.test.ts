@@ -9,11 +9,12 @@
  * in-memory Redis; nothing leaves this machine.
  */
 import { NextRequest } from "next/server";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { POST as studioRoute } from "@/app/api/store/discount/route";
 import { POST as apiMake, DELETE as apiStop } from "@/app/api/v1/codes/route";
 import { makeKey } from "@/lib/api-keys";
+import { boxIs, boxSwitchedOn, setDiscountBox } from "@/lib/discount-box";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { claimHandle, ensureStatsId, setHasDiscounts, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
@@ -201,6 +202,22 @@ async function main(): Promise<void> {
   await fresh();
   const studioFine = await studio({ action: "add", code: "STUDIOFINE", percent: "10" });
   is("control: added as before, box on", [studioFine.status, studioFine.body.ok, await box()], [200, true, true]);
+
+  part("The box is read exactly; a write that throws is not confirmed");
+  is("only `true` is on", [boxSwitchedOn({ hasDiscounts: true }), boxSwitchedOn(null), boxSwitchedOn(undefined), boxSwitchedOn({ hasDiscounts: false }), boxSwitchedOn({ hasDiscounts: "true" as unknown as boolean }), boxSwitchedOn({ hasDiscounts: 1 as unknown as boolean })], [true, false, false, false, false, false]);
+  is("only `false` is off", [boxIs({ hasDiscounts: false }, false), boxIs(null, false), boxIs({ hasDiscounts: undefined as unknown as boolean }, false), boxIs({ hasDiscounts: 0 as unknown as boolean }, false)], [true, false, false, false]);
+  await fresh();
+  failing = "throw";
+  const thrown = await setDiscountBox(OWNER, true);
+  failing = null;
+  is("a store write that throws: not confirmed, and the box as it was", [thrown, await box()], [false, false]);
+  is("a store that is not there: not confirmed", await setDiscountBox("nobody-here@example.com", true), false);
+  is("written and read back: confirmed", [await setDiscountBox(OWNER, true), await box()], [true, true]);
+
+  part("No route writes the box without reading its answer (rule 30)");
+  const walk = (dir: string): string[] => readdirSync(join(process.cwd(), dir), { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? walk(join(dir, entry.name)) : /\.tsx?$/.test(entry.name) ? [join(dir, entry.name)] : []));
+  const direct = walk("app").filter((file) => /\bsetHasDiscounts\s*\(/.test(readFileSync(join(process.cwd(), file), "utf8")));
+  is("every route goes through lib/discount-box.ts", direct, []);
 
   part("The words, for the creator and in the API reference");
   const root = process.cwd();

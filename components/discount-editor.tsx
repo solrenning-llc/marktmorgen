@@ -22,6 +22,8 @@ const MESSAGES: Record<string, string> = {
     "Codes come off a charge, so they need your Stripe account connected and your subscription running.",
   taken: "You already have a live code with that word. Pick another.",
   stripe: "Stripe did not answer just now. Try again in a moment.",
+  checkout_box:
+    "Your codes are on in Stripe, but buyers cannot enter them yet: the code box at checkout could not be switched on just now. Reload this page to try again.",
   signed_out: "Your session ended. Log in again.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   server_error: "Something went wrong on our side. Try again in a moment.",

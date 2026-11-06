@@ -566,11 +566,16 @@ export default function DevelopersPage() {
           <code className="font-mono">{`{"code": "TENOFF", "kind": "amount", "amount": "10"}`}</code> in your store&apos;s
           currency; <code className="font-mono">uses</code> and <code className="font-mono">minimum</code> are optional. A
           code that cannot be made says why, as <code className="font-mono">error</code> and{" "}
-          <code className="font-mono">message</code>; the same letters twice give 409 <code className="font-mono">taken</code>.
+          <code className="font-mono">message</code>; the same letters twice give 409 <code className="font-mono">taken</code>. Buyers can enter a code only while the
+          code box at checkout is on: when it cannot be switched on, the answer is 503{" "}
+          <code className="font-mono">checkout_box</code>, naming the code that is on in Stripe and how to switch it off,
+          never a success.
         </Endpoint>
         <Endpoint method="DELETE" path="/api/v1/codes?id=promo_…">
           Switches one of your store&apos;s codes off. Stripe never deletes a code that may be on a receipt, so it stays in
-          the list, switched off. Making and switching off need a key that writes; all three answer 409{" "}
+          the list, switched off. If your other codes are still on and the code box at checkout cannot be switched on, the
+          answer is 503 <code className="font-mono">checkout_box</code>, saying the code was switched off. Making and
+          switching off need a key that writes; all three answer 409{" "}
           <code className="font-mono">not_selling</code> while your store is not taking payments.
         </Endpoint>
       </LegalSection>

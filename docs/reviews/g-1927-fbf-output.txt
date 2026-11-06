@@ -1,0 +1,1047 @@
+=== /tmp/g1927-fbf-original-and-focused.log ===
+G_HISTORY_AFTER_REMOVAL {"control":false,"boundary":1,"saved":true,"removed":true,"forgotten":true,"deletedBeforeResume":0,"definitions":[],"history":[],"afterSecondForget":0,"charged":null}
+  ok    real save completed through the admitted workflow writer
+  ok    real concurrent removal and forgetting completed
+  ok    the history was absent before the paused save resumed
+  ok    the exact history boundary was reached when raced
+  ok    the real workflow definitions stay removed
+  ok    a removed workflow cannot regain retained history
+  ok    a later full workflow forget leaves no orphaned history
+
+7 checks, all passing.
+forgetting a removed workflow's versions failed Error: a workflow's earlier versions could not be confirmed deleted
+    at dropFlowVersions (/tmp/codex-g-proof-ImiTTp/proof.cjs:5962:11)
+    at async removeFlow (/tmp/codex-g-proof-ImiTTp/proof.cjs:47543:24)
+    at async main (/tmp/codex-g-proof-ImiTTp/proof.cjs:47726:21)
+G_HISTORY_UNKNOWN_DELETE {"control":false,"initial":1,"injected":1,"unconfirmed":true,"definitions":[],"remaining":0}
+  ok    fixture has real retained history before removing it
+  ok    the actual unapplied history delete was intercepted
+  ok    unknown delete is reported as unconfirmed, healthy removal completes
+  ok    the removal does not restore the active workflow
+  ok    later full forgetting finds and deletes any retained history
+
+5 checks, all passing.
+G_HISTORY_AFTER_REMOVAL {"control":false,"boundary":1,"saved":true,"removed":true,"forgotten":true,"deletedBeforeResume":0,"definitions":[],"history":[],"afterSecondForget":0,"charged":null}
+  ok    real save completed through the admitted workflow writer
+  ok    real concurrent removal and forgetting completed
+  ok    the history was absent before the paused save resumed
+  ok    the exact history boundary was reached when raced
+  ok    the real workflow definitions stay removed
+  ok    a removed workflow cannot regain retained history
+  ok    a later full workflow forget leaves no orphaned history
+
+7 checks, all passing.
+forgetting a removed workflow's versions failed Error: a workflow's earlier versions could not be confirmed deleted
+    at dropFlowVersions (/tmp/codex-g-proof-ImiTTp/proof.cjs:5962:11)
+    at async removeFlow (/tmp/codex-g-proof-ImiTTp/proof.cjs:47543:24)
+    at async main (/tmp/codex-g-proof-ImiTTp/proof.cjs:47726:21)
+G_HISTORY_UNKNOWN_DELETE {"control":false,"initial":1,"injected":1,"unconfirmed":true,"definitions":[],"remaining":0}
+  ok    fixture has real retained history before removing it
+  ok    the actual unapplied history delete was intercepted
+  ok    unknown delete is reported as unconfirmed, healthy removal completes
+  ok    the removal does not restore the active workflow
+  ok    later full forgetting finds and deletes any retained history
+
+5 checks, all passing.
+G2_HISTORY_RECOUNT_RACE {"entries":3,"charged":2384,"required":2240}
+✔ control: sequential history writes retain and charge the complete list (11.309255ms)
+✔ recount after a refused old push cannot shrink the room of a newer third push (2.102962ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 21.226036
+G2_HISTORY_RECOUNT_RACE {"entries":3,"charged":2384,"required":2240}
+✔ control: sequential history writes retain and charge the complete list (13.617474ms)
+✔ recount after a refused old push cannot shrink the room of a newer third push (2.254119ms)
+✔ after a refused push, nothing reads the list again, so no recount can go stale (2.767351ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 26.421286
+✔ control: confirmed history is readable and accounted (50.918853ms)
+an email action failed FlowVersionsUnavailable: A workflow's earlier versions could not be read
+    at readFlowVersions (/tmp/codex-g-proof-ImiTTp/proof.cjs:13188:21)
+    at async POST (/tmp/codex-g-proof-ImiTTp/proof.cjs:65677:24)
+    at async Object.post (/tmp/codex-g-proof-ImiTTp/proof.cjs:65804:15)
+    at async TestContext.<anonymous> (/tmp/codex-g-proof-ImiTTp/proof.cjs:65820:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+G2_UNKNOWN_HISTORY {"status":503,"body":{"ok":false,"error":"flow_versions_unavailable"}}
+✔ unknown history read is never a confirmed empty version list (13.02246ms)
+G2_HISTORY_UNDERCOUNT {"entries":1,"required":384,"charged":"528"}
+✔ unknown held history cannot make the next version unaccounted (8.500541ms)
+G2_DELETE_RELEASE {"required":384,"charged":"528"}
+✔ unknown unapplied delete cannot release room while history survives (13.023491ms)
+G2_RESTORE_FULL {"ok":false,"current":"Subject B","history":["Subject A"]}
+✔ a full history budget must not silently destroy the version promised as undoable (19.896425ms)
+G2_RESTORE_PAUSE_RACE {"paused":true,"result":true,"active":false}
+✔ restoration cannot reactivate a workflow paused while its history was being read (9.306523ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 120.958271
+
+A save that changes what it does keeps the one before
+  ok    a new workflow has no earlier version
+  ok    one earlier version: the first subject
+  ok    saving it unchanged keeps none
+  ok    switching it on keeps none
+
+The route lists them, newest first
+  ok    name, trigger and steps of each, newest first
+  ok    an unknown workflow
+
+Putting one back
+  ok    its content is back, and it stays on
+  ok    the version it replaced is kept, so it can be undone
+  ok    undone the same way
+  ok    an unknown version is refused
+
+At most ten, and they go with the workflow
+  ok    only the newest 10
+  ok    a removed workflow's versions are gone
+
+A store deleted takes every workflow's versions with it (Codex Reviewer 2 on #1927)
+  ok    a version is kept before the store goes
+  ok    and gone with it
+
+The studio
+  ok    a named section that says what is kept and how putting one back works
+  ok    it says it is reading, in a status
+  ok    each version has a button whose name starts with its visible words
+  ok    and its accessible name adds the date after them
+  ok    the workflow list opens it with a toggle that says whether it is open
+  ok    putting one back is a sequence write, so an unconfirmed one is said as such
+
+20 checks, all passing.
+
+=== /tmp/g1927-fbf-adversarial.log ===
+G_HISTORY_NESTED_ID {"control":false,"boundary":1,"saved":true,"removed":true,"forgotten":true,"deletedBeforeResume":0,"definitions":["021a3cb465bdb6e2"],"history":["Original subject"],"afterSecondForget":0,"charged":"544"}
+  ok    real save completed through the admitted workflow writer
+  ok    real concurrent removal and forgetting completed
+  ok    the history was absent before the paused save resumed
+  ok    the exact history boundary was reached when raced
+  ok    the removed workflow stays absent and the other stays live
+  FAIL  a removed workflow cannot regain retained history
+        expected 0
+        got      1
+  ok    a later full workflow forget leaves no orphaned history
+
+7 checks, 1 failing.
+G_HISTORY_FINAL_ERASE_WINDOW {"control":false,"readBoundary":1,"finalBoundary":1,"beforeResume":0,"saved":true,"definitions":0,"history":["Original subject"],"indexed":["1bcb89c4bb559f05"],"afterSecondForget":0,"charged":"544"}
+  ok    the real save completed
+  ok    the exact pre-final-DEL window was reached
+  ok    the definitions are gone after full workflow forgetting completes
+  FAIL  full workflow forgetting leaves no late history
+        expected 0
+        got      1
+  ok    a second workflow forget removes indexed remnants
+
+5 checks, 1 failing.
+
+=== /tmp/g1927-e4f-new-adversarial.log ===
+G_HISTORY_NESTED_ID {"control":false,"boundary":1,"saved":true,"removed":true,"forgotten":true,"deletedBeforeResume":0,"definitions":["5c8eb7f51f89858c"],"history":["Original subject"],"afterSecondForget":1,"charged":"400"}
+  ok    real save completed through the admitted workflow writer
+  ok    real concurrent removal and forgetting completed
+  ok    the history was absent before the paused save resumed
+  ok    the exact history boundary was reached when raced
+  ok    the removed workflow stays absent and the other stays live
+  FAIL  a removed workflow cannot regain retained history
+        expected 0
+        got      1
+  FAIL  a later full workflow forget leaves no orphaned history
+        expected 0
+        got      1
+
+7 checks, 2 failing.
+G_HISTORY_FINAL_ERASE_WINDOW {"control":false,"readBoundary":1,"finalBoundary":1,"beforeResume":0,"saved":true,"definitions":0,"history":["Original subject"],"indexed":[],"afterSecondForget":1,"charged":"400"}
+  ok    the real save completed
+  ok    the exact pre-final-DEL window was reached
+  ok    the definitions are gone after full workflow forgetting completes
+  FAIL  full workflow forgetting leaves no late history
+        expected 0
+        got      1
+  FAIL  a second workflow forget removes indexed remnants
+        expected 0
+        got      1
+
+5 checks, 2 failing.
+
+=== /tmp/g1927-fbf-controls.log ===
+G_HISTORY_NESTED_ID {"control":true,"boundary":0,"saved":true,"removed":true,"forgotten":true,"deletedBeforeResume":0,"definitions":["689a5f691b205a89"],"history":[],"afterSecondForget":0,"charged":null}
+  ok    real save completed through the admitted workflow writer
+  ok    real concurrent removal and forgetting completed
+  ok    the history was absent before the paused save resumed
+  ok    the exact history boundary was reached when raced
+  ok    the removed workflow stays absent and the other stays live
+  ok    a removed workflow cannot regain retained history
+  ok    a later full workflow forget leaves no orphaned history
+
+7 checks, all passing.
+G_HISTORY_FINAL_ERASE_WINDOW {"control":true,"readBoundary":0,"finalBoundary":0,"beforeResume":-1,"saved":true,"definitions":0,"history":[],"indexed":[],"afterSecondForget":0,"charged":"544"}
+  ok    the real save completed
+  ok    the exact pre-final-DEL window was reached
+  ok    the definitions are gone after full workflow forgetting completes
+  ok    full workflow forgetting leaves no late history
+  ok    a second workflow forget removes indexed remnants
+
+5 checks, all passing.
+G_HISTORY_AFTER_REMOVAL {"control":true,"boundary":0,"saved":true,"removed":true,"forgotten":true,"deletedBeforeResume":0,"definitions":[],"history":[],"afterSecondForget":0,"charged":null}
+  ok    real save completed through the admitted workflow writer
+  ok    real concurrent removal and forgetting completed
+  ok    the history was absent before the paused save resumed
+  ok    the exact history boundary was reached when raced
+  ok    the real workflow definitions stay removed
+  ok    a removed workflow cannot regain retained history
+  ok    a later full workflow forget leaves no orphaned history
+
+7 checks, all passing.
+G_HISTORY_UNKNOWN_DELETE {"control":true,"initial":1,"injected":0,"unconfirmed":false,"definitions":[],"remaining":0}
+  ok    fixture has real retained history before removing it
+  ok    the actual unapplied history delete was intercepted
+  ok    unknown delete is reported as unconfirmed, healthy removal completes
+  ok    the removal does not restore the active workflow
+  ok    later full forgetting finds and deletes any retained history
+
+5 checks, all passing.
+
+=== /tmp/g1927-fbf-related.log ===
+
+Strict saved sequence list
+  ok    confirmed empty array remains empty
+  ok    valid saved flow is preserved
+  ok    empty steps remain editable diagnostics
+  ok    invalid business wait stays editable
+  ok    valid condition has
+  ok    valid condition lacks
+  ok    valid condition tag
+  ok    valid condition untagged
+  ok    valid condition started
+  ok    valid condition unstarted
+  ok    valid condition finished
+  ok    valid condition unfinished
+  ok    valid condition buyer
+  ok    valid condition lead
+  ok    valid condition clicked
+  ok    valid condition unclicked
+  ok    valid condition half-a
+  ok    valid condition half-b
+  ok    valid action tag
+  ok    valid action untag
+  ok    valid action start
+  ok    valid action field
+  ok    valid action deal
+  ok    valid action note
+  ok    valid action notify
+  ok    valid action webhook
+  ok    malformed list null
+  ok    malformed list {}
+  ok    malformed list ""
+  ok    malformed list [null]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}]},{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"},{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":"true","createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"unknown","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":2,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":null}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":null}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample","when":"clicked"}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample","when":{"if":"has"}}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample","action":{"do":"field"}}]}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}],"goal":{"any":false}}]
+  ok    malformed list [{"id":"flow1","name":"Welcome","trigger":"joined","productId":null,"active":false,"createdAt":1,"steps":[{"id":"step1","delayHours":0,"subject":"Hello","body":"Sample"}],"goal":"purchase"}]
+  ok    valid product goal is preserved
+  ok    valid purchase goal is preserved
+  ok    store without a list is confirmed empty
+  ok    no storage read without a list
+  ok    only selected list is read
+  ok    valid list read
+  ok    only selected list is read
+  ok    confirmed missing key is empty
+  ok    only selected list is read
+  ok    confirmed stored empty list
+  ok    only selected list is read
+  ok    failed read is not an empty list []
+  ok    only selected list is read
+  ok    failed read is not an empty list [null,null]
+  ok    only selected list is read
+  ok    failed read is not an empty list null
+  ok    only selected list is read
+  ok    failed read is not an empty list {}
+  ok    only selected list is read
+  ok    failed read is not an empty list [null]
+  ok    only selected list is read
+  ok    failed read is not an empty list [""]
+  ok    only selected list is read
+  ok    failed read is not an empty list ["bad json"]
+  ok    only selected list is read
+  ok    failed read is not an empty list ["{}"]
+  ok    only selected list is read
+  ok    failed read is not an empty list ["[null]"]
+  ok    only selected list is read
+  ok    failed read is not an empty list ["[{\"id\":\"flow1\",\"name\":\"Welcome\",\"trigger\":\"joined\",\"productId\":null,\"active\":false,\"createdAt\":1,\"steps\":null}]"]
+  ok    only selected list is read
+  ok    storage failure remains unknown
+
+74 checks, all passing.
+
+Sequence mutation read guards
+  ok    save refuses an unknown list
+  ok    save makes no sequence write
+  ok    save preserves stored bytes
+  ok    remove refuses an unknown list
+  ok    remove makes no sequence write
+  ok    remove preserves stored bytes
+  ok    starters refuses an unknown list
+  ok    starters makes no sequence write
+  ok    starters preserves stored bytes
+  ok    keep refuses an unknown list
+  ok    keep makes no sequence write
+  ok    keep preserves stored bytes
+  ok    save refuses an unknown list
+  ok    save makes no sequence write
+  ok    save preserves stored bytes
+  ok    remove refuses an unknown list
+  ok    remove makes no sequence write
+  ok    remove preserves stored bytes
+  ok    starters refuses an unknown list
+  ok    starters makes no sequence write
+  ok    starters preserves stored bytes
+  ok    keep refuses an unknown list
+  ok    keep makes no sequence write
+  ok    keep preserves stored bytes
+  ok    save refuses an unknown list
+  ok    save makes no sequence write
+  ok    save preserves stored bytes
+  ok    remove refuses an unknown list
+  ok    remove makes no sequence write
+  ok    remove preserves stored bytes
+  ok    starters refuses an unknown list
+  ok    starters makes no sequence write
+  ok    starters preserves stored bytes
+  ok    keep refuses an unknown list
+  ok    keep makes no sequence write
+  ok    keep preserves stored bytes
+  ok    save refuses an unknown list
+  ok    save makes no sequence write
+  ok    save preserves stored bytes
+  ok    remove refuses an unknown list
+  ok    remove makes no sequence write
+  ok    remove preserves stored bytes
+  ok    starters refuses an unknown list
+  ok    starters makes no sequence write
+  ok    starters preserves stored bytes
+  ok    keep refuses an unknown list
+  ok    keep makes no sequence write
+  ok    keep preserves stored bytes
+  ok    save refuses an unknown list
+  ok    save makes no sequence write
+  ok    save preserves stored bytes
+  ok    remove refuses an unknown list
+  ok    remove makes no sequence write
+  ok    remove preserves stored bytes
+  ok    starters refuses an unknown list
+  ok    starters makes no sequence write
+  ok    starters preserves stored bytes
+  ok    keep refuses an unknown list
+  ok    keep makes no sequence write
+  ok    keep preserves stored bytes
+  ok    save refuses an unknown list
+  ok    save makes no sequence write
+  ok    save preserves stored bytes
+  ok    remove refuses an unknown list
+  ok    remove makes no sequence write
+  ok    remove preserves stored bytes
+  ok    starters refuses an unknown list
+  ok    starters makes no sequence write
+  ok    starters preserves stored bytes
+  ok    keep refuses an unknown list
+  ok    keep makes no sequence write
+  ok    keep preserves stored bytes
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    save needs explicit write confirmation
+  ok    remove needs explicit write confirmation
+  ok    lost acknowledgement does not claim success
+  ok    unconfirmed response does not imply rollback
+  ok    valid creation succeeds
+  ok    creation preserves both existing sequences
+  ok    valid editing succeeds
+  ok    editing preserves the other sequence
+  ok    valid removal succeeds
+  ok    removal preserves remaining sequences
+  ok    confirmed absent list permits creation
+
+97 checks, all passing.
+
+Halves
+  ok    the same person, the same half, whatever the capitals
+  ok    about even across many people
+  ok    and not the same split in every sequence
+
+A condition on a half
+  ok    read as one
+  ok    holds for the first half only
+
+Telling the store's webhooks
+  ok    read as an action
+  ok    an event an address can listen for
+
+7 checks, all passing.
+
+An action, read strictly
+  ok    a label needs words; another sequence must be the store's
+
+Saved, and checked when saved
+  ok    a sequence that starts with a label, its label trimmed
+  ok    a label trigger with no label is refused
+  ok    a sequence that is not the store's is refused
+  ok    so is a sequence starting itself
+  ok    a condition on the email before needs an email right before it
+  ok    a welcome that gives a label and starts another sequence
+
+Carried out for the people it is for
+  ok    the welcome goes to all three
+  ok    the label, only for who has not bought, and only where there is room
+  ok    being given the label starts the offer at once, for Ana alone
+  ok    and the offer's next step takes the label off again, whatever its capitals
+  ok    starting the offer again starts nobody twice: Ana had it, the others now get it
+  ok    and the welcome goes on to its last email
+
+Two sequences that start each other
+  ok    each once, however many times they start each other
+
+Counted
+  ok    the actions that changed something, beside the emails sent
+
+A label never written over a newer change
+  ok    the unsubscribe stays, and the label is written over the contact as it now is
+
+16 checks, all passing.
+
+A condition reads what the list keeps
+  ok    having a product, or not
+  ok    having paid: a product sold for money, or first agreeing at a checkout
+  ok    a label, whatever its capitals and spaces
+  ok    the end: one product, or anything paid for
+  ok    a condition on a product the store does not have is refused
+  ok    an end that would come before the first email is refused
+
+Saved, and checked when saved
+  ok    a condition on a product that is not the store's
+  ok    an end that would come first
+  ok    kept as asked: the label trimmed, the others skipping unless told to leave
+
+Sent only to those it is for
+  ok    the first email: not to Ben, who already has what it sells
+  ok    the second, for those who have not bought: Ana; Cleo skips it
+  ok    and Cleo's next one waits its day, counted from the one she skipped
+  ok    the third, for the label: Cleo, a day after the one she skipped; Ana leaves
+  ok    the last: nobody — Ana left, Cleo now has the course
+  ok    counted: who started, what went, who left by buying, what was skipped
+
+A paid order on the list, once
+  ok    put on the list by whichever comes first, and not again
+  ok    with everything the order handed over
+  ok    somebody who did not check the box and is not on the list is added to nothing
+  ok    a buyer who never reached the thanks page is on the list, with what they bought
+  ok    and the job does not do it twice
+  ok    and the store is in that buyer's library (lib/buyer-library.ts)
+
+Which links somebody used, only if they allowed it
+  ok    allowed only by somebody's own check, with their yes to the list
+  ok    a condition on the email before cannot be on the first
+  ok    only Gus's links carry his key, and only his email says how to stop it
+  ok    the key is not the unsubscribe code
+  ok    a page opened through his link notes it; a made-up key notes nothing
+  ok    the email for those who used a link: Gus only
+  ok    the one for those who did not use the email before's link: both, as neither used one there
+
+Taken back in one press, and by leaving
+  ok    the stop page knows it is on
+  ok    stopped: what was counted is deleted, the permission gone, his key leads nowhere, and he is still on the list
+  ok    checking it again after leaving the list asks again: coming back without it, it stays off
+  ok    a buyer who checked both boxes at checkout
+
+32 checks, all passing.
+
+Saved automation references
+  ok    ordinary sequence stays quiet
+  ok    missing product trigger
+  ok    changed course trigger
+  ok    missing form trigger
+  ok    missing end goal
+  ok    missing course condition names step
+  ok    missing started sequence
+  ok    paused sequence target
+  ok    active sequence target
+  ok    missing field
+  ok    missing stage
+  ok    changed number field names incompatible value
+  ok    valid number value stays quiet
+  ok    invalid calendar date is flagged
+  ok    removed choice value is flagged
+  ok    clear-field action remains valid
+  ok    unknown field format is not claimed valid
+  ok    empty sequence needs a step
+  ok    empty email needs content
+  ok    empty subject needs completion
+  ok    action step does not need email content
+  ok    template subject identifies the affected step
+  ok    template body needs completion
+  ok    action note placeholder is reviewed too
+  ok    ordinary brackets are not template placeholders
+  ok    invalid wait identifies step
+  ok    blank wait cannot become immediate
+  ok    text wait cannot become immediate
+  ok    negative wait is rejected
+  ok    fractional hour is rejected
+  ok    fractional day with whole hours remains valid
+  ok    immediate step remains valid
+  ok    maximum wait remains valid
+  ok    overlong wait is rejected
+  ok    clicked on first step is flagged
+  ok    clicked after an action is flagged
+  ok    clicked after an email remains valid
+  ok    unclicked on first step is flagged
+  ok    unclicked after an action is flagged
+  ok    unclicked after an email remains valid
+  ok    a non-click condition can follow an action
+  ok    purchase trigger cannot end at any purchase
+  ok    product trigger cannot end at the same product
+  ok    product trigger can end at another product
+  ok    finished trigger cannot end at the same product
+  ok    finished trigger can end at another product
+  ok    joined trigger can end at a purchase
+  ok    purchase trigger without a goal remains valid
+  ok    product trigger without a goal remains valid
+  ok    product paid entry conflicts with any purchase ending
+  ok    product free entry can end at a later purchase
+  ok    product unrelated paid product does not change entry
+  ok    product missing paid context does not invent a conflict
+  ok    finished paid entry conflicts with any purchase ending
+  ok    finished free entry can end at a later purchase
+  ok    finished unrelated paid product does not change entry
+  ok    finished missing paid context does not invent a conflict
+  ok    joined entry is not a purchase even with paid context
+  ok    paid entry with no ending remains valid
+
+59 checks, all passing.
+
+Read and saved strictly
+  ok    a field and a value it keeps; a stage the board has; a note with words
+  ok    a form that asks for no address cannot start a sequence
+  ok    a sequence that starts with the form, its steps kept
+
+Started by the form, for people on the list
+  ok    the field is set for those on the list, not for somebody who is not
+  ok    Ana gets a new deal in the stage; Ben's open deal moves there
+  ok    a note on her page, saying where it came from
+  ok    the owner told once, with both of them
+  ok    and the email goes to each, once
+
+A sign-up asked from a form remembers it
+  ok    the confirmation link uses the service route and knows the form
+
+A workflow for one quiz result (added 17 October 2026)
+  ok    a result the quiz does not have is refused
+  ok    one of its results is kept on the workflow
+  ok    only the person who got that result starts it
+  ok    a sign-up asked from a quiz keeps the service route, form and result
+
+13 checks, all passing.
+
+Strict sequence activity
+  ok    confirmed empty hash means zero
+  ok    valid counters retain values
+  ok    absent counters in a confirmed hash are zero
+  ok    future metadata is ignored
+  ok    malformed hash null
+  ok    malformed hash undefined
+  ok    malformed hash {}
+  ok    malformed hash ""
+  ok    malformed hash ["sent"]
+  ok    malformed hash [12,"1"]
+  ok    malformed hash ["sent","1","sent","2"]
+  ok    invalid counter 
+  ok    invalid counter  
+  ok    invalid counter no
+  ok    invalid counter -1
+  ok    invalid counter -1
+  ok    invalid counter 1.5
+  ok    invalid counter 1.5
+  ok    invalid counter Infinity
+  ok    invalid counter Infinity
+  ok    invalid counter NaN
+  ok    invalid counter true
+  ok    invalid counter null
+  ok    invalid counter [object Object]
+  ok    invalid counter 
+  ok    invalid counter 9007199254740992
+  ok    invalid counter 1e2
+  ok    safe maximum remains exact
+  ok    empty list needs no read
+  ok    no read for empty list
+  ok    only requested sequence keys are read
+  ok    confirmed empty sequence is present
+  ok    second sequence keeps its own activity
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable []
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable [[]]
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable [[],[],[]]
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable null
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable {}
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable [[],null]
+  ok    only requested sequence keys are read
+  ok    invalid batch stays unavailable [[],["sent","bad"]]
+  ok    only requested sequence keys are read
+  ok    storage failure stays unavailable
+
+49 checks, all passing.
+
+Routes go forward only
+  ok    after a step: the next, or the end after the last
+  ok    IF/ELSE: yes goes to `next`, no to `jump`
+  ok    a good set of routes passes
+  ok    a jump back is refused
+  ok    a next to itself is refused
+  ok    a jump with no condition is refused
+  ok    a target that is not in the workflow is refused
+
+The preview is the job's path, decided only by the sample
+  ok    a lead: hello, skipped to the else branch, labeled, then the warm email
+  ok    and the label the workflow gave is carried to the end
+  ok    a buyer: the buyers' branch, then the warm condition ends the run
+  ok    the same sample gives the same path
+  ok    a label goal ends the run before the step after the label is given
+
+Limits, by plan
+  ok    active workflows: Store none, Studio 10, Scale 20, trial 3
+  ok    runs a day: Store none, Studio 18, Scale 29, trial 7
+  ok    over the limit after a move down, the oldest switched on keep starting people
+
+Saved, and checked when saved
+  ok    up to 20 steps
+  ok    a branch back is refused
+  ok    two steps with one id are refused
+  ok    an abandoned checkout needs a goal
+  ok    and is saved with one
+  ok    opening a course needs a course
+  ok    a deal owner must be on the team with orders
+  ok    the owner may own a deal
+  ok    a new workflow is saved paused, even when it is sent switched on
+  ok    paused, it starts nobody
+  ok    switching on is its own step
+
+One branch each, and the history of every step
+  ok    the welcome goes to both
+  ok    IF: only the buyer gets the buyers' email
+  ok    ELSE: the lead goes straight to the step for everyone else, after its own wait
+  ok    then the lead gets it, and the buyer skips past it to the last
+  ok    the step between the branches is never sent
+  ok    Ana's history: started, then each step attempted and confirmed, or skipped
+  ok    a label goal ends her run before the last email
+  ok    and her run says so
+
+A lost answer is held, never sent again by itself
+  ok    only somebody on the list is started
+  ok    the provider got it once, but said nothing back
+  ok    the run is held at that step, uncertain
+  ok    later runs do not send it again
+  ok    the store's held runs list it
+  ok    the creator says it went through: on to the next step
+  ok    a second answer for the same hold is refused
+  ok    the next step goes out, and the uncertain one was not repeated
+  ok    and the hold is gone
+
+An attempt left open by a run that stopped is held
+  ok    nothing is sent for it
+  ok    and the run is held for the creator
+  ok    trying it again is the creator's explicit choice
+  ok    then it goes out
+
+Runs a day
+  ok    counted before the ceiling
+  ok    past the ceiling nobody more starts today, and the refusal is counted
+  ok    and their start is given back for another day
+  ok    the next UTC day has its own empty run counter
+  ok    reading the next day does not reset the previous day's ceiling
+
+Active workflows
+  ok    Studio switches on ten at most; the eleventh is refused
+  ok    saving one switched on is refused the same way
+
+Erased: a person mid-run leaves nothing behind in any workflow
+  ok    mid-run: her first email went, the second is waiting, and her run is recorded
+  ok    before erasure, workflow keys hold her address
+  ok    erased from every workflow of the store
+  ok    afterward no key outside her list row holds her address
+  ok    nor her run key, start or held entry
+  ok    and her waiting step never goes out
+
+Erased: a workflow removed, and a store deleted
+  ok    a run is recorded for him
+  ok    removing the workflow erases its runs
+  ok    deleting the store erases every workflow, run, start and hold
+  ok    and no queued step of the store is left
+
+64 checks, all passing.
+
+Effects are counted four ways, and nothing unconfirmed counts as done
+  ok    four attempts: one confirmed, one failed, two uncertain
+  ok    the one marked as gone through by the creator stays uncertain, with their choice beside it
+  ok    an attempt with no outcome yet is uncertain and waiting, never done
+  ok    a full history is not trimmed
+  ok    a skipped step is not an effect
+  ok    a step tried again is two attempts: the first stays uncertain, the second is confirmed
+  ok    a history whose earliest events were let go says so, and still counts the outcome it kept
+
+Bounds by construction
+  ok    a workflow keeps at most the plan's runs a day for as long as a start is remembered
+  ok    after a choice, there is room for everything a run can still write
+
+A step that waits writes nothing new
+  ok    it waits: nothing was sent
+  ok    and its history is still just its start
+  ok    once there is room it goes out, written down once: attempted, then confirmed
+  ok    counted as one attempt, confirmed
+
+A held run's history stays bounded, whatever came before the creator's choice
+  ok    a lost answer holds the run
+  ok    trying it again is taken 1 time, then refused
+  ok    going on past it is the creator's word
+  ok    the choice keeps the latest 20 events, room for all that can follow
+  ok    the history says its earliest events were let go
+  ok    its last event is the creator's choice, and nothing it kept counts as confirmed
+
+19 checks, all passing.
+
+When a waiting step is tried again
+  ok    the fixture uses one clock for timestamps and UTC day keys
+  ok    without a known end: 10 minutes, then three times longer each time, a day at the most
+  ok    the month's emails: once, a minute after the window turns
+  ok    a pause: a minute after it ends
+  ok    the day's room: just after the next UTC day begins
+  ok    near midnight the daily retry retains the ten-minute minimum
+  ok    after midnight the daily retry waits for the following day
+  ok    an unknown end falls back to the growing delay
+  ok    a list's portion: at least fifteen minutes
+  ok    a run may wait while it is within both bounds
+  ok    one wait past the most a run may
+  ok    a step waiting more than 35 days
+  ok    a count that cannot be read stops it: unknown is not room
+
+The worst case per run counts every wait and every retry
+  ok    start, every step and each retry of the creator's, and every wait
+  ok    and the commercial review captures the bounds
+
+Every way a run stops, listed
+  ok    the goal, each ending condition and end, the last step, and the engine's own
+  ok    the bounds are the code's numbers
+  ok    a workflow with no goal and no conditions still lists the engine's stops
+
+The preview writes nothing
+  ok    no database command and no key
+
+A run waits a bounded number of times, then stops
+  ok    the first daily wait honors the ten-minute minimum near UTC midnight
+  ok    after 3 waits it is still waiting, nothing sent, nothing written to its history
+  ok    one wait costs at most 32 database commands, the store's own reads included
+  ok    one wait more and the run stops, with nothing done at that step
+  ok    its history says why
+  ok    and it is no longer in the queue
+
+A wait for the month's emails is tried once, when the month turns
+  ok    queued for a minute after the store's window turns
+  ok    that wait cost at most 32 database commands too
+
+Trying a held step again is bounded
+  ok    a lost answer holds the run
+  ok    taken 1 times, then refused
+  ok    the run says how often it was tried again
+  ok    refused, it stays held for the creator's other choices
+
+31 checks, all passing.
+
+Read and kept
+  ok    another of the store's sequences, never one that is not
+  ok    never the workflow itself
+  ok    saved, and the stored list reads it back
+
+Taken out where they are
+  ok    Ana waits in the nurture sequence for its first email
+  ok    taken out: nothing of hers waits in it
+  ok    its history says it ended, and by what
+  ok    joining again does not start her on it again: each person goes through a sequence once
+  ok    no email of it went
+  ok    someone not in it is told so, in the step's history
+
+Waiting under an address the store had before
+  ok    an entry made before the store changed its address
+  ok    is taken out too
+
+Due in the same minute: the stop really cancels the email
+  ok    the stop, done first in the batch, keeps the email from going, and nothing of that sequence is left queued for her
+  ok    both histories say so: taken out, not put off for later
+
+A step under way when the stop lands
+  ok    the email under way goes, nothing after it is queued, and the run ends, saying why
+  ok    every place a run is queued again after its step goes through the lease check
+
+Waiting for room to send when the stop lands
+  ok    taken out: ended there, said why; still in it: the wait as it was
+  ok    both places a step is put off use it, and a wait taken out is not counted as later
+
+A condition that sends them on, when the stop lands first
+  ok    the conditional sequence is saved
+  ok    taken out before the condition is read: nothing of that sequence is queued for him, and his run stays ended
+
+Out of time in the same batch, after the stop
+  ok    his DS step is not put back in the queue, no email of it goes, and his run stays ended
+
+When the sequence is gone
+  ok    the workflow's review says so
+
+Said in words
+  ok    the studio's choice and what it does
+  ok    the map says it
+
+23 checks, all passing.
+
+Read and kept
+  ok    a step of its own, with nothing to choose
+  ok    saved
+  ok    the stored list reads it back
+
+Shared evenly
+  ok    each open deal goes to whoever had the fewest: two each in the end
+  ok    someone with no open deal: no deal is made for them
+
+Who is never chosen, and who is kept
+  ok    a deal held by someone who left the team goes to whoever on it has the fewest
+  ok    a deal held by someone still on the team keeps them
+
+A teammate who can no longer see orders, and a tie
+  ok    a deal held by someone who can no longer see orders goes to someone who can: only the owner now
+  ok    with only the owner left, the workflow's review says every deal goes to them
+
+Never over what the creator did meanwhile
+  ok    a write over a copy the board changed meanwhile writes nothing
+  ok    the store's data room counts the record as the board left it, never the copy read before
+  ok    and what the creator typed stays
+  ok    over the record as it is now, it is written
+  ok    a deal that is gone is never made again by a write over it
+  ok    a write that lost the race sizes the room from the script's answer, without reading the deal again
+
+One run shares at a time
+  ok    while another run shares, nobody is given the deal
+  ok    once it let go, the deal is shared
+
+Said in words
+  ok    offered with a deals board and someone besides the owner, or where a step already has it, and what it does
+  ok    the map says it
+
+19 checks, all passing.
+
+The words
+  ok    a sequence on a call starts when someone books it; any other product, when someone gets it
+  ok    the trigger's choice says it covers booking a call, only when the store has one
+  ok    the store's calls are handed to the studio
+
+Nothing else changes
+  ok    the trigger is still the product's
+  ok    a paid order, a call included, starts the sequences of its product
+
+5 checks, all passing.
+
+Read strictly
+  ok    words and whole days from 0 to the most
+  ok    anything else refused
+  ok    cleaned as the deals board cleans it
+
+Kept and read back
+  ok    saved with its step
+  ok    the stored list reads it back
+  ok    a stored step without its days, or past the limits, is not read
+
+Run on the person's open deal only
+  ok    the open deal gets the next action and the day it is due, in UTC
+  ok    everything else on the deal is kept
+  ok    someone with no open deal: no deal is made for them
+  ok    a won deal is not an open one, so it is left as it was
+
+A deal that already has it
+  ok    a second workflow with the same step saves
+  ok    the same next action and due date: confirmed, not written again
+
+Said in words
+  ok    the studio's choice, its two fields and what it does
+  ok    the map says it, and the day it runs for 0
+  ok    the hint is read with both fields, and names the board's own filters
+  ok    an empty number of days is sent as none, never as today
+
+16 checks, all passing.
+
+A workflow that starts on signing
+  ok    a trigger of its own
+  ok    saved on a plan with agreements
+  ok    one workflow a store starts on signing; it can start others with a step
+
+Who it starts
+  ok    someone on the list who agreed: started
+  ok    signing again, another version or another agreement: started once
+  ok    someone not on the list: nothing, and signing never puts them on it
+  ok    someone on the list who did not agree to hear from the creator: nothing
+  ok    no address: nothing read
+
+What it costs
+  ok    a plan without workflows reads nothing
+  ok    not one command for it
+  ok    the check, beside the run's own start, is 16 commands, inside a light request
+  ok    and 1 public request, priced as a page, is above a light request of those commands
+
+The route and the studio
+  ok    the route starts it after the signature is recorded, with the address it was sent to
+  ok    the studio offers it only on a plan with agreements, and says what it does
+  ok    the privacy policy says who it starts for, that it never adds anyone to the list and what it keeps
+  ok    the check takes the store's public requests first
+
+16 checks, all passing.
+
+A workflow that starts on a paid request
+  ok    a trigger of its own
+  ok    one workflow a store; it can start others with a step
+
+Who it starts, from the payment written down
+  ok    the first time it is paid: written down, and started for the person it was sent to
+  ok    written down again (the page after paying and the five-minute job both): not fresh, so nothing is checked
+  ok    someone not on the list: nothing, and paying never puts them on it
+  ok    someone on the list who did not agree to hear from the creator: nothing
+  ok    the same person paying a second request: started once, still
+
+What it costs
+  ok    a plan without workflows reads nothing
+  ok    not one command for it
+  ok    the check, beside the run's own start, is 16 commands, inside a light request
+  ok    and 1 public request, priced as a page, is above a light request of those commands
+  ok    no address: nothing read
+
+The studio and the payment path
+  ok    offered only where payment requests can be taken now, and said in words
+  ok    the payment path loads the workflows only when a payment is first written, never at the top
+
+14 checks, all passing.
+
+What a room is, by plan
+  ok    a paid store's room is its plan's
+  ok    a free trial's, and an ended plan's
+  ok    what a store keeps may fill it up to two windows of its orders from the top
+  ok    bytes are UTF-8 and every entry counts, rounded up
+  ok    an order takes what it hands over
+  ok    a bundle hands over each of its items
+
+Taken before it is written, refused past the room
+  ok    a write that fits is taken, with its own field
+  ok    one past the room is refused with what it is
+  ok    and the creator is told in plain words
+  ok    nothing of it was written
+  ok    needData says it as a full store, so every studio route answers it
+  ok    a buyer is told it is the store's room, not theirs
+  ok    deleting gives the room back, field and all
+  ok    and never below nothing
+
+What expires by itself comes off with its month
+  ok    a record kept until December is counted until then
+  ok    in the room
+  ok    and gone once its month is over
+  ok    a cache that does not fit is not kept
+
+An order is never refused once paid
+  ok    what an order leaves is added whatever the room holds, at what it really adds
+  ok    so the room may be passed by what was paid for
+
+A checkout is held only while the room has space for its order
+  ok    an empty room admits a checkout
+  ok    a room with space for one more order admits one
+  ok    room made, sales go on
+  ok    a store is known by its id
+
+Unknown is not zero
+  ok    a room that cannot be read takes nothing
+  ok    and is an ordinary failure, to try again, not a full store
+  ok    a change that is not a number is refused before anything
+
+Counts that never grow a hash past its most
+  ok    new names fill the hash to its most
+  ok    what does not fit is counted under ~, and a name there always counts
+  ok    counting names that all fit runs its length once and a count each
+  ok    near its most, one read more says which are there
+  ok    the same hash named twice is refused, and nothing is written
+  ok    and the same names again, past it, as many
+
+33 checks, all passing.
+creator: room 18 MB; outside it 121.4 MB on average, 294.0 MB at once
+pro: room 135 MB; outside it 288.1 MB on average, 802.6 MB at once
+scale: room 250 MB; outside it 704.4 MB on average, 2468.9 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (385.005827ms)
+✔ each family is bounded one way at least, and what it says can be checked (32.215953ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (3.050918ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.665715ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.59877ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (10.542323ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.264298ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 452.468111
+
+=== /tmp/g1927-fbf-types.log ===
+
+=== /tmp/g1927-fbf-lint.log ===
+
+/tmp/g1927-return-fbf/tests/flow-history-unknown-removal.test.ts
+  3:10  warning  'readFlowVersions' is defined but never used  @typescript-eslint/no-unused-vars
+  5:10  warning  'dataKey' is defined but never used           @typescript-eslint/no-unused-vars
+
+/tmp/g1927-return-fbf/tests/g1927-final-forget-window.proof.ts
+  1:20  warning  'removeFlow' is defined but never used  @typescript-eslint/no-unused-vars
+
+/tmp/g1927-return-fbf/tests/g1927-history-unknown-removal.proof.ts
+  2:10  warning  'readFlowVersions' is defined but never used  @typescript-eslint/no-unused-vars
+  4:10  warning  'dataKey' is defined but never used           @typescript-eslint/no-unused-vars
+
+✖ 5 problems (0 errors, 5 warnings)
+

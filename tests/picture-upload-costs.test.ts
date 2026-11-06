@@ -33,12 +33,23 @@ const tries = (registry as Record<string, unknown>).BLOB_PUT_TRIES;
 is("the installed SDK's own default: 10 tries again", retries, 10);
 is("a put counted as 1 + every try again", tries, 1 + retries);
 
+// The same tries cover a head (head() goes through requestApi, as a put does); a read through get() is one plain fetch
+// (Codex S on #2801, 5805761543): every head counted with its tries, every read once.
+const index = readFileSync("node_modules/@vercel/blob/dist/index.js", "utf8");
+const body = (name: string) => index.slice(index.indexOf(`async function ${name}(`), index.indexOf("\n}", index.indexOf(`async function ${name}(`)));
+is("the SDK's head goes through requestApi, so it is tried again", /requestApi\(/.test(body("head")), true);
+is("the SDK's get is one plain fetch, never tried again", /await fetch\(/.test(body("get")) && !/requestApi\(/.test(body("get")), true);
+const headTries = (registry as Record<string, unknown>).BLOB_HEAD_TRIES;
+is("a head counted with every try, as a put is", headTries, tries);
+
 part("Every studio picture upload's Blob operations, at the plan's studio ceiling");
 const line = COST_LINES.find((each) => each.id === "picture-uploads");
 is("a line of its own", Boolean(line), true);
 is("it says which pictures it covers: a product's, a link's and a page's (a review's photo and an email's picture are reported apart)", /product's, a link's and a page's/.test(line?.feature ?? "") && !/^Pictures uploaded \(a product's/.test(line?.feature ?? ""), true);
 for (const tier of ["creator", "pro", "scale"] as const) {
-  const perRequest = (typeof tries === "number" ? tries : Number.NaN) * BLOB_ADVANCED_OP + 5 * BLOB_SIMPLE_OP + 2 * MAX_IMAGE_BYTES * BLOB_TRANSFER_PER_BYTE;
+  // A put; three heads (the name, then the picture and its smaller copy); two reads, of those two copies.
+  const put = typeof tries === "number" ? tries : Number.NaN, heads = typeof headTries === "number" ? headTries : Number.NaN;
+  const perRequest = put * BLOB_ADVANCED_OP + (3 * heads + 2) * BLOB_SIMPLE_OP + 2 * MAX_IMAGE_BYTES * BLOB_TRANSFER_PER_BYTE;
   is(`${tier}: the studio figure, each request at its dearest`, Math.abs((line?.monthlyUsd(tier) ?? 0) - STORE_ALLOWANCES[tier].studio * perRequest) < 1e-9, true);
 }
 is("its source and date are said, and why the read is counted whole", /vercel\.com\/docs\/vercel-blob\/usage-and-pricing/.test(line?.basis ?? "") && /6 November 2026/.test(line?.basis ?? "") && /206/.test(line?.basis ?? ""), true);

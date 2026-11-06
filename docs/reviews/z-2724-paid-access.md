@@ -1,3 +1,23 @@
+# Focal return: impossible single-field count remains unknown
+
+Exact reviewed head: `58aa1d7995ff5ff9d5f6ce532197d90603de801f`. Requested write-ack corrective delta `115f71d3..2832cd1ef741c45113208daa217e8001ae7b6eec` read in full (gifts, preorders, author test, cost registry). The later refunds-only correction stays with Q; it does not change this ACK boundary. Return announced before execution, new proof reserved in channel `ec74711c8faf6e90e9cbad3091510563756efa58`.
+
+**Original missing-ACK case CLOSED (same immutable proof53/53), but ONE MEDIUM residual, NOT RELEASED.**
+
+`lib/gifts.ts:315-319` and `lib/preorders.ts:486-490` accept `countOf(removed[0]) !== null` as deletion confirmation. That only proves a nonnegative safe integer. Each command is HDEL of ONE field, whose exact result is0 or1. The impossible count2 passes as confirmed deletion, and the job marks revoked/seen and advances its anchor while imported access can remain. The same generic count predicate also appears for single-member SADD and single-field HSET/EXPIRE: validate their command-specific domains too, rather than merely integer type.
+
+Durable `tests/z2724-single-count.proof.ts` is the previous53-case proof copied with only the synthetic HDEL reply changed from undefined to2, with explanatory comments adjusted. The target deletion does not execute; all other fixture commands execute normally. This models an impossible/unknown response, not a valid server count or real payment. In BOTH actual gift and preorder journeys: sweep reports1, access remains, seen1 and anchor advances; restoring normal transport yields retry0 and access still remains. Result53checks/8causal failures/45passing controls. Both injection sites explicitly reached. The original missing-ACK proof remains unchanged and green53/53; no assertion was weakened.
+
+Require one reply and an exact command-specific0/1 count for these single-item mutations. Reject2, other out-of-domain counts and malformed replies before completion/seen, preserve retries and partial-work idempotency. This is a residual of review5794703899, not Q's separate Stripe-field issue. No product fix is made by Z.
+
+The requested registry description now includes SISMEMBER and gift/preorder/imported-record reads, each bounded once per row per run. No new production command, key or ceiling is introduced by this ACK validation delta. This confirms the structural description only; company funding/dollar margin remains outside the focal opinion, never assumed zero.
+
+Validation at this exact head: original immutable proof53/53, author77/77 plus gifts33/preorders31/call-cancel22/call-reminder17/team100/cost24/data7 =311linked passing. Scoped strict types including own proofs0, product/proof lint0, public-data scanner3807/0 and diff clean (see posted review for completed results). New single-count proof intentionally RED. Native Redis, real Stripe/payment/email, browser, global build and hosted CI not certified. No author source/branch/CI changed. Two applicable clean financial opinions and nine exact-head final checks remain required; no merge by Z.
+
+Earlier reports preserved below as superseded history.
+
+---
+
 # Focal return: second independent paid-access review of #2724
 
 Exact current head: `39a8e4f92f2859122998013ac0184df940ea93f2`; corrective source `cff798b3f1279cd35ea5423c7652d0fe8925342c`, reviewed delta from `8377419e5752eb7b4319df9c24e00cd2523fcc46`. The six original product/test blobs at the corrective source are byte-identical in the current main-only join. Nominal return announced in channel `d63909712ab3d4c74dc989baa0d0c19f5d9e3a77`; added own evidence reserved in `2d1432753f311197040b520fb5c680cb179798bc`. Q retains first opinion and its separate Stripe required-field residual. No author source, branch, CI or product reservation edited.

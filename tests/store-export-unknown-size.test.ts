@@ -34,6 +34,35 @@ test("an unreadable data-room size refuses the export shape before any later rea
   }
 });
 
+for (const [name, reply] of [
+  ["boolean counts", [[false, false]]],
+  ["blank counts", [["", ""]]],
+  ["negative bytes", [["-1", "0"]]],
+  ["fractional bytes", [["0.5", "0"]]],
+  ["an extra HMGET field", [["0", "0", "extra"]]],
+  ["an extra pipeline result", [["0", "0"], "extra"]],
+] as const) {
+  test(`an unknown data-room reply (${name}) refuses the export shape before later reads`, async () => {
+    redis.clear();
+    const pipeline = redis.pipeline.bind(redis);
+    let laterReads = 0;
+    redis.pipeline = async commands => {
+      if (commands.length === 1 && commands[0]?.[0] === "HMGET" && commands[0]?.[1] === "nl:data:" + shop.sid) {
+        return reply as unknown as unknown[];
+      }
+      laterReads += 1;
+      return pipeline(commands);
+    };
+
+    try {
+      await assert.rejects(exportShape(shop), /data-room size could not be read/i);
+      assert.equal(laterReads, 0, "nothing else may be read before the paid ceiling is known");
+    } finally {
+      redis.pipeline = pipeline;
+    }
+  });
+}
+
 test("a confirmed empty data room remains an exact zero-sized shape", async () => {
   redis.clear();
   const shape = await exportShape(shop);

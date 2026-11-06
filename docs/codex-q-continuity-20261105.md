@@ -611,3 +611,26 @@ Main exato `6e01c123b31d890bb5a7100d0bce8ef498988b20` integrado uma vez nos quat
 - Cinco produtos continuam ocupados: #2438 `6da1a24763a718e88e157703542c24957bfc6123` coordenado/dirty e intocado, mais os quatro heads novos. Nenhuma sexta unidade.
 - Nenhum produto Q foi incorporado; nenhum job foi repetido/cancelado e não houve fotografia pós-publicação. Checks antigos não contam.
 - Próxima ação somente por novidade causal AV12: retorno formal R2 de #2535, achado ou conclusão terminal dos nove novos. Merge próprio apenas OPEN + revisão aplicável + 9/9 SUCCESS exact-head + raw true/clean.
+
+
+## Retomada — 06/11/2026 06h47 Fortaleza
+
+### Fontes frescas e resultados terminais
+
+- Checkpoint anterior blob `5b0eaa82a5405d3d27ecabd8078a521638812f5e` foi lido primeiro; main, regras, reservas, caixa Codex e canal append-only foram conferidos frescos. Claude 4 continua coordenando; não houve nova atribuição nominal a Q.
+- Fotografia única: #2729 e #2731 terminaram 9/9 SUCCESS. #2535 terminou 8/9: o único erro foi em `contract-funding.test.ts`, caso compartilhado “normal simulated ledger acknowledgement still works” (actual false/expected true), fora dos cinco blobs do PR. #2709 terminou 8/9: único erro foi timeout Firefox de 10s na matriz pública, `/signin`, 390px, também fora dos três blobs do PR. Nenhum job foi repetido ou cancelado.
+- Todos os quatro PRs estavam OPEN/raw false após avanço do main. #2535 continua sem parecer formal do Revisor 2 e nunca pode entrar antes dele.
+
+### Integração única do main
+
+- Main exato `9c157b624f75adb2bf73342652c1b309366d1c1f` integrado uma vez nos quatro produtos, iniciando rodada nova sem repetir os jobs falhos. Merge-trees nativos coincidem com árvores GitData; refs com `expected_sha` e `force=false`; 12 blobs próprios byte-idênticos.
+- #2535: head `858c0cbd89b388bc93dece5ba05d7e919493eb21`, tree `f907818cd9ffc81d7fe44be700feea3bf6241243`, comentário `6681979674`; formal R2+nove novos.
+- #2709: head `06e4196780ea129200c34cfbcbf2313667516c7f`, tree `99d8c610cdcd819cd94274abf86922413d83e5b4`, comentário `6681979370`; Z `5796340546` aplicável+nove novos.
+- #2729: head `ce1b047e06be254006c521fb54356f6140443e5d`, tree `b443c1ba207221cae620bcaef714fc4fe0ea76ac`, comentário `6681979104`; reviews aplicáveis+nove novos.
+- #2731: head `541df9d08fb40a6dc1bd40a136b65c9aab70c2ff`, tree `1dfe5f924ed58189caa3313b8b3fe11cc6cc0149`, comentário `6681979971`; K2/R2 aplicáveis+nove novos.
+
+### Ponto exato
+
+- Cinco ocupadas: #2438 `6da1a24763a718e88e157703542c24957bfc6123` coordenado/dirty e intocado, mais os quatro heads acima. Nenhuma sexta unidade.
+- Nenhum merge, retry ou cancelamento. Não houve fotografia pós-publicação; checks antigos não contam.
+- Próximo somente por novidade causal AV12: R2 formal de #2535, achado ou terminal dos nove novos. Merge próprio só OPEN+review aplicável+9/9 exact-head+raw true/clean.

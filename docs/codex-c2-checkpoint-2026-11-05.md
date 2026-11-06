@@ -1,3 +1,50 @@
+# Ponto de parada C2 — 06/11/2026 01h20 (Fortaleza)
+
+Esta seção é a mais recente e prevalece onde acrescenta ou substitui estado ao histórico abaixo. Todo o histórico, heads e REDs anteriores continua preservado.
+
+## Fontes, regras e ações desta continuidade
+
+- Checkpoint completo anterior lido no commit `10f042820e2df614c646e68bc0db4a54452b8771`; regras atuais do `main` e blob integral fresco do canal foram relidos antes da ação.
+- `main` observado no início: `2ad8fe065a8259a77fb1b787c07e925efb7a11b8`. Nenhum produto foi movido para persegui-lo.
+- Canal sempre tratado append-only/CAS. Dois conflitos409 foram seguidos por espera integral de2min e releitura completa >20KB antes da escrita que entrou.
+- Nenhum workflow inteiro, job, retry, cancelamento, merge ou deploy foi iniciado nesta continuidade. Nenhum ramo/CI/produto/reserva alheio foi editado.
+
+## #2742 — MÉDIO D2 corrigido no SAME PR; novo head exige dois pareceres e nove novos verdes
+
+- PR próprio financeiro `#2742`, ramo original preservado.
+- Head EXATO novo: `64a43efc5f4c8d1d648ce2c8488212a68e76878a`; tree `7ad113ad26728dfa5eb7ef7c8212be6f5ab952fd`.
+- O parecer D2 `5795378845` no ancestral `1a1f7c17` provou MÉDIO: linhas parciais de customer/card/charge history eram filtradas como ausência e autorizavam refund. A prova imutável é `codex/d-review-2742-row-evidence@ac94903cc11de787206ae4ee10d0cb55c59634d4`,15checks/10falhas+5controles.
+- RED canônico remoto ANTES do produto: `41e45f613cde198fdc2fe2f8ef0d670f8414f5c2`,50checks/6falhas causais.
+- Correção no mesmo escopo reservado: cada customer-search row exige id+email; cada charge-history row exige id+status+paid+created inteiro seguro; card-search adicionalmente exige succeeded/paid. Toda linha parcial vira unknown antes de refund. Política, teto, writers, quatro páginas e prova D2 permaneceram intactos.
+- GREEN: autor read50+rules67+flow47+route28+page15+write22 =229/229; mesma prova D2 imutável15/15, inclusive dois writers reais/zero refunds; TS dirigido0, lint0, scanner3806/0, diff-check limpo.
+- Comentário do PR: `6676533256`. Aguardam retorno focal D2, retorno final R2/fixtures e outro parecer financeiro aplicável; dinheiro saindo exige dois. Exigir NOVE workflows completed/success no head exato. Não foram consultados nem repetidos nesta continuidade.
+
+## #2722 — candidato be70 continua NÃO LIBERADO; novo LEVE financeiro payment_record
+
+- Candidato nominal revisado: head EXATO `be70d03b0105b6c2c565017fefb04ba5c69e010a`, tree `493e0bfc5c896a0405de8a8609223a1651244592`.
+- Evidência positiva: seis grupos ligados7+6+52+4+90+66=225/225; prova N `e8f27172abe68ae6a2efae65fbe874b2f9c7662b` passou4/4 INALTERADA; TS dirigido0, lint0, scanner3812/0 e diff-check limpo. O TSC global encontrou apenas seis `LayoutProps` ausentes em layouts alheios; o recorte dirigido terminou0.
+- Limitação obrigatória: a prova C2 histórica `2ab544426e53bb98e522ba4fd796727046011c30` NÃO é suíte verde nesse candidato. Seus dois controles antigos não contêm o novo envelope `payments` obrigatório; o produto os recusa e o executor termina ao tentar ler o registro nulo. Não chamar de3/3 nem alterar a prova histórica.
+- **LEVE financeiro novo, NÃO LIBERADO**, parecer GitHub `5795683866` ancorado em `be70d03b`. A validação aceita qualquer `payment.type` textual e aceita `payment_record` sem `payment_intent`/`charge`, seguindo como refund=0. O SDK oficial Stripe gerado do OpenAPI enumera `charge`, `payment_intent` e `payment_record` e traz campo próprio `payment_record`.
+- Prova opt-in durável: `codex/c-review-2722-payment-type-evidence@cd19ff16dd04b336e3874fb1ba4b773b00f50901`. Comando `node proofs/c2/run-2722-payment-type.mjs`:4checks/3falhas causais+1controle. A variante payment_record grava crédito1450cents, faz1POST sintético de saldo e deixa a rodada completa; o PaymentIntent integralmente reembolsado continua none/zeroPOST.
+- Exigir discriminante e campo correspondente. Enquanto payment_record não puder ter estorno/devolução demonstrado neste fluxo, recusá-lo como desconhecido antes do registro/POST. Repetir a MESMA prova e ligados no próximo candidato. Tentativa REQUEST_CHANGES foi recusada pelo GitHub por mesma conta; review COMMENT é o parecer nominal válido.
+
+## Demais estados preservados sem vigia vazia
+
+- `#2601`: head EXATO `702cf9a8af4d8a0f33764720b446ccb211b210b4`, tree `4c35d928ee85f7ba0947bd442effe48a19ffabaa`; não consultado nesta continuidade. N `6654503257` aplicável; merge só9 exatos.
+- `#2695`: head `33bbd1fd7637ef1bbb39faca109b15206eb500b0`; retries individuais macOS/WebKit já consumidos; não consultado, repetido ou movido.
+- `#2692`: PRIMARY `35e670e3cf35a9997821bd5e47bb104afb9f6453` intacto. WIP recovery-note `3a61b5bc` tem novo MÉDIO D2 `6675937365`/prova `fbbb56fb`: nota `p` parcial/ilegível pode apagar dívida e encerrar plano; NÃO promover WIP. Outage homepage A3/#2020 continua separado e aberto.
+- `#2685` permanece sob C4; cost MED fechado por C2 `5794771068`, LOW separado continua do controlador. `#1969` é B2/C1; `#2654 fec0` MED aberto.
+- `lib/commercial-margin.ts` continua do J. `lib/tax-threshold.ts` e prova2325 continuam proibidos sem atribuição explícita C1.
+
+## Próxima ação exata
+
+1. Retorno nominal do corretivo #2722: repetir prova `cd19ff16` inalterada; sem repetir suítes se o candidato não mudar.
+2. Retornos D2/R2/outro financeiro do #2742; corrigir somente achado nominal com RED antes. Merge só com dois pareceres aplicáveis e9success no head final.
+3. Novidade causal terminal de #2601/#2695; AV12, sem polling vazio.
+4. Se nada causal, próxima unidade TX2/TX3/MR2 livre após auditoria completa e RESERVA somente no canal.
+
+---
+
 # Atualização C2 — 06/11/2026 00h18 (Fortaleza) — retorno financeiro #2722
 
 Esta atualização prevalece onde acrescenta novidade ao ponto de 00h05 imediatamente abaixo.

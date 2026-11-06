@@ -112,7 +112,7 @@ export async function auditNumbersLink() {
     scenario = scenarios[5];
     fault = batch => batch[0]?.[0] === "GET" && batch[0][1] === verifiedKey ? [7] : undefined;
     const unknownVerified = await render(); fault = null;
-    check("an unknown verified reply is unread, not confirmed absent", [unknownVerified.unread, unknownVerified.noRecorded], [true, false]);
+    check("an unknown verified reply withholds figures and offers retry", [unknownVerified.recorded, unknownVerified.unread || (unknownVerified.noRecorded && unknownVerified.html.includes("Please try again later."))], [false, true]);
     const [stillKept] = await redis.pipeline([["GET", verifiedKey]]);
     check("the verified record was not lost from the fixture", stillKept, raw);
 

@@ -9,6 +9,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const evidenceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const sourceRoot = resolve(process.argv[2] ?? evidenceRoot);
+const mode = process.argv[3] ?? "all";
+assert.ok(mode === "all" || mode === "own-only", "select the full protocol or only the independent SSR cases");
 const HEAD = "da07c3289b77214fea2c93e3b29cbbfd66938646";
 const paths = ["app/api/numbers-link/route.ts", "app/numbers/[id]/page.tsx", "lib/numbers-links.ts", "tests/honest-numbers-link.test.ts"];
 const env = { ...process.env, GIT_NO_LAZY_FETCH: "1", GIT_TERMINAL_PROMPT: "0" };
@@ -67,7 +69,7 @@ async function run(name, contents, aliases, overlays = new Map()) {
 }
 
 try {
-  for (const phase of phasesBeforeIo) {
+  for (const phase of mode === "own-only" ? [] : phasesBeforeIo) {
     const changed = git(["diff", "--name-only", phase.commit, HEAD]).split("\n").filter(Boolean);
     assert.ok(changed.every(path => paths.includes(path)), "overlay every changed source, leaving identical files shared");
     const overlays = new Map(paths.map(path => [join(sourceRoot, path), git(["show", `${phase.commit}:${path}`]) + "\n"]));
@@ -110,6 +112,6 @@ process.exitCode=report.failures.length?1:0;`;
   assert.ok(independent.status === 0 || independent.status === 1);
   const usedCommands = phases.reduce((n, phase) => n + phase.budget.commands, 0) + Object.values(report.commands).reduce((a, b) => a + b, 0);
   assert.ok(usedCommands <= 14_000);
-  console.log(JSON.stringify({ sourceRoot, exactHead: HEAD, sourceHashes, phases, independent: { ...report, actualExit: independent.status }, usedCommands, outputBytes, milliseconds: Date.now() - started }, null, 2));
+  console.log(JSON.stringify({ mode, sourceRoot, exactHead: HEAD, sourceHashes, phases, independent: { ...report, actualExit: independent.status }, usedCommands, outputBytes, milliseconds: Date.now() - started }, null, 2));
   process.exitCode = independent.status;
 } finally { rmSync(temporary, { recursive: true, force: true }); }

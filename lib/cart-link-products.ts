@@ -50,13 +50,16 @@ export function cartLinkUnits(listings: number, bytes: number): number {
 
 /**
  * What these products' records weigh together, from the data room: a weight
- * counts only when Redis answered exactly (an array of one value per product)
+ * counts only when Redis answered exactly (one reply, an array of one value per product)
  * and the value is a positive whole number; every other product is weighed at
  * MAX_PRODUCT_BYTES.
  */
 async function weigh(store: Store, ids: string[]): Promise<number> {
   const key = dataKey(store);
-  const [reply] = key ? await redisPipeline([["HMGET", key, ...ids.map((id) => `p:${id}`)]]) : [null];
+  // Exactly one reply for the one command (Codex G on #1928): an answer with more or fewer is not known, and every
+  // product is then weighed at its ceiling.
+  const replies: unknown = key ? await redisPipeline([["HMGET", key, ...ids.map((id) => `p:${id}`)]]) : null;
+  const reply = Array.isArray(replies) && replies.length === 1 ? replies[0] : null;
   const exact = Array.isArray(reply) && reply.length === ids.length ? reply : null;
   return ids.reduce((sum, _id, i) => {
     const raw = exact?.[i];

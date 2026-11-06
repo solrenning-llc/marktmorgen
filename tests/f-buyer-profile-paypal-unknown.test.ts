@@ -8,6 +8,7 @@
  * you", and nothing on the page says the read failed (stripeError and partial
  * stay false). The creator is told something false about what a buyer paid.
  */
+import { readFileSync } from "node:fs";
 import { buyerProfile } from "@/lib/buyer-profile";
 import { grantImported } from "@/lib/imported-purchases";
 import type { Store } from "@/lib/store";
@@ -102,6 +103,41 @@ async function main(): Promise<void> {
   const lost = await buyerProfile(store, "buyer@example.com");
   is("a failed read is not 'nothing handed over': the page warns", { orders: lost.orders.length, paid: lost.paid, partial: lost.partial }, { orders: 0, paid: 0, partial: true });
   redis.pipeline = pipeline;
+
+  // Claude 4 on #2908 (LEVE): the record was trusted once its store matched, so a record of this store with an amount
+  // that is not a whole number of cents, or a currency that is not a lowercase three-letter code, was counted: a
+  // string amount concatenated into "Spent with you", a negative or fractional one counted as money. Each is unknown.
+  part("A paid record of this store with fields in another format (RED)");
+  const base = JSON.parse(record) as Record<string, unknown>;
+  const odd: [string, Record<string, unknown>][] = [
+    ["an amount as text", { ...base, cents: "4900" }],
+    ["a negative amount", { ...base, cents: -4900 }],
+    ["a fractional amount", { ...base, cents: 49.5 }],
+    ["no amount", { ...base, cents: undefined }],
+    ["a currency in capitals", { ...base, currency: "USD" }],
+    ["a currency that is not a code", { ...base, currency: "dollars" }],
+    ["no currency", { ...base, currency: undefined }],
+    ["a time that is not a whole number of seconds", { ...base, at: "yesterday" }],
+  ];
+  for (const [label, bad] of odd) {
+    await redis.pipeline([["SET", paidKey, JSON.stringify(bad)]]);
+    is(`${label}: no money counted, the sale shown without an amount, and the page warns`, await seen(store), { kind: "brought", cents: 0, note: "paypal", paid: 0, stripeError: false, partial: true });
+  }
+  await redis.pipeline([["SET", paidKey, record]]);
+  is("a free PayPal sale (0 cents, whole) is still a sale", await (async () => {
+    await redis.pipeline([["SET", paidKey, JSON.stringify({ ...base, cents: 0 })]]);
+    const s = await seen(store);
+    await redis.pipeline([["SET", paidKey, record]]);
+    return s;
+  })(), { kind: "sale", cents: 0, note: "paypal", paid: 0, stripeError: false, partial: false });
+
+  // Claude 4 and Claude 6 on #2908 (LEVE): with the handed-over read failed and nothing else read, the page still said
+  // "Nothing bought from this store under this address." Unknown is not "nothing": the empty list says the reading is incomplete.
+  part("The person page never says 'Nothing bought' when the reading is partial (RED)");
+  const page = readFileSync("app/studio/people/page.tsx", "utf8");
+  const empty = page.slice(page.indexOf("{!bought ? ("), page.indexOf("Nothing bought from this store under this address."));
+  is("the empty list checks partial and Stripe's failure before saying nothing was bought", /profile\.partial \|\| profile\.stripeError \?/.test(empty), true);
+  is("and says the list may be incomplete instead", page.includes("Their purchases could not all be read just now, so this list may be missing some."), true);
 
   part("Control after the failures");
   is("the healthy sale is read again, nothing flagged", await seen(store), { kind: "sale", cents: 4900, note: "paypal", paid: 4900, stripeError: false, partial: false });

@@ -394,6 +394,25 @@ export function studioBlobPerRequest(): number {
   const page = (MAX_PAGE_PICTURES * (STUDIO_DOOR_BLOB + pictureCheckBlob(MAX_IMAGE_BYTES))) / (MAX_PAGE_PICTURES + 1);
   return pictureCheckBlob(MAX_IMAGE_BYTES) + Math.max(STUDIO_DOOR_BLOB, reattach, page);
 }
+/**
+ * The dearest Vercel Blob work one of the store's buyer actions can make (MR audit unit (b), Claude 4
+ * C4-20261106-2790-C56-167). A buyer action that touches the Blob is one of:
+ *   - a door, for a community picture (app/api/store/community/upload) or a student's file
+ *     (app/api/store/course/task/upload): its signed token and the browser's put, every try; neither asks for a head;
+ *   - a community post that uses a picture (app/api/store/community/route.ts): one picture checked at most
+ *     (lib/community-image.ts, checkCommunityImage: a head with every try, one read of its first bytes, counted whole
+ *     at MAX_IMAGE_BYTES, the most its door lets in);
+ *   - a hand-in (app/api/store/course/task/route.ts): one head with every try, no read.
+ * A door's note lives a day, but each check is taken by its own post, so no month checks more than its own actions.
+ */
+export function buyerBlobPerAction(): number {
+  const door = (BLOB_PUT_TRIES + BLOB_TOKEN_TRIES) * BLOB_ADVANCED_OP;
+  const check = BLOB_HEAD_TRIES * BLOB_SIMPLE_OP + BLOB_SIMPLE_OP + MAX_IMAGE_BYTES * BLOB_TRANSFER_PER_BYTE;
+  const handInHead = BLOB_HEAD_TRIES * BLOB_SIMPLE_OP;
+  return Math.max(door, check, handInHead);
+}
+/** An email's picture (lib/mail-pictures.ts, keepMailPicture): one put from the server, every try; no token, head or read. */
+export const MAIL_PICTURE_BLOB = BLOB_PUT_TRIES * BLOB_ADVANCED_OP;
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */
@@ -911,7 +930,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/sales-page.ts", names: ["MAX_PAGE_PICTURES"] },
       { file: "lib/picture-door.ts", names: ["PICTURE_DOOR_SECONDS"] },
     ],
-    basis: "Every studio picture operation goes through a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling; the doors, attaches and page saves share it, so they are one line (the two lines before counted the whole figure twice). Each request is counted at the dearest kind it may be (studioBlobPerRequest): a door (its put, its signed token counted as an Advanced Operation since no official page prices it, and the head that checks the name is free, every try); a product's picture attached, its three copies checked (a head with every try, a plain read, the bytes read counted whole: firstBytes cancels a stream after sixteen bytes and no official page says the Blob honors a byte range with 206); or a page saved, which checks each picture it takes from the door once (keptPictures). A month may also check a whole figure of pictures let in on the last day before, the door note's day: counted on top. Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026 (delete operations free). Not in this line: a buyer's review photo (lib/review-photo.ts), an email's picture (lib/mail-pictures.ts), community pictures and students' files, the public picture route and the link preview (MR audit items 2, 4, 7, 8), and the storage of images/ (item 3).",
+    basis: "Every studio picture operation goes through a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling; the doors, attaches and page saves share it, so they are one line (the two lines before counted the whole figure twice). Each request is counted at the dearest kind it may be (studioBlobPerRequest): a door (its put, its signed token counted as an Advanced Operation since no official page prices it, and the head that checks the name is free, every try); a product's picture attached, its three copies checked (a head with every try, a plain read, the bytes read counted whole: firstBytes cancels a stream after sixteen bytes and no official page says the Blob honors a byte range with 206); or a page saved, which checks each picture it takes from the door once (keptPictures). A month may also check a whole figure of pictures let in on the last day before, the door note's day: counted on top. Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026 (delete operations free). The creator's own community doors and the checks of their posts are studio requests too (takeBuyerAction with \"owner\"), each cheaper than a door here (a token and a put, no head) or a picture attached (one check): inside this per-request worst. Not in this line: a buyer's review photo (lib/review-photo.ts), an email's picture (line mail-picture-blob), buyers' community pictures and students' files (line buyer-blob), the public picture route and the link preview (MR audit items 2, 4, 7, 8), and the storage of images/ (item 3).",
   },
   {
     id: "free-delivery",
@@ -1317,6 +1336,19 @@ export const COST_LINES: CostLine[] = [
     basis: "Every call of the window, held at 2 GB for ten seconds while the other service answers; what the service charges is nothing to us, and AI captions are bought apart.",
   },
   {
+    id: "mail-picture-blob",
+    feature: "Vercel Blob for an email's picture: its put, every try (6 November 2026)",
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].integration * MAIL_PICTURE_BLOB,
+    sources: [
+      { file: "app/api/store/mail/picture/route.ts", names: ["withinServiceWhy(\"mail-picture\"", "keepMailPicture(ref, checked)"] },
+      { file: "lib/mail-pictures.ts", names: ["keepMailPicture", "await put(path"] },
+      { file: "lib/mail-picture-rules.ts", names: ["MAX_MAIL_PICTURE_BYTES"] },
+      { file: "lib/metered-limits.ts", names: ["withinServiceWhy", "takeAllowance(store, \"integration\")"] },
+      { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "integration"] },
+    ],
+    basis: "An email's picture is one of the store's calls to connected services (withinServiceWhy \"mail-picture\" takes one of the integration figure before anything is kept, beside its 60 an hour), at most the plan's integration figure a month, a hard ceiling; each is one put from the server (keepMailPicture), counted as an Advanced Operation with every try the SDK may send (MAIL_PICTURE_BLOB), and nothing else: no signed token, no head, no read. Counted on top of the call's own line (integrations), every call of the figure as if it were a picture. Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026; the bytes sent in are not priced there. Not in this line: the reads of the picture when an email is opened (the public picture route, MR audit item 2) and its storage.",
+  },
+  {
     id: "free-share",
     feature: "This store's share of the stores that pay nothing: free trials, stores with no plan, ended plans (17 October 2026, the owner's \"Teto mínimo pago pela empresa\")",
     monthlyUsd: () => nonPayingWorst() / PAID_STORES_PER_FREE_STORE,
@@ -1349,6 +1381,26 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/community-text.ts", names: ["RATE_LIMITS", "EVENT_WRITES_PER_HOUR"] },
     ],
     basis: "Every action of the window at the heaviest one's cost; the creator's own acts there are studio requests (line studio), a deletion follows an action already counted, and the per-person limits only spread them. The reads beside them (pictures, calendar files, lesson downloads, sign-in links, podcast episodes) are public requests on the buyers' side (line public-requests), a picture as PICTURE_REQUEST_UNITS of them.",
+  },
+  {
+    id: "buyer-blob",
+    feature: "Vercel Blob for what buyers send: community picture doors and the check when a post uses one, students' file doors and the head when work is handed in, every try counted (6 November 2026)",
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].buyer * buyerBlobPerAction(),
+    sources: [
+      { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "buyer"] },
+      { file: "lib/buyer-actions.ts", names: ["takeBuyerAction", "takeAllowance(store, \"buyer\")", "takeAllowance(store, \"studio\")"] },
+      { file: "app/api/store/community/upload/route.ts", names: ["takeBuyerAction(store, viewer.owner ? \"owner\" : \"buyer\")", "takePicturePlace", "issueSignedToken", "maximumSizeInBytes: MAX_IMAGE_BYTES"] },
+      { file: "components/community-composer.tsx", names: ["uploadPresigned"] },
+      { file: "app/api/store/community/route.ts", names: ["takeBuyerAction(store, owner ? \"owner\" : \"buyer\")", "checkCommunityImage(path, id, blobImages)"] },
+      { file: "lib/community-image.ts", names: ["checkCommunityImage", "files.head(path)", "files.firstBytes(path)"] },
+      { file: "lib/community-files.ts", names: ["firstBytes", "reader.cancel()", "blobImages"] },
+      { file: "lib/product-image.ts", names: ["MAX_IMAGE_BYTES"] },
+      { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)", "issueSignedToken", "maximumSizeInBytes: MAX_TASK_FILE_BYTES"] },
+      { file: "components/lesson-task.tsx", names: ["uploadPresigned"] },
+      { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)", "headFile(path)"] },
+      { file: "lib/file-store.ts", names: ["headFile", "blob.head(pathname)"] },
+    ],
+    basis: "Every buyer action that touches the Blob takes one of the store's buyer figure first (takeBuyerAction), at most the plan's buyer figure a month, a hard ceiling; so each action of the figure is counted at the dearest Blob work one may be (buyerBlobPerAction), on top of its request (line buyer-actions): a door for a community picture or a student's file (its signed token, counted as an Advanced Operation since no official page prices it, and the browser's put, every try; neither door asks for a head); a post that uses a picture, which checks one picture at most (a head with every try, a plain read, the bytes read counted whole at MAX_IMAGE_BYTES, the most its door lets in: firstBytes cancels a stream after sixteen bytes and no official page says the Blob honors a byte range with 206); or a hand-in, which heads one file. Each check is taken by its own post, so a door let in the day before adds nothing. The creator's own community doors and posts are studio requests, priced at the dearest studio request in studio-blob. Deletes and the sweep of unused doors are free. Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026. Not in this line: the reads of community pictures and of handed-in files (public requests, MR audit item 2) and their storage (community-pictures, task-files).",
   },
   {
     id: "webhooks",
@@ -1534,6 +1586,8 @@ export function nonPayingWorst(): number {
     + TRIAL_VIDEO_HOURS * hourCost()
     + TRIAL_DAILY_RUNS * 15 * WORST_COMMANDS_PER_RUN * COMMAND
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)
+    // Its buyers' doors, checks and hand-ins, and its email pictures, at its own figures (lines buyer-blob, mail-picture-blob).
+    + allowances.buyer * buyerBlobPerAction() + allowances.integration * MAIL_PICTURE_BLOB
     + ["imports", "clickfunnels", "funnel-share", "team-scheduling", "quizzes"].reduce((sum, id) => sum + creator(id), 0)
     // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
     // its numbers (C4-4, review of #2111): their own lines, at Store's figures, which are more than a trial's.

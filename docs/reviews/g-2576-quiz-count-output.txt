@@ -1,0 +1,97 @@
+=== g2576-c9-original ===
+  FAIL  holes: unconfirmed nested values must refuse
+        expected true
+        got      false
+  FAIL  getter: unconfirmed nested values must refuse
+        expected true
+        got      false
+  FAIL  getter: accessors never run
+        expected 0
+        got      2
+9 checks, 3 failing.
+
+=== g2576-e0-original ===
+9 checks, all passing.
+
+=== g2576-c9-count ===
+G_QUIZ_COUNT {"gone":0,"hit":1,"refused":false,"result":0,"before":208,"after":0}
+  FAIL  0: contradictory or unsafe count is unknown
+        expected true
+        got      false
+  FAIL  0: unconfirmed deletion preserves occupied room
+        expected 208
+        got      0
+G_QUIZ_COUNT {"gone":2,"hit":1,"refused":false,"result":2,"before":208,"after":0}
+  FAIL  2: contradictory or unsafe count is unknown
+        expected true
+        got      false
+  FAIL  2: unconfirmed deletion preserves occupied room
+        expected 208
+        got      0
+G_QUIZ_COUNT {"gone":99,"hit":1,"refused":false,"result":99,"before":208,"after":0}
+  FAIL  99: contradictory or unsafe count is unknown
+        expected true
+        got      false
+  FAIL  99: unconfirmed deletion preserves occupied room
+        expected 208
+        got      0
+G_QUIZ_COUNT {"gone":9007199254740992,"hit":1,"refused":false,"result":9007199254740992,"before":208,"after":0}
+  FAIL  9007199254740992: contradictory or unsafe count is unknown
+        expected true
+        got      false
+  FAIL  9007199254740992: unconfirmed deletion preserves occupied room
+        expected 208
+        got      0
+23 checks, 8 failing.
+
+=== g2576-e0-count ===
+G_QUIZ_COUNT {"gone":0,"hit":1,"refused":false,"result":0,"before":208,"after":0}
+  FAIL  0: contradictory or unsafe count is unknown
+        expected true
+        got      false
+  FAIL  0: unconfirmed deletion preserves occupied room
+        expected 208
+        got      0
+G_QUIZ_COUNT {"gone":2,"hit":1,"refused":false,"result":2,"before":208,"after":0}
+  FAIL  2: contradictory or unsafe count is unknown
+        expected true
+        got      false
+  FAIL  2: unconfirmed deletion preserves occupied room
+        expected 208
+        got      0
+G_QUIZ_COUNT {"gone":99,"hit":1,"refused":false,"result":99,"before":208,"after":0}
+  FAIL  99: contradictory or unsafe count is unknown
+        expected true
+        got      false
+  FAIL  99: unconfirmed deletion preserves occupied room
+        expected 208
+        got      0
+G_QUIZ_COUNT {"gone":9007199254740992,"hit":1,"refused":false,"result":9007199254740992,"before":208,"after":0}
+  FAIL  9007199254740992: contradictory or unsafe count is unknown
+        expected true
+        got      false
+  FAIL  9007199254740992: unconfirmed deletion preserves occupied room
+        expected 208
+        got      0
+23 checks, 8 failing.
+
+=== g2576-e0-linked ===
+28 checks, all passing.
+64 checks, all passing.
+37 checks, all passing.
+65 checks, all passing.
+58 checks, all passing.
+7 checks, all passing.
+
+=== g2576-e0-types ===
+
+
+=== g2576-e0-lint ===
+
+
+=== g2576-e0-scan ===
+Public data check: 3759 tracked files; 0 file(s) require correction.
+
+=== g2576-native ===
+    if proc.poll() is not None:raise RuntimeError('Redis stopped before ready')
+RuntimeError: Redis stopped before ready

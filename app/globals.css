@@ -763,7 +763,7 @@ html {
  * keeps its full colour. The dashed edge (--line-off) is light, at 3:1 or
  * more, so an off button never looks louder than the ones that work. Hover
  * does not light it up. A round icon button (.icon-btn: the page editor's
- * Move, Duplicate, Earlier and Later) takes the same signs; told off by a
+ * Move, Duplicate, Earlier, Later, Undo and Redo) takes the same signs; told off by a
  * lighter gray alone, it was 1.07:1 from one that works.
  */
 .btn[aria-disabled="true"],

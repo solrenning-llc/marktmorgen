@@ -2134,7 +2134,7 @@ export function PageEditor({
             aria-disabled={(stepsLeft.back === 0 && !dirty) || undefined}
             title="Undo (Ctrl+Z)"
             aria-label="Undo the last change"
-            className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft ring-1 ring-line transition-colors hover:text-ink aria-disabled:cursor-not-allowed aria-disabled:text-ink-mute"
+            className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft ring-1 ring-line transition-colors hover:text-ink"
           >
             <Icon name="undo" size={18} />
           </button>
@@ -2145,7 +2145,7 @@ export function PageEditor({
             aria-disabled={stepsLeft.forward === 0 || undefined}
             title="Redo (Ctrl+Shift+Z)"
             aria-label="Redo"
-            className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft ring-1 ring-line transition-colors hover:text-ink aria-disabled:cursor-not-allowed aria-disabled:text-ink-mute"
+            className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft ring-1 ring-line transition-colors hover:text-ink"
           >
             <Icon name="redo" size={18} />
           </button>

@@ -1,0 +1,3 @@
+steady-state run, 24 invoices already credited: 31 Redis round trips, 79 commands
+PASS zz-r2722-trips.test.ts: 1 checks, all passing.
+ALL PASSED

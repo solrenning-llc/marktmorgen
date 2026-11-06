@@ -105,3 +105,41 @@ Actual **ES2017 strict TypeScript passed with no diagnostics** using an isolated
 The completed return scanner passed: **4,136 tracked files, zero files requiring correction**, including this appended report and the original corrected synthetic fixture. Staged `git diff --check` passed. This is the actual completed result, not a pending-process assumption.
 
 Return logs: `/tmp/t-2921-return-{old,new,linked,canonical-red,canonical-green,directory-linked,types}.log`; the type log is empty. No formal return review was submitted by this worker. The coordinator will verify publication before reporting the exact qualified return; the author must separately confirm applicable prerequisites and all nine successful final-head checks before merge.
+
+
+## Additional scan-bound candidate at the same focal head
+
+This section preserves the completed functional closure above and records a separate conditional cost/availability concern. It is not a certified financial loss or an allegation that the original code bounded every possible scan. The original code already had no page ceiling for nonterminal empty pages.
+
+Root inspection at `fdca45a209ad4d97525dee17a87371213b25c9e0`, `lib/affiliate-directory.ts:232–238`, found the stopping condition now uses unique `Set.size < MAX_ROWS` (2,000). Repeated populated pages no longer advance that counter. The existing row maximum caps distinct result IDs, not the number P of SSCAN commands.
+
+### Durable causal experiment and independent internal check
+
+Evidence-only branch `codex/t-2921-scan-budget-proof`, commit `2467c167ab9e1c1c2be58760c7d24120f843129e`, tree `75a0b9dca9c885e2ef589d9aaab3c908122aa9bd`, parent main `c366e58ab40a1d9c9f4a42f60e62eb0ec1f67a92`. Exactly two new paths: `tests/t-2921-scan-budget.proof.ts` and `scripts/t-2921-scan-budget.mjs`; no author source or CI changes. Reservation `7eab5e4e4b9631462cfecc04391fb580911341c9` preceded writing. The original five-case proof and runner remain unchanged.
+
+The same synthetic, finite 3,501-page SSCAN sequence is supplied to both exact source snapshots. Each page contains two repeated well-formed SIDs, a valid decimal next cursor, and the final page terminates at zero. `readDirectory`, `listedStores`, `storeForId` and the memory Redis implementation are real. The two stale SIDs return confirmed GET null; unknown reads are not substituted for absence.
+
+| Identical scenario | Original 07e820 | Focal fdca |
+| --- | --- | --- |
+| Short control | 1 SSCAN / 5 total commands | Same |
+| Unique-progress control | 2 SSCAN / 8 total commands | Same |
+| Repeated populated pages | 1,000 SSCAN / 3,002 total commands | 3,501 SSCAN / 3,505 total commands |
+| Comparison checks | 3 pass | 2 pass / 1 fail |
+
+The delta is **2,501 additional SSCANs minus 1,998 duplicate GETs = 503 additional commands**, 16.76% in this fixture only. The comparative assertion uses this baseline's measured envelope; it is NOT an independently declared paid quota. Both traversals terminate in this test. No infinite production run, real Redis trace, external exploit, new charge, monetary loss or margin result is claimed.
+
+One pair of executions: six cases, 6,533 synthetic commands, 4,507 SSCANs, zero network attempts, 9,387ms and 2,746 bytes of captured logs. The separate process totals are 3,015 and 3,518, each under its pre-reserved 5,000-command ceiling. Before execution the reservation also bounded three cases/process, 15,000 global commands, 4,000 SSCAN pages/process, 120 seconds and 256KiB output. The harness rejects command/page excess before calling the original pipeline; these are HARNESS protections, not production guards. HTTP and socket network denial is installed before importing reviewed modules. The new proof received actual scoped strict ES2017 types, lint, script syntax, scanner 4,152/0 and diff checks; both source checkouts remained clean.
+
+A separate internal reader inspected both immutable proof/runner files and logs without re-executing or editing them. It verified the same case string and canonical aliases across snapshots, equal cache clearing, pre-dispatch totals, finite cursor sequence, genuine null controls and the net command arithmetic. This internal check does not replace R2's independent execution/classification.
+
+### Read-only admission and cost map
+
+At this exact focal snapshot, `app/affiliate-programs/page.tsx:14–16,41–43` calls `readDirectory` for metadata and page with catch-to-null, but without an explicit paid admission for the traversal. No framework call coalescing was measured. The company host branch of `proxy.ts:262–290` supplies headers/CSP/cookies, not a cumulative directory budget.
+
+On cache miss the structural command shape is **1 cache GET + P×SSCAN + G(store) + 4N×HGETALL + W(cache)**: U≤2,000 unique IDs; G≤2U mapping/store reads; N≤U programs requiring numbers; W∈{0,1} final cache SET. This is a source command model, not complete USD/byte/CPU costing. P receives no deterministic ceiling in the inspected path. `listedStores` (`lib/directory-index.ts:89–97`) sends one SSCAN per call and validates its response, without reserving/counting total pages.
+
+The 600-second cache is written after the walk and can be omitted on failures/partial statistics; there is no single-flight guard here. `redisPipeline` (`lib/redis.ts:22–50`) has a five-second timeout per pipeline (`lib/fetch-timeout.ts:38`), but no accumulated walk budget. Its caller does not install `withCutoff`; `timeLeft()` outside one is infinite. An individual timeout does not cap a sequence of quick valid replies. The hosting platform may independently terminate a request; no such behavior or ceiling was verified or assumed.
+
+The data registry's COMPANY classification (`tests/store-data-registry.ts:528–529`) concerns ownership/retention, not an admission proof. Nearby `public-read-rules` and plan-cost registry entries cover the store's `/[handle]/affiliates` page and its sitemap, not the company's `/affiliate-programs` directory. No explicit directory/SSCAN funding entry was located; an empty OPEN list does not prove funding.
+
+**Disposition:** the two original functional LOWs remain closed. This is an additional conditional MR/admission/availability candidate in the modified walk; general clean qualification is suspended pending R2's execution and coordinator classification. R2 should separate the observed extra work and source-level absent ceiling from total funded cost, baseline empty-page behavior and real-provider reachability. No foreign-source correction is started. If confirmed, retain deduplication while using a separately bounded, funded traversal; do not restore duplicate public rows or change visible plan quotas.

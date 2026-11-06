@@ -67,7 +67,7 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 // The repository's compare-and-set script (GET equals what was read, then SET), also modelled by lib/redis-memory.ts.
 import { SAVE_CRM_PIPELINES as COMPARE_AND_SET } from "@/lib/crm";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -1053,11 +1053,13 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
   // The write cleared the original's expiry; it keeps the time it had left, never more.
   const left = Number(ttl);
   await redisPipeline([["PEXPIRE", deliveryKey(deliveryId), Number.isFinite(left) && left > 0 ? left : DELIVERY_SECONDS * 1000]]);
-  const [, count] = await redisPipeline([
+  const tests = repliesFor(await redisPipeline([
     ["SET", testsKey(statsId), "0", "EX", 60, "NX"],
     ["INCR", testsKey(statsId)],
-  ]);
-  if (Number(count) > TESTS_PER_MINUTE) return { ok: false, reason: "limited" };
+  ]), 2);
+  // A count in any other shape is unknown (CX-123 rule 24): the endpoint is not called on it.
+  const count = countOf(tests?.[1]);
+  if (count === null || count > TESTS_PER_MINUTE) return { ok: false, reason: "limited" };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "unavailable" };
   const taken = await takeAllowance(store, "webhook", 1, now);
   if (!taken.ok) return { ok: false, reason: "used", message: taken.message };
@@ -1101,11 +1103,13 @@ export async function sendTest(store: Store, id: string, now = Date.now()): Prom
   // Its API key paused or revoked (owner C3-100): refused before anything is counted or taken.
   const keyHeld = await heldNow(store, endpoint);
   if (keyHeld) return { ok: false, reason: "held", message: HELD_WORDS[keyHeld] };
-  const [, count] = await redisPipeline([
+  const tests = repliesFor(await redisPipeline([
     ["SET", testsKey(statsId), "0", "EX", 60, "NX"],
     ["INCR", testsKey(statsId)],
-  ]);
-  if (Number(count) > TESTS_PER_MINUTE) return { ok: false, reason: "limited" };
+  ]), 2);
+  // A count in any other shape is unknown (CX-123 rule 24): the endpoint is not called on it.
+  const count = countOf(tests?.[1]);
+  if (count === null || count > TESTS_PER_MINUTE) return { ok: false, reason: "limited" };
   // This is new, manually requested work, not an already queued delivery.
   if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return { ok: false, reason: "unavailable" };
   // A test is one of the store's webhook deliveries too: refused, it is not made at all.
@@ -1624,9 +1628,10 @@ const skippedDayKey = (statsId: string, reason: "large" | "used", day: number) =
 async function skippedLines(statsId: string, deliveries: Delivery[], reason: "large" | "used", words: string, now: number): Promise<void> {
   const day = Math.floor(now / 86_400_000);
   const key = skippedDayKey(statsId, reason, day);
-  const [count] = await redisPipeline([["INCR", key], ["EXPIREAT", key, (day + 2) * 86400]]);
-  const n = Number(count);
-  if (!Number.isSafeInteger(n) || n < 1) throw new Error("the day's messages not kept could not be counted");
+  // INCR's whole number from 1 up, one reply for each command (CX-123 rule 24); text or true was read as a number.
+  // Thrown, emitEvent takes the event's mark back, so it is noticed again.
+  const n = countOf(repliesFor(await redisPipeline([["INCR", key], ["EXPIREAT", key, (day + 2) * 86400]]), 2)?.[0]);
+  if (n === null || n < 1) throw new Error("the day's messages not kept could not be counted");
   if (n <= SKIPPED_LINES_PER_DAY) {
     const lines = deliveries.map((d) => noticeLine(d.id, statsId, d.endpoint, d.eventId, d.type as WebhookEvent, words, now));
     const written = await redisPipeline(lines.map((line) => ["SET", deliveryKey(line.id), JSON.stringify(line), "NX", "EX", DELIVERY_SECONDS]));
@@ -1711,20 +1716,32 @@ async function markGivenUp(store: Store, statsId: string, config: Config, event:
   // At most MAX_ENDPOINTS endpoints a store a day are told; one past them (a
   // store removing and adding endpoints) is said in the server's log only.
   const endpointsKey = givenUpEndpointsKey(statsId, day);
-  const joined = hearing.length ? await redisPipeline([
+  const joined = hearing.length ? repliesFor(await redisPipeline([
     ...hearing.flatMap(({ endpoint }) => [["SADD", endpointsKey, endpoint.id], ["SCARD", endpointsKey]]),
     ["EXPIREAT", endpointsKey, (day + 2) * 86400],
-  ]) : [];
-  const over = hearing.filter((_, n) => Number(joined[n * 2]) === 1 && Number(joined[n * 2 + 1]) > MAX_ENDPOINTS);
+  ]), hearing.length * 2 + 1) : [];
+  // SADD's 0 or 1 and SCARD's count, each in its exact shape (CX-123 rule 24). An unknown one throws before
+  // anything is written or marked, as when the numbering below cannot be read: the visit fails and the next
+  // one gives the event up again. Read as "not added" or as a small count, it would tell an endpoint past the
+  // day's MAX_ENDPOINTS; read as "over", it would leave the creator untold for good.
+  const counts: { added: number; card: number }[] = [];
+  for (let n = 0; n < hearing.length; n += 1) {
+    const added = countOf(joined?.[n * 2]);
+    const card = countOf(joined?.[n * 2 + 1]);
+    if (added === null || added > 1 || card === null) throw new UnknownReplyError("the endpoints told of a passed-over Stripe event");
+    counts.push({ added, card });
+  }
+  const over = hearing.filter((_, n) => counts[n].added === 1 && counts[n].card > MAX_ENDPOINTS);
   if (over.length) {
     await redisPipeline(over.map(({ endpoint }) => ["SREM", endpointsKey, endpoint.id]));
     console.error("more endpoints of a store were to be told of passed-over Stripe events today than it can have; said here only", statsId, stripeEvent, over.map(({ endpoint }) => endpoint.id));
   }
   const listening = hearing.filter((at) => !over.includes(at));
   // Its own number for the day, so no two events share a place (a repeat's ZADD NX keeps its first one).
-  const [seq] = listening.length ? await redisPipeline([["INCR", givenUpSeqKey(statsId, day)], ["EXPIREAT", givenUpSeqKey(statsId, day), (day + 2) * 86400]]) : [0];
-  if (listening.length && (!Number.isSafeInteger(Number(seq)) || Number(seq) < 1)) throw new Error("the day's passed-over events could not be numbered");
-  const order = now * 1000 + (Number(seq) % 1000);
+  // INCR's whole number from 1 up, one reply for each command (CX-123 rule 24); text or true was read as a number.
+  const seq = listening.length ? countOf(repliesFor(await redisPipeline([["INCR", givenUpSeqKey(statsId, day)], ["EXPIREAT", givenUpSeqKey(statsId, day), (day + 2) * 86400]]), 2)?.[0]) : 0;
+  if (seq === null || (listening.length && seq < 1)) throw new Error("the day's passed-over events could not be numbered");
+  const order = now * 1000 + (seq % 1000);
   const placed = listening.length ? await redisPipeline(listening.flatMap(({ endpoint }) => {
     const key = givenUpDayKey(statsId, day, endpoint.id);
     // Gone at the end of the next UTC day: two days' sets an endpoint at most.
@@ -1732,10 +1749,14 @@ async function markGivenUp(store: Store, statsId: string, config: Config, event:
   })) : [];
   const own: typeof listening = [];
   const summed: { endpoint: Endpoint; type: WebhookEvent; more: number }[] = [];
+  // One reply for each command, and the count and the rank each a whole number (CX-123 rule 24): a rank of null or
+  // text was read as 0, the last place, and could give an event a line of its own past the day's lines.
+  if (listening.length && !repliesFor(placed, listening.length * 4)) throw new Error("the day's passed-over events could not be counted");
   listening.forEach((at, n) => {
-    const card = Number(placed[n * 4 + 1]);
-    const place = card - 1 - Number(placed[n * 4 + 2]);
-    if (!Number.isSafeInteger(place) || place < 0) throw new Error("the day's passed-over events could not be counted");
+    const card = countOf(placed[n * 4 + 1]);
+    const rank = countOf(placed[n * 4 + 2]);
+    if (card === null || rank === null || card - 1 - rank < 0) throw new Error("the day's passed-over events could not be counted");
+    const place = card - 1 - rank;
     if (place < GIVEN_UP_LINES_PER_DAY) own.push(at);
     else summed.push({ ...at, more: card - GIVEN_UP_LINES_PER_DAY });
   });

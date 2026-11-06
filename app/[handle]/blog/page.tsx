@@ -12,7 +12,7 @@ import { StoreTracking } from "@/components/store-tracking";
 import { JsonLd } from "@/components/structured-data";
 import { SITE_URL } from "@/lib/site-url";
 import { photoUrl } from "@/lib/photo-limits";
-import { BlogUnavailable } from "@/components/blog-unavailable";
+import { BlogUnavailable } from "./blog-unavailable";
 
 type Params = {
   params: Promise<{ handle: string }>;

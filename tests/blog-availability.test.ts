@@ -5,7 +5,7 @@ import { NextRequest } from "next/server";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { POST } from "@/app/api/store/blog/route";
-import { BlogUnavailable } from "@/components/blog-unavailable";
+import { BlogUnavailable } from "@/app/[handle]/blog/blog-unavailable";
 import { blogReadingWords } from "@/lib/buyer-words/blog-reading";
 import { LANGUAGES } from "@/lib/store-language";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";

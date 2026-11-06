@@ -148,7 +148,8 @@ export function refundRowKnown(row: unknown): boolean {
 /**
  * One charge.dispute.closed event in its exact shape: its id and time, and
  * its dispute with a status Stripe gives one, its payment as an id, the
- * payment itself with its id, or nothing, and, when lost, its charge's id.
+ * payment itself with its id (never empty), or nothing, and, when lost, its
+ * charge's id.
  * Anything else is unknown (Codex Q, review 5794657228): never passed over
  * as a dispute not lost.
  */
@@ -161,7 +162,8 @@ function closingKnown(event: unknown): boolean {
   if (!dispute || typeof dispute !== "object" || Array.isArray(dispute)) return false;
   const { status, payment_intent: payment, charge } = dispute as Record<string, unknown>;
   if (typeof status !== "string" || !DISPUTE_STATUSES.has(status)) return false;
-  const paymentKnown = payment === null || (typeof payment === "string" && !!payment) || (!!payment && typeof payment === "object" && typeof (payment as { id?: unknown }).id === "string");
+  // An id that names a payment, as text or on the expanded payment, or null: an empty id names none (Codex Q, review 5794829222).
+  const paymentKnown = payment === null || (typeof payment === "string" && !!payment) || (!!payment && typeof payment === "object" && !Array.isArray(payment) && typeof (payment as { id?: unknown }).id === "string" && !!(payment as { id: string }).id);
   if (!paymentKnown) return false;
   return status !== "lost" || CHARGE_ID.test(idOf(charge));
 }

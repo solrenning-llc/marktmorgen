@@ -43,6 +43,9 @@ async function main(): Promise<void> {
     ["numeric text", ["4"]],
     ["negative count", [-1]],
     ["fractional count", [1.5]],
+    ["count above the distinct key bound", [5]],
+    ["far-above-bound count", [99]],
+    ["maximum safe count above the distinct key bound", [Number.MAX_SAFE_INTEGER]],
     ["unsafe count", [Number.MAX_SAFE_INTEGER + 1]],
     ["infinite count", [Number.POSITIVE_INFINITY]],
     ["not-a-number count", [Number.NaN]],
@@ -101,6 +104,12 @@ async function main(): Promise<void> {
   redis.run(["DEL", keys[0], keys[1]]);
   is("the exact remaining count is returned", await forgetFinishPerson(COURSES, EMAIL), keys.length - 2);
   is("nothing remains after the confirmed deletion", kept(), 0);
+  seed();
+  is(
+    "duplicate course ids retain the distinct-key deletion bound",
+    await forgetFinishPerson([COURSES[0], COURSES[0], COURSES[1]], EMAIL),
+    keys.length,
+  );
   is("an empty course list remains a known no-op", await forgetFinishPerson([], EMAIL), 0);
 
   done();

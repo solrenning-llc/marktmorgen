@@ -80,11 +80,12 @@ export async function noteIfFinished(store: Store, productId: string, courseId: 
 export async function forgetFinishPerson(courseIds: string[], email: string): Promise<number> {
   if (!courseIds.length || !isRedisConfigured()) return 0;
   const what = "the deletion of a person's course opening and finishing marks";
+  const keys = [...new Set(courseIds.flatMap((courseId) => [finishedKey(courseId, email), openedKey(courseId, email)]))];
   const [gone] = exactReplies(
-    await redisPipeline([["DEL", ...courseIds.flatMap((c) => [finishedKey(c, email), openedKey(c, email)])]]),
+    await redisPipeline([["DEL", ...keys]]),
     1,
     what,
   );
-  if (typeof gone !== "number" || !Number.isSafeInteger(gone) || gone < 0) throw new UnknownReply(what);
+  if (typeof gone !== "number" || !Number.isSafeInteger(gone) || gone < 0 || gone > keys.length) throw new UnknownReply(what);
   return gone;
 }

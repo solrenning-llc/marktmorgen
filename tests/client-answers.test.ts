@@ -10,6 +10,10 @@
  *     the switch as off whatever the server and the browser answered, so the
  *     device could keep getting notifications shown as turned off, or keep a
  *     device row on the server (counted toward the member's devices).
+ *     Once the server has forgotten the device (lib/community-push.ts
+ *     forgetDevice, before it answers ok), nothing more is sent to it, so a
+ *     browser that keeps its subscription is told quietly and the switch shows
+ *     off with the server's count (review of #2983).
  *
  * The components' real code runs under tests/client-hooks.ts (React's own
  * hooks, re-rendered after each state change), with fetch and the browser's
@@ -19,6 +23,9 @@ import { NextOfferBox } from "@/components/next-offer-box";
 import { CommunityPushToggle } from "@/components/community-push-toggle";
 import { nextOfferWords, NEXT_OFFER_WORDS } from "@/lib/buyer-words/next-offer";
 import { communityWords } from "@/lib/buyer-words/community";
+import { createECDH, randomBytes } from "node:crypto";
+import { deviceCount, forgetDevice, rememberDevice } from "@/lib/community-push";
+import { ROOM } from "./data-room";
 import { find, mount, texts } from "./client-hooks";
 import { done, is, part } from "./check";
 
@@ -124,12 +131,12 @@ const t = communityWords("en").push;
 
 type Browser = () => Promise<boolean>;
 
-async function pushToggle(server: (() => Promise<Response>)[], browser: Browser[], registrationFails = false) {
+async function pushToggle(server: (() => Promise<Response>)[], browser: Browser[], registrationFails = false, endpoint = "https://push.example.test/answers", devices = 1) {
   const sent: { action?: string; endpoint?: string }[] = [];
   let unsubscribeCalls = 0;
   let subscribed = true;
   const subscription = {
-    endpoint: "https://push.example.test/answers",
+    endpoint,
     unsubscribe: async () => {
       const answer = browser[Math.min(unsubscribeCalls, browser.length - 1)];
       unsubscribeCalls++;
@@ -159,7 +166,7 @@ async function pushToggle(server: (() => Promise<Response>)[], browser: Browser[
     sent.push(JSON.parse(String(init.body)));
     return server[Math.min(sent.length - 1, server.length - 1)]();
   }) as typeof fetch;
-  const toggle = await mount(CommunityPushToggle, { handle: "answershop", publicKey: "BAnswersKey", devices: 1, words: t });
+  const toggle = await mount(CommunityPushToggle, { handle: "answershop", publicKey: "BAnswersKey", devices, words: t });
   const pressOff = async () => {
     // A rejected handler is an unhandled rejection in the page; the checks read what the person sees.
     await Promise.resolve(click(button(toggle.tree(), t.turnOff))).catch(() => {});
@@ -200,18 +207,45 @@ async function communityPush() {
     is("and once both are done it is off, with no error", [state().subscribed, !!button(toggle.tree(), t.turnOn), alerts(toggle.tree())], [false, true, []]);
   }
 
+  // Review of #2983: once the server answered ok it has forgotten the device, and nothing more is sent to it
+  // (pushMembers sends only to the devices it keeps), so the switch shows off whatever the browser answers.
   for (const [label, browser] of [
     ["unsubscribe() resolves false", async () => false],
     ["unsubscribe() rejects", async (): Promise<boolean> => { throw new Error("AbortError"); }],
   ] as const) {
-    part(`Notifications off, browser kept the subscription: ${label}`);
-    const { toggle, pressOff, state } = await pushToggle([serverOff], [browser, async () => true]);
+    part(`Notifications off, server confirmed, browser kept the subscription once: ${label}`);
+    const { toggle, sent, pressOff, state } = await pushToggle([serverOff], [browser, async () => true]);
     await pressOff();
-    is("browser still subscribed", state().subscribed, true);
-    is("told plainly they could not be turned off, as an alert", alerts(toggle.tree()), [t.offFailed]);
-    is("still shown as on, with Turn off to try again", [!!button(toggle.tree(), t.turnOff), !!button(toggle.tree(), t.turnOn)], [true, false]);
+    is("off sent once", sent.map((s) => s.action), ["off"]);
+    is("the browser is asked again, quietly, and lets go", [state().subscribed, state().unsubscribeCalls], [false, 2]);
+    is("shown as off, with no error and no note", [!!button(toggle.tree(), t.turnOn), !!button(toggle.tree(), t.turnOff), alerts(toggle.tree()), statuses(toggle.tree())], [true, false, [], []]);
+  }
+
+  for (const [label, browser] of [
+    ["unsubscribe() resolves false", async () => false],
+    ["unsubscribe() rejects", async (): Promise<boolean> => { throw new Error("AbortError"); }],
+  ] as const) {
+    part(`Notifications off, the real forgetDevice answered ok, browser keeps the subscription: ${label}`);
+    const who = label.includes("false") ? "b1b1b1b1b1b1" : "c1c1c1c1c1c1";
+    const ecdh = createECDH("prime256v1");
+    ecdh.generateKeys();
+    const real = { endpoint: `https://fcm.googleapis.com/fcm/send/answers-${who}`, keys: { p256dh: ecdh.getPublicKey().toString("base64url"), auth: randomBytes(16).toString("base64url") } };
+    is("setup: the device is remembered", await rememberDevice("cmanswers", who, real, ROOM), "added");
+    is("setup: one device", await deviceCount("cmanswers", who), 1);
+    // The route's own "off": forgetDevice, then the count (app/api/store/community/push/route.ts).
+    const routeOff = async () => {
+      await forgetDevice("cmanswers", who, real.endpoint, ROOM);
+      return new Response(JSON.stringify({ ok: true, devices: await deviceCount("cmanswers", who) }), { status: 200 });
+    };
+    const { toggle, sent, pressOff, state } = await pushToggle([routeOff], [browser], false, real.endpoint, 1);
     await pressOff();
-    is("trying again turns it off, with no error", [state().subscribed, !!button(toggle.tree(), t.turnOn), alerts(toggle.tree())], [false, true, []]);
+    is("off sent for this device", sent, [{ handle: "answershop", action: "off", endpoint: real.endpoint }]);
+    is("the server holds no device for them, so nothing more is sent", await deviceCount("cmanswers", who), 0);
+    is("the browser still holds its subscription", state().subscribed, true);
+    is("the page does not say it is still on, on this device", texts(toggle.tree()).includes(t.onHere), false);
+    is("the page does not say notifications could not be turned off", alerts(toggle.tree()).includes(t.offFailed), false);
+    is("shown as off, with Turn notifications on", [!!button(toggle.tree(), t.turnOn), !!button(toggle.tree(), t.turnOff)], [true, false]);
+    is("a quiet note says the browser may still list the site", statuses(toggle.tree()), [t.offBrowserKept]);
   }
 
   part("Notifications off, the browser's registration cannot be read");
@@ -259,6 +293,8 @@ async function communityPush() {
   part("Notifications off: every language has the new sentence");
   const languages = ["en", "es", "fr", "de", "it", "nl", "pt"];
   is("offFailed in every language, each its own", languages.filter((code) => !communityWords(code).push.offFailed?.trim() || (code !== "en" && communityWords(code).push.offFailed === t.offFailed)), []);
+  const words = (code: string) => communityWords(code).push as Record<string, string | undefined>;
+  is("offBrowserKept in every language, each its own", languages.filter((code) => !words(code).offBrowserKept?.trim() || (code !== "en" && words(code).offBrowserKept === words("en").offBrowserKept)), []);
 }
 
 // A press left waiting forever would empty the event loop and end the run with

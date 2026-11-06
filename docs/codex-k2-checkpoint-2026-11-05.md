@@ -763,3 +763,22 @@ exact2replyenvelope,fullreadablelist,nativenonnegativeintegerLLEN; elseUnknownRe
 2.No waiting2811CI/review anymore: itisMERGED. No repeated review ofunchanged2799/2790, noflowsedit/no1969authorfileedit.
 3.FutureC6nominalreviewonlyifactualrequest;2801/2803owner-costHOLDunchanged.
 4.BeforeendingpublishthischeckpointSHAandexactproof/dependencytoFULLfreshchannel. Gates/coordinationtransient; existingcontinuityretained,noautomationcreated/updated/disabled. No arbitrarynewproductbysilence; zeroownproductOPENandnominalproofpreserved.
+
+
+## SUPERSEDING ORDER + IN-PROGRESS WIP — 2026-11-06 — C4-1910, not blocked on coordination
+**C4-20261106-1910-K2-113 arrived while publishing the preceding point. Coordination RESOLVED: full correction is K2's, ONE PR, priority over1969; C3 mergesmainafterK2. Do NOT wait for more approval or treat prior awaitingcoordination as current.** R2cycle94 independentlyreproduced21ab32/14, proposes **MEDIUMprivacy for person-copy/store-export/CSV**, LOWstudio/form-opportunity. Accepted this classification; previousLOW-only statement is superseded, no data-erasure/exposureclaim.
+
+ExpandedRESERVA successfullypublished **36e2370e88f616d39c099ebd88d486ef19a3d357**, SAMEunit:
+branch **codex/k-form-response-unavailable**
+lib/form-store.ts ONLYreadResponses/necessaryparser; app/studio/forms/page.tsx ONLYresponse-read; components/forms-editor.tsx ONLYunavailablestate; app/api/store/forms/export/route.ts; app/api/store/forms/response-pdf/route.ts; lib/person-copy.ts/lib/store-export.ts ONLYresponseconsumers; ownk-form-response-read-evidence.test.ts; newtests/form-response-unavailable.test.ts,form-response-unavailable-world.tsx,form-response-copy-evidence.test.ts; sharedtests/test-config.mjsONLYownaliasesifnecessary. Allotheragentsrefsuntouched,1969fileoverlapEXPLICITC4release. No reservationdocumentPR/edit.
+
+Durable **WIP be5fb70ad126e0cf5a122eeb674442ceb02aa028** on **codex/k-form-response-unavailable**, parentoriginalRED21ab, tree **af60c800b903be54fb5df14e322db104ffcdda18** native=GitData. NewdeltaONLYlib/form-store.tsreadResponses:
+existingexactReplies+plainList, exactly2replies, listallparseable,nativeintegerLLEN>=0, elseexistingUnknownReply(classalreadyinrepo, C4calledUnknownReplyErrorgenerically). SAMEoriginalcanonicaltest32/14→**32/32**, NOtestblob/expectationchanges. Allconsumererrorsnotyethandled! **DO NOT OPEN/REVIEW/MERGE AS COMPLETE**, thisisrequestedGitHubWIPpreservationCX122. No productPR/CIstarted. Existing reportat21abdescribesoriginalsourceproof, remainshistoricalevidence, notclaimsourceunchangedinWIP.
+Localk2-form-evidence HEADffb/staged3paths/treeaf60; originalproofbranch21abimmutable. Readergreenlog/tmp/k2-form-reader-green.log. WIPtypes/lint/scansrunlogs/tmp/k2-form-wip-{types,lint,scan}.log; don'tinferconsumer/integralgreenfrom32.
+
+Nextimplementautonomously WITHOUTpermission:
+1.ConsumerREDs BEFORErepair: actualStudioFormspage usable+honestunavailable, nozero; actualCSV/PDF503unavailable/noemptyfile; actualperson-copy/store-exportmarkpartunread, neveremptyconfirmed. Baseline21abfororiginalprivacyfailure andcurrentWIPforunhandledconsumererrors. PreserveREALfunctionboundaries/syntheticauth/servicesexplicitly.
+2.PageSavedFormtotalcurrentlynumber; designnullable/explicitdiscriminantunavailableandcomponentnotice, keepformeditusable/noFormAnswerszero. components/forms-editor.tsx45/232/274 relevant. KeepcontentEnglishUSdespiteC4Portugueseconceptphrase.
+3.CSV/PDFlocalunknowncatch503plainunavailable; auth/permission/validknowncontrols. person-copyandstore-exportalreadyhaveOUTERpartialhandling; proveitactuallymarksunknown, changesonlyifneeded. No extraIO/provider/ceiling.
+4.Otherform-storehelpersrule30candidatesonlyuntilcausalproof; readForms/readForm/responseCounts/addResponse/dropFormnotedited. flowsC3.
+5.CompleteALLconsumers+linkedtypeslintscan/diff, causalmainintegrationonlybeforequalifiedreview, onefullPR/R2nominal/nineexactsuccess/NORMALexpectedSHA. OneownWIPunit, zeroproductPRopen; alloldmerged2811ffb/2796etcstable. No coordinationblockremains; continuefrombe5WIP, neverrecreateRED21ab.

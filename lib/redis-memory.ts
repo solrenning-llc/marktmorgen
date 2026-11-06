@@ -99,6 +99,18 @@ export class MemoryRedis {
     const name = String(rawName).toUpperCase();
     const key = String(rest[0] ?? "");
     const args = rest.slice(1).map(String);
+    // Redis checks command arity before looking up or changing any key.
+    const minimum = name === "HSET" || name === "ZADD" ? 4
+      : name === "DEL" || name === "MGET" ? 2
+      : ["HDEL", "SADD", "SREM", "ZREM", "LPUSH", "RPUSH", "HMGET"].includes(name) ? 3 : 0;
+    if (command.length < minimum || (name === "HSET" && command.length % 2 !== 0)) {
+      throw new Error(`ERR wrong number of arguments for '${name.toLowerCase()}' command`);
+    }
+    if (name === "ZADD") {
+      let firstPair = 0;
+      while (["NX", "XX", "GT", "LT", "CH", "INCR"].includes(args[firstPair]?.toUpperCase())) firstPair += 1;
+      if ((args.length - firstPair) === 0 || (args.length - firstPair) % 2 !== 0) throw new Error("ERR syntax error");
+    }
     this.live(key);
 
     switch (name) {
@@ -113,6 +125,19 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/assistant-memory-store.ts MEMORY_WRITE: the notes written or deleted only while the change's lock is its own.
+        if (key.startsWith("-- marktmorgen:amem-write:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, lock, notes, token, json] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(json === "" ? ["DEL", notes] : ["SET", notes, json]);
+          return 1;
+        }
+        // lib/assistant-memory-store.ts MEMORY_FORGET: the lock made the forgetting's own and the notes deleted in one step.
+        if (key.startsWith("-- marktmorgen:amem-forget:v3\n") && args[0] === "2" && args.length === 5) {
+          this.run(["SET", args[1], args[3], "EX", args[4]]);
+          const length = this.run(["STRLEN", args[2]]);
+          return [this.run(["DEL", args[2]]), length];
+        }
         // DR1: one provider receipt and its campaign counter, atomically.
         if (key.startsWith("-- marktmorgen:mail-report:v1\n") && args[0] === "1" && args.length === 7) {
           const [, daily, receipt, aggregate, count, expiry, limit] = args;
@@ -645,6 +670,21 @@ export class MemoryRedis {
           }
           this.hash(names).delete(who);
           return gone;
+        }
+        if (key.startsWith("-- marktmorgen:kept-any:v1\n")) {
+          // lib/two-step.ts KEEP_ANY: KEYS[1] the list, ARGV[1] a tag, ARGV[2] the most tags, ARGV[3] seconds.
+          const [list, tag, most, seconds] = [args[1], args[2], Number(args[3]), Number(args[4])];
+          this.live(list);
+          const held = this.data.get(list);
+          if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
+          let value = held ?? "";
+          if (value !== "*" && !value.split(" ").includes(tag)) {
+            const n = value.split(" ").filter(Boolean).length;
+            value = n >= most ? "*" : value === "" ? tag : `${value} ${tag}`;
+          }
+          this.data.set(list, value);
+          this.until.set(list, this.now() + seconds * 1000);
+          return value === "*" ? 0 : 1;
         }
         if (key.startsWith("-- marktmorgen:list-blank:v1\n")) {
           const count = Number(args[0]);

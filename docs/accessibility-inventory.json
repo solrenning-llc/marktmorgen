@@ -1667,6 +1667,7 @@
     "app/api/store/answers/route.ts",
     "app/api/store/api-keys/route.ts",
     "app/api/store/ask/route.ts",
+    "app/api/store/assistant-memory/route.ts",
     "app/api/store/assistant-next/route.ts",
     "app/api/store/assistant-settings/route.ts",
     "app/api/store/assistant/route.ts",
@@ -1904,6 +1905,7 @@
     "app/api/v1/leads/route.ts",
     "app/api/v1/members/route.ts",
     "app/api/v1/products/route.ts",
+    "app/api/v1/sales/route.ts",
     "app/api/v1/stats/route.ts",
     "app/api/v1/store/route.ts",
     "app/api/v1/students/route.ts"
@@ -1970,8 +1972,16 @@
       "status": "not yet reviewed for this programme"
     },
     {
+      "source": "app/help/layout.tsx",
+      "status": "AAA review not completed"
+    },
+    {
       "source": "app/layout.tsx",
       "status": "not yet reviewed for this programme"
+    },
+    {
+      "source": "app/platform/[slug]/layout.tsx",
+      "status": "AAA review not completed"
     },
     {
       "source": "app/signin/layout.tsx",

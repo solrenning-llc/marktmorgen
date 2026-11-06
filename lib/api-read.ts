@@ -167,7 +167,7 @@ export async function recentEvents(store: Store, type: WebhookEvent, limit: numb
     // Said with the whole the reading may take, not only the rest of it.
     const words = settleRest.status === 429 ? ((await settleRest.clone().json().catch(() => null)) as { error?: string } | null) : null;
     return words?.error === "monthly_limit"
-      ? apiError(429, "monthly_limit", `This read may take up to ${(whole + 1).toLocaleString("en-US")} of your store's API requests, more than your store has left, so nothing was read.`)
+      ? apiError(429, "monthly_limit", `This read may take up to ${(whole + 1).toLocaleString("en-US")} of your store's API requests, more than your store has left, so no event was read. The requests used to measure them stay counted.`)
       : settleRest;
   }
   const { messages, readBytes } = await recentMessagesOf(store, type, sized.ids, bounds, most);

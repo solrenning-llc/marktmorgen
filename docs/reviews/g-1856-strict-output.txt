@@ -1,0 +1,90 @@
+
+=== g1856-8b-focal.log ===
+47 checks, all passing.
+29 checks, all passing.
+20 checks, all passing.
+4 checks, all passing.
+3 checks, all passing.
+49 checks, all passing.
+
+=== g1856-8b-red.log ===
+  FAIL  missing-slot: success only for a verified actual restoration
+        expected false
+        got      true
+  FAIL  number-slot: success only for a verified actual restoration
+        expected false
+        got      true
+  FAIL  object-slot: success only for a verified actual restoration
+        expected false
+        got      true
+47 checks, 3 failing.
+49 checks, all passing.
+  FAIL  missing-slot: success only for a verified actual restoration
+        expected false
+        got      true
+  FAIL  number-slot: success only for a verified actual restoration
+        expected false
+        got      true
+  FAIL  object-slot: success only for a verified actual restoration
+        expected false
+        got      true
+  FAIL  extra-slot: success only for a verified actual restoration
+        expected false
+        got      true
+  FAIL  hole: success only for a verified actual restoration
+        expected false
+        got      true
+  FAIL  bool-slot: success only for a verified actual restoration
+        expected false
+        got      true
+  FAIL  nested-slot: success only for a verified actual restoration
+        expected false
+        got      true
+65 checks, 7 failing.
+
+=== g1856-8b-transport.log ===
+65 checks, all passing.
+
+=== g1856-8b-linked.log ===
+13 checks, all passing.
+24 checks, all passing.
+13 checks, all passing.
+23 checks, all passing.
+37 checks, all passing.
+10 checks, all passing.
+ℹ tests 3
+ℹ pass 3
+ℹ fail 0
+ℹ skipped 0
+ℹ tests 3
+ℹ pass 3
+ℹ fail 0
+ℹ skipped 0
+13 checks, all passing.
+17 checks, all passing.
+29 checks, all passing.
+10 checks, all passing.
+26 checks, all passing.
+42 checks, all passing.
+10 checks, all passing.
+12 checks, all passing.
+8 checks, all passing.
+18 checks, all passing.
+7 checks, all passing.
+5 checks, all passing.
+ℹ tests 19
+ℹ pass 19
+ℹ fail 0
+ℹ skipped 0
+ℹ tests 7
+ℹ pass 7
+ℹ fail 0
+ℹ skipped 0
+33 checks, all passing.
+
+=== g1856-8b-types.log ===
+
+=== g1856-8b-lint.log ===
+
+=== g1856-8b-scanner.log ===
+Public data check: 3274 tracked files; 0 file(s) require correction.

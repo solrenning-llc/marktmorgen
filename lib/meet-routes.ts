@@ -144,8 +144,8 @@ export async function finishConnect(request: NextRequest, provider: MeetProvider
   if (!isConfigured(provider)) return notFound();
   const origin = originFrom(request);
   const admission = await essentialLimitState("meet-return", clientAddress(request), RETURNS_PER_TEN_MINUTES, 600);
-  if (admission === "unknown") return away(origin, `/studio/meetings?meet=error&p=${provider}`);
-  if (admission === "exceeded") return away(origin, `/studio/meetings?meet=limited&p=${provider}`);
+  if (admission === "unknown") return away(origin, `/studio/calendar?cal=error&p=${provider}`);
+  if (admission === "exceeded") return away(origin, `/studio/calendar?cal=limited&p=${provider}`);
   const cookie = request.cookies.get(SESSION_COOKIE)?.value ?? "";
   const email = await emailForSession(cookie);
   if (!email) return away(origin, "/signin?status=expired");

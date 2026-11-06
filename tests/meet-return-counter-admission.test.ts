@@ -26,8 +26,8 @@ for(const kind of kinds){
   assert.equal(state.providerCalls,0,'unknown company counter must not authorize downstream provider work');
   assert.equal(response.status,303);
   const target=new URL(response.headers.get('Location')!);
-  assert.equal(target.pathname,'/studio/meetings');
-  assert.equal(target.searchParams.get('meet'),'error');
+  assert.equal(target.pathname,'/studio/calendar');
+  assert.equal(target.searchParams.get('cal'),'error');
   assert.equal(target.searchParams.get('p'),kind==='zoom'?'zoom':'google');
   assert.equal(await response.text(),'');
   assert.equal(state.commands.length,2);
@@ -36,7 +36,7 @@ for(const kind of kinds){
  for(const mode of ['empty','partial','exceeded'])test(kind+' counter control '+mode,async()=>{
   reset();const req=await request(kind);state.counter=mode;const response=await invoke(kind,req);
   assert.equal(state.providerCalls,0);assert.equal(state.commands.length,2);
-  const target=new URL(response.headers.get('Location')!);assert.equal(response.status,303);assert.equal(target.pathname,'/studio/meetings');assert.equal(target.searchParams.get('meet'),mode==='exceeded'?'limited':'error');
+  const target=new URL(response.headers.get('Location')!);assert.equal(response.status,303);assert.equal(target.pathname,'/studio/calendar');assert.equal(target.searchParams.get('cal'),mode==='exceeded'?'limited':'error');
  });
  for(const gate of ['configuration','session','state','access','pause','funding'])test(kind+' independent gate '+gate,async()=>{
   reset();const req=await request(kind);state.counter='normal';

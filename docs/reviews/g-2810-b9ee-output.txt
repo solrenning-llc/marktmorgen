@@ -1,0 +1,445 @@
+
+### canonical
+
+✔ a healthy read returns every file and forgets the list (7.993689ms)
+✔ a file handed in after the reading stays listed, never lost (Revisor 1 on #2810) (0.785791ms)
+✔ the course route reads the work before it saves the course without the assignment (0.528034ms)
+✔ files: no reply: unknown, and the list of files is kept (0.40581ms)
+✔ files: null: unknown, and the list of files is kept (0.267222ms)
+✔ files: odd list: unknown, and the list of files is kept (0.233421ms)
+✔ files: a size not a whole number: unknown, and the list of files is kept (0.207211ms)
+✔ files: a name not text: unknown, and the list of files is kept (0.280842ms)
+✔ work list: null: unknown, and the list of files is kept (0.384569ms)
+✔ records: one reply missing: unknown, and the list of files is kept (0.774966ms)
+✔ a product's course: every assignment read before the product goes (Revisor 1 on #2810) (2.823766ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 25.175173
+
+
+### preflight-old
+
+✔ a healthy read returns every file and forgets the list (10.8927ms)
+✖ files: no reply: unknown, and the list of files is kept (1.86893ms)
+✖ files: null: unknown, and the list of files is kept (0.65845ms)
+✖ files: odd list: unknown, and the list of files is kept (0.547944ms)
+✖ files: a size not a whole number: unknown, and the list of files is kept (1.189529ms)
+✖ files: a name not text: unknown, and the list of files is kept (0.702536ms)
+✖ work list: null: unknown, and the list of files is kept (0.722567ms)
+✖ records: one reply missing: unknown, and the list of files is kept (1.106804ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 1
+ℹ fail 7
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 28.550584
+
+✖ failing tests:
+
+test at [stdin]:46027:32
+✖ files: no reply: unknown, and the list of files is kept (1.86893ms)
+  AssertionError [ERR_ASSERTION]: files: no reply: throws UnknownReplyError
+      at TestContext.<anonymous> ([stdin]:46030:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:46027:32
+✖ files: null: unknown, and the list of files is kept (0.65845ms)
+  AssertionError [ERR_ASSERTION]: files: null: throws UnknownReplyError
+      at TestContext.<anonymous> ([stdin]:46030:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:46027:32
+✖ files: odd list: unknown, and the list of files is kept (0.547944ms)
+  AssertionError [ERR_ASSERTION]: files: odd list: throws UnknownReplyError
+      at TestContext.<anonymous> ([stdin]:46030:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:46027:32
+✖ files: a size not a whole number: unknown, and the list of files is kept (1.189529ms)
+  AssertionError [ERR_ASSERTION]: files: a size not a whole number: throws UnknownReplyError
+      at TestContext.<anonymous> ([stdin]:46030:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:46027:32
+✖ files: a name not text: unknown, and the list of files is kept (0.702536ms)
+  AssertionError [ERR_ASSERTION]: files: a name not text: throws UnknownReplyError
+      at TestContext.<anonymous> ([stdin]:46030:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:46027:32
+✖ work list: null: unknown, and the list of files is kept (0.722567ms)
+  AssertionError [ERR_ASSERTION]: work list: null: throws UnknownReplyError
+      at TestContext.<anonymous> ([stdin]:46030:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:46027:32
+✖ records: one reply missing: unknown, and the list of files is kept (1.106804ms)
+  AssertionError [ERR_ASSERTION]: records: one reply missing: throws UnknownReplyError
+      at TestContext.<anonymous> ([stdin]:46030:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+
+### preflight-head
+
+✔ a healthy read returns every file and forgets the list (12.882583ms)
+✔ files: no reply: unknown, and the list of files is kept (0.446942ms)
+✔ files: null: unknown, and the list of files is kept (0.265158ms)
+✔ files: odd list: unknown, and the list of files is kept (0.221082ms)
+✔ files: a size not a whole number: unknown, and the list of files is kept (0.17972ms)
+✔ files: a name not text: unknown, and the list of files is kept (0.251087ms)
+✔ work list: null: unknown, and the list of files is kept (0.176495ms)
+✔ records: one reply missing: unknown, and the list of files is kept (3.952134ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 27.585813
+
+
+### disposal-old
+
+
+Healthy control: real course POST, actual removal and metering
+  ok    seed door consumed
+  ok    seed 150 bytes charged before hand-in
+  ok    HTTP success
+  ok    payload ok
+  ok    provider deletion invoked once
+  ok    provider file absent
+  ok    file inventory removed
+  ok    meter released after actual healthy deletion
+
+Provider rejects BEFORE deletion: preserved paid bytes or durable recovery required
+  ok    seed door consumed
+  ok    seed 150 bytes charged before hand-in
+EXPECTED SYNTHETIC FAILURE: could not delete handed-in work Error: synthetic provider unavailable BEFORE deletion
+OBSERVATION provider failure {"result":{"status":200,"body":{"ok":true,"course":{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","modules":[{"id":"r856b900lqmn","title":"Module 1","dripDays":0,"lessons":[{"id":"12d1r145i7ud","title":"Local lesson","preview":false,"video":null,"files":[],"link":null,"hasBody":false,"quiz":null}]}],"certificate":false,"startsAt":null}}},"providerStillHas":true,"providerCalls":1,"room":0,"files":[],"sub":null,"stale":[]}
+  FAIL  failed deletion keeps charge while file is retained
+        expected 150
+        got      0
+  FAIL  failed deletion preserves file inventory for retry
+        expected "150"
+        got      null
+  FAIL  failed deletion does not say complete success
+        expected false
+        got      true
+  FAIL  retry keeps ability to invoke provider
+        expected true
+        got      false
+
+Redis destructive batch applied, response LOST: preserve disposal path before throwing
+  ok    seed door consumed
+  ok    seed 150 bytes charged before hand-in
+EXPECTED SYNTHETIC FAILURE: changing a course failed Error: synthetic Redis response LOST after batch application
+OBSERVATION applied-lost {"result":{"status":500,"body":{"ok":false,"error":"server_error"}},"lost":true,"providerStillHas":true,"providerCalls":0,"room":150,"files":[],"taskInCourse":false,"data":{"used":1744,"orders":0,"room":250000000}}
+  ok    lost-response reaches server_error control
+  ok    provider still retains file control
+  FAIL  lost-response preserves file inventory or disposal work
+        expected "150"
+        got      null
+  FAIL  healthy retry reaches orphan provider file
+        expected false
+        got      true
+
+Destructive write ACK absent and NOT applied: no release on unknown write
+  ok    seed door consumed
+  ok    seed 150 bytes charged before hand-in
+OBSERVATION no-apply/missing-ACK {"result":{"status":200,"body":{"ok":true,"course":{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","modules":[{"id":"v8n4wiscyk7v","title":"Module 1","dripDays":0,"lessons":[{"id":"nojqgdv5ceoq","title":"Local lesson","preview":false,"video":null,"files":[],"link":null,"hasBody":false,"quiz":null}]}],"certificate":false,"startsAt":null}}},"missing":true,"providerCalls":1,"subKept":true,"room":0,"data":{"used":768,"orders":0,"room":250000000}}
+  FAIL  unknown write does not report success
+        expected false
+        got      true
+  FAIL  unknown write does not uncount retained Redis records
+        expected 1744
+        got      768
+  ok    provider actually deleted file, so physical file room can be zero
+
+Healthy read fault control: no mutation on malformed preflight
+  ok    seed door consumed
+  ok    seed 150 bytes charged before hand-in
+  FAIL  unknown files throws
+        expected true
+        got      false
+  ok    unknown preflight keeps provider bytes charged
+  FAIL  unknown preflight keeps file inventory
+        expected "150"
+        got      null
+  ok    unknown preflight never calls provider
+
+31 checks, 10 failing.
+
+
+### disposal-head
+
+
+Healthy control: real course POST, actual removal and metering
+  ok    seed door consumed
+  ok    seed 150 bytes charged before hand-in
+  ok    HTTP success
+  ok    payload ok
+  ok    provider deletion invoked once
+  ok    provider file absent
+  ok    file inventory removed
+  ok    meter released after actual healthy deletion
+
+Provider rejects BEFORE deletion: preserved paid bytes or durable recovery required
+  ok    seed door consumed
+  ok    seed 150 bytes charged before hand-in
+EXPECTED SYNTHETIC FAILURE: could not delete handed-in work Error: synthetic provider unavailable BEFORE deletion
+OBSERVATION provider failure {"result":{"status":200,"body":{"ok":true,"course":{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","modules":[{"id":"y4cb1pq9h7y3","title":"Module 1","dripDays":0,"lessons":[{"id":"4kvqhkdjp45f","title":"Local lesson","preview":false,"video":null,"files":[],"link":null,"hasBody":false,"quiz":null}]}],"certificate":false,"startsAt":null}}},"providerStillHas":true,"providerCalls":1,"room":0,"files":[],"sub":null,"stale":[]}
+  FAIL  failed deletion keeps charge while file is retained
+        expected 150
+        got      0
+  FAIL  failed deletion preserves file inventory for retry
+        expected "150"
+        got      null
+  FAIL  failed deletion does not say complete success
+        expected false
+        got      true
+  FAIL  retry keeps ability to invoke provider
+        expected true
+        got      false
+
+Redis destructive batch applied, response LOST: preserve disposal path before throwing
+  ok    seed door consumed
+  ok    seed 150 bytes charged before hand-in
+EXPECTED SYNTHETIC FAILURE: changing a course failed Error: synthetic Redis response LOST after batch application
+OBSERVATION applied-lost {"result":{"status":500,"body":{"ok":false,"error":"server_error"}},"lost":true,"providerStillHas":true,"providerCalls":0,"room":150,"files":[],"taskInCourse":false,"data":{"used":1744,"orders":0,"room":250000000}}
+  ok    lost-response reaches server_error control
+  ok    provider still retains file control
+  FAIL  lost-response preserves file inventory or disposal work
+        expected "150"
+        got      null
+  FAIL  healthy retry reaches orphan provider file
+        expected false
+        got      true
+
+Destructive write ACK absent and NOT applied: no release on unknown write
+  ok    seed door consumed
+  ok    seed 150 bytes charged before hand-in
+OBSERVATION no-apply/missing-ACK {"result":{"status":200,"body":{"ok":true,"course":{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","modules":[{"id":"t7x8neojyut6","title":"Module 1","dripDays":0,"lessons":[{"id":"egbw4pe7fx6d","title":"Local lesson","preview":false,"video":null,"files":[],"link":null,"hasBody":false,"quiz":null}]}],"certificate":false,"startsAt":null}}},"missing":true,"providerCalls":1,"subKept":true,"room":0,"data":{"used":768,"orders":0,"room":250000000}}
+  FAIL  unknown write does not report success
+        expected false
+        got      true
+  FAIL  unknown write does not uncount retained Redis records
+        expected 1744
+        got      768
+  ok    provider actually deleted file, so physical file room can be zero
+
+Healthy read fault control: no mutation on malformed preflight
+  ok    seed door consumed
+  ok    seed 150 bytes charged before hand-in
+  ok    unknown files throws
+  ok    unknown preflight keeps provider bytes charged
+  ok    unknown preflight keeps file inventory
+  ok    unknown preflight never calls provider
+
+31 checks, 8 failing.
+
+
+### linked-assignments
+
+
+An assignment and its switches
+  ok    an assignment with no prompt is refused
+  ok    the prompt is trimmed, its line ends made plain
+  ok    a switch is on only when it is true
+  ok    a file's name loses what could break a download
+
+A student's file is theirs, for that lesson, of a kind taken
+  ok    a fresh name in their own folder
+  ok    another student's folder
+  ok    a kind that is not taken
+  ok    a folder inside it
+  ok    a way out of it
+  ok    a Word file is taken
+  ok    a web page is not
+  ok    nor anything that only looks like a key
+
+The lesson carries the switches, and a quiz or an assignment
+  ok    the switches are on the lesson
+  ok    taking it off leaves no trace on the lesson
+
+A must-finish assignment holds the rest shut until it is done
+  ok    the next lesson waits on it
+  ok    and the one after
+  ok    the lesson itself is open
+
+Reviewed: waiting, another try, approved
+  ok    the prompt is kept apart from the outline
+  ok    handed in, it waits for the creator
+  ok    and is in the creator's list
+  ok    the lesson is not done yet
+  ok    the next lesson still waits
+  ok    another try asked for
+  ok    nothing waits any more
+  ok    work already answered is not answered twice
+  ok    the old file is handed back to be deleted
+  ok    the second try is counted
+  ok    and the old answer is cleared with it
+  ok    the same file kept is not deleted
+  ok    approved
+  ok    approving finishes the lesson
+  ok    and opens the lessons after it
+
+Not reviewed: handing in is enough
+  ok    done at once
+  ok    the lesson is marked done
+  ok    nothing waits for the creator
+  ok    everything handed in, newest first
+
+What a store's students keep is held to its figure
+  ok    room up to the figure
+  ok    no room past it
+  ok    room given back is room again
+
+Removing an assignment forgets the work and returns its files
+  ok    every file still kept for it, to delete: the replaced one went when it was replaced
+  ok    the student's work is forgotten
+  ok    and the assignment
+
+Uploads never handed in, and doors used once
+  ok    the old one is found, the new one left
+  ok    a door is used
+  ok    once
+
+Who hears about it
+  ok    the creator is told
+  ok    not again within the hour
+  ok    at the store's address
+  ok    the student's email is in the store's language
+  ok    with what the creator wrote, and the way back
+
+AI needs something to go on
+  ok    a file alone, with nothing said about it, is not enough
+
+51 checks, all passing.
+
+
+### linked-room
+
+✔ an unknown assignment-room read never becomes zero free usage (5.017194ms)
+✔ known assignment-room counts retain their exact boundary (0.297197ms)
+✔ the route says an unread room as unavailable, never as full (2.59659ms)
+✔ the upload route asks the room reader before signing storage IO (0.206049ms)
+✔ a counter below zero is nothing used, never a store locked out (Revisor 1 on #2655) (4.087681ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 23.657368
+
+
+### linked-unknown
+
+✔ control: with the room counter answering as Redis does, the file is handed in and kept (66.312387ms)
+✔ an unknown room reply (a null reply) deletes the uploaded file and hands nothing in (20.088411ms)
+✔ an unknown room reply (a word for a count) deletes the uploaded file and hands nothing in (16.666334ms)
+✔ an unknown room reply (no reply at all) deletes the uploaded file and hands nothing in (12.209833ms)
+✔ an unknown room reply (a count smaller than what was added) deletes the uploaded file and hands nothing in (6.710943ms)
+✔ an unknown room reply (a failed call) deletes the uploaded file and hands nothing in (7.275151ms)
+✔ a reply lost after the room was really taken: the file is deleted, and the bytes it took come back (10.421032ms)
+✔ a reply lost before the room was taken: nothing is given back that never entered (11.482378ms)
+✔ a lost reply whose giving back also fails: the route still answers, the file is deleted, the room only refuses sooner (11.333564ms)
+✔ a full room: refused as before, nothing kept, no mark left (29.795519ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 208.010908
+
+
+### types
+
+sourceFiles 1018 diagnostics 0
+
+
+
+### lint
+
+
+
+### public
+
+Public data check: 4029 tracked files; 0 file(s) require correction.
+Own evidence: 3 files; 0 findings
+[]
+

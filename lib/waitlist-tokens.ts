@@ -26,6 +26,45 @@ export function waitlistTokenKey(token: string): string {
   return "nl:wl:t:" + createHash("sha256").update(token).digest("hex");
 }
 
+function hasDuplicateTopLevelMembers(raw: string): boolean {
+  const names = new Set<string>();
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let keyStart = -1;
+  let expectingKey = false;
+  for (let i = 0; i < raw.length; i += 1) {
+    const character = raw[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') {
+        inString = false;
+        if (keyStart >= 0) {
+          const name = JSON.parse(raw.slice(keyStart, i + 1)) as unknown;
+          if (typeof name !== "string" || names.has(name)) return true;
+          names.add(name);
+          keyStart = -1;
+          expectingKey = false;
+        }
+      }
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      if (depth === 1 && expectingKey) keyStart = i;
+    } else if (character === "{" || character === "[") {
+      depth += 1;
+      if (depth === 1) expectingKey = true;
+    } else if (character === "}" || character === "]") {
+      depth -= 1;
+    } else if (character === "," && depth === 1) {
+      expectingKey = true;
+    }
+  }
+  return false;
+}
+
 /** Keep the original store decoder's behavior for legacy persisted grants.
  * A scoped platform grant must never enter a creator's confirm/leave flow.
  */
@@ -33,6 +72,7 @@ export function parseStoreWaitlistGrant(raw: unknown): StoreWaitlistGrant | null
   if (typeof raw !== "string" || Buffer.byteLength(raw, "utf8") > 2048) return null;
   try {
     const value = JSON.parse(raw);
+    if (hasDuplicateTopLevelMembers(raw)) return null;
     if (!value || typeof value !== "object" || Array.isArray(value) || Object.hasOwn(value, "scope")) return null;
     const row = value as Record<string, unknown>;
     const route = (field: unknown): field is string =>
@@ -57,6 +97,7 @@ export function parsePlatformWaitlistGrant(
       !Number.isSafeInteger(nowSeconds) || nowSeconds < 0) return null;
   try {
     const value = JSON.parse(raw);
+    if (hasDuplicateTopLevelMembers(raw)) return null;
     if (!value || typeof value !== "object" || Array.isArray(value) ||
         value.scope !== "platform_waitlist" || value.version !== 1 ||
         value.k !== purpose || typeof value.entryId !== "string" ||

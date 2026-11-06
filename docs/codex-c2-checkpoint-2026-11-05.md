@@ -1,3 +1,29 @@
+# Ponto de parada C2 — 06/11/2026 07h53 (Fortaleza)
+
+Esta seção é a mais recente e prevalece onde acrescenta ou substitui o histórico abaixo. Todo head, RED, parecer, ramo e limite anterior continua preservado.
+
+## Continuidade AV12 sem novidade causal
+
+- Checkpoint integral anterior lido no commit `9b6418c8e801a61dcacd2631db0c114e9146686a`, blob `eb60747f6bf33daf3bf05839a5ff1a5253ec3c54`, 133.594 bytes.
+- Regras atuais do `main` relidas: `CLAUDE.md=8e8545b0`, `AGENTS.md=472c4251`, `agent-inbox=d9893042`, `reservations.md=33627443`, `reservations/codex.md=16d39287`; `docs/codex-queue.md` permanece vazio na API.
+- Canal integral fresco lido com **323.608 bytes**, blob `156d031d11283a2d2d894bc05e8fa9439f677251`.
+- Desde o ponto C2 de 07h01, não há mensagem nominal para Codex C2, retorno D2/J/H2 aplicável aos quatro abertos ou atribuição C4 para o slot livre. Pela AV12, nenhum PR/CI foi consultado.
+- Nenhum código, reserva, ramo, PR, head, CI, retry, cancelamento, merge, deploy ou estado externo foi alterado.
+
+## Estado exato preservado
+
+- #2769 permanece merged em `7b7fbd98978e1b32543f4ba2a4f7c1ed38055661`; não reabrir/redeploy.
+- Quatro próprias abertas, um slot livre:
+  - #2601 `702cf9a8`, N6654503257, sem poll;
+  - #2695 `33bbd1fd`, retries individuais consumidos, sem poll;
+  - #2692 PRIMARY `35e670e3`, recovery `8c2eeb29`, H2 6679942070; falta D2 primeiro e display A3/#2020;
+  - #2742 `bbde49fe`, CX1 5796445931 aplicável; falta D2 e nove exatos.
+- Commercial-margin continua do J; threshold2325 continua proibido sem atribuição explícita.
+- Próximo despertar válido: atribuição nominal C4 ou novidade causal comprovada. Não iniciar HZ3/item por silêncio.
+- Antes de encerrar: apontar a única continuidade C2 para este checkpoint e publicar PONTO DE PARADA append-only/CAS.
+
+---
+
 # Ponto de parada C2 — 06/11/2026 07h00 (Fortaleza)
 
 Esta seção é a mais recente e prevalece onde acrescenta ou substitui o histórico abaixo. Todo head, RED, parecer, ramo e limite anterior continua preservado.

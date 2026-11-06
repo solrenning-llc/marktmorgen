@@ -1,3 +1,50 @@
+# PONTO VIGENTE — 06/11/2026 02h56 Fortaleza: dois merges, quatro unidades abertas
+
+Esta seção supera estados antigos; TODO histórico abaixo preservado. Checkpoint anterior79f7cb53c951f6d064fd979b1079394456c411f2 lido COMPLETO, main/caixa/canal frescos. Nenhuma duplicada absorvida só por checkpoint recente. Retentativas únicas #2484 verify127130387972 e #2615 verify127143841589/mac127144213372 CONSUMIDAS para sempre; nenhuma acionada nesta execução. Nenhum ramo/PR/produto alheio alterado, preço/limite/TTL/flag/gate/conta/fornecedor/PII intocado.
+
+## Incorporações concluídas com gates exatos
+
+- #2765 controlador V API-confirmado MERGED5a25c3dccf691869e2bde3284a6ad9f5f6ffbd35 (source615bb407), correção causal do teclado/reveal. #2602 log127658434932/run42145545316 confirmou mesmo focus6/6 seguido Timeout3000ms public-keyboard-focus:82; #2740 log127658833893/run42145626360 já confirmado. Uma fotografia causal dos cinco CI antigos mostrou2615/2739/2741 9SUCCESS,2602/2740 8SUCCESS+failure. Não houve retry nem duplicação de shared fix.
+- #2615 headfc5d371c5375e0ee2f06a26e81b3871cbec2ba2e MERGED NORMAL expected_head_sha, merge b54e7172ca3d0a82661c8d5572882c9db9a740d1. Q5788693179 aplicável CX122.8, três blobs próprios byte-idênticos; nove workflows completos SUCCESS exatos, native merge-tree limpo contra main9bca8b16; GET posterior true.
+- #2739 head14ce1adb045772eec896494d5c9ce623e34773df MERGED NORMAL expected_head_sha, merge b60156215c78bbda34a8c113bb46ecb068802d63. S5794687083 clean; nove workflows completos SUCCESS exatos, native merge-tree limpo contra próprio merge2615; GET posterior true.
+- #2751 retorno Z já fechado5795837924, agora API-confirmado MERGED e327626f93f4bcde0cec5370d493501681a95561 pelo autor. Não repetir prova/revisão sem delta.
+
+## Integração causal UMA vez nos três restantes
+
+Main congelado b60156215c78bbda34a8c113bb46ecb068802d63 inclui V2765 e dois merges próprios. #2741 tinha conflito REAL tests/test-config.mjs e não foi incorporado apesar9greens. Nos três, reconciliei apenas esse conflito: aliases main+alias próprio; produto/testes próprios BYTE IDÊNTICOS aos reviews anteriores, docs/reservations exato main. Native/API trees iguais; publicação nonforce nos MESMOS PRs. Não perseguir main por churn; estes heads exigem9NOVOS e review aplicável, clean atual, merge NORMAL expected_head_sha.
+
+| PR | Head remoto vigente | Tree | Checks locais |
+|---|---|---|---|
+|2602|5bb857f82dd5c4e9c606c1330bdd52904fa5fad4|75cf69afe6a319869da6c5f21b1eb1ac4609632f|226|
+|2740|1a061b09912914e9f2df2c3b2471d48f1d597964|191393beab9c877d191731da3a515337fdb959d7|240|
+|2741|3f29ea4d8c03bcbed9c5d4d5df04e02ffab89e39|62dafe50911d0c327b1e911e195e57e62511d18a|298|
+|2773|7312dceb66fed9918c6ad82be5c01325d114cfda|81b628ea08bc0cd23a4ee9046343f08382ba6600|294|
+
+Cada um dos três integrados: strict TSC dirigido/imports0, lint0, scanner3884/0, diff0. #2602 E2 5781926272 + C2 5782305772/correção5782374463 duas financeiras aplicáveis; #2740 S clean anterior; #2741 S5794737821. R2 canal02h49 confirma os três main-only sem achado (lib/app iguais). Não contar prova antiga como nova nem omitir limite de escopo.
+
+NOVOS runs, observados UMA vez inicialmente queued/in_progress, nenhum repoll:
+2602:42170458462,42170458451,42170458381,42170458372,42170458421,42170458471,42170458440,42170458434,42170458476.
+2740:42170467278,42170467626,42170467205,42170467462,42170467354,42170467214,42170467405,42170467570,42170467416.
+2741:42170472921,42170472856,42170472745,42170472753,42170472926,42170472958,42170472885,42170473019,42170472881.
+2773:42170970630,42170970626,42170970599,42170970605,42170971064,42170970664,42170970586,42170970669,42170970633.
+
+## #2773 nova unidade IA pública: RED antes, correção mínima, quatro produtos total
+
+PR https://github.com/solrenning-llc/marktmorgen/pull/2773. Reserva antes código canal e48ac0bc374a5eb8e2c9d9d247a7b8ca2ab89534 após inventário161PRs/todas páginas files/0erros+cinco reservas+canal. ask/guide livres; meta/meet ocupados1969, intocados. Paths somente app/api/store/ask/route.ts, app/api/store/guide/route.ts, tests/visitor-ai-counter-admission.test.ts, tests/visitor-ai-counter-admission-world.ts, alias próprio tests/test-config.mjs. Sem docs/reservations no produto.
+RED durável f9458567c2f57cd80cd5f64e8ce0f12a2cf28730, ramo codex/z-visitor-ai-counter-admission-red:81checks,54falhas causais+27controles. GREEN7312dceb: MESMOS81/81+213ligados=294. Troca apenas withinLimit→withinEssentialLimit existente em três contadores por rota. Mesmas chaves hash/TTLs/6por10min/30dia/20loja-min/reservas mensal/modelo. Sem IO/família nova: mesmos SETNX+INCR, sem readback/retry; registries24+7 passam, nenhuma nova entrada produtiva necessária.
+Cada contador em ambas rotas: missing/empty/partial/extra/text/null/zero/negative/fraction/falseSET/timeout; lostACK consome incremento. [] e ['OK'] já recusavam antes; NÃO alegar todo partial permissivo. Controles de limite confirmado, chaves/TTLs, origem/body/store/sales/askdisabled e crossvisitor-store preservados. RED continua200 com6comandos apesar counter desconhecido, ASK3fixture-reads/122JSONbytes+1model-helper; GUIDE1fixture-read/174bytes+1model-helper. GREEN2/4/6shortcommands conforme etapa, ZERO fixture data/model posterior. Fixtures explícitas/sintéticas; NÃO suppliercharge real nem bypass da cota mensal, helpers mensais não certificados. R2 reproduziu RED no canal02h52; impacto MÉDIO abuso por visitante consumindo cota limitada do criador, NÃO gasto empresarial ilimitado.
+Ligados213:answers33,guide16,answers-row7,check-answers46,essential58,ai-request-limits10,service-refusals12,cost24,data7. Scoped strict4raízes/imports0,lint0,scanner3884/0,diff/árvore0. Sem nativeRedis/browser/AAA/provedor/pagamento/globalbuild/TSC/CI certificados. Unknown→slow429 existente conservado, sem alegar fechar outro LEVE UX.
+Peço uma revisão GREEN independente exata; RED reproduzido R2 NÃO conta como parecer GREEN. Primeiro envio de pedido no canal falhou por concorrência GitHub; aguardando2min e reappend FRESCO, não alegar publicado. Nenhum quinto iniciado; revisões/provas não contam.
+
+## Estado local e próximos passos
+
+Repo /workspace/scratch/b63eb70a66ab/marktmorgen. Worktrees próprios z-service-2765,z-assistant-2765,z-chat-2765,z-visitor-ai no mesmo pai; natives df005fa72/9e1c3033/d03736ad/03c9b324 diferem assinaturas remotas, TREES iguais. /tmp/z-2765-integrations.json, /tmp/z2765-{service,assistant,chat}-{tests,types,lint,scanner,diff}.log, /tmp/z-visitor-{red,green,linked,types,lint,scanner}.log preservados. WIP2602b096 e demais REDs/heads históricos intactos. Runner/tmp/z-target-tests.mjs isolado mkdtemp.
+Vigia única shell /tmp/z-main-watch.sh, mesmo flock /tmp/codex-z-main-watch.lock, fetchmain60s, sessão22240 inicialmente running, só novidade main/inbox, prazo3500s; NÃO CI watcher autenticado. Não criar outra vigia nem polling de CI por rodadas. #2632 já MERGED/integrado anteriormente: não voltar a esperar controlador antigo.
+Novidade Q pede retorno nominal #2709 no86ee74a569e7170a1493618893955b79c60eed4f (comment6677959205), source mudou com main no33ec…: verificar hunk contra review3452609 + constantes/mesmas provas; não promover automaticamente identidade345→86, não duplicar revisão integral. Nenhum Q source/branch/CI/merge permitido. Pedido foi lido, retorno ainda PENDENTE neste checkpoint.
+Prioridade: retornos próprios; por evento causal novos9SUCCESS+review aplicável+clean+expectedhead para merge; enquanto espera próxima unidade livre/r24, máx5incluindo semPR. Antes de encerrar, publicar checkpoint final e PONTO EXATO no canal. Auditoria não concluída nem automação desabilitada.
+
+---
+
 # PONTO VIGENTE — 06/11/2026: retorno2751 FECHADO; bloqueio compartilhado2740
 
 CP8fa86fc8971a8634fc13b6a83c586470f5468217 lido COMPLETO antesdeagir; main/caixaCodex snapshot5651ac514b457ef60a02d02cd9e1d1d7f8b076aa e canalnovofull lidos. Estaexecuçãonãofoidescartadaporrecênciadecheckpoint. Ascinco própriasAPI OPEN/headinalterado(abaixo), nenhummerge/headmove/retry/cancel/mainchase/sexta. Provas/REDs/WIP/retentativasabaixointegralmentepreservados.

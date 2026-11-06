@@ -183,10 +183,28 @@ function parseList(raw: unknown): Passkey[] {
   }
 }
 
-/** The passkeys an account holds, oldest first. */
+/**
+ * The passkeys an account holds, oldest first, read exactly (CX-123 rule 24; Codex G's audit of 06/11/2026): no key is
+ * a known "none"; a list of whole passkeys is the list. Anything else (no reply, a reply of another shape, a list
+ * that is not JSON, not an array, or holds an entry that is not a passkey) throws UnknownReplyError, so no caller
+ * takes "none" from what it could not read: a move, an add or a removal never deletes or overwrites on it, and the
+ * second step is never skipped on it.
+ */
 export async function listPasskeys(email: string): Promise<Passkey[]> {
   if (!isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["GET", listKey(email)]]);
+  const reply = repliesFor(await redisPipeline([["GET", listKey(email)]]), 1);
+  if (!reply) throw new UnknownReplyError("a passkey list");
+  const raw = reply[0];
+  if (raw === null) return [];
+  if (typeof raw !== "string" || !raw) throw new UnknownReplyError("a passkey list");
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new UnknownReplyError("a passkey list");
+  }
+  const whole = (p: unknown) => Boolean(p) && typeof p === "object" && !Array.isArray(p) && typeof (p as Passkey).id === "string" && typeof (p as Passkey).publicKey === "string";
+  if (!Array.isArray(value) || !value.every(whole)) throw new UnknownReplyError("a passkey list");
   return parseList(raw);
 }
 

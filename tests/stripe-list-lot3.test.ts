@@ -26,7 +26,7 @@ import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { askPlace, openGroup, readGroup, revokeRefundedGroups, settleGroup, startGroup, takePlace } from "@/lib/group-buy";
-import { importedFor } from "@/lib/imported-purchases";
+import { importedFor, importedKey } from "@/lib/imported-purchases";
 import { createCheckout } from "@/lib/store-checkout";
 import { STRIPE_LIST_VERSION } from "@/lib/stripe-list";
 import { advance, store as redis } from "./redis-stub";
@@ -285,6 +285,29 @@ async function main(): Promise<void> {
     await revokeRefundedGroups((await storeForEmail("lotthree@example.com"))!, Date.now() + 30_000, async () => {});
     is("the readable place is taken back in the same run", (await importedFor((await storeForEmail("lotthree@example.com"))!, email)).length, 0);
     is("and the refund is not marked: it waits to be tried again for the one that did not read", [await seen("re_C4TwoPlaces01"), (await redis.pipeline([["HGET", retryKey, "re_C4TwoPlaces01"]]))[0]], [0, "pi_C4TwoPlaces01"]);
+  }
+
+  part("group-buy.ts: a place's own record that does not read is unknown, never 'came another way' (Claude 4 on #2781, C4-20261106-0725-C5-31)");
+  {
+    await redis.pipeline([["DEL", anchorKey], ["DEL", `${anchorKey}:pass`], ["DEL", retryKey]]);
+    const odd = await paidGroup("pi_C4OddRecord01", 21);
+    const email = "oddrecord@example.com";
+    await askPlace({ store, id: odd, email, product, base: "https://marktmorgen.com/@lotthree", from: '"Lot Three" <hello@marktmorgen.com>', ordersLink: async () => null });
+    const placeToken = mails.filter((m) => m.to[0] === email).at(-1)?.text.match(/\?take=([0-9a-f]{64})/)?.[1] ?? "";
+    is("a place was taken", (await takePlace({ store, token: placeToken, recordStart: async () => {} })).outcome, "taken");
+    const owner = (await storeForEmail("lotthree@example.com"))!;
+    const recordKey = importedKey(owner.statsId!, email);
+    const kept = (await redis.pipeline([["HGET", recordKey, product.id]]))[0];
+    is("the place's record is where the purchase wrote it", typeof kept === "string" && String(kept).includes(`group:${odd}`), true);
+    for (const bad of ["{not json", JSON.stringify({ job: 7 })]) {
+      await redis.pipeline([["HSET", recordKey, product.id, bad], ["DEL", retryKey], ["DEL", anchorKey], ["DEL", `${anchorKey}:pass`]]);
+      pages = [list([refund("re_C4OddRecord01", "pi_C4OddRecord01")])];
+      await revokeRefundedGroups(owner, Date.now() + 30_000, async () => {});
+      is(`a record ${bad}: unknown, the refund not marked and waiting`, [await seen("re_C4OddRecord01"), (await redis.pipeline([["HGET", retryKey, "re_C4OddRecord01"]]))[0]], [0, "pi_C4OddRecord01"]);
+    }
+    await redis.pipeline([["HSET", recordKey, product.id, String(kept)]]);
+    await revokeRefundedGroups(owner, Date.now() + 30_000, async () => {});
+    is("once the record reads, the place loses its access and the refund is let go", [(await importedFor((await storeForEmail("lotthree@example.com"))!, email)).length, await seen("re_C4OddRecord01")], [0, 1]);
   }
 
   part("group-buy.ts: an anchor in another shape starts no pass");

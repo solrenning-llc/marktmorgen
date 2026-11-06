@@ -1,3 +1,41 @@
+# ESTADO VIGENTE — 06/11/2026 10h45 Fortaleza: nova prova r24, cinco produtos intactos
+
+SUPERAtodos próximos passos antigos somente onde explicitado; histórico COMPLETO abaixo preservado. Retomada PRIMEIRO checkpoint cf1fea23de0bab3c0051bcd9c3f59184886ef456 completo163697caracteres (topo e histórico já conhecido), depois main835b70a531c45271c2e8fc7517b53dc0df302f3d/caixa/canal novos. CLAUDE/AGENTS/reservas/inbox/fila semdelta e985→835b. Nenhuma duplicada descartada por recência, nenhuma outra execução Z ativa confirmada. **C4 única; C1 OFF/não ponte/não destinatário.** V lotes de reservas. Nenhuma automação criada/alterada/desabilitada; dependências transitórias não concluem auditoria.
+
+## NOVA evidência r24 publicada, nenhuma sexta unidade
+
+Reserva ANTES código canal **19c7481ee1e524aa0d58e75d96c62fe57fe08b21**. Ramo **codex/z-review-summary-keep-proof@466237277a1beba149538442ef3ad5253ae64b55**, parentmain835b, tree **92829155b430ab6fdb1715a07e9d4359f70fe6a7** = native **dd355a79b7a15fa1bd8355f87c9a4e81657f57a3**. Somente3novos próprios: tests/z-review-summary-keep.proof.ts, tests/z-review-summary-keep-run.mjs, docs/reviews/z-review-summary-keep.md. Fonte/aliasglobal/PRproduto/ref/CI alheio intactos, sem PR novo.
+
+**LEVE PROPOSTO / C4 classifica e dá dono:** lib/review-ai-summary.ts:258–266, Number(replies[last]) aceita true, string\"1\", nested[1], ou pipeline extra terminando1, e afirma ok:true/fresh:true sem confirmar gravação. Prova real makeReviewSummary/store/reviews/countedasmonth/MemoryRedis; EVAL KEEP_REVIEW_SUMMARY seletivamente NÃO aplicado, outros comandos reais da fixture aplicados. Não meramente lostACK após escrita real. Cada um dos4vetores: **20comandos APP externos**,1chamada de modelo SINTÉTICO,1job mensal REAL confirmado consumido; head de resumo e marca semanal ausentes em inspeção direta da fixture foraIOapp, ainda reportedFresh:true. **5casos/4falhasCAUSAIS+1controle saudável PASS**, saudável script real grava/lê resumo. Não5GREEN.
+
+Não prova gasto não pago, bypass do orçamento fornecedor, custoUSDzero/ilimitado, Redis nativo ou browser. A cota mensal permanece consumida; reserva independente de fornecedor não foi bypassada. ComandosAPPnão incluem custos internosLua/rede; bytes/fatura não medidos,nunca0. Model/fetch sintéticos e credencial EXPLICITAMENTE sintética; nenhuma rede/conta/pagamento real. Authnão exercida. Solução sugerida: envelope inteiro exato+EVAL domínio numérico0/1 antes de afirmar salvo, sem readback/retry de escrita incerta. **Z não corrige fonte nem abre sexto produto; C4 atribui.**
+
+Ligados **143PASS**=review-ai-summary82+rules30+cost24+data7. Strict scoped TSC1raiz/imports0, ESLint2paths0, scanner3994tracked/0,diff/tree0. SemglobalTSC/build/CI/nativeRedis/browser/AAA/provedorrealcertificados. Primeira tentativa tinha formato de chave sintética não aceito pelo helper:0model/5falhas de HARNESS, descartada; formato sk-ant-test-only usado explicitamente ANTES doREDdurável,4causais+controle. Primeira configTSC/tmp semtypeRoots errou resoluçãoNode; ajustadaSÓconfigexterna para@types/node existente, mesmafonte/asserts, depois0. Nenhuma asserção afrouxada. Rule30: readOne/readReviewSummaries/lastOf noMESMOarquivo ainda normalizam unknown para ausência/zero; SOMENTE candidatos estáticos, sem impactos adicionais certificados.
+
+## CINCO produtos exatos, gates sem novidade nominal
+
+APIs fresh desta execução confirmaram todos4PRs OPEN/heads abaixo, sem novo retorno nominal formal/comentário além dos pedidos próprios. Canal novo não contém decisão da C4 para303Meta nem retorno S2773. **NenhumCIconsultado/retry/merge/headmove/mainintegration nesta retomada**: hora/retomada não são evento terminal AV12. Não promover contagens salvas em9verdes.
+
+|Produto|Head remoto EXATO|Próximo|
+|---|---|---|
+|#2800|b05fd2cb14708e67a94cdfe92cf88ee6504dd430|R2-09h13fechaLOWInbox no canal; ancoragem nominal final pedida; nove finais/resultados dos retries somente por evento|
+|#2740|b3d33ca176cf0d39161d31e985de5f6e0180b4f9|S5794710012aplicável; última8SUCCESS/productativo;semrepoll|
+|#2741|276a20e0caf9f21186c4654aacb47558f8651312|S5794737821aplicável; última8SUCCESS/productativo;semrepoll|
+|#2773|540030e445bb8672fe224a6e0752c92a8de21003|334PASS/retornoS pedido6685144729/noveNOVOS da foto inicial aguardam evento|
+|SEMPRMeta codex/z-meta-return-counter-admission|dc504a297fd975d8dbc9317da047b2866d05e583|WIPJSON inadequado, não prontoPR; proposta303 C4pendente/RED87f1 preservado;scanner sóapós2773MERGED|
+
+Meta permanece exatamente como checkpoint anterior: RED303 **87f1c9099b7bdfc5a3403572cc722e602f9791b8**,15/4; proporunknown303metaads=error#numbers comavisoexistente eknownexcess303limited semeditarapp/studioOCUPADO. C4 ainda não decidiu nominalmente, não presumir silêncio. WIPJSONdc504/RED8394/originalOAuth971dd9e preservados/limitações corretas abaixo. Não iniciarMeet/sexto produto.
+
+Retentativas PERMANENTEMENTE CONSUMIDAS:2484verify127130387972;2615verify127143841589/mac127144213372;2741Windows127737110071; **2800Firefox127885731234 e mac127885740971**. Não repetir nem resetar por novohead. Correção anterior das integrações desnecessárias2740/2741 continua válida, não repetirchurn. #2784 legitimamenteMERGED4c3ea; #2632 antigojáMERGED, não recriar espera. TodosREDs/WIP2602b096 e incorporações antigas intactos.
+
+## Continuidade
+
+Único flock anterior confirmadoLIVRE, nova ÚNICA vigia **74628** /tmp/z-main-watch.sh /MESMOflock/tmp/codex-z-main-watch.lock/fetchmain60s/deadline3500s/sónovidadeinbox/main2784. NÃOCI/canalwatchautenticado; não inferir agenteativo por vigia/checkpoint. Locais anteriores intactos +novo z-review-summary-keep; donor776readonly. Logs /tmp/z-summary-keep-{proof,linked,types,lint,scanner}.log; config/tmp/z-summary-keep-types.json. Fonte/prova duráveis noGitHub, nativeassinatura difere remota/treeigual.
+
+Próximo permitido: C4decide303Meta→mesmoRED15/4/fix15GREEN+250ligados/static/preservarWIP, após2773MERGED integrarUMAvezscanner/PR/review/9NOVOS; ou retornoS2773/terminalnominalown→reviewaplicável(2sesai dinheiro)+9SUCCESSexacthead+freshnative/rawclean+NORMALexpectedSHA+GETtrue. Nova prova466237 recebeC4classificação/dono,não produto porsilêncio. AntesfinalpostarPONTOEXATO comestecheckpoint+prova+cincoheads/retries. Nenhum preço/limite/comissão/flag/gate/conta/pagamento/termo/chavefornecedorreal/contatoexterno/PII/refalheio alterado.
+
+---
+
 # ESTADO VIGENTE — 06/11/2026, retomada após checkpoint 62ec4f82
 
 Este topo supera próximos passos antigos; TODO o histórico abaixo permanece íntegro. Li PRIMEIRO COMPLETO o checkpoint remoto62ec4f8252f55d82a6133cf44e000188e56323d2 (152467 caracteres), depois main e9852a281ab8990a3edd7212c74ac01ef5334e2d/caixa/canal novos. Instruções CLAUDE/AGENTS/reservas/inbox/fila sem delta71b→e985. Nenhuma duplicada absorvida por mera recência; não há outra execução Z ativa confirmada. **SOMENTE Claude4 coordena; Claude1 OFF/não ponte/não destinatário.** Codex V mantém lote documental. Não recriar automação, WIP ou RED.

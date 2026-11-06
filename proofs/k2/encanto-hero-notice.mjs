@@ -9,8 +9,13 @@ import { mkdirSync, readFileSync } from "node:fs";
 const root=resolve(process.argv[2] || process.cwd());
 const require=createRequire(join(root,"package.json"));
 const {startServices}=await import(pathToFileURL(join(root,"tests/e2e/services.mjs")));
-const {checkHomeHero,checkHomeHeroLayout,checkMorningNoticeFocus}=await import(pathToFileURL(join(root,"tests/e2e/home-hero.mjs")));
+const {checkHomeHero,checkHomeHeroLayout,checkMorningNoticeFocus,checkNoticeLineRegression}=await import(pathToFileURL(join(root,"tests/e2e/home-hero.mjs")));
 const {checkHomeActions}=await import(pathToFileURL(join(root,"tests/e2e/home-actions.mjs")));
+if(process.env.K2_NOTICE_OBSERVER_ONLY==="1"){
+ const browser=await require("playwright-core").chromium.launch({headless:true});let failures=0,checks=0;
+ try{const page=await browser.newPage();await page.setContent("<!doctype html><html><body></body></html>");await checkNoticeLineRegression({page,is:(name,actual,expected)=>{checks++;try{assert.deepEqual(actual,expected);}catch{failures++;console.error("FAIL",name,JSON.stringify({actual,expected}));}}});console.log("NOTICE_LINE_RESULT",JSON.stringify({checks,failures}));}finally{await browser.close();}
+ process.exit(failures?1:0);
+}
 const services=await startServices(4519);
 const fake="http://127.0.0.1:4519",origin="http://127.0.0.1:3219";
 const env={PATH:process.env.PATH,HOME:process.env.HOME,NODE_ENV:"development",NEXT_TELEMETRY_DISABLED:"1",NEXT_FONT_GOOGLE_MOCKED_RESPONSES:join(root,"tests/e2e/google-fonts-mock.cjs"),E2E_FONT_ORIGIN:fake,UPSTASH_REDIS_REST_URL:fake,UPSTASH_REDIS_REST_TOKEN:"local",STRIPE_SECRET_KEY:"sk_test_local_only_a_stand_in_0000",STRIPE_CONNECT_API_BASE:fake,RESEND_API_KEY:"re_local_only_a_stand_in",RESEND_API_BASE:fake};

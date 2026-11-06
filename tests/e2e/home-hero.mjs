@@ -7,6 +7,7 @@ export async function checkHomeHero({browser,LOCAL,axeSource,is}){
    await page.route("**/api/**",async route=>{if(route.request().method()!=="GET"){writes++;await route.abort();}else await route.continue();});
    await page.goto(LOCAL+"/",{waitUntil:"domcontentloaded",timeout:60000});
    await checkMorningNoticeFocus({page,width,is});
+   await checkNoticeLineRegression({page,is});
    const hero=page.locator("[data-home-hero]");
    is("HT1 one page heading "+width,await page.locator("h1").count(),1);
    is("HT1 creator result "+width,(await hero.locator("h1").innerText()).replace(/\s+/g," ").trim(),"Your link in bio, now a store.");
@@ -104,9 +105,9 @@ export async function checkHomeHeroLayout({page,width,is}){
   if(await compact.count()){
    const toggle=page.locator("summary#hm-preview-toggle");
    const disclosure=page.locator("details.hm-preview");
-   const size=await compact.evaluate(node=>({height:node.getBoundingClientRect().height,text:node.textContent}));
+   const size=await compact.evaluate(noticeLineGeometry);
    is("Encanto14 factual summary "+width,size.text,"Still being built. Plans closed.");
-   is("Encanto14 single line at default text size "+width,size.height,44);
+   is("Encanto14 single line at default text size "+width,size.lines===1,true);
    await toggle.focus();await page.keyboard.press("Space");
    is("Encanto14 keyboard opens full notice "+width,await disclosure.evaluate(node=>node.open),true);
    is("Encanto14 open notice is rendered "+width,await page.locator(".hm-preview-full").isVisible(),true);
@@ -127,4 +128,31 @@ export async function checkHomeHeroLayout({page,width,is}){
  }
  is("Encanto hero page fits "+width,await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  console.log("HERO_GEOMETRY",JSON.stringify({width,...geometry}));
+}
+
+/** Observe the notice line contract; shared by the canonical journey and controls. */
+export function noticeLineGeometry(node){
+ const height=node.getBoundingClientRect().height;
+ return {height,text:node.textContent,lines:height===44?1:0};
+}
+
+/** A taller single line and a wrapped 44px box distinguish lines from box height. */
+export async function checkNoticeLineRegression({page,is}){
+ const fixture=await page.evaluateHandle(()=>{
+  const host=document.createElement("div");host.dataset.noticeLineFixture="";
+  host.style.cssText="position:fixed;left:0;top:0;z-index:2147483647;background:white;color:black";
+  for(const [id,width,lineHeight,height] of [["standard",500,24,"auto"],["fractional",500,24.5,"auto"],["wrapped",120,24,"44px"]]){
+   const details=document.createElement("details"),summary=document.createElement("summary");summary.id="notice-control-"+id;
+   summary.style.cssText=`display:block;box-sizing:border-box;width:${width}px;min-height:44px;height:${height};padding:10px;font:16px/${lineHeight}px Arial;`;
+   summary.textContent="Still being built. Plans closed.";details.append(summary);host.append(details);
+  }
+  document.body.append(host);return host;
+ });
+ try{
+  for(const [id,single] of [["standard",true],["fractional",true],["wrapped",false]]){
+   const measured=await page.locator("#notice-control-"+id).evaluate(noticeLineGeometry);
+   console.log("NOTICE_LINE_CONTROL",JSON.stringify({id,...measured}));
+   is("notice line observer "+id,measured.lines===1,single);
+  }
+ }finally{await fixture.evaluate(node=>node.remove());await fixture.dispose();}
 }

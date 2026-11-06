@@ -99,7 +99,8 @@ async function main(): Promise<void> {
   is("save of the import already done", await withLedgerReply([{ 0: "x" }], async () => answer(await post({ action: "save", ...input }))), [503, "unavailable"]);
   is("plan of it", await withLedgerReply([{ 0: "x" }], async () => answer(await post({ action: "plan", ...input }))), [503, "unavailable"]);
   const other = { name: "Thanks only", pages: [pages[1]] };
-  is("save of a new import", await withLedgerReply([[null, null]], async () => answer(await post({ action: "save", ...other }))), [503, "unavailable"]);
+  // Thanks only asks two fields (its run, its one page): one slot is one short.
+  is("save of a new import", await withLedgerReply([[null]], async () => answer(await post({ action: "save", ...other }))), [503, "unavailable"]);
   is("still two pages, one funnel, one form", await counts(), [2, 1, 1]);
 
   part("Exact nils still read as not made yet, and the lock was let go");

@@ -1,0 +1,123 @@
+=== g2560-write-race.proof.ts ===
+
+Batch write not applied, unknown receipt null
+  ok    g2560batchnil: real contact writer joined
+  ok    fault reached exactly once; personal data genuinely persisted
+  FAIL  unknown batch receipt must retain the original store or its exact durable walk entry and retry
+        expected true
+        got      false
+{"vector":"batch","bad":null,"report":{"started":false,"stores":1,"failed":0,"parked":0,"stopped":0,"left":0,"stuck":0,"unread":0,"pages":0,"deleted":0,"pruned":0,"finished":0,"done":true},"batch":0,"due":null,"kept":1,"record":null}
+  FAIL  later healthy run never leaves personal data with no store, no batch and no retry
+        expected true
+        got      false
+
+Batch write not applied, unknown receipt extra
+  ok    g2560batchextra: real contact writer joined
+  ok    fault reached exactly once; personal data genuinely persisted
+  FAIL  unknown batch receipt must retain the original store or its exact durable walk entry and retry
+        expected true
+        got      false
+{"vector":"batch","bad":"extra","report":{"started":false,"stores":1,"failed":0,"parked":0,"stopped":0,"left":0,"stuck":0,"unread":0,"pages":0,"deleted":0,"pruned":0,"finished":0,"done":true},"batch":0,"due":null,"kept":1,"record":null}
+  FAIL  later healthy run never leaves personal data with no store, no batch and no retry
+        expected true
+        got      false
+
+Deletion not applied, unknown receipt
+  ok    g2560delnil: real contact writer joined
+  ok    delete fault reached and original personal data retained
+  FAIL  unknown unapplied delete never finishes the store or says erased
+        expected [0,false]
+        got      [1,true]
+{"vector":"delete","report":{"started":true,"stores":1,"failed":0,"parked":0,"stopped":0,"left":0,"stuck":0,"unread":0,"pages":1,"deleted":4,"pruned":0,"finished":1,"done":true},"kept":1,"state":{"erased":1794240000000}}
+
+Control: exact ordinary replies delete and finish
+  ok    g2560control: real contact writer joined
+  ok    normal closure removes contact and original record, then confirms erasure
+
+Reopened store between guard read and key deletion
+  ok    g2560raceold: real contact writer joined
+  ok    guard barrier reached, actual newly opened store still owns this key
+  FAIL  old walk preserves the newly opened store's key after its stale absent read
+        expected "new-store-pause"
+        got      null
+  FAIL  old walk also preserves the new store's valid monthly order counter under the same folder
+        expected "5"
+        got      null
+{"vector":"race","report":{"started":true,"stores":1,"failed":0,"parked":0,"stopped":0,"left":0,"stuck":0,"unread":0,"pages":1,"deleted":6,"pruned":0,"finished":1,"done":true},"captured":1,"current":"6e50e7569d2b43e49cd204dfb908cc99","pause":null}
+
+17 checks, 7 failing.
+
+=== review-sg2a-closed.test.ts ===
+
+A: the store record's delete fails after the batch was written
+  ok    the failing DEL was hit
+  FAIL  its record is deleted in the end, or it is still in line; never 'erased' with its record kept for ever
+        expected true
+        got      false
+  state at the end: record anaclosing, in line false, closing record says erased true
+
+B: what a store is made of answered in an unknown shape is taken for nothing
+  ok    the store has a list
+  ok    the odd answer was given
+  FAIL  its sequence's stats are deleted, or the store is still in line; never finished with them kept for ever
+        expected true
+        got      false
+  state at the end: stats key kept true, record deleted, in line false
+
+C: renewals already ended count against the page cap, so the closing never ends
+  FAIL  nothing is live to stop: on some day its renewals are said all stopped
+        expected true
+        got      false
+  done on each of 3 days: false, false, false; Stripe searches: 150
+
+6 checks, 3 failing.
+
+/tmp/g2560-new-tests.log:=== closed-store-reads.test.ts ===
+/tmp/g2560-new-tests.log:76 checks, all passing.
+/tmp/g2560-new-tests.log:=== review-sg2a-closed.test.ts ===
+/tmp/g2560-new-tests.log:6 checks, all passing.
+/tmp/g2560-new-tests.log:=== review-sg2a-second.test.ts ===
+/tmp/g2560-new-tests.log:8 checks, all passing.
+/tmp/g2560-new-tests.log:=== review-sg2a-third.test.ts ===
+/tmp/g2560-new-tests.log:2 checks, all passing.
+/tmp/g2560-new-tests.log:=== review-sg2a-fourth.test.ts ===
+/tmp/g2560-new-tests.log:2 checks, all passing.
+/tmp/g2560-new-tests.log:=== review-sg2a-fifth.test.ts ===
+/tmp/g2560-new-tests.log:2 checks, all passing.
+/tmp/g2560-new-tests.log:=== review-sg2a-sixth.test.ts ===
+/tmp/g2560-new-tests.log:1 checks, all passing.
+/tmp/g2560-new-tests.log:=== review-sg2a-seventh.test.ts ===
+/tmp/g2560-new-tests.log:1 checks, all passing.
+/tmp/g2560-linked.log:=== closed-store.test.ts ===
+/tmp/g2560-linked.log:28 checks, all passing.
+/tmp/g2560-linked.log:=== plan-closing.test.ts ===
+/tmp/g2560-linked.log:90 checks, all passing.
+/tmp/g2560-linked.log:=== closing-plan-guard.test.ts ===
+/tmp/g2560-linked.log:53 checks, all passing.
+/tmp/g2560-linked.log:=== closing-cost.test.ts ===
+/tmp/g2560-linked.log:ℹ tests 6
+/tmp/g2560-linked.log:ℹ pass 6
+/tmp/g2560-linked.log:ℹ fail 0
+/tmp/g2560-linked.log:ℹ skipped 0
+/tmp/g2560-linked.log:=== closing-families.test.ts ===
+/tmp/g2560-linked.log:ℹ tests 4
+/tmp/g2560-linked.log:ℹ pass 4
+/tmp/g2560-linked.log:ℹ fail 0
+/tmp/g2560-linked.log:ℹ skipped 0
+/tmp/g2560-linked.log:=== plan-margin.test.ts ===
+/tmp/g2560-linked.log:ℹ tests 39
+/tmp/g2560-linked.log:ℹ pass 39
+/tmp/g2560-linked.log:ℹ fail 0
+/tmp/g2560-linked.log:ℹ skipped 0
+/tmp/g2560-linked.log:=== store-closing-fair.test.ts ===
+/tmp/g2560-linked.log:103 checks, all passing.
+/tmp/g2560-linked.log:=== closing-plan-routes.test.ts ===
+/tmp/g2560-linked.log:15 checks, all passing.
+/tmp/g2560-linked.log:=== review-reminder.test.ts ===
+/tmp/g2560-linked.log:56 checks, all passing.
+/tmp/g2560-linked.log:=== sign-in-history-rules.test.ts ===
+/tmp/g2560-linked.log:51 checks, all passing.
+/tmp/g2560-linked.log:=== stats-report.test.ts ===
+/tmp/g2560-linked.log:18 checks, all passing.
+/tmp/g2560-linked.log:=== shipping.test.ts ===
+/tmp/g2560-linked.log:182 checks, all passing.

@@ -319,6 +319,9 @@ async function main(): Promise<void> {
     is(`${code}: and the card says the short sentence`, textOf(html).includes(SHORT[code]), true);
     const tag = holding(html, SHORT[code]);
     is(`${code}: on a line that wraps, never cut short`, [tag !== "", /\btruncate\b|line-clamp|text-ellipsis/.test(tag)], [true, false]);
+    // Claude 5 on #3019: the note under the button ("Secure checkout by Stripe, in a new tab.") is never cut either.
+    const noteTag = holding(html, wordsIn(code).cardCheckout);
+    is(`${code}: the checkout note under the button wraps too, never cut short`, [noteTag !== "", /\btruncate\b|line-clamp|text-ellipsis/.test(noteTag)], [true, false]);
   }
   await setLanguage(OWNER, "en");
   const pasted = await cardHtml("harbor", pan.product.id);

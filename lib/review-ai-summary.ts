@@ -30,6 +30,7 @@
  *   nl:rsum:lock:<statsId>              one at a time, two minutes
  */
 import { randomBytes } from "node:crypto";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { answerModel, askModel, counted, jsonIn } from "@/lib/ai";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
@@ -246,7 +247,7 @@ export async function makeReviewSummary(store: Store, productId: string, now = D
     // What the set held under the lock that is not the kept head's is from a try that was not kept: it goes first,
     // so the set holds the kept summary's, this one's and at most one a failed clean-up left.
     const leftover = now2.entries.filter((e) => parseEntry(e)?.g !== now2.token);
-    const replies = await redisPipeline([
+    const commands: (string | number)[][] = [
       ...(leftover.length ? [["ZREM", readKey, ...leftover]] : []),
       ["ZADD", readKey, newest, entry],
       ["EXPIRE", readKey, KEEP_SECONDS],
@@ -254,8 +255,14 @@ export async function makeReviewSummary(store: Store, productId: string, now = D
         "EVAL", KEEP_REVIEW_SUMMARY, 4, markKey(statsId, productId), summaryKey(statsId, productId), lastKey(statsId, productId), lockKey(statsId),
         typeof mark === "string" && mark ? mark : NO_MARK, head, KEEP_SECONDS, done.value.at, mine,
       ],
-    ]);
-    if (Number(replies[replies.length - 1]) !== 1) {
+    ];
+    const replies = await redisPipeline(commands);
+    let exact: unknown[] | null;
+    try { exact = repliesFor(replies, commands.length); } catch { exact = null; }
+    const offset = leftover.length ? 1 : 0;
+    const removed = leftover.length && exact ? countOf(exact[0]) : 0;
+    if (!exact || removed === null || removed > leftover.length ||
+        exact[offset] !== 1 || exact[offset + 1] !== 1 || exact[offset + 2] !== 1) {
       // Not kept: its themes go too (when this fails, they stay unread, under no head, until they expire).
       await redisPipeline([["ZREM", readKey, entry]]).catch(() => undefined);
       return { ok: false, reason: "failed" };

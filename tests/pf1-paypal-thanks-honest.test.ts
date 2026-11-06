@@ -11,7 +11,8 @@
  *   pending mark: settle() clears that mark BEFORE anything is handed over (Claude 5's MEDIUM on #2911), so it says
  *   nothing about delivery. A grant that cannot be read means the page could not check.
  * - When the payment is recorded and this order's grant is there, the page is as before: the purchase, its link and
- *   the event. A product that cannot be read then never sends the buyer to the error page or to "not found".
+ *   the event. The same when the address already held the product (a repeat purchase, a gift: grantImported keeps the
+ *   first grant) and this order stands behind it in `nl:ppsell:own:` (the Claude 4 team's re-review of #2911). A product that cannot be read then never sends the buyer to the error page or to "not found".
  * - Claude 5's proof on #2911, kept: the real openOrder -> captureOrder -> watchPayPal/settle against the PayPal stand-in
  *   of tests/paypal-sales.test.ts, the page drawn while the sweep hands over and after a hand-over that failed.
  *
@@ -371,6 +372,21 @@ async function main(): Promise<void> {
     const page = await open(giftedOrder);
     undo();
     is("the page is drawn", page === "crashed" ? "crashed" : "drawn", "drawn");
+    const html = page === "crashed" ? "" : page.html;
+    is("it says it could not check the payment just now", html.includes(COULD_NOT_CHECK), true);
+    is("no link and no purchase event", [html.includes("Open what you bought"), page === "crashed" ? null : page.purchaseEvent], [false, false]);
+  }
+
+  part("Another grant holds the product and this order's standing mark answers in another shape: could not check, never delivered");
+  {
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const replies = await real(commands);
+      // "1" as text, not the integer SISMEMBER answers: not its shape, so unknown.
+      return commands.map((c, i) => (c[0] === "SISMEMBER" && String(c[1]).startsWith("nl:ppsell:own:") ? String(replies[i]) : replies[i]));
+    }) as typeof redis.pipeline;
+    const page = await open(giftedOrder);
+    redis.pipeline = real;
     const html = page === "crashed" ? "" : page.html;
     is("it says it could not check the payment just now", html.includes(COULD_NOT_CHECK), true);
     is("no link and no purchase event", [html.includes("Open what you bought"), page === "crashed" ? null : page.purchaseEvent], [false, false]);

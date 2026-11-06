@@ -1406,7 +1406,9 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
       })
     : null;
   const ours = paid && paid.store === store.statsId ? paid : null;
-  // Handed over only when this very order's grant proves it (lib/paypal-handed.ts). The pending mark is no proof:
+  // Handed over only when the buyer's grant proves it (lib/paypal-handed.ts): this order's own, or, when the address
+  // already held the product (a repeat purchase, a gift: the record keeps the first grant), this order standing behind
+  // it (the Claude 4 team's re-review of #2911). The pending mark is no proof:
   // settle() in lib/paypal-sales.ts clears it before anything is handed over (Claude 5's MEDIUM on #2911), so a paid
   // order without its grant is still being handed over (the sweep running, or a hand-over that failed), and a grant
   // that cannot be read is unknown: never a link to the purchase or a purchase event for the creator's pixels.

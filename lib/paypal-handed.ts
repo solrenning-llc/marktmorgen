@@ -1,19 +1,26 @@
 /**
  * Whether a paid PayPal order was handed over, for the thanks page (PF1, Claude 5's MEDIUM on #2911).
  *
- * The only proof is this very order's grant: deliverPayPal (lib/paypal-sales.ts) writes the buyer's record
+ * The proof is the buyer's grant: deliverPayPal (lib/paypal-sales.ts) writes the buyer's record
  * `nl:imp:buy:<statsId>:<address hash>` field <product> = { job: "paypal:<order>", ... } as its first step of the
  * hand-over. The pending mark is no proof: settle() clears it BEFORE anything is handed over, so a paid order with no
  * mark may still be waiting for (or have failed) its hand-over.
  *
- *   true       the grant is there and names this order
- *   false      no grant, or a grant written by another payment, gift or import (this order's hand-over not proven)
- *   "unknown"  the read failed or did not answer in its exact shape: never taken as handed over
+ * grantImported writes with HSETNX, so the record keeps the FIRST grant's job (the Claude 4 team's re-review of #2911):
+ * when the address already held the product (an earlier PayPal purchase, a gift, an import, a place), this order's own
+ * hand-over leaves the earlier job there. Then the address holds what it bought, and this order counts as handed over
+ * only while it is one of the paid orders standing behind that product (`nl:ppsell:own:`, written by settle() and
+ * taken off when PayPal refunds it in full), read exactly.
  *
- * One HGET, read in its exact envelope (lib/redis-reply.ts), as the refund watch reads the same record.
+ *   true       the grant names this order; or another grant holds the product and this order stands behind it
+ *   false      no grant; or another grant holds it and this order does not stand behind it
+ *   "unknown"  a read failed or did not answer in its exact shape: never taken as handed over
+ *
+ * One HGET, read in its exact envelope (lib/redis-reply.ts), as the refund watch reads the same record; one
+ * SISMEMBER more only when the grant names another job.
  */
 import { importedKey } from "@/lib/imported-purchases";
-import type { Paid } from "@/lib/paypal-sales";
+import { type Paid, ownKey } from "@/lib/paypal-sales";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 
@@ -31,5 +38,10 @@ export async function paypalHandedOver(paid: Pick<Paid, "store" | "email" | "pro
     return "unknown";
   }
   if (!value || typeof value !== "object" || Array.isArray(value) || typeof (value as { job?: unknown }).job !== "string") return "unknown";
-  return (value as { job: string }).job === `paypal:${paid.order}`;
+  if ((value as { job: string }).job === `paypal:${paid.order}`) return true;
+  // Another grant holds the product: this order is handed over while it stands behind it. SISMEMBER answers 0 or 1;
+  // anything else is unknown, never "handed over" and never "not yet".
+  const stands = repliesFor(await redisPipeline([["SISMEMBER", ownKey(paid.store, paid.email, paid.product), paid.order]]), 1);
+  if (!stands || (stands[0] !== 0 && stands[0] !== 1)) return "unknown";
+  return stands[0] === 1;
 }

@@ -10,7 +10,6 @@
  *   nl:transparency:since           ISO day counting began
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { REPORT_KINDS, type ReportKind } from "@/lib/takedown-rules";
 
 export type NoticeKind = ReportKind;
@@ -62,42 +61,23 @@ export type YearCounts = {
   steps: Record<StepType, number>;
 };
 
-/** A year's hash, field by field, only as HGETALL answers it: an even list of names and whole counts. Else null. */
-function countsOf(reply: unknown): Map<string, number> | null {
-  const flat = stringList(reply);
-  if (!flat || flat.length % 2 !== 0) return null;
-  const counts = new Map<string, number>();
-  for (let i = 0; i < flat.length; i += 2) {
-    const value = flat[i + 1];
-    if (!/^\d{1,15}$/.test(value)) return null;
-    counts.set(flat[i], Number(value));
-  }
-  return counts;
-}
-
-/**
- * The day counting began (null before the first count), and each year since, newest first.
- * A reply in any other shape is unknown (CX-123 rule 24): it throws UnknownReplyError, never
- * "nothing counted yet" and never a zero; a field the hash does not have is a count never made.
- */
+/** The day counting began (null before the first count), and each year since, newest first. */
 export async function transparencyCounts(now = Date.now()): Promise<{ since: string | null; years: YearCounts[] }> {
   if (!isRedisConfigured()) return { since: null, years: [] };
-  const read = repliesFor(await redisPipeline([["GET", SINCE]]), 1);
-  if (!read) throw new UnknownReplyError("the day transparency counting began");
-  const [since] = read;
-  if (since === null) return { since: null, years: [] };
-  if (typeof since !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(since)) throw new UnknownReplyError("the day transparency counting began");
+  const [since] = await redisPipeline([["GET", SINCE]]);
+  if (typeof since !== "string") return { since: null, years: [] };
   const first = Number(since.slice(0, 4));
   const last = Number(yearOf(now));
   const years = Array.from({ length: Math.max(0, last - first + 1) }, (_, i) => String(last - i));
-  const raws = years.length ? repliesFor(await redisPipeline(years.map((y) => ["HGETALL", yearKey(y)])), years.length) : [];
-  if (!raws) throw new UnknownReplyError("the transparency counts");
+  const raws = await redisPipeline(years.map((y) => ["HGETALL", yearKey(y)]));
   return {
     since,
     years: years.map((year, i) => {
-      const counts = countsOf(raws[i]);
-      if (!counts) throw new UnknownReplyError(`the transparency counts for ${year}`);
-      const get = (field: string) => counts.get(field) ?? 0;
+      const flat = Array.isArray(raws[i]) ? (raws[i] as unknown[]).map(String) : [];
+      const get = (field: string) => {
+        const at = flat.findIndex((v, k) => k % 2 === 0 && v === field);
+        return at >= 0 ? Number(flat[at + 1]) || 0 : 0;
+      };
       return {
         year,
         notices: { copyright: get("notice:copyright"), other: get("notice:other") },

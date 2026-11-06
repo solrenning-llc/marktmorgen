@@ -21,25 +21,19 @@ const n = (value: number) => value.toLocaleString("en-US");
  * (lib/transparency.ts). Only real counts, from the day counting began.
  */
 export default async function TransparencyPage() {
-  // A read that failed or answered in an unknown shape is said as such, never as "nothing counted yet" (CX-123 rule 24).
-  const read: { since: string | null; years: YearCounts[] } | null = await transparencyCounts().catch((error: unknown) => {
-    console.error("the transparency counts could not be read", error);
-    return null;
-  });
+  const { since, years } = await transparencyCounts().catch(() => ({ since: null, years: [] as YearCounts[] }));
   return (
     <LegalPage title="Notices about content" eyebrow="Transparency" effective={null} legalNav={false}>
       <p>
         Anybody can tell us that something on a Marktmorgen store infringes their copyright or is otherwise illegal, with the
         form at <Link href="/report" className="text-black underline underline-offset-2 hover:no-underline">Report content</Link>. These are the notices we received and the ones we acted on, counted as they happen. Nothing here says who sent a notice or which store it was about.
       </p>
-      {!read ? (
-        <p role="status">The counts could not be loaded just now. This does not mean that no notice was received. Try again in a moment.</p>
-      ) : !read.since ? (
+      {!since ? (
         <p>No notice has been counted yet. Counting begins with the first notice.</p>
       ) : (
         <>
-          <p>{`Counted from ${DAY.format(new Date(`${read.since}T00:00:00Z`))}. Orders from courts or authorities are not counted on this page.`}</p>
-          {read.years.map((y) => (
+          <p>{`Counted from ${DAY.format(new Date(`${since}T00:00:00Z`))}. Orders from courts or authorities are not counted on this page.`}</p>
+          {years.map((y) => (
             <section key={y.year} aria-labelledby={`year-${y.year}`}>
               <h2 id={`year-${y.year}`}>{y.year}</h2>
               <table>

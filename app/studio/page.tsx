@@ -1254,6 +1254,10 @@ export default async function StudioPage({
   // a promise React renders beside the other sections, so they wait together and not one after another. Each sits
   // where it did, under the same condition, and reads and writes what it did; a refusal still fails the page.
   // tests/studio-today-trips.test.ts renders the tree whole.
+  // The two store writes in the parts below keep the order they had: a token's platforms are written (ServerEvents)
+  // before the add-on's month is read again from Stripe and written (the assistant), so they never wait on each
+  // other's store lock in one visit. Set while the page's JSX is built, before either part awaits anything.
+  const serverWrite: { done: Promise<unknown> } = { done: Promise.resolve() };
   return (
     <div className="min-h-screen bg-paper text-ink">
       {store && view ? (
@@ -1995,15 +1999,18 @@ export default async function StudioPage({
                 })()}
 
                 <PixelEditor pixels={store.pixels} canViewAttribution={may("stats")} />
-                {hasPixels(store.pixels) ? (async () => (
+                {hasPixels(store.pixels) ? (async () => {
+                  const setupRead = (async () => {
+                    const setup = await serverSetup(store.statsId).catch(() => NO_SETUP);
+                    // A token saved before the store kept its own list of platforms is written there now, once.
+                    const on = SERVER_PLATFORMS.filter((p) => setup.on[p]);
+                    if (on.join() !== store.adsServer.join()) await setAdsServer(storeRef(store), on).catch(() => null);
+                    return setup;
+                  })();
+                  serverWrite.done = setupRead;
+                  return (
                   <ServerEventsEditor
-                    setup={await (async () => {
-                      const setup = await serverSetup(store.statsId).catch(() => NO_SETUP);
-                      // A token saved before the store kept its own list of platforms is written there now, once.
-                      const on = SERVER_PLATFORMS.filter((p) => setup.on[p]);
-                      if (on.join() !== store.adsServer.join()) await setAdsServer(storeRef(store), on).catch(() => null);
-                      return setup;
-                    })()}
+                    setup={await setupRead}
                     pixels={{
                       meta: Boolean(store.pixels.meta),
                       tiktok: Boolean(store.pixels.tiktok),
@@ -2012,7 +2019,8 @@ export default async function StudioPage({
                     }}
                     googleId={store.pixels.google ?? ""}
                   />
-                ))() : null}
+                  );
+                })() : null}
 
                 {(async () => {
                   const cardsRead = readCards(store).catch(() => new Map());
@@ -2022,7 +2030,7 @@ export default async function StudioPage({
                   const assistant = may("page")
                     ? early((async () => {
                         // The add-on's month as Stripe has it, read again when the snapshot has run out (lib/assistant-billing.ts).
-                        const own = store.assistantPlan && !assistantWindow(store.assistantPlan) && isBillingConfigured() ? await syncAssistant(store).catch(() => store) : store;
+                        const own = store.assistantPlan && !assistantWindow(store.assistantPlan) && isBillingConfigured() ? await serverWrite.done.then(() => syncAssistant(store)).catch(() => store) : store;
                         const missed = assistantMissed(own).catch(() => []);
                         return (
                           <StoreAssistantEditor

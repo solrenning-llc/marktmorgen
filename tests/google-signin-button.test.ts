@@ -7,6 +7,7 @@
  * text, 2.5.5 a 44 px target, 2.4.13 focus visible).
  */
 import { createElement } from "react";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { GoogleSignIn } from "@/components/google-signin";
 import { done, is } from "./check";
@@ -20,4 +21,12 @@ is("in Google's four standard colors", ["#4285F4", "#34A853", "#FBBC05", "#EA433
 is("on white, whatever the page's colors", /bg-white[^"]*"[^>]*>\s*<svg/.test(button), true);
 is("a target of at least 44 px", /<button[^>]*class="[^"]*min-h-11/.test(button), true);
 is("no image of text: the words are text", /<img[^>]*alt="[^"]+"/.test(button), false);
+// Codex U's LOW on #2671 (proof codex/u-review-2671-doc-state-proof@05708df9): the guide's opening state
+// separates what no agent did from what the owner already checked in Google Cloud.
+const guide = readFileSync("docs/google-signin.md", "utf8");
+is("the guide still records the feature as disabled", guide.includes("GOOGLE_SIGNIN_APPROVED` é `false"), true);
+is("the guide records that the owner checked steps 2 through 7", guide.includes("O dono conferiu os passos 2 a 7"), true);
+is("the guide records the renamed project", guide.includes('agora com o nome "Marktmorgen"'), true);
+is("the opening state no longer says that nothing was done in Google Cloud", guide.includes("Nada foi feito no Google Cloud"), false);
+is("it says that no agent acted there", guide.includes("Nenhum agente fez nada no Google Cloud"), true);
 done();

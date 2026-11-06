@@ -1,6 +1,6 @@
 # Entrar com o Google — 276 [H3-1]
 
-Registro de 01/11/2026 (Fortaleza). Estado (VR): **desligado pelas travas**, construído e testado num PR; não está disponível ao cliente. `GOOGLE_SIGNIN_APPROVED` é `false` em `lib/google-signin.ts`. Nada foi feito no Google Cloud, nenhuma conta, termo ou configuração foi tocada.
+Registro de 01/11/2026 (Fortaleza). Estado (VR): **desligado pelas travas**, construído e testado num PR; não está disponível ao cliente. `GOOGLE_SIGNIN_APPROVED` é `false` em `lib/google-signin.ts`. Nenhum agente fez nada no Google Cloud nem tocou em conta, termo ou configuração; o que o dono já conferiu lá está registrado abaixo (passos 2 a 7).
 
 ## O que foi construído
 

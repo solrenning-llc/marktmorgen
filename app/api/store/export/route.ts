@@ -69,7 +69,14 @@ export async function GET(request: NextRequest) {
         return plain(429, `You have downloaded your store's main data ${ENDED_STORE_EXPORTS} times since your plan ended, which is what a store whose plan has ended keeps for this. Your list, your sales and your numbers still download one by one below, and starting a plan again lets you download it again.`);
       }
     } else {
-      const took = await takeAllowance(store, "studio", exportUnits(await exportShape(store)));
+      let shape;
+      try {
+        shape = await exportShape(store);
+      } catch (error) {
+        console.error("measuring a store export failed", error);
+        return plain(503, "Your store's file could not be measured just now. Try again in a minute.");
+      }
+      const took = await takeAllowance(store, "studio", exportUnits(shape));
       if (!took.ok) return plain(429, took.message);
     }
     return new Response(storeExport(store), {

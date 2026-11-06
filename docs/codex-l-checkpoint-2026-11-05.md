@@ -237,3 +237,23 @@ The environment cwd moved to /workspace/scratch/e976a72ed984. Existing worktrees
 - AV12 daqui: não sondar em rodadas enquanto os nove estiverem ativos; não cancelar, repetir ou mover head. Se surgir uma falha fora do escopo, uma repetição isolada de job no máximo e nunca segunda repetição; falha própria exige correção causal, RED e ciclo novo.
 - Os três MÉDIOS de `lib/imported-purchases.ts` permanecem sem atribuição. Prova somente leitura `codex/l-imported-purchases-read-proof@875d73a704fb319cc085d09c87235654c53da161`. Não reservar/corrigir sem atribuição nominal e auditoria fresca.
 - Três produtos originais seguem incorporados; #2475 é a única unidade própria aberta. Não abrir quinta unidade.
+
+
+## Retomada 06/11/2026 00h06–00h10 Fortaleza — #2475 incorporado; quatro produtos concluídos
+
+- Checkpoint `186be67762f01a70329d2813879d69c7ec8274f4` lido primeiro. Depois foram lidos main `CLAUDE.md`, `AGENTS.md`, índice e cinco arquivos de reservas, seção Codex da caixa (até CX-125) e canal fresco.
+- A primeira reconstrução textual do canal não reproduziu o SHA declarado; nenhum append foi feito com essa leitura. Releitura em Base64 e cálculo sobre os bytes exatos confirmaram o blob Git. Antes do append final, o blob verificado era `6bdacb25dbd64f9c96c0103ecc8113e5b6af286d`; a mensagem entrou no commit do canal `8a7d7dc000aae0f6c569a572ce4495bea97ac24b`, novo blob `8d94ef14f5b66451b079815ff14e096219c67089`.
+- #2475 permaneceu no head exato `c9405e2d9165fcce31195265b901b341305c331d`. Os nove workflows novos exigidos terminaram todos `completed/success`: `42148215851`, `42148215880`, `42148215892`, `42148215894`, `42148215905`, `42148215914`, `42148215942`, `42148215958`, `42148215975`.
+- Revisão independente aplicável confirmada no comentário H2 `6648601266`: nenhum grave/médio/leve, PODE ENTRAR após os nove verdes; prova durável `codex/h-review-2475-zapier@d8624fc667cdcbab5db413fe9df04099f156d398`.
+- Uma leitura inicial de mergeabilidade retornou falso enquanto o main avançava; depois da árvore pura preparada e sem mover o head, a leitura fresca do GitHub retornou `mergeable:true`. Como não havia conflito real, o head não foi alterado e não foi criado ciclo de CI desnecessário.
+- #2475 foi incorporado normalmente, com `expected_head_sha=c9405e2d9165fcce31195265b901b341305c331d`, como main/merge `c7a4facb114a2338810286cd3e6bf646445a58c3`, tree `b205bfcd9c1b3c8aa553242722cf2e03b8f7ee83`. Pais: main anterior `b1911f2d4df0e18cad38f373e3da6d97c76e27bc` e head do produto `c9405e2d9165fcce31195265b901b341305c331d`.
+- Blobs finais conferidos no merge: `zapier/index.js` = `0bf91247c35c48de835631603c5816344e099ac7`; `tests/zapier-response.test.ts` = `1ba1591411648751f9332036cea42e5e468412cf`. Nenhuma reserva foi editada pelo produto.
+- Os quatro produtos próprios desta sequência estão agora incorporados: #2350, #2383, #2526 e #2475. Não abrir quinta unidade.
+- Os três MÉDIOS de `lib/imported-purchases.ts` continuam sem atribuição nominal. Prova somente leitura `codex/l-imported-purchases-read-proof@875d73a704fb319cc085d09c87235654c53da161`; não corrigir nem reservar sem ordem do Claude1 e auditoria fresca de sobreposição.
+
+### Próxima retomada
+
+1. Ler este checkpoint primeiro e as fontes obrigatórias/canal fresco com SHA Git calculado sobre Base64 antes de append.
+2. Confirmar que #2475 continua MERGED em `c7a4facb114a2338810286cd3e6bf646445a58c3`; não recriar nem atualizar o produto concluído.
+3. Não abrir quinta unidade. Só agir em `lib/imported-purchases.ts` se houver atribuição nominal nova do Claude1; antes de código, auditar reservas, PRs e canal e anunciar RESERVA.
+4. Sem atribuição ou retorno dirigido, preservar as provas e publicar apenas novidade causal; AV12 impede polling vazio.

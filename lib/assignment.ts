@@ -20,7 +20,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { ENTRY_BYTES, dataBytes } from "@/lib/store-data-rules";
 import { markLesson } from "@/lib/learn";
@@ -99,25 +99,22 @@ export type TaskDrop = { courseId: string; lessonId: string; files: string[]; by
  * takes the assignment out of the course (Revisor 1 on #2810), so a read that fails leaves everything findable.
  */
 export async function readTaskDrop(courseId: string, lessonId: string): Promise<TaskDrop> {
-  const flat = repliesFor(await redisPipeline([["HGETALL", filesKey(courseId, lessonId)]]), 1)?.[0];
-  const pairs: unknown[] | null = Array.isArray(flat)
-    ? flat
-    : flat && typeof flat === "object"
-      ? Object.entries(flat as Record<string, unknown>).flat()
-      : null;
+  // HGETALL and ZRANGEBYSCORE answer a plain list of text: read from its own slots (stringList), so a Proxy, a hole,
+  // a member that is not text or a reply that is not a list is unknown, never a list.
+  const pairs = stringList(repliesFor(await redisPipeline([["HGETALL", filesKey(courseId, lessonId)]]), 1)?.[0]);
   if (!pairs || pairs.length % 2 !== 0) throw new UnknownReplyError("the files handed in for an assignment");
   const files: string[] = [];
   let bytes = 0;
   for (let i = 0; i < pairs.length; i += 2) {
     const [name, size] = [pairs[i], pairs[i + 1]];
-    if (typeof name !== "string" || !name || typeof size !== "string" || !FILE_BYTES_TEXT.test(size)) throw new UnknownReplyError("the files handed in for an assignment");
+    if (!name || !FILE_BYTES_TEXT.test(size)) throw new UnknownReplyError("the files handed in for an assignment");
     files.push(name);
     bytes += Number(size);
   }
   // Each student's own record, found by the list of all the work handed in.
-  const waiting = repliesFor(await redisPipeline([["ZRANGEBYSCORE", allKey(courseId), "-inf", "+inf"]]), 1)?.[0];
-  if (!Array.isArray(waiting) || !waiting.every((m) => typeof m === "string")) throw new UnknownReplyError("the work handed in for a course");
-  const gone = (waiting as string[]).filter((m) => m.startsWith(`${lessonId}|`));
+  const waiting = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", allKey(courseId), "-inf", "+inf"]]), 1)?.[0]);
+  if (!waiting) throw new UnknownReplyError("the work handed in for a course");
+  const gone = waiting.filter((m) => m.startsWith(`${lessonId}|`));
   // What the prompt and the work weighed comes back to the store's data room.
   const held = repliesFor(
     await redisPipeline([["GET", taskKey(courseId, lessonId)], ...gone.map((member) => ["GET", subKey(courseId, lessonId, member.slice(lessonId.length + 1))])]),

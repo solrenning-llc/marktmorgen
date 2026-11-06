@@ -139,3 +139,53 @@ test('alternating exposure raws cannot pass one guard and populate the snapshot 
  assert.equal(await reserveFundedExposure('swap_tx','trial',f.policy,f.context),false);
  assert.equal(reads,4);assert.equal(calls.length,0);assert.deepEqual([...ledger.get(f.key)!],before);
 });
+
+test('decorated, hidden and non-plain ACKs never authorize exposure-funded work',async()=>{
+ const responses:unknown[][]=[];
+ const decorated=[1];Object.defineProperty(decorated,'error',{value:'unknown transaction',enumerable:true});responses.push(decorated);
+ const hidden=[1];Object.defineProperty(hidden,'0',{enumerable:false});responses.push(hidden);
+ const extraGetter=[1];let reads=0;
+ Object.defineProperty(extraGetter,'unknown',{enumerable:true,get(){reads++;throw Error('must not execute');}});responses.push(extraGetter);
+ const nonPlain=[1];Object.setPrototypeOf(nonPlain,null);responses.push(nonPlain);
+ for(const response of responses){
+  const f=start();settings({response});
+  assert.equal(await reserveFundedExposure('malformed','trial',f.policy,f.context),false);
+  assert.equal(calls.length,1);assert.equal(calls[0].length,1);assert.equal(calls[0][0][0],'EVAL');
+ }
+ assert.equal(reads,0);
+});
+
+test('a Proxy cannot forge or conceal the numeric Redis exposure acknowledgement',async()=>{
+ const reads:PropertyKey[]=[];
+ const forged=new Proxy([0],{
+  getOwnPropertyDescriptor(target,key){const d=Reflect.getOwnPropertyDescriptor(target,key);return key==='0'&&d?{...d,value:1}:d;},
+  get(target,key,receiver){reads.push(key);return Reflect.get(target,key,receiver);},
+ });
+ const shortened=new Proxy([1,0],{
+  ownKeys(target){return Reflect.ownKeys(target).filter(key=>key!=='1');},
+  getOwnPropertyDescriptor(target,key){const d=Reflect.getOwnPropertyDescriptor(target,key);return key==='length'&&d?{...d,value:1}:d;},
+ });
+ const revoked=Proxy.revocable([1],{});revoked.revoke();
+ for(const response of [forged,shortened,new Proxy([1],{}),revoked.proxy]){
+  const f=start();settings({response});
+  assert.equal(await reserveFundedExposure('proxy','trial',f.policy,f.context),false);
+  assert.equal(calls.length,1);
+ }
+ // Async transport resolution necessarily probes then; ACK validation reads no values.
+ assert.deepEqual(reads,['then']);
+});
+
+test('an uncertain ACK keeps an existing allocation and only exact plain ACKs allow reuse',async()=>{
+ const f=start();assert.equal(await reserveFundedExposure('held','trial',f.policy,f.context),true);
+ const before=[...ledger.get(f.key)!];
+ const malformed=[1];Object.defineProperty(malformed,'unknown',{value:null,enumerable:true});
+ settings({response:malformed});
+ assert.equal(await reserveFundedExposure('held','trial',f.policy,f.context),false);
+ assert.deepEqual([...ledger.get(f.key)!],before);
+ settings({response:Object.freeze([1]) as unknown as unknown[]});
+ assert.equal(await reserveFundedExposure('held','trial',f.policy,f.context),true);
+ assert.deepEqual([...ledger.get(f.key)!],before);
+ settings({response:null});
+ assert.equal(await reserveFundedExposure('held','trial',f.policy,f.context),true);
+ assert.deepEqual([...ledger.get(f.key)!],before);
+});

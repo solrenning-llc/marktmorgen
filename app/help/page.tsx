@@ -40,6 +40,10 @@ export default function HelpPage() {
               <Icon name="check" size={15} className="text-mint-deep" />
               Checked against the product on September 28, 2026.
             </p>
+            <p className="mt-3">
+              Bought something from a creator here?{" "}
+              <Link href="/help/buyers" className="link font-medium">Help for buyers</Link>
+            </p>
             <HelpSearch />
           </div>
         </section>

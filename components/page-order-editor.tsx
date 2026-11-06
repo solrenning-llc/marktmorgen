@@ -3,6 +3,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
+import { useLeaveGuard } from "@/components/leave-guard";
 import { PAGE_PARTS, type PagePart, USUAL_ORDER, isUsualOrder } from "@/lib/store-order";
 
 const subscribeReady = () => () => {};
@@ -25,6 +26,7 @@ export function PageOrderEditor({ order, on }: { order: PagePart[]; on: Record<P
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const changed = list.some((part, i) => part !== saved[i]);
+  useLeaveGuard(changed);
 
   function move(at: number, by: -1 | 1) {
     if (!ready || saving) return;

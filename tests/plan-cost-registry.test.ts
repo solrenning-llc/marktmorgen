@@ -1,4 +1,13 @@
 import { PATH_GROWTH_READ_UNITS } from "@/lib/path-growth-facts";
+import { API_SALES_READ } from "./plan-cost-registry";
+import { bundleItemUnits, collectionUnits } from "@/lib/page-read-rules";
+import { MAX_BUNDLE_ITEMS } from "@/lib/bundle-rules";
+import { MAX_BUMPS } from "@/lib/product-extras";
+import { MAX_COLLECTION_PRODUCTS } from "@/lib/store-collections";
+import { bundleItemRead, collectionRead } from "./plan-cost-registry";
+import { checkUnits, searchUnits, walkUnits } from "@/lib/community-read-rules";
+import { SEARCH_CONVERSATIONS } from "@/lib/community-dm";
+import { ACCESS_CHECK_READ, searchRead, walkRead } from "./plan-cost-registry";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
 import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS } from "./plan-cost-registry";
 import { TEST_SALES_PAGES } from "@/lib/broadcasts";
@@ -54,7 +63,7 @@ import { MAX_POST_PAGES } from "@/lib/store-sitemap";
 import { affiliateLoadRead, affiliatePageRead, publicListingsRead, sitemapRead } from "./plan-cost-registry";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { CERTIFICATE_PDF_UNITS } from "@/lib/certificate-pdf";
-import { ALLOWANCE_KINDS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { ALLOWANCE_KINDS, API_SALES_UNITS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { CALL_ORDER_UNITS } from "@/lib/order-rules";
 import { SETUP_EXTRA_REQUESTS, SETUP_VISITS, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
@@ -222,10 +231,28 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(STUDIO_PAGE_UNITS * UNIT_COST.studio >= request("heavy", 80, 400_000));
   // A contact added or a product given is API_WRITE_UNITS requests: more than a write of sixty commands.
   assert.ok(API_WRITE_UNITS * UNIT_COST.api >= request("write", 60, 20_000));
+  // A page of sales read through the API is API_SALES_UNITS requests: more than its wait on Stripe, its reads and its answer cost (lib/api-sales.ts).
+  // With room: at least 5% more than that worst page.
+  assert.ok(API_SALES_UNITS * UNIT_COST.api >= 1.05 * API_SALES_READ, `${API_SALES_UNITS} x ${UNIT_COST.api} < 1.05 x ${API_SALES_READ}`);
   // A booked call is CALL_ORDER_UNITS orders: its confirmation to buyer and host and its two reminders are four emails.
   assert.ok(CALL_ORDER_UNITS * 2 >= 4);
   // A community picture is PICTURE_REQUEST_UNITS public requests, each priced as a later page: more than its megabyte through us costs.
   assert.ok(PICTURE_REQUEST_UNITS * laterPageCost() >= PICTURE_READ, `${PICTURE_REQUEST_UNITS} x ${laterPageCost()} < ${PICTURE_READ}`);
+  // A collection's products (lib/page-read-rules.ts, 4 November 2026): at every size the requests taken cost more than what they read.
+  for (let products = 1; products <= MAX_COLLECTION_PRODUCTS; products += 1) assert.ok(collectionUnits(products) * laterPageCost() >= collectionRead(products), `collection of ${products}`);
+  // The items its bundles hold (Codex G2 on #2583): every product and every one its checkout boxes offer may be a bundle of MAX_BUNDLE_ITEMS.
+  for (let items = 1; items <= MAX_COLLECTION_PRODUCTS * (1 + MAX_BUMPS) * MAX_BUNDLE_ITEMS; items += 1) assert.ok(bundleItemUnits(items) * laterPageCost() >= bundleItemRead(items), `${items} bundle items`);
+  console.log(`a collection of 8 products: ${1 + collectionUnits(8)} requests with its page ($${collectionRead(8).toFixed(6)} past it), ${1 + collectionUnits(MAX_COLLECTION_PRODUCTS)} at the largest`);
+  // A community search, its access checks and each step of the walk of its archive (lib/community-read-rules.ts,
+  // 4 November 2026): at every size the requests taken cost more than what they read.
+  for (const room of [false, true]) for (let conversations = 0; conversations <= SEARCH_CONVERSATIONS; conversations += 1) {
+    assert.ok(searchUnits({ room, conversations }) * laterPageCost() >= searchRead({ room, conversations }), `search ${room} ${conversations}`);
+  }
+  for (const checks of [1, 2, 20]) assert.ok(checkUnits(checks) * laterPageCost() >= checks * ACCESS_CHECK_READ, `${checks} checks`);
+  for (const commands of [0, 1, 24, 25, 26, 600, 30_000]) for (const bytes of [0, 1, 999_999, 1_000_000, 1_000_001, 51_200_000]) {
+    assert.ok(walkUnits(commands, bytes) * laterPageCost() >= walkRead(commands, bytes), `walk step ${commands} commands ${bytes} bytes`);
+  }
+  console.log(`a community search: ${1 + searchUnits({ room: false, conversations: 0 })} requests with its page, ${1 + searchUnits({ room: true, conversations: 3 })} with the room and three conversations ($${searchRead({ room: true, conversations: 3 }).toFixed(6)})`);
   // A certificate's PDF is CERTIFICATE_PDF_UNITS public requests, all taken before it is drawn: more than its CPU, its time and its bytes cost.
   assert.ok(CERTIFICATE_PDF_UNITS * laterPageCost() >= CERTIFICATE_PDF_READ, `${CERTIFICATE_PDF_UNITS} x ${laterPageCost()} < ${CERTIFICATE_PDF_READ}`);
   console.log(`a certificate's PDF: $${CERTIFICATE_PDF_READ.toFixed(6)} at most, counted as ${CERTIFICATE_PDF_UNITS} requests at $${laterPageCost().toFixed(6)}`);

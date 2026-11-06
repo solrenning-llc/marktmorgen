@@ -25,6 +25,8 @@ import { ProductUpdateBox } from "@/components/product-update-box";
 import { ShippingEditor } from "@/components/shipping-editor";
 import { MAX_SHIPPING_SKU } from "@/lib/shipping";
 import { confirmsOptionWrite, OPTION_NOT_CONFIRMED, optionRefusalWords } from "@/lib/option-confirmation";
+import { membersOn, readOptionInvited, readOptionMembers, type OptionMembers } from "@/lib/option-members";
+import Link from "next/link";
 import { CheckoutFieldsEditor } from "@/components/checkout-fields-editor";
 import { ProductImageEditor } from "@/components/product-image-editor";
 import type { CoverLook } from "@/components/cover-maker";
@@ -60,7 +62,7 @@ import {
   handsOver,
   optionDelivers,
 } from "@/lib/product-option";
-import { activePlan } from "@/lib/product-extras";
+import { activePlan, planPausedByRestore } from "@/lib/product-extras";
 import { activeShipping } from "@/lib/shipping";
 import type { Listing } from "@/lib/store";
 import { LINK_PROBLEMS, type LinkProblem, linkHost } from "@/lib/product-link";
@@ -115,6 +117,7 @@ const OPTION_MESSAGES: Record<string, string> = {
   store_too_many: `Your store holds ${MAX_STORE_OPTIONS.toLocaleString("en-US")} prices across all its products, which is the most it can. Remove a price you no longer use to add this one.`,
   bundle: "A bundle has one price for everything in it, so it cannot have several.",
   store_full: "Your store has reached the most it can hold. Remove something, or shorten a long list of choices, to make room.",
+  plan_pauses: "Putting this price back on sale would stop the payment plan for every price. Nothing was changed.",
 };
 
 export { fastMoneyMessage } from "@/lib/terms-check-rules";
@@ -900,6 +903,21 @@ function OptionsBlock({
     refocusRemove.current = null;
     if (back) removeButtons.current.get(back)?.focus();
   }, [removingId]);
+  // The same for "Put back on sale" when it would stop the payment plan
+  // (planPausedByRestore): it asks first, and focus follows as for "Remove".
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const restoreSaid = useRef<HTMLParagraphElement>(null);
+  const saleButtons = useRef(new Map<string, HTMLButtonElement>());
+  const refocusSale = useRef<string | null>(null);
+  useEffect(() => {
+    if (restoringId) {
+      restoreSaid.current?.focus();
+      return;
+    }
+    const back = refocusSale.current;
+    refocusSale.current = null;
+    if (back) saleButtons.current.get(back)?.focus();
+  }, [restoringId]);
   const [label, setLabel] = useState("");
   const [price, setPrice] = useState("");
   const [details, setDetails] = useState("");
@@ -915,8 +933,58 @@ function OptionsBlock({
   // Shipped by the creator (lib/shipping.ts): each price is a size or a version of the same thing, with nothing to attach.
   const shipped = Boolean(product.shipping);
   const [error, setError] = useState<string | null>(null);
+  // A membership on a price taken off sale goes on being billed (642 [WG2]); the
+  // studio says how many still pay on each, from the kept reading only (never
+  // Stripe). Asked only when one is off sale; unknown is never shown as 0.
+  const recurring = Boolean(product.recurring);
+  const offSaleIds = product.options.filter((option) => option.offSale).map((option) => option.id).join(",");
+  const [members, setMembers] = useState<OptionMembers | null>(null);
+  useEffect(() => {
+    if (!recurring || !offSaleIds) return;
+    let live = true;
+    fetch("/api/store/option", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "count", id: product.id }),
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: unknown) => {
+        if (live) setMembers(readOptionMembers(data));
+      })
+      .catch(() => {
+        if (live) setMembers(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [recurring, offSaleIds, product.id]);
+  // Members invited to move here from another platform on a price keep it even off sale (lib/move-members.ts,
+  // openMove), so the studio says how many invitations not yet kept name each price, before and after taking it
+  // off sale (Revisor 1, C4-20261105-1945-C2-2). Unknown is said as unknown, never as 0.
+  const optionIds = product.options.map((option) => option.id).join(",");
+  const [invited, setInvited] = useState<OptionMembers | null>(null);
+  useEffect(() => {
+    if (!recurring || !optionIds) return;
+    let live = true;
+    fetch("/api/store/option", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "invited", id: product.id }),
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: unknown) => {
+        if (live) setInvited(readOptionInvited(data));
+      })
+      .catch(() => {
+        if (live) setInvited(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [recurring, optionIds, offSaleIds, product.id]);
+  const allOffSale = product.options.length > 0 && product.options.every((option) => option.offSale);
 
-  async function run(payload: Record<string, unknown>, done: () => void, confirmation?: string) {
+  async function run(payload: Record<string, unknown>, done: () => void, confirmation?: string | ((data: unknown) => string)) {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
@@ -934,6 +1002,13 @@ function OptionsBlock({
         const reason = refusal && typeof data === "object" && data !== null
           && Object.hasOwn(data, "error") && typeof (data as { error?: unknown }).error === "string"
           ? (data as { error: string }).error : null;
+        // The server read the product as stored and putting this price back would stop the plan (Claude 5 on
+        // #2690): this copy was stale, so ask the same question as when the studio knows it, and refresh.
+        if (reason === "plan_pauses" && typeof payload.id === "string") {
+          setRestoringId(payload.id);
+          router.refresh();
+          return;
+        }
         setError(
           reason === "fast_money"
             ? fastMoneyMessage((data as { passage?: unknown }).passage, "save")
@@ -948,7 +1023,7 @@ function OptionsBlock({
         return;
       }
       done();
-      if (confirmation) toast(confirmation);
+      if (confirmation) toast(typeof confirmation === "function" ? confirmation(data) : confirmation);
       router.refresh();
     } catch {
       setError(OPTION_NOT_CONFIRMED);
@@ -1108,6 +1183,12 @@ function OptionsBlock({
         </p>
       )}
 
+      {allOffSale ? (
+        <p className="mt-2 text-sm font-semibold text-danger">
+          Every price is off sale, so nobody can buy this now. Put one back on sale to sell it again.
+        </p>
+      ) : null}
+
       <ul className="mt-3 space-y-2">
         {product.options.map((option, index) => (
           <li key={option.id} className="rounded-2xl bg-sand p-3">
@@ -1189,6 +1270,9 @@ function OptionsBlock({
                     {option.best ? (
                       <span className="ml-2 rounded-full bg-lilac px-2 py-0.5 text-xs font-bold text-violet-deep">Recommended</span>
                     ) : null}
+                    {option.offSale ? (
+                      <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs font-bold text-ink">Off sale</span>
+                    ) : null}
                   </p>
                   <p className="font-semibold tabular-nums text-ink">
                     {formatMoney(option.priceCents, currency)}
@@ -1203,6 +1287,43 @@ function OptionsBlock({
                       <li key={at}>{line}</li>
                     ))}
                   </ul>
+                ) : null}
+
+                {option.offSale ? (() => {
+                  const count = membersOn(members, option.id);
+                  return (
+                    <div className="mt-1 text-sm text-ink">
+                      <p>
+                        {recurring
+                          ? "New buyers can’t pick this price. Members who already pay on it keep it and are billed as before, and anyone you invited to move here on it still gets it."
+                          : "New buyers can’t pick this price. People who already bought it keep what they bought."}
+                      </p>
+                      {recurring ? (
+                        count === null ? (
+                          <p className="mt-1">
+                            <Link href="/studio/memberships" className="font-bold underline underline-offset-4">
+                              See who still pays on this price in Memberships
+                            </Link>
+                          </p>
+                        ) : (
+                          <p className="mt-1 font-semibold">
+                            {count === 1 ? "1 membership is still on it here (paying, in a free trial or with a late payment), as of your last membership reading." : `${count} memberships are still on it here (paying, in a free trial or with a late payment), as of your last membership reading.`}
+                          </p>
+                        )
+                      ) : null}
+                      {recurring && membersOn(invited, option.id) === null ? (
+                        <p className="mt-1">We couldn’t count the invitations to move here that name this price. Anyone you invited on it still gets it.</p>
+                      ) : null}
+                    </div>
+                  );
+                })() : null}
+
+                {recurring && (membersOn(invited, option.id) ?? 0) > 0 ? (
+                  <p className="mt-1 text-sm font-semibold text-ink">
+                    {membersOn(invited, option.id) === 1
+                      ? "1 person invited to move here on this price hasn’t moved yet. They keep this price even if you take it off sale."
+                      : `${membersOn(invited, option.id)} people invited to move here on this price haven’t moved yet. They keep this price even if you take it off sale.`}
+                  </p>
                 ) : null}
 
                 {!opens && !option.file && !option.link ? (
@@ -1257,6 +1378,31 @@ function OptionsBlock({
                   >
                     Move down
                   </button>
+                  <button
+                    type="button"
+                    disabled={busy || restoringId === option.id}
+                    ref={(button) => {
+                      if (button) saleButtons.current.set(option.id, button);
+                      else saleButtons.current.delete(option.id);
+                    }}
+                    onClick={() => {
+                      // Back on sale with no payment for it in the plan would stop the plan for every price: ask first.
+                      if (option.offSale && planPausedByRestore(product as Listing, option.id)) {
+                        setRestoringId(option.id);
+                        setError(null);
+                        return;
+                      }
+                      run(
+                        { action: "sale", id: option.id, onSale: option.offSale === true },
+                        () => {},
+                        option.offSale ? `${option.label} is back on sale.` : `${option.label} is off sale. Anyone who already has it keeps it.`,
+                      );
+                    }}
+                    className="inline-flex min-h-12 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
+                  >
+                    {option.offSale ? "Put back on sale" : "Take off sale"}
+                    <span className="sr-only">{`: ${option.label}`}</span>
+                  </button>
                   {removingId === option.id ? null : (
                     <button
                       type="button"
@@ -1292,6 +1438,49 @@ function OptionsBlock({
                   membership={product.recurring !== null}
                 />
                 )}
+
+                {restoringId === option.id ? (
+                  <div className="mt-2 rounded-2xl border-2 border-pink-brand/30 bg-white p-3">
+                    <p ref={restoreSaid} tabIndex={-1} className="text-sm text-ink-soft">
+                      Put <strong className="text-ink">{option.label}</strong> back on sale? The payment plan has no
+                      payment for this price that adds up to it, so the payment plan will stop for every price. To keep
+                      it, first set a payment for this price in the payment plan.
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        aria-busy={busy} disabled={busy}
+                        onClick={() =>
+                          run(
+                            { action: "sale", id: option.id, onSale: true, planPauseConfirmed: true },
+                            () => {
+                              refocusSale.current = option.id;
+                              setRestoringId(null);
+                            },
+                            // The server says whether the plan did stop: another tab may have covered this price since.
+                            (data) =>
+                              (data as { planStopped?: unknown }).planStopped === false
+                                ? `${option.label} is back on sale. The payment plan goes on.`
+                                : `${option.label} is back on sale. The payment plan has stopped.`,
+                          )
+                        }
+                        className="btn btn-primary btn-sm"
+                      >
+                        {busy ? "Saving…" : "Put back on sale"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          refocusSale.current = option.id;
+                          setRestoringId(null);
+                        }}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        Keep it off sale
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
 
                 {removingId === option.id ? (
                   <div className="mt-2 rounded-2xl border-2 border-pink-brand/30 bg-white p-3">

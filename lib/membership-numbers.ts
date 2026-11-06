@@ -30,6 +30,7 @@
  */
 import { DISCOUNT_KINDS, type DiscountKind, entryOf } from "@/lib/discount-impact";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { normaliseEmail } from "@/lib/auth";
 import { keepUnlessErased, suppressedAmong } from "@/lib/suppression";
 import { onAccount } from "@/lib/stripe-account";
@@ -47,6 +48,8 @@ export type Sub = {
   email?: string;
   status: string;
   product: string;
+  /** The price option it was bought at (metadata[option]); absent when it was bought at the product's own price. */
+  option?: string;
   /** In the currency's smallest unit, per interval, quantity included. */
   amount: number;
   currency: string;
@@ -229,7 +232,14 @@ export type ChannelStay = {
 export const STAY_AGES = [1, 2, 3, 6, 12];
 const MONTH = 30.4375 * DAY;
 
-export type ProductNumbers = { product: string; members: number; trialing: number; mrr: number };
+export type ProductNumbers = {
+  product: string;
+  members: number;
+  trialing: number;
+  mrr: number;
+  /** Live members (paying or in a trial) by the price option they bought at (642 [WG2]); absent with none on an option. */
+  byOption?: Record<string, number>;
+};
 
 export type Numbers = {
   currency: string;
@@ -253,6 +263,8 @@ export type Numbers = {
   byProduct: ProductNumbers[];
   /** Whether every membership Stripe holds was read. */
   complete: boolean;
+  /** Set on a reading that counted members by price option (byOption); absent on a reading from before, which cannot say. */
+  optionsCounted?: true;
   at: number;
   /** The last twelve months' cohorts, newest first; absent on a reading from before October 11, 2026. */
   cohorts?: Cohort[];
@@ -302,6 +314,7 @@ export function numbersFrom(subs: Sub[], currency: string, now: number, complete
     elsewhere: 0,
     byProduct: [],
     complete,
+    optionsCounted: true,
     at: now,
   };
   let payingThen = 0;
@@ -323,6 +336,9 @@ export function numbersFrom(subs: Sub[], currency: string, now: number, complete
     } else if (sub.status === "trialing") {
       out.trialing += 1;
       row.trialing += 1;
+    }
+    if (sub.option && LIVE.has(sub.status)) {
+      row.byOption = { ...row.byOption, [sub.option]: (row.byOption?.[sub.option] ?? 0) + 1 };
     }
     if (row.members || row.trialing) byProduct.set(sub.product, row);
 
@@ -472,6 +488,7 @@ export function readSub(raw: Raw, handles: Set<string>): Sub | null {
     id: typeof raw.id === "string" ? raw.id : "",
     status: typeof raw.status === "string" ? raw.status : "",
     product: meta.product,
+    ...(typeof meta.option === "string" && meta.option ? { option: meta.option } : {}),
     amount: unit * quantity,
     currency: typeof raw.currency === "string" ? raw.currency : "",
     interval: typeof item?.price?.recurring?.interval === "string" ? item.price.recurring.interval : "month",
@@ -491,6 +508,60 @@ export function readSub(raw: Raw, handles: Set<string>): Sub | null {
     email: raw.customer && typeof raw.customer === "object" && typeof (raw.customer as { email?: unknown }).email === "string" ? normaliseEmail((raw.customer as { email: string }).email) : "",
     comment: typeof raw.cancellation_details?.comment === "string" ? raw.cancellation_details.comment.replace(/\s+/g, " ").trim().slice(0, COMMENT_LENGTH) : "",
   };
+}
+
+/** An own data property of a plain object, never through a getter or the prototype; undefined when absent or odd. */
+function ownValue(record: unknown, key: string): { value: unknown } | undefined {
+  if (typeof record !== "object" || record === null || Array.isArray(record)) return undefined;
+  const field = Object.getOwnPropertyDescriptor(record, key);
+  return field && Object.hasOwn(field, "value") ? { value: field.value } : undefined;
+}
+
+/**
+ * How many live members (paying or in a trial) are on one price option, read from a reading already made (642 [WG2]):
+ * no Stripe call of its own. The reading may come back from the cache (JSON), so it is read in its exact shape
+ * (Codex T on #2690): complete and optionsCounted exactly true, byProduct a list of objects with one row at most
+ * for the product, its byOption absent or a plain table, and the count a safe whole number. Null when it cannot be
+ * said: no reading, one that did not read every membership, one from before members were counted by option, or any
+ * other shape. 0 only when the whole reading proves it: no row for the product, or none of its members on the option.
+ */
+export function membersOnOption(numbers: Numbers | null, productId: string, optionId: string): number | null {
+  if (ownValue(numbers, "complete")?.value !== true || ownValue(numbers, "optionsCounted")?.value !== true) return null;
+  const rows = ownValue(numbers, "byProduct")?.value;
+  if (!Array.isArray(rows)) return null;
+  let found: unknown = undefined;
+  for (const row of rows) {
+    const product = ownValue(row, "product");
+    if (!product || typeof product.value !== "string") return null;
+    if (product.value !== productId) continue;
+    if (found !== undefined) return null;
+    found = row;
+  }
+  if (found === undefined) return 0;
+  const table = ownValue(found, "byOption");
+  if (!table) return Object.hasOwn(found as object, "byOption") ? null : 0;
+  if (typeof table.value !== "object" || table.value === null || Array.isArray(table.value)) return null;
+  if (!Object.hasOwn(table.value, optionId)) return 0;
+  const count = ownValue(table.value, optionId);
+  return count && typeof count.value === "number" && Number.isSafeInteger(count.value) && count.value >= 0 ? count.value : null;
+}
+
+/**
+ * The membership numbers already kept for this store, read only if they fit in `maxBytes` (642 [WG2], Codex Z on
+ * #2690): one GETRANGE of at most maxBytes + 1 bytes, so nothing past the bound is ever transferred, and never
+ * Stripe. Null when nothing is kept, when the reading is bigger than the bound, or when it is not JSON; the caller
+ * reads its shape exactly (membersOnOption). Unknown, never 0.
+ */
+export async function keptNumbersWithin(store: Store, maxBytes: number): Promise<Numbers | null> {
+  if (!store.stripeAccountId || !store.statsId || !isRedisConfigured() || !Number.isSafeInteger(maxBytes) || maxBytes < 1) return null;
+  const replies = repliesFor(await redisPipeline([["GETRANGE", cacheKey(store), 0, maxBytes]]), 1);
+  const kept: unknown = replies ? replies[0] : null;
+  if (typeof kept !== "string" || kept === "" || new TextEncoder().encode(kept).length > maxBytes) return null;
+  try {
+    return JSON.parse(kept) as Numbers;
+  } catch {
+    return null;
+  }
 }
 
 /** The store's membership numbers kept CACHE_SECONDS; a person's erasure deletes it (lib/store-readings.ts, forgetReadingsPerson). */
@@ -622,7 +693,10 @@ async function readMemberships(
     query.append("expand[]", "data.customer");
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", store.stripeAccountId, `/subscriptions?${query}`);
-    const rows = (Array.isArray(listed.data) ? listed.data : []) as Raw[];
+    // CX-123 rule 24 (Claude 4, C4-2890): a page without its list, or that does not say whether more follow, is unknown,
+    // never "no members": it throws, so no number is computed from it and nothing is kept.
+    if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") throw new Error("a page of subscriptions did not read");
+    const rows = listed.data as Raw[];
     for (const raw of rows) {
       const sub = readSub(raw, handles);
       if (sub) subs.push(sub);
@@ -646,7 +720,9 @@ async function readMemberships(
       const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
       if (page) query.set("starting_after", page);
       const listed = await onAccount("GET", store.stripeAccountId, `/invoices?${query}`);
-      const rows = (Array.isArray(listed.data) ? listed.data : []) as (Invoice & { id?: unknown })[];
+      // The same for invoices: an unknown page leaves the movements out (caught below), never moves computed from none.
+      if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") throw new Error("a page of invoices did not read");
+      const rows = listed.data as (Invoice & { id?: unknown })[];
       invoices.push(...rows);
       const last = rows[rows.length - 1];
       if (listed.has_more !== true || !last || typeof last.id !== "string") break;

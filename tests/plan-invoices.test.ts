@@ -6,8 +6,10 @@
  *     for, and a row of any other customer or subscription is never shown;
  *   - a store with no plan subscription asks Stripe nothing and takes nothing
  *     from its studio figure: it says, in plain text, that there are none;
- *   - PLAN_INVOICES_UNITS studio requests are taken before Stripe is asked,
- *     and a refusal asks nothing;
+ *   - the page costs the studio's figure only what every page costs; one of
+ *     the store's billing requests of the day (the counter countStudio keeps
+ *     for "billing") is taken before Stripe is asked, and a refusal, or a
+ *     count that could not be read, asks nothing;
  *   - Stripe's pages are linked only at Stripe's own https hosts;
  *   - an answer Stripe could not give, or gave in another shape, is said as
  *     "could not be read", never as "no invoices";
@@ -23,13 +25,15 @@ import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEma
 import { STRIPE_LIST_VERSION } from "@/lib/stripe-list";
 import {
   PLAN_INVOICES_SHOWN,
-  PLAN_INVOICES_UNITS,
+  PLAN_INVOICES_USED,
   planInvoicesOf,
   readPlanInvoicePage,
   type PlanInvoices,
 } from "@/lib/plan-invoices";
 import { PlanInvoicesList } from "@/components/plan-invoices-list";
 import StudioInvoicesPage from "@/app/studio/invoices/page";
+import { ESSENTIAL_PER_DAY } from "@/lib/studio-allowance-rules";
+import { countStudio } from "@/lib/studio-route";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -120,7 +124,8 @@ async function main() {
   {
     const taken: number[] = [];
     asked.length = 0;
-    const read = await planInvoicesOf({ stripeCustomerId: null, subscriptionId: null }, async (units) => (taken.push(units), { ok: true }));
+    // Changed (rule 23): the take counts one billing request of the day, no longer studio units; still none taken.
+    const read = await planInvoicesOf({ stripeCustomerId: null, subscriptionId: null, sid: "", handle: "x" }, async () => (taken.push(1), "within" as const));
     is("none", read, { state: "none" });
     is("Stripe is not asked and no request is taken", [asked.length, taken.length], [0, 0]);
     const text = html(read);
@@ -128,23 +133,24 @@ async function main() {
     is("and nothing to click", text.includes("<a "), false);
   }
 
-  part("The store's own plan, asked once, after its studio requests are taken");
+  part("The store's own plan, asked once, after its billing request of the day is taken");
   {
     const order: string[] = [];
     asked.length = 0;
     reply = { status: 200, body: { object: "list", data: [invoice()], has_more: false } };
-    const read = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB }, async (units) => {
-      order.push(`take ${units} with ${asked.length} asked`);
-      return { ok: true };
+    const read = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, async () => {
+      order.push(`take with ${asked.length} asked`);
+      return "within";
     });
-    is("the requests are taken before Stripe is asked", order, [`take ${PLAN_INVOICES_UNITS} with 0 asked`]);
+    // Changed (rule 23): one billing request, not PLAN_INVOICES_UNITS studio requests; still taken before Stripe is asked.
+    is("the request is taken before Stripe is asked", order, ["take with 0 asked"]);
     is("one request, for this customer and this subscription only", asked.map((a) => a.path), [
       `GET /v1/invoices?${new URLSearchParams({ customer: CUS, subscription: SUB, limit: String(PLAN_INVOICES_SHOWN) })}`,
     ]);
     is("at the pinned list version", asked[0]?.version, STRIPE_LIST_VERSION);
     is("listed", read.state === "listed" && read.invoices.length, 1);
     const text = html(read);
-    is("the amount and the number are shown", [text.includes("$69.00"), text.includes("ABCD1234-0001")], [true, true]);
+    is("the amount and the number are shown", [text.includes("$69"), text.includes("ABCD1234-0001")], [true, true]);
     is("Stripe's page is linked with its purpose in the link", text.includes('href="https://invoice.stripe.com/i/acct_platform/test_one"') && text.includes("View invoice ABCD1234-0001 on Stripe"), true);
     is("its PDF too", text.includes('href="https://pay.stripe.com/invoice/acct_platform/test_one/pdf"') && text.includes("Download invoice ABCD1234-0001 as a PDF"), true);
     is("the date is said in UTC", text.includes("UTC"), true);
@@ -153,36 +159,41 @@ async function main() {
   part("A refused request asks nothing");
   {
     asked.length = 0;
-    const read = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB }, async () => ({ ok: false, message: "Your studio's requests for this month are used." }));
-    is("said as used", read, { state: "used", message: "Your studio's requests for this month are used." });
+    // Changed (rule 23): the refusal is the day's billing requests used, said in PLAN_INVOICES_USED; still nothing asked.
+    const read = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, async () => "exceeded");
+    is("said as used", read, { state: "used", message: PLAN_INVOICES_USED });
     is("Stripe is not asked", asked.length, 0);
-    is("the message is shown, never 'no invoices'", [html(read).includes("requests for this month are used"), html(read).includes("no invoices")], [true, false]);
+    is("the message is shown, never 'no invoices'", [html(read).includes(`its ${ESSENTIAL_PER_DAY} billing requests for today`), html(read).includes("no invoices")], [true, false]);
+    const unknown = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, async () => "unknown");
+    is("a count that could not be read asks nothing and is never said as too many", [unknown, asked.length, html(unknown).includes("today")], [{ state: "unknown" }, 0, false]);
+    const thrown = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, async () => { throw new Error("redis down"); });
+    is("a count that threw asks nothing", [thrown, asked.length], [{ state: "unknown" }, 0]);
   }
 
   part("What Stripe could not answer is never said as no invoices");
   {
-    const take = async () => ({ ok: true as const });
+    const take = async () => "within" as const;
     for (const [label, r] of [
       ["Stripe failed", { status: 500, body: { error: { message: "down" } } }],
       ["a page in another shape", { status: 200, body: { data: "nothing", has_more: false } }],
       ["a page without has_more", { status: 200, body: { data: [] } }],
     ] as [string, Reply][]) {
       reply = r;
-      const read = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB }, take);
+      const read = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, take);
       is(`${label}: unknown`, read, { state: "unknown" });
       const text = html(read);
       is(`${label}: says it could not be read`, [text.includes("could not be read"), text.includes("no invoices")], [true, false]);
     }
     reply = { status: 200, body: { data: [invoice({ customer: "cus_SomebodyElse1" })], has_more: false } };
-    const foreign = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB }, take);
+    const foreign = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, take);
     is("only another customer's row: nothing shown and not said as none", [foreign.state === "listed" && foreign.invoices.length, html(foreign).includes("no invoices"), html(foreign).includes("could not be read")], [0, false, true]);
     reply = { status: 200, body: { data: [], has_more: false } };
-    const empty = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB }, take);
+    const empty = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, take);
     is("a complete, empty page: none yet, in plain text", [html(empty).includes("no invoices"), html(empty).includes("<a ")], [true, false]);
     reply = { status: 200, body: { data: Array.from({ length: PLAN_INVOICES_SHOWN }, (_, n) => invoice({ id: `in_Many${String(n).padStart(8, "0")}` })), has_more: true } };
-    const many = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB }, take);
+    const many = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, take);
     is("more than a page: says only the latest are shown", html(many).includes(`your ${PLAN_INVOICES_SHOWN} most recent invoices`), true);
-    is("a malformed id is never sent to Stripe", [await planInvoicesOf({ stripeCustomerId: "cus_x/../charges", subscriptionId: SUB }, take), asked.some((a) => a.path.includes("charges"))], [{ state: "none" }, false]);
+    is("a malformed id is never sent to Stripe", [await planInvoicesOf({ stripeCustomerId: "cus_x/../charges", subscriptionId: SUB, sid: "", handle: "x" }, take), asked.some((a) => a.path.includes("charges"))], [{ state: "none" }, false]);
   }
 
   part("The studio page, for the store whose studio is open");
@@ -209,7 +220,15 @@ async function main() {
     is("asked for its own customer and subscription", asked.filter((a) => a.path.startsWith("GET /v1/invoices")).map((a) => a.path), [
       `GET /v1/invoices?${new URLSearchParams({ customer: CUS, subscription: SUB, limit: String(PLAN_INVOICES_SHOWN) })}`,
     ]);
-    is("the page says what reading them counts", shown.includes(`${PLAN_INVOICES_UNITS} studio requests`), true);
+    // Changed (rule 23): the page says the read takes one of the day's billing requests, not studio units.
+    is("the page says what reading them counts", shown.includes(`one of the ${ESSENTIAL_PER_DAY} billing requests your store has each day`), true);
+
+    // The same counter as cancelling or changing the plan: past it, the page asks Stripe nothing and says why.
+    for (let n = 1; n < ESSENTIAL_PER_DAY; n += 1) await countStudio(store, "billing");
+    asked.length = 0;
+    const used = renderToStaticMarkup((await StudioInvoicesPage({ searchParams: Promise.resolve({ store: store.sid }) })) as React.ReactElement);
+    is("past the day's billing requests: said, and Stripe not asked for invoices", [used.includes("billing requests for today"), asked.filter((a) => a.path.startsWith("GET /v1/invoices")).length], [true, 0]);
+    is("and cancelling the plan is refused the same day, by the same counter", (await countStudio(store, "billing")).ok, false);
   }
 
   part("The studio links the page only for a store with a plan subscription");

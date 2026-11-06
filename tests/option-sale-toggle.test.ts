@@ -165,7 +165,7 @@ async function main(): Promise<void> {
   part("A list of invitations that does not match its count is unknown (Codex T on #2690)");
   const invitations = `nl:mv:${statsId}`;
   const listedNow = (redis.run(["HLEN", invitations]) as number);
-  for (const [name, values] of [["an empty list for invitations that exist", () => []], ["a list shorter than the count", () => [String(redis.run(["HVALS", invitations]) && (redis.run(["HVALS", invitations]) as string[])[0])]]] as const) {
+  for (const [name, values] of [["an empty list for invitations that exist", () => []], ["a list shorter than the count", () => [String(redis.run(["HVALS", invitations]) && (redis.run(["HVALS", invitations]) as string[])[0])]], ["copies of one invitation as long as the count (Codex T on #2690)", () => Array.from({ length: listedNow }, () => (redis.run(["HVALS", invitations]) as string[])[0])]] as const) {
     if (listedNow < 2) break;
     redis.pipeline = (async (commands: (string | number)[][]) => (commands[0]?.[0] === "HVALS" ? [values()] : realPipe(commands))) as typeof redis.pipeline;
     let counted: readonly [number, Record<string, unknown>];

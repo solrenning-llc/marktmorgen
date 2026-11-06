@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {setImmediate} from 'node:timers/promises';
-import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {spawn} from 'node:child_process';
+import {pathToFileURL} from 'node:url';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {runTestFiles, runBundle} from './test-runner.mjs';
@@ -185,18 +187,26 @@ test('a timeout first prints what /proc and the runner say: the file, whether ex
   console.error = (...args: unknown[]) => { lines.push(args.map(String).join(' ')); };
   let guard: ReturnType<typeof setTimeout> | undefined;
   try {
+    let procReadable = false;
+    const watch = setInterval(() => {
+      try { procReadable ||= existsSync(`/proc/${Number(readFileSync(pidFile, 'utf8'))}/status`); } catch { /* not written yet */ }
+    }, 20);
     const status = await Promise.race([
       (runBundle as (...args: unknown[]) => Promise<number>)(worker, process.env, process.execPath, {timeoutMs: 500, label: 'never.test.ts', diagnose: () => 'next compile resolved'}),
       new Promise<'hung'>(done => { guard = setTimeout(() => done('hung'), 5000); }),
     ]);
+    clearInterval(watch);
     assert.equal(status, 1);
     const line = lines.find(text => text.includes('TIMEOUT')) ?? '';
     assert.match(line, /never\.test\.ts/);
     assert.match(line, /exit not seen/);
-    if (process.platform === 'linux') {
+    // Rule 23 (Codex G on #2826, 5805110853): where /proc shows the process (Linux CI) the line has its State and each
+    // thread's wchan; where the child's /proc entry cannot be read (G's sandbox: ENOENT while /proc/self exists) the
+    // line says exactly proc=unreadable. Which one is decided by what this environment showed while the file ran.
+    if (procReadable) {
       assert.match(line, /state=[A-Z]/, 'State from /proc/<pid>/status');
       assert.match(line, /wchan=\d+:/, 'each thread\'s wchan from /proc/<pid>/task/*/wchan');
-    }
+    } else assert.match(line, /proc=unreadable/);
     assert.match(line, /next compile resolved/);
   } finally {
     console.error = write;
@@ -230,4 +240,76 @@ test('a run is told whether the next file\'s compilation has settled, and that t
     run: async (file: string, _bundle: string, next: () => string) => { await setImmediate(); seen.push(file + ':' + next()); return 0; },
   });
   assert.deepEqual(seen, ['a:resolved', 'b:none']);
+});
+
+// Codex G on #2826 (5805110853, MEDIUM; proofs 285f70bb and 43c69845, kept here): killing only the direct worker left a
+// process it had started alive, still holding the inherited output, overlapping the next test and keeping whoever reads
+// the runner's pipes waiting after the runner itself had finished. A timed-out file's whole process tree goes.
+const running = (pid: number) => { try { process.kill(pid, 0); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false; throw error; } };
+async function gone(pid: number, ms = 3000): Promise<boolean> {
+  const until = Date.now() + ms;
+  while (running(pid) && Date.now() < until) await new Promise(done => setTimeout(done, 10));
+  return !running(pid);
+}
+
+test('a timed-out file\'s descendants go with it, a throwing diagnose still counts the failure, and the next file runs', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'runner-tree-'));
+  const owned: number[] = [];
+  try {
+    const grand = join(directory, 'grand.cjs'), parent = join(directory, 'parent.cjs'), grandPid = join(directory, 'grand.pid'), parentPid = join(directory, 'parent.pid');
+    writeFileSync(grand, `require('node:fs').writeFileSync(${JSON.stringify(grandPid)}, String(process.pid)); setInterval(() => {}, 1000); if (process.send) process.send('ready');`);
+    writeFileSync(parent, `require('node:fs').writeFileSync(${JSON.stringify(parentPid)}, String(process.pid)); require('node:child_process').fork(${JSON.stringify(grand)}, [], {stdio: ['inherit', 'inherit', 'inherit', 'ipc']}); setInterval(() => {}, 1000);`);
+    const write = console.error;
+    console.error = () => {};
+    let status: number;
+    try {
+      // The descendant is up before the limit: the parent's interval keeps it waiting, and the grandchild writes its pid.
+      status = await (runBundle as (...args: unknown[]) => Promise<number>)(parent, process.env, process.execPath, {timeoutMs: 1200, label: 'descendant-stuck.test.ts', diagnose: () => { throw new Error('synthetic diagnostic failure'); }});
+    } finally { console.error = write; }
+    const pp = Number(readFileSync(parentPid, 'utf8')), gp = Number(readFileSync(grandPid, 'utf8'));
+    owned.push(pp, gp);
+    assert.equal(status, 1, 'a timeout stays a failure even when diagnose throws');
+    assert.equal(await gone(pp), true, 'the direct worker is gone');
+    assert.equal(await gone(gp, 500), true, 'no descendant of the timed-out file survives');
+    const quick = join(directory, 'quick.cjs');
+    writeFileSync(quick, 'process.exitCode = 0;');
+    assert.equal(await (runBundle as (...args: unknown[]) => Promise<number>)(quick, process.env, process.execPath, {timeoutMs: 1200, label: 'quick.test.ts'}), 0);
+  } finally {
+    for (const pid of owned) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+    rmSync(directory, {recursive: true, force: true});
+  }
+});
+
+test('once the runner has finished, nothing it started holds its output open', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'runner-output-'));
+  const pidFile = join(root, 'grand.pid');
+  let owned = 0;
+  let executor: ReturnType<typeof spawn> | undefined;
+  let guard: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const grand = join(root, 'grand.cjs'), worker = join(root, 'worker.cjs'), driver = join(root, 'driver.mjs');
+    writeFileSync(grand, `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000); process.send('ready');`);
+    writeFileSync(worker, `require('node:child_process').fork(${JSON.stringify(grand)}, [], {stdio: ['inherit', 'inherit', 'inherit', 'ipc']}); setInterval(() => {}, 1000);`);
+    writeFileSync(driver, `import {runBundle} from ${JSON.stringify(pathToFileURL(join(process.cwd(), 'tests/test-runner.mjs')).href)}; const status = await runBundle(${JSON.stringify(worker)}, process.env, process.execPath, {timeoutMs: 1200, label: 'worker.test.ts'}); console.log('DRIVER_FINISHED', status); process.exit(status === 1 ? 0 : 2);`);
+    executor = spawn(process.execPath, [driver], {stdio: ['ignore', 'pipe', 'pipe']});
+    executor.stdout?.resume();
+    executor.stderr?.resume();
+    const closed = new Promise<'closed'>(done => executor!.once('close', () => done('closed')));
+    const exit = await Promise.race([
+      new Promise<{code: number | null, signal: NodeJS.Signals | null}>(done => executor!.once('exit', (code, signal) => done({code, signal}))),
+      new Promise<'guard'>(done => { guard = setTimeout(() => done('guard'), 8000); }),
+    ]);
+    clearTimeout(guard);
+    try { owned = Number(readFileSync(pidFile, 'utf8')); } catch { /* never started */ }
+    assert.deepEqual(exit, {code: 0, signal: null}, 'the runner counted the timeout and finished');
+    const released = await Promise.race([closed, new Promise<'open'>(done => { guard = setTimeout(() => done('open'), 1500); })]);
+    clearTimeout(guard);
+    assert.equal(released, 'closed', 'its output closes: no descendant holds it');
+    if (owned) assert.equal(running(owned), false, 'and the descendant is gone');
+  } finally {
+    clearTimeout(guard);
+    if (owned) { try { process.kill(owned, 'SIGKILL'); } catch { /* already gone */ } }
+    if (executor && executor.exitCode === null) { try { executor.kill('SIGKILL'); } catch { /* already gone */ } }
+    rmSync(root, {recursive: true, force: true});
+  }
 });

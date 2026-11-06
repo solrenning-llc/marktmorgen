@@ -424,3 +424,51 @@ All test data synthetic. No price/visible limit/commission/flag/gate/account/pay
 
 - O worktree raiz local `/workspace/scratch/d28fe5e80a85/repo` ficou em `codex/n-mail-click-read-shape` com commit local acidental `cc23e7321951ff916cc297cbcac518360cd8293c` e aparece ahead do remoto. **Esse commit nunca foi enviado e não é head de produto; não fazer push dele.** Os heads remotos corretos são os registrados acima, criados pela API GitHub.
 - Worktrees locais de validação/merge são somente descartáveis: `n-product-2700-main.50m7Rq`, `n-product-2608-main.sWN3V4` e `n-review-2722-final.l6Nf6b`. Não promover seus commits locais; usar apenas os heads remotos exatos do checkpoint.
+
+
+---
+
+## Retomada — 05/11/2026 23h43 Fortaleza — revisões #2744/#2745 e qualificação #2700
+
+### Fonte durável e preservação
+
+- Esta retomada começou pelo checkpoint canônico anterior `98ead4d15967f4370e73c87def82893c8c506b18`, blob `da25910210672dbb329e77c139788192030fa2ea`; ele supera o commit antigo repetido no disparo.
+- Main observado uma vez: `e881f1f5284ff7674cd6da6cca236965be9f656c`. CLAUDE/AGENTS/reservas e CX104–125 foram lidos; não há CX126 no main atual. O canal foi lido somente no delta novo por `fetch_file` + `fetch_blob`, conforme AV12.
+- Cinco produtos continuam ocupando todos os slots; nenhuma sexta unidade, reserva, retry, merge ou edição de produto foi feita nesta retomada.
+
+### Cinco produtos próprios — heads exatos
+
+1. **#2451** — `bf6840e04371e0c8bcaa27674989532ff5b0ec96`: L aplicável; 8/9; retry único verify `127163240735` esgotado. Nunca repetir.
+2. **#2544** — `447e97287e9bec0062e7878186495cb92cbdc277`: G sem achado; NÃO editar/retry até liberação explícita A3 para cancel_paid25→27.
+3. **#2608** — `cefbf115d08efc6c77d3ed322ef73f8490fa9f96`, tree `d8abffcd38abc00c76e00db8f177e75de6c4a2a3`: conteúdo próprio byte-idêntico ao já revisado; aguarda nove agregadores NOVOS. Retry antigo verify `127378763596` CANCELLED no teto e nunca pode ser repetido.
+4. **#2674** — `5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3`: bloqueado pelo triestado reservado. REDs `f8911772`, `e8dfabf5`, válido legal `73a1745db1b7d57c14844cccd91d2f5a2111feda`/blob `60aa1ba0` e produto/API `17f4f4c47031f41dfed95b887deda34ccfc34191`/blob `255aae86` preservados. Teste `2421674d` continua inválido. Não tocar request-guard sem liberação explícita.
+5. **#2700** — `c3fda3d2580ffd62f53f92b024cca48ea694ef18`, tree `88807d4dbc389c424990ab56aa5f51c653f639f5`: Codex P publicou qualificação aplicável sem achado no parecer `5795031317`; os blobs próprios permanecem `lib/mail-clicks.ts=061902fec8420e9950fb8dafe94ee556e8368ad3` e `tests/mail-click-read-shape.test.ts=2b45f6e21a6fd1850d9cbe69394cb8b79e3d35f1`. Continua aguardando NOVE agregadores exatos; nenhum polling/retry foi feito.
+
+### Revisões independentes concluídas
+
+#### #2744 — alvos de controles do editor de bundle
+
+- Head exato `2fcd28b43f6c7579e80810444e54f71db379024e`; parecer `5794970971`: **SEM GRAVE/MÉDIO**.
+- RED `eda52c005af874044aa1bce21f01ad41b0a391ad` falha no primeiro alvo real de 36 px. Final confirma nove nomes/ordem/disabled e CSS compilado 44×44; full TSC, lint, scanner 3807/0 e diff verdes.
+- Branch ficou não limpa após main avançar; parecer somente segue aplicável após integração exclusiva de main com os dois blobs revisados byte-idênticos. Nove agregadores finais ainda obrigatórios. Sem navegador, leitor de tela, dispositivo, jornada AAA ou suíte completa.
+
+#### #2745 — relógio controlado do retry de webhook
+
+- Head exato `71c37f613e25b34eab67d7a0cf260503fae3c06f`; parecer `5795039678`: **SEM GRAVE/MÉDIO**.
+- RED durável `e3a2b08891331902b2d335bc5d26c85a98e813c9` reproduzido três vezes: sempre 68 checks/1 falha, somente o timestamp não estritamente mais novo; id, assinatura e corpo byte-idêntico continuaram corretos.
+- Head final passou cinco execuções consecutivas 68/68. A asserção completa id/timestamp/assinatura/corpo é byte-idêntica; o relógio chega ao caminho real e `Date.now` é restaurado em `finally`, inclusive em rejeição. Nenhum prazo, timeout, comportamento de produto ou cobertura foi enfraquecido.
+- Onze arquivos webhook ligados passaram; ESLint focal limpo; scanner 3806/0; diff limpo. `next typegen` gerou os tipos; TSC completo passou com heap4GiB. A tentativa inicial com heap padrão terminou em OOM ambiental depois da geração, não em erro de tipo.
+- Branch reportava `mergeable=false` após main avançar. O parecer só permanece aplicável com o blob do teste idêntico após merge de main; nove agregadores finais exatos continuam obrigatórios. Não foram executados browser/dispositivo/acessibilidade nem suíte total.
+
+### Coordenação e próximo exato
+
+- #2714 foi incorporado pela Claude2; não é produto N e nenhuma ação foi repetida. #2722 permanece revisão alheia concluída, sem ação N.
+- AV12: não sondar CI em rodadas. Aguardar evento causal para os cinco produtos; #2700 já tem revisão aplicável e só falta a matriz final legítima.
+- O primeiro append do resultado #2745 ao canal encontrou 409 por concorrência, após leitura integral de 145.711 bytes. Repetir somente depois da janela exigida, sempre com novo `fetch_file` + `fetch_blob` + CAS e prefixo integral.
+- Próxima ação: publicar no canal o parecer #2745, a qualificação #2700 e este novo checkpoint; depois nenhuma nova revisão/unidade sem novidade real.
+- Merge próprio somente com `expected_head_sha`, UMA revisão sem grave/médio e NOVE agregadores exatos verdes (duas revisões apenas se dinheiro sai). Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhum preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.
+
+### Higiene local
+
+- O worktree raiz `/workspace/scratch/d28fe5e80a85/repo` continua no commit local acidental `cc23e7321951ff916cc297cbcac518360cd8293c`; **não fazer push**.
+- Worktrees `n-review-2745.U5aYeS` e `n-review-2745-red.Y3vfFa` são descartáveis. Não promover nada deles. O único produto correto permanece nos heads remotos exatos acima.

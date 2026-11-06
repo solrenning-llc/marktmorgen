@@ -35,4 +35,6 @@ export const STUDIO_MESSAGES: Record<string, string> = {
   files_unavailable: "File uploads are unavailable right now. Keep your file and try again in a few minutes.",
   // A page whose read did not come back in a known shape (lib/sales-page-store.ts readPage): nothing is decided from it.
   page_unread: "A page could not be read just now, so nothing was changed. Reload, then try again.",
+  // The same, once a section update had already been counted toward the month (app/api/store/saved-blocks, apply).
+  page_unread_counted: "A page could not be read just now, so no page was changed. This try still counts toward this month's section updates. Reload, then try again.",
 };

@@ -140,7 +140,10 @@ export async function POST(request: NextRequest) {
       if (asked.some((key) => !mayChange(role, key))) return refuse("forbidden", 403);
       const month = monthOfUse(store);
       if (!month) return refuse("unavailable", 503);
-      // Every page is read before the month's count is taken or anything is written: an unknown read changes nothing.
+      // The month's count is taken first, as before, so a request past the figure reads no page at all (Codex Z on
+      // #2830: those reads would be beyond what the request's studio unit covers). Then every page is read before any
+      // is written, so an unknown read writes nothing; the try it counted is said in the answer (page_unread_counted).
+      if (!(await countUse(storeMonthKey(statsId, "apply", month), limits.appliesPerMonth, MONTH_USE_SECONDS))) return refuse("applies_full", 429, { limit: limits.appliesPerMonth });
       const titles = new Map([...(await readCards(store)).values()].map((card) => [card.id, card.title]));
       const planned: { key: string; next: NonNullable<ReturnType<typeof withSection>> }[] = [];
       const skipped: { key: string; why: string }[] = [];
@@ -149,7 +152,13 @@ export async function POST(request: NextRequest) {
           skipped.push({ key, why: "This page is gone." });
           continue;
         }
-        const held = await heldPage(statsId, key);
+        let held;
+        try {
+          held = await heldPage(statsId, key);
+        } catch (error) {
+          if (error instanceof PageUnread) return refuse("page_unread_counted", 503);
+          throw error;
+        }
         const problem = updateProblem(held, id);
         const next = problem ? null : withSection(held, section, kindsFor(key));
         if (!next) {
@@ -158,7 +167,6 @@ export async function POST(request: NextRequest) {
         }
         planned.push({ key, next });
       }
-      if (!(await countUse(storeMonthKey(statsId, "apply", month), limits.appliesPerMonth, MONTH_USE_SECONDS))) return refuse("applies_full", 429, { limit: limits.appliesPerMonth });
       const done: string[] = [];
       for (const { key, next } of planned) {
         // Kept like any save: the page as it was is the newest of its earlier versions, to bring back.

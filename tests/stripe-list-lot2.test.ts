@@ -100,6 +100,24 @@ async function refundPass(): Promise<void> {
     ["has_more missing, a newer refund on it", { object: "list", data: [fresh] }],
     ["has_more as text, a newer refund on it", { object: "list", data: [fresh], has_more: "false" }],
     ["a row not readable beside a newer refund", { object: "list", data: [fresh, "re_garbled"], has_more: false }],
+    [
+      "a refund whose expanded charge is not readable beside a newer refund",
+      {
+        object: "list",
+        data: [
+          fresh,
+          {
+            id: "re_LotTwoUnreadableCharge1",
+            object: "refund",
+            status: "succeeded",
+            created: before + 100,
+            payment_intent: "pi_LotTwoPaid0002",
+            charge: { id: "ch_LotTwo2", object: "charge", refunded: "yes" },
+          },
+        ],
+        has_more: false,
+      },
+    ],
   ];
   for (const [label, page] of cases) {
     redis.run(["SET", anchorKey, String(before)]);

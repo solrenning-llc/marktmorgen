@@ -1,0 +1,266 @@
+
+FILE g2806-extra-linked.log
+125 checks, all passing.
+47 checks, all passing.
+117 checks, all passing.
+63 checks, all passing.
+57 checks, all passing.
+85 checks, all passing.
+17 checks, all passing.
+32 checks, all passing.
+13 checks, all passing.
+22 checks, all passing.
+ℹ tests 5
+ℹ fail 0
+ℹ skipped 0
+ℹ tests 9
+ℹ fail 0
+ℹ skipped 0
+49 checks, all passing.
+14 checks, all passing.
+30 checks, all passing.
+8 checks, all passing.
+
+FILE g2806-frozen-canonical.log
+31 checks, all passing.
+  FAIL  the day's check answered queued, not written: nothing read, nothing sent
+  FAIL  the day's check answered no reply, not written: nothing read, nothing sent
+  FAIL  the day's check answered undefined, not written: nothing read, nothing sent
+  FAIL  the day's check answered an extra reply, not written: nothing read, nothing sent
+  FAIL  the day's check answered a count, not written: nothing read, nothing sent
+  FAIL  the email's mark answered queued, not written: no email
+  FAIL  the email's mark answered no reply, not written: no email
+  FAIL  the email's mark answered undefined, not written: no email
+  FAIL  the email's mark answered an extra reply, not written: no email
+  FAIL  the email's mark answered a count, not written: no email
+  FAIL  the day's look answered queued, not written: nothing read, nothing said
+  FAIL  the day's look answered no reply, not written: nothing read, nothing said
+  FAIL  the day's look answered undefined, not written: nothing read, nothing said
+  FAIL  the day's look answered an extra reply, not written: nothing read, nothing said
+  FAIL  the day's look answered a count, not written: nothing read, nothing said
+  FAIL  an alert's mark answered queued, not written: not said
+  FAIL  an alert's mark answered no reply, not written: not said
+  FAIL  an alert's mark answered undefined, not written: not said
+  FAIL  an alert's mark answered an extra reply, not written: not said
+  FAIL  an alert's mark answered a count, not written: not said
+  FAIL  the sale's mark answered queued, not written: nothing posted
+  FAIL  the sale's mark answered no reply, not written: nothing posted
+  FAIL  the sale's mark answered undefined, not written: nothing posted
+  FAIL  the sale's mark answered an extra reply, not written: nothing posted
+  FAIL  the sale's mark answered a count, not written: nothing posted
+  FAIL  the email's mark answered queued, not written: counted, no email
+  FAIL  the email's mark answered no reply, not written: counted, no email
+  FAIL  the email's mark answered undefined, not written: counted, no email
+  FAIL  the email's mark answered an extra reply, not written: counted, no email
+  FAIL  the email's mark answered a count, not written: counted, no email
+  FAIL  a failed send lets go of its own mark only: the other run's mark stays
+  FAIL  the lock answered queued, not written: the job does not run
+  FAIL  the lock answered no reply, not written: the job does not run
+  FAIL  the lock answered undefined, not written: the job does not run
+  FAIL  the lock answered an extra reply, not written: the job does not run
+  FAIL  the lock answered a count, not written: the job does not run
+  FAIL  our lock ran out and another run took it: ours ending never deletes theirs
+  FAIL  the lock answered queued, not written: the job does not run
+  FAIL  the lock answered no reply, not written: the job does not run
+  FAIL  the lock answered undefined, not written: the job does not run
+  FAIL  the lock answered an extra reply, not written: the job does not run
+  FAIL  the lock answered a count, not written: the job does not run
+  FAIL  our lock ran out and another run took it: ours ending never deletes theirs
+  FAIL  the lock answered queued, not written: the job does not run
+  FAIL  the lock answered no reply, not written: the job does not run
+  FAIL  the lock answered undefined, not written: the job does not run
+  FAIL  the lock answered an extra reply, not written: the job does not run
+  FAIL  the lock answered a count, not written: the job does not run
+  FAIL  our lock ran out and another run took it: ours ending never deletes theirs
+  FAIL  the lock answered queued, not written: the job does not run
+  FAIL  the lock answered no reply, not written: the job does not run
+  FAIL  the lock answered undefined, not written: the job does not run
+  FAIL  the lock answered an extra reply, not written: the job does not run
+  FAIL  the lock answered a count, not written: the job does not run
+  FAIL  our lock ran out and another run took it: ours ending never deletes theirs
+  FAIL  G courses: actual release EVAL failed once
+  FAIL  G courses: read real token then successor legitimately won NX after actual TTL
+  FAIL  G courses: the successor lock survives old run's release
+  FAIL  G reminders: actual release EVAL failed once
+  FAIL  G reminders: read real token then successor legitimately won NX after actual TTL
+  FAIL  G reminders: the successor lock survives old run's release
+  FAIL  G discord: actual release EVAL failed once
+  FAIL  G discord: read real token then successor legitimately won NX after actual TTL
+  FAIL  G discord: the successor lock survives old run's release
+  FAIL  G quiet: actual release EVAL failed once
+  FAIL  G quiet: read real token then successor legitimately won NX after actual TTL
+  FAIL  G quiet: the successor lock survives old run's release
+93 checks, 67 failing.
+  FAIL  G courses: real original claim then legitimate successor NX
+  FAIL  G courses: old release preserves new owner
+  FAIL  G reminders: real original claim then legitimate successor NX
+  FAIL  G reminders: old release preserves new owner
+  FAIL  G discord: real original claim then legitimate successor NX
+  FAIL  G discord: old release preserves new owner
+  FAIL  G quiet: real original claim then legitimate successor NX
+  FAIL  G quiet: old release preserves new owner
+15 checks, 8 failing.
+
+FILE g2806-joint.log
+31 checks, all passing.
+93 checks, all passing.
+G_LOCK_ENVELOPE {"mode":"extra","evals":3,"kept":true,"wrote":true,"gone":true,"getters":0,"owner":"legitimate-successor","target":"before"}
+  FAIL  extra: unknown receipt cannot confirm lease held by successor
+  FAIL  extra: unknown receipt cannot confirm unwritten record
+  FAIL  extra: unknown receipt cannot confirm unapplied deletion
+G_LOCK_ENVELOPE {"mode":"accessor","evals":3,"kept":true,"wrote":true,"gone":true,"getters":3,"owner":"legitimate-successor","target":"before"}
+  FAIL  accessor: unknown receipt cannot confirm lease held by successor
+  FAIL  accessor: unknown receipt cannot confirm unwritten record
+  FAIL  accessor: unknown receipt cannot confirm unapplied deletion
+  FAIL  accessor: no getter invoked
+G_LOCK_ENVELOPE {"mode":"inherited","evals":3,"kept":true,"wrote":true,"gone":true,"getters":0,"owner":"legitimate-successor","target":"before"}
+  FAIL  inherited: unknown receipt cannot confirm lease held by successor
+  FAIL  inherited: unknown receipt cannot confirm unwritten record
+  FAIL  inherited: unknown receipt cannot confirm unapplied deletion
+18 checks, 10 failing.
+
+FILE g2806-linked.log
+96 checks, all passing.
+ℹ tests 2
+ℹ fail 0
+ℹ skipped 0
+ℹ tests 7
+ℹ fail 0
+ℹ skipped 0
+
+FILE g2806-lint.log
+
+
+FILE g2806-original-red.log
+  FAIL  G courses: the successor lock survives old run's release
+  FAIL  G reminders: the successor lock survives old run's release
+  FAIL  G discord: the successor lock survives old run's release
+  FAIL  G quiet: the successor lock survives old run's release
+93 checks, 4 failing.
+  FAIL  G courses: old release preserves new owner
+  FAIL  G reminders: old release preserves new owner
+  FAIL  G discord: old release preserves new owner
+  FAIL  G quiet: old release preserves new owner
+15 checks, 4 failing.
+
+FILE g2806-parent-canonical-acks.log
+  FAIL  courses: no read-then-delete after it
+  FAIL  reminders: no read-then-delete after it
+  FAIL  discord: no read-then-delete after it
+  FAIL  quiet: no read-then-delete after it
+  FAIL  courses: after the failed script, no DEL is sent
+  FAIL  reminders: after the failed script, no DEL is sent
+  FAIL  discord: after the failed script, no DEL is sent
+  FAIL  quiet: after the failed script, no DEL is sent
+  FAIL  not held, so the caller does not write
+  FAIL  and no separate GET or EXPIRE was sent
+  FAIL  not written
+  FAIL  and no separate GET, EXISTS or SET was sent
+31 checks, 12 failing.
+G_LOCK_ENVELOPE {"mode":"extra","evals":3,"kept":true,"wrote":true,"gone":true,"getters":0,"owner":"legitimate-successor","target":"before"}
+  FAIL  extra: unknown receipt cannot confirm lease held by successor
+  FAIL  extra: unknown receipt cannot confirm unwritten record
+  FAIL  extra: unknown receipt cannot confirm unapplied deletion
+G_LOCK_ENVELOPE {"mode":"accessor","evals":3,"kept":true,"wrote":true,"gone":true,"getters":3,"owner":"legitimate-successor","target":"before"}
+  FAIL  accessor: unknown receipt cannot confirm lease held by successor
+  FAIL  accessor: unknown receipt cannot confirm unwritten record
+  FAIL  accessor: unknown receipt cannot confirm unapplied deletion
+  FAIL  accessor: no getter invoked
+G_LOCK_ENVELOPE {"mode":"inherited","evals":3,"kept":true,"wrote":true,"gone":true,"getters":0,"owner":"legitimate-successor","target":"before"}
+  FAIL  inherited: unknown receipt cannot confirm lease held by successor
+  FAIL  inherited: unknown receipt cannot confirm unwritten record
+  FAIL  inherited: unknown receipt cannot confirm unapplied deletion
+18 checks, 10 failing.
+
+FILE g2806-renew-envelope.log
+G2806_RENEW {"injected":1,"successorOk":true,"afterSuccessor":"Successor title","response":"Error","actual":"Successor title"}
+3 checks, all passing.
+
+FILE g2806-route-control.log
+  FAIL  the day's check answered queued, not written: nothing read, nothing sent
+  FAIL  the day's check answered no reply, not written: nothing read, nothing sent
+  FAIL  the day's check answered undefined, not written: nothing read, nothing sent
+  FAIL  the day's check answered an extra reply, not written: nothing read, nothing sent
+  FAIL  the day's check answered a count, not written: nothing read, nothing sent
+  FAIL  the email's mark answered queued, not written: no email
+  FAIL  the email's mark answered no reply, not written: no email
+  FAIL  the email's mark answered undefined, not written: no email
+  FAIL  the email's mark answered an extra reply, not written: no email
+  FAIL  the email's mark answered a count, not written: no email
+  FAIL  the day's look answered queued, not written: nothing read, nothing said
+  FAIL  the day's look answered no reply, not written: nothing read, nothing said
+  FAIL  the day's look answered undefined, not written: nothing read, nothing said
+  FAIL  the day's look answered an extra reply, not written: nothing read, nothing said
+  FAIL  the day's look answered a count, not written: nothing read, nothing said
+  FAIL  an alert's mark answered queued, not written: not said
+  FAIL  an alert's mark answered no reply, not written: not said
+  FAIL  an alert's mark answered undefined, not written: not said
+  FAIL  an alert's mark answered an extra reply, not written: not said
+  FAIL  an alert's mark answered a count, not written: not said
+  FAIL  the sale's mark answered queued, not written: nothing posted
+  FAIL  the sale's mark answered no reply, not written: nothing posted
+  FAIL  the sale's mark answered undefined, not written: nothing posted
+  FAIL  the sale's mark answered an extra reply, not written: nothing posted
+  FAIL  the sale's mark answered a count, not written: nothing posted
+  FAIL  the email's mark answered queued, not written: counted, no email
+  FAIL  the email's mark answered no reply, not written: counted, no email
+  FAIL  the email's mark answered undefined, not written: counted, no email
+  FAIL  the email's mark answered an extra reply, not written: counted, no email
+  FAIL  the email's mark answered a count, not written: counted, no email
+  FAIL  a failed send lets go of its own mark only: the other run's mark stays
+  FAIL  the lock answered queued, not written: the job does not run
+  FAIL  the lock answered no reply, not written: the job does not run
+  FAIL  the lock answered undefined, not written: the job does not run
+  FAIL  the lock answered an extra reply, not written: the job does not run
+  FAIL  the lock answered a count, not written: the job does not run
+  FAIL  our lock ran out and another run took it: ours ending never deletes theirs
+  FAIL  the lock answered queued, not written: the job does not run
+  FAIL  the lock answered no reply, not written: the job does not run
+  FAIL  the lock answered undefined, not written: the job does not run
+  FAIL  the lock answered an extra reply, not written: the job does not run
+  FAIL  the lock answered a count, not written: the job does not run
+  FAIL  our lock ran out and another run took it: ours ending never deletes theirs
+  FAIL  the lock answered queued, not written: the job does not run
+  FAIL  the lock answered no reply, not written: the job does not run
+  FAIL  the lock answered undefined, not written: the job does not run
+  FAIL  the lock answered an extra reply, not written: the job does not run
+  FAIL  the lock answered a count, not written: the job does not run
+  FAIL  our lock ran out and another run took it: ours ending never deletes theirs
+  FAIL  the lock answered queued, not written: the job does not run
+  FAIL  the lock answered no reply, not written: the job does not run
+  FAIL  the lock answered undefined, not written: the job does not run
+  FAIL  the lock answered an extra reply, not written: the job does not run
+  FAIL  the lock answered a count, not written: the job does not run
+  FAIL  our lock ran out and another run took it: ours ending never deletes theirs
+  FAIL  G courses: actual release EVAL failed once
+  FAIL  G courses: read real token then successor legitimately won NX after actual TTL
+  FAIL  G reminders: actual release EVAL failed once
+  FAIL  G reminders: read real token then successor legitimately won NX after actual TTL
+  FAIL  G discord: actual release EVAL failed once
+  FAIL  G discord: read real token then successor legitimately won NX after actual TTL
+  FAIL  G quiet: actual release EVAL failed once
+  FAIL  G quiet: read real token then successor legitimately won NX after actual TTL
+93 checks, 63 failing.
+
+FILE g2806-scan.log
+Public data check: 3972 tracked files; 0 file(s) require correction.
+
+
+FILE g2806-script-envelope.log
+G_LOCK_ENVELOPE {"mode":"extra","evals":3,"kept":true,"wrote":true,"gone":true,"getters":0,"owner":"legitimate-successor","target":"before"}
+  FAIL  extra: unknown receipt cannot confirm lease held by successor
+  FAIL  extra: unknown receipt cannot confirm unwritten record
+  FAIL  extra: unknown receipt cannot confirm unapplied deletion
+G_LOCK_ENVELOPE {"mode":"accessor","evals":3,"kept":true,"wrote":true,"gone":true,"getters":3,"owner":"legitimate-successor","target":"before"}
+  FAIL  accessor: unknown receipt cannot confirm lease held by successor
+  FAIL  accessor: unknown receipt cannot confirm unwritten record
+  FAIL  accessor: unknown receipt cannot confirm unapplied deletion
+  FAIL  accessor: no getter invoked
+G_LOCK_ENVELOPE {"mode":"inherited","evals":3,"kept":true,"wrote":true,"gone":true,"getters":0,"owner":"legitimate-successor","target":"before"}
+  FAIL  inherited: unknown receipt cannot confirm lease held by successor
+  FAIL  inherited: unknown receipt cannot confirm unwritten record
+  FAIL  inherited: unknown receipt cannot confirm unapplied deletion
+18 checks, 10 failing.
+
+FILE g2806-types.log
+

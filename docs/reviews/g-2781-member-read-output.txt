@@ -1,0 +1,67 @@
+=== g2781-member-read.proof.ts ===
+
+G: a valid member survives unknown HGETALL and healthy retry
+  ok    vector0: valid place granted by real functions
+  ok    vector0: unknown member read intercepted exactly once
+  FAIL  vector0: unknown list must not commit handled refund
+        expected [0,null]
+        got      [1,"1793952359"]
+G_MEMBER_AFTER {"n":0,"seen":1,"remaining":["f79c2c5a84"],"displayed":[{"title":"Sourdough Course","place":true}]}
+  FAIL  vector0: a healthy retry removes the refunded entitlement
+        expected 0
+        got      1
+  ok    vector1: valid place granted by real functions
+  ok    vector1: unknown member read intercepted exactly once
+  FAIL  vector1: unknown list must not commit handled refund
+        expected [0,null]
+        got      [1,"1793952359"]
+G_MEMBER_AFTER {"n":1,"seen":1,"remaining":["f79c2c5a84"],"displayed":[{"title":"Sourdough Course","place":true}]}
+  FAIL  vector1: a healthy retry removes the refunded entitlement
+        expected 0
+        got      1
+  ok    vector2: valid place granted by real functions
+  ok    vector2: unknown member read intercepted exactly once
+  FAIL  vector2: unknown list must not commit handled refund
+        expected [0,null]
+        got      [1,"1793952359"]
+G_MEMBER_AFTER {"n":2,"seen":1,"remaining":["f79c2c5a84"],"displayed":[{"title":"Sourdough Course","place":true}]}
+  FAIL  vector2: a healthy retry removes the refunded entitlement
+        expected 0
+        got      1
+
+12 checks, 6 failing.
+
+12 checks, 6 failing.
+34 checks, all passing.
+61 checks, all passing.
+=== g2781-return-recovery.proof.ts ===
+
+G return: two bounded runs reach the eleventh page
+  ok    first run bounded and later group remains pending
+  ok    second run resumes after first pass while still bounded and revokes
+  ok    close: injection hit exact current boundary and no completion mark
+  ok    close: healthy retry actually closes and completes
+  ok    mapping: injection hit exact current boundary and no completion mark
+  ok    mapping: healthy retry actually closes and completes
+
+6 checks, all passing.
+
+
+/tmp/g2781-return-c2b/tests/g2781-member-read.proof.ts
+  22:20  warning  'openGroup' is defined but never used         @typescript-eslint/no-unused-vars
+  22:31  warning  'readGroup' is defined but never used         @typescript-eslint/no-unused-vars
+  52:7   warning  'GARBLED' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  89:9   warning  'other' is assigned a value but never used    @typescript-eslint/no-unused-vars
+
+/tmp/g2781-return-c2b/tests/g2781-return-recovery.proof.ts
+  25:10  warning  'askPlace' is defined but never used             @typescript-eslint/no-unused-vars
+  25:31  warning  'readGroup' is defined but never used            @typescript-eslint/no-unused-vars
+  25:89  warning  'takePlace' is defined but never used            @typescript-eslint/no-unused-vars
+  26:10  warning  'importedFor' is defined but never used          @typescript-eslint/no-unused-vars
+  28:10  warning  'STRIPE_LIST_VERSION' is defined but never used  @typescript-eslint/no-unused-vars
+  55:7   warning  'GARBLED' is assigned a value but never used     @typescript-eslint/no-unused-vars
+  88:9   warning  'anchor' is assigned a value but never used      @typescript-eslint/no-unused-vars
+
+✖ 11 problems (0 errors, 11 warnings)
+
+Public data check: 3907 tracked files; 0 file(s) require correction.

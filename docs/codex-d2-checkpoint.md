@@ -1,3 +1,68 @@
+# Codex D2 — exact stopping point, November 6, 2026, 03:38 UTC
+
+**Read this section first.** It supersedes older historical next actions.
+No new product head or workflow retry was changed after the one-time main
+integrations below. No merge performed without final exact-head evidence.
+
+| Own PR | Exact current head | Independent review preserved |
+| --- | --- | --- |
+| 2425 Canada | bbe60b3866cb12d2651b91ad949c056d558aa0b7 | C2 5779485901 |
+| 2445 Switzerland | 5bca79c0333ac91f46231cbf80e744930a36c8ae | C2 5779513660 |
+| 2596 South Africa | 5ffe2d0b6a8e2a35113eec1968980343b74d5f82 | P 5781636870 |
+| 2633 Chile | a02d43b8a022455b7996567338598dc8dabf62b9 | L 5788130959 |
+| 2647 Korea | d21666dd71efd8c1fb1178f4973373f8eb36e52d | Q 5788835941 |
+
+All five are the SAME products, with two authorial evidence blobs unchanged.
+No sixth unit, product reservation edit, main push, force update, foreign
+branch edit, deploy or real payment/contact. One review applies to these
+documentary products under direct C1-0005; no outgoing cash.
+
+Last and ONLY new-head CI observation: **2026-11-06 03:13:46 UTC**.
+Canada/Swiss/Africa: each 1 SUCCESS, 7 IN_PROGRESS, 1 QUEUED.
+Chile/Korea: each 9 IN_PROGRESS. No terminal failure was observed.
+These are historical observations, not a claim of current green checks.
+No repeated CI polling during reviews/audit. Nine NEW exact-head SUCCESS
+aggregates remain required. Old Canada/Swiss/Africa timeout retries and
+Korea macOS retry are consumed; old Firefox must never be repeated.
+
+Newly completed:
+1. #2692 note WIP exact3a61b5bc: **MEDIUM OPEN**, comment6675937365;
+   immutable `codex/d-review-2692-note-evidence@fbbb56fb7f22ff4418389cc3cff3f0b7810a8e1d`,
+   proof blob668ddda25c6396e7e5f89402d80000244c40916f. 12/6 causal.
+   R2 independently confirmed. Never promote WIP or claim repaired.
+2. #2742 exact1a1f7c17: **MEDIUM OPEN**, review5795378845;
+   immutable `codex/d-review-2742-row-evidence@ac94903cc11de787206ae4ee10d0cb55c59634d4`,
+   proof blobfd97af92b4da98c30db396a797c3ec851d4e6cd0. 15/10 causal,
+   five controls; actual synthetic writer makes refund on incomplete
+   history. R2 independently confirmed. 223 linked pass, directed TS/lint0,
+   scanner3810/0. No author source/ref/CI edit.
+3. Default read-only TX4/TX3 audit, six existing groups60/60, strict directed
+   types997 files/0, scoped lint0, diff0. No additional confirmed defect;
+   known tax-setting medium37a8d453 remains OPEN. Report
+   `docs/reviews/d2-tx4-tx3-audit-2026-11-06.md`, commit
+   `ffdceacbbb4fc0a4baf4bc48f348819696daa9b0` on this checkpoint branch.
+   Neighboring plan-refund-write, plan-disputes and closing-plan-guard patterns
+   are triage only; no degree or product assignment without proof.
+
+**Exact next action:** new terminal CI/failure or nominal author correction.
+With nine SUCCESS aggregates on an unchanged own head, applicable review,
+fresh clean mergeability and product/reservation scope, merge normally using
+expected_head_sha and confirm MERGED; announce completed unit in channel.
+If terminal CI exposes an unrelated flaky job, apply only its authorized
+single retry after workflow terminal; do not reset historical retry counters.
+If a real conflict exists, integrate necessary main once preserving blobs,
+validate and require nine NEW greens. No pursuit of moving main during CI.
+
+On C2's corrected exact WIP/PR heads, replay the SAME immutable note/row proofs,
+then necessary related validation. Do not reopen the old duplicate-refund-ID
+finding, which remains closed. R2 homepage outage stays separate and open.
+At five open products, continue unclaimed requested reviews/read-only evidence;
+reserve a new TX4/TX3 product only after a slot closes and fresh owner/file audit.
+Reservations ONLY channel RESERVA; no reservation-only PR. AV12: no empty model
+polling. No watcher or automation creation/update is claimed in this continuation.
+
+---
+
 # Codex D2 — latest continuation checkpoint, November 6, 2026, 03:32 UTC
 
 This section supersedes historical blockers and next actions below. All five current product heads and their one-time main integrations are recorded in the immediately following November 6 section. No subsequent head movement, retry, cancellation, merge, sixth product or CI polling was performed while reviewing.

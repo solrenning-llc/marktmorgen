@@ -799,3 +799,28 @@ Main exato `6e01c123b31d890bb5a7100d0bce8ef498988b20` integrado uma vez nos quat
 
 - Cinco produtos continuam ocupados: #2438 congelado até #2576 entrar e os quatro heads acima. Nenhuma sexta unidade.
 - Próximo gatilho causal: #2822 MERGED; então integrar o main corrigido uma única vez nos quatro independentes, preservar os 12 blobs e exigir nove novos checks. Em paralelo, #2576 MERGED libera a junção coordenada de #2438. #2535 continua exigindo parecer formal R2.
+
+
+## Retomada de 06/11/2026 às 14h40 (Fortaleza)
+
+### O bloqueio compartilhado caiu e o main corrigido foi integrado uma vez
+
+- #2822 foi incorporado no head `b9395b922916629e9320a37f76bef22bb928e7cb`, merge `1ca58a1c0a6d7b74e6411b2a78c8ebb3e332d1f0`. O main fresco e corrigido usado por Q é `8de354ff1cf507c1e8b6426f91ec80a113b7c015`, árvore `7e96248a202be517c31f1ae914c9b87776a7787f`.
+- #2576 continua OPEN no head `d8d8c3d557166cb32b4ae87084dd88c48ded2ce4`; portanto #2438 permanece congelado em `6da1a24763a718e88e157703542c24957bfc6123`. Q não tocou em #2438, #2576, seus arquivos, reservas ou CI.
+- Conforme a ordem C4-20261106-2230-TODOS-131, Q integrou o main corrigido exatamente uma vez nos quatro produtos independentes. Cada commit tem como primeiro pai o head anterior e como segundo pai o main exato; a árvore criada pela API coincide com `git merge-tree --write-tree`.
+
+### Quatro heads finais desta integração
+
+- #2535: `c4ed4839e95f940d156a6c93beed9fe956066eb6`; árvore `43f8cce37484abd14c128e8e14423845a9558347`; pais `9bb1da77f81fec2ff1680b5b5f34a0545fe6ae53` + main; comentário `6691368178`.
+- #2709: `0c107fe2d813746317d9225e0b3f934941f94aa3`; árvore `e90dcac794563b92961956f0b770b3cbc992f5e6`; pais `7399635d42b6b2e03ad915079bad5c3da73b7237` + main; comentário `6691368916`.
+- #2729: `5bcc1de030af8d6350aac2bd087318a94fb6909f`; árvore `f0b9aff92e29364658e023b339fd2fe1fc250c08`; pais `37acc5d89c5d7ee329bf43aab75a0e4126f3026c` + main; comentário `6691369297`.
+- #2731: `8b2f46eef06d946c8a2c1d1a07939adf10434c01`; árvore `02e6102a6b0540809da2641011a5731e8e973144`; pais `cac6c1242657f0b01f412d61c7ca0e258af48f75` + main; comentário `6691368524`.
+- REST fresco confirmou os quatro OPEN, `base_sha=8de354ff1cf507c1e8b6426f91ec80a113b7c015` e `mergeable=true`. Os 12 blobs próprios foram lidos nos novos heads e conferidos 12/12 byte-idênticos aos blobs anteriores.
+
+### Regras de continuação
+
+- Os agregadores dos heads anteriores não contam depois desta integração. Cada um dos quatro PRs exige nove checks NOVOS em SUCCESS no head exato acima; Q não repetiu nem cancelou qualquer job e não incorporou produto.
+- #2535 continua exigindo parecer formal/aplicável do Revisor 2 no head exato; a confirmação apenas no canal não substitui o parecer GitHub.
+- As revisões limpas já aplicáveis dos demais PRs continuam registradas, pois a integração alterou somente o main e preservou exatamente os blobs próprios.
+- Cinco produtos próprios seguem ocupados, sem sexta unidade: #2438 congelado e os quatro heads acima.
+- Próximo gatilho causal: acompanhar os nove checks novos sem rerun; resolver qualquer vermelho causal com RED. Só incorporar um produto próprio se estiver OPEN, com revisão qualificada aplicável, 9/9 SUCCESS exatos e REST raw `mergeable=true/clean`. #2438 só se move depois de #2576 entrar e da coordenação correspondente.

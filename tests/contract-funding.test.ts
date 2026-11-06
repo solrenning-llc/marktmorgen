@@ -563,9 +563,13 @@ test('closed final submission check cannot authorize POST for fabricated ownersh
 
 test('closed recovery wrapper performs no Redis reads or writes for fabricated ownership',async()=>{reset();assert.equal(await takeRestartRecovery(null as never),null);assert.equal(calls.length,0);});
 
-test('actual checkout and switch activation reject non-own ACKs before member traversal',async()=>{
+test('actual checkout and switch activation reject non-own ACKs before member traversal',async(t)=>{
+ // C4-20261106-1835-C56-109: the clock is pinned a millisecond before a whole second and turns between the steps below,
+ // as it did in CI (verify on #2672 and #2721), so the order of reserving and observing is checked, not left to chance.
+ t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-10T12:00:00.999Z')});
  for(const mode of ['checkout','switch'] as const){
   const f=mode==='switch'?await switchSetup():{...start(),input:activation()};
+  t.mock.timers.tick(1);
   if(mode==='checkout')assert.ok(await reserveContractFunding('one','creator','month','checkout',f.policy,f.context,'ctr_activate'));
   // A switch keeps the exact provider subscription and original creation time.
   const input=f.input;

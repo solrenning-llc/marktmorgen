@@ -166,7 +166,16 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
     ["SET", `nl:course:${w.courseId}:open:${learner}`, "1", "EX", 400 * 86_400],
     ["SET", `nl:course:${w.courseId}:fin:${learner}`, "1", "EX", 400 * 86_400],
     ["SET", `nl:course:${w.courseId}:quiz:${w.lessons[0]}:tries:${learner}`, "1"],
-    ["SET", `nl:course:${w.courseId}:quiz:${w.lessons[0]}:result:${learner}`, JSON.stringify({ score: 3, of: 3 })],
+    ["SET", `nl:course:${w.courseId}:quiz:${w.lessons[0]}:result:${learner}`, JSON.stringify({
+      used: 1,
+      last: {
+        answers: { q1: [0] },
+        grade: { right: 1, total: 1, percent: 100, passed: true, marks: { q1: true } },
+        at: now,
+      },
+      best: 100,
+      passed: true,
+    })],
   ]);
   await markPassed(w.courseId, learner, w.lessons[0], ROOM);
   await takeRoom(storeKey(store), 1_000);

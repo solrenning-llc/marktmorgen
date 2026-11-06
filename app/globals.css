@@ -2788,6 +2788,11 @@ form:has(input[name="pay"][value="plan"]:checked):has(input[data-bump="0"]:check
     padding: 2.25rem 1.25rem;
     margin-inline: -0.5rem;
   }
+  /* A link on a band: black or white, whichever reads at 7:1 on it, always underlined (274 [AX1], lib/store-look.ts bandLink). */
+  .sp-style-bands .sp-band-phone > .sp-section a:not(.btn):not(.st-btn) {
+    color: var(--st-band-link);
+    text-decoration-line: underline;
+  }
   .sp-only-computer {
     display: none;
   }
@@ -2798,6 +2803,11 @@ form:has(input[name="pay"][value="plan"]:checked):has(input[data-bump="0"]:check
     border-radius: 1.75rem;
     padding: 3rem 2.5rem;
     margin-inline: -1.5rem;
+  }
+  /* A link on a band: black or white, whichever reads at 7:1 on it, always underlined (274 [AX1], lib/store-look.ts bandLink). */
+  .sp-style-bands .sp-band-computer > .sp-section a:not(.btn):not(.st-btn) {
+    color: var(--st-band-link);
+    text-decoration-line: underline;
   }
   .sp-only-phone {
     display: none;

@@ -12,6 +12,7 @@ import { DemoStrip } from "@/components/demo-notes";
 import { MailClick } from "@/components/mail-click";
 import { StoreChat } from "@/components/store-chat";
 import { StoreAssistant } from "@/components/store-assistant";
+import { SkipLink } from "@/components/skip-link";
 import { chatOpen } from "@/lib/inbox";
 import { assistantShown } from "@/lib/store-assistant";
 import { lookStyle } from "@/lib/store-look";
@@ -82,6 +83,7 @@ export default async function StoreLayout({ children, params }: LayoutProps<"/[h
   }
   return (
     <>
+      {store && !store.suspended ? <SkipLink /> : null}
       {store && isHouseStore(store) ? <DemoStrip /> : null}
       {children}
       <StoreApp />

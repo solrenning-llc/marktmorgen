@@ -12,7 +12,8 @@ import { isFree, syncTakesBuyer, type Listing, type Store } from "@/lib/store";
 import { canSellProduct, fromPriceCents, sellableOptions } from "@/lib/store-checkout";
 import { canGiveProduct } from "@/lib/free";
 import { activeBumps, activePlan, planFor } from "@/lib/product-extras";
-import { activeShipping, shipsToWords } from "@/lib/shipping";
+import { shipsToWords } from "@/lib/shipping";
+import { shippingNow } from "@/lib/physical-legal-ship";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { activePwyw } from "@/lib/pay-what-you-want";
 import { IMAGE_SIZES } from "@/lib/product-image";
@@ -626,7 +627,8 @@ export function BuyBox({
   };
   const pwyw = activePwyw(product);
   // Shipped by the creator (lib/shipping.ts): said under the button.
-  const shipping = activeShipping(product);
+  // Where it ships now: without the EU/EEA while its safety fields are not filled (618 [SZ2], lib/physical-legal-ship.ts).
+  const shipping = shippingNow(product);
   const sw = shippingWords(store.language);
   const trial = product.recurring && product.recurring.trialDays > 0 ? product.recurring.trialDays : 0;
   // A membership's introductory price (lib/intro-price.ts): what the button and the line under it say.
@@ -949,7 +951,7 @@ export function BuyBox({
           );
         })}
       </button>
-      {shipping ? (
+      {shipping && shipping.countries.length > 0 ? (
         /* A product the creator ships (lib/shipping.ts): what shipping costs and where it goes, before anybody pays. */
         <p className="st-muted mt-2 text-center text-xs" data-shipping="">
           {[

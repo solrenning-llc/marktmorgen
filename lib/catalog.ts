@@ -39,6 +39,7 @@ import { MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalo
 export { MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
 import { type Shipping, parseShipping } from "@/lib/shipping";
 import { type PhysicalLegal, readPhysicalLegal } from "@/lib/physical-legal-record";
+import { safetyComplete } from "@/lib/physical-legal-ship";
 import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
@@ -257,6 +258,15 @@ export type Product = {
    */
   legal?: PhysicalLegal | null;
   /**
+   * On the listing only: true when the product's own legal record had every
+   * EU/EEA safety item, its picture included, when it was last saved
+   * (lib/physical-legal-ship.ts), so the store page and the cart know where
+   * it ships now without reading that record. Computed by listingOf from a
+   * full product, never typed and never read from a full record; absent is
+   * not filled. Every checkout judges the record itself.
+   */
+  safetyFilled?: boolean;
+  /**
    * A draft: kept in the studio and left off the store, its own page and its
    * checkout until the creator publishes it. What an import makes starts
    * here. A hidden product can still be part of a bundle.
@@ -469,13 +479,18 @@ export function listingOf(product: Listing): Listing {
     yearly: product.yearly ?? null,
     note: product.note ?? false,
     shipping: product.shipping ?? null,
+    // From a full product, computed from its own legal record; from a listing, its mark as stored.
+    ...((Object.hasOwn(product, "fields") ? safetyComplete(product as Product) : product.safetyFilled === true) ? { safetyFilled: true } : {}),
     hidden: product.hidden,
   };
 }
 
 function parseListing(entry: unknown): Listing | null {
   const product = parseProduct(entry);
-  return product ? listingOf(product) : null;
+  if (!product) return null;
+  // A stored listing keeps its mark only when it is exactly true (lib/physical-legal-ship.ts).
+  const mark = (entry as { safetyFilled?: unknown }).safetyFilled === true;
+  return listingOf({ ...listingOf(product), ...(mark ? { safetyFilled: true } : {}) });
 }
 
 /** The kind bits of a product. */
@@ -741,6 +756,20 @@ export async function readProducts(store: Store, ids?: Iterable<string>): Promis
     if (product && product.id === id) out.push(product);
   });
   return out;
+}
+
+/**
+ * The legal information of one product (618 [SZ2]; lib/physical-legal-record.ts),
+ * from its own record: null when it has none or the record cannot be read.
+ * One GET of that record and nothing else, for the page of a shipped product.
+ */
+export async function readProductLegal(store: Store, id: string): Promise<PhysicalLegal | null> {
+  const catalog = store.catalog;
+  if (catalog.inline) return catalog.inline.find((product) => product.id === id)?.legal ?? null;
+  if (!SAFE_ID.test(id) || !catalog.id || !isRedisConfigured() || !catalog.items.some((item) => item.id === id)) return null;
+  const [raw] = await getMany([extrasKey(catalog.id, id)]);
+  const extras = parseJson(raw);
+  return extras && typeof extras === "object" && !Array.isArray(extras) ? readPhysicalLegal((extras as Record<string, unknown>).legal) : null;
 }
 
 /** One product in full, or null when the store has no such product (or no id was given). */

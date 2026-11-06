@@ -1,0 +1,33 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "lib/flow-versions.ts",
+    "lib/flows.ts",
+    "lib/flow-list.ts",
+    "app/api/store/mail/route.ts",
+    "components/workflow-versions.tsx",
+    "tests/flow-history-refused-third-push-evidence.test.ts",
+    "tests/g1927-history-after-removal.proof.ts",
+    "components/email-studio.tsx",
+    "lib/data-families.ts",
+    "lib/redis-memory.ts",
+    "tests/flow-history-after-removal.test.ts",
+    "tests/flow-history-unknown-removal.test.ts",
+    "tests/flow-history-room-evidence.test.ts",
+    "tests/store-data-registry.ts",
+    "tests/g1927-history-unknown-removal.proof.ts",
+    "tests/g1927-nested-id.proof.ts",
+    "tests/g1927-final-forget-window.proof.ts",
+    "tests/flow-forget-retry.test.ts",
+    "tests/flow-history-final-forget-window.test.ts",
+    "tests/flow-history-nested-id.test.ts",
+    "tests/g1927-forget-definition-ack.proof.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

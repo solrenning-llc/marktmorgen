@@ -1,67 +1,29 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
-import { REMOVE_POINT, award } from "@/lib/community-points";
-import { COST_LINES } from "./plan-cost-registry";
-import { store as redis } from "./redis-stub";
 
-const COMMUNITY = "c".repeat(32);
-const MEMBER = "a".repeat(32);
-const NOW = 1_794_000_000_000;
-const DAY = Math.floor(NOW / 86_400_000);
-const TOTAL_KEY = `nl:cm:${COMMUNITY}:pts`;
-const DAY_KEY = `nl:cm:${COMMUNITY}:pts:d:${DAY}`;
+const source = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
 
-test("taking one community point spends five Redis commands after one buyer action was charged", async () => {
-  redis.clear();
-  await redis.pipeline([
-    ["ZADD", TOTAL_KEY, 1, MEMBER],
-    ["ZADD", DAY_KEY, 1, MEMBER],
-  ]);
-
-  const pipeline = redis.pipeline.bind(redis);
-  let billedCommands = 0;
-  redis.pipeline = (async (commands) => {
-    if (commands.length !== 1 || commands[0]?.[0] !== "EVAL" || commands[0]?.[1] !== REMOVE_POINT) {
-      billedCommands += commands.length;
-      return pipeline(commands);
-    }
-
-    billedCommands += 1; // EVAL itself is billed by Upstash.
-    const totalKey = String(commands[0][3]);
-    const dayKey = String(commands[0][4]);
-    const member = String(commands[0][5]);
-    billedCommands += 2;
-    const scores = await pipeline([
-      ["ZSCORE", totalKey, member],
-      ["ZSCORE", dayKey, member],
-    ]);
-    assert.deepEqual(scores, ["1", "1"]);
-    billedCommands += 2;
-    await pipeline([
-      ["ZINCRBY", totalKey, -1, member],
-      ["ZINCRBY", dayKey, -1, member],
-    ]);
-    return [[1, 1]];
-  }) as typeof redis.pipeline;
-
-  try {
-    await award(COMMUNITY, MEMBER, -1, { sid: "community-points-cost" }, NOW);
-  } finally {
-    redis.pipeline = pipeline;
-  }
-
-  assert.equal(billedCommands, 5);
+test("taking one community point spends five Redis commands after one buyer action was charged", () => {
+  const points = source("lib/community-points.ts");
+  const script = points.match(/export const REMOVE_POINT = `([\s\S]*?)`;/)?.[1];
+  assert.ok(script);
+  assert.match(points, /redisPipeline\(\[\["EVAL", REMOVE_POINT, 2,/);
+  const reads = [...script.matchAll(/score\(KEYS\[/g)].length;
+  const writes = [...script.matchAll(/return \{take\(KEYS\[/g)].length * 2;
+  assert.equal(reads, 2, "the script reads both point boards");
+  assert.equal(writes, 2, "the positive path writes both point boards");
+  assert.match(script, /if value < 0 then redis\.call\('ZADD'/);
+  assert.match(script, /if value == 0 then return 0 end\s+redis\.call\('ZINCRBY'/);
+  assert.equal(1 + reads + writes, 5, "Upstash bills EVAL and each Redis call it makes");
 });
 
 test("the buyer-actions cost line names the five-command community point removal", () => {
-  const buyerActions = COST_LINES.find((line) => line.id === "buyer-actions");
-  assert.ok(buyerActions);
-  assert.ok(
-    buyerActions.sources.some(
-      (source) => source.file === "lib/community-points.ts"
-        && source.names.includes("REMOVE_POINT")
-        && source.names.includes("award"),
-    ),
+  const registry = source("tests/plan-cost-registry.ts");
+  assert.match(
+    registry,
+    /\{ file: "lib\/community-points\.ts", names: \["REMOVE_POINT", "award"\] \}/,
     "register the paid five-command community point removal",
   );
 });

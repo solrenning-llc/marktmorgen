@@ -230,6 +230,11 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               <p className="mt-2 text-sm text-ink-soft">{HEALTH_NOTE}</p>
             </section>
           ) : null}
+          {can(role, "send") && broadcasts.some((b) => b.sent > 0) ? (
+            <p className="mt-6">
+              <a href={studioPath(store, "", "email/links")} className="underline">Change where a link goes in an email you already sent</a>
+            </p>
+          ) : null}
           {(emailTemplate || query.sequenceTemplate) ? <p role="status" className="card mt-6 p-5 text-sm text-ink-soft">{emailTemplate ? "Library email opened as an unsaved draft. Replace every placeholder and review consent before saving or sending." : initialSequence ? "Library sequence opened as an unsaved paused draft. Review every step before saving; activation is a separate action." : "A new sequence could not be opened: its trigger may already be in use, your role may not allow it, or its records or products could not be confirmed. Existing sequences were preserved."}</p> : null}
           <EmailStudio
             initialTemplate={emailTemplate ? {label:emailTemplate.label,subject:"",body:serializeMailBlocks(emailTemplate.blocks)} : undefined}

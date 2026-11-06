@@ -1032,6 +1032,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/email/links/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/email/links",
+      "parameters": []
+    },
+    {
       "source": "app/studio/email/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/email",
@@ -1512,6 +1518,7 @@
     "components/sales-levers.tsx",
     "components/save-offer-editor.tsx",
     "components/saved-sections.tsx",
+    "components/sent-links-editor.tsx",
     "components/sequence-import-box.tsx",
     "components/server-events-editor.tsx",
     "components/session-picker.tsx",
@@ -1811,6 +1818,7 @@
     "app/api/store/links/route.ts",
     "app/api/store/live/route.ts",
     "app/api/store/look/route.ts",
+    "app/api/store/mail/links/route.ts",
     "app/api/store/mail/picture/route.ts",
     "app/api/store/mail/route.ts",
     "app/api/store/manage/cancel/route.ts",
@@ -2023,6 +2031,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 137
+    "pageTemplates": 139
   }
 }

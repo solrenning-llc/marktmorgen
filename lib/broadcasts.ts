@@ -12,6 +12,7 @@
  *   nl:mail:bc:<id>:to     who it goes to, in order (a list)
  *   nl:mail:bcs:<listId>   the store's broadcasts, newest first
  *   nl:mail:queue          broadcasts waiting or under way
+ *   nl:mail:bc:<id>:go     where its links were sent since it went out (lib/sent-links.ts)
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { hasPlaceholder } from "@/lib/mail-body";
@@ -29,7 +30,8 @@ import { allowancesUsedStrict, giveAllowance, giveAllowanceIn, holdAllowanceAt, 
 import { paypalKept } from "@/lib/paypal-sales";
 import type { Store } from "@/lib/store";
 import { hasProduct, idsOfKind } from "@/lib/catalog";
-import { broadcastCampaign, isOwnLink, variantCampaign } from "@/lib/mail-links";
+import { type MailTag, broadcastCampaign, isOwnLink, variantCampaign } from "@/lib/mail-links";
+import { sentLinkKey, sentLinksFor, sentLinksReady } from "@/lib/sent-links";
 import { type Counted, type SubjectTest, MIN_TEST_REACH, chooseSubject, newTest, parseTest, partAt, splitFor } from "@/lib/mail-test";
 import { campaignViews, readPaidSales } from "@/lib/stats";
 import { moneyByCampaign } from "@/lib/mail-revenue";
@@ -94,6 +96,13 @@ export type Broadcast = {
    * email with one subject, which is every email made before this existed.
    */
   test: SubjectTest | null;
+  /**
+   * Whether its links go through one signed redirect each, so the creator
+   * can change where they lead after it went out (lib/sent-links.ts, 124
+   * [F2-EDIT-SENT-LINKS]). Absent on every email made before 6 November
+   * 2026, whose links go straight to the address: those cannot be changed.
+   */
+  links?: true;
   /**
    * Studio requests held for the readings of the store's buyers its list
    * needs when the scheduled job makes it (a narrowed email: READS_HELD
@@ -186,7 +195,7 @@ const QUEUE = "nl:mail:queue";
 const bcKey = (id: string) => `nl:mail:bc:${id}`;
 const toKey = (id: string) => `nl:mail:bc:${id}:to`;
 /** Every key a broadcast keeps, by its id: for a closed store (lib/closed-store-data.ts). */
-export const broadcastKeys = (id: string): string[] => [bcKey(id), toKey(id), `${bcKey(id)}:lock`];
+export const broadcastKeys = (id: string): string[] => [bcKey(id), toKey(id), `${bcKey(id)}:lock`, sentLinkKey(id)];
 const listKey = (listId: string) => `nl:mail:bcs:${listId}`;
 const lockKey = (id: string) => `nl:mail:bc:${id}:lock`;
 export const BROADCAST_ID = /^[0-9a-f]{24}$/;
@@ -420,6 +429,8 @@ export async function createBroadcast(
     listed: false,
     tagged: true,
     test,
+    // Its links can be changed after it went out only when they can be signed here (lib/sent-links.ts).
+    ...(sentLinksReady() ? { links: true as const } : {}),
   };
   // What the scheduled job's readings of the buyers will cost at the most, held in the month it goes out, before
   // anything is written. Given back if its room in the data room is not there (below), so a refusal holds nothing.
@@ -689,16 +700,12 @@ export async function advanceBroadcast(
         b = { ...b, status: "waiting", note: "The recipient list could not be read completely. Nothing more was sent. It will be checked again automatically." };
         break;
       }
-      const result = await sendTo(
-        store,
-        emails,
-        subject,
-        b.body,
-        `bc:${id}:${b.sent}`,
-        // Only an email made since links were tagged: one scheduled before
-        // goes out exactly as it was written and scheduled.
-        b.tagged ? { medium: "broadcast", campaign } : undefined,
-      );
+      // Only an email made since links were tagged: one scheduled before
+      // goes out exactly as it was written and scheduled.
+      const tag: MailTag | undefined = b.tagged ? { medium: "broadcast", campaign } : undefined;
+      // And only one made since links could be changed after sending sends them through their redirect (lib/sent-links.ts).
+      const via = tag && b.links === true ? sentLinksFor(store.handle, id, campaign, b.body) : undefined;
+      const result = await sendTo(store, emails, subject, b.body, `bc:${id}:${b.sent}`, tag && via ? { ...tag, via } : tag);
       // Whatever went before a stop counts, so the next run starts after it.
       const processed = emails.length - result.rest.length;
       if (processed > 0) b = { ...b, sent: b.sent + processed };

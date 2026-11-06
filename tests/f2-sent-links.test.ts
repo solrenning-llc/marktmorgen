@@ -263,7 +263,7 @@ async function main(): Promise<void> {
   is("the section's name", page.includes("Change where a link goes"), true);
   is("an email sent before cannot be changed, and it says so", /sent before/i.test(page + editor), true);
   is("the route needs the role that sends", /guardStoreWrite\(request, "send"/.test(read("app/api/store/mail/links/route.ts")), true);
-  is("the email studio leads to it", read("app/studio/email/page.tsx").includes("/studio/email/links"), true);
+  is("the email studio leads to it", read("app/studio/email/page.tsx").includes("studioPath(store, \"\", \"email/links\")"), true);
   is("no open, no click counted, in the route", !/noteClick|SADD|pixel/.test(read("app/go/[handle]/[id]/[link]/route.ts")), true);
 
   delivery.restore();

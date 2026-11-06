@@ -736,7 +736,12 @@ export default function PrivacyPage() {
           when the creator is trying two, each sent to a part of the list
           chosen at random. The tag is the same for everyone who got that
           email or that subject line: it lets the store count visits and sales
-          by email, and says nothing about who you are. Which of a
+          by email, and says nothing about who you are. In a one-off email
+          sent since November 6, 2026, each link first opens an address of
+          ours, the same for everyone who got the email, so the creator can
+          change where a wrong link leads after sending. Opening it counts as
+          one request of the store, as a page of the store does, and writes
+          nothing about you or the email you opened. Which of a
           creator&apos;s automatic emails reach you is decided by what their
           list already holds about you — what you got or bought from them, and
           any labels their import brought or their automatic emails gave you

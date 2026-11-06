@@ -185,6 +185,8 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "GET store/live": row("numbers", read),
   "POST store/look": row("pages", draft),
   "POST store/mail": row("email", execute, "Drafts are prepared; sending, scheduling and imports to the list are confirmed one at a time."),
+  // Where a link of an email already sent goes (124 [F2-EDIT-SENT-LINKS]): it reaches the list, so one link at a time, confirmed.
+  "POST store/mail/links": row("email", execute, "Where a link of a sent email goes is changed one link at a time, each confirmed."),
   "POST store/mail/picture": row("email", draft),
   "POST store/meta-ads": row("numbers", draft, "Which connected Meta ad account the numbers read; the ads themselves are 632 [AA2]."),
   "POST store/next-offer": row("offers", draft),

@@ -6,7 +6,7 @@ import { testAliases, testEnvironment } from "../../tests/test-config.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const file = "cx1-review-2742-status.proof.ts";
-const out = join(root, ".git", "cx1-results");
+const out = join(root, "node_modules", ".cache", "cx1-reviews");
 mkdirSync(out, { recursive: true });
 const bundle = join(out, "review-2742-status.cjs");
 await build({ entryPoints: [join(root, "tests", file)], bundle: true, platform: "node", format: "cjs", outfile: bundle, alias: testAliases(file, root, join(root, "tests")), logLevel: "error" });

@@ -42,6 +42,7 @@
  */
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { storeForId } from "@/lib/store";
 import { costsPaused } from "@/lib/plan-standing";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
@@ -419,8 +420,9 @@ export async function disconnectMeta(statsId: string): Promise<MetaAccount | nul
   return c.accounts.find((a) => a.id === c.account) ?? null;
 }
 
-async function forget(statsId: string, user: string): Promise<void> {
-  await redisPipeline([
+/** Forgets one store's connection and what was read from it; answers the deletion's own replies. */
+async function forget(statsId: string, user: string): Promise<unknown[]> {
+  return redisPipeline([
     ["DEL", connKey(statsId)],
     ["DEL", readKey(statsId)],
     ["DEL", linesKey(statsId)],
@@ -450,19 +452,43 @@ export function signedUser(raw: unknown): string | null {
   }
 }
 
-/** Forgets every store a Meta user connected. Returns, for each, who to tell. */
+/** Every reply of one deletion pipeline confirmed by its own count, or UnknownReplyError: never taken as done unseen. */
+function confirmDeleted(replies: unknown, commands: number, what: string): void {
+  const answered = repliesFor(replies, commands);
+  if (!answered || answered.some((reply) => countOf(reply) === null)) throw new UnknownReplyError(what);
+}
+
+/** One store's connection read exactly (CX-123 rule 24): null only when it is confirmed absent; an unknown reply throws. */
+async function exactConnection(statsId: string): Promise<Connection | null> {
+  const read = repliesFor(await redisPipeline([["GET", connKey(statsId)]]), 1);
+  if (!read) throw new UnknownReplyError("a Meta connection");
+  if (read[0] === null) return null;
+  const c = parseConnection(read[0]);
+  if (!c) throw new UnknownReplyError("a Meta connection");
+  return c;
+}
+
+/**
+ * Forgets every store a Meta user connected. Returns, for each, who to tell.
+ *
+ * Read exactly (CX-123 rule 24): the user's stores, each connection and each
+ * deletion. An unknown reply throws before the user's index is deleted, so
+ * the callback answers 503 without a confirmation code
+ * (app/api/integrations/meta/deauthorize) and Meta asks again; nothing the
+ * user connected is left without a way to find it.
+ */
 export async function forgetMetaUser(user: string): Promise<{ statsId: string; owner: { email: string; handle: string } }[]> {
   if (!isRedisConfigured() || !user) return [];
-  const [members] = await redisPipeline([["SMEMBERS", userKey(user)]]);
-  const stores = Array.isArray(members) ? (members as unknown[]).filter((m): m is string => typeof m === "string") : [];
+  const stores = stringList(repliesFor(await redisPipeline([["SMEMBERS", userKey(user)]]), 1)?.[0]);
+  if (!stores) throw new UnknownReplyError("the stores a Meta user connected");
   const forgot: { statsId: string; owner: { email: string; handle: string } }[] = [];
   for (const statsId of stores.slice(0, 50)) {
-    const c = await readConnection(statsId);
+    const c = await exactConnection(statsId);
     if (!c || c.user !== user) continue;
-    await forget(statsId, user);
+    confirmDeleted(await forget(statsId, user), 5, "a Meta connection's deletion");
     forgot.push({ statsId, owner: c.owner });
   }
-  await redisPipeline([["DEL", userKey(user)]]);
+  confirmDeleted(await redisPipeline([["DEL", userKey(user)]]), 1, "a Meta user's index deletion");
   return forgot;
 }
 
@@ -619,18 +645,24 @@ export async function readMetaDue(
 ): Promise<{ read: number; skipped: number }> {
   const counts = { read: 0, skipped: 0 };
   if (!isMetaConfigured() || !isRedisConfigured()) return counts;
-  const [members] = await redisPipeline([["SMEMBERS", STORES_KEY]]);
-  const stores = Array.isArray(members) ? (members as unknown[]).filter((m): m is string => typeof m === "string") : [];
+  // Read exactly (CX-123 rule 24): an unknown list throws, so the daily job says it failed and the next run reads it.
+  const stores = stringList(repliesFor(await redisPipeline([["SMEMBERS", STORES_KEY]]), 1)?.[0]);
+  if (!stores) throw new UnknownReplyError("the stores with Meta connected");
   const today = new Date().toISOString().slice(0, 10);
   for (const statsId of stores) {
     if (Date.now() >= deadline) break;
-    const [rawConn, rawRead] = await redisPipeline([["GET", connKey(statsId)], ["GET", readKey(statsId)]]);
-    const c = parseConnection(rawConn);
-    if (!c) {
+    const replies = repliesFor(await redisPipeline([["GET", connKey(statsId)], ["GET", readKey(statsId)]]), 2);
+    // Only a connection confirmed absent takes the store off the list; one that cannot be read is skipped this time.
+    if (replies && replies[0] === null) {
       await redisPipeline([["SREM", STORES_KEY, statsId]]);
       continue;
     }
-    const read = parseRead(rawRead);
+    const c = replies ? parseConnection(replies[0]) : null;
+    if (!replies || !c) {
+      counts.skipped += 1;
+      continue;
+    }
+    const read = parseRead(replies[1]);
     if (c.broken || !c.account || read?.day === today || (read?.after ?? 0) * 1000 > Date.now()) continue;
     const store = await storeFor(c.sid).catch(() => null);
     if (!store || store.statsId !== statsId) {

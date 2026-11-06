@@ -60,6 +60,8 @@
  */
 import { onAccount } from "@/lib/stripe-account";
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { StripeListUnreadable } from "@/lib/stripe-list";
 
 type ChargeLike = {
   id?: unknown;
@@ -177,7 +179,9 @@ function closingKnown(event: unknown): boolean {
  * for a charge marked disputed (rare) is Stripe asked for that charge's
  * disputes: a door reading an undisputed payment makes no extra request.
  * A charge not expanded, or not marked, counts as not lost, as with refunds.
- * Throws when Stripe cannot be asked.
+ * Throws when Stripe cannot be asked, and when its list of disputes is in
+ * another shape (CX-123 rule 24): a list, every row with a status Stripe
+ * gives a dispute, and "not lost" only from a list read to its end.
  */
 export async function disputeLost(account: string, payment: unknown): Promise<boolean> {
   const charge = chargeOf(payment);
@@ -186,8 +190,14 @@ export async function disputeLost(account: string, payment: unknown): Promise<bo
   const id = typeof charge.id === "string" ? charge.id : "";
   if (!CHARGE_ID.test(id)) return false;
   const listed = await onAccount("GET", account, `/disputes?${new URLSearchParams({ charge: id, limit: "10" })}`);
-  const rows = Array.isArray(listed.data) ? (listed.data as { status?: unknown }[]) : [];
-  return rows.some((row) => !!row && row.status === "lost");
+  const rows = Array.isArray(listed.data) ? (listed.data as unknown[]) : null;
+  const statusOf = (row: unknown) => (row && typeof row === "object" && !Array.isArray(row) ? (row as { status?: unknown }).status : undefined);
+  if (!rows || !rows.every((row) => { const status = statusOf(row); return typeof status === "string" && DISPUTE_STATUSES.has(status); })) {
+    throw new StripeListUnreadable("a charge's disputes");
+  }
+  if (rows.some((row) => statusOf(row) === "lost")) return true;
+  if (listed.has_more !== false) throw new StripeListUnreadable("a charge's disputes, not read to the end");
+  return false;
 }
 
 /**
@@ -273,12 +283,17 @@ export type LostRead = { rows: GivenBackRow[]; complete: boolean; newest: number
  * handled, that is, is in the job's set of rows already read (one SMISMEMBER):
  * a row passed over for the run's lookups, its time or an error leaves the
  * place where it was, and the next run reads it again. True when kept.
+ * Each flag is read in its exact shape (CX-123 rule 24): the integer 1 or 0,
+ * one for each row; any other reply throws UnknownReplyError and the place
+ * is not written, never taken for "handled".
  */
 export async function confirmLostRead(read: LostRead, seenKey: string): Promise<boolean> {
   const ids = read.rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
   if (ids.length) {
-    const [flags] = await redisPipeline([["SMISMEMBER", seenKey, ...ids]]);
-    if (!Array.isArray(flags) || flags.length !== ids.length || flags.some((flag) => Number(flag) !== 1)) return false;
+    const replies = repliesFor(await redisPipeline([["SMISMEMBER", seenKey, ...ids]]), 1);
+    const flags = replies ? repliesFor(replies[0], ids.length) : null;
+    if (!flags || !flags.every((flag) => flag === 0 || flag === 1)) throw new UnknownReplyError("the lost disputes already read (SMISMEMBER)");
+    if (flags.some((flag) => flag !== 1)) return false;
   }
   await read.commit();
   return true;

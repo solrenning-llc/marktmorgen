@@ -111,6 +111,10 @@ export async function publishLetter(store: Store, broadcast: Broadcast, now = Da
     if (!keep && ids.length === 0 && !open && keptByScore(already)) {
       return { ok: false, reason: "kept", message: "This email is on your store for members only. Take it off first if everyone should read it." };
     }
+    // Nothing said, no copy left, but its place says it was kept for members (Codex J on #2762): which products
+    // opened it is lost, so it is refused, never written again for everyone. Taking it off and publishing it with
+    // its products, or for everyone on purpose, still works.
+    if (keep && before === null && keptByScore(already)) return refuse;
     if (keep && typeof before === "string") {
       const named = (JSON.parse(before) as { products?: unknown }).products;
       kept = letterProducts(named);

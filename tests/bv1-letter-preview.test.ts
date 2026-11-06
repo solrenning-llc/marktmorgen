@@ -263,7 +263,9 @@ async function main(): Promise<void> {
   await redis.pipeline([["DEL", `nl:letters:i:${letter.id}`]]);
   const missing = await publishLetter(store, kept, now + 31);
   is("a missing member copy refuses republication", missing.ok, false);
-  is("a visitor never reads the private recipe after missing-copy republication", (await render(store, letter.id)).includes(SECRET), false);
+  // With the copy gone and the republish refused, the page has nothing to show and answers 404: no words at all.
+  const afterMissing = await render(store, letter.id).catch((e: unknown) => (String((e as { digest?: unknown })?.digest ?? "").endsWith(";404") ? "" : Promise.reject(e)));
+  is("a visitor never reads the private recipe after missing-copy republication", afterMissing.includes(SECRET), false);
   done();
 }
 

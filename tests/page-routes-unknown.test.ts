@@ -13,6 +13,7 @@
  */
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { readListing } from "@/lib/catalog";
 import { addProduct, claimHandle, ensureStatsId, imageFolder, setProductPage, setSitePages, storeForEmail } from "@/lib/store";
 import { claimPictures, writePage } from "@/lib/sales-page-store";
 import { emptyBlock, parsePage, type PageBlock } from "@/lib/sales-page";
@@ -92,7 +93,7 @@ async function main(): Promise<void> {
     versions: await redis.pipeline([["LRANGE", `nl:product:pages:${statsId}:${product}`, 0, -1]]),
     section: await redis.pipeline([["HGETALL", `nl:sblocks:${statsId}`], ["SMEMBERS", `nl:sblock:uses:${statsId}:${section.id}`]]),
     applied: await redis.pipeline([["GET", applyKey]]),
-    flag: (await storeForEmail(OWNER))?.catalog.items.find((item) => item.id === product)?.page ?? null,
+    flag: (await readListing((await storeForEmail(OWNER))!, product))?.page ?? null,
   });
 
   /** Runs the request while Redis answers every page read in the given unknown shape; counts the reads changed. */

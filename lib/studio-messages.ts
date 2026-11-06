@@ -33,4 +33,6 @@ export const STUDIO_MESSAGES: Record<string, string> = {
   // Also the store's calls to connected services used, or no place this month (lib/metered-limits.ts): no reason is claimed.
   slow_down: "Uploads can't start just now. Try again later.",
   files_unavailable: "File uploads are unavailable right now. Keep your file and try again in a few minutes.",
+  // A page whose read did not come back in a known shape (lib/sales-page-store.ts readPage): nothing is decided from it.
+  page_unread: "A page could not be read just now, so nothing was changed. Reload, then try again.",
 };

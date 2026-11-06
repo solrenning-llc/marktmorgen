@@ -26,6 +26,8 @@ import {
   saveDue,
   writePlace,
 } from "@/lib/lesson-position-rules";
+import { devicePlaceKey } from "@/lib/lesson-position";
+import { emailKey } from "@/lib/learn";
 import { done, is, part } from "./check";
 
 const ADA = "a".repeat(32);
@@ -83,11 +85,33 @@ part("The lesson page: hosted video through the player, with the signed-in stude
 const page = readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8");
 is("both hosted players use it", (page.match(/<LessonPlayer\b/g) ?? []).length, 2);
 is("no bare hosted <video> left", /<video\b/.test(page), false);
-is("the key is the student's (never the creator or a visitor): `who`", (page.match(/learner=\{student \? who : null\}/g) ?? []).length, 2);
+is("the key is made for the signed-in student only (never the creator or a visitor)", /const placeKey = student \? devicePlaceKey\(course\.id, student\.email\) : null;/.test(page), true);
+is("both players get that key", (page.match(/learner=\{placeKey\}/g) ?? []).length, 2);
 
 part("The course page: places forgotten once the student's access is not open");
 const coursePage = readFileSync("app/[handle]/course/[product]/page.tsx", "utf8");
-is("drawn for a signed-in student whose access is not open (refund, lost dispute, ended, taken off)", /access\.state !== "open" && access\.learner && !access\.learner\.owner \? \(\s*<ForgetLessonPositions courseId=\{course\.id\} learner=\{emailKey\(access\.learner\.email\)\} \/>/.test(coursePage), true);
+is("drawn for a signed-in student whose access is not open (refund, lost dispute, ended, taken off)", /const forgetKey = access\.state !== "open" && access\.learner && !access\.learner\.owner \? devicePlaceKey\(course\.id, access\.learner\.email\) : null;/.test(coursePage) && /\{forgetKey \? <ForgetLessonPositions courseId=\{course\.id\} learner=\{forgetKey\} \/> : null\}/.test(coursePage), true);
+
+part("The device key cannot be worked out from an address (Revisor 1 on #2728)");
+const dataKey = process.env.NIMBUS_DATA_KEY;
+const stripeKey = process.env.STRIPE_SECRET_KEY;
+delete process.env.NIMBUS_DATA_KEY;
+delete process.env.STRIPE_SECRET_KEY;
+is("no server key: no device key, so nothing is kept", devicePlaceKey("c1", "ada@example.com"), null);
+process.env.NIMBUS_DATA_KEY = "tests-only-not-a-real-deployment-secret";
+const k1 = devicePlaceKey("c1", "Ada@Example.com");
+is("made from the course and the address as typed any way, 32 hex", [k1 === devicePlaceKey("c1", "ada@example.com"), /^[0-9a-f]{32}$/.test(k1 ?? "")], [true, true]);
+is("not the learner key anyone can compute from the address", k1 === emailKey("ada@example.com"), false);
+is("another course, another key; another person, another key", [k1 === devicePlaceKey("c2", "ada@example.com"), k1 === devicePlaceKey("c1", "ben@example.com")], [false, false]);
+process.env.NIMBUS_DATA_KEY = "another-tests-only-secret";
+is("another server key, another device key", k1 === devicePlaceKey("c1", "ada@example.com"), false);
+if (dataKey === undefined) delete process.env.NIMBUS_DATA_KEY; else process.env.NIMBUS_DATA_KEY = dataKey;
+if (stripeKey !== undefined) process.env.STRIPE_SECRET_KEY = stripeKey;
+
+part("Said in the privacy policy, and in the person-data registry");
+const privacy = readFileSync("app/privacy/page.tsx", "utf8");
+is("the policy names both keys, the 90 days, and that nothing is sent to us", [privacy.includes('<p id="lesson-places">'), privacy.includes("<code>mm:lp:</code>"), privacy.includes("<code>mm:lp-speed</code>"), /after 90 days/.test(privacy), /never sent to\s+us/.test(privacy)], [true, true, true, true, true]);
+is("the registry line", readFileSync("lib/person-data.ts", "utf8").includes('{ file: "lib/lesson-position.ts", how: "none"'), true);
 
 part("The words, in every language");
 for (const [code, w] of Object.entries(COURSES_WORDS)) {

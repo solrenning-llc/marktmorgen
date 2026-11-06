@@ -22,7 +22,7 @@ Expansion source65557d014092682f68e9b1b34a9c11d66f107e8e, tests/g2781-course-ack
 
 - Author current lot3:55/55. Permanent course copy9/9 (overlaps original9).
 - Separate current-boundary M1/M2 recovery6/6 and confirmed member-queue contract12/12 re-executed onexactd77; old original member proof remains12/3only oldanchor expectation, not a current defect. Its unchanged source and separate contract are retained in earlier Gbranches.
-- Eleven standard non-proof groups343customchecks+34node:testgreen/0skip:55lot3+9course+61group+218othercustom; closing4/taxjournal6/costregistry24. No claim that these greens make expanded18/3green.
+- Twelve standard non-proof groups343customchecks+34node:testgreen/0skip:55lot3+9course+61group+218othercustom; closing4/taxjournal6/costregistry24. No claim that these greens make expanded18/3green.
 - Scopedstrict TypeScript actualgroup/learn/course/auth importgraph+both course tests0. Focusedlint0errors/11unusedfixturewarnings (7newderivative+4authorpermanent), explicitly declared. Public-data3915tracked/0 plus newproof0. Corrective whitespace clean.
 - No full build/globalCI, browser, nativeRedis, actual Stripe/Resend, liveaccount/payment/contact, margin or activation certification. Product, reservation, authorrefs/base/CI and merges untouched.
 

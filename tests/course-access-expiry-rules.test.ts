@@ -26,7 +26,7 @@ const maxTimestamp = 8_640_000_000_000_000;
 const invalidTimestamps: unknown[] = [
   undefined, null, "0", "2026-11-06T00:00:00.000Z", "", true, false,
   NaN, Infinity, -Infinity, 0.5, -0.5, maxTimestamp + 1, -maxTimestamp - 1,
-  Number.MAX_SAFE_INTEGER, Number.MIN_SAFE_INTEGER, 0n, Symbol("timestamp"),
+  Number.MAX_SAFE_INTEGER, Number.MIN_SAFE_INTEGER, BigInt(0), Symbol("timestamp"),
   [], [0], {}, new Date(0), new Number(0),
 ];
 

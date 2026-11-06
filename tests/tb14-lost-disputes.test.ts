@@ -322,6 +322,74 @@ async function main(): Promise<void> {
   is("the next run, with the lookup answered, takes it back", await revokeRefundedGifts(store, Date.now() + 10_000, drop), 1);
   is("gone", await holds("friend4@tb14.example"), false);
 
+  part("A write left unknown marks nothing read and keeps the anchor; the next run finishes it (Codex Z, write acknowledgements)");
+  // The command matched is not run and is answered in a shape no command gives; the rest run as they are.
+  const unknownWrite = (when: (command: (string | number)[]) => boolean) => {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const ran = await realPipeline(commands.filter((command) => !when(command)));
+      let at = 0;
+      return commands.map((command) => (when(command) ? "QUEUED" : ran[at++]));
+    }) as typeof redis.pipeline;
+  };
+  const read = async (key: string, id: string) => (await realPipeline([["SISMEMBER", key, id]]))[0];
+  const preSeen = `nl:pre:${store.statsId}:seen`;
+  const giftSeen = `nl:gift:${store.statsId}:seen`;
+  const writes: [string, number, string, (command: (string | number)[]) => boolean][] = [
+    ["the purchase's removal", 6, "fay@tb14.example", (c) => c[0] === "HDEL" && String(c[1]).startsWith("nl:imp:buy:")],
+    ["the pre-order's taken-back mark", 7, "gus@tb14.example", (c) => c[0] === "HSET" && c[1] === `nl:pre:${store.statsId}:${product.id}`],
+    ["the row's read mark", 8, "hal@tb14.example", (c) => c[0] === "SADD" && c[1] === preSeen],
+  ];
+  for (const [label, n, email, when] of writes) {
+    is(`pre-order ${n} handed over`, await confirmPreorder(store, session(n, email) as never, product, deps), "given");
+    const event = closing(100 + n, "lost", session(n, "").payment_intent);
+    closings = [event];
+    refunds = [];
+    const anchorThen = (await realPipeline([["GET", preorderAnchor]]))[0];
+    unknownWrite(when);
+    try {
+      await revokeRefundedPreorders(store, Date.now() + 10_000, drop);
+    } finally {
+      redis.pipeline = realPipeline;
+    }
+    is(`pre-orders, ${label} unknown: not marked read, and the anchor stays`, [await read(preSeen, String(event.id)), (await realPipeline([["GET", preorderAnchor]]))[0]], [0, anchorThen]);
+    await revokeRefundedPreorders(store, Date.now() + 10_000, drop);
+    is(`pre-orders, ${label}: the next run finishes it and marks it read`, [await has(email), Boolean((await readPreorder(store, product.id, session(n, "").id))?.revoked), await read(preSeen, String(event.id))], [false, true, 1]);
+  }
+  let g = 4;
+  for (const [label, when] of [
+    ["the purchase's removal", (c: (string | number)[]) => c[0] === "HDEL" && String(c[1]).startsWith("nl:imp:buy:")],
+    ["the gift's taken-back mark", (c: (string | number)[]) => c[0] === "SET" && String(c[1]).startsWith("nl:gift:g")],
+    ["the row's read mark", (c: (string | number)[]) => c[0] === "SADD" && c[1] === giftSeen],
+  ] as [string, (command: (string | number)[]) => boolean][]) {
+    g += 1;
+    const to = `friend${g}@tb14.example`;
+    const started = await startGift(store, product as Listing, { to, from: "Ana", message: "" });
+    if (!started.ok) throw new Error("no gift");
+    const pi = `pi_tb14gift${String(g).padStart(8, "0")}`;
+    await deliverGift({
+      store,
+      session: { id: `cs_test_tb14gift${String(g).padStart(8, "0")}`, created: NOW - 600, amount_total: 2500, currency: "usd", payment_intent: pi, metadata: { store: "tb14shop", product: product.id, gift: started.gift.id }, customer_details: { email: "buyer@tb14.example" } } as never,
+      product: product as Listing,
+      base: deps.base,
+      from: deps.from,
+      recordStart: async () => {},
+      ordersLink: async () => null,
+    });
+    const event = closing(110 + g, "lost", pi);
+    closings = [event];
+    refunds = [];
+    const anchorThen = (await realPipeline([["GET", giftAnchor]]))[0];
+    unknownWrite(when);
+    try {
+      await revokeRefundedGifts(store, Date.now() + 10_000, drop);
+    } finally {
+      redis.pipeline = realPipeline;
+    }
+    is(`gifts, ${label} unknown: not marked read, and the anchor stays`, [await read(giftSeen, String(event.id)), (await realPipeline([["GET", giftAnchor]]))[0]], [0, anchorThen]);
+    await revokeRefundedGifts(store, Date.now() + 10_000, drop);
+    is(`gifts, ${label}: the next run finishes it and marks it read`, [await holds(to), Boolean((await readGift(started.gift.id))?.revoked), await read(giftSeen, String(event.id))], [false, true, 1]);
+  }
+
   part("Booked calls: a lost dispute frees the booking's time, as a full refund does");
   const call = (n: number, disputed: boolean) => ({
     id: `cs_test_tb14call${String(n).padStart(8, "0")}`,

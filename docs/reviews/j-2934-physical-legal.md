@@ -26,9 +26,9 @@ Os arquivos antigos2915/2844 e seus logs/refs não foram apagados nem reescritos
 
 ## Permanente do autor — fatos verificáveis sem execução
 
-O teste no head nominal tem blob **fbcbc0313c0abc5d8d1155fc995144e75d001b17**. A API retornou o mesmo blob em 470b599e7. Nesse RED, a API retornou404 para lib/physical-legal.ts; o teste usa import estático desse módulo.
+O teste no head nominal tem blob **fbcbc0313c0abc5d8d1155fc995144e75d001b17**. A API retornou o mesmo blob no RED **470b599e70c425a9ee8587c5d7f68680c277e8f9**, cujo SHA completo foi resolvido por metadados do commit. Nesse RED, a API retornou404 para lib/physical-legal.ts; o teste usa import estático desse módulo.
 
-Logo, ainda é necessário obter/executar o comando e o log inteiro do RED. Não transformo a ausência do módulo ou a declaração do autor em “64 asserts falharam”, e não confirmo os “64 verdes” sem execução. O commit RED completo precisa ser resolvido quando o executor voltar; não foi possível obter seu SHA completo pelo git local após a falha.
+Logo, ainda é necessário obter/executar o comando e o log inteiro do RED. Não transformo a ausência do módulo ou a declaração do autor em “64 asserts falharam”, e não confirmo os “64 verdes” sem execução. O SHA completo foi obtido pela API, mas a execução do arquivo inteiro nesse commit permanece pendente.
 
 ## Candidatos técnicos para teste e esclarecimento factual
 

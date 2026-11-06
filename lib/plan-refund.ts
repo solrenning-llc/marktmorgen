@@ -36,7 +36,7 @@
  * `tax` and a charge names its `invoice`.
  */
 import { normaliseEmail } from "@/lib/auth";
-import { customerOf, isAddOn, isBillingConfigured, onPlatformAt, ownedBy, planOf } from "@/lib/billing";
+import { customerOf, isAddOn, isBillingConfigured, onPlatformAt, ownedBy } from "@/lib/billing";
 import { LEGACY_PLAN_PRICES, PLAN_PRICES, PRICES_WITH_COMMISSION, PRICES_WITHOUT_COMMISSION, REFUND_DAYS } from "@/lib/plan";
 import { type PlanRefund, type PlanRefundCharge, planRefund } from "@/lib/plan-refund-rules";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store } from "@/lib/store";
@@ -159,6 +159,18 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       if (!INVOICE_ID.test(invoiceId) || !CHARGE_ID.test(chargeId)) return { refund: { kind: "unknown", reason: "unreadable" } };
       const charge = await get(`/charges/${encodeURIComponent(chargeId)}?expand[]=balance_transaction`);
       if (charge.id !== chargeId || idOf(charge.invoice) !== invoiceId || idOf(charge.customer) !== customer.id) return { refund: { kind: "unknown", reason: "unreadable" } };
+      // Rule 24: a charge without its exact status, paid, disputed or currency is not decided here, never read as
+      // unpaid (a silent no), not disputed, or refundable in no currency (the refund made, then reported failed).
+      if (
+        typeof charge.status !== "string" ||
+        !CHARGE_STATUSES.has(charge.status) ||
+        typeof charge.paid !== "boolean" ||
+        typeof charge.disputed !== "boolean" ||
+        typeof charge.currency !== "string" ||
+        charge.currency === ""
+      ) {
+        return { refund: { kind: "unknown", reason: "unreadable" } };
+      }
       let disputeStatus: string | null = null;
       let disputedCents: number | null = null;
       if (charge.disputed === true) {
@@ -166,7 +178,9 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
         if (!disputes) return { refund: { kind: "unknown", reason: "unreadable" } };
         // More than one, or none listed although the charge says disputed: not decided here.
         if (disputes.length !== 1) return { refund: { kind: "unknown", reason: "unreadable" } };
-        disputeStatus = typeof disputes[0].status === "string" ? disputes[0].status : "unknown";
+        // A dispute without its status is not decided here, never taken as open (a silent no).
+        if (typeof disputes[0].status !== "string") return { refund: { kind: "unknown", reason: "unreadable" } };
+        disputeStatus = disputes[0].status;
         disputedCents = num(disputes[0].amount);
       }
       const lines = embedded(invoice.lines);
@@ -174,17 +188,21 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       const line = lines.find((l) => l.type === "subscription");
       const price = obj(line?.price);
       const interval = obj(price?.recurring)?.interval;
-      const cycle = interval === "year" ? "year" : interval === "month" ? "month" : planOf(sub).cycle;
+      // The cycle is the line's own: never today's subscription, which may have switched since or not say (read
+      // as monthly, a yearly payment's months not started would be refused).
+      if (interval !== "year" && interval !== "month") return { refund: { kind: "unknown", reason: "unreadable" } };
+      const cycle = interval;
       const fee = obj(charge.balance_transaction);
       const paidAt = num(obj(invoice.status_transitions)?.paid_at);
       const input: PlanRefundCharge = {
-        currency: typeof charge.currency === "string" ? charge.currency : "",
+        currency: charge.currency,
         succeeded: charge.status === "succeeded" && charge.paid === true,
         amountCents: num(charge.amount_captured),
         invoiceTotalCents: num(invoice.total),
         billingReason: typeof invoice.billing_reason === "string" ? invoice.billing_reason : "",
         refundedCents: num(charge.amount_refunded),
-        taxCents: invoice.tax === null || invoice.tax === undefined ? 0 : num(invoice.tax),
+        // Only a stated null is no tax; an invoice without `tax`, or another shape, is unreadable (the rules refuse NaN).
+        taxCents: invoice.tax === null ? 0 : num(invoice.tax),
         feeCents: fee ? num(fee.fee) : null,
         feeCurrency: fee && typeof fee.currency === "string" ? fee.currency : null,
         paidAtSeconds: Number.isFinite(paidAt) ? paidAt : num(charge.created),

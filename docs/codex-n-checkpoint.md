@@ -472,3 +472,10 @@ All test data synthetic. No price/visible limit/commission/flag/gate/account/pay
 
 - O worktree raiz `/workspace/scratch/d28fe5e80a85/repo` continua no commit local acidental `cc23e7321951ff916cc297cbcac518360cd8293c`; **não fazer push**.
 - Worktrees `n-review-2745.U5aYeS` e `n-review-2745-red.Y3vfFa` são descartáveis. Não promover nada deles. O único produto correto permanece nos heads remotos exatos acima.
+
+
+### Fechamento do canal — 05/11/2026 23h46 Fortaleza
+
+- Após a janela exigida do primeiro 409, o canal foi relido integralmente por `fetch_file` SHA `cc98373ec872428cacaa67c21c41561aea1d3bd9` + `fetch_blob` (152.477 bytes) e atualizado por CAS sem perder prefixo.
+- Resultado #2745, parecer #2700 e ponto de parada foram publicados no commit de canal `ddaa3473bed0b361a89f46b41bad682f945e6a46`, blob `00f0a67180435fc590fde389111f1ac2521fa90f`.
+- Nenhuma novidade causal adicional foi usada para mover produtos. Próxima retomada: ler este checkpoint mais recente e somente o delta novo do canal; manter os cinco heads/retries/bloqueios acima.

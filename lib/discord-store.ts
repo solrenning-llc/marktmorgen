@@ -79,12 +79,22 @@ export async function saveServer(room: string, server: DiscordServer): Promise<v
  * Forgets the server, the roles each product gave and everyone given them.
  * Returns who was given roles, so the caller can say how many; nothing is
  * taken back in Discord, where the bot is no longer.
+ *
+ * Both reads are exact (CX-123 rule 24, lib/redis-reply.ts): a reply that is not a list of strings, or a person kept
+ * in another shape, throws UnknownReplyError before anything is deleted. Deleting the people while their addresses
+ * are unknown would leave each buyer's address linked to their Discord id for good (Claude 6's proof,
+ * tests/discord-forget-server.test.ts); kept whole, the next try forgets everything.
  */
 export async function forgetServer(room: string, sid: string): Promise<number> {
-  const [ids] = await redisPipeline([["HKEYS", membersKey(room)]]);
-  const people = Array.isArray(ids) ? ids.map(String) : [];
-  const [rows] = await redisPipeline([["HVALS", membersKey(room)]]);
-  const addresses = (Array.isArray(rows) ? rows : []).map((row) => parse<Member>(row)?.e).filter((e): e is string => typeof e === "string");
+  const people = stringList(oneReply(await redisPipeline([["HKEYS", membersKey(room)]]), "the people given Discord roles"));
+  if (!people) throw new UnknownReplyError("the people given Discord roles");
+  const rows = stringList(oneReply(await redisPipeline([["HVALS", membersKey(room)]]), "the addresses of the people given Discord roles"));
+  if (!rows) throw new UnknownReplyError("the addresses of the people given Discord roles");
+  const addresses = rows.map((row) => {
+    const email = parse<Partial<Member>>(row)?.e;
+    if (typeof email !== "string" || !email) throw new UnknownReplyError("the addresses of the people given Discord roles");
+    return email;
+  });
   await redisPipeline([
     ["DEL", serverKey(room), productsKey(room), membersKey(room), ...addresses.map((e) => addressKey(room, e))],
     ...(people.length ? [["ZREM", DUE_KEY, ...people.map((id) => `${sid}|${id}`)]] : []),

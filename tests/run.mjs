@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { checkClientBundles } from "./client-bundles.mjs";
 import {testAliases,testEnvironment} from "./test-config.mjs";
+import {runTestFiles,runBundle,TEST_FILE_TIMEOUT_MS} from "./test-runner.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
@@ -25,7 +26,7 @@ try {
     console.log("No tests found.");
     process.exit(0);
   }
-  for (const file of files) {
+  failed = await runTestFiles({files, compileTimeoutMs: TEST_FILE_TIMEOUT_MS, compile: async file => {
     const bundle = join(out, `${file}.cjs`);
     await build({
       entryPoints: [join(here, file)],
@@ -36,14 +37,11 @@ try {
       logLevel: "error",
       alias: testAliases(file,root,here),
     });
+    return bundle;
+  }, run: async (file, bundle, next) => {
     console.log(`\n=== ${file} ===`);
-    const { spawnSync } = await import("node:child_process");
-    const run = spawnSync(process.execPath, [bundle], {
-      stdio: "inherit",
-      env: testEnvironment(process.env),
-    });
-    if (run.status !== 0) failed += 1;
-  }
+    return runBundle(bundle, testEnvironment(process.env), process.execPath, {timeoutMs: TEST_FILE_TIMEOUT_MS, label: file, diagnose: () => `next compile ${next()}`});
+  }});
 } finally {
   rmSync(out, { recursive: true, force: true });
 }

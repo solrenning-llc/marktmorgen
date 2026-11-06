@@ -21,6 +21,7 @@ export { ADD_ON_MARK, isAddOn } from "@/lib/billing";
 import { standingOf } from "@/lib/plan-standing";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, setAssistantPlan, storeForHandle, storeRef } from "@/lib/store";
 import { ASSISTANT_NAME, ASSISTANT_PRICE_CENTS, type AssistantPlan } from "@/lib/store-assistant-rules";
+import { StripeListUnreadable, hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 export const ASSISTANT_PRODUCT_ID = "nimbus_labs_store_assistant";
 export const ASSISTANT_LOOKUP_KEY = "nimbus_assistant_month";
@@ -134,14 +135,26 @@ export async function readAssistantReturn(store: Store, sessionId: string | unde
   return assistantPlanOf(await onPlatform("GET", `/subscriptions/${encodeURIComponent(subscriptionId)}`));
 }
 
-/** Whether any of the add-on's last payments was disputed. */
+/**
+ * Whether any of the add-on's last payments was disputed. The page is read in its exact shape (lib/stripe-list.ts):
+ * a disputed charge on any readable row is a yes; "none disputed" is said only when every row of the page is readable
+ * (each with its charge, or none, and that charge's own disputed true or false). Otherwise it throws, and nothing is
+ * written on it this run (syncAssistant leaves the store as it is). The page is the last three payments by design, so
+ * more invoices after them do not make it incomplete.
+ */
 async function disputed(subscriptionId: string): Promise<boolean> {
-  const listed = await onPlatformAt(INVOICE_VERSION, "GET", `/invoices?${new URLSearchParams({ subscription: subscriptionId, limit: "3", "expand[]": "data.charge" })}`);
-  const rows = Array.isArray(listed.data) ? (listed.data as { charge?: unknown }[]) : [];
-  return rows.some((row) => {
-    const charge = row.charge as { disputed?: unknown } | null | undefined;
-    return Boolean(charge && typeof charge === "object" && charge.disputed === true);
-  });
+  const chargeOf = (row: Record<string, unknown>) => ownField(row, "charge");
+  const read = readStripePage(
+    await onPlatformAt(INVOICE_VERSION, "GET", `/invoices?${new URLSearchParams({ subscription: subscriptionId, limit: "3", "expand[]": "data.charge" })}`),
+    (row) => {
+      if (!hasOwnField(row, "charge")) return false;
+      const charge = chargeOf(row);
+      return charge === null || (plainObject(charge) && typeof ownField(charge, "disputed") === "boolean");
+    },
+  );
+  if (read.rows.some((row) => { const charge = chargeOf(row); return plainObject(charge) && ownField(charge, "disputed") === true; })) return true;
+  if (read.unreadable) throw new StripeListUnreadable("an add-on invoice not readable");
+  return false;
 }
 
 /**

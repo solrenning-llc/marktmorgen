@@ -1,0 +1,144 @@
+=== g2781-recovery.proof.ts ===
+
+G control: a refund on the tenth full page is reached
+  FAIL  ten pages really read and valid refund closes the paid group
+        expected [10,true]
+        got      [1,false]
+
+G residual: an eleventh page is never reached by repeated capped runs
+  FAIL  each repeat hits its ten-page bound and restarts from the same first page
+        expected [[10,null,null],[10,null,null],[10,null,null]]
+        got      [[1,null,"1793948465"],[1,null,"1793948465"],[1,null,"1793948465"]]
+G_CAP [{"after":[null],"anchor":"1793948465","open":true},{"after":[null],"anchor":"1793948465","open":true},{"after":[null],"anchor":"1793948465","open":true}]
+  FAIL  a later refund makes bounded progress across repeated runs
+        expected true
+        got      false
+
+G residual: dedup claim before confirmed group close prevents recovery
+  ok    close failed before apply: one real claim applied but group remains open
+  FAIL  close failed before apply: later healthy runs recover the uncompleted refund
+        expected true
+        got      false
+  ok    payment mapping reply lost: one real claim applied but group remains open
+  FAIL  payment mapping reply lost: later healthy runs recover the uncompleted refund
+        expected true
+        got      false
+
+7 checks, 5 failing.
+
+=== g2781-recovery.proof.ts ===
+
+G control: a refund on the tenth full page is reached
+  ok    ten pages really read and valid refund closes the paid group
+
+G residual: an eleventh page is never reached by repeated capped runs
+  ok    each repeat hits its ten-page bound and restarts from the same first page
+G_CAP [{"after":[null,"re_LotThreeOther3099","re_LotThreeOther3199","re_LotThreeOther3299","re_LotThreeOther3399","re_LotThreeOther3499","re_LotThreeOther3599","re_LotThreeOther3699","re_LotThreeOther3799","re_LotThreeOther3899"],"anchor":null,"open":true},{"after":[null,"re_LotThreeOther3099","re_LotThreeOther3199","re_LotThreeOther3299","re_LotThreeOther3399","re_LotThreeOther3499","re_LotThreeOther3599","re_LotThreeOther3699","re_LotThreeOther3799","re_LotThreeOther3899"],"anchor":null,"open":true},{"after":[null,"re_LotThreeOther3099","re_LotThreeOther3199","re_LotThreeOther3299","re_LotThreeOther3399","re_LotThreeOther3499","re_LotThreeOther3599","re_LotThreeOther3699","re_LotThreeOther3799","re_LotThreeOther3899"],"anchor":null,"open":true}]
+  FAIL  a later refund makes bounded progress across repeated runs
+        expected true
+        got      false
+
+G residual: dedup claim before confirmed group close prevents recovery
+  ok    close failed before apply: one real claim applied but group remains open
+  FAIL  close failed before apply: later healthy runs recover the uncompleted refund
+        expected true
+        got      false
+  ok    payment mapping reply lost: one real claim applied but group remains open
+  FAIL  payment mapping reply lost: later healthy runs recover the uncompleted refund
+        expected true
+        got      false
+
+7 checks, 3 failing.
+
+=== stripe-list-lot3.test.ts ===
+
+group-buy.ts: refunds read in another shape never move the anchor
+  FAIL  refunds answered no data: the anchor stays
+        expected null
+        got      "1793346293"
+  FAIL  refunds answered data not a list: the anchor stays
+        expected null
+        got      "1793346293"
+  FAIL  refunds answered has_more missing: the anchor stays
+        expected null
+        got      "1793346293"
+  FAIL  refunds answered has_more as text: the anchor stays
+        expected null
+        got      "1793346293"
+  FAIL  refunds answered not an object: the anchor stays
+        expected null
+        got      "1793346293"
+  FAIL  a row not readable: the anchor stays
+        expected null
+        got      "1793951393"
+
+group-buy.ts: refunds are read to their end
+  FAIL  each page is read, after the last row of the one before
+        expected [null,"re_LotThreeOther002","re_LotThreeOther003"]
+        got      [null]
+  FAIL  its refund on the third page takes the purchase back
+        expected true
+        got      false
+  FAIL  the anchor moves once the last page is read
+        expected "1793951392"
+        got      "1793951393"
+  FAIL  each read pinned to the lot's version
+        expected true
+        got      false
+
+group-buy.ts: a readable refund stands beside a row not readable; the anchor does not move
+  ok    the purchase is taken back
+  FAIL  and the anchor stays
+        expected null
+        got      "1793951393"
+
+group-buy.ts: more pages than one run reads
+  FAIL  read up to its own ceiling
+        expected true
+        got      false
+  FAIL  and the anchor stays
+        expected null
+        got      "1793951393"
+
+14 checks, 13 failing.
+
+/tmp/g2781-linked.log:=== bought-for-others.test.ts ===
+/tmp/g2781-linked.log:12 checks, all passing.
+/tmp/g2781-linked.log:=== closing-families.test.ts ===
+/tmp/g2781-linked.log:ℹ tests 4
+/tmp/g2781-linked.log:ℹ pass 4
+/tmp/g2781-linked.log:ℹ fail 0
+/tmp/g2781-linked.log:ℹ skipped 0
+/tmp/g2781-linked.log:=== tax-sales-journal.test.ts ===
+/tmp/g2781-linked.log:ℹ tests 6
+/tmp/g2781-linked.log:ℹ pass 6
+/tmp/g2781-linked.log:ℹ fail 0
+/tmp/g2781-linked.log:ℹ skipped 0
+/tmp/g2781-linked.log:=== l6-checkout-sweep-exact.test.ts ===
+/tmp/g2781-linked.log:6 checks, all passing.
+/tmp/g2781-linked.log:=== stripe-list-lot1.test.ts ===
+/tmp/g2781-linked.log:58 checks, all passing.
+/tmp/g2781-linked.log:=== flow-conditions.test.ts ===
+/tmp/g2781-linked.log:32 checks, all passing.
+/tmp/g2781-linked.log:=== digital-consent.test.ts ===
+/tmp/g2781-linked.log:93 checks, all passing.
+/tmp/g2781-linked.log:=== group-place-delivery-copy.test.ts ===
+/tmp/g2781-linked.log:17 checks, all passing.
+/tmp/g2781-linked.log:=== plan-cost-registry.test.ts ===
+/tmp/g2781-linked.log:ℹ tests 24
+/tmp/g2781-linked.log:ℹ pass 24
+/tmp/g2781-linked.log:ℹ fail 0
+/tmp/g2781-linked.log:ℹ skipped 0
+/tmp/g2781-author-green.log:=== stripe-list-lot3.test.ts ===
+/tmp/g2781-author-green.log:14 checks, all passing.
+/tmp/g2781-author-green.log:=== group-buy.test.ts ===
+/tmp/g2781-author-green.log:61 checks, all passing.
+
+/tmp/g2781-review/tests/g2781-recovery.proof.ts
+  17:21  warning  'readGroup' is defined but never used            @typescript-eslint/no-unused-vars
+  19:10  warning  'STRIPE_LIST_VERSION' is defined but never used  @typescript-eslint/no-unused-vars
+  42:7   warning  'GARBLED' is assigned a value but never used     @typescript-eslint/no-unused-vars
+
+✖ 3 problems (0 errors, 3 warnings)
+
+Public data check: 3907 tracked files; 0 file(s) require correction.

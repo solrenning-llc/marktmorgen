@@ -11,8 +11,16 @@
  * ones of theirs, and the code among the store's active ones. A membership
  * that already has a discount is refused rather than having it replaced
  * without a word: a better one could be lost.
+ *
+ * Stripe's answers are read in their exact shape (CX-123 rules 24 and 30,
+ * lib/stripe-list.ts): a list that is not a whole, readable list is "could
+ * not check" ("unreadable"), never "no running membership"; a `discounts`
+ * that is not Stripe's own shape is "not known", and the code is not put on,
+ * since putting it on would replace whatever is there.
  */
+import { types } from "node:util";
 import { onAccount } from "@/lib/stripe-account";
+import { StripeListUnreadable, hasOwnField, ownField, plainObject, readStripePage, type StripeRow } from "@/lib/stripe-list";
 import { saleHandles, type Store } from "@/lib/store";
 import { listCodes } from "@/lib/discount";
 
@@ -23,7 +31,13 @@ const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
 const PROMO_PATTERN = /^promo_[A-Za-z0-9]{6,64}$/;
 /** The statuses of a membership still running, as lib/membership-manage.ts counts them. */
 const LIVE = new Set(["active", "trialing", "past_due", "unpaid", "paused"]);
+/** Every status Stripe gives a subscription; a row with another is not read as anything. */
+const STRIPE_STATUSES = new Set(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]);
+/** One page of customers under an address: more than that is not checked, and says so. */
 const MAX_CUSTOMERS = 20;
+/** A customer's subscriptions, read page by page up to this many; past it the memberships are not known. */
+const SUB_PAGE = 100;
+const MAX_SUB_PAGES = 5;
 
 /** One of a member's running memberships of this store, as the studio shows it. */
 export type MemberSub = {
@@ -35,17 +49,50 @@ export type MemberSub = {
   amount: number;
   currency: string;
   interval: string;
-  /** Whether a discount already comes off it. */
-  discounted: boolean;
+  /** Whether a discount already comes off it; null when Stripe's answer could not be read (then nothing is put on). */
+  discounted: boolean | null;
 };
 
 export type Raw = Record<string, unknown>;
 const list = (value: unknown): Raw[] => (value && typeof value === "object" && Array.isArray((value as Raw).data) ? ((value as Raw).data as Raw[]) : []);
 
-/** Whether Stripe says a subscription already has a discount on it (old `discount` or new `discounts`). */
-export function hasDiscount(sub: Raw): boolean {
-  if (sub.discount && typeof sub.discount === "object") return true;
-  return Array.isArray(sub.discounts) && sub.discounts.length > 0;
+/**
+ * Whether Stripe says a subscription already has a discount on it (old
+ * `discount` or new `discounts`), read exactly: `discounts` is a list of
+ * discount ids or discount objects, empty when there is none. Anything else
+ * (missing, null, a list object, one id as text) is null, "not known", never
+ * "no discount": a code put on would replace what is there.
+ */
+export function hasDiscount(sub: Raw): boolean | null {
+  const old = hasOwnField(sub, "discount") ? ownField(sub, "discount") : null;
+  if (plainObject(old)) return true;
+  if (old !== null) return null;
+  const now = ownField(sub, "discounts");
+  if (!Array.isArray(now) || types.isProxy(now)) return null;
+  if (now.length === 0) return false;
+  const known = (d: unknown) => (typeof d === "string" && d.length > 0) || (plainObject(d) && typeof ownField(d, "id") === "string");
+  return now.every(known) ? true : null;
+}
+
+/** A subscription row is readable when it has a status Stripe gives and its metadata as an object. */
+const legibleSub = (row: Record<string, unknown>): boolean => {
+  const status = ownField(row, "status");
+  return typeof status === "string" && STRIPE_STATUSES.has(status) && plainObject(ownField(row, "metadata"));
+};
+
+/** Every row of a Stripe list read to its end, every row readable; otherwise StripeListUnreadable. */
+async function readWhole(account: string, path: string, limit: number, maxPages: number, pattern: RegExp, legible?: (row: Record<string, unknown>) => boolean): Promise<StripeRow[]> {
+  const rows: StripeRow[] = [];
+  let after = "";
+  for (let page = 0; page < maxPages; page += 1) {
+    const read = readStripePage(await onAccount("GET", account, `${path}&limit=${limit}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`, undefined, API_VERSION), legible, pattern);
+    if (read.unreadable > 0) throw new StripeListUnreadable(`${read.unreadable} row(s) could not be read`);
+    rows.push(...read.rows);
+    if (!read.hasMore) return rows;
+    if (!read.lastId) throw new StripeListUnreadable("no row to read the next page from");
+    after = read.lastId;
+  }
+  throw new StripeListUnreadable("more pages than are read");
 }
 
 /** A subscription row made safe for the studio, or null when it is not a running membership of this store. */
@@ -69,27 +116,31 @@ export function readMemberSub(sub: Raw, handles: Set<string>): MemberSub | null 
   };
 }
 
-/** Every running membership of this store held under an address, newest customer first; null when Stripe could not be read. */
-export async function memberSubs(store: Store, email: string): Promise<MemberSub[] | null> {
+/**
+ * Every running membership of this store held under an address, newest
+ * customer first; null when Stripe could not be reached, "unreadable" when it
+ * answered in a shape that cannot be read whole (not known, never "none").
+ */
+export async function memberSubs(store: Store, email: string): Promise<MemberSub[] | "unreadable" | null> {
   const rows = await memberSubRows(store, email);
-  return rows === null ? null : rows.map((r) => r.row);
+  return rows === null || rows === "unreadable" ? rows : rows.map((r) => r.row);
 }
 
 /**
  * The same memberships with what Stripe answered for each, for a reader that
  * needs more of a subscription than the studio row (lib/member-free-days.ts:
- * its next charge). Same reads, same filter; null when Stripe could not be read.
+ * its next charge). Same reads, same filter, same answers when Stripe could not
+ * be reached (null) or read whole ("unreadable").
  */
-export async function memberSubRows(store: Store, email: string): Promise<{ row: MemberSub; raw: Raw }[] | null> {
+export async function memberSubRows(store: Store, email: string): Promise<{ row: MemberSub; raw: Raw }[] | "unreadable" | null> {
   const account = store.stripeAccountId;
   if (!account) return null;
   const handles = saleHandles(store);
   try {
-    const customers = list(await onAccount("GET", account, `/customers?email=${encodeURIComponent(email)}&limit=${MAX_CUSTOMERS}`, undefined, API_VERSION));
+    const customers = await readWhole(account, `/customers?email=${encodeURIComponent(email)}`, MAX_CUSTOMERS, 1, CUSTOMER_PATTERN);
     const out: { row: MemberSub; raw: Raw }[] = [];
     for (const customer of customers) {
-      if (typeof customer.id !== "string" || !CUSTOMER_PATTERN.test(customer.id)) continue;
-      const subs = list(await onAccount("GET", account, `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all&limit=20`, undefined, API_VERSION));
+      const subs = await readWhole(account, `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all`, SUB_PAGE, MAX_SUB_PAGES, SUB_PATTERN, legibleSub);
       for (const sub of subs) {
         const row = readMemberSub(sub, handles);
         if (row) out.push({ row, raw: sub });
@@ -97,12 +148,16 @@ export async function memberSubRows(store: Store, email: string): Promise<{ row:
     }
     return out;
   } catch (error) {
+    if (error instanceof StripeListUnreadable) {
+      console.error("a member's memberships could not be read whole", error.message);
+      return "unreadable";
+    }
     console.error("reading a member's memberships failed", error);
     return null;
   }
 }
 
-export type ApplyResult = { ok: true } | { ok: false; reason: "not_member" | "discounted" | "code" | "stripe" | "refused" };
+export type ApplyResult = { ok: true } | { ok: false; reason: "not_member" | "discounted" | "code" | "stripe" | "refused" | "unavailable" };
 
 /**
  * Puts one of the store's active codes on one of the member's running
@@ -114,8 +169,11 @@ export async function applyMemberDiscount(store: Store, email: string, subscript
   if (!account || !SUB_PATTERN.test(subscription) || !PROMO_PATTERN.test(promotion)) return { ok: false, reason: "not_member" };
   const subs = await memberSubs(store, email);
   if (subs === null) return { ok: false, reason: "stripe" };
+  if (subs === "unreadable") return { ok: false, reason: "unavailable" };
   const sub = subs.find((s) => s.id === subscription);
   if (!sub) return { ok: false, reason: "not_member" };
+  // Not known is never "none": the code would replace whatever is there.
+  if (sub.discounted === null) return { ok: false, reason: "unavailable" };
   if (sub.discounted) return { ok: false, reason: "discounted" };
   const codes = await listCodes(account);
   if (codes.state !== "ok") return { ok: false, reason: "stripe" };

@@ -98,12 +98,13 @@ export function MemberDiscount({ titles }: { titles: Record<string, string> }) {
                     <span className="text-sm text-ink">
                       {`${titles[m.product] ?? "A membership"} · ${m.amount && m.currency ? formatMoney(m.amount, m.currency.toUpperCase()) : "amount not known"}${m.interval ? ` a ${m.interval}` : ""}`}
                       {m.discounted ? <span className="text-ink-soft"> · a discount already comes off</span> : null}
+                      {m.discounted === null ? <span className="text-ink-soft"> · whether a discount already comes off could not be read, so it is left as it is</span> : null}
                     </span>
-                    {m.discounted ? null : (
+                    {m.discounted === false ? (
                       <button type="button" className="btn btn-primary btn-sm" disabled={busy !== "" || !code} aria-busy={busy === m.id} onClick={() => void apply(m.id)}>
                         Put the code on
                       </button>
-                    )}
+                    ) : null}
                   </li>
                 ))}
               </ul>

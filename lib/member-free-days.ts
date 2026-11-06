@@ -49,10 +49,14 @@ const CLAIM_SECONDS = 86_400;
 
 const claimKey = (store: Store, subscription: string, nextCharge: number) => `nl:free-days:${store.sid || store.handle}:${subscription}:${nextCharge}`;
 
-/** Every running membership of this store held under an address, with its next charge; null when Stripe could not be read. */
-export async function freeDaysSubs(store: Store, email: string, nowSeconds = Math.floor(Date.now() / 1000)): Promise<FreeDaysSub[] | null> {
+/**
+ * Every running membership of this store held under an address, with its next
+ * charge; null when Stripe could not be reached, "unreadable" when it answered
+ * in a shape that cannot be read whole (not known, never "none").
+ */
+export async function freeDaysSubs(store: Store, email: string, nowSeconds = Math.floor(Date.now() / 1000)): Promise<FreeDaysSub[] | "unreadable" | null> {
   const rows = await memberSubRows(store, email);
-  if (rows === null) return null;
+  if (rows === null || rows === "unreadable") return rows;
   return rows.map(({ row, raw }) => {
     const state = freeDaysState(raw, nowSeconds);
     return { id: row.id, product: row.product, amount: row.amount, currency: row.currency, interval: row.interval, nextCharge: state.nextCharge, blocked: state.blocked };
@@ -61,7 +65,7 @@ export async function freeDaysSubs(store: Store, email: string, nowSeconds = Mat
 
 export type GiveResult =
   | { ok: true; nextCharge: number; emailed: boolean }
-  | { ok: false; reason: "days" | "not_member" | "changed" | "busy" | "refused" | "unknown" | "stripe" }
+  | { ok: false; reason: "days" | "not_member" | "changed" | "busy" | "refused" | "unknown" | "stripe" | "unavailable" }
   | { ok: false; reason: "blocked"; blocked: FreeDaysBlock };
 
 /**
@@ -85,6 +89,7 @@ export async function giveFreeDays(
 
   const rows = await memberSubRows(store, email);
   if (rows === null) return { ok: false, reason: "stripe" };
+  if (rows === "unreadable") return { ok: false, reason: "unavailable" };
   const found = rows.find((r) => r.row.id === subscription);
   if (!found) return { ok: false, reason: "not_member" };
   const state = freeDaysState(found.raw, nowSeconds);

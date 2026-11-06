@@ -34,7 +34,7 @@ async function main(): Promise<void> {
   process.env.STRIPE_SECRET_KEY = "sk_test_product_page_a11y";
   process.env.RESEND_API_KEY = "re_test_product_page_a11y";
 
-  part("1.4.6: the creator's colour as text keeps 7:1, in every theme and for any colour picked");
+  part("1.4.6: the creator's color as text keeps 7:1, in every theme and for any color picked");
   const accents = [...ACCENTS.map((a) => a.hex), "#5a36ee", "#ffff00", "#00ffff", "#ffffff", "#000000", "#7f7f7f", "#ff00ff", "#00ff88"];
   let worst = { card: 99, item: 99, bg: 99, at: "" };
   for (const theme of THEMES) {
@@ -50,7 +50,7 @@ async function main(): Promise<void> {
   const violet = lookColours({ theme: "light", accent: "#5a36ee" });
   is("the default violet, measured at 6.56:1 in the browser, now reads at 7:1", contrast(violet.accentText, violet.card) >= 7, true);
 
-  part("2.5.5: every box a buyer ticks on the product page is a 44 px target");
+  part("2.5.5: every box a buyer checks on the product page is a 44 px target");
   const OWNER = "a11y-test@example.com";
   await claimHandle(OWNER, "a11ytest", "Quiet Oven Test", "");
   await ensureStatsId(OWNER);
@@ -98,7 +98,7 @@ async function main(): Promise<void> {
   const width = Number(measure?.[2].match(/max-width:\s*(\d+)ch/)?.[1] ?? 999);
   // 1ch is the width of "0", wider than an average letter: in Chromium 72ch still held 92-101 letters a line, 56ch at most 78.
   is("at no more than 56ch, so a line stays under 80 letters", width <= 56, true);
-  is("a centred line stays centred under the cap", /\.st-measure :where\([^)]*\.text-center[^)]*\)\s*\{[^}]*margin-inline:\s*auto/.test(css), true);
+  is("a centered line stays centered under the cap", /\.st-measure :where\([^)]*\.text-center[^)]*\)\s*\{[^}]*margin-inline:\s*auto/.test(css), true);
   is("the product page, its reviews page and a call's booking page use it", [/<main id="content" className=\{`st-measure /.test(page), /<main id="content" className="st-measure /.test(reviewsPage), /<main id="content" className="st-measure /.test(bookPage)], [true, true, true]);
 
   part("2.4.10 and 1.3.1: the reviews page has one level-one heading");

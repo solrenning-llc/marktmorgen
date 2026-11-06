@@ -27,6 +27,7 @@ import { deliverGift, readGift, revokeRefundedGifts, startGift } from "@/lib/gif
 import { importedFor, importedKey } from "@/lib/imported-purchases";
 import { confirmPreorder, readPreorder, revokeRefundedPreorders } from "@/lib/preorders";
 import { paidCall, paidCalls } from "@/lib/calls";
+import { lostDisputesSince } from "@/lib/refunds";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -36,6 +37,7 @@ let refunds: Record<string, unknown>[] = [];
 /** Closing events of disputes, newest first, as Stripe lists them. */
 let closings: Record<string, unknown>[] = [];
 let eventsFail = false;
+let eventsMalformed = false;
 let eventReads = 0;
 /** The store's completed checkouts, newest first, as Stripe lists them with their payment's latest charge. */
 let sessions: Record<string, unknown>[] = [];
@@ -53,6 +55,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === "/events") {
     eventReads += 1;
     if (eventsFail) return answer({ error: { message: "rate limited" } }, 429);
+    if (eventsMalformed) return answer({ object: "list", data: null, has_more: false });
     const after = url.searchParams.get("starting_after");
     const from = after ? closings.findIndex((e) => e.id === after) + 1 : 0;
     return answer({ object: "list", data: closings.slice(from, from + 100), has_more: from + 100 < closings.length });
@@ -89,6 +92,12 @@ async function main(): Promise<void> {
   await ensureStatsId("owner@tb14.example");
   await setStripeAccount("owner@tb14.example", "acct_1TestTb14Lost01", true);
   await setSubscription("owner@tb14.example", { customerId: "cus_Tb14Owner01", subscriptionId: "sub_Tb14Owner01", active: true, period: paidPeriod() });
+
+  part("Adversarial: an incomplete events list is unknown, not a completed read");
+  eventsMalformed = true;
+  const incomplete = await lostDisputesSince("acct_1TestTb14Lost01", NOW - 600);
+  is("the caller must keep its cursor and anchor", incomplete.complete, false);
+  eventsMalformed = false;
   const made = await addProduct("owner@tb14.example", "Bread Course", "", "25", null);
   if (!made.ok) throw new Error("no product");
   await setProductLink("owner@tb14.example", made.product.id, "https://example.com/course");

@@ -45,6 +45,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { onAccount, platformKey } from "@/lib/stripe-account";
 import { RECOVERY_OPEN_SECONDS, recoveryOn } from "@/lib/recovery-setting";
 import { isSettled } from "@/lib/instant-pay";
@@ -183,6 +184,22 @@ async function paidSince(store: Store, email: string, productIds: string[], sinc
 
 export type RemindOutcome = "sent" | "skip" | "failed";
 
+/**
+ * Whether a mark is there, from its EXISTS reply read only in its exact
+ * shape (CX-123 rule 24): the integer 1 or 0. Anything else (no reply, text,
+ * another number) is unknown, never "not there", and throws
+ * UnknownReplyError, so no reminder goes on it. Each caller already reports
+ * a throw as not sent: the checkout sweep logs it and a later pass reads
+ * the checkout again (nothing was marked as sent); the asked-for and the
+ * Store assistant reminders count it as skipped, as any failure there.
+ */
+function markThere(reply: unknown, what: string): boolean {
+  const count = countOf(reply);
+  if (count === 1) return true;
+  if (count === 0) return false;
+  throw new UnknownReplyError(what);
+}
+
 /** The products of a cart that can still go in one and be bought now, in its order. */
 async function cartItems(store: Store, raw: (string | undefined)[]): Promise<Listing[]> {
   const ids = readCartIds(raw.filter((id): id is string => typeof id === "string" && id !== ""));
@@ -219,8 +236,9 @@ export async function remindAbandoned(
   if (!email) return "skip";
   // The buyer checked the Store assistant's own box for this checkout
   // (lib/assistant-reminder.ts): its reminder is the one, an hour on.
-  const [assisted] = await redisPipeline([["EXISTS", assistRemindKey(id)]]);
-  if (Number(assisted) === 1) return "skip";
+  const assisted = repliesFor(await redisPipeline([["EXISTS", assistRemindKey(id)]]), 1);
+  if (!assisted) throw new UnknownReplyError("the Store assistant's reminder mark");
+  if (markThere(assisted[0], "the Store assistant's reminder mark")) return "skip";
 
   const created = typeof session.created === "number" ? session.created : closed - RECOVERY_OPEN_SECONDS;
   // A call (lib/calls.ts): its time was held only while the checkout was
@@ -378,14 +396,28 @@ async function deliver(
   const ids = about.kind === "cart" ? about.items.map((p) => p.id) : [about.product.id];
   // What "once a week" counts: one product, or one cart of the same products in any order.
   const onceFor = about.kind === "cart" ? `cart:${[...ids].sort().join(",")}` : about.product.id;
-  const [sent, off, once, contact, deleted] = await redisPipeline([
-    ["EXISTS", sentKey(id)],
-    ["EXISTS", offKey(statsId, email)],
-    ["EXISTS", onceKey(statsId, email, onceFor)],
-    store.listId ? ["HGET", leadsKey(store.listId), normaliseEmail(email)] : ["EXISTS", "nl:none"],
-    suppressedCommand(store.listId, email),
-  ]);
-  if (Number(sent) === 1 || Number(off) === 1 || Number(once) === 1) return "skip";
+  // Read only in their exact shape (CX-123 rule 24): one reply for each of
+  // the five, each mark exactly 0 or 1, the contact text or nothing. An
+  // unknown one throws before anything is claimed or sent.
+  const marks = repliesFor(
+    await redisPipeline([
+      ["EXISTS", sentKey(id)],
+      ["EXISTS", offKey(statsId, email)],
+      ["EXISTS", onceKey(statsId, email, onceFor)],
+      store.listId ? ["HGET", leadsKey(store.listId), normaliseEmail(email)] : ["EXISTS", "nl:none"],
+      suppressedCommand(store.listId, email),
+    ]),
+    5,
+  );
+  if (!marks) throw new UnknownReplyError("the checkout reminder's marks");
+  const [sent, off, once, contact, deleted] = marks;
+  const wasSent = markThere(sent, "the checkout reminder's sent mark");
+  const stopped = markThere(off, "the checkout reminder's stop mark");
+  const heardThisWeek = markThere(once, "the checkout reminder's once-a-week mark");
+  if (store.listId ? contact !== null && typeof contact !== "string" : countOf(contact) === null) {
+    throw new UnknownReplyError("the list contact for the checkout reminder");
+  }
+  if (wasSent || stopped || heardThisWeek) return "skip";
   // Somebody deleted from this store is never written to again (lib/suppression.ts).
   if (wasSuppressed(deleted)) return "skip";
   // Someone who left the creator's list has said no to their email, and a
@@ -398,10 +430,22 @@ async function deliver(
   }
 
   // Taken before sending: whichever pass gets here first is the only one.
-  const [claimed, claimedOnce] = await redisPipeline([
-    ["SET", sentKey(id), "sending", "NX", "EX", ONCE_PER_SECONDS * 2],
-    ["SET", onceKey(statsId, email, onceFor), "1", "NX", "EX", ONCE_PER_SECONDS],
-  ]);
+  const claims = repliesFor(
+    await redisPipeline([
+      ["SET", sentKey(id), "sending", "NX", "EX", ONCE_PER_SECONDS * 2],
+      ["SET", onceKey(statsId, email, onceFor), "1", "NX", "EX", ONCE_PER_SECONDS],
+    ]),
+    2,
+  );
+  if (!claims) throw new UnknownReplyError("the checkout reminder's claim");
+  const [claimed, claimedOnce] = claims;
+  // Sent only when both were taken here, each answered exactly "OK"; nothing
+  // back means another pass holds it. Any other reply is unknown and nothing
+  // is sent. A lost reply may still have set its mark, which can only hold
+  // back this one optional reminder for its week: the safe side.
+  if ((claimed !== "OK" && claimed !== null) || (claimedOnce !== "OK" && claimedOnce !== null)) {
+    throw new UnknownReplyError("the checkout reminder's claim");
+  }
   if (claimed === null || claimedOnce === null) return "skip";
 
   // The stop mark this email's link may leave is kept for as long as the

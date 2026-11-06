@@ -401,3 +401,14 @@ Claude1/Y were notified in channel747383a96883a655c87195dded9e9cf4b7323aac. Reco
 - A fresh channel `fetch_file` supplied blob SHA `c63c61c08e239e332853a592515a2c7cf5724884`; the full 311,296-character UTF-8 blob was fetched before writing.
 - The evidence report and exact point of stop were appended only, successfully, in channel commit `48a3a69feb804fc597ae90cef1c040710b973b5e`, new content blob `fb122471088f5ca5e7df0d0f0563c464136a06c4`.
 - This supersedes the preceding line that said the channel retry remained pending. No foreign content was restored, rewritten or removed.
+
+
+## 2026-11-06 04h03 Fortaleza — independent reproduction received; heads reconfirmed (latest)
+
+- Fresh channel SHA/blob read found one causal novelty for P: Revisor 2 independently reproduced `codex/p-assignment-room-read-evidence@6e6848c775c13c49de816254fc8bd893f2e62951` with the same 3 tests / 1 causal failure and four unknown Redis reply vectors.
+- Revisor 2 confirmed the MR impact and the intended `hasRoom` contract: only `null` is absent/zero, a safe non-negative decimal integer is confirmed usage, and every other form refuses before upload signing.
+- A follow-up top-level #2655 comment was published as `6679190828`; product, author branch and CI remain untouched. Ownership remains with the holder of `lib/assignment.ts`.
+- Exact current PR heads were fetched once: #2539 OPEN/mergeable at `3e286154e41e3712c8c981784b7cd487d57597e3`; #2542 OPEN/mergeable at `f5d0f5c5490715f5fcac2d75464c3fe1a2127359`; #2655 OPEN/mergeable at `4441a693f6a52a65e47ef964751d5356ffe5314d`. No corrective reply/head exists yet on #2655.
+- Main advanced from `ffbfb57416650d441946a8ebb0ed787b43ac3aab` to `9bea20a3b164374ade2d1df8accdebfc4f9823ce` only through #2776, the CX-126 reservation batch containing P's evidence row, and unrelated #2726. No P product dependency was released.
+- A focused current-main scan of course/media/lesson/quiz/certificate files found no second safe product unit: central KX3/audio/editor/access surfaces remain occupied; the remaining unknown-response candidates are in occupied `lib/assignment.ts`, `lib/certificate.ts`, `lib/lesson-comments.ts`, or money/refund paths in `lib/auto-captions.ts` outside P's authorized constraints. No artificial/partial unit was opened.
+- Own product count remains 2. Next action only on causal novelty: #2655 corrective head/request, #2539/#2542 dependency movement, or a genuinely free queue item after fresh overlap audit. No retry, cancel, head movement, foreign merge or publication.

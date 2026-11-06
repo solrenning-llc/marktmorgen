@@ -1,0 +1,241 @@
+
+FILE g2791-847-canonical-red.log
+=== g2791-other-order-id.test.ts ===
+  FAIL  G other: unknown does not reassign ownership
+  FAIL  G other: target stays watched
+G_OTHER_ID_FIRST {"otherMode":"extra","grant":[],"watch":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"otherPaid":true,"otherStatus":"COMPLETED"}
+  FAIL  G other: healthy retry assigns real other payment
+  FAIL  G other: no course removal while other payment stands
+61 checks, 4 failing.
+
+FILE g2791-847-canonical.log
+=== g2791-other-order-id.test.ts ===
+G_OTHER_ID_FIRST {"otherMode":"extra","grant":["paypal:5O190127TN3647102"],"watch":["5O190127TN3647102","5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"otherPaid":true,"otherStatus":"COMPLETED"}
+61 checks, all passing.
+
+FILE g2791-847-frozen-control.log
+=== g2791-other-order-id.proof.ts ===
+G_OTHER_ID_FIRST {"otherMode":"control","grant":["paypal:5O190127TN3647107"],"watch":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"otherPaid":true,"otherStatus":"COMPLETED"}
+61 checks, all passing.
+
+FILE g2791-847-frozen-emptyid.log
+=== g2791-other-order-id.proof.ts ===
+G_OTHER_ID_FIRST {"otherMode":"emptyid","grant":["paypal:5O190127TN3647102"],"watch":["5O190127TN3647102","5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"otherPaid":true,"otherStatus":"COMPLETED"}
+61 checks, all passing.
+
+FILE g2791-847-frozen-invalid.log
+=== g2791-other-order-id.proof.ts ===
+G_OTHER_ID_FIRST {"otherMode":"invalid","grant":["paypal:5O190127TN3647102"],"watch":["5O190127TN3647102","5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"otherPaid":true,"otherStatus":"COMPLETED"}
+61 checks, all passing.
+
+FILE g2791-847-frozen-long.log
+=== g2791-other-order-id.proof.ts ===
+G_OTHER_ID_FIRST {"otherMode":"long","grant":["paypal:5O190127TN3647102"],"watch":["5O190127TN3647102","5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"otherPaid":true,"otherStatus":"COMPLETED"}
+61 checks, all passing.
+
+FILE g2791-847-frozen-proto.log
+=== g2791-other-order-id.proof.ts ===
+G_OTHER_ID_FIRST {"otherMode":"proto","grant":["paypal:5O190127TN3647102"],"watch":["5O190127TN3647102","5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"otherPaid":true,"otherStatus":"COMPLETED"}
+61 checks, all passing.
+
+FILE g2791-847-linked.log
+=== access-revocation.test.ts ===
+31 checks, all passing.
+=== api-read-units.test.ts ===
+54 checks, all passing.
+=== assignments.test.ts ===
+51 checks, all passing.
+=== bought-for-others.test.ts ===
+12 checks, all passing.
+=== buyer-affiliates.test.ts ===
+25 checks, all passing.
+=== buyer-profile.test.ts ===
+31 checks, all passing.
+=== cashflow-reading.test.ts ===
+9 checks, all passing.
+=== certificate-pdf-ceiling.test.ts ===
+13 checks, all passing.
+=== community-points.test.ts ===
+29 checks, all passing.
+=== community-reward-evidence.test.ts ===
+60 checks, all passing.
+=== course-finish-claim.test.ts ===
+70 checks, all passing.
+=== course-paid-legacy-isolation.test.ts ===
+ℹ tests 1
+ℹ fail 0
+ℹ skipped 0
+=== course-triggers.test.ts ===
+12 checks, all passing.
+=== cx1-review-2726-readback.test.ts ===
+10 checks, all passing.
+=== demo-store.test.ts ===
+84 checks, all passing.
+=== digital-consent.test.ts ===
+93 checks, all passing.
+=== discord.test.ts ===
+35 checks, all passing.
+=== drop-enrollment-exact.test.ts ===
+14 checks, all passing.
+=== erasure-request-asked.test.ts ===
+4 checks, all passing.
+=== erasure-request-full.test.ts ===
+21 checks, all passing.
+=== gifts.test.ts ===
+34 checks, all passing.
+=== group-buy.test.ts ===
+61 checks, all passing.
+=== intro-price.test.ts ===
+39 checks, all passing.
+=== lesson-comments.test.ts ===
+30 checks, all passing.
+=== letter-members.test.ts ===
+67 checks, all passing.
+=== lost-dispute-access.test.ts ===
+37 checks, all passing.
+=== mail-from.test.ts ===
+ℹ tests 10
+ℹ fail 0
+ℹ skipped 0
+=== member-health.test.ts ===
+19 checks, all passing.
+=== next-offer.test.ts ===
+49 checks, all passing.
+=== order-confirmation-paid.test.ts ===
+ℹ tests 16
+ℹ fail 0
+ℹ skipped 0
+=== order-data.test.ts ===
+15 checks, all passing.
+=== orders-page-bounds.test.ts ===
+ℹ tests 21
+ℹ fail 0
+ℹ skipped 0
+=== payment-requests.test.ts ===
+64 checks, all passing.
+=== paypal-numbers.test.ts ===
+13 checks, all passing.
+=== paypal-sales-shape.test.ts ===
+12 checks, all passing.
+=== paypal-sales.test.ts ===
+67 checks, all passing.
+=== pick-bundle.test.ts ===
+13 checks, all passing.
+=== preorder-email-copy.test.ts ===
+17 checks, all passing.
+=== preorders.test.ts ===
+32 checks, all passing.
+=== public-explanations.test.ts ===
+ℹ tests 4
+ℹ fail 0
+ℹ skipped 0
+=== read-ceilings.test.ts ===
+77 checks, all passing.
+=== ses-sender.test.ts ===
+831 checks, all passing.
+=== sg2-l3-counts.test.ts ===
+186 checks, all passing.
+=== shipping.test.ts ===
+182 checks, all passing.
+=== single-digital-confirmation.test.ts ===
+ℹ tests 6
+ℹ fail 0
+ℹ skipped 0
+=== store-closing-fair.test.ts ===
+103 checks, all passing.
+=== tb14-claim-marks.test.ts ===
+21 checks, all passing.
+=== tb14-lost-disputes.test.ts ===
+93 checks, all passing.
+=== thanks-note.test.ts ===
+14 checks, all passing.
+=== watch.test.ts ===
+64 checks, all passing.
+=== yearly-price.test.ts ===
+18 checks, all passing.
+
+FILE g2791-847-lint.log
+
+/tmp/g2791-return-847/tests/g2791-final-reassign-receipt.proof.ts
+  25:23  warning  'ensureStoreId' is defined but never used            @typescript-eslint/no-unused-vars
+  51:10  warning  'NextRequest' is defined but never used              @typescript-eslint/no-unused-vars
+  52:10  warning  'openSession' is defined but never used              @typescript-eslint/no-unused-vars
+  52:23  warning  'SESSION_COOKIE' is defined but never used           @typescript-eslint/no-unused-vars
+  53:17  warning  'returnPayPalSeller' is defined but never used       @typescript-eslint/no-unused-vars
+  71:5   warning  'paypalRequests' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/tmp/g2791-return-847/tests/g2791-final-revoke-receipt.proof.ts
+  25:23  warning  'ensureStoreId' is defined but never used            @typescript-eslint/no-unused-vars
+  38:3   warning  'readPaid' is defined but never used                 @typescript-eslint/no-unused-vars
+  51:10  warning  'NextRequest' is defined but never used              @typescript-eslint/no-unused-vars
+  52:10  warning  'openSession' is defined but never used              @typescript-eslint/no-unused-vars
+  52:23  warning  'SESSION_COOKIE' is defined but never used           @typescript-eslint/no-unused-vars
+  53:17  warning  'returnPayPalSeller' is defined but never used       @typescript-eslint/no-unused-vars
+  71:5   warning  'paypalRequests' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/tmp/g2791-return-847/tests/g2791-other-order-id.test.ts
+  26:23  warning  'ensureStoreId' is defined but never used            @typescript-eslint/no-unused-vars
+  52:10  warning  'NextRequest' is defined but never used              @typescript-eslint/no-unused-vars
+  53:10  warning  'openSession' is defined but never used              @typescript-eslint/no-unused-vars
+  53:23  warning  'SESSION_COOKIE' is defined but never used           @typescript-eslint/no-unused-vars
+  54:17  warning  'returnPayPalSeller' is defined but never used       @typescript-eslint/no-unused-vars
+  72:5   warning  'paypalRequests' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+✖ 19 problems (0 errors, 19 warnings)
+
+
+
+FILE g2791-847-membernull.log
+=== g2791-other-order-id-expanded.proof.ts ===
+G_OTHER_ID_FIRST {"otherMode":"membernull","grant":["paypal:5O190127TN3647102"],"watch":["5O190127TN3647102","5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"otherPaid":true,"otherStatus":"COMPLETED"}
+61 checks, all passing.
+
+FILE g2791-847-parent-reassign.log
+=== g2791-final-reassign-receipt.proof.ts ===
+  FAIL  G other: target stays watched
+G_OTHER_ID_FIRST {"otherMode":"invalid","grant":["paypal:5O190127TN3647102"],"watch":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"otherPaid":true,"otherStatus":"COMPLETED"}
+  FAIL  G other: healthy retry assigns real other payment
+G_REASSIGN_AFTER_BOTH_REFUNDED {"otherMode":"invalid","grant":["paypal:5O190127TN3647102"],"purchases":["Sourdough Guide"]}
+  FAIL  G mutation: refunding both real payments leaves no imported purchase
+62 checks, 3 failing.
+
+FILE g2791-847-parent-revoke.log
+=== g2791-final-revoke-receipt.proof.ts ===
+  FAIL  G: unknown receipt keeps this order on the watch
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":1,"purchases":["Sourdough Guide"],"dropped":["buyer@example.com|3c9a9e277b"]}
+  FAIL  G: healthy retry removes the refunded purchase
+62 checks, 2 failing.
+
+FILE g2791-847-reassign-ack.log
+=== g2791-final-reassign-receipt.proof.ts ===
+  FAIL  G other: target stays watched
+G_OTHER_ID_FIRST {"otherMode":"invalid","grant":["paypal:5O190127TN3647102"],"watch":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"otherPaid":true,"otherStatus":"COMPLETED"}
+  FAIL  G other: healthy retry assigns real other payment
+G_REASSIGN_AFTER_BOTH_REFUNDED {"otherMode":"invalid","grant":["paypal:5O190127TN3647102"],"purchases":["Sourdough Guide"]}
+  FAIL  G mutation: refunding both real payments leaves no imported purchase
+62 checks, 3 failing.
+
+FILE g2791-847-reassign-control.log
+=== g2791-final-reassign-receipt.proof.ts ===
+G_OTHER_ID_FIRST {"otherMode":"control","grant":["paypal:5O190127TN3647107"],"watch":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"otherPaid":true,"otherStatus":"COMPLETED"}
+G_REASSIGN_AFTER_BOTH_REFUNDED {"otherMode":"control","grant":[],"purchases":[]}
+62 checks, all passing.
+
+FILE g2791-847-revoke-ack.log
+=== g2791-final-revoke-receipt.proof.ts ===
+  FAIL  G: unknown receipt keeps this order on the watch
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"extra","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":1,"purchases":["Sourdough Guide"],"dropped":["buyer@example.com|624dee8318"]}
+  FAIL  G: healthy retry removes the refunded purchase
+62 checks, 2 failing.
+
+FILE g2791-847-revoke-control.log
+=== g2791-final-revoke-receipt.proof.ts ===
+G_PAYPAL_AFTER_HEALTHY_RETRY {"mode":"control","injected":1,"watchAfterUnknown":["5O190127TN3647104","5O190127TN3647105","5O190127TN3647106"],"imported":0,"purchases":[],"dropped":["buyer@example.com|b7c2571f86"]}
+62 checks, all passing.
+
+FILE g2791-847-scan.log
+Public data check: 3924 tracked files; 0 file(s) require correction.
+
+
+FILE g2791-847-types.log
+

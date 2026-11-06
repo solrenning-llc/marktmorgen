@@ -784,13 +784,17 @@ export default function PrivacyPage() {
           hour. Using it sets a cookie for that store in their browser for 90
           days, the same one a course uses. For each member we keep their email
           address, the name they choose to be seen by, whether they chose to be
-          listed in the member directory and to be emailed announcements, when
+          listed in the member directory and to be emailed announcements, the
+          links to their profiles on social networks that they add there
+          (only https addresses on the network&apos;s own site, at most three,
+          never an email address or a phone number), when
           they joined and were last there, and whether the creator muted or
           removed them. We keep what members write: posts, comments, the
           pictures they add, likes, and reports of a post or comment. Posts,
           comments, pictures and likes are seen by the other members and by the
-          creator. The directory shows only the chosen name, and only of those
-          who asked to be listed. A member&apos;s email address is seen by the
+          creator. The directory shows only the chosen name and those links, and
+          only of those who asked to be listed and are not muted; the links
+          open the other site with no referrer and nothing added to them. A member&apos;s email address is seen by the
           creator and never by other members. What is written is kept while
           the community exists, until its author or the creator deletes it;
           deleting a post deletes its comments, likes, reports and picture.

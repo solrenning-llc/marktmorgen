@@ -47,7 +47,7 @@ import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
-import { normaliseEmail } from "@/lib/auth";
+import { MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
 import {
   COMMUNITY_ID,
@@ -83,6 +83,8 @@ import { type Poll, parsePoll, pollKeys } from "@/lib/community-polls";
 import { type DmSetting, NO_DM, parseDmSetting } from "@/lib/community-dm";
 import { type ChatSetting, NO_CHAT, parseChatSetting } from "@/lib/community-chat";
 import { claimHandle } from "@/lib/community-mentions";
+import { MAX_MEMBER_LINKS, MAX_MEMBER_LINK_URL, parseMemberLinks } from "@/lib/member-links";
+import type { Social } from "@/lib/store-socials";
 
 /** The author of what the creator writes. Never a member key, which is hex. */
 export const CREATOR = "creator";
@@ -162,7 +164,33 @@ export type Member = {
   qq: string[];
   /** When they answered, in seconds; 0 until they have. */
   qa: number;
+  /**
+   * Links to their own profiles on social networks, which they add
+   * themselves and which the directory shows only while they are listed
+   * (lib/member-links.ts, shownLinks). Empty until they add one.
+   */
+  s: Social[];
 };
+
+/**
+ * The most a member's record can weigh as kept, in bytes: what reads a page
+ * of members is charged at (lib/community-walk.ts). Every text in it is cut
+ * by length in UTF-16 units and cleaned of control characters
+ * (lib/community-text.ts, cleanText), so a unit is at most three bytes as
+ * JSON (a character of the Basic Multilingual Plane, or an escaped quote,
+ * tab or newline); the address is not cleaned, so it is counted at six; a
+ * link is ASCII. The rest is the keys, numbers,
+ * booleans and punctuation, with room.
+ */
+const JSON_UNIT_BYTES = 3;
+export const MEMBER_RECORD_MAX_BYTES =
+  400 + // the field names, the numbers, the booleans and the punctuation
+  32 + // k, a hash
+  MAX_EMAIL_LENGTH * 6 + // e, which no cleaning reaches: a control character is a six-byte escape
+  2 * MAX_DISPLAY_NAME * JSON_UNIT_BYTES + // n and h
+  40 + // t
+  MAX_QUESTIONS * ((MAX_ANSWER + MAX_QUESTION) * JSON_UNIT_BYTES + 8) + // q and qq
+  MAX_MEMBER_LINKS * (MAX_MEMBER_LINK_URL + 40); // s
 
 export type CommunityImage = { path: string; w: number; h: number; alt: string };
 
@@ -350,6 +378,7 @@ function parseMember(raw: unknown): Member | null {
       q: Array.isArray(v.q) ? v.q.filter((a): a is string => typeof a === "string").map((a) => a.slice(0, MAX_ANSWER)).slice(0, MAX_QUESTIONS) : [],
       qa: typeof v.qa === "number" ? v.qa : 0,
       qq: Array.isArray(v.qq) ? v.qq.filter((a): a is string => typeof a === "string").map((a) => a.slice(0, MAX_QUESTION)).slice(0, MAX_QUESTIONS) : [],
+      s: parseMemberLinks(v.s),
     };
   } catch {
     return null;
@@ -445,7 +474,7 @@ export async function touchMember(id: string, email: string, existing: Member | 
   }
   const [size] = await redisPipeline([["HLEN", membersKey(id)]]);
   if (Number(size) >= MAX_MEMBERS) return null;
-  const member: Member = { k: key, e: normaliseEmail(email), n: "", h: "", dir: false, mail: false, at, seen: at, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+  const member: Member = { k: key, e: normaliseEmail(email), n: "", h: "", dir: false, mail: false, at, seen: at, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], s: [] };
   // HSETNX: two first visits at once make one record, not two. Counted in
   // the store's room at what it adds (lib/order-data.ts); what a member adds
   // to it later is taken from the room (MEMBERS_SLOT).
@@ -456,12 +485,14 @@ export async function touchMember(id: string, email: string, existing: Member | 
 /**
  * A member's own choices: the name they are seen by, the directory, the
  * emails — and, when given, their answers to the creator's questions, which
- * count as answered once each one asked has something in it.
+ * count as answered once each one asked has something in it, and their
+ * links to their profiles elsewhere (lib/member-links.ts), kept as the form
+ * rule left them.
  */
 export async function setProfile(
   id: string,
   member: Member,
-  change: { name: string; dir: boolean; mail: boolean; answers?: string[]; questions?: string[] },
+  change: { name: string; dir: boolean; mail: boolean; answers?: string[]; questions?: string[]; links?: Social[] },
   room: DataStore,
 ): Promise<Member> {
   const name = cleanLine(change.name, MAX_DISPLAY_NAME);
@@ -469,7 +500,10 @@ export async function setProfile(
   // the name and the answers, the handle they are mentioned by and the words
   // their name is found by. A record that shrinks gives it back.
   const answers = change.answers && change.questions ? answersFor(change.answers, change.questions, member.qa) : {};
-  const after = JSON.stringify({ ...member, n: name, h: name.slice(0, 40), dir: change.dir && Boolean(name), mail: change.mail, ...answers });
+  // The links go through the rule a stored record is read back by, so what
+  // is written is exactly what the directory may show.
+  const links = change.links ? { s: parseMemberLinks(change.links) } : {};
+  const after = JSON.stringify({ ...member, n: name, h: name.slice(0, 40), dir: change.dir && Boolean(name), mail: change.mail, ...answers, ...links });
   const grown = dataBytes([after]) - dataBytes([JSON.stringify(member)]) + (name ? indexBytes([name]) + SET_ENTRY_BYTES : 0) - (member.n ? indexBytes([member.n]) + SET_ENTRY_BYTES : 0);
   if (grown > 0) await needData(room, [{ slot: MEMBERS_SLOT, bytes: grown }]);
   else if (grown < 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: -grown }]);
@@ -484,6 +518,7 @@ export async function setProfile(
       dir: change.dir && Boolean(name),
       mail: change.mail,
       ...(change.answers && change.questions ? answersFor(change.answers, change.questions, now.qa) : {}),
+      ...links,
     }))) ?? member
   );
 }

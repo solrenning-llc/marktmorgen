@@ -31,6 +31,8 @@ const WARN = new Set([
   "noemail", "dmoff", "dmbetween", "dmfull", "chatoff", "pollclosed", "polloptions", "polltitle", "notyours", "empty", "links", "slow",
   "name", "questions", "image", "creatoronly", "level", "muted", "full", "fullposts", "fullcomments", "pinfull", "gone", "forbidden",
   "eventfull", "eventcancelled", "eventover", "eventlocked", "host", "nospace", "spacelocked", "out", "off", "error", "locked",
+  // Saved, with a profile link turned away (lib/member-links.ts).
+  "savedlinkoff",
 ]);
 
 /** What happened after a button, in the store's language (lib/buyer-words/community.ts). */

@@ -116,7 +116,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/discord-access.ts", how: "erased", what: "The answers kept about whether they may have Discord roles" },
 
   // ---------------------------------------------------------------- the community
-  { file: "lib/community.ts", how: "erased", via: CE, what: "Their community member record: address, name, handle, answers to your questions and their place in the directory" },
+  { file: "lib/community.ts", how: "erased", via: CE, what: "Their community member record: address, name, handle, answers to your questions, their place in the directory and the links to their profiles elsewhere" },
   { file: "lib/community-mentions.ts", how: "erased", via: CE, what: "The handle others used to mention them" },
   { file: "lib/community-points.ts", how: "erased", via: CE, what: "Their points, rewards and places on the leaderboards" },
   { file: "lib/community-notify.ts", how: "erased", via: CE, what: "What the community told them, and when they last looked" },

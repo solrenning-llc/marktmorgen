@@ -102,7 +102,8 @@ is("a record's links are read back cleaned", (await readMember(cid, "knew"))?.s,
 const wide = "\u{1F600}";
 const worst = {
   k: "k".repeat(64),
-  e: `${"e".repeat(64)}@${"d".repeat(185)}.com`,
+  // An address is not cleaned of control characters, so each can be a six-byte escape.
+  e: `${"\u0001".repeat(64)}@${"d".repeat(185)}.com`,
   n: wide.repeat(MAX_DISPLAY_NAME / 2),
   h: "h".repeat(44),
   dir: true,
@@ -139,8 +140,11 @@ is("no link opens a new window", /target=/.test(members), false);
 is("the links are a list with its own name", members.includes("<ul") && members.includes("aria-label={w.linksOf(m.n)}"), true);
 const you = readFileSync("app/[handle]/community/you/page.tsx", "utf8");
 is("the member's page asks for them in a group with a legend", you.includes("<legend") && you.includes("{w.linksLegend}"), true);
-is("one labelled box per link, as addresses", you.includes('name="link"') && you.includes('type="url"') && you.includes("htmlFor={`you-link-${i}`}") && you.includes("MAX_MEMBER_LINKS"), true);
+// Changed before the first green (rule 23): type="text" with inputMode="url", not type="url", whose
+// browser check refuses "instagram.com/ana" (which the rule keeps) with a bubble screen readers announce unevenly.
+is("one labelled box per link, an address keyboard, no browser check of its own", you.includes('name="link"') && you.includes('type="text"') && you.includes('inputMode="url"') && you.includes("htmlFor={`you-link-${i}`}") && you.includes("MAX_MEMBER_LINKS"), true);
 is("the page says it sends links, so an older page never wipes them", you.includes('name="links" value="1"'), true);
+is("no box cuts a pasted address short without saying so", /name="link"[\s\S]{0,400}maxLength/.test(you), false);
 const route = readFileSync("app/api/store/community/route.ts", "utf8");
 is("the route keeps them through the same rule, only from that page", route.includes('form.get("links") === "1" ? memberLinksFromForm(form.getAll("link")) : null'), true);
 is("and says when one was turned away", route.includes('sentLinks && sentLinks.refused ? "savedlinkoff" : "saved"'), true);

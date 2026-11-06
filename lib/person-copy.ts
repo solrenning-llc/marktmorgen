@@ -342,7 +342,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     void _polls;
     const record = {
       // The link in their announcement emails is a key, left out: they have it in those emails.
-      profile: member ? { email: member.e, name: member.n, handle: member.h, inDirectory: member.dir, announcementEmails: member.mail, joined: iso(member.at), lastSeen: iso(member.seen), muted: member.muted } : null,
+      profile: member ? { email: member.e, name: member.n, handle: member.h, inDirectory: member.dir, links: member.s.map((l) => l.url), announcementEmails: member.mail, joined: iso(member.at), lastSeen: iso(member.seen), muted: member.muted } : null,
       points,
       // What happened, on which post, and when; not who did it, which is theirs.
       notifications: notices.map((n) => ({ kind: n.kind, post: n.post, ...(n.comment ? { comment: n.comment } : {}), at: iso(n.at) })),

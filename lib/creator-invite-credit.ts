@@ -33,6 +33,8 @@
  * from 2025 on, which is why the version is pinned here.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
+import { claimMark } from "@/lib/claim-mark";
 import { isBillingConfigured, onPlatformAt } from "@/lib/billing";
 import { type Store, storeForEmail, storeForId } from "@/lib/store";
 import {
@@ -106,6 +108,26 @@ export function paidOn(invoice: Invoice, refunded: number): number {
   return Math.max(0, num(invoice.amount_paid) - num(invoice.post_payment_credit_notes_amount) - refunded);
 }
 
+/**
+ * Puts a credit already written, and still owed, back on the lists it is paid from: its inviter's credits and the
+ * owed set. Both are sets, so a credit listed already is unchanged. The invited store's own bonus is relisted with
+ * its first payment's credit, since both were listed by the same write. Never throws.
+ */
+async function relist(id: string, sid: string): Promise<void> {
+  try {
+    const read = repliesFor(await redisPipeline([["GET", creditKey(id)], ["GET", creditKey(`bonus_${sid}`)]]), 2);
+    if (!read) return;
+    const writes: (string | number)[][] = [];
+    for (const raw of read) {
+      const credit = parseCredit(raw);
+      if (credit?.state === "owed" && credit.cents > 0) writes.push(["ZADD", mineKey(credit.to), credit.at, credit.id], ["SADD", OWED_KEY, credit.id]);
+    }
+    if (writes.length) await redisPipeline(writes);
+  } catch (error) {
+    console.error("relisting an owed invite credit failed", id, error);
+  }
+}
+
 /** Step 1 for one invited store. Returns how many credits it wrote. */
 async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
   const [rawBy] = await redisPipeline([["GET", byKey(sid)]]);
@@ -144,9 +166,18 @@ async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
     .sort((a, b) => num(a.status_transitions?.paid_at) - num(b.status_transitions?.paid_at));
   if (!ordered.length) return 0;
 
-  const seen = await redisPipeline(ordered.map((inv) => ["EXISTS", creditKey(String(inv.id))]));
+  // Read exactly (CX-123 rule 24, L9): one reply per invoice, each 0 or 1; anything else waits for the next run.
+  const seen = repliesFor(await redisPipeline(ordered.map((inv) => ["EXISTS", creditKey(String(inv.id))])), ordered.length);
+  if (!seen) return 0;
   for (let i = 0; i < ordered.length; i += 1) {
-    if (Number(seen[i]) === 1) continue;
+    const mark = countOf(seen[i]);
+    if (mark === null || mark > 1) continue;
+    if (mark === 1) {
+      // Written before: a credit still owed is put back on the lists it is paid from (both idempotent), so one
+      // whose listing failed after its record was written is never left unpaid (L9).
+      await relist(String(ordered[i].id), sid);
+      continue;
+    }
     const inv = ordered[i];
     const id = String(inv.id);
     const paidAt = num(inv.status_transitions?.paid_at);
@@ -154,8 +185,8 @@ async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
     const paid = num(inv.amount_paid) > 0 ? paidOn(inv, await refundedOn(inv)) : 0;
     const cents = inviteShare(paid, terms);
     const share: Credit = { id, kind: "share", to: by.r, from: sid, cents, cur, at: paidAt, state: cents > 0 ? "owed" : "none" };
-    const [took] = await redisPipeline([["SET", creditKey(id), JSON.stringify(share), "NX"]]);
-    if (took === null) continue;
+    // Written once, for good: ours only on OK or this record read back (CX-123 rule 24, L9).
+    if ((await claimMark(creditKey(id), null, JSON.stringify(share))) !== "ours") continue;
     const writes: (string | number)[][] = [["ZADD", mineKey(by.r), paidAt, id]];
     if (cents > 0) writes.push(["SADD", OWED_KEY, id]);
     wrote += 1;
@@ -163,8 +194,7 @@ async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
     if (paid > 0 && terms.bonusCents > 0) {
       const bonusId = `bonus_${sid}`;
       const bonus: Credit = { id: bonusId, kind: "bonus", to: sid, from: sid, cents: terms.bonusCents, cur, at: paidAt, state: "owed" };
-      const [gotBonus] = await redisPipeline([["SET", creditKey(bonusId), JSON.stringify(bonus), "NX"]]);
-      if (gotBonus !== null) {
+      if ((await claimMark(creditKey(bonusId), null, JSON.stringify(bonus))) === "ours") {
         writes.push(["ZADD", mineKey(sid), paidAt, bonusId], ["SADD", OWED_KEY, bonusId]);
         wrote += 1;
       }

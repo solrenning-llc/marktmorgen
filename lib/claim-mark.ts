@@ -23,10 +23,12 @@ export function claimValue(now = Date.now()): string {
   return `${now}.${String(randomInt(1_000_000_000)).padStart(9, "0")}`;
 }
 
-export async function claimMark(key: string, seconds: number, value = claimValue()): Promise<Claimed> {
+export async function claimMark(key: string, seconds: number | null, value = claimValue()): Promise<Claimed> {
   let reply: unknown[] | null = null;
+  // null: a claim kept for good (a record written once, such as a credit), with no expiry.
+  const command = seconds === null ? ["SET", key, value, "NX"] : ["SET", key, value, "NX", "EX", seconds];
   try {
-    reply = repliesFor(await redisPipeline([["SET", key, value, "NX", "EX", seconds]]), 1);
+    reply = repliesFor(await redisPipeline([command]), 1);
   } catch {
     reply = null;
   }

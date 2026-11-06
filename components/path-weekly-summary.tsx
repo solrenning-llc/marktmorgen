@@ -15,7 +15,7 @@ export function PathWeeklySummary({ summary, streak }: { summary: WeeklySummary;
         {summary.days.map(day => <li key={day}><time dateTime={day}>{dateWords(day)}</time></li>)}
       </ul> : null}
       <p className="mt-3 text-sm text-ink-soft">Check-in days are dates saved when you open Path.</p>
-      {streak ? <p className="mt-3">Current streak: {streak.days} check-in {streak.days === 1 ? "day" : "days"}. {streak.restLeft} rest days left this week.</p> : null}
+      {streak ? <p className="mt-3">Current streak: {streak.days} check-in {streak.days === 1 ? "day" : "days"}. {streak.restLeft} rest {streak.restLeft === 1 ? "day" : "days"} left this week.</p> : null}
       <p className="mt-3">Review the days you returned, then choose your next useful step below.</p>
     </>}
   </section>;

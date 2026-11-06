@@ -22,15 +22,15 @@ async function main() {
         await check(`${route}/${scope} refuses ${label} before data/model work`, async () => {
           reset(); state.scope = scope; state.reply = reply;
           const response = await handler(request());
-          if (response.status !== 429) console.log(JSON.stringify({ route, scope, label, commands: state.commands.length, fixtureReadCalls: state.reads, fixtureReadBytes: state.readBytes, modelHelperAttempts: state.models }));
-          assert.equal(response.status, 429);
-          assert.deepEqual(await response.json(), { ok: false, error: "slow" });
+          if (response.status !== 503) console.log(JSON.stringify({ route, scope, label, commands: state.commands.length, fixtureReadCalls: state.reads, fixtureReadBytes: state.readBytes, modelHelperAttempts: state.models }));
+          assert.equal(response.status, 503);
+          assert.deepEqual(await response.json(), { ok: false, error: "try again in a moment" });
           assert.deepEqual([state.models, state.reads, state.readBytes, state.commands.length], [0, 0, 0, 2 * (stage + 1)]);
         });
       }
       await check(`${route}/${scope} refuses timeout without retry or readback`, async () => {
         reset(); state.scope = scope; state.throws = true;
-        assert.equal((await handler(request())).status, 429);
+        assert.equal((await handler(request())).status, 503);
         assert.deepEqual([state.models, state.reads, state.commands.length], [0, 0, 2 * (stage + 1)]);
       });
     }
@@ -59,7 +59,7 @@ async function main() {
     });
     await check(`${route} consumes a committed increment with lost acknowledgement`, async () => {
       reset(); state.scope = "ask"; state.commit = true; state.reply = [];
-      assert.equal((await handler(request())).status, 429);
+      assert.equal((await handler(request())).status, 503);
       state.scope = "";
       for (let i = 0; i < ASKS_PER_TEN_MINUTES - 1; i++) assert.equal((await handler(request())).status, 200);
       assert.equal((await handler(request())).status, 429);

@@ -2,8 +2,8 @@ import {join} from 'node:path';
 /** One wiring source for the repository runner and local parallel verification. */
 export function testAliases(file,root,here){
  const aliases={'@':root,'@/lib/redis':['range-traffic-coverage.test.ts','stats-traffic-coverage.test.ts'].includes(file)?join(root,'lib/redis.ts'):join(here,'redis-stub.ts')};
- if(file==='visitor-ai-counter-response.test.ts'){for(const name of ['redis','store','store-checkout','catalog','product-about','sales-page-store','answers','store-guide','sales-page'])aliases['@/lib/'+name]=join(here,'visitor-ai-counter-admission-world.ts');aliases['@/components/store-product']=join(here,'visitor-ai-counter-admission-world.ts');}
- if(file==='visitor-ai-counter-admission.test.ts'){for(const name of ['redis','store','store-checkout','catalog','product-about','sales-page-store','answers','store-guide','sales-page'])aliases['@/lib/'+name]=join(here,'visitor-ai-counter-admission-world.ts');aliases['@/components/store-product']=join(here,'visitor-ai-counter-admission-world.ts');}
+ if(file==='service-counter-admission.test.ts')for(const name of ['redis','store-allowance','traffic'])aliases['@/lib/'+name]=join(here,'service-counter-admission-world.ts');
+ if(file==='stream-hook-counter-admission.test.ts')for(const name of ['redis','stream','auto-captions'])aliases['@/lib/'+name]=join(here,'stream-hook-counter-admission-world.ts');
  if(file==='yearly-ask-read-evidence.test.ts')for(const name of ['redis','order-data','stripe-account','email','store','membership-manage','mail','contacts','purchase-email','catalog','store-checkout','auth','member-health','yearly-switch'])aliases['@/lib/'+name]=join(here,'yearly-ask-read-world.ts');
  if(file==='community-mail-read-evidence.test.ts')for(const name of ['redis','community','community-access','community-events','email','mail','order-data','calls','phone-alerts'])aliases['@/lib/'+name]=join(here,'community-mail-read-world.ts');
  if(file==='community-report-queue-view.test.ts'){
@@ -22,7 +22,7 @@ export function testAliases(file,root,here){
  }
  if(file==='letter-members.test.ts'){aliases['next/headers']=join(here,'letter-members-world.ts');aliases['next/server']=join(here,'next-server-after-world.ts');aliases['@/components/store-tracking']=join(here,'letter-members-world.ts');}
  if(file==='public-reads-ceiling.test.ts')aliases['next/headers']=join(here,'security/next-headers.ts');
- if(file==='failure-cleanup-paths.test.ts')for(const name of ['@/lib/blob','@vercel/blob/client'])aliases[name]=join(here,'failure-cleanup-world.ts');
+ if(file==='failure-cleanup-paths.test.ts'||file==='picture-owner-paths.test.ts')for(const name of ['@/lib/blob','@vercel/blob/client'])aliases[name]=join(here,'failure-cleanup-world.ts');
  if(file==='meeting-disabled-settings.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');
  if(file==='zoom-arrival.test.ts')aliases['next/navigation']=join(here,'meeting-withdrawal-page-world.ts');
  if(file==='meeting-disabled-withdrawal.test.ts'){
@@ -74,6 +74,8 @@ export function testAliases(file,root,here){
  if(['video-admission.test.ts','video-tier.test.ts'].includes(file)){aliases['@/lib/redis']=join(here,'video-admission-redis.ts');aliases['@/lib/stream']=join(here,'video-admission-stream.ts');}
  if(file==='storage-measurement.test.ts')for(const name of ['blob','vault','stream'])aliases['@/lib/'+name]=join(here,'storage-provider-stub.ts');
  if(file==='blob-download-attachment.test.ts')aliases['@/lib/blob']=join(here,'blob-download-attachment-world.ts');
+ if(file==='sg2-l1-serve-file.test.ts')aliases['@/lib/blob']=join(here,'blob-download-attachment-world.ts');
+ if(file==='sg2-l1-outreach-order.test.ts')aliases['@/lib/contract-resource-window']=join(here,'sg2-l1-reserve-world.ts');
  if(['exposure-budget.test.ts','exposure-provider.test.ts'].includes(file))aliases['@/lib/redis']=join(here,'exposure-budget-redis.ts');
  if(file==='exposure-provider.test.ts'){
   aliases['@/lib/ai-spend']=join(here,'exposure-ai-spend-stub.ts');
@@ -159,6 +161,8 @@ export function testAliases(file,root,here){
  if(["contract-admission-ack.test.ts","contract-funding.test.ts","contract-resource-window.test.ts","contract-routes.test.ts","restart-activation-ack.test.ts","restart-recovery-ack.test.ts","restart-result-ack.test.ts","restart-submission-ack.test.ts"].includes(file))aliases['@/lib/llc-fixed-costs']=join(here,'llc-fixed-approved-policy.ts');
  if(file==='file-download-refusals.test.ts')aliases['@/lib/studio-route']=join(here,'file-download-refusals-world.ts');
  if(file==='ai-counter-admission.test.ts')for(const name of ['redis','store-request','ai'])aliases['@/lib/'+name]=join(here,'ai-counter-admission-world.ts');
+ if(file==='visitor-ai-counter-response.test.ts'){for(const name of ['redis','store','store-checkout','catalog','product-about','sales-page-store','answers','store-guide','sales-page'])aliases['@/lib/'+name]=join(here,'visitor-ai-counter-admission-world.ts');aliases['@/components/store-product']=join(here,'visitor-ai-counter-admission-world.ts');}
+ if(file==='visitor-ai-counter-admission.test.ts'){for(const name of ['redis','store','store-checkout','catalog','product-about','sales-page-store','answers','store-guide','sales-page'])aliases['@/lib/'+name]=join(here,'visitor-ai-counter-admission-world.ts');aliases['@/components/store-product']=join(here,'visitor-ai-counter-admission-world.ts');}
  return aliases;
 }
 export function testEnvironment(env){return{...env,DEMO_STUDIO_ADMIN:'operator@example.test',STRIPE_DEMO_ACCOUNT_ID:'acct_fixtureDemo',NIMBUS_DATA_KEY:env.NIMBUS_DATA_KEY??'tests-only-not-a-real-deployment-secret'};}

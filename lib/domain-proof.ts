@@ -27,14 +27,20 @@ const SWAP_KEEPING_TTL = [
 const DNS_TIMEOUT_MS = 4_000;
 
 async function txtRecords(host: string): Promise<string[]> {
+  // The race's timer is cleared once DNS answers, so no 4 s timer outlives the check (C4-3000).
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const answer = await Promise.race([
       resolveTxt(host),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), DNS_TIMEOUT_MS)),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("timeout")), DNS_TIMEOUT_MS);
+      }),
     ]);
     return answer.map((parts) => parts.join(""));
   } catch {
     return [];
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 

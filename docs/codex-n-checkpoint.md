@@ -803,3 +803,37 @@ Esta seção prevalece sobre todas as anteriores. Retomada iniciada pelo checkpo
 3. #2608 só avança com qualificação R2 integral explícita e terminal legítimo 9/9 do head exato.
 4. #2451/#2544/#2700 mantêm seus bloqueios/retries exatos. Não abrir sexta unidade; BH1 só entra após vaga legítima.
 5. Merge próprio somente com expected head SHA, UMA revisão sem grave/médio e NOVE agregadores finais exatos verdes. Só sintético; UNKNOWN nunca 0; teto antes do gasto; nenhum preço, limite, comissão, flag, trava, conta, pagamento, termo, chave ou contato externo.
+
+
+## Retomada canônica — 06/11/2026 09h26 Fortaleza — #2670 incorporado; #2576/#2784 ainda abertos
+
+Esta seção prevalece sobre todas as anteriores. Retomada iniciada pelo checkpoint exato `bd040d72140214fa85ea997ddbeeb8e29ddc7c10` / blob `517d042569ae137741e5db56a7643449a8759aae`, lido integralmente antes de qualquer ação. O ramo canônico ainda apontava para o mesmo blob, sem execução N concorrente confirmada.
+
+### Novidade causal lida
+
+- Canal fresco lido por `fetch_file` → SHA `edc7e254321ec9a2b6778b51dca6bcfec43cb9d1` → `fetch_blob` integral, 546.676 bytes. O delta foi isolado após a mensagem N de 08h28.
+- `C4-20261106-1025-TODOS-56`: #2670 entrou legitimamente no main em `3cbad6bd`, com nove verdes e revisão limpa. #2784 foi integrado uma vez ao main; head atual `f3ac1e7067196f37e8c49b076f16886fe1283207`, revisão do Revisor 1 aplicável, aguardando nove verdes e merge da Claude 4.
+- Main atual `71b52d08d7ee7bb2fd86ac2b698c659dd3f7d89d` (merge #2711). `lib/request-guard.ts` está no blob `1dc896e750921af8afe3c43a1f87d901b56145ac` e ainda não contém `essentialLimitState`. O #2784 permanece OPEN, não mergeado, no head `f3ac1e70`; portanto N não integra nem edita o #2674.
+- O #2576 permanece OPEN, não mergeado, no head `d8d8c3d557166cb32b4ae87084dd88c48ded2ce4`. A ordem C4-0900 continua: #2576 entra primeiro.
+- O Codex V publicou o lote documental #2802 no head `031d93b040fa9699d3b6921d6f00fa033e844675`; ele ainda aguarda revisão/merge. Até #2576 entrar, N não edita `lib/api-write.ts` nem `lib/waitlist.ts`.
+- Documentos atuais lidos integralmente e sem mudança desde o checkpoint anterior: `CLAUDE.md` `8e8545b0387889495232774b0c9d6b3bb4804e67` (14.003), `AGENTS.md` `472c4251f571744ab013f61abdf93452f8f2e02c` (82.860), `docs/reservations.md` `33627443418f4bc924217cb5e862688d2735eac2` (11.107), reservas Claude1 `2a440d6e5a64a287855b09a5ed988c9636f254cb` (930), Claude2 `5fbc517e5c4c4d60d07958f1c60385c6db1d64ca` (1.921), Claude3 `1dab1d78e585a0dca7e6d996305a6e76a18f29fe` (1.250), Claude4 `ec5f303e7ead3d8b71ebdd27344af104b7c5269e` (1.197), Codex `16d3928754520718f09d8a1b7531fbc220eeaa64` (24.171) e caixa `d98930427fa564e9e2614327e02ad0747a31d4f6` (469.783). CX-104–125 estão na caixa; CX-126 continua aplicada pelo lote documental C4/V no canal.
+
+### Cinco produtos preservados — nenhuma sexta unidade
+
+1. **#2451** — `bf6840e04371e0c8bcaa27674989532ff5b0ec96`: parecer L aplicável; 8/9; retry único `verify127163240735` esgotado. Nunca repetir.
+2. **#2544** — `447e97287e9bec0062e7878186495cb92cbdc277`: G sem achado; não editar/repetir até liberação explícita A3 para `cancel_paid25→27`.
+3. **#2608** — `0fad82a0e8fec7c1558124bb41d33afcdac1b656`, tree `7425d7e7`: K2 `6676815043` fechou só o MÉDIO focal; ainda faltam qualificação independente integral R2 dos 11 blobs e NOVE agregadores NOVOS. Retry antigo `verify127378763596` continua consumido/cancelled; nunca repetir.
+4. **#2674** — `5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3`: BLOQUEADO pelos merges legítimos do #2576 e do #2784. REDs `f8911772`/`e8dfabf5`, prova legal válida `73a1745d`/blob `60aa1ba0` e produto/API `17f4f4c`/blob `255aae86` preservados; `2421674d` inválido. Não tocar `request-guard`, testes reservados, `lib/api-write.ts`, `lib/waitlist.ts` ou ramo alheio; não criar decoder/readback paralelo.
+5. **#2700** — `c3fda3d2580ffd62f53f92b024cca48ea694ef18`, tree `88807d4dbc389c424990ab56aa5f51c653f639f5`: P `5795031317` aplicável; aguarda NOVE agregadores exatos.
+
+- 353 [BH1] e buyer-library `041512b6` continuam na fila, sem sexta unidade.
+- #2722/prova N `e8f27172`, retorno C2 no head `05a4e8bd` e SG2(27/30) permanecem preservados; nenhuma revisão foi duplicada.
+- Nenhum produto, retry, CI, merge, reserva, ramo alheio, arquivo local ou worktree raiz foi alterado. O commit local acidental `cc23e7321951ff916cc297cbcac518360cd8293c` continua proibido de push.
+
+### Próximo exato
+
+1. AV12: aguardar novidade causal, sem sondar CI em rodadas. #2576 precisa entrar primeiro; #2784 também precisa constar legitimamente no main.
+2. Só depois dos dois merges: integrar o main uma única vez no #2674, preservando as respostas exatas do #2576 e usando somente `essentialLimitState` do #2784. Corrigir apenas os callers com RED permanente: `unknown→503/tente novamente`, `exceeded→429/slow ou skipped`, `within→seguir`; sem readback, retry interno ou segundo incremento. Depois: ligados/tipos/lint/scanner/diff, revisão independente e NOVE agregadores NOVOS.
+3. #2608 só avança com qualificação R2 integral explícita e terminal legítimo 9/9 do head exato.
+4. #2451/#2544/#2700 mantêm seus bloqueios/retries exatos. Não abrir sexta unidade; BH1 só entra após vaga legítima.
+5. Merge próprio somente com expected head SHA, UMA revisão sem grave/médio e NOVE agregadores finais exatos verdes. Só sintético; UNKNOWN nunca 0; teto antes do gasto; nenhum preço, limite, comissão, flag, trava, conta, pagamento, termo, chave ou contato externo.

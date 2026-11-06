@@ -13,6 +13,7 @@ import { emailEquivalence } from "@/lib/email-equivalence";
 import { useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useLeaveGuard } from "@/components/leave-guard";
+import { NewTab } from "@/components/new-tab";
 import { isAiEmailCopy, isAiSequenceDraft } from "@/lib/ai-response";
 import { RFM_GROUPS, type RfmGroup } from "@/lib/rfm-rules";
 import { MAX_TAG_LENGTH, readTags } from "@/lib/contact-rules";
@@ -79,7 +80,7 @@ const MESSAGES: Record<string, string> = {
   paid_request_taken: "Another workflow already starts when someone pays a payment request. Paying one starts one workflow; that one can start others with a step.",
   unknown: "That is not there anymore. Reload the page.",
   send: "The email service did not take it just now. Nothing was sent; try again in a moment.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: "Your session ended. What you wrote stays on this page: log in again in a new tab, then come back to this tab and press the same button again.",
   unavailable: "Email is not switched on yet, so nothing was sent.",
   draft_remove_conflict: "A newer version of this draft was saved. It was not deleted. Reload saved drafts and review the latest version before deleting it.",
   draft_conflict: "A newer version of this draft was saved. Your text is still here. Keep a copy of it, then reload saved drafts and open the latest version before saving again.",
@@ -311,6 +312,15 @@ function When({ seconds }: { seconds: number }) {
 }
 
 function Feedback({ error, done }: { error: string | null; done: string | null }) {
+  // A session that ended: logging in again in another tab keeps everything on this one (WCAG 2.2.5).
+  if (error === MESSAGES.signed_out) {
+    return (
+      <p className="notice notice-error mt-3" role="alert">
+        {error}{" "}
+        <a href="/signin" target="_blank" rel="noopener" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4">Log in again<NewTab /></a>
+      </p>
+    );
+  }
   if (error) return <p className="notice notice-error mt-3" role="alert">{error}</p>;
   if (done) return <p className="notice notice-success mt-3" role="status">{done}</p>;
   return null;
@@ -1227,7 +1237,7 @@ function Compose(props: {
           ) : null}
         </div>
         {props.canSend ? (
-        <fieldset>
+        <fieldset className="min-w-0">
           <legend className="field-label">When</legend>
           <div className="mt-2 flex flex-wrap gap-4 text-sm">
             <label className="flex min-h-11 items-center gap-2">
@@ -3007,7 +3017,7 @@ function Flows({
             <button type="submit" aria-busy={busy} disabled={locked || invalidWait || overCapacity} className="btn btn-primary">Save the sequence</button>
             <button
               type="button"
-              className="inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4"
+              className="inline-flex min-h-11 min-w-11 items-center justify-center text-sm font-bold text-ink-soft underline underline-offset-4"
               onClick={() => {
                 setDraft(null);
                 setImported(null);

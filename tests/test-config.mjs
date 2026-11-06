@@ -2,6 +2,11 @@ import {join} from 'node:path';
 /** One wiring source for the repository runner and local parallel verification. */
 export function testAliases(file,root,here){
  const aliases={'@':root,'@/lib/redis':['range-traffic-coverage.test.ts','stats-traffic-coverage.test.ts'].includes(file)?join(root,'lib/redis.ts'):join(here,'redis-stub.ts')};
+ if(file==='review-summary-unavailable-page.test.ts'){
+  for(const name of ['catalog','studio-route','reviews','review-ai-summary','customer-voice','buyer-orders','purchase-email','ai','mail'])aliases['@/lib/'+name]=join(here,'review-summary-page-world.tsx');
+  for(const name of ['studio-header','studio-store-pin','ai-assist','review-studio','review-qr','review-themes','review-ai-summaries'])aliases['@/components/'+name]=join(here,'review-summary-page-world.tsx');
+  for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'review-summary-page-world.tsx');
+ }
  if(file==='blog-read-unavailable-page.test.ts'){
   for(const name of ['store','store-blog','studio-route','traffic','ai'])aliases['@/lib/'+name]=join(here,'blog-read-page-world.tsx');
   for(const name of ['studio-header','studio-store-pin','ai-assist','blog-editor','store-tracking'])aliases['@/components/'+name]=join(here,'blog-read-page-world.tsx');

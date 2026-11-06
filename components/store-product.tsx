@@ -21,7 +21,7 @@ import { RatingLine } from "@/components/review-list";
 import type { Summary } from "@/lib/review-summary";
 import { MIN_BUNDLE_ITEMS, bundleReady, picks } from "@/lib/bundle-rules";
 import { payPalPrice, paypalReady } from "@/lib/paypal-sales";
-import { comparable, startingOption } from "@/lib/product-option";
+import { comparable, optionsInPickOrder } from "@/lib/product-option";
 import { DEFAULT_PEOPLE, MAX_PEOPLE, MIN_PEOPLE } from "@/lib/group-rules";
 import { givableOptions } from "@/lib/gift-rules";
 import { productSegment } from "@/lib/product-slug";
@@ -266,18 +266,22 @@ export function PackageOffer({ store, product }: { store: Store; product: Listin
 
 /**
  * Which of a product's prices is being bought for somebody else: a list to
- * pick from, each with its price, opened on the creator's pick. Nothing for
+ * pick from, each with its price, the creator's pick listed first and none
+ * chosen for the buyer (487 [IT4]): the form asks for a choice. Nothing for
  * a product sold at one price. The price charged is read on the server from
  * the option's id, never from this list.
  */
 function GivenOptionPicker({ store, product, each = false }: { store: Store; product: Listing; each?: boolean }) {
-  const options = givableOptions(product);
+  const options = optionsInPickOrder(givableOptions(product));
   if (options.length === 0) return null;
   const { w, money } = speech(store);
   return (
     <label className="block">
       <span className="st-label">{w.whichOne}</span>
-      <select className="st-field mt-2" name="option" required defaultValue={(startingOption(options) ?? options[0]).id}>
+      <select className="st-field mt-2" name="option" required defaultValue="">
+        <option value="" disabled>
+          {w.chooseOne}
+        </option>
         {options.map((option) => (
           <option key={option.id} value={option.id}>
             {w.priced(option.label, `${money(option.priceCents)}${each ? w.perPerson : ""}`)}
@@ -716,7 +720,7 @@ export function BuyBox({
   // checked, where only an added product does (beside a shipped one). Its
   // form also carries the PayPal button, so one box serves both.
   const formId = `buy-${place}${product.id}`;
-  const digitalHere = deliversDigitally(product, startingOption(options)?.id ?? null);
+  const digitalHere = deliversDigitally(product, null);
   const digitalAdded = !digitalHere && extras.some((extra) => deliversDigitally(extra.target));
   return (
     <>
@@ -747,8 +751,11 @@ export function BuyBox({
         */
         <div className="mb-4">
           <label htmlFor={`os-${product.id}`} className="st-label">{w.chooseOptionFor(product.title)}</label>
-          <select id={`os-${product.id}`} name="option" defaultValue={startingOption(options)?.id} className="st-field mt-2">
-            {options.map((option) => (
+          <select id={`os-${product.id}`} name="option" required defaultValue="" className="st-field mt-2">
+            <option value="" disabled>
+              {w.chooseOne}
+            </option>
+            {optionsInPickOrder(options).map((option) => (
               <option key={option.id} value={option.id}>
                 {`${w.priced(option.label, `${money(option.priceCents)}${every}`)}${units.get(option.id) ? ` (${unitWords(units.get(option.id)!)})` : ""}${planAt(option.id) ? ` · ${w.orPlan(planAt(option.id)!)}` : ""}${option.best ? w.recommendedAfter : ""}`}
               </option>
@@ -761,11 +768,13 @@ export function BuyBox({
           {/*
             With what each includes written down, the cards stand side by side
             on a wide screen so the buyer can compare them; on a phone they
-            stack. The creator's pick opens chosen and says so, in the
-            creator's voice: "Recommended", never a claim about other buyers.
+            stack. The creator's pick is listed first and says so, in the
+            creator's voice: "Recommended", never a claim about other buyers;
+            nothing is chosen for the buyer, and the form asks for a choice
+            (487 [IT4]).
           */}
           <div className={comparable(options) ? `st-compare st-compare-${Math.min(options.length, 3)}` : "space-y-2"}>
-            {options.map((option) => (
+            {optionsInPickOrder(options).map((option) => (
               <label key={option.id} htmlFor={`o-${option.id}`} className={comparable(options) ? "st-option st-option-card" : "st-option"}>
                 <span className="flex items-center gap-3">
                   <input
@@ -773,7 +782,7 @@ export function BuyBox({
                     type="radio"
                     name="option"
                     value={option.id}
-                    defaultChecked={option.id === startingOption(options)?.id}
+                    required
                     className="h-4 w-4"
                   />
                   <span className="font-bold">{option.label}</span>

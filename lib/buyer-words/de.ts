@@ -136,7 +136,8 @@ export const de: BuyerWords = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store) => `Blog von ${store}`,
-  blogEmpty: "Hier gibt es noch nichts.",
+  blogPastEnd: "Keine Beiträge auf dieser Seite",
+  blogPastEndBody: "Diese Seite liegt hinter dem letzten Beitrag.",
   blogMinutes: (n) => `${n} Min. Lesezeit`,
   blogNewer: "Neuere Beiträge",
   blogOlder: "Ältere Beiträge",

@@ -16,6 +16,7 @@ import { FREE_POOL_BASE_STORES, PAYING_INDEX, freePoolSize } from "@/lib/free-po
 import { type PlanFields, standingOf } from "@/lib/plan-standing";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark } from "@/lib/claim-mark";
+import { repliesFor } from "@/lib/redis-reply";
 
 const KEEP_SECONDS = 40 * 86_400;
 const REFUSED_SECONDS = 3_600;
@@ -63,7 +64,9 @@ export async function poolPlace(store: PoolStore, now = Date.now()): Promise<"in
     if (set === "taken") {
       // Decided a moment ago by another request: that answer stands, and the
       // place this one counted is not handed out again.
-      const [again] = await redisPipeline([["GET", inKey(month, id)]]);
+      // Read exactly (Codex CX1 on #2723): one reply, "1" or "0"; anything else is not known, never a place.
+      const read = repliesFor(await redisPipeline([["GET", inKey(month, id)]]), 1);
+      const again = read ? read[0] : undefined;
       return again === "1" ? "in" : again === "0" ? "full" : "unknown";
     }
     return fits ? "in" : "full";

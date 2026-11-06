@@ -206,6 +206,25 @@ export async function readAgreement(id: string): Promise<Agreement | null> {
   }
 }
 
+/**
+ * Whether the stored record names version n with this fingerprint, read exactly (CX-123 rule 24): "yes", "no" (the
+ * record is there and does not, or there is no record at all), or "unknown" (no reply, a reply of another shape, or
+ * a record that does not read).
+ */
+async function recordNames(id: string, n: number, sha256: string): Promise<"yes" | "no" | "unknown"> {
+  try {
+    const reply = repliesFor(await redisPipeline([["GET", recordKey(id)]]), 1);
+    if (!reply) return "unknown";
+    if (reply[0] === null) return "no";
+    if (typeof reply[0] !== "string") return "unknown";
+    const record = parseAgreement(JSON.parse(reply[0]));
+    if (!record) return "unknown";
+    return record.versions.some((m) => m.n === n && m.sha256 === sha256) ? "yes" : "no";
+  } catch {
+    return "unknown";
+  }
+}
+
 /** One of this store's agreements, or null: an agreement is only ever found under the store that made it. */
 export async function agreementOf(store: Pick<Store, "sid">, id: string): Promise<Agreement | null> {
   const a = await readAgreement(id);
@@ -310,9 +329,13 @@ export async function reviseAgreement(store: Store, id: string, draft: Agreement
     try {
       await saveAgreement(next, now);
     } catch (error) {
-      // The record does not name this text: it is let go (only while it is this text), so the next try writes
-      // version n instead of finding it taken (Claude 3 on #2723).
-      await releaseMark(versionKey(a.id, n), text);
+      // The save's answer may be lost while the save landed (Codex CX1 on #2723): the record is read back exactly
+      // first. Naming this version, the change went through; known not to name it, the text is let go (only while it
+      // is this text), so the next try writes version n (Claude 3 on #2723); not known, the text is kept, never let go
+      // under a record that may name it.
+      const named = await recordNames(a.id, n, version.sha256);
+      if (named === "yes") return { ok: true, agreement: next, version };
+      if (named === "no") await releaseMark(versionKey(a.id, n), text);
       throw error;
     }
     return { ok: true, agreement: next, version };

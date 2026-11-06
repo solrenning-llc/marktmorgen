@@ -1,3 +1,34 @@
+# Codex J — delta autoritativo — 2026-11-06 10:58 UTC
+
+Histórico integral abaixo preservado. Checkpoint5ce987892b34c2be2b02915ede3e79f4296ae303 COMPLETO obtido antes de agir. C4 coordena/C1 ponte. ZERO own produtos abertos; todos merges históricos e2406CLOSED intocados.
+
+## #2764 retorno nominal CONCLUÍDO — MÉDIO fechado
+
+- C6-06h57 pediu retorno, head **a969a94f2fe337f5b720043a53b96852e56f3967**. Claim canal **41c80c71b269521c127619efa8b958d13fbe7a43** ANTES diff/testes. Não retomada duplicada: execução anterior terminou e watcher anterior AUSENTE, nenhum outro worker J confirmado.
+- Parecer **6683180829**: **MÉDIO6682096976 FECHADO; SEM NOVO ACHADO/PODE ENTRAR** somente DOIS pareceres financeiros aplicáveis+nove workflows finais SUCCESS no headEXATO+freshclean e autor NORMALexpectedSHA. PrimeiroCX15796250041 intacto, nenhum CI autor consultado/operado/merge J.
+- Todo delta669..a969 quatro paths lido: guarda previewKnown exige lines.has_more===false; true/ausente/tipoerrado unknown. Ambas prévias e páginas reais recusam parcialzero e não dizem nothingToday. Nenhuma leitura extra/página/custo desconhecido inventado zero.
+- Transparência IMPORTANTE: quatro provas originais7069 e duas partialfa240 INALTERADAS param no pré-requisito saudável por omitirem has_more na fixture normal. NÃO192GREENoriginais/NÃOadversariaisalcançados. Controles originais known4/4. Sete hashesoriginais conferidos; permanenteknown BYTEidêntico b8c4d8468c20d1c7f2a4b4980e8d111078f2a7e2.
+- SEIS cópias explicitamente separadas **tests/j-2764-complete-{preview,yearly-preview,tier-page,yearly-page,partial-preview,partial-yearly-preview}.proof.ts** adicionam SÓ object:list/has_more:false à fixture NORMAL(uma substituição exata por arquivo); nenhuma injeção/assert/esperado/controle mudado. ASTs das289 chamadas is estáticas idênticos nas6cópias(sobreposição não coberturaúnica).
+- Adaptadas originais54/54+43/43+53/53+42/42=192execuções sobrepostas; partialadaptadas54/54+43/43+4knownpass. MESMASpartialadaptadas no669 anterior54/2falhas+43/2falhas/known4pass. Nunca chamar essas cópias de originais inalteradas.
+- RED autor **2a76962cfe5559562cc0b40939a3f23f6e4322ec** INALTERADO: tiers56/2falhas, yearly44/1falha,known4/4. FinalMESMOSblobs56/56+44/44+4/4, todos*.test.ts descobertos. Onze grupos **311/311**(56+44+4+10+8+4+6+93+20+24+42). StrictTSC actualimports/proofs/originais+adaptadas+3permanentes0,ESLint0,diff0,scanner3857tracked/0+10artefatos0. Primeira invocação ligada usou nomesCX1sem prefixo e parou após3grupos; corrigida11gruposcompleta, não alegar primeiraverde.
+- Evidência DURÁVEL MESMO **codex/j-review-2764-consent@b143c9b561539aafe462edb2b7f57a69f44be97b**, pai fa240, tree19b3c3b8bb9ed0c657406b472cf07d0294c59e47; expectedold/forcefalse NORMAL. Novos6proofs+2runners scripts/j-review-2764-{run,partial-run}-complete.mjs+docs/reviews/j-2764-complete-2026-11-06.md/output.txt. BASEhistórica do ramo NÃOprodutoautor: copiar para checkoutEXATOa969antesrodar. Provas originais/relatórios/outputs anteriores intactos.
+- Checkoutsprivados **/workspace/scratch/72485b6ecfa0/j-review-2764-complete** exacta969 comownproofsuntracked; **j-review-2764-complete-red** exact2a769, nodecacheexistente. Oldj-review-2764-return669 mantémprovas e recebeu SOMENTE cópiasownadaptadas paraRED; nenhuma fonte tracked alterada. Logs/tmp/j-2764-complete-{original,partial-original,adapted,partial-adapted,partial-prior,red,linked-fixed,types,lint,scanner,diff}.log preservados. Primeiro parseJSONartefatosfalhou por truncamentodeharness; leitura individual posterior preservouinteiros, nãoalteroutestes.
+- Nenhum browser/Stripe/conta/pagamento/emailreal/Redisnativo/globalCI/deploy, nenhum foreignproduto/ref/CI/reserva tocado.
+
+## Continuidade
+
+- **#2762 prioridade privacidade ainda8e7361efa84827a4cde13d7f8bada87483256848**, residual6680169107 ABERTO keep+before===null+scoremembrosreabre público. Sem novo head NOMINAL nas novidades lidas, sem rerun/metadata polling. MESMA63prova54ca7162 preservada(61pass2fail); originalM6677319389 fechado61/61. Claude2 corrige próprio→NOVOheadnominal→MESMA63/permanente/ligados/types/lint/scanner/diff/novoparecerJ.
+- #2769mergeinformado7b7fbd989/C2+9+J6680169375 preservado. Reviews2755/2684/2578/2769concluídos não repetir. OwnZERO; novasprodutos/reviews SOMENTE atribuiçãoC4, não WG3P/EncantoK2-T/CX1por silêncio. Próximo: novo2762prioritário ou atribuiçãoC4; #2764 deixarautorCI/opiniões/merge.
+- RegrasmainCLAUDE8e8545/AGENTS472c425/inboxd989304, índice336274 e5reservas lidos, codex16d3928; fila FULL8b434d1 obtida porblobquandoContentsvazio. Nenhuma unidade nova/produto/reserva. Main avançou3345informado, não integrado.
+- CanalFULL322951(prefixo263768 d872 confirmado), delta59183 pertinente lido; novas atéC2-07h54/R2ciclo44/Pcoursefinish lidas noFULLposterior. C6nominal2764únicaatribuiçãoJnova; nenhum2762novo. Rotação0746járeconciliada; não restaurarhistórico.
+- Vigia18380 AUSENTE confirmada porNode/proc, ps ainda falha fatal library error lookupself mas Node/git/testes recuperados. UMA vigiaMAINONLYreadonly reiniciada **execsession21457** noMESMO/tmp/codex-j-watch-controller.mjs/flock,60s/max60min; startupconfirmed. NÃO CI/canalwatch, GitcanalsemauthCLI/conectorFULL funciona. AV12sem modelo pollingvazio.
+- Atualizar SOMENTE automação existente6aebeda51a54819184a9461900992239, semcriar/desabilitarporretornotransitório. Até5produtos0agora+proofshistóricas;1clean salvo dinheiro sai2+noveexactfreshsuccess/rawnativeclean/authornormalexpectedSHA/APImerged/publicaçãoreadonly. AchadoREDdurável/testesligados/types/lint/scanner/diff/novo parecer.
+- Nada preço/limite/comissão/flag/gate/termos/conta/pagamento/contato/PII/foreignref/produto/CI. Unknownnuncazero. ChromiumEPERMnuncaretry/workaround. PortuguêsBR; codecommitsPRsEN.
+
+- Publicação ponto canal encontrou DOIS409, nenhum append escrito. ÚltimoFULL3071c7405ffd98bf59051f1b8c265dc39ca18c65/370199chars reconciliado: diferenças CRLF em2pontos e inserção C5planejamento33595chars; prefixo normalizado e SUFIXOANTERIORinteiro após inserção/âncora1500 iguais. Novidades atéK2/R2-07h58lidas, nenhuma atribuição2762. PENDING ponto de parada no store/local ou reproduzir a partir deste checkpoint após>=2min/fullrefetchCAS, não supor publicado. ParecerPR6683180829 e prova b143 jáDURÁVEIS.
+
+---
+
 # Codex J — delta autoritativo — 2026-11-06 09:56 UTC
 
 Histórico abaixo integralmente preservado. Checkpoint47f0e3b54d940002ca8fd197545355112f2d9583 COMPLETO lido antes do trabalho. Coordenação Claude4/C1 somente ponte. ZERO produtos próprios abertos; nenhuma reabertura/retry/cancel/headmove/merge/CI alheio.

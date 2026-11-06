@@ -178,7 +178,7 @@ test("controls: a written order PayPal says was refunded is not handed over; one
   const handed: Paid[] = [];
   const sweep = sweeper(handed);
   await sweep();
-  assert.deepEqual(handed, []);
+  assert.equal(handed.length, 0, "nothing handed over");
   assert.equal(await pending(refunded), null);
   paypal = "completed";
   const order = nextOrder();

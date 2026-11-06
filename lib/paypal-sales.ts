@@ -612,17 +612,26 @@ async function settle(order: string, opened: Opened, captureId: string, email: s
   const wrote = repliesFor(await redisPipeline([["SET", paidKey(order), JSON.stringify(paid), "NX", "EX", PAID_KEPT_SECONDS]]), 1);
   if (!wrote || (wrote[0] !== "OK" && wrote[0] !== null)) throw new UnknownReplyError("writing a PayPal payment down");
   if (wrote[0] === null) return { paid: (await readPaid(order)) ?? paid, fresh: false };
-  await redisPipeline([
-    ["ZADD", watchKey(opened.s), String(nextLook(paid.at, paid.at) ?? paid.at), order],
-    ["SADD", ownKey(opened.s, email, opened.p), order],
-    ["EXPIRE", ownKey(opened.s, email, opened.p), PAID_KEPT_SECONDS],
-    ["ZREM", pendingKey(opened.s), order],
-    // Counted in the store's numbers like a Stripe sale (lib/stats.ts readPaidSales).
-    ["ZADD", salesKey(opened.s), String(paid.at), order],
-    ["ZREMRANGEBYSCORE", salesKey(opened.s), "-inf", String(paid.at - SALES_KEPT_SECONDS)],
-    ["EXPIRE", salesKey(opened.s), SALES_KEPT_SECONDS],
-  ]);
+  await redisPipeline(settledWrites(paid));
   return { paid, fresh: true };
+}
+
+/**
+ * What a payment written down leaves beside its record: watched for a refund, among the buyer's orders, no longer
+ * pending, and counted in the store's numbers like a Stripe sale (lib/stats.ts readPaidSales). Each is the same
+ * written twice, so the sweep writes them again for a record whose writes were never confirmed (watchPayPal).
+ */
+function settledWrites(paid: Paid): (string | number)[][] {
+  const { store, order, email, product, at } = paid;
+  return [
+    ["ZADD", watchKey(store), String(nextLook(at, at) ?? at), order],
+    ["SADD", ownKey(store, email, product), order],
+    ["EXPIRE", ownKey(store, email, product), PAID_KEPT_SECONDS],
+    ["ZREM", pendingKey(store), order],
+    ["ZADD", salesKey(store), String(at), order],
+    ["ZREMRANGEBYSCORE", salesKey(store), "-inf", String(at - SALES_KEPT_SECONDS)],
+    ["EXPIRE", salesKey(store), SALES_KEPT_SECONDS],
+  ];
 }
 
 /**
@@ -691,8 +700,9 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
     const { paid, fresh } = await settle(order, opened, capture.id, email);
     return { ok: true, paid, fresh };
   } catch (error) {
-    // Taken, but whether it was written down here is unknown: nothing is handed over on it; the sweep asks again.
-    if (!(error instanceof UnknownReplyError)) throw error;
+    // Taken, but whether it was written down here is unknown (a reply in another shape, or one lost after Redis
+    // applied it): nothing is handed over on it; the order is kept pending, and the sweep hands it over once
+    // PayPal confirms it, whether or not its record was written (watchPayPal).
     console.error("a PayPal payment could not be written down", order, error);
     await watchLater(order, opened);
     return { ok: false, reason: "error" };
@@ -787,21 +797,27 @@ export async function watchPayPal(
   for (const order of Array.isArray(waiting) ? (waiting as string[]) : []) {
     if (Date.now() >= deadline) return result;
     let opened: Opened | null;
-    let written: Paid | null;
+    let written: Paid | null | "unknown";
     try {
       opened = await readOpened(order);
-      written = opened ? await readPaid(order) : null;
+      written = opened ? await readPaidExact(order) : null;
     } catch (error) {
       // Unknown is not "ended": the order stays pending and is read again on the next pass (CX-123 rule 24).
       if (!(error instanceof UnknownReplyError)) throw error;
       console.error("a pending PayPal order could not be read", order, error);
       continue;
     }
+    if (written === "unknown") {
+      console.error("a pending PayPal order's payment could not be read", order);
+      continue;
+    }
     // Thirty days without PayPal settling it: no longer asked about.
-    if (!opened || written) {
+    if (!opened) {
       await redisPipeline([["ZREM", pendingKey(statsId), order]]);
       continue;
     }
+    // A record written while the order is still pending is not "handed over": the writes after it (which take it
+    // off pending) were never confirmed, and the hand-over comes after them. It is asked about as any other below.
     let done: Record<string, unknown>;
     try {
       done = await call("GET", `/v2/checkout/orders/${encodeURIComponent(order)}`, { merchant: opened.m });
@@ -821,6 +837,19 @@ export async function watchPayPal(
     // Completed and what was asked, but without the buyer's address or the capture's id: paid, not yet readable.
     if (capture.status === "COMPLETED" && matches(opened, capture, payee) && (!email || typeof capture.id !== "string")) continue;
     if (capture.status === "COMPLETED" && matches(opened, capture, payee) && email && typeof capture.id === "string") {
+      if (written) {
+        // Written down before, never confirmed settled: handed over as written, then settled, so a hand-over that
+        // fails leaves it pending for the next pass. Every hand-over step is keyed by the order (its grant, receipt,
+        // count, credit and webhook), so one that did happen is not repeated by this (CX-123 rule 24).
+        if (written.store !== statsId || written.product !== opened.p || written.capture !== capture.id) {
+          console.error("a pending PayPal order's record does not match its order", order);
+          continue;
+        }
+        await on.handOver(written);
+        await redisPipeline(settledWrites(written));
+        result.cleared += 1;
+        continue;
+      }
       let settled: { paid: Paid; fresh: boolean };
       try {
         settled = await settle(order, opened, capture.id, email);

@@ -172,9 +172,8 @@ test("controls: the sweep drops an order whose opened record is gone, and settle
   assert.equal(handed.length, 1);
   assert.equal(handed[0].order, order);
   assert.equal(await pendingScore(order), null);
-  await putPending(order);
   await sweep(handed);
-  assert.equal(handed.length, 1, "already written down: not handed over again");
+  assert.equal(handed.length, 1, "settled and off pending: not handed over again");
 });
 
 test("controls: the return writes a payment down once, and the second time is not fresh", async () => {

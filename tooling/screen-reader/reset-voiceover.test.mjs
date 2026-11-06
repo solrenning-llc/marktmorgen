@@ -27,12 +27,13 @@ test("an explicit empty inventory needs no signal",async()=>{
  const f=fixture();f.state.running=false;assert.deepEqual(await resetVoiceOverRunner(f.options),{initialProcesses:0,forcedProcesses:0});assert.deepEqual(f.signals,[]);
 });
 test("foreign user, unmarked host, unknown inventory and changed process refuse",async()=>{
- for(const mode of ["foreign","host","inventory","path","changed"]){
+ for(const mode of ["foreign","host","inventory","path","missing","changed"]){
   const f=fixture();
   if(mode==="foreign")f.state.foreign=true;
   if(mode==="host")f.options.env.AX2_PUBLIC_DISPOSABLE_RUNNER="false";
   if(mode==="inventory")f.state.unknown=true;
   if(mode==="path"){const original=f.options.run;f.options.run=(file)=>file.endsWith("ps")?"501 S /tmp/VoiceOver\n":original(file);}
+  if(mode==="missing")f.state.psMissing=true;
   if(mode==="changed")f.options.wait=async()=>{f.state.changed=true;};
   await assert.rejects(resetVoiceOverRunner(f.options),undefined,mode);
   if(mode!=="changed")assert.deepEqual(f.signals,[],mode);

@@ -1,5 +1,14 @@
 /** Strictly reads the saved exposure before any new payout batch is allowed. */
-export type PendingPayoutBatch = { at: number; currency: string; lines: { a: string; c: number }[] };
+export type PendingPayoutBatch = {
+  at: number;
+  currency: string;
+  /** `r`: the SHA-256 (hex) of the PayPal address the line was sent to, never the address itself (lib/paypal-payouts.ts). */
+  lines: { a: string; c: number; r?: string }[];
+  /** A batch whose answer was not known (lib/paypal-payouts.ts): when it was last sent again, ms. */
+  t?: number;
+  /** 1: it could not be confirmed with PayPal and needs the creator's own check; it is not sent again. */
+  m?: 1;
+};
 
 const unavailable = (): never => { throw new Error("Pending payout records are unavailable"); };
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -33,10 +42,18 @@ export function readPendingPayoutBatches(results: unknown): Map<string, PendingP
     for (const line of value.lines) {
       if (!record(line) || typeof line.a !== "string" || !line.a.trim() || seen.has(line.a) ||
           !Number.isSafeInteger(line.c) || (line.c as number) <= 0) return unavailable();
+      if (line.r !== undefined && (typeof line.r !== "string" || !/^[0-9a-f]{64}$/.test(line.r))) return unavailable();
       seen.add(line.a);
-      lines.push({ a: line.a, c: line.c as number });
+      lines.push({ a: line.a, c: line.c as number, ...(typeof line.r === "string" ? { r: line.r } : {}) });
     }
-    out.set(id, { at: value.at as number, currency: value.currency, lines });
+    // The two marks of a batch whose answer was not known, each only in its own shape.
+    if (value.t !== undefined && (!Number.isSafeInteger(value.t) || (value.t as number) < 0)) return unavailable();
+    if (value.m !== undefined && value.m !== 1) return unavailable();
+    out.set(id, {
+      at: value.at as number, currency: value.currency, lines,
+      ...(value.t !== undefined ? { t: value.t as number } : {}),
+      ...(value.m === 1 ? { m: 1 as const } : {}),
+    });
   }
   return out;
 }

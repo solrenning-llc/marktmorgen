@@ -1234,6 +1234,20 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
  * Returns the import as it stands. An import someone else is working on is
  * left to them.
  */
+/** A kept batch of rows: JSON of a list of rows, each a list of cells as text; null for anything else. */
+function batchOf(raw: unknown): string[][] | null {
+  if (typeof raw !== "string") return null;
+  let batch: unknown;
+  try {
+    batch = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(batch)) return null;
+  for (const row of batch) if (!Array.isArray(row) || row.some((cell) => typeof cell !== "string")) return null;
+  return batch as string[][];
+}
+
 export async function runImport(id: string, deadline: number): Promise<ImportJob | null> {
   let held;
   try {
@@ -1299,13 +1313,11 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
           await redisPipeline([saveJob(job)]);
           continue;
         }
-        const [raw] = await redisPipeline([["LINDEX", rowsKey(id), job.cursor.batch]]);
-        let batch: string[][] = [];
-        try {
-          batch = typeof raw === "string" ? (JSON.parse(raw) as string[][]) : [];
-        } catch {
-          batch = [];
-        }
+        // The batch in its exact shape (Claude 4, second review of #2717; CX-123 rule 24): a list of rows, each a list of
+        // cells as text. Read as empty, one of another shape was passed over and, at the end, the import failed and its
+        // rows were deleted. Thrown, the job is left as it was (the catch below).
+        const batch = batchOf(repliesFor(await redisPipeline([["LINDEX", rowsKey(id), job.cursor.batch]]), 1)?.[0]);
+        if (!batch) throw new UnknownReplyError("a batch of an import's rows");
         const rows = batch.slice(job.cursor.row, job.cursor.row + CHUNK[job.kind]);
         if (rows.length) {
           // The store as it is now: a chunk of products changes it.

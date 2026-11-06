@@ -319,17 +319,28 @@ const moveKey = async (token: string) =>
 const addressKey = async (email: string) =>
   `nl:rl:address:${(await sha256Hex(`nimbus-signin-address:${email}`)).slice(0, 32)}`;
 
-/** Five sign-in emails an hour from one address on the internet. */
-export async function withinRateLimit(ip: string): Promise<boolean> {
-  if (!isRedisConfigured()) return false;
-  const key = await rateKey(ip);
+/** Where a sign-in email stands against an hourly limit: inside it, past it, or unknown (CX-123 rule 24). */
+export type LimitAnswer = "within" | "over" | "unknown";
+
+/** Counts one more in the hour's window at `key`; a count in any other shape is unknown, and nothing is sent on it. */
+async function hourCount(key: string, limit: number): Promise<LimitAnswer> {
   const replies = repliesFor(await redisPipeline([
     ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
     ["INCR", key],
   ]), 2);
-  // A count in any other shape is unknown (CX-123 rule 24): no sign-in email is sent on it.
   const count = countOf(replies?.[1]);
-  return count !== null && count <= RATE_LIMIT;
+  return count === null ? "unknown" : count <= limit ? "within" : "over";
+}
+
+/** Five sign-in emails an hour from one address on the internet: where this one stands. */
+export async function rateLimitAnswer(ip: string): Promise<LimitAnswer> {
+  if (!isRedisConfigured()) return "unknown";
+  return hourCount(await rateKey(ip), RATE_LIMIT);
+}
+
+/** Five sign-in emails an hour from one address on the internet. */
+export async function withinRateLimit(ip: string): Promise<boolean> {
+  return (await rateLimitAnswer(ip)) === "within";
 }
 
 /**
@@ -447,17 +458,15 @@ export async function openSession(email: string, second?: SecondStep, passkeyId?
   return id;
 }
 
+/** Eight sign-in emails an hour to one address, however many machines ask: where this one stands. */
+export async function addressLimitAnswer(email: string): Promise<LimitAnswer> {
+  if (!isRedisConfigured()) return "unknown";
+  return hourCount(await addressKey(normaliseEmail(email)), ADDRESS_LIMIT);
+}
+
 /** Eight sign-in emails an hour to one address, however many machines ask. */
 export async function withinAddressLimit(email: string): Promise<boolean> {
-  if (!isRedisConfigured()) return false;
-  const key = await addressKey(normaliseEmail(email));
-  const replies = repliesFor(await redisPipeline([
-    ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-    ["INCR", key],
-  ]), 2);
-  // A count in any other shape is unknown (CX-123 rule 24): no sign-in email is sent on it.
-  const count = countOf(replies?.[1]);
-  return count !== null && count <= ADDRESS_LIMIT;
+  return (await addressLimitAnswer(email)) === "within";
 }
 
 /** Creates the one-time link and emails it. Returns false if nothing was sent. */
@@ -717,20 +726,22 @@ export async function noteSignIn(
     ]), 2);
     const known = countOf(replies?.[0]);
     const count = countOf(replies?.[1]);
-    // SISMEMBER's 0 or 1 and SCARD's count, each in its exact shape (CX-123 rule 24). Unknown, nothing is noted
-    // and no email goes out, as when Redis does not answer (the catch below); the login itself goes on.
-    if (known === null || known > 1 || count === null) throw new UnknownReplyError("the browsers seen with an account");
+    // SISMEMBER's 0 or 1 and SCARD's count, each in its exact shape (CX-123 rule 24). An unknown SISMEMBER notes
+    // nothing and sends nothing, as when Redis does not answer (the catch below); the login itself goes on.
+    if (known === null || known > 1) throw new UnknownReplyError("the browsers seen with an account");
     if (known === 1) {
       await redisPipeline([["EXPIRE", key, DEVICE_TTL_SECONDS]]);
       return cookie;
     }
-    if (count < MAX_DEVICES) {
+    // A browser surely new with an unknown count is told about in the doubt, once, and not noted (Claude 4, second
+    // review of #2717): unnoted, the next login from it is new again, as it would be past MAX_DEVICES.
+    if (count !== null && count < MAX_DEVICES) {
       await redisPipeline([
         ["SADD", key, seen],
         ["EXPIRE", key, DEVICE_TTL_SECONDS],
       ]);
     }
-    if (count > 0 && !options.quiet && isSenderConfigured()) {
+    if ((count === null || count > 0) && !options.quiet && isSenderConfigured()) {
       const when = new Date().toISOString().replace("T", " ").slice(0, 16);
       await sendEmail({ meter: { by: "company" },
         from: NIMBUS_FROM,

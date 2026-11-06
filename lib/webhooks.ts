@@ -67,6 +67,7 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 // The repository's compare-and-set script (GET equals what was read, then SET), also modelled by lib/redis-memory.ts.
 import { SAVE_CRM_PIPELINES as COMPARE_AND_SET } from "@/lib/crm";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -1970,14 +1971,25 @@ export async function watchStripe(deadline: number, now = Date.now()): Promise<{
 export async function forgetStoreWebhooks(statsId: string | null): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
   const today = Math.floor(Date.now() / 86_400_000);
-  const [rawLog, rawConfig, ...rawTold] = await redisPipeline([
-    ["LRANGE", logKey(statsId), 0, -1],
-    ["GET", cfgKey(statsId)],
-    ...[0, 1, 2].map((back) => ["SMEMBERS", givenUpEndpointsKey(statsId, today - back)]),
-  ]);
-  const ids = Array.isArray(rawLog) ? (rawLog as unknown[]).map(String).filter((id) => DELIVERY_ID_PATTERN.test(id)) : [];
+  const replies = repliesFor(
+    await redisPipeline([
+      ["LRANGE", logKey(statsId), 0, -1],
+      ["GET", cfgKey(statsId)],
+      ...[0, 1, 2].map((back) => ["SMEMBERS", givenUpEndpointsKey(statsId, today - back)]),
+    ]),
+    5,
+  );
+  // The log is the only way to the delivery bodies, which hold what was sent about people (audit SG2,
+  // finding 19): a reply not in its exact shape deletes nothing, keeps the log and fails.
+  const log = stringList(replies?.[0]);
+  const rawConfig = replies?.[1];
+  const rawTold = (replies ?? []).slice(2).map(stringList);
+  if (!replies || !log || (rawConfig !== null && typeof rawConfig !== "string") || rawTold.some((members) => members === null)) {
+    throw new UnknownReplyError("a deleted store's webhooks");
+  }
+  const ids = log.filter((id) => DELIVERY_ID_PATTERN.test(id));
   // The endpoints told on those days, removed since or not.
-  const told = new Set([...(parseConfig(rawConfig)?.endpoints ?? []).map((e) => e.id), ...rawTold.flatMap((members) => (Array.isArray(members) ? (members as unknown[]).map(String) : []))]);
+  const told = new Set([...(parseConfig(rawConfig)?.endpoints ?? []).map((e) => e.id), ...rawTold.flatMap((members) => members ?? [])]);
   await redisPipeline([
     ["DEL", cfgKey(statsId)],
     ["SREM", STORES_KEY, statsId],

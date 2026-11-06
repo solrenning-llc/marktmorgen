@@ -151,10 +151,12 @@ export function CartButton({
   const [bundle, setBundle] = useState<BundleSwap | null>(null);
   const [shipping, setShipping] = useState<ShippingRow | null>(null);
   const [apart, setApart] = useState<Apart | null>(null);
-  // The ids the last read that answered was for; whether the latest read failed or ran out of time; and the count that
-  // "Try again" raises to read the cart once more (with the focus put back on the panel when that read answers).
+  // The ids the last read that answered was for; the ids a read failed or ran out of time for (a failure about another
+  // cart is not said); whether a read "Try again" started is still running; and the count that "Try again" raises to
+  // read the cart once more (with the focus put back on the panel when that read answers, and only then).
   const [checked, setChecked] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [failedFor, setFailedFor] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [tries, setTries] = useState(0);
   const retried = useRef(false);
   // Whether anything is handed over digitally: only then is the box to start at once asked for (lib/digital-consent.ts).
@@ -165,15 +167,19 @@ export function CartButton({
   useEffect(() => {
     if (!open || !wanted) return;
     let live = true;
-    // A read that fails, or does not answer within CART_READ_MS, clears the combined figures of the read before it (the
-    // total, the deal, the "add more" row and shipping): the button then carries no amount and the panel says the prices
-    // could not be checked (Stripe's page shows the exact total before anything is paid). Each line's own price, and the
-    // bundle and suggestion prices, stay from the last read that answered. A product that read never covered is not
-    // offered for payment at all until a read covers it (`unchecked` below).
+    // The combined figures (the total, the deal, the "add more" row and shipping) are shown only for the cart the last
+    // read that answered was for (`current` below): from the moment the cart changes, the button carries no amount and
+    // the panel says the prices are being checked. A read that fails, or does not answer within CART_READ_MS, also clears
+    // them and the panel says the prices could not be checked (Stripe's page shows the exact total before anything is
+    // paid). Each line's own price, and the bundle and suggestion prices, stay from the last read that answered. A
+    // product that read never covered is not offered for payment at all until a read covers it (`unchecked` below).
     const stop = new AbortController();
     const fail = () => {
       if (!live) return;
-      setFailed(true);
+      setFailedFor(wanted);
+      setBusy(false);
+      // A "Try again" that failed is over: a later read the buyer did not ask for never moves the focus.
+      retried.current = false;
       setTotal("");
       setDeal(null);
       setNext(null);
@@ -199,7 +205,8 @@ export function CartButton({
         // Unknown is asked: a cart that does not say is treated as holding something digital.
         setDigital(data.digital !== false);
         setChecked(wanted);
-        setFailed(false);
+        setFailedFor(null);
+        setBusy(false);
         if (retried.current) {
           // "Try again" goes once the read answers: the focus goes to the panel, not to the page.
           retried.current = false;
@@ -229,26 +236,43 @@ export function CartButton({
   // that reads the cart again.
   const covered = checked === null ? [] : checked.split(",");
   const unchecked = ids.filter((id) => !covered.includes(id));
+  // The combined figures belong to the cart the last read that answered was for, never to the one before a change.
+  const current = checked === wanted;
+  // A failure is said only for this cart and not while "Try again" is checking it; when that read fails too, the alert
+  // comes back as a new one, so it is announced again.
+  const failed = failedFor === wanted && !busy;
+  // "Try again" stays where it is while its read runs (so the focus is not lost), says it is busy, and starts no second read.
   const retry = (
     <button
       type="button"
       className="btn st-btn-ghost btn-sm min-h-11"
+      aria-disabled={busy}
+      aria-busy={busy}
       onClick={() => {
+        if (busy) return;
         retried.current = true;
+        setBusy(true);
         setTries((n) => n + 1);
       }}
     >
       {c.retry}
     </button>
   );
-  const waiting = failed ? (
-    <div className="mt-3 space-y-2">
-      <p className="st-note text-sm" role="alert" data-cart-unchecked="">{c.uncheckedSome(unchecked.length)}</p>
+  // What could not be checked, a status line that says when it is being checked again (kept in place, so the change is
+  // heard), and the button that checks again.
+  const trouble = (sentence: string, mark: "data-cart-unchecked" | "data-cart-unpriced") => (
+    <div className="space-y-2">
+      {failed ? <p className="st-note text-sm" role="alert" {...{ [mark]: "" }}>{sentence}</p> : null}
+      <p className={busy ? "st-muted text-sm" : "sr-only"} role="status">{busy ? c.loading : ""}</p>
       {retry}
     </div>
-  ) : (
-    <p className="st-muted mt-3 text-sm" role="status">{c.loading}</p>
   );
+  const waiting =
+    failed || busy ? (
+      <div className="mt-3">{trouble(c.uncheckedSome(unchecked.length), "data-cart-unchecked")}</div>
+    ) : (
+      <p className="st-muted mt-3 text-sm" role="status">{c.loading}</p>
+    );
 
   return (
     <div id="cart" className="st-cart">
@@ -372,15 +396,15 @@ export function CartButton({
                   {payable.map((line) => (
                     <input key={line.id} type="hidden" name="id" value={line.id} />
                   ))}
-                  {deal ? (
+                  {current && deal ? (
                     <p className="flex justify-between text-sm font-semibold" style={{ color: "var(--st-accent-text)" }}>
                       <span>{c.dealRow(deal.percent)}</span>
                       <span className="tabular-nums">{`−${deal.saved}`}</span>
                     </p>
-                  ) : next ? (
+                  ) : current && next ? (
                     <p className="st-muted text-sm font-semibold">{c.dealNext(next.more, next.percent)}</p>
                   ) : null}
-                  {shipping ? (
+                  {current && shipping ? (
                     <div className="text-sm" data-cart-shipping="">
                       <p className="flex justify-between font-semibold">
                         <span>{shipping.label}</span>
@@ -389,21 +413,22 @@ export function CartButton({
                       <p className="st-muted text-xs">{shipping.notTo ? `${shipping.where}. ${shipping.notTo}` : shipping.where}</p>
                     </div>
                   ) : null}
-                  {total ? (
+                  {current && total ? (
                     <p className="flex justify-between text-sm font-semibold">
                       <span>{c.total}</span>
                       <span className="tabular-nums">{total}</span>
                     </p>
+                  ) : failed || busy ? (
+                    trouble(c.unchecked, "data-cart-unpriced")
+                  ) : !current ? (
+                    <p className="st-muted text-sm" role="status">{c.loading}</p>
                   ) : (
-                    <>
-                      <p className="st-note text-sm" role="alert" data-cart-unpriced="">{c.unchecked}</p>
-                      {failed ? retry : null}
-                    </>
+                    <p className="st-note text-sm" role="alert" data-cart-unpriced="">{c.unchecked}</p>
                   )}
                   {remind ? <AssistReminderBox id={`r-cart-${handle}`} lang={lang} store={remind} /> : null}
                   {/* Asked when anything in the cart is handed over digitally; a cart of shipped products only has nothing to start at once. */}
                   {digital ? <DigitalConsentBox id={`dc-cart-${handle}`} lang={lang} refused={notice === "consent"} /> : null}
-                  <button type="submit" className="btn st-btn btn-block">{total ? c.checkout(total) : c.checkoutUnpriced}</button>
+                  <button type="submit" className="btn st-btn btn-block">{current && total ? c.checkout(total) : c.checkoutUnpriced}</button>
                   <p className="st-muted text-xs">{c.note}</p>
                 </form>
               ) : null}

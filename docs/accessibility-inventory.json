@@ -1567,6 +1567,7 @@
     "components/takedown-actions.tsx",
     "components/task-editor.tsx",
     "components/tasks-agenda.tsx",
+    "components/tax-collected.tsx",
     "components/tax-editor.tsx",
     "components/team-event-editor.tsx",
     "components/team-manager.tsx",
@@ -2022,6 +2023,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 137
+    "pageTemplates": 138
   }
 }

@@ -12,7 +12,10 @@
  *   - the page fills in the link's address and asks for a name; "Confirm
  *     withdrawal" records the withdrawal once, emails the acknowledgement with
  *     its content and the date and time, and files the creator's notice;
- *   - a second statement for the same order sends nothing again;
+ *   - a second statement for the same order sends nothing again, unless the
+ *     acknowledgement never went: then it is sent again, with the first
+ *     statement's time, at most WITHDRAWAL_ACK_SENDS times in all, and the
+ *     creator is told only once;
  *   - a closed order, a name missing or an email that does not read records
  *     and sends nothing;
  *   - an order the link's address did not pay for is never withdrawn from;
@@ -29,6 +32,9 @@ import { afterTasks } from "./next-server-after-world";
 import { ordersLinkFor, purchasesFor, OrdersMeter } from "@/lib/buyer-orders";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { windowOf, withdrawalKey } from "@/lib/withdrawal";
+
+/** lib/withdrawal.ts, WITHDRAWAL_ACK_SENDS: the most times one order's acknowledgement is tried. */
+const ACK_SENDS = 3;
 import { readInbox } from "@/lib/inbox";
 import { POST as withdrawRoute } from "@/app/api/store/withdraw/route";
 import WithdrawPage from "@/app/[handle]/orders/withdraw/page";
@@ -41,6 +47,8 @@ const DAY = 86_400;
 
 let sessions: Record<string, unknown>[] = [];
 const mails: { to: string; subject: string; text: string }[] = [];
+/** How many of the next emails the email service refuses. */
+let refuseMail = 0;
 /** Every request that would change something in Stripe. */
 const stripeWrites: string[] = [];
 
@@ -48,6 +56,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const url = new URL(String(input instanceof Request ? input.url : input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "api.resend.com") {
+    if (refuseMail > 0) {
+      refuseMail -= 1;
+      return answer({ message: "unavailable" }, 500);
+    }
     const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
     mails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text });
     return answer({ id: "00000000-0000-4000-8000-000000000000" });
@@ -68,6 +80,7 @@ beforeEach(() => {
   sessions = [];
   mails.length = 0;
   stripeWrites.length = 0;
+  refuseMail = 0;
   afterTasks.length = 0;
   process.env.STRIPE_SECRET_KEY = "sk_test_withdrawal_only_a_stand_in";
   process.env.RESEND_API_KEY = "re_test_orders_only_a_stand_in";
@@ -101,6 +114,7 @@ const paid = (id: string, product: string, created: number, metadata: Record<str
 const post = (fields: Record<string, string>) =>
   withdrawRoute(new NextRequest(`${ORIGIN}/api/store/withdraw`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(fields).toString() }));
 const stateOf = (answer: Response) => new URL(answer.headers.get("location") ?? "https://x").searchParams.get("w");
+const recorded = async (sid: string, ref: string) => (await redis.pipeline([["HGET", withdrawalKey(sid, ref), "at"]]))[0];
 const render = async (query: Record<string, string>) => renderToStaticMarkup(await WithdrawPage({ params: Promise.resolve({ handle: "@mara" }), searchParams: Promise.resolve(query) }));
 
 test("an order inside its period gets the function; content handed over after the yes does not", async () => {
@@ -139,7 +153,7 @@ test("the page fills in the address and asks for a name; confirming records once
 
   const answer = await post({ handle: "mara", token, ref, name: "Ana Souza", email: BUYER });
   assert.deepEqual([answer.status, stateOf(answer)], [303, "done"]);
-  assert.ok(typeof (await redis.pipeline([["GET", withdrawalKey(store.sid!, ref)]]))[0] === "string", "the withdrawal is recorded");
+  assert.ok(typeof (await recorded(store.sid!, ref)) === "string", "the withdrawal is recorded");
   assert.equal(mails.filter((m) => m.to === BUYER && m.subject.includes("withdrawal")).length, 1);
   const ack = mails.find((m) => m.subject.includes("withdrawal"))!;
   assert.ok(["Ana Souza", ref, "The Butter Course", BUYER, " UTC"].every((part) => ack.text.includes(part)), ack.text);
@@ -161,7 +175,7 @@ test("a closed order, a missing name or an email that does not read records and 
   assert.equal(stateOf(await post({ handle: "mara", token, ref: old, name: "Ana", email: BUYER })), "closed");
   assert.equal(stateOf(await post({ handle: "mara", token, ref: open, name: " ", email: BUYER })), "form");
   assert.equal(stateOf(await post({ handle: "mara", token, ref: open, name: "Ana", email: "not an email" })), "form");
-  for (const ref of [old, open]) assert.equal((await redis.pipeline([["GET", withdrawalKey(store.sid!, ref)]]))[0], null);
+  for (const ref of [old, open]) assert.equal(await recorded(store.sid!, ref), null);
   assert.equal(mails.filter((m) => m.subject.includes("withdrawal")).length, 0);
   assert.ok(!(await render({ token, ref: old })).includes("Confirm withdrawal"), "a closed order offers no confirmation");
 });
@@ -171,7 +185,34 @@ test("an order the link's address did not pay for is never withdrawn from", asyn
   const other = { ...paid("other", product, NOW - DAY), customer_details: { email: "someone@example.com" } };
   sessions = [other];
   assert.equal(stateOf(await post({ handle: "mara", token, ref: other.id, name: "Ana", email: BUYER })), "closed");
-  assert.equal((await redis.pipeline([["GET", withdrawalKey(store.sid!, other.id)]]))[0], null);
+  assert.equal(await recorded(store.sid!, other.id), null);
   assert.equal(mails.filter((m) => m.subject.includes("withdrawal")).length, 0);
   assert.equal(stateOf(await post({ handle: "mara", token: "f".repeat(64), ref: other.id, name: "Ana", email: BUYER })), "closed");
+});
+
+test("an acknowledgement that did not go is sent again on the next statement, with the first time, a bounded number of times", async () => {
+  const { store, product, token } = await shop();
+  sessions = [paid("open", product, NOW - 2 * DAY), paid("never", product, NOW - DAY)];
+  const [ref, never] = sessions.map((s) => s.id as string);
+  const acks = () => mails.filter((m) => m.subject.includes("withdrawal"));
+
+  refuseMail = 1;
+  assert.equal(stateOf(await post({ handle: "mara", token, ref, name: "Ana Souza", email: BUYER })), "unsent");
+  assert.equal(acks().length, 0);
+  const first = await recorded(store.sid!, ref);
+  assert.ok(typeof first === "string", "the withdrawal is recorded although its email did not go");
+
+  assert.equal(stateOf(await post({ handle: "mara", token, ref, name: "Ana Souza", email: BUYER })), "done", "the next statement sends the acknowledgement");
+  assert.equal(acks().length, 1);
+  assert.equal(await recorded(store.sid!, ref), first, "the first statement's time is kept");
+  const inbox = await readInbox(store.statsId!);
+  assert.equal(inbox.filter((c) => JSON.stringify(c).includes(ref)).length, 1, "the creator is told once");
+  assert.equal(stateOf(await post({ handle: "mara", token, ref, name: "Ana Souza", email: BUYER })), "already", "once it went, nothing more is sent");
+  assert.equal(acks().length, 1);
+
+  refuseMail = ACK_SENDS + 5;
+  for (let i = 0; i < ACK_SENDS; i++) assert.equal(stateOf(await post({ handle: "mara", token, ref: never, name: "Ana", email: BUYER })), "unsent");
+  const left = refuseMail;
+  assert.equal(stateOf(await post({ handle: "mara", token, ref: never, name: "Ana", email: BUYER })), "already", "past the ceiling, no further try");
+  assert.equal(refuseMail, left, "no email was tried past the ceiling");
 });

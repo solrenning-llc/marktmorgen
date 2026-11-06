@@ -508,3 +508,23 @@ The single causal workflow read after that return found eight completed/success 
 #2659, the foreign review completed by S, was normally merged by Claude 4 as `aec24e60d`. No action remains. #2770 still has 9/9 but no explicit nominal Revisor 2 return; #2516 remains 8/9 with the shared Firefox harness assigned to Codex V; #2473 and #2689 remain blocked. Five own products remain; no sixth was opened and no other foreign review was started because the current candidates in the channel already have named reviewers/controllers.
 
 Exact next action: terminal #2798 event, Revisor 2 nominal #2770 return, V's Firefox correction, or the existing coordinator decisions. No poll, retry, cancel, merge, price/limit/commission/flag/gate/account/payment/term/key/contact/provider/deployment/automation change.
+
+
+## Checkpoint 2026-11-06 11h22 Fortaleza — two nominal foreign returns completed
+
+Current coordination is Claude 4 only; Claude 1 is off and is not a bridge or destination. The newest main commit found through GitHub is `b769d0b052063e581c2148d14a868a963cafd96b` (#2806). No own head was moved and no CI was polled, retried or cancelled in this continuation.
+
+Two assigned foreign reviews were completed without changing either author branch:
+
+- #2733 exact `229dc828e0706ec246c1021e3da7829329e5a760`, focal review `5801308393`: no finding. Delta `01572f4b..229dc828` removes five route-level loading files and places the Today, Inbox and Library skeletons inside page-local Suspense boundaries. Session reads and direct redirects remain before each boundary; server-only values cross to the old bodies; no suspended body redirects. RED `e06d34ad6` reproduced 74/19 failures; final 74/74; expanded linked set 84 files/0 failures; typegen, global TypeScript, scoped lint, scanner 3981/0 and diff-check passed. Limits: no hosted browser matrix, real screen reader or CLS/LCP measurement.
+- #2773 exact `540030e445bb8672fe224a6e0752c92a8de21003`, nominal review `5801392477`: no finding; prior LOW `5796448521` is closed. Unknown visitor-counter replies now produce 503/retry words while confirmed excess remains 429/slow, preserving the three counters, keys, TTLs, ceilings, short-circuit order and consumed acknowledgement without retry/readback. The C4-1225 scanner hunk only recognizes `essentialLimitState` as `EssentialLimit`. Corrective RED `255ef0cc6` reproduced 0/4; final focal and linked checks 156/156; typegen, global TypeScript, lint, scanner 3979/0 and diff-check passed. Limits: no native Redis, real model/provider, hosted browser/AAA or global production build.
+
+The five own products remain OPEN and exact:
+
+1. #2473 `d57357ab42fa2abc522def9f16c90e3e526bd0c3`: unknown member-activity contract decision still required; WIP `756d8f366a726d1e71195fbb884e650f6797a17b` preserved.
+2. #2516 `a8f0ff1c3bee1fe82db87b903df8be1a74b66967`: Revisor 2 clean; last causal state 8/9 with the shared Firefox sign-in scroll failure owned outside S. Do not touch that runner.
+3. #2689 `481e26c64c0b3031645c85c8c46b7cd1bb8f71b2`: occupied Studio UI block unchanged; WIP `c918be44966ca60b0a13b5a413e2ad4c1edadd74` preserved.
+4. #2770 `7fa81525040f7712f063a72a367a20e506076a3c`: last causal state 9/9; explicit nominal Revisor 2 return still absent.
+5. #2798 `cb6673a982efb43e84c266bc95018d22b5909f77`: Revisor 2 clean; last causal state 8/9. Do not chase main or poll without a terminal event. On terminal novelty, integrate current main once, preserve reviewed product/test blobs, rerun the 141 linked checks/static proof and require nine new exact-head successes.
+
+Exact next action is causal only: a named review request not already announced, the terminal #2798 event, the Revisor 2 return for #2770, the shared Firefox correction for #2516, or coordinator disposition for #2473/#2689. Do not open a sixth product. Preserve #2111 and its files, all occupied files, foreign refs and CI, MR ceilings and unknown semantics. No price, limit, commission, flag, gate, account, payment, term, key, contact, provider, deployment or automation changed.

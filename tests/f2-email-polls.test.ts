@@ -5,7 +5,7 @@
  *
  *   - The block: a question and 2 to 5 different answers, bounded; anything
  *     written like a poll and not one stops the email, saying why; one poll
- *     an email; a sequence refuses one.
+ *     an email; a sequence refuses only a broken one (unit 2).
  *   - Sent: each reader's copy has its own signed answer links, real links
  *     with the answer's own words (buttons at least 44 px tall), the text
  *     version lists each answer with its link, and no pixel; sending records
@@ -80,7 +80,9 @@ async function main(): Promise<void> {
   is("the designer's new poll cannot go until written", [hasPlaceholder(POLL_STARTER), hasPoll(POLL_STARTER)], [true, true]);
   is("on the web, the poll is its question and answers, no link", [pollOnWeb(BODY).includes("@poll"), pollOnWeb(BODY).includes("/poll?"), pollOnWeb(BODY).includes("- A printable guide")], [false, false, true]);
   is("a preview's buttons lead to the preview page only", [...pollPreviewBody(BODY).matchAll(/\]\((https:[^)]+)\)/g)].map((m) => m[1]), Array(3).fill("https://marktmorgen.com/poll?preview=1"));
-  is("a sequence's email with a poll is refused before it is saved", flowConfigurationIssues({ id: "f", name: "Seq", trigger: "joined", active: false, steps: [{ id: "s1", delayHours: 0, subject: "Hi", body: POLL }] } as never, { flows: [], products: [], courses: [], forms: [], stages: [], fields: [] } as never).some((issue) => issue.includes("poll")), true);
+  // Unit 2 (tests/f2-email-polls-sequences.test.ts): a sequence's email takes a whole poll; only a broken one is an issue.
+  const seqIssues = (body: string) => flowConfigurationIssues({ id: "f", name: "Seq", trigger: "joined", active: false, steps: [{ id: "s1", delayHours: 0, subject: "Hi", body }] } as never, { flows: [], products: [], courses: [], forms: [], stages: [], fields: [] } as never).some((issue) => issue.toLowerCase().includes("poll"));
+  is("a sequence's email with a whole poll is fine; a broken one is refused before it is saved", [seqIssues(POLL), seqIssues("@poll Which?\n- Only one")], [false, true]);
 
   part("Sent: each reader's own links, real links, no pixel");
   const made = await claimHandle(OWNER, "poll-harbor", "Harbor Polls", "");

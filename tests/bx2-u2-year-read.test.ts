@@ -40,8 +40,7 @@ const sec = (ms: number) => Math.floor(ms / 1000);
 
 // ---- The stand-in Stripe: five lists, newest first, with created[gte] and starting_after as Stripe reads them.
 type Row = Record<string, unknown> & { id: string; created: number };
-const LISTS = ["/checkout/sessions", "/payment_intents", "/invoices", "/refunds", "/disputes"] as const;
-type ListPath = (typeof LISTS)[number];
+type ListPath = "/checkout/sessions" | "/payment_intents" | "/invoices" | "/refunds" | "/disputes";
 let stripe: Record<ListPath, Row[]>;
 let broken: Partial<Record<ListPath, "garbled" | "error" | "shuffled">> = {};
 const log: string[] = [];
@@ -175,16 +174,16 @@ async function main(): Promise<void> {
     is("read now, not stale, twelve months from June 2031", [kept?.stale, kept?.at, e?.months.length, e?.months[0].month, e?.months[11].month], [false, NOW, 12, "2031-06", "2030-07"]);
     is("the reading begins at the oldest month's floor", e?.since, readingSince(NOW, "UTC"));
     is("Stripe, June: the store's paid checkouts and extras, the renewal paid in June, refunds and money-taking disputes", of(e, "2031-06", "stripe"), {
-      source: "stripe", state: "read", leftOut: [],
-      lines: [{ currency: "usd", salesCents: 6500, renewalCents: 2000, enteredCents: 0, refundCents: 1000, disputeCents: 500, netCents: 7000 }],
+      source: "stripe", state: "read",
+      lines: [{ currency: "usd", salesCents: 6500, renewalCents: 2000, enteredCents: 0, refundCents: 1000, disputeCents: 500, netCents: 7000 }], leftOut: [],
     });
     is("Stripe, May: the sale under an earlier address, in euros; the renewal made in May but paid in June is not in May", of(e, "2031-05", "stripe"), {
-      source: "stripe", state: "read", leftOut: [],
-      lines: [{ currency: "eur", salesCents: 3000, renewalCents: 0, enteredCents: 0, refundCents: 0, disputeCents: 0, netCents: 3000 }],
+      source: "stripe", state: "read",
+      lines: [{ currency: "eur", salesCents: 3000, renewalCents: 0, enteredCents: 0, refundCents: 0, disputeCents: 0, netCents: 3000 }], leftOut: [],
     });
     is("PayPal, June: the sale and its full refund; disputes said as not read", of(e, "2031-06", "paypal"), {
-      source: "paypal", state: "read", leftOut: ["dispute"],
-      lines: [{ currency: "usd", salesCents: 4000, renewalCents: 0, enteredCents: 0, refundCents: 4000, disputeCents: 0, netCents: 0 }],
+      source: "paypal", state: "read",
+      lines: [{ currency: "usd", salesCents: 4000, renewalCents: 0, enteredCents: 0, refundCents: 4000, disputeCents: 0, netCents: 0 }], leftOut: ["dispute"],
     });
     is("PayPal, April: euros on their own line", (of(e, "2031-04", "paypal") as { lines?: unknown })?.lines, [{ currency: "eur", salesCents: 2500, renewalCents: 0, enteredCents: 0, refundCents: 0, disputeCents: 0, netCents: 2500 }]);
     is("a month with nothing, read in full: a confirmed zero, not unknown", [of(e, "2031-02", "stripe")?.state, (of(e, "2031-02", "stripe") as { lines?: unknown[] })?.lines?.length], ["read", 0]);

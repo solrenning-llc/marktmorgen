@@ -78,7 +78,7 @@ import { LOG_SIZE as SYNC_LOG } from "@/lib/email-sync";
 import { MAX_DEVICES } from "@/lib/phone-alerts";
 import { CALENDAR_POLLS_PER_HOUR, MAX_FEEDS } from "@/lib/calendar-sync";
 import { CALENDAR_FILE_BYTES } from "@/lib/read-ceilings";
-import { READING_COPY_MAX_BYTES } from "@/lib/store-readings";
+import { READING_COPY_MAX_BYTES, READING_KINDS } from "@/lib/store-readings";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { CLOSING, FOLLOWED_FAMILIES } from "@/lib/data-families";
 import { CLOSING_DAYS } from "@/lib/plan-closing-rules";
@@ -358,7 +358,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cal:builds:@lib/calendar-sync.ts": { what: "The feed's file made again today, and its credits used", parts: [capped(4 * KEY, "Two counts a store a UTC day, kept two days.")] },
   "nl:cal:chg:@lib/call-records.ts": short("When the store's bookings last changed, by its calls id, forty days; and the day's credits, two days: set at each booking made, moved or let go", "call", 40),
   // C4-4 (owner's decision of 4 November 2026, C4-18): a store's readings of its numbers, kept a day for the pages that show them, and the day's count.
-  "nl:reading:@lib/store-readings.ts": { what: "A store's last readings of its visits, sales and memberships, a day", parts: [capped(3 * READING_COPY_MAX_BYTES, "Three readings a store, each at most READING_COPY_MAX_BYTES.", src("lib/store-readings.ts", "READING_COPY_MAX_BYTES", "READING_KEEP_SECONDS"))] },
+  "nl:reading:@lib/store-readings.ts": { what: "A store's last readings of its visits, sales, memberships and twelve months of earnings, a day", parts: [capped(READING_KINDS.length * READING_COPY_MAX_BYTES, "One reading a store of each of READING_KINDS (four), each at most READING_COPY_MAX_BYTES.", src("lib/store-readings.ts", "READING_COPY_MAX_BYTES", "READING_KEEP_SECONDS"))] },
   "nl:list:try:@lib/store-readings.ts": short("A store with no list: its one try of the day to be given one", "day", 2),
   "nl:reading:day:@lib/store-readings.ts": { what: "A store's readings of the day, and of them the heavy ones", parts: [capped(4 * KEY, "Two counts a store a UTC day, kept two days.")] },
   // C4-33 (4): a product update's searches for its buyers, from a count of their own.

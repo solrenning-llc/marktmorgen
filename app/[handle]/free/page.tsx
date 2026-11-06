@@ -106,7 +106,9 @@ export default async function FreePage({ params, searchParams }: Params) {
   const claimed = claim
     ? await readListing(store, claim.productId) ?? null
     : null;
-  const asked = await readListing(store, productId) ?? null;
+  // Named only while it is on the store: a draft is never named to whoever only knows its id (MM-SA-30).
+  const listed = await readListing(store, productId) ?? null;
+  const asked = listed && !listed.hidden ? listed : null;
   const stillFree = claimed !== null && claimed.priceCents === 0;
   // Signed up from a step of a funnel of pages (lib/page-funnel.ts): the way on
   // to its next step, in place of the one paid product the page names.

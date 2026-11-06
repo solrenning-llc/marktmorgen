@@ -51,6 +51,7 @@
  */
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, stringList } from "@/lib/redis-reply";
 import { deriveKey, deriveLegacyKey } from "@/lib/secret-box";
 import { type Member, parseTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
@@ -165,9 +166,21 @@ function parseStored(raw: unknown): Stored | null {
 const clean = (name: unknown) =>
   (typeof name === "string" ? name : "").replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim().slice(0, MAX_KEY_NAME);
 
-/** A store's keys, newest first, as the studio lists them. Never the key itself. */
+/** The store's list of keys, field and value by turns, only in that exact shape (audit SG2, finding 23). */
+async function readList(sid: string): Promise<string[]> {
+  const [raw] = await redisPipeline([["HGETALL", listKey(sid)]]);
+  const flat = stringList(raw);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a store's API keys");
+  return flat;
+}
+
+/**
+ * A store's keys, newest first, as the studio lists them. Never the key
+ * itself. A list that cannot be read throws: it is never shown as no keys.
+ */
 export async function listKeys(sid: string): Promise<ApiKey[]> {
-  return (await keyRecords(sid)).map(({ id, name, hint, madeAt, usedAt, write, agent }) => ({ id, name, hint, madeAt, usedAt, write, agent })).sort((a, b) => b.madeAt - a.madeAt);
+  // Strict: a list, its holds or its uses read in another shape throw, never shown as no keys (audit SG2, finding 23).
+  return (await keyRecords(sid, true)).map(({ id, name, hint, madeAt, usedAt, write, agent }) => ({ id, name, hint, madeAt, usedAt, write, agent })).sort((a, b) => b.madeAt - a.madeAt);
 }
 
 export type MakeResult = { ok: true; key: string; made: ApiKey } | { ok: false; reason: "full" | "name" | "unavailable" };
@@ -184,7 +197,10 @@ export async function makeKey(sid: string, rawName: unknown, now = Date.now(), w
   const name = clean(rawName);
   if (!name) return { ok: false, reason: "name" };
   const [count] = await redisPipeline([["HLEN", listKey(sid)]]);
-  if (Number(count) >= MAX_KEYS) return { ok: false, reason: "full" };
+  // An unknown count is not room for one more (audit SG2, rule 30).
+  const held = countOf(count);
+  if (held === null) return { ok: false, reason: "unavailable" };
+  if (held >= MAX_KEYS) return { ok: false, reason: "full" };
 
   const key = `${KEY_PREFIX}${randomBytes(20).toString("hex")}`;
   const id = randomBytes(6).toString("hex");
@@ -197,10 +213,11 @@ export async function makeKey(sid: string, rawName: unknown, now = Date.now(), w
   ]);
   // Two tabs pressing "Make a key" at once can both pass the count above.
   // Counted again after writing, and the one just made is taken back if it
-  // went over, so the limit is the limit.
-  if (Number(after) > MAX_KEYS) {
+  // went over, or if the count cannot be read, so the limit is the limit.
+  const afterCount = countOf(after);
+  if (afterCount === null || afterCount > MAX_KEYS) {
     await redisPipeline([["DEL", lookupKey(hash)], ["HDEL", listKey(sid), id]]);
-    return { ok: false, reason: "full" };
+    return { ok: false, reason: afterCount === null ? "unavailable" : "full" };
   }
   return { ok: true, key, made: { id, name, hint: stored.hint, madeAt: stored.madeAt, usedAt: 0, write, agent } };
 }
@@ -217,10 +234,18 @@ export async function revokeKey(sid: string, id: string): Promise<boolean> {
   return true;
 }
 
-/** Every key of a store with who made it and its hold, oldest first, for lib/api-key-pause.ts. */
-export async function keyRecords(sid: string): Promise<KeyRecord[]> {
+/**
+ * Every key of a store with who made it and its hold, oldest first, for lib/api-key-pause.ts. `strict` (the
+ * studio's list, listKeys): each of the three replies must be a list of fields and values, or this throws
+ * (audit SG2, finding 23); otherwise read as before.
+ */
+export async function keyRecords(sid: string, strict = false): Promise<KeyRecord[]> {
   if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return [];
   const [raw, holds, uses] = await redisPipeline([["HGETALL", listKey(sid)], ["HGETALL", holdKey(sid)], ["HGETALL", usedKey(sid)]]);
+  if (strict && [raw, holds, uses].some((reply) => {
+    const flat = stringList(reply);
+    return !flat || flat.length % 2 !== 0;
+  })) throw new UnknownReplyError("a store's API keys");
   const held = mapOf(holds);
   const used = mapOf(uses);
   const flat = flatOf(raw);
@@ -406,8 +431,8 @@ const flatOf = (raw: unknown): unknown[] =>
  */
 export async function revokeAllKeys(sid: string): Promise<number> {
   if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["HGETALL", listKey(sid)]]);
-  const flat = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? Object.entries(raw as Record<string, unknown>).flat() : [];
+  // The list is the only way to the lookups (audit SG2, rule 30): unread, nothing is deleted and this fails.
+  const flat = await readList(sid);
   const hashes: string[] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const stored = parseStored(flat[i + 1]);

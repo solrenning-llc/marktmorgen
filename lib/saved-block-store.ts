@@ -17,6 +17,19 @@ const sectionsKey = (statsId: string) => `nl:sblocks:${statsId}`;
 export const sectionUsesKey = (statsId: string, id: string) => `nl:sblock:uses:${statsId}:${id}`;
 
 /** Every section of a store, newest change first. Throws when the list cannot be read, so an empty list is never a guess. */
+/**
+ * How many sections the library holds, read exactly (HLEN), so a reading of
+ * them is paid for before it is made (lib/mcp-tools.ts savedBlocksTool);
+ * null when Redis answered in another shape.
+ */
+export async function countSections(statsId: string | null): Promise<number | null> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const replies: unknown = await redisPipeline([["HLEN", sectionsKey(statsId)]]);
+  if (!Array.isArray(replies) || replies.length !== 1) return null;
+  const n = replies[0];
+  return typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : null;
+}
+
 export async function readSections(statsId: string | null): Promise<SavedSection[]> {
   if (!statsId || !isRedisConfigured()) throw new Error("Saved sections unavailable");
   const replies = await redisPipeline([["HVALS", sectionsKey(statsId)]]);
@@ -31,6 +44,32 @@ export async function readSections(statsId: string | null): Promise<SavedSection
       }
     })
     .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
+}
+
+/**
+ * The library exactly as kept, for a reader that must never leave a section
+ * out unsaid (the MCP tools): throws when Redis's answer is not exactly one
+ * list of texts or a kept section is not one.
+ */
+export async function readSectionsExact(statsId: string): Promise<{ sections: SavedSection[]; bytes: number }> {
+  if (!isRedisConfigured()) throw new Error("Saved sections unavailable");
+  const replies: unknown = await redisPipeline([["HVALS", sectionsKey(statsId)]]);
+  if (!Array.isArray(replies) || replies.length !== 1 || !Array.isArray(replies[0])) throw new Error("Saved sections unavailable");
+  const sections: SavedSection[] = [];
+  let bytes = 0;
+  for (const value of replies[0] as unknown[]) {
+    if (typeof value !== "string") throw new Error("Saved sections unavailable");
+    bytes += Buffer.byteLength(value, "utf8");
+    let section: SavedSection | null = null;
+    try {
+      section = parseSection(JSON.parse(value));
+    } catch {
+      section = null;
+    }
+    if (!section) throw new Error("Saved sections unavailable");
+    sections.push(section);
+  }
+  return { sections, bytes };
 }
 
 export async function readSection(statsId: string, id: string): Promise<SavedSection | null> {

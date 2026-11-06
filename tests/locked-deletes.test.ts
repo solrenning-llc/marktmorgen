@@ -419,6 +419,7 @@ async function main(): Promise<void> {
     "api-keys": ["need:export"],
     "answers": ["act:page:clear"],
     "assistant": ["not:a buyer deleting their own conversation with the assistant"],
+    "assistant-memory": ["need:settings"],
     "assistant-settings": ["act:page:clear"],
     "blog": ["act:page:delete"],
     "bundle": ["act:products:clear", "not:a bundle made in the same request is taken back when its pictures fail"],
@@ -526,6 +527,7 @@ async function main(): Promise<void> {
     "assistant": "not:a buyer's own conversation with the store's assistant",
     "blog": { delete: "act:page" },
     "bundle": { clear: "act:products", create: "open:adds", save: "open:edits" },
+    "assistant-memory": "need:settings",
     "calendar": "need:settings",
     "community": {
       comment: "open:adds", delete: "lockedFor", "delete-comment": "lockedFor", edit: "open:edits", "edit-comment": "open:edits",

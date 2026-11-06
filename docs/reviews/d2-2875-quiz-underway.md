@@ -1,3 +1,17 @@
+# D2 final focal return: no remaining finding on exact55cb783c
+
+Exact final author head:55cb783ce7d21d4dff17342a9f069f3fbf4e3e25, treecf3fb3e323b222d8d2cd093c43369f66323adf02. Return announced before new source/diff/tests in channeldcdbc640044aec9158644c160f5c112d7f7c2537.
+
+The entire delta from reviewed correctiveecf is ONE new path, tests/d2-2875-quiz-underway.test.ts. Its blob2eb7875e5820d331e762d7d4591740c3c541a8ae is BYTE-IDENTICAL to the original immutable12-assertion proof; all product modules and historical proof/runner remain unchanged.
+
+Executed using the CANONICAL aliases for that NEW filename on the exact final snapshot:12/12,52synthetic commands under unchanged5000ceiling. Executed the actual tests/run.mjs discovery expression:1470selected names, new regression selected=true and original authored test selected=true. Focused lint, scanner4131tracked/0 and exact diff check pass. This CLOSES the normal-CI registration prerequisite; no runner/policy/source assertion was weakened.
+
+The two runtime findings already closed by D2 on exactecf remain closed on this unchanged product delta. That actual corrective validation32linked1121/1121 plus immutable12, strict directed1108/0, all corrective-path lint0/scanner4130/0/diff0 remains applicable; it was NOT needlessly rerun for a byte-identical test-file addition. Types were executed at ecf including the identical proof module in the same tests directory, not falsely called a fresh global TSC on55cb.
+
+No remaining D2 focal finding. Clear for normal AUTHOR merge only after all nine exact-final-head workflow aggregates succeed and applicable review policy is met. No CI greens, global TypeScript/build, browser/AT, real provider/native Redis/authenticated download are certified here. R2 historical execution/classification request is separate and not represented as completed. Original conditional MEDIUM/LIGHT proof and all reports remain in the history below; no regression was called introduced by this PR.
+
+---
+
 # D2 focal return: runtime findings closed on ecf3f35a; permanent CI registration pending
 
 Returned exact head: ecf3f35ad6c8896d39bb4186f5a6c139b461168a, treef06e489ae06a0db17fea85fe5d44d97925ee34e3. Announced before new diff/source/tests in channel98b088adc8fe00759b1abb44f8ed66dad8b2ea6c. This section supersedes the two runtime findings' open status below ONLY in the demonstrated cases; it is not a whole-PR clean release.

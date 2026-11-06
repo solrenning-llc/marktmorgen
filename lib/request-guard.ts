@@ -122,9 +122,12 @@ async function sha256Hex(value: string): Promise<string> {
  *
  * `scope` names the purpose ("checkout", "book"…) and `who` whatever it is
  * counted by — an address and a store, usually — which is hashed, so no
- * address is kept in the clear. When Redis cannot be asked the answer is yes:
- * these limits keep abuse down, and a buyer must never be kept from paying
- * because a counter was out of reach.
+ * address is kept in the clear. When Redis cannot be asked (it throws) the
+ * answer is yes: these limits keep abuse down, and a buyer must never be
+ * kept from paying because a counter was out of reach. A reply that did come
+ * back in another shape is an unknown count and the answer is no (SG2 17,
+ * Claude 1's decision of 05/11/2026). Work that spends money uses
+ * withinEssentialLimit, which says no on both.
  */
 /** Essential authenticated actions need a confirmed finite allowance before
  * provider or data work. Same existing counter/key/TTL; uncertainty consumes
@@ -150,16 +153,47 @@ export async function withinEssentialLimit(scope: string, who: string, limit: nu
 
 export async function withinLimit(scope: string, who: string, limit: number, windowSeconds: number): Promise<boolean> {
   if (!isRedisConfigured()) return true;
+  let reply: unknown;
   try {
     const key = `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
-    const [, count] = await redisPipeline([
+    reply = await redisPipeline([
       ["SET", key, "0", "EX", windowSeconds, "NX"],
       ["INCR", key],
     ]);
-    return Number(count) <= limit;
   } catch {
+    // Redis could not be asked: open, so a buyer is never kept from paying by a counter out of reach.
     return true;
   }
+  // A reply that came back in another shape, or that cannot even be looked at, is an unknown count, never room
+  // (SG2 17, Claude 1, 05/11/2026; Codex Q on #2670: reading it is outside the catch above).
+  return countWithin(reply, limit);
+}
+
+/** Whether a returned SET NX + INCR reply holds a count within `limit`; no for any other shape or a reply that throws when read. */
+function countWithin(reply: unknown, limit: number): boolean {
+  try {
+    const count = counterReply(reply);
+    return count !== null && count <= limit;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The count of a SET NX + INCR pipeline, only in its exact shape: two
+ * replies, the SET's "OK" or null, and the INCR's own whole number of at
+ * least 1; null for anything else. Read by the replies' own data fields,
+ * as withinEssentialLimit does, so a getter cannot answer for them.
+ */
+function counterReply(reply: unknown): number | null {
+  if (!Array.isArray(reply)) return null;
+  const length = Object.getOwnPropertyDescriptor(reply, "length");
+  if (!length || !Object.hasOwn(length, "value") || length.value !== 2) return null;
+  const set = Object.getOwnPropertyDescriptor(reply, "0");
+  const count = Object.getOwnPropertyDescriptor(reply, "1");
+  if (!set || !Object.hasOwn(set, "value") || (set.value !== null && set.value !== "OK")) return null;
+  if (!count || !Object.hasOwn(count, "value") || !Number.isSafeInteger(count.value) || count.value < 1) return null;
+  return count.value as number;
 }
 
 /**
@@ -178,17 +212,18 @@ export async function withinMonth(scope: string, who: string, limit: number, win
   if (!window || !/^\d{4}-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?$/.test(window)) return false;
   if (!isRedisConfigured()) return true;
   if (!Number.isSafeInteger(limit) || limit <= 0) return false;
+  let reply: unknown;
   try {
     const month = window;
     const key = `nl:rlm:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}:${month}`;
-    const [, count] = await redisPipeline([
+    reply = await redisPipeline([
       ["SET", key, "0", "EX", 32 * 86_400, "NX"],
       ["INCR", key],
     ]);
-    return Number(count) <= limit;
   } catch {
     return true;
   }
+  return countWithin(reply, limit);
 }
 
 /**

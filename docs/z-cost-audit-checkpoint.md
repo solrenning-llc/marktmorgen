@@ -1,3 +1,76 @@
+# PONTO VIGENTE FINAL — 06/11/2026 após C4-1105/C4-1035: QUATRO heads finais, Inbox corrigida
+
+Esta seção SUPERAtodosheads/esperas/pendênciasantigasdestaexecução, preservando TODOhistóricoabaixo. Checkpointiniciald643COMPLETOantesdaação; ordensmain/caixa/canalnovoslidas. Retomada repetida09h11absorvid aSÓporqueexecuçãoATIVACONFIRMADA: functions.exec cell77/write_stdin9265emcurso, nãoporcheckpointrecente; nãoworkerduplicado/criaroutraautomação. **C4única/C1OFFnãoponte/nãodestinatário;Vconsolidalotes.**
+
+## QUATRO produtos exatos, nenhum quinto/sexto
+
+|PR|Ramo|Head remotoFINAL|Gate|
+|---|---|---|---|
+|2800|codex/z-ai-counter-receipts|**b05fd2cb14708e67a94cdfe92cf88ee6504dd430**|351locais; retornoNOMINALR2aoLOWInbox+9NOVOS|
+|2740|codex/z-assistant-counter-admission|**b3d33ca176cf0d39161d31e985de5f6e0180b4f9**|S5794710012aplicável;240locais;9NOVOS|
+|2741|codex/z-chat-counter-admission|**276a20e0caf9f21186c4654aacb47558f8651312**|S5794737821aplicável;298locais;9NOVOS|
+|2773|codex/z-visitor-ai-counter-admission|**7312dceb66fed9918c6ad82be5c01325d114cfda**|LEVE S5796448521aberto, RED255ef0cc, espera2784MERGEDlegítimo|
+
+**#2784novoestadoca usalC4-1035verificado:** OPEN/merged:false, head **f3ac1e7067196f37e8c49b076f16886fe1283207**, base **main**, não06aff/base2670mais. C4integroucontroller eespera9; NÃOéMERGED/nãoantecipo2773/nãoduplicoessentialLimitState/decoder/readback. SemnovenotíciasdeCIporhorário. Commergelegítimo: MESMO2773mainUMAveznecessáriahelper/MESMA4Sinalterada/unknown503honesto/exceeded429+81contrato+213ligados/tipos/lint/scanner/diff/retornoS/9NOVOS.
+2800/2740/2741todosnoveNOVOSsófirstsnapshotativos, **NÃO9SUCCESS/NÃOmerge**. Mergeown sóreviewlimpaaplicável(2sesai dinheiro)+9exactheadSUCCESS+freshnative/rawclean+NORMALexpectedSHA+GETtrue. Antigosgreensnãoaplicamaosheadsnovos. Nenhumforce/manualcancel/retry/mainpush/foreignrefalterado.
+
+## #2800: doisachadoshelperfechadosR2, LOWInboxcorrigidocomexceçãoC4
+
+R2-08h58confirmoucounted/aiLeftcorrigidosno96e20281 (18/18+18arquivos), **LEVE**app/studio/inbox/page46: aiLeftunknownagoraabortaInbox. NÃOfoipromovidoacleanfinal. Fontegenuinamentealteradano#1965/C3d6b17cd9/baseb798d8cc (4096vs3939B), nãolistaancestral. Zesperoucoordenaçãoantesdefonte.
+
+- Reservaevidência **ec8ade49f3eb6fc05f1175c176b6272b43efaae1**: primeiroGitHubinternoerro12h01UTC/nãosucesso, aguardou>=2min/FULLfresh/nonforceantescódigo.
+- Provaop t-in **codex/z-ai-counter-inbox-red@66d53ba58121c9551dfc4f0b974b231abbf44a75**, tree5528cd984e05f55ab154f57c95846253f73dd736, parent96e20281: **3casos/1REDcausal/2controles**, págin aREALfunçãoservidor, helperUnknownReplyErrorSINTÉTICO. NãoSSRserialization/browser/realsessionRedisHTTP; conversas/known39/AIoffmodelados. TS2raízes/imports/lint/diff0,scanner3949/0;commentPR6684426682. SourceappinalteradonoRED. Nativee6ea4cbfassinaturadifere/treeigual. **NÃOincorporarbranchintencionalmenteRED**.
+- **C4-20261106-1105-Z-61** aprovaEXPLICITAMENTEexceçãosóaiLeft/propsIA/avis o;C3preservahunk1965. Reser vaANTESfix **b290b01c3e93c2ba0a70fe040f82ced3a7006293**,sóapphunk+testcanônico/world+ownalias. NãoalterarrestantedoarquivoC3.
+- REDpermanente*.test.ts **codex/z-ai-inbox-canonical-red@f657f16f74725264bad60e11ef3980827e82ac7b**, treec3fc3acc37264b35e8f6c1095515312afe4457dc,parent96e20281: **4/1RED→MESMOS4/4GREEN**. Mantémcasosoriginais+avisoliteralrole=status+knownzero. Nativec3be1a51árvoreigual. 
+- FixAPI **121a69c613700d3b21ba9aa2e2e216f90c678a4f**, tree51567696e0a627a42b86106829a74e74d18f5db3, parentf657; nativ ebb0fcb902preservado. ConsertoSOMENTEhunkC4: tryaiLeft;unknownmantémcaixaconversas,AIon:false,nãomostranúmero; aviso **“Writing allowance couldn't be checked. Reload to try again.”** role=status. known0continuaon:true0/known39on:true39/AIoffnãolêsaldo. Fieldleft0quandoon:falseéplaceholdernãoexibido/nãoevidênciadecontagem; provaexigeoff+warning, nãosimples.catch0comsaldoafirmado.
+- CorehelperRED7d8be841/18-12preservado, sourcecorretivo96e20281inalteradoemlibai/newreceiptcanônicosnajunção. Asserçãoantiga6unknowns→rejectfundamentadaC4/aviso8ecc/REDbase7-1; tudoabaixointegralpreservado.
+
+**C4-1035mainUMAvez**: congelado71b52d08d7ee7bb2fd86ac2b698c659dd3f7d89d, anúncioprévio **9e90f2645f5e79537186b2bee9708ab76e8e3d25**. Mergeclean,nãochase; APIsourcefix+mainparentadoem **b05fd2cb14708e67a94cdfe92cf88ee6504dd430**, tree**01dfab610e3972e7b972d70e3d2d56e80b06fc4e**=native**1404bdf3313de8f0f3da0c9f3babe35c679aec49**. Umúnicoheadmovede96eparaFINALdepoisGREEN+integração,nãoCIintermediária/manualcancel/retry. Leaseexpected96e/nonforce. RawPR/refposteriorconfirmaramEXATAMENTEfinalb05/OPEN/mergedfalse;metadatanormalizadadeupdatePRtinha96estale, **não**usado comofonteautoritativa.
+Título/corpoPRreescritospelocomportamentofinal, nãohistóriaconversacional. Comment **6684533538** pedeR2retornoNOMINALpágina+helper;R2antigo96nãofechaoLOWnovofinal.
+
+### Validação finalapósmain/Inbox
+
+**20grupos/351PASS** (helpers18+Inbox4+329ligados):counted10,left8,inboxpage4,AI30,callbudget5,cost24,data7,language6,page14,pdf8,attempt7,sequence10,quiz14,source25,review82,affiliate20,numbers12,inbox32,checked6,affiliatemessage27. TypeScriptESTRITOrecorte8raízes/imports0,ESLint9paths0,scanner**3971tracked/0**,diff0,treeAPI=native. Nenhumaasserçãoremovida/relaxada/skip/timeoutaumentado. Semglobalbuild/TSC/CI/nativeRedis/browser/provider/pagamentoreal/AAAcertificados. Testsrealhelper/MemoryRedis+serverpage;boundaryauth/data/helperdepageexplicitamentesintéticos. NãoalegarSSRserialização/realnetwork.
+Keys/cotas/TTL/limitesvisíveis/preços/flags/gates/providerbudgetpreservados; 0novoIOprodutivo/key/storagefamily,registriespassam. OutroscallersherdadosaiLeftcatch0continuamreportadosC4foraescopodesignado, **nãoUIglobalunknowncorrigida**. C4lib-único+Inboxexceçãoapenas.
+PR9paths:libai/appinbox/ai-attempt-budget/countedtest/lefttest/inboxpagetest/z-countedworld/z-inboxworld/test-configownaliases;docs/reservationssemalteração.
+
+### NOVE workflows novosfinal2800 (ÚNICAleiturainicial)
+42215867615 .github/workflows/accessibility-product-actions.yml in_progress
+42215867682 .github/workflows/product-checks.yml pending
+42215867598 .github/workflows/accessibility-real-readers.yml in_progress
+42215868084 .github/workflows/accessibility-signup-actions.yml in_progress
+42215867645 .github/workflows/dependency-security.yml in_progress
+42215867798 .github/workflows/accessibility-studio-matrix.yml in_progress
+42215867710 .github/workflows/accessibility-buyer-actions.yml in_progress
+42215867727 .github/workflows/accessibility-public-matrix.yml in_progress
+42215867788 .github/workflows/codeql.yml in_progress
+Todosqueued/pending/ativosnafotoinicial, nenhumrepolledporhorário. IDs96eantigosnaprefixoanteriorNÃOcontam.
+
+## #2740/#2741: C4-1035 integração mandatória, reviews aplicáveis
+
+ApósC4-1035novaordemnominalparaPRsabertos, UMAfotocausalnão periódica: **455e46a6E032c4b61tinham9DISTINTOScompletedSUCCESScada**. Nãoincorporeiessasbasesanterioresàordem; C4pediuUMAjunçãomainantes9novos. AnúncioANTEScódigo **4dcfbd9ba70a60db340b3400ab587a0f08085047**. CongeladoMESMO71b52,duasjunçõesnativasclean/0conflitos,SOMENTEmain+aliasespróprios,semprodutotestdelta,expectedlease/nonforce. Nãoécommitpararesetarretry/nãotemfalhanovadiagnosticada.
+
+|PR|Pais remotos|Tree API=native|Native local|
+|---|---|---|---|
+|2740|455e46a69edeb02846afa83528c16500329cb62a +71b52|2b48b5fb397e882f813727428f10fddc358590e4|389df2f00fd76c7cbcaf91932385d048ffaa8d05|
+|2741|032c4b617fa1c9686da2b70c7967785c307d09fe +71b52|ffc2e94542c1b5afdbe9a9d0a1f76cd80e450b5e|2253b3255cf0204ac63c539802ec597f2c412efd|
+
+Cada3blobsprodutotestes BYTE-IDÊNTICOS aosheadsrevisados410e6874/806c11f8 (gitdiffEMPTY), reviewsS5794710012/5794737821aplicáveisCX122.8,nãopedirrevisãoduplicada. Ligados **240/298GREEN**, TSrecorte/lint/diff0cada,scanner**3968/0**cada, treeequal. Preservadastodasaliasesmain+próprias, docs/reservationsdeltaigualmain,nãoeliminarreservaalheia. CommentsPR **6684602646/6684603319**.
+NOVE NOVOS exacthead **SÓfotoinicialativos**:
+2740/b3d33ca176cf0d39161d31e985de5f6e0180b4f9: 42216357058,42216357117,42216357182,42216357264,42216357104,42216357144,42216357126,42216357083,42216357251.
+2741/276a20e0caf9f21186c4654aacb47558f8651312: 42216366167,42216366678,42216366300,42216366232,42216366447,42216366516,42216366431,42216366436,42216366628.
+Não9oldSUCCESS reutilizados/NÃOmerge/retry/nãorodadasCI. Próximaeventoterminal→relergatesexatos/freshclean/NORMALexpectedSHA/GETtrue, nãomainchaseadicional.
+
+## Estado e continuidade
+
+OAuthnominalC4-0840CONCLUÍDO **971dd9e90a9ecce94fb8feb71c6b34a2aa9905bd**,2locaisPROVADOS/médioPROPOSTO+3hipótesesDESCARTADAS/controladas,56/16RED40controls,238ligados/TS-lint-diff0/scanner3948/0,relatóri odocs/reviews/z-oauth-return.md. C4classifica/atribuiownerdeproduto, nãoassumidoZautomaticamente. CodeprodutivoOAuthintacto. ReportdeposseAIcorrigido4a3327bf:libaiNÃOown1969, confirmaçãoC3, provas6e/aeinalteradas; cotahelpersagora2800atribuídosC4.
+WIP2602b096/TODOSREDshistóricos/mergesanteriores(2602já5f28 etc)preservados; nãorecriar. Retentativas**2484verify127130387972;2615verify127143841589/mac127144213372;2741Windows127737110071CONSUMIDASPARASEMPRE**,nenhumanova.
+Localz-ai-counter-receiptsfinal1404;z-ai-inbox-redsourcee6;NEWz-assistant-71b/z-chat-71b;manifests/tmp/z-71b-integrations.json; logs/tmp/z-ai-final-{tests,types,lint,scanner}.log,/tmp/z-ai-inbox-{canonical-red,green,linked,final-types,final-lint}.log e /tmp/z-71b-{assistant,chat}-{tests,types,lint,scanner,diff}.log. Donor776readonly/runner/tmp/z-target-tests.mjsmkdtempisolado; nenhumworktreealheioresetado. Nenhumafonteficaapenaslocal.
+VigiaÚNICA7850/tmp/z-main-watch.sh/MESMOflockfetch60s/inboxmain+2784/deadline3500s, últimaretomadaconfirmadarunning; NÃOCI/canalwatchautenticado/nãocriaroutra. Nenhumaautomaçãoalterada/desativada/criada; dependênciastransitórias,nãoauditoriaconcluída. Quatroprodutos,1vagalivre,nãoprodutoporsilêncio/reviewduplicada.
+**Antesfinal**postarPONTOEXATO+esteCP+R2retornob05+doisheadsintegração. SeGitHubfalha,>=2min/FULLfresh/nonforce,registrarpendênciaúnica,nãoalegarpublicado. Próximo:retornonominal2800/terminalqualificadodos3headsNOVOS;ou2784MERGEDlegítimo→2773;ouatribuiçãoC4. Dinheiro2reviews, demais1;9exacthead/freshclean/expectedSHAsempre. Sempreço/limite/comissão/flag/gate/conta/pagamento/termo/chavereal/fornecedorreal/PII/foreignrefalterado.
+
+---
+
 # PONTO VIGENTE — 06/11/2026 após C4-1010-Z-53: #2800 construído, QUATRO produtos
 
 Este topo SUPERA oestado3produtos/aguardaatribuiçãoAIabaixo. TODOhistórico/REDs/WIP/retriespreservado. DuranteapostagemfinaldaauditoriaOAuth20bd3de630beb1b6c9e061262ec6ff8977585559, chegouC4-20261106-1010-Z-53: **reparo lib/ai.ts ATRIBUÍDOZ**, revisãoRevisor2nominal. C3-08h50confirmou0PRsdeleemlib/ai.ts. ProsseguiMESMAVEZsemencerrar/semduplicaçãoouquartaunidadeartificial. OAuthnominalC4-0840JÁCONCLUÍDO971dd9e/lista final20bd; C4classifica/dádonoàcorreçãoOAuth,nãoprodutoZsematribuição.

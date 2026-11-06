@@ -221,6 +221,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "GET store/product": row("products", tool("get_product_description")),
   "POST store/product": row("products", draft),
   "POST store/product-update": row("email", execute, "Tells a product's buyers by email."),
+  "GET store/receipt-batch": row("buyers", never(PEOPLE_FILE)),
   "GET store/receipt-pdf": row("buyers", never(PEOPLE_FILE)),
   "POST store/recent-sales": row("pages", draft),
   "POST store/recovery": row("email", draft),

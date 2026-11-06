@@ -131,6 +131,8 @@ async function main(): Promise<void> {
   is("and says none is added while it is off, even where registered", page.includes("Tax is off in your checkout, so Stripe adds none now, even where you are registered."), true);
   is("the sentence follows the store's own setting", /store\.tax\.enabled \?/.test(page), true);
   is("never says tax is added whatever the setting", page.includes("Stripe adds tax at your\n            checkout only where you have one"), false);
+  // Revisor 1 on #2735: a sale paid with PayPal (lib/paypal-sales.ts) adds no tax; the page says so whenever the store sells that way.
+  is("says PayPal sales carry no tax, when the store sells through PayPal", page.includes("Sales paid with PayPal have no tax added.") && /sellsThroughPayPal\(store\) \?/.test(page), true);
   is("no threshold, no coverage", /threshold|you are covered|fully covered|compliant/i.test(page), false);
   done();
 }

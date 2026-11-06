@@ -41,3 +41,30 @@ Independent fingerprint verification used Node's SHA-256 over the actual canonic
 - No full suite or unrelated framework repair was run. The known unrelated main failures are not represented as fixed by this PR.
 
 Local causal logs: `/tmp/t-2940-base-accessibility-inventory.test.ts.log`, `/tmp/t-2940-base-accessibility-statement.test.ts.log`, `/tmp/t-2940-head-accessibility-inventory.test.ts.log`, `/tmp/t-2940-head-accessibility-statement.test.ts.log`; strict type log `/tmp/t-2940-types.log` is empty. The four test logs total less than 16 KiB; each process had a 120-second timeout and 128-KiB captured-output ceiling.
+
+## Nominal merge return: 4bb52476224a2e00f2b672de879b870e4f2bb18d
+
+This is a read-only focal return requested by the author after combining the already reviewed #2931 test fix with main. The coordinating reviewer announced the nominal return before diff inspection. Target head: `4bb52476224a2e00f2b672de879b870e4f2bb18d`; supplied PR base: `c366e58ab40a1d9c9f4a42f60e62eb0ec1f67a92`. No author ref, source, CI or head was altered.
+
+**Focal conclusion: no high, medium or low finding demonstrated in the three scoped paths. Transfer is qualified, not a claim that every original artifact is byte-identical.** The statement and imported Stripe test are byte-identical to their respective reviewed versions. The inventory has exactly one static, merge-derived source-list addition, inspected below. No new tests, generator run, build, types, lint, scanner, browser or accessibility audit were executed or claimed on this return.
+
+### Exact blob receipts
+
+| Scoped path | Reviewed source | New head | Result |
+| --- | --- | --- | --- |
+| `lib/accessibility-statement.ts` | Original #2940 head `56d5a42d8522571914b77f47ae6d60539af6cc09`: `41e8e260ad55cae76796888c49ae0c41a668e1a8` | `41e8e260ad55cae76796888c49ae0c41a668e1a8` | BYTE-ID |
+| `tests/stripe-list-lot1.test.ts` | Reviewed #2931 head `44aa73d359b367a4aa6acd5d90cbca07a5749505`: `fb38e3815376ee71733e9bb1de3dcfbfbba154d8` | `fb38e3815376ee71733e9bb1de3dcfbfbba154d8` | BYTE-ID; retains C2's review, not a new test run here |
+| `docs/accessibility-inventory.json` | Original #2940: `8c606dbdd79164a0b1ef7a08a0bfffb89496953d` | `efec7662bb94f87e4a5ccd2671e0c305105bae51` | NOT BYTE-ID; bounded JSON delta inspected |
+
+Both complete inventory blobs were read through fetch_blob and matched their file readings. In-memory JSON comparison proves that **only `componentSources` changes**, from 359 to 360 unique, sorted entries, adding `components/cart-link-builder.tsx` and removing nothing. Every other top-level value is equal: schemaVersion, sourceRevision, brief, purpose, standard, source, pageTemplates, boundaryTemplates, apiRouteSources, openWork, currentEvidence, layoutTemplates and routeInventory. There is no change to recorded review statuses, gaps, page rows, page-template count or the fingerprint inputs previously examined. This static equality is not a rerun of the generator or a fresh correctness claim for all current main inputs.
+
+Git tree metadata confirms that the added path already belongs to the supplied main base. The complete `components` subtree is **`d735e4d021b3bfcfc8f79791d2786336e3bba5bf` on both main `c366e58` and head `4bb5247`**. Its untruncated entry for `cart-link-builder.tsx` is mode 100644, blob `4a10c5a4ac59ce0b216daf819abdcbbd1ef4c958`, size 13,259 bytes. Only tree metadata was inspected; the component source blob was not read or reviewed in this return.
+
+### Merge provenance and review boundary
+
+The exact Git commit graph contains two successive merge commits:
+
+1. `56a8d9959b2d45e61df1e6a8c621b4ce104c461d`: parents are the original reviewed #2940 `56d5a42d8522571914b77f47ae6d60539af6cc09` and reviewed #2931 `44aa73d359b367a4aa6acd5d90cbca07a5749505`. Its message explains carrying the unchanged test-only #2931 fix to resolve the mutually red suites.
+2. `4bb52476224a2e00f2b672de879b870e4f2bb18d`: parents are that merge and main `c366e58ab40a1d9c9f4a42f60e62eb0ec1f67a92`. Head tree: `b7dc9c1035c57dd3496bbcb4dbaead7ccab9768a`; main tree: `f82aaaf7410dbaf997375b2682b5c447c5624a31`.
+
+Under CX-122.8, the original T review `5807496602` and its previously observed 93/93 checks remain historical evidence for the unchanged reviewed content, with the one inventory addition explicitly qualified above. C2's independent review of #2931 remains responsible for the imported, exact same Stripe test. These receipts do not turn old test results into newly executed results on `4bb5247`, do not review unrelated main changes, and do not establish nine final CI successes or merge eligibility. The coordinating author retains gate and final-check decisions.

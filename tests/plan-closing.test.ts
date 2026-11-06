@@ -36,6 +36,7 @@ import { type Course, readCourse, saveCourse } from "@/lib/course";
 import { deleteFile, listFiles } from "@/lib/file-store";
 import { CLOSING_DAYS, type Hands, RECHECK_DAYS, WARN_MONTH_DAYS, WARN_WEEK_DAYS, closeEnded, closeOne, closingOf, finishClosed, noticeFor, removalDay } from "@/lib/plan-closing";
 import { eraseClosed } from "@/lib/closed-store-data";
+import { lastPlanMoment } from "@/lib/closing-plan-guard";
 import { KEEP_NOTHING_FROM, keptRoomFor } from "@/lib/plan-closing-rules";
 import { communityFolder } from "@/lib/community-image";
 import { picturesKept, takePicturePlace } from "@/lib/community-files";
@@ -92,7 +93,8 @@ const stripeAsked: string[] = [];
 
 type Sent = { to: string[]; subject: string; text: string; reply_to?: string };
 const sent: Sent[] = [];
-let mail: "up" | "down" = "up";
+let mail: "up" | "down" | "uncertain" = "up";
+let mailAttempts = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -141,7 +143,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
 
   if (url.hostname === "api.resend.com") {
-    if (mail === "down") return json({ message: "unavailable" }, 500);
+    mailAttempts += 1;
+    if (mail === "down") return json({ message: "unavailable" }, 429);
+    if (mail === "uncertain") return json({ message: "acceptance unknown" }, 500);
     sent.push(JSON.parse(String(init?.body)) as Sent);
     return json({ id: `email-${sent.length}` });
   }
@@ -235,6 +239,8 @@ const clockAt = (ms: number) => {
 };
 
 async function main(): Promise<void> {
+  // A synthetic company address, so the buyers' notice of a plan that ends from 31 October 2026 can go (lib/company-postal.ts).
+  process.env.COMPANY_POSTAL_ADDRESS = "100 Example Street, Example City, NY 10001, United States";
   redis.clear();
   // A plan that ended before 18 October 2026 keeps a store with no plan's room (lib/plan-closing-rules.ts).
   clockAt(Date.UTC(2026, 9, 10, 12, 0, 0));
@@ -374,7 +380,7 @@ async function main(): Promise<void> {
   const V = await endedAt(eve.email);
   for (const day of [0, M, W]) await closeOne(eve.email, V + day * DAY, hands);
   is("told three times, like anybody", mailTo(eve.email).map((m) => m.subject.slice(0, 7)), ["Eve Stu", "14 days", "7 days "]);
-  running.set("eve", { id: "sub_eve0002", status: "active", created: 1_790_000_000, customer: { id: "cus_eve0001", email: eve.email }, metadata: { store: "eve" }, items: { data: [{ price: { unit_amount: 9900, recurring: { interval: "month" } } }] } });
+  running.set("eve", { id: "sub_eve0002", status: "active", created: 1_790_000_000, current_period_start: 1_790_000_000, current_period_end: 1_792_678_400, customer: { id: "cus_eve0001", email: eve.email }, metadata: { store: "eve" }, items: { data: [{ quantity: 1, price: { currency: "usd", unit_amount: 9900, recurring: { interval: "month", interval_count: 1 } } }] } });
   const repaired = await closeOne(eve.email, V + C * DAY, hands);
   const eveNow = (await storeForEmail(eve.email))!;
   is("Stripe says the plan runs: nothing is removed and nobody is told it was", [repaired.state, repaired.note, objects.has((await readListing(eveNow, evesFile))!.file!.pathname), mailTo(eve.email).length], ["running", "Stripe says the plan runs", true, 3]);
@@ -545,7 +551,7 @@ async function main(): Promise<void> {
     /keeps the rule it ended under: the store and its records stay/.test(terms),
   ], [true, true, true, true, true, true]);
   const help = JSON.stringify(HELP_SECTIONS);
-  is("the help pages say the same", [help.includes(`stays as it is for ${CLOSING_DAYS} days`), help.includes(`${WARN_MONTH_DAYS} days before that day and ${WARN_WEEK_DAYS} days before it`), help.includes(`keeps more than ${storageWords(SETUP_STORAGE_BYTES)} has a date`), help.includes("download your whole store as one file")], [true, true, true, true]);
+  is("the help pages say the same", [help.includes(`stays as it is for ${CLOSING_DAYS} days`), help.includes(`${WARN_MONTH_DAYS} days before that day and ${WARN_WEEK_DAYS} days before it`), help.includes(`keeps more than ${storageWords(SETUP_STORAGE_BYTES)} has a date`), help.includes("download your store's main data as one file")], [true, true, true, true]);
   is("and the privacy policy says when such files are deleted", read("app/privacy/page.tsx").includes(`deleted ${CLOSING_DAYS} days after the plan`), true);
   const studio = read("app/studio/page.tsx");
   is("and the studio shows a store past its room the day, counted the way the job counts it", [/closingOf\(store\)/.test(studio), /keptNow > keptRoom/.test(studio), /keptRoomFor\(closingAt\.endedAt\)/.test(studio), /dayWords\(closing\.day\)/.test(studio)], [true, true, true, true]);
@@ -581,7 +587,7 @@ async function main(): Promise<void> {
   is("ten megabytes and two pictures are not a store that fits: it is written to", [zoeFirst.state, zoeFirst.note], ["told", "ended"]);
   is("its letter gives the day, and one way out, and says what goes", [
     zoeLetter.text.includes(`On ${dateWords(Z + C * DAY)}, ${CLOSING_DAYS} days after your plan ended`),
-    zoeLetter.text.includes(`Starting a plan again before ${dateWords(Z + C * DAY)} stops all of it`),
+    zoeLetter.text.includes(`Starting a plan again before ${new Date(lastPlanMoment(Z + C * DAY)).toLocaleString("en-US", { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" })} UTC keeps your store`),
     zoeLetter.text.includes("delete files or lessons"),
     zoeLetter.text.includes("the files your students handed in and the\n    pictures in your community's posts"),
   ], [true, true, false, true]);
@@ -595,6 +601,19 @@ async function main(): Promise<void> {
   const walked = await eraseClosed(Date.now() + 20_000, finishClosed, Z + (C + 1) * DAY + 3_600_000);
   is("the walk deletes its records, and nobody else's", [walked.done, walked.finished, await storeForEmail(zoe.email), (await storeForEmail(ana.email))?.handle, (await storeForEmail(ben.email))?.handle], [true, 1, null, "ana", "ben"]);
   is("and its owner, told three times before, is not written to again", [told, mailTo(zoe.email).length], [3, 3]);
+
+  part("Unknown acceptance never authorizes a second provider attempt");
+  const unknownOwner = await storeWith("uncertain");
+  await productWith(unknownOwner, "Kept source", 6 * GB);
+  await endPlan(unknownOwner.email);
+  const unknownEnd = await endedAt(unknownOwner.email);
+  const attemptsBefore = mailAttempts, sentBefore = sent.length;
+  mail = "uncertain";
+  const unknownFirst = await closeOne(unknownOwner.email, unknownEnd + 60_000, hands);
+  mail = "up";
+  const unknownRetry = await closeOne(unknownOwner.email, unknownEnd + 120_000, hands);
+  is("a server error may follow acceptance: hold the notice without another POST", [unknownFirst.state, unknownRetry.state, mailAttempts - attemptsBefore, sent.length - sentBefore], ["held", "held", 1, 0]);
+  is("the ended-plan source and recovery entry remain available", [await endedAt(unknownOwner.email), await inLine(unknownOwner.email), (await storeForEmail(unknownOwner.email))?.handle], [unknownEnd, unknownEnd, unknownOwner.handle]);
 
   done();
 }

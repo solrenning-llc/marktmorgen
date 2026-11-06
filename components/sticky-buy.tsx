@@ -33,7 +33,7 @@ export function StickyBuy({ target, label, price }: { target: "buy" | "get"; lab
   }, [target]);
 
   return (
-    <div className="st-sticky-buy" data-away={away ? "" : undefined} aria-hidden={away || undefined}>
+    <div role="region" aria-label={label} className="st-sticky-buy" data-away={away ? "" : undefined} aria-hidden={away || undefined}>
       <div className="st-sticky-price">{price}</div>
       <a href={`#${target}`} className="btn st-btn st-sticky-go" tabIndex={away ? -1 : undefined}>
         {label}

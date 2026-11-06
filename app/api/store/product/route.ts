@@ -1,4 +1,4 @@
-import { dropCourseTasks } from "@/lib/assignment";
+import { applyCourseTaskDrops, dropCourseTasks, readCourseTaskDrops } from "@/lib/assignment";
 import { storeKey } from "@/lib/learn";
 import { imagePaths } from "@/lib/product-image";
 import { waitingCount } from "@/lib/preorders";
@@ -27,15 +27,21 @@ import { type Intro, introProblem } from "@/lib/intro-price";
 import { type Yearly, yearlyProblem } from "@/lib/yearly-price";
 import { priceBounds, readMoney } from "@/lib/money";
 import { MAX_ABOUT_LENGTH, cleanAbout, dropAbout, readAbout, writeAbout } from "@/lib/product-about";
-import { jsonAccess } from "@/lib/studio-route";
+import { jsonAccess, refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 import { dropPage } from "@/lib/sales-page-store";
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { dropCourse, filesInCourse, readCourse } from "@/lib/course";
+import { exampleTitlesLeft } from "@/lib/course-templates";
 import { dropStream } from "@/lib/stream";
 import { dropStamped } from "@/lib/pdf-stamp";
-import { idsOfKind, readAllListings, readListing, readProducts } from "@/lib/catalog";
+import { deliveredFile, idsOfKind, readAllListings, readDelivery, readListing, readProducts } from "@/lib/catalog";
+import { fastMoneyOnPage, fastMoneyRefusal } from "@/lib/terms-check-rules";
+import { productPromptsLeft } from "@/lib/product-outline";
+import { pageWords } from "@/lib/page-translate";
+import { readPage } from "@/lib/sales-page-store";
 import { quietedBy } from "@/lib/extras-notes";
 
 const ACTIONS = new Set(["add", "edit", "remove", "move", "link", "unlink", "visibility"]);
@@ -143,7 +149,8 @@ export async function POST(request: NextRequest) {
   const title = text(body.title, MAX_TITLE_LENGTH);
   const summary = text(body.summary, MAX_SUMMARY_LENGTH);
   const price = text(body.price, 20);
-  const link = text(body.link, MAX_LINK_LENGTH);
+  // One past the length kept, so a longer link is refused as too long rather than cut and kept broken.
+  const link = text(body.link, MAX_LINK_LENGTH + 1);
   // Absent or unrecognised means a single sale, which is what a product is
   // unless the creator says otherwise. A trial or a payment count that was
   // typed and is not a whole number in range is said, not dropped.
@@ -161,6 +168,21 @@ export async function POST(request: NextRequest) {
 
   if (action !== "add" && !id) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+  }
+
+  // What the Terms forbid ("anything that promises fast or easy money, or income
+  // for little effort") is not published (567 [GD1] (d)): a new product, which
+  // is on the store at once, and a published one, are refused with the passage,
+  // why and the fix. A draft may be saved with it; it is checked again when it
+  // is published, below. The creator's words are never changed for them.
+  if (action === "add" || action === "edit") {
+    // A product that cannot be read is taken as published: a failed read never lets words through.
+    const published = action === "add" || (await readListing(guarded.store, id).catch(() => null))?.hidden !== true;
+    const refused = published ? fastMoneyRefusal({ title, summary, about: about ?? "" }) : null;
+    if (refused) return Response.json({ ok: false, error: "fast_money", passage: refused }, { status: 409 });
+    // Nor with a prompt of the ready outline still in it (lib/product-outline.ts); a draft may keep them.
+    const promptLeft = published ? productPromptsLeft({ title, summary, about: about ?? "" })[0] : undefined;
+    if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft }, { status: 409 });
   }
 
   // A membership's introductory price (lib/intro-price.ts) and its yearly
@@ -257,6 +279,22 @@ export async function POST(request: NextRequest) {
       // The product comes back as it was, so the storage its files used can
       // be released once the removal is safely written. A product with price
       // options holds one file per option as well as its own.
+      // A course's handed-in work is read before the product goes (Revisor 1 on #2810): a read that fails answers 503
+      // and removes nothing, so the work, its files and the room they take stay findable for the next try.
+      // A product or course that cannot be read is unknown, never "not a course" (Revisor 1 on #2810).
+      let before: Awaited<ReturnType<typeof readListing>>;
+      let beforeCourse: Awaited<ReturnType<typeof readCourse>> = null;
+      try {
+        before = await readListing(guarded.store, id);
+        if (before?.course) beforeCourse = await readCourse(before.course.id);
+      } catch (error) {
+        console.error("could not read a product or its course before removing it", error);
+        return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      }
+      const taskDrops = beforeCourse
+        ? await readCourseTaskDrops(beforeCourse).catch((error: unknown) => (console.error("could not read a course's handed-in work", error), null))
+        : [];
+      if (!taskDrops) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
       const removed = await removeProduct(ref, id);
       result = removed.ok ? { ok: true, product: null } : removed;
       if (removed.ok) {
@@ -269,7 +307,10 @@ export async function POST(request: NextRequest) {
         if (course) had.push(...filesInCourse(course));
         // And the work its students handed in for its assignments (lib/assignment.ts).
         if (course) {
-          const handed = await dropCourseTasks(course, storeKey(removed.store), removed.store).catch(() => [] as string[]);
+          // As read before the removal; a course that changed in between is read again here, and logged if it cannot be.
+          const handed = beforeCourse && beforeCourse.id === course.id
+            ? await applyCourseTaskDrops(beforeCourse, taskDrops, storeKey(removed.store), removed.store)
+            : await dropCourseTasks(course, storeKey(removed.store), removed.store).catch((error: unknown) => (console.error("could not read a removed course's handed-in work", error), [] as string[]));
           had.push(...handed.map((pathname) => ({ pathname })));
         }
         if (going.about) await dropAbout(removed.store.statsId, id, removed.store).catch(() => {});
@@ -281,7 +322,12 @@ export async function POST(request: NextRequest) {
           had.push(...pictures.map((pathname) => ({ pathname })));
         }
         // And the photos buyers added to them (lib/reviews.ts).
-        const reviewPhotos = await dropReviews(removed.store.statsId, id).catch(() => [] as string[]);
+        // The deletion tried again up to three times when Redis fails, so the reviews and their AI summary go at
+        // once; said in the log if they cannot (the product is already gone, so nothing shows them).
+        const reviewPhotos = await dropReviews(removed.store.statsId, id, 3).catch((error: unknown) => {
+          console.error("could not drop a removed product's reviews", error);
+          return [] as string[];
+        });
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));
         if (course) await dropCourse(course, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
         for (const file of had) {
@@ -296,6 +342,10 @@ export async function POST(request: NextRequest) {
     } else if (action === "link") {
       // The link is checked before anything is written, so a product is never
       // left pointing at something a buyer could not open.
+      // A link over the file deletes the file and the buyers' stamped copies: a session let in
+      // without its second step waits (lib/two-step.ts). The id may name a price option, whose file
+      // is its own, so the file is read where the id points (readDelivery), not on a product only.
+      if ((await lockedFor(request, "products", "replace")) && deliveredFile(await readDelivery(guarded.store, id))) return refusedJson("locked");
       const read = readLink(link);
       if (!read.ok) {
         return Response.json(
@@ -316,6 +366,24 @@ export async function POST(request: NextRequest) {
     } else if (action === "visibility") {
       // A draft published, or a product taken off the store and kept.
       if (typeof body.hidden !== "boolean") return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+      if (body.hidden === false) {
+        // Published only when nothing a buyer reads promises fast or easy money (the Terms; 567 [GD1] (d)).
+        const draft = await readListing(guarded.store, id);
+        if (draft) {
+          const words = draft.about && guarded.store.statsId ? await readAbout(guarded.store.statsId, draft.id) : "";
+          const shownPage = draft.page && guarded.store.statsId ? await readPage(guarded.store.statsId, draft.id) : null;
+          const refused = fastMoneyRefusal({ title: draft.title, summary: draft.summary, about: words }) ?? (shownPage ? fastMoneyOnPage(pageWords(shownPage)) : null);
+          if (refused) return Response.json({ ok: false, error: "fast_money", passage: { ...refused, product: draft.title } }, { status: 409 });
+          const promptLeft = productPromptsLeft({ title: draft.title, summary: draft.summary, about: words })[0];
+          if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft, product: draft.title }, { status: 409 });
+          // A course from a ready structure is published only once its example titles are replaced (540 [CU1]).
+          if (draft.course) {
+            const course = await readCourse(draft.course.id);
+            if (!course) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+            if (exampleTitlesLeft(course) > 0) return Response.json({ ok: false, error: "course_examples" }, { status: 409 });
+          }
+        }
+      }
       const done = await setProductHidden(ref, id, body.hidden);
       result = done.ok ? { ok: true, product: done.product } : done;
     } else if (action === "unlink") {

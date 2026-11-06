@@ -70,6 +70,6 @@ is("an empty block draws nothing", renderToStaticMarkup(createElement(BlockView,
 is("the link's words in every store language", LANGUAGE_CODES.map((code) => blockWords(code).quoteSource("x.com").includes("x.com")), LANGUAGE_CODES.map(() => true));
 
 part("In the studio");
-is("the coach reads it", coachChecks({ page, productTitle: "Bread", free: false, picture: false, facts: {} }).length > 0, true);
+is("the coach reads it", coachChecks({ page, productTitle: "Bread", free: false, picture: false, pictureAlt: "", facts: {} }).length > 0, true);
 is("the gallery offers it", BLOCK_GROUPS.some((g) => g.kinds.includes("quotes")), true);
 done();

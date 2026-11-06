@@ -64,22 +64,28 @@ Reproducible checks: tests/plan-capacity-review.test.ts compares both tables and
 
 ## MR — Current precheck (27 October2026)
 
-Binding configured reading: `most-tax`.
+### TX current update — 1 November2026
 
-Counterfactual ceiling before all non-tax costs: 16.82%; required: positive net with the existing spend-floor room.60%is the actual monthly company target.
+Current TX precheck: no scoped CustomerTaxInput or complete paid full-use ceiling is supplied; all fiscal ceilings, net results and approved maxima are unknown.
 
-Existing registered list-email delivery assumption: $0.000900 per email; storage assumption: $0.023000 per model GiB-month.
+Tax ceilings are absolute USD cents calculated from complete scoped annual BRL books, explicit incoming exchange operations, dated sources/facts and both reviewed FX ceilings; a15%/38bps metadata profile supplies no bound.
 
-The unchanged registered model now tests positive net with the existing spend-floor room. Positive arithmetic is not an approved supplier maximum or complete review. No feasible maximum is different from a maximum of zero; a counterfactual is not a zero supplier cost. Every actual supplier/capacity assumption still needs its most expensive paid unit, configuration, retention, combined-use bounds and advance funding. No increase, price change or release is authorized.
+Zero usage is a counterfactual only, not a zero supplier cost. Existing prices, entitlements, twelve annual windows and concurrent storage are unchanged.
+
+The precheck now accepts an optional evidence map keyed by plan and payment interval. Each entry must provide the complete scoped tax review/context and an explicit full-rights non-receiving usage ceiling in USD cents. Omitted or unknown full-use cost stays unknown. A supplied tax scope must match the exact plan and its one or twelve paid months. Books cover every calendar year reached by that scope; FX ceilings cover its entire date range and each incoming exchange operation remains explicit. Sources, applicable facts and complete operations are required even for a reviewed empty operation list. None is populated for a real account here.
+
+With complete supplied evidence, both full use and the zero-use counterfactual call the same reviewedUnitUnder production adapter. The complete absolute tax amount remains reserved when usage increases; no tax credit is guessed from added costs. An absolute tax amount is not converted into a universal tax percentage or a supplier maximum. Missing evidence, a mismatched scope, missing annual book or incomplete FX yields unknown rather than a tax-profile infeasibility conclusion.
+
+Positive net requires at least one whole cent and preserves the existing spend-floor room in the separate funding/admission review. The60%target belongs to the monthly actual company report. Arithmetic here never proves an actual paid supplier cost, a legal tax treatment, the company base or authorization to spend. Current supplier quotes, configurations, concurrent combined rights and advance reservations remain mandatory. No free supplier quota is treated as zero cost.
 
 | Plan | Interval | Price | Full existing use | Zero usage, receiving still charged | Capacity precheck |
 | --- | --- | --- | --- | --- | --- |
-| Store | month | $69.00 | 12.09% | 13.14% | unreviewed; no approved maximum |
-| Store | year | $690.00 | 12.21% | 13.37% | unreviewed; no approved maximum |
-| Studio | month | $449.00 | 12.14% | 13.36% | unreviewed; no approved maximum |
-| Studio | year | $4490.00 | 12.02% | 13.40% | unreviewed; no approved maximum |
-| Scale | month | $999.00 | 12.17% | 13.38% | unreviewed; no approved maximum |
-| Scale | year | $9990.00 | 12.02% | 13.40% | unreviewed; no approved maximum |
+| Store | month | $69.00 | unknown | unknown | unreviewed; no approved maximum |
+| Store | year | $690.00 | unknown | unknown | unreviewed; no approved maximum |
+| Studio | month | $449.00 | unknown | unknown | unreviewed; no approved maximum |
+| Studio | year | $4490.00 | unknown | unknown | unreviewed; no approved maximum |
+| Scale | month | $999.00 | unknown | unknown | unreviewed; no approved maximum |
+| Scale | year | $9990.00 | unknown | unknown | unreviewed; no approved maximum |
 
 | Plan | Interval | Windows | List emails | Shared buyer actions | Visits | Orders | Concurrent GiB | GiB-months | Video hours |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -90,4 +96,4 @@ The unchanged registered model now tests positive net with the existing spend-fl
 | Scale | month | 1 | 10000 | 3000 | 40000 | 1500 | 80 | 80 | 64 |
 | Scale | year | 12 | 120000 | 36000 | 480000 | 18000 | 80 | 960 | 768 |
 
-All quantities above are the exact unchanged exports, computed in CI. Queue89 remains in progress for the complete paid-unit/configuration audit. Unknown rates, full LLC costs, exposure and SR3requirements still fail; no actual company base or certified profit is asserted.
+All quantities above are the exact unchanged exports. Yearly billing covers twelve monthly windows; concurrent storage is unchanged and storage occupancy is counted as GiB-months without creating a new monthly storage quota. Queue89 remains in progress for the complete paid-unit/configuration audit. Unknown rates, complete LLC costs, funded exposure and SR3 requirements continue to refuse approval. Maximum capacity remains unknown even when a synthetic calculation is positive. No price, visible limit, commission, gate, real review or supplier setting is changed.

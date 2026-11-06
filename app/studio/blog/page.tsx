@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { parseLanguage } from "@/lib/store-language";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
@@ -36,14 +37,14 @@ export default async function StudioBlogPage({ searchParams }: Params) {
   const { store } = view;
   const editing = typeof query.edit === "string" ? query.edit : "";
   const [posts, open, left] = await Promise.all([
-    allPosts(store.statsId),
-    editing && editing !== "new" ? readPost(store.statsId, editing) : Promise.resolve(null),
+    allPosts(store.statsId).catch(() => null),
+    editing && editing !== "new" ? readPost(store.statsId, editing).catch(() => undefined) : Promise.resolve(null),
     aiAvailableFor(store) ? aiLeft(store).catch(() => 0) : Promise.resolve(0),
   ]);
   const back = studioPath(store, "", "blog");
   const products = store.catalog.head.filter((p) => !p.hidden).map((p) => ({ id: p.id, title: p.title }));
   const live = (id: string, title: string) => `/@${store.handle}/blog/${postSegment({ id, title })}`;
-  const writing = editing === "new" || open !== null;
+  const writing = open !== undefined && (editing === "new" || open !== null);
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -60,13 +61,15 @@ export default async function StudioBlogPage({ searchParams }: Params) {
             <section aria-labelledby="posts-title" className="card min-w-0 p-5">
               <div className="flex items-center justify-between gap-3">
                 <h2 id="posts-title" className="text-lg font-semibold">
-                  {`Posts (${posts.length})`}
+                  {posts === null ? "Posts" : `Posts (${posts.length})`}
                 </h2>
                 <Link href={`${back}${back.includes("?") ? "&" : "?"}edit=new`} className="btn btn-secondary btn-sm">
                   New post
                 </Link>
               </div>
-              {posts.length === 0 ? (
+              {posts === null ? (
+                <p role="status" className="mt-3 text-sm text-ink-soft">Posts couldn&apos;t be loaded. Reload to try again.</p>
+              ) : posts.length === 0 ? (
                 <p className="mt-3 text-sm text-ink-soft">No posts yet. Your store page links to the blog once one is published.</p>
               ) : (
                 <ul className="mt-3 divide-y divide-line">
@@ -82,20 +85,24 @@ export default async function StudioBlogPage({ searchParams }: Params) {
               )}
             </section>
 
-            <section aria-label={open ? `Editing ${open.title}` : "A new post"} className="card min-w-0 p-5 sm:p-7">
-              {writing ? (
+            <section aria-label={open === undefined ? "Blog editor unavailable" : open ? `Editing ${open.title}` : "A new post"} className="card min-w-0 p-5 sm:p-7">
+              {open === undefined ? (
+                <p role="status" className="text-ink-soft">This post couldn&apos;t be loaded. Reload to try again.</p>
+              ) : writing ? (
                 <AiOn value={aiAvailableFor(store) ? { on: true, left } : { on: false, left: 0 }}>
                   <BlogEditor
                     key={open?.id ?? "new"}
                     post={open ? { id: open.id, title: open.title, body: open.body, product: open.product, draft: open.draft, href: open.draft ? null : live(open.id, open.title) } : { id: null, title: "", body: "", product: null, draft: true, href: null }}
                     products={products}
                     back={back}
+                    look={store.look}
+                    language={parseLanguage(store.language)}
                   />
                 </AiOn>
               ) : (
                 <div className="text-ink-soft">
                   <p className="text-lg font-semibold text-ink">Write a post</p>
-                  <p className="mt-2">Pick a post on the left to change it, or start a new one. AI can draft one from a few words about the topic.</p>
+                  <p className="mt-2">{posts === null ? "Your post list is unavailable. You can still start a new post." : "Pick a post on the left to change it, or start a new one. AI can draft one from a few words about the topic."}</p>
                   <Link href={`${back}${back.includes("?") ? "&" : "?"}edit=new`} className="btn btn-primary mt-4">
                     New post
                   </Link>

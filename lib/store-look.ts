@@ -196,7 +196,8 @@ const PALETTES: Record<ThemeId, Palette> = {
     card: "#fffdf9",
     item: "#f8f3ea",
     text: "#2a2118",
-    muted: "#5c5244",
+    // 7.98:1 on the page, 9.22:1 on a card, 8.48:1 on an item: muted words are small text, so AAA asks 7:1 (was #5c5244, 6.51:1).
+    muted: "#4f4538",
     line: "#e4d9c6",
     lineStrong: "#c9bba2",
     field: "#fffdf9",
@@ -299,6 +300,13 @@ export type LookColours = {
    * on it all still read.
    */
   band: string;
+  /**
+   * The colour of a link on that band (274 [AX1]; C1-20261106-0100-TODOS-1): black or white, whichever reads more
+   * on it, so it keeps 7:1 (WCAG 1.4.6) whatever accent the creator picked; it is always underlined (app/globals.css).
+   * The band keeps the page's text at 7:1, and that text is near black or near white, so one of the two always does
+   * better than it (tests/band-link-contrast.test.ts).
+   */
+  bandLink: string;
   dark: boolean;
 };
 
@@ -335,13 +343,15 @@ export function lookColours(look: LookPaint): LookColours {
   const accentSoft = nearestPassing(
     mix(fill, palette.card, palette.dark ? 0.72 : 0.86),
     palette.card,
-    (c) => contrast(c, palette.text) >= 7,
+    // Muted words sit on it too (a chosen or highlighted thing's note): 7:1, which the card always reaches.
+    (c) => contrast(c, palette.text) >= 7 && contrast(c, palette.muted) >= 7,
   );
 
   const band = nearestPassing(
     mix(fill, palette.card, palette.dark ? 0.78 : 0.87),
     palette.card,
-    (c) => contrast(c, palette.text) >= 7 && contrast(c, palette.muted) >= 4.5 && contrast(c, accentText) >= 4.5,
+    // Muted words on a band are small text too: 7:1, which the card always reaches, so a band only grows paler to pass.
+    (c) => contrast(c, palette.text) >= 7 && contrast(c, palette.muted) >= 7 && contrast(c, accentText) >= 4.5,
   );
 
   // The band behind the name on the Colour theme runs from the fill to a
@@ -363,6 +373,7 @@ export function lookColours(look: LookPaint): LookColours {
     accentSoft,
     accent2,
     band,
+    bandLink: contrast(BLACK, band) >= contrast(WHITE, band) ? BLACK : WHITE,
     dark: palette.dark,
   };
 }
@@ -385,6 +396,7 @@ export function lookStyle(look: LookPaint): Record<string, string> {
     "--st-accent-soft": c.accentSoft,
     "--st-accent-2": c.accent2,
     "--st-band": c.band,
+    "--st-band-link": c.bandLink,
     ...fontStyle(look.font),
     ...backdropStyle(look.backdrop),
     colorScheme: c.dark ? "dark" : "light",

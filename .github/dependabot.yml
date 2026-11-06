@@ -1,0 +1,20 @@
+# 508 [SG4] part 1: Dependabot, for security updates of dependencies only.
+#
+# open-pull-requests-limit: 0 turns off routine version-update pull requests
+# while leaving security updates alone, so Dependabot opens a pull request
+# only when an advisory affects a dependency here. Nothing is merged by
+# itself: every pull request goes through the same checks and review as any
+# other. Security updates also need "Dependabot security updates" switched
+# on in the repository's settings, which only the owner can do.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: daily
+    open-pull-requests-limit: 0
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0

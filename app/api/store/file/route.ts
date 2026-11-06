@@ -14,7 +14,7 @@ import {
   ownsPath,
 } from "@/lib/product-file";
 import { ITEM_ID_PATTERN, findLesson, readCourses } from "@/lib/course";
-import { storageRefusal, standingOf } from "@/lib/plan-standing";
+import { costPauseCode, storageRefusal, standingOf } from "@/lib/plan-standing";
 import { maximumUploadBytes, storageBrakeFor, storageUsed } from "@/lib/storage-quota";
 import { rememberFolderOwner } from "@/lib/delivery";
 import { isVaultConfigured } from "@/lib/vault";
@@ -96,6 +96,8 @@ export async function POST(request: NextRequest) {
           if (!isLesson) throw new Error("unknown");
         }
 
+        // Nothing new is stored while a renewal is unpaid (232 [CA1] unit 4).
+        { const paused = costPauseCode(store); if (paused) throw new Error(paused); }
         if (!(await reserveStoreUpload(store, MAX_FILE_BYTES, "blob"))) throw new Error("upload_budget_unavailable");
         const folder = await storeFolder(ref);
         if (!ownsPath(pathname, folder, productId)) throw new Error("invalid");
@@ -148,11 +150,11 @@ export async function POST(request: NextRequest) {
     return Response.json(answer);
   } catch (error) {
     const reason = error instanceof Error ? error.message : "server_error";
-    const known = ["signed_out", "none", "unknown", "invalid", "forbidden", "gone", "storage_full", "storage_trial", "storage_setup", "files_unavailable", "upload_budget_unavailable"].includes(reason);
+    const known = ["signed_out", "none", "unknown", "invalid", "forbidden", "gone", "storage_full", "storage_trial", "storage_setup", "files_unavailable", "upload_budget_unavailable", "renewal_unpaid", "plan_disputed"].includes(reason);
     if (!known) console.error("signing an upload failed", error);
     return Response.json(
       { ok: false, error: known ? reason : "server_error" },
-      { status: reason === "signed_out" ? 401 : reason === "forbidden" || reason === "gone" ? 403 : reason === "files_unavailable" || reason === "upload_budget_unavailable" ? 503 : known ? 400 : 500 },
+      { status: reason === "signed_out" ? 401 : reason === "forbidden" || reason === "gone" ? 403 : reason === "files_unavailable" || reason === "upload_budget_unavailable" ? 503 : reason === "renewal_unpaid" || reason === "plan_disputed" ? 409 : known ? 400 : 500 },
     );
   }
 }

@@ -43,7 +43,8 @@ export type StageTrigger = "none" | "checked" | "not_checked";
  * After a deal was saved from the studio: starts the workflow its new stage
  * starts, for the person it names. "none" when nothing could start (no
  * address, the same stage, a plan without workflows); "not_checked" when the
- * store's studio requests for the month are used up. Never throws.
+ * studio's count refused it (its figure used, no place this month, not counted)
+ * or the check failed. Never throws.
  */
 export async function dealEnteredStage(store: Store, deal: Pick<Deal, "email" | "stage">, before: Pick<Deal, "stage"> | null | undefined): Promise<StageTrigger> {
   if (!entersStage(deal, before) || activeFlowLimit(store) === 0) return "none";

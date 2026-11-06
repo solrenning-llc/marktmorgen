@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
-import { confirmErasure, requestErasureLink } from "@/lib/erasure-request";
+import { askErasureLink, confirmErasure } from "@/lib/erasure-request";
 import { makeErasureReceipt } from "@/lib/erasure-receipt";
 import { handleProblem } from "@/lib/store";
 
@@ -31,13 +31,16 @@ export async function POST(request: NextRequest) {
       // A field no person can see: whatever filled it in is told it worked, and nothing is sent.
       if (String(form.get("website") ?? "").trim()) return away(`status=sent${back}`);
       const scope = String(form.get("scope") ?? "");
-      const status = await requestErasureLink({
+      const asked = await askErasureLink({
         email: String(form.get("email") ?? "").slice(0, 300),
         ip: clientAddress(request),
         origin,
         handle: scope === "store" && back ? handle : undefined,
       });
-      return away(`status=${status}${back}`);
+      // Asked from one store that has no room: the first whole day (UTC) it can be asked for again.
+      // Asked for every store the answer is always "sent" (lib/erasure-request.ts), so nothing is added.
+      const opens = asked.status === "full" && asked.opens ? `&opens=${new Date(asked.opens).toISOString().slice(0, 10)}` : "";
+      return away(`status=${asked.status}${opens}${back}`);
     }
     if (action === "confirm") {
       const token = String(form.get("token") ?? "").slice(0, 80);

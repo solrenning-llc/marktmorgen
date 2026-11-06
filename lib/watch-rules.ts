@@ -10,7 +10,7 @@
 /** Historical invoice allowance only. Playback admission is tier-specific in
  * video-admission-rules.ts and plan-standing.ts; do not use this for new grants. */
 export const VIDEO_HOURS_INCLUDED = 400;
-/** What an hour watched past that costs the creator, in cents. */
+/** Historical price of an hour past that, in cents. Never charged since 31 October 2026 (232 [CA1] unit 3). */
 export const VIDEO_CENTS_PER_HOUR_OVER = 3;
 
 /** The same allowance in seconds, which is what is counted. */

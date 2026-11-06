@@ -1,3 +1,5 @@
+**IDIOMA, antes de tudo (dono, 03/11/2026 00h11 Fortaleza):** toda frase que aparece na tela do dono, inclusive as frases curtas entre um comando e outro ("Vou rodar...", "Próxima unidade..."), os resumos, os status e as perguntas, é em português do Brasil, norma culta, sempre, do começo ao fim de cada vez. Inglês americano só no que vai para o site e para o cliente, nos nomes de código, commits, PRs e comentários no código. Regra completa: IDIOMA em AGENTS.md.
+
 @AGENTS.md
 @docs/cross-product-handoff.md
 

@@ -112,6 +112,14 @@ async function main(): Promise<void> {
     ["ben@example.com", 100, []],
   ]);
   is("counted by band, with the revenue at risk", [health.counts, health.atRisk], [{ well: 1, slipping: 0, risk: 2 }, 4000]);
+  // A membership sold before the store changed its currency, paying in euros and at risk (22 [E5], unit 2e).
+  const kept = subs;
+  subs = [...subs, member("sub_Fay000000001", "fay@example.com", { currency: "eur", status: "past_due" })];
+  const mixed = (await memberHealth(store, true))!;
+  const fay = mixed.members.find((m) => m.email === "fay@example.com");
+  is("a member paying in another currency: shown in it, counted at risk apart, never added", [fay?.own, fay?.monthly, mixed.atRisk, mixed.atRiskElsewhere], [{ cents: 2000, currency: "eur" }, 0, 4000, 1]);
+  subs = kept;
+  await memberHealth(store, true);
 
   part("The email back in");
   is("on only with an address", (await setNudge(OWNER, { on: true, address: "" })).ok, false);

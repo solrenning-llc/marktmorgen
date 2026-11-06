@@ -1,7 +1,6 @@
-import { zeroExposureFixture } from './margin-test-fixtures';
-import {fundedCustomerScenario,fundedCustomerWithAi,zeroFixedCompanyFixture} from './margin-test-fixtures';
+import {planPaymentDisputeFixture, zeroExposureFixture } from './margin-test-fixtures';
+import {fundedCustomerWithAi} from './margin-test-fixtures';
 import { BASE_PLAN_REVENUE_CEILINGS, CURRENT_COMMERCIAL_TERMS, CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, commercialMarginReady, REQUIRED_MARGIN_SCENARIOS, type CommercialMarginReview } from "@/lib/commercial-margin";
-import { CUSTOMER_COST_CATEGORIES } from "@/lib/net-margin-rules";
 import { STORAGE_BRAKE_BYTES } from "@/lib/storage-rules";
 import { STORAGE_BRAKE_BYTES as UPLOAD_STORAGE_BYTES } from "@/lib/storage-quota";
 import { AI_REQUEST_LIMITS, SUPPORTED_AI_MODELS } from "@/lib/ai-request-rules";
@@ -10,14 +9,13 @@ import { VISITS_INCLUDED } from "@/lib/traffic-rules";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { PAID_VIDEO_HOURS, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
 import { done, is } from "./check";
-const scenario = fundedCustomerScenario();
 const review = (): CommercialMarginReview => ({
- companyBase:{monthlyFixedCostsCeilingCents:0,monthlyFixedTaxesCeilingCents:0,allFixedCostsBounded:true,allFixedTaxesReviewed:true,fixedCostsEvidence:"TEST ONLY: zero fixed costs",fixedTaxEvidence:"TEST ONLY: zero fixed taxes",reviewedPayingCustomers:1},priceAndRightsSnapshot: CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,
+ companyBase:{monthlyFixedCostsCeilingCents:0,monthlyFixedTaxesCeilingCents:0,allFixedCostsBounded:true,allFixedTaxesReviewed:true,fixedCostsEvidence:"TEST ONLY: zero fixed costs",fixedTaxEvidence:"TEST ONLY: zero fixed taxes",reviewedPayingCustomers:1},planPaymentDisputes:planPaymentDisputeFixture(),priceAndRightsSnapshot: CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,
  taxEvidence: "TEST ONLY: hypothetical taxes",
  costAndLimitEvidence: "TEST ONLY: hypothetical funded limits",
  allocatedFixedCostsVerified:true, fundedExposure:zeroExposureFixture(),
  prepaidUsageEnforced: true,
- scenarios: Object.fromEntries(REQUIRED_MARGIN_SCENARIOS.map(key => { const gross = BASE_PLAN_REVENUE_CEILINGS[key] ?? 10000; return [key, fundedCustomerWithAi(gross,Math.floor(gross*.65))]; })),
+ scenarios: Object.fromEntries(REQUIRED_MARGIN_SCENARIOS.map(key => { const gross = BASE_PLAN_REVENUE_CEILINGS[key] ?? 10000; return [key, fundedCustomerWithAi(gross,Math.floor(gross*.65),12,key)]; })),
 });
 is("hypothetical current review passes calculation", commercialMarginReady(review()), true);
 is("actual review remains absent", commercialMarginReady(), false);
@@ -44,4 +42,16 @@ is("review captures allowed provider models", CURRENT_COMMERCIAL_TERMS.ai.suppor
 checkLeaves(CURRENT_COMMERCIAL_TERMS);
 const legacy = JSON.stringify({ prices: CURRENT_COMMERCIAL_TERMS.prices, commission: CURRENT_COMMERCIAL_TERMS.commission, trialDays: CURRENT_COMMERCIAL_TERMS.trialDays });
 is("partial legacy contract cannot approve current rights", commercialMarginReady({ ...review(), priceAndRightsSnapshot: legacy }), false);
+
+const withoutDisputeEvidence=review();
+delete withoutDisputeEvidence.planPaymentDisputes;
+is("a legacy review cannot approve unreviewed lost-plan-payment liabilities",commercialMarginReady(withoutDisputeEvidence),false);
+const unknownDisputeFee=review();
+unknownDisputeFee.planPaymentDisputes!.creator_month!.maximumTotalFeesCents=null;
+is("unknown lost-dispute fees are not zero",commercialMarginReady(unknownDisputeFee),false);
+const omittedDisputeFee=review();
+omittedDisputeFee.planPaymentDisputes!.creator_month!.maximumTotalFeesCents=30;
+is("a reviewed fee absent from the per-customer expense ceiling is rejected",commercialMarginReady(omittedDisputeFee),false);
+omittedDisputeFee.scenarios.creator_month_full!.costCeilings.refundAndDisputeFees=30;
+is("an explicitly represented fee remains calculable without opening sales",commercialMarginReady(omittedDisputeFee),true);
 done();

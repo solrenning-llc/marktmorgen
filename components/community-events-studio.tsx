@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
+import { UrlField } from "@/components/url-field";
+import { type LinkCheck, roomOnLeave } from "@/lib/url-check";
 import type { MeetAccount } from "@/components/call-editor";
 import { MEET_NAMES, type MeetProvider } from "@/lib/call-setup";
 import {
@@ -80,7 +82,7 @@ const MESSAGES: Record<string, string> = {
   upcoming: "Cancel it first, so everyone coming is told.",
   telling: "Everyone coming is still being told it was canceled. Delete it once that is done.",
   busy: "This event is being saved from somewhere else right now. Try again in a moment.",
-  store_full: "Your store's data room is full. Delete old posts, events or drafts you no longer need, or move to a larger plan.",
+  store_full: "Your store's data room is full. Delete old posts, events or drafts you no longer need.",
   slow: "That is a lot of changes in an hour. Wait a little, then try again.",
   unknown: "That event is not there anymore. Reload the page.",
   not_set_up: "Set the community up first.",
@@ -91,6 +93,11 @@ const MESSAGES: Record<string, string> = {
   invalid: "That could not be read. Nothing was changed.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
+
+// The meeting link is checked when its field is left, by the reading the server keeps (487 [IT4], pattern 1).
+// The link is required here, so an empty one is said too.
+const ROOM_CHECK = roomOnLeave(MESSAGES.link);
+const LINK_CHECK: LinkCheck = (raw) => (raw.trim() ? ROOM_CHECK(raw) : { problem: MESSAGES.link, fix: null });
 
 type Answer = { ok?: boolean; error?: string; moved?: boolean };
 
@@ -220,7 +227,14 @@ export function CommunityEventsStudio({
 
       <h3 className="mt-8 text-sm font-bold uppercase tracking-[0.06em] text-ink-soft">Coming up</h3>
       {events.length === 0 ? (
-        <p className="mt-3 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">Nothing scheduled.</p>
+        <p className="mt-3 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">
+          {/* The button is named only where it is on the screen: for a role that schedules, while the new event's form is closed. */}
+          {canManage && editing !== "new" ? (
+            <>Nothing scheduled yet. A live call, a workshop or a Q&amp;A: press &ldquo;Schedule an event&rdquo; to put one on your community&rsquo;s calendar.</>
+          ) : (
+            "Nothing scheduled yet."
+          )}
+        </p>
       ) : (
         <ul className="mt-3 space-y-3">
           {events.map((event) => (
@@ -627,7 +641,7 @@ function EventForm({
         {draft.where === "link" ? (
           <div className="mt-2 px-2">
             <label htmlFor={id("link")} className="sr-only">Your meeting link</label>
-            <input id={id("link")} className="field" type="url" inputMode="url" required value={draft.link} onChange={(e) => set({ link: e.target.value })} placeholder="https://zoom.us/j/… or https://meet.google.com/…" />
+            <UrlField id={id("link")} className="field" value={draft.link} onChange={(link) => set({ link })} check={LINK_CHECK} placeholder="https://zoom.us/j/… or https://meet.google.com/…" />
           </div>
         ) : null}
       </fieldset>

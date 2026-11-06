@@ -17,6 +17,7 @@ import { reviewPage } from "@/lib/ai";
 import { coachChecks, coachScore, scoreWord, steepestDrop } from "@/lib/page-coach";
 import { CELL_YES, parsePage } from "@/lib/sales-page";
 import { store as redis } from "./redis-stub";
+import { readFileSync } from "node:fs";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -54,23 +55,48 @@ const LESSONS = { lessons: { key: "lessons" as const, value: "10", label: "lesso
 
 async function main(): Promise<void> {
   part("The score");
-  const empty = coachChecks({ page: parsePage({ blocks: [] }), productTitle: "Knife Skills", free: false, picture: true, facts: {} });
+  const empty = coachChecks({ page: parsePage({ blocks: [] }), productTitle: "Knife Skills", free: false, picture: true, pictureAlt: "A chef's knife on a board", facts: {} });
   is("an empty page scores nothing", coachScore(empty), 0);
   is("and says so in a word", scoreWord(coachScore(empty)), "Just started");
   is("each missing part comes with the block that answers it", empty.filter((c) => c.add).map((c) => c.add), ["hero", "cta", "benefits", "inside", "fit", "faq", "guarantee", "cta", "reviews", "pictures", "bio"]);
-  const full = coachChecks({ page: FULL, productTitle: "Knife Skills", free: false, picture: true, facts: LESSONS });
+  const full = coachChecks({ page: FULL, productTitle: "Knife Skills", free: false, picture: true, pictureAlt: "A chef's knife on a board", facts: LESSONS });
   is("a complete page scores 100", [coachScore(full), full.filter((c) => !c.done).map((c) => c.id)], [100, []]);
   const named = parsePage({ ...FULL, blocks: FULL.blocks.map((b) => (b.kind === "hero" ? { ...b, headline: "knife skills" } : b)) });
-  is("a headline that is only the product's name is not one", coachChecks({ page: named, productTitle: "Knife Skills", free: false, picture: true, facts: LESSONS }).find((c) => c.id === "headline")?.done, false);
+  is("a headline that is only the product's name is not one", coachChecks({ page: named, productTitle: "Knife Skills", free: false, picture: true, pictureAlt: "A chef's knife on a board", facts: LESSONS }).find((c) => c.id === "headline")?.done, false);
   const late = parsePage({ ...FULL, blocks: FULL.blocks.filter((b) => b.id !== "cta00001") });
-  is("a first button five blocks down is too far", coachChecks({ page: late, productTitle: "Knife Skills", free: false, picture: true, facts: LESSONS }).find((c) => c.id === "early-button")?.done, false);
+  is("a first button five blocks down is too far", coachChecks({ page: late, productTitle: "Knife Skills", free: false, picture: true, pictureAlt: "A chef's knife on a board", facts: LESSONS }).find((c) => c.id === "early-button")?.done, false);
+
+  part("Pictures a screen reader can say (98 [D2-COMPLIANCE-REVIEW] unit 3, AX274 Part A item 6)");
+  const pic = (n: number, alt: string) => ({ path: `images/${"a".repeat(24)}/${String(n).repeat(32)}.jpg`, width: 800, height: 600, alt, caption: "" });
+  const pictured = (alts: [string, string], feature = "") =>
+    parsePage({ ...FULL, blocks: [...FULL.blocks.slice(0, 5), { id: "pics0001", kind: "pictures", heading: "", items: [pic(1, alts[0]), pic(2, alts[1])] }, { id: "feat0001", kind: "feature", heading: "Inside", body: "Pages", picture: pic(3, feature), side: "left" }, ...FULL.blocks.slice(5)] });
+  const described = (page: ReturnType<typeof parsePage>) => coachChecks({ page, productTitle: "Knife Skills", free: false, picture: true, pictureAlt: "A chef's knife on a board", facts: LESSONS }).find((c) => c.id === "described");
+  is("only the product's picture at the top, described: asked and done", full.find((c) => c.id === "described")?.done, true);
+  is("no picture on the page at all: not asked", coachChecks({ page: FULL, productTitle: "Knife Skills", free: false, picture: false, pictureAlt: "", facts: LESSONS }).some((c) => c.id === "described"), false);
+  is("a picture with no description: asked, not done, and it says how many", [described(pictured(["A chef's knife on a board", ""], "A page of the book"))?.done, described(pictured(["A chef's knife on a board", ""], "A page of the book"))?.label], [false, "Every picture described (1 has no description)"]);
+  is("a picture beside words counts too", described(pictured(["One", "Two"], ""))?.done, false);
+  is("every picture described: done, and the page can still score 100", [described(pictured(["One", "Two"], "Three"))?.done, coachScore(coachChecks({ page: pictured(["One", "Two"], "Three"), productTitle: "Knife Skills", free: false, picture: true, pictureAlt: "A chef's knife on a board", facts: LESSONS }))], [true, 100]);
+  is("spaces are not a description", described(pictured(["One", "   "], "Three"))?.done, false);
+  is("it never offers a block to add: the fix is the description, written by the creator", described(pictured(["", ""], ""))?.add, undefined);
+  is("several without: said in plain words", described(pictured(["", ""], ""))?.label, "Every picture described (3 have none)");
+  // The picture at the top is the product's own (its description is the product's): counted too (independent review, 31/10/2026).
+  const topBare = coachChecks({ page: pictured(["One", "Two"], "Three"), productTitle: "Knife Skills", free: false, picture: true, pictureAlt: " ", facts: LESSONS }).find((c) => c.id === "described");
+  is("the product's picture at the top, with no description: not done", [topBare?.done, topBare?.label], [false, "Every picture described (1 has no description)"]);
+  const topOnly = coachChecks({ page: FULL, productTitle: "Knife Skills", free: false, picture: true, pictureAlt: "", facts: LESSONS }).find((c) => c.id === "described");
+  is("and asked even when it is the only picture", topOnly?.done, false);
+  // The second version's pictures count, each version once (the editor sends the one not being edited as the variant).
+  const withB = parsePage({ ...pictured(["One", "Two"], "Three"), variant: { id: "", blocks: pictured(["", "Two"], "Three").blocks } });
+  is("a picture with no description in the second version counts", described(withB)?.label, "Every picture described (1 has no description)");
+  const editor = readFileSync("components/page-editor.tsx", "utf8");
+  is("the editor sends the version not being edited as the second one, never the edited one twice", /page=\{\{ \.\.\.pageToSend\(\), blocks: drafts\.map\(\(d\) => d\.block\), variant: other \? \{ id: "", blocks: other\.map\(\(d\) => d\.block\) \} : null \}\}/.test(editor), true);
+  is("and the product picture's description", /pictureAlt=\{product\.picture\?\.alt \?\? ""\}/.test(editor), true);
 
   part("Never a reason to type a number");
   is("no number counted: the numbers check is not asked", empty.some((c) => c.id === "facts"), false);
   is("one counted: it is", full.some((c) => c.id === "facts"), true);
 
   part("A free product's page");
-  const free = coachChecks({ page: parsePage({ blocks: [] }), productTitle: "Free list", free: true, picture: false, facts: {} });
+  const free = coachChecks({ page: parsePage({ blocks: [] }), productTitle: "Free list", free: true, picture: false, pictureAlt: "", facts: {} });
   is("asks nothing about payment: no guarantee, buttons or headline test", free.some((c) => ["guarantee", "closing-button", "test", "reviews"].includes(c.id)), false);
 
   part("Where readers stop");

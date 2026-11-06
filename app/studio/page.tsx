@@ -1,4 +1,12 @@
+import { serviceAllowanceWords } from "@/lib/store-allowance";
+import { placeLine } from "@/lib/call-place";
+import { planAboveSold } from "@/lib/larger-plan";
 import { SalesLevers } from "@/components/sales-levers";
+import { costsPaused } from "@/lib/plan-standing";
+import { INTEGRATION_PAUSED_WORDS, META_READ_PAUSED } from "@/lib/integration-pause";
+import { PlanDisputeNotice } from "@/components/plan-dispute-notice";
+import { planDisputed } from "@/lib/plan-dispute-rules";
+import { RenewalUnpaidNotice } from "@/components/renewal-unpaid-notice";
 import { funnelLaunchChecklist } from "@/lib/funnel-launch-checklist";
 import { activationTiming } from "@/lib/store-activation";
 import { PathStudioReminder } from "@/components/path-studio-reminder";
@@ -46,14 +54,16 @@ import {
 } from "@/lib/store";
 import { KIND, idsOfKind, productCount, readKind, readListings, sellsAny, studioShelf } from "@/lib/catalog";
 import { HandleForm } from "@/components/handle-form";
+import { prefillHandle } from "@/lib/handle-prefill";
 import { RenameForm } from "@/components/rename-form";
 import { OldAddresses } from "@/components/old-addresses";
 import { DetailsForm } from "@/components/details-form";
 import { SocialsEditor } from "@/components/socials-editor";
 import { IntroEditor } from "@/components/intro-editor";
 import { LookEditor } from "@/components/look-editor";
-import { type PaidCall, catchUpBookings, paidCalls } from "@/lib/calls";
-import { productsInStats, reachProducts, readAllTimeSales, readSales, readStats, studioStats } from "@/lib/stats";
+import { type PaidCall, catchUpBookings, paidCallsRead } from "@/lib/calls";
+import { productsInStats, reachProducts, readAllTimeSales, studioStats } from "@/lib/stats";
+import { ReadingFailed, ReadingsUsed, keptSales, keptStats, readingsBackAt, readingsLeft } from "@/lib/store-readings";
 import { StatsPanel } from "@/components/stats-panel";
 import { readNotes } from "@/lib/stats-notes";
 import { readSpends } from "@/lib/ad-spend";
@@ -87,6 +97,7 @@ import { keepHandle, webhooksView } from "@/lib/webhooks";
 import { PixelEditor } from "@/components/pixel-editor";
 import { ExitOfferEditor } from "@/components/exit-offer-editor";
 import { StoreLayoutEditor } from "@/components/store-layout-editor";
+import { VisitUsEditor } from "@/components/visit-us-editor";
 import { CollectionsEditor } from "@/components/collections-editor";
 import { BuyButtonEditor } from "@/components/buy-button-editor";
 import { CheckoutScriptEditor } from "@/components/checkout-script-editor";
@@ -102,7 +113,7 @@ import { TaxEditor } from "@/components/tax-editor";
 import { StoreLanguageEditor } from "@/components/store-language-editor";
 import { RecoveryEditor } from "@/components/recovery-editor";
 import { ApiKeyEditor } from "@/components/api-key-editor";
-import { listKeys } from "@/lib/api-keys";
+import { shownKeys } from "@/lib/api-key-pause";
 import { INVITE_SHARE_PERCENT, INVITE_PROGRAM_OPEN } from "@/lib/creator-invite-rules";
 import { SaveOfferEditor } from "@/components/save-offer-editor";
 import { PauseEditor } from "@/components/pause-editor";
@@ -132,11 +143,16 @@ import { ProductEditor } from "@/components/product-editor";
 import { PaymentsPanel } from "@/components/payments-panel";
 import { chargeableCurrencies, readWaysToPay } from "@/lib/payment-methods";
 import { formatMoney } from "@/lib/money";
+import { TodayPanel } from "@/components/today-panel";
+import { bookingCounts, salesCounts, todayView, type TodayCounts, type TodayId } from "@/lib/today-rules";
 import { LinkEditor } from "@/components/link-editor";
 import { JoinBoxEditor } from "@/components/join-box-editor";
 import { ContactBoxEditor } from "@/components/contact-box-editor";
 import { FaqEditor } from "@/components/faq-editor";
 import { StoreCoach } from "@/components/store-coach";
+import { StoreAccessCheck } from "@/components/store-access-check";
+import { StoreSearchCheck } from "@/components/store-search-check";
+import { searchCheck } from "@/lib/store-search-check";
 import { PageOrderEditor } from "@/components/page-order-editor";
 import { tipsOpen } from "@/lib/store-tip-checkout";
 import { TipsEditor } from "@/components/tips-editor";
@@ -147,9 +163,10 @@ import { joinOpen } from "@/lib/store-join";
 import { contactOpen } from "@/lib/store-contact";
 import { visibleCount } from "@/lib/catalog";
 import { storeChecks } from "@/lib/store-coach";
+import { accessCheck } from "@/lib/store-access-check";
 import { isPaidUp } from "@/lib/billing";
 import { allowanceWindow, calendarWindow, samePeriod } from "@/lib/allowance-window";
-import { ALLOWANCE_KINDS, API_WRITE_UNITS, KIND_WORDS, allowanceFor } from "@/lib/store-allowance-rules";
+import { ALLOWANCE_KINDS, API_SALES_UNITS, API_WRITE_UNITS, KIND_WORDS, allowanceFor } from "@/lib/store-allowance-rules";
 import { allowanceUsed } from "@/lib/store-allowance";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 
@@ -178,6 +195,7 @@ import {
   TRIAL_DAYS,
   isBillingConfigured,
   readSubscription,
+  renewalInvoicePage,
   trialOffered,
 } from "@/lib/billing";
 import { STORAGE_BRAKE_BYTES, storageBrakeFor, storageUsed, storageWords } from "@/lib/storage-quota";
@@ -186,19 +204,27 @@ import { CALL_ORDER_UNITS, TRIAL_ORDERS, ordersIncluded, ordersWords } from "@/l
 import { ordersIn } from "@/lib/orders";
 import { BUYER_RESERVE_BPS, SETUP_VISITS, TRIAL_VISITS, countWords, publicVisitLimit, visitLimitFor, visitsIncluded, visitsWords } from "@/lib/traffic-rules";
 import { AI_MONTHLY } from "@/lib/ai-rules";
-import { COMMISSION_LIVE, canUse, hasPro, PLAN_PRICES, PRO_MONTHLY_EMAILS, PRO_ON_SALE, SCALE_MONTHLY_EMAILS, priceWords, yearSaving } from "@/lib/plan";
+import { COMMISSION_LIVE, canUse, hasPro, PLAN_PRICES, PRO_MONTHLY_EMAILS, PRO_ON_SALE, REFUND_DAYS, SCALE_MONTHLY_EMAILS, priceWords, yearSaving } from "@/lib/plan";
 import { ASSISTANT_ON_SALE, PLANS_ON_SALE } from "@/lib/opening";
 import { studioPath, studioView } from "@/lib/studio-route";
+import { unusedSummary } from "@/lib/closing-refunds";
+import { holdCounts } from "@/lib/closing-holds";
+import { CLOSING_CHECKOUT_SECONDS, lastPlanMoment } from "@/lib/closing-plan-guard";
 import { type Permission, type Role, ROLE_NAMES, ROLE_SUMMARIES, can } from "@/lib/team-roles";
-import { MAX_TEAM, readTeam } from "@/lib/team";
+import { MAX_TEAM, SECOND_STEP_WORDS, readTeam, secondStepWay } from "@/lib/team";
 import { MAX_FUNNEL_STEPS } from "@/lib/funnel";
-import { listPasskeys } from "@/lib/passkeys";
+import { REMOVAL_DAYS, listPasskeys, pendingRemoval } from "@/lib/passkeys";
+import { liveSecondStep, mayAddSecondStep, mayKeepPasskey } from "@/lib/second-step-gate";
 import { SESSION_COOKIE, isFreshSession } from "@/lib/auth";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { PasskeyManager } from "@/components/passkey-manager";
+import { PasskeySignIn } from "@/components/passkey-signin";
 import { TwoStepManager } from "@/components/two-step-manager";
+import { AppCodeInvite } from "@/components/app-code-invite";
+import { showAppCodeInvite } from "@/lib/app-code-invite-words";
 import { lockedUntil, twoStepStatus } from "@/lib/two-step";
+import { LOCKED_LIST } from "@/lib/locked-words";
 import { RecoveryAddressManager } from "@/components/recovery-address-manager";
 import { hideAddress, recoveryAddress } from "@/lib/recovery-address";
 import { ResendPurchase } from "@/components/resend-purchase";
@@ -314,6 +340,14 @@ const PAYPAL_NOTICES: Record<string, { title: string; body: string }> = {
 
 /** How connecting the store's Meta ad account went (lib/meta-routes.ts). */
 const META_NOTICES: Record<string, { title: string; body: string }> = {
+  paused_unpaid: {
+    title: "Nothing was connected",
+    body: `${INTEGRATION_PAUSED_WORDS.paused_unpaid} ${META_READ_PAUSED}`,
+  },
+  paused_disputed: {
+    title: "Nothing was connected",
+    body: `${INTEGRATION_PAUSED_WORDS.paused_disputed} ${META_READ_PAUSED}`,
+  },
   connected: {
     title: "Your Meta ad account is connected",
     body: "Your numbers read what each campaign spent over the last 30 days, and read it again once a day. It is at the bottom of your numbers, under what you spent on ads.",
@@ -349,6 +383,11 @@ const META_NOTICES: Record<string, { title: string; body: string }> = {
   limited: {
     title: "That was a lot of tries",
     body: "Wait ten minutes, then connect again.",
+  },
+  // The paid period's resources could not be reserved (lib/contract-resource-window.ts): not a matter of tries.
+  funding: {
+    title: "Meta can't be connected just now",
+    body: "Connections can't be made just now. Nothing was changed; try again later.",
   },
   busy: {
     title: "Meta could not be reached",
@@ -544,6 +583,26 @@ const BILLING_NOTICES: Record<string, { title: string; body: string }> = {
     title: "That plan is not open yet",
     body: "Nothing was charged and nothing was changed.",
   },
+  closing: {
+    title: "Your store is closing today",
+    body: "Its closing day has begun: its memberships have ended and it is being removed, so a plan can no longer be started for it. Nothing was charged. You can open a new store from your account.",
+  },
+  "closing-returned": {
+    title: "Your store's closing day had begun, so your payment was returned",
+    body: "The plan was paid for after your store's closing day began, so it could not keep the store. We ended the plan and returned the payment in full. Nothing else will be charged. We emailed you the same.",
+  },
+  "closing-returned-early": {
+    title: "Your plan came too late to stop your store's closing, so your payment was returned",
+    body: "The plan went through just before your store's closing day began, too late to stop the closing, which had already started. So it could not keep the store. We ended the plan and returned the payment in full. Nothing else will be charged. We emailed you the same.",
+  },
+  "closing-returning": {
+    title: "Your plan came too late to keep your store, so your payment is being returned",
+    body: "The plan reached us too late to stop your store's closing, so it could not keep the store. We are ending the plan and returning the payment in full, and we email you once it is done. Nothing else will be charged.",
+  },
+  "closing-late": {
+    title: "It is too late to start a plan for this store",
+    body: "A plan can keep a store only if it is started before the last moment shown under \"Your plan has ended\" below, so that its checkout ends before the closing day begins. That moment has passed. Nothing was charged. You can open a new store from your account.",
+  },
   "not-open": {
     title: "Plans are not on sale yet",
     body: "Marktmorgen is still being built, so no plan can be started. Nothing was charged and nothing was changed.",
@@ -575,6 +634,11 @@ const ADDRESS_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Your account moved",
     body: "This address logs you in from now on. Every session the old one had open is closed.",
   },
+  // The move stands, but the sessions open before could not all be closed (app/api/auth/move; review of #2556).
+  "moved-sessions-open": {
+    title: "Your account moved, but other sessions may still be open",
+    body: "This address logs you in from now on. We could not close every session that was open before the move. Choose “Log out of all devices” at the bottom of your studio.",
+  },
   same: {
     title: "That is the address you already use",
     body: "Nothing to move.",
@@ -598,6 +662,14 @@ const ADDRESS_NOTICES: Record<string, { title: string; body: string }> = {
   reauth: {
     title: "Log in again first",
     body: "Moving your account needs a login from the last 15 minutes. Log out, log in again, and ask once more. Nothing was changed.",
+  },
+  "second-step": {
+    title: "Log in again with your passkey or your app's code",
+    body: "Your account has a passkey or two-step login, so moving it needs a login with one of them, not only the emailed link. Nothing was changed.",
+  },
+  "has-login": {
+    title: "That address has its own passkeys or two-step login",
+    body: "An account cannot be moved onto an address that already has its own passkeys, authenticator app or recovery codes. Nothing was changed.",
   },
   limited: {
     title: "Too many attempts for that address",
@@ -709,6 +781,11 @@ function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
 
+/** Now, in milliseconds, for the "Today" counts. */
+function todayNow(): number {
+  return Date.now();
+}
+
 /** The first and last days the numbers' chart can show, in UTC: the 90 days up to today. */
 function chartDays(): [string, string] {
   const now = Date.now();
@@ -727,6 +804,10 @@ export default async function StudioPage({
   const found = await studioView(cookieStore, typeof params.store === "string" ? params.store : undefined, null);
   if (!found.ok && found.reason === "signed_out") redirect("/signin");
   const view = found.ok ? found.view : null;
+  // A team that requires two-step sign-in held this session at its door
+  // (lib/team.ts teamTwoStepBlocks): what to do next, in place of starting a store.
+  const heldAt = !found.ok && found.reason === "two_step" && found.email ? found.store ?? null : null;
+  const secondStep = heldAt && !found.ok && found.email ? await secondStepWay(found.email).catch(() => "set_up" as const) : null;
   const email = view?.email ?? (found.ok ? "" : (found.email ?? ""));
   const role: Role = view?.role ?? "owner";
   /** Whether this person's role on this store has a permission (lib/team-roles.ts). */
@@ -746,6 +827,9 @@ export default async function StudioPage({
   const notice =
     ADDRESS_NOTICES[typeof params.address === "string" ? params.address : ""] ??
     STRIPE_NOTICES[typeof params.stripe === "string" ? params.stripe : ""] ??
+    // A call to PayPal or Meta refused for the store's calls to connected services (lib/metered-limits.ts).
+    (store && typeof params.paypal === "string" && serviceAllowanceWords(store, params.paypal) ? { title: "PayPal can't be connected just now", body: serviceAllowanceWords(store, params.paypal) ?? "" } : undefined) ??
+    (store && typeof params.metaads === "string" && serviceAllowanceWords(store, params.metaads) ? { title: "Meta can't be connected just now", body: serviceAllowanceWords(store, params.metaads) ?? "" } : undefined) ??
     PAYPAL_NOTICES[typeof params.paypal === "string" ? params.paypal : ""] ??
     META_NOTICES[typeof params.metaads === "string" ? params.metaads : ""] ??
     BILLING_NOTICES[BILLING_ALIASES[String(params.billing)] ?? (typeof params.billing === "string" ? params.billing : "")] ??
@@ -769,20 +853,28 @@ export default async function StudioPage({
       : Boolean(store?.subscriptionActive);
   const plan =
     live?.state === "active"
-      ? { tier: live.tier, cycle: live.cycle, trialEnds: live.trialing ? live.until : 0, shared: live.shared, period: live.period }
+      ? { tier: live.tier, cycle: live.cycle, trialEnds: live.trialing ? live.until : 0, shared: live.shared, period: live.period, renewalUnpaid: live.renewalUnpaid === true }
       : null;
+  let written: Awaited<ReturnType<typeof setSubscription>> = null;
   if (
     store &&
     live &&
     live.state !== "unknown" &&
     (paid !== store.subscriptionActive ||
-      (plan && (plan.tier !== store.tier || plan.cycle !== store.cycle || plan.trialEnds !== store.trialEnds || plan.shared !== store.shared || !samePeriod(plan.period, store.period ?? null))))
+      (plan && (plan.tier !== store.tier || plan.cycle !== store.cycle || plan.trialEnds !== store.trialEnds || plan.shared !== store.shared || !samePeriod(plan.period, store.period ?? null) ||
+        plan.renewalUnpaid !== (store.renewalUnpaidSince ?? 0) > 0)))
   ) {
-    await setSubscription(ref, { active: paid, ...(plan ?? {}) });
+    written = await setSubscription(ref, { active: paid, ...(plan ?? {}) });
   }
   // Everything below reads this, not the record we loaded, so one page never
-  // shows two different answers to the same question.
-  const current = store ? { ...store, subscriptionActive: paid, ...(plan ?? {}) } : null;
+  // shows two different answers to the same question. A renewal Stripe could
+  // not collect is dated as the store's record dates it (lib/store.ts); on
+  // this page it is unpaid even if that write did not go through.
+  const recordedSince = (written ?? store)?.renewalUnpaidSince ?? 0;
+  const unpaidSince = plan ? (plan.renewalUnpaid ? Math.max(1, recordedSince) : 0) : paid ? recordedSince : 0;
+  const current = store ? { ...store, subscriptionActive: paid, ...(plan ?? {}), renewalUnpaidSince: unpaidSince } : null;
+  // Stripe's own page that pays an unpaid renewal, read fresh on each load (232 [CA1] unit 4).
+  const renewalPage = current && unpaidSince > 0 && store?.subscriptionId && isBillingConfigured() ? await renewalInvoicePage(store.subscriptionId) : null;
   const trialing = live?.state === "active" && live.trialing;
   // The trial is once per store. A store starting again is told, on every
   // button, that it pays from today — the same rule the checkout opens with.
@@ -798,7 +890,7 @@ export default async function StudioPage({
   const billedYearly = live?.state === "active" ? live.cycle === "year" : current?.cycle === "year";
   // A store that has sold sees the yearly plan offered open, not folded away
   // (lib/yearly-offer.ts). One read, and only for a monthly plan.
-  const firstSale = store && paid && !billedYearly ? await firstSaleAt(store) : 0;
+  const firstSale = PLANS_ON_SALE && store && paid && !billedYearly ? await firstSaleAt(store) : 0;
   // A break the creator chose (lib/plan-pause.ts): set and not yet begun on
   // this subscription, or begun, with the plan starting again on its day.
   const pauseObservation = store && isBillingConfigured() ? await pauseView(store) : { kind: "missing" as const };
@@ -809,6 +901,8 @@ export default async function StudioPage({
   const breakDay = (seconds: number) =>
     new Date(seconds * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
   const tier = current?.tier ?? "creator";
+  // Whether a larger plan can be had now (lib/larger-plan.ts): none above Scale, none while Pro is not sold, nothing while no plan is on sale.
+  const largerOnSale = PLANS_ON_SALE && planAboveSold(tier);
   // The store's own domain: shown where this deployment can add one, and its
   // records read from Vercel only while it is not yet live.
   const domainsOn = isDomainsConfigured();
@@ -821,6 +915,19 @@ export default async function StudioPage({
       ? `$${live.amountCents % 100 ? (live.amountCents / 100).toFixed(2) : live.amountCents / 100} a ${live.cycle}`
       : priceWords(tier, billedYearly ? "year" : "month");
   const changePending = live?.state === "active" && live.changePending;
+  // The way to the plan refund's review page (305 [SY1]): for the owner of a paid plan that may have one today, a
+  // yearly plan or a period begun within the guarantee's days. The page itself reads the exact amount, or says why
+  // there is none, before anything changes.
+  const refundOffered = Boolean(store && paid && !trialing && role === "owner" && current?.period &&
+    (billedYearly || nowSeconds() - current.period.start < REFUND_DAYS * 86_400));
+  const refundLink = refundOffered && store ? (
+    <p className="mt-4 text-sm text-ink-soft">
+      <Link href={studioPath(store, "", "refund")} className="font-bold text-ink underline underline-offset-2">
+        Refund my payment
+      </Link>
+      {" "}— see the exact amount and what happens to your store before anything changes.
+    </p>
+  ) : null;
   const endsOn =
     live?.state === "active" && live.until > 0
       ? new Date(live.until * 1000).toLocaleDateString("en-US", {
@@ -886,7 +993,12 @@ export default async function StudioPage({
   // A plan ended from 18 October 2026 closes the whole store on that day, files or none (lib/plan-closing-rules.ts, closesStore).
   const closesWhole = closingAt ? closesStore(closingAt.endedAt) : false;
   const closing = closingAt && (closesWhole || keptNow > keptRoom) ? { ...closingAt, bytes: keptNow, room: keptRoom, whole: closesWhole } : null;
+  // Queue item 307 [EC1]: what members paid for past the closing day, from what was written down when the plan ended (no call to Stripe).
+  const unusedTime = closing?.whole ? await unusedSummary(store!, closing.day).catch(() => null) : null;
+  const notPaused = closing?.whole ? await holdCounts(folder).catch(() => null) : null;
   const dayWords = (ms: number) => new Date(ms).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
+  /** A moment to the minute, in UTC, said so. */
+  const momentWords = (ms: number) => `${new Date(ms).toLocaleString("en-US", { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" })} UTC`;
   // The list is shown once there is something that fills it, or once it holds
   // anybody — a creator who stops giving things away still owns what came in.
   const list = store && may("export") ? await listSize(store) : null;
@@ -894,10 +1006,11 @@ export default async function StudioPage({
   // Booked calls are read from the creator's Stripe account, the ledger, and
   // only asked for when the store sells calls at all.
   const callProducts = store ? await readKind(store, "call") : [];
-  const paidList =
+  const paidRead =
     current && current.stripeAccountId && callProducts.length > 0 && may("orders")
-      ? await paidCalls(current).catch(() => null)
+      ? await paidCallsRead(current).catch(() => null)
       : null;
+  const paidList = paidRead ? paidRead.paid : null;
   const calls = paidList && store ? upcoming(paidList, callProducts) : null;
   // The room of each booked time: the one made for it, or the creator's own link.
   const callRooms =
@@ -936,7 +1049,8 @@ export default async function StudioPage({
   // first time there is a call to put in it, and the busy times are read (from
   // the ten-minute copy, usually) to point out a dated session that clashes.
   if (current && callProducts.length > 0 && may("settings")) await ensureFeedToken(current).catch(() => {});
-  const apiKeys = current && may("export") ? await listKeys(current.sid).catch(() => []) : null;
+  // A list that cannot be read is said as such in the studio, never as no keys (audit SG2, finding 23).
+  const apiKeys = current && may("export") ? await shownKeys(current, email, role).catch(() => "unread" as const) : null;
   const [calendar, calendarBusyTimes, hooks] = current
     ? await Promise.all([
         callProducts.length > 0 && may("settings") ? calendarView(current).catch(() => null) : Promise.resolve(null),
@@ -952,15 +1066,18 @@ export default async function StudioPage({
   if (current && paidList && paidList.length) after(() => catchUpBookings(current, paidList, SITE_URL));
   // Visits from Redis and sales from the creator's Stripe, read side by side,
   // with the creator's own notes on the chart and what they spent on ads.
-  const [visits, salesRead, statsNotes, adSpends, heardIsOff, trouble, autoMarks] = current && may("stats")
+  // "Update now" asks for the store's numbers read again, from the day's own budget (inbox C4-33 (2)).
+  const freshNumbers = params.numbers === "fresh";
+  const [visitsKept, salesRead, statsNotes, adSpends, heardIsOff, trouble, autoMarks] = current && may("stats")
     ? await Promise.all([
-        readStats(current).catch(() => null),
+        // Kept for every page that shows them, and read again only from the store's own daily budget (lib/store-readings.ts).
+        keptStats(current, undefined, freshNumbers).then((kept) => kept, () => null),
         readsSales(current)
-          ? readSales(current).then(
-              (value) => ({ state: "ok" as const, value }),
-              () => ({ state: "error" as const, value: null }),
+          ? keptSales(current, undefined, freshNumbers).then(
+              (kept) => ({ state: "ok" as const, value: kept.value, at: kept.at, used: false, failed: kept.failed === true, unnamed: kept.unnamed === true }),
+              (error: unknown) => ({ state: "error" as const, value: null, at: null, used: error instanceof ReadingsUsed, failed: error instanceof ReadingFailed, unnamed: false }),
             )
-          : Promise.resolve({ state: "none" as const, value: null }),
+          : Promise.resolve({ state: "none" as const, value: null, at: null, used: false, failed: false, unnamed: false }),
         readNotes(current.statsId).catch(() => []),
         readSpends(current.statsId).catch(() => []),
         heardOff(current.handle).catch(() => false),
@@ -969,6 +1086,26 @@ export default async function StudioPage({
         readMarks(current, ...chartDays()).catch(() => []),
       ])
     : [null, null, [], [], false, { week: 0, last: null }, []];
+  const visits = visitsKept?.value ?? null;
+  // When the numbers shown were read, whether the day still has a reading to read them again, and when the
+  // day's readings come back: said on the panel, the kept copy shown as it is (inbox C4-33 (2), (3)).
+  const readingAt = [visitsKept?.at, salesRead?.at].filter((at): at is number => typeof at === "number");
+  const left = current && visits ? await readingsLeft(current) : { any: false, heavy: false, anyLeft: 0, heavyLeft: 0 };
+  const numbersReading = current && visits
+    ? {
+        at: readingAt.length ? Math.min(...readingAt) : null,
+        canRefresh: readsSales(current) ? left.heavy : left.any,
+        refreshHref: studioPath(current, "numbers=fresh"),
+        backAt: readingsBackAt(),
+        salesUsed: salesRead?.used === true,
+        // Its biggest buyers left out for lack of a list (lib/store-readings.ts, listForNaming): back on their own, or
+        // after the next saved change of a store not yet moved to product records.
+        buyersLater: salesRead?.unnamed ? (current.catalog.id ? ("on-their-own" as const) : ("after-change" as const)) : undefined,
+        // A reading that failed after calling Stripe was counted (inbox C4-53): said, with what is left of the day.
+        failed: salesRead?.failed === true || visitsKept?.failed === true,
+        left: readsSales(current) ? left.heavyLeft : left.anyLeft,
+      }
+    : null;
   const statListings = current && visits && salesRead ? await readListings(current, [...new Set([...productsInStats(current, visits, salesRead.value), ...reachProducts(visits)])]) : [];
   const counted =
     current && visits && salesRead
@@ -981,6 +1118,18 @@ export default async function StudioPage({
   // The biggest buyers carry their addresses, so only whoever may read orders
   // with the buyer's address sees them (lib/team-roles.ts, "orders").
   const numbers = counted && may("orders") ? { ...counted, topBuyers: salesRead?.value?.buyers?.top ?? [] } : counted;
+  // "Today" (484 [IT1], complement item 1, unit 2a): from readings this page already made, each counted only
+  // where its place on this page is shown, so every line leads somewhere; the rest is not on this screen yet.
+  const today = current ? todayNow() : 0;
+  const todayCounts: TodayCounts = {
+    ...(current && numbers && salesRead ? salesCounts(salesRead, (cents) => formatMoney(cents, current.currency), today) : {}),
+    ...(current && callProducts.length > 0 && may("orders") ? (current.stripeAccountId ? bookingCounts(paidRead, today) : { bookingsToday: 0, bookingsTomorrow: 0 }) : {}),
+  };
+  const todayHrefs: Partial<Record<TodayId, string>> = {
+    ...(todayCounts.salesToday !== undefined ? { sales: "#numbers" } : {}),
+    ...(todayCounts.bookingsToday !== undefined ? { calls: "#calls-title" } : {}),
+  };
+  const todayScreen = current ? todayView(todayCounts, may) : null;
   // The list of products: all of a short one, a page of a long one, found by
   // name when the creator searched (lib/catalog.ts reads only that page in full).
   const shelf = store ? await studioShelf(store, params) : null;
@@ -997,6 +1146,12 @@ export default async function StudioPage({
     : [null, { state: "none" as const }, null];
   // The person's own passkeys, and — for the owner — how many are on the team.
   // Adding a passkey needs a login from the last fifteen minutes (lib/auth.ts).
+  // Passkeys whose wait to be removed has run out go first, so the list below is what is left; and
+  // whether this session may add a passkey or an app (lib/second-step-gate.ts), so the managers say so.
+  const removing = email ? await pendingRemoval(email).catch(() => null) : null;
+  const passkeyRemovals: Record<string, number> = removing ? removing.atOf : {};
+  const needsStep = email ? !(await mayAddSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => false)) : false;
+  const canKeep = email ? mayKeepPasskey(await liveSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => null)) : false;
   const [passkeys, team, freshLogin, lockedTill, twoStep, recoveryShown] = await Promise.all([
     email ? listPasskeys(email).catch(() => []) : Promise.resolve([]),
     store?.sid && may("team") ? readTeam(store.sid).catch(() => null) : Promise.resolve(null),
@@ -1091,20 +1246,26 @@ export default async function StudioPage({
           <div className="notice notice-warn mt-6" role="status">
             <p className="font-bold text-ink">{`Some things are locked until ${new Date(lockedTill).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })}`}</p>
             <p className="mt-1 text-sm text-ink-soft">
-              You got in through your recovery address or without your second step, so payments, your plan, your team, exports, settings, sending to your list, your sign-in address, passkeys and two-step login wait until then. Everything else is open: your products, pages, buyers, numbers and drafts. On that day nothing is locked any more, and you can move your sign-in address to an inbox you have. Logging in with your sign-in email, a passkey or your app&apos;s code before then opens everything at once.
+              {`You got in through your recovery address or without your second step, so ${LOCKED_LIST} wait until then. Everything else is open: your products, pages, buyers, numbers and drafts. On that day nothing is locked any more, and you can move your sign-in address to an inbox you have. Logging in with your sign-in email, a passkey or your app's code before then opens everything at once.`}
             </p>
           </div>
         ) : twoStep.reset > 0 ? (
           <div className="notice notice-warn mt-6" role="status">
             <p className="font-bold text-ink">Two-step login is set to turn off</p>
             <p className="mt-1 text-sm text-ink-soft">
-              {`Somebody who opened a login link was let in without the second step, saying the phone, the recovery codes, the passkeys and the recovery address are all lost. What matters is locked for them, and two-step login turns off on ${new Date(twoStep.reset).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })}. If that was not you, press Cancel under Two-step login: they are logged out at once. Then change your email password.`}
+              {`Somebody who opened a login link was let in without the second step, saying the phone, the recovery codes, the passkeys and the recovery address are all lost. What matters is locked for them, and two-step login turns off on ${new Date(twoStep.reset).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })}. If that was not you, press Cancel under Two-step login to log them out, and change your email password.`}
             </p>
             <a href="#two-step" className="mt-2 inline-flex min-h-11 items-center text-sm font-bold text-ink underline underline-offset-4">
               Go to Two-step login
             </a>
           </div>
         ) : null}
+
+        {/* Passkeys but no app's code: a quiet invitation, once a browser session, from what was read above (owner C3-96). */}
+        {store && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedTill > 0 }) ? <AppCodeInvite /> : null}
+
+        {current && unpaidSince > 0 ? <RenewalUnpaidNotice payUrl={renewalPage} canPay={may("billing")} /> : null}
+        {current && current.subscriptionActive && planDisputed(current) ? <PlanDisputeNotice /> : null}
 
         {notice ? (
           <div className="notice notice-warn mt-6">
@@ -1161,6 +1322,7 @@ export default async function StudioPage({
               <StoreSetupAi currency={store.currency} left={ai.left} hasFaq={store.faq.length > 0} storeName={store.name} />
             ) : null}
             {role === "owner" ? <StudioStart steps={startSteps} activation={activationTiming(store)} launchChecklist={funnelLaunchChecklist(store.name, visibleCount(store) > 0, startSteps.map(step => ({title: step.title, open: step.done, product: step.key === "product" || step.key === "publish", free: false})), startSteps.filter(step => !step.done).map(step => ({title: step.title, detail: step.hint})), "store")} /> : null}
+            {todayScreen ? <TodayPanel view={todayScreen} hrefs={todayHrefs} at={today} /> : null}
             {role === "owner" && !store.suspended ? <PathStudioReminder store={store} role={role} /> : null}
             {/* "How do I…?": answered from the help center's own answers (lib/help-ask.ts). */}
             {ai.on ? <StudioHelp left={ai.left} /> : null}
@@ -1168,8 +1330,15 @@ export default async function StudioPage({
             {may("page") ? (
               <StoreCoach checks={storeChecks(store, { path: (page) => studioPath(store, "", page) })} />
             ) : null}
+            {/* 98 [D2-COMPLIANCE-REVIEW] unit 1: pictures with no description, and what every store gets (lib/store-access-check.ts). */}
+            {may("products") ? <StoreAccessCheck check={accessCheck(store)} /> : null}
+            {may("products") && accessCheck(store) ? <StoreSearchCheck check={searchCheck(store)} /> : null}
             <StudioTools
               tools={[
+                // 491 [PP2]: payments, the domain, email and checkout, read now, each with where to fix it.
+                ...(may("settings")
+                  ? [{ href: studioPath(store, "", "checkup"), title: "Something not working?", text: "Check payments, your domain, email to your list and checkout, and see how to fix what is wrong.", icon: "target" as const, prefetch: false as const }]
+                  : []),
                 { href: studioPath(store, "", "growth")+"#template-library", title: "Template library", text: "Preview existing pages, funnels, email layouts and paused sequences.", icon: "layout" as const, prefetch: false },
                 { href: studioPath(store, "", "growth"), title: "Growth", text: "Choose a goal and connect the tools for your next action.", icon: "chart" as const, prefetch: false },
                 ...(may("products")
@@ -1347,12 +1516,13 @@ export default async function StudioPage({
                 ) : null}
                 <StatsPanel
                   data={numbers}
+                  reading={numbersReading}
                   canExport={may("export")}
                   notes={statsNotes}
                   marks={autoMarks}
                   spends={adSpends}
                   beside={beside}
-                  meta={await metaView(store.statsId, store.currency).catch(() => null)}
+                  meta={await metaView(store.statsId, store.currency).then((view) => (view ? { ...view, readPaused: costsPaused(store) } : view)).catch(() => null)}
                   canConnectMeta={may("settings")}
                   pin={pin}
                   askHeard={!heardIsOff}
@@ -1484,7 +1654,11 @@ export default async function StudioPage({
                   preorders={await preorderViews(store, (shelf?.products ?? []).map((p) => p.id)).catch(() => ({}))}
                   mailAddress={store.mail?.address ?? store.winback?.address ?? ""}
                   cover={{ accent: store.look.accent, font: store.look.font, name: store.name, language: store.language }}
+                  look={store.look}
+                  ownHosts={store.domain?.name ? [store.domain.name] : []}
                   pairChoices={await publishedChoices(store)}
+                  tiers={store.tiers}
+                  taxOnTop={store.tax.enabled && !store.tax.included}
                 />
               </div>
             ) : (
@@ -1527,7 +1701,7 @@ export default async function StudioPage({
 
             {callProducts.length > 0 && may("orders") ? (
               <section className="card mt-8 p-6 sm:p-8" aria-labelledby="calls-title">
-                <h2 id="calls-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
+                <h2 id="calls-title" className="scroll-mt-32 text-lg font-semibold tracking-[-0.02em] text-ink">
                   Upcoming calls
                 </h2>
                 {!current?.stripeAccountId ? (
@@ -1540,7 +1714,7 @@ export default async function StudioPage({
                   </p>
                 ) : calls.length === 0 ? (
                   <p className="mt-2 text-ink-soft">
-                    Nothing booked yet. When someone books, it shows up here, and you both get an email with a calendar file, then a reminder a day and an hour before.
+                    Nothing booked yet. When someone books, it shows up here. The buyer gets an email with a calendar file. You get one too, or the host does on a team call. If the call is already in that person&apos;s Google Calendar, their email has no file. You and the buyer get reminders a day and an hour before. A reminder that would come less than an hour after the booking is skipped. On a team call, your reminders still come to you.
                   </p>
                 ) : (
                   <ul className="mt-4 divide-y divide-line">
@@ -1592,6 +1766,10 @@ export default async function StudioPage({
                                 >
                                   Start in Zoom
                                 <NewTab /></a>
+                              ) : null}
+                              {/* In person (lib/call-place.ts): where, as text, and no link. */}
+                              {product?.call?.place ? (
+                                <span className="break-words text-sm text-ink-soft">{`In person, at: ${placeLine(product.call.place)}`}</span>
                               ) : null}
                               {room ? (
                                 <a href={room} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 -my-2.5 items-center text-sm font-semibold text-violet-deep underline underline-offset-4">
@@ -1648,9 +1826,16 @@ export default async function StudioPage({
               </section>
             ) : null}
 
-            {calendar ? <CalendarEditor view={calendar} weekly={callProducts.some((p) => p.call?.kind === "weekly")} /> : null}
+            {calendar ? (
+              <CalendarEditor
+                view={calendar}
+                weekly={callProducts.some((p) => p.call?.kind === "weekly")}
+                // No list yet: its file names nobody (lib/store-readings.ts, listForNaming), said on the card.
+                namesLater={current && !current.listId ? (current.catalog.id ? "on-their-own" : "after-change") : undefined}
+              />
+            ) : null}
 
-            {may("page") ? <LinkEditor links={store.links} folder={pictures} /> : null}
+            {may("page") ? <div id="links" className="scroll-mt-32"><LinkEditor links={store.links} folder={pictures} /></div> : null}
 
             {may("page") ? <FaqEditor faq={store.faq} ai={ai} /> : null}
 
@@ -1760,6 +1945,7 @@ export default async function StudioPage({
                     <>
                       <ExitOfferEditor current={store.exitOffer} free={free} />
                       {may("page") ? <StoreLayoutEditor sections={store.sections} announcement={store.announcement} products={published} /> : null}
+                      {may("page") ? <VisitUsEditor visitUs={store.visitUs} /> : null}
                       {may("page") ? <CollectionsEditor collections={store.collections ?? []} products={published} handle={store.handle} /> : null}
                       {may("page") ? (
                         <BuyButtonEditor
@@ -1943,7 +2129,7 @@ export default async function StudioPage({
             ) : null}
 
             {domainsOn && may("settings") ? (
-              <div className="card mt-8 p-6 sm:p-8">
+              <div id="domain" className="card mt-8 scroll-mt-32 p-6 sm:p-8">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Your own domain</p>
                   <span className="tag tag-brand">Pro</span>
@@ -1958,14 +2144,21 @@ export default async function StudioPage({
                 ) : (
                   <>
                     <p className="mt-2 text-ink-soft">
-                      {`Your store on a domain of your own, like shop.yourname.com, with its certificate handled for you. Part of Pro, at ${priceWords("pro", "month")}.`}
+                      {`Your store on a domain of your own, like shop.yourname.com, with its certificate handled for you. Part of Pro, ${PLANS_ON_SALE ? "at" : "which, when plans open, is"} ${priceWords("pro", "month")}.`}
                     </p>
                     {store.domain ? (
                       <p className="mt-3 rounded-2xl bg-sand px-4 py-3 text-sm text-ink-soft">
                         {`${store.domain.name} is resting while your store is not on Pro: visitors are sent to marktmorgen.com/@${store.handle}. It opens your store again the moment Pro is back.`}
                       </p>
                     ) : null}
-                    <a href="#billing" className="btn btn-secondary mt-5">See Pro</a>
+                    {/* #billing is drawn only for whoever may change the plan, where billing is set up, and offers Pro only while plans are on sale. */}
+                    {!may("billing") ? (
+                      <p className="mt-5 text-sm text-ink-soft">The store&apos;s owner chooses its plan.</p>
+                    ) : !PLANS_ON_SALE || !billingReady ? (
+                      <p className="mt-5 text-sm text-ink-soft">Paid plans are not on sale yet, so this store cannot move to Pro for now.</p>
+                    ) : (
+                      <a href="#billing" className="btn btn-secondary mt-5">See Pro</a>
+                    )}
                   </>
                 )}
               </div>
@@ -2107,14 +2300,14 @@ export default async function StudioPage({
                         Ask Stripe again
                       </button>
                     </form>
-                    <form action={`/api/stripe/disconnect${pin}`} method="post">
-                      <button
-                        type="submit"
-                        className="btn btn-ghost"
-                      >
-                        Disconnect it here
-                      </button>
-                    </form>
+                    {/* 568 [GD2] (h): asked first, natively, so it works without scripts too. */}
+                    <details className="group" data-confirm-disconnect="stripe">
+                      <summary className="btn btn-ghost cursor-pointer list-none [&::-webkit-details-marker]:hidden">Disconnect it here</summary>
+                      <form action={`/api/stripe/disconnect${pin}`} method="post" className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                        <span className="font-semibold text-ink">Disconnect Stripe? Your store stops taking payments until you connect it again.</span>
+                        <button type="submit" className="btn btn-danger btn-sm">Yes, disconnect</button>
+                      </form>
+                    </details>
                   </div>
                 </>
               )}
@@ -2157,11 +2350,13 @@ export default async function StudioPage({
                       </p>
                     ) : null}
                   </div>
-                  <form action={`/api/store/paypal/disconnect${pin}`} method="post" className="mt-5">
-                    <button type="submit" className="btn btn-ghost">
-                      Stop selling with PayPal
-                    </button>
-                  </form>
+                  <details className="group mt-5" data-confirm-disconnect="paypal">
+                    <summary className="btn btn-ghost cursor-pointer list-none [&::-webkit-details-marker]:hidden">Stop selling with PayPal</summary>
+                    <form action={`/api/store/paypal/disconnect${pin}`} method="post" className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                      <span className="font-semibold text-ink">Stop selling with PayPal? Buyers can no longer pay you with PayPal until you connect it again.</span>
+                      <button type="submit" className="btn btn-danger btn-sm">Yes, stop</button>
+                    </form>
+                  </details>
                 </>
               ) : (
                 <form action={`/api/store/paypal/connect${pin}`} method="post" className="mt-5">
@@ -2188,17 +2383,17 @@ export default async function StudioPage({
 
             {!closing && may("export") && standing !== "ended" && standing !== "none" ? (
               <div className="card mt-8 p-6 sm:p-8">
-                <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Your whole store, as one file</p>
+                <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Your store&rsquo;s main data, as one file</p>
                 <p className="mt-2 text-ink-soft">
-                  Your products and their pages, posts, courses with every lesson&rsquo;s text, forms and their answers,
+                  Your store&rsquo;s address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson&rsquo;s text, forms and their answers,
                   contacts and a summary of your orders. It is counted from your studio&rsquo;s requests by its size.
-                  Files and videos download from their own pages.
+                  Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio.
                 </p>
                 <form action="/api/store/export" method="get" className="mt-4 max-w-full">
                   <input type="hidden" name="store" value={store.sid} />
                   <input type="hidden" name="what" value="store" />
                   <button type="submit" className="btn btn-secondary">
-                    Download everything
+                    Download the file
                   </button>
                 </form>
               </div>
@@ -2207,27 +2402,69 @@ export default async function StudioPage({
             {closing && closing.whole ? (
               <div id="closing" className="card mt-8 scroll-mt-32 p-6 sm:p-8">
                 <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
-                  {`Your plan has ended, and your store closes on ${dayWords(closing.day)}`}
+                  {closing.today ? "Your store is closing today" : `Your plan has ended, and your store closes on ${dayWords(closing.day)}`}
                 </p>
+                {closing.today ? (
+                  <p className="mt-4 notice notice-warn">
+                    Its closing day has begun: every membership and payment plan sold through it has ended, and it is being removed. A plan can no longer be started for it, and nothing will be charged for one. You can open a new store from your account.
+                  </p>
+                ) : null}
                 <p className="mt-4 notice notice-warn">
                   {`Your plan ended on ${dayWords(closing.endedAt)}. `}
                   <strong>{`On ${dayWords(closing.day)} your store closes`}</strong>
-                  {`: its files are removed (the files your products hand over, your lessons' videos and downloads, your podcast's episodes, the files your students handed in and the pictures in your community's posts), the renewals of the memberships and payment plans you sold through it are stopped at Stripe at the end of the period already paid, and within ${ERASE_WITHIN_DAYS} days, usually the same day, everything else it keeps with us is deleted: its page, products, pages, posts, courses and the certificates they gave, community, contacts, forms, numbers and your buyers' access to what they bought.`}
+                  {`: its files are removed (the files your products hand over, your lessons' videos and downloads, your podcast's episodes, the files your students handed in and the pictures in your community's posts), every membership and payment plan you sold through it ends that day on your Stripe account, and within ${ERASE_WITHIN_DAYS} days, usually the same day, everything else it keeps with us is deleted: its page, products, pages, posts, courses and the certificates they gave, community, contacts, forms, numbers and your buyers' access to what they bought.`}
                 </p>
                 <p className="mt-4 text-ink-soft">
-                  {`We keep no copy of your sales: every sale, refund and payout is on your own Stripe account, and stays there. Your account and sign-in stay. Tell your students to download their course certificates before that day: they can until then, and not after. Starting a plan again before that day stops all of it.`}
+                  Since your plan ended, none of your members is charged again, and they keep their access until that day.
                 </p>
+                {closing.buyers ? (
+                  <p className="mt-4 text-ink-soft">
+                    {closing.buyers.done
+                      ? `Everyone who bought from your store was emailed on ${dayWords(closing.buyers.by)}, once, from Marktmorgen: the day it closes, and to download what they can before then.`
+                      : `By ${dayWords(closing.buyers.by)}, at least 7 days before your store closes, we email everyone who bought from it, once, from Marktmorgen: the day it closes, and to download what they can before then.`}
+                    {closing.buyers.untold > 0
+                      ? ` ${closing.buyers.untold} ${closing.buyers.untold === 1 ? "address was" : "addresses were"} not covered by your store's closing emails: please tell ${closing.buyers.untold === 1 ? "that buyer" : "those buyers"} yourself.`
+                      : ""}
+                  </p>
+                ) : null}
+                {notPaused && notPaused.failed + notPaused.over > 0 ? (
+                  <p className="mt-4 notice notice-warn">
+                    {`${notPaused.failed + notPaused.over} ${notPaused.failed + notPaused.over === 1 ? "membership's payments are" : "memberships' payments are"} not paused${notPaused.failed ? " yet: we try again every day" : ""}${notPaused.over ? `${notPaused.failed ? ", and some are" : ":"} past this closing's limit` : ""}. Every one of them ends on ${dayWords(closing.day)}. If a member is charged before then, please refund them from Stripe.`}
+                  </p>
+                ) : null}
+                {unusedTime && unusedTime.members > 0 ? (
+                  <div className="mt-4">
+                    <p className="text-ink">
+                      {`${unusedTime.members} ${unusedTime.members === 1 ? "member has" : "members have"} paid for time after ${dayWords(closing.day)}: ${unusedTime.totals.map((t) => formatMoney(t.amount, t.cur)).join(" and ")} in all. On that day each is refunded the unused part of their last payment from your own Stripe account, if its balance covers it. Marktmorgen never pays it and never takes it.`}
+                    </p>
+                    <p className="mt-3">
+                      <a href={studioPath(store!, "", "closing-refunds")} className="btn btn-secondary">
+                        Review and refund unused time now
+                      </a>
+                    </p>
+                  </div>
+                ) : null}
+                <p className="mt-4 text-ink-soft">
+                  {`We keep no copy of your sales: every sale, refund and payout is on your own Stripe account, and stays there. Your account and sign-in stay. Tell your students to download their course certificates before that day: they can until then, and not after. Starting a plan again before that day keeps your store: everything stays as it is, your members' payments go on as they were with nothing charged for the days in between, and nothing is refunded.`}
+                </p>
+                {closing.today ? null : (
+                  <p className="mt-4 text-ink" data-last-plan-moment="">
+                    {nowSeconds() * 1000 < lastPlanMoment(closing.day)
+                      ? <>{"To keep your store, start a plan before "}<strong>{momentWords(lastPlanMoment(closing.day))}</strong>{`. A plan's checkout started then lasts ${CLOSING_CHECKOUT_SECONDS / 60} minutes, so it ends before the closing day begins.`}</>
+                      : <>{"The last moment to start a plan and keep this store was "}<strong>{momentWords(lastPlanMoment(closing.day))}</strong>{". It has passed, so a plan can no longer be started for it."}</>}
+                  </p>
+                )}
                 {/* A GET form, not a link: a link may be prefetched, and each prefetch would read the whole store. */}
                 <div className="mt-5 flex flex-wrap items-center gap-3">
                   <form action="/api/store/export" method="get" className="max-w-full">
                     <input type="hidden" name="store" value={store.sid} />
                     <input type="hidden" name="what" value="store" />
                     <button type="submit" className="btn btn-primary">
-                      Download everything
+                      Download the file
                     </button>
                   </form>
                   <span className="text-sm text-ink-soft">
-                    {`One file: your products and their pages, posts, courses with every lesson's text, forms and their answers, contacts and your orders as a spreadsheet. ${ENDED_STORE_EXPORTS === 1 ? "Once" : `${ENDED_STORE_EXPORTS} times`} now that your plan has ended, whatever your store's size, so download it when you are ready to keep it. Files and videos download from their own pages.`}
+                    {`One file: your store's address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson's text, forms and their answers, contacts and your orders as a spreadsheet. ${ENDED_STORE_EXPORTS === 1 ? "Once" : `${ENDED_STORE_EXPORTS} times`} now that your plan has ended, whatever your store's size, so download it when you are ready to keep it. Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio.`}
                   </span>
                 </div>
                 <p className="mt-3 text-sm text-ink-soft">
@@ -2419,8 +2656,8 @@ export default async function StudioPage({
                     <p className="mt-4 notice notice-warn">
                       <strong>{visited >= visitLimit ? "Your store\u2019s pages, and your buyers\u2019 pages, are resting." : "Your store\u2019s public pages are resting."}</strong>
                       {visited >= visitLimit
-                        ? ` It has used all ${countWords(visitLimit)} counted visits this month, so courses, the community and podcasts rest too, with a page that tells your buyers their access is kept. Everything opens again ${standing === "paid" ? "with your next billing month, or on a larger plan" : standing === "trial" ? "as soon as your plan is paid" : "when the month turns"}.`
-                        : ` It has reached ${countWords(publicVisitLimit(visitLimit))} of its ${countWords(visitLimit)} counted visits this month. Your buyers\u2019 courses, community and podcasts stay open for the last ${countWords(visitLimit - publicVisitLimit(visitLimit))}. Public pages open again ${standing === "paid" ? "with your next billing month, or on a larger plan" : standing === "trial" ? "as soon as your plan is paid" : "when the month turns"}.`}
+                        ? ` It has used all ${countWords(visitLimit)} counted visits ${standing === "trial" ? "for the trial" : "this month"}, so courses, the community and podcasts rest too, with a page that tells your buyers their access is kept. Everything opens again ${standing === "paid" ? `with your next billing month${largerOnSale ? ", or on a larger plan" : ""}` : standing === "trial" ? "as soon as your plan is paid" : "when the month turns"}.`
+                        : ` It has reached ${countWords(publicVisitLimit(visitLimit))} of its ${countWords(visitLimit)} counted visits ${standing === "trial" ? "for the trial" : "this month"}. Your buyers\u2019 courses, community and podcasts stay open for the last ${countWords(visitLimit - publicVisitLimit(visitLimit))}. Public pages open again ${standing === "paid" ? `with your next billing month${largerOnSale ? ", or on a larger plan" : ""}` : standing === "trial" ? "as soon as your plan is paid" : "when the month turns"}.`}
                     </p>
                   ) : null}
                   <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
@@ -2455,7 +2692,7 @@ export default async function StudioPage({
                   {standing === "paid" && store && ordered >= orderRoom ? (
                     <p className="mt-4 notice notice-warn">
                       <strong>New orders are paused for the month.</strong>
-                      {` Your store has had the ${countWords(orderRoom)} orders your plan covers. A buyer who presses buy is told the store is not taking new orders right now, and nothing is charged; anybody already paying finishes. Orders open again with your next billing month, or on a larger plan.`}
+                      {` Your store has had the ${countWords(orderRoom)} orders your plan covers. A buyer who presses buy is told the store is not taking new orders right now, and nothing is charged; anybody already paying finishes. Orders open again with your next billing month${largerOnSale ? ", or on a larger plan" : ""}.`}
                     </p>
                   ) : null}
                   {standing === "trial" && ordered >= TRIAL_ORDERS ? (
@@ -2485,7 +2722,7 @@ export default async function StudioPage({
                       ))}
                     </dl>
                     <p className="mt-3 text-sm text-ink-soft">
-                      {`A page of the studio counts as ${STUDIO_PAGE_UNITS} studio requests, and a contact added or a product given through the API as ${API_WRITE_UNITS} API requests. Past a figure, that use waits for the next month or a larger plan, with a plain message; nothing is billed. Changing or canceling your plan, deleting your store and downloading your sales always work.`}
+                      {`A page of the studio counts as ${STUDIO_PAGE_UNITS} studio requests, a contact added or a product given through the API as ${API_WRITE_UNITS} API requests, and a page of sales read through the API as ${API_SALES_UNITS}. Past a figure, that use waits until the figure opens again${standing === "paid" && largerOnSale ? ", or for a larger plan" : ""}, with a plain message that says when; nothing is billed. ${PLANS_ON_SALE ? "Changing or canceling your plan" : "Canceling your plan"}, deleting your store and downloading your sales always work.`}
                     </p>
                   </div>
                 ) : null}
@@ -2495,11 +2732,11 @@ export default async function StudioPage({
                     <p className="mt-2 text-sm text-ink-soft">{`${dataWords(data.used)} of ${dataWords(data.room)} used, ${dataWords(data.orders)} of it kept for your orders.`}</p>
                     {data.used >= data.room * 0.9 ? (
                       <p className="mt-3 notice notice-warn">
-                        {data.used >= data.room ? dataFullWords(data.used, data.room) : "Your data room is nearly full. Delete something you no longer need, such as old posts, drafts, pages or contacts, or move to a larger plan, before it is."}
+                        {data.used >= data.room ? dataFullWords(data.used, data.room, standing === "paid" && largerOnSale) : `Your data room is nearly full. Delete something you no longer need, such as old posts, drafts, pages or contacts${standing === "paid" && largerOnSale ? ", or move to a larger plan" : ""}, before it is.`}
                       </p>
                     ) : null}
                     <p className="mt-3 text-sm text-ink-soft">
-                      {"It holds your products, pages, posts, courses, contacts, forms and their answers, and what each order keeps. When it is full, what you or your buyers would add is refused until you delete something or move to a larger plan; deleting is never refused, and an order already paid for is never refused."}
+                      {`It holds your products, pages, posts, courses, contacts, forms and their answers, and what each order keeps. When it is full, what you or your buyers would add is refused until you delete something${standing === "paid" && largerOnSale ? " or move to a larger plan" : ""}; deleting is never refused, and an order already paid for is never refused.`}
                     </p>
                   </div>
                 ) : null}
@@ -2565,6 +2802,7 @@ export default async function StudioPage({
                         Keep my subscription
                       </button>
                     </form>
+                    {refundLink}
                   </>
                 ) : paid ? (
                   <>
@@ -2577,6 +2815,11 @@ export default async function StudioPage({
                       <p className="mt-3 notice notice-warn">
                         A change of billing is waiting for your bank to let the
                         payment through. Until it does, nothing has changed.
+                      </p>
+                    ) : !PLANS_ON_SALE ? (
+                      // Every change below goes through app/api/billing/switch, which refuses while no plan is on sale.
+                      <p className="mt-3 text-sm text-ink-soft">
+                        {`Plans are not on sale yet, so this plan and how it is billed cannot be changed for now.${store.subscriptionId ? " You can still cancel it below." : ""}`}
                       </p>
                     ) : billedYearly ? (
                       <details className="mt-4">
@@ -2618,7 +2861,7 @@ export default async function StudioPage({
                         </form>
                       </details>
                     )}
-                    {!changePending && PRO_ON_SALE && tier === "creator" ? (
+                    {PLANS_ON_SALE && !changePending && PRO_ON_SALE && tier === "creator" ? (
                       <details className="mt-4">
                         <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">
                           {`Move up to Pro: ${priceWords("pro", billedYearly ? "year" : "month")}`}
@@ -2644,7 +2887,7 @@ export default async function StudioPage({
                       count on the Email page, and nowhere as a nag: a store
                       that never reaches its emails is never asked.
                     */}
-                    {!changePending && PRO_ON_SALE && tier === "pro" ? (
+                    {PLANS_ON_SALE && !changePending && PRO_ON_SALE && tier === "pro" ? (
                       <details className="mt-4">
                         <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">
                           {`Move up to Scale: ${priceWords("scale", billedYearly ? "year" : "month")}`}
@@ -2664,7 +2907,7 @@ export default async function StudioPage({
                         </form>
                       </details>
                     ) : null}
-                    {!changePending && tier === "scale" ? (
+                    {PLANS_ON_SALE && !changePending && tier === "scale" ? (
                       <details className="mt-4">
                         <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">
                           {`Go back to Pro: ${priceWords("pro", billedYearly ? "year" : "month")}`}
@@ -2683,7 +2926,7 @@ export default async function StudioPage({
                         </form>
                       </details>
                     ) : null}
-                    {!changePending && tier === "pro" ? (
+                    {PLANS_ON_SALE && !changePending && tier === "pro" ? (
                       <details className="mt-4">
                         <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">
                           {`Go back to the ${priceWords("creator", billedYearly ? "year" : "month")} plan`}
@@ -2725,6 +2968,8 @@ export default async function StudioPage({
                         </form>
                       </details>
                     ) : null}
+                    {/* The cancel route needs the subscription's id (app/api/billing/cancel); without one, nothing to offer. */}
+                    {store.subscriptionId ? (
                     <details className="mt-4">
                       <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">
                         Cancel the subscription
@@ -2744,11 +2989,13 @@ export default async function StudioPage({
                         </button>
                       </form>
                     </details>
+                    ) : null}
                     <p className="mt-3 text-sm text-ink-soft">
                       No email to us, no chat, no second request. This button
                       is the whole of it, and you can change your mind until
                       the day it stops.
                     </p>
+                    {refundLink}
                   </>
                 ) : pauseUnknown ? (
                   <p className="mt-3 text-ink-soft">Your store and its content stay as they are while your break status is unconfirmed.</p>
@@ -3025,6 +3272,7 @@ export default async function StudioPage({
                   <input
                     type="email"
                     name="email"
+                    autoComplete="off"
                     required
                     maxLength={254}
                     placeholder="you@somewhere-else.com"
@@ -3050,6 +3298,10 @@ export default async function StudioPage({
               <PasskeyManager
                 initial={passkeys.map(({ id, name, createdAt, lastUsedAt, synced }) => ({ id, name, createdAt, lastUsedAt, synced }))}
                 fresh={freshLogin}
+                needsStep={needsStep}
+                canKeep={canKeep}
+                removals={passkeyRemovals}
+                removalDays={REMOVAL_DAYS}
               />
               <RecoveryAddressManager shown={recoveryShown} />
               <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} fresh={freshLogin} locked={lockedTill > 0} />
@@ -3106,6 +3358,51 @@ export default async function StudioPage({
             </div>
             </div>
           </>
+        ) : secondStep ? (
+          <section aria-labelledby="second-step-title" className="card mt-8 p-6 sm:p-8">
+            <h2 id="second-step-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
+              {SECOND_STEP_WORDS[secondStep].title}
+            </h2>
+            {heldAt?.name ? (
+              <p className="mt-2 max-w-[80ch] text-ink-soft">
+                {"You help run "}
+                <strong className="text-ink [overflow-wrap:anywhere]">{heldAt.name}</strong>.
+              </p>
+            ) : null}
+            <p className="mt-2 max-w-[80ch] text-ink-soft">{SECOND_STEP_WORDS[secondStep].body}</p>
+            {secondStep === "passkey" ? (
+              <>
+                <PasskeySignIn />
+                <p className="mt-4 text-sm text-ink-soft">
+                  <Link href="/signin" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-4">
+                    Go to the login page to use your passkey there
+                  </Link>
+                </p>
+              </>
+            ) : secondStep === "app" ? (
+              <Link href="/signin" className="btn btn-primary mt-6 inline-flex min-h-11 items-center">
+                {SECOND_STEP_WORDS.app.action}
+              </Link>
+            ) : (
+              <div className="mt-6 space-y-6">
+                <PasskeyManager
+                  initial={passkeys.map(({ id, name, createdAt, lastUsedAt, synced }) => ({ id, name, createdAt, lastUsedAt, synced }))}
+                  fresh={freshLogin}
+                  needsStep={needsStep}
+                  canKeep={canKeep}
+                  removals={passkeyRemovals}
+                  removalDays={REMOVAL_DAYS}
+                />
+                <RecoveryAddressManager shown={recoveryShown} />
+                <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} fresh={freshLogin} locked={lockedTill > 0} />
+                <p className="text-sm text-ink-soft">
+                  <Link href="/signin" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-4">
+                    Once it is set up, log in again with it
+                  </Link>
+                </p>
+              </div>
+            )}
+          </section>
         ) : (
           <div className="card mt-8 p-6 sm:p-8">
             <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
@@ -3116,7 +3413,7 @@ export default async function StudioPage({
               agonizing over it: you can change it later, and the old address
               keeps working and sends people to the new one.
             </p>
-            <HandleForm />
+            <HandleForm initial={prefillHandle(params.handle)} />
           </div>
         )}
 

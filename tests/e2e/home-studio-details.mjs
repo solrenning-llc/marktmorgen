@@ -13,12 +13,11 @@ export async function checkHomeStudioDetails({browser,LOCAL,axeSource,is}){
    is("ME3 studio summary home response "+width,response.status(),200);
    const html=await response.text();
    is("ME3 home does not serialize full studio screenshots "+width,html.includes("data-studio-screens"),false);
-   is("ME3 home keeps studio discovery "+width,await page.locator("[data-home-studio-summary]").count(),1);
    is("ME3 full screen section moved off home "+width,await page.locator("[data-studio-screens]").count(),0);
-   const discovery=page.getByRole("link",{name:"See the studio and product editor examples",exact:true});
-   is("ME3 existing detail destination "+width,await discovery.getAttribute("href"),"/platform#studio-screens-title");
-   await discovery.focus();is("ME3 studio discovery keyboard focus "+width,await discovery.evaluate(n=>n===document.activeElement),true);
-   await Promise.all([page.waitForURL(LOCAL+"/platform#studio-screens-title"),page.keyboard.press("Enter")]);
+   // VS1 (owner, 30/10/2026): the home page no longer links the studio examples
+   // itself; the feature page keeps them, reached from the footer of every page.
+   is("ME3 footer reaches the feature page "+width,await page.locator('footer a[href="/platform"]').count()>0,true);
+   await page.goto(LOCAL+"/platform#studio-screens-title",{waitUntil:"domcontentloaded",timeout:60000});
    const section=page.locator("[data-studio-screens]");await section.scrollIntoViewIfNeeded();
    is("ME3 original studio heading retained "+width,(await section.locator("h2").innerText()).trim(),"See the work before you start");
    is("ME3 original synthetic provenance retained "+width,(await section.innerText()).includes("captured on October 20, 2026 with isolated fictional test content"),true);

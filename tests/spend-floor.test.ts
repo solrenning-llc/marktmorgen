@@ -1,19 +1,20 @@
-/** MR27Oct: registered full-use cost checks under the unchanged binding tax reading.
+/** MR27Oct: registered full-use cost checks with complete synthetic dated TX evidence through the real adapter.
  * Unknown costs outside this registry remain unapproved; no model result opens sales.
  * Existing25c monthly/100c annual cost room and every AI/upload entitlement are preserved.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PUBLISHED_PLAN_PRICES, TIERS, type Cycle, type Tier } from "@/lib/plan";
-import { costBudgetCents } from "@/lib/receiving-costs";
-import { gateReading } from "@/lib/tax-gate";
+import {maximumPretaxCostCents} from "@/lib/cost-envelope";
+import {reviewedUnitUnder} from "@/lib/reviewed-receiving";
+import {reviewedReceivingTaxInput} from "./reviewed-receiving-fixture";
+import {syntheticTaxContext} from "./customer-tax-review-fixture";
 import { commercialMarginReady } from "@/lib/commercial-margin";
 import { AUTOMATIC_AI_STORE_MICRO_USD, currentAiSpendPolicy } from "@/lib/ai-spend-policy";
-import { currentUploadBudgetPolicy, uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
+import { currentUploadBudgetPolicy } from "@/lib/upload-budget-policy";
 import { AI_MONTHLY } from "@/lib/ai-rules";
 import { ANSWERS_MONTHLY } from "@/lib/answers-rules";
 import { ANSWER_MICRO_USD, WRITING_JOB_MICRO_USD } from "@/lib/spend-cost-table";
-import { unitUnder } from "@/lib/receiving-costs";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { aiCeilingUsd, perPaymentCost, uploadOpsUsd, worstCost, worstLines } from "./plan-cost-model";
 
@@ -25,8 +26,9 @@ function sum(tier: Tier, cycle: Cycle) {
   const ai = aiCeilingUsd(tier), uploads = uploadOpsUsd(tier);
   const after = perPaymentCost(tier);
   const usageCents = Math.ceil(Math.round((months(cycle) * monthly + after) * 1e7) / 1e5);
-  const unit = unitUnder(priceCents, usageCents, gateReading(), true);
-  const allowed = costBudgetCents(unit.revenueCents, gateReading()) / 100;
+  const input=reviewedReceivingTaxInput(priceCents,usageCents,syntheticTaxContext(tier+'_'+cycle+'_full',months(cycle) as 1|12));
+  const unit=reviewedUnitUnder(priceCents,usageCents,input,true);assert.ok(unit);
+  const allowed=maximumPretaxCostCents(unit.revenueCents,unit.taxCents)!/100;
   const receiving = unit.totalCents / 100;
   const total = receiving + usageCents / 100;
   const other = monthly - ai - uploads;
@@ -47,7 +49,7 @@ test("each plan's AI ceiling is its published writing jobs and answers at the pr
 
 for (const tier of TIERS) for (const cycle of ["month", "year"] as const) {
   const name = `${tier}, ${cycle}`;
-  test(`${name}: every allowance used in full, the AI and upload ceilings included, keeps positive modeled net with the unchanged tax reading`, () => {
+  test(`${name}: every allowance used in full, the AI and upload ceilings included, keeps positive modeled net with complete dated TX books/operations/FX`, () => {
     const row = sum(tier, cycle);
     console.log(`${name}: paid $${row.paid.toFixed(2)}, costs allowed $${row.allowed.toFixed(4)}; receiving $${row.receiving.toFixed(4)} + ${months(cycle)} x ($${row.other.toFixed(4)} other + $${row.ai.toFixed(4)} AI + $${row.uploads.toFixed(4)} uploads) + $${row.after.toFixed(4)} kept after the plan ends = $${row.total.toFixed(4)}; room $${row.room.toFixed(4)}; net ${(row.unit.netBps / 100).toFixed(2)}%`);
     // The sums agree with the cost envelope: within a cent of rounding, the costs allowed are the receiving model's own budget.

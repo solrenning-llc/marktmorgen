@@ -43,11 +43,12 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { storeForId } from "@/lib/store";
+import { costsPaused } from "@/lib/plan-standing";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import { timed } from "@/lib/fetch-timeout";
 import type { AdSpend } from "@/lib/ad-spend-rules";
-import { linesFrom, mergeLines, parseLines, readWindow, type InsightRow } from "@/lib/meta-ads-rules";
+import { linesFrom, mergeLines, minorUnits, parseLines, readWindow, type InsightRow } from "@/lib/meta-ads-rules";
 
 export type MetaAccount = { id: string; name: string; currency: string };
 
@@ -95,12 +96,19 @@ export type MetaAdsView = {
   /** When Meta's permission ends and it must be connected again, in seconds; 0 when unknown. */
   expires: number;
   by: string;
+  /**
+   * Set by a caller that holds the store: its reads wait while the plan's
+   * renewal is unpaid or its payment disputed (lib/integration-pause.ts).
+   */
+  readPaused?: boolean;
 };
 
 const STATE_SECONDS = 600;
 const KEEP_SECONDS = 400 * 86_400;
 const REQUEST_MS = 10_000;
-const DEFAULT_VERSION = "v26.0";
+// Marketing API's supported version, not the latest Graph API version.
+// Checked 2026-11-04: docs/meta-marketing-api-version-2026-11-04.md.
+const DEFAULT_VERSION = "v25.0";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 40);
 const connKey = (statsId: string) => `nl:metaads:conn:${statsId}`;
@@ -168,7 +176,12 @@ async function call(method: "GET" | "DELETE", path: string, params: Record<strin
   } catch {
     throw new MetaError("busy", "Meta could not be reached");
   }
-  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  const parsed: unknown = await response.json().catch(() => undefined);
+  // Only a JSON object is one of Meta's answers (CX-123 rule 24): a success that is not one, or cannot be read, is
+  // not known, never "nothing" (a read with no rows would erase the days already read).
+  const object = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+  const body = (object ? parsed : {}) as Record<string, unknown>;
+  if (response.ok && !object) throw new MetaError("busy", `Meta answered ${response.status} in a shape that could not be read`);
   if (response.ok && !body.error) return body;
   const error = (body.error ?? {}) as { code?: number; message?: string };
   const code = Number(error.code);
@@ -456,7 +469,7 @@ export async function forgetMetaUser(user: string): Promise<{ statsId: string; o
 // ---- Reading what was spent ------------------------------------------------------------
 
 /** What a read did: read, nothing to read yet, or why it stopped. */
-export type ReadResult = "read" | "none" | "currency" | "busy" | "error" | "broken";
+export type ReadResult = "read" | "none" | "currency" | "busy" | "error" | "broken" | "paused";
 
 /** Hook for telling the owner once that the connection broke. */
 export type MetaBrokenHook = (owner: { email: string; handle: string }) => Promise<void>;
@@ -483,6 +496,9 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
   // daily job or account picker, before a read lock or any provider request.
   const store = await storeForId(c.sid);
   if (!store || store.statsId !== statsId) return "none";
+  // 232 [CA1] 4b3: no read while the plan's renewal is unpaid or its payment disputed
+  // (lib/integration-pause.ts); the daily pass counts it skipped and tries the next day.
+  if (costsPaused(store)) return "paused";
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "busy";
   const [got] = await redisPipeline([["SET", readingKey(statsId), "1", "NX", "EX", 90]]);
   if (got === null) return "busy";
@@ -524,13 +540,25 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
     };
     for (let page = 0; next && page < 20; page += 1) {
       const answer = await call("GET", next, params, open.value);
-      for (const row of Array.isArray(answer.data) ? (answer.data as InsightRow[]) : []) rows.push(row);
-      const paging = answer.paging as { next?: unknown } | undefined;
-      // Meta's next page carries the token and every parameter itself; it is followed only on Meta's own host.
-      next = typeof paging?.next === "string" && sameHost(paging.next) ? paging.next : null;
+      // Every page names its rows, each in Meta's shape; anything else is not a read, and nothing kept is replaced.
+      if (!Array.isArray(answer.data) || !answer.data.every(insightRow)) throw new MetaError("busy", "Meta's ad spend came back in a shape that could not be read");
+      for (const row of answer.data as InsightRow[]) rows.push(row);
+      // Meta's next page carries the token and every parameter itself; it is followed only on Meta's own host. No
+      // `next` is the last page; a `paging` or `next` out of shape is not known (review of Codex G on #2681).
+      const paging = answer.paging;
+      if (paging !== undefined && (paging === null || typeof paging !== "object" || Array.isArray(paging))) throw new MetaError("busy", "Meta's next page could not be read");
+      const link = (paging as { next?: unknown } | undefined)?.next;
+      if (link !== undefined && (typeof link !== "string" || !sameHost(link))) throw new MetaError("busy", "Meta's next page could not be read");
+      next = link ?? null;
       params = {};
     }
+    // More pages than one read takes: a part is not the whole, so nothing kept is replaced.
+    if (next) throw new MetaError("busy", "Meta had more ad spend than one read takes");
     const fresh = linesFrom(rows, account.currency);
+    // Every cent Meta said was spent must be in the lines kept: a row the lines left out (a day or an amount out of
+    // range) would show a cost lower than Meta's, so the read is not taken.
+    const said = rows.reduce((sum, row) => sum + minorUnits(row.spend, account.currency), 0);
+    if (!Number.isSafeInteger(said) || said !== fresh.reduce((sum, line) => sum + line.cents, 0)) throw new MetaError("busy", "Meta's ad spend did not add up");
     const [rawKept] = await redisPipeline([["GET", linesKey(statsId)]]);
     const merged = mergeLines(parseLines(rawKept), fresh, window.from, window.to);
     const still = await readConnection(statsId);
@@ -558,6 +586,16 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
   } finally {
     await redisPipeline([["DEL", readingKey(statsId)]]).catch(() => {});
   }
+}
+
+/** One row of the insights asked for: its campaign, its day, its platform and a spend Meta wrote as a decimal. */
+function insightRow(row: unknown): boolean {
+  if (row === null || typeof row !== "object" || Array.isArray(row)) return false;
+  const r = row as Record<string, unknown>;
+  return typeof r.spend === "string" && /^\d{1,15}(\.\d{1,6})?$/.test(r.spend) &&
+    typeof r.date_start === "string" && /^\d{4}-\d{2}-\d{2}$/.test(r.date_start) &&
+    (r.campaign_name === undefined || typeof r.campaign_name === "string") &&
+    (r.publisher_platform === undefined || typeof r.publisher_platform === "string");
 }
 
 function sameHost(link: string): boolean {

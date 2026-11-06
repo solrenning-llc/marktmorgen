@@ -18,6 +18,9 @@
  *   - it is forgotten with the connection, and a provider that fails says so.
  */
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MeetingConnections } from "@/components/meeting-connections";
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { NotConnected, beginConsent, disconnect, finishConsent, meetView } from "@/lib/meet-connect";
@@ -176,13 +179,13 @@ async function main(): Promise<void> {
   const beforeConnectUnits = await allowanceUsed(funded, "integration");
   const ownerStart = await startConnect(post(`/api/integrations/zoom/start?${pin}`, `${SESSION_COOKIE}=${session}; ${ZOOM_ARRIVAL_COOKIE}=1`), "zoom");
   const ownerDestination = new URL(ownerStart.headers.get("location") ?? "https://none.invalid/");
-  is("owner remains at the studio instead of a new consent", [ownerStart.status, ownerDestination.hostname, ownerDestination.searchParams.get("meet")], [303, HOST, "limited"]);
+  is("owner remains at the studio instead of a new consent", [ownerStart.status, ownerDestination.hostname, ownerDestination.searchParams.get("meet")], [303, HOST, "funding"]);
   const previousHostScopes = process.env.GOOGLE_CALENDAR_SYNC_SCOPES;
   try {
     process.env.GOOGLE_CALENDAR_SYNC_SCOPES = "1";
     const hostStart = await startHostConnect(post(`/api/integrations/google/host/start?${pin}`, `${SESSION_COOKIE}=${session}`));
     const hostDestination = new URL(hostStart.headers.get("location") ?? "https://none.invalid/");
-    is("a member's optional host consent is also refused", [hostStart.status, hostDestination.hostname, hostDestination.searchParams.get("cal")], [303, HOST, "limited"]);
+    is("a member's optional host consent is also refused", [hostStart.status, hostDestination.hostname, hostDestination.searchParams.get("cal")], [303, HOST, "funding"]);
   } finally {
     if (previousHostScopes === undefined) delete process.env.GOOGLE_CALENDAR_SYNC_SCOPES;
     else process.env.GOOGLE_CALENDAR_SYNC_SCOPES = previousHostScopes;
@@ -199,14 +202,14 @@ async function main(): Promise<void> {
     return finishConnect(page(`/api/integrations/${provider}/callback?${query}`, `${SESSION_COOKIE}=${session}`), provider);
   };
   const ownerReturn = await callbackFor("zoom");
-  is("new owner credentials are refused after state validation", [ownerReturn.status, new URL(ownerReturn.headers.get("location")!).searchParams.get("meet")], [303, "limited"]);
+  is("new owner credentials are refused after state validation", [ownerReturn.status, new URL(ownerReturn.headers.get("location")!).searchParams.get("meet")], [303, "funding"]);
   const ownerDecline = await callbackFor("zoom", false, true);
   is("canceling remains available without funding", new URL(ownerDecline.headers.get("location")!).searchParams.get("meet"), "declined");
   const previousReturnScopes = process.env.GOOGLE_CALENDAR_SYNC_SCOPES;
   try {
     process.env.GOOGLE_CALENDAR_SYNC_SCOPES = "1";
     const hostReturn = await callbackFor("google", true);
-    is("new host credentials are also refused", [hostReturn.status, new URL(hostReturn.headers.get("location")!).searchParams.get("cal")], [303, "limited"]);
+    is("new host credentials are also refused", [hostReturn.status, new URL(hostReturn.headers.get("location")!).searchParams.get("cal")], [303, "funding"]);
     const hostDecline = await callbackFor("google", true, true);
     is("host canceling remains available", new URL(hostDecline.headers.get("location")!).searchParams.get("cal"), "declined");
   } finally {
@@ -227,7 +230,13 @@ async function main(): Promise<void> {
   const route = readFileSync("app/api/integrations/meetings/route.ts", "utf8");
   is("only the owner and Admins can make or delete one", /guardStoreWrite\(request, "settings"/.test(route) && route.includes('action === "test"'), true);
   is("a failure is written where every meeting's failure is", route.includes("logProblem("), true);
-  is("the card shows it only on a connection that works", readFileSync("components/meeting-connections.tsx", "utf8").includes("connection && !connection.broken ? ("), true);
+  // Render the real card instead of matching the spelling of its JSX guard.
+  // A working connection still offers the test; broken or disabled ones do not.
+  const card = (broken: string, disabled = false) => renderToStaticMarkup(createElement(MeetingConnections, {
+    view: { providers: ["zoom"], connected: { zoom: { provider: "zoom", account: "host@example.com", connectedAt: 1, by: "owner@example.com", broken } }, problems: [] },
+    pin: "", disabledProviders: disabled ? ["zoom"] : [],
+  }));
+  is("the card offers a test only for a working configured connection", [card("").includes('data-meet-test="zoom"'), card("Access was withdrawn").includes('data-meet-test="zoom"'), card("", true).includes('data-meet-test="zoom"')], [true, false, false]);
   is("and the guide says how", readFileSync("app/help/zoom/page.tsx", "utf8").includes("Make a test meeting"), true);
 
   done();

@@ -59,6 +59,7 @@ import { idsIn } from "@/lib/data-recount";
 import { readAllListings } from "@/lib/catalog";
 import { readCourses } from "@/lib/course";
 import { readFlows } from "@/lib/flows";
+import { FINAL_INDEX } from "@/lib/closing-holds";
 import { type Store, accountStores, closeStoreRecord, saleHandles, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
 import { dropTeam, memberStores, readTeam } from "@/lib/team";
@@ -66,6 +67,8 @@ import { hostCalendarKeys } from "@/lib/host-calendar";
 import { revokeAllKeys } from "@/lib/api-keys";
 import { forgetStoreWebhooks } from "@/lib/webhooks";
 import { forgetStoreSync } from "@/lib/email-sync";
+import { forgetShipmentMail } from "@/lib/shipment-mail-outbox";
+import { forgetOrderConfirmationMail } from "@/lib/order-confirmation-outbox";
 import { forgetStorePhones } from "@/lib/phone-alerts";
 import { claimsKey, hostId } from "@/lib/host-claims";
 import { MAX_PREVIEW_PAGES, previewKey } from "@/lib/pdf-preview";
@@ -226,11 +229,17 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   if (store.sid) await revokeAllKeys(store.sid);
   await forgetStoreWebhooks(store.statsId);
   await forgetStoreSync(store.statsId);
+  await forgetShipmentMail(store.statsId);
+  await forgetOrderConfirmationMail(store.statsId);
   await forgetStorePhones(store.statsId);
   // The owner's path: their answers and the days they showed up (lib/path.ts).
   await forgetPath(store);
   if (store.domain?.name) extra.push(domainKey(store.domain.name));
   await del(extra);
+  // Out of the closing day's line before its record goes (queue item 307 [EC1]): a new store its owner opens
+  // under the same key is never taken for this one. A plan paid under this store's addresses after this is
+  // still found by their mark (lib/closing-plan-guard.ts, markShut).
+  await redisPipeline([["ZREM", FINAL_INDEX, ref]]);
   await closeStoreRecord(store);
   return {
     ref,
@@ -626,13 +635,23 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
 }
 
 /**
- * Stops the renewals of every membership and payment plan the store sold,
- * on the creator's own Stripe account: once the store is closed nothing it
- * sold can be reached, so nothing it sold may be charged again. Each ends at
- * the end of the period already paid, and the creator decides any refund.
- * RENEWALS_AT_ONCE at a time, so a store that sold many is not a long wait
- * (each was priced with the order that sold it, tests/plan-cost-registry.ts).
- * Bounded by `until`; answers whether every one was reached.
+ * Ends every membership and payment plan the store sold, on the creator's
+ * own Stripe account, at once (queue item 307 [EC1], part 3): once the store
+ * is closed nothing it sold can be reached, so nothing it sold may be
+ * charged again, and none goes on to the end of a period it can no longer
+ * give. Until 30 October 2026 each was set to end at the end of the period
+ * already paid, which let a member be charged in the closing days for a
+ * period they would never get. Since the plan ended none of them was charged
+ * (lib/closing-holds.ts), and the time a member paid for past the closing day
+ * is given back from the creator's account that day (lib/closing-refunds.ts).
+ *
+ * Stripe's Cancel a subscription (DELETE /v1/subscriptions/:id, read 30
+ * October 2026): "Cancels a customer's subscription immediately. The customer
+ * won't be charged again"; prorate and invoice_now default to false, so no
+ * credit or final invoice is made; its open invoices stop being collected.
+ * RENEWALS_AT_ONCE at a time (each was priced with the order that sold it,
+ * tests/plan-cost-registry.ts). Bounded by `until`; answers whether every one
+ * was reached.
  */
 export async function stopRenewals(store: Store, until: number): Promise<{ done: boolean; stopped: number; subs: string[] }> {
   const account = store.stripeAccountId;
@@ -651,12 +670,12 @@ export async function stopRenewals(store: Store, until: number): Promise<{ done:
         const status = typeof sub.status === "string" ? sub.status : "";
         if (!id || ["canceled", "incomplete_expired"].includes(status)) continue;
         out.subs.push(id);
-        if (sub.cancel_at_period_end !== true) toStop.push(id);
+        toStop.push(id);
       }
       for (let i = 0; i < toStop.length; i += RENEWALS_AT_ONCE) {
         if (Date.now() > until) return { ...out, done: false };
         await Promise.all(toStop.slice(i, i + RENEWALS_AT_ONCE).map((id) =>
-          onAccount("POST", account, `/subscriptions/${encodeURIComponent(id)}`, new URLSearchParams({ cancel_at_period_end: "true", "metadata[store_closed]": "yes" }), undefined, `closed:${id}`)));
+          onAccount("DELETE", account, `/subscriptions/${encodeURIComponent(id)}`, undefined, undefined, `closed-now:${id}`)));
         out.stopped += Math.min(RENEWALS_AT_ONCE, toStop.length - i);
       }
       page = typeof found.next_page === "string" ? found.next_page : "";

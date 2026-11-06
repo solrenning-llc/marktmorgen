@@ -3,34 +3,83 @@
 // Navigation setup only; assertions run after the temporary marker is removed.
 import {voiceOverKeyCodeCommands,MacOSKeyCodes,macOSActivateId,NVDAKeyCodeCommands,WindowsKeyCodes,WindowsModifiers} from "@guidepup/guidepup";
 const pause=()=>new Promise(resolve=>setTimeout(resolve,100));
-export async function navigateToContent(reader,page,kind){
+export async function navigateToContent(reader,page,kind,foreground){
  await page.bringToFront();
  if(kind==="nvda"){
   await reader.perform(NVDAKeyCodeCommands.exitFocusMode,{capture:false});
   // The active Playwright tab does not prove NVDA's foreground application.
   const pageTitle=(await page.title()).replace(/\s+/g," ").trim().toLowerCase();
   if(!pageTitle)throw Error("NVDA browser focus requires a nonempty page title");
-  let browserFocused=false;
-  for(let attempt=0;attempt<=10;attempt++){
-   await reader.perform(NVDAKeyCodeCommands.reportTitle);
-   const windowTitle=(await reader.lastSpokenPhrase()).replace(/\s+/g," ").trim().toLowerCase();
-   console.log("AX2_NVDA_WINDOW_FOCUS:"+JSON.stringify({attempt,pageTitle,windowTitle}));
-   if(windowTitle.startsWith(pageTitle)){browserFocused=true;break;}
-   if(attempt===10)break;
-   await reader.perform({keyCode:[WindowsKeyCodes.Escape],modifiers:[WindowsModifiers.Alt]},{capture:false});
-   await new Promise(resolve=>setTimeout(resolve,500));
+  // Diagnostic snapshots do not replace NVDA's existing foreground gate.
+  async function observeNativeForeground(stage){
+   if(!foreground)return null;
+   try{
+    const title=await foreground.read();
+    console.log("AX2_NVDA_NATIVE_FOREGROUND:"+JSON.stringify({stage,title}));
+    return title;
+   }catch(error){
+    console.error("AX2_NVDA_NATIVE_FOREGROUND_UNKNOWN:"+JSON.stringify({stage,error:String(error)}));
+    return null;
+   }
   }
-  if(!browserFocused)throw Error("NVDA foreground window did not match the synthetic page title");
+  let switches=0;
+  async function confirmForeground(stage,canSwitch=true,activatePage=false){
+   let changed=false,activated=false;
+   for(;;){
+    await reader.perform(NVDAKeyCodeCommands.reportTitle);
+    const windowTitle=(await reader.lastSpokenPhrase()).replace(/\s+/g," ").trim().toLowerCase();
+    console.log("AX2_NVDA_WINDOW_FOCUS:"+JSON.stringify({attempt:switches,stage,pageTitle,windowTitle}));
+    if(windowTitle.startsWith(pageTitle))return changed;
+    if(activatePage&&!activated){
+     // The exact native title check observed that another application owns the
+     // foreground. Reactivate the already selected page, then prove its title;
+     // Playwright focus alone never counts as evidence.
+     activated=true;changed=true;
+     await page.bringToFront();
+     continue;
+    }
+    if(!canSwitch||switches===10)throw Error("NVDA foreground window did not match the synthetic page title ("+stage+")");
+    switches++;
+    await reader.perform({keyCode:[WindowsKeyCodes.Escape],modifiers:[WindowsModifiers.Alt]},{capture:false});
+    await new Promise(resolve=>setTimeout(resolve,500));
+    changed=true;
+   }
+  }
+  await confirmForeground("before preparation");
   await page.locator("body").focus();
+  await observeNativeForeground("after body focus");
   await page.locator("body").click({position:{x:1,y:1}});
+  await observeNativeForeground("after body click");
   await page.locator("body").blur();
+  await observeNativeForeground("after body blur");
   await reader.perform(NVDAKeyCodeCommands.readNextFocusableItem,{capture:false});
+  await observeNativeForeground("after next focusable item");
   await pause();
   await reader.perform(NVDAKeyCodeCommands.toggleBetweenBrowseAndFocusMode,{capture:false});
+  await observeNativeForeground("after first browse-focus toggle");
   await pause();
   await reader.perform(NVDAKeyCodeCommands.toggleBetweenBrowseAndFocusMode,{capture:false});
+  await observeNativeForeground("after second browse-focus toggle");
   await reader.perform(NVDAKeyCodeCommands.exitFocusMode,{capture:false});
+  await observeNativeForeground("after exit focus mode");
   await reader.perform({keyCode:[WindowsKeyCodes.Home],modifiers:[WindowsModifiers.Control]});
+  const resetForeground=await observeNativeForeground("after document reset");
+  let dismissedSearch=false;
+  if(typeof resetForeground==="string"&&resetForeground.replace(/\s+/g," ").trim().toLowerCase()==="search"){
+   // Windows Search can take the foreground when Ctrl+Home is sent. Close
+   // only that exactly observed window, then let NVDA's title gate prove the
+   // browser is back; the native snapshot itself never counts as approval.
+   await reader.perform({keyCode:[WindowsKeyCodes.Escape],modifiers:[]},{capture:false});
+   dismissedSearch=true;
+  }
+  // Preparation can lose native focus after the initial title was proved.
+  // Reacquire it within the same ten-switch budget, never retry a heading assertion.
+  const foregroundChanged=await confirmForeground("after preparation",true,true);
+  if(dismissedSearch||foregroundChanged){
+   await reader.perform({keyCode:[WindowsKeyCodes.Home],modifiers:[WindowsModifiers.Control]});
+   await observeNativeForeground("after final document reset");
+   await confirmForeground("after final document reset",false);
+  }
   return;
  }
  await macOSActivateId("org.webkit.Playwright");
@@ -68,4 +117,7 @@ export async function navigateToContent(reader,page,kind){
  }finally{
   await page.evaluate(()=>document.getElementById("__guidepup_marker__")?.remove());
  }
+ // Item chooser interaction can leave the cursor at a later heading.
+ // Establish the area start only after removing the temporary marker.
+ await reader.perform(voiceOverKeyCodeCommands.moveToAreaTop,{capture:false});
 }

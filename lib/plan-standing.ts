@@ -6,6 +6,7 @@
  */
 import type { Tier } from "@/lib/plan";
 import { paidVideoSeconds, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
+import { type PlanDispute, planDisputed } from "@/lib/plan-dispute-rules";
 
 const GB = 1024 * 1024 * 1024;
 
@@ -17,6 +18,13 @@ export type PlanFields = {
   subscriptionId: string | null;
   trialEnds: number;
   planEndedAt: string;
+  /**
+   * When a renewal of a running plan was first seen unpaid, in seconds; 0 or
+   * absent when the plan is paid up (lib/store.ts, queue item 232 [CA1]).
+   */
+  renewalUnpaidSince?: number;
+  /** Disputes of payments made to us for the plan (lib/plan-dispute-rules.ts, 232 [CA1] unit 5). */
+  planDisputes?: PlanDispute[];
 };
 
 /** Where a store stands with its plan right now. */
@@ -25,6 +33,45 @@ export function standingOf(store: PlanFields, nowSeconds = Date.now() / 1000): S
   // A plan that was started and is not running has ended, whether or not
   // the day it ended was written down.
   return store.planEndedAt || store.subscriptionId ? "ended" : "none";
+}
+
+/**
+ * Whether a running plan's renewal payment did not go through (Stripe's
+ * `past_due`, lib/billing.ts stateOf). The plan has not ended: Stripe keeps
+ * trying the card, the store's page stays up and nothing starts closing.
+ */
+export function renewalUnpaid(store: Pick<PlanFields, "subscriptionActive" | "renewalUnpaidSince">): boolean {
+  return store.subscriptionActive && Number.isFinite(store.renewalUnpaidSince) && (store.renewalUnpaidSince as number) > 0;
+}
+
+/**
+ * Where a store stands for what costs us money to run (232 [CA1] unit 4):
+ * as `standingOf`, except that a paid plan whose renewal is unpaid gets what
+ * a store whose plan ended gets (no AI drafts, no new uploads, the video of
+ * a store with no plan), from the first day it is seen, without being an
+ * ended plan anywhere else: no closing, no notices, nothing deleted.
+ */
+export function costStandingOf(store: PlanFields, nowSeconds = Date.now() / 1000): Standing {
+  const standing = standingOf(store, nowSeconds);
+  if (standing === "ended" || standing === "none") return standing;
+  // A plan payment the creator disputed pauses a trial's costs too (unit 5).
+  if (standing === "trial") return planDisputed(store, nowSeconds) ? "ended" : standing;
+  return costsPaused(store, nowSeconds) ? "ended" : standing;
+}
+
+/**
+ * Whether what costs us to run is paused on a running plan: its renewal is
+ * unpaid (unit 4), or a payment for it is disputed (unit 5,
+ * lib/plan-dispute-rules.ts). The plan itself goes on; nothing closes.
+ */
+export function costsPaused(store: Pick<PlanFields, "subscriptionActive" | "renewalUnpaidSince" | "planDisputes">, nowSeconds = Date.now() / 1000): boolean {
+  return renewalUnpaid(store) || (store.subscriptionActive && planDisputed(store, nowSeconds));
+}
+
+/** The reason a route gives when it refuses for `costsPaused`, or null. */
+export function costPauseCode(store: Pick<PlanFields, "subscriptionActive" | "renewalUnpaidSince" | "planDisputes">, nowSeconds = Date.now() / 1000): "renewal_unpaid" | "plan_disputed" | null {
+  if (renewalUnpaid(store)) return "renewal_unpaid";
+  return store.subscriptionActive && planDisputed(store, nowSeconds) ? "plan_disputed" : null;
 }
 
 /** Historical trial storage threshold; all-cost review remains required. */
@@ -40,7 +87,7 @@ export const SETUP_VIDEO_SECONDS = SETUP_VIDEO_HOURS * 3600;
  * its video is paused. Paid plans also have a finite monthly threshold.
  */
 export function videoLimitFor(store: PlanFields & { tier?: Tier }, nowSeconds = Date.now() / 1000): number {
-  const standing = standingOf(store, nowSeconds);
+  const standing = costStandingOf(store, nowSeconds);
   if (standing === "paid") return paidVideoSeconds(store.tier);
   return standing === "trial" ? Math.min(paidVideoSeconds(store.tier), TRIAL_VIDEO_SECONDS) : SETUP_VIDEO_SECONDS;
 }

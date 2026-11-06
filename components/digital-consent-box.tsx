@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { digitalConsentWords } from "@/lib/buyer-words/digital-consent";
 import { CONSENT_FIELD, CONSENT_VERSION_FIELD, type ConsentKind, EU_WITHDRAWAL_CONSENT_VERSION } from "@/lib/digital-consent";
+import { CLOSING_ACCESS_SENTENCE, CLOSING_TERMS_PATH, CLOSING_TERMS_WORDS } from "@/lib/closing-buyers-rules";
 
 /**
  * The box a buyer checks before paying for something handed over during the
@@ -85,6 +86,13 @@ export function DigitalConsentBox({
       <input type="hidden" name={CONSENT_VERSION_FIELD} value={EU_WITHDRAWAL_CONSENT_VERSION} />
       <p id={noteId} className="st-muted mt-1 text-xs">
         {required ? c.note : c.noteAdded}
+      </p>
+      {/* The fixed sentence of queue item 307 [EC1], before every payment for something that lasts: drawn here, never the creator's, in US English. */}
+      <p lang="en" className="st-muted mt-2 text-sm" data-closing-access="">
+        {CLOSING_ACCESS_SENTENCE}{" "}
+        <a href={CLOSING_TERMS_PATH} className="underline underline-offset-2">
+          {`${CLOSING_TERMS_WORDS}.`}
+        </a>
       </p>
     </div>
   );

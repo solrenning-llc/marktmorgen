@@ -36,14 +36,17 @@ export function QuizCategories({ categories, onChange }: { categories: FormCateg
       <ul className="mt-2 space-y-2">
         {categories.map((c, i) => (
           <li key={c.id} className="flex flex-wrap items-center gap-2">
-            <input
-              className="field min-w-0 flex-1"
-              aria-label={`Category ${i + 1}`}
-              value={c.name}
-              maxLength={MAX_CATEGORY_NAME}
-              placeholder={`Category ${i + 1}`}
-              onChange={(e) => onChange(categories.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
-            />
+            {/* A visible name of its own, not a placeholder that goes when typing starts (487 [IT4], item 4). */}
+            <label className="flex min-w-0 flex-1 items-center gap-2">
+              <span className="shrink-0 text-sm text-ink-soft">{`Category ${i + 1}`}</span>
+              <input
+                className="field min-w-0 flex-1"
+                value={c.name}
+                maxLength={MAX_CATEGORY_NAME}
+                placeholder="Mindset"
+                onChange={(e) => onChange(categories.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
+              />
+            </label>
             <button type="button" className="btn btn-secondary btn-sm" aria-label={`Remove category ${i + 1}`} onClick={() => onChange(categories.filter((_, j) => j !== i))}>
               <Icon name="minus" size={16} />
             </button>

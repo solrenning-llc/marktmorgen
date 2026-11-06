@@ -71,7 +71,9 @@ export function MailPictureButton({
       const url = confirmedMailPictureUrl(response.ok, data);
       if (!url) {
         const error = data && typeof data === "object" && "error" in data ? data.error : null;
-        return setProblem(typeof error === "string" && Object.hasOwn(PROBLEMS, error) ? PROBLEMS[error] : PROBLEMS.server_error);
+        // The server's own words first, where it gave them (a figure used, no place this month: lib/metered-limits.ts).
+        const said = data && typeof data === "object" && "message" in data && typeof data.message === "string" ? data.message : "";
+        return setProblem(said || (typeof error === "string" && Object.hasOwn(PROBLEMS, error) ? PROBLEMS[error] : PROBLEMS.server_error));
       }
       const line = pictureLine(alt, url);
       const field = box();

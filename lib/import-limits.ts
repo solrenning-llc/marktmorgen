@@ -31,10 +31,16 @@
  *                 those emails come out of the plan's monthly emails instead
  *                 (lib/mail.ts, reserve)
  *
- * A store in its free trial, or with no plan, has Store's figures.
+ * A store in its free trial, or with no plan, has Store's figures. So does a
+ * paid plan whose renewal is unpaid or whose payment is disputed
+ * (lib/plan-standing.ts costStandingOf, 232 [CA1] unit 4b2), although no
+ * import starts, checks or runs until that is settled (lib/imports.ts
+ * runImport, app/api/store/import and app/api/store/import/funnel); the one
+ * exception is rows, where an upload already under way keeps its plan's
+ * own month (importRowsFor).
  */
 import type { Tier } from "@/lib/plan";
-import { type PlanFields, standingOf } from "@/lib/plan-standing";
+import { type PlanFields, costStandingOf, standingOf } from "@/lib/plan-standing";
 
 export type ImportAllowance = {
   rows: number;
@@ -55,9 +61,18 @@ export const IMPORT_ALLOWANCES: Record<Tier, ImportAllowance> = {
   scale: { rows: 20_000, starts: 100, steps: 600, reports: 100, checks: 300, buyerChecks: 60, pageReads: 150, funnelChecks: 150, funnelSaves: 15, movedEmails: 0 },
 };
 
-/** The figures a store has right now: its plan's while it is paid up, Store's otherwise. */
+/** The figures a store has right now: its plan's while it is paid up and its costs are not paused, Store's otherwise. */
 export function importAllowanceFor(store: PlanFields & { tier: Tier }, nowSeconds = Date.now() / 1000): ImportAllowance {
-  return standingOf(store, nowSeconds) === "paid" ? IMPORT_ALLOWANCES[store.tier] ?? IMPORT_ALLOWANCES.creator : IMPORT_ALLOWANCES.creator;
+  return costStandingOf(store, nowSeconds) === "paid" ? IMPORT_ALLOWANCES[store.tier] ?? IMPORT_ALLOWANCES.creator : IMPORT_ALLOWANCES.creator;
+}
+
+/**
+ * The rows an upload may bring in a month: the plan's own while it is paid
+ * up, even while its costs are paused (only an upload already under way can
+ * send rows then, and its plan's month bounds them), Store's otherwise.
+ */
+export function importRowsFor(store: PlanFields & { tier: Tier }, nowSeconds = Date.now() / 1000): number {
+  return standingOf(store, nowSeconds) === "paid" ? (IMPORT_ALLOWANCES[store.tier] ?? IMPORT_ALLOWANCES.creator).rows : IMPORT_ALLOWANCES.creator.rows;
 }
 
 /**
@@ -78,6 +93,29 @@ export const IMPORT_MIN_ROWS_PER_UPLOAD = 50;
  */
 export const IMPORT_ROW_BYTES = 2_000;
 export const IMPORT_WORST_BYTES_PER_ROW = 3_000;
+
+/**
+ * How long rows not brought in yet are kept from their upload (lib/imports.ts
+ * RAW_DAYS, which tests/import-paused.test.ts holds equal to this), for the
+ * words below.
+ */
+export const IMPORT_ROWS_KEPT_DAYS = 3;
+
+/**
+ * What the studio says when an import or a funnel migration is refused
+ * because the plan's renewal is unpaid or a payment for it is disputed
+ * (232 [CA1] unit 4b2), in place of the studio's words about uploads.
+ */
+export const IMPORTS_PAUSED = {
+  renewal_unpaid: `Your plan's renewal payment did not go through, so imports are paused. Check the notice at the top of your studio to pay it. An import already started goes on where it stopped once it is paid, and what it already brought in stays. Rows not brought in yet are kept ${IMPORT_ROWS_KEPT_DAYS} days from their upload; after that, start again with the rows not brought in.`,
+  plan_disputed: `A payment for your plan is disputed with your bank, so imports are paused. Check the notice at the top of your studio for what happens next. An import already started goes on where it stopped if everything starts again, and what it already brought in stays. Rows not brought in yet are kept ${IMPORT_ROWS_KEPT_DAYS} days from their upload; after that, start again with the rows not brought in.`,
+} as const;
+
+/** The same, for a ClickFunnels funnel migration, which keeps no rows. */
+export const FUNNEL_PAUSED = {
+  renewal_unpaid: "Your plan's renewal payment did not go through, so funnel imports are paused. Check the notice at the top of your studio to pay it; you can import the funnel once it is paid. Pages already made stay as they are.",
+  plan_disputed: "A payment for your plan is disputed with your bank, so funnel imports are paused. Check the notice at the top of your studio for what happens next. Pages already made stay as they are.",
+} as const;
 
 /** "2,000 rows", for the studio. */
 export function rowsWords(rows: number): string {

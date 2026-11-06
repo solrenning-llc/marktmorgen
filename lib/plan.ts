@@ -11,6 +11,7 @@
  * Nothing in this file may ever read an environment variable or a secret. That
  * is the whole reason it is safe for a client component to import it.
  */
+import { type PlanDispute, planDisputed } from "@/lib/plan-dispute-rules";
 
 /**
  * The plans. Pro adds what costs us money to run for you, and Scale is Pro
@@ -251,10 +252,14 @@ export type ProFeature = "email" | "domain" | "branding" | "stores" | "api";
  * the snapshot the studio refreshes, so a buyer's page never waits on Stripe.
  */
 export function canUse(
-  store: { subscriptionActive: boolean; tier: Tier },
+  store: { subscriptionActive: boolean; tier: Tier; renewalUnpaidSince?: number; planDisputes?: PlanDispute[] },
   feature: ProFeature,
 ): boolean {
-  void feature;
+  // Emails to the list stop while a renewal is unpaid (232 [CA1] unit 4);
+  // the store's own domain and look stay, so its page stays up as it was.
+  if (feature === "email" && (store.renewalUnpaidSince ?? 0) > 0) return false;
+  // And while a plan payment is disputed (unit 5, lib/plan-dispute-rules.ts).
+  if (feature === "email" && store.subscriptionActive && planDisputed(store)) return false;
   return store.subscriptionActive && hasPro(store.tier);
 }
 

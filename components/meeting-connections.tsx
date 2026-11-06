@@ -63,7 +63,7 @@ function when(ms: number): string {
  * The store's Google Calendar and Zoom connections (lib/meet-connect.ts):
  * connect (a form that leaves for the provider's consent page), connect a
  * different account, or disconnect, with what each one does said plainly.
- * Only the providers this deployment has switched on are shown. `review` is
+ * Disabled providers with retained connections allow withdrawal only. `review` is
  * the review link's visit (lib/meet-providers.ts): Zoom's form then says so,
  * for the route to let it through.
  */
@@ -71,11 +71,14 @@ export function MeetingConnections({
   view,
   pin,
   review = false,
+  disabledProviders = [],
   tests: firstTests = {},
 }: {
   view: MeetView;
   pin: string;
   review?: boolean;
+  /** Settings-only retained connections; never offer new provider operations. */
+  disabledProviders?: readonly MeetProvider[];
   /** The test meeting each connected account has, where it has one (lib/meet-test.ts). */
   tests?: Partial<Record<MeetProvider, TestMeeting>>;
 }) {
@@ -99,7 +102,7 @@ export function MeetingConnections({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: step, provider }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; test?: TestMeeting | null };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; message?: string; test?: TestMeeting | null };
       if (data.ok) {
         setTests((all) => ({ ...all, [provider]: data.test ?? undefined }));
         toast(
@@ -111,7 +114,7 @@ export function MeetingConnections({
         );
         return;
       }
-      setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
+      setError(data.message ?? MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
       if (data.error === "meeting_failed") router.refresh();
     } catch {
       setError(MESSAGES.server_error);
@@ -150,6 +153,7 @@ export function MeetingConnections({
         {view.providers.map((provider) => {
           const info = ACCOUNTS[provider];
           const connection = view.connected[provider] ?? null;
+          const disabled = disabledProviders.includes(provider);
           const word = review && provider === "zoom" ? `${pin ? "&" : "?"}zoom=review` : "";
           const start = `/api/integrations/${provider}/start${pin}${word}`;
           return (
@@ -173,17 +177,23 @@ export function MeetingConnections({
                     )}
                   </div>
                 </div>
-                <span className={`tag ${connection && !connection.broken ? "tag-live" : ""}`}>
-                  {connection ? (connection.broken ? "Needs connecting again" : "Connected") : "Not connected"}
+                <span className={`tag ${connection && !connection.broken && !disabled ? "tag-live" : ""}`}>
+                  {disabled ? "Unavailable" : connection ? (connection.broken ? "Needs connecting again" : "Connected") : "Not connected"}
                 </span>
               </div>
 
-              {connection?.broken ? (
+              {disabled ? (
+                <p className="notice notice-warn mt-4" role="status">
+                  This service is currently unavailable. You can disconnect this account. Existing meetings stay with the provider.
+                </p>
+              ) : connection?.broken ? (
                 <p className="notice notice-warn mt-4" role="status">
                   {`${connection.broken}. Until it is connected again, bookings of calls set to ${info.meeting} get your own link, or a private video room.`}
                 </p>
               ) : null}
 
+              {!disabled ? (
+                <>
               <ul className="mt-4 space-y-2 text-sm text-ink-soft">
                 {info.does.map((line) => (
                   <li key={line} className="flex items-start gap-2">
@@ -193,9 +203,11 @@ export function MeetingConnections({
                 ))}
               </ul>
               <p className="mt-3 text-sm text-ink-soft">{info.limits}</p>
+                </>
+              ) : null}
 
               <div className="mt-5 flex flex-wrap items-center gap-2">
-                {!connection || connection.broken ? (
+                {disabled ? null : !connection || connection.broken ? (
                   <form action={start} method="post">
                     <button type="submit" className="btn btn-primary">
                       {connection ? `Connect ${info.name} again` : `Connect ${info.name}`}
@@ -222,9 +234,9 @@ export function MeetingConnections({
                   </button>
                 ) : null}
               </div>
-              <p className="mt-3 text-xs text-ink-soft">{info.asks}</p>
+              {!disabled ? <p className="mt-3 text-xs text-ink-soft">{info.asks}</p> : null}
 
-              {connection && !connection.broken ? (
+              {connection && !connection.broken && !disabled ? (
                 <div className="mt-5 border-t border-line pt-5" data-meet-test={provider}>
                   <h3 className="text-sm font-semibold text-ink">Check that it works</h3>
                   {tests[provider] ? (
@@ -290,6 +302,7 @@ export function MeetingConnections({
       </div>
 
       <div className="grid min-w-0 gap-6">
+        {view.providers.some((provider) => !disabledProviders.includes(provider)) ? (
         <section className="card p-6 sm:p-8" aria-labelledby="meet-next-title">
           <h2 id="meet-next-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
             Then choose it for a call or a live event
@@ -309,6 +322,8 @@ export function MeetingConnections({
             the start. If it cannot be made, the event uses its private video room.
           </p>
         </section>
+
+        ) : null}
 
         <section className="card p-6 sm:p-8" aria-labelledby="meet-log-title">
           <h2 id="meet-log-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">

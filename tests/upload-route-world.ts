@@ -19,6 +19,9 @@ export const text=(value:unknown,length:number)=>typeof value==='string'?value.s
 export const withinLimit=async()=>state.rateAllowed;
 /** The short limit and the store's figure together (lib/metered-limits.ts): the figure is held by tests/store-allowance.test.ts. */
 export const withinService=async()=>state.rateAllowed;
+/** The same refusal said with its reason (lib/metered-limits.ts, withinServiceWhy): here only the short window refuses. */
+export const withinServiceWhy=async()=>(state.rateAllowed?null:{reason:"tries" as const});
+export const serviceRefusedJson=(refusal:{reason:string;message?:string},code:string)=>Response.json(refusal.reason==="tries"?{ok:false,error:code}:{ok:false,error:code,message:refusal.message},{status:429});
 export const withinStore=async()=>state.rateAllowed;
 export const fromAnotherSite=()=>false;
 export const limited=async(request:Request)=>request;

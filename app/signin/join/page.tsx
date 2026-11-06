@@ -1,7 +1,6 @@
-import Link from "next/link";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { Logo } from "@/components/logo";
+import { MorningLogo } from "@/components/morning-header";
 import { peekInvite } from "@/lib/team";
 import { ROLE_NAMES, ROLE_SUMMARIES } from "@/lib/team-roles";
 
@@ -32,11 +31,9 @@ export default async function JoinPage({
   const role = ROLE_NAMES[invite.role];
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-paper text-ink">
+    <div className="relative min-h-screen overflow-hidden">
       <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
-        <Link href="/" className="inline-block w-fit rounded-[10px]" aria-label="Marktmorgen, home">
-          <Logo />
-        </Link>
+        <MorningLogo />
 
         <h1 className="t-h1 mt-6 break-words">{`Join ${invite.store.name}`}</h1>
         <p className="mt-4 text-lg text-ink-soft">

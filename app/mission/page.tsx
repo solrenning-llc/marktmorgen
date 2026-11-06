@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import Link from "next/link";
 import { Icon, iconFor, type IconName } from "@/components/icons";
 import { RevealOnScroll } from "@/components/home-parts";
@@ -11,6 +12,9 @@ import { ASSISTANT_ON_SALE, PLANS_ON_SALE } from "@/lib/opening";
 import { ASSISTANT_MESSAGES_MONTHLY, ASSISTANT_NAME, ASSISTANT_PRICE_CENTS } from "@/lib/store-assistant-rules";
 import { isDomainsConfigured } from "@/lib/domains";
 import { feeWords } from "@/lib/fee-words";
+import { hostSyncOn } from "@/lib/meet-providers";
+import { calendarEventsMissionLine } from "@/lib/host-sync-words";
+import { paypalAtCheckout, paypalCheckoutLine } from "@/lib/public-explanations";
 
 export const metadata: Metadata = {
   title: "Our mission — Marktmorgen",
@@ -81,11 +85,11 @@ const BUILT = [
   "Sales tax and VAT worked out by Stripe Tax on your own account and added at checkout, switched on once Stripe says your tax setup is complete",
   "Limited quantities: the page shows how many are left, counted from real payments, and a unit someone is paying for is held so the last one is never sold twice",
   "Courses: modules of lessons with video, text, downloads and a link, free preview lessons, modules that open a set number of days after each student joins, with an email to the student the day each one opens, and each student's progress in your studio — students open them with their email, no password",
-  "Paid calls with a calendar: your weekly hours in your time zone, the free times shown to each buyer in theirs, the time held while they pay, and a calendar file emailed to both of you",
+  "Paid calls with a calendar: your weekly hours in your time zone, the free times shown to each buyer in theirs, the time held while they pay, and an email about each booking to the buyer and to you",
   "Group calls of up to 50 people, and live sessions on dates you set with up to 500 seats each, held on the meeting service whose link you give or in a video room made for them",
   "A private Jitsi Meet video room made for each booking if you choose it, in every email, reminder and calendar file, and a buyer's booked calls on their list of purchases",
   "Google Meet links made for each booking and live event once you connect your own Google Calendar, with a call's buyers on its event's guest list",
-  "Reminders before every booking, a day and an hour before, and buyers who move their own booking up to twice",
+  "Reminders a day and an hour before each booking, when it leaves time for them, and buyers who move their own booking up to twice",
   "Pay what you want: your price as the minimum, a suggested price in the box, and Stripe refusing anything under it",
   "Up to three questions at checkout — a short answer, a number or a list — with the answers in your list of sales",
   "A confirmation email to every buyer, from your store's name, with the way back to what they bought",
@@ -103,7 +107,7 @@ const BUILT = [
   "An email to a member whose renewal failed, once, with a link that pays it and makes the card that worked the one used next time",
   "An API with up to five keys you make and revoke in the studio: it reads your list, members, a course's students, your affiliates and your bookings, and a key made to write adds people who agreed to your list, changes their labels, and gives or takes back products",
   "Memberships whose files, course and community close when the membership ends",
-  "An affiliate program: commission of 1% to 90%, a window of 1 to 90 days, a link and a page for each affiliate, and a record of who is owed what — paid out by you",
+  `An affiliate program: commission of 1% to 90%, a window of up to ${MAX_COOKIE_DAYS} days for as long as the buyer's browser keeps it, a link and a page for each affiliate, and a record of who is owed what — paid out by you`,
   "Calendar sync: busy times in up to three Google, Outlook or iCloud calendars hide call times, and a private feed puts your bookings in your calendar",
   "Webhooks: up to five addresses told about sales, members, leads, bookings and refunds, signed, for Zapier, Make or your own server",
   "Course quizzes of up to 20 questions, and certificates of completion with a page anyone can open to check them",
@@ -173,9 +177,12 @@ const ASSISTANT_CLOSED_LINE = `The ${ASSISTANT_NAME}: an AI chat on every page o
 const DOMAIN_LINE =
   "Your store on your own domain, on Studio: type it in the studio, add the one record we show you, and the certificate is handled for you";
 
+/*
+ * PayPal at checkout (paypalCheckoutLine, by the PayPal client) and writing
+ * every booking as an event (calendarEventsMissionLine, by hostSyncOn) are
+ * placed by the component, from the state this deployment is in.
+ */
 const NOT_BUILT = [
-  "PayPal at checkout: Stripe offers it only to accounts in the EU (except Hungary), the UK, Switzerland, Norway and Liechtenstein, and does not support it for the direct charges every sale here is made with",
-  "Writing every booking into your calendar as an event: only calls set to Google Meet are written there, other bookings come as a feed you subscribe to, and calendars are read for busy times",
   "Paying affiliates with no PayPal account of your own: they are paid from your PayPal, in one press or on your payday, never from money we hold",
   "A thank-you page of your own: after paying, the store's own page hands over what was bought, with your note and, in a funnel, a button to the next step",
   "Automatic replies on Instagram",
@@ -199,7 +206,7 @@ const RELEASES: { date: string; items: string }[] = [
   { date: "September 26, 2026", items: "Up to 200 products with pictures and pages of their own, questions at checkout, pay what you want, free trials and fixed-length memberships, group calls and live sessions with reminders and self-serve moves, a confirmation email for every purchase, every store installable as its own app, 43 Stripe countries, and one reminder after an unpaid checkout. Then a community for your buyers, funnels of offers after paying, an affiliate program, calendar sync, webhooks, course quizzes and certificates, license keys, stamped PDFs, longer windows and exports for your numbers, and memberships whose access ends when they do." },
   { date: "September 27, 2026", items: "Up to 2,000 products, a private video room for each booking, up to five stores in one account and a team with roles for each, passkeys, 15 currencies and more ways to pay, sales and landing pages, reviews only buyers can write, Mailchimp, Kit, beehiiv and MailerLite built in, and notifications on your phone. Then live events in the community, bundles, drafts, moving your list, products and past buyers from another platform, and Google Meet links made on your own Google Calendar." },
   { date: "October 5, 2026", items: "The demo store became an ordinary store, made and drawn by the same code as every creator's, and product pictures reach a phone at the phone's own size. Then Outreach: one short email to a business that could sponsor you, sell for you or buy from you, written from what you say and opened as a draft in your own mailbox." },
-  { date: "October 18, 2026", items: "A store whose plan ends closes after 30 days and three emails, with its whole store downloadable as one file first: its files, the renewals of what it sold and every record it kept go, and only a compressed record of its sales is kept for tax, for seven years." },
+  { date: "October 18, 2026", items: "A store whose plan ends closes after 30 days and three emails, with its main data (products, courses, posts, forms, contacts and orders) downloadable as one file first: its files, the renewals of what it sold and every record it kept go, and only a compressed record of its sales is kept for tax, for seven years." },
 ];
 
 /* Facts a creator can check before trusting us with a store. */
@@ -208,7 +215,7 @@ const TRUST: { icon: IconName; title: string; body: string; href: string; link: 
   { icon: "mail", title: "How to reach us", body: "By email. A person reads every message and answers in writing, in English.", href: "mailto:support@marktmorgen.com", link: "Write to us" },
   { icon: "bank", title: "Where the money is", body: "Every sale is processed by Stripe on the creator's own account. We never hold a balance of yours.", href: "/platform/your-stripe", link: "How the money moves" },
   { icon: "shield", title: "What we keep about you", body: "What the service needs to run, listed in plain words, with who processes it for us. Nothing is sold.", href: "/privacy", link: "Privacy policy" },
-  { icon: "receipt", title: "The rules, in writing", body: `The terms of the service, a full refund of your first payment to us if you ask within ${REFUND_DAYS} days, and the months of a yearly plan you have not started refunded at any time, less Stripe's card fee.`, href: "/terms", link: "Terms and refunds" },
+  { icon: "receipt", title: "The rules, in writing", body: `The terms of the service, a full refund of your first payment to us, and of every plan payment for the same store made since, if you ask within ${REFUND_DAYS} days of the first, and the months of a yearly plan you have not started refunded at any time, less Stripe's card fee.`, href: "/terms", link: "Terms and refunds" },
   { icon: "door", title: "Leaving is free", body: "Your Stripe account, customers and payouts were always yours, and your list downloads as a file at any time.", href: "/proof/promises", link: "What we never do" },
 ];
 
@@ -219,8 +226,11 @@ export default function MissionPage() {
   const billingReached = isBillingConfigured();
   const billing = billingReached && PLANS_ON_SALE;
   const domains = isDomainsConfigured();
+  const paypal = paypalAtCheckout();
+  const calendarSync = hostSyncOn();
   const built = [
     ...BUILT,
+    ...(paypal ? [paypalCheckoutLine(true)] : []),
     ...(domains ? [DOMAIN_LINE] : []),
     ...(ready ? [STRIPE_LINE, CHECKOUT_LINE, ORDERS_LINE] : []),
     ...(billing ? [BILLING_LINE] : []),
@@ -231,6 +241,8 @@ export default function MissionPage() {
     ...(ready ? [] : [STRIPE_LINE, CHECKOUT_LINE, ORDERS_LINE]),
     ...(billing ? [] : [billingReached ? BILLING_CLOSED_LINE : BILLING_LINE]),
     ...(billing && ASSISTANT_ON_SALE ? [] : [ASSISTANT_CLOSED_LINE]),
+    ...(paypal ? [] : [paypalCheckoutLine(false)]),
+    calendarEventsMissionLine(calendarSync),
     ...NOT_BUILT,
   ];
   return (

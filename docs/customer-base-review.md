@@ -23,3 +23,14 @@ Validation: 12 new cases cover exact cent boundaries, annual fractions, worst mi
 ## FX275 — full company costs,22 October2026
 
 Owner22/10/2026 05:10Fortaleza: "esqueça Hazelsong". Every full LLC fixed cost and fixed tax is100% Marktmorgen; no Hazelsong allocation reduces F. lib/llc-fixed-costs.ts sums full reviewed monthly/annual ceilings and rejects any missing required line. Current ceilings remain unknown, current commercial review null, so minimum paying base is not established and consolidated margin not approved. Most-tax individual failures cannot be repaired by more customers. Native prices, taxes, FX and reserve gaps: [dated evidence](llc-fixed-costs-2026-10-22.md). No commercial-review/gate code changed. Prior validation paragraphs are historical, not verification of this new head.
+
+
+## FX1 — inventory bound to actual commercial admission,30October2026
+
+The earlier report-only status is superseded narrowly by [the full LLC gate](llc-cost-gate.md): commercialMarginReady now consumes allocateEntireLlcFixedCosts and refuses incomplete current records. Its fixed-cost plus fixed-tax aggregate must include the complete monthly LLC total before separately funded exposure is added, without adding those costs twice. Both monthly and annual ceilings and each line's reserve/evidence remain mandatory. The new deployment-artifact-retention category and all existing categories remain unknown in production.
+
+Schema24binds inventory/allocation/ceilings to the review snapshot. No actual ceiling, review, reserve, customer count, provider cap or tax classification becomes approved. Full six-case cost/base and cash/funding work still remains; all previous history above stays preserved.
+
+
+### Annual inclusion follow-up
+The actual gate additionally compares twelve fixed monthly budgets with the complete annual LLC ceiling (snapshot schema25). A known annual amount cannot disappear behind a smaller monthly amount or integer division; one missing cent rejects. This does not establish worst-month recognition, invoice timing, a funded reserve or permission to amortize. All actual ceilings/reviews remain absent/unknown and plans stay closed. Historical schema24 text above records the prior integration.

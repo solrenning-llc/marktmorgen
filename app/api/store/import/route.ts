@@ -4,6 +4,7 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { jsonAccess } from "@/lib/studio-route";
 import { contentDisposition, withinLimit, withinMonth } from "@/lib/request-guard";
 import { importAllowanceFor } from "@/lib/import-limits";
+import { costPauseCode } from "@/lib/plan-standing";
 import {
   BATCH_BYTES,
   IMPORT_ID_PATTERN,
@@ -96,7 +97,7 @@ export async function GET(request: NextRequest) {
     if (!job) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
     if (request.nextUrl.searchParams.get("report") === "1") {
       if (!(await withinLimit("import-report", store.sid, 60, 600))) return new Response("Too many downloads for now. Try again in a few minutes.", { status: 429 });
-      if (!(await withinMonth("import-report-month", store.sid, importAllowanceFor(store).reports, windowId(store)))) return new Response("Your plan's downloads of import reports for this month are used. They open again with your next billing month.", { status: 429 });
+      if (!(await withinMonth("import-report-month", store.sid, importAllowanceFor(store).reports, windowId(store)))) return new Response("Your store has downloaded all the import reports its figure allows for now.", { status: 429 });
       const csv = await reportCsv(job);
       const day = new Date(job.at).toISOString().slice(0, 10);
       return new Response(csv, {
@@ -122,6 +123,15 @@ export async function POST(request: NextRequest) {
   const action = text(body.action, 10);
   const id = text(body.id, 24);
   const refuse = (error: string, status = 400, extra: Record<string, unknown> = {}) => Response.json({ ok: false, error, ...extra }, { status });
+  // While the plan's renewal is unpaid or a payment for it is disputed, an
+  // import does not start, check or move on (232 [CA1] unit 4b2,
+  // lib/plan-standing.ts costPauseCode); one already started keeps its place
+  // (lib/imports.ts runImport). An upload already under way may still send
+  // its rows and finish, so it is queued rather than lost; they count against
+  // the month's rows as always, and nothing is applied until it is paid.
+  // Canceling, reading where one stands and the report stay open.
+  const paused = action === "start" || action === "preview" || action === "step" ? costPauseCode(store) : null;
+  if (paused) return refuse(paused, 409);
 
   try {
     if (action === "start") {
@@ -177,6 +187,8 @@ export async function POST(request: NextRequest) {
       if (!done.ok) return refuse(done.reason, 409);
       // The first few seconds of work right away, so a small file is done
       // by the time the page shows it; past the month's steps the five-minute job does it.
+      // Queued and left while the plan's costs are paused: no step is spent on it (unit 4b2).
+      if (costPauseCode(store)) return Response.json({ ok: true, import: view(done.job) });
       if (!(await withinMonth("import-step-month", store.sid || guarded.ref, importAllowanceFor(store).steps, windowId(store)))) return Response.json({ ok: true, import: view(done.job) });
       const after = await runImport(id, Date.now() + STEP_MS);
       return Response.json({ ok: true, import: view(after ?? done.job) });

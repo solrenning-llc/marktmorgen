@@ -190,12 +190,43 @@ function hostPart(name: string, apex: string): string {
   return name.slice(0, name.length - apex.length - 1);
 }
 
-/** What Vercel sees for a domain, and what is still missing. */
+/**
+ * What Vercel sees for a domain, and what is still missing; null when it
+ * could not be told. Read as strictly as the checkup (CX-123 rule 24): the
+ * studio's check takes a live domain off when this says it is not live, so
+ * an answer that did not come, or came without Vercel's verdicts, is never
+ * read as records that are wrong.
+ */
 export async function domainStatus(name: string, store: Pick<Store, "sid">): Promise<DomainStatus | null> {
+  // "Gone" and not known are the same null here, so the checkup's second request is not made (review of Codex P).
+  const read = await readDomain(name, store, false);
+  return read === "gone" ? null : read;
+}
+
+/**
+ * The same, read strictly for the studio's checkup (491 [PP2]): "gone" when
+ * Vercel says the domain is not on the project any more (a problem to tell
+ * the creator, not a failure to read), and null whenever either answer did
+ * not come, so a missing answer is never taken for records that are wrong.
+ */
+export async function domainCheckup(name: string, store: Pick<Store, "sid">): Promise<DomainStatus | "gone" | null> {
+  return readDomain(name, store, true);
+}
+
+async function readDomain(name: string, store: Pick<Store, "sid">, tellGone: boolean): Promise<DomainStatus | "gone" | null> {
   const project = await vercel("GET", `/v9/projects/${vercelProject()}/domains/${name}`);
+  if (project.status === 404) {
+    if (!tellGone) return null;
+    // "Not found" is also every answer while the project's own name is wrong (see vercelProject):
+    // the domain is gone only when the project itself is there.
+    const own = await vercel("GET", `/v9/projects/${vercelProject()}`);
+    return own.status === 200 ? "gone" : null;
+  }
   if (project.status !== 200) return null;
   const proved = await domainProved(name);
   const config = await vercel("GET", `/v6/domains/${name}/config?projectIdOrName=${vercelProject()}`);
+  // An answer whose verdicts are not there is not read as records that are wrong.
+  if (config.status !== 200 || typeof config.body.misconfigured !== "boolean" || typeof project.body.verified !== "boolean") return null;
   const apex = typeof project.body.apexName === "string" ? project.body.apexName : name;
   const verified = project.body.verified === true;
   const misconfigured = config.status !== 200 || config.body.misconfigured !== false;

@@ -1,0 +1,91 @@
+# 508 [SG4] part 1: CodeQL code scanning, free for a public repository.
+# Runs on every pull request, on main and once a day. It reads the code and
+# uploads its findings to the repository's code scanning; it changes nothing,
+# merges nothing and needs no secret. Actions are pinned to full commit SHAs
+# at least two weeks old (github/codeql-action v4.38.3, 8 October 2026).
+name: CodeQL
+run-name: PV8 source ${{ github.sha }}
+on:
+  schedule:
+    - cron: '37 5 * * *'
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: codeql-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+jobs:
+  documentation-scope:
+    name: Documentation scope (codeql)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test conservative documentation classification
+        run: |
+          python3 scripts/test_ci_documentation_scope.py
+          python3 scripts/test_ci_full_tree_proof.py
+      - name: Compare actual PR trees; uncertainty keeps full coverage
+        id: scope
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          CI_REF: ${{ github.ref }}
+          CI_REPOSITORY: ${{ github.repository }}
+          CI_TOKEN: ${{ github.token }}
+          CI_BASE: ${{ github.event.pull_request.base.sha }}
+          CI_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/ci_documentation_scope.py
+  analyze:
+    needs: documentation-scope
+    if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, actions]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          queries: security-extended
+      - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          category: /language:${{ matrix.language }}
+
+  all-checks:
+    # The one check GitHub requires before main (scripts/ci_all_checks.py): it always runs and
+    # passes only when every job above passed, or was skipped for a documentation-only change.
+    name: All checks (codeql)
+    needs: [analyze, documentation-scope]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Read every job's result; a skip counts only for a documentation-only change
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          python3 scripts/test_ci_all_checks.py
+          python3 scripts/ci_all_checks.py

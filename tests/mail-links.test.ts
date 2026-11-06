@@ -67,7 +67,7 @@ test("a full stop after an address ends the sentence, not the link", () => {
   assert.match(html, /<a href="https:\/\/example\.com\/plan"[^>]*>https:\/\/example\.com\/plan<\/a>\./);
 });
 
-test("sales are added up by email, from email only, in the store's currency", () => {
+test("sales are added up by email, from email only, in the store's currency; another currency's are counted apart, never added", () => {
   const c1 = broadcastCampaign("1".repeat(24));
   const by = moneyByCampaign(
     [
@@ -79,8 +79,13 @@ test("sales are added up by email, from email only, in the store's currency", ()
     ],
     "usd",
   );
-  assert.deepEqual(by, { [c1]: { sales: 2, cents: 6600 } });
-  assert.deepEqual(broadcastMoney({ by, partial: false }, "1".repeat(24)), { sales: 2, cents: 6600 });
+  // The euro sale is from before the store changed its currency (22 [E5], unit 2d).
+  assert.deepEqual(by, { [c1]: { sales: 2, cents: 6600, elsewhere: 1 } });
+  assert.deepEqual(broadcastMoney({ by, partial: false }, "1".repeat(24)), { sales: 2, cents: 6600, elsewhere: 1 });
+  // An email whose only sale was in another currency still shows it, as a count.
+  const c3 = broadcastCampaign("3".repeat(24));
+  const only = moneyByCampaign([{ source: "email", campaign: c3, cents: 5000, currency: "eur" }], "usd");
+  assert.deepEqual(broadcastMoney({ by: only, partial: false }, "3".repeat(24)), { sales: 0, cents: 0, elsewhere: 1 });
   assert.equal(broadcastMoney({ by, partial: false }, "2".repeat(24)), null);
   assert.equal(broadcastMoney(null, "1".repeat(24)), null);
 });
@@ -93,6 +98,8 @@ test("a sequence's figure is every one of its emails together, and nobody else's
     [stepCampaign("e".repeat(16), "1".repeat(16))]: { sales: 5, cents: 99900 },
   };
   assert.deepEqual(flowMoney({ by, partial: false }, flow), { sales: 3, cents: 10500 });
+  // A sequence whose only sale was in another currency still shows it, as a count (22 [E5], unit 2d).
+  assert.deepEqual(flowMoney({ by: { [stepCampaign(flow, "3".repeat(16))]: { sales: 0, cents: 0, elsewhere: 2 } }, partial: false }, flow), { sales: 0, cents: 0, elsewhere: 2 });
   assert.equal(flowMoney({ by, partial: false }, "d".repeat(16)), null);
   assert.ok(stepCampaign(flow, "1".repeat(16)).startsWith(flowCampaignPrefix(flow)));
 });

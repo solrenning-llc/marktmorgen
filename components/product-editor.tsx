@@ -1,12 +1,17 @@
 "use client";
 
+import { optionPriceReview, optionRemovalWords, priceReview as reviewPrice, type PriceField } from "@/lib/price-review";
+import { isBundle } from "@/lib/bundle-rules";
+import { PRODUCT_OUTLINE, PRODUCT_OUTLINE_LEFT, productOutlineMessage } from "@/lib/product-outline";
 import { PackageEditor } from "@/components/package-editor";
 import { PodcastToggle } from "@/components/podcast-toggle";
 import { WaitlistPanel } from "@/components/waitlist-panel";
 import type { PreorderView } from "@/lib/preorders";
 import { hasContent, preorderProblem } from "@/lib/preorder-rules";
 import type { WaitlistView } from "@/lib/waitlist";
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useLeaveGuard } from "@/components/leave-guard";
+import { UrlField } from "@/components/url-field";
 import { useRouter } from "next/navigation";
 import { TeamEventEditor } from "@/components/team-event-editor";
 import { CallEditor, type MeetAccount } from "@/components/call-editor";
@@ -19,11 +24,11 @@ import type { BumpChoice, ProductPaging } from "@/lib/catalog";
 import { ProductUpdateBox } from "@/components/product-update-box";
 import { ShippingEditor } from "@/components/shipping-editor";
 import { MAX_SHIPPING_SKU } from "@/lib/shipping";
-import { confirmsOptionWrite } from "@/lib/option-confirmation";
+import { confirmsOptionWrite, OPTION_NOT_CONFIRMED, optionRefusalWords } from "@/lib/option-confirmation";
 import { CheckoutFieldsEditor } from "@/components/checkout-fields-editor";
 import { ProductImageEditor } from "@/components/product-image-editor";
 import type { CoverLook } from "@/components/cover-maker";
-import type { LanguageCode } from "@/lib/store-language";
+import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
 import { LicenceKeyEditor } from "@/components/licence-key-editor";
 import { PdfStampToggle } from "@/components/pdf-stamp-toggle";
 import { PdfPreviewToggle } from "@/components/pdf-preview-toggle";
@@ -36,7 +41,7 @@ import {
   isFree,
   type Product,
 } from "@/lib/store-field-rules";
-import { type Currency, fieldPrefix, formatMoney, moneyField, priceExample, priceBounds, rangeWords, readMoney } from "@/lib/money";
+import { type Currency, fieldPrefix, formatMoney, moneyField, priceExample, priceBounds, priceInRange, rangeWords, readMoney } from "@/lib/money";
 import { StoreCurrency, useStoreCurrency } from "@/components/store-currency";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import {
@@ -52,7 +57,12 @@ import {
   MAX_OPTION_DETAIL_LENGTH,
   MAX_OPTION_LABEL_LENGTH,
   MAX_STORE_OPTIONS,
+  handsOver,
+  optionDelivers,
 } from "@/lib/product-option";
+import { activePlan } from "@/lib/product-extras";
+import { activeShipping } from "@/lib/shipping";
+import type { Listing } from "@/lib/store";
 import { LINK_PROBLEMS, type LinkProblem, linkHost } from "@/lib/product-link";
 import {
   INTERVALS,
@@ -66,8 +76,11 @@ import {
   intervalName,
   membershipPrice,
 } from "@/lib/product-recurring";
-import { MAX_INTRO_COUNT, introLineEnglish } from "@/lib/intro-price";
-import { MAX_ABOUT_LENGTH } from "@/lib/product-about";
+import { MAX_INTRO_COUNT, activeIntro, introLineEnglish } from "@/lib/intro-price";
+import { activeYearly } from "@/lib/yearly-price";
+import { MAX_ABOUT_LENGTH, aboutBlocks } from "@/lib/product-about";
+import { ProductAbout } from "@/components/product-about-view";
+import { type StoreLook, lookStyle } from "@/lib/store-look";
 import { imageUrl } from "@/lib/product-image";
 import { StoreField, useStudioHref, useStudioStore } from "@/components/studio-store-pin";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
@@ -75,6 +88,9 @@ import { productSegment } from "@/lib/product-slug";
 import { feeWords } from "@/lib/fee-words";
 import { COMMISSION_LIVE } from "@/lib/plan";
 import { NewTab } from "@/components/new-tab";
+import { TermsCheckPanel } from "@/components/terms-check-panel";
+import { fastMoneyMessage } from "@/lib/terms-check-rules";
+import { deliversDigitally } from "@/lib/digital-consent";
 
 /** The sentences about amounts, in the store's own currency (lib/money.ts). */
 const optionPrice = (currency: Currency) => `Type an amount ${rangeWords(currency)}, like ${priceExample(currency, 39)}.`;
@@ -101,6 +117,9 @@ const OPTION_MESSAGES: Record<string, string> = {
   store_full: "Your store has reached the most it can hold. Remove something, or shorten a long list of choices, to make room.",
 };
 
+export { fastMoneyMessage } from "@/lib/terms-check-rules";
+
+
 /** Why a price the buyer chooses was refused, in words the creator can act on. */
 const PWYW_MESSAGES: Record<string, string> = {
   recurring: "A membership charges the same amount each time, so its buyers cannot choose it. Stripe lets a buyer choose the amount of a one-off payment only.",
@@ -111,8 +130,11 @@ const PWYW_MESSAGES: Record<string, string> = {
 };
 
 const MESSAGES: Record<string, string> = {
+  outline_left: PRODUCT_OUTLINE_LEFT,
   ...STUDIO_MESSAGES,
   title: "Give it a name before saving.",
+  // A course from a ready structure, published before its example titles were replaced (540 [CU1]).
+  course_examples: 'This course still has example titles. Open the course, replace each with your own, then publish it.',
   trial: `Type a free trial of ${MIN_TRIAL_DAYS} to ${MAX_TRIAL_DAYS} days, or leave it empty for none.`,
   payments: `Type ${MIN_MEMBER_PAYMENTS} to ${MAX_MEMBER_PAYMENTS} payments, or leave it empty for a membership that runs until it is canceled.`,
   store_full: "Your store has reached the most it can hold. Remove something, or shorten a long list of choices, to make room.",
@@ -261,6 +283,11 @@ async function send(
       return wrong(why === "suggested" || !PWYW_MESSAGES[why] ? pwywSuggested(currency) : PWYW_MESSAGES[why]);
     }
     if (data.error === "price") return wrong(productPrice(currency));
+    if (data.error === "outline_left") {
+      const said = data as { left?: unknown; product?: unknown };
+      return wrong(productOutlineMessage(payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save", typeof said.left === "string" ? said.left : null, typeof said.product === "string" ? said.product : null));
+    }
+    if (data.error === "fast_money") return wrong(fastMoneyMessage((data as { passage?: unknown }).passage, payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save"));
     return wrong(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
   } catch {
     return wrong(MESSAGES.server_error);
@@ -278,6 +305,8 @@ function ProductForm({
   onCancel,
   product,
   loadingAbout = false,
+  ownHosts = [],
+  preview = null,
 }: {
   draft: Draft;
   setDraft: (draft: Draft) => void;
@@ -290,8 +319,52 @@ function ProductForm({
   product?: Product;
   /** Whether the long description is still being read. */
   loadingAbout?: boolean;
+  /** The store's own hosts besides its marktmorgen.com address (its own domain), not warned as "another site". */
+  ownHosts?: string[];
+  /** The store's look and language, so the product's own words are previewed as buyers see them (487 [IT4], pattern 7). */
+  preview?: { look: StoreLook; language: LanguageCode } | null;
 }) {
   const id = product?.id ?? "new";
+  // A ready outline for the description of a new product (487 [IT4], item 5), decided when the form opens: it never comes and goes while typing.
+  const [offerOutline, setOfferOutline] = useState(() => !product && !draft.about.trim());
+  const aboutField = useRef<HTMLTextAreaElement>(null);
+  // The preview starts at a phone's width, where most product pages are read.
+  const [phone, setPhone] = useState(true);
+  const toggle = (on: boolean) => `inline-flex min-h-11 items-center rounded-full px-4 text-sm font-semibold ${on ? "bg-white text-ink shadow-sm" : "text-ink-soft"}`;
+  // The title, summary and description as the product page draws them (components/product-about-view.tsx), from what is typed now.
+  const pagePreview = preview ? (
+    <div className="min-w-0">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-ink-soft">As buyers see it</p>
+        <div role="group" aria-label="Preview width" className="inline-flex rounded-full bg-sand p-1">
+          <button type="button" className={toggle(phone)} aria-pressed={phone} onClick={() => setPhone(true)}>
+            Phone
+          </button>
+          <button type="button" className={toggle(!phone)} aria-pressed={!phone} onClick={() => setPhone(false)}>
+            Wide
+          </button>
+        </div>
+      </div>
+      <p className="mt-1 text-xs text-ink-soft">The same words as in the form, laid out as your product&apos;s page shows them. The price and the Buy button aren&apos;t shown here: your page adds them from what you save. Nothing in it can be pressed here.</p>
+      <div className="mt-1 overflow-hidden rounded-2xl ring-1 ring-line">
+        <div
+          // Inert: its links stay out of the Tab order and out of reach of a click that would leave the form.
+          inert
+          // In the store's language, as the page is, so a screen reader would read its words in the right language (3.1.2).
+          lang={LANGUAGES[preview.language]?.locale ?? "en-US"}
+          className={`st-page st-theme-${preview.look.theme} mx-auto px-4 pb-8 pt-6`}
+          // Wide is the product page's own width (max-w-2xl, 672 px); the card and the title follow Phone or Wide, as the page does.
+          style={{ ...(lookStyle(preview.look) as React.CSSProperties), maxWidth: phone ? 390 : 672 }}
+        >
+          <div className={`st-card ${phone ? "p-6" : "p-8"}`}>
+            <p className={`font-display font-semibold leading-tight tracking-[-0.02em] ${phone ? "text-2xl" : "text-3xl"}`}>{draft.title.trim() || "Your product's name"}</p>
+            {draft.summary.trim() ? <p className="st-muted mt-4 text-lg leading-relaxed">{draft.summary}</p> : null}
+            {draft.about.trim() ? <ProductAbout blocks={aboutBlocks(draft.about)} language={preview.language} /> : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null;
   const currency = useStoreCurrency();
   const prefix = fieldPrefix(currency);
   const free = typedFree(draft.price);
@@ -387,11 +460,13 @@ function ProductForm({
         </p>
       </div>
 
-      <div>
+      <div className={pagePreview ? "grid min-w-0 gap-4 xl:grid-cols-2" : "min-w-0"}>
+      <div className="min-w-0">
         <label htmlFor={`product-about-${id}`} className="field-label">
           The full description <span className="font-normal text-ink-soft">(optional)</span>
         </label>
         <textarea
+          ref={aboutField}
           id={`product-about-${id}`}
           name="about"
           rows={7}
@@ -408,6 +483,71 @@ function ProductForm({
             ? "Reading what you wrote…"
             : `On this product's own page, which the card links to. A blank line starts a new paragraph. ${(MAX_ABOUT_LENGTH - draft.about.length).toLocaleString("en-US")} characters left.`}
         </p>
+        {offerOutline && !loadingAbout ? (
+          <div className="mt-2 rounded-[var(--r-sm)] border border-line bg-white p-3" data-product-outline="">
+            <p id={`product-outline-help-${id}`} className="text-sm text-ink-soft">
+              Not sure what to write? Start from an outline: it sets out what buyers look for, and each part in [brackets] is yours to replace with your own words, including the brackets. This product can&apos;t go on your store until you replace every one.
+            </p>
+            {draft.about.trim() ? (
+              <p className="mt-2 text-sm text-ink-soft">The outline goes only into an empty description. Clear the description to use it.</p>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm mt-2"
+                aria-describedby={`product-outline-help-${id}`}
+                onClick={() => {
+                  // Only into an empty description: nothing typed is replaced.
+                  if (draft.about.trim()) return;
+                  setDraft({ ...draft, about: PRODUCT_OUTLINE });
+                  setOfferOutline(false);
+                  // The button goes with the box: the focus moves to the description, the first part to replace selected.
+                  requestAnimationFrame(() => {
+                    const field = aboutField.current;
+                    if (!field) return;
+                    field.focus();
+                    const start = PRODUCT_OUTLINE.indexOf("[");
+                    field.setSelectionRange(start, PRODUCT_OUTLINE.indexOf("]", start) + 1);
+                  });
+                }}
+              >
+                Start from an outline
+              </button>
+            )}
+          </div>
+        ) : null}
+        {loadingAbout ? null : (
+          <TermsCheckPanel
+            id={id}
+            fieldId={`product-about-${id}`}
+            input={{
+              text: draft.about,
+              ownHosts,
+              // The checkout's one price: none to compare for a membership, a choose-your-price, a product sold by its
+              // options (the single price is then not charged) or a free one.
+              priceCents: !draft.every && !draft.pwyw && !product?.options.length && !free ? readMoney(draft.price, currency) : null,
+              currency,
+              // The consent the checkout will ask for once this is saved: a new product is plain digital content until
+              // a call or shipping is set on it (lib/digital-consent.ts, deliversDigitally).
+              immediateAccessConsent: !draft.every && deliversDigitally(product ?? {}),
+              // No end date exists on a product, so no deadline is ever real here.
+              realDeadline: false,
+              realStockLimit: product?.stock != null,
+              resaleLicense: false,
+            }}
+            onChange={(about) => setDraft({ ...draft, about })}
+          />
+        )}
+      </div>
+      {pagePreview ? (
+        <>
+          {/* Beside the description on a wide screen; on a narrow one, folded. */}
+          <div className="hidden xl:block">{pagePreview}</div>
+          <details className="xl:hidden">
+            <summary className="inline-flex min-h-11 cursor-pointer items-center text-sm font-semibold text-ink underline underline-offset-4">See it as buyers see it</summary>
+            <div className="mt-2">{pagePreview}</div>
+          </details>
+        </>
+      ) : null}
       </div>
 
       <div>
@@ -725,8 +865,14 @@ function OptionsBlock({
   onDetach,
   onLink,
   onUnlink,
+  taxOnTop,
+  tiers,
 }: {
   product: Product;
+  /** Whether sales tax or VAT is added on top of prices at checkout (lib/tax.ts). */
+  taxOnTop: boolean;
+  /** The plans members switch between (lib/tier-switch.ts): none offers an introductory or yearly price. */
+  tiers: readonly string[];
   fileBusyId: string | null;
   percent: number;
   fileError: { id: string; message: string } | null;
@@ -740,12 +886,28 @@ function OptionsBlock({
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  // WCAG 2.4.3 and 4.1.3: "Remove" gives way to its confirmation, so focus
+  // moves to what it says (read out at once), and back to "Remove" on "Keep it".
+  const removeSaid = useRef<HTMLParagraphElement>(null);
+  const removeButtons = useRef(new Map<string, HTMLButtonElement>());
+  const refocusRemove = useRef<string | null>(null);
+  useEffect(() => {
+    if (removingId) {
+      removeSaid.current?.focus();
+      return;
+    }
+    const back = refocusRemove.current;
+    refocusRemove.current = null;
+    if (back) removeButtons.current.get(back)?.focus();
+  }, [removingId]);
   const [label, setLabel] = useState("");
   const [price, setPrice] = useState("");
   const [details, setDetails] = useState("");
   const [sku, setSku] = useState("");
   const [best, setBest] = useState(false);
   const [busy, setBusy] = useState(false);
+  // The option whose new price is being checked before saving (487 [IT4], item 8; lib/price-review.ts).
+  const [optionReview, setOptionReview] = useState<string | null>(null);
   const inFlight = useRef(false);
   // A course or private podcast is its own delivery: every price opens it,
   // and a file or link on one is something extra that price includes.
@@ -773,15 +935,15 @@ function OptionsBlock({
           && Object.hasOwn(data, "error") && typeof (data as { error?: unknown }).error === "string"
           ? (data as { error: string }).error : null;
         setError(
-          reason === "too_many"
+          reason === "fast_money"
+            ? fastMoneyMessage((data as { passage?: unknown }).passage, "save")
+            : reason === "too_many"
             ? `A product carries up to ${MAX_OPTIONS} prices.`
             : reason === "label"
               ? "Give this price a name the buyer will read, like “5 weeks.”"
               : reason === "price"
                 ? optionPrice(currency)
-                : reason && Object.hasOwn(OPTION_MESSAGES, reason)
-                  ? OPTION_MESSAGES[reason]
-                  : "The price change was not confirmed. Reload to check its status before trying again.",
+                : optionRefusalWords(reason, OPTION_MESSAGES),
         );
         return;
       }
@@ -789,7 +951,7 @@ function OptionsBlock({
       if (confirmation) toast(confirmation);
       router.refresh();
     } catch {
-      setError("The price change was not confirmed. Reload to check its status before trying again.");
+      setError(OPTION_NOT_CONFIRMED);
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -837,7 +999,10 @@ function OptionsBlock({
             inputMode={currency === "jpy" ? "numeric" : "decimal"}
             required
             value={price}
-            onChange={(event) => setPrice(event.target.value)}
+            onChange={(event) => {
+              setPrice(event.target.value);
+              setOptionReview(null);
+            }}
             placeholder={currency === "jpy" ? "3900" : "39"}
             className="field mt-1"
           />
@@ -879,7 +1044,7 @@ function OptionsBlock({
         <span>
           Recommend this one
           <span className="block font-normal text-ink-soft">
-            Chosen when the page opens and marked “Recommended.” One per product: picking it here unpicks any other.
+            Marked “Recommended” and listed first. Buyers still pick it themselves: nothing is chosen for them. One per product: picking it here unpicks any other.
           </span>
         </span>
       </label>
@@ -946,21 +1111,77 @@ function OptionsBlock({
       <ul className="mt-3 space-y-2">
         {product.options.map((option, index) => (
           <li key={option.id} className="rounded-2xl bg-sand p-3">
-            {editingId === option.id ? (
-              form(
-                "Save",
-                () =>
-                  run(
-                    { action: "edit", id: option.id, label, price, details, best, ...(shipped ? { sku } : {}) },
-                    () => setEditingId(null),
-                    "Price saved.",
-                  ),
-                () => {
-                  setEditingId(null);
-                  setError(null);
+            {editingId === option.id ? (() => {
+              // The payment plan and this price's own payment in it, and whether buyers are offered it now and with the new price (lib/product-extras.ts, activePlan).
+              const ownPayment = product.plan?.options?.[option.id];
+              const review = optionPriceReview(
+                { label, priceCents: option.priceCents, details, sku: shipped ? sku : undefined },
+                price,
+                {
+                  hidden: product.hidden,
+                  interval: product.recurring?.interval ?? null,
+                  shown: optionDelivers(option, opens),
+                  taxOnTop,
+                  plan: product.plan && ownPayment ? { payments: product.plan.payments, cents: ownPayment } : null,
+                  planBefore: activePlan(product as Listing) !== null,
+                  planAfter: (cents) => activePlan({ ...product, options: product.options.map((o) => (o.id === option.id ? { ...o, priceCents: cents } : o)) } as Listing) !== null,
                 },
-              )
-            ) : (
+                // Only a price the save can take is reviewed; anything else the save itself explains.
+                (typed) => {
+                  const cents = readMoney(typed, currency);
+                  return cents !== null && priceInRange(cents, currency) ? cents : null;
+                },
+                (cents) => formatMoney(cents, currency),
+              );
+              const save = () =>
+                run(
+                  { action: "edit", id: option.id, label, price: price.trim(), details, best, ...(shipped ? { sku } : {}) },
+                  () => {
+                    setEditingId(null);
+                    setOptionReview(null);
+                  },
+                  "Price saved.",
+                );
+              return (
+                <>
+                  {form(
+                    "Save",
+                    () => {
+                      // A new price buyers meet at once is checked first (487 [IT4], item 8).
+                      if (review && optionReview !== option.id) {
+                        setOptionReview(option.id);
+                        requestAnimationFrame(() => document.getElementById(`option-${option.id}-price-review-title`)?.focus());
+                        return;
+                      }
+                      save();
+                    },
+                    () => {
+                      setEditingId(null);
+                      setOptionReview(null);
+                      setError(null);
+                    },
+                  )}
+                  {optionReview === option.id && review ? (
+                    <div className="mt-3 rounded-[var(--r-md)] bg-white p-4 text-sm text-ink">
+                      <h3 id={`option-${option.id}-price-review-title`} tabIndex={-1} className="font-semibold">Check what buyers pay</h3>
+                      <dl className="mt-2 divide-y divide-line">
+                        {review.rows.map((row) => (
+                          <div key={row.key} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                            <dt className="basis-full font-semibold sm:basis-28 sm:shrink-0">{row.label}</dt>
+                            <dd className="min-w-0 basis-full break-words sm:basis-0 sm:flex-1"><span className="block">{`Now: ${row.now}`}</span><span className="block font-semibold">{`Once you save: ${row.then}`}</span></dd>
+                            <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => { setOptionReview(null); requestAnimationFrame(() => document.getElementById(`option-price-${product.id}`)?.focus()); }}>Change<span className="sr-only">{` the price of ${row.label}`}</span></button></dd>
+                          </div>
+                        ))}
+                      </dl>
+                      <p className="mt-2">{review.note}</p>
+                      <button type="button" className="btn btn-primary btn-sm mt-3" disabled={busy} aria-busy={busy} onClick={save}>
+                        Yes, save what buyers pay
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              );
+            })() : (
               <>
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <p className="font-bold text-ink">
@@ -1039,6 +1260,10 @@ function OptionsBlock({
                   {removingId === option.id ? null : (
                     <button
                       type="button"
+                      ref={(button) => {
+                        if (button) removeButtons.current.set(option.id, button);
+                        else removeButtons.current.delete(option.id);
+                      }}
                       onClick={() => {
                         setRemovingId(option.id);
                         setError(null);
@@ -1070,11 +1295,30 @@ function OptionsBlock({
 
                 {removingId === option.id ? (
                   <div className="mt-2 rounded-2xl border-2 border-pink-brand/30 bg-white p-3">
-                    <p className="text-sm text-ink-soft">
+                    <p ref={removeSaid} tabIndex={-1} className="text-sm text-ink-soft">
                       Remove <strong className="text-ink">{option.label}</strong>
-                      {option.file
-                        ? ". The file on it is deleted with it."
-                        : ". Nothing else on the product changes."}
+                      {`. ${optionRemovalWords(
+                        { hasFile: Boolean(option.file), delivers: Boolean(option.file || option.link), extra: Boolean(product.course || product.podcast) },
+                        {
+                          options: product.options.length,
+                          interval: product.recurring?.interval ?? null,
+                          hidden: product.hidden,
+                          ownPriceCents: product.priceCents,
+                          // What sells it with no option left (lib/store-checkout.ts, canSellProduct).
+                          missing: product.course ? (product.course.lessons > 0 ? null : "lesson") : product.podcast ? (product.podcast.episodes > 0 ? null : "episode") : activeShipping(product) || product.file || product.link ? null : "delivery",
+                          ownDelivery: Boolean(product.file || product.link),
+                          // Whether it can be bought, with and without this option, by the checkout's own rule (lib/product-option.ts, handsOver).
+                          sellsBefore: handsOver(product),
+                          sellsAfter: handsOver({ ...product, options: product.options.filter((o) => o.id !== option.id) }),
+                          payments: product.recurring?.payments ?? 0,
+                          // What the checkout would offer without this option (lib/store-checkout.ts): read, never assumed from what is stored.
+                          introKept: activeIntro({ ...product, options: product.options.filter((o) => o.id !== option.id) }, tiers) !== null,
+                          yearlyKept: activeYearly({ ...product, options: product.options.filter((o) => o.id !== option.id) }, tiers) !== null,
+                          planBefore: activePlan(product as Listing) !== null,
+                          planAfter: activePlan({ ...product, options: product.options.filter((o) => o.id !== option.id) } as Listing) !== null,
+                        },
+                        (cents) => formatMoney(cents, currency),
+                      )}`}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2">
                       <button
@@ -1093,7 +1337,10 @@ function OptionsBlock({
                       </button>
                       <button
                         type="button"
-                        onClick={() => setRemovingId(null)}
+                        onClick={() => {
+                          refocusRemove.current = option.id;
+                          setRemovingId(null);
+                        }}
                         className="btn btn-secondary btn-sm"
                       >
                         Keep it
@@ -1352,16 +1599,15 @@ function FileBlock({
           >
             Where the buyer should be sent
           </label>
-          <input
+          <UrlField
             id={`link-${target.id}`}
-            type="url"
             value={url}
             autoFocus
-            onChange={(event) => setUrl(event.target.value)}
-            placeholder="https://"
+            onChange={setUrl}
+            describedBy={`link-${target.id}-help`}
             className="field mt-1"
           />
-          <p className="mt-1 text-sm text-ink-soft">
+          <p id={`link-${target.id}-help`} className="mt-1 text-sm text-ink-soft">
             A Google Drive folder, a private video page, a Notion page — anything
             with an https address. Check that anyone with the link can open it.
             {membership
@@ -1540,7 +1786,11 @@ export function ProductEditor({
   preorders = {},
   mailAddress = "",
   cover = null,
+  look = null,
   pairChoices = [],
+  ownHosts = [],
+  tiers = [],
+  taxOnTop,
 }: {
   /** The products shown: every one, or one page of a long list. */
   products: Product[];
@@ -1586,8 +1836,16 @@ export function ProductEditor({
   mailAddress?: string;
   /** The store's color, letters, name and language, for the cover maker (components/cover-maker.tsx). */
   cover?: (CoverLook & { language: LanguageCode }) | null;
+  /** The store's look, for the preview of a product's own words. */
+  look?: StoreLook | null;
   /** The store's published products, by name: what a product's "Goes well with" can pick (lib/store-collections.ts). */
   pairChoices?: { id: string; title: string }[];
+  /** The store's own domain, if it has one: not warned as "another site" in what the creator writes (493 [DE2]). */
+  ownHosts?: string[];
+  /** The plans members switch between (lib/tier-switch.ts): none takes an introductory or yearly price. */
+  tiers?: readonly string[];
+  /** Whether sales tax or VAT is added on top of prices at checkout (lib/tax.ts). */
+  taxOnTop: boolean;
 }) {
   const router = useRouter();
   const sid = useStudioStore();
@@ -1596,8 +1854,18 @@ export function ProductEditor({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY);
+  // The form as it was opened: leaving with changes to it asks first (487 [IT4], item 6), an untouched one never.
+  const [opened, setOpened] = useState<Draft>(EMPTY);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useLeaveGuard((adding || editingId !== null) && JSON.stringify(draft) !== JSON.stringify(opened) && !busy);
+  // A new price on a product buyers can see is shown, old and new, before it is saved (487 [IT4], pattern 8): the id under review.
+  const [priceReview, setPriceReview] = useState<string | null>(null);
+  /** "Change" on a row of the price review: back to the field it names, or to the price when that field is not shown. */
+  function changePrice(productId: string, field: PriceField = "price") {
+    setPriceReview(null);
+    requestAnimationFrame(() => (document.getElementById(`product-${field}-${productId}`) ?? document.getElementById(`product-price-${productId}`))?.focus());
+  }
   const [fileBusyId, setFileBusyId] = useState<string | null>(null);
   const [percent, setPercent] = useState(0);
   const [fileError, setFileError] = useState<{ id: string; message: string } | null>(
@@ -1755,13 +2023,14 @@ export function ProductEditor({
     setLoadingAbout(false);
     setAboutUnread(false);
     setDraft(EMPTY);
+    setOpened(EMPTY);
     setError(null);
     setEditingId(null);
     setAdding(true);
   }
 
   async function startEditing(product: Product) {
-    setDraft({
+    const form: Draft = {
       title: product.title,
       summary: product.summary,
       price: moneyField(product.priceCents, currency),
@@ -1774,7 +2043,10 @@ export function ProductEditor({
       pwyw: product.pwyw !== null,
       suggested: product.pwyw ? moneyField(product.pwyw.suggestedCents, currency) : "",
       about: "",
-    });
+    };
+    setDraft(form);
+    setOpened(form);
+    setPriceReview(null);
     setError(null);
     setAdding(false);
     setEditingId(product.id);
@@ -1800,6 +2072,7 @@ export function ProductEditor({
     if (about !== null) {
       const read = about;
       setDraft((current) => ({ ...current, about: read }));
+      setOpened((current) => ({ ...current, about: read }));
     } else {
       setAboutUnread(true);
       setError("Your description could not be read just now, so it is not shown. Anything else you change is saved and the description is kept as it is.");
@@ -1825,6 +2098,8 @@ export function ProductEditor({
       {adding ? (
         <div className="mt-5">
           <ProductForm
+            ownHosts={ownHosts}
+            preview={look && cover ? { look, language: cover.language } : null}
             draft={draft}
             setDraft={setDraft}
             busy={busy}
@@ -1912,10 +2187,63 @@ export function ProductEditor({
             key={product.id}
             className="rounded-2xl border border-line bg-paper p-4"
           >
-            {editingId === product.id ? (
+            {editingId === product.id ? (() => {
+              // What this save changes in what buyers pay, if anything (lib/price-review.ts): a price, a membership's, a price they choose.
+              const review = reviewPrice(
+                {
+                  hidden: product.hidden,
+                  options: product.options.length,
+                  priceCents: product.priceCents,
+                  interval: product.recurring?.interval ?? null,
+                  suggestedCents: product.pwyw?.suggestedCents ?? null,
+                  // "Now" is what the checkout offers, never only what is stored (lib/store-checkout.ts).
+                  intro: activeIntro(product, tiers),
+                  yearlyCents: activeYearly(product, tiers)?.cents ?? null,
+                  trialDays: product.recurring?.trialDays ?? 0,
+                  payments: product.recurring?.payments ?? 0,
+                  id: product.id,
+                  tiers,
+                  bounds: priceBounds(currency),
+                  // What the save refuses for this kind of product (lib/store.ts, editProduct; lib/pay-what-you-want.ts, pwywProblem).
+                  refuses: {
+                    free: Boolean(product.call || product.course || product.podcast || product.shipping) || isBundle(product),
+                    membership: Boolean(product.call || product.shipping) || isBundle(product),
+                    choose: Boolean(product.call || product.plan || product.bumps.length || product.shipping) || isBundle(product),
+                  },
+                  taxOnTop,
+                  // The payment plan, offered now and once saved at the new price and schedule (lib/product-extras.ts).
+                  plan: product.plan && product.options.length === 0 ? { payments: product.plan.payments, cents: product.plan.amountCents } : null,
+                  planBefore: activePlan(product as Listing) !== null,
+                  planAfter: (next) => activePlan({ ...product, priceCents: next.priceCents, recurring: next.interval ? { ...(product.recurring ?? { trialDays: 0, payments: 0 }), interval: next.interval } : null, pwyw: null } as Listing) !== null,
+                },
+                // The words the save checks, the description as it will be sent (unread and untouched: not sent).
+                { ...draft, about: aboutUnread && !draft.about ? "" : draft.about },
+                (typed) => readMoney(typed, currency),
+                (cents) => formatMoney(cents, currency),
+              );
+              const priceChanged = review !== null;
+              const save = () => {
+                const payload = payloadOf(draft);
+                if (aboutUnread && !draft.about) delete payload.about;
+                run(
+                  { action: "edit", id: product.id, ...payload },
+                  () => {
+                    setEditingId(null);
+                    setPriceReview(null);
+                  },
+                  "Product saved.",
+                );
+              };
+              return (
+              <>
               <ProductForm
+                ownHosts={ownHosts}
+                preview={look && cover ? { look, language: cover.language } : null}
                 draft={draft}
-                setDraft={setDraft}
+                setDraft={(next) => {
+                  setDraft(next);
+                  if (next.price !== draft.price || next.every !== draft.every || next.pwyw !== draft.pwyw || next.suggested !== draft.suggested || next.introPrice !== draft.introPrice || next.introCount !== draft.introCount || next.yearlyPrice !== draft.yearlyPrice || next.trial !== draft.trial || next.payments !== draft.payments) setPriceReview(null);
+                }}
                 busy={busy}
                 error={error}
                 submitLabel="Save"
@@ -1923,20 +2251,42 @@ export function ProductEditor({
                 loadingAbout={loadingAbout}
                 onSubmit={() => {
                   if (loadingAbout) return;
-                  const payload = payloadOf(draft);
-                  if (aboutUnread && !draft.about) delete payload.about;
-                  run(
-                    { action: "edit", id: product.id, ...payload },
-                    () => setEditingId(null),
-                    "Product saved.",
-                  );
+                  if (priceChanged && priceReview !== product.id) {
+                    setPriceReview(product.id);
+                    requestAnimationFrame(() => document.getElementById(`product-${product.id}-price-review-title`)?.focus());
+                    return;
+                  }
+                  save();
                 }}
                 onCancel={() => {
                   setEditingId(null);
+                  setPriceReview(null);
                   setError(null);
                 }}
               />
-            ) : (
+              {priceReview === product.id && review ? (
+                <div className="mt-3 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink">
+                  <h3 id={`product-${product.id}-price-review-title`} tabIndex={-1} className="font-semibold">Check what buyers pay</h3>
+                  {/* A summary list (GOV.UK "Check answers"): what buyers pay changes as soon as it is saved. */}
+                  <dl className="mt-2 divide-y divide-line">
+                    {review.rows.map((row) => (
+                      <div key={row.key} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                        <dt className="basis-full font-semibold sm:basis-28 sm:shrink-0">{row.label}</dt>
+                        <dd className="min-w-0 basis-full break-words sm:basis-0 sm:flex-1"><span className="block">{`Now: ${row.now}`}</span><span className="block font-semibold">{`Once you save: ${row.then}`}</span></dd>
+                        <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => changePrice(product.id, row.field)}>Change<span className="sr-only">{` ${row.label.toLowerCase()}`}</span></button></dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <p className="mt-2">{review.note}</p>
+                  {/* The confirmation is here, after what it confirms, so the reading and the focus order end on it. */}
+                  <button type="button" className="btn btn-primary btn-sm mt-3" disabled={busy} aria-busy={busy} onClick={save}>
+                    Yes, save what buyers pay
+                  </button>
+                </div>
+              ) : null}
+              </>
+              );
+            })() : (
               <>
                 <div className="flex items-start gap-3">
                   {product.image ? (
@@ -2149,6 +2499,7 @@ export function ProductEditor({
                     preorders={preorders[product.id] ?? null}
                     preorderBlocked={preorderProblem(product)}
                     hasContent={hasContent(product)}
+                    price={formatMoney(product.priceCents, currency)}
                   />
                 ) : null}
                 {product.call || product.course || product.shipping ? null : <BundleToggle product={product} />}
@@ -2158,6 +2509,8 @@ export function ProductEditor({
                 {product.shipping ? (
                   <OptionsBlock
                     product={product}
+                    taxOnTop={taxOnTop}
+                    tiers={tiers}
                     fileBusyId={fileBusyId}
                     percent={percent}
                     fileError={fileError}
@@ -2192,6 +2545,8 @@ export function ProductEditor({
                 {(isFree(product) || product.pwyw) && product.options.length === 0 ? null : (
                 <OptionsBlock
                   product={product}
+                  taxOnTop={taxOnTop}
+                  tiers={tiers}
                   fileBusyId={fileBusyId}
                   percent={percent}
                   fileError={fileError}
@@ -2215,6 +2570,8 @@ export function ProductEditor({
                 {(product.course || product.podcast) && !product.recurring && !isFree(product) && !product.pwyw ? (
                   <OptionsBlock
                     product={product}
+                    taxOnTop={taxOnTop}
+                    tiers={tiers}
                     fileBusyId={fileBusyId}
                     percent={percent}
                     fileError={fileError}

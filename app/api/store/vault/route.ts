@@ -1,4 +1,4 @@
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import { reserveStoreUpload, reserveUploadControl } from "@/lib/upload-budget";
 import { openReservedVault, closeReservedVault, abortReservedVault } from "@/lib/vault-storage";
 import type { NextRequest } from "next/server";
@@ -6,7 +6,7 @@ import { readKind } from "@/lib/catalog";
 import { ITEM_ID_PATTERN, findLesson, readCourses } from "@/lib/course";
 import { rememberFolderOwner } from "@/lib/delivery";
 import { ALLOWED_CONTENT_TYPES, MAX_FILE_BYTES, safeFileName } from "@/lib/product-file";
-import { storageRefusal, standingOf } from "@/lib/plan-standing";
+import { costPauseCode, storageRefusal, standingOf } from "@/lib/plan-standing";
 import { storageBrakeFor } from "@/lib/storage-quota";
 import { ownsDeliveryId, storeFolder, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -67,11 +67,14 @@ export async function POST(request: NextRequest) {
         const courses = ITEM_ID_PATTERN.test(ownerId) ? await readCourses(courseIds) : new Map();
         if (![...courses.values()].some((course) => findLesson(course, ownerId) !== null)) return fail("unknown", 404);
       }
-      if (!(await withinService("vault-open", folder, OPENS_PER_HOUR, 3600, store))) return fail("slow_down", 429);
+      const refused = await withinServiceWhy("vault-open", folder, OPENS_PER_HOUR, 3600, store);
+      if (refused) return serviceRefusedJson(refused, "slow_down");
       // What a store may keep goes by where it stands with its plan (lib/plan-standing.ts).
       const standing = standingOf(store);
       quotaRefusal = storageRefusal(standing);
       if (body.multipart !== true) return fail("upload_refresh", 409);
+      // Nothing new is stored while a renewal is unpaid (232 [CA1] unit 4).
+      { const paused = costPauseCode(store); if (paused) return fail(paused, 409); }
       if (!(await reserveStoreUpload(store, bytes, "r2"))) return fail("upload_budget_unavailable", 503);
       await rememberFolderOwner(folder, ref);
 
@@ -86,7 +89,8 @@ export async function POST(request: NextRequest) {
     if (action === "sign") {
       const numbers = Array.isArray(body.numbers) ? body.numbers.filter((n): n is number => Number.isInteger(n)) : [];
       if (!numbers.length || numbers.length > PIECES_PER_ASK) return fail("invalid");
-      if (!(await withinService("vault-sign", folder, ASKS_PER_HOUR, 3600, store))) return fail("slow_down", 429);
+      const refused = await withinServiceWhy("vault-sign", folder, ASKS_PER_HOUR, 3600, store);
+      if (refused) return serviceRefusedJson(refused, "slow_down");
       if (!(await reserveUploadControl(store))) return fail("upload_budget_unavailable", 503);
       const pieces = await signPieces(pathname, numbers);
       if (!pieces) return fail("unknown", 404);

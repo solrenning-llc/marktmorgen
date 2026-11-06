@@ -41,6 +41,7 @@ const TIKTOK_TOKEN = "tt" + "y".repeat(40);
 
 let sessions: Record<string, unknown>[] = [];
 let refunds: Record<string, unknown>[] = [];
+let disputes: Record<string, unknown>[] = [];
 const sentOut: { url: string; body: Record<string, unknown>; headers: Record<string, string> }[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -57,6 +58,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (path === "/checkout/sessions") return json({ object: "list", data: sessions, has_more: false });
   if (path === "/refunds") return json({ object: "list", data: refunds, has_more: false });
+  if (path === "/disputes") return json({ object: "list", data: disputes, has_more: false });
   return json({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 
@@ -127,6 +129,13 @@ async function main(): Promise<void> {
     { id: "re_test_fixture1", status: "succeeded", amount: 3000, currency: "usd", created: Math.floor((NOW - DAY) / 1000), payment_intent: "pi_refunded" },
     { id: "re_test_fixture2", status: "succeeded", amount: 500, currency: "usd", created: Math.floor((NOW - DAY) / 1000), payment_intent: "pi_unknown" },
     { id: "re_test_fixture3", status: "failed", amount: 999, currency: "usd", created: Math.floor((NOW - DAY) / 1000), payment_intent: "pi_refunded" },
+    // From before the store changed its currency (22 [E5], unit 2b): left out of every amount, and counted.
+    { id: "re_test_fixture4", status: "succeeded", amount: 700, currency: "eur", created: Math.floor((NOW - DAY) / 1000), payment_intent: "pi_old_currency" },
+  ];
+  // Disputes in euros: one the bank holds (counted), one the creator won (in no figure).
+  disputes = [
+    { id: "dp_test_fixture1", status: "lost", amount: 900, currency: "eur", created: Math.floor((NOW - DAY) / 1000), payment_intent: "pi_old_currency" },
+    { id: "dp_test_fixture2", status: "won", amount: 400, currency: "eur", created: Math.floor((NOW - DAY) / 1000), payment_intent: "pi_old_currency" },
   ];
   const sales = (await readSales(store, NOW))!;
   is("money by the buyer's country", sales.byCountryIn?.d7, [{ country: "DE", cents: 7000, sales: 2 }, { country: "US", cents: 3000, sales: 1 }]);
@@ -138,6 +147,8 @@ async function main(): Promise<void> {
   ]);
   is("and under its product", sales.refundsByProduct, { prod000001: { refunds: 1, cents: 3000 } });
   is("daily refunds stay on their recorded date", sales.refundDays, { [new Date(NOW - DAY).toISOString().slice(0, 10)]: 3500 });
+  is("a refund and a dispute in another currency are in none of those, counted apart; a dispute the creator won is not", [sales.takenBackElsewhere, sales.disputesIn?.d7], [{ refunds: 1, disputes: 1 }, []]);
+  disputes = [];
 
   part("Reused ad names stay separate in the payment reading");
   const originalSessions = sessions;

@@ -6,12 +6,9 @@ export async function checkHomeModules({browser,LOCAL,axeSource,is}){
    const page=await context.newPage();let writes=0;
    await page.route("**/api/**",async route=>{if(route.request().method()!=="GET"){writes++;await route.abort();}else await route.continue();});
    await page.goto(LOCAL+"/",{waitUntil:"domcontentloaded",timeout:60000});
-   const discovery=page.getByRole("region",{name:"Everything in one place",exact:true});
-   is("ME3 home module summary has no detailed cards "+width,await discovery.locator("li").count(),0);
-   const more=discovery.getByRole("link",{name:"Explore all 14 tools and their conditions",exact:true});
-   await more.focus();is("ME3 module discovery focus "+width,await more.evaluate(n=>n===document.activeElement),true);
-   is("ME3 module discovery destination "+width,await more.getAttribute("href"),"/platform#home-modules-heading");
-   await Promise.all([page.waitForURL(LOCAL+"/platform#home-modules-heading"),more.click()]);
+   is("ME3 footer reaches the feature page "+width,await page.locator("footer a[href=\"/platform\"]").count()>0,true);
+   // VS1: the home page no longer carries a module summary; the feature page keeps all fourteen, reached from the footer of every page.
+   await page.goto(LOCAL+"/platform#home-modules-heading",{waitUntil:"domcontentloaded",timeout:60000});
    const section=page.getByRole("region",{name:"Everything in one place",exact:true});
    await section.scrollIntoViewIfNeeded();
    is("ME3 existing feature page keeps all14 factual modules "+width,await section.locator("li").count(),14);

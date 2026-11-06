@@ -18,7 +18,7 @@
  * kept apart (lib/assignment.ts), as a quiz's questions are. Browser-safe.
  */
 import type { Tier } from "@/lib/plan";
-import { type PlanFields, standingOf } from "@/lib/plan-standing";
+import { type PlanFields, costStandingOf } from "@/lib/plan-standing";
 
 /** What the lesson record keeps about its assignment. */
 export type TaskSetup = {
@@ -56,7 +56,8 @@ export const MAX_STORE_TASK_BYTES = Math.max(...Object.values(TASK_ROOM_BYTES));
 
 /** The room this store's students have right now. */
 export function taskRoomFor(store: PlanFields & { tier?: Tier }, nowSeconds = Date.now() / 1000): number {
-  const standing = standingOf(store, nowSeconds);
+  // No new hand-ins while a renewal is unpaid (232 [CA1] unit 4); those kept stay.
+  const standing = costStandingOf(store, nowSeconds);
   if (standing === "paid") return TASK_ROOM_BYTES[store.tier ?? "creator"] ?? TASK_ROOM_BYTES.creator;
   return standing === "trial" ? TRIAL_TASK_ROOM_BYTES : 0;
 }

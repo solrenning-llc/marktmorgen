@@ -1,0 +1,11 @@
+/* Signing in is a keyboard task. Select immediate scrolling before focus
+ * arrives, rather than switching a smooth scroll during :focus-visible.
+ * A small scroll inset keeps native focus away from the viewport edge.
+ * This changes scrolling only: the morning colors, layout and type stay in
+ * app/home.css. Native keyboard visibility is still checked without scripted
+ * focus/scroll in tests/e2e/accessibility-public-matrix.mjs.
+ */
+html:has(.hm-signin-main) {
+  scroll-behavior: auto;
+  scroll-padding-block: 1rem;
+}

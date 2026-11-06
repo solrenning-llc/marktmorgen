@@ -11,8 +11,10 @@
  * on a store, and a purchase for several people — could only be looked at on
  * a store with products that can sell, which production does not have yet.
  *
- * What runs: the real app, built as the site builds it (`next build`, then
- * `next start`; E2E_DEV=1 runs `next dev` instead), unchanged, pointed at one local
+ * What runs: the production build first, then a separate disposable copy
+ * with an explicit synthetic reviewed-account mail fixture and the real
+ * transport guard (Lua is proved separately). E2E_DEV=1 uses next dev on that
+ * copy. The production mail policy stays null and unchanged. Pointed at one local
  * stand-in for its database, for Stripe and for the email sender
  * (tests/e2e/services.mjs), through the addresses the code already accepts
  * for exactly this (STRIPE_CONNECT_API_BASE, RESEND_API_BASE, and the
@@ -52,6 +54,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { startServices } from "./services.mjs";
+import { prepareReviewedMailApp } from "./reviewed-mail-app.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "../..");
@@ -73,6 +76,7 @@ const env = {
   STRIPE_SECRET_KEY: "sk_test_local_only_a_stand_in_0000",
   STRIPE_CONNECT_API_BASE: FAKE,
   RESEND_API_KEY: "re_local_only_a_stand_in",
+  RESEND_READ_API_KEY: "re_local_only_a_stand_in",
   // Google Fonts cannot be reached from here: next/font is answered by a stand-in (google-fonts-mock.cjs).
   NEXT_FONT_GOOGLE_MOCKED_RESPONSES: join(here, "google-fonts-mock.cjs"),
   E2E_FONT_ORIGIN: FAKE,
@@ -148,6 +152,7 @@ const words = async (locator) => (await locator.innerText()).replace(/\s+/g, " "
 
 const services = await startServices(SERVICES);
 let app = null;
+let reviewedApp = null;
 let browser = null;
 /** Starts the app again (set once the app is up). */
 let restartApp = async () => {};
@@ -215,13 +220,15 @@ try {
     if (built.status !== 0) throw new Error(`the app did not build:\n${built.said.slice(-3000)}`);
   }
 
+  reviewedApp = await prepareReviewedMailApp(root, env);
+
   // The app. A dev server stopped while writing can leave Turbopack's cache
   // unreadable, and the next one panics on it; it is only a cache, so it is
   // put aside once and the app started again.
   let log = "";
   const start = () => {
     log = "";
-    app = spawn("npx", ["next", PRODUCTION ? "start" : "dev", "-p", String(APP)], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+    app = spawn(process.execPath, [join(reviewedApp.root, "node_modules/next/dist/bin/next"), PRODUCTION ? "start" : "dev", "-H", "127.0.0.1", "-p", String(APP)], { cwd: reviewedApp.root, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
     app.stdout.on("data", (chunk) => {
       log += chunk;
       appLog += chunk;
@@ -243,12 +250,12 @@ try {
     if (/panicked/.test(log) && !retried) {
       retried = true;
       await stop(app);
-      rmSync(join(root, ".next", "dev", "cache"), { recursive: true, force: true });
+      rmSync(join(reviewedApp.root, ".next", "dev", "cache"), { recursive: true, force: true });
       start();
       started = Date.now();
     }
     if (Date.now() - started > 180_000 || /panicked/.test(log)) throw new Error(`the app did not start:\n${log.slice(-2000)}`);
-    const up = await fetch(`${LOCAL}/@localshop`).then((r) => r.status === 200).catch(() => false);
+    const up = await fetch(`${LOCAL}/@localshop`, { signal: AbortSignal.timeout(5_000) }).then((r) => r.status === 200).catch(() => false);
     if (up) break;
     await new Promise((wait) => setTimeout(wait, 1500));
   }
@@ -275,10 +282,10 @@ try {
     if (restarts >= 2) throw new Error("the product page was not found on three dev servers in a row");
     console.log("the first product page was not found; the dev server is started again");
     await stop(app);
-    rmSync(join(root, ".next", "dev", "cache"), { recursive: true, force: true });
+    rmSync(join(reviewedApp.root, ".next", "dev", "cache"), { recursive: true, force: true });
     start();
     const again = Date.now();
-    while (!(await fetch(`${LOCAL}/@localshop`).then((r) => r.status === 200).catch(() => false))) {
+    while (!(await fetch(`${LOCAL}/@localshop`, { signal: AbortSignal.timeout(5_000) }).then((r) => r.status === 200).catch(() => false))) {
       if (Date.now() - again > 180_000) throw new Error(`the app did not start again:\n${log.slice(-2000)}`);
       await new Promise((wait) => setTimeout(wait, 1500));
     }
@@ -296,10 +303,10 @@ try {
   restartApp = async () => {
     for (let restarts = 0; ; restarts += 1) {
       await stop(app);
-      rmSync(join(root, ".next", "dev", "cache"), { recursive: true, force: true });
+      rmSync(join(reviewedApp.root, ".next", "dev", "cache"), { recursive: true, force: true });
       start();
       const again = Date.now();
-      while (!(await fetch(`${LOCAL}/@localshop`).then((r) => r.status === 200).catch(() => false))) {
+      while (!(await fetch(`${LOCAL}/@localshop`, { signal: AbortSignal.timeout(5_000) }).then((r) => r.status === 200).catch(() => false))) {
         if (Date.now() - again > 180_000) throw new Error(`the app did not start again:\n${log.slice(-2000)}`);
         await new Promise((wait) => setTimeout(wait, 1500));
       }
@@ -2044,13 +2051,13 @@ try {
     await open(studio, `${LOCAL}/studio?store=${fresh}`);
     const setup = studio.locator("section#setup-ai");
     is("a store with nothing on it is offered a first draft", await setup.count(), 1);
-    await setup.getByLabel("What you do, and for whom").fill("I teach busy parents to cook a week of dinners in two hours on Sunday.");
+    await setup.getByLabel("What you do, and for whom").fill("I teach busy parents to cook a week of dinners in two hours on Sunday. My planner is $12 and the club is $7 a month.");
     await setup.getByRole("button", { name: "Draft my store" }).click();
     await setup.getByRole("radio", { name: "Cook once, eat all week." }).check();
     is("it shows the products to keep, each editable", [await setup.locator("#setup-title-0").inputValue(), await setup.locator("#setup-price-1").inputValue()], ["Sunday Meal Planner", "7"]);
     await setup.locator("#setup-price-0").fill("14");
     await setup.getByRole("button", { name: "Keep what I chose" }).click();
-    await studio.getByText("Kept: the line under your name, 2 draft products, your questions and answers.").first().waitFor({ timeout: 30_000 });
+    await studio.getByText("Kept: the line under your name, 2 draft products, each with its sales page, your questions and answers.").first().waitFor({ timeout: 30_000 });
     await open(page, `${LOCAL}/@freshshop`);
     const front = await words(page.locator("main"));
     is("the line is under the name, the questions are on the page, and the drafts are not for sale", [front.includes("Cook once, eat all week."), front.includes("How do I get the planner?"), front.includes("Sunday Meal Planner")], [true, true, false]);
@@ -3587,9 +3594,12 @@ try {
     await open(studio, `${LOCAL}/studio`);
     await studio.locator("button[aria-expanded]", { hasText: "Weeknight Dinners" }).first().click();
     await studio.getByRole("button", { name: "Tell buyers about an update" }).first().click();
-    const form = studio.locator("form", { has: studio.getByRole("button", { name: "Email every buyer" }) });
+    const form = studio.locator("form", { has: studio.getByRole("button", { name: "Check before sending" }) });
     await form.getByLabel("What changed (optional)").fill("Ten new recipes.");
-    await form.getByRole("button", { name: "Email every buyer" }).click();
+    // The first press shows what will go out (487 [IT4], pattern 8); only "Yes, email every buyer" sends.
+    await form.getByRole("button", { name: "Check before sending" }).click();
+    await form.getByRole("heading", { name: "Check before it goes out" }).waitFor({ timeout: 30_000 });
+    await form.getByRole("button", { name: "Yes, email every buyer" }).click();
     const said = form.getByRole("alert");
     await said.waitFor({ timeout: 30_000 });
     is("on a store without Pro, it says where it is, and sends nothing", await words(said), "Emails to your buyers are on Pro, with your store's email set up under Email.");
@@ -3894,6 +3904,7 @@ try {
   if (browser) await browser.close().catch(() => {});
   await stop(app);
   await services.close().catch(() => {});
+  if (reviewedApp) await reviewedApp.cleanup();
   if (process.env.E2E_APP_LOG) writeFileSync(process.env.E2E_APP_LOG, appLog);
 }
 

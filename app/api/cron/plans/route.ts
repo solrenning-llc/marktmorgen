@@ -5,6 +5,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { settlePlans } from "@/lib/plans";
 import { isBillingConfigured } from "@/lib/billing";
 import { syncSubscriptions } from "@/lib/billing-sync";
+import { syncPlanDisputes } from "@/lib/plan-disputes";
 import { moveAllStores } from "@/lib/store";
 import { pruneResearch } from "@/lib/creator-research-store";
 import { recoverFailedPayments } from "@/lib/payment-recovery";
@@ -28,6 +29,8 @@ export const maxDuration = 60;
  *     at Stripe (lib/billing-sync.ts), so a store that stopped paying us
  *     stops selling, and one that paid while its way back got lost is
  *     written down;
+ *   - writes down a payment for a plan that its creator disputed with their
+ *     bank (lib/plan-disputes.ts), which pauses what costs us to run;
  *   - tells each member whose renewal failed, once, with a link that pays it
  *     (lib/payment-recovery.ts), so a member whose card expired is not
  *     quietly cut off without ever being asked for a new one;
@@ -74,6 +77,17 @@ async function run(request: NextRequest): Promise<Response> {
       plans = await settlePlans();
     } catch (error) {
       console.error("settling payment plans failed", error);
+    }
+    // A creator who disputed a payment for their plan has what costs us to
+    // run paused, as for an unpaid renewal (232 [CA1] unit 5). At most eight
+    // seconds of its own, before the subscriptions take the rest.
+    let disputes = null;
+    if (isBillingConfigured()) {
+      try {
+        disputes = await syncPlanDisputes(Math.min(deadline, Date.now() + 8_000));
+      } catch (error) {
+        console.error("reading plan disputes failed", error);
+      }
     }
     let billing = null;
     if (isBillingConfigured()) {
@@ -153,8 +167,8 @@ async function run(request: NextRequest): Promise<Response> {
       return null;
     });
     if (demo && demo.pending.length) console.error("the demo store is missing something", demo.pending);
-    const ok = plans !== null && (billing !== null || !isBillingConfigured());
-    return Response.json({ ok, ...(plans ?? {}), billing, recovered, comeBack, nudged, yearly, verified, benchmarks, invites, catalogs, demo }, { status: ok ? 200 : 500, headers: { "Cache-Control": "no-store" } });
+    const ok = plans !== null && ((billing !== null && disputes !== null) || !isBillingConfigured());
+    return Response.json({ ok, ...(plans ?? {}), billing, disputes, recovered, comeBack, nudged, yearly, verified, benchmarks, invites, catalogs, demo }, { status: ok ? 200 : 500, headers: { "Cache-Control": "no-store" } });
   } finally {
     await redisPipeline([["DEL", "nl:plans:lock"]]).catch(() => {});
   }

@@ -12,7 +12,7 @@
  * Client-safe: the pages that publish the number read this one.
  */
 import type { Tier } from "@/lib/plan";
-import { type PlanFields, standingOf } from "@/lib/plan-standing";
+import { type PlanFields, costStandingOf } from "@/lib/plan-standing";
 import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 
 export const COMMUNITY_PICTURES: Record<Tier, number> = { creator: 200, pro: 1_000, scale: 3_000 };
@@ -24,7 +24,8 @@ export const PICTURE_BYTES = MAX_IMAGE_BYTES;
 
 /** The pictures this store's community may keep right now. */
 export function picturesLimitFor(store: PlanFields & { tier?: Tier }, nowSeconds = Date.now() / 1000): number {
-  const standing = standingOf(store, nowSeconds);
+  // No new pictures while a renewal is unpaid (232 [CA1] unit 4); those kept stay.
+  const standing = costStandingOf(store, nowSeconds);
   if (standing === "paid") return COMMUNITY_PICTURES[store.tier ?? "creator"] ?? COMMUNITY_PICTURES.creator;
   return standing === "trial" ? TRIAL_COMMUNITY_PICTURES : 0;
 }

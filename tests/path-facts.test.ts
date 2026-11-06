@@ -129,7 +129,10 @@ async function main() {
     const again = await visitPath(store, visited.record, Date.UTC(2026, 9, 19, 15, 5));
     is("the fresh reading reused: Stripe not asked again", again.record.money?.at, visited.record.money?.at);
     is("the counts kept with it", visited.record.counts, { at: Date.UTC(2026, 9, 19, 15), social: 1, visitors: 41, links: 3, leads: 1 });
-    const used = await allowanceUsed(store, "studio", Date.UTC(2026, 9, 19, 15, 6));
+    // countStudio takes the requests at the real moment of the call (visitPath's own
+    // clock only decides whether the reading is stale), so its window is read at that
+    // moment: a fixed date fell into another month's window from 1 November 2026 on.
+    const used = await allowanceUsed(store, "studio");
     is("a reading takes its studio requests first", used >= PATH_READ_UNITS, true);
     const calls = stripeCalls;
     const refused = await visitPath(store, visited.record, Date.UTC(2026, 9, 19, 16), async () => false);

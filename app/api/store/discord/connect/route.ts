@@ -1,5 +1,5 @@
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusalCode, withinServiceWhy } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { authorizeUrl, isDiscordConfigured, redirectUri } from "@/lib/discord";
 import { startTrip } from "@/lib/discord-store";
@@ -18,10 +18,11 @@ export async function POST(request: NextRequest) {
   if (creator instanceof Response) return creator;
   const { store, ref, email, origin } = creator;
   const back = (query: string) => away(origin, studioPath(store, query, "discord"));
-  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back("discord=limited");
+  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back("discord=funding");
   const sid = store.sid || (await ensureStoreId(ref))?.sid || "";
   if (!sid) return back("discord=error");
-  if (!(await withinService("discord-connect", sid, 10, 600, store))) return back("discord=limited");
+  const refused = await withinServiceWhy("discord-connect", sid, 10, 600, store);
+  if (refused) return back(`discord=${serviceRefusalCode(refused, "limited")}`);
   const redirect = redirectUri(origin);
   const state = await startTrip({ k: "install", sid, by: email, redirect });
   return new Response(null, { status: 303, headers: { Location: authorizeUrl("install", state, redirect), "Cache-Control": "no-store" } });

@@ -5,6 +5,19 @@ import {reserveFundedExposure} from '@/lib/exposure-budget';
 import {exposureFixture} from './exposure-budget-fixture';
 import {reset,seed,ledger,calls,settings} from './exposure-budget-redis';
 function start(){reset();const f=exposureFixture();const c=exposureBudgetConfiguration(f.policy,f.context)!;const key='nl:exposure:v1:'+c.month;seed(key,c);return {...f,key,c};}
+test('direct exposure reservation refuses original TX presence before snapshots or Redis',async()=>{
+ let reads=0;
+ for(const field of ['taxReview','taxContext'])for(const kind of ['enumerable','hidden','getter','inherited','proxy']){
+  const f=start(),row=f.context.review!.cases.trial.worstCase!,before=[...ledger.get(f.key)!];
+  if(kind==='inherited')Object.setPrototypeOf(row,{[field]:null});
+  else Object.defineProperty(row,field,kind==='getter'?{enumerable:false,get(){reads++;throw Error('must not execute');}}:{value:null,enumerable:kind==='enumerable',configurable:true});
+  if(kind==='proxy')f.context.review!.cases.trial.worstCase=new Proxy(row,{has(){return false;}});
+  assert.equal(exposureBudgetConfiguration(f.policy,f.context),null);
+  assert.equal(await reserveFundedExposure('hidden_tx','trial',f.policy,f.context),false);
+  assert.equal(calls.length,0);assert.deepEqual([...ledger.get(f.key)!],before);
+ }
+ assert.equal(reads,0);
+});
 test('two full allocations survive 64 concurrent stores without overspending',async()=>{const f=start();const results=await Promise.all(Array.from({length:64},(_,i)=>reserveFundedExposure('store'+i,'trial',f.policy,f.context)));assert.equal(results.filter(Boolean).length,2);assert.equal(ledger.get(f.key)?.get('reserved'),'200');assert.equal(ledger.get(f.key)?.get('slots:trial'),'0');});
 test('repeated calls reuse the full case allocation instead of creating new spending',async()=>{const f=start();for(let i=0;i<50;i++)assert.equal(await reserveFundedExposure('one','trial',f.policy,f.context),true);assert.equal(ledger.get(f.key)?.get('reserved'),'100');assert.equal(ledger.get(f.key)?.get('slots:trial'),'1');});
 test('lost replies retain the reservation; retry does not renew money or slots',async()=>{const f=start();settings({lostAck:true});assert.equal(await reserveFundedExposure('one','trial',f.policy,f.context),false);assert.equal(ledger.get(f.key)?.get('reserved'),'100');assert.equal(await reserveFundedExposure('one','trial',f.policy,f.context),true);assert.equal(ledger.get(f.key)?.get('reserved'),'100');});
@@ -115,5 +128,64 @@ test('exposure ACK must be an own numeric array entry without invoking accessors
  assert.equal(memberReads,0,'over-cardinality ACK rejected before visiting entries');
  settings({response:null});
  assert.equal(await reserveFundedExposure('one','trial',f.policy,f.context),true,'ordinary numeric own ACK still reuses allocation');
+ assert.deepEqual([...ledger.get(f.key)!],before);
+});
+
+test('alternating exposure raws cannot pass one guard and populate the snapshot from another',async()=>{
+ const f=start(),item=f.context.review!.cases.trial,legacy=item.worstCase!,tx={...legacy},before=[...ledger.get(f.key)!];
+ Object.defineProperty(tx,'taxReview',{value:null,enumerable:false});let reads=0;
+ f.context.review!.cases.trial=new Proxy(item,{getOwnPropertyDescriptor(target,key){const d=Reflect.getOwnPropertyDescriptor(target,key);return key==='worstCase'&&d?{...d,value:++reads%2?legacy:tx}:d;}});
+ assert.equal(exposureBudgetConfiguration(f.policy,f.context),null);assert.equal(reads,2);
+ assert.equal(await reserveFundedExposure('swap_tx','trial',f.policy,f.context),false);
+ assert.equal(reads,4);assert.equal(calls.length,0);assert.deepEqual([...ledger.get(f.key)!],before);
+});
+
+test('decorated, hidden and non-plain ACKs never authorize exposure-funded work',async()=>{
+ const responses:unknown[][]=[];
+ const decorated=[1];Object.defineProperty(decorated,'error',{value:'unknown transaction',enumerable:true});responses.push(decorated);
+ const hidden=[1];Object.defineProperty(hidden,'0',{enumerable:false});responses.push(hidden);
+ const extraGetter=[1];let reads=0;
+ Object.defineProperty(extraGetter,'unknown',{enumerable:true,get(){reads++;throw Error('must not execute');}});responses.push(extraGetter);
+ const nonPlain=[1];Object.setPrototypeOf(nonPlain,null);responses.push(nonPlain);
+ for(const response of responses){
+  const f=start();settings({response});
+  assert.equal(await reserveFundedExposure('malformed','trial',f.policy,f.context),false);
+  assert.equal(calls.length,1);assert.equal(calls[0].length,1);assert.equal(calls[0][0][0],'EVAL');
+ }
+ assert.equal(reads,0);
+});
+
+test('a Proxy cannot forge or conceal the numeric Redis exposure acknowledgement',async()=>{
+ const reads:PropertyKey[]=[];
+ const forged=new Proxy([0],{
+  getOwnPropertyDescriptor(target,key){const d=Reflect.getOwnPropertyDescriptor(target,key);return key==='0'&&d?{...d,value:1}:d;},
+  get(target,key,receiver){reads.push(key);return Reflect.get(target,key,receiver);},
+ });
+ const shortened=new Proxy([1,0],{
+  ownKeys(target){return Reflect.ownKeys(target).filter(key=>key!=='1');},
+  getOwnPropertyDescriptor(target,key){const d=Reflect.getOwnPropertyDescriptor(target,key);return key==='length'&&d?{...d,value:1}:d;},
+ });
+ const revoked=Proxy.revocable([1],{});revoked.revoke();
+ for(const response of [forged,shortened,new Proxy([1],{}),revoked.proxy]){
+  const f=start();settings({response});
+  assert.equal(await reserveFundedExposure('proxy','trial',f.policy,f.context),false);
+  assert.equal(calls.length,1);
+ }
+ // Async transport resolution necessarily probes then; ACK validation reads no values.
+ assert.deepEqual(reads,['then']);
+});
+
+test('an uncertain ACK keeps an existing allocation and only exact plain ACKs allow reuse',async()=>{
+ const f=start();assert.equal(await reserveFundedExposure('held','trial',f.policy,f.context),true);
+ const before=[...ledger.get(f.key)!];
+ const malformed=[1];Object.defineProperty(malformed,'unknown',{value:null,enumerable:true});
+ settings({response:malformed});
+ assert.equal(await reserveFundedExposure('held','trial',f.policy,f.context),false);
+ assert.deepEqual([...ledger.get(f.key)!],before);
+ settings({response:Object.freeze([1]) as unknown as unknown[]});
+ assert.equal(await reserveFundedExposure('held','trial',f.policy,f.context),true);
+ assert.deepEqual([...ledger.get(f.key)!],before);
+ settings({response:null});
+ assert.equal(await reserveFundedExposure('held','trial',f.policy,f.context),true);
  assert.deepEqual([...ledger.get(f.key)!],before);
 });

@@ -3,9 +3,9 @@ import { StoreFullError } from "@/lib/store-full";
 import { setReviewAsk } from "@/lib/store";
 import { refreshStoreQuotes } from "@/lib/store-quotes";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { MAX_REPLY_TEXT, REVIEW_ID_PATTERN, markSeen, setHidden, setReply, setReviewPhoto } from "@/lib/reviews";
+import { MAX_REPLY_TEXT, REVIEW_ID_PATTERN, isHideReason, markSeen, setHidden, setReply, setReviewPhoto } from "@/lib/reviews";
 import { dropReviewPhoto } from "@/lib/review-photo";
-import { MAX_ASK_DAYS, MIN_ASK_DAYS } from "@/lib/review-ask";
+import { MAX_ASK_DAYS, MIN_ASK_DAYS, readAgain } from "@/lib/review-ask";
 import { parseReviewElsewhere } from "@/lib/review-elsewhere";
 import { canWrite } from "@/lib/mail";
 
@@ -20,6 +20,7 @@ const PRODUCT_ID = /^[a-z0-9]{6,40}$/;
  *   { action: "seen", items | all }           take reviews out of the queue of new ones
  *   { action: "ask", days }                   the review-request email: 3 to 30 days, or 0 for off
  *   { action: "ask", days, elsewhere }        and the creator's public review page, "" for none
+ *   { action: "ask", days, again }            and one reminder 3 to 14 days after it, 0 for none (636 [GL4](a))
  *
  * There is no action that changes what a buyer wrote or the stars they gave,
  * and none that deletes a review: only its buyer can (lib/reviews.ts). A
@@ -54,7 +55,14 @@ export async function POST(request: NextRequest) {
           elsewhere = page;
         }
       }
-      await setReviewAsk(guarded.ref, elsewhere ? { days, elsewhere } : { days });
+      // One reminder, or none: absent keeps what was chosen, anything out of range is refused.
+      let again = store.reviewAsk.again ?? 0;
+      if ("again" in body) {
+        const asked = Number(body.again);
+        if (asked !== 0 && readAgain(asked) === 0) return Response.json({ ok: false, error: "again" }, { status: 400 });
+        again = asked;
+      }
+      await setReviewAsk(guarded.ref, { days, ...(elsewhere ? { elsewhere } : {}), ...(again ? { again } : {}) });
       return Response.json({ ok: true });
     }
 
@@ -76,6 +84,8 @@ export async function POST(request: NextRequest) {
     if (!PRODUCT_ID.test(productId) || !REVIEW_ID_PATTERN.test(id)) return Response.json({ ok: false, error: "missing" }, { status: 400 });
 
     if (action === "photo") {
+      // A buyer's photo is taken off only for one of the review rules, as a review is hidden (567 [GD1] (e)).
+      if (!isHideReason(body.reason)) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       const taken = await setReviewPhoto(statsId, productId, id, null);
       if (taken === "busy") return Response.json({ ok: false, error: "busy" }, { status: 409 });
       if (taken === "missing") return Response.json({ ok: false, error: "missing" }, { status: 404 });
@@ -85,7 +95,7 @@ export async function POST(request: NextRequest) {
 
     const done =
       action === "hide"
-        ? await setHidden(statsId, productId, id, body.hidden === true)
+        ? await setHidden(statsId, productId, id, body.hidden === true, body.reason)
         : action === "reply"
           ? await setReply(statsId, productId, id, text(body.text, MAX_REPLY_TEXT + 200), store)
           : null;

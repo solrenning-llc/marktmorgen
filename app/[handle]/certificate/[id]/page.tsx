@@ -1,17 +1,20 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { SITE_URL } from "@/lib/site-url";
 import { storeKey } from "@/lib/learn";
-import { CERT_ID_PATTERN, type Certificate, linkedInAddUrl, linkedInShareUrl, readCertificate } from "@/lib/certificate";
+import { CERT_ID_PATTERN, type Certificate, linkedInAddUrl, linkedInShareUrl, readCertificate, standingOf } from "@/lib/certificate";
 import { readCourse } from "@/lib/course";
 import { CertificateActions } from "@/components/certificate-actions";
 import { readCourseListing } from "@/lib/catalog";
 import { speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
+import { SESSION_COOKIE } from "@/lib/auth";
+import { seesDrafts } from "@/lib/draft-view";
 
 type Params = {
   params: Promise<{ handle: string; id: string }>;
@@ -29,6 +32,9 @@ async function load(rawHandle: string, id: string, product: string | undefined) 
     const found = await readCourseListing(store, product);
     const course = found?.course ? await readCourse(found.course.id) : null;
     if (!found || !course?.certificate) return null;
+    // A draft's sample is for the store's owner and team, signed in: its
+    // title is never shown to whoever only knows its id (MM-SA-30).
+    if (found.hidden && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value))) return null;
     const sample: Certificate = {
       id: "sample",
       store: storeKey(store),
@@ -93,6 +99,8 @@ export default async function CertificatePage({ params, searchParams }: Params) 
   const said = speech(store);
   const w = coursesWords(store.language);
   const withdrawn = certificate.withdrawnAt > 0;
+  // A certificate past its validity (639 [GL7](32)) says so, and is still the record of what it certified.
+  const expired = !sample && standingOf(certificate, Math.floor(new Date().getTime() / 1000)) === "expired";
   const url = `${SITE_URL}/@${store.handle}/certificate/${certificate.id}`;
   const shortUrl = url.replace(/^https?:\/\//, "");
   const issued = said.date(certificate.issuedAt * 1000);
@@ -115,13 +123,21 @@ export default async function CertificatePage({ params, searchParams }: Params) 
               <p className="font-bold">{w.withdrawnOn(said.date(certificate.withdrawnAt * 1000))}</p>
               <p className="mt-1">{w.withdrawnBody(certificate.creator)}</p>
             </div>
+          ) : expired ? (
+            <div className="rounded-2xl px-5 py-4 text-sm" style={{ background: "var(--st-item)", color: "var(--st-text)" }} role="status">
+              <p className="font-bold">{w.expiredOn(said.date((certificate.validUntil ?? 0) * 1000))}</p>
+              <p className="mt-1">{w.onRecord(store.name, issued)} {w.expiredBody(certificate.creator)}</p>
+            </div>
           ) : (
             <div className="rounded-2xl px-5 py-4 text-sm" style={{ background: "var(--st-accent-soft)", color: "var(--st-text)" }} role="status">
               <p className="font-bold">
                 <span aria-hidden="true">{"✓ "}</span>
                 {query.issued === "1" ? w.certReady : w.certGenuine}
               </p>
-              <p className="mt-1">{w.onRecord(store.name, issued)}</p>
+              <p className="mt-1">
+                {w.onRecord(store.name, issued)}
+                {certificate.validUntil ? ` ${w.validUntil(said.date(certificate.validUntil * 1000))}` : ""}
+              </p>
             </div>
           )}
           {sample || withdrawn ? null : (

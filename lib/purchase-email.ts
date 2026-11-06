@@ -34,6 +34,8 @@
  * its license key when it hands one out — kept under the offer's payment,
  * the same reference the thanks page and the list of purchases use.
  */
+import { CLOSING_ACCESS_SENTENCE, CLOSING_TERMS_PATH, CLOSING_TERMS_WORDS } from "@/lib/closing-buyers-rules";
+import { deliversDigitally } from "@/lib/digital-consent";
 import { consentEmailLines } from "@/lib/digital-consent-email";
 import { ADMITTED_FIELD, settleAdmitted } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
@@ -72,6 +74,9 @@ import { type NextOffer, nextOfferForEmail } from "@/lib/next-offer";
 import { nextOfferWords } from "@/lib/buyer-words/next-offer";
 import { pricePill } from "@/components/store-product";
 import { productSegment } from "@/lib/product-slug";
+
+/** The fixed sentence as a receipt carries it, with the address of the Terms that explain its limit (queue item 307 EC1). */
+const closingAccessLine = () => `${CLOSING_ACCESS_SENTENCE} ${CLOSING_TERMS_WORDS}: ${SITE_URL}${CLOSING_TERMS_PATH}`;
 
 const SESSION_ID_PATTERN = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 const INTENT_ID_PATTERN = /^pi_[A-Za-z0-9]{10,200}$/;
@@ -188,6 +193,25 @@ export function confirmationFor(
    */
   next: NextOffer | null = null,
 ): Confirmation | null {
+  return renderConfirmation(store, session, nowSeconds, keys, listings, note, next, true);
+}
+
+/** Only the selected, protected physical origin may outlive the old sweep.
+ * It grants no expiring digital link and reads no current product catalog.
+ * Payment and source binding must be independently checked by its worker.
+ */
+export function originalPhysicalConfirmation(store: Store, session: SessionRecord, product: Listing): Confirmation | null {
+  if (store.stripeAccountId === DEMO_CONNECTED_ACCOUNT || session.metadata?.mm_order_origin !== "physical-v1" || !wasShipped(session) || !product.shipping ||
+      product.call || product.course || product.podcast || product.recurring || product.bundle || product.keys || product.note ||
+      product.file || product.link || product.plan || product.pwyw || product.callPackage || product.options.length !== 0 ||
+      !Number.isSafeInteger(session.amount_total) || Number(session.amount_total) < 0 ||
+      session.payment_status === "no_payment_required" && session.amount_total !== 0 ||
+      typeof session.currency !== "string" || !/^[a-z]{3}$/.test(session.currency)) return null;
+  return renderConfirmation(store, session, Date.now() / 1000, [], [product], null, null, false);
+}
+
+function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: number, keys: KeyLine[], listings: Listing[],
+  note: ThanksNote | null, next: NextOffer | null, ageLimited: boolean): Confirmation | null {
   const id = typeof session.id === "string" ? session.id : "";
   if (!SESSION_ID_PATTERN.test(id)) return null;
   if (!isSettled(session)) return null;
@@ -198,7 +222,7 @@ export function confirmationFor(
   const product = listings.find((p) => p.id === meta.product);
   if (!product || product.call) return null;
   const created = typeof session.created === "number" ? session.created : 0;
-  if (nowSeconds - created > CONFIRM_WITHIN_SECONDS) return null;
+  if (ageLimited && nowSeconds - created > CONFIRM_WITHIN_SECONDS) return null;
   const typed = session.customer_details?.email;
   const email = typeof typed === "string" && typed ? typed : typeof session.customer_email === "string" ? session.customer_email : "";
   if (!email) return null;
@@ -308,6 +332,9 @@ export function confirmationFor(
         : `${schedule} ${words.cancelByReply(endsAfter > 0, name)}`,
     );
   }
+
+  // What lasts depends on the store staying open (queue item 307 EC1): the fixed sentence, drawn here, never the creator's.
+  if (deliversDigitally(product)) lines.push("", closingAccessLine());
 
   // The creator's own note after paying, as the thank-you page shows it: words, video, button.
   if (note) {
@@ -445,6 +472,9 @@ async function confirmOnce(
     }
   }
   if (session.id !== sessionId) return "skip";
+  // The original reserved source owns confirmation and accounting. The
+  // thanks page/sweep must never start a second legacy sender or counter.
+  if (["physical-v1", "single-digital-v1"].includes(session.metadata?.mm_order_origin ?? "")) return "skip";
   read.session = session;
   // A gift through "Support my work" has nothing to hand over or confirm (lib/store-tips.ts).
   if (session.metadata?.kind === "tip") return "skip";
@@ -639,6 +669,8 @@ export function offerConfirmationFor(store: Store, offer: TakenOffer, key: SaleK
     words.openItAt(`${base}/thanks?session_id=${offer.parent}`),
     "",
     words.offerThreeDays(`${base}/orders`, offer.email, name),
+    // The fixed sentence (queue item 307 EC1), when what was added lasts.
+    ...(deliversDigitally(offer.product) ? ["", closingAccessLine()] : []),
   ];
   for (const line of [...(key ? [{ title: offer.product.title, key }] : []), ...keys]) {
     const label = words.yourKeyFor(line.title);

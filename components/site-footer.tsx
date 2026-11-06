@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Logo } from "@/components/logo";
+import { MorningLogo } from "@/components/morning-header";
 import { feeWords } from "@/lib/fee-words";
 
 const SUPPORT_EMAIL = "support@marktmorgen.com";
@@ -56,10 +57,14 @@ const COLUMNS: { title: string; links: FooterLink[] }[] = [
     title: "Company",
     links: [
       { label: "Our mission", href: "/mission" },
+      // Not in the legal links: those are on the home page, held to 30 links (498 [ME3]).
+      { label: "Security", href: "/platform/security" },
+      { label: "Status", href: "/status" },
     ],
   },
   {
-    // The same last column, with the same five links, on every Marktmorgen product.
+    // The same last column, with the same five links, on every Marktmorgen product (the home page's short footer
+    // keeps their jobs elsewhere: log in and pricing in its header, support, refunds and cancelling below).
     title: "Account & billing",
     links: [
       { label: "Log in", href: "/signin?to=login" },
@@ -72,12 +77,30 @@ const COLUMNS: { title: string; links: FooterLink[] }[] = [
   },
 ];
 
+/**
+ * The home page's own column (498 [ME3]): the home page is held to 30 links
+ * (owner, 28 October 2026), so its footer keeps only what someone landing
+ * there may be looking for, beside the legal links. Every other link stays
+ * in the footer of every other page, one tap away.
+ */
+const HOME_COLUMN: { title: string; links: FooterLink[] } = {
+  title: "More from Marktmorgen",
+  links: [
+    { label: "Every feature", href: "/platform" },
+    { label: "All comparisons", href: "/proof/comparisons" },
+    { label: "Help center", href: "/help" },
+    { label: "Your library", href: "/library" },
+    { label: "Cancel subscription", href: "/refunds#cancel" },
+  ],
+};
+
 const LEGAL_LINKS: FooterLink[] = [
   { label: "Terms of Service", href: "/terms" },
   { label: "Privacy Policy", href: "/privacy" },
   { label: "Refund Policy", href: "/refunds" },
   { label: "Copyright", href: "/copyright" },
   { label: "Report content", href: "/report" },
+  { label: "Accessibility", href: "/accessibility" },
 ];
 
 function FooterAnchor({ link, className }: { link: FooterLink; className: string }) {
@@ -95,9 +118,9 @@ function FooterAnchor({ link, className }: { link: FooterLink; className: string
 /**
  * The site footer. `full` on marketing and content pages; `slim` on pages
  * where the person is in the middle of a task (logging in), so nothing pulls
- * them away from it.
+ * them away from it; `home` on the home page, with one short column (HOME_COLUMN).
  */
-export function SiteFooter({ variant = "full" }: { variant?: "full" | "slim" }) {
+export function SiteFooter({ variant = "full", morning = false }: { variant?: "full" | "slim" | "home"; morning?: boolean }) {
   const year = new Date().getFullYear();
 
   if (variant === "slim") {
@@ -110,7 +133,7 @@ export function SiteFooter({ variant = "full" }: { variant?: "full" | "slim" }) 
               <li key={link.label}>
                 <FooterAnchor
                   link={link}
-                  className="inline-flex min-h-11 -my-2.5 items-center transition-colors hover:text-ink"
+                  className="inline-flex min-h-11 items-center transition-colors hover:text-ink"
                 />
               </li>
             ))}
@@ -124,9 +147,12 @@ export function SiteFooter({ variant = "full" }: { variant?: "full" | "slim" }) 
     <footer className="surface-night on-dark overflow-hidden">
       <div className="container-page grid gap-12 py-16 lg:grid-cols-[15rem_1fr] lg:gap-16 lg:py-20">
         <div className="max-w-xs">
-          <Link prefetch={false} href="/" className="inline-flex min-h-11 items-center rounded-[10px]" aria-label="Marktmorgen, home">
-            <Logo tone="light" />
-          </Link>
+          {/* On the pages in the morning look (VS1, app/home.css .hm-foot), their own light mark. */}
+          {morning ? <MorningLogo /> : (
+            <Link prefetch={false} href="/" className="inline-flex min-h-11 items-center rounded-[10px]" aria-label="Marktmorgen, home">
+              <Logo tone="light" />
+            </Link>
+          )}
           <p className="mt-4 text-[0.9375rem] leading-relaxed text-white/70">
             A store page for creators, built in public. Your buyers pay into your
             own Stripe account.
@@ -138,13 +164,16 @@ export function SiteFooter({ variant = "full" }: { variant?: "full" | "slim" }) 
             </a>
             .
           </p>
-          <Link prefetch={false} href="/signin" className="btn btn-light btn-sm mt-6">
-            Start your store
-          </Link>
+          {/* The home page starts a store from its own address fields, at the top and the end. */}
+          {variant === "home" ? null : (
+            <Link prefetch={false} href="/signin" className="btn btn-light btn-sm mt-6">
+              Start your store
+            </Link>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 xl:grid-cols-[repeat(6,auto)] xl:justify-between">
-          {COLUMNS.map((column) => (
+          {(variant === "home" ? [HOME_COLUMN] : COLUMNS).map((column) => (
             <nav key={column.title} aria-label={column.title}>
               <p className="whitespace-nowrap text-[0.8125rem] font-semibold uppercase tracking-[0.14em] text-white/70">
                 {column.title}

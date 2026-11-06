@@ -7,7 +7,7 @@ export async function checkMenuMounting({browser,LOCAL,is}){
    if(route.request().method()==="GET"){await route.continue();return;}
    writes++;await route.abort();
   });
-  await page.goto(LOCAL+"/",{waitUntil:"networkidle",timeout:60000});
+  await page.goto(LOCAL+"/platform",{waitUntil:"networkidle",timeout:60000}); // VS1: the home page has its own short menu; the shared menu is checked on a feature page.
   const drawer=page.locator("#mobile-drawer");
   const toggle=page.getByRole("button",{name:"Open the menu",exact:true});
   is("closed mobile menu keeps its controlled container",await drawer.count(),1);

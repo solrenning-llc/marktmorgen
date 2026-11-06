@@ -12,7 +12,7 @@ import { SOCIALS, type Social } from "@/lib/store-socials";
 export function StoreSocialsRow({ socials, name, words }: { socials: Social[]; name: string; words: BlockWords }) {
   if (socials.length === 0) return null;
   return (
-    <nav aria-label={words.socialsLabel} className="mx-auto mt-5 max-w-lg">
+    <nav aria-label={words.socialsLabel} className="mx-auto mt-3 max-w-lg">
       <ul className="flex flex-wrap justify-center gap-2">
         {socials.map((social) => {
           const spec = SOCIALS[social.network];

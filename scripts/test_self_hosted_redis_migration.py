@@ -39,7 +39,9 @@ def main():
     if (os.environ.get("MARKTMORGEN_REDIS_INTEGRATION") != "1"
             or os.environ.get("SV4_STANDARD_PUBLIC_CI") != "true"
             or os.environ.get("GITHUB_ACTIONS") != "true"
-            or os.environ.get("GITHUB_REPOSITORY") != "viniciussucupira/marktmorgen"
+            # This repository by its permanent ID (kept across a move to another owner) or its original name.
+            or (os.environ.get("GITHUB_REPOSITORY_ID") != "1334793724"
+                and os.environ.get("GITHUB_REPOSITORY") != "viniciussucupira/marktmorgen")
             or os.environ.get("RUNNER_OS") != "Linux"):
         raise RuntimeError("Dedicated standard/public Linux CI only; no production mode")
     started = time.monotonic()

@@ -31,6 +31,7 @@
  * person who owns them. Every function below that takes a store's key calls
  * it `email` for the first kind and works the same for the second.
  */
+import { type PlanDispute, parsePlanDispute, parsePlanDisputes, withPlanDispute } from "@/lib/plan-dispute-rules";
 import { MAX_NAME_LENGTH, MAX_BIO_LENGTH, MAX_ADDRESSES, isFree, type StoreJoin, MAX_JOIN_HEADING, MAX_JOIN_LINE, parseJoin } from "@/lib/store-field-rules";
 export { MAX_NAME_LENGTH, MAX_BIO_LENGTH, MAX_ADDRESSES, isFree, type StoreJoin, MAX_JOIN_HEADING, MAX_JOIN_LINE, parseJoin } from "@/lib/store-field-rules";
 import { MAX_LINKS, type NumbersLink, parseLinks } from "@/lib/numbers-links";
@@ -38,6 +39,7 @@ import { type ShipProblem, type Shipping, shipProblem, readShippingSku } from "@
 import { type CartDeal, NO_DEAL, parseCartDeal } from "@/lib/cart-rules";
 import { type Video, parseVideo } from "@/lib/sales-page";
 import { type FaqItem, parseFaq } from "@/lib/store-faq";
+import { type FaqAddRefusal, faqAddition } from "@/lib/faq-from-inbox";
 import { type StoreQuote, parseQuotes } from "@/lib/store-quotes-rules";
 import { type Social, parseSocials } from "@/lib/store-socials";
 import type { CallPackage } from "@/lib/call-package-rules";
@@ -46,7 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type Held, LockBusyError, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
+import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
 import {
@@ -153,6 +155,7 @@ import {
   hasProduct,
 } from "@/lib/catalog";
 import { type Announcement, type StoreSection, parseAnnouncement, parseSections, sectionsWithout } from "@/lib/store-sections";
+import { type VisitUs, parseVisitUs, readVisitUs } from "@/lib/visit-us";
 import { noteData, takeData } from "@/lib/store-data";
 import { DEPTH_RECORD_BYTES } from "@/lib/page-depth-rules";
 import { PRODUCT_SIDE_BYTES } from "@/lib/store-data-rules";
@@ -430,6 +433,22 @@ export type Store = {
    * keep and play goes by this (lib/plan-standing.ts).
    */
   planEndedAt: string;
+  /**
+   * When the renewal of the plan now running was first seen unpaid (Stripe's
+   * `past_due`), in seconds; 0 while it is paid up (232 [CA1] unit 4). The
+   * plan has not ended: what costs us to run stops (lib/plan-standing.ts,
+   * costStandingOf; lib/billing.ts, isPaidUp) and starts again the moment
+   * Stripe says it is paid. Absent from records written before.
+   */
+  renewalUnpaidSince?: number;
+  /**
+   * Disputes of payments the creator made to us for the plan, as the daily
+   * job read them from Stripe (lib/plan-disputes.ts, 232 [CA1] unit 5). An
+   * open one, or one decided for the creator until the period it paid for
+   * ends, pauses what costs us to run (lib/plan-standing.ts, costsPaused).
+   * Absent from records written before.
+   */
+  planDisputes?: PlanDispute[];
   /** How the creator's emails to their list are signed. Null until set up. */
   mail: MailSettings | null;
   /** The creator's own domain for the store, when they added one. */
@@ -667,6 +686,12 @@ export type Store = {
   /** One line of the creator's own news across the top of the store page, or null. */
   announcement: Announcement | null;
   /**
+   * "Visit us" under the products, for a business with an address (521
+   * [LB2], lib/visit-us.ts): its address, opening hours and phone, as the
+   * creator typed them; null on every store until its creator writes one.
+   */
+  visitUs: VisitUs | null;
+  /**
    * Whether visitors' questions about a product are answered from its page
    * (lib/answers-rules.ts), and the creator's notes for those answers. Off on
    * every store until its creator switches it on.
@@ -804,6 +829,24 @@ export function handleProblem(handle: string): HandleProblem {
   return null;
 }
 
+/**
+ * Addresses that could pass for Marktmorgen's own (568 [GD2] (j)): never claimed, never taken in a rename. Only
+ * taking an address is refused here; a store that already holds one keeps working (storeForHandle reads
+ * handleProblem), so no creator's store goes dark.
+ */
+const IMPERSONATING = new Set([
+  "official", "security", "secure", "billing", "payments", "checkout", "staff", "team", "moderator", "verify",
+  "verified", "trust", "safety", "abuse", "press", "status", "noreply", "no-reply", "helpdesk",
+]);
+
+/** What stops an address from being claimed or taken: its shape, the site's own names, or passing for ours. */
+export function newAddressProblem(handle: string): HandleProblem {
+  const problem = handleProblem(handle);
+  if (problem) return problem;
+  if (IMPERSONATING.has(handle) || handle.includes("marktmorgen") || handle.includes("solrenning")) return "reserved";
+  return null;
+}
+
 async function sha256Hex(value: string): Promise<string> {
   const data = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", data);
@@ -816,6 +859,13 @@ const ownerKey = async (email: string) =>
   `nl:store:owner:${(await sha256Hex(`nimbus-store:${email.toLowerCase()}`)).slice(0, 40)}`;
 
 const handleKey = (handle: string) => `nl:store:handle:${handle}`;
+/**
+ * Whether a handle's key, as read, still leads to a store: not free, not held
+ * back after a store was deleted or closed. For a reader that asks along with
+ * other keys, such as the private calendar feed (lib/calendar-sync.ts).
+ */
+export const storeHandleKey = handleKey;
+export const handleLeadsToStore = (raw: unknown): boolean => typeof raw === "string" && raw !== "" && !raw.startsWith(RELEASED_PREFIX);
 
 /** The ids of an account's other stores. Deliberately not under nl:store:owner:. */
 const accountKey = async (email: string) =>
@@ -925,6 +975,10 @@ function parseStore(raw: unknown): Store | null {
       shared: value.shared === true,
       // Stores written before this was kept have none: read as never ended.
       planEndedAt: typeof value.planEndedAt === "string" && !Number.isNaN(Date.parse(value.planEndedAt)) ? value.planEndedAt : "",
+      // Records from before this was kept have none: read as paid up.
+      renewalUnpaidSince: Number.isSafeInteger((value as { renewalUnpaidSince?: unknown }).renewalUnpaidSince) && ((value as { renewalUnpaidSince: number }).renewalUnpaidSince) > 0 ? (value as { renewalUnpaidSince: number }).renewalUnpaidSince : 0,
+      // Records from before this was kept have none.
+      planDisputes: parsePlanDisputes((value as { planDisputes?: unknown }).planDisputes),
       mail: parseMail(value.mail),
       domain: parseDomain(value.domain),
       // A record from before products had records of their own still
@@ -1001,6 +1055,7 @@ function parseStore(raw: unknown): Store | null {
       collections: parseCollections(value.collections),
       sitePages: parseSitePages(value.sitePages),
       announcement: parseAnnouncement(value.announcement),
+      visitUs: parseVisitUs(value.visitUs),
       answers: parseAnswers(value.answers),
       assistant: parseAssistant(value.assistant),
       assistantPlan: parseAssistantPlan(value.assistantPlan),
@@ -1155,6 +1210,18 @@ export async function storeForHandle(handle: string): Promise<Store | null> {
 export const storeForPage = cache(storeForHandle);
 
 /**
+ * Whether a store with this id still exists: one command, the id's own key,
+ * which deleting the store removes first (deleteStore, closeStoreRecord) and
+ * moving its owner rewrites in place. For a write that must not outlive its
+ * store (the tasks, lib/crm.ts), without reading the whole store record.
+ */
+export async function storeIdExists(sid: string): Promise<boolean> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return false;
+  const [n] = await redisPipeline([["EXISTS", storeIdKey(sid)]]);
+  return Number(n) === 1;
+}
+
+/**
  * The store with this id, or null. The id comes from a cookie, a link or a
  * team record, so the store found is checked to carry that very id.
  */
@@ -1305,6 +1372,7 @@ async function freshStore(fields: {
     collections: [],
     sitePages: [],
     announcement: null,
+    visitUs: null,
     answers: { ...NO_ANSWERS },
     assistant: { ...NO_ASSISTANT },
     assistantPlan: null,
@@ -1657,7 +1725,7 @@ export async function claimHandle(
   rawBio: string,
 ): Promise<ClaimResult> {
   const handle = normaliseHandle(rawHandle);
-  const problem = handleProblem(handle);
+  const problem = newAddressProblem(handle);
   if (problem) return { ok: false, reason: problem };
 
   const existing = await storeForEmail(email);
@@ -1704,7 +1772,7 @@ export async function createStore(
   rawBio: string,
 ): Promise<CreateResult> {
   const handle = normaliseHandle(rawHandle);
-  const problem = handleProblem(handle);
+  const problem = newAddressProblem(handle);
   if (problem) return { ok: false, reason: problem };
   if (!(await storeForEmail(email))) return { ok: false, reason: "first" };
 
@@ -1828,7 +1896,7 @@ export async function renameHandle(
   rawHandle: string,
 ): Promise<RenameResult> {
   const handle = normaliseHandle(rawHandle);
-  const problem = handleProblem(handle);
+  const problem = newAddressProblem(handle);
   if (problem) return { ok: false, reason: problem };
 
   const result = await withStore<RenameResult>(email, async (store, save) => {
@@ -1920,6 +1988,11 @@ export async function setSubscription(
     shared?: boolean;
     /** The period paid for; null forgets it (a plan not running, a trial). Left as it is when not given. */
     period?: BillingPeriod | null;
+    /**
+     * Whether Stripe says the renewal now running is unpaid (232 [CA1] unit 4).
+     * Not given: kept for the same subscription, cleared for another one.
+     */
+    renewalUnpaid?: boolean;
   },
   expected?: Pick<Store, "sid" | "statsId" | "stripeCustomerId" | "subscriptionId" | "subscriptionActive" | "tier" | "cycle">,
 ): Promise<Store | null> {
@@ -1964,6 +2037,12 @@ export async function setSubscription(
     // wiped when a plan runs again. A store that never started one has none.
     const had = store.subscriptionActive || store.subscriptionId !== null || subscriptionId !== null;
     const planEndedAt = fields.active ? "" : store.planEndedAt || (had ? new Date(Date.now()).toISOString() : "");
+    // The day a renewal was first seen unpaid is written down once and kept
+    // while it stays unpaid; paying it, a plan not running, or another
+    // subscription clears it.
+    const unpaidBefore = store.subscriptionId === subscriptionId ? store.renewalUnpaidSince ?? 0 : 0;
+    const unpaid = fields.active && (fields.renewalUnpaid ?? unpaidBefore > 0);
+    const renewalUnpaidSince = unpaid ? unpaidBefore || Math.floor(Date.now() / 1000) : 0;
 
     const saved = await save({
       ...store,
@@ -1978,6 +2057,7 @@ export async function setSubscription(
       // A plan that is not running has no period to follow.
       period,
       planEndedAt,
+      renewalUnpaidSince,
     });
     // Kept in line by the day its plan ended, for the daily job that looks
     // at what such a store still keeps (lib/plan-closing.ts), and taken out
@@ -1992,7 +2072,8 @@ export async function setSubscription(
     // (lib/free-pool-rules.ts): it grows only with them. A trial pays
     // nothing yet, and a plan with no subscription behind it pays nothing.
     const nowSeconds = Date.now() / 1000;
-    const paysNow = (record: Store) => record.subscriptionActive && Boolean(record.subscriptionId) && !(record.trialEnds > nowSeconds);
+    // A renewal Stripe could not collect pays nothing until it is paid.
+    const paysNow = (record: Store) => record.subscriptionActive && Boolean(record.subscriptionId) && !(record.trialEnds > nowSeconds) && !((record.renewalUnpaidSince ?? 0) > 0);
     await redisPipeline([[paysNow(saved) ? "SADD" : "SREM", PAYING_INDEX, storeRef(saved)]]).catch((error) =>
       console.error("could not keep the list of stores that pay", error),
     );
@@ -2047,6 +2128,45 @@ export type MoveResult =
  * account's other stores keep their folders as they are, because their keys
  * never held the address.
  */
+/**
+ * A move that wrote the store at its new address and could not take it off
+ * the old one leaves it on both (lib/move-repair.ts). With both stores' locks
+ * held: the address the store's handle points to (written in the same step
+ * that takes the old record away) is the store; the copy on the other is
+ * deleted (fenced), and the account's other stores, rewritten for the new
+ * address before that step, are written back to it or listed under it. When
+ * the two records differ in anything but the address (somebody edited one of
+ * them since), nothing is deleted and null is answered: the record stays for
+ * a person (scripts/move-repair.mjs). Answers the address that keeps it, or
+ * null when that cannot be told.
+ */
+export async function settleDoubledStore(fromEmail: string, toEmail: string): Promise<string | null> {
+  const from = fromEmail.toLowerCase();
+  const to = toEmail.toLowerCase();
+  const settled = await withStore(from, (a, _saveA, heldA) =>
+    withStore(to, async (b, _saveB, heldB): Promise<string | null> => {
+      if (!a.handle || a.handle !== b.handle) return null;
+      if (recordJson({ ...a, email: "" }) !== recordJson({ ...b, email: "" })) return null;
+      const [points] = await redisPipeline([["GET", handleKey(a.handle)]]);
+      const home = typeof points === "string" ? points.toLowerCase() : "";
+      if (home !== from && home !== to) return null;
+      const [members] = await redisPipeline([["SMEMBERS", await accountKey(from)]]);
+      const extras = (Array.isArray(members) ? members : []).filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id));
+      for (const sid of extras) {
+        const back = await withStore(extraRef(sid), async (extra, _save, held) => {
+          if (extra.email.toLowerCase() === home) return true;
+          return setIfHeld(held, await ownerKey(extraRef(sid)), recordJson({ ...extra, email: home }));
+        });
+        if (back === false) throw new StoreBusyError();
+      }
+      if (home === to && extras.length) await redisPipeline([["SADD", await accountKey(to), ...extras], ["DEL", await accountKey(from)]]);
+      if (!(await deleteIfHeldOnly(home === from ? heldB : heldA, [await ownerKey(home === from ? to : from)]))) throw new StoreBusyError();
+      return home;
+    }),
+  );
+  return typeof settled === "string" ? settled : null;
+}
+
 export async function moveAccount(
   fromEmail: string,
   toEmail: string,
@@ -2228,7 +2348,7 @@ async function onProduct<R extends string>(
 
 export type CallResult =
   | { ok: true; store: Store; product: Product }
-  | { ok: false; reason: "none" | "unknown" | "free" | "recurring" | "options" | "delivery" | "course" | "pwyw" | "bundle" };
+  | { ok: false; reason: "none" | "unknown" | "free" | "recurring" | "options" | "delivery" | "course" | "pwyw" | "bundle" | "lengths_package" | "lengths_price" };
 
 /**
  * Makes a product a paid call, changes when it can be booked, or turns it
@@ -2243,10 +2363,16 @@ export async function setProductCall(
   id: string,
   setup: CallSetup | null,
 ): Promise<CallResult> {
-  return onProduct<"free" | "recurring" | "options" | "delivery" | "course" | "pwyw" | "bundle">(
+  return onProduct<"free" | "recurring" | "options" | "delivery" | "course" | "pwyw" | "bundle" | "lengths_package" | "lengths_price">(
     email,
     id,
     (product) => {
+      // Several lengths (lib/call-lengths.ts), read again on the record as it is now, under its write: never with a package,
+      // whose sessions are free once bought, and only while the first is still at the product's price.
+      if (setup?.lengths?.length) {
+        if (product.callPackage) return { ok: false, reason: "lengths_package" };
+        if (setup.lengths[0].cents !== product.priceCents) return { ok: false, reason: "lengths_price" };
+      }
       if (setup) {
         if (isFree(product)) return { ok: false, reason: "free" };
         // A bundle hands over its products; a time in a calendar is not one.
@@ -2341,9 +2467,11 @@ export async function setPodcastEpisodes(email: string, id: string, episodes: nu
  * (null). Only a call booked in weekly hours: dated live sessions are bought
  * one date at a time.
  */
-export async function setCallPackage(email: string, id: string, pkg: CallPackage | null): Promise<{ ok: true; store: Store; product: Product } | { ok: false; reason: "none" | "unknown" | "call" }> {
-  return onProduct<"call">(email, id, (product) => {
+export async function setCallPackage(email: string, id: string, pkg: CallPackage | null): Promise<{ ok: true; store: Store; product: Product } | { ok: false; reason: "none" | "unknown" | "call" | "lengths" }> {
+  return onProduct<"call" | "lengths">(email, id, (product) => {
     if (pkg && product.call?.kind !== "weekly") return { ok: false, reason: "call" };
+    // A package's sessions are free once bought, so a call with several lengths (lib/call-lengths.ts) has none: a long one would be had at a short one's price.
+    if (pkg && product.call?.lengths?.length) return { ok: false, reason: "lengths" };
     return { ...product, callPackage: pkg };
   });
 }
@@ -2678,10 +2806,11 @@ export type CurrencyShortfall = {
   title: string;
   /**
    * What it is: the product's price, the floor of a price the buyer chooses,
-   * a price option, the offer at checkout, an offer after paying, or one
-   * payment of a payment plan.
+   * a price option, the offer at checkout, an offer after paying, one
+   * payment of a payment plan, or the deposit on an in-person booking
+   * (lib/call-deposit.ts).
    */
-  what: "price" | "minimum" | "option" | "bump" | "offer" | "plan";
+  what: "price" | "minimum" | "option" | "bump" | "offer" | "plan" | "deposit" | "length";
   /** The option's label, or the title of the product offered; "" otherwise. */
   label: string;
   /** In the smallest unit, the same number in either currency. */
@@ -2707,6 +2836,10 @@ export function chargesBelow(products: Product[], currency: Currency): CurrencyS
     for (const bump of p.bumps) if (bump.priceCents < least) on("bump", titles.get(bump.productId) ?? "", bump.priceCents);
     for (const step of p.funnel?.steps ?? []) if (step.priceCents < least) on("offer", titles.get(step.productId) ?? "", step.priceCents);
     if (p.plan && p.plan.amountCents < least) on("plan", "", p.plan.amountCents);
+    // A deposit below the smallest charge would quietly become the whole price (lib/call-deposit.ts, chargeNow): said instead.
+    if (p.call?.deposit && p.call.deposit < least) on("deposit", "", p.call.deposit);
+    // A call's other lengths (lib/call-lengths.ts) are charged at their own prices: each one below the smallest charge is said too.
+    for (const length of (p.call?.lengths ?? []).slice(1)) if (length.cents < least) on("length", `${length.minutes} minutes`, length.cents);
   }
   return out;
 }
@@ -3691,6 +3824,18 @@ export async function setFaq(email: string, raw: unknown): Promise<Store | null>
   return patchStore(email, () => ({ faq }));
 }
 
+/** Adds one question and its answer at the end of the store's own (lib/faq-from-inbox.ts), read and written as one change. */
+export async function addFaq(email: string, raw: unknown): Promise<{ ok: true; faq: FaqItem[] } | { ok: false; reason: FaqAddRefusal | "none" }> {
+  let refused: FaqAddRefusal | null = null;
+  const store = await patchStore(email, (current) => {
+    const added = faqAddition(current.faq, raw);
+    refused = added.ok ? null : added.reason;
+    return added.ok ? { faq: added.faq } : null;
+  });
+  if (!store) return { ok: false, reason: "none" };
+  return refused ? { ok: false, reason: refused } : { ok: true, faq: store.faq };
+}
+
 /** Switches the store page's contact form and saves its words (lib/store-contact.ts). */
 export async function setContact(email: string, raw: unknown): Promise<Store | null> {
   const contact = parseJoin(raw);
@@ -4185,6 +4330,21 @@ export async function setAssistantPlan(email: string, plan: AssistantPlan | null
   });
 }
 
+/**
+ * Writes one dispute of a plan payment on the store's record (232 [CA1]
+ * unit 5, lib/plan-disputes.ts): a new one is added, a known one takes its
+ * new status. Answers the store as it is now, or null when it is gone.
+ */
+export async function recordPlanDispute(email: string, entry: PlanDispute, nowSeconds = Date.now() / 1000): Promise<Store | null> {
+  const parsed = parsePlanDispute(entry);
+  if (!parsed) return null;
+  return patchStore(email, (store) => {
+    const before = store.planDisputes ?? [];
+    const next = withPlanDispute(before, parsed, nowSeconds);
+    return JSON.stringify(next) === JSON.stringify(before) ? null : { planDisputes: next };
+  });
+}
+
 /** Switches fair prices by country on or off, with the deepest discount the creator accepts (lib/fair-price.ts). */
 /** Saves the store's deal for buying more in one cart (lib/cart-rules.ts). */
 export async function setCartDeal(email: string, raw: unknown): Promise<Store | null> {
@@ -4198,6 +4358,17 @@ export async function setFair(email: string, raw: unknown): Promise<Store | null
 /** Sets the language the store speaks to its buyers in (lib/store-language.ts). */
 export async function setLanguage(email: string, raw: unknown): Promise<Store | null> {
   return patchStore(email, () => ({ language: parseLanguage(raw) }));
+}
+
+/**
+ * Sets the "Visit us" block (lib/visit-us.ts), or takes it away when
+ * nothing is in it. Says which part cannot be kept, and changes nothing then.
+ */
+export async function setVisitUs(email: string, raw: unknown): Promise<{ ok: true; store: Store } | { ok: false; reason: "place" | "hours" | "phone" | "none" }> {
+  const read = readVisitUs(raw);
+  if (typeof read === "string") return { ok: false, reason: read };
+  const store = await patchStore(email, () => ({ visitUs: read }));
+  return store ? { ok: true, store } : { ok: false, reason: "none" };
 }
 
 /** Sets the line of news across the top of the store page, or takes it away (null or empty). */

@@ -1,3 +1,4 @@
+import { fastMoneyRefusal } from "@/lib/terms-check-rules";
 import type { NextRequest } from "next/server";
 import { deleteFile as del } from "@/lib/file-store";
 import {
@@ -60,6 +61,12 @@ export async function POST(request: NextRequest) {
         : undefined;
     const best = typeof body.best === "boolean" ? body.best : undefined;
     const sku = Object.hasOwn(body, "sku") ? body.sku : undefined;
+    // What the Terms forbid is never a price's name or its lines (567 [GD1] (d), unit 3): an option is shown
+    // wherever its product is, so it is refused as it is written, with the passage, why and the fix.
+    if (action === "add" || action === "edit") {
+      const refused = fastMoneyRefusal({ title: label, summary: details ?? "", about: "" });
+      if (refused) return Response.json({ ok: false, error: "fast_money", passage: { ...refused, field: "option" } }, { status: 409 });
+    }
     if (action === "add") {
       result = await addOption(ref, id, label, price, { details, best, sku });
     } else if (action === "edit") {

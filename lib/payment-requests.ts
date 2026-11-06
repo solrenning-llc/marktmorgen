@@ -38,7 +38,7 @@ import { fromStore, storeBase } from "@/lib/purchase-email";
 import { speechFor } from "@/lib/buyer-words";
 import { requestWords } from "@/lib/buyer-words/requests";
 import { type Store, saleHandles, storeForId } from "@/lib/store";
-import { type PaymentRequest, statusOf, nextReminderAt, canSendAgain } from "@/lib/payment-request-rules";
+import { type OutsideMethod, type PaymentRequest, statusOf, nextReminderAt, canSendAgain } from "@/lib/payment-request-rules";
 import { changeRequest, delayReminder, dropReminder, dueReminders, holdForCheckout, letGo, markPaid, requestOf } from "@/lib/payment-request-store";
 
 /** A reminder that could not go is tried again a day later, never sooner. */
@@ -341,4 +341,69 @@ export async function refreshRefunds(store: Store, requests: PaymentRequest[], n
     }
   }
   return requests.map((r) => changed.get(r.id) ?? r);
+}
+
+/** Why a request could not be marked as paid outside Stripe. */
+export type OutsideRefusal = "gone" | "busy" | "paid_online" | "processing" | "error";
+
+/** Stripe keeps a checkout open a day at most: one opened longer ago than this cannot be paid any more. */
+const CHECKOUT_LIFE_MS = 25 * 3_600 * 1000;
+
+/**
+ * Marks an open request as paid outside Stripe, in cash, by transfer or
+ * otherwise (639 [GL7](30)), on the day the creator says. Nothing is charged
+ * and nothing is released by it: a request is lines of the creator's own
+ * words, and its page becomes the receipt.
+ *
+ * Never two payments for one request: under the same hold as opening its
+ * checkout, the checkout already opened for it on the creator's Stripe is read
+ * first. Paid there, it is written down as paid online and the mark is
+ * refused; still being paid, it is refused; open, it is closed on Stripe
+ * before anything is marked, and if it cannot be closed nothing is marked.
+ */
+export async function markPaidOutside(
+  store: Store,
+  id: string,
+  mark: { method: OutsideMethod; note: string; paidAt: number },
+  now = Date.now(),
+): Promise<{ ok: true; request: PaymentRequest } | { ok: false; reason: OutsideRefusal }> {
+  const request = await requestOf(store, id);
+  if (!request || request.state !== "open") return { ok: false, reason: "gone" };
+  if (!(await holdForCheckout(request.id))) return { ok: false, reason: "busy" };
+  try {
+    if (SESSION_ID.test(request.session) && now - request.sessionAt < CHECKOUT_LIFE_MS) {
+      if (!store.stripeAccountId) return { ok: false, reason: "error" };
+      const known = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}`).catch((error: unknown) => {
+        if (error instanceof StripeError && error.status === 404) return {};
+        throw error;
+      })) as Record<string, unknown>;
+      if (isSettled(known)) {
+        await markPaid(store, request.id, known, now);
+        return { ok: false, reason: "paid_online" };
+      }
+      if (known.status === "complete") return { ok: false, reason: "processing" };
+      if (known.status === "open") {
+        const closed = (await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}/expire`, new URLSearchParams())) as Record<string, unknown>;
+        if (closed.status !== "expired") return { ok: false, reason: "error" };
+      }
+    }
+    const done = await changeRequest(
+      store,
+      request.id,
+      (current) =>
+        current.state !== "open"
+          ? { next: null, answer: false }
+          : {
+              next: { ...current, state: "paid", paidAt: Math.min(now, mark.paidAt), amountPaid: current.total, payment: "", failed: "", closedAt: now, outside: { method: mark.method, note: mark.note } },
+              answer: true,
+            },
+      now,
+    );
+    return done?.answer ? { ok: true, request: done.request } : { ok: false, reason: "gone" };
+  } catch (error) {
+    console.error("marking a payment request paid outside Stripe failed", error);
+    return { ok: false, reason: "error" };
+  } finally {
+    await letGo(request.id);
+  }
 }

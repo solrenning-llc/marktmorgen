@@ -1,12 +1,15 @@
 import type { NextRequest } from "next/server";
 import { hasProduct } from "@/lib/catalog";
-import { issueSignedToken } from "@/lib/blob";
+import { head, issueSignedToken } from "@/lib/blob";
+import { BlobNotFoundError } from "@vercel/blob";
 import { handleUploadPresigned, type HandleUploadPresignedBody } from "@vercel/blob/client";
 import { studioAccess } from "@/lib/studio-route";
 import { isHeader } from "@/lib/store-link";
 import { imageFolder } from "@/lib/store";
 import { IMAGE_CONTENT_TYPES, MAX_IMAGE_BYTES, ownsImagePath } from "@/lib/product-image";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { costPauseCode } from "@/lib/plan-standing";
+import { notePictureDoor } from "@/lib/picture-door";
 
 /** How long the creator has to start the upload after asking for the door. */
 const UPLOAD_WINDOW_MS = 5 * 60 * 1000;
@@ -69,6 +72,21 @@ export async function POST(request: NextRequest) {
           throw new Error("unknown");
         }
         if (!ownsImagePath(pathname, await imageFolder(ref))) throw new Error("invalid");
+        // Nothing new is stored while a renewal is unpaid (232 [CA1] unit 4).
+        { const paused = costPauseCode(store); if (paused) throw new Error(paused); }
+
+        // A name that is already a file is refused: the upload could never write over it, and noting it would let a
+        // failed request later take somebody's picture for a fresh upload (lib/picture-door.ts). Only a name the file
+        // store says is not there is written down. A name that cannot be checked or written down is not opened at
+        // all: only a noted upload may be put on a product, a link or a page, so it would be stored for nothing.
+        const there = await head(pathname).then(() => true, (error: unknown) => (error instanceof BlobNotFoundError ? false : null));
+        if (there === true) throw new Error("invalid");
+        if (there === null) throw new Error("could not check whether a picture name is free");
+        const noted = await notePictureDoor(pathname).catch((error: unknown) => {
+          console.error("could not note a picture upload", error);
+          return false;
+        });
+        if (!noted) throw new Error("could not note a picture upload");
 
         const rules = {
           allowedContentTypes: [...IMAGE_CONTENT_TYPES],
@@ -84,11 +102,11 @@ export async function POST(request: NextRequest) {
     return Response.json(answer);
   } catch (error) {
     const reason = error instanceof Error ? error.message : "server_error";
-    const known = ["signed_out", "none", "unknown", "invalid", "forbidden", "gone"].includes(reason);
+    const known = ["signed_out", "none", "unknown", "invalid", "forbidden", "gone", "renewal_unpaid", "plan_disputed"].includes(reason);
     if (!known) console.error("signing a picture upload failed", error);
     return Response.json(
       { ok: false, error: known ? reason : "server_error" },
-      { status: reason === "signed_out" ? 401 : reason === "forbidden" || reason === "gone" ? 403 : known ? 400 : 500 },
+      { status: reason === "signed_out" ? 401 : reason === "forbidden" || reason === "gone" ? 403 : reason === "renewal_unpaid" || reason === "plan_disputed" ? 409 : known ? 400 : 500 },
     );
   }
 }

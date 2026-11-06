@@ -43,6 +43,7 @@ import {
 import { MAX_SITE_PAGES, MAX_SITE_TITLE, SITE_KINDS, SLUG_PATTERN, MAX_SLUG, type SitePage } from "@/lib/site-page-rules";
 import { MAX_FUNNEL_NAME, MAX_FUNNEL_PAGES, type PageFunnelStep } from "@/lib/page-funnel";
 import { MAX_FORMS, newFormId, parseForm, tierIssues, type FormDef } from "@/lib/forms";
+import { sensitiveFieldOf } from "@/lib/form-sensitive";
 
 export const BUNDLE_FORMAT = "marktmorgen-funnel";
 /** The version of the format written now. A file of a later version is refused with a word of its own, so an older app never half-reads it. */
@@ -273,6 +274,7 @@ export function leftOutWords(left: LeftOut): string[] {
 
 export type BundleError =
   | "format"
+  | "forms_sensitive"
   | "newer"
   | "too_big"
   | "unsafe"
@@ -372,6 +374,8 @@ export function readBundle(raw: unknown, options: { maxBytes: number; own?: bool
     ) {
       return { ok: false, error: "forms" };
     }
+    // A form in a funnel file never asks what a scam asks for (568 [GD2] (c)), whoever wrote the file.
+    if (sensitiveFieldOf(parsed)) return { ok: false, error: "forms_sensitive" };
     const { id: _id, updatedAt: _at, ...rest } = parsed;
     void _id;
     void _at;

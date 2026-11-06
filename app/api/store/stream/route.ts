@@ -1,4 +1,4 @@
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import { takeData } from "@/lib/store-data";
 import { reserveStoreUpload } from "@/lib/upload-budget";
 import type { NextRequest } from "next/server";
@@ -6,7 +6,7 @@ import { readKind } from "@/lib/catalog";
 import { ITEM_ID_PATTERN, VIDEO_TYPES, findLesson, readCourses } from "@/lib/course";
 import { rememberFolderOwner } from "@/lib/delivery";
 import { MAX_FILE_BYTES, safeFileName } from "@/lib/product-file";
-import { storageRefusal, standingOf } from "@/lib/plan-standing";
+import { costPauseCode, storageRefusal, standingOf } from "@/lib/plan-standing";
 import { fits, storageBrakeFor, storageUsed } from "@/lib/storage-quota";
 import { storeFolder, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -59,11 +59,12 @@ export async function POST(request: NextRequest) {
 
     // An unbounded direct-provider grant is unavailable; the studio can use
     // its existing R2 file fallback instead, subject to that path's budget.
+    // Nothing new is stored while a renewal is unpaid (232 [CA1] unit 4).
+    { const paused = costPauseCode(store); if (paused) return Response.json({ ok: false, error: paused }, { status: 409 }); }
     if (!(await reserveStoreUpload(store, bytes, "stream"))) return Response.json({ ok: false, error: "off" }, { status: 404 });
     const folder = await storeFolder(ref);
-    if (!(await withinService("stream-door", folder, DOORS_PER_HOUR, 3600, store))) {
-      return Response.json({ ok: false, error: "slow_down" }, { status: 429 });
-    }
+    const refused = await withinServiceWhy("stream-door", folder, DOORS_PER_HOUR, 3600, store);
+    if (refused) return serviceRefusedJson(refused, "slow_down");
     // What a store may keep goes by where it stands with its plan (lib/plan-standing.ts).
     const standing = standingOf(store);
     const held = await storageUsed(folder, storageBrakeFor(standing, store.tier));

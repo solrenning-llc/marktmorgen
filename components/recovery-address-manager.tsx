@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { EmailInput } from "@/components/email-input";
 import Link from "next/link";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
@@ -14,6 +15,7 @@ const MESSAGES: Record<string, string> = {
   wrong: "That code is not right. Type the six digits in the email we sent there.",
   locked: "You got in through your recovery address, so this waits until the date at the top of your studio.",
   reauth: "This needs a login from the last 15 minutes. Log in again, then come back here.",
+  second_step: "Your account has a passkey or two-step login, so changing the recovery address needs a login with one of them. Log in again with your passkey or your app's code, then come back here.",
   rate_limited: "That is a lot of changes in an hour. Try again later.",
   signed_out: "Your session ended. Log in again.",
   server_error: "Something went wrong on our side. Try again in a moment.",
@@ -110,10 +112,12 @@ export function RecoveryAddressManager({ shown: initial }: { shown: string }) {
             void run({ action: "start", address }, () => setSent(true));
           }}
         >
-          <label className="block min-w-0 flex-1 basis-60 text-sm font-bold text-ink">
-            {shown ? "Change it to" : "Your recovery address"}
-            <input className="field mt-1" type="email" autoComplete="email" required maxLength={254} value={address} onChange={(e) => setAddress(e.target.value)} />
-          </label>
+          <div className="min-w-0 flex-1 basis-60">
+            <label htmlFor="account-recovery-email" className="block text-sm font-bold text-ink">
+              {shown ? "Change it to" : "Your recovery address"}
+            </label>
+            <EmailInput id="account-recovery-email" className="field mt-1" required autoComplete="email" value={address} onChange={setAddress} />
+          </div>
           <button type="submit" className="btn btn-secondary" disabled={busy}>
             {busy ? "Sending…" : "Send a code there"}
           </button>

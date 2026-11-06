@@ -1,6 +1,6 @@
 import {reservePaidResourceWindow} from '@/lib/contract-resource-window';
 import { isRedisConfigured, redisPipeline } from '@/lib/redis';
-import { standingOf } from '@/lib/plan-standing';
+import { costStandingOf } from '@/lib/plan-standing';
 import { type AllowanceWindow, type WindowFields, allowanceWindow } from '@/lib/allowance-window';
 import type { Tier } from '@/lib/plan';
 import { AUTOMATIC_UPLOAD_REVIEW_ID, UPLOAD_BUDGET_RULES, UPLOAD_BUDGET_SCOPES, currentUploadBudgetPolicy, isUploadBudgetConfigured, uploadBudgetSnapshot, uploadLedgerKey, uploadOpenedKey, type UploadBudgetPolicy, type UploadBudgetScope } from '@/lib/upload-budget-policy';
@@ -8,7 +8,8 @@ import { AUTOMATIC_UPLOAD_REVIEW_ID, UPLOAD_BUDGET_RULES, UPLOAD_BUDGET_SCOPES, 
 export type UploadBackend = 'r2'|'blob'|'stream';
 export type UploadStore = WindowFields & { statsId: string|null; tier: Tier };
 export function uploadScopeFor(store: UploadStore): UploadBudgetScope {
-  const standing=standingOf(store);
+  // A paid plan whose renewal is unpaid uploads as an ended one (232 [CA1] unit 4).
+  const standing=costStandingOf(store);
   return standing==='paid'?store.tier:standing==='none'?'setup':standing;
 }
 /** One persistent cluster-slot hash covers all providers and all customers.

@@ -1,4 +1,5 @@
 import {HANDLE_PATTERN} from '@/lib/store-handle-pattern';
+import {customerTaxContractContextSupported} from './customer-tax-review';
 import {createHash,randomUUID} from 'node:crypto';
 import {isRedisConfigured,redisPipeline} from '@/lib/redis';
 import {commercialMarginReady,CURRENT_COMMERCIAL_MARGIN_REVIEW,CURRENT_PRICE_AND_RIGHTS_SNAPSHOT} from '@/lib/commercial-margin';
@@ -99,6 +100,7 @@ export async function reserveContractFunding(statsId:string,tier:Tier,cycle:Cycl
  if(action==='restart'&&(!Boolean(CONTRACT_ADMISSION_COVERAGE.pauseRestart)||cycle!=='month'))return null;
  if((action==='switch'||action==='restart')?(typeof sourceSubscriptionId!=='string'||!/^sub_[A-Za-z0-9]{6,64}$/.test(sourceSubscriptionId)):sourceSubscriptionId!==null)return null;
  const key=(tier+'_'+cycle) as ContractKey;
+ if(!customerTaxContractContextSupported(context,policy))return null;
  const encodedContext=canonicalFinancialSnapshot(context);
  if(!encodedContext)return null;
  context=JSON.parse(encodedContext) as ContractFundingContext;
@@ -196,6 +198,7 @@ export async function activateCheckoutContract(
  policy:ContractFundingPolicy|null=CURRENT_CONTRACT_FUNDING_POLICY,
  context:ContractFundingContext={termsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,review:CURRENT_COMMERCIAL_MARGIN_REVIEW},
 ):Promise<boolean>{
+ if(!customerTaxContractContextSupported(context,policy))return false;
  const encoded=canonicalFinancialSnapshot({input,context});
  if(!encoded)return false;
  ({input,context}=JSON.parse(encoded) as {input:CheckoutContractActivation;context:ContractFundingContext});
@@ -277,6 +280,7 @@ export async function activateSwitchContract(
  policy:ContractFundingPolicy|null=CURRENT_CONTRACT_FUNDING_POLICY,
  context:ContractFundingContext={termsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,review:CURRENT_COMMERCIAL_MARGIN_REVIEW},
 ):Promise<boolean>{
+ if(!customerTaxContractContextSupported(context,policy))return false;
  const encoded=canonicalFinancialSnapshot({input,context});if(!encoded)return false;
  ({input,context}=JSON.parse(encoded) as {input:CheckoutContractActivation;context:ContractFundingContext});
  if(!input||!context||typeof input!=='object'||typeof context!=='object')return false;
@@ -449,6 +453,7 @@ export async function claimRestartIntent(
 ):Promise<OwnedRestartIntent|null>{
  // New IO is forbidden until the entire lifecycle/cost review is covered.
  if(!Boolean(CONTRACT_ADMISSION_COVERAGE.pauseRestart))return null;
+ if(!customerTaxContractContextSupported(context,policy))return null;
  const encoded=canonicalFinancialSnapshot({input,context});if(!encoded)return null;
  ({input,context}=JSON.parse(encoded) as {input:RestartIntentInput;context:ContractFundingContext});
  if(!input||!context||typeof input!=='object'||typeof context!=='object')return null;
@@ -534,6 +539,7 @@ export async function armRestartSubmission(
  context:ContractFundingContext={termsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,review:CURRENT_COMMERCIAL_MARGIN_REVIEW},
 ):Promise<ArmedRestartSubmission|null>{
  if(!Boolean(CONTRACT_ADMISSION_COVERAGE.pauseRestart))return null;
+ if(!customerTaxContractContextSupported(context,policy))return null;
  const encoded=canonicalFinancialSnapshot({input,context});if(!encoded)return null;
  ({input,context}=JSON.parse(encoded));
  const {intent,priceId,bodyHash}=input;
@@ -619,6 +625,7 @@ export function restartSubmissionOpenNow(
  context:ContractFundingContext={termsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,review:CURRENT_COMMERCIAL_MARGIN_REVIEW},
 ):boolean{
  if(!Boolean(CONTRACT_ADMISSION_COVERAGE.pauseRestart))return false;
+ if(!customerTaxContractContextSupported(context,policy,new Date(nowMs)))return false;
  const encoded=canonicalFinancialSnapshot({armed,nowMs,policy,context});if(!encoded)return false;
  ({armed,nowMs,policy,context}=JSON.parse(encoded));
  if(!Number.isSafeInteger(nowMs)||nowMs<=0||!armed?.intent)return false;
@@ -753,6 +760,7 @@ export async function takeRestartRecovery(
  context:ContractFundingContext={termsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,review:CURRENT_COMMERCIAL_MARGIN_REVIEW},
 ):Promise<RestartRecovery|null>{
  if(!Boolean(CONTRACT_ADMISSION_COVERAGE.pauseRestart))return null;
+ if(!customerTaxContractContextSupported(context,policy))return null;
  const encoded=canonicalFinancialSnapshot({input,policy,context});if(!encoded)return null;
  ({input,policy,context}=JSON.parse(encoded));
  if(!input||!/^[A-Za-z0-9_-]{1,128}$/.test(input.statsId)||!/^sub_[A-Za-z0-9]{6,64}$/.test(input.sourceSubscriptionId)||!/^ctr_[A-Za-z0-9_-]{1,80}$/.test(input.sourceGrantId)||typeof input.ref!=='string'||input.ref.length===0||input.ref.length>320||!HANDLE_PATTERN.test(input.handle)||typeof input.paused!=='string'||Buffer.byteLength(input.paused)>1536||!isRedisConfigured())return null;

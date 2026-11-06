@@ -1,4 +1,4 @@
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusalCode, withinServiceWhy } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { away, creatorFrom } from "@/lib/studio-route";
 import { clientAddress } from "@/lib/request-guard";
@@ -16,9 +16,8 @@ export async function POST(request: NextRequest) {
   const { store, origin, studio } = creator;
   if (!paypalSalesConfigured()) return away(origin, studio("paypal=unavailable#paypal"));
   if (!store.statsId) return away(origin, studio("paypal=error#paypal"));
-  if (!(await withinService("paypal-sell-connect", `${clientAddress(request)}|${store.handle}`, 10, 3600, store))) {
-    return away(origin, studio("paypal=slow#paypal"));
-  }
+  const refused = await withinServiceWhy("paypal-sell-connect", `${clientAddress(request)}|${store.handle}`, 10, 3600, store);
+  if (refused) return away(origin, studio(`paypal=${serviceRefusalCode(refused, "slow")}#paypal`));
   try {
     const pin = store.sid ? `?store=${encodeURIComponent(store.sid)}` : "";
     const url = await onboardingUrl(store, `${origin}/api/store/paypal/onboarded${pin}`);

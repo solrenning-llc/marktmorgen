@@ -45,9 +45,8 @@
  * for an hour in exchange for it (sesCredentials, below). Nothing that could
  * be copied out of a settings page and used from somewhere else exists.
  *
- * A long-lived key still works in the role's place, for a host that has no
- * such token: AWS_SES_ACCESS_KEY_ID and AWS_SES_SECRET_ACCESS_KEY. The role
- * is used when both are set.
+ * Only the sending role is accepted. User access keys are not a fallback;
+ * a host without a usable token cannot send through SES.
  *
  *   nl:ses:state            what Amazon last said the account may do (JSON)
  *   nl:ses:h:<YYYY-MM-DDTHH> emails Amazon took in that hour
@@ -59,10 +58,10 @@ import { SES_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 
 export type SesConfig = {
-  /** The role to borrow a key for; null when a long-lived key is used in its place. */
-  roleArn: string | null;
-  /** The long-lived key, when there is one. */
-  key: AwsKey | null;
+  /** The only identity allowed to send: a role borrowed with the host token. */
+  roleArn: string;
+  /** Retained shape for callers; user access keys are never accepted. */
+  key: null;
   region: string;
   configurationSet: string;
   topicArn: string;
@@ -75,21 +74,18 @@ function env(name: string): string {
 /** The settings, or null when any is missing or does not look like what it should be. */
 export function sesConfig(): SesConfig | null {
   const role = env("AWS_SES_ROLE_ARN");
-  const accessKeyId = env("AWS_SES_ACCESS_KEY_ID");
-  const secretAccessKey = env("AWS_SES_SECRET_ACCESS_KEY");
   const region = env("AWS_SES_REGION");
   const configurationSet = env("AWS_SES_CONFIGURATION_SET");
   const topicArn = env("AWS_SES_TOPIC_ARN");
   const roleArn = /^arn:aws:iam::\d{12}:role\/[A-Za-z0-9+=,.@_\/-]{1,128}$/.test(role) ? role : null;
-  const key = /^[A-Z0-9]{16,128}$/.test(accessKeyId) && secretAccessKey.length >= 16 ? { accessKeyId, secretAccessKey } : null;
-  if (!roleArn && !key) return null;
+  if (!roleArn) return null;
   if (!/^[a-z]{2}(-[a-z]+)+-\d$/.test(region)) return null;
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(configurationSet)) return null;
   // The topic must be in the region email is sent from: its announcements
   // are signed by that region's certificate (lib/sns.ts).
   const arn = /^arn:aws:sns:([a-z0-9-]+):\d{12}:[A-Za-z0-9_-]{1,256}$/.exec(topicArn);
   if (!arn || arn[1] !== region) return null;
-  return { roleArn, key, region, configurationSet, topicArn };
+  return { roleArn, key: null, region, configurationSet, topicArn };
 }
 
 /* ------------------------------------------------------------------ */
@@ -155,13 +151,13 @@ let refusedUntil = 0;
 const between = (text: string, tag: string) => new RegExp(`<${tag}>([^<]+)</${tag}>`).exec(text)?.[1] ?? "";
 
 /**
- * The key to sign with: the long-lived one when that is what is set, or one
- * Amazon lends for an hour in exchange for the host's token. Null when
+ * The temporary key Amazon lends to the sending role for an hour in
+ * exchange for the host's token. Null when
  * Amazon will not lend one — no token on this request, or a role that does
  * not trust it — and then Amazon is simply not used.
  */
 export async function sesCredentials(config: SesConfig, now = Date.now()): Promise<AwsKey | null> {
-  if (!config.roleArn) return config.key;
+  if (!config.roleArn) return null;
   if (lent && lent.role === config.roleArn && now < lent.until) return lent.key;
   if (now < refusedUntil) return null;
   const token = hostToken();
@@ -265,10 +261,10 @@ export type SesState = {
   ready: boolean;
   /** Why not, in a word, when it does not: "sandbox", "off", "shutdown", "unreachable", or what a send was refused with. */
   why: string;
-  /** Emails a second, and in any 24 hours; 0 for no limit. */
+  /** Emails a second, and in any 24 hours; only max24 = -1 denotes unlimited quota. */
   rate: number;
   max24: number;
-  /** When Amazon was last asked, and until when it is not asked again after a refusal (seconds). */
+  /** Cache freshness/retry anchor, and the end of a sender-refusal hold (seconds). */
   at: number;
   hold: number;
 };
@@ -281,12 +277,28 @@ export const HOLD_SECONDS = 600;
 /** How long a state is kept at all: past this, with Amazon not answering, it is not used. */
 const KEPT_SECONDS = 3_600;
 
+/** Only documented numeric quota evidence may authorize SES. */
+function accountRate(raw: unknown): number | null {
+  return typeof raw === "number" && Number.isFinite(raw) && raw >= 1 && raw <= Number.MAX_SAFE_INTEGER ? raw : null;
+}
+
+function accountMax(raw: unknown): number | null {
+  if (raw === -1) return -1; // The documented unlimited-quota sentinel.
+  return typeof raw === "number" && Number.isFinite(raw) && raw >= 1 && raw <= Number.MAX_SAFE_INTEGER ? Math.floor(raw) : null;
+}
+
 function parseState(raw: unknown): SesState | null {
-  if (typeof raw !== "string") return null;
+  if (typeof raw !== "string" || raw.length > 1_024) return null;
   try {
-    const v = JSON.parse(raw) as Partial<SesState>;
-    if (typeof v.ready !== "boolean") return null;
-    return { ready: v.ready, why: typeof v.why === "string" ? v.why : "", rate: Number(v.rate) || 0, max24: Number(v.max24) || 0, at: Number(v.at) || 0, hold: Number(v.hold) || 0 };
+    const v = JSON.parse(raw) as Partial<SesState> | null;
+    if (!v || typeof v !== "object" || Array.isArray(v) || typeof v.ready !== "boolean" ||
+        typeof v.why !== "string" || v.why.length > 300 ||
+        typeof v.rate !== "number" || !Number.isFinite(v.rate) || v.rate < 0 || v.rate > Number.MAX_SAFE_INTEGER ||
+        typeof v.max24 !== "number" || !Number.isSafeInteger(v.max24) || v.max24 < -1 ||
+        typeof v.at !== "number" || !Number.isSafeInteger(v.at) || v.at < 0 ||
+        typeof v.hold !== "number" || !Number.isSafeInteger(v.hold) || v.hold < 0) return null;
+    if (v.ready && (v.why !== "" || v.hold !== 0 || accountRate(v.rate) === null || accountMax(v.max24) === null)) return null;
+    return { ready: v.ready, why: v.why, rate: v.rate, max24: v.max24, at: v.at, hold: v.hold };
   } catch {
     return null;
   }
@@ -309,10 +321,16 @@ async function askAccount(config: SesConfig, now: number): Promise<SesState | nu
       EnforcementStatus?: unknown;
       SendQuota?: { Max24HourSend?: unknown; MaxSendRate?: unknown };
     };
-    const why = a.ProductionAccessEnabled !== true ? "sandbox" : a.SendingEnabled !== true ? "off" : a.EnforcementStatus === "SHUTDOWN" ? "shutdown" : "";
-    const rate = Number(a.SendQuota?.MaxSendRate);
-    const max24 = Number(a.SendQuota?.Max24HourSend);
-    return { ready: why === "", why, rate: Number.isFinite(rate) && rate > 0 ? rate : 0, max24: Number.isFinite(max24) && max24 > 0 ? Math.floor(max24) : 0, at: now, hold: 0 };
+    if (!a || typeof a !== "object" || Array.isArray(a)) return { ready: false, why: "status", rate: 0, max24: 0, at: now, hold: 0 };
+    let why = a.ProductionAccessEnabled !== true ? "sandbox" : a.SendingEnabled !== true ? "off" :
+      a.EnforcementStatus === "SHUTDOWN" ? "shutdown" :
+      a.EnforcementStatus === "HEALTHY" || a.EnforcementStatus === "PROBATION" ? "" : "status";
+    const rate = accountRate(a.SendQuota?.MaxSendRate);
+    const max24 = accountMax(a.SendQuota?.Max24HourSend);
+    // The current batch pacer supports at least one email a second. Missing,
+    // zero, coerced or unsupported quota data is not permission to send.
+    if (!why && (rate === null || max24 === null)) why = "quota";
+    return { ready: why === "", why, rate: rate ?? 0, max24: max24 ?? 0, at: now, hold: 0 };
   } catch (error) {
     console.error("Amazon SES could not be reached", error);
     return null;
@@ -328,23 +346,35 @@ export async function sesState(now = Date.now()): Promise<SesState | null> {
   const config = sesConfig();
   if (!config || !isRedisConfigured()) return null;
   const seconds = Math.floor(now / 1000);
+  if (!Number.isFinite(now) || now < 0 || !Number.isSafeInteger(seconds)) return null;
   let known: SesState | null = null;
   try {
-    known = parseState((await redisPipeline([["GET", STATE_KEY]]))[0]);
+    const reply: unknown = await redisPipeline([["GET", STATE_KEY]]);
+    if (!Array.isArray(reply)) return null;
+    const length = Object.getOwnPropertyDescriptor(reply, "length");
+    if (!length || !("value" in length) || length.value !== 1) return null;
+    const item = Object.getOwnPropertyDescriptor(reply, "0");
+    if (!item || !("value" in item)) return null;
+    known = parseState(item.value);
   } catch {
     return null;
   }
-  if (known && (seconds < known.hold || seconds - known.at < BELIEVED_SECONDS)) return known;
+  // A future timestamp is not evidence that the account was checked recently.
+  if (known && known.at <= seconds && (seconds < known.hold || seconds - known.at < BELIEVED_SECONDS)) return known;
   const asked = await askAccount(config, seconds);
   if (asked) {
     await saveState(asked).catch(() => {});
     return asked;
   }
-  // Amazon did not answer. What it said within the hour stands, and it is
-  // asked again in a minute rather than on every email.
-  const stale: SesState = known ?? { ready: false, why: "unreachable", rate: 0, max24: 0, at: 0, hold: 0 };
-  await saveState({ ...stale, at: seconds - BELIEVED_SECONDS + 60 }).catch(() => {});
-  return stale;
+  // A failed refresh is not renewed permission to send under an old answer.
+  // Reuse the existing one-minute retry anchor and cache write, without
+  // preserving ready=true indefinitely by extending its timestamp and TTL.
+  const unavailable: SesState = {
+    ready: false, why: "unreachable", rate: known?.rate ?? 0, max24: known?.max24 ?? 0,
+    at: seconds - BELIEVED_SECONDS + 60, hold: 0,
+  };
+  await saveState(unavailable).catch(() => {});
+  return unavailable;
 }
 
 /** The account's limits when Amazon may be used right now; null when it may not. */
@@ -373,6 +403,9 @@ export async function sesDown(why: string, seconds = HOLD_SECONDS, now = Date.no
 /* What Amazon took                                                    */
 /* ------------------------------------------------------------------ */
 
+// A rolling 24-hour interval may touch 25 UTC hourly buckets. Retain the
+// first partial hour conservatively; the same pipeline reads one extra key.
+const SES_USAGE_BUCKETS = 25;
 const hourKey = (ms: number) => `nl:ses:h:${new Date(ms).toISOString().slice(0, 13)}`;
 
 export async function countSesSent(n: number, now = Date.now()): Promise<void> {
@@ -384,15 +417,30 @@ export async function countSesSent(n: number, now = Date.now()): Promise<void> {
   ]).catch(() => {});
 }
 
-/** Emails Amazon took in the last 24 hours, this hour included. 0 when it cannot be read. */
-export async function sesSentLast24h(now = Date.now()): Promise<number> {
-  if (!isRedisConfigured()) return 0;
+/** Conservative rolling usage: the current hour and the preceding 24 whole
+ * hourly buckets. The first partial hour may overcount by less than an hour,
+ * never omit a send still within the last 24 hours. Null when unproved. */
+export async function sesSentLast24h(now = Date.now()): Promise<number | null> {
+  if (!isRedisConfigured()) return null;
   try {
-    const keys = Array.from({ length: 24 }, (_, i) => hourKey(now - i * 3_600_000));
-    const rows = await redisPipeline(keys.map((key) => ["GET", key]));
-    return rows.reduce((sum: number, raw) => sum + (Number(raw) || 0), 0);
+    const keys = Array.from({ length: SES_USAGE_BUCKETS }, (_, i) => hourKey(now - i * 3_600_000));
+    const rows: unknown = await redisPipeline(keys.map((key) => ["GET", key]));
+    if (!Array.isArray(rows)) return null;
+    const length = Object.getOwnPropertyDescriptor(rows, "length");
+    if (!length || !Object.hasOwn(length, "value") || length.value !== SES_USAGE_BUCKETS) return null;
+    let total = 0;
+    for (let i = 0; i < SES_USAGE_BUCKETS; i += 1) {
+      const item = Object.getOwnPropertyDescriptor(rows, String(i));
+      if (!item || !Object.hasOwn(item, "value")) return null;
+      if (item.value === null) continue; // Explicit absence is known zero.
+      if (typeof item.value !== "string" || !/^(0|[1-9][0-9]{0,15})$/.test(item.value)) return null;
+      const count = Number(item.value);
+      if (!Number.isSafeInteger(count) || count > Number.MAX_SAFE_INTEGER - total) return null;
+      total += count;
+    }
+    return total;
   } catch {
-    return 0;
+    return null;
   }
 }
 
@@ -403,10 +451,13 @@ export async function sesSentLast24h(now = Date.now()): Promise<number> {
  */
 export const SES_BULK_SHARE = 0.8;
 
-/** How many more emails sent many at a time Amazon's day has room for. Infinity for an account with no limit. */
-export async function sesBulkRoom(state: SesState, now = Date.now()): Promise<number> {
-  if (state.max24 <= 0) return Number.POSITIVE_INFINITY;
-  return Math.max(0, Math.floor(state.max24 * SES_BULK_SHARE) - (await sesSentLast24h(now)));
+/** Recorded bulk room; null when usage cannot be proved. Infinity for an account with no limit. */
+export async function sesBulkRoom(state: SesState, now = Date.now()): Promise<number | null> {
+  if (typeof state.max24 !== "number" || !Number.isSafeInteger(state.max24) || state.max24 < -1) return null;
+  if (state.max24 === -1) return Number.POSITIVE_INFINITY;
+  if (state.max24 === 0) return 0;
+  const sent = await sesSentLast24h(now);
+  return sent === null ? null : Math.max(0, Math.floor(state.max24 * SES_BULK_SHARE) - sent);
 }
 
 /* ------------------------------------------------------------------ */
@@ -440,7 +491,7 @@ export type SesOutcome = "sent" | "busy" | "account" | "refused";
 
 const ACCOUNT_ERRORS = /AccountSuspended|SendingPaused|MailFromDomainNotVerified|LimitExceeded|AccessDenied|InvalidClientTokenId|SignatureDoesNotMatch|UnrecognizedClient|ExpiredToken|NotFound/i;
 
-export async function sesSend(config: SesConfig, message: SesMessage): Promise<{ outcome: SesOutcome; why: string }> {
+export async function sesSend(config: SesConfig, message: SesMessage): Promise<{ outcome: SesOutcome; why: string; uncertain?: true }> {
   const payload = JSON.stringify({
     FromEmailAddress: message.from,
     Destination: { ToAddresses: [message.to] },
@@ -467,6 +518,10 @@ export async function sesSend(config: SesConfig, message: SesMessage): Promise<{
   try {
     const response = await call(config, "POST", "/v2/email/outbound-emails", payload);
     if (response.ok) return { outcome: "sent", why: "" };
+    // SES can accept a message before returning a server error. This is not
+    // a confirmed refusal; sends must not retry or change sender.
+    // Read no error body before preserving that distinction.
+    if (response.status >= 500) return { outcome: "busy", why: `SES ${response.status}: acceptance unknown`, uncertain: true };
     const type = response.headers.get("x-amzn-errortype") ?? "";
     let said = "";
     try {
@@ -477,14 +532,14 @@ export async function sesSend(config: SesConfig, message: SesMessage): Promise<{
     }
     const why = `${response.status} ${type} ${said}`.replace(/\s+/g, " ").trim().slice(0, 300);
     if (response.status === 429 && !/quota/i.test(why)) return { outcome: "busy", why };
-    if (response.status >= 500) return { outcome: "busy", why };
     if (response.status === 401 || response.status === 403 || response.status === 404 || response.status === 429) return { outcome: "account", why };
     // An address not proved, in an account still in its sandbox or sending
     // from a domain it has not proved, comes back as the email's own fault.
     if (ACCOUNT_ERRORS.test(why) || /not verified|sandbox|quota/i.test(why)) return { outcome: "account", why };
     return { outcome: "refused", why };
   } catch (error) {
-    return { outcome: "busy", why: error instanceof Error ? error.message.slice(0, 200) : "no answer" };
+    // A lost response is not proof that SES did not accept the message.
+    return { outcome: "busy", why: error instanceof Error ? error.message.slice(0, 200) : "no answer", uncertain: true };
   }
 }
 
@@ -493,17 +548,32 @@ const didKey = (batchKey: string, to: string) => `nl:ses:did:${createHash("sha25
 const DID_SECONDS = 2 * 86_400;
 
 /**
- * Those of a batch that Amazon has not already taken under this key. A batch
- * tried again — after a timeout, after the rest of it failed — never writes
- * to the same person twice.
+ * Recipients whose existing marker explicitly confirms absence. A known
+ * marker leaves that recipient out; null means evidence is unavailable,
+ * never permission to send. This preflight is not proof of delivery or
+ * lifetime idempotency after an uncertain provider response.
  */
-export async function notYetTaken<T extends { to: string }>(batchKey: string, messages: T[]): Promise<T[]> {
+export async function notYetTaken<T extends { to: string }>(batchKey: string, messages: T[]): Promise<T[] | null> {
   if (!messages.length) return messages;
+  // sendBatch already caps a request at 100; validate only that finite window.
+  if (messages.length > 100) return null;
   try {
-    const found = await redisPipeline(messages.map((m) => ["GET", didKey(batchKey, m.to)]));
-    return messages.filter((_, i) => found[i] === null || found[i] === undefined);
+    const found: unknown = await redisPipeline(messages.map((m) => ["GET", didKey(batchKey, m.to)]));
+    if (!Array.isArray(found)) return null;
+    const length = Object.getOwnPropertyDescriptor(found, "length");
+    if (!length || !("value" in length) || length.value !== messages.length) return null;
+    const pending: T[] = [];
+    for (let i = 0; i < messages.length; i += 1) {
+      const item = Object.getOwnPropertyDescriptor(found, String(i));
+      if (!item || !("value" in item)) return null;
+      // Only explicit absence permits sending. Missing, inherited, computed
+      // or unexpected evidence is not proof that SES never took the message.
+      if (item.value === null) pending.push(messages[i]);
+      else if (item.value !== "1") return null;
+    }
+    return pending;
   } catch {
-    return messages;
+    return null;
   }
 }
 
@@ -515,23 +585,25 @@ const BATCH_MS = 9_000;
  * may send, and says which it took and which are left for the other sender:
  * the ones not reached in time, and all of them from the moment Amazon
  * refuses one for the account's own sake. One it refused for the email's own
- * sake is in neither: it is not sent by anybody.
+ * sake is in neither: it is not sent by anybody. An uncertain acceptance
+ * stops new waves and rounds; callers must not hand its remainder elsewhere.
  */
 export async function sesBatch<T extends SesMessage>(
   config: SesConfig,
   state: SesState,
   messages: T[],
   batchKey: string,
-): Promise<{ taken: T[]; left: T[]; down: string }> {
+): Promise<{ taken: T[]; left: T[]; down: string; uncertain?: true }> {
   const taken: T[] = [];
   const refused = new Set<T>();
   const perSecond = Math.max(1, Math.floor(state.rate || 1));
   const started = Date.now();
   let down = "";
+  let uncertain = false;
   let queue = [...messages];
-  for (let round = 0; round < 2 && queue.length && !down; round += 1) {
+  for (let round = 0; round < 2 && queue.length && !down && !uncertain; round += 1) {
     const again: T[] = [];
-    for (let i = 0; i < queue.length && !down; i += perSecond) {
+    for (let i = 0; i < queue.length && !down && !uncertain; i += perSecond) {
       if (Date.now() - started > BATCH_MS) {
         again.push(...queue.slice(i));
         break;
@@ -541,7 +613,12 @@ export async function sesBatch<T extends SesMessage>(
       const results = await Promise.all(wave.map((m) => sesSend(config, m)));
       const done: T[] = [];
       results.forEach((result, j) => {
-        if (result.outcome === "sent") done.push(wave[j]);
+        if (result.uncertain === true) {
+          // A provider may have accepted this email before losing its reply.
+          // Keep it unresolved, with no second attempt in this call.
+          uncertain = true;
+          again.push(wave[j]);
+        } else if (result.outcome === "sent") done.push(wave[j]);
         else if (result.outcome === "refused") {
           refused.add(wave[j]);
           console.error("Amazon SES refused an email", result.why);
@@ -556,14 +633,14 @@ export async function sesBatch<T extends SesMessage>(
         // leaves these people out.
         await redisPipeline(done.map((m) => ["SET", didKey(batchKey, m.to), "1", "EX", DID_SECONDS])).catch(() => {});
       }
-      if (down) again.push(...queue.slice(i + perSecond));
+      if (down || uncertain) again.push(...queue.slice(i + perSecond));
       else if (i + perSecond < queue.length) await pause(Math.max(0, 1_000 - (Date.now() - waveStarted)));
     }
     queue = again;
-    if (queue.length && !down && round === 0) {
+    if (queue.length && !down && !uncertain && round === 0) {
       if (Date.now() - started > BATCH_MS) break;
       await pause(1_000);
     }
   }
-  return { taken, left: queue.filter((m) => !refused.has(m)), down };
+  return { taken, left: queue.filter((m) => !refused.has(m)), down, ...(uncertain ? { uncertain: true as const } : {}) };
 }

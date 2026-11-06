@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { FUNNEL_PAUSED } from "@/lib/import-limits";
 import { DROPPED_WORDS, MAX_SAVED_PAGE_BYTES, MAX_TRIMMED_PAGE_CHARS, type PageDraft, trimSavedPage } from "@/lib/clickfunnels-page";
 
 /** A product of the store, as the funnel's choices need it (app/studio/import). */
@@ -36,7 +37,7 @@ const MESSAGES: Record<string, string> = {
   empty: "That file has nothing in it.",
   too_big: "That page is too large to read, even without its scripts and styles.",
   slow: "That was a lot in a short time. Wait a while and try again.",
-  month: "Your plan's figure for this month is used: pages read, funnel checks or funnels made. It opens again when the month turns, or on a larger plan.",
+  month: "Your store has used its figure for this for now (pages read, funnel checks or funnels made). More can be done when it opens again.",
   role: "Only the store's owner and Admins can make pages and funnels.",
   plan: "The funnel has problems to fix first: see the list below.",
   busy: "This funnel is being imported in another tab. Wait a moment and check again.",
@@ -44,6 +45,9 @@ const MESSAGES: Record<string, string> = {
   setup_incomplete: "The import stopped partway. Check the funnel again: anything already made is used again, not made twice.",
   unavailable: "Imports are not switched on yet.",
   server_error: "Something went wrong on our side. Try again in a moment.",
+  // 232 [CA1] unit 4b2: in place of the studio's words about uploads.
+  renewal_unpaid: FUNNEL_PAUSED.renewal_unpaid,
+  plan_disputed: FUNNEL_PAUSED.plan_disputed,
 };
 
 function summary(draft: PageDraft): string {

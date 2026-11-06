@@ -40,7 +40,9 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Store, storeForId } from "@/lib/store";
 import { recordListings, type Listing } from "@/lib/catalog";
-import { commissionOn, commissionRate } from "@/lib/affiliate-setting";
+import { RECURRING_ALWAYS, commissionOn, commissionRate } from "@/lib/affiliate-setting";
+import { activeIntro } from "@/lib/intro-price";
+import { activePlan } from "@/lib/product-extras";
 import { canSell } from "@/lib/store-checkout";
 import { isHouseStore } from "@/lib/house-store";
 import { imageUrl } from "@/lib/product-image";
@@ -66,8 +68,22 @@ export type DirectoryProduct = {
   priceCents: number;
   /** The share this product earns, in percent. */
   rate: number;
-  /** What one sale earns at today's price, before any refund. */
+  /** What one sale earns at today's price, before any refund; for a membership, what one of its payments earns. */
   earnCents: number;
+  /**
+   * A membership, when the store credits them (lib/affiliate-setting.ts,
+   * recurring): how many months of its payments earn, RECURRING_ALWAYS for as
+   * long as the member pays. Absent for a product sold once (397 [SL1]).
+   */
+  months?: number;
+  /** A membership's billing interval, so "a monthly payment" says how often (lib/product-recurring.ts). */
+  interval?: "day" | "week" | "month" | "year";
+  /** A membership's free days: the months above count from sign-up, the free days included (lib/affiliates.ts withinMonths). */
+  trialDays?: number;
+  /** Its first payments are at an introductory price, which earns less than the price shown. */
+  intro?: boolean;
+  /** It can also be paid in a payment plan, which earns nothing while the store does not credit memberships: only a sale paid in full earns. */
+  paidInFull?: boolean;
   /** The product's picture, small, when it has one. */
   image: string | null;
 };
@@ -112,9 +128,19 @@ export type DirectoryNumbers = {
   paidCents: number;
 };
 
-/** A product an affiliate earns on: paid, sold once (memberships and payment plans earn nothing), on the store, and not left out of the program. */
+/**
+ * A product an affiliate earns on: paid, on the store, and not left out of the
+ * program. A product sold once earns on each sale, also when it can be paid in
+ * a payment plan (its one-time sale earns; 397 [SL1]); a membership earns on
+ * its payments only when the store credits them (affiliates.recurring).
+ */
 function earns(store: Store, listing: Listing): DirectoryProduct | null {
-  if (listing.priceCents <= 0 || listing.hidden || listing.recurring || listing.plan) return null;
+  if (listing.priceCents <= 0 || listing.hidden) return null;
+  const months = store.affiliates.recurring;
+  if (listing.recurring && months <= 0) return null;
+  // The months count from sign-up (lib/affiliates.ts withinMonths): a free trial as long as them leaves no payment that earns.
+  const trialDays = listing.recurring?.trialDays ?? 0;
+  if (listing.recurring && months < RECURRING_ALWAYS && trialDays >= months * 28) return null;
   const rate = commissionRate(store.affiliates, listing.id);
   if (rate <= 0) return null;
   const price = listing.options.length ? Math.min(...listing.options.map((option) => option.priceCents)) : listing.priceCents;
@@ -125,6 +151,9 @@ function earns(store: Store, listing: Listing): DirectoryProduct | null {
     priceCents: price,
     rate,
     earnCents: commissionOn(price, rate),
+    ...(listing.recurring ? { months, interval: listing.recurring.interval, ...(trialDays > 0 ? { trialDays } : {}) } : {}),
+    ...(activeIntro(listing, store.tiers) ? { intro: true } : {}),
+    ...(!listing.recurring && activePlan(listing) && months <= 0 ? { paidInFull: true } : {}),
     image: listing.image ? imageUrl(listing.image.small ? { path: listing.image.small.path } : listing.image) : null,
   };
 }

@@ -1,5 +1,5 @@
 import { after } from "next/server";
-import { apiError, apiOk, apiWriter, readApiBody } from "@/lib/api-guard";
+import { apiAdder, apiError, apiOk, apiWriter, readApiBody } from "@/lib/api-guard";
 import { noticeCreator } from "@/lib/account-notice";
 import { MAX_ENDPOINT_URL, addEndpoint, removeEndpoint, webhooksView } from "@/lib/webhooks";
 
@@ -16,7 +16,7 @@ import { MAX_ENDPOINT_URL, addEndpoint, removeEndpoint, webhooksView } from "@/l
  * (lib/account-notice.ts). The same five endpoints a store may have
  * (MAX_ENDPOINTS) count both.
  */
-const ADD_ERRORS: Record<"full" | "invalid" | "events" | "duplicate" | "unavailable", number> = { full: 409, invalid: 400, events: 400, duplicate: 409, unavailable: 503 };
+const ADD_ERRORS: Record<"full" | "invalid" | "events" | "duplicate" | "unavailable" | "paused", number> = { full: 409, invalid: 400, events: 400, duplicate: 409, unavailable: 503, paused: 409 };
 
 /** After the answer when there is a request to wait for; at once otherwise (a check, a script). */
 function later(task: () => Promise<unknown>): void {
@@ -29,13 +29,14 @@ function later(task: () => Promise<unknown>): void {
 }
 
 export async function POST(request: Request) {
-  const writer = await apiWriter(request);
+  // 232 [CA1] unit 4c: waits while the plan's renewal is unpaid or a payment for it is disputed, before it is counted.
+  const writer = await apiAdder(request);
   if (writer instanceof Response) return writer;
-  const body = await readApiBody(request);
-  if (body instanceof Response) return body;
+  const body = writer.body;
   const url = typeof body.url === "string" ? body.url.slice(0, MAX_ENDPOINT_URL + 1) : "";
   try {
-    const result = await addEndpoint(writer.store, url, body.events);
+    // Kept with the key that added it, so it pauses and stops with that key (owner C3-100).
+    const result = await addEndpoint(writer.store, url, body.events, Date.now(), writer.keyId);
     if (!result.ok) return apiError(ADD_ERRORS[result.reason], result.reason, result.message);
     const added = result.view.endpoints[result.view.endpoints.length - 1];
     if (!added) return apiError(502, "unavailable", "The endpoint could not be read back just now. Try again in a moment.");

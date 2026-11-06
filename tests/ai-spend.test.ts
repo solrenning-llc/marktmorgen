@@ -77,6 +77,9 @@ test('setup, trial and ended stores are attributed to their own acquisition allo
   assert.equal(aiBudgetScopeFor({...base,subscriptionId:'old'},100),'ended');
   assert.equal(aiBudgetScopeFor({...base,subscriptionActive:true,trialEnds:101},100),'trial');
   assert.equal(aiBudgetScopeFor({...base,subscriptionActive:true},100),'creator');
+  // 232 [CA1] unit 4: a renewal Stripe could not collect is spent as an ended plan, and paid up again it is its tier.
+  assert.equal(aiBudgetScopeFor({...base,subscriptionActive:true,renewalUnpaidSince:100},100),'ended');
+  assert.equal(aiBudgetScopeFor({...base,subscriptionActive:true,renewalUnpaidSince:0},100),'creator');
   assert.equal(aiBudgetScopeFor({...base,tier:'pro',subscriptionActive:true},100),'pro');
 });
 

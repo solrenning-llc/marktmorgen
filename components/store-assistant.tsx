@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { EmailInput } from "@/components/email-input";
 import { assistantWords } from "@/lib/buyer-words/assistant";
 import { MAX_ASSISTANT_QUESTION, MIN_ASSISTANT_QUESTION } from "@/lib/store-assistant-rules";
 
@@ -185,10 +186,10 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
           ) : null}
           {handing ? (
             <form onSubmit={handOff} className="mt-3 space-y-2" data-assistant-handoff>
-              <label className="block">
-                <span className="st-label text-sm">{w.email}</span>
-                <input type="email" required maxLength={254} autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className="st-field mt-1 w-full" />
-              </label>
+              <div>
+                <label htmlFor="store-assistant-email" className="st-label block text-sm">{w.email}</label>
+                <EmailInput id="store-assistant-email" required autoComplete="email" value={email} onChange={setEmail} className="st-field mt-1 w-full" language={language} store />
+              </div>
               <label className="block">
                 <span className="st-label text-sm">{w.name}</span>
                 <input maxLength={80} autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} className="st-field mt-1 w-full" />

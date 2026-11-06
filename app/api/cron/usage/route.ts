@@ -11,13 +11,14 @@ import {
 } from "@/lib/delivery";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { PLANS_ON_SALE } from "@/lib/opening";
+import { largerPlanFor } from "@/lib/larger-plan";
 import { SITE_URL } from "@/lib/site-url";
-import { SETUP_VIDEO_SECONDS, standingOf, videoLimitFor } from "@/lib/plan-standing";
+import { SETUP_VIDEO_SECONDS, costsPaused, standingOf, videoLimitFor } from "@/lib/plan-standing";
 import { watchedFolders, watchedIn } from "@/lib/watch";
 import { firstWord, settleAll, storeOf } from "@/lib/watch-billing";
 import { allowanceWindow, calendarWindow, resetWords } from "@/lib/allowance-window";
 
-import { VIDEO_SECONDS_INCLUDED, canBeCharged, centsWords, videoOwedCents } from "@/lib/watch-rules";
+import { centsWords } from "@/lib/watch-rules";
 import { videoUsageNotice } from "@/lib/video-usage-notice";
 import { visitedFolders, visitsIn } from "@/lib/traffic";
 import { firstWordOnVisits } from "@/lib/traffic-billing";
@@ -54,12 +55,11 @@ async function foldersOfTwoMonths(read: (month: string) => Promise<string[]>): P
  *
  * Nothing in here blocks or limits anything. It writes.
  *
- * It is also the run that bills the one thing charged by use: lesson video
- * watched past the hours a plan covers (lib/watch-billing.ts). Each store
- * past them has the hours added to its next invoice, by itself, and its
- * creator is written to the first time a month passes them: what they have
- * come to, and that nobody is cut off. A store with no plan to charge is
- * written to as well, because its videos are paused (lib/learn.ts).
+ * It also settles lesson video watched past the hours a plan covers
+ * (lib/watch-billing.ts). Since 31 October 2026 (232 [CA1] unit 3) that
+ * meter owes nothing, so nothing is ever put on an invoice after use; each
+ * creator is written to the first time a month's videos are paused
+ * (lib/learn.ts).
  *
  * Visits and orders are not billed (since 17 October 2026, when their prices
  * past a plan no longer kept the owner's 60% after tax). Each creator is
@@ -115,12 +115,13 @@ async function videoRun(): Promise<VideoRun> {
       if (seconds < SETUP_VIDEO_SECONDS) continue;
       const limit = videoLimitFor(store);
       const paused = limit !== null && seconds >= limit;
-      const charged = canBeCharged(store) && seconds > VIDEO_SECONDS_INCLUDED;
-      if (!paused && !charged) continue;
+      if (!paused) continue;
       if (paused) out.paused += 1;
+      // A renewal Stripe could not collect pauses video for its own reason, and the
+      // creator is told that one (232 [CA1] unit 4): not a plan's hours used up.
+      if (costsPaused(store)) continue;
       if (!isSenderConfigured() || !(await firstWord(folder, month))) continue;
       const notice = videoUsageNotice({ seconds, limit, standing: standingOf(store),
-        legacyChargeCents: charged ? videoOwedCents(seconds) : 0,
         studioUrl: `${SITE_URL}/studio`, supportEmail: SUPPORT_EMAIL });
       const sent = await sendEmail({ meter: { by: "company" },
         from: NIMBUS_FROM,
@@ -191,7 +192,7 @@ async function visitsRun(): Promise<VisitsRun> {
           "visits, and nothing anyone bought is taken away.",
           "",
           ...(standing === "paid"
-            ? [resetWords(store), "Moving to a larger plan opens them at once."]
+            ? [resetWords(store), ...(largerPlanFor(store) ? ["Moving to a larger plan opens them at once."] : [])]
             : PLANS_ON_SALE || standing === "trial"
               ? ["Your pages open again as soon as your plan is paid, or when the month", "turns, whichever comes first."]
               : ["Your pages open again when the month turns. Plans are not on sale yet."]),
@@ -233,7 +234,19 @@ export async function GET(request: NextRequest) {
   const visits = await visitsRun();
   const orders = await ordersRun();
 
-  const over = await storesOverAllowance();
+  // The delivery part on its own: a list or total Redis answered in an unknown shape (CX-123 rule 24) is never
+  // "nobody is over". It is said as unknown, nobody is written to on it and its told list is left as it was; the
+  // other parts above have run whatever it does, and the run answers an error only here, at the end.
+  let over: Awaited<ReturnType<typeof storesOverAllowance>>;
+  try {
+    over = await storesOverAllowance();
+  } catch (error) {
+    console.error("usage-watch: the stores over the delivery allowance are unknown today; nobody was written to about it", error);
+    return Response.json(
+      { ok: false, unread: ["delivery"], video, visits, orders },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   const allowance = bytesWords(DELIVERY_ALLOWANCE_BYTES);
 
   console.log(
@@ -369,7 +382,7 @@ async function ordersRun(): Promise<OrdersRun> {
           `Your store has had ${ordersWords(orders)} ${standingOf(store) === "trial" ? "in its free trial" : "this billing month"}, which is the ${countWords(limit)} ${standingOf(store) === "trial" ? "a free trial" : "your plan"}`,
           "covers, so new orders are paused.",
           resetWords(store),
-          "Moving to a larger plan opens them at once.",
+          ...(largerPlanFor(store) ? ["Moving to a larger plan opens them at once."] : []),
           "",
           "A buyer who presses buy now is told plainly that the store is not taking new",
           "orders right now, and nothing is charged. Anybody who was already paying",

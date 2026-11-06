@@ -1,4 +1,4 @@
-import { standingOf, type PlanFields } from '@/lib/plan-standing';
+import { costStandingOf, type PlanFields } from '@/lib/plan-standing';
 import type { Tier } from '@/lib/plan';
 import { isRedisConfigured, redisPipeline } from '@/lib/redis';
 import { AI_BUDGET_TIERS, AUTOMATIC_AI_SPEND_REVIEW_ID, aiSpendLedgerKey, aiSpendOpenedKey, aiSpendPolicySnapshot, currentAiSpendPolicy, isAiSpendPolicyValid, type AiBudgetTier, type AiSpendPolicy } from '@/lib/ai-spend-policy';
@@ -7,7 +7,8 @@ import type { AllowanceWindow } from '@/lib/allowance-window';
 
 /** Acquisition and ended accounts never consume a paid-tier allocation. */
 export function aiBudgetScopeFor(store: PlanFields & { tier: Tier }, nowSeconds = Date.now() / 1000): AiBudgetTier {
-  const standing = standingOf(store, nowSeconds);
+  // A paid plan whose renewal is unpaid is spent as an ended one (232 [CA1] unit 4).
+  const standing = costStandingOf(store, nowSeconds);
   return standing === 'paid' ? store.tier : standing === 'none' ? 'setup' : standing;
 }
 

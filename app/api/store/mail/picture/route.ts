@@ -1,6 +1,7 @@
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
+import { costPauseCode } from "@/lib/plan-standing";
 import { checkMailPicture, keepMailPicture } from "@/lib/mail-pictures";
 import { MAX_MAIL_PICTURE_BYTES } from "@/lib/mail-picture-rules";
 
@@ -19,7 +20,10 @@ export async function POST(request: NextRequest) {
   const raw = typeof body.picture === "string" ? body.picture : "";
   const checked = raw ? checkMailPicture(raw) : "picture";
   if (checked === "picture") return Response.json({ ok: false, error: "picture" }, { status: 400 });
-  if (!(await withinService("mail-picture", store.statsId ?? ref, 60, 3_600, store))) return Response.json({ ok: false, error: "slow" }, { status: 429 });
+  // Nothing new is stored while a renewal is unpaid (232 [CA1] unit 4).
+  { const paused = costPauseCode(store); if (paused) return Response.json({ ok: false, error: paused }, { status: 409 }); }
+  const refused = await withinServiceWhy("mail-picture", store.statsId ?? ref, 60, 3_600, store);
+  if (refused) return serviceRefusedJson(refused, "slow");
   try {
     const kept = await keepMailPicture(ref, checked);
     return Response.json({ ok: true, ...kept });

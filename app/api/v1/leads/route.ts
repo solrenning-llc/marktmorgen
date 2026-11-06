@@ -1,5 +1,6 @@
-import { apiError, apiOk, apiStore, apiWriter, readApiBody } from "@/lib/api-guard";
-import { leads } from "@/lib/api-read";
+import { apiAdder, apiError, apiOk, apiStore, holdMoreApi } from "@/lib/api-guard";
+import { apiOkFields, badFields } from "@/lib/api-fields";
+import { LEAD_FIELDS, chargedLeads } from "@/lib/api-read";
 import { WRITE_ERRORS, addLead, roomFor } from "@/lib/api-write";
 
 /**
@@ -10,9 +11,15 @@ import { WRITE_ERRORS, addLead, roomFor } from "@/lib/api-write";
 export async function GET(request: Request) {
   const store = await apiStore(request);
   if (store instanceof Response) return store;
+  // A ?fields= that cannot be answered is refused before any further request is taken or anything read.
+  const bad = badFields(request, LEAD_FIELDS);
+  if (bad) return bad;
   const params = new URL(request.url).searchParams;
   try {
-    return apiOk(await leads(store, params.get("cursor"), params.get("agreed") === "true"));
+    // A page at its most is set aside before the scan, and settled at what it read and sends before it is sent (lib/api-read-rules.ts, listPageMost, scannedPageWork).
+    const found = await chargedLeads(store, params.get("cursor"), params.get("agreed") === "true", (most) => holdMoreApi(store, most));
+    if (found instanceof Response) return found;
+    return apiOkFields(request, found);
   } catch (error) {
     console.error("api: leads failed", error);
     return apiError(502, "unavailable", "The list could not be read just now. Try again in a moment.");
@@ -25,13 +32,13 @@ export async function GET(request: Request) {
  * A key that may write only.
  */
 export async function POST(request: Request) {
-  const writer = await apiWriter(request);
+  // 232 [CA1] unit 4c: waits while the plan's renewal is unpaid or a payment for it is disputed.
+  const writer = await apiAdder(request);
   if (writer instanceof Response) return writer;
-  const body = await readApiBody(request);
-  if (body instanceof Response) return body;
+  const body = writer.body;
   try {
     const done = await roomFor(() => addLead(writer.store, body));
-    if (!done.ok) return apiError(WRITE_ERRORS[done.error][0], done.error, WRITE_ERRORS[done.error][1]);
+    if (!done.ok) return apiError(WRITE_ERRORS[done.error][0], done.error, done.message ?? WRITE_ERRORS[done.error][1]);
     return apiOk({ data: done.value });
   } catch (error) {
     console.error("api: adding a lead failed", error);

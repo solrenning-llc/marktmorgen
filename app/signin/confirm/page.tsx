@@ -1,8 +1,8 @@
 import { PendingSubmit } from "@/components/pending-submit";
-import Link from "next/link";
-import { Logo } from "@/components/logo";
+import { MorningLogo } from "@/components/morning-header";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { prefillHandle } from "@/lib/handle-prefill";
 
 export const metadata: Metadata = {
   title: "Confirm login — Marktmorgen",
@@ -27,14 +27,15 @@ export default async function ConfirmPage({
   const params = await searchParams;
   const token = typeof params.token === "string" ? params.token : "";
   if (!/^[0-9a-f]{64}$/.test(token)) redirect("/signin?status=expired");
+  // The store address typed on the home page, when the link carries a valid
+  // one; carried on to the address step, never reserved (lib/handle-prefill.ts).
+  const handle = prefillHandle(params.handle);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-paper text-ink">
+    <div className="relative min-h-screen overflow-hidden">
 
       <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
-        <Link href="/" className="inline-block w-fit rounded-[10px]" aria-label="Marktmorgen, home">
-          <Logo />
-        </Link>
+        <MorningLogo />
 
         <h1 className="t-h1 mt-6">
           One tap and you are in
@@ -46,6 +47,7 @@ export default async function ConfirmPage({
         <div className="card mt-8 p-6 sm:p-8">
           <form method="post" action="/api/auth/callback">
             <input type="hidden" name="token" value={token} />
+            {handle ? <input type="hidden" name="handle" value={handle} /> : null}
             <PendingSubmit label="Log me in" pending="Logging you in…" className="btn btn-primary btn-lg btn-block" />
           </form>
           <p className="mt-4 text-sm text-ink-soft">

@@ -147,14 +147,19 @@ async function main(): Promise<void> {
   is("named after the membership, credited as a membership payment", book.lines.find((l) => l.ref === "in_Month0000002")?.title, "Supper Club");
 
   part("A bonus for each goal reached in a month");
+  // Both sales inside the month that is running: an hour or two before now fell in the
+  // month before during a month's first hours (seen on 1 November 2026, 01:00 UTC).
+  const monthStart = Date.UTC(new Date(NOW * 1000).getUTCFullYear(), new Date(NOW * 1000).getUTCMonth(), 1) / 1000;
+  const firstSale = Math.max(NOW - 2 * 3600, monthStart + 1);
+  const secondSale = Math.max(NOW - 3600, monthStart + 2);
   invoices = [
-    invoice("in_Bonus0000001", NOW - 2 * 3600, 2000, { ...terms, via_at: String(NOW - 3 * DAY) }),
-    invoice("in_Bonus0000002", NOW - 3600, 2000, { ...terms, via_at: String(NOW - 3 * DAY) }, { customer_email: "other@example.com" }),
+    invoice("in_Bonus0000001", firstSale, 2000, { ...terms, via_at: String(NOW - 3 * DAY) }),
+    invoice("in_Bonus0000002", secondSale, 2000, { ...terms, via_at: String(NOW - 3 * DAY) }, { customer_email: "other@example.com" }),
   ];
   refunds = [];
   book = await readBook(store);
   const bonus = book.lines.find((l) => l.how === "bonus");
-  is("two sales that earn in this month: the bonus once, dated at the second", [bonus?.commission, bonus?.at, bonus?.aff], [5000, NOW - 3600, SARA]);
+  is("two sales that earn in this month: the bonus once, dated at the second", [bonus?.commission, bonus?.at, bonus?.aff], [5000, secondSale, SARA]);
   is("not counted as a sale", book.rows.find((r) => r.affiliate.id === SARA)?.sales, 2);
   refunds = [{ status: "succeeded", payment_intent: "pi_in_Bonus0000002", amount: 2000 }];
   book = await readBook(store);

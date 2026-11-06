@@ -114,7 +114,9 @@ async function main() {
     is("the subject names the plan", renewal.subject, "Your Marktmorgen payment did not go through");
     is("it says the amount", renewal.text.includes("The payment of $29 for your Marktmorgen plan did not go through."), true);
     is("it gives the page that pays it", renewal.text.includes("https://invoice.stripe.com/i/sub_renewal01"), true);
-    is("it says the store keeps selling until then", renewal.text.includes("Until then your store keeps taking payments."), true);
+    // 232 [CA1] unit 4: a renewal that failed stops what costs us to run; the email says so, and never that the store keeps selling.
+    is("it no longer says the store keeps selling", renewal.text.includes("keeps taking payments"), false);
+    is("it says the checkout takes no new orders until it is paid", renewal.text.includes("Until it is paid, your checkout takes no new orders"), true);
     is("it says when the card is tried again", renewal.text.includes("We will try your card again on"), true);
 
     const first = failedPlanEmail({

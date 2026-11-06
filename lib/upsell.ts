@@ -57,7 +57,7 @@ import {
 import { funnelRate, noteCharge } from "@/lib/affiliates";
 import { confirmOffer } from "@/lib/purchase-email";
 import { noteOfferSale } from "@/lib/sale-events";
-import { refundedInFull } from "@/lib/refunds";
+import { givenBack } from "@/lib/refunds";
 import { methodId, reusableMethod } from "@/lib/instant-pay";
 import type { Listing, Product, Store } from "@/lib/store";
 import { listingFinder, readListing, readListings, readProduct } from "@/lib/catalog";
@@ -68,6 +68,8 @@ import { bundleFromMeta, bundleMeta, deliverableItems, deliveredIds } from "@/li
 import { type BundleContents, contentsOf, offerableAfterPaying } from "@/lib/bundles";
 import { applyShareToPayment } from "@/lib/platform-share";
 import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliversDigitally, validConsent } from "@/lib/digital-consent";
+import { cartOfferFrom, ownedBeforeCart } from "@/lib/cart-offers";
+import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 export const UPSELL_COOKIE = "nl_upsell";
 export const UPSELL_WINDOW_SECONDS = 60 * 60;
@@ -197,8 +199,12 @@ type SessionView = {
   payment_intent?: { id?: unknown; payment_method?: unknown } | string | null;
 };
 
-/** Reads a paid checkout of this store, with what an upsell needs from it. */
-async function paidSession(store: Store, session: string): Promise<{ view: SessionView; product: Product } | null> {
+/**
+ * Reads a paid checkout of this store, with what an upsell needs from it:
+ * the product whose funnel follows it, which for a cart is the one its
+ * checkout named (lib/cart-offers.ts), and nothing when it named none.
+ */
+async function paidSession(store: Store, session: string): Promise<{ view: SessionView; product: Product; cart: boolean } | null> {
   if (!store.stripeAccountId || !SESSION_ID.test(session)) return null;
   let view: SessionView;
   try {
@@ -212,8 +218,10 @@ async function paidSession(store: Store, session: string): Promise<{ view: Sessi
   }
   if (view.status !== "complete" || view.payment_status !== "paid") return null;
   if (view.metadata?.store !== store.handle) return null;
-  const product = view.metadata?.product ? await readProduct(store, view.metadata.product) : null;
-  return product ? { view, product } : null;
+  const cart = view.metadata?.cart === "yes";
+  const from = cart ? cartOfferFrom(view.metadata) : view.metadata?.product;
+  const product = from ? await readProduct(store, from) : null;
+  return product ? { view, product, cart } : null;
 }
 
 /** Whether the offers can still be shown to this browser, for this order. */
@@ -252,7 +260,7 @@ export async function takeUpsell(input: {
   if (!store.stripeAccountId || !isRedisConfigured()) return { kind: "unavailable" };
   const found = await paidSession(store, session);
   if (!found) return { kind: "unavailable" };
-  const { view, product } = found;
+  const { view, product, cart } = found;
   // A one-click charge cannot carry Stripe Tax, so with tax on there is none.
   // A bundle that holds a course is never offered here (lib/bundles.ts).
   const offered = await offerableAfterPaying(store, await readListings(store, funnelProductIds(product.funnel)));
@@ -269,7 +277,17 @@ export async function takeUpsell(input: {
   // Where the buyer is, worked out from what they already answered: only
   // that offer can be answered now.
   const owned = new Set(deliveredIds(view.metadata));
+  // After a cart, nothing the buyer already has from the store either, read
+  // as the page read it; unreadable, nothing is offered (lib/cart-offers.ts).
+  if (cart) {
+    const before = await ownedBeforeCart(store, typeof view.customer_details?.email === "string" ? view.customer_details.email : null);
+    if (!before) return { kind: "unavailable" };
+    before.forEach((id) => owned.add(id));
+  }
   const records = await readAnswers(session);
+  // After a cart, a product turned down in this order is never offered again,
+  // not even at a lower price on a "no thanks" path (lib/cart-offers.ts).
+  if (cart) for (const record of records.values()) if (record.state === "declined" || record.state === "failed") owned.add(record.product);
   const position = funnelPosition(funnel, offered, toAnswers(records), owned);
   if (position.kind !== "offer" || position.step.id !== input.step) {
     const asked = funnel.steps.find((s) => s.id === input.step);
@@ -435,36 +453,69 @@ async function afterPaid(store: Store, session: string, target: Listing, pi: Rec
   await noteOfferSale(store, target, pi).catch((error) => console.error("telling about an offer's sale failed", error));
 }
 
-/** One offer's charge for this order, found among the customer's payments. */
-async function findCharge(
+/**
+ * Pages of a hundred of the customer's payments read before "not there" is no longer known, per offer still waiting
+ * (Claude 4's cost note on #2759, rule MR). On the buyer's own page (settleUpsells, at most the first offer and 20 more
+ * that readAnswers keeps, 21 a visit) one page, as many requests as before this lot; in the five-minute job (settlePendingOffers, at most
+ * 50 offers a run, stopped earlier by its deadline) up to five. An offer not found within its pages stays waiting for
+ * the job, never closed: the worst case is OFFER_PAGES_ON_PAGE × 21 = 21 requests a visit and OFFER_PAGES_IN_JOB × 50
+ * = 250 a run, all reads on the creator's own Stripe account, none of them a charge.
+ */
+export const OFFER_PAGES_ON_PAGE = 1;
+export const OFFER_PAGES_IN_JOB = 5;
+
+/**
+ * One offer's charge for this order, found among the customer's payments, each page read in its exact shape
+ * (lib/stripe-list.ts) and pinned to one version. Found on any readable row is found. Null ("not there", after which
+ * the offer is closed as never charged) only when the payments were read to their end with every row readable;
+ * a page in another shape, a row not readable or more pages than are read throw, and the offer stays waiting.
+ */
+export async function findOfferCharge(
   store: Store,
   session: string,
   slot: string,
   customer: string,
+  pages: number = OFFER_PAGES_IN_JOB,
 ): Promise<Record<string, unknown> | null> {
-  const listed = await onAccount(
-    "GET",
-    store.stripeAccountId as string,
-    `/payment_intents?${new URLSearchParams({ customer, limit: "20" })}`,
-  );
-  const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-  return (
-    rows.find((pi) => {
-      const meta = pi.metadata as Record<string, string> | null;
-      return meta?.kind === "upsell" && meta?.parent === session && (meta?.step ?? "") === slot;
-    }) ?? null
-  );
+  let after = "";
+  let unreadable = 0;
+  for (let page = 0; page < pages; page += 1) {
+    const query = new URLSearchParams({ customer, limit: "100" });
+    if (after) query.set("starting_after", after);
+    const read = readStripePage(
+      await onAccount("GET", store.stripeAccountId as string, `/payment_intents?${query}`, undefined, STRIPE_LIST_VERSION),
+      (pi) => {
+        const meta = ownField(pi, "metadata");
+        return meta === null || plainObject(meta);
+      },
+    );
+    unreadable += read.unreadable;
+    const found = read.rows.find((pi) => {
+      const meta = ownField(pi, "metadata");
+      if (!plainObject(meta)) return false;
+      const step = ownField(meta, "step");
+      return ownField(meta, "kind") === "upsell" && ownField(meta, "parent") === session && (step === undefined ? "" : step) === slot;
+    });
+    if (found) return found;
+    if (!read.hasMore) {
+      if (unreadable) throw new StripeListUnreadable("a payment not readable");
+      return null;
+    }
+    if (!read.lastId) throw new StripeListUnreadable("more payments and no readable last one");
+    after = read.lastId;
+  }
+  throw new StripeListUnreadable("more payments than are read");
 }
 
 /** Settles one offer still waiting on an answer. Nothing is ever charged here. */
-async function settleOne(store: Store, session: string, slot: string, record: UpsellRecord): Promise<void> {
+async function settleOne(store: Store, session: string, slot: string, record: UpsellRecord, pages: number): Promise<void> {
   if (record.state !== "pending" || !store.stripeAccountId) return;
   try {
     let pi: Record<string, unknown> | null;
     if (record.pi) {
       pi = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(record.pi)}`);
     } else if (record.customer) {
-      pi = await findCharge(store, session, slot, record.customer);
+      pi = await findOfferCharge(store, session, slot, record.customer, pages);
       if (!pi) {
         // Not there after long enough: the request never reached Stripe.
         if (Date.now() - record.at > LOST_ANSWER_MS) {
@@ -507,7 +558,7 @@ async function settleOne(store: Store, session: string, slot: string, record: Up
 export async function settleUpsells(store: Store, session: string): Promise<void> {
   const records = await readAnswers(session);
   for (const [slot, record] of records) {
-    if (record.state === "pending") await settleOne(store, session, slot, record);
+    if (record.state === "pending") await settleOne(store, session, slot, record, OFFER_PAGES_ON_PAGE);
   }
 }
 
@@ -549,7 +600,7 @@ export async function settlePendingOffers(
         if (Date.now() - record.at > PENDING_WATCH_MS) await drop();
         continue;
       }
-      await settleOne(store, session, slot, record);
+      await settleOne(store, session, slot, record, OFFER_PAGES_IN_JOB);
       const after = await readUpsell(session, slot);
       if (!after || after.state !== "pending") {
         counts.settled += 1;
@@ -574,7 +625,8 @@ export function upsellReference(session: string, slot: string, record: UpsellRec
 }
 
 /**
- * Whether an offer's own payment was refunded in full since (lib/refunds.ts),
+ * Whether an offer's own payment was refunded in full, or lost to a dispute,
+ * since (lib/refunds.ts),
  * read from Stripe on every download, as the order is. An offer is its own
  * payment, so the order it followed may stand while it is refunded, or the
  * other way round. Throws when Stripe cannot be asked; the download then
@@ -583,7 +635,7 @@ export function upsellReference(session: string, slot: string, record: UpsellRec
 export async function offerRefunded(store: Store, reference: string): Promise<boolean> {
   if (!/^pi_[A-Za-z0-9]{6,200}$/.test(reference) || !store.stripeAccountId) return false;
   const pi = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(reference)}?expand[]=latest_charge`);
-  return refundedInFull(pi);
+  return givenBack(store.stripeAccountId, pi);
 }
 
 /** What one offer delivers, once it is paid. `slot` is "" for the first. */
@@ -642,6 +694,12 @@ export async function funnelView(input: {
   created: number;
   secret: string | undefined;
   upsellKey: string | null;
+  /**
+   * Paid for from the cart (lib/cart-offers.ts): the product whose funnel
+   * follows, as its checkout named it (none: no offer), and the address it
+   * was paid with, to pass over what the buyer already has from the store.
+   */
+  cart?: { offerFrom: string | null; email: string | null };
 }): Promise<FunnelView> {
   const { store, session, product } = input;
   const records = await readAnswers(session);
@@ -663,12 +721,22 @@ export async function funnelView(input: {
 
   // The funnel and what it names are read only when an offer could follow.
   const open = input.eligible && !store.tax.enabled && offerOpen(input.created, input.secret, input.upsellKey ?? undefined);
-  const full = open ? await readProduct(store, product.id) : null;
+  const owner = input.cart ? input.cart.offerFrom : product.id;
+  const full = open && owner ? await readProduct(store, owner) : null;
   const offered = full ? await offerableAfterPaying(store, await readListings(store, funnelProductIds(full.funnel))) : [];
   const funnel = full ? activeFunnel(offered, full) : null;
   if (!funnel) return { offer: null, taken, notes, declined };
-  const owned = new Set([product.id, ...input.alsoOwned]);
-  const position = funnelPosition(funnel, offered, toAnswers(records), owned);
+  // After a cart, what was turned down in this order is passed over too, as on the server (takeUpsell).
+  const owned = new Set([product.id, ...input.alsoOwned, ...(input.cart ? declined : [])]);
+  let position = funnelPosition(funnel, offered, toAnswers(records), owned);
+  // After a cart, what the buyer already has from the store is passed over
+  // too, read only when there is an offer to show (lib/cart-offers.ts).
+  if (position.kind === "offer" && input.cart) {
+    const before = await ownedBeforeCart(store, input.cart.email);
+    if (!before) return { offer: null, taken, notes, declined };
+    before.forEach((id) => owned.add(id));
+    position = funnelPosition(funnel, offered, toAnswers(records), owned);
+  }
   if (position.kind !== "offer") return { offer: null, taken, notes, declined };
   const { step, target } = position;
   const pictured = step.imageFrom ? offered.find((p) => p.id === step.imageFrom) ?? null : null;

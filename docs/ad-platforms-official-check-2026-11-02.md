@@ -1,0 +1,36 @@
+# 632 [AA2] — Conferência oficial do estudo das plataformas de anúncios (02/11/2026)
+
+Conferência feita pelo Claude 1 em 02/11/2026, só em páginas oficiais da Meta, do Google e do TikTok, para o estudo `docs/ad-platforms-study.md` do Claude 3 (PR #1758), que não conseguiu abrir esses sites. Estados: **CONFIRMADO**, **DIVERGENTE**, **NÃO ENCONTRADO**. O que estiver NÃO ENCONTRADO continua lacuna: não vira parâmetro de código. Este documento não abre nada, não cria conta nem app, não aceita termos e não muda preço, limite, comissão ou flag.
+
+## Meta (Marketing API)
+
+1. `ads_management` cria e gerencia campanhas; `ads_read` lê insights; as duas exigem App Review — **CONFIRMADO**. https://developers.facebook.com/docs/permissions
+2. Gerir contas de terceiros exige acesso Full (antes "advanced") com Business Verification; gerir só a própria conta basta o acesso Limited — **CONFIRMADO**. https://developers.facebook.com/documentation/ads-commerce/marketing-api/get-started/authorization e https://developers.facebook.com/docs/development/release/business-verification/ . A antiga "Access Verification" de Tech Provider foi aposentada: https://developers.facebook.com/documentation/development/release/access-verification.md
+3. Níveis Limited/Full e passagem a Full com 500 chamadas em 15 dias — **CONFIRMADO**, com mais uma condição: taxa de erro abaixo de 15% nas últimas 500 chamadas (renomeação datada de 05/04/2026 no changelog). https://developers.facebook.com/documentation/ads-commerce/marketing-api/overview/rate-limiting
+4. Limite de `ads_management` por conta e por hora: 100.000 (Full), 300 (Limited), mais 40 por anúncio ativo — **CONFIRMADO**. Mesma página do item 3.
+5. Versão corrente v26.0, de 29/07/2026 — **CONFIRMADO**. https://developers.facebook.com/docs/graph-api/changelog/versions/ . Datas de fim de vida divergem entre a tabela (v24 até 18/02/2028) e o changelog (10/11/2026) — **DIVERGENTE**: nenhuma data de fim de versão entra no código.
+6. **Gasto acima do orçamento diário (25% × 75%):** não há conflito. A regra antiga era 25%; desde a v24 (blog oficial de 08/10/2025) a flexibilidade é de até 75% a mais em alguns dias, em algumas contas e sem critério público, com no máximo 7 vezes o orçamento diário por semana (domingo a sábado); campanha com menos de 7 dias nunca passa de orçamento diário × duração. **Teto a usar no pior caso: 1,75 × diário por dia e 7 × diário por semana.** https://developers.facebook.com/blog/post/2025/10/08/introducing-graph-api-v24-and-marketing-api-v24/ . Atenção: "períodos de alta demanda" (agendamento de orçamento) permitem até 8 × o diário; o recurso não deve usá-los. https://developers.facebook.com/documentation/ads-commerce/marketing-api/reference/high-demand-period
+7. Campanha e conjunto podem nascer `PAUSED`, e a documentação recomenda isso para evitar gasto acidental — **CONFIRMADO**. https://developers.facebook.com/documentation/ads-commerce/marketing-api/advantage-shopping-campaigns . "Conjunto sem status nasce ACTIVE" — **NÃO ENCONTRADO**: sempre enviar `PAUSED` explicitamente.
+8. Orçamento mínimo diário do conjunto depende de `bid_strategy` e do evento (por exemplo US$ 0,50 por impressões e US$ 2,50 por cliques, com o dobro em países como os EUA); ao reduzir um orçamento, o novo valor precisa ficar pelo menos 10% acima do já gasto — **CONFIRMADO** (não estava no estudo). Referência do ad set na documentação da Marketing API.
+9. Textos das políticas de anúncios (Ad Standards, saúde, práticas proibidas), regra de IA para anúncios comuns e páginas da Central de Ajuda sobre cobrança — **NÃO ENCONTRADO**: as páginas de transparency.meta.com entregam só metadados e a Central de Ajuda bloqueia leitura automática.
+
+## Google Ads API
+
+1. Níveis de acesso — **CONFIRMADO** (página atualizada em 30/10/2026): Test (15.000 operações, só contas de teste), Explorer (2.880 por dia em produção), Basic (15.000), Standard (ilimitado, auditoria manual de cerca de 10 dias úteis). Os tokens de desenvolvedor foram encerrados em 09/09/2026; o acesso agora é por projeto do Google Cloud. https://developers.google.com/google-ads/api/docs/api-policy/access-levels . "Basic automático depois da verificação de marca" — **DIVERGENTE em parte**: a verificação de marca é pré-requisito para pedir Basic, e o app OAuth precisa estar "External" e "In production". https://developers.google.com/google-ads/api/docs/api-policy/brand-verification
+2. Versão v26.1, de 28/10/2026 (v26 em 14/10/2026) — **CONFIRMADO**. https://developers.google.com/google-ads/api/docs/release-notes . "Cada versão vive cerca de um ano" — **NÃO ENCONTRADO**.
+3. Um dia pode gastar até 2 × o orçamento diário médio, e o mês até 30,4 × — **CONFIRMADO**. https://support.google.com/google-ads/answer/1704443 e https://support.google.com/google-ads/answer/6385083 . **Teto a usar no pior caso: 2 × diário por dia e 30,4 × diário por mês.** O orçamento total de campanha nunca é ultrapassado — **CONFIRMADO**; se ele exige data final — **NÃO ENCONTRADO**. https://support.google.com/google-ads/answer/10486938
+4. Criar campanha `PAUSED` — **CONFIRMADO**. https://developers.google.com/google-ads/api/docs/shopping-ads/create-campaign
+5. Políticas de alegações não confiáveis (ganho financeiro, perda de peso, retorno garantido) e de práticas comerciais inaceitáveis (falsa afiliação, personificação) — **CONFIRMADO**. https://support.google.com/adspolicy/answer/15936857 e https://support.google.com/adspolicy/answer/15938071 . "Serviços financeiros restritos por país" — **NÃO ENCONTRADO**.
+
+## TikTok (API for Business)
+
+1. Gasto diário até 125% do maior orçamento diário do dia (25% acima) e no máximo 7 × o diário por semana — **CONFIRMADO**; o conflito do estudo era aparente. **Teto a usar no pior caso: 1,25 × diário por dia e 7 × diário por semana.** https://ads.tiktok.com/help/article/how-to-set-up-a-daily-budget-in-tiktok-ads-manager e https://ads.tiktok.com/help/article/about-dynamic-daily-budget
+2. Mínimos: orçamento diário de campanha acima de US$ 50 e de grupo de anúncios acima de US$ 20 — **CONFIRMADO** (não estava no estudo). https://ads.tiktok.com/resources/help/article/budget
+3. Conteúdo gerado ou muito editado por IA precisa de rótulo, senão o anúncio é rejeitado; promessas exageradas de resultado e antes e depois são proibidas — **CONFIRMADO** (página atualizada em abril de 2026). https://ads.tiktok.com/help/article/tiktok-ads-policy-misleading-and-false-content
+4. Ordem: perfil de desenvolvedor, app, escopos, revisão, token — **CONFIRMADO em parte**. https://business-api.tiktok.com/portal/docs/get-started-guide/v1.3 . Nomes dos escopos, prazo de revisão, limites de chamadas e `operation_status` — **NÃO ENCONTRADO** (as páginas do portal só abrem com JavaScript).
+
+## O que muda no estudo
+
+- Os três tetos de pior caso acima (Meta 1,75×/7×, Google 2×/30,4×, TikTok 1,25×/7×) substituem as faixas "não confirmadas" do estudo para o cálculo do gasto máximo de anúncios. O dinheiro é sempre da conta de anúncios do criador; nenhuma das três documentações lidas cita taxa de uso da API.
+- Todo anúncio criado pelo Marktmorgen nasce `PAUSED` e só é ativado por confirmação do criador; os períodos de alta demanda da Meta ficam fora.
+- O que ficou NÃO ENCONTRADO continua lacuna no estudo, sem valor inventado.

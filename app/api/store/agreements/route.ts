@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
       const latest = current ? latestOf(current) : null;
       const version = current && latest ? await readVersion(current, latest.n) : null;
       if (!version) return refuse("gone", "That agreement can't be read right now. Reload the page.", 404);
-      return Response.json({ ok: true, version: { n: version.n, title: version.title, body: version.body, lines: version.lines.map((l) => ({ text: l.text, quantity: String(l.quantity), amount: moneyField(l.cents, version.currency) })), text: version.text, sha256: version.sha256 } });
+      return Response.json({ ok: true, version: { n: version.n, title: version.title, body: version.body, lines: version.lines.map((l) => ({ text: l.text, quantity: String(l.quantity), amount: moneyField(l.cents, version.currency) })), text: version.text, sha256: version.sha256, currency: version.currency } });
     }
     if (action === "revise") {
       if (!agreementsAllowed(store)) return refuse("closed", "Agreements can be sent while your plan, or free trial, is running.", 409);

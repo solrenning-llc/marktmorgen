@@ -9,7 +9,8 @@ export function PricingValue({place}:{place:"home"|"plans"}){
  return <section aria-labelledby={heading} data-pricing-value={place} className="mb-12">
   <h2 id={heading} className="t-h2 balance">What your store can do for your business</h2>
   <p className="mt-5 max-w-3xl text-ink-soft">Start with the work you need to do. These tools already have their own feature pages, plan requirements and limits; choosing a plan does not activate every tool or replace buyer consent.</p>
-  {!PLANS_ON_SALE ? <p className="notice mt-5 max-w-3xl" data-pricing-value-closed>Paid plans and paid selling remain closed. You can prepare your store and explore the live demo.</p> : null}
+  {/* On the pricing page this is said once, above the plans (243 [CF6]); the home page keeps it here. */}
+  {!PLANS_ON_SALE && place==="home" ? <p className="notice mt-5 max-w-3xl" data-pricing-value-closed>Paid plans and paid selling remain closed. You can prepare your store and explore the live demo.</p> : null}
   <ul className="mt-8 grid grid-cols-2 gap-3 lg:grid-cols-5">
    {PRICING_VALUE.map(item=><li key={item.name}><a href={item.href} className="block h-full rounded-2xl border border-line bg-white p-4 transition-colors hover:bg-lilac sm:p-5">
     <h3 className="text-lg font-semibold text-violet-deep underline underline-offset-4">{item.name}</h3><p className="mt-3 text-sm leading-relaxed text-ink-soft">{item.benefit}</p><span className="sr-only"> Read requirements and plan details.</span>

@@ -7,8 +7,8 @@
  * those roles. One Discord account per address: bringing in another moves
  * the roles to it, so a purchase cannot open the server for a friend too.
  *
- * Checking: everyone given roles is checked again every CHECK_HOURS, by the
- * job (app/api/cron/discord). Roles for products no longer held are taken
+ * Checking: everyone given roles is checked again about every CHECK_HOURS,
+ * at the job's next run after it is due (app/api/cron/discord). Roles for products no longer held are taken
  * back, roles a product gives since are added, and somebody who holds none
  * any more loses every role given and, when the creator asked for it, is
  * taken out of the server. Only roles this store gave are ever taken: a
@@ -17,10 +17,11 @@
  */
 import { holdsProductsOrThrow } from "@/lib/community-access";
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { emailKey, storeKey } from "@/lib/learn";
 import { type Store, storeForId } from "@/lib/store";
 import { giveRole, putMember, removeMember, takeRole } from "@/lib/discord";
-import { rolesDiff, rolesFor } from "@/lib/discord-rules";
+import { KICK_TRIES, rolesDiff, rolesFor } from "@/lib/discord-rules";
 import { accountOf, checkSoon, dueMembers, forgetMember, keepMember, productRoles, readMember, readServer } from "@/lib/discord-store";
 
 const cacheKey = (store: Store, email: string, productId: string) => `nl:dc:ok:${storeKey(store)}:${emailKey(email)}:${productId}`;
@@ -118,7 +119,17 @@ export async function checkMember(sid: string, userId: string, now = Date.now())
       await keepMember(room, sid, userId, member, now);
       return "later";
     }
-    if (server.kick && !left) await removeMember(server.id, userId, reason);
+    if (server.kick && !left) {
+      // Discord refused or did not answer: kept, its roles already gone, so the next check tries the removal again
+      // instead of forgetting somebody who is still in the server.
+      // At most KICK_TRIES more checks, then forgotten as before, so a lasting refusal never keeps a check going.
+      const out = await removeMember(server.id, userId, reason);
+      const tried = (member.k ?? 0) + 1;
+      if (out === "failed" && tried <= KICK_TRIES) {
+        await keepMember(room, sid, userId, { ...member, p: held, r: [], checked: at, k: tried }, now);
+        return "later";
+      }
+    }
     await forgetMember(room, sid, userId, member.e);
     return "ended";
   }
@@ -194,8 +205,10 @@ export async function forgetDiscordPerson(store: Store, email: string, productId
     records += 1;
   }
   if (productIds.length) {
-    const [gone] = await redisPipeline([["DEL", ...productIds.map((id) => cacheKey(store, email, id))]]);
-    records += Number(gone) || 0;
+    const gone = countOf(repliesFor(await redisPipeline([["DEL", ...productIds.map((id) => cacheKey(store, email, id))]]), 1)?.[0]);
+    // Never 0 removed on a reply of another shape (CX-123 rule 24): thrown, so the erasure says this part did not finish (lib/person-erasure.ts).
+    if (gone === null) throw new UnknownReplyError("the deletion of a person's Discord access checks");
+    records += gone;
   }
   return { records, rolesLeft };
 }

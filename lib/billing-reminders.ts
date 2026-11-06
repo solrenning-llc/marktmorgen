@@ -13,6 +13,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { isAddOn, keepCardThatPays, listSubscriptions, pastDueInGrace, periodEnd, planOf } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
+import { recordUnpaidRenewal } from "@/lib/billing-sync";
+import { RENEWAL_KEPT_WORDS, RENEWAL_PAUSED_WORDS, RENEWAL_RESUME_WORDS } from "@/lib/renewal-unpaid-words";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { PLAN_NAMES, PLAN_PRICES, type Cycle, type Tier } from "@/lib/plan";
 
@@ -278,9 +280,14 @@ export function failedPlanEmail(failed: FailedPlan): { subject: string; text: st
       "",
       failed.afterTrial
         ? "Until it is paid, your checkout cannot take money. Your store and your products stay up, and nothing you uploaded is removed without several emails well before."
-        : failed.nextTry
-          ? `Until then your store keeps taking payments. We will try your card again on ${day(failed.nextTry)}, and if it still does not go through after the last try, your plan ends and your checkout stops taking money.`
-          : "If it is not paid, your plan ends and your checkout stops taking money. Your store and your products stay up, and nothing you uploaded is removed without several emails well before.",
+        : [
+            // What stops is what costs us to run (232 [CA1] unit 4, lib/plan-standing.ts costStandingOf, lib/billing.ts isPaidUp).
+            `${RENEWAL_PAUSED_WORDS} ${RENEWAL_KEPT_WORDS} ${RENEWAL_RESUME_WORDS}`,
+            "",
+            failed.nextTry
+              ? `We will try your card again on ${day(failed.nextTry)}. If it is still unpaid after the last try, your plan can end, and then your store closes as our Terms say.`
+              : "If it is not paid, your plan can end, and then your store closes as our Terms say.",
+          ].join("\n"),
       "",
       `If you meant to stop, you do not need to do anything, or you can cancel in your studio: ${studio}`,
       "",
@@ -307,6 +314,9 @@ export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: n
       const [claimed] = await redisPipeline([["SET", key, "1", "NX", "EX", 90 * DAY]]);
       if (claimed === null) continue;
       try {
+        // A renewal's email says what has stopped, so it is written down
+        // first (lib/billing-sync.ts); a failure waits for the next run.
+        if (!due.afterTrial) await recordUnpaidRenewal(subscription);
         // First, so the card that pays is the one the next renewal uses.
         await keepCardThatPays(due.subscription);
         const { subject, text } = failedPlanEmail(due);

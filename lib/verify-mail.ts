@@ -41,8 +41,69 @@ import { agreedKey, isMailable, leadsKey, unsubKey, upsertContact } from "@/lib/
 import { LIST_TAG, STORE_TAG, forgetHealth, listHealth } from "@/lib/mail-health";
 import { redisPipeline } from "@/lib/redis";
 import { TRUSTED_TOKEN, hostTokenClaims, isSesConfigured, sesConfig, sesState } from "@/lib/ses";
+import { timed, withCutoff } from "@/lib/fetch-timeout";
+import { resendAccountUsage, resendUsageSince, type ResendAccountUsage, type ResendUsage } from "@/lib/resend-usage";
+import { sesProviderUsage, type SesProviderUsage } from "@/lib/ses-provider-usage";
+import { currentResendFallbackProofIsMissing } from "@/lib/resend-fallback-transport";
 
-export type Check = { check: string; ok: boolean; detail: string };
+/**
+ * One check's answer. `loop` is true only on what a sender's delivery loop
+ * itself answered (it sent, or tried to send, its two test emails): the
+ * status page counts a run as passed only when one ran (lib/status-page.ts).
+ */
+export type Check = { check: string; ok: boolean; detail: string; loop?: boolean };
+
+/**
+ * Separate provider observations, never send admission or billed units.
+ * SES is a rolling counter observed between its request and response clocks.
+ * Resend's sent metric covers the exact requested UTC range; neither source
+ * proves a simultaneous snapshot or equivalent recipients/billing units.
+ */
+export type MailProviderUsageReport = {
+  basis: "provider_reported_counters";
+  window: { from: string; through: string } | null;
+  ses: SesProviderUsage;
+  resend: ResendUsage;
+  resendAccount: ResendAccountUsage;
+  alignment: {
+    anchor: "collector_start_utc";
+    exactSameWindow: false;
+    billingUnitsComparable: false;
+  };
+};
+
+/**
+ * At most one usage GET per provider plus Resend /usage; a cold SES session
+ * may also borrow credentials. No probe or notification is sent here.
+ * The outer limits also cover credential exchange bodies before GetAccount.
+ */
+export async function verifyProviderUsage(now = Date.now()): Promise<MailProviderUsageReport> {
+  const alignment = {
+    anchor: "collector_start_utc", exactSameWindow: false, billingUnitsComparable: false,
+  } as const;
+  const basis = "provider_reported_counters" as const;
+  const day = 86_400_000;
+  if (!Number.isSafeInteger(now) || now < day || now > 8_640_000_000_000_000) {
+    return {
+      basis, window: null, alignment,
+      ses: { ok: false, reason: "unknown" },
+      resend: { ok: false, reason: "unknown" },
+      resendAccount: { ok: false, reason: "unknown" },
+    };
+  }
+  const from = now - day;
+  return withCutoff(now + 30_000, async () => {
+    const [ses, resend, resendAccount] = await Promise.all([
+      timed(30_000, () => sesProviderUsage(now)).catch((): SesProviderUsage => ({ ok: false, reason: "provider" })),
+      timed(30_000, () => resendUsageSince(from, now)).catch((): ResendUsage => ({ ok: false, reason: "provider" })),
+      timed(30_000, () => resendAccountUsage()).catch((): ResendAccountUsage => ({ ok: false, reason: "provider" })),
+    ]);
+    return {
+      basis, window: { from: new Date(from).toISOString(), through: new Date(now).toISOString() },
+      ses, resend, resendAccount, alignment,
+    };
+  });
+}
 
 type Sender = "resend" | "amazon";
 const NAMES: Record<Sender, string> = { resend: "Resend", amazon: "Amazon SES" };
@@ -107,7 +168,7 @@ async function loop(sender: Sender, deadline: number): Promise<Check[]> {
       sender,
     );
     if (sent !== "sent") {
-      return [{ check: `${name} takes a list email`, ok: false, detail: `it answered "${sent}"` }];
+      return [{ check: `${name} takes a list email`, ok: false, detail: `it answered "${sent}"`, loop: true }];
     }
     const heard: Record<(typeof kinds)[number], number> = { bounced: 0, complained: 0 };
     while (Date.now() < deadline && (!heard.bounced || !heard.complained)) {
@@ -123,11 +184,13 @@ async function loop(sender: Sender, deadline: number): Promise<Check[]> {
         check: `${name}: a list email's bounce comes back with its tags and takes the address off`,
         ok: heard.bounced > 0 && counted.bounced === 1,
         detail: heard.bounced ? `off the list ${Math.round(heard.bounced / 1000)}s after sending, counted ${counted.bounced} time` : `nothing heard in ${waited}s`,
+        loop: true,
       },
       {
         check: `${name}: a spam report comes back with its tags and takes the address off`,
         ok: heard.complained > 0 && counted.complained === 1,
         detail: heard.complained ? `off the list ${Math.round(heard.complained / 1000)}s after sending, counted ${counted.complained} time` : `nothing heard in ${waited}s`,
+        loop: true,
       },
     ];
   } finally {
@@ -141,12 +204,13 @@ async function loop(sender: Sender, deadline: number): Promise<Check[]> {
 export async function verifyMailLoop(deadline: number): Promise<Check[]> {
   const out: Check[] = [];
   const senders: Sender[] = [];
-  if (hasResend() && canHearResend()) senders.push("resend");
+  if (hasResend() && canHearResend() && currentResendFallbackProofIsMissing()) out.push({ check: "Resend's loop", ok: true, detail: "not checked: reviewed Resend fallback proof is missing" });
+  else if (hasResend() && canHearResend()) senders.push("resend");
   else out.push({ check: "Resend's loop", ok: true, detail: "not checked: Resend, or the secret that signs its announcements, is not set" });
   const amazon = isSesConfigured() ? await sesState() : null;
   if (amazon?.ready) senders.push("amazon");
   else out.push({ check: "Amazon SES's loop", ok: true, detail: `not checked: ${amazon ? `Amazon is not sending yet (${amazon.why})` : "Amazon is not set up"}` });
   // Both at once: each waits on its own sender, and neither on the other.
-  const results = await Promise.all(senders.map((sender) => loop(sender, deadline).catch((error): Check[] => [{ check: `${NAMES[sender]}'s loop`, ok: false, detail: error instanceof Error ? error.message : "failed" }])));
+  const results = await Promise.all(senders.map((sender) => loop(sender, deadline).catch((error): Check[] => [{ check: `${NAMES[sender]}'s loop`, ok: false, detail: error instanceof Error ? error.message : "failed", loop: true }])));
   return [...results.flat(), ...out];
 }

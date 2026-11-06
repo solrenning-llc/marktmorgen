@@ -113,6 +113,8 @@ export type Member = {
   /** When they first came in, and were last checked, in seconds. */
   at: number;
   checked: number;
+  /** Removals from the server Discord refused in a row, once their access ended (lib/discord-access.ts); absent for none. */
+  k?: number;
 };
 
 export async function readMember(room: string, userId: string): Promise<Member | null> {

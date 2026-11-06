@@ -6,14 +6,9 @@ export async function checkHomeReasons({browser,LOCAL,axeSource,is}){
   try{
    const page=await context.newPage();let writes=0;
    await page.route("**/api/**",async route=>{if(route.request().method()!=="GET"){writes++;await route.abort();}else await route.continue();});
-   await page.goto(LOCAL+"/",{waitUntil:"domcontentloaded",timeout:60000});
-   const summary=page.getByRole("region",{name:"Built for the people who use it",exact:true});
-   is("ME3 home keeps three concise factual benefits "+width,await summary.locator("h3").allTextContents(),expected.map(row=>row.title));
-   is("ME3 home defers detailed reason articles "+width,await summary.locator("article").count(),0);
-   const more=summary.getByRole("link",{name:"Read the details, examples and current limitations",exact:true});
-   await more.focus();is("ME3 reason discovery keyboard focus "+width,await more.evaluate(node=>node===document.activeElement),true);
-   is("ME3 reason discovery destination "+width,await more.getAttribute("href"),"/platform#home-reasons-heading");
-   await Promise.all([page.waitForURL(LOCAL+"/platform#home-reasons-heading"),more.click()]);
+   // VS1 (owner, 30/10/2026): the reasons summary left the home page; the
+   // feature page keeps the three full reasons and their limitations.
+   await page.goto(LOCAL+"/platform#home-reasons-heading",{waitUntil:"domcontentloaded",timeout:60000});
    const detail=page.getByRole("region",{name:"Built for the people who use it",exact:true});
    await detail.scrollIntoViewIfNeeded();
    const articles=detail.locator("article");

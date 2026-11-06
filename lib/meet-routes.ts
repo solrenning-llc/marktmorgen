@@ -10,7 +10,7 @@
  * provider on.
  */
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusalCode, withinServiceWhy } from "@/lib/metered-limits";
 import { type NextRequest, after } from "next/server";
 import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { noticeCreator } from "@/lib/account-notice";
@@ -21,6 +21,7 @@ import { hostId } from "@/lib/host-claims";
 import { clientAddress, withinLimit } from "@/lib/request-guard";
 import { originFrom } from "@/lib/request-origin";
 import { ensureStatsId } from "@/lib/store";
+import { integrationPauseWord } from "@/lib/integration-pause";
 import { away, creatorFrom, resolveAccess, studioPath } from "@/lib/studio-route";
 import { logTeam } from "@/lib/team";
 import { PERMISSION_WORDS } from "@/lib/team-roles";
@@ -49,10 +50,14 @@ export async function startConnect(request: NextRequest, provider: MeetProvider)
   if (!offeredProviders(store, review).includes(provider)) return notFound();
   const kept = review && !offeredProviders(store).includes(provider) ? `&${ZOOM_REVIEW_QUERY}` : "";
   const back = (query: string) => away(origin, studioPath(store, `${query}${kept}`, "meetings"));
-  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back(`meet=limited&p=${provider}`);
+  // 232 [CA1] 4b3: no new connection while the plan's costs are paused (lib/integration-pause.ts).
+  const paused = integrationPauseWord(store);
+  if (paused) return back(`meet=${paused}&p=${provider}`);
+  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back(`meet=funding&p=${provider}`);
   const named = store.statsId ? store : await ensureStatsId(ref);
   if (!named?.statsId || !store.sid) return back(`meet=error&p=${provider}`);
-  if (!(await withinService("meet-start", named.statsId, STARTS_PER_TEN_MINUTES, 600, named))) return back(`meet=limited&p=${provider}`);
+  const refused = await withinServiceWhy("meet-start", named.statsId, STARTS_PER_TEN_MINUTES, 600, named);
+  if (refused) return back(`meet=${serviceRefusalCode(refused, "limited")}&p=${provider}`);
   const cookie = request.cookies.get(SESSION_COOKIE)?.value ?? "";
   try {
     const url = await beginConsent(provider, { statsId: named.statsId, sid: store.sid, sessionCookie: cookie, email });
@@ -76,10 +81,13 @@ export async function startHostConnect(request: NextRequest): Promise<Response> 
   if (creator instanceof Response) return creator;
   const { store, ref, email, origin } = creator;
   const back = (query: string) => away(origin, studioPath(store, query, "calendar"));
-  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back("cal=limited");
+  const paused = integrationPauseWord(store);
+  if (paused) return back(`cal=${paused}`);
+  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back("cal=funding");
   const named = store.statsId ? store : await ensureStatsId(ref);
   if (!named?.statsId || !store.sid) return back("cal=error");
-  if (!(await withinService("meet-start", `${named.statsId}|${email}`, STARTS_PER_TEN_MINUTES, 600, named))) return back("cal=limited");
+  const refused = await withinServiceWhy("meet-start", `${named.statsId}|${email}`, STARTS_PER_TEN_MINUTES, 600, named);
+  if (refused) return back(`cal=${serviceRefusalCode(refused, "limited")}`);
   const cookie = request.cookies.get(SESSION_COOKIE)?.value ?? "";
   try {
     const url = await beginConsent("google", { statsId: named.statsId, sid: store.sid, sessionCookie: cookie, email, host: hostId(email), scopes: GOOGLE_HOST_SCOPES });
@@ -97,7 +105,7 @@ async function finishHostConnect(
   email: string,
   taken: { statsId: string; sid: string; verifier: string; host: string },
 ): Promise<Response> {
-  const allowed = await resolveAccess(email, { pinned: taken.sid }, "member");
+  const allowed = await resolveAccess(email, { pinned: taken.sid, session: request.cookies.get(SESSION_COOKIE)?.value ?? "" }, "member");
   if (!allowed.ok) return away(origin, allowed.store ? studioPath(allowed.store, "team=forbidden") : "/studio?team=gone");
   const { store } = allowed.access;
   const back = (query: string) => away(origin, studioPath(store, query, "calendar"));
@@ -106,7 +114,9 @@ async function finishHostConnect(
   const code = params.get("code") ?? "";
   if (params.get("error") || !code) return back("cal=declined");
   if (code.length > 2048 || !/^[A-Za-z0-9._~/+=-]+$/.test(code)) return back("cal=error");
-  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back("cal=limited");
+  const paused = integrationPauseWord(store);
+  if (paused) return back(`cal=${paused}`);
+  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back("cal=funding");
   try {
     const result = await finishConsent("google", {
       statsId: taken.statsId,
@@ -147,7 +157,7 @@ export async function finishConnect(request: NextRequest, provider: MeetProvider
   if (taken.host) return finishHostConnect(request, origin, email, taken);
   // Still allowed on that very store, read now: a role taken away while the
   // person was on the provider's page counts.
-  const allowed = await resolveAccess(email, { pinned: taken.sid }, "settings");
+  const allowed = await resolveAccess(email, { pinned: taken.sid, session: cookie }, "settings");
   if (!allowed.ok) return away(origin, allowed.store ? studioPath(allowed.store, "team=forbidden") : "/studio?team=gone");
   const { store, role } = allowed.access;
   // A consent for a provider the store is not openly offered was started
@@ -162,7 +172,10 @@ export async function finishConnect(request: NextRequest, provider: MeetProvider
   // "access_denied": they pressed Cancel on the provider's page.
   if (params.get("error") || !code) return back(`meet=declined&p=${provider}`);
   if (code.length > 2048 || !/^[A-Za-z0-9._~/+=-]+$/.test(code)) return back(`meet=error&p=${provider}`);
-  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back(`meet=limited&p=${provider}`);
+  // Paused while the person was on the provider's page: the code is not exchanged.
+  const paused = integrationPauseWord(store);
+  if (paused) return back(`meet=${paused}&p=${provider}`);
+  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back(`meet=funding&p=${provider}`);
 
   try {
     const result = await finishConsent(provider, {

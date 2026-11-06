@@ -7,8 +7,9 @@
  *   - in bands, the first section shown below the hero is on a band and they
  *     alternate from there;
  *   - the band's colour, for every theme and every preset colour and some
- *     colours of a creator's own, keeps the text at 7:1 and the muted text
+ *     colours of a creator's own, keeps the text and the muted text at 7:1
  *     and the coloured links at 4.5:1 — a style never costs anyone reading;
+ *   - muted text keeps 7:1 on the page, cards, items and the soft accent too;
  *   - the stylesheet draws each style the page and the preview ask for.
  */
 import { readFileSync } from "node:fs";
@@ -66,8 +67,21 @@ async function main() {
     }
   }
   is("text on a band, at least 7:1", worst.text >= 7, true);
-  is("muted text on a band, at least 4.5:1", worst.muted >= 4.5, true);
+  is("muted text on a band, at least 7:1 (WCAG 1.4.6 AAA, small text)", worst.muted >= 7, true);
   is("links on a band, at least 4.5:1", worst.link >= 4.5, true);
+  // Muted words (dates, notes, hints) are small text: 7:1 on every surface of every theme, not only on bands.
+  let worstSurface = 99;
+  for (const theme of THEMES) {
+    const c = lookColours({ theme: theme.id, accent: ACCENTS[0].hex });
+    worstSurface = Math.min(worstSurface, contrast(c.bg, c.muted), contrast(c.card, c.muted), contrast(c.item, c.muted));
+  }
+  is("muted text on the page, a card and an item, at least 7:1 in every theme", worstSurface >= 7, true);
+  let worstSoft = 99;
+  for (const theme of THEMES) for (const accent of accents) {
+    const c = lookColours({ theme: theme.id, accent });
+    worstSoft = Math.min(worstSoft, contrast(c.accentSoft, c.muted));
+  }
+  is("muted text on the soft accent (chosen, selected and highlighted things), at least 7:1", worstSoft >= 7, true);
   const violet = lookColours({ theme: "light", accent: "#5a36ee" });
   is("the band is not the card: it can be seen", violet.band !== violet.card, true);
   is("the page is given the band", lookStyle({ theme: "light", accent: "#5a36ee" })["--st-band"], violet.band);

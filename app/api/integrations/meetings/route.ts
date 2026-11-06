@@ -1,4 +1,4 @@
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
 import { isMeetProvider } from "@/lib/call-setup";
@@ -6,6 +6,7 @@ import { ACCOUNT_NAMES, NotConnected, disconnect, logProblem, meetView } from "@
 import { ProviderError, isConfigured } from "@/lib/meet-providers";
 import { makeTest, moveTest, removeTest, TestMeetingUnavailable } from "@/lib/meet-test";
 import { guardStoreWrite } from "@/lib/store-request";
+import { MEETING_TEST_PAUSED_WORDS, integrationPauseWord } from "@/lib/integration-pause";
 
 /** Changes a store may make here in a minute: each one reaches Google or Zoom. */
 const PER_MINUTE = 20;
@@ -31,7 +32,10 @@ export async function POST(request: NextRequest) {
   const { store, body } = guarded;
   const provider = body.provider;
   const action = body.action;
-  if ((action !== "disconnect" && action !== "test" && action !== "movetest" && action !== "untest") || !isMeetProvider(provider) || !isConfigured(provider)) {
+  // A deployment may have removed its OAuth credentials while old tokens remain.
+  // Forgetting an existing connection must still reach the bounded cleanup below.
+  // Creating or testing meetings continues to require the configured provider.
+  if ((action !== "disconnect" && action !== "test" && action !== "movetest" && action !== "untest") || !isMeetProvider(provider) || (action !== "disconnect" && !isConfigured(provider))) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   }
   if (!store.statsId) {
@@ -39,9 +43,12 @@ export async function POST(request: NextRequest) {
       ? Response.json({ ok: true, view: await meetView(null, store) })
       : Response.json({ ok: false, error: "not_connected" }, { status: 400 });
   }
-  if (!(await withinService("meet-manage", store.statsId, PER_MINUTE, 60, store))) {
-    return Response.json({ ok: false, error: "limited" }, { status: 429 });
-  }
+  // 232 [CA1] 4b4a: a test meeting made or moved at the provider waits while the plan's costs
+  // are paused; deleting one (untest) and disconnecting stay open.
+  const paused = action === "test" || action === "movetest" ? integrationPauseWord(store) : null;
+  if (paused) return Response.json({ ok: false, error: paused, message: MEETING_TEST_PAUSED_WORDS[paused] }, { status: 409 });
+  const refused = await withinServiceWhy("meet-manage", store.statsId, PER_MINUTE, 60, store);
+  if (refused) return serviceRefusedJson(refused, "limited");
   if (action === "test" || action === "movetest" || action === "untest") {
     try {
       if (action === "test") return Response.json({ ok: true, test: await makeTest(store, provider) });

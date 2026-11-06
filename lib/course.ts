@@ -20,6 +20,7 @@ import { dataBytes } from "@/lib/store-data-rules";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
 import { type QuizSetup, parseSetup as parseQuizSetup } from "@/lib/quiz";
 import { type TaskSetup, parseTaskSetup } from "@/lib/assignment-rules";
+import { randomLetters } from "@/lib/random-letters";
 
 export const MAX_MODULES = 30;
 export const MAX_LESSONS = 200;
@@ -96,6 +97,19 @@ export type Course = {
    */
   certificate: boolean;
   /**
+   * How long a certificate issued from now on stays valid, in months
+   * (639 [GL7](32)), for a training that has to be renewed; absent is for
+   * good, as for every course before it. Fixed on each certificate when it
+   * is issued, so changing it later never changes one already given.
+   */
+  certificateMonths?: number;
+  /**
+   * Whether each lesson video shows the signed-in student's email and the
+   * day they joined over it (602 [WP1], lib/video-stamp.ts). Off until the
+   * creator switches it on; left out of courses saved before it existed.
+   */
+  stampVideo?: boolean;
+  /**
    * The day the course begins, in seconds, or null for a course with no
    * fixed start. This is the one thing that decides whether a course is a
    * cohort or not, and it changes nothing else about it.
@@ -125,10 +139,7 @@ export function newCourseId(): string {
 
 /** Twelve lowercase letters and digits: short enough for a URL, unique in practice. */
 export function newItemId(): string {
-  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const bytes = new Uint8Array(12);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
+  return randomLetters("abcdefghijklmnopqrstuvwxyz0123456789", 12);
 }
 
 function cleanTitle(raw: unknown, fallback: string): string {
@@ -172,6 +183,15 @@ function parseModule(raw: unknown): CourseModule | null {
   };
 }
 
+/** The longest a certificate may stay valid: ten years. */
+export const MAX_CERTIFICATE_MONTHS = 120;
+
+/** A validity as typed or kept: a whole number of months from 1 to 120, or null. */
+export function readCertificateMonths(raw: unknown): number | null {
+  const n = typeof raw === "string" && raw.trim() ? Number(raw.trim()) : raw;
+  return typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= MAX_CERTIFICATE_MONTHS ? n : null;
+}
+
 export function parseCourse(raw: unknown): Course | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
@@ -182,7 +202,8 @@ export function parseCourse(raw: unknown): Course | null {
       : [];
     const startsAt =
       typeof value.startsAt === "number" && Number.isFinite(value.startsAt) ? Math.floor(value.startsAt) : null;
-    return { id: value.id, modules, certificate: value.certificate === true, startsAt };
+    const months = readCertificateMonths(value.certificateMonths);
+    return { id: value.id, modules, certificate: value.certificate === true, ...(months ? { certificateMonths: months } : {}), startsAt, ...(value.stampVideo === true ? { stampVideo: true } : {}) };
   } catch {
     return null;
   }
@@ -275,13 +296,15 @@ export type CourseEdit =
   | { op: "quiz"; lessonId: string; quiz: QuizSetup | null }
   | { op: "task"; lessonId: string; task: TaskSetup | null }
   | { op: "certificate"; on: boolean }
+  /** How long certificates issued from now on stay valid: 1 to 120 months, or null for good. */
+  | { op: "certificate-months"; months: unknown }
   | { op: "start"; at: unknown }
   /** Several modules at once, each with its lessons by title: an outline taken from the writing help (lib/ai.ts). */
   | { op: "outline"; modules: { title: unknown; lessons: unknown[] }[] };
 
 export type EditResult =
   | { ok: true; course: Course; removed: ProductFile[]; addedId?: string }
-  | { ok: false; reason: "unknown" | "too_many" | "not_empty" | "drip" | "files" | "video_type" | "start" };
+  | { ok: false; reason: "unknown" | "too_many" | "not_empty" | "drip" | "files" | "video_type" | "start" | "months" };
 
 function mapLesson(course: Course, lessonId: string, change: (lesson: Lesson) => Lesson): Course | null {
   let found = false;
@@ -471,6 +494,16 @@ export function editCourse(course: Course, edit: CourseEdit): EditResult {
     }
     case "certificate":
       return { ok: true, course: { ...course, certificate: edit.on }, removed: [] };
+    case "certificate-months": {
+      if (edit.months === null || edit.months === 0 || edit.months === "") {
+        const rest = { ...course };
+        delete rest.certificateMonths;
+        return { ok: true, course: rest, removed: [] };
+      }
+      const months = readCertificateMonths(edit.months);
+      if (!months) return { ok: false, reason: "months" };
+      return { ok: true, course: { ...course, certificateMonths: months }, removed: [] };
+    }
     case "start": {
       if (edit.at === null) return { ok: true, course: { ...course, startsAt: null }, removed: [] };
       const at = typeof edit.at === "number" ? Math.floor(edit.at) : Number.NaN;

@@ -3,11 +3,14 @@
 import { useEffect, useState } from "react";
 import { initBotId } from "botid/client/core";
 import { Icon } from "@/components/icons";
+import { EmailSuggestion } from "@/components/email-suggestion";
+import { EmailCodeForm } from "@/components/email-code-form";
+import { holdForSuggestion, suggestEmail } from "@/lib/email-typo";
 
 type State =
   | { kind: "idle" }
   | { kind: "sending" }
-  | { kind: "sent" }
+  | { kind: "sent"; request: string | null }
   | { kind: "error"; message: string };
 
 const MESSAGES: Record<string, string> = {
@@ -44,11 +47,21 @@ function startChallenge() {
 const LOOKS_LIKE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const RESEND_AFTER_SECONDS = 30;
 
-export function SignInForm() {
+/**
+ * `handle` is a store address typed on the home page, already checked by the
+ * server (lib/handle-prefill.ts). It goes with the request so the emailed
+ * link opens the address step with it filled in; the server checks it again
+ * and nothing is reserved.
+ */
+export function SignInForm({ handle = "" }: { handle?: string } = {}) {
   const [email, setEmail] = useState("");
   const [website, setWebsite] = useState("");
   const [state, setState] = useState<State>({ kind: "idle" });
   const [touched, setTouched] = useState(false);
+  // The address the line was last shown for, so a second send of it goes as typed.
+  const [shownFor, setShownFor] = useState("");
+  // The address the link was really asked for, said back on the next screen.
+  const [sentTo, setSentTo] = useState("");
   const [wait, setWait] = useState(0);
 
   useEffect(startChallenge, []);
@@ -61,6 +74,9 @@ export function SignInForm() {
   }, [wait]);
 
   const trimmed = email.trim();
+  // The suggestion's line describes the field only while it says something (lib/email-typo.ts).
+  const showSuggestion = touched && state.kind !== "sending";
+  const suggesting = showSuggestion && suggestEmail(email) !== null;
   const shapeProblem =
     touched && trimmed.length > 0 && !LOOKS_LIKE_EMAIL.test(trimmed)
       ? "Check the address: it needs an @ and a domain, like you@example.com."
@@ -69,13 +85,14 @@ export function SignInForm() {
   async function send() {
     if (state.kind === "sending") return;
     setState({ kind: "sending" });
+    setSentTo(email);
 
     try {
       const ask = (how: typeof fetch) =>
         how("/api/auth/request", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, website }),
+          body: JSON.stringify(handle ? { email, website, handle } : { email, website }),
         });
       const response = await ask(fetch).catch((error: unknown) => {
         if (!plainFetch) throw error;
@@ -84,7 +101,8 @@ export function SignInForm() {
       const raw: unknown = await response.json();
       const data: Record<string, unknown> = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
       if (response.ok && data.ok === true && data.error === undefined) {
-        setState({ kind: "sent" });
+        // The request's id, for the code in the same email (652 [WG12]); a page without it shows the link only.
+        setState({ kind: "sent", request: typeof data.request === "string" && /^[0-9a-f]{64}$/.test(data.request) ? data.request : null });
         setWait(RESEND_AFTER_SECONDS);
         return;
       }
@@ -105,6 +123,11 @@ export function SignInForm() {
       setState({ kind: "error", message: trimmed ? "Check the address: it needs an @ and a domain, like you@example.com." : "Type your email first." });
       return;
     }
+    // A likely slip waits once, so its suggestion is seen; sending again sends it as typed (lib/email-typo.ts).
+    if (holdForSuggestion(email, shownFor)) {
+      setShownFor(email);
+      return;
+    }
     await send();
   }
 
@@ -116,10 +139,11 @@ export function SignInForm() {
         </span>
         <p className="mt-4 text-xl font-semibold text-ink">Check that inbox</p>
         <p className="mt-2 text-ink-soft">
-          If <span className="font-medium text-ink">{email}</span> can log in, the link is on its way from Marktmorgen.
-          It works once and stops working in 15 minutes.
+          If <span className="font-medium text-ink [overflow-wrap:anywhere]">{sentTo || email}</span> can log in, a link and a 6-digit code are on their way from Marktmorgen.
+          They work once, together, and stop working in 15 minutes.
         </p>
         <p className="mt-3 text-sm text-ink-soft">Not there within a minute? Look in spam or promotions.</p>
+        {state.request ? <EmailCodeForm request={state.request} /> : null}
         <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
           <button type="button" onClick={() => void send()} disabled={wait > 0} className="btn btn-secondary btn-sm">
             {wait > 0 ? `Send it again in ${wait}s` : "Send it again"}
@@ -153,7 +177,7 @@ export function SignInForm() {
           onBlur={() => setTouched(true)}
           placeholder="you@example.com"
           aria-invalid={state.kind === "error" || shapeProblem ? true : undefined}
-          aria-describedby={state.kind === "error" ? "signin-error" : shapeProblem ? "signin-hint" : undefined}
+          aria-describedby={[state.kind === "error" ? "signin-error" : shapeProblem ? "signin-hint" : "", suggesting ? "signin-suggestion" : ""].filter(Boolean).join(" ") || undefined}
           className="field mt-2"
         />
         {shapeProblem && state.kind !== "error" ? (
@@ -161,6 +185,17 @@ export function SignInForm() {
             {shapeProblem}
           </p>
         ) : null}
+        {/* A likely slip in the address, offered and never applied by itself (lib/email-typo.ts). */}
+        <EmailSuggestion
+          id="signin-suggestion"
+          inputId="signin-email"
+          value={email}
+          show={showSuggestion}
+          onUse={(address) => {
+            setEmail(address);
+            if (state.kind === "error") setState({ kind: "idle" });
+          }}
+        />
       </div>
 
       {/* Honeypot: hidden from people, irresistible to robots. */}

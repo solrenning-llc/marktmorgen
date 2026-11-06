@@ -9,8 +9,13 @@
  * "Join the Discord", says yes on Discord's own page, and is put in the
  * server with those roles. While they hold the product — paid and not
  * refunded, a membership still running — they keep them; once they do not,
- * the roles are taken back at the next check, within CHECK_HOURS, and if the
- * creator asked for it, they are taken out of the server too.
+ * the roles are taken back at the next check, and if the creator asked for
+ * it, they are taken out of the server too. The next check is CHECK_HOURS
+ * after the last one, run by the half-hourly job (vercel.json), so it comes
+ * about every CHECK_HOURS (sooner when a run ran out of time, lib/discord-
+ * access.ts checkSoon); while Stripe or Discord cannot be asked, or Discord
+ * refuses the bot a role, the person is kept and checked again CHECK_HOURS
+ * later, so nothing is promised "within" a time.
  *
  * Nobody types a Discord name anywhere: who a buyer is on Discord is what
  * Discord says when they agree, and which products they hold is read from
@@ -28,6 +33,12 @@ export const MAX_DISCORD_PRODUCTS = 20;
 export const MAX_ACCOUNTS_PER_ADDRESS = 1;
 /** How often everyone given roles is checked again, at most. */
 export const CHECK_HOURS = 6;
+/**
+ * Times a removal from the server is tried again after Discord refused it,
+ * one check apart, before the person is forgotten as before: the checks of
+ * a person kept are not priced on their own, so the retries stay few.
+ */
+export const KICK_TRIES = 3;
 /**
  * What the bot asks for when it is added to a server: Create Instant Invite
  * (1), which Discord needs to put a person in a server, Kick Members (2),

@@ -7,6 +7,9 @@ import { formatMoney } from "@/lib/money";
 import type { MetaAdsView } from "@/lib/meta-ads";
 import { channelName } from "@/lib/channel-names";
 
+/** The same as META_READ_PAUSED in lib/integration-pause.ts (232 [CA1] 4b3), written here so this browser file stays free of server code. */
+const READ_PAUSED = "Reading it waits while your plan's renewal is unpaid or a payment for it is disputed, and starts again on its own once the payment is recorded or the dispute is won.";
+
 function shortDay(day: string): string {
   const [y, m, d] = day.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
@@ -72,7 +75,7 @@ function MetaAds({
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; meta?: MetaAdsView; spends?: AdSpend[] };
       if (answer.ok && answer.meta && answer.spends) {
         onChosen(answer.meta, answer.spends);
-        toast(answer.meta.read?.day ? "Read from Meta." : "Chosen. It is read within the hour.");
+        toast(answer.meta.readPaused ? `Chosen. ${READ_PAUSED}` : answer.meta.read?.day ? "Read from Meta." : "Chosen. It is read within the hour.");
       } else toast("That did not save. Try again.");
     } catch {
       toast("That did not save. Check your connection and try again.");
@@ -125,10 +128,12 @@ function MetaAds({
             {read?.problem === "currency"
               ? `Not read: this ad account pays in ${meta.account.currency.toUpperCase()} and your store sells in ${meta.currency.toUpperCase()}, and no exchange rate is guessed.${meta.accounts.length > 1 ? " Choose an account in your store's currency below." : ""}`
               : read?.day
-                ? `Read ${longDay(read.at)}: ${money(read.cents)} over the last 30 days${read.campaigns ? `, ${read.campaigns === 1 ? "1 campaign" : `${read.campaigns} campaigns`}` : ""}. Read again once a day.${read.problem ? " The last try did not reach Meta; it tries again within a few hours." : ""}`
-                : read?.problem
-                  ? "Meta could not be read yet; it tries again within a few hours."
-                  : "Read for the first time within the hour."}
+                ? `Read ${longDay(read.at)}: ${money(read.cents)} over the last 30 days${read.campaigns ? `, ${read.campaigns === 1 ? "1 campaign" : `${read.campaigns} campaigns`}` : ""}.${meta.readPaused ? ` ${READ_PAUSED}` : " Read again once a day."}${!meta.readPaused && read.problem ? " The last try did not reach Meta; it tries again within a few hours." : ""}`
+                : meta.readPaused
+                  ? READ_PAUSED
+                  : read?.problem
+                    ? "Meta could not be read yet; it tries again within a few hours."
+                    : "Read for the first time within the hour."}
           </p>
           {lines.length ? (
             <p className="mt-1 text-xs text-ink-soft">

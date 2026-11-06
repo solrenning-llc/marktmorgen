@@ -1,4 +1,5 @@
 import {EVERGREEN_GUIDES,DIGITAL_FILE_GUIDE_EXTRA,DIGITAL_FILE_GUIDE_FAQ} from "@/lib/evergreen-guides";
+import { COMMUNITY_PLATFORM_GUIDE } from "@/lib/community-platform-guide";
 /**
  * The whole blog lives here: categories, posts and the blocks each post is
  * built from. Nothing is fetched at run time, so a post page is a static file.
@@ -9,6 +10,10 @@ import {EVERGREEN_GUIDES,DIGITAL_FILE_GUIDE_EXTRA,DIGITAL_FILE_GUIDE_FAQ} from "
  * from so a reader can check it.
  */
 import { PLAN_AT, feeWords, gumroadSums } from "@/lib/fee-words";
+import { AFFILIATES_PAID, PAYPAL_WAITS, STAN_AFFILIATES_AHEAD, paypalAtCheckout, paypalConnectionWords } from "@/lib/public-explanations";
+
+/** Whether a buyer can pay with PayPal here, read from the deployment so the posts say what is true on the day (lib/public-explanations.ts). */
+const PAYPAL = paypalAtCheckout();
 
 export type BlogBlock =
   | { type: "p"; text: string }
@@ -44,6 +49,7 @@ export const BLOG_CATEGORIES = [
 ] as const;
 
 const BASE_BLOG_POSTS: BlogPost[] = [
+COMMUNITY_PLATFORM_GUIDE,
 ...EVERGREEN_GUIDES,
 {
   "slug": "how-much-kajabi-costs-in-2026",
@@ -429,7 +435,7 @@ const BASE_BLOG_POSTS: BlogPost[] = [
     date: "2026-09-18",
     readMinutes: 6,
     excerpt:
-      "The whole path, from the file on your laptop to the money in your bank: what to make, what to charge, what the page needs to say, and what has to happen the second someone pays.",
+      "Prepare a digital file offer: what to make, what to charge, what the page needs to say, and what a buyer needs after a confirmed payment.",
     kicker: "Start here",
     from: "#6c3bff",
     to: "#ff3d8a",
@@ -476,14 +482,14 @@ const BASE_BLOG_POSTS: BlogPost[] = [
         type: "p",
         text: "Whatever you use to collect the money, check two things before you launch: that Apple Pay and Google Pay appear on a phone, and that the price shown on the product is the price charged at the end. A surprise fee at the last screen is the most expensive kind of surprise.",
       },
-      { type: "h2", text: "5. Deliver in the same second" },
+      { type: "h2", text: "5. Make delivery clear" },
       {
         type: "p",
-        text: "The moment after payment is the whole relationship. If the file appears immediately, you are a business. If it arrives in an email twenty minutes later, you are a person who might have forgotten.",
+        text: "Give the buyer a clear route back to what they bought. Distinguish payment still processing, a confirmed purchase and an expired download link. Describe the access you provide without promising a download within a fixed number of seconds.",
       },
       {
         type: "note",
-        text: "Test your own checkout with a real card before you send a single person to it. Buy your own product. Read the confirmation. Download the file on a phone, on mobile data, not on your home Wi-Fi. Most broken stores were never bought from by their owner.",
+        text: "Rehearse in test mode with a test card and synthetic buyer details. Do not use a real payment as a test. Read the confirmation and check the file on a phone. Check the page for a payment still processing and the message for an expired download link too.",
       },
       { type: "h2", text: "What to do this week" },
       {
@@ -503,7 +509,7 @@ const BASE_BLOG_POSTS: BlogPost[] = [
           },
           {
             title: "Friday",
-            text: "Buy it yourself. Fix whatever annoyed you. Then put the link in your bio and tell people what you made.",
+            text: "Rehearse the checkout in test mode with a test card. Fix whatever annoyed you. Then put the link in your bio and tell people what you made.",
           },
         ],
       },
@@ -849,6 +855,10 @@ const BASE_BLOG_POSTS: BlogPost[] = [
         type: "note",
         text: "And later the same day, when Marktmorgen added live events inside the community, bundles of products, drafts, and importing a list, products and past buyers from another platform. Later still, it added Google Meet links made on your own Google Calendar.",
       },
+      {
+        type: "note",
+        text: `Corrected on November 1, 2026: an earlier version gave only half the PayPal story and said affiliates are not paid automatically. Stripe does not offer its own PayPal for the direct charges every sale here is made with; that part was right. ${paypalConnectionWords(PAYPAL)} And affiliates can be paid automatically on your payday, from your own PayPal.`,
+      },
       { type: "h2", text: "What Stan is" },
       {
         type: "p",
@@ -861,7 +871,7 @@ const BASE_BLOG_POSTS: BlogPost[] = [
       { type: "h2", text: "What Marktmorgen is" },
       {
         type: "p",
-        text: "Marktmorgen is a store page for selling files, courses, memberships, communities and calls, and it is early. At its core are three things: a colorful page, price options on a product, and the file in the buyer's hands the second the payment clears.",
+        text: "Marktmorgen is a store page for selling files, courses, memberships, communities and calls, and it is early. At its core are three things: a colorful page, price options on a product, and download access checked against the buyer's payment.",
       },
       { type: "h2", text: "The one thing we do differently" },
       {
@@ -876,7 +886,7 @@ const BASE_BLOG_POSTS: BlogPost[] = [
       {
         type: "ul",
         items: [
-          "Range: automatic Instagram replies, PayPal, affiliates paid automatically, one builder for funnels, Zoom links made for each booking and webinar, and stores with no limit on products. We have none of those. PayPal does not reach our checkout, because Stripe does not support it for the direct charges every sale here is made with; our affiliates are paid by you; our funnels are pages and offers you connect rather than one builder; our video rooms, for calls and live events alike, are Google Meet links made on your connected Google Calendar, your own meeting link, or Jitsi Meet rooms, where the first person in may have to sign in to Jitsi; and a store holds up to 2,000 products.",
+          `Range: automatic Instagram replies, ${PAYPAL ? "" : "PayPal at checkout, "}${STAN_AFFILIATES_AHEAD}, one builder for funnels, Zoom links made for each booking and webinar, and stores with no limit on products. We have none of those. ${PAYPAL ? "" : `PayPal is not at our checkout yet: ${PAYPAL_WAITS}. `}Our affiliates are ${AFFILIATES_PAID}, which needs a PayPal Business account with Payouts switched on; our funnels are pages and offers you connect rather than one builder; our video rooms, for calls and live events alike, are Google Meet links made on your connected Google Calendar, your own meeting link, or Jitsi Meet rooms, where the first person in may have to sign in to Jitsi; and a store holds up to 2,000 products.`,
           "Years of running: their support library is deep, and ours is a few pages.",
           "A native creator app: their help center states their creator app is currently available only on iPhone and iPad. We do not have a native app at all — our studio and every store install to the home screen from the browser, on both iPhone and Android, and the studio can send notifications of sales, which is a different trade-off, not a better one in every case.",
           "Integrations with third-party tools, which they list on their site. We have webhooks that Zapier, Make or your own server can catch, and no app of our own in anyone's directory.",

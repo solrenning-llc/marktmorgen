@@ -1,3 +1,4 @@
+import { EmailField } from "@/components/email-field";
 import type { Store } from "@/lib/store";
 import { joinWords } from "@/lib/buyer-words/join";
 import { speech } from "@/lib/buyer-words";
@@ -30,17 +31,8 @@ export function StoreJoinBox({ store }: { store: Store }) {
         <label htmlFor="join-email" className="sr-only">
           {w.label}
         </label>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <input
-            id="join-email"
-            type="email"
-            name="email"
-            required
-            maxLength={254}
-            autoComplete="email"
-            placeholder={said.w.emailPlaceholder}
-            className="st-field min-w-0 flex-1"
-          />
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+          <EmailField id="join-email" name="email" className="st-field w-full" wrapClassName="min-w-0 flex-1" required autoComplete="email" placeholder={said.w.emailPlaceholder} language={store.language} />
           <button type="submit" className="btn st-btn shrink-0">
             {w.button}
           </button>

@@ -400,6 +400,84 @@ export async function replyTo(store: Store, id: string, by: string, textRaw: unk
   return { ok: true, thread: { conversation: shown(next), messages: await readMessages(statsId, id) }, emailed };
 }
 
+/**
+ * First messages a store may write to its affiliates in a day: a bucket of its
+ * own under the same counted burst as a visitor's first message ("inbox-new"),
+ * so the creator writing to many affiliates never spends the visitors' cap.
+ */
+const AFFILIATE_MESSAGES_PER_DAY = 50;
+
+export type FirstMessageResult = { ok: true; thread: Thread; emailed: boolean } | { ok: false; reason: "email" | "short" | "limited" | "closed" };
+
+/**
+ * The creator writes first, to one of their own affiliates (630 [HN6](5)).
+ *
+ * A conversation of its own in the store's inbox, marked "affiliate", begun by
+ * the store's message rather than a visitor's, so the affiliate's answer and
+ * the creator's next reply live where every other conversation does. The
+ * affiliate is emailed the message in the store's language, from the store,
+ * with replies going to the creator's own address; and, while the store's chat
+ * is open, a link back to the conversation, where their answer reaches the
+ * inbox. Counted as one of the store's inbox conversations for its window and
+ * under a daily cap of its own (AFFILIATE_MESSAGES_PER_DAY), apart from the
+ * visitors', before anything is written; refused when the text is too short,
+ * the address is not one, or the store is suspended, the house store or has
+ * no address of its own for the answers. A store whose data room is full
+ * throws DataRoomError, as every write of the inbox does, for the caller to
+ * say so; `emailed` false means the conversation is kept but the affiliate
+ * was not told (the store's emails spent, or none could be sent), which the
+ * caller shows the creator.
+ *
+ * `to` is an affiliate the caller has read from the store's own program; this
+ * function trusts nothing else about them.
+ */
+export async function writeToAffiliate(
+  store: Store,
+  to: { email: string; name?: string },
+  textRaw: unknown,
+  by: string,
+  now = Date.now(),
+): Promise<FirstMessageResult> {
+  const statsId = store.statsId;
+  if (!statsId || !isRedisConfigured() || store.suspended || isHouseStore(store) || !store.email) return { ok: false, reason: "closed" };
+  const email = readEmail(to.email);
+  if (!email) return { ok: false, reason: "email" };
+  const text = messageText(textRaw);
+  if (text.length < MIN_MESSAGE) return { ok: false, reason: "short" };
+  if (!(await withinLimit("inbox-new", `${statsId}:affiliates`, AFFILIATE_MESSAGES_PER_DAY, 86_400))) return { ok: false, reason: "limited" };
+  if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "closed" };
+  if (!(await takeAllowance(store, "inbox", 1, now)).ok) return { ok: false, reason: "limited" };
+  const conversation: Kept = {
+    id: newId(),
+    email,
+    name: nameText(to.name ?? ""),
+    source: "affiliate",
+    status: "open",
+    assigned: "",
+    startedAt: now,
+    lastAt: now,
+    lastFrom: "store",
+    unread: 0,
+    token: randomBytes(24).toString("base64url"),
+  };
+  const message: Message = { at: now, from: "store", text, by };
+  const kept = await write(store, statsId, store.handle, conversation, message, true, now);
+  await trim(statsId);
+  const w = chatWords(store.language);
+  const link = chatOpen(store) && kept.token ? `${SITE_URL}/@${store.handle}?chat=${kept.token}` : "";
+  const emailed = isSenderConfigured()
+    ? await sendEmail({ meter: { by: "store", store: store, kind: "email" },
+        from: storeSender(store),
+        to: kept.email,
+        replyTo: store.email,
+        subject: w.affiliateSubject(store.name).slice(0, 200),
+        text: [w.affiliateIntro(store.name), "", text, "", ...(link ? [w.replyLink, link] : [w.replyByEmail]), "", `— ${store.name}`].join("\n"),
+        idempotencyKey: `inbox-affiliate-${statsId}-${kept.id}`,
+      }).catch(() => false)
+    : false;
+  return { ok: true, thread: { conversation: shown(kept), messages: [message] }, emailed };
+}
+
 /** Closes a conversation, or opens it again. */
 export async function setStatus(store: Store, id: string, status: unknown): Promise<Conversation | null> {
   if (!store.statsId || (status !== "open" && status !== "closed")) return null;
@@ -430,6 +508,8 @@ export async function suggestReply(store: Store, id: string, now = Date.now()): 
   if (!store.statsId) return { ok: false, reason: "off" };
   const thread = await openConversation(store.statsId, id);
   if (!thread) return { ok: false, reason: "notes" };
+  // Written for answering a visitor; a conversation the creator began with an affiliate is not one (630 [HN6](5)).
+  if (thread.conversation.source === "affiliate") return { ok: false, reason: "off" };
   const language = LANGUAGES[parseLanguage(store.language)].english;
   return counted(store, now, async () => {
     const faq = store.faq.slice(0, 20).map((f) => `Q: ${forAi(f.q, 300)}\nA: ${forAi(f.a, 800)}`).join("\n\n");

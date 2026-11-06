@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { IMPORT_DATE } from "@/lib/import-words";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -62,7 +63,7 @@ const CLICKFUNNELS_STEPS: { step: "products" | "contacts" | "purchases" | "funne
   { step: "funnel", title: "4. Funnel pages", text: "Your saved pages, made into a funnel.", icon: "layout" },
 ];
 
-const DATE = new Intl.DateTimeFormat("en-US", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+const DATE = IMPORT_DATE;
 
 function view(job: ImportJob): ImportView {
   return {
@@ -290,6 +291,14 @@ export default async function StudioImportPage({ searchParams }: Params) {
                 {tab.title}
               </h2>
               {facts[kind] ? <p className="mt-1 text-sm text-ink-soft">{facts[kind]}</p> : null}
+              {kind === "contacts" && can(access.role, "send") ? (
+                <p className="mt-1 text-sm text-ink-soft">
+                  {"Already on your list and want to group them? "}
+                  <Link href={studioPath(store, "", "labels")} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4">
+                    Label several contacts at once
+                  </Link>
+                </p>
+              ) : null}
               <div className="mt-5">
                 <ImportTool
                   key={kind}

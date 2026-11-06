@@ -10,10 +10,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CLOSING, COUNTED_FAMILIES, ELSEWHERE_FAMILIES, FOLLOWED_FAMILIES, closingFamilyOf } from "@/lib/data-families";
+import { CLOSING, COUNTED_FAMILIES, ELSEWHERE_FAMILIES, FOLLOWED_FAMILIES, closingFamilyOf, countedInRoom } from "@/lib/data-families";
 import { FOLLOWERS, followable, ownerOfKey } from "@/lib/closed-store-data";
 import { PERSON_RECORD_MONTHS } from "@/lib/joined-stores";
 import { FAMILIES } from "./store-data-registry";
+import { CURRENT_TAX_OBSERVATION_POLICY, TAX_OBSERVATION_KEEP_SECONDS, TAX_OBSERVATION_LIMITS } from "@/lib/checkout-sweep";
 
 const prefixOf = (name: string) => name.slice(0, name.lastIndexOf("@"));
 const byPrefix = new Map<string, (typeof FAMILIES)[string][]>();
@@ -24,12 +25,18 @@ const STEPS = new Set(["prepare", "files"]);
 const KEPT_AS_COMPANY: Record<string, string> = {
   "nl:plan:closing:": "The closing job's record of the store: dates only, kept ERASED_KEPT_DAYS after (lib/plan-closing.ts).",
   "nl:store:handle:": "The store's addresses, held back from anybody else for RELEASE_QUARANTINE_DAYS (lib/store.ts, closeStoreRecord).",
+  "nl:ship:done:": "The legacy physical delivery record has400days; a matching inactive outbox source has no TTL while pending and400days after an explicit outcome. The outbox cleanup handles pending payloads, not an invented universal expiry.",
 };
 /** Families gone by themselves whose time is set in code and not by a part of the registry. */
 const TIMED_IN_CODE: Record<string, [string, string]> = {
+  "nl:taxobs:v1:": ["lib/checkout-sweep.ts", "TAX_OBSERVATION_KEEP_SECONDS"],
+  // The mark of a passed-over Stripe event (a capped part): set with the same expiry as every event mark.
+  "nl:hooks:evt:": ["lib/webhooks.ts", "EVENT_SECONDS"],
   "nl:call:confirmed:": ["lib/calls.ts", "CONFIRMED_SECONDS"],
   "nl:adsrv:ctx:": ["lib/ad-events.ts", "CTX_SECONDS"],
   "nl:adsrv:sent:": ["lib/ad-events.ts", "SENT_SECONDS"],
+  // A store's picture uploads not yet put on anything (a capped part): the list expires a window after its last note.
+  "nl:pictures:doors:": ["lib/picture-door.ts", "PICTURE_DOOR_SECONDS"],
 };
 /** A person's records across stores that hold a store's id among others and run out by the quarter (lib/joined-stores.ts), and the file that writes them. */
 const PERSON_RECORDS: Record<string, string> = {
@@ -42,6 +49,14 @@ const STORE_LISTS: Record<string, string> = {
   "nl:mail:flowq": "One sorted set of every store's steps due, each counted in its own store's room (lib/flows.ts).",
   "nl:payreq:due": "One sorted set of every store's payment request reminders due, each counted in its own store's room (lib/payment-request-store.ts).",
 };
+
+test("inactive diagnostic observations retain their existing absolute one-day expiry", () => {
+  assert.equal(CURRENT_TAX_OBSERVATION_POLICY, null);
+  assert.equal(TAX_OBSERVATION_KEEP_SECONDS, 86_400);
+  assert.equal(TAX_OBSERVATION_LIMITS.maxLifetimeMs, TAX_OBSERVATION_KEEP_SECONDS * 1000);
+  assert.deepEqual(CLOSING["nl:taxobs:v1:"], { how: "expires", days: 1 });
+  assert.equal(countedInRoom("nl:taxobs:v1:synthetic:synthetic"), true);
+});
 
 test("every family of the registry says what becomes of it when its store closes, and nothing more is said", () => {
   const registry = new Set(byPrefix.keys());

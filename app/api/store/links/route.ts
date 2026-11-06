@@ -11,6 +11,8 @@ import { MAX_LINK_LENGTH, readLink } from "@/lib/product-link";
 import { MAX_LINK_TITLE_LENGTH, linkExtras, playsOnPage } from "@/lib/store-link";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { StoreFullError } from "@/lib/store";
+import { refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 
 const ACTIONS = new Set(["add", "edit", "remove", "move"]);
 
@@ -42,7 +44,8 @@ export async function POST(request: NextRequest) {
 
   const id = text(body.id, 40);
   const title = text(body.title, MAX_LINK_TITLE_LENGTH);
-  const raw = text(body.url, MAX_LINK_LENGTH);
+  // One past the length kept, so a longer link is refused as too long rather than cut and kept broken.
+  const raw = text(body.url, MAX_LINK_LENGTH + 1);
 
   if (action !== "add" && !id) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
@@ -52,6 +55,9 @@ export async function POST(request: NextRequest) {
     let result: LinkResult;
     if ((action === "add" || action === "edit") && body.header === true) {
       // A heading over links: a title, no address, perhaps a window to show in.
+      // A link turned into one lets its picture go for good: a session let in without its second
+      // step waits (lib/two-step.ts).
+      if (action === "edit" && (await lockedFor(request, "page", "replace")) && guarded.store.links.some((link) => link.id === id && link.image)) return refusedJson("locked");
       const { from, until } = linkExtras(body, false);
       const extras = { header: true, ...(from ? { from } : {}), ...(until ? { until } : {}) };
       result = action === "add" ? await addStoreLink(ref, title, "", extras) : await editStoreLink(ref, id, title, "", extras);

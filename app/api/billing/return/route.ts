@@ -3,6 +3,8 @@ import { away, creatorFrom } from "@/lib/studio-route";
 import { isBillingConfigured, readStartedSubscription } from "@/lib/billing";
 import { setSubscription } from "@/lib/store";
 import { dropPause } from "@/lib/plan-pause";
+import { inClosingDay } from "@/lib/closing-holds";
+import { refuseSession } from "@/lib/closing-plan-guard";
 
 /**
  * Where Stripe sends a creator who has finished, or looked like they finished.
@@ -22,6 +24,13 @@ export async function GET(request: NextRequest) {
   const sessionId = request.nextUrl.searchParams.get("session_id") ?? undefined;
 
   try {
+    // Its closing day has begun (queue item 307 [EC1]): a plan finished now
+    // would be paid for and never given, so it is ended and its payment
+    // returned in full, never written down (lib/closing-plan-guard.ts).
+    if (store.planEndedAt && (await inClosingDay(ref))) {
+      const refused = await refuseSession(store, sessionId);
+      return away(origin, studio(refused === "no" ? "billing=closing" : `billing=closing-${refused}`));
+    }
     const started = await readStartedSubscription(store, sessionId);
     if (!started) return away(origin, studio("billing=unfinished"));
 

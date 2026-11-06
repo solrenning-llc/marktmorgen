@@ -1,7 +1,8 @@
 import { MIN_TEST_REACH, newTest } from "@/lib/mail-test";
 import type { MailAnswer } from "@/lib/mail-response";
-import { readNarrow } from "@/lib/segments-rules";
-const REFUSALS = new Set(["subject", "body", "when", "product", "empty", "allowance", "setup", "plan", "test_subject", "test_small", "test_links", "placeholder", "role", "locked", "store_gone", "none", "signed_out", "origin", "bad_request"]);
+import { readNarrow, sameNarrow } from "@/lib/segments-rules";
+import { readTags } from "@/lib/contact-rules";
+const REFUSALS = new Set(["subject", "body", "when", "product", "empty", "allowance", "setup", "plan", "test_subject", "test_small", "test_links", "placeholder", "role", "locked", "store_gone", "none", "signed_out", "origin", "bad_request", "studio_used", "store_full"]);
 const positive = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n > 0;
 const association = (value: unknown) => typeof value === "string" && value ? value : null;
 /** Confirm creation, not delivery. Unknown write outcomes must not invite an immediate retry. */
@@ -19,11 +20,14 @@ export function broadcastAnswer(responseOk: boolean, raw: unknown, input: Record
   if (!subject || !body || b.subject !== subject || b.body !== body || b.productId !== association(input.productId) || b.notProductId !== association(input.notProductId) || b.who !== input.who) return unknown;
   if (input.sendAt !== undefined && (typeof input.sendAt !== "number" || !Number.isFinite(input.sendAt) || b.sendAt !== Math.floor(input.sendAt / 1000))) return unknown;
   const narrow = readNarrow(input.narrow);
-  if (narrow.minSpent || narrow.channel || narrow.quietDays) {
+  if (narrow.minSpent || narrow.channel || narrow.quietDays || narrow.group || narrow.activeDays) {
     if (!b.narrow || typeof b.narrow !== "object" || Array.isArray(b.narrow)) return unknown;
     const actual = b.narrow as Record<string, unknown>;
-    if (actual.minSpent !== narrow.minSpent || actual.channel !== narrow.channel || actual.quietDays !== narrow.quietDays) return unknown;
+    if (!sameNarrow(actual, narrow)) return unknown;
   } else if (b.narrow !== null) return unknown;
+  // The label as createBroadcast keeps it (99 [E2-TAG-BROADCAST]): a server that lost it would write to a broader group.
+  const expectedLabel = readTags([typeof input.label === "string" ? input.label : ""])[0] ?? null;
+  if ((typeof b.label === "string" ? b.label : null) !== expectedLabel) return unknown;
   const expectedTest = newTest(input.test, subject, 150);
   if (expectedTest === "subject") return unknown;
   if (expectedTest === "none") {
@@ -45,7 +49,7 @@ export function broadcastAnswer(responseOk: boolean, raw: unknown, input: Record
   return { ...answer, draftCleanupConfirmed };
 }
 
-const CANCEL_REFUSALS = new Set(["unknown", "role", "locked", "store_gone", "none", "signed_out", "origin", "bad_request"]);
+const CANCEL_REFUSALS = new Set(["unknown", "role", "locked", "store_gone", "none", "signed_out", "origin", "bad_request", "studio_used"]);
 /** A generic success cannot confirm cancellation of the campaign the user chose. */
 export function cancellationAnswer(responseOk: boolean, raw: unknown, id: unknown): MailAnswer {
   const unknown: MailAnswer = { ok: false, error: "broadcast_cancel_unconfirmed" };

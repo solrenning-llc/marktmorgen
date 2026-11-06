@@ -796,6 +796,13 @@ export type SalesStats = {
   /** Refunds by product over the 90 days. */
   refundsByProduct?: Record<string, { refunds: number; cents: number }>;
   /**
+   * Refunds and disputes of the last 90 days in a currency other than the
+   * store's (from before it changed its currency), left out of every amount
+   * above as sales in another one are, and counted here so the page can say
+   * so (22 [E5], unit 2b). A count is null when that list could not be read.
+   */
+  takenBackElsewhere?: { refunds: number | null; disputes: number | null };
+  /**
    * Disputes opened in each window that the bank holds or the buyer won, by
    * the channel of the sale disputed (added 18 October 2026); null when they
    * could not be read. "unrecorded" is a payment not among the sales read.
@@ -1238,6 +1245,104 @@ async function readRenewals(store: Store, since: number, now: number, pages: num
   return { ...renewalsFrom(store, invoices, now, store.currency), partial, entries: renewalEntries(store, invoices) };
 }
 
+/** One paid renewal of this store's memberships and payment plans, for the buyer ledger (lib/segments.ts, 270 [GR1] unit 2). */
+export type RenewalPayment = {
+  email: string;
+  created: number;
+  cents: number;
+  currency: string;
+  /** The payment, when the invoice names it: on the invoice itself in older API versions, or among its payments when they come with it; empty otherwise, so a refund of it cannot be matched. */
+  paymentIntent: string;
+  /** The channel the subscription was sold through, by the same rule as renewalEntries: "" for direct, UNRECORDED when it says nothing. */
+  channel: string;
+  /** The invoice, to find its payment among the account's invoice payments when the invoice does not name it. */
+  invoice: string;
+};
+
+/**
+ * Each paid invoice's payment on the creator's account, invoice id to payment
+ * intent, from Stripe's list of invoice payments (GET /v1/invoice_payments,
+ * whose `invoice` filter is optional: "List all payments for an invoice",
+ * read 2 November 2026), so a refund of a membership's or a payment plan's
+ * payment can be matched whatever API version the account answers in. At
+ * most `pages` pages of a hundred, stopping at `deadline`; `partial` when
+ * there was more (270 [GR1], unit 3a).
+ */
+export async function readInvoicePayments(store: Store, since: number, pages: number, deadline = Infinity): Promise<{ byInvoice: Map<string, string[]>; partial: boolean }> {
+  // Every paid payment of an invoice (one paid in parts has several); a paid one with no payment intent (a charge) is kept as "", a miss.
+  const byInvoice = new Map<string, string[]>();
+  let after = "";
+  const seen = new Set<string>();
+  let partial = false;
+  for (let page = 0; page < pages; page += 1) {
+    const list = (await onAccount(
+      "GET",
+      store.stripeAccountId as string,
+      `/invoice_payments?limit=100&status=paid&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+    )) as { data?: unknown; has_more?: unknown };
+    const rows = financialPage(list, seen);
+    for (const row of rows) {
+      const invoice = typeof row.invoice === "string" ? row.invoice : "";
+      const intent = (row.payment as { payment_intent?: unknown } | null | undefined)?.payment_intent;
+      if (row.status !== "paid" || !invoice) continue;
+      byInvoice.set(invoice, [...(byInvoice.get(invoice) ?? []), typeof intent === "string" ? intent : ""]);
+    }
+    if (!list.has_more) break;
+    const last = rows[rows.length - 1];
+    after = typeof last.id === "string" ? last.id : "";
+    if (!after) { partial = true; break; }
+    if (page === pages - 1 || Date.now() > deadline) { partial = true; break; }
+  }
+  return { byInvoice, partial };
+}
+
+/**
+ * The paid renewals of this store since `since` (seconds), each with the
+ * buyer's address as the invoice has it: the same invoices renewalEntries
+ * counts (paid, billing_reason "subscription_cycle", this store's handles),
+ * at most `pages` pages of a hundred; `partial` when there were more.
+ */
+export async function readRenewalPayments(store: Store, since: number, pages: number, deadline = Infinity): Promise<{ rows: RenewalPayment[]; partial: boolean }> {
+  const handles = saleHandles(store);
+  const out: RenewalPayment[] = [];
+  let after = "";
+  const seen = new Set<string>();
+  let partial = false;
+  for (let page = 0; page < pages; page += 1) {
+    const list = (await onAccount(
+      "GET",
+      store.stripeAccountId as string,
+      `/invoices?limit=100&status=paid&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+    )) as { data?: unknown; has_more?: unknown };
+    const rows = financialPage(list, seen);
+    for (const invoice of rows) {
+      if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
+      if (!handles.has(invoiceMeta(invoice).store ?? "")) continue;
+      const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
+      const email = typeof invoice.customer_email === "string" ? invoice.customer_email.trim() : "";
+      if (cents <= 0 || !email) continue;
+      const meta = invoiceMeta(invoice);
+      const listedPayment = ((invoice.payments as { data?: { status?: unknown; payment?: { payment_intent?: unknown } | null }[] } | null | undefined)?.data ?? []).find((p) => p.status === "paid")?.payment?.payment_intent;
+      const paymentIntent = typeof invoice.payment_intent === "string" ? invoice.payment_intent : typeof listedPayment === "string" ? listedPayment : "";
+      const channel = "channel" in meta ? (meta.channel === "direct" ? "" : meta.channel) : meta.utm_source || UNRECORDED;
+      out.push({ email, created: (typeof invoice.created === "number" ? invoice.created : 0) * 1000, cents, currency: currencyOf(invoice), paymentIntent, channel, invoice: typeof invoice.id === "string" ? invoice.id : "" });
+    }
+    if (!list.has_more) break;
+    // Out of time: what was read is kept, and the reading says it is partial.
+    if (Date.now() > deadline) { partial = true; break; }
+    const last = rows[rows.length - 1];
+    after = typeof last.id === "string" ? last.id : "";
+    if (!after) { partial = true; break; }
+    if (page === pages - 1) partial = true;
+  }
+  return { rows: out, partial };
+}
+
+/** The disputes that took money since `since`, for a reader outside this file (lib/segments.ts); the same reading the numbers use. */
+export function readStoreDisputes(store: Store, since: number, pages = DISPUTE_PAGES): Promise<{ rows: DisputeRow[]; partial: boolean }> {
+  return readDisputes(store, since, pages);
+}
+
 /** One dispute as Stripe lists it, only in a state that takes the money (DISPUTE_TAKES). */
 export type DisputeRow = { created: number; cents: number; currency: string; paymentIntent: string };
 
@@ -1503,6 +1608,7 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
       if (refund.currency !== store.currency || day < cut90) continue;
       out.refundDays[day] = (out.refundDays[day] ?? 0) + refund.cents;
     }
+    out.takenBackElsewhere = { refunds: refundRows.filter((refund) => refund.currency !== store.currency && dayKey(refund.created) >= cut90).length, disputes: null };
     out.refundsByProduct = {};
     for (const refund of refundRows) {
       if (refund.currency !== store.currency) continue;
@@ -1543,6 +1649,7 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
       return [...by.values()].sort((a, b) => b.cents - a.cents || a.source.localeCompare(b.source));
     };
     out.disputesIn = { d7: disputesFrom(cut7), d30: disputesFrom(cut30), d90: disputesFrom(cut90) };
+    out.takenBackElsewhere = { refunds: out.takenBackElsewhere?.refunds ?? null, disputes: disputeRead.rows.filter((dispute) => dispute.currency !== store.currency && dayKey(dispute.created) >= cut90).length };
   } else {
     out.disputesIn = null;
   }
@@ -1905,6 +2012,8 @@ export type StatsData = {
   refunds: Record<"d7" | "d30" | "d90", { source: string; refunds: number; cents: number }[]> | null;
   /** Refunds over the last 90 days, by product. */
   refundsByProduct: Record<string, { refunds: number; cents: number }>;
+  /** Refunds and disputes of the last 90 days in another currency, left out of the amounts (SalesStats.takenBackElsewhere). */
+  takenBackElsewhere?: { refunds: number | null; disputes: number | null } | null;
   /** Disputes opened in the window that took money, by the channel of the sale; null when they could not be read. */
   disputes?: Record<"d7" | "d30" | "d90", { source: string; disputes: number; cents: number }[]> | null;
   disputesComplete?: boolean;
@@ -2172,6 +2281,7 @@ export function studioStats(
     salesCountries: sales?.byCountryIn ?? { d7: [], d30: [], d90: [] },
     refunds: sales?.refundsIn ?? null,
     refundsByProduct: sales?.refundsByProduct ?? {},
+    takenBackElsewhere: sales?.takenBackElsewhere ?? null,
     disputes: sales?.disputesIn ?? null,
     disputesComplete: sales?.disputesComplete ?? false,
     kept: sales?.keptIn ?? null,

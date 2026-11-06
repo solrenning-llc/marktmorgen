@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { withinLimit, withinMonth } from "@/lib/request-guard";
 import { importAllowanceFor } from "@/lib/import-limits";
+import { costPauseCode } from "@/lib/plan-standing";
 import { can } from "@/lib/team-roles";
 import { MAX_TRIMMED_PAGE_CHARS, convertSavedPage } from "@/lib/clickfunnels-page";
 import { planFunnelImport, saveFunnelImport } from "@/lib/clickfunnels-funnel";
@@ -39,6 +40,10 @@ export async function POST(request: NextRequest) {
   // Each path has a calendar month's figure by plan (lib/import-limits.ts), the one each plan's
   // worst month counts (tests/plan-cost-registry.ts); the short windows only spread the work.
   const allowance = importAllowanceFor(store);
+  // Nothing of a funnel migration runs while the plan's renewal is unpaid or a
+  // payment for it is disputed (232 [CA1] unit 4b2, lib/plan-standing.ts).
+  const paused = costPauseCode(store);
+  if (paused) return refuse(paused, 409);
 
   try {
     if (action === "page") {

@@ -3,6 +3,70 @@
 > **MR vigente — dono27/10/2026 07h42 Fortaleza,464[MR1]:** [REGRA DE MARGEM](../AGENTS.md#mr--regra-de-margem-vigente-27-de-outubro-de-2026) substitui todos os pisos históricos de60% neste documento e suas referências. Exigir lucro líquido por unidade maior que zero no pior caso com a folga existente do spend floor,100% direitos mensal/anual e complementos; empresa sem prejuízo a partir de base mínima calculada com100%FX275 e exposições.60% é meta real mensal da empresa. Preservados ISS5%, leitura mais onerosa, recebimento mais caro, reservas/tetos/gates; desconhecido reprova, não é zero. Texto/citações/números antigos abaixo são histórico, não recalculados nem certificados. Código/relatório/regeneração pertencem a MR2; resultados atuais a MR3. Sem mudança de preços/limites/comissão/vendas.
 
 
+## CX-67 — Held stores: financed company exposure (4 November2026)
+
+This is an explicit exception to the historical closing-day deletion statements
+below. Unknown billing coverage (`has_more`, malformed/failed evidence or an
+unreadable independent refund queue) never advances a store to `removed`.
+There is no deletion deadline for uncertainty and no new customer limit.
+
+`lib/held-stores.ts` retains each unresolved obligation in the private shared
+`nl:held:stores` index. The daily closing job revisits oldest due entries. **CX-69,4 November2026:**
+only unknown platform billing coverage belongs in this index; known pauses,
+member/buyer batches, notices and refund progress continue through the ordinary
+walk. Previously misclassified entries may make local progress before any
+coverage read is needed. The two-read retry is independent of the retention
+policy and is counted in its existing recovery work line. The current-month
+`post_cancellation` review governs retention only: its allocation supplies the
+global funded retention-case ceiling and consumes its existing ledger without
+initializing money, refunding slots or offsetting another scope. A null review
+leaves retention unknown, but cannot freeze recovery. At most50 rechecks may run company-wide
+per UTC day, and at most one per store/day, committed atomically before either
+of the two recovery reads. A lost acknowledgement consumes its claim and cannot
+permit another attempt. Attempted entries rotate to the next UTC day; unattempted entries retain their older score so the same first50 cannot starve the rest. Once
+complete evidence proves there is no live billing, normal closing continues.
+A refund already independently queued after a confirmed stop does not retain
+files; its refund worker remains responsible after deletion.
+
+`HELD_EXPOSURE` and `heldStoreMonthlyExposure` in `tests/plan-cost-registry.ts`
+count the full paid-tier file/task/community ceiling and the full data room
+plus **peak** outside-room keys and a4096-byte index allowance per held store,
+for31days. They add up to31 two-read timeout waits per store,128 bookkeeping
+commands and MAX_STORE_BYTES+128KiB of database replies per retry. The global
+model uses at most1550 attempts/month, the reviewed simultaneous case cap,
+three overlapping daily hashes (50 hashed identities each, two-day TTL) and
+15 monthly aggregate keys (400-day TTL) plus a1KiB global walk cursor. Daily work caps are internal company
+work bounds. These are modeled components, not a verified complete supplier
+quote: endpoint tariff, deployment coverage, all retained provider records,
+independent refund work and taxes require the complete funded review. The
+runtime floor is only a necessary minimum; it cannot certify missing categories.
+The approved current policy, actual case ceiling and complete total remain
+**null**, never zero. No price, allowance, commercial flag or gate changes.
+
+Retention funding must be renewed for every calendar month unresolved stores remain.
+A full first page of final closings is not the whole queue: a global cursor
+continues the bounded pages across a job deadline. A partial walk or a changed
+final-index cardinality cannot certify a complete monthly observation.
+Existing obligations above the reviewed case ceiling are **still retained and
+counted**, not hidden or deleted to fit a budget; such overflow or any unknown
+count makes the financed company total unknown and prevents certification of
+an adequate minimum paid base. An unknown-duration hold has no invented finite
+lifetime cost. The whole reviewed monthly exposure belongs100% in company
+fixed/exposure accounting and its minimum paid base, never subsidized by a
+paid customer's modeled profit or a hoped-for conversion.
+
+The daily job atomically records aggregate count, observed daily peak, date and
+walk completeness in `nl:held:month:YYYY-MM`; index mutations invalidate its
+completion in the same Redis operation. Only a complete last-calendar-day
+observation may populate `heldStores` and `heldStoresPeak` in the prior-month
+company report (`companyMonthlyMarginReportWithHeld`). Missing, partial or stale
+counts stay null; private store references, addresses and refund data never
+enter the report. This connects operational counts to the existing report
+calculator; reconciled money ingestion, scheduling and owner presentation are
+still separate work, as before. No message, account or provider action is made
+by the report. Synthetic tests and disposable-Redis Lua checks do not establish
+an actual balance or authorize commercial release.
+
 The owner authorized a calculated minimum paid customer base and separately funded acquisition/refund exposure. A free account has no positive revenue on which a 60% profit margin could be computed. It is never reported as a profitable paid customer.
 
 Commercial review now separates nine revenue-bearing scenarios (six fixed plan/cycle offers and three overage cases) from seven funded exposure scopes: trial, setup, full refunds, non-payment, post-cancellation, paused accounts and accrued legacy credits. Every scope requires explicit maximum occurrences in the worst recognized month and complete per-occurrence cost/tax ceilings, even when the reviewed occurrence cap is zero. Expected conversions, future invoices and another scope's profit cannot offset losses. Full refunds preserve non-refundable card fees, taxes and service costs.
@@ -41,6 +105,25 @@ Both exposures of the database after a plan ends are closed:
 The database is priced as one region. A read region added in Upstash keeps a copy of everything and is billed for it: it multiplies the `database-storage` and `retained-data` lines by the number of copies, and must be priced before it is turned on. `tests/upstash-single-region.test.ts` fails if the code or the deployment ever configures one; switching one on in Upstash's console is the owner's act, and must wait for that price.
 
 Moving orders older than 90 days to R2 was asked for and is not built: docs/order-data.md ("Asked for, and not built here") says why, with the measured sizes, for the owner's decision. Deleting a closed store's records at its closing day is built (above); keeping its sales in R2 for 7 years was built and taken out the same day, because they are the creator's records, not Marktmorgen's.
+
+## EC1 — A closing store fair to its buyers: post-cancellation exposure (queue item 307, 30 October 2026)
+
+Queue item 307 [EC1] (owner's request of 23/10/2026, 15h58 Fortaleza, and its complement of 30/10/2026, 13h12) adds to every closing of a store whose plan ended from 31 October 2026 (`BUYER_NOTICE_FROM`): its members held from the plan's end (Stripe pause of collection, invoices voided, `lib/closing-holds.ts`), one service email to each of its buyers at least 7 days before the closing and one follow-up ("the store stays" or "your refund could not be made", `lib/closing-buyers.ts`), and its members' unused time refunded from the creator's own Stripe account (`lib/closing-refunds.ts`). The refunds are the creator's money on the creator's account, never Marktmorgen's: each is made only when the account's available balance, read first, covers it.
+
+What Marktmorgen pays for it is bounded per closing, before any of it is spent: the closing's emails are set once, when its members are held, at `EMAILS_PER_BUYER_PER_ENDING` (2) for each buyer `buyerNoticeCap` allows (`BUYER_CAP_MONTHS` = 24 months of the plan's orders; a free trial's 100 orders for a store that never paid), and every email is taken from them first (`lib/closing-credit.ts`). Each buyer at its cap is costed at `CLOSING_BUYER_COST` (tests/plan-cost-registry.ts): two emails at the dearer provider's $0.0009, its address and a member's last payment kept for the closing days, its share of a page of the store's own payments (found by Stripe's search on their metadata, at most `buyerPagesCap` pages a closing: past it the rest are counted as not told), and `STRIPE_CALLS_PER_MEMBER` (8) calls to the creator's Stripe account, each held two seconds at 2 GB. The calls are capped like the emails: when the closing starts, its call budget is set to `STRIPE_CALLS_PER_MEMBER` for each buyer the cap allows (`startCallBudget`, `lib/closing-holds.ts`), and every call for a member (listing its open and draft invoices, voiding them or keeping drafts as drafts and letting them go on a release, reading its paid invoices, its hold, its release, a retry, and its refund: the payment, the refunds made and the refund) is taken from it before it is made (`takeCalls`). The three calls of a member's refund are set aside when it is held (`REFUND_CALLS_PER_MEMBER`, "rcalls"), so the holds' daily retries can never spend them; a later try of a refund the balance did not cover takes from the rest of the budget. On the closing day a refund the budget cannot cover is told to its member like one the balance did not cover. A member past the budget is not held and is counted for the creator in every notice and in the studio. Each membership's end on the closing day is not in this budget: it is the one its order already pays for (`ORDER_RENEWAL_STOP` in `ORDER_COST`), and it is never refused, so no member is charged after the closing. One closing at its cap (`closingBuyersCost`):
+
+| Plan that ended | Buyers at the cap | Ceiling of one closing |
+|---|---|---|
+| Store | 4,800 | $9.15 |
+| Studio | 10,800 | $20.60 |
+| Scale | 36,000 | $68.65 |
+| A store that never paid | 100 | $0.19 |
+
+**Why it is here and not in the closure line.** The item asked for it in the closure line (`PER_PAYMENT_LINES`). Priced there, at the price list of 18 October 2026 Store's monthly unit no longer keeps the historical 60% sizing floor that tests/limits-proposal.test.ts, tests/pricing-optimization.test.ts and tests/pricing-usage-proposal.test.ts hold (they propose cutting Store's visible figures for a few cents a month), and no test may be relaxed. So it is carried as the company's post-cancellation exposure, one occurrence per closing (a closing follows at least a payment or a trial), at the ceilings above; the exposure review stays null and release stays closed, as before. Whether to move it into the closure line (with a price change) or lower the cap is in "Depende do dono" of docs/codex-queue.md, item 307. Buyers past the cap are not written to by Marktmorgen and are counted for the creator in every notice and in the studio, so nothing is silent; while the cap is what it is, a store with more distinct buyers than its cap is the one case the checkout's sentence does not cover in full.
+
+No company postal address exists yet (`lib/company-postal.ts`, empty): until it does, no buyer is emailed, and a store whose buyers must be told does not close (its retention continues inside the existing closing-days exposure). This is a release condition, not a cost.
+
+**A plan paid for a store already closing (queue item 307 [EC1], with item 569 [NC1]).** From the start of its closing day a store refuses a plan checkout, but one opened before can still be finished on it. That plan is ended at once and its payment refunded in full from Marktmorgen's own Stripe account (`lib/closing-plan-guard.ts`): it is the money the creator paid us, given back, so the refund itself is not a cost, but the receiving cost of that one payment (`lib/receiving-costs.ts`, the dearer provider's fee on the amount charged) is not given back by Stripe on a refund and is the company's. It is a full-refund occurrence of this review, never offset by another scope. **Bounded by the owner's decision of 30/10/2026, 18h16 ("faça o correto"; "Depende do dono" (d) of item 307 resolved):** starting a plan again during the closing period stays open, because it saves the store, but from the plan's end every plan checkout of the store lasts `CLOSING_CHECKOUT_SECONDS` (31 minutes: Stripe's minimum of 30, docs.stripe.com/api/checkout/sessions/create, and one for clocks), and none is opened from `lastPlanMoment` (the closing day less 32 minutes; the studio shows the exact moment, in UTC). So no plan checkout of the store is open when its closing day begins; the open ones are expired then anyway (`expirePlanCheckouts`), and a new one is refused until the store's records are gone. What is left is a payment submitted on a checkout before it expired that Stripe confirms only after the day began (a delayed payment method), or one that Stripe completes later than its own expiry. Each is at most one occurrence per closing: the contract funding allows one pending checkout grant per store (`pending: 'one-grant-per-store'`, lib/contract-funding-rules.ts) and a store whose plan is paid is refused a second checkout (`billing=already`). Its ceiling is the receiving cost of the dearest plan payment a store can make (Scale yearly, from `lib/receiving-costs.ts`), and the refund guard (`lib/closing-plan-guard.ts`) ends it and returns the money. Like every scope here, the exposure review stays null and release stays closed.
 
 ## LE448 — exposição própria da lista de pré-abertura (em implementação)
 

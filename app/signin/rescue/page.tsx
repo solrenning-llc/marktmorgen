@@ -1,6 +1,5 @@
 import { PendingSubmit } from "@/components/pending-submit";
-import Link from "next/link";
-import { Logo } from "@/components/logo";
+import { MorningLogo } from "@/components/morning-header";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
@@ -22,11 +21,9 @@ export default async function RescuePage({ searchParams }: { searchParams: Promi
   if (!/^[0-9a-f]{64}$/.test(token)) redirect("/signin?status=expired");
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-paper text-ink">
+    <div className="relative min-h-screen overflow-hidden">
       <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
-        <Link href="/" className="inline-block w-fit rounded-[10px]" aria-label="Marktmorgen, home">
-          <Logo />
-        </Link>
+        <MorningLogo />
         <h1 className="t-h1 mt-6">Back into your account</h1>
         <p className="mt-4 text-lg text-ink-soft">One tap turns two-step login off and logs you in. Turn it on again in your studio once you have your phone.</p>
         <div className="card mt-8 p-6 sm:p-8">

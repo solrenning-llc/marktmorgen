@@ -174,7 +174,7 @@ export type ConnectionView = {
 export type MeetProblem = { at: number; provider: MeetProvider; what: string; error: string };
 
 export type MeetView = {
-  /** The providers this deployment has switched on. Empty: show nothing. */
+  /** Configured providers, or retained connections in the settings-only view. */
   providers: MeetProvider[];
   connected: Partial<Record<MeetProvider, ConnectionView>>;
   problems: MeetProblem[];
@@ -184,24 +184,31 @@ function viewOf(c: Connection): ConnectionView {
   return { provider: c.provider, account: c.account.email || c.account.name || "your account", connectedAt: c.connectedAt, by: c.by, broken: c.broken };
 }
 
-/** Which accounts a store has connected, for the studio. Nothing is read when both are off. */
+/** Which configured accounts can serve bookings. Disabled providers stay excluded. */
 export async function meetView(statsId: string | null, sid?: OfferedTo, review = false): Promise<MeetView> {
-  // A studio page names its store, and sees what that store is offered, and
-  // any account it has connected whether or not it is still offered: one the
-  // bookings use (usableProviders reads every provider switched on) must stay
-  // in sight, to be seen and disconnected.
   const configured = configuredProviders();
   const offered = sid === undefined ? configured : offeredProviders(sid, review);
-  if (!configured.length || !statsId || !isRedisConfigured()) return { providers: offered, connected: {}, problems: [] };
-  const replies = await redisPipeline([...configured.map((p) => ["GET", connKey(statsId, p)]), ["LRANGE", logKey(statsId), 0, LOG_SIZE - 1]]);
+  return readMeetingView(statsId, configured, offered);
+}
+
+/** Settings alone also show retained disabled connections, so consent can be
+ * withdrawn. Never use this view to select a provider for new bookings. */
+export async function meetSettingsView(statsId: string | null, sid: OfferedTo, review = false): Promise<MeetView> {
+  return readMeetingView(statsId, ["google", "zoom"], offeredProviders(sid, review));
+}
+
+/** At most two connection reads and one bounded problem-list read. */
+async function readMeetingView(statsId: string | null, candidates: MeetProvider[], offered: MeetProvider[]): Promise<MeetView> {
+  if (!candidates.length || !statsId || !isRedisConfigured()) return { providers: offered, connected: {}, problems: [] };
+  const replies = await redisPipeline([...candidates.map((p) => ["GET", connKey(statsId, p)]), ["LRANGE", logKey(statsId), 0, LOG_SIZE - 1]]);
   const connected: MeetView["connected"] = {};
-  configured.forEach((p, i) => {
+  candidates.forEach((p, i) => {
     const c = parseConnection(replies[i], p);
     if (c) connected[p] = viewOf(c);
   });
-  const providers = configured.filter((p) => offered.includes(p) || connected[p]);
+  const providers = candidates.filter((p) => offered.includes(p) || connected[p]);
   const problems: MeetProblem[] = [];
-  for (const raw of Array.isArray(replies[configured.length]) ? (replies[configured.length] as unknown[]) : []) {
+  for (const raw of Array.isArray(replies[candidates.length]) ? (replies[candidates.length] as unknown[]) : []) {
     try {
       const v = JSON.parse(String(raw)) as MeetProblem;
       if (isMeetProvider(v.provider) && typeof v.what === "string" && typeof v.error === "string") problems.push(v);

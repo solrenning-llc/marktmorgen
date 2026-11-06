@@ -1,0 +1,8 @@
+# Marktmorgen security contact (RFC 9116). How to report a security problem:
+# email the address below with what you found and how to see it. A person
+# answers by email. Please do not test against other people's stores or data.
+Contact: mailto:support@marktmorgen.com
+Expires: 2027-10-31T23:59:59.000Z
+Preferred-Languages: en
+Canonical: https://marktmorgen.com/.well-known/security.txt
+Policy: https://marktmorgen.com/platform/security

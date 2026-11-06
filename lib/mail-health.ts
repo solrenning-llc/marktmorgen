@@ -84,7 +84,15 @@ export { BOUNCE_FLOOR, BOUNCE_RATE, COMPLAINT_FLOOR, COMPLAINT_RATE, HEALTH_WIND
 export const STORE_TAG = "nl_store";
 /** And, on a list email, the list the address is on, so it can be taken off it. */
 export const LIST_TAG = "nl_list";
+/** The email shared by all of its recipients, for aggregate delivery reporting. */
+export const MAIL_REPORT_TAG = "nl_mail";
 export const HEALTH_ID = /^[0-9a-f]{32}$/;
+const REPORT_CAMPAIGN = /^[bs]-[A-Za-z0-9_-]{1,38}$/;
+
+/** A campaign made by lib/mail-links.ts, or an empty string for an untrusted tag. */
+export function mailReportCampaign(value: unknown): string {
+  return typeof value === "string" && REPORT_CAMPAIGN.test(value) ? value : "";
+}
 
 /** What a store's watched email is counted under. "" for a store with neither id, which sends none. */
 export function healthId(store: Pick<Store, "sid" | "listId">): string {
@@ -93,10 +101,15 @@ export function healthId(store: Pick<Store, "sid" | "listId">): string {
 }
 
 /** The tags for one watched email, as the sender takes them. */
-export function healthTags(store: Pick<Store, "sid" | "listId">, onList: boolean): Record<string, string> {
+export function healthTags(store: Pick<Store, "sid" | "listId">, onList: boolean, campaign?: string): Record<string, string> {
   const id = healthId(store);
   if (!id) return {};
-  return { [STORE_TAG]: id, ...(onList && store.listId && HEALTH_ID.test(store.listId) ? { [LIST_TAG]: store.listId } : {}) };
+  const report = mailReportCampaign(campaign);
+  return {
+    [STORE_TAG]: id,
+    ...(onList && store.listId && HEALTH_ID.test(store.listId) ? { [LIST_TAG]: store.listId } : {}),
+    ...(report ? { [MAIL_REPORT_TAG]: report } : {}),
+  };
 }
 
 
@@ -105,17 +118,19 @@ export type Pause = { reason: PauseReason; until: number; sent: number; count: n
 export type Health = { sent: number; bounced: number; complained: number };
 
 const dayOf = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-const dayKey = (id: string, ms: number) => `nl:mail:health:${id}:${dayOf(ms)}`;
+export const mailHealthDayKey = (id: string, ms: number) => `nl:mail:health:${id}:${dayOf(ms)}`;
 const seenKey = (id: string, email: string) => `nl:mail:health:${id}:seen:${createHash("sha256").update(email).digest("hex").slice(0, 32)}`;
 const pausedKey = (id: string) => `nl:mail:paused:${id}`;
 const fromKey = (id: string) => `nl:mail:health:${id}:from`;
-const KEPT_SECONDS = (HEALTH_WINDOW_DAYS + 3) * 86_400;
+/** Unit 2 gives daily report hashes their reviewed 30-day lifetime and cost ceiling. */
+export const MAIL_HEALTH_DAY_SECONDS = (HEALTH_WINDOW_DAYS + 3) * 86_400;
+const MAIL_HEALTH_SEEN_SECONDS = (HEALTH_WINDOW_DAYS + 3) * 86_400;
 
 async function add(id: string, field: "s" | "b" | "c", n: number, now: number): Promise<void> {
-  const key = dayKey(id, now);
+  const key = mailHealthDayKey(id, now);
   await redisPipeline([
     ["HINCRBY", key, field, n],
-    ["EXPIRE", key, KEPT_SECONDS],
+    ["EXPIRE", key, MAIL_HEALTH_DAY_SECONDS],
   ]);
 }
 
@@ -156,19 +171,39 @@ export function overTheLine(health: Health): { reason: PauseReason; count: numbe
   return null;
 }
 
-/** Whether this store's watched email is paused right now, and why. Null when it is not, or cannot be read. */
-export async function pausedFor(id: string, now = Date.now()): Promise<Pause | null> {
-  if (!id || !isRedisConfigured()) return null;
+/**
+ * Read the existing health-pause checkpoint before admitting list email.
+ * Null proves no current pause; undefined means the read is unconfirmed.
+ * No unknown result authorizes a marketing attempt.
+ */
+export async function pauseForSending(id: string, now = Date.now()): Promise<Pause | null | undefined> {
+  if (!id || !isRedisConfigured()) return undefined;
   try {
-    const [raw] = await redisPipeline([["GET", pausedKey(id)]]);
-    if (typeof raw !== "string") return null;
-    const value = JSON.parse(raw) as Partial<Pause>;
-    if ((value.reason !== "bounces" && value.reason !== "complaints") || typeof value.until !== "number") return null;
-    if (value.until * 1000 <= now) return null;
-    return { reason: value.reason, until: value.until, sent: Number(value.sent) || 0, count: Number(value.count) || 0 };
+    const reply: unknown = await redisPipeline([["GET", pausedKey(id)]]);
+    if (!Array.isArray(reply)) return undefined;
+    const length = Object.getOwnPropertyDescriptor(reply, "length");
+    if (!length || !("value" in length) || length.value !== 1) return undefined;
+    const item = Object.getOwnPropertyDescriptor(reply, "0");
+    if (!item || !("value" in item)) return undefined;
+    if (item.value === null) return null;
+    if (typeof item.value !== "string" || item.value.length > 512) return undefined;
+    const value = JSON.parse(item.value) as Partial<Pause> | null;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    if (value.reason !== "bounces" && value.reason !== "complaints") return undefined;
+    const { until, sent, count } = value;
+    if (typeof until !== "number" || !Number.isSafeInteger(until) || until < 0 ||
+        typeof sent !== "number" || !Number.isSafeInteger(sent) || sent < 0 ||
+        typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) return undefined;
+    if (until * 1000 <= now) return null;
+    return { reason: value.reason, until, sent, count };
   } catch {
-    return null;
+    return undefined;
   }
+}
+
+/** Existing display/service contract; list admission uses pauseForSending instead. */
+export async function pausedFor(id: string, now = Date.now()): Promise<Pause | null> {
+  return (await pauseForSending(id, now)) ?? null;
 }
 
 /** Pauses the store when its seven days are over a line. A pause already running keeps its own end. */
@@ -194,15 +229,29 @@ type Ramp = { size: number; left: number; opens: number };
 const rampKey = (id: string) => `nl:mail:ramp:${id}`;
 const RAMP_KEPT_SECONDS = 180 * 86_400;
 
+/** A single, explicit own response to one existing ramp command. */
+function rampReply(reply: unknown): { value: unknown } | null {
+  if (!Array.isArray(reply)) return null;
+  const length = Object.getOwnPropertyDescriptor(reply, "length");
+  if (!length || !("value" in length) || length.value !== 1) return null;
+  const item = Object.getOwnPropertyDescriptor(reply, "0");
+  return item && "value" in item ? { value: item.value } : null;
+}
+
 function parseRamp(raw: unknown): Ramp | null {
-  if (typeof raw !== "string") return null;
+  if (typeof raw !== "string" || raw.length > 512) return null;
   try {
-    const value = JSON.parse(raw) as Partial<Ramp>;
-    const size = Number(value.size);
-    const left = Number(value.left);
-    const opens = Number(value.opens);
-    if (!Number.isFinite(size) || size < RAMP_FIRST || !Number.isFinite(left) || left < 0 || !Number.isFinite(opens)) return null;
-    return { size, left: Math.min(left, size), opens };
+    const value = JSON.parse(raw) as Partial<Ramp> | null;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const { size, left, opens } = value;
+    if (typeof size !== "number" || !Number.isSafeInteger(size) ||
+        typeof left !== "number" || !Number.isSafeInteger(left) || left < 0 || left > size ||
+        typeof opens !== "number" || !Number.isSafeInteger(opens) || opens < 0) return null;
+    let knownSize = false;
+    for (let portion = RAMP_FIRST; portion <= RAMP_LAST; portion *= 2) {
+      if (size === portion) knownSize = true;
+    }
+    return knownSize ? { size, left, opens } : null;
   } catch {
     return null;
   }
@@ -226,31 +275,41 @@ export async function startRamp(id: string, added: number): Promise<void> {
  * How many of `want` emails this store may send right now, taken from the
  * portion that is open. `want` itself for a store with no portions running,
  * which is nearly every store nearly all the time; 0 while the next portion
- * has not opened yet.
+ * has not opened yet, or when its read/write checkpoint is unconfirmed.
  */
 export async function rampRoom(id: string, want: number, now = Date.now()): Promise<number> {
-  if (!id || want <= 0 || !isRedisConfigured()) return want;
+  if (!id || !Number.isSafeInteger(want) || want <= 0 || !Number.isFinite(now) || !isRedisConfigured()) return 0;
   const key = rampKey(id);
-  const [raw] = await redisPipeline([["GET", key]]);
-  let ramp = parseRamp(raw);
-  if (!ramp) return want;
-  const seconds = Math.floor(now / 1000);
-  if (ramp.left <= 0) {
-    if (seconds < ramp.opens) return 0;
-    const next = ramp.size * 2;
-    if (next > RAMP_LAST) {
-      // The last portion went without the store being paused: the list has
-      // shown itself to be a real one, and goes out at once from here on.
-      await redisPipeline([["DEL", key]]);
-      return want;
+  try {
+    const found = rampReply(await redisPipeline([["GET", key]]));
+    if (!found) return 0;
+    // Only confirmed absence means no portions are running. An unreadable
+    // checkpoint cannot authorize the whole requested audience.
+    if (found.value === null) return want;
+    let ramp = parseRamp(found.value);
+    if (!ramp) return 0;
+    const seconds = Math.floor(now / 1000);
+    if (ramp.left <= 0) {
+      if (seconds < ramp.opens) return 0;
+      const next = ramp.size * 2;
+      if (next > RAMP_LAST) {
+        // The confirmed final portion has finished; this only cleans up
+        // its existing checkpoint, without changing the progression.
+        await redisPipeline([["DEL", key]]);
+        return want;
+      }
+      ramp = { size: next, left: next, opens: 0 };
     }
-    ramp = { size: next, left: next, opens: 0 };
+    const take = Math.min(want, ramp.left);
+    const left = ramp.left - take;
+    const after: Ramp = { size: ramp.size, left, opens: left === 0 ? seconds + RAMP_GAP_MINUTES * 60 : 0 };
+    const saved = rampReply(await redisPipeline([["SET", key, JSON.stringify(after), "EX", RAMP_KEPT_SECONDS]]));
+    // A missing acknowledgement may have applied. Keep that capacity taken
+    // and grant no dispatch; do not refund or overwrite an uncertain write.
+    return saved?.value === "OK" ? take : 0;
+  } catch {
+    return 0;
   }
-  const take = Math.min(want, ramp.left);
-  const left = ramp.left - take;
-  const after: Ramp = { size: ramp.size, left, opens: left === 0 ? seconds + RAMP_GAP_MINUTES * 60 : 0 };
-  await redisPipeline([["SET", key, JSON.stringify(after), "EX", RAMP_KEPT_SECONDS]]);
-  return take;
 }
 
 /** Gives back what rampRoom took, for a batch that did not go out. */
@@ -275,7 +334,7 @@ export const PORTION_NOTE = `Going out in growing portions: addresses were broug
 export async function forgetHealth(id: string, emails: string[], now = Date.now()): Promise<void> {
   if (!HEALTH_ID.test(id) || !isRedisConfigured()) return;
   const keys = [pausedKey(id), fromKey(id), rampKey(id), ...emails.map((email) => seenKey(id, normaliseEmail(email)))];
-  for (let i = -1; i <= HEALTH_WINDOW_DAYS; i += 1) keys.push(dayKey(id, now - i * 86_400_000));
+  for (let i = -1; i <= HEALTH_WINDOW_DAYS; i += 1) keys.push(mailHealthDayKey(id, now - i * 86_400_000));
   await redisPipeline([["DEL", ...keys]]);
 }
 
@@ -310,7 +369,7 @@ export async function heardFromSender(notice: SenderNotice, now = Date.now()): P
   // Off the list first, and every time: this is the part that must not be
   // skipped because a count had already been made.
   if (HEALTH_ID.test(notice.list)) await stopWriting(notice.list, email, notice.kind);
-  const [first] = await redisPipeline([["SET", seenKey(notice.store, email), "1", "NX", "EX", KEPT_SECONDS]]);
+  const [first] = await redisPipeline([["SET", seenKey(notice.store, email), "1", "NX", "EX", MAIL_HEALTH_SEEN_SECONDS]]);
   if (first === null) return "ignored";
   await add(notice.store, notice.kind === "complained" ? "c" : "b", 1, now);
   return (await pauseIfOver(notice.store, now)) ? "paused" : "counted";

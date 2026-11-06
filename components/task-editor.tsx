@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useLeaveGuard } from "@/components/leave-guard";
 import { toast } from "@/components/toast";
 import type { Course } from "@/lib/course";
 import { MAX_TASK_PROMPT, type Task, type TaskSetup } from "@/lib/assignment-rules";
@@ -50,11 +51,16 @@ export function TaskEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
+  // The assignment as it was opened: leaving with changes to it asks first (487 [IT4], item 6), an untouched one never.
+  const [opened, setOpened] = useState("");
+  useLeaveGuard(draft !== null && JSON.stringify(draft) !== opened && !busy);
 
   async function open() {
     setError(null);
     if (!setup) {
-      setDraft({ prompt: "", review: true, gate: false, file: true });
+      const fresh = { prompt: "", review: true, gate: false, file: true };
+      setDraft(fresh);
+      setOpened(JSON.stringify(fresh));
       return;
     }
     setLoading(true);
@@ -65,7 +71,9 @@ export function TaskEditor({
         setError("The assignment could not be read just now. Try again in a moment.");
         return;
       }
-      setDraft({ prompt: data.task.prompt, review: data.task.review, gate: data.task.gate, file: data.task.file });
+      const read = { prompt: data.task.prompt, review: data.task.review, gate: data.task.gate, file: data.task.file };
+      setDraft(read);
+      setOpened(JSON.stringify(read));
     } catch {
       setError("The assignment could not be read just now. Try again in a moment.");
     } finally {

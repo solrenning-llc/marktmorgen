@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { EmailInput } from "@/components/email-input";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
@@ -19,9 +20,11 @@ const MESSAGES: Record<string, string> = {
   invited: "That address already has an invitation waiting. Take it back first to send a new one.",
   full: "A store's team holds five people, invitations waiting included.",
   limited: "That is a lot of invitations for one day. Try again tomorrow.",
-  unsent: "The invitation email could not be sent just now, so nothing was kept. Try again in a moment.",
+  unsent: "The invitation email could not be sent just now, so nothing was kept. Try again later.",
   unknown: "That is not there anymore. Reload the page.",
   same: "They already have that role.",
+  not_found: "That address is not on the team. Reload the page.",
+  repeat: "They are off the team, but some of the API keys they made may still work. Press Remove again to finish.",
   signed_out: "Your session ended. Log in again.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
@@ -181,16 +184,14 @@ export function TeamManager({
             <label htmlFor="invite-email" className="field-label mt-4 block">
               Their email
             </label>
-            <input
+            <EmailInput
               id="invite-email"
-              type="email"
               required
-              maxLength={254}
               autoComplete="off"
               className="field mt-2"
               placeholder="name@example.com"
               value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              onChange={setEmail}
             />
             <fieldset className="mt-5">
               <legend className="field-label">What they can do</legend>

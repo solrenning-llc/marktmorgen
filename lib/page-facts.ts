@@ -5,7 +5,8 @@
  * Each is there only when it is true and worth saying: a course with no lesson
  * yet has no lessons fact, a product bought fewer than ten times — or on a
  * store whose look hides how many times things were bought — has no buyers
- * fact, a product with no visible review has no rating. The page and the
+ * fact, a product with no review that counts has no rating (showsRating:
+ * hidden reviews count, so hiding every review never takes a rating away). The page and the
  * studio's preview ask this same function, so the preview never promises a
  * number the page would not show.
  *
@@ -13,6 +14,7 @@
  */
 import type { FactKey } from "@/lib/sales-page";
 import { blockWords } from "@/lib/buyer-words/blocks";
+import { listedLengths } from "@/lib/call-lengths";
 
 export type FactValue = { key: FactKey; value: string; label: string };
 export type PageFacts = Partial<Record<FactKey, FactValue>>;
@@ -23,7 +25,8 @@ export type FactInputs = {
   product: {
     course?: { lessons: number } | null;
     podcast?: { episodes: number } | null;
-    call?: { kind: "weekly" | "live"; minutes: number } | null;
+    priceCents?: number;
+    call?: { kind: "weekly" | "live"; minutes: number; lengths?: { minutes: number; cents: number }[]; deposit?: number } | null;
   };
   /** How many products a bundle holds now, or null for anything else. */
   bundleItems: number | null;
@@ -44,12 +47,12 @@ export function pageFacts(input: FactInputs): PageFacts {
   if (input.bundleItems !== null && input.bundleItems > 0) {
     out.products = { key: "products", value: number(input.bundleItems), label: w.products(input.bundleItems) };
   }
-  // A dated session has its own length each; only one length for every booking is a fact.
+  // A dated session has its own length each, and so does a call with several (lib/call-lengths.ts); only one length for every booking is a fact.
   const call = input.product.call;
-  if (call && call.kind === "weekly" && call.minutes > 0) out.length = { key: "length", value: number(call.minutes), label: w.minutes(call.minutes) };
+  if (call && call.kind === "weekly" && call.minutes > 0 && listedLengths(call, input.product.priceCents ?? 0).length === 0) out.length = { key: "length", value: number(call.minutes), label: w.minutes(call.minutes) };
   if (input.sold !== null && input.sold > 0) out.buyers = { key: "buyers", value: number(input.sold), label: w.bought(input.sold) };
   const reviews = input.reviews;
-  if (reviews && reviews.visible >= 1 && reviews.count >= 1) {
+  if (reviews && reviews.count >= 1) {
     const average = Math.round((reviews.stars / reviews.count) * 10) / 10;
     const value = new Intl.NumberFormat(input.locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(average);
     out.rating = { key: "rating", value, label: w.rating(reviews.count) };

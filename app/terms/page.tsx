@@ -1,8 +1,12 @@
 import { PAID_STORAGE_BYTES } from "@/lib/storage-rules";
+import { BUYER_CAP_MONTHS, BUYER_NOTICE_DAYS } from "@/lib/closing-buyers-rules";
+import { CLOSING_CHECKOUT_SECONDS } from "@/lib/closing-plan-guard";
 import { CENTS_PER_MINUTE, GIVE_UP_HOURS, MIN_CENTS, dollars } from "@/lib/auto-captions-rules";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
+import { DISPUTE_KEPT_WORDS, DISPUTE_OUTCOME_WORDS, DISPUTE_PAUSED_WORDS } from "@/lib/plan-dispute-rules";
+import { RENEWAL_KEPT_WORDS, RENEWAL_PAUSED_WORDS, RENEWAL_RESUME_WORDS } from "@/lib/renewal-unpaid-words";
 import { isDomainsConfigured } from "@/lib/domains";
 import { formatMoney } from "@/lib/money";
 import { PRO_MONTHLY_EMAILS, REFUND_DAYS, SCALE_MONTHLY_EMAILS, TRIAL_MONTHLY_EMAILS, PLAN_TITLES } from "@/lib/plan";
@@ -14,7 +18,7 @@ import { SETUP_STORAGE_BYTES, SETUP_VIDEO_SECONDS, TRIAL_STORAGE_BYTES } from "@
 import { CLOSING_DAYS, ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, KEEP_NOTHING_FROM, WARN_MONTH_DAYS, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { RELEASE_QUARANTINE_DAYS } from "@/lib/store";
 import { CALL_ORDER_UNITS, ORDERS_INCLUDED, TRIAL_ORDERS } from "@/lib/order-rules";
-import { API_WRITE_UNITS, allowanceListWords } from "@/lib/store-allowance-rules";
+import { API_SALES_UNITS, API_WRITE_UNITS, allowanceListWords } from "@/lib/store-allowance-rules";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { FREE_POOL_BASE_STORES, PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { BUYER_RESERVE_BPS, EXTRA_REQUESTS, REQUESTS_PER_VISIT, ROOM_IDLE_PARTS, ROOM_LIVE_PARTS, SETUP_VISITS, TRIAL_VISITS, VISITS_INCLUDED, countWords, partsWords } from "@/lib/traffic-rules";
@@ -36,7 +40,7 @@ export const metadata: Metadata = {
 export default function TermsPage() {
   const domains = isDomainsConfigured();
   return (
-    <LegalPage title="Terms of Service" lastUpdated="October 30, 2026">
+    <LegalPage title="Terms of Service" lastUpdated="November 4, 2026">
       <p>
         These Terms of Service (“Terms”) govern your access to and use of the
         websites, products, and subscription services operated by Solrenning
@@ -219,9 +223,13 @@ export default function TermsPage() {
         <p>
           <strong className="text-black">Reviews.</strong> Reviews on your
           store come only from buyers whose payment your Stripe account
-          confirms. You may answer a review and hide one. You may not offer
-          anything in return for a review, or present as a review anything a
-          buyer did not write. A hidden review still counts
+          confirms. You may answer a review, and hide one only for one of
+          the review rules: it shares private information, is abusive or
+          hateful, is not about the product, is clearly false, or breaks the
+          law. The rules are the same for every rating; you may not hide a
+          review because of its stars or because it criticizes you. You may
+          not offer anything in return for a review, or present as a review
+          anything a buyer did not write. A hidden review still counts
           in your average, and your page says how many are hidden.
         </p>
         <p>
@@ -241,7 +249,7 @@ export default function TermsPage() {
           <strong className="text-black">
             Ad pixels, and purchases sent to ad platforms.
           </strong>{" "}
-          When you add a Meta, Google, TikTok or Pinterest pixel to your store,
+          When you add a Meta, Google, TikTok, Pinterest, X or Reddit pixel to your store,
           or give us an access token so that purchases, membership payments and
           sign-ups are also sent to that platform from our server, you are instructing us to send that data to
           that platform on your behalf, and you are responsible for doing so
@@ -435,7 +443,8 @@ export default function TermsPage() {
           studio you open (each counts as {STUDIO_PAGE_UNITS}), any save, and
           the studio&apos;s own refreshing; an API request is one made with
           one of your store&apos;s keys (a contact added or a product given
-          counts as {API_WRITE_UNITS}); store emails are the emails your
+          counts as {API_WRITE_UNITS}, and a page of sales read counts as{" "}
+          {API_SALES_UNITS}); store emails are the emails your
           store&apos;s own tools send outside your monthly emails and your
           orders (inbox notices and replies, a purchase sent again, reminders,
           offers, notices to members); access emails hand a buyer what they
@@ -447,7 +456,9 @@ export default function TermsPage() {
           marked done, a certificate; what you do there yourself counts as
           studio requests, and deleting what one wrote is not counted); a
           webhook delivery is each try to send one of your webhooks,
-          retries and tests included. When one is used, that use is refused with a plain
+          retries and tests included, and each one not sent because your
+          plan&apos;s renewal payment did not go through or a payment for it
+          is disputed. When one is used, that use is refused with a plain
           message until your next billing month or a larger plan; nothing is
           billed past it. Changing your plan, canceling it, deleting your
           store and downloading your sales are never refused for it. Your
@@ -760,6 +771,25 @@ export default function TermsPage() {
           next charges until it is used up. Credit is not paid out in cash,
           except where a refund applies under our Refund Policy.
         </p>
+        <p id="renewal-unpaid" className="scroll-mt-24">
+          <strong className="text-black">If a renewal payment does not go through.</strong>{" "}
+          We learn it from Stripe at our daily check, or sooner when you open
+          your studio or when we email you about it. {RENEWAL_PAUSED_WORDS}{" "}
+          {RENEWAL_KEPT_WORDS} Your studio shows a link to Stripe&apos;s page
+          that pays the open invoice. {RENEWAL_RESUME_WORDS} We see it at our
+          next daily check, or at once when you open your studio. If Stripe
+          ends the plan after its last try, section 8 applies.
+        </p>
+        <p id="plan-disputed" className="scroll-mt-24">
+          <strong className="text-black">If you dispute a payment for your plan.</strong>{" "}
+          When you dispute with your bank a payment you made to us for your
+          plan, we learn it from Stripe at our daily check. {DISPUTE_PAUSED_WORDS}{" "}
+          {DISPUTE_KEPT_WORDS} Your studio says so at the top.{" "}
+          {DISPUTE_OUTCOME_WORDS} We see the bank&apos;s decision at our daily
+          check. A dispute of a payment for the Store assistant ends the
+          assistant as soon as we see it, and it is not sold to that store
+          again.
+        </p>
       </LegalSection>
 
       <LegalSection title="7. Creator invites" id="invites">
@@ -812,11 +842,9 @@ export default function TermsPage() {
           On the closing day the files the store keeps are removed (the files
           its products hand over, its lessons&rsquo; videos and downloads, its
           podcast&rsquo;s episodes, the files its students handed in and the
-          pictures in its community&rsquo;s posts), and the renewals of the
-          memberships and payment plans sold through it are set to end on the
-          creator&rsquo;s own Stripe account, each at the end of the period its
-          buyer already paid for; any refund remains the creator&rsquo;s
-          decision. Within {ERASE_WITHIN_DAYS} days, and usually the same day,
+          pictures in its community&rsquo;s posts), and every membership and
+          payment plan sold through it ends that day on the creator&rsquo;s
+          own Stripe account. Within {ERASE_WITHIN_DAYS} days, and usually the same day,
           everything else the store keeps with us is deleted: its page and
           settings, products and prices, pages, posts, courses and the
           certificates they gave, community, contacts, forms and their
@@ -825,16 +853,51 @@ export default function TermsPage() {
           anyone else for {RELEASE_QUARANTINE_DAYS} days. Your account and sign-in stay until you
           delete them, and you may open a new store.
         </p>
+        <p id="closing-members">
+          <strong className="text-black">Members and buyers of a store that closes.</strong>{" "}
+          From the day a store&rsquo;s plan ends, we pause the collection of
+          its memberships and payment plans on the creator&rsquo;s own Stripe
+          account and void their unpaid invoices, so those members are not
+          charged again, and they keep their access until the closing day. We
+          do this for as many members as the closing&rsquo;s limit covers (the
+          same limit as the emails below); a membership Stripe does not let us
+          pause is tried again every day. A member we could not pause may
+          still be charged until the closing day: the creator is told how
+          many, and asked to refund any such charge. Every membership ends on
+          the closing day. If the creator starts a plan again
+          before then, each payment goes on as it was, and nothing is charged
+          for the days in between. On the closing day, the part of a
+          member&rsquo;s last payment that paid for time after that day is
+          refunded automatically from the creator&rsquo;s own Stripe account,
+          if its balance covers it, unless the creator already refunded it.
+          The creator can make these refunds sooner from the studio, after
+          seeing each amount. Marktmorgen never pays these refunds and never
+          takes any part of them. If the balance does not cover a refund, it
+          is not made, and we email the member to say so, with the
+          creator&rsquo;s contact. At least {BUYER_NOTICE_DAYS} days before the
+          closing day, we email everyone who bought from the store once, from
+          Marktmorgen, with the date and what they can download before then;
+          if the store stays open after that email, we tell them so. These
+          emails go to as many buyers as the closing&rsquo;s cap allows ({BUYER_CAP_MONTHS}{" "}
+          months of the plan&rsquo;s orders); the creator is told how many,
+          if any, we could not write to. Starting a plan again before the
+          closing day keeps the store. It can be started until{" "}
+          {CLOSING_CHECKOUT_SECONDS / 60 + 1} minutes before that day begins
+          (the studio shows the exact time), and
+          its checkout lasts {CLOSING_CHECKOUT_SECONDS / 60} minutes. If a plan
+          is still paid once the closing day has begun, we end that plan at
+          once, refund its payment in full and email the creator.
+        </p>
         <p>
           <strong className="text-black">Download what you want to keep before that day.</strong>{" "}
-          The studio offers your whole store as one file: while your plan
+          The studio offers your store&rsquo;s main data as one file: while your plan
           runs, as often as your plan&rsquo;s studio use allows, and{" "}
           {ENDED_STORE_EXPORTS === 1 ? "once" : `${ENDED_STORE_EXPORTS} times`}{" "}
           after it ends, before the closing day, whatever the store&rsquo;s
-          size. It holds your products and their pages, posts,
+          size. It holds your store&rsquo;s address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts,
           courses with every lesson&rsquo;s text, forms and their answers,
           contacts and your orders as a spreadsheet. Files and videos
-          download from their own pages. Your students can download their
+          download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio. Your students can download their
           course certificates until the closing day, and not after.
         </p>
         <p>
@@ -851,11 +914,23 @@ export default function TermsPage() {
           <strong className="text-black">If you bought from a creator&rsquo;s store.</strong>{" "}
           What you buy from a store is delivered through that store while it
           is open on Marktmorgen. When it closes, what was bought from it can
-          no longer be downloaded or opened here, and renewals of what you
-          subscribe to there stop at the end of the period you paid for. The
-          creator is told {CLOSING_DAYS} days ahead and asked to give buyers
-          another way to what they bought. Download the files and course
-          certificates you want to keep before then. The store leaves your
+          no longer be downloaded or opened here. From the day the
+          store&rsquo;s plan ends we pause the payments for what you
+          subscribe to there (unless the store is past the limit described
+          above, or Stripe does not let us pause yours), and on the closing
+          day it ends. We email the
+          store&rsquo;s buyers at least {BUYER_NOTICE_DAYS} days before it closes, up to
+          the limit its plan sets: as many buyers as {BUYER_CAP_MONTHS} months of the
+          plan&rsquo;s orders, or 100 for a store that never paid. If a store has
+          more buyers than that, we cannot promise that you are among those we
+          email; the creator is told how many we could not write to and asked
+          to tell them. If you paid for time after
+          that day, the unused part is refunded to you from the
+          creator&rsquo;s Stripe account, if its balance covers it; if it does
+          not, we email you with the creator&rsquo;s contact. The creator is
+          told {CLOSING_DAYS} days ahead and asked to give buyers another way
+          to what they bought. Download the files and course certificates you
+          want to keep before then. The store leaves your
           library on Marktmorgen when it closes; nothing else in it changes.
           A refund is a matter between you and the creator (section 9).
         </p>
@@ -881,8 +956,9 @@ export default function TermsPage() {
           >
             Refund Policy
           </Link>
-          . In summary: your first payment to us is refunded in full on request
-          within {REFUND_DAYS} days of it, for any reason or none; a yearly
+          . In summary: within {REFUND_DAYS} days of your first payment to us,
+          that payment and every plan payment for the same store made since
+          are refunded in full on request, once, for any reason or none; a yearly
           plan is refunded at any time for the months not yet started, the
           months used being charged at the monthly price and the card
           processing fee Stripe charged on that payment being kept; and you may cancel

@@ -4,12 +4,12 @@ export async function checkHomePath({browser,LOCAL,axeSource,is}){
   try{
    const page=await context.newPage();let writes=0;
    await page.route("**/api/**",async route=>{if(route.request().method()!=="GET"){writes++;await route.abort();}else await route.continue();});
-   await page.goto(LOCAL+"/",{waitUntil:"domcontentloaded",timeout:60000});
-   const s=page.getByRole("region",{name:"Your next step, checked against real facts",exact:true});await s.scrollIntoViewIfNeeded();
-   is("ME3 home keeps Path brief "+width,await s.locator("li").count(),0);
-   const link=s.getByRole("link",{name:"Read how the Path works",exact:true});is("Path discovery "+width,await link.getAttribute("href"),"/platform/path");await link.focus();is("Path discovery keyboard "+width,await link.evaluate(n=>n===document.activeElement),true);
-   is("Path fits "+width,await s.evaluate(n=>n.scrollWidth<=n.clientWidth+1),true);
-   await page.addScriptTag({content:axeSource});const issues=await s.evaluate(async n=>(await window.axe.run(n,{runOnly:{type:"tag",values:["wcag2a","wcag2aa","wcag21aa","wcag22aa"]}})).violations.map(v=>v.id));is("home Path accessibility "+width,issues,[]);
+   // VS1 (owner, 30/10/2026): the Path summary left the home page. The feature
+   // page links the Path page, which keeps every mission and caveat.
+   await page.goto(LOCAL+"/platform",{waitUntil:"domcontentloaded",timeout:60000});
+   const link=page.locator('main a[href="/platform/path"]').first();
+   is("Path discovery from the feature page "+width,await link.count(),1);
+   await link.scrollIntoViewIfNeeded();await link.focus();is("Path discovery keyboard "+width,await link.evaluate(n=>n===document.activeElement),true);
    await link.click();await page.waitForURL(url=>url.pathname==="/platform/path");
    const details=page.getByRole("region",{name:"Your next step, checked against real facts",exact:true});
    await details.scrollIntoViewIfNeeded();

@@ -1,10 +1,11 @@
 import { PendingSubmit } from "@/components/pending-submit";
 import Link from "next/link";
 import { cookies } from "next/headers";
-import { Logo } from "@/components/logo";
+import { MorningLogo } from "@/components/morning-header";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { RESET_DAYS, TWO_STEP_COOKIE, heldFor, twoStepStatus } from "@/lib/two-step";
+import { LOCKED_LIST, LOCKED_LIST_START } from "@/lib/locked-words";
 
 export const metadata: Metadata = {
   title: "Your code — Marktmorgen",
@@ -19,6 +20,7 @@ const NOTICES: Record<string, string> = {
     "Your app's codes cannot be checked right now, after a security change on our side. Use one of your recovery codes, or log in with a passkey, then turn two-step login off and on again.",
   "rescue-limited": "A link has gone to your recovery address three times this hour. Use the newest one, or try again later.",
   "rescue-unsent": "The email to your recovery address could not be sent just now. Try again in a moment.",
+  "rescue-none": "There is no recovery address to send a link to for this login. Use a recovery code or a passkey, or the choice below.",
 };
 
 /**
@@ -38,11 +40,9 @@ export default async function CodePage({ searchParams }: { searchParams: Promise
   const resetDay = reset ? new Date(reset).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }) : "";
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-paper text-ink">
+    <div className="relative min-h-screen overflow-hidden">
       <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
-        <Link href="/" className="inline-block w-fit rounded-[10px]" aria-label="Marktmorgen, home">
-          <Logo />
-        </Link>
+        <MorningLogo />
 
         <h1 className="t-h1 mt-6">One more step</h1>
         <p className="mt-4 text-lg text-ink-soft">Your link was good. Now type the code your authenticator app shows for Marktmorgen.</p>
@@ -98,8 +98,8 @@ export default async function CodePage({ searchParams }: { searchParams: Promise
             </summary>
             <p className="mt-2">
               {reset
-                ? `You can get in now, as before. Payments, your plan, your team, exports, settings, sending to your list, your sign-in address, passkeys and two-step login stay locked until ${resetDay}, when two-step login turns off; everything else is open.`
-                : `Get in now. Everything you need to keep selling is open at once: your products, pages, buyers, numbers and drafts. What could take money, data or the account away — payments, your plan, your team, exports, settings, sending to your list, your sign-in address — stays locked for ${RESET_DAYS} days, and then two-step login turns off. That is what keeps someone who only got into your email from doing harm: we email you, and logging in with a code or a passkey in that time, or Cancel in your studio, logs them out.`}
+                ? `You can get in now, as before. ${LOCKED_LIST_START} stay locked until ${resetDay}, when two-step login turns off; everything else is open.`
+                : `Get in now. Everything you need to keep selling is open at once: your products, pages, buyers, numbers and drafts. What could take money, data or the account away — ${LOCKED_LIST} — stays locked for ${RESET_DAYS} days, and then two-step login turns off. That is what keeps someone who only got into your email from doing harm: we email you, and logging in with a code or a passkey in that time, or Cancel in your studio, logs them out.`}
             </p>
             <form method="post" action="/api/auth/code" className="mt-3">
               <input type="hidden" name="action" value="reset" />

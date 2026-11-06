@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { FORM_ID, badPoints, newFormId, parseForm, tierIssueText, tierIssues } from "@/lib/forms";
+import { SENSITIVE_WHY, sensitiveFieldOf } from "@/lib/form-sensitive";
 import { dropForm, readForm, writeForm } from "@/lib/form-store";
 import { setSitePages } from "@/lib/store";
 
@@ -48,6 +49,9 @@ export async function POST(request: NextRequest) {
     const form = parseForm({ ...raw, id: existing?.id ?? newFormId(), updatedAt: Math.floor(Date.now() / 1000) });
     if (!form) return Response.json({ ok: false, error: text(raw.name, 60).trim() ? "fields" : "name" }, { status: 400 });
     if (badPoints(raw)) return Response.json({ ok: false, error: "points" }, { status: 400 });
+    // What a scam asks for is never asked here (568 [GD2] (c)): refused before anything is written, naming the field.
+    const sensitive = sensitiveFieldOf(form);
+    if (sensitive) return Response.json({ ok: false, error: "sensitive", field: sensitive.label, why: SENSITIVE_WHY[sensitive.what] }, { status: 400 });
     const issues = tierIssues(form);
     if (issues.length) return Response.json({ ok: false, error: "tiers", issues: issues.map((issue) => tierIssueText(form, issue)) }, { status: 400 });
     // A result points at one of this store's products, or at none.

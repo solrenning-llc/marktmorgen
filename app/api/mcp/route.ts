@@ -1,7 +1,8 @@
-import { apiStore } from "@/lib/api-guard";
+import { apiStore, holdMoreApi, takeMoreApi } from "@/lib/api-guard";
 import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
-import { readNumbers, summaryOf } from "@/lib/stats-report";
+import { apiNumbers } from "@/lib/api-numbers";
+import { summaryOf } from "@/lib/stats-report";
 import type { StatsData } from "@/lib/stats";
 import {
   affiliatesTool,
@@ -11,8 +12,15 @@ import {
   funnelTool,
   insightsTool,
   membershipsTool,
+  productTextTool,
   productsTool,
-  readFullNumbers,
+  readCourseTool,
+  readLessonTool,
+  readPageReadingTool,
+  readPageTestTool,
+  readPageVersionsTool,
+  readSalesPageTool,
+  savedBlocksTool,
   windowOf,
 } from "@/lib/mcp-tools";
 
@@ -36,61 +44,7 @@ import {
  * whoever runs the assistant, and the people on a creator's list never agreed
  * to be read there. The API is where a creator's own tools read those.
  */
-const PROTOCOL = "2025-06-18";
-
-const TOOLS = [
-  {
-    name: "get_numbers",
-    description:
-      "The store's numbers for the last 7, 30 and 90 days: visitors, checkouts, sales and revenue; each channel (instagram, tiktok, newsletter…) from visit to sale; and page views by country and device, each window with the same stretch of days just before it under previous. Money is in the smallest unit of the store's currency (cents for USD), before Stripe's fee.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true },
-  },
-  {
-    name: "list_products",
-    description: "The store's products in the order the store shows them, drafts included, 50 at a time. Pass the returned `next` as `cursor` for more.",
-    inputSchema: { type: "object", properties: { cursor: { type: "string" } }, additionalProperties: false },
-    annotations: { readOnlyHint: true },
-  },
-  ...(
-    [
-      ["get_revenue_by_channel", "Revenue by channel for the last 7, 30 or 90 days: each channel's visits, checkouts, free sign-ups, sales and revenue; the same money credited three ways (last visit, first visit, what buyers said after paying); and money by ad and by post."],
-      ["get_funnel", "From visit to sale for the last 7, 30 or 90 days, with the same stretch of days before, the rates between each step, and how far down the store page visitors read and what they clicked."],
-      ["get_product_numbers", "Each product for the last 7, 30 or 90 days: page views, checkouts, sales, revenue and sales per view; and, from all sales, which product is bought first and what buyers buy next, how many and how many days later."],
-      ["get_buyers", "Who bought in the last 7, 30 or 90 days, in numbers only: people, orders, revenue, how many had bought before and how many bought more than once. No names or addresses."],
-      ["get_worth_knowing", "What changed in the last 7, 30 or 90 days that is worth acting on, by the studio's own fixed rules, with the arithmetic behind any money at stake."],
-    ] as const
-  ).map(([name, description]) => ({
-    name,
-    description,
-    inputSchema: { type: "object", properties: { days: { type: "number", enum: [7, 30, 90], description: "The window; 30 when left out." } }, additionalProperties: false },
-    annotations: { readOnlyHint: true },
-  })),
-  {
-    name: "get_memberships",
-    description: "Memberships as the Membership numbers page shows them: MRR and ARR, paying and trialing members, churn, trials that converted, each membership, each channel's members and how long they stay, why members left (counted), MRR month by month by what moved it, ARPU, net revenue retention and a three-month forecast.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true },
-  },
-  {
-    name: "get_emails",
-    description: "The store's list (how many people, how many agreed to hear) and what each email and each sequence did: how many it went to, and the sales and revenue its links brought.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true },
-  },
-  {
-    name: "get_affiliates",
-    description: "The affiliate program's terms and each affiliate by their link's code: clicks, sales, earned, paid, owed, payable now, and anything held for review and why. No addresses.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true },
-  },
-  {
-    name: "get_store",
-    description: "Which store this key reads: its handle, name and currency.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true },
-  },
-];
+import { MCP_INSTRUCTIONS, MCP_PROTOCOL as PROTOCOL, MCP_SERVER, MCP_TOOLS as TOOLS } from "@/lib/mcp-catalog";
 
 type Rpc = { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown };
 
@@ -125,16 +79,19 @@ export async function POST(request: Request) {
     return result(id, {
       protocolVersion: PROTOCOL,
       capabilities: { tools: {} },
-      serverInfo: { name: "marktmorgen", version: "1.1.0" },
-      instructions:
-        "Read a Marktmorgen store's numbers, products, memberships, emails and affiliate program, never anybody's name or address. Money fields are in the smallest unit of the store's currency. A channel named 'direct' is a visit or sale from nowhere the store could name. Tools that take `days` read the last 7, 30 or 90 days.",
+      serverInfo: MCP_SERVER,
+      instructions: MCP_INSTRUCTIONS,
     });
   }
   if (method === "ping") return result(id, {});
 
   const store = await apiStore(request);
   if (store instanceof Response) {
-    return failure(id, -32001, store.status === 429 ? "Too many requests this minute for this key." : "Send your Marktmorgen API key as: Authorization: Bearer nl_live_…");
+    // The refusal's own sentence (a pause, the month used, the minute), so an
+    // assistant never asks for a key that was already accepted (232 [CA1] 4b4c).
+    if (store.status === 401) return failure(id, -32001, "Send your Marktmorgen API key as: Authorization: Bearer nl_live_…");
+    const said = (await store.json().catch(() => null)) as { message?: unknown } | null;
+    return failure(id, -32001, typeof said?.message === "string" ? said.message : "That could not be read just now. Try again in a moment.");
   }
 
   if (method === "tools/list") return result(id, { tools: TOOLS });
@@ -143,29 +100,89 @@ export async function POST(request: Request) {
   const params = (message.params ?? {}) as { name?: unknown; arguments?: Record<string, unknown> };
   try {
     if (params.name === "get_store") return result(id, said(storeInfo(store)));
-    if (params.name === "get_numbers") {
-      const data = await readNumbers(store);
-      return result(id, data ? said(summaryOf(data)) : said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
-    }
+    // Every other tool takes what it reads past the door before reading it (lib/api-read-rules.ts);
+    // refused, the refusal's own sentence, as the door's.
+    const charge = (more: number, taken?: number) => takeMoreApi(store, more, taken);
+    const hold = (most: number) => holdMoreApi(store, most);
+    const refusedWith = async (refusal: Response) => {
+      const words = (await refusal.json().catch(() => null)) as { message?: unknown } | null;
+      return failure(id, -32001, typeof words?.message === "string" ? words.message : "That could not be read just now. Try again in a moment.");
+    };
+    const answer = async (read: unknown) => (read instanceof Response ? refusedWith(read) : result(id, said(read)));
     const days = windowOf(params.arguments?.days);
     const windowed: Record<string, (data: StatsData) => unknown | Promise<unknown>> = {
+      get_numbers: (data) => summaryOf(data),
       get_revenue_by_channel: (data) => channelsTool(data, days),
       get_funnel: (data) => funnelTool(data, days),
-      get_product_numbers: (data) => productsTool(store, data, days),
+      get_product_numbers: (data) => productsTool(store, data, days, { hold, charge }),
       get_buyers: (data) => buyersTool(data, days),
       get_worth_knowing: (data) => insightsTool(data, days),
     };
     const tool = typeof params.name === "string" && Object.hasOwn(windowed, params.name) ? windowed[params.name] : undefined;
     if (typeof tool === "function") {
-      const data = await readFullNumbers(store);
-      return result(id, data ? said(await tool(data)) : said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
+      // The numbers, from the copy kept an hour or read anew, paid for first (lib/api-numbers.ts); get_numbers without the products' listings, as /api/v1/stats.
+      const read = await apiNumbers(store, params.name === "get_numbers" ? "plain" : "full", charge, hold);
+      if (read instanceof Response) return refusedWith(read);
+      if (!read) return result(id, said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
+      const value = {
+        ...((await tool(read.data)) as Record<string, unknown>),
+        asOf: read.asOf,
+        ...(read.listed ? {} : { products_note: "The products' names were not read: your store's API requests left did not cover them." }),
+      };
+      const answer = said(value);
+      // What the answer sends is settled before it is sent.
+      const refused = await read.settle(Buffer.byteLength(answer.content[0].text));
+      return refused ? refusedWith(refused) : result(id, answer);
     }
-    if (params.name === "get_memberships") return result(id, said(await membershipsTool(store)));
-    if (params.name === "get_emails") return result(id, said(await emailsTool(store)));
-    if (params.name === "get_affiliates") return result(id, said(await affiliatesTool(store)));
+    if (params.name === "get_memberships") return answer(await membershipsTool(store, charge));
+    if (params.name === "get_emails") return answer(await emailsTool(store, { charge, hold }));
+    if (params.name === "get_affiliates") return answer(await affiliatesTool(store, charge));
+    // The store's pages and courses (631 [AA1] (a)): each takes what it reads, at its most, before reading (lib/api-read-rules.ts).
+    const unknownProduct = { error: "There is no product with that id in this store. Use list_products for the ids." };
+    const productArg = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
+    if (params.name === "get_product_description" || params.name === "get_sales_page") {
+      if (!productArg) return result(id, said(unknownProduct, true));
+      const found = await (params.name === "get_sales_page" ? readSalesPageTool(store, productArg, charge) : productTextTool(store, productArg, charge));
+      if (found instanceof Response) return refusedWith(found);
+      return result(id, found ? said(found, "error" in found) : said(unknownProduct, true));
+    }
+    if (params.name === "get_course_outline" || params.name === "get_lesson") {
+      const lesson = typeof params.arguments?.lesson === "string" ? params.arguments.lesson.slice(0, 40) : "";
+      const missing = { error: params.name === "get_lesson" ? "There is no such lesson in this store's courses. Use get_course_outline for the ids." : "There is no course with that id in this store. Use list_products for the ids." };
+      if (!productArg || (params.name === "get_lesson" && !lesson)) return result(id, said(missing, true));
+      const found = params.name === "get_lesson" ? await readLessonTool(store, productArg, lesson, charge) : await readCourseTool(store, productArg, charge);
+      if (found instanceof Response) return refusedWith(found);
+      return result(id, found ? said(found) : said(missing, true));
+    }
+    if (params.name === "get_page_test") {
+      if (!productArg) return result(id, said(unknownProduct, true));
+      const tested = await readPageTestTool(store, productArg, charge);
+      if (tested instanceof Response) return refusedWith(tested);
+      return result(id, tested.found ? said(tested.value) : said({ error: tested.error }, true));
+    }
+    if (params.name === "get_page_reading") {
+      if (!productArg) return result(id, said(unknownProduct, true));
+      const reading = await readPageReadingTool(store, productArg, charge);
+      if (reading instanceof Response) return refusedWith(reading);
+      return result(id, reading ? said(reading, "error" in reading) : said(unknownProduct, true));
+    }
+    if (params.name === "get_page_versions") {
+      const raw = params.arguments?.version;
+      const version = raw === undefined || raw === null ? null : Number.isInteger(raw) && (raw as number) >= 0 && (raw as number) < 100 ? (raw as number) : -1;
+      if (version === -1) return result(id, said({ error: "version is a whole number from the list, 0 for the newest." }, true));
+      if (!productArg) return result(id, said(unknownProduct, true));
+      const found = await readPageVersionsTool(store, productArg, version, hold);
+      if (found instanceof Response) return refusedWith(found);
+      return result(id, found.found ? said(found.value) : said({ error: found.error }, true));
+    }
+    if (params.name === "list_saved_blocks") {
+      const listed = await savedBlocksTool(store, hold);
+      if (listed instanceof Response) return refusedWith(listed);
+      return result(id, said(listed, listed.sections === null));
+    }
     if (params.name === "list_products") {
       const cursor = typeof params.arguments?.cursor === "string" ? params.arguments.cursor.slice(0, 200) : null;
-      return result(id, said(await products(store, cursor)));
+      return answer(await products(store, cursor, charge));
     }
     return result(id, said({ error: `There is no tool called ${String(params.name).slice(0, 40)}.` }, true));
   } catch (error) {

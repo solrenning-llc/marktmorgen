@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { unitUnder as currentUnitUnder, SIZING_READING, FLOOR_BPS as currentFloor } from "../lib/receiving-costs";
+import { unitUnder as currentUnitUnder, SIZING_READING, FLOOR_BPS as currentFloor } from "./historical-receiving-model";
 import { unitUnder as archivedUnitUnder, FLOOR_BPS as archivedFloor, HISTORICAL_MARGIN_NOTICE } from "./historical-margin-model";
 
 test("the superseded target reproduces history without changing the single receiving or tax model", () => {
@@ -23,7 +23,7 @@ test("production code cannot import the archived target or its price proposals",
       if (statSync(path).isDirectory()) visit(path);
       else if (/\.(ts|tsx|js|mjs)$/.test(name)) {
         const source = readFileSync(path, "utf8");
-        if (/from\s*["'][^"']*(?:historical-margin-model|tests\/(?:pricing-usage-proposal|pack-cost-decomposition|limits-proposal|per-use-resale|pricing-optimization))/.test(source)) failures.push(path);
+        if (/from\s*["'][^"']*(?:historical-(?:(?:margin|receiving)-model|worst-case-policy)|tests\/(?:pricing-usage-proposal|pack-cost-decomposition|limits-proposal|per-use-resale|pricing-optimization))/.test(source)) failures.push(path);
       }
     }
   };

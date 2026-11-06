@@ -88,7 +88,8 @@ export class StripeError extends Error {
  * request and the version can never disagree, today or after an upgrade.
  */
 export async function onAccount(
-  method: "GET" | "POST",
+  /** DELETE: a subscription ended at once (lib/closed-store-data.ts, stopRenewals). */
+  method: "GET" | "POST" | "DELETE",
   account: string,
   path: string,
   body?: URLSearchParams,

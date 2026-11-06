@@ -23,13 +23,22 @@
  * told in the studio rather than the buyer being refused a file they paid for:
  * one over MAX_STAMP_BYTES (50 MB), and one pdf-lib cannot write to —
  * password-protected, or damaged.
+ *
+ * An EPUB on the same product gets the same line, as an invisible mark inside
+ * the book (lib/epub-stamp.ts; 630 [HN6] item 30, unit 2), through the same
+ * switch, the same copy per sale and the same notes to the creator. An EPUB
+ * the mark cannot go into without breaking it (signed, encrypted, damaged or
+ * built in a way it does not read) is handed over as uploaded, and the
+ * studio says which and why.
  */
 import { createHash } from "node:crypto";
+import { stampLine } from "@/lib/pdf-stamp-line";
 import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
 import { deleteFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file-store";
 import { VAULT_PREFIX, isVaultPath, keyName } from "@/lib/vault-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { MAX_STAMP_BYTES, type ProductFile, isPdf } from "@/lib/product-file";
+import { MAX_STAMP_BYTES, type ProductFile, isEpub, isStampable } from "@/lib/product-file";
+import { type EpubProblem, stampEpub } from "@/lib/epub-stamp";
 import { folderFromPathname } from "@/lib/delivery";
 import { type DataStore, keepFor } from "@/lib/store-data";
 
@@ -45,14 +54,22 @@ const PROBLEM_SECONDS = 60 * 24 * 60 * 60;
 export const copyKey = (reference: string, file: Pick<ProductFile, "pathname" | "addedAt">) => `nl:stamp:copy:${sha(`${reference}|${file.pathname}|${file.addedAt}`).slice(0, 40)}`;
 export const problemKey = (pathname: string) => `nl:stamp:problem:${sha(pathname).slice(0, 40)}`;
 
-export type StampProblem = "too_big" | "unreadable";
+/**
+ * Why a file is handed over unstamped: too big; one the stamp cannot write
+ * into (a PDF locked with a password or damaged, an EPUB damaged or built in a
+ * way the mark does not read); or, for an EPUB only, one carrying a digital
+ * signature a mark would break, or one under encryption (DRM).
+ */
+export type StampProblem = "too_big" | "unreadable" | "signed" | "encrypted";
+const PROBLEMS: readonly StampProblem[] = ["too_big", "unreadable", "signed", "encrypted"];
 
-/** The line printed on every page. */
-export function stampLine(email: string, reference: string, at: Date = new Date()): string {
-  const day = at.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
-  const order = reference.replace(/^(cs|pi)_(test|live)?_?/, "").slice(-6).toUpperCase();
-  return `Sold to ${email} on ${day} · order …${order} · for personal use`;
+/** An EPUB's reason, in the creator's terms: only the four the studio explains. */
+export function epubProblem(why: EpubProblem): StampProblem {
+  return why === "too_big" || why === "signed" || why === "encrypted" ? why : "unreadable";
 }
+
+/** The line printed on every page (lib/pdf-stamp-line.ts, which pages that only show it read without the PDF library). */
+export { stampLine };
 
 /**
  * The standard PDF font writes only the Latin-1 letters, so anything else in
@@ -101,9 +118,9 @@ export async function stampPdf(bytes: Uint8Array, line: string): Promise<Uint8Ar
   return doc.save();
 }
 
-/** Whether a product's file is one that stamping applies to at all. */
+/** Whether a product's file is one that stamping applies to at all: a PDF or an EPUB. */
 export function wantsStamp(stamp: boolean, file: ProductFile): boolean {
-  return stamp && isPdf(file);
+  return stamp && isStampable(file);
 }
 
 async function noteProblem(pathname: string, problem: StampProblem): Promise<void> {
@@ -115,13 +132,14 @@ async function noteProblem(pathname: string, problem: StampProblem): Promise<voi
 export async function stampProblems(files: ProductFile[]): Promise<Map<string, StampProblem>> {
   const found = new Map<string, StampProblem>();
   for (const file of files) {
-    if (isPdf(file) && file.bytes > MAX_STAMP_BYTES) found.set(file.pathname, "too_big");
+    if (isStampable(file) && file.bytes > MAX_STAMP_BYTES) found.set(file.pathname, "too_big");
   }
-  const rest = files.filter((file) => !found.has(file.pathname) && isPdf(file));
+  const rest = files.filter((file) => !found.has(file.pathname) && isStampable(file));
   if (rest.length === 0 || !isRedisConfigured()) return found;
   const rows = await redisPipeline(rest.map((file) => ["GET", problemKey(file.pathname)]));
   rows.forEach((raw, i) => {
-    if (raw === "too_big" || raw === "unreadable") found.set(rest[i].pathname, raw);
+    const problem = PROBLEMS.find((p) => p === raw);
+    if (problem) found.set(rest[i].pathname, problem);
   });
   return found;
 }
@@ -145,7 +163,7 @@ export function copyFolder(file: Pick<ProductFile, "pathname">): string {
 }
 
 /**
- * The buyer's stamped copy of a PDF, made on the first download of a sale and
+ * The buyer's stamped copy of a PDF or an EPUB, made on the first download of a sale and
  * reused after. Null means hand over the original: stamping does not apply,
  * or it could not be done, and the reason is kept for the creator to see.
  * Never throws: a buyer who paid gets a file either way.
@@ -155,45 +173,63 @@ export async function stampedCopy(
   sale: { reference: string; email: string; paidAt: number },
   store: DataStore,
 ): Promise<ProductFile | null> {
-  if (!isPdf(file) || !sale.reference || !sale.email) return null;
+  if (!isStampable(file) || !sale.reference || !sale.email) return null;
   if (file.bytes > MAX_STAMP_BYTES) {
     await noteProblem(file.pathname, "too_big");
     return null;
   }
   try {
     const key = copyKey(sale.reference, file);
+    const epub = isEpub(file);
     if (isRedisConfigured()) {
-      const [cached] = await redisPipeline([["GET", key]]);
+      const [cached, noted] = await redisPipeline([["GET", key], ["GET", problemKey(file.pathname)]]);
       if (typeof cached === "string") {
         try {
           return JSON.parse(cached) as ProductFile;
         } catch {}
       }
+      // An EPUB refused for what it is (signed, encrypted, unreadable) is
+      // refused again by the same bytes: it is handed over as uploaded without
+      // being read and opened on every download. The note is per path, and a
+      // new file is a new path. A size note is not trusted this way, since a
+      // failed read is noted as one too.
+      if (epub && (noted === "signed" || noted === "encrypted" || noted === "unreadable")) return null;
     }
     const original = await readWhole(file.pathname, MAX_STAMP_BYTES);
     if (!original) {
       await noteProblem(file.pathname, "too_big");
       return null;
     }
+    const line = stampLine(sale.email, sale.reference, new Date((sale.paidAt || Date.now() / 1000) * 1000));
     let stamped: Uint8Array;
-    try {
-      stamped = await stampPdf(original, stampLine(sale.email, sale.reference, new Date((sale.paidAt || Date.now() / 1000) * 1000)));
-    } catch (error) {
-      console.error("a PDF could not be stamped; handing over the original", error);
-      await noteProblem(file.pathname, "unreadable");
-      return null;
+    if (epub) {
+      const result = stampEpub(original, line);
+      if (!result.ok) {
+        await noteProblem(file.pathname, epubProblem(result.why));
+        return null;
+      }
+      stamped = result.bytes;
+    } else {
+      try {
+        stamped = await stampPdf(original, line);
+      } catch (error) {
+        console.error("a PDF could not be stamped; handing over the original", error);
+        await noteProblem(file.pathname, "unreadable");
+        return null;
+      }
     }
+    const contentType = epub ? "application/epub+zip" : "application/pdf";
     // In the store that charges nothing to send, a path is plain characters
     // only (lib/vault-rules.ts); the name the buyer saves it under is kept
     // beside the path, as it is for the original.
     const last = isVaultPath(file.pathname) ? keyName(file.name) : file.name;
     const pathname = `${copyFolder(file)}${sha(`${sale.reference}|${file.addedAt}`).slice(0, 24)}/${last}`;
-    await writeFileWhole(pathname, stamped, "application/pdf");
+    await writeFileWhole(pathname, stamped, contentType);
     const copy: ProductFile = {
       pathname,
       name: file.name,
       bytes: stamped.byteLength,
-      contentType: "application/pdf",
+      contentType,
       addedAt: new Date().toISOString(),
     };
     // Its record is kept only while the store's data room has space for it
@@ -204,7 +240,7 @@ export async function stampedCopy(
     }
     return copy;
   } catch (error) {
-    console.error("stamping a PDF failed; handing over the original", error);
+    console.error("stamping a file failed; handing over the original", error);
     return null;
   }
 }
@@ -214,7 +250,7 @@ export async function stampedCopy(
  * Best effort, like every other clean-up of storage here.
  */
 export async function dropStamped(file: Pick<ProductFile, "pathname" | "name" | "contentType">): Promise<void> {
-  if (!isPdf(file)) return;
+  if (!isStampable(file)) return;
   try {
     const copies = await listFiles(copyFolder(file));
     for (let i = 0; i < copies.length; i += 1000) await deleteFile(copies.slice(i, i + 1000));

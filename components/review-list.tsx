@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { afterPurchaseLine } from "@/lib/buyer-words/reviews";
 import { Stars } from "@/components/review-stars";
 import { type Review, type Summary, average, showsRating } from "@/lib/review-summary";
 import { speechFor } from "@/lib/buyer-words";
@@ -89,6 +90,11 @@ export function ReviewItem({
       <p className="st-muted mt-1 text-xs">
         {date(review.createdAt)}
         {review.editedAt ? w.edited(date(review.editedAt)) : ""}
+        {/* How long after paying it was first written (606 [WP5]), when the order's time was kept. */}
+        {review.paidAt ? (() => {
+          const after = afterPurchaseLine(lang, review.paidAt, Math.floor(review.createdAt / 1000));
+          return after ? ` · ${after}` : "";
+        })() : ""}
       </p>
       {review.text ? <p className="mt-3 whitespace-pre-line leading-relaxed [overflow-wrap:anywhere]">{review.text}</p> : null}
       {/* The buyer's photo (lib/review-photo.ts), small here and whole when opened. */}
@@ -102,7 +108,7 @@ export function ReviewItem({
             height={review.photo.height}
             loading="lazy"
             decoding="async"
-            className="h-28 w-28 overflow-hidden rounded-xl bg-[var(--st-line)] object-cover text-[0px] sm:h-32 sm:w-32"
+            className="h-28 w-28 overflow-hidden rounded-xl bg-[var(--st-line)] object-cover text-[0px] page-sm:h-32 page-sm:w-32"
           />
         <NewTab /></a>
       ) : null}
@@ -150,7 +156,7 @@ export function ReviewsSection({
   const shown = average(summary).toLocaleString(said(lang).lang.locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   return (
     <div id="reviews" className="scroll-mt-6">
-      <h2 className="font-display text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-[1.75rem]">{heading || w.reviews}</h2>
+      <h2 className="font-display text-2xl font-semibold leading-tight tracking-[-0.02em] page-sm:text-[1.75rem]">{heading || w.reviews}</h2>
       {rated ? (
         <div className="rv-summary mt-5">
           <div>

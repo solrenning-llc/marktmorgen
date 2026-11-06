@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { EmailInput } from "@/components/email-input";
 import { chatWords } from "@/lib/buyer-words/chat";
 import { CHAT_TOKEN, MAX_MESSAGE, MAX_NAME, MIN_MESSAGE, POLL_FOR_MINUTES, POLL_SECONDS } from "@/lib/inbox-rules";
 
@@ -180,10 +181,10 @@ export function StoreChat({ handle, storeName, language }: { handle: string; sto
           <form onSubmit={submit} className="mt-3 space-y-2">
             {!token ? (
               <>
-                <label className="block">
-                  <span className="st-label text-sm">{w.email}</span>
-                  <input type="email" required maxLength={254} autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className="st-field mt-1 w-full" />
-                </label>
+                <div>
+                  <label htmlFor="store-chat-email" className="st-label block text-sm">{w.email}</label>
+                  <EmailInput id="store-chat-email" required autoComplete="email" value={email} onChange={setEmail} className="st-field mt-1 w-full" language={language} store />
+                </div>
                 <label className="block">
                   <span className="st-label text-sm">{w.name}</span>
                   <input maxLength={MAX_NAME} autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} className="st-field mt-1 w-full" />

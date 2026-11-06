@@ -47,6 +47,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { normaliseEmail } from "@/lib/auth";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import {
@@ -296,7 +298,8 @@ function firstName(name: string | null | undefined): string | null {
  * Hands one person to the creator's platform, when the creator's settings
  * take them and they agreed. Returns what happened: "off" (not connected, or
  * not wanted), "seen" (sent already), "skipped" (did not agree: logged,
- * never sent) or "queued".
+ * never sent) or "queued". Throws UnknownReplyError, with nothing written,
+ * when whether it was sent already cannot be read.
  */
 export async function queuePerson(store: Store, person: Person, now = Date.now()): Promise<"off" | "seen" | "skipped" | "queued"> {
   if (!store.statsId || !isRedisConfigured()) return "off";
@@ -312,8 +315,18 @@ export async function queuePerson(store: Store, person: Person, now = Date.now()
   if (!wanted || person.at < config.since - GRACE_MS) return "off";
   const email = (person.email ?? "").trim().toLowerCase();
   if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "off";
-  const [fresh] = await redisPipeline([["SET", seenKey(statsId, `${person.source}|${person.seed}`), "1", "NX", "EX", SEEN_SECONDS]]);
-  if (fresh === null) return "seen";
+  // Read exactly (CX-123 rule 24): only a mark that is ours writes a job. One held by another run is a person already
+  // handed over; one that cannot be read writes nothing and is said as not done, so a person is never handed over twice.
+  const seen = seenKey(statsId, `${person.source}|${person.seed}`);
+  const mine = claimValue();
+  const fresh = await claimMark(seen, SEEN_SECONDS, mine);
+  if (fresh === "taken") return "seen";
+  if (fresh === "unknown") {
+    // A mark this run may have written is let go only while it holds this run's value, so the person is handed
+    // over on the next try (Claude 3 on #2723); another's is never touched.
+    await releaseMark(seen, mine);
+    throw new UnknownReplyError("the mark of a person handed to an email platform");
+  }
 
   const agreed = person.consent;
   const job: Job = {
@@ -733,4 +746,28 @@ export async function forgetSyncPerson(statsId: string | null, email: string): P
   if (!theirs.length) return 0;
   await redisPipeline([["DEL", ...theirs.map(jobKey)], ...theirs.map((id) => ["LREM", logKey(statsId), 0, id]), ["ZREM", QUEUE_KEY, ...theirs.map((id) => `${statsId}|${id}`)]]);
   return theirs.length;
+}
+
+/**
+ * The record of sending a person to the store's connected email platform, for
+ * the copy of their data (619 [SZ3], lib/person-copy.ts): what was sent,
+ * when and what became of it. The same jobs the erasure deletes. Only reads.
+ */
+export async function syncJobsOf(statsId: string | null, email: string): Promise<JobView[]> {
+  if (!statsId || !isRedisConfigured()) return [];
+  const address = normaliseEmail(email);
+  const [logged] = await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]);
+  const ids = (Array.isArray(logged) ? logged : []).map(String).slice(0, LOG_SIZE * 2);
+  if (!ids.length) return [];
+  const raws = await redisPipeline(ids.map((id) => ["GET", jobKey(id)]));
+  return raws.flatMap((raw) => {
+    try {
+      const job = JSON.parse(String(raw)) as Job;
+      if (typeof job.email !== "string" || normaliseEmail(job.email) !== address) return [];
+      const { id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt } = job;
+      return [{ id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt }];
+    } catch {
+      return [];
+    }
+  });
 }

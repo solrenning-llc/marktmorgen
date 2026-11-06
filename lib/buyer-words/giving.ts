@@ -73,7 +73,7 @@ const en = {
   sent: "Sent",
   emailedLinkTo: (title: string) => `We emailed you a link to ${title}.`,
   emailedLink: "We emailed you a link.",
-  comesFrom: (store: string) => `It comes from ${store} via Marktmorgen and usually arrives within a minute. If it is not there, look in spam.`,
+  comesFrom: (store: string) => `It comes from ${store} via Marktmorgen. If it is not there, look in spam.`,
   joinsOnUse: (store: string) => `Your address joins ${store}'s list only once you use that link, so a mistyped address never ends up on it.`,
   freeGone: "This is no longer offered for free.",
   freeNothing: "There is nothing on this yet. Ask the store about it.",
@@ -284,6 +284,7 @@ const en = {
     busy: "Someone else was saving at the same moment. Send it again.",
     error: "Something went wrong on our side. Nothing was changed. Try again in a moment.",
     photo: "That photo could not be added. Try another one, as a JPEG or straight from your camera.",
+    photoPaused: "Your review was saved, but the new photo was not added: this store is not taking new photos right now.",
   } as Record<string, string>,
   yourRating: (title: string) => `Your rating for ${title}`,
   whatYouThink: "What you think (optional)",
@@ -312,6 +313,12 @@ const en = {
   askShows: (store: string) =>
     `Your review appears on ${store}'s page marked as a verified purchase, under the name you choose. Your email address is never shown. The same link lets you change or delete it for 60 days.`,
   askOnly: "This is the only email about reviewing this order.",
+  /** With the one reminder on (636 [GL4](a)): said in the first email instead of askOnly. */
+  askOneMore: (days: number) => `If you have not reviewed it ${days} days from now, you get one reminder, and that is the last email about it.`,
+  againSubject: (title: string) => `A reminder: how is ${title}?`,
+  againLead: (what: string, store: string, date: string) =>
+    `A few days ago ${store} asked what you think of ${what}, bought on ${date}. If you have a minute, a few words are welcome, good or bad.`,
+  againOnly: "This is the last email about reviewing this order.",
   askWhy: (store: string) => `You are getting this because you bought from ${store}.`,
   askStopLabel: "Stop review requests",
   askStopAfter: (store: string) => `from ${store} in one click.`,
@@ -413,7 +420,7 @@ const es: GivingWords = {
   sent: "Enviado",
   emailedLinkTo: (title) => `Te hemos enviado por email un enlace a ${title}.`,
   emailedLink: "Te hemos enviado un enlace por email.",
-  comesFrom: (store) => `Llega de ${store} a través de Marktmorgen y suele tardar menos de un minuto. Si no está, mira en spam.`,
+  comesFrom: (store) => `Llega de ${store} a través de Marktmorgen. Si no está, mira en spam.`,
   joinsOnUse: (store) => `Tu dirección solo entra en la lista de ${store} cuando usas ese enlace, así que una dirección mal escrita nunca acaba en ella.`,
   freeGone: "Esto ya no se ofrece gratis.",
   freeNothing: "Todavía no hay nada aquí. Pregunta a la tienda.",
@@ -611,6 +618,7 @@ const es: GivingWords = {
     busy: "Alguien más estaba guardando en ese mismo momento. Vuelve a enviarla.",
     error: "Algo ha fallado por nuestra parte. No se ha cambiado nada. Vuelve a intentarlo en un momento.",
     photo: "No se pudo añadir esa foto. Prueba con otra, en JPEG o directamente de tu cámara.",
+    photoPaused: "Su reseña se guardó, pero la foto nueva no se añadió: esta tienda no acepta fotos nuevas en este momento.",
   },
   yourRating: (title) => `Tu valoración de ${title}`,
   whatYouThink: "Qué te parece (opcional)",
@@ -636,6 +644,11 @@ const es: GivingWords = {
   askShows: (store) =>
     `Tu reseña aparece en la página de ${store} marcada como compra verificada, con el nombre que elijas. Tu dirección de email nunca se muestra. El mismo enlace te permite cambiarla o eliminarla durante 60 días.`,
   askOnly: "Este es el único email sobre la reseña de este pedido.",
+  askOneMore: (days) => `Si dentro de ${days} días aún no lo has reseñado, recibirás un recordatorio, y será el último email sobre esto.`,
+  againSubject: (title) => `Un recordatorio: ¿qué tal ${title}?`,
+  againLead: (what, store, date) =>
+    `Hace unos días, ${store} te preguntó qué te parece ${what}, comprado el ${date}. Si tienes un minuto, unas palabras son bienvenidas, para bien o para mal.`,
+  againOnly: "Este es el último email sobre la reseña de este pedido.",
   askWhy: (store) => `Recibes esto porque compraste en ${store}.`,
   askStopLabel: "Dejar de recibir solicitudes de reseña",
   askStopAfter: (store) => `de ${store} con un clic.`,
@@ -730,7 +743,7 @@ const fr: GivingWords = {
   sent: "Envoyé",
   emailedLinkTo: (title) => `Nous vous avons envoyé par e-mail un lien vers ${title}.`,
   emailedLink: "Nous vous avons envoyé un lien par e-mail.",
-  comesFrom: (store) => `Il vient de ${store} via Marktmorgen et arrive généralement en moins d'une minute. S'il n'y est pas, regardez dans les spams.`,
+  comesFrom: (store) => `Il vient de ${store} via Marktmorgen. S'il n'y est pas, regardez dans les spams.`,
   joinsOnUse: (store) =>
     `Votre adresse ne rejoint la liste de ${store} qu'une fois ce lien utilisé, une adresse mal saisie n'y figure donc jamais.`,
   freeGone: "Ce n'est plus proposé gratuitement.",
@@ -925,6 +938,7 @@ const fr: GivingWords = {
     busy: "Quelqu'un d'autre enregistrait au même moment. Renvoyez-le.",
     error: "Un problème est survenu de notre côté. Rien n'a été modifié. Réessayez dans un instant.",
     photo: "Impossible d'ajouter cette photo. Essayez-en une autre, en JPEG ou prise directement avec votre appareil.",
+    photoPaused: "Votre avis a été enregistré, mais la nouvelle photo n'a pas été ajoutée : cette boutique n'accepte pas de nouvelles photos pour le moment.",
   },
   yourRating: (title) => `Votre note pour ${title}`,
   whatYouThink: "Votre avis (facultatif)",
@@ -950,6 +964,11 @@ const fr: GivingWords = {
   askShows: (store) =>
     `Votre avis apparaît sur la page de ${store}, marqué comme achat vérifié, sous le nom de votre choix. Votre adresse e-mail n'est jamais affichée. Le même lien vous permet de le modifier ou de le supprimer pendant 60 jours.`,
   askOnly: "C'est le seul e-mail concernant l'avis sur cette commande.",
+  askOneMore: (days) => `Si vous n'avez pas donné votre avis d'ici ${days}${S}jours, vous recevrez un rappel, et ce sera le dernier e-mail à ce sujet.`,
+  againSubject: (title) => `Un rappel${S}: que pensez-vous de ${title}${S}?`,
+  againLead: (what, store, date) =>
+    `Il y a quelques jours, ${store} vous a demandé ce que vous pensez de ${what}, acheté le ${date}. Si vous avez une minute, quelques mots sont les bienvenus, en bien ou en mal.`,
+  againOnly: "C'est le dernier e-mail concernant l'avis sur cette commande.",
   askWhy: (store) => `Vous recevez ceci parce que vous avez acheté chez ${store}.`,
   askStopLabel: "Ne plus recevoir de demandes d'avis",
   askStopAfter: (store) => `de ${store} en un clic.`,
@@ -1044,7 +1063,7 @@ const de: GivingWords = {
   sent: "Gesendet",
   emailedLinkTo: (title) => `Wir haben Ihnen einen Link zu ${title} per E-Mail geschickt.`,
   emailedLink: "Wir haben Ihnen einen Link per E-Mail geschickt.",
-  comesFrom: (store) => `Er kommt von ${store} über Marktmorgen und ist meist innerhalb einer Minute da. Falls nicht, sehen Sie im Spam-Ordner nach.`,
+  comesFrom: (store) => `Er kommt von ${store} über Marktmorgen. Falls nicht, sehen Sie im Spam-Ordner nach.`,
   joinsOnUse: (store) =>
     `Ihre Adresse kommt erst auf die Liste von ${store}, wenn Sie diesen Link nutzen, damit eine vertippte Adresse nie darauf landet.`,
   freeGone: "Das wird nicht mehr kostenlos angeboten.",
@@ -1239,6 +1258,7 @@ const de: GivingWords = {
     busy: "Jemand anderes hat im selben Moment gespeichert. Senden Sie sie erneut.",
     error: "Bei uns ist etwas schiefgelaufen. Es wurde nichts geändert. Versuchen Sie es gleich noch einmal.",
     photo: "Dieses Foto konnte nicht hinzugefügt werden. Versuche ein anderes, als JPEG oder direkt aus der Kamera.",
+    photoPaused: "Ihre Bewertung wurde gespeichert, aber das neue Foto wurde nicht hinzugefügt: Dieser Shop nimmt im Moment keine neuen Fotos an.",
   },
   yourRating: (title) => `Ihre Sterne für ${title}`,
   whatYouThink: "Ihre Meinung (optional)",
@@ -1264,6 +1284,11 @@ const de: GivingWords = {
   askShows: (store) =>
     `Ihre Bewertung erscheint auf der Seite von ${store}, als verifizierter Kauf gekennzeichnet, unter dem Namen, den Sie wählen. Ihre E-Mail-Adresse wird nie angezeigt. Mit demselben Link können Sie sie 60 Tage lang ändern oder löschen.`,
   askOnly: "Das ist die einzige E-Mail zur Bewertung dieser Bestellung.",
+  askOneMore: (days) => `Wenn Sie in ${days} Tagen noch keine Bewertung geschrieben haben, erhalten Sie eine Erinnerung, und das ist die letzte E-Mail dazu.`,
+  againSubject: (title) => `Eine Erinnerung: Wie gefällt Ihnen ${title}?`,
+  againLead: (what, store, date) =>
+    `Vor ein paar Tagen hat ${store} Sie gefragt, was Sie von ${what} halten, gekauft am ${date}. Wenn Sie eine Minute haben, sind ein paar Worte willkommen – ob gut oder schlecht.`,
+  againOnly: "Das ist die letzte E-Mail zur Bewertung dieser Bestellung.",
   askWhy: (store) => `Sie erhalten diese E-Mail, weil Sie bei ${store} gekauft haben.`,
   askStopLabel: "Keine Bewertungsanfragen mehr",
   askStopAfter: (store) => `von ${store} – mit einem Klick.`,
@@ -1358,7 +1383,7 @@ const it: GivingWords = {
   sent: "Inviato",
   emailedLinkTo: (title) => `Ti abbiamo inviato via email un link a ${title}.`,
   emailedLink: "Ti abbiamo inviato un link via email.",
-  comesFrom: (store) => `Arriva da ${store} tramite Marktmorgen, di solito entro un minuto. Se non lo trovi, guarda nello spam.`,
+  comesFrom: (store) => `Arriva da ${store} tramite Marktmorgen. Se non lo trovi, guarda nello spam.`,
   joinsOnUse: (store) =>
     `Il tuo indirizzo entra nella lista di ${store} solo quando usi quel link, così un indirizzo scritto male non ci finisce mai.`,
   freeGone: "Non è più offerto gratuitamente.",
@@ -1557,6 +1582,7 @@ const it: GivingWords = {
     busy: "Qualcun altro stava salvando nello stesso momento. Inviala di nuovo.",
     error: "Qualcosa è andato storto da parte nostra. Non è stato modificato nulla. Riprova tra un momento.",
     photo: "Non è stato possibile aggiungere quella foto. Provane un'altra, in JPEG o scattata dalla fotocamera.",
+    photoPaused: "La Sua recensione è stata salvata, ma la nuova foto non è stata aggiunta: questo negozio al momento non accetta nuove foto.",
   },
   yourRating: (title) => `Il tuo voto per ${title}`,
   whatYouThink: "Cosa ne pensi (facoltativo)",
@@ -1582,6 +1608,11 @@ const it: GivingWords = {
   askShows: (store) =>
     `La tua recensione compare sulla pagina di ${store} segnata come acquisto verificato, con il nome che scegli. Il tuo indirizzo email non viene mai mostrato. Lo stesso link ti permette di modificarla o eliminarla per 60 giorni.`,
   askOnly: "Questa è l'unica email sulla recensione di questo ordine.",
+  askOneMore: (days) => `Se tra ${days} giorni non avrai ancora scritto una recensione, riceverai un promemoria, e sarà l'ultima email al riguardo.`,
+  againSubject: (title) => `Un promemoria: com'è ${title}?`,
+  againLead: (what, store, date) =>
+    `Qualche giorno fa ${store} ti ha chiesto cosa pensi di ${what}, acquistato in data ${date}. Se hai un minuto, qualche parola è benvenuta, nel bene o nel male.`,
+  againOnly: "Questa è l'ultima email sulla recensione di questo ordine.",
   askWhy: (store) => `Ricevi questa email perché hai acquistato da ${store}.`,
   askStopLabel: "Non ricevere più richieste di recensione",
   askStopAfter: (store) => `da ${store} con un clic.`,
@@ -1676,7 +1707,7 @@ const nl: GivingWords = {
   sent: "Verstuurd",
   emailedLinkTo: (title) => `We hebben je een link naar ${title} gemaild.`,
   emailedLink: "We hebben je een link gemaild.",
-  comesFrom: (store) => `De e-mail komt van ${store} via Marktmorgen en is er meestal binnen een minuut. Staat hij er niet, kijk dan in je spam.`,
+  comesFrom: (store) => `De e-mail komt van ${store} via Marktmorgen. Staat hij er niet, kijk dan in je spam.`,
   joinsOnUse: (store) => `Je adres komt pas op de lijst van ${store} als je die link gebruikt, dus een verkeerd getypt adres komt er nooit op.`,
   freeGone: "Dit wordt niet meer gratis aangeboden.",
   freeNothing: "Hier staat nog niets op. Vraag het de winkel.",
@@ -1868,6 +1899,7 @@ const nl: GivingWords = {
     busy: "Iemand anders was op hetzelfde moment aan het opslaan. Verstuur het opnieuw.",
     error: "Er ging iets mis aan onze kant. Er is niets gewijzigd. Probeer het zo opnieuw.",
     photo: "Die foto kon niet worden toegevoegd. Probeer een andere, als JPEG of rechtstreeks van je camera.",
+    photoPaused: "Uw review is opgeslagen, maar de nieuwe foto is niet toegevoegd: deze winkel neemt op dit moment geen nieuwe foto's aan.",
   },
   yourRating: (title) => `Je score voor ${title}`,
   whatYouThink: "Wat je ervan vindt (optioneel)",
@@ -1893,6 +1925,11 @@ const nl: GivingWords = {
   askShows: (store) =>
     `Je beoordeling verschijnt op de pagina van ${store}, gemarkeerd als geverifieerde aankoop, onder de naam die je kiest. Je e-mailadres wordt nooit getoond. Met dezelfde link kun je haar 60 dagen lang wijzigen of verwijderen.`,
   askOnly: "Dit is de enige e-mail over het beoordelen van deze bestelling.",
+  askOneMore: (days) => `Heb je over ${days} dagen nog geen beoordeling gegeven, dan krijg je één herinnering, en dat is de laatste e-mail hierover.`,
+  againSubject: (title) => `Een herinnering: hoe bevalt ${title}?`,
+  againLead: (what, store, date) =>
+    `Een paar dagen geleden vroeg ${store} wat je vindt van ${what}, gekocht op ${date}. Als je een minuutje hebt, zijn een paar woorden welkom, goed of slecht.`,
+  againOnly: "Dit is de laatste e-mail over het beoordelen van deze bestelling.",
   askWhy: (store) => `Je ontvangt dit omdat je bij ${store} hebt gekocht.`,
   askStopLabel: "Geen beoordelingsverzoeken meer",
   askStopAfter: (store) => `van ${store}, met één klik.`,
@@ -1987,7 +2024,7 @@ const pt: GivingWords = {
   sent: "Enviado",
   emailedLinkTo: (title) => `Enviámos-lhe por email uma ligação para ${title}.`,
   emailedLink: "Enviámos-lhe uma ligação por email.",
-  comesFrom: (store) => `Chega de ${store} através da Marktmorgen e costuma demorar menos de um minuto. Se não estiver lá, veja na pasta de spam.`,
+  comesFrom: (store) => `Chega de ${store} através da Marktmorgen. Se não estiver lá, veja na pasta de spam.`,
   joinsOnUse: (store) =>
     `O seu endereço só entra na lista de ${store} quando utilizar essa ligação, por isso um endereço mal escrito nunca lá fica.`,
   freeGone: "Isto já não é oferecido gratuitamente.",
@@ -2186,6 +2223,7 @@ const pt: GivingWords = {
     busy: "Outra pessoa estava a guardar no mesmo momento. Envie-a novamente.",
     error: "Algo correu mal do nosso lado. Nada foi alterado. Tente novamente daqui a pouco.",
     photo: "Não foi possível adicionar essa fotografia. Experimente outra, em JPEG ou tirada diretamente com a câmara.",
+    photoPaused: "A sua avaliação foi guardada, mas a nova fotografia não foi adicionada: esta loja não está a aceitar novas fotografias neste momento.",
   },
   yourRating: (title) => `A sua classificação de ${title}`,
   whatYouThink: "O que achou (opcional)",
@@ -2211,6 +2249,11 @@ const pt: GivingWords = {
   askShows: (store) =>
     `A sua avaliação aparece na página de ${store} marcada como compra verificada, com o nome que escolher. O seu endereço de email nunca é mostrado. A mesma ligação permite-lhe alterá-la ou eliminá-la durante 60 dias.`,
   askOnly: "Este é o único email sobre a avaliação desta encomenda.",
+  askOneMore: (days) => `Se daqui a ${days} dias ainda não a tiver avaliado, recebe um lembrete, e será o último email sobre isto.`,
+  againSubject: (title) => `Um lembrete: o que achou de ${title}?`,
+  againLead: (what, store, date) =>
+    `Há alguns dias, ${store} perguntou-lhe o que achou de ${what}, comprado em ${date}. Se tiver um minuto, algumas palavras são bem-vindas, seja bom ou mau.`,
+  againOnly: "Este é o último email sobre a avaliação desta encomenda.",
   askWhy: (store) => `Recebe isto porque comprou a ${store}.`,
   askStopLabel: "Deixar de receber pedidos de avaliação",
   askStopAfter: (store) => `de ${store} com um clique.`,

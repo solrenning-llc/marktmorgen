@@ -256,13 +256,13 @@ async function main(): Promise<void> {
   is("nor one from another store's folder", parseProductImage({ ...big, small: { ...copy, path: `images/${"b".repeat(24)}/${"2".repeat(32)}.webp` } })?.small, null);
   is("both files are deleted together", imagePaths({ ...big, small: copy }), [big.path, copy.path]);
   const card = withoutComments(read("components/store-product.tsx"));
-  is("the store page's card hands the browser both", /srcSet=\{imageSrcSet\(image\)\}/.test(card) && /sizes=\{image\.small \?/.test(card), true);
+  is("the store page's card hands the browser both", /srcSet=\{servedSrcSet\(image\)\}/.test(card) && /sizes=\{image\.small \?/.test(card), true);
   is("and tells it to fetch the first product's picture first", /fetchPriority=\{first \? "high" : undefined\}/.test(card), true);
-  is("the product's own page hands it both too", /srcSet=\{imageSrcSet\(product\.image\)\}/.test(withoutComments(read("app/[handle]/p/[product]/page.tsx"))), true);
+  is("the product's own page hands it both too", /srcSet=\{servedSrcSet\(product\.image\)\}/.test(withoutComments(read("app/[handle]/p/[product]/page.tsx"))), true);
   const editor = withoutComments(read("components/product-image-editor.tsx"));
   is("the studio makes the copy when a picture is added, and sends it with the picture", /await shrink\(file, SMALL_LONG_SIDE\)/.test(editor) && /\.\.\.\(small \? \{ small \} : \{\}\)/.test(editor), true);
   const attach = withoutComments(read("app/api/store/image/route.ts"));
-  is("what is attached is checked as the picture is, and deleted with it", /smallWidth < width/.test(attach) && /copyKind === copy\.contentType/.test(attach) && /del\(imagePaths\(result\.removed\)\)/.test(attach), true);
+  is("what is attached is checked as the picture is, and deleted with it", /smallWidth < width/.test(attach) && /copyKind === copy\.contentType/.test(attach) && /const replaced = imagePaths\(result\.removed\)/.test(attach) && /del\(replaced\)/.test(attach), true);
 
   part("Its checkout is the real one, on the demo's own account and key");
   is("the demo's account is asked with the demo's key", keyFor(DEMO_CONNECTED_ACCOUNT), DEMO_KEY);
@@ -313,7 +313,7 @@ async function main(): Promise<void> {
   emails.length = 0;
   const keys = async () => ((await redis.pipeline([["SCAN", "0", "MATCH", "*", "COUNT", 100000]]))[0] as [string, string[]])[1].length;
   const keysBefore = await keys();
-  is("no sign-in link is made for its owner", await sendSignInLink(HOUSE_OWNER, "https://marktmorgen.com"), false);
+  is("no sign-in link is made for its owner", (await sendSignInLink(HOUSE_OWNER, "https://marktmorgen.com")).sent, false);
   is("nothing is written and nothing is sent", [await keys(), emails.length], [keysBefore, 0]);
   is("it takes no reviews, and a creator's store does", [takesReviews(store), takesReviews(theirs)], [false, true]);
   stripe.length = 0;
@@ -339,7 +339,7 @@ async function main(): Promise<void> {
   const demo = withoutComments(read("app/demo/page.tsx"));
   is("/demo makes sure the store is there and sends the visitor to it", /await ensureDemoStore\(\)/.test(demo) && /if \(seed\.ok\) redirect\(`\/@\$\{HOUSE_HANDLE\}`\);/.test(demo), true);
   is("and draws no product or buy button of its own", /<form|<button|priceCents|\$\d/.test(demo), false);
-  is("the home page links to the store itself, and no longer squeezes it into a frame", [/<a href="\/demo"/.test(read("app/page.tsx")), /<iframe/.test(read("components/home-parts.tsx"))], [true, false]);
+  is("the home page links to the store itself, and no longer squeezes it into a frame", [/<a href="\/demo"/.test(read("app/page.tsx") + read("components/home-claim.tsx")), /<iframe/.test(read("app/page.tsx") + read("components/home-claim.tsx") + read("components/home-parts.tsx"))], [true, false]);
   const everything = [...sources("app"), ...sources("components"), ...sources("lib")];
   is(
     "nothing anywhere posts to the old demo routes",
@@ -356,7 +356,9 @@ async function main(): Promise<void> {
   // instead: some page builders hold pasted code in a frame that may not
   // move the page, and every one of them lets it open a tab.
   const EMBED = "app/embed/[handle]/[product]/page.tsx";
-  const leaves = (file: string, tag: string) => /target="_top"/.test(tag) || (file.endsWith(EMBED) && /target="_blank"/.test(tag));
+  // So does the time picker's form when it is drawn inside that frame (637 [GL5] unit 6, its newTab), and only there.
+  const PICKER = "components/slot-picker.tsx";
+  const leaves = (file: string, tag: string) => /target="_top"/.test(tag) || ((file.endsWith(EMBED) || file.endsWith(PICKER)) && /target="_blank"/.test(tag));
   is("there are such forms to check", forms.length >= 9, true);
   is("each of them has target=\"_top\", or a new tab on the pasted card", forms.filter((f) => !leaves(f.file, f.tag)).map((f) => f.file), []);
   const marked = [...sources("app"), ...sources("components")].flatMap((file) =>

@@ -1,17 +1,9 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
-import {
-  DEVICE_COOKIE,
-  SESSION_COOKIE,
-  emailForSession,
-  endSession,
-  noteSignIn,
-  openSession,
-  sessionCookie,
-  takeSignInLink,
-} from "@/lib/auth";
-import { HOLD_SECONDS, TWO_STEP_COOKIE, endRecoveryAccess, holdSignIn, resetIfDue, twoStepOn } from "@/lib/two-step";
+import { takeSignInLink } from "@/lib/auth";
+import { finishProvenSignIn } from "@/lib/signin-finish";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { withPrefill } from "@/lib/handle-prefill";
 
 /**
  * Finishing the emailed link.
@@ -35,7 +27,7 @@ export async function GET(request: NextRequest) {
   if (!/^[0-9a-f]{64}$/.test(token)) {
     return redirectTo(origin, "/signin?status=expired");
   }
-  return redirectTo(origin, `/signin/confirm?token=${token}`);
+  return redirectTo(origin, withPrefill(`/signin/confirm?token=${token}`, request.nextUrl.searchParams.get("handle")));
 }
 
 export async function POST(request: NextRequest) {
@@ -48,55 +40,25 @@ export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return new Response("forbidden", { status: 403 });
 
   let token = "";
+  let handle: unknown = null;
   try {
     const form = await (await limited(request, 8_000)).formData();
     const value = form.get("token");
     token = typeof value === "string" ? value : "";
+    // The store address from the home page, if the link carried a valid one:
+    // read again here and only ever put in the studio's address, never kept.
+    handle = form.get("handle");
   } catch {
     return redirectTo(origin, "/signin?status=expired");
   }
 
-  let sessionId: string | null = null;
+  let owner: string | null = null;
   try {
-    const owner = await takeSignInLink(token);
-    // Two-step login (lib/two-step.ts): the link is spent, and the session
-    // waits for the app's code, behind a cookie of this browser alone.
-    // A request to turn it off that has waited its days turns it off here, and the link logs in alone.
-    if (owner && (await twoStepOn(owner)) && !(await resetIfDue(owner))) {
-      const held = await holdSignIn(owner);
-      const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-      const response = redirectTo(origin, "/signin/code");
-      response.headers.append("Set-Cookie", `${TWO_STEP_COOKIE}=${held}; Path=/; Max-Age=${HOLD_SECONDS}; HttpOnly; SameSite=Lax${secure}`);
-      return response;
-    }
-    sessionId = owner ? await openSession(owner) : null;
-    // The sign-in inbox itself: what the recovery address opened is closed (lib/recovery-address.ts).
-    if (owner) await endRecoveryAccess(owner).catch((error) => console.error("closing a recovery login failed", error));
+    owner = await takeSignInLink(token);
   } catch (error) {
     console.error("sign-in callback failed", error);
   }
-
-  if (!sessionId) {
-    return redirectTo(origin, "/signin?status=expired");
-  }
-
-  // A session this browser already held is closed, not kept alongside: the
-  // new one is always freshly made here, and nothing set before signing in —
-  // by another tab, another person on this computer, or a planted cookie —
-  // outlives the sign-in.
-  const previous = request.cookies.get(SESSION_COOKIE)?.value;
-  if (previous && previous !== sessionId) await endSession(previous);
-
-  const response = redirectTo(origin, "/studio");
-  response.headers.append("Set-Cookie", sessionCookie(sessionId));
-  // A browser this account has never signed in from is worth an email
-  // (lib/auth.ts, noteSignIn); the cookie that names the browser goes back.
-  const email = await emailForSession(sessionId);
-  if (email) {
-    response.headers.append(
-      "Set-Cookie",
-      await noteSignIn(email, request.cookies.get(DEVICE_COOKIE)?.value, "link", request.headers.get("user-agent") ?? ""),
-    );
-  }
-  return response;
+  // Two-step login, the session, the recovery address, the browser this was
+  // in: the same for every proven address (lib/signin-finish.ts).
+  return finishProvenSignIn(request, owner, "link", withPrefill("/studio", handle));
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { EmailInput } from "@/components/email-input";
 import Link from "next/link";
 import QRCode from "qrcode";
 import { toast } from "@/components/toast";
@@ -14,6 +15,8 @@ const MESSAGES: Record<string, string> = {
   limited: "That is a lot of codes in an hour. Try again later.",
   unreadable: "Your app's codes cannot be checked right now, after a security change on our side. Use a recovery code.",
   reauth: "Turning this on needs a login from the last 15 minutes. Log in again, then come back here.",
+  busy: "Your account is being changed by another request right now. Try again in a moment.",
+  second_step: "Your account already has a passkey, so turning on an authenticator app needs a login with it. Log in again with your passkey, then come back here.",
   rate_limited: "That is a lot of changes in an hour. Try again later.",
   unavailable: "Two-step login is not available on this deployment yet.",
   signed_out: "Your session ended. Log in again.",
@@ -22,9 +25,16 @@ const MESSAGES: Record<string, string> = {
   same: "The recovery address has to be another inbox than the one you log in with: that is what makes it a way back in.",
   unsent: "The code could not be emailed to that address just now. Check it, and try again.",
   "backup-wrong": "The code from your recovery address is not right. Type the six digits in the email we sent there.",
+  sessions: "Two-step login was not turned on: we could not check your other browsers just now. Try again in a moment.",
 };
 
-type Answer = { ok?: boolean; error?: string; secret?: string; uri?: string; codes?: string[] };
+type Answer = { ok?: boolean; error?: string; secret?: string; uri?: string; codes?: string[]; loggedOut?: boolean };
+
+/** Said when the request is canceled but the browsers let in without the second step could not be logged out (review of #2556). */
+export const CANCEL_NOT_LOGGED_OUT = "Canceled. Two-step login stays on, but the browsers let in without it could not be logged out just now. They stay locked until they are. Choose “Log out of all devices” at the bottom of your studio.";
+
+/** Said when the app is off but the browsers it let in could not be logged out (audit SG2, finding 6). */
+export const OFF_NOT_LOGGED_OUT = "Two-step login is off, but the browsers it let in could not be logged out just now. Choose “Log out of all devices” at the bottom of your studio.";
 
 async function call(payload: Record<string, unknown>): Promise<Answer> {
   try {
@@ -159,9 +169,11 @@ export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: i
             className="btn btn-primary mt-3"
             disabled={busy}
             onClick={() =>
-              void run({ action: "cancel" }, () => {
+              void run({ action: "cancel" }, (answer) => {
                 setReset(0);
-                toast("Canceled. Two-step login stays on.");
+                // Something to act on stays inline, never in a toast that goes (components/toast.tsx).
+                if (answer.loggedOut === false) setError(CANCEL_NOT_LOGGED_OUT);
+                else toast("Canceled. Two-step login stays on.");
               })
             }
           >
@@ -198,11 +210,13 @@ export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: i
           {recoveryShown ? (
             <p className="min-w-0 flex-1 basis-60 text-sm text-ink-soft">{`Your recovery address, ${recoveryShown}, is the way back in if you ever lose your phone.`}</p>
           ) : (
-            <label className="block min-w-0 flex-1 basis-60 text-sm font-bold text-ink">
-              Recovery address
-              <span className="block text-xs font-normal text-ink-soft">A second inbox you can open. If you ever lose your phone, a link sent there lets you straight back in.</span>
-              <input className="field mt-1" type="email" autoComplete="email" required maxLength={254} value={backup} onChange={(e) => setBackup(e.target.value)} />
-            </label>
+            <div className="min-w-0 flex-1 basis-60">
+              <label htmlFor="two-step-backup" className="block text-sm font-bold text-ink">
+                Recovery address
+              </label>
+              <span id="two-step-backup-hint" className="block text-xs font-normal text-ink-soft">A second inbox you can open. If you ever lose your phone, a link sent there lets you straight back in.</span>
+              <EmailInput id="two-step-backup" className="field mt-1" required autoComplete="email" value={backup} onChange={setBackup} describedBy="two-step-backup-hint" />
+            </div>
           )}
           <button type="submit" className="btn btn-secondary" disabled={busy}>
             <Icon name="lock" size={16} />
@@ -247,10 +261,12 @@ export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: i
           onSubmit={(e) => {
             e.preventDefault();
             if (asking === "off") {
-              void run({ action: "off", code }, () => {
+              void run({ action: "off", code }, (answer) => {
                 setOn(false);
                 setAsking(null);
-                toast("Two-step login is off.");
+                // Something to act on stays inline, never in a toast that goes (components/toast.tsx).
+                if (answer.loggedOut === false) setError(OFF_NOT_LOGGED_OUT);
+                else toast("Two-step login is off.");
               });
             } else {
               void run({ action: "codes", code }, (answer) => {

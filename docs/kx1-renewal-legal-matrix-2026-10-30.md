@@ -328,3 +328,152 @@ are required for creators too, not only a courtesy, and stay on for every
 creator whatever their location. G14 stays open (DC's trial notice and a
 14-day trial; "free trial" has no definition in §28A-202). Utah §13-70-101
 could not be read (the page returned no text).
+
+## 10. PR #1296 after review, and gap G16 (30 Oct 2026, 18h10 Fortaleza)
+
+An independent review of PR #1296 found that "the 30th day" was decided by
+elapsed seconds: with the daily run at 10:00 UTC, a renewal charged late in
+the UTC day was first noticed on the 29th calendar day and still reported on
+time. Fixed on the branch (82fd087 and after): the yearly window compares UTC
+calendar dates, the notice is first due on the 30th day before the charge's
+date whatever the hour, and any later day is sent but marked late. A
+mutation back to elapsed days makes 2 of 10 checks fail.
+
+**Gap G16 — local dates.** The statutes count days in the customer's own
+calendar. The daily run (10:00 UTC) falls on the same date in every US zone
+from UTC−4 to UTC−10, but a charge between 00:00 and about 10:00 UTC falls on
+the previous local date for some or all US zones, so the UTC count can be a
+day off for them. Settling it needs the creator's time zone (or a run per
+zone) and a rule for an unknown zone; until then PR #1296 stays unmerged,
+with the other open points: California's official text, Oregon, Utah
+§13-70-101, Canada, G12–G15, and two review findings recorded for the next
+unit: a notice missed until one day or less before the charge is dropped
+without being counted as missed (`TOO_LATE_SECONDS`), and a cancellation
+scheduled after the next renewal (`cancel_at` later than the charge) gets no
+notice for that renewal.
+
+## 11. California's legislature, a second review, and gap G17 (30 Oct 2026, 18h20 Fortaleza)
+
+**California.** The statute on leginfo still could not be read (the page asks
+for a permission a scheduled run cannot get, and the bill page failed). Read
+instead, on the Legislature's own site: the Senate Judiciary Committee's
+analysis of AB 2863 (bill as amended 17 Jun 2024, hearing 25 Jun 2024),
+sjud.senate.ca.gov/system/files/2024-06/ab-2863-schiavo-sjud-analysis.pdf.
+It describes existing law as a notice "at least 15 days and not more than 45
+days before the automatic renewal offer or continuous service offer renews"
+for an initial term of one year or longer, and "at least 3 days before and at
+most 21 days before" the end of a trial or promotion over 31 days; the bill
+added 7–30 days before a fee change and an annual reminder. It is an official
+legislative document but not the enacted text: S3 is now "official analysis,
+statute unread". The 30th day still falls inside 15–45.
+
+**Second review of PR #1296** (head 5eead52): the missed-notice count is
+correct and never blocks a real send. It found that noticing a renewal whose
+cancellation is scheduled inside the renewed period would send an untrue
+email (Stripe prorates that last period, API reference for `cancel_at`, so
+neither the full amount nor "another year" holds). Fixed in c2567aa: the
+full-price notice goes only when the scheduled cancellation is at least a
+full period after the charge.
+
+**Gap G17 — a renewal that ends early.** When a cancellation is scheduled
+inside the renewed period, Stripe still charges a prorated amount at the
+renewal, and no notice goes. A truthful notice needs Stripe's upcoming
+invoice for the amount and words for a shortened last period; recorded for
+the next unit. Also open from the review: tests of `sendReminders` itself
+(a sent notice never counted as missed, a second run, a failed send).
+
+## 12. Utah's definitions, and three texts still not read (30 Oct 2026, 20h45–20h55 Fortaleza)
+
+Read the same way as sections 6 to 8 (a page reader returning short
+quotations; open the page before relying on a figure). Nothing here is legal
+advice, and nothing certifies that Marktmorgen complies with any law.
+
+| # | Jurisdiction and text | Official page read | Finding |
+| --- | --- | --- | --- |
+| O18 | Utah Code §13-70-101, "Effective 5/6/2026" | le.utah.gov/xcode/Title13/Chapter70/C13-70-S101_2026050620260506.html | "Automatic renewal provision" means a provision under a contract that is automatically renewed at the end of a definite, paid term "for a subsequent, paid term that is longer than 45 days". "Trial period offer" means an offer to provide a period of time to sample or use a product or service without payment. "Consumer" is not defined in this section, and nothing in it addresses business customers. |
+
+**What it changes.**
+
+- **G12 (Utah, monthly plans) closes for monthly renewals.** A monthly plan
+  renews for a term of about 30 days, not "longer than 45 days", so Utah's
+  30–60-day renewal notice (O1, §13-70-201) does not reach it. A yearly
+  renewal is still reached, and the 30th calendar day before the renewal
+  still fits Utah's 30–60 days. A plan or membership that renews for a term
+  longer than 45 days but shorter than a year (a quarter, six months) is
+  reached: none is sold today; if one is added, it needs a notice 30–60 days
+  before each renewal for Utah customers.
+- **Utah's trial notice** (O1: "at least three days before" a trial
+  expires) depends on "trial period offer", which has no length condition:
+  Marktmorgen's 14-day trial (`TRIAL_DAYS`) is reached, so the trial notice
+  goes at least three days before the trial ends for every creator whatever
+  their location, as the protective reading. The window of 15 to 21 days of
+  section 8 already sits inside it for trials long enough to have one.
+- **Not changed:** O1 was read in its version "Effective 1/1/2025"; whether
+  §13-70-201 itself was amended with §13-70-101 on 6 May 2026 was not read.
+  The protective reading keeps O1's windows.
+
+**Still not read on an official site, with the reason:**
+
+- **California, Bus. & Prof. Code §17602 and §17601:** leginfo answered with
+  a client error on both the section page and the article page (20h50
+  Fortaleza). S3 stays "official analysis, statute unread" (section 11).
+- **Oregon, ORS 646A.293 and 646A.295:** the official chapter page
+  (oregonlegislature.gov/bills_laws/ors/ors646a.html, "2025 EDITION", with a
+  note that some sections were amended or repealed in the 2026 session) is
+  longer than the page reader returns; both its parts end before 646A.293,
+  and the 2023 archive edition likewise. The table of contents names
+  646A.295 "Prohibited actions; requirements; timing; failure to obtain
+  consent; exceptions". Oregon stays at the protective reading.
+- **Canada:** Ontario's "Consumer protection laws in Ontario" page (updated
+  9 Sep 2026) says nothing about subscriptions, automatic renewal or notices,
+  and names no Consumer Protection Act, 2023; the 2023 Act and Quebec's law
+  were not read on an official site.
+
+PR #1296 stays unmerged: California, Oregon and Canada are still unread, and
+G13–G17 are open.
+
+## 13. Oregon read on its official site; Ontario and California still not (31 Oct 2026, 17h50–18h05 Fortaleza)
+
+Read by Claude 2 from the official pages themselves (the whole chapter
+fetched and searched, not a page reader's excerpt). Nothing here is legal
+advice, and nothing certifies that Marktmorgen complies with any law.
+
+| # | Jurisdiction and text | Official page read | Finding |
+| --- | --- | --- | --- |
+| O19 | Oregon, ORS 646A.293 and 646A.295, "2025 EDITION" | oregonlegislature.gov/bills_laws/ors/ors646a.html | Both sections carry only "[2011 c.509 §2]" and "[2011 c.509 §3]": unchanged since 2011. "Consumer" means "any individual who seeks or acquires … goods, services, money or credit for personal, family or household purposes" (646A.293(3)). 646A.295(1): present the offer terms clearly and conspicuously "in visual proximity … to the request for consent"; no charge "without first obtaining the consumer's affirmative consent"; an acknowledgment "capable of being retained by the consumer" with the offer terms and how to cancel, and with a free trial, "how to cancel and allow the consumer to cancel before the consumer pays". (2): a "toll-free telephone number, electronic mail address … or another cost-effective, timely and easy-to-use mechanism for cancellation", described in the acknowledgment. (3) and (4)(b): a "material change" in accepted terms needs a clear and conspicuous notice with how to cancel, "prior to implementation of the material change". **No notice before a renewal is required.** |
+| O20 | Oregon Laws 2026, table "ORS sections amended, repealed or 'added to'" | oregonlegislature.gov/bills_laws/lawsstatutes/2026OrLawAR.pdf (the table the chapter page links to) | In chapter 646A only 646A.115 (c.9) and 646A.694 (c.109) were amended in the 2026 session; 646A.293 and 646A.295 are not in the table. Chapter 11 of 2026 (HB 4029, solar energy) only names 646A.295 inside its own list of unlawful practices. |
+
+**What it changes.**
+
+- **Oregon adds no window.** The 30th calendar day before a yearly renewal
+  (sections 6 to 8) is not constrained by Oregon, and neither is the trial
+  notice. Oregon's own duties are the offer terms beside the consent, the
+  affirmative consent, the retained acknowledgment with how to cancel (and,
+  for a trial, how to cancel before paying), an easy cancellation mechanism,
+  and a notice with how to cancel before any material change in accepted
+  terms, such as a price change, takes effect: the price-change notice of
+  item 414 (b) already has to go before the change, so Oregon fixes no
+  extra number of days for it.
+- **Who it protects.** Only individuals buying for personal, family or
+  household purposes. A creator buying a plan for their store is not reached
+  by Oregon's definition; a store's buyer usually is. The protective reading
+  of section 9 (creators included where a text includes small businesses)
+  is unchanged for the other states.
+- **Not read here:** whether a 2026 session law outside the A&R table touches
+  automatic renewals in Oregon (the four 2026 laws the chapter page lists,
+  chapters 11, 17, 85 and 96, were opened: solar energy, child safety
+  systems, AI companions and data brokers; none mentions automatic renewal).
+
+**Still not read on an official site, with the reason (31 Oct 2026):**
+
+- **California, Bus. & Prof. Code §17602:** leginfo.legislature.ca.gov
+  answered 403 to this session at 18h00 Fortaleza, with and without a
+  browser's User-Agent. S3 stays "official analysis, statute unread".
+- **Ontario, Consumer Protection Act, 2023:** the e-Laws statute page
+  (ontario.ca/laws/statute/23c23) answered 403 to this session, and e-Laws
+  needs a browser running scripts; a headless browser through this session's
+  network was refused the same way. The 2002 Act's page opened only as its
+  "needs JavaScript" shell. Canada stays at the protective reading.
+
+PR #1296 stays unmerged: California and Canada are still unread, and G13–G17
+are open. Oregon no longer holds it.

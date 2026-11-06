@@ -2,12 +2,14 @@ import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
 import { ensureStatsId, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { MAX_ENDPOINT_URL, addEndpoint, removeEndpoint, sendTest, setEndpointEvents, webhooksView } from "@/lib/webhooks";
+import { WEBHOOK_TEST_PAUSED_WORDS, integrationPauseWord } from "@/lib/integration-pause";
+import { MAX_ENDPOINT_URL, addEndpoint, removeEndpoint, resendDelivery, rotateSecret, sendTest, setEndpointEvents, webhooksView } from "@/lib/webhooks";
 
 /**
  * The creator's webhook endpoints: add one (its signing secret comes back in
- * this answer and never again), change which events it hears, remove it, or
- * send it a test message now.
+ * this answer and never again), change which events it hears, replace its
+ * secret (the old one keeps signing for a day), remove it, or send it a test
+ * message now.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "settings");
@@ -22,7 +24,7 @@ export async function POST(request: NextRequest) {
     const id = text(guarded.body.id, 40);
     if (action === "add") {
       const result = await addEndpoint(store, text(guarded.body.url, MAX_ENDPOINT_URL + 1), guarded.body.events);
-      if (!result.ok) return Response.json({ ok: false, error: result.reason, message: result.message }, { status: result.reason === "unavailable" ? 503 : 400 });
+      if (!result.ok) return Response.json({ ok: false, error: result.reason, message: result.message }, { status: result.reason === "unavailable" ? 503 : result.reason === "paused" ? 409 : 400 });
       // Buyers' details can leave through a webhook, so every new one is
       // reported to the creator's inbox (lib/account-notice.ts).
       const added = result.view.endpoints[result.view.endpoints.length - 1];
@@ -36,6 +38,12 @@ export async function POST(request: NextRequest) {
       if (result === "missing") return Response.json({ ok: false, error: "missing" }, { status: 404 });
       return Response.json({ ok: true, view: result });
     }
+    if (action === "rotate") {
+      // 378 [TB4]: a new secret, shown this once; the old one signs beside it for a day.
+      const result = await rotateSecret(store, id);
+      if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 404 });
+      return Response.json({ ok: true, secret: result.secret, oldSecretUntil: result.oldSecretUntil, view: result.view });
+    }
     if (action === "remove") {
       const before = (await webhooksView(store)).endpoints.find((e) => e.id === id);
       const view = await removeEndpoint(store, id);
@@ -43,10 +51,15 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, view });
     }
     if (action === "test") {
+      // 232 [CA1] 4b4b1: no test message while the plan's costs are paused; changing and removing stay open.
+      const paused = integrationPauseWord(store);
+      if (paused) return Response.json({ ok: false, error: paused, message: WEBHOOK_TEST_PAUSED_WORDS[paused] }, { status: 409 });
       const result = await sendTest(store, id);
       if (!result.ok) {
         if (result.reason === "unavailable") return Response.json({ ok: false, error: "unavailable", message: "The test could not be sent just now. Try again in a moment." }, { status: 503 });
         if (result.reason === "used") return Response.json({ ok: false, error: "used", message: result.message }, { status: 429 });
+        // Its API key is paused or revoked (owner C3-100): nothing was counted.
+        if (result.reason === "held") return Response.json({ ok: false, error: "held", message: result.message }, { status: 409 });
         return Response.json({ ok: false, error: result.reason }, { status: result.reason === "limited" ? 429 : 404 });
       }
       return Response.json({
@@ -56,6 +69,21 @@ export async function POST(request: NextRequest) {
         message: result.delivery.lastError,
         view: result.view,
       });
+    }
+    if (action === "resend") {
+      // 378 [TB4] unit 3: a failed delivery sent again by hand, once. Paused like a test while the plan's costs are paused.
+      const paused = integrationPauseWord(store);
+      if (paused) return Response.json({ ok: false, error: paused, message: WEBHOOK_TEST_PAUSED_WORDS[paused] }, { status: 409 });
+      const result = await resendDelivery(store, text(guarded.body.delivery, 40));
+      if (!result.ok) {
+        if (result.reason === "unavailable") return Response.json({ ok: false, error: "unavailable", message: "It could not be sent again just now. Try again in a moment." }, { status: 503 });
+        if (result.reason === "used") return Response.json({ ok: false, error: "used", message: result.message }, { status: 429 });
+        if (result.reason === "paused") return Response.json({ ok: false, error: "paused", message: result.message }, { status: 409 });
+        if (result.reason === "too_large") return Response.json({ ok: false, error: "too_large", message: result.message }, { status: 409 });
+        if (result.reason === "limited") return Response.json({ ok: false, error: "limited" }, { status: 429 });
+        return Response.json({ ok: false, error: result.reason }, { status: result.reason === "missing" ? 404 : 409 });
+      }
+      return Response.json({ ok: true, delivered: result.delivery.state === "delivered", status: result.delivery.lastStatus, message: result.delivery.lastError, view: result.view });
     }
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {

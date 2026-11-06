@@ -46,6 +46,19 @@ async function main():Promise<void>{
  }
  resetStorageAnswers();answers.pages=Array.from({length:20},(_,i)=>page(i,i<19,i<19?String(i+1):undefined));
  is("twentieth final page is complete",await filesHeld(folder),190);
+ const fullPage=()=>Array.from({length:1000},(_,i)=>({pathname:path(i),size:1}));
+ resetStorageAnswers();answers.pages=[{blobs:fullPage(),hasMore:false}];
+ held=await storageUsed(folder,1001);
+ is("the complete requested thousand-entry page remains usable",[held.bytes,held.available,fits(held,1)],[1000,true,true]);
+ resetStorageAnswers();answers.pages=[{blobs:Array.from({length:1001},(_,i)=>({pathname:path(i),size:0})),hasMore:false}];
+ held=await storageUsed(folder,100);
+ is("an oversized final page is unavailable, never confirmed empty",[held.available,held.full,held.left,fits(held,1)],[false,false,0,false]);
+ resetStorageAnswers();answers.pages=[page(10,true,"next"),{blobs:Array.from({length:1001},(_,i)=>({pathname:path(i+100),size:0})),hasMore:false}];
+ held=await storageUsed(folder,100);
+ is("an oversized later page cannot authorize from its valid partial prefix",[held.available,fits(held,1)],[false,false]);
+ resetStorageAnswers();answers.pages=Array.from({length:20},(_,p)=>({blobs:Array.from({length:1000},(_,i)=>({pathname:path(p*1000+i),size:1})),hasMore:p<19,cursor:p<19?String(p+1):undefined}));
+ held=await storageUsed(folder,20001);
+ is("all twenty full requested pages remain measurable",[held.bytes,held.available,fits(held,1)],[20000,true,true]);
  resetStorageAnswers();answers.pages=[{blobs:[{pathname:path(1),size:Number.MAX_SAFE_INTEGER}],hasMore:false}];answers.vault=1;
  is("unsafe aggregate blocks upload",(await storageUsed(folder,100)).available,false);
  resetStorageAnswers();answers.pages=[page(100)];

@@ -28,11 +28,11 @@
  * was played (lib/watch.ts): replays in one sitting, after a video has
  * reached its end.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { monthKey, rememberFolderOwner } from "@/lib/delivery";
 import { lessonVideo } from "@/lib/learn";
-import { claimHandle, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
+import { claimHandle, setSubscription, storeFolder } from "@/lib/store";
 import { PLAYER_SECONDS, streamWatched } from "@/lib/stream";
 import { STREAM_API_ORIGIN, streamPath } from "@/lib/stream-rules";
 import { measure, measureDue, opened, watchedFolders, watchedIn } from "@/lib/watch";
@@ -40,9 +40,7 @@ import { firstWord, settle, settleAll } from "@/lib/watch-billing";
 import {
   MEASURE_EVERY_MS,
   MEASURE_SOON_MS,
-  SMALLEST_LINE_CENTS,
   VIDEO_CENTS_PER_HOUR_OVER,
-  VIDEO_HOURS_INCLUDED,
   VIDEO_SECONDS_INCLUDED,
   canBeCharged,
   centsWords,
@@ -78,7 +76,7 @@ const lines: Line[] = [];
 const keys = new Map<string, Line>();
 const monthly: string[] = [];
 /** up; down, nothing happens and nothing is answered; lost, the request is carried out and never answered. */
-let stripe: "up" | "down" | "lost" = "up";
+const stripe = "up" as "up" | "down" | "lost";
 const stripeAsked: string[] = [];
 /** What time it is at Stripe: the time of the run that is asking. */
 let clock = Date.now();
@@ -178,6 +176,8 @@ async function watched(folder: string, month: string, seconds: number): Promise<
 }
 
 const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
+/** Every .ts and .tsx file under a folder, as paths from the repository's root. */
+const filesUnder = (dir: string): string[] => readdirSync(join(process.cwd(), dir), { withFileTypes: true }).flatMap((e) => e.isDirectory() ? filesUnder(`${dir}/${e.name}`) : /\.tsx?$/.test(e.name) ? [`${dir}/${e.name}`] : []);
 
 async function main(): Promise<void> {
   setUp();
@@ -253,44 +253,27 @@ async function main(): Promise<void> {
   is("the last hour of a month, read in the next, is counted there and once", [await measure(bea.folder, Date.UTC(2026, 10, 1, 0, 30)), await watchedIn(bea.folder, "2026-11"), await watchedIn(bea.folder, month)], [60, 60, 2002]);
   is("a store with no videos at the service has watched nothing", [await streamWatched("f".repeat(32)), await measure("f".repeat(32), t0)], [[], 0]);
 
-  part("Past the hours, on the creator's next invoice");
+  part("Past the hours, nothing is put on an invoice (232 [CA1] unit 3)");
   const now = Date.UTC(2026, 9, 21, 14, 0, 0);
   await setSubscription("ana@example.com", { customerId: "cus_Ana0001", subscriptionId: "sub_Ana0001", active: true, cycle: "month", period: paidPeriod() });
-  await watched(ana.folder, month, VIDEO_SECONDS_INCLUDED + 50 * HOUR);
   stripeAsked.length = 0;
-  const billed = await settleAt(ana.folder, month, false, now);
-  is("fifty hours past them is a line of a dollar fifty", [billed.state, billed.owed, billed.added], ["billed", 150, 150]);
-  is("on the store's own subscription, in dollars", [lines.length, lines[0]?.customer, lines[0]?.subscription, lines[0]?.amount], [1, "cus_Ana0001", "sub_Ana0001", 150]);
-  is("saying what it is for", lines[0]?.description, `Video watched past your plan's ${VIDEO_HOURS_INCLUDED} hours in October 2026 (450 hours watched so far)`);
-  is("a plan paid by the month is left to bill it with the plan", monthly, []);
-  is("the same day again adds nothing", [(await settleAt(ana.folder, month, false, now)).state, lines.length], ["nothing", 1]);
-  await watched(ana.folder, month, VIDEO_SECONDS_INCLUDED + 60 * HOUR);
-  const small = await settleAt(ana.folder, month, false, now + 86_400_000);
-  is("ten hours more is thirty cents: not a line yet, while the month runs", [small.state, small.owed, small.added, lines.length, 30 < SMALLEST_LINE_CENTS], ["waiting", 180, 0, 1, true]);
-  await watched(ana.folder, month, VIDEO_SECONDS_INCLUDED + 100 * HOUR);
-  is("once it is worth a dollar it is one", [(await settleAt(ana.folder, month, false, now + 2 * 86_400_000)).added, lines[1]?.amount, lines.length], [150, 150, 2]);
-  await watched(ana.folder, month, VIDEO_SECONDS_INCLUDED + 101 * HOUR);
-  is("when the month is over what is left is billed, to the cent", [(await settleAt(ana.folder, month, true, Date.UTC(2026, 10, 1, 14))).added, lines[2]?.amount], [3, 3]);
-  is("and the month comes to what the hours come to, once", lines.filter((l) => l.customer === "cus_Ana0001").reduce((n, l) => n + l.amount, 0), videoOwedCents(VIDEO_SECONDS_INCLUDED + 101 * HOUR));
-
-  part("Stripe does not answer");
+  lines.length = 0;
+  for (const past of [50 * HOUR, 101 * HOUR, 1000 * HOUR]) {
+    await watched(ana.folder, month, VIDEO_SECONDS_INCLUDED + past);
+    const row = await settleAt(ana.folder, month, false, now);
+    is(`${past / HOUR} hours past them owes nothing and adds nothing`, [row.state, row.owed, row.added], ["nothing", 0, 0]);
+  }
+  is("when the month is over nothing is billed either", [(await settleAt(ana.folder, month, true, Date.UTC(2026, 10, 1, 14))).added, lines.length], [0, 0]);
   const cal = await storeWith("cal@example.com", "cal");
   await setSubscription("cal@example.com", { customerId: "cus_Cal0001", subscriptionId: "sub_Cal0001", active: true, cycle: "year", period: paidPeriod() });
-  await watched(cal.folder, month, VIDEO_SECONDS_INCLUDED + 200 * HOUR);
-  stripe = "down";
-  const before = lines.length;
-  is("nothing is added and nothing is written down as billed", [(await settleAt(cal.folder, month, false, now)).state, lines.length - before], ["failed", 0]);
-  stripe = "lost";
-  is("a request Stripe carried out without saying so is not known to have worked", [(await settleAt(cal.folder, month, false, now + 3_600_000)).state, lines.length - before], ["failed", 1]);
-  stripe = "up";
-  await watched(cal.folder, month, VIDEO_SECONDS_INCLUDED + 210 * HOUR);
-  const after = await settleAt(cal.folder, month, false, now + 86_400_000);
-  is("the next run finds the line that is there, and does not add it twice", [after.state, lines.length - before, lines[before]?.amount], ["billed", 1, 600]);
-  is("what was watched since waits to be worth a line", [after.owed, after.added], [630, 600]);
   await watched(cal.folder, month, VIDEO_SECONDS_INCLUDED + 300 * HOUR);
-  is("a plan paid by the year has its added lines billed by the month, from its first line", monthly, ["sub_Cal0001"]);
-  is("and is billed for what is new, and only that", [(await settleAt(cal.folder, month, false, now + 2 * 86_400_000)).added, lines.length - before, lines[before + 1]?.amount], [300, 2, 300]);
-  is("the yearly plan is set to that once", monthly, ["sub_Cal0001"]);
+  is("a yearly plan is not switched to billing added lines monthly", [(await settleAt(cal.folder, month, true, now)).added, monthly], [0, []]);
+  // A line begun before 31 October 2026 and left unfinished is dropped, never charged after use.
+  await redis.pipeline([["SET", `nl:watch:adding:${ana.folder}:${month}`, JSON.stringify({ from: 0, to: 150, at: now, amount: VIDEO_SECONDS_INCLUDED + 50 * HOUR, line: "old line", customerId: "cus_Ana0001", subscriptionId: "sub_Ana0001" })]]);
+  const stale = await settleAt(ana.folder, month, true, now);
+  is("an unfinished line from before is dropped, not finished", [stale.state, stale.added, lines.length, (await redis.pipeline([["GET", `nl:watch:adding:${ana.folder}:${month}`]]))[0]], ["nothing", 0, 0, null]);
+  is("Stripe is never asked to add a line", [stripeAsked.filter((p) => p.includes("invoiceitems")).length, lines.length], [0, 0]);
+  is("the legacy price is kept only as history: the meter does not use it", videoOwedCents(VIDEO_SECONDS_INCLUDED + HOUR) > 0, true);
 
   part("A store with no plan that can be charged");
   const dee = await storeWith("dee@example.com", "dee");
@@ -298,13 +281,7 @@ async function main(): Promise<void> {
   await watched(dee.folder, month, VIDEO_SECONDS_INCLUDED + 300 * HOUR);
   stripeAsked.length = 0;
   const trial = await settleAt(dee.folder, month, false, now);
-  is("in its free trial, nothing is put on an invoice", [trial.state, trial.added, stripeAsked], ["no_plan", 0, []]);
-  const eve = await storeWith("eve@example.com", "eve");
-  await watched(eve.folder, month, VIDEO_SECONDS_INCLUDED + 300 * HOUR);
-  is("nor for a store that never started a plan", (await settleAt(eve.folder, month, true, now)).state, "no_plan");
-  const nobody = "a".repeat(32);
-  await watched(nobody, month, VIDEO_SECONDS_INCLUDED + 300 * HOUR);
-  is("nor for a folder nobody is known to own", (await settleAt(nobody, month, true, now)).state, "no_store");
+  is("in its free trial, nothing is put on an invoice", [trial.state, trial.added, stripeAsked], ["nothing", 0, []]);
 
   // Its video plays for the hours a plan covers, and is paused past them.
   const lessonPath = streamPath(dee.folder, "abcdefghij12", guid());
@@ -331,18 +308,19 @@ async function main(): Promise<void> {
   await watched(fay.folder, "2026-11", VIDEO_SECONDS_INCLUDED + 10 * HOUR);
   await watched(fay.folder, "2026-12", VIDEO_SECONDS_INCLUDED + 40 * HOUR);
   await watched(gus.folder, "2026-12", VIDEO_SECONDS_INCLUDED - 60);
-  const early = await settleAll(Date.UTC(2026, 11, 2, 14));
-  is("in a month's first days the month before is closed, to the cent", early.filter((r) => r.month === "2026-11").map((r) => [r.folder === fay.folder, r.state, r.added]), [[true, "billed", 30]]);
-  is("and the month that is running is billed as it goes", early.filter((r) => r.month === "2026-12").map((r) => [r.folder === fay.folder, r.state, r.added]), [[true, "billed", 120]]);
+  // Only this part's stores: a store from the parts above recorded its hours under the
+  // real month (monthKey()), which from 1 November 2026 is the "2026-11" read here.
+  const ours = (r: { folder: string }) => r.folder === fay.folder || r.folder === gus.folder;
+  const early = (await settleAll(Date.UTC(2026, 11, 2, 14))).filter(ours);
+  is("in a month's first days the month before is read and owes nothing", early.filter((r) => r.month === "2026-11").map((r) => [r.folder === fay.folder, r.state, r.added]), [[true, "nothing", 0]]);
+  is("and the month that is running owes nothing either", early.filter((r) => r.month === "2026-12").map((r) => [r.folder === fay.folder, r.state, r.added]), [[true, "nothing", 0]]);
   is("a store inside its hours is not in it at all", early.some((r) => r.folder === gus.folder), false);
-  const later = await settleAll(Date.UTC(2026, 11, 20, 14));
-  is("later in the month, the month before is left closed", [later.some((r) => r.month === "2026-11"), lines.length], [false, 2]);
+  const later = (await settleAll(Date.UTC(2026, 11, 20, 14))).filter(ours);
+  is("later in the month, the month before is left closed, and no line was ever added", [later.some((r) => r.month === "2026-11"), lines.length], [false, 0]);
   is("a creator is written to about a month once", [await firstWord(fay.folder, "2026-12"), await firstWord(fay.folder, "2026-12"), await firstWord(fay.folder, "2027-01")], [true, false, true]);
-  is("the store the hours belong to comes back with them", [early.find((r) => r.folder === fay.folder)?.store?.handle, (await storeForEmail("fay@example.com"))?.handle], ["fay", "fay"]);
+
 
   part("What the pages say is what is charged");
-  const hours = `${VIDEO_HOURS_INCLUDED} hours`;
-  const price = centsWords(VIDEO_CENTS_PER_HOUR_OVER);
   const terms = read("app/terms/page.tsx");
   is("the Terms disclose a finite video threshold", [/paidVideoWords/.test(terms), /New playback pauses/.test(terms)], [true, true]);
   is("the Terms explain existing player links and separate file delivery", [/Existing player/.test(terms), /separate download path/.test(terms)], [true, true]);
@@ -356,7 +334,12 @@ async function main(): Promise<void> {
   is("the course feature page explains pauses", features.includes("New playback pauses at the recorded threshold"), true);
   is("nothing still says video counts as a download", [/Videos watched count toward/.test(help), /Videos watched count toward/.test(features)], [false, false]);
   is("a lesson's video is no longer counted by the page that opens it", /recordDelivery\(file\.pathname, viewingBytes/.test(read("lib/learn.ts")), false);
-  is("the daily job is the one that bills, and it is scheduled", [/settleAll/.test(read("app/api/cron/usage/route.ts")), /\/api\/cron\/usage/.test(read("vercel.json"))], [true, true]);
+  is("the daily job still runs and is scheduled", [/settleAll/.test(read("app/api/cron/usage/route.ts")), /\/api\/cron\/usage/.test(read("vercel.json"))], [true, true]);
+  is("the daily job never tells a creator of a charge after use", /videoOwedCents|canBeCharged/.test(read("app/api/cron/usage/route.ts")), false);
+  const naming = ["lib", "app", "components", "scripts"].flatMap((dir) => filesUnder(dir)).filter((f) => f !== "lib/billing.ts" && /\baddToNextInvoice\b/.test(read(f)));
+  is("nothing but the usage meters names addToNextInvoice, however it is imported", naming, ["lib/usage-billing.ts"]);
+  is("and lib/billing.ts only defines it", (read("lib/billing.ts").match(/\baddToNextInvoice\s*\(/g) ?? []).length, 1);
+  is("no meter owes anything after use", [/owed: \(\) => 0/.test(read("lib/watch-billing.ts")), /owed: \(\) => 0/.test(read("lib/traffic-billing.ts")), /owed: \(\) => 0/.test(read("lib/orders-billing.ts"))], [true, true, true]);
   is("and the five-minute job is the one that reads", /measureDue/.test(read("app/api/cron/stream/route.ts")), true);
 
   done();

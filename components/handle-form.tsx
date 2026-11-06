@@ -25,9 +25,14 @@ const MESSAGES: Record<string, string> = {
 /**
  * Taking an address and making a store under it: the account's first, or,
  * with `another`, one more (app/api/store/claim). The studio opens on it.
+ *
+ * `initial` is the address typed on the home page, already checked by the
+ * server with the store's handle rules (lib/handle-prefill.ts), so it is not
+ * typed twice (WCAG 3.3.7). It only fills the field: nothing is held until
+ * this form is sent, and the creator can change it first.
  */
-export function HandleForm({ another = false }: { another?: boolean }) {
-  const [handle, setHandle] = useState("");
+export function HandleForm({ another = false, initial = "" }: { another?: boolean; initial?: string }) {
+  const [handle, setHandle] = useState(initial);
   const [name, setName] = useState("");
   const [bio, setBio] = useState("");
   const [state, setState] = useState<State>({ kind: "idle" });
@@ -57,6 +62,7 @@ export function HandleForm({ another = false }: { another?: boolean }) {
         // A same-route refresh can expose the new body while head metadata changes.
         const destination = new URL(another ? "/studio" : window.location.href, window.location.origin);
         destination.pathname = "/studio";
+        destination.searchParams.delete("handle");
         destination.searchParams.set("store", data.store);
         window.location.assign(destination.href);
         return;

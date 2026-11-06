@@ -6,14 +6,15 @@
  * Meta app.
  */
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusalCode, withinServiceWhy } from "@/lib/metered-limits";
 import { type NextRequest, after } from "next/server";
 import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { noticeCreator } from "@/lib/account-notice";
 import { MetaError, beginMeta, disconnectMeta, finishMeta, isMetaConfigured, readMetaSpend, takeMeta } from "@/lib/meta-ads";
-import { clientAddress, withinLimit } from "@/lib/request-guard";
+import { clientAddress, essentialLimitState } from "@/lib/request-guard";
 import { originFrom } from "@/lib/request-origin";
 import { ensureStatsId, type Store } from "@/lib/store";
+import { integrationPauseWord } from "@/lib/integration-pause";
 import { away, creatorFrom, resolveAccess, studioPath } from "@/lib/studio-route";
 import { logTeam } from "@/lib/team";
 import { PERMISSION_WORDS } from "@/lib/team-roles";
@@ -28,10 +29,14 @@ export async function startMeta(request: NextRequest): Promise<Response> {
   const creator = await creatorFrom(request, "settings");
   if (creator instanceof Response) return creator;
   const { store, ref, email, origin } = creator;
-  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back(origin, store, "limited");
+  // 232 [CA1] 4b3: no new connection while the plan's costs are paused (lib/integration-pause.ts).
+  const paused = integrationPauseWord(store);
+  if (paused) return back(origin, store, paused);
+  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back(origin, store, "funding");
   const named = store.statsId ? store : await ensureStatsId(ref);
   if (!named?.statsId || !store.sid) return back(origin, store, "error");
-  if (!(await withinService("metaads-start", named.statsId, 10, 600, named))) return back(origin, store, "limited");
+  const refused = await withinServiceWhy("metaads-start", named.statsId, 10, 600, named);
+  if (refused) return back(origin, store, serviceRefusalCode(refused, "limited"));
   try {
     const url = await beginMeta({ statsId: named.statsId, sid: store.sid, sessionCookie: request.cookies.get(SESSION_COOKIE)?.value ?? "", email, redirect: `${origin}${CALLBACK}` });
     return new Response(null, { status: 303, headers: { Location: url, "Cache-Control": "no-store" } });
@@ -49,7 +54,9 @@ export async function startMeta(request: NextRequest): Promise<Response> {
 export async function finishMetaConnect(request: NextRequest): Promise<Response> {
   if (!isMetaConfigured()) return notFound();
   const origin = originFrom(request);
-  if (!(await withinLimit("metaads-return", clientAddress(request), 30, 600))) return away(origin, "/studio?metaads=limited");
+  const admission = await essentialLimitState("metaads-return", clientAddress(request), 30, 600);
+  if (admission === "unknown") return away(origin, "/studio?metaads=error#numbers");
+  if (admission === "exceeded") return away(origin, "/studio?metaads=limited");
   const cookie = request.cookies.get(SESSION_COOKIE)?.value ?? "";
   const email = await emailForSession(cookie);
   if (!email) return away(origin, "/signin?status=expired");
@@ -57,7 +64,7 @@ export async function finishMetaConnect(request: NextRequest): Promise<Response>
   const taken = await takeMeta(params.get("state") ?? "", { sessionCookie: cookie, email });
   if (!taken) return away(origin, "/studio?metaads=expired#numbers");
   // Still allowed on that very store, read now.
-  const allowed = await resolveAccess(email, { pinned: taken.sid }, "settings");
+  const allowed = await resolveAccess(email, { pinned: taken.sid, session: cookie }, "settings");
   if (!allowed.ok) return away(origin, allowed.store ? studioPath(allowed.store, "team=forbidden") : "/studio?team=gone");
   const { store, role } = allowed.access;
   if (store.statsId !== taken.statsId) return back(origin, store, "expired");
@@ -65,7 +72,9 @@ export async function finishMetaConnect(request: NextRequest): Promise<Response>
   // They pressed Cancel on Meta's page.
   if (params.get("error") || !code) return back(origin, store, "declined");
   if (code.length > 2048 || !/^[A-Za-z0-9._~/+=#-]+$/.test(code)) return back(origin, store, "error");
-  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back(origin, store, "limited");
+  const paused = integrationPauseWord(store);
+  if (paused) return back(origin, store, paused);
+  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back(origin, store, "funding");
   try {
     const result = await finishMeta({
       statsId: taken.statsId,

@@ -1,4 +1,4 @@
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusalCode, withinServiceWhy } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { hostLink } from "@/lib/meet-links";
 import { isScope } from "@/lib/meet-records";
@@ -35,7 +35,9 @@ export async function GET(request: NextRequest) {
   // Only a scope of this store's own: one of its calls, or one of its community's events.
   const ours = (store.callsId && scope.startsWith(`c:${store.callsId}:`)) || isEventScopeOf(scope, store.community?.id);
   if (!isScope(scope) || !store.statsId || !ours) return back;
-  if (!(await withinService("meet-host", store.statsId, PER_TEN_MINUTES, 600, store))) return back;
+  // Refused before Zoom is asked: said as such, never as Zoom not giving the link.
+  const refused = await withinServiceWhy("meet-host", store.statsId, PER_TEN_MINUTES, 600, store);
+  if (refused) return away(origin, studioPath(store, `meet=${serviceRefusalCode(refused, "limited")}&p=zoom`, "meetings"));
   try {
     const url = await hostLink(store, scope);
     if (!url) return back;

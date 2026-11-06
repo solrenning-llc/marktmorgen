@@ -1,68 +1,21 @@
-/**
- * TX/SV, owner27October2026: no tax consultation is made or prepared, and
- * EU hosting is not an opening condition. Older rationale/comments below
- * are historical, not current instructions.
- *
- * This stage removes those dependencies only. GATE_READING_ID and all
- * numerical readings remain unchanged pending the complete TX2 transition.
- * Consultation parsers are retained for historical records and cannot decide
- * taxGateValid(). No actual answer is recorded and no other release gate,
- * commercial review, funding, exposure, fee or reserve is waived.
+/** TX selector metadata only. Historical consultations never authorize a
+ * reading or a sale. Actual approval requires explicit scoped annual books,
+ * exchanges, FX and component evidence; absence is unknown, never zero.
+ * Flags, reviews, reserves, rights and other opening gates remain unchanged.
  */
-/**
- * Which tax reading decides whether Marktmorgen may sell, and how a tax doubt
- * is closed (owner, 18 October 2026; docs/tax-uncertainty.md and
- * docs/tax-consultations.md).
- *
- * Since 18 October 2026 the owner uses no accountant. A doubt is closed only
- * by an official text, or by an answer to a consultation (Receita Federal
- * under IN RFB 2.058/2021, or the Prefeitura de Fortaleza for ISS) recorded
- * with its date and source in CONSULTATION_ANSWERS below; otherwise it stays
- * at the reading with more tax (rule 19). The confirmation flag of the
- * earlier rule is gone, and tests/tax-gate.test.ts fails if it comes back.
- *
- * The readings themselves are the receiving model's (lib/receiving-costs.ts);
- * this file only says which one is the gate. Nothing here opens a sale: the
- * release gate is lib/opening.ts, which also needs the per-customer margin
- * review (lib/commercial-margin.ts) and the deemed-supplier records
- * (lib/deemed-supplier.ts). This is the same arrangement as Hazelsong's
- * lib/owner-margin.ts (gateReading, EU_HOSTING_CONFIRMED, CONSULTATION_ANSWERS).
- */
-import { EU_HOSTING_READING, MOST_TAX_READING, type Reading } from "@/lib/receiving-costs";
+import { MOST_CORRECT_READING, type Reading } from "@/lib/receiving-costs";
 
-/**
- * EU hosting (the owner's decision B, 18 October 2026): every server and
- * store of BOTH products in EU regions, paid by the LLC from its own account,
- * so the LLC has no US place of business and no US-source income
- * (docs/tax-uncertainty.md questions 1, 4 and 22). One LLC runs both
- * products, so this is set to true only when Marktmorgen's and Hazelsong's
- * hosting are both live in EU regions and verified. Until then it stays
- * false, and gateProblems() refuses the after-design reading.
- */
+/** Historical fact/configuration retained; EU hosting is not an opening condition. */
 export const EU_HOSTING_CONFIRMED = false;
-
-export type GateReadingId = "most-tax" | "most-tax-after-design";
-
-/**
- * The reading sales are gated on: "most-tax" (every tax stacked,
- * MOST_TAX_READING) while EU hosting is not live; "most-tax-after-design"
- * (EU_HOSTING_READING) only once EU_HOSTING_CONFIRMED is true. Either way
- * MR27Oct requires positive unit net with unchanged spend-floor room under it
- * (tests/tax-gate.test.ts).
- */
-export const GATE_READING_ID: GateReadingId = "most-tax";
-
-/** Why a gate setting is not allowed: empty when it is. */
+export type GateReadingId = "most-correct";
+/** This selects metadata only. Complete scoped tax/FX evidence remains
+ * mandatory in the customer assessor, contract and reviewed receiving model. */
+export const GATE_READING_ID: GateReadingId = "most-correct";
 export function gateProblems(id: GateReadingId, _historicalEuHostingConfirmed?: boolean): string[] {
-  const out: string[] = [];
-  if (id !== "most-tax" && id !== "most-tax-after-design") out.push(`unknown gate reading ${String(id)}`);
-  return out;
+  void _historicalEuHostingConfirmed;
+  return id === "most-correct" ? [] : [`unknown gate reading ${String(id)}`];
 }
-
-/** The reading sales are gated on. */
-export function gateReading(): Reading {
-  return GATE_READING_ID === "most-tax-after-design" ? EU_HOSTING_READING : MOST_TAX_READING;
-}
+export function gateReading(): Reading { return MOST_CORRECT_READING; }
 
 /** The authorities whose answer can close a doubt (docs/tax-consultations.md). */
 export const CONSULTATION_AUTHORITIES = ["Receita Federal", "Prefeitura de Fortaleza"] as const;

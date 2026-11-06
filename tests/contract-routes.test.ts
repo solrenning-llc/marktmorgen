@@ -32,3 +32,32 @@ test('an unmigrated subscription retains existing rights but cannot create an un
  assert.equal(result(await change(request('switch'))),'not-open');assert.equal(observations.switches.length,0);
  assert.deepEqual([...ledger.get('nl:contract-reserve:v1')!],before);
 });
+
+test('an unreadable subscription search cannot reserve cash or create a second checkout; recovery stays possible',async()=>{
+ for(const cycle of ['month','year']){
+  start();
+  const before=JSON.stringify([...ledger].map(([key,value])=>[key,[...value]]));
+  observations.findFail=true;
+  for(let attempt=0;attempt<2;attempt++){
+   assert.equal(result(await checkout(request('checkout',cycle))),'error');
+   assert.equal(observations.find,attempt+1,'one search per request, no automatic retry');
+   assert.equal(observations.checkout.length,0,'no new provider checkout on unknown existing subscriptions');
+   assert.equal(JSON.stringify([...ledger].map(([key,value])=>[key,[...value]])),before,'no cash reservation or pending obligation on unknown search');
+  }
+  observations.findFail=false;
+  const recovered=await checkout(request('checkout',cycle));
+  assert.equal(recovered.headers.get('Location'),'https://checkout.stripe.test/session');
+  assert.equal(observations.find,3);
+  assert.equal(observations.checkout.length,1);
+  assert.equal(observations.checkout[0].key,'creator_'+cycle);
+ }
+});
+test('an already active plan remains accessible while subscription search is unavailable',async()=>{
+ start(false);observations.findFail=true;
+ setRouteStore({subscriptionActive:true,subscriptionId:'sub_Test000001'});
+ const before=JSON.stringify([...ledger]);
+ assert.equal(result(await checkout(request('checkout'))),'already');
+ assert.equal(observations.find,0);
+ assert.equal(observations.checkout.length,0);
+ assert.equal(JSON.stringify([...ledger]),before);
+});

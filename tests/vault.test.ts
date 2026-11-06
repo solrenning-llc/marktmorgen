@@ -366,6 +366,47 @@ async function main() {
     return bucket(`<IsTruncated>${page<19}</IsTruncated>${page<19?`<NextContinuationToken>${page+1}</NextContinuationToken>`:""}`);
   };
   is("final page at page cap is complete",await vaultHeld(FOLDER),0);
+  const listed=(count:number,start=0,size=1)=>Array.from({length:count},(_,i)=>`<Contents><Key>vault/${FOLDER}/bounded-${start+i}</Key><Size>${size}</Size></Contents>`).join("");
+  listingOverride=()=>bucket("<IsTruncated>false</IsTruncated>"+listed(1000));
+  is("a full requested thousand-key page remains complete",[(await listVault(`vault/${FOLDER}/`))?.files.length,await vaultHeld(FOLDER)],[1000,1000]);
+  listingOverride=()=>bucket("<IsTruncated>false</IsTruncated>"+listed(1001,0,0));
+  is("an oversized S3 page cannot be exposed as a complete listing",await listVault(`vault/${FOLDER}/`),null);
+  is("an oversized zero-byte final page is unknown, never empty",await vaultHeld(FOLDER),null);
+  listingOverride=(url)=>url.searchParams.has("continuation-token")
+    ?bucket("<IsTruncated>false</IsTruncated>"+listed(1001,100,0))
+    :bucket("<IsTruncated>true</IsTruncated><NextContinuationToken>next</NextContinuationToken>"+listed(1,0,5));
+  is("an oversized later S3 page never returns the valid partial prefix",await vaultHeld(FOLDER),null);
+  listingOverride=(url)=>{
+    const page=Number(url.searchParams.get("continuation-token")??0);
+    return bucket(`<IsTruncated>${page<19}</IsTruncated>${listed(1000,page*1000)}${page<19?`<NextContinuationToken>${page+1}</NextContinuationToken>`:""}`);
+  };
+  is("twenty full requested S3 pages remain measurable",await vaultHeld(FOLDER),20000);
+  listingOverride=()=>bucket("<IsTruncated>false</IsTruncated><KeyCount>0</KeyCount><MaxKeys>1000</MaxKeys>");
+  is("explicit consistent empty listing remains zero",await vaultHeld(FOLDER),0);
+  listingOverride=()=>`<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><IsTruncated>false</IsTruncated><KeyCount>1</KeyCount><MaxKeys>1000</MaxKeys>${listed(1)}</ListBucketResult>`;
+  is("consistent declared counts and the standard default namespace remain usable",[(await listVault(`vault/${FOLDER}/`))?.files.length,await vaultHeld(FOLDER)],[1,1]);
+  listingOverride=()=>bucket("<IsTruncated>false</IsTruncated><KeyCount>1000</KeyCount><MaxKeys>1000</MaxKeys>"+listed(1000));
+  is("the full declared requested page remains measurable",await vaultHeld(FOLDER),1000);
+  const invalidEvidence=[
+    "<IsTruncated>false</IsTruncated><KeyCount>1</KeyCount>",
+    "<IsTruncated>false</IsTruncated><KeyCount>0</KeyCount>"+listed(1),
+    ...["-1","0.5","1e3","NaN","","1001"].map(value=>"<IsTruncated>false</IsTruncated><KeyCount>"+value+"</KeyCount>"+listed(1)),
+    "<IsTruncated>false</IsTruncated><KeyCount>1</KeyCount><KeyCount>1</KeyCount>"+listed(1),
+    "<IsTruncated>false</IsTruncated><KeyCount>1</KeyCount><KeyCount>2</KeyCount>"+listed(1),
+    "<IsTruncated>false</IsTruncated><IsTruncated>true</IsTruncated>",
+    "<IsTruncated>false</IsTruncated><MaxKeys>0</MaxKeys>"+listed(1),
+    "<IsTruncated>false</IsTruncated><MaxKeys>1001</MaxKeys>"+listed(1),
+    "<IsTruncated>false</IsTruncated><MaxKeys>1000</MaxKeys><MaxKeys>1000</MaxKeys>"+listed(1),
+    `<IsTruncated>false</IsTruncated><s3:Contents xmlns:s3="http://s3.amazonaws.com/doc/2006-03-01/"><s3:Key>vault/${FOLDER}/hidden</s3:Key><s3:Size>1</s3:Size></s3:Contents>`,
+    `<IsTruncated>false</IsTruncated><Contents unexpected="true"><Key>vault/${FOLDER}/hidden</Key><Size>1</Size></Contents>`,
+    "<IsTruncated>false</IsTruncated><KeyCount unexpected=\"true\">1</KeyCount>",
+    "<IsTruncated>false</IsTruncated><s3:KeyCount xmlns:s3=\"http://s3.amazonaws.com/doc/2006-03-01/\">1</s3:KeyCount>",
+  ];
+  for(const body of invalidEvidence){
+    listingOverride=()=>bucket(body);
+    is("contradictory or unsupported listing evidence never becomes a complete listing",await listVault(`vault/${FOLDER}/`),null);
+    is("contradictory or unsupported listing evidence is unknown, never zero",await vaultHeld(FOLDER),null);
+  }
   listingOverride=null;
 
   part("A creator removes a file");

@@ -65,6 +65,8 @@ export function feeWords(live = COMMISSION_PLANS_PUBLISHED) {
       takesOfCreator: "Marktmorgen takes 0% of the sale.",
       /** The pricing table's line about fees. */
       feesRow: "0% of your sales. Stripe charges its own processing fee, on your own account.",
+      /** The home page's price line (VS1): the cost that is charged, without the 0% line. */
+      homeFee: "Stripe charges its own processing fee, on your own account.",
       /** Under the buy box in the product editor. */
       editor: "Marktmorgen takes no cut of the sale.",
       /** The 404 page's card about pricing. */
@@ -98,7 +100,6 @@ export function feeWords(live = COMMISSION_PLANS_PUBLISHED) {
       cardBody: "Our only income is your plan. Stripe charges its own card fee on your account, line by line.",
       /** Who holds the money, in one answer. */
       whoHolds: "You do, in your own Stripe account. We take 0% of your sales and charge only a subscription, paid monthly or yearly.",
-      whoHoldsLong: "You do. Payments go to your own Stripe account through direct charges, so payouts follow your Stripe settings and we never sit between you and your buyer's money. We charge a monthly subscription and take 0% of your sales.",
       /** "...a buyer can pay for it on your account, with nothing taken on top." */
       onTop: "with nothing taken on top",
       /** The invite page. */
@@ -145,6 +146,7 @@ export function feeWords(live = COMMISSION_PLANS_PUBLISHED) {
     takes: `Marktmorgen takes the share of each sale your plan sets: ${store}, ${studio}, or none on Scale.`,
     takesOfCreator: `Marktmorgen takes the share of each sale the creator's plan sets: ${store}, ${studio}, or none.`,
     feesRow: `${store} of each sale on Store, ${studio} on Studio, none on Scale, taken by Stripe from the sale itself. Stripe charges its own processing fee, on your own account.`,
+    homeFee: `${store} of each sale on Store, ${studio} on Studio, none on Scale, taken by Stripe from the sale itself. Stripe charges its own processing fee, on your own account.`,
     editor: `Your plan's share of the sale, ${store} on Store, is taken from it by Stripe.`,
     pricingCard: `Three plans, each a monthly price and a share of each sale: ${store}, ${studio}, or none on Scale.`,
     missionPromise: "One subscription and one share of each sale, both written in one line. No fee that appears at the last screen, no feature listed on the site that does not exist in the product.",
@@ -162,7 +164,6 @@ export function feeWords(live = COMMISSION_PLANS_PUBLISHED) {
     cardTitle: "One share, set by your plan",
     cardBody: `${store}, ${studio} or none of each sale, taken by Stripe from the sale. Stripe charges its own card fee on your account, line by line.`,
     whoHolds: `You do, in your own Stripe account. We charge a subscription, monthly or yearly, and the share of each sale your plan sets, which Stripe takes from the sale.`,
-    whoHoldsLong: `You do. Payments go to your own Stripe account through direct charges, so payouts follow your Stripe settings and we never sit between you and your buyer's money. We charge a subscription and the share of each sale your plan sets: ${store}, ${studio}, or none on Scale.`,
     onTop: "with only your plan's share taken from it",
     inviteLead: `and your plan's share of each sale is the only thing we take from it: ${store}, ${studio}, or none on Scale.`,
     inviteMeta: "with your plan's share of each sale and nothing more",

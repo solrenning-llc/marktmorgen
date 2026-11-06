@@ -60,6 +60,12 @@ export function sweepPayPal(store: Store, deadline: number): Promise<{ cleared: 
       await handOverPayPal(store, paid);
     },
     dropStart: (email, productId) => dropEnrollment(store, email, productId),
+    // A course put back for a payment that keeps the purchase (Codex G's M1 on #2791): HSETNX, so nothing for one
+    // still there, and no email; only for a product that is a course, as handing over does.
+    restoreStart: async (email, productId, start) => {
+      const course = await readListing(store, productId);
+      if (course?.course) await recordEnrollment(store, email, productId, start);
+    },
     refunded: async (paid) => {
       const product = await readListing(store, paid.product).catch(() => null);
       await emitEvent(store, "refund.issued", `paypal:${paid.capture}`, {

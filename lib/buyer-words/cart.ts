@@ -21,6 +21,15 @@ const en = {
   note: "You pay once, on Stripe's secure page. Each product is handed over exactly as if you had bought it on its own.",
   empty: "Your cart is empty.",
   gone: "Not available in a cart right now: buy it from its own page.",
+  /** Products that cannot ship to the one country the rest of the cart ships to (lib/cart-shipping.ts): "A, B and C", how many, and that country. */
+  apart: (titles: string, count: number, country: string) =>
+    count === 1
+      ? `${titles} cannot ship with the rest of your cart (shipping to: ${country}). Remove it to check out, and buy it from its own page.`
+      : `${titles} cannot ship with the rest of your cart (shipping to: ${country}). Remove them to check out, and buy them from their own pages.`,
+  /** Under "Ships to": the country the visitor seems to be in, when it is not one of them. */
+  notTo: (country: string) => `${country} is not one of them.`,
+  /** A cart holding both shipped products and products handed over online (lib/cart-shipping.ts, shipsWithOnline). */
+  mixed: "Shipped products and products you get online cannot be paid for together in one cart. Remove one kind to check out, and buy the others separately.",
   loading: "Checking the prices…",
   close: "Close",
   changed: "Something in your cart changed since you added it. Look it over and check out again.",
@@ -66,6 +75,12 @@ const es: CartWords = {
   note: "Pagas una sola vez, en la página segura de Stripe. Cada producto se entrega igual que si lo compraras por separado.",
   empty: "Tu carrito está vacío.",
   gone: "No está disponible en un carrito ahora mismo: cómpralo desde su propia página.",
+  apart: (titles, count, country) =>
+    count === 1
+      ? `No se puede enviar con el resto de tu carrito (país de envío: ${country}): ${titles}. Quítalo para pagar y cómpralo desde su propia página.`
+      : `No se pueden enviar con el resto de tu carrito (país de envío: ${country}): ${titles}. Quítalos para pagar y cómpralos desde sus propias páginas.`,
+  notTo: (country) => `${country} no está entre ellos.`,
+  mixed: "Los productos que se envían y los que recibes en línea no se pueden pagar juntos en un carrito. Quita un tipo para pagar y compra los otros por separado.",
   loading: "Comprobando los precios…",
   close: "Cerrar",
   changed: "Algo de tu carrito cambió desde que lo añadiste. Revísalo y vuelve a pagar.",
@@ -108,6 +123,12 @@ const fr: CartWords = {
   note: "Vous payez une seule fois, sur la page sécurisée de Stripe. Chaque produit est remis exactement comme s'il était acheté seul.",
   empty: "Votre panier est vide.",
   gone: `Pas disponible dans un panier pour l'instant${S}: achetez-le depuis sa propre page.`,
+  apart: (titles, count, country) =>
+    count === 1
+      ? `Ne peut pas être livré avec le reste de votre panier (pays de livraison${S}: ${country})${S}: ${titles}. Retirez-le pour payer, et achetez-le depuis sa propre page.`
+      : `Ne peuvent pas être livrés avec le reste de votre panier (pays de livraison${S}: ${country})${S}: ${titles}. Retirez-les pour payer, et achetez-les depuis leurs propres pages.`,
+  notTo: (country) => `${country} n'en fait pas partie.`,
+  mixed: `Les produits livrés et les produits reçus en ligne ne peuvent pas être payés ensemble dans un panier. Retirez-en un type pour payer, et achetez les autres à part.`,
   loading: "Vérification des prix…",
   close: "Fermer",
   changed: "Quelque chose a changé dans votre panier depuis votre ajout. Vérifiez-le et payez de nouveau.",
@@ -150,6 +171,12 @@ const de: CartWords = {
   note: "Sie bezahlen einmal, auf der sicheren Seite von Stripe. Jedes Produkt wird genau so übergeben, als hätten Sie es einzeln gekauft.",
   empty: "Ihr Warenkorb ist leer.",
   gone: "Gerade nicht im Warenkorb erhältlich: Kaufen Sie es auf seiner eigenen Seite.",
+  apart: (titles, count, country) =>
+    count === 1
+      ? `Kann nicht mit dem Rest Ihres Warenkorbs geliefert werden (Lieferland: ${country}): ${titles}. Entfernen Sie es, um zu bezahlen, und kaufen Sie es auf seiner eigenen Seite.`
+      : `Können nicht mit dem Rest Ihres Warenkorbs geliefert werden (Lieferland: ${country}): ${titles}. Entfernen Sie sie, um zu bezahlen, und kaufen Sie sie auf ihren eigenen Seiten.`,
+  notTo: (country) => `${country} gehört nicht dazu.`,
+  mixed: "Versandprodukte und Online-Produkte können nicht zusammen in einem Warenkorb bezahlt werden. Entfernen Sie eine Art, um zu bezahlen, und kaufen Sie die anderen einzeln.",
   loading: "Preise werden geprüft…",
   close: "Schließen",
   changed: "Seit dem Hinzufügen hat sich etwas in Ihrem Warenkorb geändert. Prüfen Sie ihn und gehen Sie erneut zur Kasse.",
@@ -192,6 +219,12 @@ const it: CartWords = {
   note: "Paghi una volta sola, sulla pagina sicura di Stripe. Ogni prodotto viene consegnato esattamente come se lo comprassi da solo.",
   empty: "Il tuo carrello è vuoto.",
   gone: "Al momento non disponibile in un carrello: compralo dalla sua pagina.",
+  apart: (titles, count, country) =>
+    count === 1
+      ? `Non può essere spedito con il resto del carrello (paese di spedizione: ${country}): ${titles}. Toglilo per pagare e compralo dalla sua pagina.`
+      : `Non possono essere spediti con il resto del carrello (paese di spedizione: ${country}): ${titles}. Toglili per pagare e comprali dalle loro pagine.`,
+  notTo: (country) => `${country} non è tra questi.`,
+  mixed: "I prodotti spediti e quelli che ricevi online non si possono pagare insieme in un carrello. Togli un tipo per pagare e compra gli altri a parte.",
   loading: "Controllo dei prezzi…",
   close: "Chiudi",
   changed: "Qualcosa nel tuo carrello è cambiato da quando l'hai aggiunto. Controllalo e paga di nuovo.",
@@ -234,6 +267,12 @@ const nl: CartWords = {
   note: "Je betaalt één keer, op de beveiligde pagina van Stripe. Elk product wordt precies zo geleverd als wanneer je het los koopt.",
   empty: "Je winkelwagen is leeg.",
   gone: "Nu niet beschikbaar in een winkelwagen: koop het op zijn eigen pagina.",
+  apart: (titles, count, country) =>
+    count === 1
+      ? `Kan niet met de rest van je winkelwagen worden verzonden (verzendland: ${country}): ${titles}. Haal het eruit om te betalen en koop het op zijn eigen pagina.`
+      : `Kunnen niet met de rest van je winkelwagen worden verzonden (verzendland: ${country}): ${titles}. Haal ze eruit om te betalen en koop ze op hun eigen pagina's.`,
+  notTo: (country) => `${country} hoort er niet bij.`,
+  mixed: "Producten die worden verzonden en producten die je online krijgt, kunnen niet samen in één winkelwagen worden betaald. Haal één soort eruit om te betalen en koop de andere apart.",
   loading: "Prijzen controleren…",
   close: "Sluiten",
   changed: "Er is iets in je winkelwagen veranderd sinds je het toevoegde. Bekijk het en reken opnieuw af.",
@@ -276,6 +315,12 @@ const pt: CartWords = {
   note: "Paga uma única vez, na página segura da Stripe. Cada produto é entregue exatamente como se o comprasse em separado.",
   empty: "O seu carrinho está vazio.",
   gone: "Não está disponível num carrinho neste momento: compre-o na sua própria página.",
+  apart: (titles, count, country) =>
+    count === 1
+      ? `Não pode ser enviado com o resto do carrinho (país de envio: ${country}): ${titles}. Retire-o para pagar e compre-o na sua própria página.`
+      : `Não podem ser enviados com o resto do carrinho (país de envio: ${country}): ${titles}. Retire-os para pagar e compre-os nas suas próprias páginas.`,
+  notTo: (country) => `${country} não está entre eles.`,
+  mixed: "Os produtos enviados e os produtos que recebe online não podem ser pagos juntos num carrinho. Retire um dos tipos para pagar e compre os outros à parte.",
   loading: "A verificar os preços…",
   close: "Fechar",
   changed: "Algo no seu carrinho mudou desde que o adicionou. Reveja-o e pague novamente.",

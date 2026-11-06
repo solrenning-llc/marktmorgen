@@ -46,9 +46,10 @@ export async function GET(request: NextRequest) {
   }
 
   // A creator: still signed in as the one who started, still allowed on that store.
-  const email = await emailForSession(request.cookies.get(SESSION_COOKIE)?.value ?? "");
+  const session = request.cookies.get(SESSION_COOKIE)?.value ?? "";
+  const email = await emailForSession(session);
   if (!email || email.toLowerCase() !== trip.by.toLowerCase()) return away(origin, "/signin?status=expired");
-  const allowed = await resolveAccess(email, { pinned: trip.sid }, "settings");
+  const allowed = await resolveAccess(email, { pinned: trip.sid, session }, "settings");
   if (!allowed.ok) return away(origin, allowed.store ? studioPath(allowed.store, "team=forbidden") : "/studio?team=gone");
   const { role } = allowed.access;
   const back = (query: string) => away(origin, studioPath(store, query, "discord"));
@@ -57,7 +58,7 @@ export async function GET(request: NextRequest) {
   // A valid trip can return after its financial approval changed. Recheck the
   // marked creator contract before exchanging credentials or replacing a server.
   // Cancellation and existing buyer access above remain separate.
-  if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return back("discord=limited");
+  if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return back("discord=funding");
   const granted = await exchange(code, trip.redirect);
   if (!granted?.serverId) return back("discord=error");
   const room = storeKey(store);

@@ -16,10 +16,12 @@ export async function checkCrmFeature({browser,LOCAL,axeSource,is}){
    is("CRM accessibility "+width,audit,[]);
    for(const link of await page.locator('main a[href="/proof/highlevel"],main a[href="/pricing"]').all()){await link.focus();is("CRM related link focus "+width,await link.evaluate(node=>node===document.activeElement),true);}
    is("CRM reading makes no API write "+width,writes,0);
+   // VS1 (owner, 30/10/2026): the module summary left the home page; the
+   // footer of every page reaches the feature page, which lists the CRM.
    await page.goto(LOCAL+"/",{waitUntil:"domcontentloaded",timeout:60000});
-   const discovery=page.locator('[aria-labelledby="home-modules-heading"] a[href="/platform#home-modules-heading"]');
-   is("ME3 home keeps feature discovery for CRM "+width,await discovery.count(),1);
-   await Promise.all([page.waitForURL(LOCAL+"/platform#home-modules-heading"),discovery.click()]);
+   const discovery=page.locator('footer a[href="/platform"]').first();
+   is("ME3 home footer keeps feature discovery for CRM "+width,await discovery.count(),1);
+   await Promise.all([page.waitForURL(LOCAL+"/platform"),discovery.click()]);
    const crm=page.locator('[aria-labelledby="home-modules-heading"] a[href="/platform/crm"]');
    is("ME3 relocated tools link actual CRM page "+width,await crm.count(),1);
    await Promise.all([page.waitForURL(LOCAL+"/platform/crm"),crm.click()]);

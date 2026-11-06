@@ -37,6 +37,7 @@
  *   nl:recover:off:<statsId>:<hash>          that address pressed stop, kept for good
  *   nl:recover:link:<token>                  who a stop link belongs to
  */
+import { fromPrice, listedLengths } from "@/lib/call-lengths";
 import { takeDataBytes } from "@/lib/store-data";
 import { saleHandles } from "@/lib/store";
 import { activeIntro } from "@/lib/intro-price";
@@ -65,6 +66,8 @@ import { membershipLine, speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
 import { type CallListing, slotsForProduct } from "@/lib/calls";
 import { isTimeZone, readableTime, zoneName } from "@/lib/call-setup";
+import { chargeNow } from "@/lib/call-deposit";
+import { bookingWords } from "@/lib/buyer-words/booking";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { noteForErasure } from "@/lib/erasure-index";
 import { suppressedCommand, wasSuppressed } from "@/lib/suppression";
@@ -230,8 +233,10 @@ export async function remindAbandoned(
     const product = meta.product ? await readListing(store, meta.product) : null;
     if (!Number.isSafeInteger(start) || start <= 0) return "skip";
     if (!product || !product.call || product.hidden || !canSellProduct(store, product)) return "skip";
-    if (!(await hasOpenTime(store, product as CallListing))) return "skip";
-    return deliver(store, { kind: "call", product, start, tz: meta.tz ?? "" }, email, {
+    // The length chosen, on a call with several (lib/call-lengths.ts), as the sale keeps it.
+    const minutes = /^\d{1,3}$/.test(meta.minutes ?? "") ? Number(meta.minutes) : undefined;
+    if (!(await hasOpenTime(store, product as CallListing, minutes))) return "skip";
+    return deliver(store, { kind: "call", product, start, tz: meta.tz ?? "", minutes }, email, {
       claim: id,
       since: created,
       why: givingWords(store.language).recoverWhyCheckout(store.name),
@@ -262,8 +267,10 @@ export async function remindAbandoned(
 }
 
 /** Whether a call has a time or a session anybody could book now. Unreadable is no. */
-async function hasOpenTime(store: Store, product: CallListing): Promise<boolean> {
-  const offer = await slotsForProduct(store, product);
+async function hasOpenTime(store: Store, product: CallListing, minutes?: number): Promise<boolean> {
+  // At the length the buyer chose, on a call with several (lib/call-lengths.ts): the link leads to its times.
+  const chosen = minutes && listedLengths(product.call, product.priceCents).some((l) => l.minutes === minutes) ? minutes : null;
+  const offer = await slotsForProduct(store, product, null, chosen);
   if (!offer) return false;
   return offer.sessions.length > 0 || offer.days.some((day) => day.starts.length > 0);
 }
@@ -349,7 +356,7 @@ export async function remindAssisted(
  */
 async function deliver(
   store: Store,
-  about: { kind: "product"; product: Listing } | { kind: "cart"; items: Listing[] } | { kind: "call"; product: Listing; start: number; tz: string },
+  about: { kind: "product"; product: Listing } | { kind: "cart"; items: Listing[] } | { kind: "call"; product: Listing; start: number; tz: string; minutes?: number },
   email: string,
   how: {
     claim: string;
@@ -438,7 +445,17 @@ async function deliver(
     const locale = LANGUAGES[parseLanguage(store.language)].locale;
     const when = `${readableTime(about.start, tz, locale)} (${zoneName(about.start, tz, locale)})`;
     subject = g.callSubject(product.title);
-    text = [g.callLead(product.title, when, name), "", g.callHere, bookLink(store, product.id), "", g.recoverPrice(money(product.priceCents)), "", ...foot].join("\n");
+    // A deposit on an in-person booking (lib/call-deposit.ts): said as the booking page and Stripe's page say it, at today's price.
+    const due = chargeNow({ priceCents: product.priceCents, currency: store.currency, deposit: product.call?.deposit ?? null, inPerson: Boolean(product.call?.place) });
+    const deposit = due.rest > 0 ? [bookingWords(store.language).depositRest(money(due.rest), store.name)] : [];
+    // A call with several lengths (lib/call-lengths.ts): the length chosen, at its price today, and the link to its times;
+    // a length since taken off the list leads to the call's lengths, from the lowest price.
+    const lengths = product.call ? listedLengths(product.call, product.priceCents) : [];
+    const chosen = lengths.find((l) => l.minutes === about.minutes) ?? null;
+    const title = chosen ? `${product.title}${bookingWords(store.language).chosenLength(chosen.minutes)}` : product.title;
+    const price = chosen ? money(chosen.cents) : lengths.length ? w.fromPrice(money(fromPrice(lengths) as number)) : money(product.priceCents);
+    const link = chosen ? `${bookLink(store, product.id)}?length=${chosen.minutes}` : bookLink(store, product.id);
+    text = [g.callLead(title, when, name), "", g.callHere, link, "", g.recoverPrice(price), ...deposit, "", ...foot].join("\n");
   } else {
   const product = about.product;
   // The price as the store page says it: the floor of a price the buyer

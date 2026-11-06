@@ -415,6 +415,16 @@ export async function writeVault(pathname: string, bytes: Uint8Array, contentTyp
 }
 
 /** One page of what is kept under a prefix: each file's path and size, and where to go on from. */
+/** Listing evidence is data: a repeated field or one with unsupported attributes or namespace
+ * that this adapter cannot interpret is unavailable, never an absent zero.
+ * This is not a general XML validator or a bound on network/body bytes. */
+function listingField(xml: string, name: "IsTruncated" | "KeyCount" | "MaxKeys"): string | null | undefined {
+  const openings = xml.match(new RegExp("<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?" + name + "[^A-Za-z0-9_.:-]", "g")) ?? [];
+  if (openings.length === 0) return undefined;
+  const fields = [...xml.matchAll(new RegExp("<" + name + ">([^<]*)</" + name + ">", "g"))];
+  return openings.length === 1 && fields.length === 1 ? fields[0][1] : null;
+}
+
 export async function listVault(prefix: string, cursor?: string): Promise<{ files: { pathname: string; bytes: number }[]; cursor: string | null } | null> {
   const config = vaultConfig();
   if (!config) return null;
@@ -425,11 +435,19 @@ export async function listVault(prefix: string, cursor?: string): Promise<{ file
   if (cursor) url.searchParams.set("continuation-token", cursor);
   const answer = await ask(config, "GET", url.toString());
   if (answer.status !== 200) return null;
-  const truncated = tag(answer.text, "IsTruncated");
+  const truncated = listingField(answer.text, "IsTruncated");
   if (!answer.text.includes("<ListBucketResult") || !answer.text.includes("</ListBucketResult>") || (truncated !== "true" && truncated !== "false")) return null;
   const files: { pathname: string; bytes: number }[] = [];
   const entries = answer.text.match(/<Contents>[\s\S]*?<\/Contents>/g) ?? [];
-  if ((answer.text.match(/<Contents>/g) ?? []).length !== entries.length) return null;
+  if (entries.length > 1000 || (answer.text.match(/<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?Contents[^A-Za-z0-9_.:-]/g) ?? []).length !== entries.length) return null;
+  for (const name of ["KeyCount", "MaxKeys"] as const) {
+    const value = listingField(answer.text, name);
+    if (value === undefined) continue; // Retain compatible replies without optional count fields.
+    if (value === null || !/^\d+$/.test(value)) return null;
+    const count = Number(value);
+    if (!Number.isSafeInteger(count) || count > 1000 ||
+        (name === "KeyCount" ? count !== entries.length : count < entries.length)) return null;
+  }
   for (const entry of entries) {
     const pathname = tag(entry, "Key");
     const size = tag(entry, "Size");

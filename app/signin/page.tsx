@@ -1,19 +1,22 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Icon } from "@/components/icons";
-import { Logo } from "@/components/logo";
+import { MorningLogo } from "@/components/morning-header";
 import { SignInForm } from "@/components/signin-form";
 import { PasskeySignIn } from "@/components/passkey-signin";
+import { GoogleSignIn } from "@/components/google-signin";
+import { googleSignInShown } from "@/lib/google-signin";
+import { headers } from "next/headers";
 import { ToastOnLoad } from "@/components/toast";
 import { isConnectConfigured } from "@/lib/stripe-connect";
 import { PLAN_TITLES as PLAN_NAMES, TIERS, TRIAL_DAYS, parseTier, publishedPriceWords as priceWords } from "@/lib/plan";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { formatMoney } from "@/lib/money";
 import { INVITE_PROGRAM_OPEN, INVITE_BONUS_CENTS, INVITE_HOLD_DAYS } from "@/lib/creator-invite-rules";
-import { feeWords } from "@/lib/fee-words";
+import { newAddressProblem, normaliseHandle } from "@/lib/store";
 
 /** Somebody who came back to a store they have: by Log in, or sent here to log in again. */
-const RETURNING_STATUSES = new Set(["reauth", "out", "out-everywhere"]);
+const RETURNING_STATUSES = new Set(["reauth", "out", "out-everywhere", "out-everywhere-unknown"]);
 function isReturning(params: { [key: string]: string | string[] | undefined }): boolean {
   return params.to === "login" || (typeof params.status === "string" && RETURNING_STATUSES.has(params.status));
 }
@@ -59,6 +62,19 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
     title: "That address already has a store",
     body: "An account cannot be moved on top of another one. Nothing was changed.",
   },
+  "move-busy": {
+    title: "Your account is in the middle of a move",
+    body: "Its sign-in address is being changed, so logging in with only the emailed link waits until that is over. Log in with your passkey, or with the emailed link and the code from your authenticator app. Without either, try again in a few minutes; if it still says this, reply to any email from us and we finish the move for you.",
+  },
+  "move-has-login": {
+    title: "That address has its own passkeys or two-step login",
+    body: "An account cannot be moved onto an address that already has its own passkeys, authenticator app or recovery codes. Nothing was changed. Remove them from that address first, or move to another address.",
+  },
+  // A move refused because what the new address had open could not be read (app/api/auth/move; review of #2556).
+  "move-unread": {
+    title: "We could not finish the move just now",
+    body: "Your account was not moved, and it stays at its old address. Log in, then try the move again in a minute.",
+  },
   "move-error": {
     title: "The move did not finish",
     body: "Nothing was changed. Log in and try again.",
@@ -95,9 +111,38 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
     title: "You joined the team",
     body: "Your address already has an account here, so the invitation did not log you in. Log in below with a link sent to that address, or with a passkey, and the store is in your studio.",
   },
+  "google-expired": {
+    title: "That login with Google did not finish",
+    body: "It has to finish in the same browser within 10 minutes. Nothing was changed. Try again below.",
+  },
+  "google-declined": {
+    title: "Nothing happened",
+    body: "Google's page was closed or the request was turned down. Try again, or log in with a link sent to your email.",
+  },
+  "google-unverified": {
+    title: "Google has not confirmed that address",
+    body: "We only log you in with Google when Google has confirmed the email address on that account. Log in below with a link sent to your email instead.",
+  },
+  "google-elsewhere": {
+    title: "Use the emailed link for that address",
+    body: "Google can only confirm a Gmail address or a work address on Google Workspace. For any other address, log in below with a link sent to it.",
+  },
+  "google-slow": {
+    title: "Too many tries",
+    body: "Nothing was changed. Wait a few minutes, then try again, or log in with a link sent to your email.",
+  },
+  "google-error": {
+    title: "Logging in with Google did not work just now",
+    body: "Nothing was changed. Try again in a moment, or log in below with a link sent to your email.",
+  },
   "invite-slow": {
     title: "Too many tries",
     body: "Nothing was changed. Wait a little, then open the invitation again.",
+  },
+  // Log out of all devices when the other sessions could not be read (audit SG2, rule 27): never said as done.
+  "out-everywhere-unknown": {
+    title: "Your other devices may still be logged in",
+    body: "This browser is logged out, but we could not log out your other devices just now. Log in again in a moment and choose “Log out of all devices” once more.",
   },
 };
 
@@ -118,7 +163,10 @@ export default async function SignInPage({
 }) {
   const params = await searchParams;
   const status = typeof params.status === "string" ? params.status : "";
-  const notice = NOTICES[status];
+  // The button on the site's own address only (lib/google-signin.ts); its notices only where it can be.
+  const sent = await headers();
+  const google = googleSignInShown(sent.get("x-forwarded-host") ?? sent.get("host"), params.google);
+  const notice = status.startsWith("google-") && !google ? undefined : NOTICES[status];
   // Somebody who pressed Log in has a store already, or believes so: the page
   // greets them that way, rather than with "Start your store", which reads as
   // if they had pressed the wrong thing. The form, the link and what it opens
@@ -146,48 +194,55 @@ export default async function SignInPage({
       }
     : null;
 
+  /*
+   * The address typed on the home page, said back the same way (VS1). It is
+   * not reserved here and not kept anywhere: the address is taken on the
+   * address step after the emailed link, under the same rules as below.
+   */
+  const asked = typeof params.handle === "string" ? normaliseHandle(params.handle.slice(0, 64)) : "";
+  const askedProblem = asked ? newAddressProblem(asked) : null;
+
   return (
-    <div className="min-h-screen bg-paper text-ink lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-      <aside className="surface-night nb-grid-lines on-dark hidden flex-col justify-between p-10 lg:flex xl:p-14">
-        <Link prefetch={false} href="/" className="w-fit rounded-[10px]" aria-label="Marktmorgen, home">
-          <Logo tone="light" />
-        </Link>
+    <div className="min-h-screen lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+      {/* VS1: the home page's morning sky beside the form, no dark surface. */}
+      <aside className="hm-signin-panel hidden flex-col justify-between p-10 lg:flex xl:p-14">
+        <div aria-hidden="true" className="hm-sky-layer">
+          <div className="hm-blob hm-sun-signin" />
+        </div>
+        <MorningLogo />
         <div className="max-w-md">
-          <p className="t-h2 balance text-white">
-            Your store. Your <span className="serif font-normal text-[#cfc4ff]">Stripe.</span> Your money.
-          </p>
-          <ul className="mt-10 space-y-5 text-white/80">
+          <p className="hm-signin-title"><span>Simple to set up.</span> <span>Easy to run.</span></p>
+          <ul className="hm-signin-facts">
             {[
               { icon: "mail" as const, text: "No password. A link sent to your email logs you in." },
               { icon: "bank" as const, text: "Your buyers pay into your own Stripe account." },
-              { icon: "percent" as const, text: feeWords().takes },
             ].map((item) => (
-              <li key={item.text} className="flex gap-3">
-                <span className="icon-tile icon-tile-sm">
+              <li key={item.text}>
+                <span className="icon-tile icon-tile-sm" aria-hidden="true">
                   <Icon name={item.icon} size={18} />
                 </span>
-                <span className="pt-1.5">{item.text}</span>
+                <span className="pt-1">{item.text}</span>
               </li>
             ))}
           </ul>
         </div>
-        <Link prefetch={false} href="/demo" className="link-arrow on-dark w-fit text-[0.9375rem]">
+        <Link prefetch={false} href="/demo" className="link-arrow w-fit text-[1.0625rem]">
           See the live demo store first
           <Icon name="arrow-right" size={16} className="arrow" />
         </Link>
       </aside>
 
-      <main id="content" className="flex min-h-screen min-w-0 flex-col px-4 py-8 [overflow-wrap:anywhere] sm:px-8 lg:min-h-0 lg:justify-center lg:py-16">
-        <Link prefetch={false} href="/" className="inline-flex min-h-11 w-fit items-center rounded-[10px] lg:hidden" aria-label="Marktmorgen, home">
-          <Logo />
-        </Link>
+      <main id="content" className="hm-signin-main flex min-h-screen min-w-0 flex-col px-4 py-8 [overflow-wrap:anywhere] sm:px-8 lg:min-h-0 lg:justify-center lg:py-16">
+        <div className="lg:hidden">
+          <MorningLogo />
+        </div>
 
         <div className="mx-auto w-full min-w-0 max-w-md flex-1 pt-12 lg:flex-none lg:pt-0">
           <h1 className="t-h1">{returning ? "Log in to your store" : "Start your store"}</h1>
           <p className="mt-4 text-ink-soft">
             {returning
-              ? "Type the email your store is under and we'll send you a link that opens it. No password here, on purpose. New here? The same link starts a store."
-              : "Type your email and we'll send you a link. It opens your store if you already have one, and starts one if you do not. There is no password to create. After the link, you choose a store address and prepare your first offer."}
+              ? "Type the email your store is under. We'll send you a link that opens it. No password needed. New here? The same link starts a store."
+              : "Type your email. We'll send you a link that opens your store, or starts one if you don't have one yet. No password to create."}
           </p>
 
           {!returning ? <section aria-labelledby="signin-plan-title" className="notice mt-6" data-signin-terms>
@@ -208,6 +263,26 @@ export default async function SignInPage({
             </div>
           ) : null}
 
+          {asked && !returning ? (
+            <div className={`notice mt-6${askedProblem ? " notice-warn" : ""}`} role="status" data-signin-handle>
+              {askedProblem === null ? (
+                <>
+                  <p className="font-semibold">{`You picked marktmorgen.com/@${asked}`}</p>
+                  <p className="mt-1">It is not held for you yet. After you open the emailed link, it is already filled in on the address step. Create your store there to take it, if nobody has taken it first.</p>
+                </>
+              ) : (
+                <>
+                  <p className="font-semibold">{`marktmorgen.com/@${asked} cannot be a store address`}</p>
+                  <p className="mt-1">
+                    {askedProblem === "reserved"
+                      ? "That name belongs to the site itself. You pick another one after the emailed link."
+                      : "Use 3 to 24 letters, numbers, dots, hyphens or underscores, starting and ending with a letter or number. You pick the address after the emailed link."}
+                  </p>
+                </>
+              )}
+            </div>
+          ) : null}
+
           {confirmation ? <ToastOnLoad message={confirmation} param="status" /> : null}
           {notice ? (
             <div className={`notice ${notice.tone === "success" ? "notice-success" : "notice-warn"} mt-6`} role="status">
@@ -217,8 +292,9 @@ export default async function SignInPage({
           ) : null}
 
           <div className="card mt-8 p-6 sm:p-8">
-            <SignInForm />
+            <SignInForm handle={asked && !returning && askedProblem === null ? asked : ""} />
             <PasskeySignIn />
+            {google ? <GoogleSignIn handle={asked && !returning && askedProblem === null ? asked : ""} /> : null}
             {/* Lost the inbox this account logs in with (lib/recovery-address.ts). */}
             <p className="mt-4 text-sm text-ink-soft">
               <Link prefetch={false} href="/signin/lost" className="link inline-flex min-h-11 items-center">
@@ -245,7 +321,7 @@ export default async function SignInPage({
                 },
               ].map((step, i) => (
                 <li key={step.title} className="flex gap-4">
-                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-lilac text-sm font-semibold text-violet-deep">
+                  <span className="hm-step-dot grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm">
                     {i + 1}
                   </span>
                   <span>

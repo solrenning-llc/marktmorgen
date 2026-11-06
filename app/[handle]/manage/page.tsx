@@ -1,3 +1,4 @@
+import { EmailField } from "@/components/email-field";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -83,16 +84,7 @@ export default async function ManagePage({ params, searchParams }: Params) {
       <label htmlFor="manage-email" className="st-label">
         {m.payEmailLabel}
       </label>
-      <input
-        id="manage-email"
-        type="email"
-        name="email"
-        required
-        maxLength={254}
-        autoComplete="email"
-        placeholder={w.emailPlaceholder}
-        className="st-field"
-      />
+      <EmailField id="manage-email" name="email" className="st-field" required autoComplete="email" placeholder={w.emailPlaceholder} language={store.language} />
       <button type="submit" className="btn st-btn btn-block">
         {m.emailMeLink}
       </button>
@@ -221,7 +213,8 @@ export default async function ManagePage({ params, searchParams }: Params) {
                       ) : null}
                       {one.pause ? null : (() => {
                         const choices = choicesFor(store, one, tiers);
-                        if (!choices.length) return null;
+                        // On a tier, but paid in another currency than the store's now (22 [E5], unit 2b): say why there is no switch.
+                        if (!choices.length) return one.currency.toLowerCase() !== store.currency && tiers.some((t) => t.id === one.product) ? <p className="st-muted mt-3 w-full basis-full text-sm">{m.switchCurrencyNote}</p> : null;
                         return (
                           <details className="mt-3 w-full basis-full">
                             <summary className="cursor-pointer text-sm font-semibold" style={{ color: "var(--st-text)" }}>

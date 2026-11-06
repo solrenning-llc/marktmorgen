@@ -31,8 +31,10 @@ export type MemberRow = {
   email: string;
   product: string;
   title: string;
-  /** What it brings in a month, in the store's currency; 0 for one in another currency. */
+  /** What it brings in a month, in the store's currency; 0 for one in another currency, so no total mixes two. */
   monthly: number;
+  /** What it brings in a month in its own currency, to show beside it (22 [E5], unit 2e); absent on a copy kept before. */
+  own?: { cents: number; currency: string };
   score: number;
   band: Band;
   factors: HealthFactor[];
@@ -49,8 +51,10 @@ export type Health = {
   currency: string;
   members: MemberRow[];
   counts: Record<Band, number>;
-  /** The monthly revenue of the members at risk. */
+  /** The monthly revenue of the members at risk, in the store's currency. */
   atRisk: number;
+  /** Members at risk paying in another currency than the store's: counted, never added to atRisk (22 [E5], unit 2e). */
+  atRiskElsewhere?: number;
   complete: boolean;
 };
 
@@ -152,12 +156,16 @@ export async function scoreMembers(store: Store, rows: Raw[], now = Date.now()):
         },
         nowSeconds,
       );
+      // The currency it pays in, lowercased; the store's when Stripe says none, so a missing one is never counted apart.
+      const currency = typeof raw.currency === "string" && raw.currency ? raw.currency.toLowerCase() : store.currency;
+      const cents = monthlyOf(amount, interval, count);
       return {
         sub: String(raw.id),
         email,
         product,
         title: listing?.title ?? "",
-        monthly: raw.currency === store.currency ? monthlyOf(amount, interval, count) : 0,
+        monthly: currency === store.currency ? cents : 0,
+        own: { cents, currency },
         score,
         band: bandOf(score),
         factors,
@@ -185,11 +193,14 @@ export async function memberHealth(store: Store, fresh = false, now = Date.now()
   const members = await scoreMembers(store, rows, now);
   const counts: Record<Band, number> = { well: 0, slipping: 0, risk: 0 };
   let atRisk = 0;
+  let atRiskElsewhere = 0;
   for (const m of members) {
     counts[m.band] += 1;
-    if (m.band === "risk") atRisk += m.monthly;
+    if (m.band !== "risk") continue;
+    if (m.own && m.own.currency !== store.currency) atRiskElsewhere += 1;
+    else atRisk += m.monthly;
   }
-  const health: Health = { at: Math.floor(now / 1000), currency: store.currency, members, counts, atRisk, complete };
+  const health: Health = { at: Math.floor(now / 1000), currency: store.currency, members, counts, atRisk, atRiskElsewhere, complete };
   if (isRedisConfigured()) await redisPipeline([["SET", cacheKey(store), JSON.stringify(health), "EX", CACHE_SECONDS]]).catch(() => {});
   return health;
 }

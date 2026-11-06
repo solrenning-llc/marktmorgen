@@ -1,7 +1,7 @@
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { ensureStatsId, storeRef } from "@/lib/store";
 import { AI_PER_MINUTE, MAX_AI_NOTES } from "@/lib/ai-rules";
 import { dropPitch, editPitch, readStoreSite, saveSender, setPitchStatus, startPitch } from "@/lib/outreach";
@@ -41,15 +41,17 @@ export async function POST(request: NextRequest) {
 
   try {
     if (action === "find") {
-      if (!(await withinService("outreach-find", who, FINDS_PER_MINUTE, 60, store))) return fail("slow", 429);
-      if (!(await withinLimit("outreach-find-day", who, FINDS_PER_DAY, 86_400))) return fail("slow", 429);
+      // The day's limit first, so a read refused for the day takes nothing from the store's month.
+      if (!(await withinEssentialLimit("outreach-find-day", who, FINDS_PER_DAY, 86_400))) return fail("day", 429);
+      const refused = await withinServiceWhy("outreach-find", who, FINDS_PER_MINUTE, 60, store);
+      if (refused) return serviceRefusedJson(refused, "slow");
       const read = await readStoreSite(store, text(body.site, 300));
       if (!read.ok) return fail(read.reason, read.reason === "unavailable" ? 503 : 400);
       return Response.json({ ok: true, site: read.site });
     }
     if (action === "draft") {
       if (!isGoal(body.goal)) return fail("invalid");
-      if (!(await withinLimit("ai", who, AI_PER_MINUTE, 60))) return fail("slow", 429);
+      if (!(await withinEssentialLimit("ai", who, AI_PER_MINUTE, 60))) return fail("slow", 429);
       const done = await startPitch(store, {
         goal: body.goal,
         country: text(body.country, 2).toUpperCase(),

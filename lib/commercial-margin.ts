@@ -1,3 +1,5 @@
+import { assessPlanPaymentDisputeCosts, PLAN_PAYMENT_DISPUTE_COST_RULES, PLAN_PAYMENT_DISPUTE_KEYS, type PlanPaymentDisputeReview } from "@/lib/plan-payment-dispute-cost-rules";
+import { allocateEntireLlcFixedCosts, CURRENT_LLC_FIXED_COST_CEILINGS, LLC_FIXED_COST_IDS, LLC_FIXED_COST_ALLOCATION } from "@/lib/llc-fixed-costs";
 import {CONTRACT_FUNDING_RULES,contractLifecycleReady,CURRENT_CONTRACT_FUNDING_POLICY,contractFundingConfiguration,canonicalFinancialSnapshot} from '@/lib/contract-funding-rules';
 import { CURRENT_EXPOSURE_BUDGET_POLICY, exposureBudgetConfiguration, EXPOSURE_ADMISSION_RULES } from '@/lib/exposure-budget-policy';
 import { assessFundedExposure, FUNDED_EXPOSURE_RULES, type FundedExposureReview } from '@/lib/funded-exposure-rules';
@@ -9,7 +11,8 @@ import { AUTOMATIC_UPLOAD_BUDGET_CEILINGS, UPLOAD_BUDGET_RULES, currentUploadBud
 import { assessMinimumCustomerBase, CUSTOMER_BASE_RULES, type CustomerBaseReview } from "@/lib/customer-base-rules";
 import { PLAN_PRICES, COMMISSION_BPS, COMMISSION_LIVE, COMMISSION_PLANS_PUBLISHED, PUBLISHED_PLAN_PRICES, TRIAL_DAYS, REFUND_DAYS, PRO_MONTHLY_EMAILS, SCALE_MONTHLY_EMAILS, TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
 import { SHARE_PROVED_IN_TEST_MODE } from "@/lib/platform-share";
-import { assessCustomerWorstCase, CUSTOMER_COST_CATEGORIES, MINIMUM_NET_MARGIN_BPS, MINIMUM_NET_PROFIT_CENTS, PLANNING_PROFIT_TAX_FLOOR_BPS, type CustomerWorstCase } from "@/lib/net-margin-rules";
+import { assessCustomerWorstCase, CUSTOMER_COST_CATEGORIES, MINIMUM_NET_MARGIN_BPS, MINIMUM_NET_PROFIT_CENTS, type CustomerWorstCase } from "@/lib/net-margin-rules";
+import { CUSTOMER_TAX_REVIEW_POLICY, customerTaxScenarioMatches, customerTaxCollectionState } from './customer-tax-review';
 import { AI_SPEND_RULES, AUTOMATIC_AI_SPEND_CEILINGS, currentAiSpendPolicy, aiStoreCostCents, isAiSpendPolicyValid } from "@/lib/ai-spend-policy";
 import { AI_REQUEST_LIMITS, SUPPORTED_AI_MODELS } from "@/lib/ai-request-rules";
 import { AI_MONTHLY, AI_PER_MINUTE, MAX_AI_NOTES, READ_PDF_PAGES, READ_PDF_JOBS } from "@/lib/ai-rules";
@@ -68,12 +71,15 @@ function scenarioWithPlanRoom(key: MarginScenario, scenario: CustomerWorstCase |
  */
 export const CURRENT_COMMERCIAL_TERMS = {
  // Since 18 October 2026 (schema 22): the price list of the owner's decision of 11:21, one list with no share of a sale, and the limits raised with it.
- schemaVersion: 23,
+ // Schema24: a complete LLC inventory and its ceilings bind every financial review.
+ schemaVersion: 29,
+ customerTaxReview: CUSTOMER_TAX_REVIEW_POLICY,
+ planPaymentDisputes: PLAN_PAYMENT_DISPUTE_COST_RULES,
  marginPolicy: { decision: '2026-10-27T07:42:00-03:00', unit: 'strictly-positive-net-cents', minimumNetProfitCents: MINIMUM_NET_PROFIT_CENTS, company: 'nonnegative-at-computed-minimum-base', companyTargetBps: 6000, targetBasis: 'monthly-reconciled-actual-not-a-sales-gate', spendFloorRoom: COMMERCIAL_SPEND_FLOOR_ROOM_CENTS, assistantCostRoomCents: ADD_ON_ROOM_CENTS },
  usageAdmission: { schema: 1, paidVisits: "finite-plan-threshold", paidVideo: "finite-explicit-threshold", unknownTraffic: "pause", supplierByteCeilingProven: false },
  uploadAdmission: { rules: UPLOAD_BUDGET_RULES, policy: AUTOMATIC_UPLOAD_BUDGET_CEILINGS },
- planningProfitTaxFloorBps: PLANNING_PROFIT_TAX_FLOOR_BPS,
  customerBaseRules: CUSTOMER_BASE_RULES,
+ llcFixedCosts: { allocation: LLC_FIXED_COST_ALLOCATION, required: LLC_FIXED_COST_IDS, ceilings: CURRENT_LLC_FIXED_COST_CEILINGS, budget: "full-month-and-year-included-before-separately-funded-exposure", annual: "complete-ceilings-and-reserve-review-no-automatic-amortization" },
  fundedExposureRules: FUNDED_EXPOSURE_RULES,
  exposureAdmissionRules: EXPOSURE_ADMISSION_RULES,
  contractFundingRules:CONTRACT_FUNDING_RULES,
@@ -114,6 +120,7 @@ export const CURRENT_COMMERCIAL_TERMS = {
 } as const;
 export const CURRENT_PRICE_AND_RIGHTS_SNAPSHOT = JSON.stringify(CURRENT_COMMERCIAL_TERMS);
 export type CommercialMarginReview={
+ planPaymentDisputes?:PlanPaymentDisputeReview|null;
  priceAndRightsSnapshot:string;
  companyBase:CustomerBaseReview|null;
  fundedExposure:FundedExposureReview|null;
@@ -129,10 +136,66 @@ export const CURRENT_COMMERCIAL_MARGIN_REVIEW:CommercialMarginReview|null=null;
  * The same bounded canonical representation already binds contract funding.
  * Keep real reviews absent until their evidence is established independently.
  */
+function commercialOwnReviewData(review:unknown):CommercialMarginReview|null{
+ if(!review||typeof review!=='object')return null;
+ try{
+  if(typeof process==='undefined'||typeof process.getBuiltinModule!=='function')return null;
+  const isProxy=process.getBuiltinModule('node:util').types.isProxy;
+  const active=new WeakSet<object>();
+  // Capture the whole original graph before any semantic reader can inspect
+  // it. A Proxy is rejected before reflection, including at nested fields.
+  function capture(value:unknown,depth:number):unknown{
+   if(depth>30)return undefined;
+   if(value===null||typeof value==='string'||typeof value==='boolean')return value;
+   if(typeof value==='number')return Number.isSafeInteger(value)?value:undefined;
+   if(!value||typeof value!=='object'||isProxy(value)||active.has(value))return undefined;
+   const list=Array.isArray(value),prototype=Object.getPrototypeOf(value);
+   if(list?(prototype!==Array.prototype&&prototype!==null):(prototype!==Object.prototype&&prototype!==null))return undefined;
+   const keys=Reflect.ownKeys(value);
+   if(keys.some(key=>typeof key!=='string'))return undefined;
+   active.add(value);
+   try{
+    if(list){
+     const descriptor=Object.getOwnPropertyDescriptor(value,'length');
+     if(!descriptor||!Object.hasOwn(descriptor,'value'))return undefined;
+     const length=descriptor.value;
+     if(typeof length!=='number'||!Number.isSafeInteger(length)||length<0||keys.length!==length+1)return undefined;
+     const copy:unknown[]=[];
+     for(let i=0;i<length;i++){
+      const item=Object.getOwnPropertyDescriptor(value,String(i));
+      if(!item||!Object.hasOwn(item,'value')||!item.enumerable)return undefined;
+      const child=capture(item.value,depth+1);
+      if(child===undefined)return undefined;
+      copy.push(child);
+     }
+     return copy;
+    }
+    const copy:Record<string,unknown>=Object.create(null);
+    for(const key of keys as string[]){
+     const descriptor=Object.getOwnPropertyDescriptor(value,key);
+     if(!descriptor||!Object.hasOwn(descriptor,'value')||!descriptor.enumerable)return undefined;
+     const child=capture(descriptor.value,depth+1);
+     if(child===undefined)return undefined;
+     copy[key]=child;
+    }
+    return copy;
+   }finally{active.delete(value);}
+  }
+  const data=capture(review,0);
+  return data&&typeof data==='object'&&!Array.isArray(data)?data as CommercialMarginReview:null;
+ }catch{return null;}
+}
 function commercialReviewData(review:CommercialMarginReview|null):CommercialMarginReview|null{
- if(!review||typeof review!=="object"||Array.isArray(review))return null;
- const encoded=canonicalFinancialSnapshot(review);
- return encoded===null?null:JSON.parse(encoded) as CommercialMarginReview;
+ const original=commercialOwnReviewData(review);
+ if(!original)return null;
+ const taxState=customerTaxCollectionState(original);
+ if(taxState==='unknown')return null;
+ const encoded=canonicalFinancialSnapshot(original);
+ if(encoded===null)return null;
+ const data=JSON.parse(encoded) as CommercialMarginReview;
+ // Keep the detached null-prototype data for all later checks: parsing the
+ // encoding must not reintroduce inherited assertions into the calculation.
+ return customerTaxCollectionState(data)===taxState?original:null;
 }
 export function commercialMarginReady(review:CommercialMarginReview|null=CURRENT_COMMERCIAL_MARGIN_REVIEW):boolean{
  const data=commercialReviewData(review);
@@ -147,6 +210,30 @@ function commercialMarginDataReady(review:CommercialMarginReview):boolean{
  if(!review||review.priceAndRightsSnapshot!==CURRENT_PRICE_AND_RIGHTS_SNAPSHOT)return false;
  if(typeof review.taxEvidence!=="string"||!review.taxEvidence.trim()||typeof review.costAndLimitEvidence!=="string"||!review.costAndLimitEvidence.trim())return false;
  if(review.allocatedFixedCostsVerified!==true||review.prepaidUsageEnforced!==true||!review.scenarios)return false;
+ // Every scoped TX record belongs to this exact scenario, not another plan or interval.
+ for(const key of REQUIRED_MARGIN_SCENARIOS){
+  const scenario=review.scenarios[key];
+  if(scenario&&!customerTaxScenarioMatches(scenario,key))return false;
+ }
+ // A reserve for a lost plan payment must include the reviewed maximum paid
+ // principal and fees. The fees are already an expense category: require their
+ // complete ceiling there, without adding the same fee a second time.
+ const disputes=assessPlanPaymentDisputeCosts(review.planPaymentDisputes);
+ if(!disputes)return false;
+ for(const key of PLAN_PAYMENT_DISPUTE_KEYS){
+  const fee=review.scenarios[(key+"_full") as MarginScenario]?.costCeilings.refundAndDisputeFees;
+  if(typeof fee!=="number"||!Number.isSafeInteger(fee)||fee<disputes[key].feesCents)return false;
+ }
+ // Aggregate flags cannot approve unknown or omitted lines in the actual LLC
+ // inventory. Include the full cost/tax total once; never add it a second time
+ // or borrow the separately earmarked acquisition/closing exposure budget.
+ const llc=allocateEntireLlcFixedCosts(CURRENT_LLC_FIXED_COST_CEILINGS);
+ const fixedCosts=review.companyBase?.monthlyFixedCostsCeilingCents;
+ const fixedTaxes=review.companyBase?.monthlyFixedTaxesCeilingCents;
+ if(!llc || typeof fixedCosts!=="number" || !Number.isSafeInteger(fixedCosts) || fixedCosts<0
+  || typeof fixedTaxes!=="number" || !Number.isSafeInteger(fixedTaxes) || fixedTaxes<0)return false;
+ const fixedBudget=BigInt(fixedCosts)+BigInt(fixedTaxes);
+ if(fixedBudget<BigInt(llc.monthlyUsdCents)||fixedBudget*BigInt(12)<BigInt(llc.annualUsdCents))return false;
  const exposure=assessFundedExposure(review.fundedExposure);
  if(!exposure.approved||!review.companyBase||review.companyBase.monthlyFixedCostsCeilingCents==null)return false;
  const combinedCosts=review.companyBase.monthlyFixedCostsCeilingCents+exposure.monthlyBudgetCents!;
@@ -235,6 +322,47 @@ function profitCents(value:unknown):value is number {
 function safeProfitNumber(value:bigint):number|null {
  return value>BigInt(Number.MAX_SAFE_INTEGER)||value<BigInt(Number.MIN_SAFE_INTEGER)?null:Number(value);
 }
+/** Copy descriptive accounting evidence without traversing executable caller data.
+ * Node's native Proxy check runs before descriptors/prototypes on each container.
+ * No Node module enters the browser bundle: without that native proof this
+ * descriptive report is unknown. Release policy above is independent of it.
+ */
+export function commercialProfitMixData(input:unknown):CommercialProfitMixInput|null {
+ try{
+  if(typeof process==='undefined'||typeof process.getBuiltinModule!=='function')return null;
+  const isProxy=process.getBuiltinModule('node:util').types.isProxy;
+  const ownData=(value:unknown,keys:readonly string[]):Record<string,unknown>|null=>{
+   if(!value||typeof value!=='object'||isProxy(value)||Array.isArray(value))return null;
+   const prototype=Object.getPrototypeOf(value);
+   if(prototype!==null&&prototype!==Object.prototype)return null;
+   const actual=Reflect.ownKeys(value);
+   if(actual.length!==keys.length||!actual.every(key=>typeof key==='string'&&keys.includes(key)))return null;
+   const copy:Record<string,unknown>=Object.create(null);
+   for(const key of keys){
+    const descriptor=Object.getOwnPropertyDescriptor(value,key);
+    if(!descriptor||!Object.hasOwn(descriptor,'value'))return null;
+    copy[key]=descriptor.value;
+   }
+   return copy;
+  };
+  const root=ownData(input,['basis','interval','period','currency','companyFixedCostsCents','sources']);
+  if(!root||(root.basis!=='worst_case'&&root.basis!=='reconciled_actual')||
+   (root.interval!=='month'&&root.interval!=='year')||root.currency!=='USD'||
+   typeof root.period!=='string'||!root.period.trim()||
+   (root.companyFixedCostsCents!==null&&!profitCents(root.companyFixedCostsCents)))return null;
+  const sources=ownData(root.sources,COMMERCIAL_PROFIT_SOURCES);
+  if(!sources)return null;
+  for(const source of COMMERCIAL_PROFIT_SOURCES){
+   if(sources[source]===null)continue;
+   const row=ownData(sources[source],[...profitAmountKeys,'evidence']);
+   if(!row||typeof row.evidence!=='string'||!row.evidence.trim()||
+    !profitAmountKeys.every(key=>row[key]===null||profitCents(row[key])))return null;
+   sources[source]=row;
+  }
+  root.sources=sources;
+  return root as CommercialProfitMixInput;
+ }catch{return null;}
+}
 /** A missing source is unknown, even when sales are closed. Explicit evidenced zero is supported.
  * Negative source profits remain negative; their share may be negative or exceed 100%.
  * Shares are truncated to one basis point and need not sum to exactly 10,000.
@@ -245,9 +373,7 @@ export function commercialProfitMix(input:CommercialProfitMixInput|null):Commerc
   rows:COMMERCIAL_PROFIT_SOURCES.map(source=>({source,netProfitCents:null,shareOfNetProfitBps:null})),
   totalNetProfitCents:null,reason:"unknown",
  };
- const encoded=canonicalFinancialSnapshot(input);
- if(encoded===null)return result;
- const data=JSON.parse(encoded) as CommercialProfitMixInput|null;
+ const data=commercialProfitMixData(input);
  if(!data||Array.isArray(data)||(data.basis!=="worst_case"&&data.basis!=="reconciled_actual")||
   (data.interval!=="month"&&data.interval!=="year")||data.currency!=="USD"||
   typeof data.period!=="string"||!data.period.trim()||
@@ -259,8 +385,9 @@ export function commercialProfitMix(input:CommercialProfitMixInput|null):Commerc
  for(const row of result.rows){
   const amounts=data.sources[row.source];
   if(!amounts||Array.isArray(amounts)||typeof amounts!=="object"||
+   Object.keys(amounts).length!==profitAmountKeys.length+1||!Object.hasOwn(amounts,'evidence')||
    typeof amounts.evidence!=="string"||!amounts.evidence.trim()||
-   !profitAmountKeys.every(key=>profitCents(amounts[key]))){complete=false;continue;}
+   !profitAmountKeys.every(key=>Object.hasOwn(amounts,key)&&profitCents(amounts[key]))){complete=false;continue;}
   const net=BigInt(amounts.revenueCents!)-BigInt(amounts.variableCostsCents!)-
    BigInt(amounts.allocatedFixedCostsCents!)-BigInt(amounts.taxesCents!)-
    BigInt(amounts.refundsCents!)-BigInt(amounts.reservesCents!);

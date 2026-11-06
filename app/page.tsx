@@ -1,28 +1,39 @@
 /* eslint-disable @next/next/no-html-link-for-pages -- Static home navigation intentionally uses native anchors to avoid client link hydration; hrefs and browser/keyboard regressions remain checked. */
-import { TrustChecks } from "@/components/trust-checks";
-import { CreatorShowcase, PlatformProof } from "@/components/creator-showcase";
-import { PricingValue } from "@/components/pricing-value";
 import type { Metadata } from "next";
 import { Suspense } from "react";
+import "./home.css";
 import { SITE_OG_IMAGE } from "@/lib/site-og";
 import { SiteFooter } from "@/components/site-footer";
-import { BuyerPath } from "@/components/buyer-path";
-import { SiteNav } from "@/components/site-nav";
-import { Icon, type IconName } from "@/components/icons";
-import { HOME_REASONS } from "@/lib/home-reasons";
-import { HeroFlow, Pricing } from "@/components/home-parts";
-import { Faq, SoldMarquee } from "@/components/home-static";
+import { MORNING_FONTS } from "@/components/morning-fonts";
+import { MorningHeader } from "@/components/morning-header";
+import { Faq } from "@/components/home-static";
+import { ClaimForm, HeroClaim } from "@/components/home-claim";
+import { ExampleMembership, ExampleTimes } from "@/components/home-examples";
 import { HomeData } from "@/components/structured-data";
 import { homeQuestions } from "@/lib/home-faq";
-import { paypalSalesConfigured } from "@/lib/paypal-sales";
-import { PUBLISHED_PRICE_CENTS as PRICE_CENTS, REFUND_DAYS, TRIAL_DAYS } from "@/lib/plan";
-import { isDomainsConfigured } from "@/lib/domains";
+import { PLAN_TITLES, PUBLISHED_PRICE_CENTS as PRICE_CENTS, TRIAL_DAYS } from "@/lib/plan";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { feeWords } from "@/lib/fee-words";
+import { INVITE_PROGRAM_OPEN, INVITE_SHARE_PERCENT } from "@/lib/creator-invite-rules";
+import { DEMO_CALL, DEMO_PRODUCT } from "@/lib/demo-seed";
 
-const HOME_TITLE = "Marktmorgen — sell your work, build your business";
+/*
+ * The home page, VS1 (queue item 571, the owner's approved mockup of
+ * 30 October 2026, 19:32): Stan's order of sections, made simpler and more
+ * colorful. One action in words, "Claim it", at the top and at the end.
+ *
+ * Every sentence is true of the code today (rule VR): prices and the trial
+ * come from lib/plan.ts, the fee line from lib/fee-words.ts, the closed-sale
+ * line from lib/opening.ts, and the phone shows the real demo store's
+ * products (lib/demo-seed.ts). Examples are labeled as examples on screen.
+ * What does not work today is not drawn: the invite band appears only while
+ * INVITE_PROGRAM_OPEN is true, and the mockup's studio "Today" screen is left
+ * out until the studio has one (queue item 484).
+ */
+
+const HOME_TITLE = "Marktmorgen — your link in bio, now a store";
 const HOME_DESCRIPTION =
-  "A fast store page for creators who sell files, courses, calls and memberships. Buyers pay into your own Stripe account, every handover is checked against Stripe's own record of the payment, and " + feeWords().takes + " Stripe's processing fee applies.";
+  "One store for creators who sell courses, downloads, memberships and paid calls from their link in bio. Buyers pay into your own Stripe account, and " + feeWords().takes + " Stripe's processing fee applies.";
 
 export const metadata: Metadata = {
   title: HOME_TITLE,
@@ -42,465 +53,196 @@ export const metadata: Metadata = {
   twitter: { card: "summary_large_image", title: HOME_TITLE, description: HOME_DESCRIPTION, images: [SITE_OG_IMAGE.url] },
 };
 
-const PHOTO = (id: string, w = 400, h = 400) =>
-  `https://images.unsplash.com/${id}?auto=format&fit=crop&crop=faces&w=${w}&h=${h}&q=72`;
-
 const PRICE = PRICE_CENTS / 100;
 
-/*
- * The three things that make a sale on Marktmorgen different.
- *
- * Each one is shown, not described: beside the words is the drawing of the
- * screen it happens on, taken from the page that explains it in full. A claim
- * about where money goes is worth more with the path drawn next to it, and
- * two of these three drawings are the real thing and can be clicked.
- */
+/* The trial line, true in both states: no plan can be started while
+   PLANS_ON_SALE is false, so the free days are said to come with the plans. */
+const OFFER_LINE = PLANS_ON_SALE
+  ? `Free to set up. ${TRIAL_DAYS} days free, then $${PRICE} a month.`
+  : `Free to set up. When plans open: ${TRIAL_DAYS} days free, then $${PRICE} a month.`;
 
-const DOMAINS = isDomainsConfigured();
-
-/*
- * What a creator may come looking for and will not find, said beside what is
- * live. Not a promise of when: each is a line where Stan is ahead today, and
- * the feature-by-feature page has the rest.
- */
-
-
-/*
- * Eight kinds of creator, each shown at work rather than posed.
- *
- * Four was a tidy row and a thin answer: a visitor looking for themselves
- * either saw their trade in the first four or decided this was not for them.
- * Eight is a market, and the cards are now sized unevenly — the first two
- * run tall, the rest sit in a denser grid — so the block reads as a wall of
- * people rather than a set of equal tiles.
- *
- * The photographs are licensed stock, and the line under them says so: the
- * people in them are not our customers, and we will not pretend they are.
- * What they are for is recognition — a visitor should see the thing they do
- * all day before they read a word of ours.
- */
-const CREATORS = [
-  {
-    href: "/for/coaches",
-    label: "Coaches and teachers",
-    sells: "Worksheets, programs, paid calls",
-    photo: "photo-1581065178047-8ee15951ede6",
-    alt: "A woman sitting on the floor of her living room, talking through a lesson to a camera",
-  },
-  {
-    href: "/for/cooks",
-    label: "Cooks and nutritionists",
-    sells: "Meal plans, grocery lists, recipe packs",
-    photo: "photo-1607990283143-e81e7a2c9349",
-    alt: "A cook in an apron plating a dish in a bright kitchen",
-  },
-  {
-    href: "/for/fitness",
-    label: "Fitness creators",
-    sells: "Training programs and challenges",
-    photo: "photo-1630939687530-241d630735df",
-    alt: "A movement teacher showing a stretch to someone in a light studio",
-  },
-  {
-    href: "/for/designers",
-    label: "Designers and photographers",
-    sells: "Presets, templates, brush packs",
-    photo: "photo-1589386417686-0d34b5903d23",
-    alt: "A photographer holding a camera among tall trees",
-  },
-  {
-    href: "/platform/courses",
-    label: "Musicians and producers",
-    sells: "Sample packs, lessons, chord charts",
-    photo: "photo-1573496527892-904f897eb744",
-    alt: "A musician at a desk with a keyboard and headphones",
-  },
-  {
-    href: "/platform/memberships",
-    label: "Writers and newsletters",
-    sells: "Memberships, archives, workshops",
-    photo: "photo-1758691737605-69a0e78bd193",
-    alt: "A writer at a window desk with a notebook open",
-  },
-  {
-    href: "/platform/calls",
-    label: "Therapists and counselors",
-    sells: "Booked sessions and workbooks",
-    photo: "photo-1600679472868-eae382e28b34",
-    alt: "Two people talking across a low table in a calm room",
-  },
-  {
-    href: "/platform/community",
-    label: "Makers and crafters",
-    sells: "Patterns, classes, a community",
-    photo: "photo-1789757165446-daec9334f72e",
-    alt: "A maker at a bench with tools and materials laid out",
-  },
+/* The demo store's own products, as the studio seeds them. */
+const PHONE_ITEMS = [
+  { title: DEMO_PRODUCT.title, kind: "Download", price: `$${DEMO_PRODUCT.price}` },
+  { title: DEMO_CALL.title, kind: `${DEMO_CALL.setup.minutes}-minute call`, price: `$${DEMO_CALL.price}` },
 ];
 
+/* Generic kinds of tool a creator would otherwise put together; each is part
+   of the Store plan (components/home-parts.tsx, INCLUDED). */
+const APPS = ["Link-in-bio page", "Sales page builder", "Course platform", "Booking app", "File delivery tool"];
 
+const CHECK = (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10" /></svg>
+);
 
-
-function HomeActions({place}:{place:string}) {
- return <div data-home-actions={place} role="group" aria-label={"Choose your next step: "+place} className="container-page flex flex-wrap items-center justify-center gap-x-6 gap-y-4 py-8">
-  <a href="/signin" className="btn btn-primary btn-lg">Start your store<Icon name="arrow-right" size={18}/></a>
-  <a href="/demo" className="link-arrow">See the live demo<Icon name="arrow-right" size={18} className="arrow"/></a>
- </div>;
+function Invite() {
+  // Shown only while new invitations are open (lib/creator-invite-rules.ts).
+  const share = INVITE_SHARE_PERCENT === 50 ? "half" : `${INVITE_SHARE_PERCENT}%`;
+  const needed = Math.ceil(100 / INVITE_SHARE_PERCENT);
+  return (
+    <section aria-labelledby="hm-invite-title" className="hm-band">
+      <div className="hm-card-band hm-band-rose">
+        <div className="hm-grow">
+          <h2 id="hm-invite-title" className="hm-h2">{`Bring a creator. Get ${share} of what they pay.`}</h2>
+          <p className="hm-lead">As credit on your own plan, for as long as they pay. They get their first month back after their first payment.</p>
+        </div>
+        <div className="hm-invite-card">
+          <p className="hm-example-label">Example</p>
+          <p>{`${needed} creators you bring stay on ${PLAN_TITLES.creator}`}</p>
+          <p className="hm-invite-figure">Your plan is paid for</p>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 export default function Home() {
-  const questions = homeQuestions(paypalSalesConfigured());
+  const questions = homeQuestions();
   return (
-    <div className="min-h-screen bg-paper text-ink">
-      <SiteNav />
+    <div className={`${MORNING_FONTS} hm`}>
+      <MorningHeader />
 
-      <main id="content" data-static-reading data-home-page>
-        {/* ------------------------------------------------------------ hero */}
-        <section aria-labelledby="home-hero-heading" className="surface-daybreak on-dark overflow-hidden" data-home-hero>
-          <div className="container-page grid items-center gap-12 pb-28 pt-12 sm:gap-14 sm:pt-16 lg:grid-cols-[1.04fr_1fr] lg:gap-12 lg:pb-32 lg:pt-20">
-            <div className="">
-              <p className="mb-5 text-base font-semibold text-white/85" data-home-pillar>
-                Your store. Your Stripe. Your money.
-              </p>
-              <h1 id="home-hero-heading" className="t-display text-white">
-                Sell your work.
-                <br />
-                Build your
-                <br />
-                <span className="serif nb-gradient-text pr-1 text-[1.08em] leading-[0.9]">business.</span>
-              </h1>
-              <p className="t-lead measure mt-7 text-white/80">
-                From your first sale to everything you sell next: files, courses, memberships and paid sessions
-                in one storefront. Payments go through your own Stripe account.
-              </p>
-              {/*
-                On a phone the two calls to action run the width of the
-                column: a thumb reaching across a 390px screen should not have
-                to find a 180px target, and a half-width button next to empty
-                space reads as the smaller of two choices rather than the
-                first of two. From 480px up they sit side by side.
-              */}
-              <div className="mt-9 grid gap-3 min-[480px]:flex min-[480px]:flex-wrap min-[480px]:items-center">
-                {/*
-                  `w-full` rather than `.btn-block`: that class is plain CSS
-                  and Tailwind's utilities sit in a layer, so `.btn-block`
-                  would beat the breakpoint that is meant to undo it and the
-                  buttons would run the full column on a desktop too.
-                */}
-                <a href="/signin" className="btn btn-light btn-lg w-full min-[480px]:w-auto" data-home-primary>
-                  Start your store
-                  <Icon name="arrow-right" size={18} />
-                </a>
-                {/* The demo stays available as a secondary link. */}
-                <a href="/demo" className="link-arrow on-dark inline-flex min-h-11 items-center justify-center min-[480px]:justify-start">
-                  See the live demo
-                  <Icon name="arrow-right" size={18} />
-                </a>
-              </div>
-              {/*
-                The three chips are gone with the rest of the clutter.
-
-                They repeated the sentence directly above them — what we take
-                from a sale is in that paragraph, the trial is in the line below —
-                and three pills under a paragraph that already says the same
-                thing is the house style of a page with nothing to show. The
-                band under this screen states all three as measurements with
-                a source, which is worth more than a pill.
-              */}
-              <p className="mt-4 text-sm text-white/80">
-                {PLANS_ON_SALE ? `$${PRICE} a month. Free for ${TRIAL_DAYS} days.` : `Not on sale yet. $${PRICE} a month when it is.`}
-              </p>
-            </div>
-
-            <div className="">
-              <Suspense fallback={null}><HeroFlow /></Suspense>
-            </div>
+      <main id="content" tabIndex={-1} data-static-reading data-home-page className="hm-body">
+        <section aria-labelledby="home-hero-heading" className="hm-hero" data-home-hero>
+          <div aria-hidden="true" className="hm-sky-layer">
+            <div className="hm-blob hm-sun-glow" />
+            <div className="hm-blob hm-sun" />
           </div>
-
+          <div className="hm-wrap hm-rel">
+            <HeroClaim offer={OFFER_LINE} items={PHONE_ITEMS} />
+          </div>
         </section>
 
-        {/*
-          The band under the hero.
-
-          It deliberately does not repeat the three chips above it. Those are
-          the offer; these are the four things a careful person checks next —
-          how fast it is, who handles the card, how hard it is to leave, and
-          what the limit is — and every one of them is a measurement or a
-          number stated elsewhere on this site, not a slogan.
-        */}
-        <Suspense fallback={null}>
-        <section aria-label="What you can check before you sign up" className="surface-sand section-tight">
-          {/*
-            Four numbers, and nothing behind them.
-
-            These were photographs with the figure laid over the top: a
-            runner at dawn under "97-100 Google PageSpeed", a desk under
-            "200 GB", a woman at a laptop under "2 clicks to cancel". Not
-            one of them showed what its number was about — the runner was a
-            pun on the word speed — and a picture that illustrates nothing
-            makes the thing it sits behind harder to read, not easier.
-
-            The number is the content here. It gets the page to itself.
-          */}
-          <ul className="container-page grid gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
-            {[
-              {
-                icon: "gauge" as IconName,
-                figure: "No account",
-                title: "For your buyers",
-                body: "They pay and receive what they bought. Nothing to sign up for, no password to keep.",
-              },
-              {
-                icon: "lock" as IconName,
-                figure: "Stripe",
-                title: "Handles the card",
-                body: "The payment happens on Stripe's own checkout. We never see a card number.",
-              },
-              {
-                icon: "receipt" as IconName,
-                figure: `${REFUND_DAYS} days`,
-                title: "To change your mind",
-                body: "Your first payment back in full on request. Canceling is two clicks in your studio, any time.",
-              },
-              {
-                icon: "download" as IconName,
-                figure: "200 GB",
-                title: "Of downloads a month",
-                body: "Files up to 5 GB each. Past it we write to you rather than cutting anything off.",
-              },
-            ].map((f) => (
-              <li key={f.title} className="flex gap-3.5">
-                <span className="icon-tile icon-tile-sm">
-                  <Icon name={f.icon} size={18} />
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-[1.5rem] font-semibold leading-none tracking-[-0.03em] text-ink">
-                    {f.figure}
-                  </span>
-                  <span className="mt-2 block text-[0.9375rem] font-semibold leading-snug text-ink-soft">{f.title}</span>
-                  <span className="mt-1 block text-[0.875rem] leading-snug text-ink-mute">{f.body}</span>
-                </span>
+        <section aria-labelledby="hm-sell-title" className="hm-section">
+          <div className="hm-wrap">
+            <h2 id="hm-sell-title" className="hm-h2">What you can sell.</h2>
+            <p className="hm-lead hm-lead-gap">Each one gets its own page, its own checkout and its own delivery.</p>
+            <ul className="hm-bento">
+              <li className="hm-tile hm-bg-gold">
+                <div>
+                  <h3 className="hm-h3">Courses</h3>
+                  <p>Video lessons in order. Each student&apos;s finished lessons are saved.</p>
+                </div>
+                <div className="hm-tile-panel">
+                  <p className="hm-example-label">Example lessons</p>
+                  <ol className="hm-lessons">
+                    <li><span aria-hidden="true" className="hm-dot hm-dot-done">{CHECK}</span>Plan your week<span className="hm-sr"> (done)</span></li>
+                    <li><span aria-hidden="true" className="hm-dot hm-dot-done">{CHECK}</span>Shop once<span className="hm-sr"> (done)</span></li>
+                    <li><span aria-hidden="true" className="hm-dot" />Cook for five days<span className="hm-sr"> (not done yet)</span></li>
+                  </ol>
+                </div>
               </li>
-            ))}
-          </ul>
+              <li className="hm-tile hm-bg-sky">
+                <div>
+                  <h3 className="hm-h3">Calls</h3>
+                  <p>Buyers pick a time in their own time zone and pay first. Then they and you each get an email.</p>
+                </div>
+                <ExampleTimes />
+              </li>
+              <li className="hm-tile hm-bg-rose">
+                <div>
+                  <h3 className="hm-h3">Memberships</h3>
+                  <p>Monthly or yearly access, with a members&apos; area you can open to them.</p>
+                </div>
+                <ExampleMembership />
+              </li>
+              <li className="hm-tile hm-bg-green">
+                <div>
+                  <h3 className="hm-h3">Downloads</h3>
+                  <p>Guides, templates and presets, on the buyer&apos;s screen once the payment clears.</p>
+                </div>
+                <div className="hm-tile-panel hm-file">
+                  <span aria-hidden="true" className="hm-file-art" />
+                  <span className="hm-grow">
+                    <span className="hm-example-label">Example file</span>
+                    <span className="hm-file-name">Meal Planner.pdf</span>
+                  </span>
+                  <span aria-hidden="true" className="hm-file-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 20h14" /></svg>
+                  </span>
+                </div>
+              </li>
+            </ul>
+          </div>
         </section>
-        </Suspense>
 
-        <HomeActions place="proof"/>
-
-        {/*
-          What people sell, running past.
-
-          The one piece of this page that moves on its own, placed where a
-          visitor has just read the offer and is asking whether it is for
-          someone like them. Forty kinds of product answer that faster than
-          a paragraph about categories, and a strip that never stops is what
-          a market looks like.
-        */}
-        <Suspense fallback={null}>
-        <section aria-label="Things people sell from a Marktmorgen store" className="surface-paper overflow-hidden py-5">
-          <SoldMarquee />
+        <section aria-labelledby="hm-apps-title" className="hm-band">
+          <div className="hm-card-band hm-band-sky">
+            <div className="hm-grow">
+              <h2 id="hm-apps-title" className="hm-h2">One store instead of five apps.</h2>
+              <p className="hm-lead">Your page, sales pages, courses, calls, downloads and email sign-ups in one place, with one login.</p>
+            </div>
+            <ul aria-label="What it replaces" className="hm-pills">
+              {APPS.map((app) => (
+                <li key={app} className="hm-pill-old">{app}</li>
+              ))}
+              <li className="hm-pill-new">All in Marktmorgen</li>
+            </ul>
+          </div>
         </section>
-        </Suspense>
 
-        {/* ------------------------------------------------------ who it's for */}
-        <Suspense fallback={null}>
-        <section className="surface-sand section">
-          <div className="container-page">
-            <div className="flex flex-col justify-between gap-6 md:flex-row md:items-end">
-              <div className="max-w-2xl">
-                <h2 className="t-h2 balance">People who sell what they know</h2>
+        {INVITE_PROGRAM_OPEN ? <Invite /> : null}
+
+        <section id="pricing" aria-labelledby="hm-price-title" className="hm-section hm-section-top0 hm-scroll">
+          <div className="hm-wrap hm-price">
+            <div className="hm-grow">
+              <h2 id="hm-price-title" className="hm-h2">One plan to start.</h2>
+              <p className="hm-lead" data-home-fee>
+                {feeWords().homeFee}
+                {PLANS_ON_SALE ? "" : " Not on sale yet."}
+              </p>
+              <a href="/pricing#plans" className="hm-text-link">{`Compare ${PLAN_TITLES.creator}, ${PLAN_TITLES.pro} and ${PLAN_TITLES.scale}`}</a>
+            </div>
+            <div className="hm-plan" data-home-plan>
+              <h3 className="hm-plan-name">{PLAN_TITLES.creator}</h3>
+              <p className="hm-plan-price">{`$${PRICE}`}<span> a month</span></p>
+              <p className="hm-plan-trial" data-home-price-line>
+                {PLANS_ON_SALE
+                  ? `The first ${TRIAL_DAYS} days free on your first store.`
+                  : `When plans open, the first ${TRIAL_DAYS} days are free on your first store.`}
+              </p>
+              <ul className="hm-plan-list">
+                <li>{CHECK}Your store and its checkout</li>
+                <li>{CHECK}Courses, downloads, memberships and calls</li>
+                <li>{CHECK}Money goes to your own Stripe account</li>
+              </ul>
+              <a href="/signin" className="hm-plan-button">Start your store</a>
+            </div>
+          </div>
+        </section>
+
+        <section id="faq" aria-labelledby="hm-faq-title" className="hm-section hm-section-top0 hm-scroll">
+          <div className="hm-wrap hm-faq">
+            <div>
+              <h2 id="hm-faq-title" className="hm-h2">Questions.</h2>
+              <p className="hm-lead">Short answers to what creators ask first.</p>
+            </div>
+            <div className="hm-grow">
+              <div className="hm-faq-list">
+                <Faq questions={questions} />
               </div>
-              <a href="/creators" className="link-arrow">
-                Tell us what you sell
-                <Icon name="arrow-right" size={16} className="arrow" />
-              </a>
-            </div>
-
-            <ul className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {CREATORS.map(creator=><li key={creator.href}><a href={creator.href} className="card flex h-full min-h-36 flex-col justify-between gap-4 p-6">
-                <h3 className="text-lg font-semibold">{creator.label}</h3><p className="text-sm text-ink-soft">{creator.sells}</p><span className="link inline-flex min-h-11 items-center">Explore this kind of work<Icon name="arrow-right" size={16}/></span>
-              </a></li>)}
-            </ul>
-            <p className="mt-6 max-w-3xl text-sm text-ink-soft">These pages show fictional examples of work you can sell. They are not customer testimonials or evidence of earnings. <a href="/demo" className="link">Explore the live demo</a>.</p>
-
-          </div>
-        </section>
-        </Suspense>
-
-        <HomeActions place="situations"/>
-
-        {/* ------------------------------------------------ the buyer's path */}
-        <section aria-labelledby="studio-screens-title" data-home-studio-summary className="container-page py-12">
-          <h2 id="studio-screens-title" className="t-h2">See the work before you start</h2>
-          <p className="mt-4 max-w-3xl text-ink-soft">Two actual screens from isolated fictional fixtures show the guided setup and product-page editor. View the examples and their explanations on the feature page.</p>
-          <a href="/platform#studio-screens-title" className="link mt-4 inline-flex min-h-11 items-center">See the studio and product editor examples</a>
-        </section>
-        <Suspense fallback={null}><BuyerPath /></Suspense>
-
-        <section className="section" aria-labelledby="home-modules-heading">
-          <div className="container-page">
-            <h2 id="home-modules-heading" className="t-h2 balance">Everything in one place</h2>
-            <p className="mt-5 max-w-3xl text-ink-soft">Explore the tools, their limits and the cost calculator on the feature page.</p>
-            <a href="/platform#home-modules-heading" className="link mt-4 inline-flex min-h-11 items-center">Explore all 14 tools and their conditions</a>
-          </div>
-        </section>
-
-        <HomeActions place="modules"/>
-
-        <Suspense fallback={null}>
-        <section aria-labelledby="home-path-heading" className="surface-sand section">
-          <div className="container-page">
-            <h2 id="home-path-heading" className="t-h2 balance">Your next step, checked against real facts</h2>
-            <p className="mt-5 max-w-3xl text-ink-soft">The Path names the work to do and checks records your store already keeps. These are its first seven missions, not a promise of a sale in seven days. Paid selling remains subject to availability; reminders and sharing are opt-in.</p>
-            <a href="/platform/path" className="link mt-8 inline-block">Read how the Path works</a>
-          </div>
-        </section>
-        </Suspense>
-
-        <HomeActions place="path"/>
-
-        <section className="section" aria-labelledby="home-reasons-summary-heading">
-          <div className="container-page">
-            <h2 id="home-reasons-summary-heading" className="t-h2 balance">Built for the people who use it</h2>
-            <ul className="mt-8 grid gap-5 lg:grid-cols-3">
-              {HOME_REASONS.map(reason=><li key={reason.href} className="rounded-2xl border border-line bg-white p-6">
-                <h3 className="t-h3">{reason.title}</h3>
-                <a href={reason.href} className="link mt-4 inline-flex min-h-11 items-center">{reason.link}</a>
-              </li>)}
-            </ul>
-            <a href="/platform#home-reasons-heading" className="link mt-6 inline-flex min-h-11 items-center">Read the details, examples and current limitations</a>
-          </div>
-        </section>
-
-        {/* -------------------------------------------------------- pricing */}
-        <Suspense fallback={null}>
-        <section id="pricing" className="surface-sand section scroll-mt-20">
-          <div className="container-page">
-            <TrustChecks place="home" />
-            <div className="mt-12"><PricingValue place="home" /></div>
-            <div className="mx-auto mt-10 max-w-2xl text-center">
-              <h2 className="t-h2 balance">Three plans, with the monthly price and sales fee shown together.</h2>
-              <p className="mt-5 text-ink-soft">
-                {feeWords().costLine}
-              </p>
-            </div>
-            <div className="mx-auto mt-12 max-w-5xl" data-plan-prices>
-              <Suspense fallback={null}>
-                <Pricing domains={DOMAINS} />
-              </Suspense>
-              <p className="mt-6 text-center"><a href="/pricing" className="link">Compare all plan limits, annual prices and optional add-ons</a></p>
+              <a href="/help" className="hm-text-link">More answers in the help center</a>
             </div>
           </div>
         </section>
-        </Suspense>
 
-        <HomeActions place="plans"/>
-        <Suspense fallback={null}><CreatorShowcase /></Suspense>
-        <Suspense fallback={null}><PlatformProof /></Suspense>
-
-        {/* ------------------------------------------------------------ faq */}
-        <Suspense fallback={null}>
-        <section id="faq" className="section scroll-mt-20">
-          <div className="container-page grid gap-10 lg:grid-cols-[1fr_1.6fr]">
-            <div className="">
-              <h2 className="t-h2 balance">Questions</h2>
-              <p className="mt-5 text-ink-soft">
-                Something else?{" "}
-                <a href="/help" className="link">
-                  The help center
-                </a>{" "}
-                answers the rest, in writing.
-              </p>
-            </div>
-            <div className="">
-              <Faq questions={questions} />
-            </div>
+        <section aria-labelledby="hm-end-title" className="hm-end">
+          <div aria-hidden="true" className="hm-sky-layer">
+            <div className="hm-blob hm-sun-end" />
           </div>
-        </section>
-        </Suspense>
-
-        {/* ------------------------------------------------------ final CTA */}
-        <Suspense fallback={null}>
-        <section className="surface-signature on-dark overflow-hidden">
-          <div className="container-narrow relative py-20 text-center sm:py-28">
-            {/*
-              The five example stores, one last time.
-
-              A row of faces above a call to action is the oldest move
-              there is, and it only works when it is true. These are the
-              five stores drawn at the top of this page, the same people,
-              said again in the caption to be examples we built.
-            */}
-            <ul className="mx-auto mb-8 flex items-center justify-center -space-x-3">
-              {[
-                "photo-1601397210737-a5534480bdc5",
-                "photo-1613746203812-717e6e5db3da",
-                "photo-1614244139209-53c071a4737d",
-                "photo-1676742663664-2da16ddcad7a",
-                "photo-1609174112693-52fdcebffd89",
-              ].map((id) => (
-                <li key={id}>
-                  {/* A photograph served at the sizes asked for by its own host, never through the image optimizer, which is billed per image. */}
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={PHOTO(id, 96, 96)}
-                    alt=""
-                    width={48}
-                    height={48}
-                    loading="lazy"
-                    decoding="async"
-                    className="h-12 w-12 rounded-full object-cover ring-2 ring-white/80"
-                  />
-                </li>
-              ))}
-            </ul>
-            <h2 className="t-h1 balance text-white">Open your store</h2>
-            <p className="t-lead mx-auto mt-6 max-w-xl text-white/80">
+          <div className="hm-end-inner">
+            <h2 id="hm-end-title" className="hm-h2">Pick your name today.</h2>
+            <p className="hm-end-lead" id="hm-end-hint">
               {PLANS_ON_SALE
-                ? `Take your address, connect Stripe, list what you sell. Free for ${TRIAL_DAYS} days, then $${PRICE} a month.`
-                : `Take your address, connect Stripe, list what you sell. The plan is not on sale yet: $${PRICE} a month when it is.`}
+                ? `Set up your store today. ${TRIAL_DAYS} days free, then $${PRICE} a month.`
+                : "Set up your store today. Selling opens when the plans do."}
             </p>
-            <div className="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-4">
-              <a href="/signin" className="btn btn-light btn-lg">
-                Start your store
-                <Icon name="arrow-right" size={18} />
-              </a>
-              <a href="/demo" className="link-arrow on-dark">
-                See the live demo
-                <Icon name="arrow-right" size={18} className="arrow" />
-              </a>
-            </div>
-            <ul className="mx-auto mt-10 flex max-w-2xl flex-wrap items-center justify-center gap-x-6 gap-y-3 text-[0.9375rem] text-white/80">
-              {[
-                { icon: "calendar" as IconName, text: PLANS_ON_SALE ? `${TRIAL_DAYS} days free` : "Free to set up" },
-                /*
-                  The strongest of the four, and the only one that costs us
-                  anything to mean. It replaced "Cancel in two clicks", which
-                  is a smaller promise made in the same breath — cancelling
-                  stops the next charge, this gives back the one already
-                  made — and cancelling is still written out in full in both
-                  plan cards and in the Refund Policy.
-                */
-                { icon: "receipt" as IconName, text: `${REFUND_DAYS}-day money-back guarantee` },
-                { icon: "percent" as IconName, text: feeWords().short },
-                { icon: "lock" as IconName, text: "Payments by Stripe" },
-              ].map((f) => (
-                <li key={f.text} className="flex items-center gap-2">
-                  <Icon name={f.icon} size={17} className="text-white/70" />
-                  {f.text}
-                </li>
-              ))}
-            </ul>
-            <p className="mt-8 text-[0.8125rem] text-white/65">
-              Example stores we built. The photographs are licensed stock, not customers of ours.
-            </p>
+            <ClaimForm id="hm-handle-end" hintId="hm-end-hint" />
           </div>
         </section>
-        </Suspense>
       </main>
 
-      <Suspense fallback={null}><SiteFooter /></Suspense>
+      <div className="hm-foot"><Suspense fallback={null}><SiteFooter morning variant="home" /></Suspense></div>
       <HomeData questions={questions} />
     </div>
   );

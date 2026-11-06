@@ -1,4 +1,4 @@
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import { StoreFullError } from "@/lib/store-full";
 import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
@@ -30,9 +30,8 @@ export async function POST(request: NextRequest) {
     if (body.action === "find") {
       const email = readAddress(body.email);
       if (!email) return Response.json({ ok: false, error: "email" }, { status: 400 });
-      if (!(await withinService("person-find", guarded.store.sid || guarded.store.handle, FINDS_PER_HOUR, 60 * 60, guarded.store))) {
-        return Response.json({ ok: false, error: "limited" }, { status: 429 });
-      }
+      const refused = await withinServiceWhy("person-find", guarded.store.sid || guarded.store.handle, FINDS_PER_HOUR, 60 * 60, guarded.store);
+      if (refused) return serviceRefusedJson(refused, "limited");
       const token = await findToken(guarded.store, email);
       if (!token) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
       return Response.json({ ok: true, href: studioPath(guarded.store, `p=${token}`, "people") }, noStore);
@@ -52,7 +51,9 @@ export async function POST(request: NextRequest) {
       }
       if (result.reason === "incomplete") return Response.json({ ok: false, error: "incomplete", failed: result.failed }, { status: 503 });
       if (result.reason === "limit") return Response.json({ ok: false, error: "limited", message: result.message }, { status: 429 });
-      return Response.json({ ok: false, error: result.reason }, { status: result.reason === "email" ? 400 : 503 });
+      // No place this month, or not counted: the store's own words, where the erasure gave them.
+      const said = "message" in result && typeof result.message === "string" ? { message: result.message } : {};
+      return Response.json({ ok: false, error: result.reason, ...said }, { status: result.reason === "email" ? 400 : 503 });
     }
 
     const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.store.email);

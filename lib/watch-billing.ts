@@ -1,5 +1,8 @@
 /**
- * Video watched past what a plan covers, put on the creator's next invoice.
+ * Video watched past what a plan covers. Since 31 October 2026 (232 [CA1]
+ * unit 3) nothing is put on an invoice for it: the meter owes nothing, as
+ * visits and orders have since 17 October 2026, and what is left is the
+ * record that the creator was written to.
  *
  * lib/watch-rules.ts says what is covered and what an hour past it costs;
  * lib/watch.ts keeps how long each store's video was watched. How a month
@@ -18,12 +21,18 @@
  */
 import { type Meter, type Settled as Used, firstWordOf, settleAllUsage, settleUsage, storeOf } from "@/lib/usage-billing";
 import { watchedFolders, watchedIn } from "@/lib/watch";
-import { VIDEO_HOURS_INCLUDED, VIDEO_SECONDS_INCLUDED, hoursWords, monthWords, videoOwedCents } from "@/lib/watch-rules";
+import { VIDEO_HOURS_INCLUDED, VIDEO_SECONDS_INCLUDED, hoursWords, monthWords } from "@/lib/watch-rules";
 
 const VIDEO: Meter = {
   name: "watch",
   measured: watchedIn,
-  owed: (seconds) => videoOwedCents(seconds),
+  // Nothing is owed after use (232 [CA1] unit 3, 31 October 2026): the
+  // owner's rule is that the customer pays first and receives after, and
+  // the Terms publish no charge past the hours (playback pauses at each
+  // plan's hours instead, lib/video-admission-rules.ts). Visits and orders
+  // have owed nothing since 17 October 2026; video now joins them, so no
+  // meter can put used service on an invoice.
+  owed: () => 0,
   // Every plan covers the same hours.
   byPlan: false,
   covered: VIDEO_SECONDS_INCLUDED,

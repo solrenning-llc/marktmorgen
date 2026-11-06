@@ -15,6 +15,10 @@ const scheduled = {...record,who:"buyers",productId:"course",notProductId:"extra
 is("matching schedule is seconds on the server",broadcastAnswer(true,answer(scheduled),picked).ok,true);
 is("a different schedule is not acknowledged",broadcastAnswer(true,answer({...scheduled,sendAt:201}),picked).error,unknown);
 for(const narrow of [null,[],{...picked.narrow,minSpent:0},{...picked.narrow,channel:"direct"},{...picked.narrow,quietDays:0},{...picked.narrow,minSpent:"2550"}])is("changed audience cannot confirm",broadcastAnswer(true,answer({...scheduled,narrow}),picked).error,unknown);
+// One group of buyers (270 [GR1], unit 3b): kept, confirmed; dropped or changed, never.
+const grouped = {...picked,narrow:{...picked.narrow,group:"loyal"}};
+is("a group kept is confirmed",broadcastAnswer(true,answer({...scheduled,narrow:grouped.narrow}),grouped).ok,true);
+for(const narrow of [picked.narrow,{...picked.narrow,group:"best"},{...grouped.narrow,extra:1}])is("a group dropped, changed or with a field unknown cannot confirm",broadcastAnswer(true,answer({...scheduled,narrow}),grouped).error,unknown);
 for(const sendAt of [NaN,Infinity,"200999"])is("invalid request schedule cannot confirm",broadcastAnswer(true,answer(scheduled),{...picked,sendAt}).error,unknown);
 for(const error of ["subject","body","when","empty","allowance","plan","role","signed_out","placeholder"])is("explicit pre-write refusal remains actionable "+error,broadcastAnswer(false,{ok:false,error},input).error,error);
 is("empty requested content cannot confirm",broadcastAnswer(true,answer(),{...input,body:" "}).error,unknown);

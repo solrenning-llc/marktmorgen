@@ -1,4 +1,4 @@
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { ensureStatsId } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -13,6 +13,7 @@ import {
   setHostSource,
 } from "@/lib/host-calendar";
 import { isTimeZone } from "@/lib/call-setup";
+import { TOOLS_PAUSED_WORDS, integrationPauseWord } from "@/lib/integration-pause";
 
 /** Changes one person may make to their own calendar here in ten minutes: several reach Google or a calendar. */
 const PER_TEN_MINUTES = 30;
@@ -37,13 +38,21 @@ export async function POST(request: NextRequest) {
   const { email, body } = guarded;
   const store = guarded.store.statsId ? guarded.store : ((await ensureStatsId(guarded.ref)) ?? guarded.store);
   if (!store.statsId) return Response.json({ ok: false, error: "none" }, { status: 400 });
-  if (!(await withinService("host-calendar", `${store.statsId}|${email}`, PER_TEN_MINUTES, 600, store))) {
-    return Response.json({ ok: false, error: "limited" }, { status: 429 });
-  }
+  const action = text(body.action, 20);
+  // member admission already enforces the existing authenticated daily bound.
+  // Removing access must not depend on the monthly figure for new service work.
+  const removing = action === "disconnect" || action === "ics-remove";
+  // 232 [CA1] 4b4a: while the plan's costs are paused, nothing here reaches Google or a
+  // calendar address for the host; taking something away (and choosing no source) stays open.
+  const paused = integrationPauseWord(store);
+  const reaches = action === "check" || action === "calendars" || action === "ics-add" || (action === "source" && (body.source === "google" || body.source === "ics"));
+  if (paused && reaches) return Response.json({ ok: false, error: paused, message: TOOLS_PAUSED_WORDS[paused] }, { status: 409 });
+  const refused = removing ? null : await withinServiceWhy("host-calendar", `${store.statsId}|${email}`, PER_TEN_MINUTES, 600, store);
+  if (refused) return serviceRefusedJson(refused, "limited");
   const tz = isTimeZone(body.tz) ? (body.tz as string) : "UTC";
   const view = () => hostCalendarView(store, email, tz);
   try {
-    switch (text(body.action, 20)) {
+    switch (action) {
       case "source": {
         const source = body.source === "google" || body.source === "ics" ? body.source : "none";
         const problem = await setHostSource(store, email, source);

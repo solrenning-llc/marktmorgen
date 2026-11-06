@@ -387,6 +387,8 @@ const offeredKey = (account: string, subscription: string) => `nl:save:${account
 export type SubRow = {
   id?: unknown;
   status?: unknown;
+  /** The currency Stripe bills it in, for the whole subscription. */
+  currency?: unknown;
   customer?: unknown;
   metadata?: Record<string, string> | null;
   cancel_at_period_end?: unknown;
@@ -400,6 +402,16 @@ export type SubRow = {
     }[];
   };
 };
+
+/**
+ * The currency a subscription is paid in: the one Stripe bills the whole
+ * subscription in, else its one price's, else the store's (22 [E5], unit 2b).
+ * The member's page and the tier switch read it the same way.
+ */
+export function subscriptionCurrency(sub: Pick<SubRow, "currency" | "items">, fallback: string): string {
+  const own = typeof sub.currency === "string" && sub.currency ? sub.currency : sub.items?.data?.[0]?.price?.currency;
+  return typeof own === "string" && own ? own.toLowerCase() : fallback.toLowerCase();
+}
 
 /** The grant behind a live link, read without spending one of its opens. */
 export async function grantOf(store: Store, token: string): Promise<Grant | null> {
@@ -475,7 +487,7 @@ export async function membershipsFor(store: Store, token: string): Promise<Membe
       fixedEnd: Boolean(sub.metadata?.ends_after),
       title: titles.get(product) || membershipWords(store.language).yourMembership,
       amount: typeof price?.unit_amount === "number" ? price.unit_amount : 0,
-      currency: typeof price?.currency === "string" ? price.currency : store.currency,
+      currency: subscriptionCurrency(sub, store.currency),
       interval: typeof price?.recurring?.interval === "string" ? price.recurring.interval : "month",
       intervalCount: typeof price?.recurring?.interval_count === "number" ? price.recurring.interval_count : 1,
       endsAt: endsAtOf(sub),

@@ -45,6 +45,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
@@ -74,6 +75,7 @@ import {
 } from "@/lib/community-text";
 import { MAX_ALT_LENGTH } from "@/lib/product-image";
 import { indexBytes, indexPost, partsOf, unindexPost } from "@/lib/community-search";
+import { TRACED_SINCE, TRACE_ENTRY, traceKey } from "@/lib/community-trace";
 import { type DataStore, needData, giveData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { indexMember } from "@/lib/community-index";
@@ -220,7 +222,6 @@ const dirKey = (id: string) => `${base(id)}:dir`;
 const reportsKey = (id: string) => `${base(id)}:rep`;
 const reportersKey = (id: string, target: string) => `${base(id)}:rep:${target}`;
 const rateKey = (id: string, who: string, kind: string) => `nl:cm:rl:${id}:${who}:${kind}`;
-
 /** How long who-reported-what is kept, so the same member cannot report twice. */
 const REPORTERS_SECONDS = 90 * 86_400;
 
@@ -236,7 +237,6 @@ const POST_SLOT = (post: string) => `cm:p:${post}`;
 const MEMBERS_SLOT = "cm:m";
 /** A like, a vote or a member key in a set: its member and Redis's own. */
 export const SET_ENTRY_BYTES = 96;
-
 /** What a post counts for: its record, its two places in the feeds, and its words. */
 function postBytes(post: Post): number {
   return dataBytes([JSON.stringify(post)], 3) + indexBytes([post.title, post.text]);
@@ -554,19 +554,21 @@ export async function directorySize(id: string): Promise<number> {
  * Everyone who has come in, for the creator's list: a page at a time, in the
  * order Redis keeps them. `cursor` is Redis's own, "0" to begin.
  */
-export async function memberPage(id: string, cursor: string, count = 200): Promise<{ members: Member[]; next: string; total: number }> {
+export async function memberPage(id: string, cursor: string, count = 200): Promise<{ members: Member[]; next: string; total: number; bytes: number }> {
   const [reply, total] = await redisPipeline([
     ["HSCAN", membersKey(id), cursor, "COUNT", count],
     ["HLEN", membersKey(id)],
   ]);
-  if (!Array.isArray(reply) || reply.length < 2) return { members: [], next: "0", total: Number(total) || 0 };
+  if (!Array.isArray(reply) || reply.length < 2) return { members: [], next: "0", total: Number(total) || 0, bytes: 0 };
   const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
   const members: Member[] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const member = parseMember(flat[i + 1]);
     if (member) members.push(member);
   }
-  return { members, next: String(reply[0]), total: Number(total) || 0 };
+  // The bytes the scan answered with, for a reading that pays for them (lib/api-read.ts, members).
+  const bytes = flat.reduce((n: number, v) => n + Buffer.byteLength(String(v)), 0);
+  return { members, next: String(reply[0]), total: Number(total) || 0, bytes };
 }
 
 /** Every member who asked for announcement emails and is still here. */
@@ -584,15 +586,25 @@ export async function mailableMembers(id: string): Promise<Member[]> {
 
 // ------------------------------------------------------------------ limits
 
-/** Counts one more of `kind` for this member, and says whether it is allowed. */
+/**
+ * Counts one more of `kind` for this member, and says whether it is allowed.
+ * A count not read in its exact shape is never taken as room, nor said as
+ * the limit reached: it is thrown, and the route answers with its error
+ * (CX-123 rule 24).
+ */
 export async function within(id: string, who: string, kind: RateKind): Promise<boolean> {
   const { limit, seconds } = RATE_LIMITS[kind];
   const key = rateKey(id, who, kind);
-  const [, count] = await redisPipeline([
-    ["SET", key, "0", "EX", seconds, "NX"],
-    ["INCR", key],
-  ]);
-  return Number(count) <= limit;
+  const both = repliesFor(
+    await redisPipeline([
+      ["SET", key, "0", "EX", seconds, "NX"],
+      ["INCR", key],
+    ]),
+    2,
+  );
+  const count = both && (both[0] === "OK" || both[0] === null) ? countOf(both[1]) : null;
+  if (count === null || count < 1) throw new UnknownReplyError(`a community ${kind} count`);
+  return count <= limit;
 }
 
 // ------------------------------------------------------------------ posts
@@ -679,11 +691,13 @@ export async function createPost(id: string, input: NewPost, room: DataStore): P
     poll: input.poll,
   };
   // Its room first: refused here, nothing is written (DataRoomError).
-  await needData(room, [{ slot: POST_SLOT(post.id), bytes: postBytes(post), set: true }]);
+  const traced = post.a !== CREATOR;
+  await needData(room, [{ slot: POST_SLOT(post.id), bytes: postBytes(post), set: true }, ...(traced ? [TRACE_ENTRY] : [])]);
   await redisPipeline([
     ["SET", postKey(id, post.id), JSON.stringify(post)],
     ["ZADD", feedKey(id), post.n, post.id],
     ["ZADD", spaceKey(id, post.sp), post.n, post.id],
+    ...(traced ? [["SADD", traceKey(id, post.a), `p:${post.id}`]] : []),
   ]);
   await reindex(id, post, []);
   return { ok: true, post };
@@ -763,7 +777,9 @@ export async function deletePost(id: string, post: Post, room: DataStore): Promi
     ["ZREM", feedKey(id), post.id],
     ["ZREM", spaceKey(id, post.sp), post.id],
     ["ZREM", reportsKey(id), `p:${post.id}`, ...commentIds.map((c) => `c:${post.id}:${c}`)],
+    ...(post.a !== CREATOR ? [["SREM", traceKey(id, post.a), `p:${post.id}`]] : []),
   ]);
+  if (post.a !== CREATOR) await giveData(room, [TRACE_ENTRY]);
   await unindexPost(id, post.id).catch((error) => {
     console.error("taking a deleted post out of the search index failed", error);
   });
@@ -829,23 +845,25 @@ export async function postNumbers(
 
 /** One like per member per post: a second press takes it back. */
 export async function toggleLike(id: string, post: string, who: string, room: DataStore): Promise<boolean> {
-  return toggleIn(likesKey(id, post), post, who, room);
+  return toggleIn(id, likesKey(id, post), `l:${post}`, post, who, room);
 }
 
 /** Adds `who` to a set of likes, or takes them out when they were in it: its room is taken first and given back after. */
-async function toggleIn(key: string, post: string, who: string, room: DataStore): Promise<boolean> {
+async function toggleIn(id: string, key: string, ref: string, post: string, who: string, room: DataStore): Promise<boolean> {
   const [held] = await redisPipeline([["SISMEMBER", key, who]]);
-  if (Number(held) !== 1) await needData(room, [{ slot: POST_SLOT(post), bytes: SET_ENTRY_BYTES }]);
-  const [added] = await redisPipeline([["SADD", key, who]]);
+  // The like and its entry in the member's trace (traceKey) take their room first.
+  if (Number(held) !== 1) await needData(room, [{ slot: POST_SLOT(post), bytes: SET_ENTRY_BYTES }, TRACE_ENTRY]);
+  const [added] = await redisPipeline([["SADD", key, who], ["SADD", traceKey(id, who), ref]]);
   if (Number(added) === 1) return true;
-  await redisPipeline([["SREM", key, who]]);
-  await giveData(room, [{ slot: POST_SLOT(post), bytes: Number(held) === 1 ? SET_ENTRY_BYTES : 2 * SET_ENTRY_BYTES }]);
+  await redisPipeline([["SREM", key, who], ["SREM", traceKey(id, who), ref]]);
+  const times = Number(held) === 1 ? 1 : 2;
+  await giveData(room, [{ slot: POST_SLOT(post), bytes: times * SET_ENTRY_BYTES }, { ...TRACE_ENTRY, bytes: times * TRACE_ENTRY.bytes }]);
   return false;
 }
 
 /** The same for a comment: one like per member, a second press takes it back. */
 export async function toggleCommentLike(id: string, post: string, comment: string, who: string, room: DataStore): Promise<boolean> {
-  return toggleIn(commentLikesKey(id, post, comment), post, who, room);
+  return toggleIn(id, commentLikesKey(id, post, comment), `lc:${post}:${comment}`, post, who, room);
 }
 
 /** How many liked each comment under a post, and whether this member did. */
@@ -941,8 +959,9 @@ export async function addComment(
     parent = above.parent || above.id;
   }
   const comment: Comment = { id: newItemId(), parent, a: input.author, text: input.text, at: now(), hid: false, ed: 0 };
-  await needData(room, [{ slot: POST_SLOT(post), bytes: commentBytes(comment) }]);
-  await redisPipeline([["HSET", commentsKey(id, post), comment.id, JSON.stringify(comment)]]);
+  const traced = comment.a !== CREATOR;
+  await needData(room, [{ slot: POST_SLOT(post), bytes: commentBytes(comment) }, ...(traced ? [TRACE_ENTRY] : [])]);
+  await redisPipeline([["HSET", commentsKey(id, post), comment.id, JSON.stringify(comment)], ...(traced ? [["SADD", traceKey(id, comment.a), `c:${post}:${comment.id}`]] : [])]);
   await reindexComments(id, post);
   return { ok: true, comment };
 }
@@ -974,8 +993,10 @@ export async function deleteComment(id: string, post: string, comment: Comment, 
     ["DEL", ...gone.map((c) => commentLikesKey(id, post, c))],
     ["ZREM", reportsKey(id), ...gone.map((c) => `c:${post}:${c}`)],
     ...gone.map((c) => ["DEL", reportersKey(id, `c:${post}:${c}`)]),
+    ...[comment, ...all].filter((c) => c.a !== CREATOR).map((c) => ["SREM", traceKey(id, c.a), `c:${post}:${c.id}`]),
   ]);
-  await giveData(room, [{ slot: POST_SLOT(post), bytes: freed }]);
+  const traced = [comment, ...all].filter((c) => c.a !== CREATOR).length;
+  await giveData(room, [{ slot: POST_SLOT(post), bytes: freed }, ...(traced ? [{ ...TRACE_ENTRY, bytes: traced * TRACE_ENTRY.bytes }] : [])]);
   await reindexComments(id, post);
 }
 
@@ -1001,12 +1022,16 @@ export function parseTarget(raw: string): ReportTarget | null {
  * A member flags a post or a comment for the creator. Counted once per
  * member; the queue keeps the most recent MAX_REPORT_QUEUE.
  */
-export async function report(id: string, target: ReportTarget, who: string): Promise<"added" | "again"> {
+export async function report(id: string, target: ReportTarget, who: string, room: DataStore): Promise<"added" | "again"> {
   const key = targetKey(target);
-  const [added] = await redisPipeline([
+  // Its entry in the member's trace (traceKey) takes its room first; given back when it was a report made before.
+  await needData(room, [TRACE_ENTRY]);
+  const [added, , traced] = await redisPipeline([
     ["SADD", reportersKey(id, key), who],
     ["EXPIRE", reportersKey(id, key), REPORTERS_SECONDS],
+    ["SADD", traceKey(id, who), `r:${key}`],
   ]);
+  if (Number(traced) !== 1) await giveData(room, [TRACE_ENTRY]);
   if (Number(added) !== 1) return "again";
   await redisPipeline([
     ["ZADD", reportsKey(id), Date.now(), key],
@@ -1015,20 +1040,71 @@ export async function report(id: string, target: ReportTarget, who: string): Pro
   return "added";
 }
 
-export type QueuedReport = { target: ReportTarget; key: string; at: number; count: number };
+export type QueuedReport = { target: ReportTarget; key: string; at: number; count: number | null };
+
+/** A failed moderation read is never evidence that nobody reported anything. */
+export class ReportQueueReadError extends Error {
+  constructor() {
+    super("The community report queue could not be read completely.");
+    this.name = "ReportQueueReadError";
+  }
+}
+
+async function readReportedRecord<T>(command: (string | number)[], parse: (raw: unknown) => T | null): Promise<T | null> {
+  const reply = await redisPipeline([command]);
+  const slot = Array.isArray(reply) && reply.length === 1 ? Object.getOwnPropertyDescriptor(reply, "0") : undefined;
+  if (!slot || !Object.hasOwn(slot, "value")) throw new ReportQueueReadError();
+  if (slot.value === null) return null;
+  const record = parse(slot.value);
+  if (!record) throw new ReportQueueReadError();
+  return record;
+}
+
+/** Resolve a confirmed report without treating a missing reply as a deleted target. */
+export async function readReportedTarget(id: string, target: ReportTarget): Promise<{ post: Post; comment: Comment | null } | null> {
+  const post = await readReportedRecord(["GET", postKey(id, target.post)], parsePost);
+  if (!post) return null;
+  if (post.id !== target.post) throw new ReportQueueReadError();
+  if (target.kind === "post") return { post, comment: null };
+  const comment = await readReportedRecord(["HGET", commentsKey(id, target.post), target.comment], parseComment);
+  if (!comment) return null;
+  if (comment.id !== target.comment) throw new ReportQueueReadError();
+  return { post, comment };
+}
+
+function reportInteger(raw: unknown): number | null {
+  if (typeof raw !== "number" && (typeof raw !== "string" || !/^(0|[1-9][0-9]*)$/.test(raw))) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
 
 /** The creator's moderation queue, newest report first. */
 export async function reportQueue(id: string, limit = 100): Promise<QueuedReport[]> {
-  const [raw] = await redisPipeline([["ZREVRANGEBYSCORE", reportsKey(id), "+inf", "-inf", "WITHSCORES", "LIMIT", 0, limit]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_REPORT_QUEUE) throw new ReportQueueReadError();
+  const reply = await redisPipeline([["ZREVRANGEBYSCORE", reportsKey(id), "+inf", "-inf", "WITHSCORES", "LIMIT", 0, limit]]);
+  if (!Array.isArray(reply) || reply.length !== 1) throw new ReportQueueReadError();
+  const flat: unknown = reply[0];
+  if (!Array.isArray(flat) || flat.length % 2 !== 0 || flat.length > limit * 2) throw new ReportQueueReadError();
   const rows: { key: string; at: number; target: ReportTarget }[] = [];
+  const seen = new Set<string>();
   for (let i = 0; i + 1 < flat.length; i += 2) {
-    const target = parseTarget(flat[i]);
-    if (target) rows.push({ key: flat[i], at: Math.floor(Number(flat[i + 1]) / 1000), target });
+    const key: unknown = flat[i];
+    const target = typeof key === "string" ? parseTarget(key) : null;
+    const score = reportInteger(flat[i + 1]);
+    if (typeof key !== "string" || !target || score === null || score > 8_640_000_000_000_000 || seen.has(key)) throw new ReportQueueReadError();
+    seen.add(key);
+    rows.push({ key, at: Math.floor(score / 1000), target });
   }
   if (!rows.length) return [];
   const counts = await redisPipeline(rows.map((r) => ["SCARD", reportersKey(id, r.key)]));
-  return rows.map((r, i) => ({ ...r, count: Math.max(1, Number(counts[i]) || 0) }));
+  if (!Array.isArray(counts) || counts.length !== rows.length) throw new ReportQueueReadError();
+  return rows.map((r, i) => {
+    const count = reportInteger(counts[i]);
+    if (count === null) throw new ReportQueueReadError();
+    // Reporter sets expire after 90 days; their absence does not say how
+    // many people originally reported an item that still waits in the queue.
+    return { ...r, count: count === 0 ? null : count };
+  });
 }
 
 /** Takes an item off the queue without touching it: the creator saw nothing wrong. */
@@ -1059,4 +1135,122 @@ export async function forgetMemberRecord(id: string, who: string): Promise<Membe
     ["DEL", ...(Object.keys(RATE_LIMITS) as RateKind[]).map((kind) => rateKey(id, who, kind))],
   ]);
   return member;
+}
+
+/** Commands sent at once while reading a whole community for one member's copy. */
+const TRACE_BATCH = 500;
+
+export type MemberTraces = {
+  posts: { post: string; space: string; title: string; text: string; at: number; edited: number; hidden: boolean }[];
+  comments: { post: string; comment: string; text: string; at: number; edited: number; hidden: boolean }[];
+  likedPosts: string[];
+  likedComments: { post: string; comment: string }[];
+  reported: string[];
+  /** The posts that carry a poll, for reading their votes (lib/community-polls.ts, votesOf). */
+  pollPosts: string[];
+};
+
+/**
+ * What one member wrote and did in the community, for the copy of their data
+ * (619 [SZ3], lib/person-copy.ts): their posts and comments (their own words
+ * only, never the replies under them), the posts and comments they liked and
+ * what they reported. These stay in the community after an erasure, without
+ * their name (lib/person-data.ts, "open"), and are theirs to see all the
+ * same. Reads every post the community keeps, at most MAX_POSTS, in batches.
+ * Only reads.
+ */
+export async function memberTraces(id: string, who: string): Promise<MemberTraces> {
+  if (!isRedisConfigured()) return { posts: [], comments: [], likedPosts: [], likedComments: [], reported: [], pollPosts: [] };
+  // Read from the member's own trace when every post the community keeps is
+  // from after the trace began; otherwise the whole community, as before it.
+  const [oldestIds] = await redisPipeline([["ZRANGEBYSCORE", feedKey(id), "-inf", "+inf", "LIMIT", 0, 1]]);
+  const oldestId = Array.isArray(oldestIds) && oldestIds.length ? String(oldestIds[0]) : "";
+  const oldest = oldestId ? await readPost(id, oldestId) : null;
+  if (oldestId && (!oldest || oldest.at < TRACED_SINCE)) return scanTraces(id, who);
+  return tracedOf(id, who);
+}
+
+/** What the member's trace names (lib/community-trace.ts), each checked against what is kept now. */
+async function tracedOf(id: string, who: string): Promise<MemberTraces> {
+  const out: MemberTraces = { posts: [], comments: [], likedPosts: [], likedComments: [], reported: [], pollPosts: [] };
+  const [raw] = await redisPipeline([["SMEMBERS", traceKey(id, who)]]);
+  const refs = (Array.isArray(raw) ? raw : []).map(String).sort();
+  const parts = refs.map((ref) => ref.split(":"));
+  const postIds = [...new Set(parts.filter((p) => p[0] === "p" && p.length === 2).map((p) => p[1]))];
+  const posts: Post[] = [];
+  for (let i = 0; i < postIds.length; i += TRACE_BATCH) posts.push(...(await readPosts(id, postIds.slice(i, i + TRACE_BATCH))));
+  for (const post of posts) {
+    if (post.a === who) out.posts.push({ post: post.id, space: post.sp, title: post.title, text: post.text, at: post.at, edited: post.ed, hidden: post.hid });
+  }
+  const comments = parts.filter((p) => p[0] === "c" && p.length === 3);
+  const likes = parts.filter((p) => p[0] === "l" && p.length === 2);
+  const commentLikes = parts.filter((p) => p[0] === "lc" && p.length === 3);
+  const reports = parts.filter((p) => p[0] === "r" && p.length >= 3).map((p) => p.slice(1).join(":"));
+  const commands: (string | number)[][] = [
+    ...comments.map(([, post, comment]) => ["HGET", commentsKey(id, post), comment]),
+    ...likes.map(([, post]) => ["SISMEMBER", likesKey(id, post), who]),
+    ...commentLikes.map(([, post, comment]) => ["SISMEMBER", commentLikesKey(id, post, comment), who]),
+    ...reports.map((target) => ["SISMEMBER", reportersKey(id, target), who]),
+  ];
+  const replies: unknown[] = [];
+  for (let i = 0; i < commands.length; i += TRACE_BATCH) replies.push(...(await redisPipeline(commands.slice(i, i + TRACE_BATCH))));
+  let at = 0;
+  for (const [, post] of comments) {
+    const comment = parseComment(replies[at++]);
+    if (comment && comment.a === who) out.comments.push({ post, comment: comment.id, text: comment.text, at: comment.at, edited: comment.ed, hidden: comment.hid });
+  }
+  for (const [, post] of likes) if (Number(replies[at++]) === 1) out.likedPosts.push(post);
+  for (const [, post, comment] of commentLikes) if (Number(replies[at++]) === 1) out.likedComments.push({ post, comment });
+  for (const target of reports) {
+    if (Number(replies[at++]) !== 1) continue;
+    const [kind, post, comment] = target.split(":");
+    out.reported.push(kind === "p" ? `post ${post}` : `comment ${comment} under post ${post}`);
+  }
+  out.pollPosts = [...new Set(parts.filter((p) => p[0] === "v" && p.length === 2).map((p) => p[1]))];
+  return out;
+}
+
+/** The whole community, read for one member: for a community with posts from before the trace began. */
+async function scanTraces(id: string, who: string): Promise<MemberTraces> {
+  const out: MemberTraces = { posts: [], comments: [], likedPosts: [], likedComments: [], reported: [], pollPosts: [] };
+  if (!isRedisConfigured()) return out;
+  const [raw] = await redisPipeline([["ZREVRANGE", feedKey(id), 0, MAX_POSTS - 1]]);
+  const ids = (Array.isArray(raw) ? raw : []).map(String);
+  for (let i = 0; i < ids.length; i += TRACE_BATCH) {
+    const batch = ids.slice(i, i + TRACE_BATCH);
+    const posts = await readPosts(id, batch);
+    const replies = await redisPipeline(
+      posts.flatMap((p) => [
+        ["HGETALL", commentsKey(id, p.id)],
+        ["SISMEMBER", likesKey(id, p.id), who],
+        ["SISMEMBER", reportersKey(id, `p:${p.id}`), who],
+      ]),
+    );
+    const theirComments: { post: string; comment: Comment }[] = [];
+    const everyComment: { post: string; comment: Comment }[] = [];
+    posts.forEach((p, k) => {
+      if (p.a === who) out.posts.push({ post: p.id, space: p.sp, title: p.title, text: p.text, at: p.at, edited: p.ed, hidden: p.hid });
+      if (p.poll) out.pollPosts.push(p.id);
+      if (Number(replies[k * 3 + 1]) === 1) out.likedPosts.push(p.id);
+      if (Number(replies[k * 3 + 2]) === 1) out.reported.push(`post ${p.id}`);
+      const flat = replies[k * 3];
+      const values = Array.isArray(flat) ? flat.filter((_, n) => n % 2 === 1) : flat && typeof flat === "object" ? Object.values(flat as Record<string, string>) : [];
+      for (const value of values) {
+        const comment = parseComment(value);
+        if (!comment) continue;
+        everyComment.push({ post: p.id, comment });
+        if (comment.a === who) theirComments.push({ post: p.id, comment });
+      }
+    });
+    for (const { post, comment } of theirComments) out.comments.push({ post, comment: comment.id, text: comment.text, at: comment.at, edited: comment.ed, hidden: comment.hid });
+    for (let c = 0; c < everyComment.length; c += TRACE_BATCH) {
+      const slice = everyComment.slice(c, c + TRACE_BATCH);
+      const marks = await redisPipeline(slice.flatMap(({ post, comment }) => [["SISMEMBER", commentLikesKey(id, post, comment.id), who], ["SISMEMBER", reportersKey(id, `c:${post}:${comment.id}`), who]]));
+      slice.forEach(({ post, comment }, k) => {
+        if (Number(marks[k * 2]) === 1) out.likedComments.push({ post, comment: comment.id });
+        if (Number(marks[k * 2 + 1]) === 1) out.reported.push(`comment ${comment.id} under post ${post}`);
+      });
+    }
+  }
+  return out;
 }

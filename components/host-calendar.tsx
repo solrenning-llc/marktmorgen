@@ -1,10 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { UrlField } from "@/components/url-field";
+import { HOST_ICS_CHECK } from "@/lib/fetch-url-check";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
 import type { HostCalendarView, HostSource, SyncState } from "@/lib/host-calendar";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { HOST_STALE_MINUTES, HOST_SYNC_MINUTES } from "@/lib/team-scheduling-rules";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -103,7 +106,7 @@ export function HostCalendar({ view: first, pin, tz, hosting }: { view: HostCale
             {view.sync.lastSuccess ? `Last successful sync: ${when(view.sync.lastSuccess)}.` : "Last successful sync: never."}{" "}
             {view.source === "none"
               ? "Pick a calendar below so meetings you have elsewhere are never booked over."
-              : "Read again at most every 15 minutes while someone is looking at a booking page. If the last good reading is more than 45 minutes old, or your calendar cannot be read, your times are hidden until it can be, and the other hosts' times stay open."}
+              : `Read again at most every ${HOST_SYNC_MINUTES} minutes while someone is looking at a booking page. If the last good reading is more than ${HOST_STALE_MINUTES} minutes old, or your calendar cannot be read, your times are hidden until it can be, and the other hosts' times stay open.`}
           </p>
           {view.sync.message ? (
             <p className={`notice mt-3 ${view.sync.blocked ? "notice-warn" : ""}`} role="status">
@@ -250,13 +253,14 @@ export function HostCalendar({ view: first, pin, tz, hosting }: { view: HostCale
               className="mt-3"
               onSubmit={(e) => {
                 e.preventDefault();
-                if (url.trim()) void send("ics-add", { url }, "Calendar added and read.");
+                // Trimmed here, as the field checks it: the route cuts at its length before it trims.
+                if (url.trim()) void send("ics-add", { url: url.trim() }, "Calendar added and read.");
               }}
             >
               <label className="field-label" htmlFor="host-ics">
                 Secret address in iCal format
               </label>
-              <input id="host-ics" className="field mt-1 w-full" type="url" inputMode="url" autoComplete="off" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" />
+              <UrlField id="host-ics" className="field mt-1 w-full" autoComplete="off" value={url} onChange={setUrl} check={HOST_ICS_CHECK} placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" />
               <p className="mt-1 text-xs text-ink-soft">Read once now, then kept sealed; never shown again, not even to you.</p>
               <button type="submit" className="btn btn-secondary btn-sm mt-3" disabled={busy !== null || !url.trim()} aria-busy={busy === "ics-add"}>
                 {busy === "ics-add" ? "Reading it…" : "Add and use it"}

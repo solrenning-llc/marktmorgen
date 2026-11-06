@@ -13,13 +13,18 @@
  *
  * What can go in one is what one plain payment can sell: a paid product at
  * one price, sold once, that nobody has to choose, book, hold or answer
- * questions for first. Up to MAX_CART at a time, which is how many products
- * one order can name.
+ * questions for first, handed over digitally or shipped by the creator
+ * (lib/cart-shipping.ts). Up to MAX_CART at a time, which is how many
+ * products one order can name.
  */
 import type { Listing } from "@/lib/store";
+import { activeShipping } from "@/lib/shipping";
 
 /** The most products one cart pays for: the product and the three an order can add to it. */
 export const MAX_CART = 4;
+
+/** The cart checkout's metadata field naming the product whose offers after paying follow it (lib/cart-offers.ts). */
+export const CART_OFFER_META = "offer_from";
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -32,6 +37,10 @@ export function cartable(product: Listing): boolean {
   if (product.bundle && product.pick) return false;
   if (product.bundle) return product.bundle.length >= 2;
   if (product.course) return product.course.lessons > 0;
+  // A physical product the creator ships (513 [PF1], unit 2b): Stripe asks for
+  // one address in a country every physical product in the cart ships to
+  // (lib/cart-shipping.ts). A limited one waits for the cart to hold stock.
+  if (activeShipping(product)) return true;
   return product.file !== null || product.link !== null;
 }
 

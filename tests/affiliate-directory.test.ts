@@ -11,7 +11,7 @@
  *   - the order is the one written on the page;
  *   - unchecking the box takes the program off the page at once.
  */
-import { addProduct, claimHandle, ensureStatsId, setAffiliateSetting, setProductHidden, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, setProductExtras, ensureStatsId, setAffiliateSetting, setProductHidden, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { DIRECTORY_ORDER, MIN_CLICKS_FOR_RATES, directoryNumbers, directoryRow, readDirectory, sortRows, type DirectoryRow } from "@/lib/affiliate-directory";
 import { programNumbers } from "@/lib/affiliates";
@@ -54,6 +54,33 @@ async function main(): Promise<void> {
     [["Sourdough Guide", 30, 600], ["Pastry Course", 40, 4800]],
   );
   is("the best one sale earns", row.topEarnCents, 4800);
+
+  // 397 [SL1]: a membership earns on its payments only when the store credits them, and says for how long.
+  const club = await addProduct(A, "Bakers' Club", "", "10", { interval: "month", trialDays: 0, payments: 0 });
+  if (!club.ok) throw new Error("no membership");
+  const noMembers = directoryRow((await storeForEmail(A))!) as DirectoryRow;
+  is("a membership not credited is not there", noMembers.products.some((p) => p.title === "Bakers' Club"), false);
+  await setAffiliateSetting(A, parseAffiliateSetting({ ...terms, directory: true, recurring: 12 }));
+  const members = directoryRow((await storeForEmail(A))!) as DirectoryRow;
+  const listed = members.products.find((p) => p.title === "Bakers' Club");
+  is("credited, it is there: what one monthly payment earns, for the months the store set", [listed?.earnCents, listed?.months, listed?.interval, listed?.trialDays], [300, 12, "month", undefined]);
+  // A free trial as long as the months credited leaves no payment that earns: not listed.
+  const trialClub = await addProduct(A, "Trial Club", "", "10", { interval: "month", trialDays: 30, payments: 0 });
+  if (!trialClub.ok) throw new Error("no trial membership");
+  await setAffiliateSetting(A, parseAffiliateSetting({ ...terms, directory: true, recurring: 1 }));
+  is("a trial that uses up the months credited is not there", (directoryRow((await storeForEmail(A))!) as DirectoryRow).products.some((p) => p.title === "Trial Club"), false);
+  await setAffiliateSetting(A, parseAffiliateSetting({ ...terms, directory: true, recurring: 12 }));
+  is("with more months than its trial, it is, and says its free days", (directoryRow((await storeForEmail(A))!) as DirectoryRow).products.find((p) => p.title === "Trial Club")?.trialDays, 30);
+  await setProductHidden(A, trialClub.product.id, true);
+  is("a product sold once has no months", members.products.find((p) => p.title === "Sourdough Guide")?.months, undefined);
+  // A product that can also be paid in parts still earns on its one-time sale, so it is there.
+  const planned = await setProductExtras(A, course.product.id, { plan: { payments: 3, interval: "month", amountCents: 4500 } });
+  const withPlan = (directoryRow((await storeForEmail(A))!) as DirectoryRow).products.find((p) => p.title === "Pastry Course");
+  is("a product with a payment plan stays at its one-time sale; while memberships and plans earn, no \"paid in full\"", [planned.ok, withPlan?.earnCents, withPlan?.paidInFull], [true, 4800, undefined]);
+  await setAffiliateSetting(A, parseAffiliateSetting({ ...terms, directory: true }));
+  is("while they earn nothing, it says a sale paid in full", (directoryRow((await storeForEmail(A))!) as DirectoryRow).products.find((p) => p.title === "Pastry Course")?.paidInFull, true);
+  await setProductExtras(A, course.product.id, { plan: null });
+  await setAffiliateSetting(A, parseAffiliateSetting({ ...terms, directory: true }));
 
   const B = "nostripe@example.com";
   await claimHandle(B, "nostripe", "No Stripe", "");

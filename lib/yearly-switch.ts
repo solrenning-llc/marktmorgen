@@ -30,7 +30,7 @@ import { readListings } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type Grant, MANAGE_TOKEN_PATTERN, grantOf, subsOf } from "@/lib/membership-manage";
 import { dueNow, productOfSub } from "@/lib/tier-rules";
-import { previewBody, switchBody, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
+import { chargedOf, previewBody, switchBody, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
 import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
 import { formatMoney } from "@/lib/money";
 import { membershipLine } from "@/lib/buyer-words";
@@ -264,13 +264,14 @@ async function tell(store: Store, account: string, found: Found, updated: Record
   }
   if (!email) return;
   await forgetPaid(store, email).catch(() => {});
-  const invoice = updated.latest_invoice as { total?: unknown; amount_paid?: unknown; currency?: unknown } | null;
-  const raw = typeof invoice?.total === "number" && !found.trialing ? invoice.total : 0;
-  const total = raw > 0 && typeof invoice?.amount_paid === "number" ? invoice.amount_paid : raw;
-  const currency = typeof invoice?.currency === "string" ? invoice.currency : store.currency;
+  // Read exactly, as a switch between tiers reads it (lib/tier-switch.ts, chargedOf): an invoice that cannot be read
+  // says nothing about the amount, never that nothing was charged (Codex CX1 on #2764).
+  const charged = found.trialing ? null : chargedOf(updated.latest_invoice);
+  const total = charged?.cents ?? 0;
+  const currency = charged?.currency ?? store.currency;
   const m = membershipWords(store.language);
   const locale = LANGUAGES[parseLanguage(store.language)].locale;
-  const paid = found.trialing ? m.yearlyPaidTrial : total > 0 ? m.yearlyPaidCharged(formatMoney(total, currency, locale)) : m.paidNothing;
+  const paid = found.trialing ? m.yearlyPaidTrial : !charged ? "" : total > 0 ? m.yearlyPaidCharged(formatMoney(total, currency, locale)) : m.paidNothing;
   const from = `"${m.fromName(store.name.replace(/["\\<>\r\n]/g, "").slice(0, 60))}" <${(NIMBUS_FROM.match(/<([^>]+)>/)?.[1] ?? NIMBUS_FROM).trim()}>`;
   await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from,
@@ -279,7 +280,7 @@ async function tell(store: Store, account: string, found: Found, updated: Record
     text: [
       m.yearlyNow(store.name, found.product.title),
       "",
-      paid,
+      ...(paid ? [paid] : []),
       m.fromNow(priceWords(store, found.choice.cents, "year", store.language)),
       // The yes given for this move, quoted as a checkout's confirmation quotes it (the durable medium).
       ...consentEmailLines(store, kept ? { [CONSENT_META]: kept } : null),
@@ -297,9 +298,11 @@ async function tell(store: Store, account: string, found: Found, updated: Record
         `${email} moved their ${found.product.title} membership from ${priceWords(store, found.choice.monthly, "month")} to ${priceWords(store, found.choice.cents, "year")}.`,
         found.trialing
           ? "They are in their free trial; the yearly price is charged when it ends."
-          : total > 0
-            ? `Charged today: ${formatMoney(total, currency)}, the year less what was left of their last monthly payment.`
-            : "",
+          : !charged
+            ? "The amount charged could not be read here; Stripe has it."
+            : total > 0
+              ? `Charged today: ${formatMoney(total, currency)}, the year less what was left of their last monthly payment.`
+              : "",
         "",
         "It is all on your own Stripe account, under that customer.",
       ].filter(Boolean).join("\n"),

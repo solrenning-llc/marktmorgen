@@ -165,6 +165,22 @@ export function switchReply(updated: unknown, subscription: string, price: strin
  */
 export const SWITCH_STRIPE_VERSION = "2026-08-26.dahlia";
 
+/**
+ * What the switch's invoice charged, read exactly (Codex CX1 on #2764; CX-123
+ * rule 24): the expanded invoice, its total in whole cents, its currency and,
+ * above zero, what the card paid after any credit, in whole cents. Anything
+ * else is unknown (null): the receipt then says nothing about the amount,
+ * never that nothing was charged.
+ */
+export function chargedOf(invoice: unknown): { cents: number; currency: string } | null {
+  if (!invoice || typeof invoice !== "object" || Array.isArray(invoice)) return null;
+  const { total, amount_paid: paid, currency } = invoice as Record<string, unknown>;
+  if (typeof total !== "number" || !Number.isSafeInteger(total) || typeof currency !== "string" || !currency) return null;
+  if (total <= 0) return { cents: total, currency };
+  if (typeof paid !== "number" || !Number.isSafeInteger(paid) || paid < 0) return null;
+  return { cents: paid, currency };
+}
+
 /** The switch itself, at the same second: charged at once, and made only if it is paid. */
 export function switchBody(itemId: string, price: string, at: number): URLSearchParams {
   const body = new URLSearchParams({
@@ -344,22 +360,24 @@ async function tell(store: Store, account: string, found: Found, updated: Record
   }
   if (!email) return;
   await Promise.all([forgetPaid(store, email), forgetTicket(store, email)]).catch(() => {});
-  const invoice = updated.latest_invoice as { total?: unknown; amount_paid?: unknown; currency?: unknown } | null;
-  // What the card paid, after any credit the member already had; a credit when below zero.
-  const raw = typeof invoice?.total === "number" && !found.trialing ? invoice.total : 0;
-  const total = raw > 0 && typeof invoice?.amount_paid === "number" ? invoice.amount_paid : raw;
-  const currency = typeof invoice?.currency === "string" ? invoice.currency : store.currency;
+  // What the card paid, after any credit the member already had; a credit when below zero. Read exactly: an invoice
+  // that cannot be read says nothing about the amount (null), never that nothing was charged (Codex CX1 on #2764).
+  const charged = found.trialing ? null : chargedOf(updated.latest_invoice);
+  const total = charged?.cents ?? 0;
+  const currency = charged?.currency ?? store.currency;
   // The member's receipt is in the store's language; the creator's note below stays in English.
   const m = membershipWords(store.language);
   const locale = LANGUAGES[parseLanguage(store.language)].locale;
   const paid =
     found.trialing
       ? m.paidTrial
-      : total > 0
-        ? m.paidCharged(formatMoney(total, currency, locale))
-        : total < 0
-          ? m.paidCredit(formatMoney(-total, currency, locale))
-          : m.paidNothing;
+      : !charged
+        ? ""
+        : total > 0
+          ? m.paidCharged(formatMoney(total, currency, locale))
+          : total < 0
+            ? m.paidCredit(formatMoney(-total, currency, locale))
+            : m.paidNothing;
   const from = `"${m.fromName(store.name.replace(/["\\<>\r\n]/g, "").slice(0, 60))}" <${(NIMBUS_FROM.match(/<([^>]+)>/)?.[1] ?? NIMBUS_FROM).trim()}>`;
   await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from,
@@ -368,7 +386,7 @@ async function tell(store: Store, account: string, found: Found, updated: Record
     text: [
       m.switchedNow(store.name, found.to.title, found.from.title),
       "",
-      paid,
+      ...(paid ? [paid] : []),
       m.fromNow(tierWords(store, found.to, store.language)),
       "",
       m.switchedOpen,
@@ -386,7 +404,7 @@ async function tell(store: Store, account: string, found: Found, updated: Record
       subject: `A member switched to ${found.to.title}`.slice(0, 200),
       text: [
         `${email} switched their membership from ${found.from.title} to ${found.to.title}.`,
-        found.trialing ? "They are in their free trial; the new price starts when it ends." : total > 0 ? `Charged today: ${formatMoney(total, currency)}.` : total < 0 ? `Credited to their next payments: ${formatMoney(-total, currency)}.` : "",
+        found.trialing ? "They are in their free trial; the new price starts when it ends." : !charged ? "The amount charged could not be read here; Stripe has it." : total > 0 ? `Charged today: ${formatMoney(total, currency)}.` : total < 0 ? `Credited to their next payments: ${formatMoney(-total, currency)}.` : "",
         "",
         "It is all on your own Stripe account, under that customer.",
       ].filter(Boolean).join("\n"),

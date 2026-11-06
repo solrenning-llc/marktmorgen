@@ -29,6 +29,8 @@
  * another page is.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { takePictureDoor } from "@/lib/picture-door";
 import { EMPTY_PAGE, MAX_STORED_PAGE_BYTES, type SalesPage, parsePage, picturePaths } from "@/lib/sales-page";
 import { sectionsOn } from "@/lib/saved-blocks";
 import { usesCommands } from "@/lib/saved-block-store";
@@ -83,6 +85,47 @@ export async function claimPictures(statsId: string, productId: string, paths: s
   const [owners] = await redisPipeline([["HMGET", picsKey(statsId), ...paths]]);
   const list = Array.isArray(owners) ? owners : [];
   return paths.filter((_, i) => list[i] !== productId);
+}
+
+/**
+ * Says these pictures, new on this page, are this page's, and returns whether
+ * every one of them may be: each has to be let in through the picture door
+ * for this very save (lib/picture-door.ts, taken here) or be written down as
+ * this page's already (a save tried again after a failure).
+ *
+ * The store's pictures share one folder, and this registry lists only the
+ * pages' pictures: a product's, a link's, a buyer's review photo or an
+ * email's picture sit in the same folder unlisted. So a name that is neither
+ * fresh from the door nor this page's is refused, never claimed; otherwise
+ * taking it off this page later would delete a file another record shows.
+ * Another page's picture is refused as before. A picture from before the door
+ * existed stays on the page that shows it: it is never new there.
+ *
+ * Those taken from the door are claimed even when another is refused, so the
+ * creator's save tried again still finds them; nothing is deleted here.
+ * A take from the door that cannot be confirmed throws (takePictureDoor), so
+ * the page is refused with server_error before it is written.
+ */
+export async function claimNewPictures(statsId: string, pageId: string, paths: string[]): Promise<boolean> {
+  const unique = [...new Set(paths)];
+  if (unique.length === 0) return true;
+  // Not known is ours to say, never "add the picture again" (Claude 4 on #2156): it throws, and the route answers
+  // server_error before anything is written.
+  if (!isRedisConfigured()) throw new UnknownReplyError("page pictures: no database");
+  const [owners] = await redisPipeline([["HMGET", picsKey(statsId), ...unique]]);
+  if (!Array.isArray(owners) || owners.length !== unique.length) throw new UnknownReplyError("page pictures: HMGET");
+  const list = owners;
+  if (unique.some((_, i) => typeof list[i] === "string" && list[i] !== "" && list[i] !== pageId)) return false;
+  const unclaimed = unique.filter((_, i) => list[i] !== pageId);
+  const taken = await takePictureDoor(unclaimed);
+  const fresh = unclaimed.filter((path) => taken.has(path));
+  if (fresh.length) {
+    await redisPipeline(fresh.map((path) => ["HSETNX", picsKey(statsId), path, pageId]));
+    const [after] = await redisPipeline([["HMGET", picsKey(statsId), ...fresh]]);
+    const now = Array.isArray(after) ? after : [];
+    if (fresh.some((_, i) => now[i] !== pageId)) return false;
+  }
+  return fresh.length === unclaimed.length;
 }
 
 /**

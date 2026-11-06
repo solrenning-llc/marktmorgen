@@ -1,0 +1,18 @@
+import {UNIT_COST,request,DB_BYTE_MONTH,ORIGIN_PER_BYTE} from "./plan-cost-registry";
+import {roomLookCost,roomLeaveCost,roomMinutesCost,visitCost} from "./traffic-cost";
+import {ROOM_LIVE_PARTS,VISITS_INCLUDED} from "@/lib/traffic-rules";
+import {STORE_ALLOWANCES} from "@/lib/store-allowance-rules";
+import {done,is} from "./check";
+const P=500,Q=20,grants=9,bytes=P*Q*64;
+const common=P*grants*roomMinutesCost(120)+grants*roomMinutesCost(120)+(2+3*Q)*UNIT_COST.studio+request("heavy",10,bytes)+bytes*ORIGIN_PER_BYTE+P*roomLookCost()+bytes*DB_BYTE_MONTH;
+const A=common+P*Q*UNIT_COST.buyer,B=common+P*UNIT_COST.buyer;
+console.log(JSON.stringify({basis:"EXACT historical repository exports, hypothetical known components only, not measured product/provider or complete worst cost",buyer:UNIT_COST.buyer,studio:UNIT_COST.studio,poll:roomLookCost(),grant:roomLeaveCost(),tenMinutes:roomMinutesCost(120),visit:visitCost(),A,B,visits:P*grants*ROOM_LIVE_PARTS/100,VISITS_INCLUDED,buyerAllowance:(["creator","pro","scale"] as const).map(k=>STORE_ALLOWANCES[k].buyer)},null,2));
+is("study known model A rounds to its stated figure",Math.round(A*100)/100,5.94);
+is("study known model B rounds to its stated figure",Math.round(B*100)/100,3.14);
+is("study live visit debit arithmetic",P*grants*ROOM_LIVE_PARTS/100,11700);
+is("study model A buyer action arithmetic",P*Q,10000);
+is("study model B buyer action arithmetic",P,500);
+is("study buyer-action price agrees within shown precision",Math.abs(UNIT_COST.buyer-0.0002945)<0.00000005,true);
+is("study ten-minute price agrees within shown precision",Math.abs(roomMinutesCost(120)-0.0006617)<0.00000005,true);
+is("study actual buyer allowance constants",(["creator","pro","scale"] as const).map(k=>STORE_ALLOWANCES[k].buyer),[200,1000,3000]);
+done();

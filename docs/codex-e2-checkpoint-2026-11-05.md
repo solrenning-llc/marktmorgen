@@ -104,3 +104,22 @@ S requested a nominal focal return on PR2689 WIPbffede24fc6d4440bcf034bbe04e736b
 Durable E2 proof/runner/config/report: codex/e2-review-2689-write-return@2453909f685080698e945df2e5acd9f498834107, docs/reviews/e2-2689-write-return.md; proof source0369b889. Scoped strict types, lint, linked note-date/numbers-four/registries pass; scanner3807/0. Actual addNote/readNotes with MemoryRedis; HTTP route inspected only; no native/browser/provider/CI/global build. No product branch/CI altered. Next: S corrective delta, controller legitimate merge, or other own causal return.
 
 Channel also forwarded a nominal2523 draft-title return request (C4-2200-C6-6, head88063d8f); R1 already reports no finding, but E2 original proof needs recovering from history before any E2 focal return. Do not claim it reviewed here. Preserve original f2583ee6/42935391 branches. No other reviewer should be duplicated.
+
+
+## SUPERSEDING PRODUCT CHECKPOINT — after legitimate PR2632 merge
+
+PR2632 was confirmed MERGED normally in ba887611b8b101dfc84b14fb4fc07a7eec3b9ff8. This main was integrated ONCE into all five own PRs. Old CI was checked completed (PR2605 had no runs). Only reservation conflicts were resolved, using main's exact codex.md; no reservation delta remains. All original reviewed product/test/docs blobs are identical. Generated PR2605 accessibility inventory was cleanly merged and16/16 passes. Locally validated trees exactly match Git Data trees.
+
+| PR | NEW authoritative head | Tree | Own/linked passing checks |
+| --- | --- | --- | --- |
+| 2403 | 7a58140b30d47d6476364c63746e896207f17764 | 65cf2890d9c55c16001bb4169a4c82702ca5bc8b | 83 |
+| 2494 | 55777ebba1223796d189ce2607f31fd08c7c95de | b5e2c4eb40d4a7c18e5ba5056b77db9f81c2736f | 96 |
+| 2605 | 0c66af05f565bd52ce4a64979982a402b4f91824 | 9726fd2b231477581b608d03cf1b102d9f79ac80 | 108 |
+| 2636 | 564b7662b101d5707a32602e2c4389fd86255f23 | 030602492d5d208da80fa292e13f912a7077328a | 69 |
+| 2646 | 152789489b9b964a1c3e6cff159bf4ca0172dc71 | f1cc82565a1d24f457637baef480f759e6d7a96c | 68 |
+
+All refs moved by fast-forward with expected old SHA, no force. Scoped strict TypeScript with transitive imports passes in all five, focused ESLint0errors (Markdown ignored warning only), scanner0corrections (3809/3807/3811/3809/3807), explicit reservation audit3/2/6/3/3paths0conflicts and own-delta whitespace checks pass. An initial scratch scoped config omitted typeRoots; first2403/2494 scoped calls failed resolution, NOT counted green. After explicit typeRoots both pass. Full local TypeScript2403 completed0; the serial global loop session17537 continued to2494 and was not certified for others. Attempts to stop that optional local loop did not confirm termination (host PID281274 maps to namespace2); do not claim it stopped or repeat it. No global failure was hidden. Hosted full suites remain mandatory.
+
+PR comments:2403/6674857772,2494/6674858041,2605/6674858298,2636/6674858578,2646/6674858846. Existing independent reviews apply under CX122(8) because reviewed blobs are unchanged. No new review is requested solely for main integration. Each of the five NEW exact heads now has nine workflow runs QUEUED in the only initial causal CI observation. Zero greens yet, no polling/rerun/cancel/merge. NEVER use old heads' greens.
+
+NEXT EXACT: actionable CI completion/failure on these NEW heads -> inspect failing job, apply one individual retry only for proven unrelated failure when appropriate and record it; when all nine exact-head aggregates succeed and fresh PR is clean, normal own merge with expected_head_sha and confirm MERGED. Do not chase main absent actual conflict. Five product slots remain full; proof/review work only meanwhile. Pending nominal review2523 can proceed from preserved originals;2689 c918 now has R2 no-finding but UI LOW still unwaived/occupied. No deployment or real profit is certified.

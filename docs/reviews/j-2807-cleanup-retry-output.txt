@@ -1,0 +1,39 @@
+
+=== j-2807-cleanup-retry.proof.ts ===
+
+Removing a product with a course
+  ok    the course has every comment family and counted room before removal
+changing a product failed UnknownReply: Redis answered the deletion of a course's lesson comments with a reply it was not asked for; its outcome is unknown
+    at exactReplies (/tmp/j-renewal-UZd0WE/j-2807-cleanup-retry.proof.ts.cjs:14025:48)
+    at dropComments (/tmp/j-renewal-UZd0WE/j-2807-cleanup-retry.proof.ts.cjs:117879:20)
+    at async POST2 (/tmp/j-renewal-UZd0WE/j-2807-cleanup-retry.proof.ts.cjs:119552:11)
+    at async removeProduct2 (/tmp/j-renewal-UZd0WE/j-2807-cleanup-retry.proof.ts.cjs:119703:22)
+    at async main (/tmp/j-renewal-UZd0WE/j-2807-cleanup-retry.proof.ts.cjs:119751:18)
+  ok    product: one unapplied unknown comment deletion
+  FAIL  the product removal succeeds
+        expected [200,true]
+        got      [404,false]
+  FAIL  the removed course leaves no comment family or counted room
+        expected [[],0]
+        got      [["nl:lc:bee68a200ee148ea8c34881e580589fb:c","nl:lc:bee68a200ee148ea8c34881e580589fb:all","nl:lc:bee68a200ee148ea8c34881e580589fb:r","nl:lc:bee68a200ee148ea8c34881e580589fb:names","nl:lc:bee68a200ee148ea8c34881e580589fb:off","nl:lc:bee68a200ee148ea8c34881e580589fb:seen","nl:lc:bee68a200ee148ea8c34881e580589fb:l:dmtltji4hoaf"],1472]
+
+Disabling an empty course after its last lesson was removed
+  ok    the last lesson is removed first
+  ok    course-level comment records and room still exist until the course goes
+changing a course failed UnknownReply: Redis answered the deletion of a course's lesson comments with a reply it was not asked for; its outcome is unknown
+    at exactReplies (/tmp/j-renewal-UZd0WE/j-2807-cleanup-retry.proof.ts.cjs:14025:48)
+    at dropComments (/tmp/j-renewal-UZd0WE/j-2807-cleanup-retry.proof.ts.cjs:117879:20)
+    at async /tmp/j-renewal-UZd0WE/j-2807-cleanup-retry.proof.ts.cjs:118651:9
+    at async withLock (/tmp/j-renewal-UZd0WE/j-2807-cleanup-retry.proof.ts.cjs:15207:12)
+    at async POST (/tmp/j-renewal-UZd0WE/j-2807-cleanup-retry.proof.ts.cjs:118638:12)
+    at async courseCall (/tmp/j-renewal-UZd0WE/j-2807-cleanup-retry.proof.ts.cjs:119699:22)
+    at async main (/tmp/j-renewal-UZd0WE/j-2807-cleanup-retry.proof.ts.cjs:119769:25)
+  ok    course: unapplied unknown comment deletion
+  FAIL  the empty course is disabled
+        expected [200,true]
+        got      [400,false]
+  FAIL  disabling leaves no course-level comment family or counted room
+        expected [[],0]
+        got      [["nl:lc:71eb02a8a21f4fb3a459e83e31a84258:c","nl:lc:71eb02a8a21f4fb3a459e83e31a84258:all","nl:lc:71eb02a8a21f4fb3a459e83e31a84258:r","nl:lc:71eb02a8a21f4fb3a459e83e31a84258:names","nl:lc:71eb02a8a21f4fb3a459e83e31a84258:off","nl:lc:71eb02a8a21f4fb3a459e83e31a84258:seen"],176]
+
+9 checks, 4 failing.

@@ -1395,10 +1395,28 @@ export default async function ThanksPage({ params, searchParams }: Params) {
  */
 async function PayPalThanks({ store, order }: { store: Store; order: string }) {
   const allowed = await withinStore("thanks-view", `${clientAddress({ headers: await headers() })}|${store.handle}`, VIEWS_PER_TEN_MINUTES, 600, store, "buyer");
-  const paid = allowed ? await readPaid(order) : null;
+  // A record or a mark that could not be read is unknown, never "not found" and never the error page (PF1): the
+  // buyer is told the payment could not be checked just now.
+  let unread = false;
+  const paid = allowed
+    ? await readPaid(order).catch(() => {
+        unread = true;
+        return null;
+      })
+    : null;
   const ours = paid && paid.store === store.statsId ? paid : null;
-  const product = ours ? await readListing(store, ours.product) : null;
-  const waiting = !ours && allowed ? await stillPending(store, order) : false;
+  // Paid but still marked as waiting on PayPal: written down, not yet handed over (lib/paypal-sales.ts settles the
+  // record first and clears the mark after). An unknown mark counts as still being handed over, never as delivered,
+  // so no link to the purchase and no purchase event for the creator's pixels until it is.
+  const handing = ours ? await stillPending(store, order).catch(() => true) : false;
+  const product = ours && !handing ? await readListing(store, ours.product) : null;
+  const waiting =
+    !ours && allowed && !unread
+      ? await stillPending(store, order).catch(() => {
+          unread = true;
+          return false;
+        })
+      : false;
   const fresh = ours ? saleClock() - ours.at < DOWNLOAD_WINDOW_SECONDS : false;
   const link = ours && product && fresh ? await ordersLinkFor(store, ours.email, storeBase(store)).catch(() => null) : null;
   const t = thanksWords(store.language);
@@ -1407,7 +1425,14 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
     <div lang={LANGUAGES[store.language].locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
       <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
         <div className="st-card p-7 sm:p-10">
-          {ours && product ? (
+          {ours && handing ? (
+            <>
+              <p className="st-price text-sm">{t.paidWithPayPal}</p>
+              <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{t.ppHandingOver}</h1>
+              <p className="st-muted mt-4">{t.ppHandingOverBody(ours.email)}</p>
+              <p className="st-muted mt-3 text-sm">{t.ppPaidTo(store.name)}</p>
+            </>
+          ) : ours && product ? (
             <>
               <p className="st-price text-sm">{t.paidWithPayPal}</p>
               <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{t.thankYou}</h1>
@@ -1431,6 +1456,11 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
                 store={store}
                 event={{ type: "purchase", id: order, value: toMajor(ours.cents, ours.currency), currency: ours.currency, productId: product.id, title: product.title }}
               />
+            </>
+          ) : unread ? (
+            <>
+              <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{t.ppCouldNotCheck}</h1>
+              <p className="st-muted mt-4">{t.ppCouldNotCheckBody}</p>
             </>
           ) : waiting ? (
             <>

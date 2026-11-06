@@ -26,6 +26,7 @@ import { COMMUNITY_WORDS } from "@/lib/buyer-words/community";
 import { THANKS_WORDS } from "@/lib/buyer-words/thanks";
 import { BLOCK_WORDS } from "@/lib/buyer-words/blocks";
 import { JOIN_WORDS } from "@/lib/buyer-words/join";
+import { PRODUCT_SAFETY_WORDS } from "@/lib/buyer-words/product-safety";
 import { GUIDE_WORDS } from "@/lib/buyer-words/guide";
 import { CONTACT_WORDS } from "@/lib/buyer-words/contact";
 import { TIPS_WORDS } from "@/lib/buyer-words/tips";
@@ -109,6 +110,8 @@ const SAME: Record<string, Record<string, string[]>> = {
   "page blocks": { es: ["bonusN"], fr: ["pagesMenu"], de: ["socialWebsite"], it: ["socialEmail", "videoWindowMark"], nl: ["socialWebsite", "videoWindowMark"] },
   // "Audience" is the French word too.
   "media kit": { fr: ["audienceTitle"] },
+  // "per kilogram", "per liter", "per meter": the Dutch words too (618 [SZ2]).
+  "product safety": { nl: ["per"] },
   // "Total" is the word in these languages too.
   cart: { es: ["total"], fr: ["total"], pt: ["total"] },
   thanks: { es: ["priceEvery"], fr: ["priceEvery"], de: ["priceEvery"], it: ["priceEvery"], nl: ["priceEvery"], pt: ["priceEvery"] },
@@ -189,6 +192,7 @@ async function main(): Promise<void> {
     ["given through the API", (code) => ACCESS_WORDS[code]],
     ["welcome offer", (code) => WELCOME_WORDS[code]],
     ["store chat", (code) => CHAT_WORDS[code]],
+    ["product safety", (code) => PRODUCT_SAFETY_WORDS[code]],
   ];
   for (const [area, wordsOf] of AREAS) {
     const englishWords = wordsOf("en");

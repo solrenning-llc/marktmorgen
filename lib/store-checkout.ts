@@ -21,7 +21,7 @@ import { fairCoupon } from "@/lib/fair-coupon";
 import { introCoupon } from "@/lib/intro-coupon";
 import { activeIntro } from "@/lib/intro-price";
 import { activeYearly } from "@/lib/yearly-price";
-import { activeShipping } from "@/lib/shipping";
+import { shippingNow, shipsNowhere } from "@/lib/physical-legal-ship";
 import { type ShipAddress, shippingAddressOf, wasShipped } from "@/lib/shipping-address";
 import { type Shipped, readShipped } from "@/lib/shipments";
 import { shippingWords } from "@/lib/buyer-words/shipping";
@@ -126,6 +126,8 @@ export function canSellProduct(store: Store, product: Listing): boolean {
   if (product.priceCents === 0) return false;
   // A draft is not on sale until the creator publishes it.
   if (product.hidden) return false;
+  // Shipped only where its EU/EEA safety fields keep closed (618 [SZ2], lib/physical-legal-ship.ts): not sold until filled.
+  if (shipsNowhere(product)) return false;
   if (!canSell(store)) return false;
   // What it hands over is read from the product alone (lib/product-option.ts,
   // handsOver), which the studio also reads to say what removing a price does.
@@ -291,7 +293,9 @@ export async function createCheckout(
   // A call is booked for a time, through its own door, never bought blind.
   if (product.call) throw new Error("A call is booked, not bought directly");
   // A physical product is shipped to the buyer who pays for it: not as a gift or for a group (lib/shipping.ts).
-  const shipping = activeShipping(product);
+  // Without the EU/EEA countries while its safety fields are not filled (618 [SZ2], lib/physical-legal-ship.ts).
+  const shipping = shippingNow(product);
+  if (shipping && shipping.countries.length === 0) throw new Error("This is not shipped anywhere right now");
   if (shipping && (extras.gift || extras.group)) throw new Error("This is shipped to the buyer who pays for it");
 
   // A bundle's list is read now and written onto the checkout, so what this

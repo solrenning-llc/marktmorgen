@@ -21,7 +21,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { addOption, addProduct, claimHandle, ensureStatsId, setProductImage, setProductLegal, setProductShipping, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { listingOf, parseProduct, readListing, readProduct, readProductLegal } from "@/lib/catalog";
+import { catalogRecord, listingOf, parseCatalog, parseProduct, readListing, readProduct, readProductLegal } from "@/lib/catalog";
 import { parseShipping } from "@/lib/shipping";
 import { GPSR_AREA, unitWords } from "@/lib/physical-legal";
 import type { PhysicalLegal } from "@/lib/physical-legal-record";
@@ -119,10 +119,11 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", extrasKey, "{not json"]]);
   store = (await storeForEmail(OWNER))!;
   is("its record unreadable: no legal record, and its checkout leaves the EU/EEA out though the listing is marked", [await readProductLegal(store, id), shippingNow((await readProduct(store, id))!)?.countries], [null, ["US"]]);
-  await redis.pipeline([["SET", extrasKey, String(savedExtras)], ["SET", listingKey, JSON.stringify({ ...JSON.parse(String(savedListing)), safetyFilled: "yes" })]]);
-  store = (await storeForEmail(OWNER))!;
-  is("a mark that is not exactly true is no mark", shippingNow((await readListing(store, id))!)?.countries, ["US"]);
-  await redis.pipeline([["SET", listingKey, String(savedListing)]]);
+  await redis.pipeline([["SET", extrasKey, String(savedExtras)]]);
+  const record = catalogRecord(store.catalog);
+  const forged = parseCatalog({ ...record, head: [{ ...JSON.parse(String(savedListing)), safetyFilled: "yes" }] }, null).head[0];
+  const kept = parseCatalog({ ...record, head: [JSON.parse(String(savedListing))] }, null).head[0];
+  is("read back from the store record, the mark is kept only when exactly true", [shippingNow(forged)?.countries, shippingNow(kept)?.countries, kept.safetyFilled], [["US"], ["US", "FR", "DE"], true]);
   await setProductImage(OWNER, id, null);
   store = (await storeForEmail(OWNER))!;
   is("the picture taken off: the mark goes with it", (await readListing(store, id))?.safetyFilled ?? false, false);
@@ -166,9 +167,14 @@ async function main(): Promise<void> {
   part("On the product page, before the buy button");
   store = (await storeForEmail(OWNER))!;
   const shown = renderToStaticMarkup(createElement(ProductSafetyFacts, { store, product: (await readListing(store, id))!, legal }));
-  for (const words of ["<section", "<h2", "Product safety and manufacturer", "<dl", "<dt", "<dd", "Manufacturer", "Harbor Print Co.", "1 Dock Rd, Austin, TX 78701", "safety@harbor.example", "United States", "EU responsible person", "EU Rep GmbH", "Germany", "Product type or model", "Hardcover cookbook, 120 pages", "Batch 2026-11", "Harbor Books states that this product has no warnings.", "California Proposition 65", "<strong>WARNING:</strong>", "www.P65Warnings.ca.gov", "Unit price: $29.17 per kilogram", "Signed: $30 per kilogram"]) {
+  for (const words of ["<section", "<h2", "Product safety and manufacturer", "<dl", "<dt", "<dd", "Manufacturer", "Harbor Print Co.", "1 Dock Rd, Austin, TX 78701", "safety@harbor.example", "United States", "EU responsible person", "EU Rep GmbH", "Germany", "Product type or model", "Hardcover cookbook, 120 pages", "Batch 2026-11", "Harbor Books states that this product has no warnings.", "California Proposition 65", "<strong>WARNING:</strong>", "www.P65Warnings.ca.gov", "Signed, unit price: $30 per kilogram"]) {
     is(`shows: ${words}`, shown.includes(words), true);
   }
+  is("with several prices, only theirs: the main price is not sold on its own", shown.includes("Unit price: $29.17"), false);
+  const single = renderToStaticMarkup(createElement(ProductSafetyFacts, { store, product: listingOf(parseProduct({ ...RAW, legal: FULL })!), legal: FULL }));
+  is("one price: its unit price, computed from the price charged", single.includes("Unit price: $29.17 per kilogram"), true);
+  const onSale = { ...store, sale: { name: "Fall", percent: 50, starts: 1, ends: 4_000_000_000, all: true, products: [], coupon: "fall50" } };
+  is("during a store sale, from the sale price", renderToStaticMarkup(createElement(ProductSafetyFacts, { store: onSale, product: listingOf(parseProduct({ ...RAW, legal: FULL })!), legal: FULL })).includes("Unit price: $14.58 per kilogram"), true);
   is("as text, never a picture of text", /<img|<svg|<canvas/.test(shown), false);
   is("the unit is never abbreviated", /\$\d+(\.\d+)? ?\/ ?kg|per kg\b/.test(shown), false);
   is("never says the product complies", /\b(compliant|complies|compliance|certified|approved)\b/i.test(shown), false);

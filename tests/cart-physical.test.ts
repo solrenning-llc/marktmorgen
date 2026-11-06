@@ -111,7 +111,8 @@ async function main(): Promise<void> {
   is("the deal for buying more takes off the lines, never the shipping", [body.get("line_items[0][price_data][unit_amount]"), body.get("line_items[1][price_data][unit_amount]"), body.get("shipping_options[0][shipping_rate_data][fixed_amount][amount]")], ["1800", "1800", "1000"]);
   const before = sent.length;
   let refused: unknown = null;
-  await createCartCheckout(shop(), [physical("box", ["US"], 500), physical("poster", ["DE"], 500)], "https://marktmorgen.com", { digitalConsent: TEST_CONSENT }).catch((error) => {
+  // Mexico, not an EU/EEA country: those stay off a product until its safety fields are filled (618 [SZ2], tests/sz2-u3-display.test.ts).
+  await createCartCheckout(shop(), [physical("box", ["US"], 500), physical("poster", ["MX"], 500)], "https://marktmorgen.com", { digitalConsent: TEST_CONSENT }).catch((error) => {
     refused = error;
   });
   is("sharing no country: refused, nothing opened", [refused instanceof CartShippingRefused && (refused as CartShippingRefused).why, sent.length], ["apart", before]);
@@ -145,7 +146,7 @@ async function main(): Promise<void> {
   };
   await shipped("Planner", ["US", "CA"], 700, "Ships in 3 days");
   await shipped("Poster", ["US", "GB"], 0, "");
-  await shipped("Mug", ["DE"], 500, "");
+  await shipped("Mug", ["MX"], 500, "");
   const open = async (ids: string[], country = "") => {
     const answer = await readCart(new NextRequest(`https://marktmorgen.com/api/store/cart?handle=paper&ids=${ids.join(",")}`, { headers: country ? { "x-vercel-ip-country": country } : {} }));
     return (await answer.json()) as {

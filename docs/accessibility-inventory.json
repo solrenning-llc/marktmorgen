@@ -1482,6 +1482,7 @@
     "components/product-about-view.tsx",
     "components/product-editor.tsx",
     "components/product-image-editor.tsx",
+    "components/product-safety-facts.tsx",
     "components/product-update-box.tsx",
     "components/promotion-planner.tsx",
     "components/purchase-card.tsx",

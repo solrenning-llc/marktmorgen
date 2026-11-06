@@ -18,7 +18,8 @@
 import { placeLine } from "@/lib/call-place";
 import { listedLengths } from "@/lib/call-lengths";
 import { windowId } from "@/lib/allowance-window";
-import { SHIP_REGIONS, activeShipping } from "@/lib/shipping";
+import { SHIP_REGIONS } from "@/lib/shipping";
+import { shippingNow } from "@/lib/physical-legal-ship";
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { aiAvailableFor, answerModel, askModel, jsonIn } from "@/lib/ai";
@@ -86,7 +87,9 @@ export function deliveryWords(product: Listing, currency = "usd"): string {
   if (product.bundle && product.pick) return `It is a bundle the buyer builds: they choose any ${product.pick} of the ${product.bundle.length} products in it before paying, and get exactly those.`;
   if (product.bundle) return "It is a bundle: after paying, the buyer gets each product inside it.";
   // A physical product the creator ships (lib/shipping.ts): where to, and what shipping costs.
-  const shipping = activeShipping(product);
+  // Where it ships now (618 [SZ2], lib/physical-legal-ship.ts), as its checkout offers it.
+  const shipping = shippingNow(product);
+  if (shipping && shipping.countries.length === 0) return "It is a physical product the creator ships themselves; it is not shipped anywhere right now, so it cannot be bought yet.";
   if (shipping) {
     const where = shipping.region === "custom" ? shipping.countries.join(", ") : SHIP_REGIONS[shipping.region].label;
     return `It is a physical product the creator ships themselves, to: ${where}. Shipping is ${shipping.cents > 0 ? `${formatMoney(shipping.cents, currency)} per order` : "free"}, added on the payment page.${shipping.note ? ` ${shipping.note}.` : ""} The buyer gives the address on the payment page and gets an email when it ships.`;

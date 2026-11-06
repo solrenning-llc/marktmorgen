@@ -230,7 +230,22 @@ rest of the studio. This unit has no interface: 0 → 0 steps and decisions.
 2. Product page and checkout path: show the fields, the unit price and the
    Prop 65 text before the buy button; take the GPSR-closed countries out of
    the checkout's shipping countries (`lib/store-checkout.ts`,
-   `lib/cart-shipping.ts`), with the studio saying why.
+   `lib/cart-shipping.ts`), with the studio saying why. **Built in unit 3**
+   (tests/sz2-u3-display.test.ts): `lib/physical-legal-ship.ts`
+   (`shippingNow`, `shipsNowhere`) is the one rule for where a product ships
+   now, read by the single checkout, the cart, the buy box's shipping line and
+   the store's answers; a full product is judged only from its own legal
+   record (unreadable is not filled), a listing only from the mark
+   `safetyFilled` that `listingOf` computes when the product is saved (only
+   exactly `true` counts). A product shipped only to the EU/EEA with a gap is
+   not sold (`canSellProduct`) and its checkout is refused before Stripe. The
+   page of a shipped product reads its legal record with one GET of the
+   product's own record, in parallel with its other reads, and nothing for any
+   other product (`readProductLegal`); `components/product-safety-facts.tsx`
+   draws it before the buy button, words in `lib/buyer-words/product-safety.ts`
+   (7 languages). The unit price is shown for each price sold, from the price
+   charged now (store sale or fair price), above the block. The studio's
+   summary (unit 2) already says "Not shipped to the EU/EEA until …".
 3. Confirmation email: the GPSR fields and the Prop 65 text.
 4. Price history written when a price or a sale changes; the EU/EEA prior
    price on the store sale (`lib/store-sale.ts`) and the percentage from it.

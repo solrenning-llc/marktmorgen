@@ -1,8 +1,8 @@
 /** Real Next interface pixels, loopback services and fictional canonical demo content only. */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { spawn, execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,58 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const require = createRequire(join(root, "package.json"));
 const { build } = require("esbuild");
 const temporary = mkdtempSync(join(root, ".git-feature-capture-"));
+if (process.argv.includes("--verify-component")) {
+  // Independent rendering of our new component while the shared hero remains reserved.
+  // No integration/hydration/global AAA claim follows from this isolated check.
+  let previewBrowser;
+  try {
+    const entry = join(temporary, "component.cjs");
+    await build({ stdin: { contents: `import {renderToStaticMarkup} from 'react-dom/server';import {FeatureCapture,hasFeatureCapture} from './components/feature-captures';import {FEATURE_CAPTURES} from './lib/feature-captures';console.log(JSON.stringify({html:renderToStaticMarkup(<main>{FEATURE_CAPTURES.map(c=><FeatureCapture key={c.slug} slug={c.slug}/>)}</main>),unknown:renderToStaticMarkup(<FeatureCapture slug="crm"/>),known:FEATURE_CAPTURES.map(c=>hasFeatureCapture(c.slug)),unknownKnown:hasFeatureCapture('crm')}));`, resolveDir: root, loader: "tsx" }, bundle: true, jsx: "automatic", platform: "node", format: "cjs", packages: "external", outfile: entry, alias: { "@": root }, logLevel: "error" });
+    const rendered = spawnSync(process.execPath, [entry], { cwd: root, encoding: "utf8", maxBuffer: 4_000_000 });
+    assert.equal(rendered.status, 0, rendered.stderr);
+    const fixture = JSON.parse(rendered.stdout);
+    assert.equal(fixture.unknown, "");
+    assert.deepEqual(fixture.known, [true, true]);
+    assert.equal(fixture.unknownKnown, false);
+    const { compile } = require("@tailwindcss/node");
+    const compiler = await compile(readFileSync(join(root, "app/globals.css"), "utf8"), { base: root, onDependency() {} });
+    const classes = [...fixture.html.matchAll(/class="([^"]*)"/g)].flatMap(m => m[1].split(/\s+/));
+    const css = compiler.build(classes);
+    previewBrowser = await require("playwright-core").chromium.launch({ headless: true });
+    for (const width of [390, 1440]) {
+      const context = await previewBrowser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
+      try {
+        let refused = 0;
+        await context.route("**/*", route => { refused++; return route.abort(); });
+        const page = await context.newPage();
+        await page.setContent('<!doctype html><html lang="en"><head><style>' + css + '</style></head><body>' + fixture.html + '</body></html>');
+        const figures = page.locator("figure[data-feature-capture]");
+        assert.equal(await figures.count(), 2);
+        for (const figure of await figures.all()) {
+          const image = figure.locator("img");
+          await image.evaluate(node => node.decode());
+          assert.deepEqual(await image.evaluate(node => [node.naturalWidth, node.naturalHeight]), [1280, 820]);
+          const text = await figure.locator("figcaption").innerText();
+          assert.match(text, /November 6, 2026/);
+          assert.match(text, /fictional test content/);
+          assert.match(text, /not a customer result/);
+          assert.ok(await figure.evaluate(node => node.scrollWidth <= node.clientWidth));
+          assert.ok(await figure.locator("figcaption").evaluate(node => parseFloat(getComputedStyle(node).fontSize) >= 16));
+        }
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+        await page.addScriptTag({ content: readFileSync(require.resolve("axe-core/axe.min.js"), "utf8") });
+        const audit = await page.locator("main").evaluate(async node => {
+          const result = await window.axe.run(node, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag2aaa", "wcag21aa", "wcag22aa"] } });
+          return { violations: result.violations.map(v => ({ id: v.id, targets: v.nodes.map(n => n.target) })), incomplete: result.incomplete.map(v => v.id) };
+        });
+        assert.deepEqual(audit.violations, []);
+        assert.equal(refused, 0);
+        console.log(JSON.stringify({ scope: "isolated real capture component, actual CSS, system font; not shared hero integration or global AAA", width, decodedCaptures: 2, unknownSlug: "empty", refused, ...audit }));
+      } finally { await context.close(); }
+    }
+  } finally { await previewBrowser?.close(); rmSync(temporary, { recursive: true, force: true }); }
+  process.exit(0);
+}
 const origin = "http://127.0.0.1:3216", fake = "http://127.0.0.1:4516";
 const sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
 const captureDirectory = process.env.T_CAPTURE_DIRECTORY ? resolve(process.env.T_CAPTURE_DIRECTORY) : temporary;

@@ -2,11 +2,28 @@ import {join} from 'node:path';
 /** One wiring source for the repository runner and local parallel verification. */
 export function testAliases(file,root,here){
  const aliases={'@':root,'@/lib/redis':['range-traffic-coverage.test.ts','stats-traffic-coverage.test.ts'].includes(file)?join(root,'lib/redis.ts'):join(here,'redis-stub.ts')};
+
+
+ if(file==='review-summary-unavailable-page.test.ts'){
+  for(const name of ['catalog','studio-route','reviews','review-ai-summary','customer-voice','buyer-orders','purchase-email','ai','mail'])aliases['@/lib/'+name]=join(here,'review-summary-page-world.tsx');
+  for(const name of ['studio-header','studio-store-pin','ai-assist','review-studio','review-qr','review-themes','review-ai-summaries'])aliases['@/components/'+name]=join(here,'review-summary-page-world.tsx');
+  for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'review-summary-page-world.tsx');
+ }
+ if(file==='blog-read-unavailable-page.test.ts'){
+  for(const name of ['store','store-blog','studio-route','traffic','ai'])aliases['@/lib/'+name]=join(here,'blog-read-page-world.tsx');
+  for(const name of ['studio-header','studio-store-pin','ai-assist','blog-editor','store-tracking'])aliases['@/components/'+name]=join(here,'blog-read-page-world.tsx');
+  aliases['next/headers']=join(here,'blog-read-page-world.tsx');
+  aliases['next/navigation']=join(here,'blog-read-page-world.tsx');
+ }
+ if(file==='service-counter-admission.test.ts')for(const name of ['redis','store-allowance','traffic'])aliases['@/lib/'+name]=join(here,'service-counter-admission-world.ts');
+ if(file==='stream-hook-counter-admission.test.ts')for(const name of ['redis','stream','auto-captions'])aliases['@/lib/'+name]=join(here,'stream-hook-counter-admission-world.ts');
+ if(file==='yearly-ask-read-evidence.test.ts')for(const name of ['redis','order-data','stripe-account','email','store','membership-manage','mail','contacts','purchase-email','catalog','store-checkout','auth','member-health','yearly-switch'])aliases['@/lib/'+name]=join(here,'yearly-ask-read-world.ts');
  if(file==='community-mail-read-evidence.test.ts')for(const name of ['redis','community','community-access','community-events','email','mail','order-data','calls','phone-alerts'])aliases['@/lib/'+name]=join(here,'community-mail-read-world.ts');
  if(file==='community-report-queue-view.test.ts'){
   for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'meeting-withdrawal-page-world.ts');
   for(const name of ['studio-header','studio-store-pin'])aliases['@/components/'+name]=join(here,'meeting-withdrawal-page-world.ts');
  }
+ if(file==='preview-counter-admission.test.ts')for(const name of ['redis','store','store-request','catalog','traffic','pdf-preview','serve-file'])aliases['@/lib/'+name]=join(here,'preview-counter-admission-world.ts');
  if(file==='flow-stop-action.test.ts')aliases['@/lib/ses']=join(here,'flow-stop-ses-network.ts');
  if(!['order-email-fallback.test.ts','resend-fallback-budget.test.ts','auth-mail-unavailable.test.ts','course-link-mail-unavailable.test.ts','email-meter-preflight.test.ts'].includes(file))aliases['@/lib/resend-fallback-transport']=join(here,'resend-fallback-fixture.ts');
  if(file==='customer-base-fixed-evidence.test.ts')for(const [name,fixture] of [['upload-budget-policy','upload-budget-approved-policy'],['ai-spend-policy','commercial-ai-approved-policy'],['llc-fixed-costs','llc-fixed-approved-policy']])aliases['@/lib/'+name]=join(here,fixture+'.ts');
@@ -16,9 +33,11 @@ export function testAliases(file,root,here){
   aliases['next/server']=join(here,'next-server-after-world.ts');
   aliases['@/lib/account-notice']=join(here,'meeting-disabled-world.ts');
  }
- if(file==='letter-members.test.ts'){aliases['next/headers']=join(here,'letter-members-world.ts');aliases['next/server']=join(here,'next-server-after-world.ts');aliases['@/components/store-tracking']=join(here,'letter-members-world.ts');}
- if(file==='public-reads-ceiling.test.ts')aliases['next/headers']=join(here,'security/next-headers.ts');
- if(file==='failure-cleanup-paths.test.ts')for(const name of ['@/lib/blob','@vercel/blob/client'])aliases[name]=join(here,'failure-cleanup-world.ts');
+ if(file==='letter-members.test.ts'||file==='bv1-letter-preview.test.ts'){aliases['next/headers']=join(here,'letter-members-world.ts');aliases['next/server']=join(here,'next-server-after-world.ts');aliases['@/components/store-tracking']=join(here,'letter-members-world.ts');}
+ if(['public-reads-ceiling.test.ts','draft-view.test.ts','draft-view-move-renew.test.ts','draft-view-waitlist.test.ts'].includes(file))aliases['next/headers']=join(here,'security/next-headers.ts');
+ if(['draft-view.test.ts','draft-view-move-renew.test.ts','draft-view-waitlist.test.ts'].includes(file))aliases['next/server']=join(here,'next-server-after-world.ts');
+ if(file==='failure-cleanup-paths.test.ts'||file==='picture-owner-paths.test.ts'||file==='encanto-tone-route.test.ts')for(const name of ['@/lib/blob','@vercel/blob/client'])aliases[name]=join(here,'failure-cleanup-world.ts');
+ if(['review-g2-card-read-completeness.test.ts','creator-card-partial-read-g.test.ts','creator-card-remove-race-g.test.ts','creator-card-reload-delete-g.test.ts','creator-card-reload-held.test.ts'].includes(file))aliases['next/headers']=join(here,'security/next-headers.ts');
  if(file==='meeting-disabled-settings.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');
  if(file==='zoom-arrival.test.ts')aliases['next/navigation']=join(here,'meeting-withdrawal-page-world.ts');
  if(file==='meeting-disabled-withdrawal.test.ts'){
@@ -26,6 +45,8 @@ export function testAliases(file,root,here){
   for(const name of ['meet-test','account-notice'])aliases['@/lib/'+name]=join(here,'meeting-disabled-world.ts');
  }
  if(file==='host-calendar-removal.test.ts')aliases['@/lib/host-calendar']=join(here,'host-calendar-removal-world.ts');
+ if(file==='outreach-counter-admission.test.ts')for(const name of ['redis','store-request','outreach','metered-limits'])aliases['@/lib/'+name]=join(here,'outreach-counter-admission-world.ts');
+ if(file==='ai-report-counter-admission.test.ts')for(const name of ['redis','store-request','review-ai-summary','stats-report','numbers-ask','person-agenda-read','ai'])aliases['@/lib/'+name]=join(here,'ai-report-counter-admission-world.ts');
  if(file==='mail-check-route.test.ts')for(const name of ['request-guard','email','verify-mail'])aliases['@/lib/'+name]=join(here,'mail-check-route-world.ts');
  if(file==='plan-break-off-cron.test.ts')for(const name of ['request-guard','billing-reminders','trial-nudges','payment-requests'])aliases['@/lib/'+name]=join(here,'plan-break-off-cron-world.ts');
  if(file==='plan-refund-route.test.ts')aliases['@/lib/studio-route']=join(here,'plan-refund-route-world.ts');
@@ -52,7 +73,7 @@ export function testAliases(file,root,here){
  }
  if(file==='path-growth-facts.test.ts')for(const name of ['redis','catalog','broadcasts','reviews'])aliases['@/lib/'+name]=join(here,'path-growth-world.ts');
  if(file==='path-reminder-push.test.ts')aliases['@/lib/web-push']=join(here,'path-push-world.ts');
- if(file==='digital-consent.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
+ if(file==='digital-consent.test.ts'||file==='checkout-key-count.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='cart-physical.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='review-photo-paused.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='orders-open.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
@@ -68,6 +89,8 @@ export function testAliases(file,root,here){
  if(['video-admission.test.ts','video-tier.test.ts'].includes(file)){aliases['@/lib/redis']=join(here,'video-admission-redis.ts');aliases['@/lib/stream']=join(here,'video-admission-stream.ts');}
  if(file==='storage-measurement.test.ts')for(const name of ['blob','vault','stream'])aliases['@/lib/'+name]=join(here,'storage-provider-stub.ts');
  if(file==='blob-download-attachment.test.ts')aliases['@/lib/blob']=join(here,'blob-download-attachment-world.ts');
+ if(file==='sg2-l1-serve-file.test.ts')aliases['@/lib/blob']=join(here,'blob-download-attachment-world.ts');
+ if(file==='sg2-l1-outreach-order.test.ts')aliases['@/lib/contract-resource-window']=join(here,'sg2-l1-reserve-world.ts');
  if(['exposure-budget.test.ts','exposure-provider.test.ts'].includes(file))aliases['@/lib/redis']=join(here,'exposure-budget-redis.ts');
  if(file==='exposure-provider.test.ts'){
   aliases['@/lib/ai-spend']=join(here,'exposure-ai-spend-stub.ts');
@@ -132,6 +155,7 @@ export function testAliases(file,root,here){
   for(const name of ['contract-restart-activation','contract-funding-rules','commercial-margin','redis','store','plan-standing','free-pool-rules','platform-share'])aliases['@/lib/'+name]=join(here,'restart-publication-ack-world.ts');
  }
  if(file==='buyer-actions.test.ts')aliases['@/lib/blob']=join(here,'buyer-actions-blob.ts');
+ if(file==='task-room-unknown.test.ts'){aliases['@/lib/blob']=join(here,'buyer-actions-blob.ts');aliases['next/headers']=join(here,'security/next-headers.ts');}
  if(file==='dispute-purchase-review.test.ts')for(const name of ['store','stripe-account','contract-resource-window','store-allowance'])aliases['@/lib/'+name]=join(here,'dispute-review-world.ts');
  if(file==='dispute-review-route.test.ts')for(const name of ['store-request','dispute-purchase-review','dispute-preorder-review'])aliases['@/lib/'+name]=join(here,'dispute-review-route-world.ts');
  if(file==='dispute-preorder-review.test.ts')for(const name of ['redis','contract-resource-window','store-allowance'])aliases['@/lib/'+name]=join(here,'dispute-preorder-world.ts');
@@ -152,6 +176,20 @@ export function testAliases(file,root,here){
  }
  if(["contract-admission-ack.test.ts","contract-funding.test.ts","contract-resource-window.test.ts","contract-routes.test.ts","restart-activation-ack.test.ts","restart-recovery-ack.test.ts","restart-result-ack.test.ts","restart-submission-ack.test.ts"].includes(file))aliases['@/lib/llc-fixed-costs']=join(here,'llc-fixed-approved-policy.ts');
  if(file==='file-download-refusals.test.ts')aliases['@/lib/studio-route']=join(here,'file-download-refusals-world.ts');
+ if(file==='ai-counter-admission.test.ts')for(const name of ['redis','store-request','ai'])aliases['@/lib/'+name]=join(here,'ai-counter-admission-world.ts');
+ if(file==='visitor-ai-counter-response.test.ts'){for(const name of ['redis','store','store-checkout','catalog','product-about','sales-page-store','answers','store-guide','sales-page'])aliases['@/lib/'+name]=join(here,'visitor-ai-counter-admission-world.ts');aliases['@/components/store-product']=join(here,'visitor-ai-counter-admission-world.ts');}
+ if(file==='visitor-ai-counter-admission.test.ts'){for(const name of ['redis','store','store-checkout','catalog','product-about','sales-page-store','answers','store-guide','sales-page'])aliases['@/lib/'+name]=join(here,'visitor-ai-counter-admission-world.ts');aliases['@/components/store-product']=join(here,'visitor-ai-counter-admission-world.ts');}
+ if(file==='meta-return-counter-admission.test.ts'){
+  for(const name of ['redis','auth','studio-route','store','integration-pause','contract-resource-window','account-notice','team','meet-providers','metered-limits'])aliases['@/lib/'+name]=join(here,'meta-return-counter-world.ts');
+  aliases['@/lib/meta-ads']=join(here,'meta-return-provider-world.ts');
+  aliases['next/server']=join(here,'next-server-after-world.ts');
+ }
+ if(file==='form-response-unavailable.test.ts'){
+  for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'form-response-unavailable-world.tsx');
+  for(const name of ['studio-route','store-request','form-store','catalog','crm','team','pipeline-access','form-opportunity','form-response-pdf'])aliases['@/lib/'+name]=join(here,'form-response-unavailable-world.tsx');
+  for(const name of ['studio-header','studio-store-pin'])aliases['@/components/'+name]=join(here,'form-response-unavailable-world.tsx');
+ }
+ if(file==='assistant-counter-admission.test.ts')for(const name of ['redis','store','store-assistant','metered-limits'])aliases['@/lib/'+name]=join(here,'assistant-counter-admission-world.ts');
  return aliases;
 }
 export function testEnvironment(env){return{...env,DEMO_STUDIO_ADMIN:'operator@example.test',STRIPE_DEMO_ACCOUNT_ID:'acct_fixtureDemo',NIMBUS_DATA_KEY:env.NIMBUS_DATA_KEY??'tests-only-not-a-real-deployment-secret'};}

@@ -85,7 +85,7 @@ export const pt: BuyerWords = {
   buyAsGift: "Comprar como presente",
   buyAsGiftFor: (price) => `Comprar como presente — ${price}`,
   giftNote: (store) =>
-    `Paga na página da Stripe. Logo a seguir, a pessoa recebe um único email de ${store} com o seu nome, a sua mensagem e uma ligação para o abrir com o próprio endereço. Fica com o recibo, não com uma cópia.`,
+    `Paga na página da Stripe. Depois do pagamento, o presente fica associado ao endereço da pessoa. Se o único email de ${store} lhe chegar, contém o seu nome, a sua mensagem e uma ligação para o abrir. Fica com o recibo, não com uma cópia.`,
   giftProblems: {
     email: "Isso não parece um endereço de email. Verifique o endereço do destinatário e tente novamente.",
     option: "Escolha o que quer oferecer e tente novamente. Nada foi cobrado.",
@@ -135,7 +135,8 @@ export const pt: BuyerWords = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store) => `Blog de ${store}`,
-  blogEmpty: "Ainda não há nada aqui.",
+  blogPastEnd: "Não há publicações nesta página",
+  blogPastEndBody: "Esta página fica depois da última publicação.",
   blogMinutes: (n) => `${n} min de leitura`,
   blogNewer: "Publicações mais recentes",
   blogOlder: "Publicações anteriores",
@@ -148,6 +149,7 @@ export const pt: BuyerWords = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent) => `poupa ${percent}%`,
   chooseOptionFor: (title) => `Escolha uma opção para ${title}`,
+  chooseOne: "Escolha uma",
   recommended: "Recomendado",
   recommendedAfter: " (recomendado)",
   howToPayFor: (title) => `Como pagar ${title}`,
@@ -299,6 +301,7 @@ export const pt: BuyerWords = {
   newer: "Mais recentes",
   older: "Mais antigas",
   askUnknown: (store) => `Esta página não o indica. Pergunte a ${store} antes de comprar.`,
+  askTermsCut: () => "Não tenho aqui as condições completas. Pergunte ao criador antes de comprar.",
 
   noLongerOnSale: "Este produto já não está à venda.",
   seeStore: (store) => `Ver ${store}`,

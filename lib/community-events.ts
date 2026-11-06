@@ -57,6 +57,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { emailKey } from "@/lib/learn";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -360,13 +361,21 @@ export function readEventInput(
   return { title, about, start, minutes, tz, cap, where, link, meet, only };
 }
 
-/** Counts one more change by the creator, and says whether it is allowed. */
+/**
+ * Counts one more change by the creator, and says whether it is allowed.
+ * The count is read only in its exact shape (CX-123 rule 24): a reply that
+ * is missing, cut short or of another shape throws UnknownReplyError, so
+ * nothing is changed and the studio says something went wrong (the route's
+ * "server_error"), never that there were too many changes.
+ */
 export async function withinEventWrites(id: string): Promise<boolean> {
-  const [, count] = await redisPipeline([
+  const replies = repliesFor(await redisPipeline([
     ["SET", writesKey(id), "0", "EX", 3_600, "NX"],
     ["INCR", writesKey(id)],
-  ]);
-  return Number(count) <= EVENT_WRITES_PER_HOUR;
+  ]), 2);
+  const count = replies && (replies[0] === "OK" || replies[0] === null) ? countOf(replies[1]) : null;
+  if (count === null || count < 1) throw new UnknownReplyError("a count of changes to live events");
+  return count <= EVENT_WRITES_PER_HOUR;
 }
 
 /** Where the reminders for an event stand in the queue: one entry per moment, for this start. */

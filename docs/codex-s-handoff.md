@@ -1,3 +1,28 @@
+# Codex S — authoritative checkpoint, 6 November 2026 16h34 Fortaleza
+
+This section supersedes older checkpoints below where they conflict. Coordination is **Claude 4 only**; Claude 1 is off and is not a bridge or recipient.
+
+## Causal return completed
+
+- **#2801**, exact head `24a134e3054472a5483f835b3072ae3c97d7f19d`, base `849a875c972f2730d31703989ded236c70a93447`: independent S money/cost return **5805877609, no findings**.
+- The old-head HIGH remains valid causally: retryable Blob operations were omitted. The new head fixes it with durable RED `131fa3a60c445951ba518ad7b4d5b5e9236fa9a5`: the three tier assertions fail while the line uses three simple operations; final counts `BLOB_PUT_TRIES = 11`, `BLOB_HEAD_TRIES = 11`, two HEAD operations with their attempts, and one plain-fetch read once.
+- **Mandatory correction to old review 5805761543:** the US$0.10 retry exposure is one worst month in the first-payment refund model. I incorrectly multiplied it by 12. `worstCost("creator")` is added once, not for twelve months. The corrected exact exposure is **US$65.6432**, including **US$0.6744** for picture uploads plus thumbnails, below the owner-decided US$66 ceiling. Retract only US$1.20 / US$66.6032; do not retract the causal missing-retry finding on the old head.
+- Final 10-file diff and exact-head blobs were reviewed directly through GitHub. The shared overlay is 100% full, so this new head could not be materialized locally and no local execution is claimed. Hosted CI is authoritative; snapshot at review time was 1/9 SUCCESS and eight active/queued. Because money is involved, #2801 still requires the other independent money review and 9/9 exact-head successes before its foreign owner may merge.
+- The interrupted detached checkout was repaired: its stale zero-byte index lock was removed after confirming no git process, and the accidentally missing test was restored. Worktree status is clean; no ref, branch, author file, or product changed.
+- Channel completion: `para-claude-1@8a3801765879ba59bb276d9c6373255c62d66081`.
+
+## Five own products — unchanged
+
+1. #2473 `d57357ab42fa2abc522def9f16c90e3e526bd0c3`: blocked on contract/shared-reader decision.
+2. #2516 `a8f0ff1c3bee1fe82db87b903df8be1a74b66967`: clean review; last causal state 8/9, shared Firefox failure outside S.
+3. #2689 `481e26c64c0b3031645c85c8c46b7cd1bb8f71b2`: blocked on occupied Studio UI/coordination.
+4. #2770 `7fa81525040f7712f063a72a367a20e506076a3c`: last causal state 9/9; explicit nominal R2 return still missing.
+5. #2798 `cb6673a982efb43e84c266bc95018d22b5909f77`: R2 clean; last causal state 8/9.
+
+Exact next event is causal only: terminal #2801 checks/other financial review, a return on an own head, or another explicit unclaimed review. CX-127 remains active. Never retry CI, edit an author branch, open a sixth product, touch #2111/stats/store-readings, or turn unknown cost/data into zero/complete.
+
+---
+
 # Codex S — authoritative checkpoint, 6 November 2026 16h26 Fortaleza
 
 This section supersedes older checkpoints below where they conflict. Coordination is **Claude 4 only**; Claude 1 is off and is not a bridge or recipient.

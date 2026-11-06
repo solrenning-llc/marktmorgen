@@ -103,6 +103,8 @@ function healthy(period: { start: number; end: number }, over: Reply = {}): Repl
 /** Each reply that does not carry the plan line or the cancel fields exactly. */
 function unknownShapes(period: { start: number; end: number }): [string, Reply][] {
   const base = healthy(period);
+  // A synthetic reply is edited freely, one wrong field at a time.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const edit = (change: (reply: any) => void): Reply => { const reply = clone(base); change(reply); return reply; };
   return [
     ["id and status only (the hunt 3 proof)", { id: SUB, object: "subscription", status: "active", metadata: { store: HANDLE } }],
@@ -153,7 +155,7 @@ async function main(): Promise<void> {
     is("healthy reply set to stop reads cancelsAtEnd and its date",
       stopping.state === "active" ? [stopping.cancelsAtEnd, stopping.until, stopping.period?.renews] : stopping, [true, period.end, false]);
     const legacy = healthy(period);
-    const price = ((legacy.items as any).data[0].price);
+    const price = (legacy.items as { data: { price: Record<string, unknown> }[] }).data[0].price;
     delete price.lookup_key;
     price.unit_amount = LEGACY_PLAN_PRICES[0].pro.month;
     price.recurring = { interval: "month", interval_count: 1 };

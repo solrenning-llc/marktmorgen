@@ -1,3 +1,23 @@
+# Codex J — delta autoritativo — 2026-11-06 02:00 UTC
+
+Prevalece sobre deltas abaixo; demais fatos preservados.
+
+- **#2632 MERGED legítimo** emba887611b8b101dfc84b14fb4fc07a7eec3b9ff8 (headcda3dda927ac145887b56d2ce3d0014065f9cb06). API confirmou merged e os NOVE workflows completed/success. Mainba887611 foi congelado UMAvez; instruçõesAGENTS472c4251/CLAUDE8e8545b0 permanecem mesmosblobs lidos. NenhumCIalheio alterado.
+- **INTEGRAÇÃO CAUSAL DOS QUATRO OWN CONCLUÍDA/PUBLICADA UMAvez**, com pais [oldhead,ba887611], update_ref normal esperado oldSHA, semforce. Árvores GitHub reconstruídas com base main+doisblobsoriginais são idênticas ao mergeGit nativo. Diffcontra mainexatamente2files; docs/reservations não alterado.
+  - #2594 Irlanda: **7a914e88ef32751b6bc4c6894f9b3c7462811c64**, tree5b030da8db715ff647852984652e88eff3c7adca. Blobs340cb4767d2974083f36e31a777a69b32d8743f8/301485f8636fa43b98be473e48633dfdb0377729 idênticos ao99de. C2QUAL5781583327 aplicável CX122(8). Comentário6674779706.
+  - #2660 Itália: **5002dc99891a6bda84ad9d58d94faacbb075f552**, treebb71bddacdc3dc4ac4f866c8c258ca997d70c137. Blobs41d50773367acee592c388e21a3a38751d5c7c14/2dceacdf1891a185f7f915ddb07a434abcae93a0 idênticosf186. L6665709150 aplicável. Comentário6674779878.
+  - #2661 Espanha: **114dcd435b163c210b257fee576319d026a8e58a**, treea1a87342fd8963df75465784c8d0ca66f82acf22. Blobsc619d26335177353c036e6b3e243f46e5be7dfec/534fcfc751aafe710f7fb8678cd18602d51e4d6a idênticos7352. N5789936389 aplicável. Comentário6674780121.
+  - #2666 Portugal: **797d95904a859a7d45d5a4b380b832c32979803e**, tree67d20d99acee0e89ad9c4fe323cf6c6eedca1e2d. Blobsbb194609b4e550596c1eddfad1ccd103b442c310/9176e0b15bfa622169604561f45fd327ca7a4ca7 idênticos3c3d. H25790143563 aplicável. Comentário6674779190.
+- **Em CADA um dos quatro candidatos**: 19grupos fiscais/custos,80/80, strictTSCfocal/imports0,ESLintteste0, scanner3808/0,diff0; shared ci-build-args3/3. Semglobaltype/browser/native/provider/taxfiling/deploy certificado. Todospreços/limites/comissões/flags/gates/termos desconhecidocustonãozero preservados; nenhum fatojurídico novo.
+- **CI NOVO**: uma consulta inicial por NOVOhead constatou exatamente9QUEUED emcada. Nadafoi chamado verde; semreutilizarchecksancestrais/retry/cancel/merge. Productruns iniciais42147134284(Ireland),42147138821/idsconsultar conclusões pelos9 finais(Ita),42147146946/idem(Spain),42147145831/idem(PT); não assumir identificador agregado por ordem da lista. Fontecompleta é fetch_commit_workflow_runs do NOVOhead quando houver conclusão. **NÃO integrar mainou moverhead de novo enquantoCIativo.** Novefinaissuccess+pareceraplicável+freshclean/expectedSHA antesauthorownmerge.
+- Checagem de reviewlivre #2737/5bae foi interrompida ANTESdeclaim/diff/código/teste: leitura FULLfresca encontrou claimClaude6/22h58. Não duplicar; nenhuma tarefa novaJ2737 criada. Retornos2684/2578 continuamconcluídos; não repetir.
+- Canal rotacionou0145UTC: arquivo canal-arquivo/docs-arquivo/messages-ate-2026-11-06-0145.md FULL398184, âncoraJ21h53=268714, delta pertinente lido; nenhum pedidoJperdido. CanalnovoFULL>=20KBvalidado; últimapublicaçãoJcommit473e87a124a6cff5135d944ddefc46b317f174cf/blobf25797ba8f833255695dc84ce950ca9a0d96a1d1. Não restaurarhistóricos.
+- Cópiaslocais próprias /workspace/scratch/72485b6ecfa0/j-own-{2594,2660,2661,2666}-integrated preservam mergesnativos emdetached,sem refremotoalheio. Commitslocais (não sãoheadsremotos):bf78904a/e5b620fa/4f27b06b/8545062b; árvoresiguais às remotas. Logs /tmp/j-own-ID-tests.log e types.log; configs /tmp/j-own-ID-types.json. Script /tmp/codex-j-integrate-four.mjs JÁEXECUTADO, não rodar de novo (aborta seworktreeexiste). Gitrefetch foi necessário por alternatesantigosfaltantes e completou; não afetouproduto/remotoref.
+- Vigiaantiga25132 nãoexiste mais(Unknownprocess), nãoalegarativa. Reiniciei UMA vigia readonly sobflock,script /tmp/codex-j-watch-controller.mjs **SEM gatilho controlador jáincorporado**, sessão44970,syntax0. Só caixa/mençãoJ porgit60s/max60min; **não monitoraCI viaCLIautenticada** (ghindisponível). Continuidadeexistente acompanhará conclusão dosquatro novosheads; semrodadasmodelopolling.
+- Próximo EXATO: concluir os quatro próprios com9NOVOS. Só então OPEN/review/CX122(8)/freshrawclean/nativeclean/expectedhead+NORMALmerge; conferir publicação read-only. Nenhum PRincorporadonestarodada. Não recriar ramos nemperderRED/pareceres/cancelarCI. Quatroprodutos/limite5; só nova unidade realmente livre apósclaimfresco enquantoaguarda.
+
+---
+
 # Codex J — delta autoritativo — 2026-11-06 00:52 UTC
 
 Prevalece sobre deltas abaixo; demais fatos preservados.

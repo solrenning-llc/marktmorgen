@@ -27,6 +27,10 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { TEST_CONSENT, withConsent } from "./digital-consent-fixture";
+import { consentMetaValue } from "@/lib/digital-consent";
+import { NextRequest } from "next/server";
+import { POST as switchRoute } from "@/app/api/store/manage/switch/route";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_yearly_switch_only";
 process.env.RESEND_API_KEY = "re_test_yearly_switch_only";
@@ -172,20 +176,41 @@ async function main(): Promise<void> {
   is("previewed as the move itself will be made", [asked.get("subscription_details[items][0][price]"), asked.get("subscription_details[proration_behavior]")], ["price_Yearly000001", "always_invoice"]);
   is("somebody else's membership is not on this link", (await previewYearly(store, token, "sub_Somebody0001")).ok, false);
 
+  part("The box is asked again before a move to yearly charges (91 [D2-EU-WITHDRAWAL]; owner, C1-20261106-0100-TODOS-1)");
+  is("the preview says the membership is delivered at once, so the page shows the box", preview.preview.digital, true);
+  const unasked = calls.length;
+  const noYes = await switchYearly(store, token, "sub_Dana00000001", preview.preview.at, null);
+  is("without the box checked: refused, and nothing sent to Stripe", [noYes, calls.slice(unasked).filter((c) => c.method === "POST").length], [{ ok: false, reason: "consent" }, 0]);
+  const post = (fields: Record<string, string>, consent: boolean) => {
+    const form = new URLSearchParams(fields);
+    if (consent) withConsent(form);
+    return switchRoute(new NextRequest("https://marktmorgen.com/api/store/manage/switch", {
+      method: "POST",
+      headers: { Host: "marktmorgen.com", Origin: "https://marktmorgen.com", "Content-Type": "application/x-www-form-urlencoded", "x-forwarded-for": "203.0.113.9" },
+      body: form.toString(),
+    }));
+  };
+  const fields = { handle: "harbor", token, sub: "sub_Dana00000001", to: YEARLY_TARGET, at: String(preview.preview.at) };
+  const sentBack = await post(fields, false);
+  const where = new URL(sentBack.headers.get("location") ?? "https://x.invalid/");
+  is("the button without the box: back to the same move, the box saying what is missing", [sentBack.status, where.pathname, where.searchParams.get("to"), where.searchParams.get("sub"), where.searchParams.get("consent")], [303, "/@harbor/manage/switch", YEARLY_TARGET, "sub_Dana00000001", "needed"]);
+  is("and nothing sent to Stripe", calls.slice(unasked).filter((c) => c.method === "POST").length, 0);
+
   part("The move");
-  is("a figure more than 15 minutes old is not used", await switchYearly(store, token, "sub_Dana00000001", preview.preview.at - 16 * 60), { ok: false, reason: "stale" });
+  is("a figure more than 15 minutes old is not used", await switchYearly(store, token, "sub_Dana00000001", preview.preview.at - 16 * 60, TEST_CONSENT), { ok: false, reason: "stale" });
   await redisPipeline([["SET", "nl:tier:sub_Dana00000001:lock", "another-change", "EX", 60]]);
   const sentBefore = calls.length;
-  const held = await switchYearly(store, token, "sub_Dana00000001", preview.preview.at);
+  const held = await switchYearly(store, token, "sub_Dana00000001", preview.preview.at, TEST_CONSENT);
   await redisPipeline([["DEL", "nl:tier:sub_Dana00000001:lock"]]);
   is("another change to the membership holding the lock: busy, never an error, and nothing sent", [held, calls.length - sentBefore], [{ ok: false, reason: "busy" }, 0]);
   declined = true;
-  is("a declined card changes nothing", await switchYearly(store, token, "sub_Dana00000001", preview.preview.at), { ok: false, reason: "declined" });
+  is("a declined card changes nothing", await switchYearly(store, token, "sub_Dana00000001", preview.preview.at, TEST_CONSENT), { ok: false, reason: "declined" });
   is("and leaves nothing owed", calls.some((c) => c.path === "/invoices/in_Declined0001/void"), true);
   declined = false;
   mails.length = 0;
-  is("made", await switchYearly(store, token, "sub_Dana00000001", preview.preview.at), { ok: true, title: "Supper Club" });
+  is("made", await switchYearly(store, token, "sub_Dana00000001", preview.preview.at, TEST_CONSENT), { ok: true, title: "Supper Club" });
   const update = calls.filter((c) => c.path === "/subscriptions/sub_Dana00000001" && c.body.get("items[0][price]")).at(-1)!.body;
+  is("the yes is kept on the subscription with the charge itself", update.get("metadata[dc]"), consentMetaValue(TEST_CONSENT, "membership"));
   is("at the preview's second, charged at once", [update.get("items[0][price]"), update.get("proration_date"), update.get("payment_behavior")], ["price_Yearly000001", String(preview.preview.at), "pending_if_incomplete"]);
   const record = calls.filter((c) => c.path === "/subscriptions/sub_Dana00000001" && c.body.get("metadata[every]")).at(-1)!.body;
   is("recorded as a membership bought yearly says it", record.get("metadata[every]"), "year");

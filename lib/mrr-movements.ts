@@ -98,7 +98,13 @@ const num = (v: unknown, what: string): number | null => {
   if (!Number.isFinite(n)) throw new UnreadInvoiceError(what);
   return n;
 };
-const str = (v: unknown) => (typeof v === "string" ? v : v && typeof v === "object" && typeof (v as { id?: unknown }).id === "string" ? (v as { id: string }).id : "");
+/** A subscription Stripe referred to: its id, or the expanded object with that id; "" when it gave none (absent or null). Anything else throws. */
+const ref = (v: unknown, what: string): string => {
+  if (v === undefined || v === null) return "";
+  const id = typeof v === "object" && !Array.isArray(v) ? (v as { id?: unknown }).id : v;
+  if (typeof id !== "string" || !id) throw new UnreadInvoiceError(what);
+  return id;
+};
 
 /**
  * What each membership was charged at, and from when, from its invoices.
@@ -109,12 +115,12 @@ export function pricesFrom(invoices: Invoice[], subs: Map<string, Sub>): Map<str
   const out = new Map<string, Entry[]>();
   for (const invoice of invoices) {
     if (!invoice || typeof invoice !== "object") throw new UnreadInvoiceError("an invoice");
-    const fromInvoice = str(invoice.subscription) || str(invoice.parent?.subscription_details?.subscription);
+    const fromInvoice = ref(invoice.subscription, "an invoice's subscription") || ref(invoice.parent?.subscription_details?.subscription, "an invoice's subscription");
     const lines = invoice.lines === undefined || invoice.lines === null ? [] : invoice.lines.data;
     if (!Array.isArray(lines)) throw new UnreadInvoiceError("an invoice's lines");
     for (const line of lines as unknown[] as Line[]) {
       if (!line || typeof line !== "object") throw new UnreadInvoiceError("an invoice line");
-      const id = str(line.subscription) || str(line.parent?.subscription_item_details?.subscription) || fromInvoice;
+      const id = ref(line.subscription, "an invoice line's subscription") || ref(line.parent?.subscription_item_details?.subscription, "an invoice line's subscription") || fromInvoice;
       const sub = subs.get(id);
       if (!sub) continue;
       const amount = num(line.amount, "an invoice line's amount");

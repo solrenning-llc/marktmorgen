@@ -1,3 +1,60 @@
+# PONTO VIGENTE — 06/11/2026 após C4-1010-Z-53: #2800 construído, QUATRO produtos
+
+Este topo SUPERA oestado3produtos/aguardaatribuiçãoAIabaixo. TODOhistórico/REDs/WIP/retriespreservado. DuranteapostagemfinaldaauditoriaOAuth20bd3de630beb1b6c9e061262ec6ff8977585559, chegouC4-20261106-1010-Z-53: **reparo lib/ai.ts ATRIBUÍDOZ**, revisãoRevisor2nominal. C3-08h50confirmou0PRsdeleemlib/ai.ts. ProsseguiMESMAVEZsemencerrar/semduplicaçãoouquartaunidadeartificial. OAuthnominalC4-0840JÁCONCLUÍDO971dd9e/lista final20bd; C4classifica/dádonoàcorreçãoOAuth,nãoprodutoZsematribuição.
+
+## #2800 NOVA quarta unidade C4-1010, pronto para revisão
+
+PR https://github.com/solrenning-llc/marktmorgen/pull/2800, ramo **codex/z-ai-counter-receipts**, headREMOTO **96e202812b43b53bab96c244ba01dfe2b77796dd**, tree **a7530d4f13995b6788abb40105aa217cad22b624**=nativob36ef5e205ed0e49455d906b78c7f884dc735124. GitDataheadpai **7d8be841c29a6832262e22772f42684361cf3f9d** +base7760. Semmerge/force, nativeassinaturadiferente/treeigual,nãoempurrarnativeporengano.
+
+ReservaANTEScódigo **c21f048e495ebcd598143dba1a524497fb132c96**, pathslib/ai.ts;novostests/ai-counted-ack.test.ts,ai-left-envelope.test.ts,z-counted-ack-world.ts;SÓaliasprópriotests/test-config.mjsantesreturn. Fileinventory154/cincoreservas/canaljáchecados+confirmaçãoC3nominal. Nenhumdocs/reservationsnoproduto. Extensãonecessáriatesteantigo **8ecc9aa1e5333b63c82f966186d0db028b01f92e**, tests/ai-attempt-budget.test.ts: sóimportUnknownReplyError/título/asserçãodocaso6vetoresunknown;0PR/reservas/canalnoutrocontrollerconfirmados. QUATROprodutos,nãocinco/sexta;ramoREDpartedamesmaunidade.
+
+### RED permanente antesproduto / contrato desconhecido
+**codex/z-ai-counter-receipts-red@7d8be841c29a6832262e22772f42684361cf3f9d**, tree3f0667e5e5c3c40b240d2d5a458062d38dd45edb; produtolibaiEXATObase7760. **18casos/12falhascausais+6controles**: counted10/6,aiLeft8/6. Testescanônicos*.test.tsdescobertospadrão,mesmoaliasfilenameexclusivo/memoriafixture; provaopt-innãoéúnicaproteção.
+- countedcanônicoéproof6e721adbinalteradoemasserções+UMAconfigsyntheticANTHROPICexplícita:runneropt-inantesforneciaenv,canonicalnão; primeirorunsemkey0commands/9falhasharnessfoidescartado. CorrigiSÓsetupantesdurableRED:10/6causal+4controles. Native019407322draftlocalpreservado,nãoalegadoREDválido;nativeb5cfe579árvoreigualREDremoto7d8be.
+- aiLeftprovaae90333besperava0conservadornaassinaturanuméricaantiga. OrdemC4literal **“Desconhecido nunca vira saldo conhecido”**→contratocanônicoé **UnknownReplyError**, não0nemNaN. AnunciadoANTEScódigo/reserva c21f048e. 4vetoresoriginais+knowncontrolsretidos;[]/nestedantes0agorarejecttambém. Originalae90333bprovaINALTERADAemseuramo; nãodizerprovaopt-inidênticaagora8GREEN.
+- Umtesteantigoai-attempt-budgetexigia0nos6valoresilegíveis. ExpliqueiANTESdeeditar/em8ecc9aa1queagoraC4exigerecusaexplícita; mesmos6vetores/7casos mantidos, assert.rejectsUnknownReplyErrornãorelaxaasserção. **Novo testecomlibaibase7760 dá7/1fail,corretivo7/7**. Log/tmp/z-ai-receipts-attempt-contract-red.log; esbuildaliaslibaiapontapara/tmp/z-ai-receipts-base.tssóleitura(semcopiarcódigoprodutoalheio).
+Nenhumexpectedtrocadoparaobservado/prazomaior/skip/removercontrole.
+
+### Correção / prova de custo
+lib/ai.ts23linhas: importshelperexistente repliesFor/countOf/UnknownReplyError. countedexigeenvelope2/INCRBYnumericoseguro>=jobs/EXPIRE===1 antescallback;qualquerunknownrecusaoffsemcallback/semdécrementonovo/readback/retry. Contadorconfirmadoacimacota mantémretornoantigoDECRBYsóconhecido;startedattemptcontinuareservado.
+aiLeftexigeGETenvelope1/nullausênciaconfirmadaoustringcountcanônicainteiraseguranãonegativa;unknownLANÇAUnknownReplyError, não retorna0conhecido. Featureoffoujanelainexistentemantém0antigo. jobCountconfereString(count)===valueeliminandozerosàesquerda/finalnewline/coerção;saldoobservadousa countvalidado. Keys/cota/TTL/threshold/visiblelimit/preço/flags/gates/providerbudgetiná lterados. Nenhumcomando/key/famílianova,registries24+7passam;UNKNOWNnão0/semnovagratuidadeUSD.
+
+**18/18canônicosGREEN+264ligados=282PASS em16grupos**:
+counted10,left8,AI30,callbudget5,cost24,data7,language6,page14,pdf8,attempt7,sequence10,quiz14,source25,review82,affiliate20,numbers12.
+Primeirobroadlinkedstoppouemai-attempt-budget7/1apenascontratoantigo; depoisdaconversãoautorizadadotestefinal7/7+restante,nãoconfundirrunparcialcomsuítetodaverde.
+StrictTSC5raízes/imports0,eslint6paths0,scanner3945tracked/0,diffcheck0,nativeAPIárvoreIGUAL. Semglobalbuild/TSC/CI/nativeRedis/browser/provider/pagamentoreal/AAAcertificados. Boundariesauth/transport/providerfixtureexplícitos,modelnãoexecutadonasprovasnovas.
+**LimiteescopoexpressoPR**: consumersherdadosapp/studio/blog/email/pages/course/reviews etc ainda catch(aiLeft)=>0. HelperscorrigidosNÃOcertificamUIinteira“unknownhonesto”; C4coordenaeventualfollowupdoscallersforaescopolib-único/arquivosocupados. Nãoaltereiessesconsumidoresàs escondidas.
+
+### Publicação e NOVA CI (sóobservaçãoinicial)
+Mainavançounestaexecuçãopara **71b52d08d7ee7bb2fd86ac2b698c659dd3f7d89d** (observadooriginmain). Native merge-treefreshcontraheadlocalb36LIMPO **763ed26dd2b98216e14474123586c7c2b021bba0**, nãoconflito/nãomainchase. SnapshotPRnormalize mergeable:falseNÃOprova conflito, nãoalterarheadpara“consertar”. ReviewR2nominalpedido nocorpoPR; canalpedido/PONTOdeveserconfirmadoantesencerrar.
+**NOVE workflowsNOVOS dohead96e202812b43b53bab96c244ba01dfe2b77796dd**, UMAleiturainicial queued/in_progress,não9SUCCESS:
+42214017206 .github/workflows/accessibility-buyer-actions.yml queued
+42214016949 .github/workflows/product-checks.yml in_progress
+42214017073 .github/workflows/accessibility-real-readers.yml in_progress
+42214017072 .github/workflows/codeql.yml in_progress
+42214017195 .github/workflows/accessibility-signup-actions.yml in_progress
+42214017062 .github/workflows/accessibility-studio-matrix.yml in_progress
+42214017120 .github/workflows/dependency-security.yml in_progress
+42214016942 .github/workflows/accessibility-public-matrix.yml in_progress
+42214017005 .github/workflows/accessibility-product-actions.yml in_progress
+NÃOpollrodadas. Apósparecer/revisãocausal/terminalreal:9exacthead+reviewlimpa+freshnative/rawclean+NORMALexpectedSHA+GETtrue; anterioresgreensnãoaplicam. NãoháreviewGREENoumergenovoalegado.
+
+## QUATRO produtos próprios exatos / retries / próximos
+
+|PR|Head remoto|Próximo|
+|---|---|---|
+|2740|455e46a69edeb02846afa83528c16500329cb62a|Saplicável5794710012,noveNOVOSanterioresaguardamterminalreal;nãoreconsultados|
+|2741|032c4b617fa1c9686da2b70c7967785c307d09fe|Saplicável5794737821,noveNOVOSanterioresaguardamterminalreal;nãoreconsultados|
+|2773|7312dceb66fed9918c6ad82be5c01325d114cfda|LEVE S5796448521/RED255ef0cc/espera2784MERGEDlegítimoAPIúltimaOPEN06aff6d2|
+|2800|96e202812b43b53bab96c244ba01dfe2b77796dd|RED7d8be/282locais/verificaçõesacima/revisãoR2nominal+9NOVOS|
+
+#2602MERGED5f28prévio/todosREDs/WIPb096mantidos. Nenhumretry/cancel/bypass/mainpush/foreignref. Retentativas **2484verify127130387972;2615verify127143841589/mac127144213372;2741Windows127737110071 CONSUMIDASPARASEMPRE**, nenhuma nova. UMA vaga livre, não produto por silêncio. C4única/C1OFFnãodestinatário/Vlotes.
+
+LocalNOVO /workspace/scratch/b63eb70a66ab/z-ai-counter-receipts, donor776readonly; logs/tmp/z-ai-receipts-{counted-red,left-red,green,linked,linked-final,types-complete,lint-final,scanner-final}.log;config/tmp/z-ai-receipts-types.json5raízes. Runner/tmp/z-target-tests.mjsmkdtempisolado. ProvasOAuth971dd9e/AIownershipdoc4a3327bfintactas; nenhumasuítereexecutadaporchurndocs.
+ÚNICAvigia7850/MESMOflockfetch60s/inboxmain+2784/deadline3500s, nãoCI/canal. Nãopresumirexecuçãoagenteporvigia/checkpointrecente/nãocriarduplicata. Nenhumaautomaçãoalterada/desativada/criada; gatescoordenaçãotransitórios,nãofimdaauditoria. Próximo:retornoR2#2800→achadoREDnominalou9final/freshmerge;outerminal2740/2741;ou2784MERGED→MESMO2773mainUMAvezhelper/MESMA4Sunknown503honesto/exceeded429+81+213/S/9NOVOS. AntesencerrarpublicarPONTOEXATOesteCP+pedidoR2/novafronteiracallersC4; seGitHubfalha>=2min/freshFULLnonforce.
+
+---
+
 # PONTO VIGENTE — 06/11/2026: C4 exclusiva; auditoria nominal meta/meet CONCLUÍDA em evidência
 
 Esta seção SUPERA próximos passos antigos; TODO histórico abaixo preservado. Checkpointd643d974b56bb6a130027d0ded4de7ac3a2d3096 recuperado COMPLETO124439chars ANTESdaação, idênticoaoestadointegraljáconhecido. Depois main7760b146fa645849bfefa357dc4c17f7c76d8ea3/caixa/CX122-CX123/fila/CLAUDE/AGENTS/canalFULLnovos lidos. PONTO anterior d8afa5e12e923e22122aabf87ff03f66e7ebccdc confirmado no canal; NÃOreenviarpendênciasantigas. Nenhuma duplicada absorvida sóporrecência, execuçãoativaconcorrente nãoconfirmada.

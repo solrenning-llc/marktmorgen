@@ -4,8 +4,6 @@ import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
-import { readNotifyOff } from "@/lib/notify-prefs";
-import { OPTIONAL_EVENTS } from "@/lib/notify-prefs-rules";
 import { NotifyPrefsPanel } from "@/components/notify-prefs-panel";
 
 export const metadata: Metadata = {
@@ -17,10 +15,10 @@ type Params = { searchParams: Promise<{ [key: string]: string | string[] | undef
 
 /**
  * Which studio alert emails the store's owner gets, event by event
- * (lib/notify-prefs.ts, queue item 601 [KB22] U6). A setting, so for the
- * owner and an Admin, as the route that saves it.
- * When the saved choice cannot be read, the page says so and shows no boxes,
- * so nobody saves over a choice they could not see.
+ * (alertEmailsOff in the store record, lib/notify-prefs-rules.ts; queue item
+ * 601 [KB22] U6). A setting, so for the owner and an Admin, as the route that
+ * saves it. The choice shown is the one in the store record the page was
+ * opened with, the same one the alert jobs follow.
  */
 export default async function StudioNotificationsPage({ searchParams }: Params) {
   const query = await searchParams;
@@ -31,7 +29,6 @@ export default async function StudioNotificationsPage({ searchParams }: Params) 
   }
   const { view: access } = found;
   const store = access.store;
-  const off = await readNotifyOff(store.statsId);
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -50,13 +47,7 @@ export default async function StudioNotificationsPage({ searchParams }: Params) 
             We email the store&apos;s owner when something about the store&apos;s numbers needs a look. Pick the ones you want. Emails about
             your account, payments, your plan and legal notices always come.
           </p>
-          {off === null ? (
-            <p className="notice notice-error mt-6" role="alert">
-              We could not read your choices just now. Nothing was changed, and every alert waits until they can be read. Try again in a moment.
-            </p>
-          ) : (
-            <NotifyPrefsPanel off={OPTIONAL_EVENTS.filter((event) => off.has(event))} />
-          )}
+          <NotifyPrefsPanel off={store.alertEmailsOff} />
         </main>
       </StudioStorePin>
     </div>

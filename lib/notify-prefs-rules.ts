@@ -1,8 +1,8 @@
 /**
  * Which studio alert emails a creator gets, event by event (queue item 601
  * [KB22], unit U6; added 6 November 2026). Browser-safe: the studio's panel
- * (components/notify-prefs-panel.tsx) and the server (lib/notify-prefs.ts)
- * read the same catalog.
+ * (components/notify-prefs-panel.tsx), the store record (lib/store.ts,
+ * alertEmailsOff) and the alert jobs read the same catalog.
  *
  * Optional: the alerts about a store's numbers (lib/store-alerts.ts, each
  * kind) and the email when sales stop (lib/quiet-sales.ts). Each is on until
@@ -12,11 +12,20 @@
  * (chatSales) keep their own settings. The stop link at the foot of the
  * weekly email still stops all of these at once, as it always did.
  *
+ * Where the choice is kept, and why there: in the store record itself, which
+ * every alert job already holds before it decides anything. So the choice a
+ * job follows is always the creator's last saved one, read with the store,
+ * and there is no second reading that could come back unknown and force a
+ * guess between sending against an "off" and losing an alert. No job can
+ * run without the store record, so none decides without the choice. A list
+ * in the record that names an event this code no longer has keeps the rest
+ * (keptOff); one that is not a list at all reads as nothing switched off.
+ *
  * Always on, shown as such with the reason: what keeps the account safe, what
  * says buyers cannot pay or the plan cannot be paid, what comes before a
  * charge or a closing, and the notices the law asks to be given. Their code
- * never reads the choice (tests/notify-prefs.test.ts checks each file), so no
- * reading of it, known or unknown, can hold one back.
+ * never reads the choice (tests/notify-prefs.test.ts checks each file), so
+ * nothing about it can hold one back.
  *
  * Left out of this unit, for a later one: the weekly and monthly emails and
  * the busy-day email are sent from lib/stats-report.ts and its cron routes
@@ -97,6 +106,23 @@ export function parseOff(value: unknown): OptionalEvent[] | null {
     seen.add(item);
   }
   return OPTIONAL_EVENTS.filter((event) => seen.has(event));
+}
+
+/**
+ * The events switched off as the store record keeps them: the known ones,
+ * once each, in the catalog's order. Lenient where parseOff is strict, because
+ * this reads what the store already saved: an event retired since is dropped
+ * and the rest of the creator's choice kept; anything not a list is nothing off.
+ */
+export function keptOff(value: unknown): OptionalEvent[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set(value.filter(isOptionalEvent));
+  return OPTIONAL_EVENTS.filter((event) => seen.has(event));
+}
+
+/** Whether a store's owner wants `event` by email, from the store record's list. */
+export function wantsAlertEmail(off: readonly string[] | undefined, event: OptionalEvent): boolean {
+  return !(off ?? []).includes(event);
 }
 
 /** The studio page where the choices are made, for a store's own id. */

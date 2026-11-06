@@ -21,23 +21,22 @@
  *
  * Who. Only a store with a plan running and Stripe connected, and never one
  * whose creator stopped the numbers emails (the weekly one stops all three)
- * or switched this one off (lib/notify-prefs.ts, queue item 601 [KB22] U6).
- * That choice is read only once a stretch is found; when it cannot be read
- * exactly, no email goes against it, the stretch is not used up and the
- * day's look is let go, so the next hourly run asks again.
+ * or switched this one off (alertEmailsOff in the store record,
+ * lib/notify-prefs-rules.ts; queue item 601 [KB22] U6). That choice is read
+ * from the store this job already holds, before anything is claimed or read
+ * from Stripe, so a store that does not want it costs no reading at all.
  * Read once a day per store by an hourly job (app/api/cron/quiet).
  */
 import { type Store, saleHandles } from "@/lib/store";
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured } from "@/lib/redis";
-import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { claimMark } from "@/lib/claim-mark";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
 import { weeklyOff, weeklyToken } from "@/lib/stats-report";
 import { daysCounts } from "@/lib/stats";
-import { readNotifyOff } from "@/lib/notify-prefs";
-import { notifyPrefsPath } from "@/lib/notify-prefs-rules";
+import { notifyPrefsPath, wantsAlertEmail } from "@/lib/notify-prefs-rules";
 
 /** Days of sales the usual pace is read from. */
 export const QUIET_PACE_DAYS = 60;
@@ -100,25 +99,18 @@ export async function checkQuiet(store: Store, now = Date.now()): Promise<QuietO
   if (!isRedisConfigured() || !isSenderConfigured() || !store.stripeAccountId) return "skipped";
   const standing = standingOf(store);
   if (standing !== "paid" && standing !== "trial") return "skipped";
+  if (!wantsAlertEmail(store.alertEmailsOff, "quiet-sales")) return "skipped";
   if (await weeklyOff(store.handle)) return "skipped";
   const day = new Date(now).toISOString().slice(0, 10);
   // The day's look and the email are ours only on an exact claim (lib/claim-mark.ts): an unknown answer
   // reads nothing and sends nothing this run, and lets nothing go.
-  const checked = checkedKey(day, store.handle);
-  const checkedValue = claimValue(now);
-  const first = await claimMark(checked, 2 * 86400, checkedValue);
+  const first = await claimMark(checkedKey(day, store.handle), 2 * 86400);
   if (first === "taken") return "seen";
   if (first !== "ours") return "skipped";
   const times = await saleTimes(store, now).catch(() => null);
   if (times === null) return "skipped";
   const verdict = isQuiet(times, now);
   if (!verdict.quiet) return "fine";
-  const off = await readNotifyOff(store.statsId);
-  if (!off) {
-    await releaseMark(checked, checkedValue);
-    return "skipped";
-  }
-  if (off.has("quiet-sales")) return "skipped";
   const claimed = await claimMark(sentKey(store.handle, verdict.last), 90 * 86400);
   if (claimed === "taken") return "fine";
   if (claimed !== "ours") return "skipped";

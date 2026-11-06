@@ -8,6 +8,16 @@ import { ALWAYS_ON_ROWS, OPTIONAL_ROWS, type OptionalEvent } from "@/lib/notify-
  * one labeled box per optional alert and one Save; the notices that cannot be
  * switched off are listed as text with their reason, not as boxes that do nothing.
  */
+const UNCONFIRMED = "We could not confirm the save. Reload this page to see what is saved, then try again.";
+
+/** What to tell the person, from the route's error: what happened, and what to do next. */
+function refusal(error: string | undefined): string {
+  if (error === "signed_out") return "Your sign-in has ended, so nothing was changed. Sign in again, then save.";
+  if (error === "forbidden") return "Only the store's owner or an Admin can change these, so nothing was changed.";
+  if (error === "server_error" || error === undefined) return UNCONFIRMED;
+  return "Nothing was changed. Try again in a moment.";
+}
+
 export function NotifyPrefsPanel({ off: initial }: { off: OptionalEvent[] }) {
   const [saved, setSaved] = useState<OptionalEvent[]>(initial);
   const [off, setOff] = useState<OptionalEvent[]>(initial);
@@ -25,13 +35,11 @@ export function NotifyPrefsPanel({ off: initial }: { off: OptionalEvent[] }) {
         setSaved(data.off);
         setOff(data.off);
         setSaid({ ok: true, text: "Saved. Your alert emails follow these choices from now on." });
-      } else if (data.error === "unknown") {
-        setSaid({ ok: false, text: "We could not confirm the save. Reload this page to see what is saved, then try again." });
       } else {
-        setSaid({ ok: false, text: "Nothing was changed. Try again in a moment." });
+        setSaid({ ok: false, text: refusal(data.error) });
       }
     } catch {
-      setSaid({ ok: false, text: "We could not confirm the save. Reload this page to see what is saved, then try again." });
+      setSaid({ ok: false, text: UNCONFIRMED });
     } finally {
       setBusy(false);
     }
@@ -82,6 +90,9 @@ export function NotifyPrefsPanel({ off: initial }: { off: OptionalEvent[] }) {
             </button>
           </fieldset>
         </form>
+        <p className="mt-4 text-sm text-ink-soft">
+          The stop link at the foot of the weekly email stops all of these alerts too, along with the weekly, monthly and busy-day emails.
+        </p>
         <p role="status" aria-live="polite" className={said ? (said.ok ? "notice mt-4" : "notice notice-error mt-4") : "sr-only"}>
           {said?.text ?? ""}
         </p>
@@ -103,9 +114,6 @@ export function NotifyPrefsPanel({ off: initial }: { off: OptionalEvent[] }) {
             </li>
           ))}
         </ul>
-        <p className="mt-6 text-sm text-ink-soft">
-          The weekly and monthly emails and the busy-day email have a stop link at the foot of each. Stopping them there also stops the alerts above.
-        </p>
       </section>
     </div>
   );

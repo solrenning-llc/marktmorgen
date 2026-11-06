@@ -60,7 +60,15 @@ export default async function DeletePage({ searchParams }: Params) {
   const opensAt = typeof query.opens === "string" && /^\d{4}-\d{2}-\d{2}$/.test(query.opens) ? new Date(`${query.opens}T00:00:00Z`) : null;
   const opensOn = opensAt && !Number.isNaN(opensAt.getTime()) ? opensAt.toLocaleDateString("en-US", { timeZone: "UTC", month: "long", day: "numeric", year: "numeric" }) : "";
   const handle = typeof query.store === "string" ? query.store.slice(0, 60).toLowerCase() : "";
-  const store = handle ? await storeForHandle(handle).catch(() => null) : null;
+  // A store that could not be read just now is said so: the choice of that store alone is never dropped without a word.
+  let storeUnread = false;
+  const store = handle
+    ? await storeForHandle(handle).catch((error: unknown) => {
+        console.error("the store for a deletion request could not be read", error);
+        storeUnread = true;
+        return null;
+      })
+    : null;
   let linkUnavailable = false;
   const link = token ? await readErasureLink(token).catch(() => {
     linkUnavailable = true;
@@ -172,6 +180,12 @@ export default async function DeletePage({ searchParams }: Params) {
                   ) : null}
                 </p>
               ) : null}
+              {storeUnread ? (
+                <p className="notice notice-info mb-6" role="status">
+                  That store could not be read just now, so deleting your data from it alone cannot be offered here at the moment. Try again in a moment, or ask
+                  below for every store.
+                </p>
+              ) : null}
               {statusKey === "full" ? (
                 <p className="notice notice-error mb-6" role="alert">
                   Your link can&apos;t be emailed right now: the emails for requests like this are used up for now. Nothing was deleted.{" "}
@@ -217,7 +231,7 @@ export default async function DeletePage({ searchParams }: Params) {
                 </p>
               </form>
               <p className="mt-6 text-sm text-ink-soft">
-                {store ? null : "To delete your data from one store only, use the link at the foot of that store's page. "}
+                {store || storeUnread ? null : "To delete your data from one store only, use the link at the foot of that store's page. "}
                 Every store means the stores you bought from since October 11, 2026, and those whose list, waitlist or free product you signed up for yourself since October 17, 2026. Any other store, such as one that brought your address over from another platform, finds you from the link at the foot of its own page. <Link href="/privacy#delete" className="underline underline-offset-4">What is deleted, and what is kept</Link>.
               </p>
             </div>

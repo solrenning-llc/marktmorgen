@@ -25,6 +25,8 @@ import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Block, aboutBlocks, aboutExcerpt, cleanAbout } from "@/lib/product-about";
 import { slugOf } from "@/lib/product-slug";
+import { blogReadArray, blogReadBody } from "@/lib/blog-read-replies";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 export const MAX_POSTS = 200;
 export const MAX_POST_TITLE = 120;
@@ -123,12 +125,20 @@ function parseMeta(raw: unknown): PostMeta | null {
 
 /** Every post of a store, drafts too, newest change first: for the studio. */
 export async function allPosts(statsId: string | null): Promise<PostMeta[]> {
-  if (!statsId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HVALS", metaKey(statsId)]]);
-  return (Array.isArray(raw) ? raw : [])
-    .map(parseMeta)
-    .filter((m): m is PostMeta => m !== null)
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+  if (!statsId) return [];
+  if (!isRedisConfigured()) throw new UnknownReplyError("the blog connection");
+  const reply = blogReadArray(await redisPipeline([["HVALS", metaKey(statsId)]]), 1);
+  const rows = reply ? blogReadArray(reply[0]) : null;
+  if (!rows) throw new UnknownReplyError("the blog list");
+  const posts: PostMeta[] = [];
+  const seen = new Set<string>();
+  for (const raw of rows) {
+    const post = parseMeta(raw);
+    if (!post || seen.has(post.id)) throw new UnknownReplyError("a blog list entry");
+    seen.add(post.id);
+    posts.push(post);
+  }
+  return posts.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 /** One page of the published posts, newest first, and how many there are. */
@@ -159,45 +169,35 @@ export async function publishedTotal(statsId: string | null): Promise<number | n
   }
 }
 
-/** One post, whole; null when there is none by that id. */
+/** One post, whole; null only for a confirmed absence, otherwise unknown reads throw. */
 export async function readPost(statsId: string | null, id: string): Promise<Post | null> {
-  if (!statsId || !isRedisConfigured() || !POST_ID.test(id)) return null;
-  const [meta, body] = await redisPipeline([
+  if (!statsId || !POST_ID.test(id)) return null;
+  if (!isRedisConfigured()) throw new UnknownReplyError("the blog connection");
+  const reply = blogReadArray(await redisPipeline([
     ["HGET", metaKey(statsId), id],
     ["HGET", bodyKey(statsId), id],
-  ]);
-  const m = parseMeta(meta);
-  if (!m) return null;
-  let words = "";
-  let product: string | null = null;
-  try {
-    const parsed = JSON.parse(String(body)) as { body?: unknown; product?: unknown };
-    words = typeof parsed.body === "string" ? parsed.body : "";
-    product = typeof parsed.product === "string" && PRODUCT_ID.test(parsed.product) ? parsed.product : null;
-  } catch {
-    words = "";
-  }
-  return { ...m, body: words, product };
+  ]), 2);
+  if (!reply) throw new UnknownReplyError("a whole blog post");
+  if (reply[0] === null && reply[1] === null) return null;
+  const meta = parseMeta(reply[0]), body = blogReadBody(reply[1]);
+  if (!meta || meta.id !== id || !body) throw new UnknownReplyError("a blog post record");
+  return { ...meta, ...body };
 }
 
 /** Every post whole, a hundred at a command for their words (HMGET): what a store's whole export reads (lib/store-export.ts). */
 export async function readPosts(statsId: string | null, metas: PostMeta[]): Promise<Post[]> {
-  if (!statsId || !isRedisConfigured()) return [];
+  if (metas.length === 0) return [];
+  if (!statsId || !isRedisConfigured()) throw new UnknownReplyError("the blog connection");
   const out: Post[] = [];
   for (let i = 0; i < metas.length; i += 100) {
     const some = metas.slice(i, i + 100);
-    const [bodies] = await redisPipeline([["HMGET", bodyKey(statsId), ...some.map((m) => m.id)]]);
+    const reply = blogReadArray(await redisPipeline([["HMGET", bodyKey(statsId), ...some.map((m) => m.id)]]), 1);
+    const bodies = reply ? blogReadArray(reply[0], some.length) : null;
+    if (!bodies) throw new UnknownReplyError("exported blog post bodies");
     some.forEach((m, n) => {
-      let words = "";
-      let product: string | null = null;
-      try {
-        const parsed = JSON.parse(String(Array.isArray(bodies) ? bodies[n] : "")) as { body?: unknown; product?: unknown };
-        words = typeof parsed.body === "string" ? parsed.body : "";
-        product = typeof parsed.product === "string" && PRODUCT_ID.test(parsed.product) ? parsed.product : null;
-      } catch {
-        words = "";
-      }
-      out.push({ ...m, body: words, product });
+      const body = blogReadBody(bodies[n]);
+      if (!body) throw new UnknownReplyError("an exported blog post body");
+      out.push({ ...m, ...body });
     });
   }
   return out;

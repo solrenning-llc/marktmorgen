@@ -393,7 +393,8 @@ export async function createBroadcast(
   if (startsNow) {
     // The month as the plan counts it (lib/allowance-window.ts), the same window
     // reserve takes from and the studio shows; a window that cannot be told
-    // leaves nothing, as reserve would refuse every batch of it.
+    // leaves nothing, as reserve would refuse every batch of it. A count Redis answered in an unknown shape throws
+    // UnknownReplyError here, before anything is written, so the email is refused, never taken as none used.
     const window = windowId(store);
     const left = window ? monthlyAllowance(store) - (await usedThisMonth(store.listId, window)) : 0;
     if (reach > left) return { ok: false, reason: "allowance" };

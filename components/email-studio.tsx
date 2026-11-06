@@ -323,7 +323,8 @@ export function EmailStudio(props: {
   name: string;
   mail: MailSettings | null;
   counts: { total: number; agreed: number; left: number; mailable: number };
-  used: number;
+  /** This month's emails used; null when the count could not be read (lib/mail.ts usedThisMonth), never shown as 0. */
+  used: number | null;
   allowance: number;
   /** Whether the plan's month can be told (lib/allowance-window.ts windowId); without it no count before sending is shown. */
   monthKnown?: boolean;
@@ -439,7 +440,7 @@ export function EmailStudio(props: {
                 products={props.products}
                 links={props.links ?? {}}
                 counts={props.counts}
-                month={props.monthKnown ? { used: props.used, allowance: props.allowance } : null}
+                month={props.monthKnown && props.used !== null ? { used: props.used, allowance: props.allowance } : null}
                 canSend={props.canSend}
                 broadcastUnconfirmed={broadcastUnconfirmed}
                 onBroadcastUnconfirmed={() => setBroadcastUnconfirmed(true)}
@@ -483,12 +484,18 @@ export function EmailStudio(props: {
       <div className="min-w-0">
         <div className="card mt-8 p-6 sm:p-8 lg:mt-0">
           <p className="text-lg font-semibold tracking-[-0.02em] text-ink">This month</p>
+          {props.used === null ? (
+            <p role="status" className="mt-2 text-ink-soft">{`This month's count could not be read. Your plan allows ${n(props.allowance)} emails a month. Reload the page in a minute to see how many are used.`}</p>
+          ) : (
+            <>
           <p className="mt-2 text-3xl font-semibold tabular-nums">{`${n(props.used)} of ${n(props.allowance)}`}</p>
           <p className="mt-1 text-sm text-ink-soft">
             {props.trial
               ? `emails sent. During the free trial a month holds ${TRIAL_MONTHLY_EMAILS.toLocaleString("en-US")}; the full ${PRO_MONTHLY_EMAILS.toLocaleString("en-US")} opens with your first payment.`
               : "emails sent, one-off and sequences together. The count starts again on the day your plan's month renews."}
           </p>
+            </>
+          )}
           {!props.trial && emailEquivalence(props.allowance) ? (
             <p className="mt-2 text-sm text-ink-soft" data-email-equivalence>{emailEquivalence(props.allowance)}</p>
           ) : null}

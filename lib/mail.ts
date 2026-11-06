@@ -18,6 +18,7 @@ import { lookColours } from "@/lib/store-look";
 import { NIMBUS_FROM, type BatchMessage, hasResend, sendListBatch, sendEmail, sentThisMonth } from "@/lib/email";
 import { isSesConfigured, sesBulkRoom, sesReady } from "@/lib/ses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { TRIAL_MONTHLY_EMAILS, canUse, monthlyEmails } from "@/lib/plan";
 import { tokensFor } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
@@ -86,10 +87,20 @@ export function inTrial(store: Store, nowSeconds = Date.now() / 1000): boolean {
   return store.trialEnds > nowSeconds;
 }
 
+/**
+ * The month's list emails used, read in its exact shape (CX-123 rule 24): a
+ * confirmed absent count is none used, a whole-number string is its value,
+ * and any other reply throws UnknownReplyError, so what decides a send from
+ * it refuses and the studio says it could not be read, never 0.
+ */
 export async function usedThisMonth(listId: string | null, window: string | null = calendarWindow().id): Promise<number> {
   if (!listId || !window || !isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["GET", usedKey(listId, window)]]);
-  return Number(raw) || 0;
+  const replies = repliesFor(await redisPipeline([["GET", usedKey(listId, window)]]), 1);
+  const raw = replies ? replies[0] : undefined;
+  if (raw === null) return 0;
+  const used = typeof raw === "string" ? confirmedCount(raw, 0) : null;
+  if (used === null) throw new UnknownReplyError("the month's list-email count");
+  return used;
 }
 
 /**

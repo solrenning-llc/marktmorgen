@@ -64,7 +64,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const allowance = monthlyAllowance(store);
   const [counts, used, loadedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
     listCounts(store.listId),
-    usedThisMonth(store.listId, windowId(store)),
+    usedThisMonth(store.listId, windowId(store)).catch(() => null),
     listBroadcastsStrict(store.listId).catch(() => null),
     readFlowListStrict(store.listId).catch(() => null),
     // The names of the products a flow or a broadcast can be about: one

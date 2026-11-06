@@ -3,6 +3,7 @@ import { canHearResend, forwardInbound, inboundSigned, isInboundConfigured } fro
 import { HEALTH_ID, LIST_TAG, STORE_TAG, heardFromSender, mailReportCampaign } from "@/lib/mail-health";
 import { MAIL_REPORT_TAG, type MailReportEvent, noteMailReportEvent } from "@/lib/mail-report";
 import { redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
 
 /** An announcement names a message; it does not carry it. Anything bigger is not one. */
@@ -12,6 +13,39 @@ const PER_MINUTE = 600;
 
 // Reading a message, fetching its files and sending it on.
 export const maxDuration = 60;
+
+/** An announcement acted on is kept this long, and the same one again is acknowledged and ignored. */
+const SEEN_SECONDS = 86_400;
+/**
+ * An announcement being acted on is held only this long: longer than one try
+ * can run, shorter than Resend's second retry (five minutes after its first).
+ * A try that failed and could not let go of it, or was stopped before it
+ * could, is so heard again on that retry, never taken as done.
+ */
+const ACTING_SECONDS = maxDuration * 2;
+const ACTING = "acting";
+const SEEN = "1";
+
+/** Marks an announcement as acted on, for the day. Already acted on: a failure here only lets a later duplicate be heard again. */
+async function markSeen(seenKey: string): Promise<void> {
+  try {
+    const [set] = repliesFor(await redisPipeline([["SET", seenKey, SEEN, "EX", SEEN_SECONDS]]), 1) ?? [];
+    if (set !== "OK") console.error("an announcement acted on could not be marked as seen", set);
+  } catch (error) {
+    console.error("an announcement acted on could not be marked as seen", error);
+  }
+}
+
+/** Lets go of an announcement not acted on, so Resend's retry is heard; if this does not land, the hold runs out by itself. */
+async function letGo(seenKey: string): Promise<void> {
+  try {
+    const [gone] = repliesFor(await redisPipeline([["DEL", seenKey]]), 1) ?? [];
+    const count = countOf(gone);
+    if (count !== 0 && count !== 1) console.error(`an announcement not acted on could not be let go of; it is heard again after ${ACTING_SECONDS} seconds`, gone);
+  } catch (error) {
+    console.error(`an announcement not acted on could not be let go of; it is heard again after ${ACTING_SECONDS} seconds`, error);
+  }
+}
 
 /** A tag's value, from the two shapes a sender writes tags in: { name: value } or [{ name, value }]. */
 function tagOf(tags: unknown, name: string): string {
@@ -35,9 +69,12 @@ function tagOf(tags: unknown, name: string): string {
  *
  * Not found until the setting that signs them is there. Every announcement
  * must carry Resend's signature from the last five minutes, and each is
- * acted on once: its id is kept for a day, and the same one again is
- * acknowledged and ignored. One we failed to act on is let go of again and
- * answered with a failure, so Resend's retry of it is heard.
+ * acted on once: its id is held while it is being acted on, then kept for a
+ * day, and the same one again is acknowledged and ignored. One still being
+ * acted on is answered with a failure, so Resend offers it again later. One we
+ * failed to act on is let go of again and answered with a failure, so
+ * Resend's retry of it is heard; if it could not be let go of, the hold runs
+ * out before that retry.
  *
  * Anything else is acknowledged and ignored.
  */
@@ -74,8 +111,14 @@ export async function POST(request: NextRequest) {
 
   const seenKey = `nl:inbound:seen:${id}`;
   try {
-    const [fresh] = await redisPipeline([["SET", seenKey, "1", "NX", "EX", 86_400]]);
-    if (fresh === null) return Response.json({ ok: true });
+    const replies = repliesFor(await redisPipeline([["SET", seenKey, ACTING, "NX", "EX", ACTING_SECONDS], ["GET", seenKey]]), 2);
+    if (replies && replies[0] === null) {
+      // Acted on already: acknowledged and ignored. Anything else (still being
+      // acted on, or a value not read) is not taken as done: answered with a
+      // failure, so Resend offers it again.
+      if (replies[1] === SEEN) return Response.json({ ok: true });
+      return Response.json({ ok: false }, { status: 409 });
+    }
   } catch {
     // Without Redis the sender's idempotency key still keeps a repeat from
     // being delivered twice; carry on.
@@ -107,13 +150,14 @@ export async function POST(request: NextRequest) {
       const emailId = typeof notice.data?.email_id === "string" && notice.data.email_id.length <= 200 ? notice.data.email_id : "";
       const occurredAt = typeof notice.created_at === "string" ? Date.parse(notice.created_at) : undefined;
       const reported = await noteMailReportEvent(store, tagOf(notice.data?.tags, MAIL_REPORT_TAG), event, recipients.length, emailId ? `resend:${emailId}` : "", occurredAt);
+      await markSeen(seenKey);
       if (!reported && !bad) return Response.json({ ok: true });
       const reportResult = event === "delivered" ? "delivered" : event === "temporary-bounce" ? "temporary" : "counted";
       return Response.json({ ok: true, result: result !== "ignored" ? result : reported ? reportResult : "ignored" });
     } catch (error) {
       // Not acted on: let go of, so the retry is heard.
       console.error("a delivery report could not be recorded", error);
-      await redisPipeline([["DEL", seenKey]]).catch(() => {});
+      await letGo(seenKey);
       return Response.json({ ok: false }, { status: 500 });
     }
   }
@@ -122,8 +166,9 @@ export async function POST(request: NextRequest) {
 
   const result = await forwardInbound(emailId);
   if (result === "retry") {
-    await redisPipeline([["DEL", seenKey]]).catch(() => {});
+    await letGo(seenKey);
     return Response.json({ ok: false }, { status: 500 });
   }
+  await markSeen(seenKey);
   return Response.json({ ok: true, result });
 }

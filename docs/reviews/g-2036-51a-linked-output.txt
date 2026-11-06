@@ -1,0 +1,1256 @@
+
+===== g2036-51a-linked-team-roles-complete.log =====
+
+The table
+  ok    admin: none of the owner's four
+  ok    editor: none of the owner's four
+  ok    support: none of the owner's four
+  ok    the owner has every permission
+  ok    support edits nothing
+  ok    an editor cannot send, export, import, delete a person or touch settings
+  ok    deleting a person is the owner's and an admin's (lib/person-erasure.ts)
+  ok    whatever two-step login locks after a recovery is beyond an editor and support
+  ok    a word that is not a permission is not one, even on an object's prototype
+
+The door, store by store
+  ok    the team member is added
+  ok    the owner cannot be added as a member of their own store
+  ok    an editor edits products
+  ok    but cannot send to the list
+  ok    nor download buyers' data
+  ok    support reads orders
+  ok    but changes no product
+  ok    an admin changes settings
+  ok    but not the plan, the Stripe connection, the team or deleting
+  ok    the owner may do all four
+  ok    a store they are not on is gone, never another store
+  ok    not even for its owner's neighbour
+  ok    an id that is not one is gone
+  ok    no store named: their own store only
+  ok    the switcher's cookie naming a store they are not on is only a preference
+
+Taken off the team
+  ok    removed
+  ok    refused at once
+
+The routes say what they need
+  ok    store/team/route.ts needs member and team
+  ok    store/export/route.ts needs export and stats
+  ok    store/import/route.ts needs import
+  ok    store/leads/route.ts needs export
+  ok    store/audience/route.ts needs export
+  ok    store/api-keys/route.ts needs export
+  ok    store/webhooks/route.ts needs settings
+  ok    store/affiliates/export/route.ts needs export
+  ok    store/paypal/connect/route.ts needs payments
+  ok    store/paypal/disconnect/route.ts needs payments
+  ok    stripe/connect/route.ts needs payments
+  ok    stripe/disconnect/route.ts needs payments
+  ok    billing/checkout/route.ts needs billing
+  ok    billing/cancel/route.ts needs billing
+  ok    billing/switch/route.ts needs billing
+  ok    every permission a route's guard names is in the table
+  ok    and there are routes to check
+
+43 checks, all passing.
+
+
+===== g2036-51a-linked-team-two-step.log =====
+
+Off: everybody on the team opens the studio as before
+  ok    owner
+  ok    a member with no second step
+
+On: a member without a second step opens nothing
+  ok    switched on
+  ok    the team record says so
+  ok    the owner still opens it
+  ok    a member without a second step is refused
+  ok    a route answers 403 with its own error
+
+Owning an authenticator app or a passkey is not enough: the session must have been opened with it
+  ok    an authenticator app, without a session opened with its code
+  ok    Ben still has none
+  ok    a passkey, without a session opened with it
+
+Team changes never switch it off
+  ok    after someone joins
+  ok    after someone leaves
+
+Off again, and the log says who did each
+  ok    a member without a second step opens it again
+  ok    both switches are in the activity log
+
+14 checks, all passing.
+
+
+===== g2036-51a-linked-team-two-step-session.log =====
+
+A member who has only a passkey, logging in with the emailed link
+  ok    the link opens a session
+  ok    with no second step written on it
+  ok    the team holds it at the door
+  ok    and says to log in again with the passkey
+  ok    the studio refuses the store to it
+  ok    and so does every studio route
+
+The same member, logging in with the passkey
+  ok    a session opens
+  ok    opened with the passkey
+  ok    the team lets it in
+  ok    the studio opens the store to it
+  ok    the link's session was replaced: it is gone
+
+A member with an authenticator app: the link waits for the code
+  ok    the link opens no session
+  ok    the app's code opens one, marked so
+  ok    the team lets it in
+  ok    the studio opens the store to it
+  ok    a recovery code opens one, marked so
+  ok    the team lets that in too
+
+What has no second step is held, and has a way out
+  ok    a session from before the mark existed
+  ok    a session left out of the question
+  ok    somebody else's session does not count
+  ok    an app user is told to log in again with the code
+  ok    a member with neither is held, and told to set one up
+  ok    every way out has a title, words and a place to go, and keeps what was typed
+  ok    a session logged out loses its mark with it
+
+The owner, and a store that does not ask, do not change
+  ok    the owner is never held, whatever the session
+  ok    the owner opens the store
+  ok    pia-passkey@example.com on a store that does not ask is never held
+  ok    pia-passkey@example.com opens the store that does not ask
+  ok    ned-nothing@example.com on a store that does not ask is never held
+  ok    ned-nothing@example.com opens the store that does not ask
+
+30 checks, all passing.
+
+
+===== g2036-51a-linked-team-pick-complete.log =====
+
+The rule
+  ok    a team that lets buyers choose keeps it, with each name
+  ok    a name's spaces are tidied
+  ok    a name that is an address, a link, markup, too long or not text is refused
+  ok    choosing needs round robin, every host named, each name once
+  ok    a team without it reads as before, with no pick and no name
+  ok    a plain name is a name
+
+The choices
+  ok    each host's position and name, in the team's order
+  ok    none on a team that does not let buyers choose
+  ok    "Any available" is no choice
+  ok    a position whose name still matches narrows the team to that host
+  ok    another name there, a position past the end, or a team that no longer lets buyers choose: changed
+
+A store
+  ok    the page is told who may be chosen and who was
+  ok    with Ana chosen, only her times: the morning, not the afternoon; any available, both
+  ok    a booking with Bela chosen holds Bela, though Ana comes first in turn and is free
+  ok    Bela taken at that time: said as taken, never handed to Ana
+  ok    a name changed since the page was drawn: refused, nobody held
+  ok    any available is round robin as before: Ana, the one still free
+
+The route, the page and the editor
+  ok    a refusal keeps the chosen host chosen, but not when the team changed
+  ok    the route reads the position and the name, and passes them on
+  ok    the page asks with a labeled choice and a button, and sends the chosen host with the time
+  ok    the time picker sends it, never when moving a booking
+  ok    the editor offers it on round robin, with each host's name, sent only when buyers choose
+
+In every language
+  ok    each asks, offers any available, shows times, names the host and says the team changed
+
+23 checks, all passing.
+
+
+===== g2036-51a-linked-team-scheduling.log =====
+
+Reading a team
+  ok    a team of one host, its address made lower case
+  ok    every wrong part is named
+  ok    each plan has its numbers; a trial has the Store plan's; no plan has none
+
+A host's own clock, across daylight saving
+  ok    9:00 in Berlin is 08:00 UTC before the clocks move and 07:00 after
+  ok    on the night New York skips 2:00, every offered hour fits inside 1:00 to 4:00 on the clock
+  ok    a host's day is their own: 23:30 UTC Monday is Tuesday in Tokyo
+
+Gap, notice, daily cap
+  ok    the host's own gap keeps an hour after a call free
+  ok    the host's own notice wins over the call's
+  ok    a host with their cap reached that day is free the next
+  ok    outside the host's hours, never
+
+Round robin and collective
+  ok    round robin offers the time with one host free
+  ok    a collective call does not
+  ok    a host whose calendar cannot be read loses their times only
+  ok    round robin order: fewest so far, then fewest coming up, then by address
+
+Claims on a host's time
+  ok    one host's hour is taken once
+  ok    a collective claim that loses on one host writes nothing on the other
+  ok    a move onto its own time is not a clash
+  ok    a full day refuses
+  ok    released, the hour is free again
+  ok    a confirmed claim stays for good
+
+Holding team times on a store
+  ok    the time is offered
+  ok    call checkout belongs to its creator harbor/0
+  ok    platform credential acts on the connected account harbor/0
+  ok    call checkout has no platform destination or transfer harbor/0
+  ok    call checkout belongs to its creator harbor/1
+  ok    platform credential acts on the connected account harbor/1
+  ok    call checkout has no platform destination or transfer harbor/1
+  ok    two holds of one time go to its two hosts in turn, the third finds none
+  ok    round robin went to Maya first (by address), then the owner
+  ok    each checkout names its host and claim, so Stripe's ledger knows them
+  ok    and the time is no longer offered
+  ok    a hold given back frees its host and the time
+  ok    call checkout belongs to its creator harbor/2
+  ok    platform credential acts on the connected account harbor/2
+  ok    call checkout has no platform destination or transfer harbor/2
+  ok    the same person on another store's team cannot be held twice for one time
+  ok    call checkout belongs to its creator harbor/3
+  ok    platform credential acts on the connected account harbor/3
+  ok    call checkout has no platform destination or transfer harbor/3
+  ok    a collective hold takes every host's time, once
+  ok    call checkout belongs to its creator harbor/4
+  ok    platform credential acts on the connected account harbor/4
+  ok    call checkout has no platform destination or transfer harbor/4
+  ok    the owner is taken, so on the round robin call the time goes to Maya
+  ok    on the Store plan a team event is closed, and offers no times
+
+A host's own Google Calendar
+  ok    Maya connects her own, with the host scopes
+  ok    she picks it as her source, a second calendar to read and one to write to
+  ok    calendar busy fixture is distinct from earlier host claims
+  ok    her busy time is read from both calendars, by free/busy only
+  ok    call checkout belongs to its creator harbor/5
+  ok    platform credential acts on the connected account harbor/5
+  ok    call checkout has no platform destination or transfer harbor/5
+  ok    busy in her calendar, the booking goes to the owner
+
+A booking written to her calendar, moved and deleted there
+  ok    call checkout belongs to its creator harbor/6
+  ok    platform credential acts on the connected account harbor/6
+  ok    call checkout has no platform destination or transfer harbor/6
+  ok    free in her calendar, Maya gets it
+  ok    an event with a Meet link is made on the calendar she chose, on her own connection
+  ok    and her claim is a booking now
+  ok    moved by the buyer, it keeps its host, and her event moves on that calendar
+  ok    refunded in full, the event is deleted on that calendar
+
+A team booking moves at the length it was paid for, inside its host's hours
+  ok    call checkout belongs to its creator quay/7
+  ok    platform credential acts on the connected account quay/7
+  ok    call checkout has no platform destination or transfer quay/7
+  ok    a move whose paid hour would run past the host's 17:00 is refused, though the call's 30 minutes now would fit
+  ok    one that fits the whole hour moves, and the host is held for the whole hour
+  ok    call checkout belongs to its creator pier/8
+  ok    platform credential acts on the connected account pier/8
+  ok    call checkout has no platform destination or transfer pier/8
+  ok    the move page offers the host's free hours at the paid length, never the store's afternoon the move would refuse
+
+When her calendar cannot be read
+  ok    a failure soon after a good reading keeps it, and says so
+  ok    repeated views across stores keep the known reading without repeating the failed provider call
+  ok    the automatic failure retry stays closed until the complete fifteen-minute interval
+  ok    at the retry boundary a synthetic provider read is allowed again
+  ok    past 45 minutes without a good reading she is blocked
+  ok    call checkout belongs to its creator harbor/9
+  ok    platform credential acts on the connected account harbor/9
+  ok    call checkout has no platform destination or transfer harbor/9
+  ok    her times are hidden, the owner's are not
+  ok    her calendar is hers, not a store's: on the other store, where she hosts alone, nothing is offered either
+  ok    her page shows the state and the last successful sync
+
+A missing permission, or the switch off
+  ok    Pat connects without the free/busy permission
+  ok    he is blocked, and told why
+  ok    with the switch off, a Google host is blocked rather than read without permission
+  ok    and choosing Google is refused
+
+New private-calendar admission uses the store funding boundary
+  ok    unmarked existing behavior reaches only the injected feed resolver
+  ok    funded admission refuses before DNS or configuration mutation
+  ok    the refusal is a temporary calendar notice
+  ok    retained removal does not require new provider reading
+
+New store calendar feed admission requires funding
+  ok    unmarked feed admission reaches only the injected resolver
+  ok    funded new feed returns unavailable before DNS or configuration changes
+  ok    retained removal stays available without a new feed read
+
+A funded host view retains stored state without a new provider calendar list
+  ok    the calendar list is unavailable without a funded resource window
+  ok    the existing connection and last reading remain visible
+  ok    new selection refuses before provider lookup and preserves existing choices
+  ok    a new manual refresh refuses without provider calls
+  ok    the unmarked fixture still performs its synthetic manual refresh
+  ok    funded nonempty source refuses without changing the saved source
+  ok    turning the busy-time source off remains available
+  ok    the stored source is off without a provider request
+
+100 checks, all passing.
+
+
+===== g2036-51a-linked-pipeline-access.log =====
+
+The rules
+  ok    the owner and Admins edit every pipeline, whatever is set
+  ok    a teammate edits until restricted
+  ok    a record that cannot be read opens nothing
+  ok    only real pipelines, only view or none, are kept
+  ok    a stage's pipeline
+  ok    what a teammate sees, and how
+
+Through the deal routes
+  ok    the owner adds a second pipeline
+  ok    unrestricted, a teammate adds a deal anywhere, as before
+  ok    on view, a change is refused, saying why
+  ok    a deal is not moved out of it either
+  ok    nor a new one put into it
+  ok    nor removed from it
+  ok    nor its stages changed, nor the pipeline removed
+  ok    the other pipeline is still theirs
+  ok    an Admin is never restricted
+  ok    nor the owner
+  ok    on none, the first pipeline's old stage route is refused too
+  ok    while the pipeline they may still change stays theirs
+  ok    removing a pipeline into one they cannot change is refused
+  ok    nor are a removed stage's deals sent into one they cannot change
+  ok    a record that cannot be read refuses every change
+
+Found in review: every other way in
+  ok    a removed stage's deals sent by one stage for all (a string) into a pipeline they cannot change: refused
+  ok    and the deal did not move
+  ok    a deal that is not there, or cannot be read, is never removed by someone limited
+  ok    the room the restrictions take moves with them: the old address gives its own back, the new one takes its own
+  ok    moving their sign-in to another address keeps exactly their restrictions
+  ok    and the new address is refused where the old one was
+  ok    with the store's data room full, the new address still gets the store and exactly its restrictions
+
+Moving one's sign-in when the database fails
+  ok    when every store stays on the old address, nothing is sent that the real database refuses: the move finishes
+  ok    the new address never gets the store without its restrictions: it is not on the team at all
+  ok    and the old address keeps its membership and its restrictions
+  ok    the old address still works, still restricted
+
+Leaving the team
+  ok    (their restrictions take room)
+  ok    their restrictions go with them
+  ok    and so does the room they took: none is left held
+
+The form route too
+  ok    a deal made from a form: someone who can be restricted cannot make one at all (export is the owner's and Admins'), so a pipeline they may not change is never reached
+  ok    every role pipeline access can restrict is one that cannot make a deal from a form
+
+Found in review of units 2 and 3
+  ok    a pipeline they add comes back without the names and stages of the ones they may not see
+  ok    an empty pipeline they may change can be removed, with no destination to check
+  ok    a change refused by access is a refusal the board shows as such, never an unconfirmed write
+
+40 checks, all passing.
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address Error: stand-in failure
+    at store.pipeline ([stdin]:53651:118)
+    at redisPipeline ([stdin]:8944:41)
+    at copyPipelineAccess ([stdin]:21887:23)
+    at [stdin]:50191:24
+    at async withLock ([stdin]:9014:12)
+    at async moveMemberships ([stdin]:50186:18)
+    at async main ([stdin]:53656:3)
+
+
+===== g2036-51a-linked-pipeline-access-team-final.log =====
+
+Choosing
+  ok    the owner restricts a Support person
+  ok    kept
+  ok    written in the activity log
+  ok    and the deal routes hold to it
+  ok    can change again, as before
+  ok    an Admin is never restricted, and it says how
+  ok    someone not on the team, or a pipeline that is gone
+  ok    a choice that is not one
+  ok    a Support person cannot choose, not even for themselves
+  ok    an Editor, whose role does not open Deals, is not offered a restriction that would do nothing
+
+A record that cannot be read
+  ok    (a second pipeline)
+  ok    (sam's record cannot be read)
+  ok    saving one pipeline never opens the others: they stay at no access
+  ok    even when the one chosen is set to change
+
+Two saves at once
+  ok    never write over each other: what is kept is exactly what the last save that went through said
+  ok    one that cannot go through says so and writes nothing
+  ok    while another change to the same person is being written, a save is refused
+  ok    and nothing of it is kept
+  ok    the lock is let go once the change is written
+  ok    and also when the write fails, so the next save is not refused
+
+While the teammate changes their sign-in
+  ok    whichever comes first, the address on the team holds the restriction the owner saved, and none is lost
+  ok    (back on the first address, with it)
+  ok    while the team is being changed, a save waits, then says so and writes nothing
+  ok    the route reads the teammate and writes with the team's lock held
+
+Every pipeline at once, from the Save button
+  ok    one Save keeps every choice, and the log says them
+  ok    a choice that is not one, or a pipeline that is gone, changes nothing
+  ok    a restriction on a pipeline the store no longer has is dropped at the next save
+
+The screen
+  ok    each teammate a group named by their address
+  ok    each pipeline a labeled choice, as it stands
+  ok    what happened is said by one live region for the whole editor, however many teammates, never one per group
+  ok    a refusal is shown beside that teammate's Save button and tied to their choices and to the button
+  ok    a record that cannot be read is said to show nothing, and what saving does
+  ok    a record that cannot be read can be saved as it shows, at No access for every pipeline: it is something to save, never "Nothing to save"
+  ok    nobody to restrict, said why
+  ok    a choice saves nothing by itself: each teammate has a Save that names them, and what happened is said in their own group
+  ok    a choice is never marked invalid: every one offered is valid, and a refusal (busy, changed elsewhere, no room, no connection) is not about the value chosen
+  ok    an error is tied to that teammate's choices, and the Save button is never disabled (it says why instead)
+
+On the team page
+  ok    a named section, only roles that open Deals offered, never an Admin
+  ok    that the owner (and Admins, when the team has some) is never restricted is said above the editor, whether it shows, has nobody to restrict or cannot be read
+  ok    Admins and Editors are named only when the team has them
+  ok    and the editor, with nobody to restrict, does not say it again
+  ok    said when it cannot be read
+
+42 checks, all passing.
+saving pipeline access failed Error: down
+    at store.pipeline ([stdin]:79678:97)
+    at redisPipeline ([stdin]:35156:41)
+    at writePipelineAccess ([stdin]:45101:35)
+    at async writeChoices ([stdin]:45210:27)
+    at async setPipelineChoices ([stdin]:45194:12)
+    at async [stdin]:79304:44
+    at async withLock ([stdin]:35871:12)
+    at async POST ([stdin]:79292:19)
+    at async post ([stdin]:79632:22)
+    at async main ([stdin]:79681:18)
+
+
+===== g2036-51a-linked-pipeline-access-edges-final.log =====
+  ok    (the owner adds Workshops)
+
+The older stages request changes the pipeline that is first now
+  ok    (Sam removes the empty Sales pipeline)
+  ok    (Workshops is first now)
+  ok    Sam cannot rewrite Workshops' stages through it: refused as access, and nothing changes
+  ok    someone who may change the first pipeline still can
+
+A deal in no pipeline is moved only by someone who may change the first one
+  ok    (the owner adds Coaching)
+  ok    Sam, who may only see Workshops, renames Coaching: the deal stays where it was
+  ok    the owner's change still brings it back to the first pipeline's first open stage
+
+A record holding anything that is not a restriction opens nothing
+  ok    {"wkshp1":"VIEW"} is read as unreadable, never as no restriction
+  ok    {"WKSHP1":"none"} is read as unreadable, never as no restriction
+  ok    {"wkshp1":"view","other":"none"} is read as unreadable, never as no restriction
+  ok    a record as written still reads as written
+
+Only pipeline ids are named
+  ok    "__proto__" is not a pipeline: refused, nothing written, nothing logged
+  ok    nor with a real one beside it, nor one at a time, nor constructor
+
+Who cannot be restricted is told why
+  ok    (Ivy is invited)
+  ok    someone invited who has not joined
+  ok    the owner
+  ok    nobody named
+  ok    someone not on the team at all is still told to reload
+
+A new deal with no stage is refused for that
+  ok    from a Support person who sees every pipeline: the stage is missing, not access
+  ok    as it is for the owner
+  ok    an unknown stage, from someone who does not see every pipeline, is refused as access (it never tells which stages exist)
+
+A Save from a page opened before another change
+  ok    (tab A, opened when Sam had no restriction, saves Workshops: only see)
+  ok    tab B, opened at the same time, is refused and told to reload; tab A's choice is kept
+  ok    after reloading, it saves
+  ok    a record that could not be read is sent as null and must still be unreadable
+  ok    the team page sends the record it read with every Save
+
+The activity log says what changed, pipeline by pipeline
+  ok    only the pipeline that changed, with what it was
+  ok    a Save that changes nothing says so
+
+Moving a sign-in
+  ok    someone with no restriction moves to an address with an old one: the old one does not follow them
+  ok    a copy over an old field counts only the difference
+  ok    a copy of no restriction deletes the old field and gives its room back
+
+A move that fails after the copy puts the new address back as it was (Codex N, #2036)
+  ok    nothing there before: nothing after, and the copy's room given back
+  ok    an earlier record there: the same record after, its room as it was
+  ok    no restriction to carry, the earlier record cleared by the copy: it comes back, with its room
+  ok    the old address's restrictions are forgotten under the team's lock, after the team names the new one
+
+Round 4: a hidden pipeline's name is never told by a refusal
+  ok    a name a hidden pipeline has answers as a name nobody has
+  ok    both are kept, told apart by their ids, and the store still reads
+  ok    a name a pipeline they see has is still refused
+  ok    and for the owner, who sees every pipeline, a name twice is still refused
+
+Round 4: an id that is not there answers as one they may not change
+  ok    a deal, and a pipeline to remove, that are not there
+  ok    the owner is still told it is gone
+
+Round 4: a deal changed between the check and the write is never written over
+  ok    refused as changed meanwhile, and the owner's move stays
+  ok    a change with nothing in between still saves
+
+Round 4: a pipelines record that cannot be read changes no access
+  ok    refused, and every restriction kept
+  ok    the team page reads the pipelines the same way
+
+Round 4: a copied record's room is taken before it is written
+  ok    a room that cannot be counted refuses the copy, and nothing is written uncounted
+
+Round 5: two pipelines with one name
+  ok    the owner still changes either one's stages, its name kept
+  ok    the team's log tells them apart
+  ok    and, on the team page, names the later one with its number
+
+Round 5: an access record that cannot be read is a known refusal
+  ok    nothing was written, and the board is told so, never that it may have happened
+
+Round 5: a removal checked against one deal never removes a changed one
+  ok    refused as changed meanwhile, and the deal is still there
+  ok    a removal of a deal they may change, with nothing in between, still works
+
+Round 5: a refused save keeps the room it took when what is saved cannot be read
+  ok    refused as changed meanwhile, and the room is never set to nothing
+
+Round 5: a full room's count that cannot be made refuses the copy
+  ok    nothing is written uncounted
+
+Round 6: the log names each pipeline as it is named when the log is read
+  ok    kept by pipeline id, with the name it had
+  ok    (the owner removes the first Coaching)
+  ok    the one left is named as it is now, never by a number that pointed at it before; the one removed is said as removed
+  ok    with the pipelines unreadable, by the name each had
+  ok    the team page words the line from it
+
+Round 6: a deal gone between the check and its removal
+  ok    is said as gone, their access having been checked
+  ok    and a removal refused as changed says nothing was removed
+
+Round 7: every log line stays within what the data registry counts
+  ok    the largest line fits: its details are dropped first, then its words shortened
+  ok    with usual addresses and names, every pipeline at once: its details dropped, its words (which name the pipelines) kept whole
+  ok    a usual one keeps its details, so the team page names its pipeline as it is when shown
+  ok    and any line at all, its words shortened when they must be
+  ok    the registry counts the log from the same bound
+
+Round 7: a logged access change names a real address
+  ok    anything else is not read as one, and the line's own words are shown
+
+Round 8: the older stages request writes only the pipeline it checked
+  ok    (two pipelines or more to reorder)
+  ok    Sam's stages are refused as changed meanwhile, and the pipeline now first keeps its own
+  ok    so is the owner's: nothing is written into a pipeline that was not the one read as first
+  ok    with nothing in between, the first pipeline's stages are saved
+  ok    the route checks, and writeStages writes, the same pipeline
+
+Round 8: an access record that cannot be read adds no pipeline either
+  ok    (with access that can be read, Sam could add it)
+  ok    refused as access, and nothing added
+
+Round 8: a session let in without its second step takes nothing away here
+  ok    (a field saved)
+  ok    taking a field away, removing a pipeline and removing a deal are refused as locked
+  ok    and nothing was taken away
+  ok    changing a deal is not
+  ok    the board says why, never that the change could not be confirmed
+  ok    a full session still removes it
+
+Codex D (#2036): a partial access read never grants a restricted write
+  ok    D control: the real support session cannot write the hidden pipeline
+  ok    (the partial read was made)
+  ok    D partial read refuses and creates no deal
+
+Codex D (#2036): a restriction is said saved only on a confirmed write
+  ok    (the write was dropped)
+  ok    D unconfirmed restriction is never reported as saved: refused, saying it could not be confirmed
+  ok    and what is read is what is really there: no restriction, so the board does not show one
+
+Codex D (#2036): a lost answer after the access was applied is not said as nothing changed
+  ok    (the write landed, its answer lost)
+  ok    D committed-but-unconfirmed restriction is never said unchanged: it says it could not be confirmed and to reload
+
+Codex D (#2036): a membership never moves without both access reads confirmed
+  ok    D migration control: source cannot write the hidden pipeline
+  ok    (the partial read was made)
+  ok    D partial ACL source read keeps original membership and restriction
+  ok    D target cannot write without confirmed migration of its restrictions
+
+Codex D and G2 (#2036): an extra answer to the copy's one write never confirms it
+  ok    HSET answered [1, 1] and never applied: the membership stays on the old address
+  ok    with its restriction
+  ok    and the new address cannot write
+  ok    HDEL answered [1, 1] and never applied: the membership stays on the old address
+
+97 checks, all passing.
+could not count a store's data Error: data room unavailable
+    at store.pipeline ([stdin]:53624:111)
+    at redisPipeline ([stdin]:8944:41)
+    at run ([stdin]:16025:27)
+    at takeData ([stdin]:16033:10)
+    at needData ([stdin]:16036:23)
+    at copyPipelineAccess ([stdin]:21956:13)
+    at async main ([stdin]:53628:3)
+could not count a store's data Error: data room unavailable
+    at store.pipeline ([stdin]:53691:13)
+    at redisPipeline ([stdin]:8944:41)
+    at run ([stdin]:16025:27)
+    at forceData ([stdin]:16049:25)
+    at copyPipelineAccess ([stdin]:21959:13)
+    at async main ([stdin]:53696:3)
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address Error: a teammate's pipeline access could not be read before their move
+    at copyPipelineAccess ([stdin]:21942:122)
+    at async [stdin]:50272:18
+    at async withLock ([stdin]:9014:12)
+    at async moveMemberships ([stdin]:50267:18)
+    at async main ([stdin]:53869:5)
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:21963:31)
+    at async [stdin]:50272:18
+    at async withLock ([stdin]:9014:12)
+    at async moveMemberships ([stdin]:50267:18)
+    at async main ([stdin]:53892:7) {
+  copy: { prior: null, now: '{"wkshp1":"none"}' },
+  taken: 176
+}
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:21948:33)
+    at async [stdin]:50272:18
+    at async withLock ([stdin]:9014:12)
+    at async moveMemberships ([stdin]:50267:18)
+    at async main ([stdin]:53892:7) {
+  copy: { prior: '{"wkshp1":"none"}', now: null },
+  taken: 0
+}
+
+
+===== g2036-51a-linked-pipeline-access-names-final.log =====
+
+Pipelines that share a name are told apart, in the order they were made
+  ok    the later one gets a number
+  ok    never one that another pipeline already has
+  ok    names nobody shares stay as they are
+  ok    so a form's or a workflow's choice of stage never offers two that read the same
+
+On the board
+  ok    each pipeline's button and total says which
+  ok    and the board says why one has a number, with the real name
+  ok    the file of selected deals is named from it too
+  ok    nothing said when no names are shared
+
+In the access editor and the team's log
+  ok    each choice named as the board names it
+  ok    the log names them the same way when shown
+
+Editing a pipeline that already shares its name
+  ok    its stages are saved while its name stays as it was
+  ok    renaming it to another pipeline's name is still refused
+
+A teammate who sees no pipeline
+  ok    is told so, and offered what the server lets them do: a pipeline of their own and the fields
+  ok    and nothing of a pipeline that is not theirs
+  ok    Remove is offered on the one pipeline they see only when the store has others (the server keeps the last one)
+  ok    and with deals and nowhere they may send them, it says what to do instead of an empty choice
+  ok    and a full store never tells them to remove one they cannot see
+  ok    the deals page draws the board for them
+
+18 checks, all passing.
+
+
+===== g2036-51a-linked-pipeline-copy.log =====
+
+The copy
+  ok    same stages, names and kinds, in order
+  ok    a new pipeline id, never one the store has
+  ok    new stage ids, none the store has
+  ok    named as a copy
+  ok    valid to save beside the original
+  ok    a second copy takes the next name
+  ok    a long name is cut to fit with its tail
+  ok    the original is untouched
+
+The board
+  ok    opens the copy as a new pipeline to read first
+  ok    only while the plan has room for one more
+  ok    the button names what it copies
+
+11 checks, all passing.
+
+
+===== g2036-51a-linked-api-key-second-step-complete.log =====
+
+(A) Making a key on an account with a second step needs a session opened with it
+  ok    an emailed-link session on a passkey account is refused
+  ok    and no key was made
+  ok    the same person with a passkey session makes it
+  ok    an account with no second step at all makes keys as before
+  ok    the owner with no second step yet makes one too
+  ok    each record says whether its session had a second step
+  ok    an old key has no maker
+  ok    the owner, once they have a passkey, is refused from an emailed-link session too
+
+(5) Who made a key is an HMAC under the deployment's secret and the store's id
+  ok    never the address
+  ok    never a plain hash of it either
+  ok    the same person reads differently on another store
+  ok    what is kept is this store's print
+
+(B) The webhook endpoints a key adds are kept with it
+  ok    both added
+  ok    a sale goes to both while nothing is paused
+  ok    a key made with a second step is never paused by the rule
+
+Before saving: which keys and endpoints will pause, and whose
+  ok    three keys and one endpoint would pause: Ned's two, his bot's endpoint, and the old key
+  ok    named by whose
+  ok    the review says the count, endpoints included
+  ok    and whose, with the endpoint, and who gets an email
+  ok    the unrecorded key in words
+  ok    and who has no second step yet
+  ok    a former teammate's key is said to be revocable only
+  ok    the team page draws the switch with its review for the owner
+
+Only the owner, only with their second step, and only for the list reviewed
+  ok    an Admin cannot switch it
+  ok    the owner from an emailed-link session is refused
+  ok    the count is the same
+  ok    but the list is not, so the save is refused with the new review
+  ok    and nothing was saved, paused or held
+
+(4) A save that cannot write the rule undoes its pause, and says so
+  ok    refused as unsaved, undone
+  ok    the rule is off, no key is paused, the endpoint is not held
+  ok    nobody was emailed
+
+(8) A key made after the first pause, as the rule is written, is paused by the second
+  ok    saved, but not finished: four keys paused, Ned's three still to be told
+  ok    the rule is on
+  ok    the late key is paused
+  ok    the page offers to finish
+  ok    pressing again tells who is left, and pauses nothing more
+  ok    pressing once more tells nobody twice
+  ok    one email, to Ned only
+  ok    it names his three keys and the way back
+  ok    its subject is plain
+
+On: the keys made without a second step pause, with their endpoints; the owner's never change
+  ok    Ned's keys are refused by the API, as paused
+  ok    the old key too
+  ok    the owner's own key still works
+  ok    Ned's bot's endpoint is held, the owner's is not
+  ok    so a sale goes to the owner's endpoint only
+  ok    nothing was deleted
+  ok    an endpoint added in the studio, by no key, is never held
+
+The panel shows each person what is paused and whose
+  ok    Ned sees his keys as his, paused, and may turn them on
+  ok    the owner sees them as Ned's and may not turn them on
+  ok    the owner may turn on the old one, whose maker nobody knows
+
+Turned back on by whoever made it, after logging in with a second step, endpoints included
+  ok    Ned from an emailed-link session is held at the team's door
+  ok    Pia cannot turn on Ned's key
+  ok    nor can the owner
+  ok    Ned, with his passkey, turns it back on
+  ok    it works again
+  ok    and so does its endpoint
+  ok    his other key stays paused until he turns it on too
+  ok    the owner turns on the old key
+
+Revoking a key stops its endpoints for good
+  ok    Ned revokes his bot
+  ok    its endpoint is held as revoked, and hears nothing
+  ok    its mark goes with it
+
+Turning the rule off turns nothing back on
+  ok    off, from the owner's passkey session
+  ok    Ned's other key is still paused
+  ok    from an emailed-link session it still needs his second step
+  ok    on again: what was turned on is vouched for, and paused keys are not counted twice
+  ok    so on again pauses nothing and emails nobody
+
+(8) A key made through the route in the instant the rule turned on is paused at once
+  ok    let in while the rule was off, made as it turned on: paused, and the answer says so
+  ok    refused by the API
+  ok    an owner's key never is
+
+(1) A teammate taken off the team has every key paused at once, whatever the rule
+  ok    made with her passkey, it works while she is on the team
+  ok    the rule is off on this store
+  ok    taken off: her key is paused
+  ok    and its endpoint is held
+  ok    her fingerprint is gone from it
+  ok    under the rule it counts as a former teammate's, vouched for or not
+  ok    shown as a former teammate's, never to be turned on
+  ok    an Admin may not revoke it
+  ok    and the route agrees
+  ok    the owner may not turn it on
+  ok    the owner revokes it
+  ok    and its endpoint stops for good
+
+(6) A teammate who moves their address keeps their keys
+  ok    the key follows the new address
+  ok    and still works
+
+G1: a key written after its maker was taken off, as the door let them in before, is theirs who left
+  ok    made, and paused in the same answer
+  ok    refused by the API, held for good
+
+G1: an endpoint written as its key was revoked is sent nothing
+  ok    it is written, and shown as its key's: revoked
+  ok    a sale goes nowhere
+
+G1: a key whose maker left is refused even with no hold written
+  ok    refused
+
+G2: turning a key on while its maker leaves never wins over the leaving
+  ok    the turning on is refused, as the hold changed
+  ok    the key stays held for good, and refused
+  ok    an undo never puts back a key whose maker left
+
+M1: a key made under the earlier secret is still its maker's once NIMBUS_DATA_KEY is set
+  ok    its print is not today's
+  ok    Ada still sees it as hers
+
+M2: a teammate leaving also pauses keys nobody is recorded as having made, without a secret too
+  ok    with no secret, nobody is recorded
+  ok    Ada's legacy key is found and held for good
+  ok    the unrecorded key is paused
+  ok    and the owner may turn it back on
+
+M3: a pause cut short before the rule is saved is undone, key by key
+  ok    refused as unsaved, and undone
+  ok    the key paused before the cut is back on
+  ok    a plan applied and undone leaves nothing
+
+L3: the team unreadable after a failed save: the pause stands, and the answer does not claim it saved
+  ok    answered unsure
+  ok    Dot's key stays paused
+
+L3: two presses at once email a teammate once
+  ok    one email to Dot
+  ok    and his key is told
+
+L1: a test to an endpoint whose key is paused takes nothing
+  ok    refused as held
+  ok    and no delivery was taken
+
+L4: using a key at the instant its maker is rewritten never writes the old maker back
+  ok    the use wrote when it was last used, after the rewrite
+  ok    the rewrite stands
+
+L5: a teammate moved to a role that cannot hand out keys has theirs wait for the owner
+  ok    paused for the role
+  ok    while her role does not allow it, the owner cannot turn it on
+  ok    the owner turns it back on
+  ok    and it works
+
+M4: when the keys cannot follow a move, the membership stays where it was
+  ok    the membership stayed on the old address
+  ok    pipeline access stays only with the address whose membership stayed
+  ok    and the room the copy took is given back
+  ok    and the key is still hers there
+  ok    and still works
+
+M5 (b): a teammate's key whose maker matches nobody on the team is refused at the door, at one command more
+  ok    a teammate's key works
+  ok    within an API request's own commands
+  ok    refused, as made by someone who could not be matched to the team (not as one who left)
+  ok    and the endpoints it added would hear nothing
+
+M5 (a), N2: a teammate leaving holds a key whose maker matches nobody, but never for good on a guess
+  ok    the ghost's key is held as unmatched
+  ok    the owner may turn it back on
+  ok    turning it on without saying whose it is is refused
+  ok    the owner may give it to Gia, an Admin
+  ok    given to Gia, it is hers and works
+  ok    and when Gia leaves, it goes with her, for good
+  ok    Fin's is untouched
+
+M6: the owner is told which keys a teammate leaving paused, and each refusal says why
+  ok    one email to the owner
+  ok    it names the key, says why, and how to turn it back on, in plain words
+  ok    the unrecorded key's refusal says the owner can turn it back on
+  ok    a key paused by the rule says whoever made it can turn it on
+  ok    one paused for its maker's role says it waits for the owner
+
+Codex D (#2290): a key nobody is recorded as making is turned on only once the owner says whose it is, so later sweeps still reach it
+  ok    the owner may turn it on, choosing whose it is
+  ok    turning it on without saying whose it is is refused, and it stays paused
+  ok    given to Gia, it is hers and works
+  ok    when her role no longer allows a writer, it waits for the owner again
+  ok    turned back on by the owner once her role allows it
+  ok    and when Gia leaves, it goes with her, for good
+  ok    claimed by the owner as theirs
+  ok    it stays on when a teammate leaves
+
+M5 (c): when the sweep after a removal fails, the route says to repeat it, and repeating finishes it
+  ok    answered: repeat the removal
+  ok    Hal is off the team, and his keys are refused all the same
+  ok    repeated: answered, not a silent 404
+  ok    and the key he made in between is held for good
+
+L5: a role change that cannot be saved undoes its pause; one whose pause fails changes nothing
+  ok    the change is refused
+  ok    and the keys it paused are back on
+  ok    a pause that fails changes no role
+  ok    tried again, it goes through
+  ok    her key and the unrecorded writer wait for the owner
+  ok    and the refusal says so
+
+L7: turning a key back on says it will not be paused by the rule again, before it is done
+  ok    the note for a key paused for its maker's role
+  ok    and for one given to a teammate, it says it becomes theirs and when it stops
+  ok    and for one nobody is recorded as making, it says it becomes theirs too
+  ok    the panel asks with it before turning on
+
+M4: a move whose team cannot be saved puts the keys back on the old address
+  ok    the key still reads as Fin's
+  ok    and works
+
+L6: rewriting who made a key never brings back one revoked meanwhile
+  ok    the revoked key's record stays gone
+
+N1: a key written as its maker is demoted, checked against the old role, is refused at the door by the new one
+  ok    made and not paused by the route, which saw the old role
+  ok    refused at the door: the role does not allow it
+  ok    an Admin's key works again
+
+N3: a demotion that pauses keys nobody is recorded as making tells the owner, and says so plainly
+  ok    one email to the owner, naming the key
+  ok    its refusal says nobody is recorded as its maker, not whose role
+
+N4: removing an address that was never on the team is not found, and touches nothing
+  ok    404 not_found
+  ok    no key paused and nobody emailed
+
+N2: a teammate leaving never reads the team in the middle of a move
+  ok    the move went through
+  ok    and Fin's key was never held
+
+N5: a rewrite that cannot finish throws, so a move is undone
+  ok    the membership stayed on the address before
+  ok    and the key is still Fin's there, and works
+
+N6: the door reads the team as the studio does: a member it would not accept matches nobody
+  ok    a member with a role the studio does not know counts for nothing
+
+The door still fits an API request's own commands
+  ok    at most 20 commands and the take
+
+A1 (2): on a role change, a turned-on key whose maker matches nobody is held again, and the owner told
+  ok    held as unmatched again
+  ok    and the owner is told, with the likely cause
+
+A2: the refusal and the panel name the likely cause and how to check
+  ok    the API says the secret most likely changed, and to check whose it is
+  ok    so does the panel
+
+N5 note: when the first sweep of a removal cannot finish, it is undone and the person stays
+  ok    refused, and Gia stays on the team
+  ok    her key's hold and maker are back, and it works
+
+C3-121 GRAVE: with the rule on, a key without a second step is refused at the door even when no sweep held it
+  ok    the switch answers that it did not finish, the rule on
+  ok    no sweep held Jo's key
+  ok    but the door refuses it, as the rule asks
+  ok    and an endpoint it added hears nothing
+  ok    a key made with a second step still works under the rule
+
+C3-121 MÉDIO (a): a removal whose team cannot be written undoes its first sweep
+  ok    refused, and Leo is still on the team
+  ok    his key is not held for good, keeps its maker, and works
+
+C3-121 MÉDIO (b): a hold written whose answer is lost is undone all the same
+  ok    refused, and Leo is still on the team
+  ok    the hold that was written goes back, and the key works
+  ok    a removal that goes through still holds it for good
+
+The developers page names the answer
+  ok    403 key_paused is listed
+  ok    with what happens to the endpoints a key added
+
+189 checks, all passing.
+a webhook delivery failed Error: MemoryRedis: unsupported EVAL
+    at MemoryRedis.run ([stdin]:34228:121)
+    at [stdin]:35144:65
+    at Array.map (<anonymous>)
+    at pipeline ([stdin]:35144:47)
+    at store.pipeline ([stdin]:149008:21)
+    at redisPipeline ([stdin]:35156:41)
+    at claim ([stdin]:75440:23)
+    at [stdin]:75514:37
+    at soon ([stdin]:75451:12)
+    at emitEvent ([stdin]:75513:9)
+turning on the team's two-step rule failed; its pause is undone Error: a stand-in for a failed write
+    at hook ([stdin]:149166:11)
+    at store.pipeline ([stdin]:149007:19)
+    at redisPipeline ([stdin]:35156:41)
+    at saveTeam ([stdin]:76182:9)
+    at [stdin]:76195:11
+    at async withLock ([stdin]:35226:12)
+    at async setRequireTwoStep ([stdin]:76193:3)
+    at async POST2 ([stdin]:145437:9)
+    at async call2 ([stdin]:149060:22)
+    at async team ([stdin]:149070:55)
+email rejected 422
+a webhook delivery failed Error: MemoryRedis: unsupported EVAL
+    at MemoryRedis.run ([stdin]:34228:121)
+    at [stdin]:35144:65
+    at Array.map (<anonymous>)
+    at pipeline ([stdin]:35144:47)
+    at store.pipeline ([stdin]:149008:21)
+    at redisPipeline ([stdin]:35156:41)
+    at claim ([stdin]:75440:23)
+    at [stdin]:75514:37
+    at soon ([stdin]:75451:12)
+    at emitEvent ([stdin]:75513:9)
+a webhook delivery failed Error: MemoryRedis: unsupported EVAL
+    at MemoryRedis.run ([stdin]:34228:121)
+    at [stdin]:35144:65
+    at Array.map (<anonymous>)
+    at pipeline ([stdin]:35144:47)
+    at store.pipeline ([stdin]:149008:21)
+    at redisPipeline ([stdin]:35156:41)
+    at claim ([stdin]:75440:23)
+    at [stdin]:75514:37
+    at soon ([stdin]:75451:12)
+    at emitEvent ([stdin]:75513:9)
+a webhook delivery failed Error: MemoryRedis: unsupported EVAL
+    at MemoryRedis.run ([stdin]:34228:121)
+    at [stdin]:35144:65
+    at Array.map (<anonymous>)
+    at pipeline ([stdin]:35144:47)
+    at store.pipeline ([stdin]:149008:21)
+    at redisPipeline ([stdin]:35156:41)
+    at claim ([stdin]:75440:23)
+    at [stdin]:75514:37
+    at soon ([stdin]:75451:12)
+    at emitEvent ([stdin]:75513:9)
+pausing API keys before the team's two-step rule failed; the rule was not saved Error: a stand-in for a pipeline cut short
+    at hook ([stdin]:149375:11)
+    at store.pipeline ([stdin]:149007:19)
+    at redisPipeline ([stdin]:35156:41)
+    at swapHolds ([stdin]:74681:27)
+    at applyPause ([stdin]:75854:53)
+    at async POST2 ([stdin]:145431:17)
+    at async call2 ([stdin]:149060:22)
+    at async team ([stdin]:149070:55)
+    at async main ([stdin]:149377:20)
+turning on the team's two-step rule failed and the team could not be read; the pause stands Error: a stand-in for a failed write
+    at hook ([stdin]:149390:13)
+    at store.pipeline ([stdin]:149007:19)
+    at redisPipeline ([stdin]:35156:41)
+    at saveTeam ([stdin]:76182:9)
+    at [stdin]:76195:11
+    at async withLock ([stdin]:35226:12)
+    at async setRequireTwoStep ([stdin]:76193:3)
+    at async POST2 ([stdin]:145437:9)
+    at async call2 ([stdin]:149060:22)
+    at async team ([stdin]:149070:55)
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address Error: a stand-in for a failed rewrite
+    at hook ([stdin]:149452:11)
+    at store.pipeline ([stdin]:149007:19)
+    at redisPipeline ([stdin]:35156:41)
+    at rewriteMakers ([stdin]:74717:29)
+    at async movedMaker ([stdin]:75981:3)
+    at async [stdin]:76421:9
+    at async withLock ([stdin]:35226:12)
+    at async moveMemberships ([stdin]:76414:18)
+    at async main ([stdin]:149454:3)
+pausing a former teammate's API keys after taking them off failed; the removal is to be repeated Error: a stand-in for a failed sweep
+    at hook ([stdin]:149550:13)
+    at async store.pipeline ([stdin]:149007:13)
+    at async keyRecords ([stdin]:74663:30)
+    at async Promise.all (index 0)
+    at async [stdin]:75879:29
+    at async withLock ([stdin]:35226:12)
+    at async removeMember ([stdin]:76393:14)
+    at async POST2 ([stdin]:145399:23)
+    at async call2 ([stdin]:149060:22)
+    at async team ([stdin]:149070:55)
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address Error: The records of some API keys kept changing while their maker was rewritten.
+    at rewriteMakers ([stdin]:74716:27)
+    at async movedMaker ([stdin]:75981:3)
+    at async [stdin]:76421:9
+    at async withLock ([stdin]:35226:12)
+    at async moveMemberships ([stdin]:76414:18)
+    at async main ([stdin]:149688:3)
+finishing the team's two-step rule failed; pressing again finishes it Error: a stand-in for the second sweep failing
+    at hook ([stdin]:149767:13)
+    at store.pipeline ([stdin]:149007:19)
+    at redisPipeline ([stdin]:35156:41)
+    at keyRecords ([stdin]:74663:36)
+    at planPause ([stdin]:75849:46)
+    at pauseForRule ([stdin]:75858:42)
+    at finish ([stdin]:145468:21)
+    at POST2 ([stdin]:145449:14)
+    at async call2 ([stdin]:149060:22)
+    at async team ([stdin]:149070:55)
+
+
+===== g2036-51a-linked-locked-deletes-complete.log =====
+
+The community: emailing every member and deleting wait
+  ok    set up by the full session
+  ok    an announcement emailed to every member is refused
+  ok    a post deleted is refused, and the post is still there
+  ok    a comment deleted is refused
+  ok    a post that emails nobody is not
+  ok    emptying the chat room is refused
+  ok    taking a chat message out is refused
+  ok    a reported post deleted from the studio is refused
+
+Events: canceling, deleting and moving one emails everyone coming
+  ok    made by the full session
+  ok    canceling it is refused
+  ok    deleting it is refused
+  ok    moving it is refused
+  ok    renaming it, at the same time, is not
+
+The course: what takes a lesson, a file or students' work away waits
+  ok    a lesson added from the locked session: adding stays open
+  ok    "lesson-remove" is refused
+  ok    "module-remove" is refused
+  ok    "media-remove" is refused
+  ok    taking an assignment off, with the work handed in, is refused
+  ok    taking a quiz off is refused
+  ok    sending a purchase email again, which carries the thank-you note, is refused
+  ok    withdrawing a student's certificate is refused
+  ok    deleting a lesson comment from the studio is refused
+  ok    a new video over the lesson's old one is refused
+  ok    and the lesson keeps it
+  ok    deleting it from the lesson page is refused too, and it is still there
+
+The product: its file, picture, page, keys and the rest
+  ok    a link put over the file, which deletes it, is refused
+  ok    and the product keeps its file
+  ok    a link on a product with no file is not
+  ok    marked coming soon by the full session
+  ok    launching it, one email in the creator's words to everyone waiting, is refused
+  ok    and it is still coming soon, its list unspent
+  ok    taking the mark off, which emails nobody waiting and gives paid pre-orders the fixed delivery email, is not
+  ok    taking the file off is refused
+  ok    a new file over it is refused
+  ok    and the product still keeps its file
+  ok    a link put over a price option's file is refused
+  ok    and the option keeps its file
+  ok    a new file over a price option's file is refused
+  ok    taking a price option's file off is refused
+  ok    and the option still keeps it
+  ok    removing the price option, with its file, is refused
+  ok    and the option is still there with its file
+  ok    a link on a price option with no file is not refused
+  ok    removing the picture is refused
+  ok    a new picture over it is refused
+  ok    and the product keeps its picture
+  ok    its alt text is not
+  ok    a page saved without a picture it showed is refused
+  ok    and the page still shows it
+  ok    removing an episode, with its audio, is refused
+  ok    and the episode is still there
+  ok    product: remove is refused
+  ok    keys: clear is refused
+  ok    bundle: clear is refused
+  ok    option: remove is refused
+  ok    podcast: remove is refused
+  ok    page-funnels: remove is refused
+  ok    stream/captions: remove is refused
+  ok    and the product is still there
+
+The store's pages
+  ok    a site page saved without a picture it showed is refused
+  ok    a new link picture over the old one is refused
+  ok    and the link keeps its picture
+  ok    turning the link into a heading, which lets its picture go, is refused
+  ok    and the link keeps its picture and its address
+  ok    editing the link's title is not refused
+  ok    removing the store photo is refused
+  ok    a new store photo over it is refused
+  ok    forms: {"action":"remove","id":"x"} is refused
+  ok    site-page: {"action":"remove","id":"pagepage01"} is refused
+  ok    saved-blocks: {"action":"remove","id":"x"} is refused
+  ok    links: {"action":"remove","id":"b633b75814"} is refused
+  ok    link-image: {"action":"remove","id":"b633b75814"} is refused
+  ok    short-links: {"action":"remove","code":"x"} is refused
+  ok    blog: {"action":"delete","id":"x"} is refused
+  ok    answers: {"clear":true} is refused
+  ok    assistant-settings: {"clear":true} is refused
+  ok    and after all of them the link is still there with its picture
+  ok    and the site page still shows its picture
+  ok    saving a form is not
+
+Notes, tasks, deals, pitches, segments, drafts and review photos
+  ok    person: unnote is refused
+  ok    person-tasks: remove is refused
+  ok    crm: undeal is refused
+  ok    crm: unpipeline is refused
+  ok    notes: remove is refused
+  ok    spend: remove is refused
+  ok    outreach: drop is refused
+  ok    mail: segment-remove is refused
+  ok    mail: draft-remove is refused
+  ok    reviews: photo is refused
+
+The store's own fields about each person
+  ok    two fields saved by the full session
+  ok    saved without one of them, which takes its answers off every person, is refused
+  ok    and both are still there
+  ok    saving them with a new one, taking none away, is not
+
+A passkey change from a locked session does not spend the owner's
+  ok    the locked session removes nothing at once: it may only ask for a wait, on a count of its own
+  ok    and the owner's own change is not refused for the hour
+  ok    31 lists from a locked session are told locked
+  ok    and the owner can still list their passkeys
+
+Said the same way everywhere, and true
+  ok    app/signin/code/page.tsx says the one list
+  ok    app/signin/lost/page.tsx says the one list
+  ok    app/studio/page.tsx says the one list
+  ok    lib/two-step.ts says the one list
+  ok    lib/recovery-address.ts says the one list
+  ok    lib/help-content.ts says the one list
+  ok    lib/feature-pages.ts says the one list
+  ok    the list names imports, passkeys, two-step login, email to members and deleting for good
+  ok    and starts a sentence with a capital
+
+Every route that deletes or sends is held
+  ok    every route that deletes is named here (a new one has to say how it is held)
+  ok    and none named here is gone
+  ok    each one held the way it says
+  ok    every route that deletes a file has a request above that reads the file still there
+  ok    and no action is named for one route only by its path
+  ok    and every action LOCKED_ACTIONS names is one a route here uses (the in-route ones are asked through lockedFor)
+
+Every action of a route that deletes or sends is named, held or open with a reason
+  ok    every action of a route that deletes or sends is in the table (a new one has to say how it is held)
+  ok    and none in the table is gone from its route
+  ok    each one held, or open, the way it says
+
+115 checks, all passing.
+changing a waitlist failed Error: `after` was called outside a request scope. Read more: https://nextjs.org/docs/messages/next-dynamic-api-wrong-context
+    at after10 ([stdin]:2499:15)
+    at POST16 ([stdin]:143988:32)
+    at async main ([stdin]:150026:33)
+

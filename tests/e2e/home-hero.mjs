@@ -11,7 +11,10 @@ export async function checkHomeHero({browser,LOCAL,axeSource,is}){
    is("HT1 creator result "+width,(await hero.locator("h1").innerText()).replace(/\s+/g," ").trim(),"Your link in bio, now a store.");
    is("HT1 subhead "+width,(await hero.locator(".hm-hero-lead").innerText()).trim(),"Simple to set up, easy to run, and every sale goes straight to your own account.");
    // The closed-sale truth stays in two places: the line above the page and the offer under the field.
+   const compact=page.locator(".hm-preview-compact");
+   if(await compact.isVisible())await compact.locator("summary").click();
    is("HT1 closed-sale notice above the page "+width,(await page.locator("[data-preview-bar]").innerText()).includes("its paid plans are not on sale yet"),true);
+   if(await compact.isVisible())await compact.locator("summary").click();
    is("HT1 closed-sale offer line "+width,(await hero.locator("[data-home-offer]").innerText()).trim(),"Free to set up. When plans open: 14 days free, then $69 a month.");
    const field=hero.getByLabel("Pick your store address",{exact:true});
    const claim=hero.getByRole("button",{name:"Claim it",exact:true});
@@ -28,6 +31,7 @@ export async function checkHomeHero({browser,LOCAL,axeSource,is}){
    is("HT1 page fits "+width,await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
    await page.evaluate(()=>document.fonts.ready);
    await hero.evaluate(async node=>{const animations=node.getAnimations({subtree:true}).filter(animation=>Number.isFinite(animation.effect?.getComputedTiming().iterations));await Promise.all(animations.map(animation=>animation.finished.catch(()=>{})));});
+   await checkHomeHeroLayout({page,width,is});
    await page.addScriptTag({content:axeSource});
    const audit=await hero.evaluate(async node=>(await window.axe.run(node,{runOnly:{type:"tag",values:["wcag2a","wcag2aa","wcag21aa","wcag22aa"]}})).violations.map(v=>v.id));
    is("HT1 hero accessibility "+width,audit,[]);
@@ -45,4 +49,40 @@ export async function checkHomeHero({browser,LOCAL,axeSource,is}){
    is("HT1 no API write "+width,writes,0);
   }finally{await context.close();}
  }
+}
+
+/** Real rendered rectangles, also exercised by the opt-in wider breakpoint proof. */
+export async function checkHomeHeroLayout({page,width,is}){
+ const geometry=await page.locator(".hm-hero-art").evaluate(art=>{
+  const rect=node=>{const r=node.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom};};
+  const phone=rect(art.querySelector(".hm-phone"));
+  const cards=[...art.querySelectorAll(".hm-float-card")].map(rect);
+  const overlaps=(a,b)=>Math.min(a.right,b.right)>Math.max(a.left,b.left)&&Math.min(a.bottom,b.bottom)>Math.max(a.top,b.top);
+  return {phone,cards,overlap:cards.map(card=>overlaps(card,phone))};
+ });
+ is("Encanto7 all example cards retained "+width,geometry.cards.length,3);
+ is("Encanto7 no card covers the phone "+width,geometry.overlap,[false,false,false]);
+ const compact=page.locator(".hm-preview-compact");
+ if(width<640){
+  is("Encanto14 native compact notice visible "+width,await compact.isVisible(),true);
+  if(await compact.count()){
+   const summary=compact.locator("summary");
+   const size=await summary.evaluate(node=>({height:node.getBoundingClientRect().height,line:parseFloat(getComputedStyle(node).lineHeight),text:node.textContent}));
+   is("Encanto14 factual summary "+width,size.text,"Still being built. Plans closed.");
+   is("Encanto14 single line at default text size "+width,size.height,44);
+   await summary.focus();await page.keyboard.press("Enter");
+   is("Encanto14 keyboard opens full notice "+width,await compact.getAttribute("open"),"");
+   is("Encanto14 full closed-plan fact visible "+width,(await compact.innerText()).includes("its paid plans are not on sale yet"),true);
+   const link=compact.getByRole("link",{name:"See what is built",exact:true});
+   is("Encanto14 original detail destination "+width,await link.getAttribute("href"),"/mission");
+   await page.keyboard.press("Tab");
+   is("Encanto14 keyboard reaches detail link "+width,await link.evaluate(node=>node===document.activeElement),true);
+   await summary.focus();await page.keyboard.press("Enter");
+   is("Encanto14 keyboard closes notice "+width,await compact.getAttribute("open"),null);
+  }
+ }else{
+  is("Encanto14 desktop keeps complete notice visible "+width,(await page.locator("[data-preview-bar]").innerText()).includes("its paid plans are not on sale yet"),true);
+ }
+ is("Encanto hero page fits "+width,await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ console.log("HERO_GEOMETRY",JSON.stringify({width,...geometry}));
 }

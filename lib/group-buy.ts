@@ -607,10 +607,23 @@ export async function revokeRefundedGroups(
             unread = true;
             continue;
           }
+          // No record: the place has nothing of this purchase (null). A record that does not read, or whose job is not
+          // text, is unknown, never "came another way" (Claude 4 on #2781): the refund then waits to be tried again.
           let job = "";
-          try {
-            job = String((JSON.parse(String(given[0])) as { job?: unknown }).job ?? "");
-          } catch {}
+          if (typeof given[0] === "string") {
+            let read: unknown;
+            try {
+              read = JSON.parse(given[0]);
+            } catch {
+              read = undefined;
+            }
+            const named = read && typeof read === "object" && !Array.isArray(read) ? (read as { job?: unknown }).job : undefined;
+            if (typeof named !== "string") {
+              unread = true;
+              continue;
+            }
+            job = named;
+          }
           if (job !== groupJob(group.id)) continue;
           const removed = repliesFor(await redisPipeline([["HDEL", importedKey(sid, member.e), group.p]]), 1);
           if (!oneWrite(removed?.[0])) {

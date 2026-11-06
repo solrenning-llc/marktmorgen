@@ -19,8 +19,8 @@ import { claimPictures, writePage } from "@/lib/sales-page-store";
 import { emptyBlock, parsePage, type PageBlock } from "@/lib/sales-page";
 import { blocksForPage } from "@/lib/saved-blocks";
 import { siteKey } from "@/lib/site-page-rules";
-import { monthOfUse } from "@/lib/funnel-share-rules";
-import { storeMonthKey } from "@/lib/funnel-share-store";
+import { monthOfUse, shareLimitsFor } from "@/lib/funnel-share-rules";
+import { MONTH_USE_SECONDS, countUse, storeMonthKey } from "@/lib/funnel-share-store";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { GET as pageCopy, POST as pageSave } from "@/app/api/store/page/route";
 import { GET as pageVersions } from "@/app/api/store/page-versions/route";
@@ -114,30 +114,37 @@ async function main(): Promise<void> {
     }
   }
 
-  const cases: [string, () => Promise<Response>][] = [
+  /** Each case, and whether the month's count of section updates is taken before its page reads (Codex Z on #2830). */
+  const cases: [string, () => Promise<Response>, "counted"?][] = [
     ["a product's page saved with its picture taken off", () => pageSave(post("/api/store/page", { id: product, page: { blocks: [cta("Buy it")] } }))],
     ["a product's page copied to start another", () => pageCopy(get(`/api/store/page?id=${product}`))],
     ["an earlier version of a product's page brought back", () => pageVersions(get(`/api/store/page-versions?id=${product}&n=0`))],
     ["a store page saved with its picture taken off", () => sitePage(post("/api/store/site-page", { action: "save", id: SITE, page: { blocks: [cta("Read more")], style: "plain" } }))],
     ["the pages that use a saved section listed", () => sectionsGet(get(`/api/store/saved-blocks?section=${section.id}&except=`))],
     ["a saved section updated", () => sectionsPost(post("/api/store/saved-blocks", { action: "update", id: section.id, blocks: [faq("Is it for me, really?"), cta("Get it")], except: "" }))],
-    ["a saved section put on its pages", () => sectionsPost(post("/api/store/saved-blocks", { action: "apply", id: section.id, pages: uses.map(siteKey) }))],
+    ["a saved section put on its pages", () => sectionsPost(post("/api/store/saved-blocks", { action: "apply", id: section.id, pages: uses.map(siteKey) })), "counted"],
   ];
 
   for (const mode of ["no reply", "not a page"] as const) {
     part(`Redis's answer to the page read: ${mode}`);
-    for (const [name, send] of cases) {
+    for (const [name, send, counted] of cases) {
       const before = await kept();
       const { answer, changed } = await unknown(mode, async () => result(await send()));
-      is(`${name}: refused, 503 page_unread`, answer, [503, "page_unread"]);
+      is(`${name}: refused, 503 ${counted ? "page_unread_counted" : "page_unread"}`, answer, [503, counted ? "page_unread_counted" : "page_unread"]);
       is(`${name}: the page read was the one changed`, changed > 0, true);
       const after = await kept();
-      for (const field of Object.keys(before) as (keyof typeof before)[]) is(`${name}: ${field} unchanged`, after[field], before[field]);
+      for (const field of Object.keys(before) as (keyof typeof before)[]) {
+        if (field === "applied" && counted) continue;
+        is(`${name}: ${field} unchanged`, after[field], before[field]);
+      }
+      // The try counted before the reads is exactly one, and the answer says so (lib/studio-messages.ts).
+      if (counted) is(`${name}: the month's count went up by exactly the one try`, Number((after.applied as unknown[])[0]), Number((before.applied as unknown[])[0] ?? 0) + 1);
     }
   }
 
   part("What the studio says");
   is("page_unread has its own words, saying nothing was changed", STUDIO_MESSAGES.page_unread, "A page could not be read just now, so nothing was changed. Reload, then try again.");
+  is("page_unread_counted says no page changed and the try still counts", STUDIO_MESSAGES.page_unread_counted, "A page could not be read just now, so no page was changed. This try still counts toward this month's section updates. Reload, then try again.");
 
   part("Healthy reads still work the same");
   is("the copy", await result(await pageCopy(get(`/api/store/page?id=${product}`))), [200, "ok"]);
@@ -145,6 +152,26 @@ async function main(): Promise<void> {
   is("the section's pages", await result(await sectionsGet(get(`/api/store/saved-blocks?section=${section.id}&except=`))), [200, "ok"]);
   is("the product's page saved as it is", await result(await pageSave(post("/api/store/page", { id: product, page: productPage }))), [200, "ok"]);
   is("the section put on its pages", await result(await sectionsPost(post("/api/store/saved-blocks", { action: "apply", id: section.id, pages: uses.map(siteKey) }))), [200, "ok"]);
+
+  // Codex Z's proof on #2830 (codex/z-review-2830-apply-read cc6a2e2b): past the month's figure, an apply is refused
+  // before it reads any page, as it was before this change; those reads would go beyond the request's studio unit.
+  part("An apply past the month's figure reads no page");
+  const limit = shareLimitsFor((await storeForEmail(OWNER))!).appliesPerMonth;
+  while (await countUse(applyKey, limit, MONTH_USE_SECONDS));
+  const original = redis.pipeline;
+  let pageReads = 0;
+  redis.pipeline = async (commands) => {
+    if (commands.some((command) => ["GET", "MGET"].includes(String(command[0])) && String(command[1]).startsWith(`nl:product:page:${statsId}:`))) pageReads += 1;
+    return original.call(redis, commands);
+  };
+  let refused: unknown[] = [];
+  try {
+    refused = await result(await sectionsPost(post("/api/store/saved-blocks", { action: "apply", id: section.id, pages: uses.map(siteKey) })));
+  } finally {
+    redis.pipeline = original;
+  }
+  is("refused for the month's figure", refused, [429, "applies_full"]);
+  is("with no page read", pageReads, 0);
   done();
 }
 

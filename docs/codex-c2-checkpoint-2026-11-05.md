@@ -1,3 +1,29 @@
+# Ponto de parada C2 — 06/11/2026 14h05 (Fortaleza)
+
+Esta seção é a mais recente e prevalece onde acrescenta ou substitui o histórico abaixo. Todo head, RED, parecer, ramo e limite anterior continua preservado.
+
+## #2654 — MÉDIO de slots fechado no produto integrado
+
+- Fontes atuais lidas primeiro: checkpoint integral `93a732a823c254d139c3ba0525c67091598407bf`; regras do main `CLAUDE.md=8e8545b0`, `AGENTS.md=472c4251`, `agent-inbox=d9893042`, `reservations.md=33627443`, `reservations/codex.md=91b1f596`; fila vazia na API.
+- O canal fresco apareceu **truncado para 0 bytes** (`messages.md` blob `0361ca97`, e continuou 0 no blob `287afebf`). Pela regra explícita, C2 NÃO escreveu e NÃO restaurou snapshot. O parecer e este checkpoint são os registros duráveis; Claude 4 centraliza qualquer recuperação do canal.
+- Fontes diretas do GitHub confirmaram #2672 merged=true no head `a4acdea24cb607ecf3e802dd57ebac1cb3b0b1db` e #2654 integrado ao main no head EXATO `76ff7ec597e1aa1e72f7205548107dbfccb93210`, tree `815e569afc3c6607f247d4d70a0cc063db9cf026`.
+- C4-20261106-1900-C2-112 já autorizava nominalmente esta sequência: #2672 entra → main no #2654 → repetir MESMA prova188 → nove exatos.
+- Prova original INALTERADA `codex/c-review-2654-counter-slot-evidence@e8a86c411c496cda61b01a47148af9f4dc8625fb`, blobs `1168bf70`/`fd7c0549`: **188/188, getterReads=0** neste head. Os mesmos bytes davam 188/19 no candidato antigo; fechamento causal real.
+- Onze blobs relevantes de produto/provas do #2654 permanecem byte-idênticos ao `9a7b5e9e`. O helper real agora é `lib/redis-reply.ts` blob `5a6b4ab8819de9234df14ef31b990da9490d139d`, com Proxy recusado antes de reflexão e slots próprios de dados copiados.
+- Quatro provas C2 incorporadas: **12/12**. Ligados: number-gates-a169 + group-buy61 + stripe-list-lot3 55 + redis-reply-envelope23 = **308/308**.
+- `next typegen` verde; TypeScript global depois: 0 erros. ESLint0, diff-check0, scanner4060/0.
+- Parecer nominal final **5803848872 SEM ACHADO / PODE ENTRAR**, ancorado no head exato. O evento GitHub APPROVE foi recusado apenas porque a conexão é a identidade autora; o mesmo veredito técnico foi publicado como revisão COMMENT, como nos retornos anteriores.
+- Não houve Redis nativo, provedor/browser/produção/CI, nem alteração de produto, ramo autoral, reserva ou workflow. Claude 4 controla nove exatos, clean e merge; C2 não faz polling.
+
+## Estado restante preservado
+
+- #2785 continua OPEN no head `496b73b88458ef935bbbc064b877d8903a4cf736`, parecer C2 `5799926541`; Claude5/R1 controlam jurídico/CI/merge.
+- Quatro próprias permanecem sem movimento: #2601 `702cf9a8`; #2695 `33bbd1fd`; #2692 PRIMARY `35e670e3`/recovery `8c2eeb29`; #2742 `bbde49fe`.
+- Commercial-margin continua do J; threshold2325 segue proibido sem atribuição explícita.
+- Próxima ação somente por novidade causal AV12: retorno/achado nominal, ou autorização C4. Não iniciar HZ3/item por silêncio; não consultar CI vazio.
+
+---
+
 # Ponto de parada C2 — 06/11/2026 07h53 (Fortaleza)
 
 Esta seção é a mais recente e prevalece onde acrescenta ou substitui o histórico abaixo. Todo head, RED, parecer, ramo e limite anterior continua preservado.

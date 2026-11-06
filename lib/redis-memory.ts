@@ -639,7 +639,7 @@ export class MemoryRedis {
           this.data.set(args[1], String(n - 1));
           return n - 1;
         }
-        if (key.startsWith("-- marktmorgen:lesson-comments-forget:v1\n")) {
+        if (key.startsWith("-- marktmorgen:lesson-comments-forget:v2\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);
           const argv = args.slice(1 + count);
@@ -653,7 +653,8 @@ export class MemoryRedis {
             try { rows.set(id, JSON.parse(raw)); } catch { /* not a comment */ }
           }
           const tops = new Set([...rows].filter(([, c]) => c.b === who && !c.r).map(([id]) => id));
-          let gone = 0;
+          const raws = new Map(held instanceof Map ? [...held] : []);
+          const gone: string[] = [];
           for (const [id, c] of rows) {
             const parent = c.r ?? null;
             if (c.b !== who && !(parent && tops.has(parent))) continue;
@@ -666,9 +667,69 @@ export class MemoryRedis {
               const counts = this.hash(replies);
               counts.set(parent, String((Number(counts.get(parent)) || 0) - 1));
             }
-            gone += 1;
+            gone.push(raws.get(id) ?? "");
           }
+          const name = this.hash(names).get(who) ?? "";
           this.hash(names).delete(who);
+          return [name, gone];
+        }
+        if (key.startsWith("-- marktmorgen:lesson-comments-hide:v1\n") && args[0] === "1" && args.length === 4) {
+          if (this.run(["HEXISTS", args[1], args[2]]) !== 1) return 0;
+          this.run(["HSET", args[1], args[2], args[3]]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:lesson-comments-add:v1\n") && args[0] === "4" && args.length === 10) {
+          const [, comments, lesson, all, replies, id, raw, at, lastRank, parent] = args;
+          if (parent !== "" && this.run(["HEXISTS", comments, parent]) !== 1) return "gone";
+          this.run(["HSET", comments, id, raw]);
+          this.run(["ZADD", lesson, at, id]);
+          this.run(["ZADD", all, at, id]);
+          this.run(["ZREMRANGEBYRANK", all, 0, lastRank]);
+          if (parent !== "") this.run(["HINCRBY", replies, parent, 1]);
+          return "ok";
+        }
+        if (key.startsWith("-- marktmorgen:lesson-comments-take:v2\n")) {
+          const count = Number(args[0]);
+          const [comments, all, replies, ...lessonKeys] = args.slice(1, 1 + count);
+          const drop = args[1 + count] === "drop";
+          const asked = drop ? lessonKeys.flatMap((k) => (this.run(["ZREVRANGE", k, 0, -1]) as string[]).reverse()) : args.slice(2 + count);
+          const askedSet = new Set(asked);
+          const taken = new Set<string>();
+          const tops = new Set<string>();
+          const gone: string[] = [];
+          const decode = (raw: string): { r?: unknown } | null => {
+            try { const c = JSON.parse(raw); return c && typeof c === "object" ? c : null; } catch { return null; }
+          };
+          for (const id of asked) {
+            if (taken.has(id)) continue;
+            const raw = this.run(["HGET", comments, id]);
+            this.run(["ZREM", all, id]);
+            this.run(["HDEL", replies, id]);
+            for (const k of lessonKeys) this.run(["ZREM", k, id]);
+            if (typeof raw !== "string") continue;
+            taken.add(id);
+            this.run(["HDEL", comments, id]);
+            gone.push(raw);
+            const c = decode(raw);
+            if (!c) continue;
+            const parent = typeof c.r === "string" ? c.r : null;
+            if (parent === null) tops.add(id);
+            else if (!askedSet.has(parent) && !taken.has(parent) && this.run(["HEXISTS", comments, parent]) === 1) this.run(["HINCRBY", replies, parent, -1]);
+          }
+          if (tops.size) for (const k of lessonKeys) {
+            for (const id of this.zset(k).map((e) => e.member)) {
+              const raw = this.run(["HGET", comments, id]);
+              if (typeof raw !== "string") continue;
+              const c = decode(raw);
+              if (!c || typeof c.r !== "string" || !tops.has(c.r)) continue;
+              this.run(["HDEL", comments, id]);
+              this.run(["HDEL", replies, id]);
+              this.run(["ZREM", all, id]);
+              this.run(["ZREM", k, id]);
+              gone.push(raw);
+            }
+          }
+          if (drop) for (const k of lessonKeys) this.run(["DEL", k]);
           return gone;
         }
         if (key.startsWith("-- marktmorgen:kept-any:v1\n")) {
@@ -704,27 +765,38 @@ export class MemoryRedis {
           }
           return n;
         }
-        if (key.startsWith("-- marktmorgen:form-forget:v1\n")) {
+        if (key.startsWith("-- marktmorgen:form-keep:v1\n") && args[0] === "1" && args.length === 4) {
+          const listKey = args[1];
+          this.live(listKey);
+          const list = this.list(listKey);
+          list.unshift(args[2]);
+          const out: string[] = [];
+          while (list.length > Number(args[3])) out.push(list.pop()!);
+          return out;
+        }
+        if (key.startsWith("-- marktmorgen:form-forget:v2\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);
           const address = args[1 + count];
-          let removed = 0;
-          for (const listKey of keys) {
+          const out: (string | number)[] = [];
+          keys.forEach((listKey, k) => {
             this.live(listKey);
-            if (!this.data.has(listKey)) continue;
+            if (!this.data.has(listKey)) return;
+            const counts = new Map<string, number>();
             const kept = this.list(listKey).filter((raw) => {
               try {
                 const value = JSON.parse(raw) as { answers?: Record<string, unknown> };
                 const hit = value && typeof value.answers === "object" && value.answers !== null && Object.values(value.answers).some((a) => typeof a === "string" && a.trim().toLowerCase() === address);
-                if (hit) removed += 1;
+                if (hit) counts.set(raw, (counts.get(raw) ?? 0) + 1);
                 return !hit;
               } catch {
                 return true;
               }
             });
             this.data.set(listKey, kept);
-          }
-          return removed;
+            for (const [raw, n] of counts) out.push(k + 1, raw, n);
+          });
+          return out;
         }
         // lib/creator-card.ts SAVE_CARD and DROP_CARD: the card and its data-room slot in one step.
         if (key.startsWith("-- marktmorgen:card-save:v1\n") && args[0] === "2" && args.length === 7) {

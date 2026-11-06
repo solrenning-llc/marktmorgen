@@ -1,0 +1,140 @@
+
+=== g1856-new-focal.log ===
+=== g-1856-book-effects.proof.ts ===
+  FAIL  throw-before: final book boundary actually reached
+        expected 1
+        got      0
+  FAIL  empty-before: final book boundary actually reached
+        expected 1
+        got      0
+  FAIL  empty-after: final book boundary actually reached
+        expected 1
+        got      0
+  FAIL  undo failure was reached
+        expected 1
+        got      0
+=== g-1856-book-effects-eval.proof.ts ===
+  FAIL  undo failure was reached
+        expected 1
+        got      4
+  FAIL  restored text is durably marked undone
+        expected true
+        got      false
+20 checks, 2 failing.
+=== g-1856-about-room.proof.ts ===
+3 checks, all passing.
+=== agent-book-durable.test.ts ===
+25 checks, all passing.
+=== agent-book-envelope-evidence.test.ts ===
+9 checks, all passing.
+
+=== g1856-new-red.log ===
+=== g-1856-book-effects-eval.proof.ts ===
+  FAIL  throw-before: effect is absent or durably recorded
+        expected true
+        got      false
+  FAIL  empty-before: effect is absent or durably recorded
+        expected true
+        got      false
+  FAIL  restored text is durably marked undone
+        expected true
+        got      false
+  FAIL  successor history remains after late writer
+        expected true
+        got      false
+  FAIL  a confirmed successor never returns to waiting
+        expected false
+        got      true
+  FAIL  empty-reply: product never changes without confirmed ownership
+        expected "Original b018c34f4c"
+        got      "Agent b018c34f4c"
+20 checks, 6 failing.
+=== g-1856-about-reconcile-race.proof.ts ===
+  FAIL  creator's newer text is preserved by the CAS
+        expected "Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text."
+        got      "Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. Latest studio text. "
+  FAIL  current text keeps its exact allocated room after rollback
+        expected 5136
+        got      4000
+4 checks, 2 failing.
+
+=== g1856-new-about-race-final.log ===
+=== g-1856-about-reconcile-race.proof.ts ===
+  FAIL  current text keeps its exact allocated room after rollback
+        expected 4128
+        got      816
+4 checks, 1 failing.
+
+=== g1856-new-about-race-final-red.log ===
+=== g-1856-about-reconcile-race.proof.ts ===
+  FAIL  current text keeps its exact allocated room after rollback
+        expected 4128
+        got      992
+4 checks, 1 failing.
+
+=== g1856-new-linked.log ===
+=== agent-book.test.ts ===
+13 checks, all passing.
+=== agent-confirm.test.ts ===
+24 checks, all passing.
+=== agent-coverage.test.ts ===
+13 checks, all passing.
+=== agent-keys.test.ts ===
+23 checks, all passing.
+=== agent-proposal-rules.test.ts ===
+37 checks, all passing.
+=== agent-propose.test.ts ===
+10 checks, all passing.
+=== agentic-catalog.test.ts ===
+ℹ tests 3
+ℹ pass 3
+ℹ fail 0
+ℹ skipped 0
+=== agentic-feed.test.ts ===
+ℹ tests 3
+ℹ pass 3
+ℹ fail 0
+ℹ skipped 0
+=== data-recount.test.ts ===
+13 checks, all passing.
+=== llms-txt.test.ts ===
+17 checks, all passing.
+=== mcp-channel-coverage.test.ts ===
+29 checks, all passing.
+=== mcp-course-tools.test.ts ===
+10 checks, all passing.
+=== mcp-dispatch.test.ts ===
+26 checks, all passing.
+=== mcp-oauth-rules.test.ts ===
+42 checks, all passing.
+=== mcp-page-test-tools.test.ts ===
+10 checks, all passing.
+=== mcp-page-tools.test.ts ===
+12 checks, all passing.
+=== mcp-page-versions.test.ts ===
+8 checks, all passing.
+=== mcp-read-tools.test.ts ===
+18 checks, all passing.
+=== mcp-saved-blocks.test.ts ===
+7 checks, all passing.
+=== mcp-tools.test.ts ===
+5 checks, all passing.
+=== plan-cost-registry.test.ts ===
+ℹ tests 19
+ℹ pass 19
+ℹ fail 0
+ℹ skipped 0
+=== store-data-registry.test.ts ===
+ℹ tests 7
+ℹ pass 7
+ℹ fail 0
+ℹ skipped 0
+=== store-data.test.ts ===
+33 checks, all passing.
+
+=== g1856-new-types.log ===
+
+=== g1856-new-lint.log ===
+
+=== g1856-new-scanner.log ===
+Public data check: 3270 tracked files; 0 file(s) require correction.

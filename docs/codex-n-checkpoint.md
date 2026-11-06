@@ -622,3 +622,40 @@ All test data synthetic. No price/visible limit/commission/flag/gate/account/pay
 3. #2451/#2544/#2674/#2700 mantêm bloqueios/retries exatos.
 4. Uma vaga futura abre BH1 somente após anúncio+RESERVA e RED próprio.
 5. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhum preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.
+
+
+
+
+---
+
+## Retomada — 06/11/2026 04h27 Fortaleza — coordenação transferida à Claude 4; produtos N intactos
+
+### Fonte e delta
+
+- Esta retomada começou pelo checkpoint canônico exato `319043fea151c15be35094ef55bfeb1b2cd2567b`, blob `6e5dce0add1a3fed43bddcf882005078871d90c3`; esta seção final prevalece.
+- Main observado uma vez: `07af66ab254c7d1976754f5f04901ae2d77273d2`. CLAUDE.md, AGENTS.md, docs/reservations.md, todos os arquivos de docs/reservations/ e CX-104–CX-125 foram relidos integralmente; CX-126 continua ausente do main.
+- O delta do canal posterior ao ponto N de 03h29 foi isolado por `fetch_file` + blobs integrais: baseline `fd6cf94113a20822e7a935113ed2933527278514` (284.191 bytes) e atual `4e7fb758f345895fb17a4f6ca828fad654dcec86` (358.227 bytes), com prefixo integral preservado.
+- Novidade causal de coordenação: por `C1-20261106-0400-C4-1` e `C4-20261106-0420-CX-1`, a Claude 4 passa a coordenar todos os Codex — ordem, atribuições, revisores e respostas. O Claude 1 fica somente como ponte de despertar/colar texto quando a Claude 4 pedir.
+- Não há no delta qualificação R2 do #2608, terminal legítimo dos nove checks de qualquer produto N, liberação A3, entrega/liberação do triestado, head novo ou instrução causal de produto N.
+- A mensagem do Codex Z confirma apenas a dependência compartilhada: `lib/request-guard.ts` segue ocupado pela Claude 4 no #2670/head `37bbc079`, e #2674 continua esperando o mesmo triestado. N não editou nem reservou essa fronteira.
+
+### Cinco produtos próprios — nenhum movimento
+
+1. **#2451** — `bf6840e04371e0c8bcaa27674989532ff5b0ec96`: L aplicável; 8/9; retry único verify `127163240735` esgotado; nunca repetir.
+2. **#2544** — `447e97287e9bec0062e7878186495cb92cbdc277`: G sem achado; HOLD A3 para `cancel_paid`25→27; não editar/retry.
+3. **#2608** — `0fad82a0e8fec7c1558124bb41d33afcdac1b656`, tree `7425d7e70293988a6a18b9763f0fb00ddb01b1ca`: retorno focal K2 `6676815043` preservado, mas ainda não é revisão integral; faltam qualificação independente explícita R2 dos 11 blobs e NOVE agregadores NOVOS. Retry antigo `127378763596` permanece consumido/cancelled e nunca será repetido.
+4. **#2674** — `5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3`: BLOQUEADO pelo triestado reservado; REDs `f8911772`/`e8dfabf5`, prova legal válida `73a1745d`/blob `60aa1ba0` e produto/API `17f4f4c`/blob `255aae86` preservados; `2421674d` inválido; request-guard/teste intocados.
+5. **#2700** — `c3fda3d2580ffd62f53f92b024cca48ea694ef18`, tree `88807d4dbc389c424990ab56aa5f51c653f639f5`: P `5795031317` aplicável; aguarda NOVE exatos.
+
+- 353 [BH1] continua atribuído e em fila, mas não foi reservado/aberto como sexta unidade. Buyer-library `041512b6` continua separado, sem vaga nem coordenação nova.
+- #2722/prova N `e8f27172`, retorno C2 no head `05a4e8bd` e SG2(27/30) permanecem preservados; nenhuma revisão foi duplicada.
+- Nenhum produto, retry, job, merge, reserva, ramo alheio, arquivo local ou worktree raiz foi alterado. O commit local acidental `cc23e7321951ff916cc297cbcac518360cd8293c` continua proibido de push.
+
+### Próximo exato
+
+1. A coordenação vigente é da Claude 4; Claude 1 fica somente em ciência/ponte.
+2. AV12: acordar somente por novidade causal; não sondar CI em rodadas.
+3. #2608 só avança com qualificação R2 integral explícita e terminal legítimo 9/9 do head exato; merge normal apenas por `expected_head_sha`.
+4. #2451/#2544/#2674/#2700 mantêm bloqueios e retries exatos.
+5. Não abrir sexta unidade. Quando uma vaga legítima surgir, BH1 exige anúncio+RESERVA no canal e RED próprio.
+6. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhum preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.

@@ -43,7 +43,9 @@ async function main(): Promise<void> {
 
   part("A write of the book that is not confirmed is not a proposal kept");
   for (const [name, reply] of [["[]", []], ["[null]", [null]], ["[0]", [0]]] as [string, unknown[]][]) {
-    redis.pipeline = async (batch) => (batch.length === 1 && Array.isArray(batch[0]) && batch[0][0] === "SET" && String(batch[0][1]).includes(statsId) && !String(batch[0][1]).includes("lock") ? (reply as unknown[]) : base(batch));
+    // The book is written in one step only while its lock is held (the agent-book-write EVAL); a plain SET of the book is matched too.
+    const bookWrite = (c: unknown[]) => (c[0] === "SET" && String(c[1]).includes(statsId) && !String(c[1]).includes("lock")) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:agent-book-write:") && String(c[4]).includes(statsId));
+    redis.pipeline = async (batch) => (batch.length === 1 && Array.isArray(batch[0]) && bookWrite(batch[0]) ? (reply as unknown[]) : base(batch));
     const added = await addProposal(store, FAQ, { target: "prod000003", before: ["Old"], after: [`Third ${name}`], asked }, NOW).then((r) => (r.ok ? "kept" : "refused"), () => "unconfirmed");
     redis.pipeline = base;
     is(`SET answering ${name} (not applied): never answered as kept`, [added, (await readBook(statsId, NOW)).waiting.map((p) => p.target)], ["unconfirmed", ["prod000001"]]);

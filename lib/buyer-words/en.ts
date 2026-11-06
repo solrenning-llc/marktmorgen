@@ -153,7 +153,8 @@ export const en = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store: string) => `The ${store} blog`,
-  blogEmpty: "Nothing here yet.",
+  blogPastEnd: "No posts on this page",
+  blogPastEndBody: "This page is past the last post.",
   blogMinutes: (n: number) => `${n} min read`,
   blogNewer: "Newer posts",
   blogOlder: "Older posts",
@@ -166,6 +167,7 @@ export const en = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent: number) => `save ${percent}%`,
   chooseOptionFor: (title: string) => `Choose an option for ${title}`,
+  chooseOne: "Choose one",
   recommended: "Recommended",
   recommendedAfter: " (recommended)",
   howToPayFor: (title: string) => `How to pay for ${title}`,

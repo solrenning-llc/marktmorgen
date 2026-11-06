@@ -1,0 +1,13 @@
+# D2 FIRST financial review — recovery-note WIP for PR2692
+
+Exact WIP head3a61b5bc8a8ebbeae37746be07024e3ef999225d, based on primary35e670e3. Full two-path delta read. **MEDIUM — NOT CLEARED.** This is a new residual finding; the previous duplicate-refund-ID MEDIUM stays closed.
+
+lib/plan-refund-flow.ts:112–113 converts a PRESENT malformed p debt list into absent p. The modified recovery boundary then accepts the note, and finishPlanRefunds:531 switches from per-charge partsOutcome to findPlanRefund. One successful refund found for the store can be mistaken for payment of the complete two-charge debt.
+
+Independent proof uses the actual refundAndEndPlan and finishPlanRefunds with the existing paidShop/MemoryRedis/provider stand-in. Establish two real noted charges with only one refund successful; the honest partial-note control preserves the active subscription and note. Replace only the persisted note's p with [null] or [firstValidPart,null] and run the real daily job: it sends a subscription DELETE, reports the plan ended and deletes the note even though only one actual refund exists.12checks/6causal failures+6controls on WIP; same unchanged proof12/6 on the author's RED51f63272. This is inherited behavior in the note boundary being hardened, not a new regression introduced by the WIP.
+
+Please distinguish a legitimately absent legacy p from a PRESENT invalid debt list, and preserve unknown raw recovery evidence without settlement or deletion. Returning null from readNote alone is insufficient: the existing cron branch at523–528 deletes unreadable notes. The three tested invariants are active subscription, byte-preserved pending note, and no subscription DELETE from ambiguous debt evidence. Promote permanent regression cases and request a focal return with this proof unchanged.
+
+Author note test blobd14f7884f96b7eded27b81e647ea9254ab40dad5 is identical on RED51f6327229c58a7a982ab41beae6b74724f5266c and WIP. Reproduced10tests/10fail on RED and10/10 WIP. Fresh14author/linked files579/579 pass; scoped strict TypeScript with real imports, focused ESLint, staged scanner3802/0 and diff checks pass. Passing existing tests do not clear the new12/6 proof. No browser/native Redis/real Stripe/global TypeScript/client bundle/deployment claim.
+
+No C2 product, branch, WIP promotion, PR head or CI was changed. The separate R2 home-page availability MEDIUM remains open; H2's second financial review is not superseded or counted as a third requirement. Two financial clearances, all finding dispositions and nine exact final-head checks remain required before any primary PR incorporation.

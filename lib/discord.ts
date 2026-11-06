@@ -203,8 +203,12 @@ export async function removeMember(serverId: string, userId: string, reason: str
   return changed(await call(`/guilds/${serverId}/members/${userId}`, { method: "DELETE", reason }).catch(() => null));
 }
 
-/** The bot leaves the server: the creator disconnected it. Roles already given stay as they are. */
+/**
+ * The bot leaves the server: the creator disconnected it. Roles already given stay as they are. True only on
+ * Discord's exact answer that it is out: a 2xx, or 404 when it was no longer there; anything else (no answer,
+ * a refusal, a 5xx) is false, and the bot may still be in the server.
+ */
 export async function leaveServer(serverId: string): Promise<boolean> {
   const answer = await call(`/users/@me/guilds/${serverId}`, { method: "DELETE" }).catch(() => null);
-  return Boolean(answer && (answer.status === 204 || answer.status === 404));
+  return Boolean(answer && ((answer.status >= 200 && answer.status < 300) || answer.status === 404));
 }

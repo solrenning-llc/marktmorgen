@@ -30,6 +30,7 @@
 import { nextUtcMidnight } from "@/lib/local-clock";
 import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, STORE_READINGS_PER_DAY } from "@/lib/store-reading-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { keyFor } from "@/lib/stripe-account";
 import { KEEP_UNLESS_ERASED, suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type Store, ensureListId, storeRef } from "@/lib/store";
@@ -275,6 +276,39 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
   } catch {
     return await closed();
   }
+}
+
+/**
+ * The copy of `kind` kept for a store, only looked at: one GET, never a
+ * reading of Stripe or the counts and never one of the day's readings, so a
+ * file can be made from what a page last showed (426 [BX2], the earnings
+ * file, app/api/store/earnings/route.ts). The time it was read and its value,
+ * unchecked: the caller reads the value in its own exact shape. undefined
+ * when none is kept; null when it could not be looked at, or the answer is
+ * not one string or nothing (lib/redis-reply.ts), or the copy is not
+ * { at, value }: unknown, never "none kept".
+ */
+export async function keptCopy(store: Pick<Store, "statsId">, kind: ReadingKind): Promise<{ at: number; value: unknown } | null | undefined> {
+  if (!store.statsId || !isRedisConfigured()) return null;
+  let replies: unknown[] | null;
+  try {
+    replies = repliesFor(await redisPipeline([["GET", copyKey(kind, store.statsId)]]), 1);
+  } catch {
+    return null;
+  }
+  if (!replies) return null;
+  const [raw] = replies;
+  if (raw === null) return undefined;
+  if (typeof raw !== "string") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  const { at, value } = parsed as { at?: unknown; value?: unknown };
+  return typeof at === "number" && Number.isSafeInteger(at) && at >= 0 && value !== undefined ? { at, value } : null;
 }
 
 /** The store's visits, kept (lib/stats.ts, readStats). */

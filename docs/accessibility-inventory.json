@@ -1765,6 +1765,7 @@
     "app/api/store/domain/route.ts",
     "app/api/store/download/route.ts",
     "app/api/store/dunning/route.ts",
+    "app/api/store/earnings/route.ts",
     "app/api/store/email-sync/route.ts",
     "app/api/store/embed-sites/route.ts",
     "app/api/store/exit-offer/route.ts",

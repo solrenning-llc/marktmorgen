@@ -1,8 +1,11 @@
 # 426 [BX2] Earnings by month and by source: design (6 November 2026)
 
-State: design, the pure rule (`lib/earnings-by-month.ts`, `tests/bx2-earnings.test.ts`) and,
-in unit 2, the year reading (`lib/earnings-read.ts`, `tests/bx2-u2-year-read.test.ts`). No page,
-route, entered amounts or CSV is built yet; nothing is available to a customer. Queue text: docs/codex-queue.md, item 426 [BX2].
+State: design, the pure rule (`lib/earnings-by-month.ts`, `tests/bx2-earnings.test.ts`), in
+unit 2 the year reading (`lib/earnings-read.ts`, `tests/bx2-u2-year-read.test.ts`), in unit 3
+the page (`app/studio/earnings/page.tsx`, `tests/bx2-u3-page.test.ts`) and in unit 4 the CSV
+file (`lib/earnings-csv.ts`, `app/api/store/earnings/route.ts`, `tests/bx2-u4-csv.test.ts`),
+each tested in its own branch. Entered amounts and sponsorships are not built; nothing is
+available to a customer until it is merged and published. Queue text: docs/codex-queue.md, item 426 [BX2].
 
 ## What the creator sees (the screen, built in a later unit)
 
@@ -124,9 +127,11 @@ inside the visible studio figure; corrections keep their history inside the same
 (a full ledger refuses new entries with a clear message, never drops old ones silently).
 
 CSV export (in the queue text) is one more reading-free render of the kept copy and the
-ledger: one studio request, rows only for the twelve months, cells guarded against formulas
-(lib/csv.ts, as the existing exports), no buyer's personal data (amounts by month,
-source and currency only).
+ledger: rows only for the twelve months, cells guarded against formulas (lib/csv.ts, as the
+existing exports), no buyer's personal data (amounts by month, source and currency only).
+Built in unit 4 at a studio page's cost (STUDIO_PAGE_UNITS), not one request: its one look at
+a kept copy of up to READING_COPY_MAX_BYTES is what the store-readings line prices for a page
+(KEPT_READINGS_SHAPE a page), and one studio request is priced at 50,000 database bytes only.
 
 ## Units, in order
 
@@ -160,7 +165,19 @@ source and currency only).
 4. **The page** app/studio/earnings/page.tsx: table per month (caption, row headers, per
    currency lines), "could not be read" states, NE1 sentence, AX274 checks (7:1, 320 px, 400%,
    screen reader, keyboard), plain words; link from the studio's numbers.
-5. **CSV export** of the twelve months (no personal data, formula guard).
+5. **CSV export** of the twelve months (built, unit 4): `earningsCsv` in lib/earnings-csv.ts
+   writes one row for each month, source and currency, the rows the page shows, with exact
+   amounts from the smallest unit (never a float division), "Could not be read",
+   "Nothing recorded" and "No total" as words with no amount, and PayPal disputes named as not
+   included. The route (app/api/store/earnings/route.ts, permission "stats") looks only at the
+   kept copy (`keptCopy` in lib/store-readings.ts, one GET read through lib/redis-reply.ts) and
+   reads it back only in the rule's exact shape (`earningsFromCopy`: every sum added again,
+   the months of the reading's time, the totals of the sources); anything else is no file. It
+   never reads Stripe or PayPal and never takes a reading; with no copy kept it says to open
+   the page first. A download costs STUDIO_PAGE_UNITS. The file is never larger than the page
+   that shows the same months (held by the test), so it sends no more than a page view does.
+   Cost: +US$ 0 on every line (no new reading, key, field or retention). "Entered by you" stays
+   out of the file until unit 3 of this list exists, as on the page.
 6. **Sponsorships** when 355 [ES1] exists, deduplicated by Stripe payment id.
 
 Each unit keeps the margin rule (MR) and the TX policy: no price, visible limit, commission,

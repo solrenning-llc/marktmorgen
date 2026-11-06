@@ -144,6 +144,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/disputes": row("buyers", never(WORDS)),
   "POST store/domain": row("settings", draft),
   "POST store/dunning": row("email", draft),
+  "GET store/earnings": row("numbers", read, "The twelve months of earnings as a file, made from the copy the earnings page kept (426 [BX2]); amounts by month, source and currency, no buyer's data."),
   "POST store/email-sync": row("connections", never(CONNECT)),
   "POST store/embed-sites": row("settings", draft),
   "POST store/exit-offer": row("offers", draft),

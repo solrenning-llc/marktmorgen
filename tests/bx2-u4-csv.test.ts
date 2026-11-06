@@ -250,18 +250,20 @@ async function route(): Promise<void> {
     const html = await draw(shop);
     is("the page offers the download as a plain GET form for this store", [html.includes('action="/api/store/earnings"'), /method="get"/.test(html), html.includes(`name="store" value="${shop.sid}"`)], [true, true, true]);
     is("its button says what it gives, in plain words", /<button[^>]*type="submit"[^>]*>Download these 12 months \(CSV\)<\/button>/.test(html), true);
-    is("and says the file has no buyer's name or email and reads nothing again", [/no buyer.s name or email/i.test(html), /does not read Stripe or PayPal again/i.test(html)], [true, true]);
+    is("and says the file has no buyer's name or email and reads nothing again", [/no buyer('|&#x27;)s name or email/i.test(html), /does not read Stripe or PayPal again/i.test(html)], [true, true]);
     const kept = await keptCopy(shop, "earnings");
     const calls = stripeCalls;
     const before = await readingsLeft(shop, clock);
     who.needs = [];
     who.units = [];
     const res = await download(shop);
-    const body = await res.text();
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    // Read as the file's bytes: Response.text() would drop the byte-order mark it checks.
+    const body = new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
     is("answered with a file", [res.status, res.headers.get("content-type")], [200, "text/csv; charset=utf-8"]);
     is("named for the store and the day it was read, as an attachment", res.headers.get("content-disposition"), 'attachment; filename="shop-earnings-2031-06-15.csv"');
     is("never cached, never indexed, never sniffed", [res.headers.get("cache-control"), res.headers.get("x-robots-tag"), res.headers.get("x-content-type-options")], ["private, no-store", "noindex", "nosniff"]);
-    is("starts with the byte-order mark Excel needs for UTF-8", body.charCodeAt(0), 0xfeff);
+    is("starts with the byte-order mark Excel needs for UTF-8", [...bytes.slice(0, 3)], [0xef, 0xbb, 0xbf]);
     is("the file is exactly the kept copy written out", body.slice(1), kept && typeof kept === "object" ? earningsCsv(earningsFromCopy(kept.value) as Earnings) : "no copy");
     is("no Stripe page read and no reading taken", [stripeCalls - calls, (await readingsLeft(shop, clock)).heavyLeft], [0, before.heavyLeft]);
     is("asks only for the permission to see the numbers", who.needs, ["stats"]);
@@ -272,7 +274,7 @@ async function route(): Promise<void> {
     part("Later the same day, with the copy no longer fresh: still the copy, still no reading");
     clock = NOW + 3 * 3600_000;
     const later = await download(shop);
-    is("the same file, the same name (the day it was read), nothing read", [later.status, (await later.text()) === body, later.headers.get("content-disposition"), stripeCalls - calls], [200, true, 'attachment; filename="shop-earnings-2031-06-15.csv"', 0]);
+    is("the same file, the same name (the day it was read), nothing read", [later.status, new TextDecoder("utf-8", { ignoreBOM: true }).decode(await later.arrayBuffer()) === body, later.headers.get("content-disposition"), stripeCalls - calls], [200, true, 'attachment; filename="shop-earnings-2031-06-15.csv"', 0]);
   }
 
   part("Nothing kept: said, with nothing read and no reading taken");
@@ -346,8 +348,10 @@ async function route(): Promise<void> {
     const html = await draw(shop);
     const res = await download(shop);
     const body = await res.text();
+    const manyRows = rowsOf(body).rows.filter((r) => r.source === "Stripe");
     is("a file", res.status, 200);
-    is("twelve months of twenty currencies each, one row each", rowsOf(body.slice(1)).rows.filter((r) => r.source === "Stripe" && r.state === "Read").length, 12 * 20);
+    // The oldest month's renewals are not proved (lib/earnings-read.ts, RENEWAL_PAID_WITHIN_DAYS), so it is words, never an amount.
+    is("eleven months of twenty currencies each, one row each, and the oldest month Could not be read", [manyRows.filter((r) => r.state === "Read").length, manyRows.filter((r) => r.month === "2030-07").map((r) => r.state)], [11 * 20, ["Could not be read"]]);
     is("no larger than the page", Buffer.byteLength(body, "utf8") <= Buffer.byteLength(html, "utf8"), true);
     is("no larger than twice the largest copy kept", Buffer.byteLength(body, "utf8") <= 2 * READING_COPY_MAX_BYTES, true);
   }

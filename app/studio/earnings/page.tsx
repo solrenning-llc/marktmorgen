@@ -261,6 +261,17 @@ export default async function StudioEarningsPage({ searchParams }: Params) {
                     </p>
                     {payPalLeftOut ? <p>PayPal disputes are not read, so PayPal amounts do not take them out.</p> : null}
                   </div>
+                  {/* A plain GET form rather than a link, so nothing prefetches it (lib/earnings-csv.ts, 426 [BX2] unit 4). */}
+                  <form action="/api/store/earnings" method="get" className="mt-6 max-w-2xl">
+                    <input type="hidden" name="store" value={store.sid} />
+                    <button type="submit" className="btn btn-secondary btn-sm" aria-describedby="earnings-file-help">
+                      Download these 12 months (CSV)
+                    </button>
+                    <p id="earnings-file-help" className="mt-2 text-sm text-ink-soft">
+                      A spreadsheet file of the amounts below, one row for each month, source and currency. It has no buyer&apos;s name or email. It is made
+                      from this reading, so it does not read Stripe or PayPal again. Downloading it counts as one studio page.
+                    </p>
+                  </form>
                   {earnings.months.map((month) => (
                     <Month key={month.month} month={month} />
                   ))}

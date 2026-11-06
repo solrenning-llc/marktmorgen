@@ -1161,6 +1161,8 @@ export const COST_LINES: CostLine[] = [
       { file: "app/studio/paused/page.tsx", names: [`SHOWN_PER_DAY = ${PAUSED_PER_DAY};`, "studio-paused"] },
       // The totals of every store take a page of each other store's studio, as the Terms say (C4-4, owner's decision of 4 November 2026, C4-18).
       { file: "app/studio/totals/page.tsx", names: ["countStudio(store, null, STUDIO_PAGE_UNITS)"] },
+      // 426 [BX2] unit 4: the earnings file costs a studio page, one request taken by the guard and the rest by the route.
+      { file: "app/api/store/earnings/route.ts", names: ["creatorFrom(request, \"stats\")", "countStudio(store, null, STUDIO_PAGE_UNITS - 1)"] },
     ],
     basis: "Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead. What a page reads of the store's numbers past that is the store's own readings (line store-readings), never more of these.",
   },
@@ -1182,13 +1184,16 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-readings.ts", names: ["READING_KEEP_SECONDS", "READING_COPY_MAX_BYTES", "takeStoreReading", "readingsLeft", "keptReading", "READING_KINDS", "HEAVY_KINDS", "listForNaming", "listTryKey"] },
       // 426 [BX2]: the twelve months of earnings are one of the day's heavy readings, within SALES_READ_SHAPE, kept as the fourth kind (tests/bx2-u2-year-read.test.ts).
       { file: "lib/earnings-read.ts", names: ["readEarningsYear", 'keptReading(store, "earnings"', "EARNINGS_STRIPE_PAGES", "EARNINGS_PAYPAL_SALES", "EARNINGS_PAYPAL_REFUNDS"] },
+      // Its file reads only the kept copy, one GET at a studio page's units, never a reading (tests/bx2-u4-csv.test.ts).
+      { file: "lib/store-readings.ts", names: ["export async function keptCopy"] },
+      { file: "app/api/store/earnings/route.ts", names: ['keptCopy(store, "earnings")'] },
       { file: "app/api/store/calendar/[token]/route.ts", names: ["listForNaming(store)"] },
       { file: "lib/read-ceilings.ts", names: ["LIST_MADE_SHAPE", "STORE_LOCK_TRIES"] },
       { file: "app/studio/page.tsx", names: ["keptStats(current, undefined, freshNumbers)", "keptSales(current, undefined, freshNumbers)", "readingsLeft(current)"] },
       { file: "app/studio/totals/page.tsx", names: ["keptNumbers(store)", "keptMembers(store)"] },
       { file: "lib/read-ceilings.ts", names: ["STATS_READ_SHAPE", "SALES_READ_SHAPE", "MEMBERS_READ_SHAPE", "STORE_READING_SHAPES", "KEPT_READINGS_SHAPE"] },
     ],
-    basis: "Every reading of every UTC day of the window, each counted before it is read: HEAVY_READINGS_PER_DAY of the store's sales from Stripe and PayPal (its recent sales or its twelve months of earnings, each within SALES_READ_SHAPE and counted as one of them), the rest of STORE_READINGS_PER_DAY at the dearer of its visits and its memberships (STORE_READING_SHAPES); what a studio page reads of the kept readings (up to three, READING_COPY_MAX_BYTES each) and of the day's counts (two) for every page the studio figure allows; and the readings kept a day, one of each of READING_KINDS (four since the earnings). The page itself is the studio's STUDIO_PAGE_UNITS, as the Terms say.",
+    basis: "Every reading of every UTC day of the window, each counted before it is read: HEAVY_READINGS_PER_DAY of the store's sales from Stripe and PayPal (its recent sales or its twelve months of earnings, each within SALES_READ_SHAPE and counted as one of them), the rest of STORE_READINGS_PER_DAY at the dearer of its visits and its memberships (STORE_READING_SHAPES); what a studio page reads of the kept readings (up to three, READING_COPY_MAX_BYTES each) and of the day's counts (two) for every page the studio figure allows (the earnings file is such a page: one kept copy looked at, at STUDIO_PAGE_UNITS, never a reading); and the readings kept a day, one of each of READING_KINDS (four since the earnings). The page itself is the studio's STUDIO_PAGE_UNITS, as the Terms say.",
   },
   {
     id: "calendar-feed",

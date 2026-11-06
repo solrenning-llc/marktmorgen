@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { withStockHold } from "@/lib/stock";
 import { parseProduct } from "@/lib/catalog";
 import type { Product, Store } from "@/lib/store";
+import { NO_DEAL } from "@/lib/cart-rules";
+import { NO_RECOVERY } from "@/lib/recovery-setting";
+import { NO_SALE } from "@/lib/store-sale";
 import { store as redis } from "./redis-stub";
 
 // Since 2 November 2026 (513 [PF1], unit 3 review) a unit is held in two writes: a provisional hold
@@ -202,7 +205,8 @@ test("a product bought on its own never gets two checkouts for its last unit", a
 // about 37 minutes, so one address could pin units it never paid for. (2) A hold that ran out and was not settled yet made the
 // first click "Sold out" (it is counted as used under the lock, where Stripe is never asked) though Stripe says it expired.
 const pinnedStore = { statsId: "f".repeat(32), stripeAccountId: "acct_test_pinned01", handle: "pinned", name: "Pinned", email: "pinned@example.com", language: "en", currency: "usd",
-  tax: { enabled: false, included: false, ids: false, invoices: false }, affiliates: { enabled: false, buyers: false }, catalog: { id: null, items: [], head: [], inline: null } } as unknown as Store;
+  sale: { ...NO_SALE }, cartDeal: { ...NO_DEAL }, recovery: { ...NO_RECOVERY }, hasDiscounts: false, tax: { enabled: false, included: false, ids: false, invoices: false },
+  affiliates: { enabled: false, percent: 0, days: 30, rates: {}, payday: 0, hold: 0 }, catalog: { id: null, items: [], head: [], inline: null } } as unknown as Store;
 /** Stripe, counted: every request, the checkouts it opens, and the ones it says expired. */
 function countingStripe(expiredAt: Set<string>) {
   const counts = { asked: 0, opened: 0 };

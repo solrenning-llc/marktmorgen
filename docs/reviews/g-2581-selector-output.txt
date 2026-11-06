@@ -1,0 +1,93 @@
+
+LOG g2581-5ba-original-red.log SHA256 203c4f89a9a8059fe6e0d513f8c2e92642fab1f37cd789a7adc1b684d5d1ef9e
+6 checks, 3 failing.
+"L︎а︎st chance" {
+  sendable: true,
+  refusals: [],
+  warnings: [],
+  notChecked: [
+    "Each ad platform's own policies beyond these words: Meta's were not readable in the official check; Google's unreliable-claims and TikTok's misleading-content rules are covered here only where they match the store's own (earnings, results); TikTok's AI-content label and before-and-after pictures are not read here (docs/ad-platforms-official-check-2026-11-02.md)",
+    "Each platform's length limits for headlines and text",
+    'Pictures and videos: only the words are read here',
+    "A price in a currency other than US dollars: an amount is compared with the product's price only when the store sells in US dollars and the amount is written with $",
+    'Words in a language other than English: the honesty rules here read English words only'
+  ]
+}
+  FAIL  variation selector cannot disguise mixed-script urgency 65038
+        expected false
+        got      true
+"L️а️st chance" {
+  sendable: true,
+  refusals: [],
+  warnings: [],
+  notChecked: [
+    "Each ad platform's own policies beyond these words: Meta's were not readable in the official check; Google's unreliable-claims and TikTok's misleading-content rules are covered here only where they match the store's own (earnings, results); TikTok's AI-content label and before-and-after pictures are not read here (docs/ad-platforms-official-check-2026-11-02.md)",
+    "Each platform's length limits for headlines and text",
+    'Pictures and videos: only the words are read here',
+    "A price in a currency other than US dollars: an amount is compared with the product's price only when the store sells in US dollars and the amount is written with $",
+    'Words in a language other than English: the honesty rules here read English words only'
+  ]
+}
+  FAIL  variation selector cannot disguise mixed-script urgency 65039
+        expected false
+        got      true
+"L󠄀а󠄀st chance" {
+  sendable: true,
+  refusals: [],
+  warnings: [],
+  notChecked: [
+    "Each ad platform's own policies beyond these words: Meta's were not readable in the official check; Google's unreliable-claims and TikTok's misleading-content rules are covered here only where they match the store's own (earnings, results); TikTok's AI-content label and before-and-after pictures are not read here (docs/ad-platforms-official-check-2026-11-02.md)",
+    "Each platform's length limits for headlines and text",
+    'Pictures and videos: only the words are read here',
+    "A price in a currency other than US dollars: an amount is compared with the product's price only when the store sells in US dollars and the amount is written with $",
+    'Words in a language other than English: the honesty rules here read English words only'
+  ]
+}
+  FAIL  variation selector cannot disguise mixed-script urgency 917760
+        expected false
+        got      true
+  ok    ordinary urgency refused
+  ok    legitimate emoji selector preserved
+  ok    legitimate Cyrillic text preserved
+
+6 checks, 3 failing.
+
+
+LOG g2581-5ba-original-green.log SHA256 ab9dfcd973608670968785c864ea400e03a4124e9fa053637393b6bad48293b7
+6 checks, all passing.
+
+LOG g2581-5ba-extra-red.log SHA256 cebbbae037744837a5843a098eee803a1193bd20ff8c532377b01c16b87cc2c9
+1036 checks, 1024 failing.
+
+LOG g2581-5ba-extra-green.log SHA256 a03f39c5d1b38bb411570dfa6aa25df5ed4c33e4886fb4fa95ed24eb08b2cfc5
+1036 checks, all passing.
+
+LOG g2581-5ba-linked-old.log SHA256 d669fa26bf89a5735ccca9355f12d0870c674422c0f0b60a97ef16ea9afe8ede
+48 checks, all passing.
+82 checks, all passing.
+105 checks, all passing.
+21 checks, all passing.
+
+LOG g2581-5ba-linked-green.log SHA256 beb6b8579fd6a964cfbea3393a1f27fe24a16d01ffb9c1e94b8b15aac1df95f8
+48 checks, all passing.
+82 checks, all passing.
+105 checks, all passing.
+21 checks, all passing.
+30 checks, all passing.
+27 checks, all passing.
+26 checks, all passing.
+14 checks, all passing.
+11 checks, all passing.
+9 checks, all passing.
+
+LOG g2581-5ba-types.log SHA256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+EMPTY: True
+
+LOG g2581-5ba-lint.log SHA256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+EMPTY: True
+
+LOG g2581-5ba-scan.log SHA256 66039701bdb8138df51cf8d3b533af6e366703a657088fb629075589d0ff839b
+Public data check: 3752 tracked files; 0 file(s) require correction.
+extra proof blob 96a837510ae52b1d00c16da77c3b100fb0b34b22

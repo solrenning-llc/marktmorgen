@@ -32,3 +32,20 @@ Result at the reviewed head: seven tests, five original controls passing, two in
 The official source/hash second reading is already complete in the earlier report. The existing pre-order scheduled-release medium and Revisor 1's late physical-delivery issue remain open at this head. No additional full certification is claimed for the plan's cost registry by its email-site entry alone. The complete sixteen-file patch and the new withdrawal page, route, rules, helper, buyer order consent fields, registry changes and seven-language words were read. No Stripe write was added by the feature.
 
 The author branch/ref/CI and all five N product units remain unchanged. This evidence adds no product, reservation document, workflow, price, limit, commission, flag, account, payment, term or external contact. Unit1b is not clean pending the two recovery issues and the outstanding rules findings.
+
+## Focal re-review at b317b55833c1a24b86d9a3b9f59d586590f5a6c9 (6 November 2026)
+
+The original seven-test evidence at 8f61e170 is unchanged. Running that bundle across checkouts initially mixed the proof checkout's relative Redis/after fixtures with the selected source checkout's aliases. Those setup failures are harness errors, not product findings. The new hash also makes direct GET timestamp assertions incompatible (WRONGTYPE in the new MemoryRedis). No such failure is counted below.
+
+A separately named v2 variant uses the exported withdrawnAt for the four record-presence/absence assertion expressions, removes the unused withdrawalKey import, and retains the same seven scenarios, expected outcomes, quota preparation and mail assertions. The v2 runner resolves entry-relative fixture imports against the selected source tests directory. It never edits author source or the original proof. SHA-256 proof 71493f576cd27a125c4b0c5cec6d9a372f47ed8ea0a49cde7e5077b1f3551653; runner f6ff8bd903290ab05d47e3042c9aa21fafe49975a6d6eb18799f33cdf460b8e8.
+
+Reproduce: TMPDIR=/dev/shm node proofs/n/2827-flow-review-v2.mjs /path/to/exact-source-checkout
+
+- At original 70244c2c: 7 tests, 5 pass, 2 causal failures. Mail: unsent then already, zero acknowledgements. Inbox: done, zero conversations, buyer copy claims passed.
+- At b317b558: 7 tests, 6 pass, 1 causal failure. Mail: unsent then done, exactly one acknowledgement. Inbox: done, zero conversations, buyer copy still claims passed.
+
+The single-transient-refusal example of proposed medium 1 is CLOSED by the resend state. This does not close Revisor 1's separately reproduced exhaustion case: three refusals consume all attempts, then healthy retries return already without a receipt; store transactional quota still gates the legal acknowledgement. This report credits R1's existing case and does not claim an independent replay of that extended case. C4-2760 permits an order cost line, but the author's 66.06 first-year calculation exceeds the stated 66 ceiling and is explicitly stopped pending a decision. No ceiling or money rule was changed by this review.
+
+Proposed medium 2 remains OPEN, lib/withdrawal.ts:155-160: fileContact(false) is discarded and only the statement that created the record attempts it. The real limiter exhaustion remains reproducible with a successful buyer acknowledgement and no stored creator notice. A declaration cannot truthfully be reported fully done with no recoverable creator notice.
+
+Validation of b317b558: author withdrawal 6/6; rules 38/38; permanent original N rule evidence 5/5; digital-consent 93/93. Targeted TypeScript program (withdrawal/rules, author flow and permanent rule test roots with their imports): zero diagnostics. ESLint on those four paths: exit0. check_public_data.py findings on both new proof/runner files: zero. No browser, national-law certification, full-suite, nine-CI or money approval is claimed. R1's shipped propagation and quota findings remain theirs; original N pre-order medium remains closed. No full clean review of unit1b.

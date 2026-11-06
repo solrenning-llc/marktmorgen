@@ -1,0 +1,557 @@
+=== backup-expiry-exact.test.ts ===
+
+Control: exact endings copy every key
+  ok    every key copied
+
+An ending answered in another shape is unknown: the copy is refused, the key never left out
+  FAIL  PEXPIRETIME answering nil: refused as unreadable, never a backup without the key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  PEXPIRETIME answering an empty text: refused as unreadable, never a backup without the key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  PEXPIRETIME answering a list: refused as unreadable, never a backup without the key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  PEXPIRETIME answering true: refused as unreadable, never a backup without the key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  PEXPIRETIME answering false: refused as unreadable, never a backup without the key
+        expected [false,"unreadable"]
+        got      [true,5]
+
+6 checks, 5 failing.
+
+=== g2734-numeric-expiry.proof.ts ===
+
+Control: exact endings copy every key
+  ok    every key copied
+
+An ending answered in another shape is unknown: the copy is refused, the key never left out
+  FAIL  PEXPIRETIME answering nil: refused as unreadable, never a backup without the key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  PEXPIRETIME answering an empty text: refused as unreadable, never a backup without the key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  PEXPIRETIME answering a list: refused as unreadable, never a backup without the key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  PEXPIRETIME answering true: refused as unreadable, never a backup without the key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  PEXPIRETIME answering false: refused as unreadable, never a backup without the key
+        expected [false,"unreadable"]
+        got      [true,5]
+
+Codex G: invalid numeric endings must be rejected before the already-expired skip
+  ok    unsupported negative sentinel: exactly one target reply replaced; original source key still exists
+  FAIL  unsupported negative sentinel: refuse rather than silently omit a source key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  unsupported negative sentinel: no verified manifest names a partial copy as complete
+        expected false
+        got      true
+  ok    negative fraction: exactly one target reply replaced; original source key still exists
+  FAIL  negative fraction: refuse rather than silently omit a source key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  negative fraction: no verified manifest names a partial copy as complete
+        expected false
+        got      true
+  ok    fractional past timestamp: exactly one target reply replaced; original source key still exists
+  FAIL  fractional past timestamp: refuse rather than silently omit a source key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  fractional past timestamp: no verified manifest names a partial copy as complete
+        expected false
+        got      true
+  ok    negative infinity: exactly one target reply replaced; original source key still exists
+  FAIL  negative infinity: refuse rather than silently omit a source key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  negative infinity: no verified manifest names a partial copy as complete
+        expected false
+        got      true
+  ok    unsafe negative integer: exactly one target reply replaced; original source key still exists
+  FAIL  unsafe negative integer: refuse rather than silently omit a source key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  unsafe negative integer: no verified manifest names a partial copy as complete
+        expected false
+        got      true
+
+21 checks, 15 failing.
+
+=== backup-expiry-exact.test.ts ===
+
+Control: exact endings copy every key
+  ok    every key copied
+
+An ending answered in another shape is unknown: the copy is refused, the key never left out
+  ok    PEXPIRETIME answering nil: refused as unreadable, never a backup without the key
+  ok    PEXPIRETIME answering an empty text: refused as unreadable, never a backup without the key
+  ok    PEXPIRETIME answering a list: refused as unreadable, never a backup without the key
+  ok    PEXPIRETIME answering true: refused as unreadable, never a backup without the key
+  ok    PEXPIRETIME answering false: refused as unreadable, never a backup without the key
+
+6 checks, all passing.
+
+=== g2734-numeric-expiry.proof.ts ===
+
+Control: exact endings copy every key
+  ok    every key copied
+
+An ending answered in another shape is unknown: the copy is refused, the key never left out
+  ok    PEXPIRETIME answering nil: refused as unreadable, never a backup without the key
+  ok    PEXPIRETIME answering an empty text: refused as unreadable, never a backup without the key
+  ok    PEXPIRETIME answering a list: refused as unreadable, never a backup without the key
+  ok    PEXPIRETIME answering true: refused as unreadable, never a backup without the key
+  ok    PEXPIRETIME answering false: refused as unreadable, never a backup without the key
+
+Codex G: invalid numeric endings must be rejected before the already-expired skip
+  ok    unsupported negative sentinel: exactly one target reply replaced; original source key still exists
+  FAIL  unsupported negative sentinel: refuse rather than silently omit a source key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  unsupported negative sentinel: no verified manifest names a partial copy as complete
+        expected false
+        got      true
+  ok    negative fraction: exactly one target reply replaced; original source key still exists
+  FAIL  negative fraction: refuse rather than silently omit a source key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  negative fraction: no verified manifest names a partial copy as complete
+        expected false
+        got      true
+  ok    fractional past timestamp: exactly one target reply replaced; original source key still exists
+  FAIL  fractional past timestamp: refuse rather than silently omit a source key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  fractional past timestamp: no verified manifest names a partial copy as complete
+        expected false
+        got      true
+  ok    negative infinity: exactly one target reply replaced; original source key still exists
+  FAIL  negative infinity: refuse rather than silently omit a source key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  negative infinity: no verified manifest names a partial copy as complete
+        expected false
+        got      true
+  ok    unsafe negative integer: exactly one target reply replaced; original source key still exists
+  FAIL  unsafe negative integer: refuse rather than silently omit a source key
+        expected [false,"unreadable"]
+        got      [true,5]
+  FAIL  unsafe negative integer: no verified manifest names a partial copy as complete
+        expected false
+        got      true
+
+21 checks, 10 failing.
+
+=== backup-parts.test.ts ===
+
+A set of parts, read back whole
+  ok    done, in several parts, every key of ours
+  ok    its objects: the parts and the manifest
+  ok    no part over its bound
+  ok    read one part at a time, in the manifest's order
+  ok    read back: every key, once, in order, with its ending
+  ok    the manifest names every part with its sums
+
+What does not match is refused
+  ok    the manifest opens with its own key only
+  ok    a part changed after the copy: refused
+  ok    a part missing: refused
+  ok    a part whose sum is not the one its manifest names: refused
+  ok    a set larger than a restore may read: refused before any part is read
+
+The run's caps hold before anything is written as whole
+  ok    more parts than allowed: refused, said so
+  ok    the parts it wrote stay, unreferenced; nothing earlier deleted
+  ok    more bytes than the run may copy: refused before a part
+  ok    caps out of range: refused, nothing sent
+  ok    a value larger than a part: the run refused, never a set without it
+  ok    a key longer than the format keeps (1,024 bytes, UTF-8): too_big at the walk, nothing copied
+
+Rows are measured in the bytes they add to their part's JSON
+  ok    copied in parts
+  ok    no part's JSON past what it counts (2621 <= 3136)
+
+Failures say which side
+  ok    the database failing while read: error, nothing written
+  ok    a write refused after one part: verify, the part before it kept
+
+The walk reads at most BACKUP_SCAN_PAGES pages; past them the copy is refused, never partial (inbox C4-46)
+  ok    200 pages, enough for the design's 10,000 keys at 500 a page with room
+  ok    201 pages: refused as scan_pages after 200 SCANs, nothing written
+  ok    exactly 200 pages: the whole set
+
+Bounds
+  ok    a manifest of the most parts stays a small object
+  ok    what a run may store: its bytes, each part's seal and its manifest
+
+26 checks, all passing.
+
+=== backup-codec.test.ts ===
+
+Encrypted backup restores synthetic data only
+  ok    authenticated roundtrip
+  ok    plaintext is not stored
+  ok    fresh nonce for every seal
+  ok    wrong key refused
+  ok    tampered envelope refused
+  ok    tampered envelope refused
+  ok    tampered envelope refused
+  ok    tampered envelope refused
+  ok    tampered envelope refused
+  ok    truncated envelope refused
+  ok    short key refused
+  ok    duplicate keys refused
+  ok    foreign key refused
+  ok    invalid dump refused
+  ok    expired capture refused
+  ok    restore never extends expired TTL
+  ok    all live records restored into simulated database
+  ok    binary value preserved
+  ok    absolute expiry preserved
+  ok    restore clock before snapshot refused
+  ok    input beyond bound refused
+
+21 checks, all passing.
+
+=== backup-cost.test.ts ===
+
+The worst month of the design as built, line by line (micro-dollars)
+  ok    64 runs a month: a run and one new try on each of 32 UTC days
+  ok    R2 storage: the review's ceiling of 32 sets, plus a GB-month of rounding
+  ok    R2 Class A: each object written and deleted, those alive at the month's start deleted, two listings a run, plus a million of rounding
+  ok    R2 Class B: each object read back, every object the bucket holds read when the last good copy is lost, plus a million of rounding
+  ok    Upstash commands: every one the caps allow and the report's two reads a day
+  ok    Upstash bytes: at most 200 full SCAN pages, every copied byte, each name sent twice, the marks
+  ok    Upstash storage: the backup's six marks
+  ok    Vercel: the whole 300 s at 2 GB, CPU all along
+  ok    the provider allowance on all of it
+  ok    the month: $9.36
+  ok    no free quota anywhere: storage, operations and bytes all above zero
+  ok    the SCAN pages priced are the fewer of the cap and what the commands allow
+
+Larger caps cost more, never less
+  ok    64 parts of 4 MiB: a review the run accepts
+  ok    and each line at least the one-part figure
+  ok    a longer route costs more
+
+Nothing priced for what the run would refuse
+  ok    a storage ceiling below retention + 2 sets
+  ok    a review with no date
+  ok    no route duration
+  ok    a duration past Vercel's longest
+
+Priced only from the review as it is, read once (Codex G on #2175, inbox C4-49)
+  ok    a cap behind a getter: not priced (unknown), the getter never run
+  ok    a review inherited from another object: not priced
+  ok    a revoked proxy: unknown, never an exception
+  ok    a proxy whose reads change: priced from one reading of each field, as the review itself
+
+A line of the LLC fixed costs, still unknown
+  ok    the backup is one of the LLC's fixed costs (FX275: 100% Marktmorgen)
+  ok    its reviewed ceiling is unknown while anything it depends on is
+  ok    its observation names the model and is not an approved ceiling
+  ok    the LLC total stays unknown without it
+
+27 checks, all passing.
+
+=== backup-export.test.ts ===
+
+Everything of ours, and nothing else
+  ok    every nl: key, each once, in order
+  ok    an expiry is kept as the moment it ends, a key without one as none
+  ok    the commands spent are counted: each SCAN, a DUMP and a PEXPIRETIME a key
+  ok    and they are what the stand-in was sent
+
+It comes back the same, into an empty database
+  ok    restored, every key
+  ok    each type, value and expiry the same
+  ok    and nothing that is not ours
+
+Never over a key the target already has
+  ok    refused before anything is written
+
+A cap reached is a refusal, never part of a copy
+  ok    the command budget: refused, and not one DUMP was sent
+  ok    the size: refused as soon as it is passed, and no batch sent after
+  ok    more than the format seals is not a limit
+  ok    the row cap
+  ok    bad limits refused
+
+A walk in pages, as a real server answers
+  ok    an empty first page and repeated keys: every key, each once, over every page
+  ok    a cursor that does not move: refused, not walked until the budget is spent
+  ok    an expiry answered as true: unreadable, never a key left out as already ended (CX-123 rule 24)
+  ok    an expiry answered as "01": unreadable, never a key left out as already ended (CX-123 rule 24)
+  ok    an expiry answered as [1]: unreadable, never a key left out as already ended (CX-123 rule 24)
+  ok    an expiry answered as "1792640000000": unreadable, never a key left out as already ended (CX-123 rule 24)
+  ok    a key deleted between the walk and its copy: the copy is made, without it
+
+A key gone between the scan and its copy is left out, not copied empty
+  ok    gone, so not in the copy, which is still made
+  ok    a restore of nothing writes nothing and asks nothing
+
+22 checks, all passing.
+
+=== backup-restore-target.test.ts ===
+
+Off until the owner's own restore database is set, and never the live one
+  ok    nothing set: off
+  ok    both set: on
+  ok    with no address: off
+  ok    with no token: off
+  ok    with the live database's address: off
+  ok    with the live address in other case: off
+  ok    with the live address with its port: off
+  ok    with the live address over http: off
+  ok    with the live address without a scheme: off
+  ok    with an address with a password: off
+  ok    with the live database's address by its other name: off
+  ok    with the live database's token: off
+  ok    with the live token by its other name: off
+  ok    with an http address: off
+  ok    with a host that is not Upstash's: off
+  ok    with a host that only ends like Upstash's: off
+  ok    with an address with a path: off
+
+Each key restored from its own bytes, never over another, with the time still left
+  ok    a new key is restored
+  ok    as one POST under a temporary name of letters and digits, no end as 0, the value's own bytes as the raw body
+  ok    never with REPLACE or anything after the value
+  ok    then renamed to its real name in a JSON pipeline, never over a key
+  ok    the real key holds the bytes, and no temporary name is left
+  ok    an end in the future: the milliseconds still left, kept by the rename
+  ok    an end passed while restoring: skipped, nothing sent
+  ok    a value that is not base64, or empty: refused before sending
+  ok    a key that is there: not renamed over, a failure, the first kept, the temporary name removed
+  ok    a rename that fails: a failure, the temporary name removed
+  ok    an error answer: not written
+  ok    a result that is not OK: not written
+  ok    an answer of 401: not written
+  ok    an unreachable database: not written
+  ok    and whether keys are there cannot be known: a failure, not none
+
+Whether keys are there: DBSIZE and EXISTS in one pipeline; only an empty database is written into
+  ok    a database that is not empty, as the live one never is: a failure
+  ok    an empty one: each key, in order
+  ok    one stray key, such as a temporary name left by a stopped drill: a failure
+  ok    an answer of the wrong length is a failure
+
+A whole snapshot, through restoreSnapshot, into an empty database
+  ok    written whole, the expired row left out
+  ok    a second time: refused before writing anything (the database is not empty)
+  ok    a row whose end passed during the restore is counted apart, never as written
+  ok    no real key was ever put in a path
+  ok    every request went to the restore database only, with its token
+
+41 checks, all passing.
+
+=== backup-roundtrip.test.ts ===
+
+Synthetic write and authenticated read-back
+  ok    one write
+  ok    one bounded read
+  ok    key count verified
+  ok    previous backup unchanged
+  ok    distinct create-only identities
+  ok    corrupt read-back fails
+  ok    previous retained after failure
+  ok    oversize refused before storage
+  ok    no write on size failure
+  ok    unknown read fails
+  ok    no deletion capability
+
+11 checks, all passing.
+
+=== backup-run.test.ts ===
+
+Off three ways today, and nothing is sent while off
+  ok    no reviewed cost ceiling exists yet
+  ok    no review: off, nothing sent
+  ok    no store: off, nothing sent
+  ok    no key: off, nothing sent
+  ok    the key: none without the setting
+  ok    the key: not 32 bytes, none
+  ok    the key: 32 bytes from base64
+  ok    the default run, with a key but no review or bucket, is off and sends nothing
+  ok    the default store: none without the bucket settings
+
+A review counts only with its date, its source, a retention and a storage ceiling the copies cannot pass
+  ok    the synthetic review is whole
+  ok    a cap behind a getter: refused, off, nothing sent, the getter never run
+  ok    a review inherited from another object: refused, nothing sent
+  ok    a field added to Object.prototype is never read into the copy
+  ok    a retention of 3 days is admitted
+  ok    a revoked proxy: refused as a result, never an exception
+  ok    no date: refused, off, nothing sent
+  ok    a date that is not one: refused, off, nothing sent
+  ok    no source: refused, off, nothing sent
+  ok    no retention: refused, off, nothing sent
+  ok    a retention of 1 day: refused, off, nothing sent
+  ok    a retention of 2 days: refused, off, nothing sent
+  ok    a storage ceiling the kept copies could pass: refused, off, nothing sent
+  ok    a storage ceiling one byte short of retention + 2 sets: refused, off, nothing sent
+  ok    no room for the run's own commands: refused, off, nothing sent
+  ok    a cap that is not a count: refused, off, nothing sent
+  ok    more parts than a set may have: refused, off, nothing sent
+  ok    parts whose stored weight the ceiling cannot hold: refused, off, nothing sent
+
+With all three, a copy is made, written once and read back the same
+  ok    done, with the keys copied (its own day count and lock among them), one part and its manifest
+  ok    a second run the same day is refused before anything is written
+  ok    the good copy's time and its manifest are kept, and survive that refusal
+  ok    the last good copy's mark is kept for good: it names the copy never deleted to make room
+
+Failures say which step, and keep the last good copy's time
+  ok    a copy that does not read back the same is a failure
+  ok    its reason is kept, with its time
+  ok    a failure's note expires by itself
+  ok    one failed day after a good one: a good copy is still under 48 hours old
+  ok    a cap reached is a failure that says which
+  ok    the reason kept is the latest
+  ok    no good copy for over 48 hours: seen
+  ok    the database failing during the export: a result, not an exception
+  ok    and its reason is kept
+  ok    a refused day mark: the run stops before copying, as a result
+  ok    a good copy whose outcome could not be written is still reported done
+  ok    with nothing ever kept, the report says there is no good copy
+
+At most one run a day and one new try after a failure, counted before any cost (inbox C4-49)
+  ok    the day's first run fails
+  ok    one new try the same day runs, and is done
+  ok    a third call that day: refused at the day's count, six commands (the lock; the count; the lock let go only if it is its own: a script, or its GET and DEL), nothing listed or written
+  ok    a day whose first run is done
+  ok    no new try after a good run: refused, six commands, nothing written
+  ok    two failures in a day: the second was the new try
+  ok    and nothing more that day
+  ok    the count of the day expires by itself
+
+A walk past its pages is a failure that says so, never a partial copy (inbox C4-46)
+  ok    refused at the walk's page cap, nothing written
+  ok    and the owner's report says so
+
+Write first, then delete past the retention; under the ceiling a failed delete never costs the day's copy (inbox C4-53)
+  ok    the normal case: written, then the copy older than 30 days deleted, the one of exactly 30 days and the younger kept
+  ok    a delete that fails under the ceiling: the day's copy is still written, done
+  ok    and the owner's report says the deletion failed
+  ok    the good copy's time is the new one
+  ok    the next run deletes what was left past the retention
+
+At the ceiling, the oldest go first, never the last verified copy; a failed delete there writes nothing (inbox C4-53)
+  ok    at the ceiling, a delete that fails: nothing written, said so
+  ok    the day's new try makes room from the oldest, keeps the last verified copy, and writes
+  ok    and the bucket stays within the review's ceiling
+
+The last verified copy is known for sure before any copy is deleted to make room (Codex G on e95705e66)
+  ok    an empty answer from the database: no copy deleted to make room, nothing written, said so
+  ok    two answers for one command: no copy deleted to make room, nothing written, said so
+  ok    a value that is not text: no copy deleted to make room, nothing written, said so
+  ok    a value that is not the kept shape: no copy deleted to make room, nothing written, said so
+  ok    an old mark with a time and no manifest: no copy deleted to make room, nothing written, said so
+  ok    no mark at all, with copies in the bucket: no copy deleted to make room, nothing written, said so
+
+The bucket's rule outlives the retention, and a last good copy lost to it never stops the backup (Reviewer 1 on e81007570)
+  ok    the bucket's lifecycle rule to set: 60 days, longer than the 30-day retention
+  ok    30 days more than the retention
+  ok    the last good copy was taken by the bucket's rule
+  ok    the first good run after it writes again
+  ok    and the report says the last good copy was lost
+  ok    the run's own note: last good copy lost
+  ok    only objects with no valid manifest were deleted to make room
+
+A failed day deletes nothing after it: the last good copy stays past the retention while new ones fail (Codex G on e95705e66)
+  ok    day 4, the first write refused: a failure, nothing deleted, the good copy of day 0 whole
+  ok    the next good copy is written, and only then is the old one, past the retention, deleted
+
+When even deleting every other copy leaves no room, nothing is written
+  ok    the others deleted, the last verified copy kept, and still no room: room_error, nothing written
+
+A listing longer than the ceiling allows: nothing written, said so
+  ok    more than its 1 page: refused as room_pages after one page, nothing written or deleted
+
+Two calls at once: one runs, the other is refused before anything costly (inbox C4-53)
+  ok    one is done, the other refused as busy; one set written
+  ok    the busy call left the day's new try untouched
+
+The lock: only its own run lets it go, it outlives the run's cutoff, and a busy call is reported
+  ok    the lock lives longer than the cutoff and the admission's two requests, with a minute to spare
+  ok    held, while writing, for at least the cutoff
+  ok    a lock taken by another run since is never let go by this one
+  ok    a call that finds the lock: busy, and the owner's report says so
+
+What the code proves: never past the review's ceiling in objects, and the last verified copy always kept
+  ok    never more than the review's 36199424 bytes (seen 21651)
+  ok    objects are what limits here: 64 reached, never passed, one listing page of 1
+  ok    the last verified copy is never deleted
+  ok    after each run whose deletion finished, none of its own copies older than 30 days
+  ok    the ceiling in sets: retention + 2 = 32
+
+The same 90 days with copies that weigh more than half a set each: bytes are what limits
+  ok    never more than the review's 36199424 bytes as listed (seen 35633871)
+  ok    and fewer objects than the 64 the count allows (seen 63)
+  ok    the last verified copy is never deleted
+
+A run that passes its cutoff stops before its manifest (independent review of #2175)
+  ok    the run's cutoff: 800 s, under a day (the retention's proof needs it)
+  ok    past the cutoff: refused as such, its part left unreferenced, no manifest written
+
+With the shortest retention, the report says no good copy before the last one can be deleted
+  ok    two failed days: the good copy is still there, and the report already says no good copy for 48 hours
+
+Nothing schedules it
+  ok    vercel.json names no backup route
+
+96 checks, all passing.
+
+=== backup-store.test.ts ===
+
+Off until the owner's own settings exist, and never on the sold files' bucket or keys
+  ok    no settings: off
+  ok    the sold files' bucket: off
+  ok    the sold files' key: off
+  ok    a malformed account: off
+  ok    its own bucket and key: on
+  ok    a bucket in the EU jurisdiction: its own address
+  ok    an unknown jurisdiction: off
+
+Written once, read back whole, through the read-back the backup needs
+  ok    one object, under backups/, named by its id
+  ok    create-only, and signed with it
+  ok    every request signed, the body's hash the body's
+  ok    the round trip never deletes
+
+It lists its own objects and deletes one by its id (inbox C4-49: the run's retention)
+  ok    one page under backups/, signed, at most 1,000 names
+  ok    only its own objects, each with the time the bucket wrote it and its size; another name is never offered for deletion
+  ok    a long listing goes on from where it stopped
+  ok    not a listing: refused, never read as an empty bucket
+  ok    a truncated listing with nowhere to go on: refused, never read as an empty bucket
+  ok    a time that is not one: refused, never read as an empty bucket
+  ok    no size: refused, never read as an empty bucket
+  ok    a count that does not match: refused, never read as an empty bucket
+  ok    a delete: of that object only, signed
+  ok    an id that is not one: refused before any request
+  ok    a delete answered 403: refused, never taken as done
+
+What is never taken as a backup
+  ok    an id that is not one: refused before any request
+  ok    a second write under the same id: refused (412), the first kept
+  ok    a read past its cap: refused
+  ok    and so when the store states no length, counted as it streams
+  ok    a cap that is not a count of bytes: refused
+  ok    an answer of 303: refused, never taken as written or read
+  ok    an answer of 409: refused, never taken as written or read
+  ok    an answer of 503: refused, never taken as written or read
+  ok    a missing object: refused
+  ok    an unreachable store: refused
+
+32 checks, all passing.
+
+Public data check: 3804 tracked files; 0 file(s) require correction.
+65:export async function exportSnapshot(limits: ExportLimits): Promise<ExportResult> {
+134:export async function restoreSnapshot(snapshot: BackupSnapshot, target: RestoreTarget, now: number): Promise<RestoreResult> {

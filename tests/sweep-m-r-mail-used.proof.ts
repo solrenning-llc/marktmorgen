@@ -50,7 +50,7 @@ async function main(): Promise<void> {
   ] as const) {
     part(`The count's reply is ${name}`);
     redis.pipeline = (async (commands: (string | number)[][]) =>
-      commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === used ? (reply as unknown[]) : pipe(commands)) as typeof redis.pipeline;
+      commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === used ? (reply as unknown as unknown[]) : pipe(commands)) as typeof redis.pipeline;
     let read: unknown;
     try { read = await usedThisMonth(store.listId, window); } catch (error) { read = `threw ${(error as Error).name}`; }
     is("usedThisMonth says it cannot tell, never 0", read === 0 ? 0 : "not 0", "not 0");

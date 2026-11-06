@@ -108,11 +108,18 @@ test("certificate privacy copy requires exact legacy-list and record-read eviden
       return RAW;
     },
   });
-  for (const rows of [undefined, null, [], [RAW, RAW], sparseRows, accessorRows]) {
+  for (const [name, rows] of [
+    ["missing outer reply", undefined],
+    ["null nested list", null],
+    ["short nested list", []],
+    ["extra nested row", [RAW, RAW]],
+    ["sparse nested list", sparseRows],
+    ["accessor nested list", accessorRows],
+  ] as const) {
     assert.equal(
       await unknown(() => copyWith([[CERTIFICATE.id], null, 0], rows === undefined ? [] : [rows])),
       "UnknownReply",
-      `record rows ${JSON.stringify(rows)} are unknown`,
+      `${name} is unknown`,
     );
   }
   assert.equal(rowGetterReads, 0, "a stored-record accessor is refused without executing it");

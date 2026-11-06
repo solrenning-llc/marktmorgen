@@ -14,8 +14,9 @@
  * neither does a sale refunded in full, a disputed payment, an unpaid
  * checkout or another store's sale. Memberships and payment plans are
  * subscriptions, whose payments Stripe invoices itself; they are refused
- * with a sentence that says so. Numbering is a later unit (U2): the receipt
- * carries Stripe's reference for the sale.
+ * with a sentence that says so. Each receipt also carries the store's own
+ * number for the sale (lib/receipt-number.ts, U2), given once and the same
+ * on every download, beside Stripe's reference.
  *
  * The letters are the certificate's (Noto Sans, lib/certificate-pdf.ts),
  * tagged through lib/tagged-pdf.ts over as many pages as it takes.
@@ -82,6 +83,9 @@ export type Receipt = {
 };
 
 export type ReceiptRefusal = "unknown" | "not_paid" | "subscription" | "nothing_charged" | "refunded" | "disputed" | "too_many_lines" | "unreadable";
+
+/** A receipt with the store's number for its sale (lib/receipt-number.ts): only a numbered receipt is drawn. */
+export type NumberedReceipt = Receipt & { number: string };
 
 export type ReceiptRead = { ok: true; receipt: Receipt } | { ok: false; why: ReceiptRefusal };
 
@@ -229,18 +233,19 @@ export async function readReceipt(account: string, seller: Seller, reference: st
 const day = (at: number) => new Intl.DateTimeFormat("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" }).format(new Date(at * 1000));
 const hour = (at: number) => new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" }).format(new Date(at * 1000));
 
-/** The file's title: whose receipt and the day it was paid. */
-export function receiptTitle(receipt: Receipt): string {
-  return `Receipt from ${receipt.sellerName} — ${day(receipt.paidAt)}`;
+/** The file's title: its number, whose receipt and the day it was paid. */
+export function receiptTitle(receipt: NumberedReceipt): string {
+  return `Receipt ${receipt.number} from ${receipt.sellerName} — ${day(receipt.paidAt)}`;
 }
 
 /** The texts the file draws, in reading order: what `canDraw` is asked about before anything is made. */
-export function receiptTexts(receipt: Receipt): { role: TagRole; text: string }[] {
+export function receiptTexts(receipt: NumberedReceipt): { role: TagRole; text: string }[] {
   const money = (value: number) => formatMoney(value, receipt.currency, "en-US");
   const out: { role: TagRole; text: string }[] = [{ role: "H1", text: `Receipt from ${receipt.sellerName}` }];
   if (receipt.sellerAddress) out.push({ role: "P", text: receipt.sellerAddress });
   out.push(
     { role: "H2", text: "Sale" },
+    { role: "P", text: `Receipt number ${receipt.number}` },
     { role: "P", text: `Paid on ${day(receipt.paidAt)}, ${hour(receipt.paidAt)}` },
     { role: "P", text: `Paid by ${receipt.buyerEmail}` },
     { role: "P", text: `Stripe reference ${receipt.reference}` },
@@ -266,7 +271,7 @@ export function receiptTexts(receipt: Receipt): { role: TagRole; text: string }[
 }
 
 /** Whether every letter can be drawn; when not, no file is made. */
-export async function receiptDrawable(receipt: Receipt): Promise<boolean> {
+export async function receiptDrawable(receipt: NumberedReceipt): Promise<boolean> {
   return canDraw(...receiptTexts(receipt).map((t) => t.text));
 }
 
@@ -276,7 +281,7 @@ const MARGIN = 72;
 const WIDTH = W - 2 * MARGIN;
 
 /** The receipt as a tagged PDF, US Letter, portrait, as many pages as it takes. */
-export async function receiptPdf(receipt: Receipt): Promise<Uint8Array> {
+export async function receiptPdf(receipt: NumberedReceipt): Promise<Uint8Array> {
   const loaded = await loadFonts();
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);

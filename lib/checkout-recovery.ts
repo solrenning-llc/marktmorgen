@@ -45,6 +45,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { onAccount, platformKey } from "@/lib/stripe-account";
 import { RECOVERY_OPEN_SECONDS, recoveryOn } from "@/lib/recovery-setting";
 import { isSettled } from "@/lib/instant-pay";
@@ -122,11 +123,43 @@ export function productLink(store: Store, productId: string): string {
 async function stopLink(store: Store, email: string): Promise<{ page: string; oneClick: string }> {
   const token = randomBytes(20).toString("hex");
   const grant = { k: store.statsId, e: normaliseEmail(email), h: store.handle, n: store.name };
-  await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LINK_SECONDS], ...noteForErasure(store.statsId, email, linkKey(token))]);
+  const notes = noteForErasure(store.statsId, email, linkKey(token));
+  // Read in their exact shape (CX-123 rule 24): the link written ("OK") and
+  // each erasure note a count. Anything else is unknown, and the reminder is
+  // not sent with a stop link that may lead nowhere or that an erasure
+  // could not find (docs/reviews/pf1-sweep-r24.md, F1).
+  const written = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LINK_SECONDS], ...notes]), 1 + notes.length);
+  if (!written || written[0] !== "OK" || written.slice(1).some((reply) => countOf(reply) === null)) {
+    throw new UnknownReplyError("a reminder's stop link");
+  }
   return {
     page: `${SITE_URL}/unsubscribe?r=${token}`,
     oneClick: `${SITE_URL}/api/mail/unsubscribe?r=${token}`,
   };
+}
+
+type StopGrant = { k: string; e: string; n?: unknown; h?: unknown };
+
+/**
+ * A stop link's grant, read from its GET reply only in its exact shape
+ * (CX-123 rule 24; docs/reviews/pf1-sweep-r24.md, F2 and F3): one reply,
+ * text or nothing. Nothing, or text that is not a grant, is a link we do
+ * not know (null); any other reply is unknown and throws, never "no such
+ * link".
+ */
+function stopGrantOf(replies: unknown): StopGrant | null {
+  const reply = repliesFor(replies, 1);
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError("a reminder's stop link");
+  const raw = reply[0];
+  if (!raw) return null;
+  try {
+    const grant = JSON.parse(raw) as unknown;
+    if (!grant || typeof grant !== "object") return null;
+    const { k, e, n, h } = grant as { k?: unknown; e?: unknown; n?: unknown; h?: unknown };
+    return typeof k === "string" && typeof e === "string" && k && e ? { k, e, n, h } : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Who a stop link belongs to, without acting on it. */
@@ -134,33 +167,29 @@ export async function readStopToken(
   token: string,
 ): Promise<{ email: string; storeName: string; stopped: boolean; handle: string } | null> {
   if (!STOP_TOKEN.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", linkKey(token)]]);
-  if (typeof raw !== "string" || !raw) return null;
-  try {
-    const grant = JSON.parse(raw) as { k?: unknown; e?: unknown; n?: unknown; h?: unknown };
-    if (typeof grant.k !== "string" || typeof grant.e !== "string" || !grant.k || !grant.e) return null;
-    const [off] = await redisPipeline([["EXISTS", offKey(grant.k, grant.e)]]);
-    // The store's handle, so the page can speak the store's language.
-    const handle = typeof grant.h === "string" ? grant.h : "";
-    return { email: grant.e, storeName: typeof grant.n === "string" ? grant.n : "", stopped: Number(off) === 1, handle };
-  } catch {
-    return null;
-  }
+  const grant = stopGrantOf(await redisPipeline([["GET", linkKey(token)]]));
+  if (!grant) return null;
+  // The stop mark is there (1) or not (0); anything else is unknown, never "not stopped".
+  const off = repliesFor(await redisPipeline([["EXISTS", offKey(grant.k, grant.e)]]), 1);
+  const count = off ? countOf(off[0]) : null;
+  if (count !== 0 && count !== 1) throw new UnknownReplyError("a reminder's stop mark");
+  // The store's handle, so the page can speak the store's language.
+  const handle = typeof grant.h === "string" ? grant.h : "";
+  return { email: grant.e, storeName: typeof grant.n === "string" ? grant.n : "", stopped: count === 1, handle };
 }
 
-/** Stops every reminder from that store to that address, for good. Safe to press twice. */
+/**
+ * Stops every reminder from that store to that address, for good. Safe to
+ * press twice. True only when Redis answered the stop mark's write "OK";
+ * any other reply is unknown and throws, never "Unsubscribed." (F3).
+ */
 export async function stopReminders(token: string): Promise<boolean> {
   if (!STOP_TOKEN.test(token) || !isRedisConfigured()) return false;
-  const [raw] = await redisPipeline([["GET", linkKey(token)]]);
-  if (typeof raw !== "string" || !raw) return false;
-  try {
-    const grant = JSON.parse(raw) as { k?: unknown; e?: unknown };
-    if (typeof grant.k !== "string" || typeof grant.e !== "string" || !grant.k || !grant.e) return false;
-    await redisPipeline([["SET", offKey(grant.k, grant.e), new Date().toISOString()]]);
-    return true;
-  } catch {
-    return false;
-  }
+  const grant = stopGrantOf(await redisPipeline([["GET", linkKey(token)]]));
+  if (!grant) return false;
+  const set = repliesFor(await redisPipeline([["SET", offKey(grant.k, grant.e), new Date().toISOString()]]), 1);
+  if (!set || set[0] !== "OK") throw new UnknownReplyError("a reminder's stop mark");
+  return true;
 }
 
 /** Whether the address paid this store for any of these products after the checkout opened. */
@@ -173,12 +202,22 @@ async function paidSince(store: Store, email: string, productIds: string[], sinc
     limit: "100",
   });
   const listed = await onAccount("GET", store.stripeAccountId as string, `/checkout/sessions?${query}`);
-  const rows = Array.isArray(listed.data) ? (listed.data as SessionRecord[]) : [];
+  // Read only in its exact shape (CX-123 rule 24; docs/reviews/pf1-sweep-r24.md,
+  // F4): a list of objects. No list, or a row of another shape, is unknown,
+  // never "not paid", so no reminder goes to someone who may have paid.
+  const data: unknown = listed.data;
+  if (!Array.isArray(data) || data.some((row) => row === null || typeof row !== "object" || Array.isArray(row))) {
+    throw new Error("Stripe answered an address's checkouts in an unknown shape");
+  }
+  const rows = data as SessionRecord[];
   // The product an order is for, and the ones added to it, as from a cart (lib/bundle-rules.ts, BUMP_KEYS).
   const bought = (row: SessionRecord) => [row.metadata?.product, ...BUMP_KEYS.map((key) => row.metadata?.[key])];
-  return rows.some(
+  const paid = rows.some(
     (row) => isSettled(row) && handles.has(row.metadata?.store ?? "") && bought(row).some((id) => id && productIds.includes(id)),
   );
+  // A page cut short is not "not paid", as lib/discount.ts codesMayTakeOff reads Stripe's lists.
+  if (!paid && listed.has_more === true) throw new Error("Stripe answered an address's checkouts cut short");
+  return paid;
 }
 
 export type RemindOutcome = "sent" | "skip" | "failed";
@@ -512,6 +551,10 @@ async function deliver(
  */
 export async function forgetRecoveryPerson(statsId: string | null, productIds: string[], email: string): Promise<number> {
   if (!statsId || !productIds.length || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", ...productIds.map((p) => onceKey(statsId, email, p))]]);
-  return Number(gone) || 0;
+  // The count only in its exact shape (CX-123 rule 24; docs/reviews/pf1-sweep-r24.md, F5):
+  // anything else is unknown, and the erasure says this step could not finish, never "nothing here".
+  const gone = repliesFor(await redisPipeline([["DEL", ...productIds.map((p) => onceKey(statsId, email, p))]]), 1);
+  const count = gone ? countOf(gone[0]) : null;
+  if (count === null) throw new UnknownReplyError("the deletion of an address's reminder marks");
+  return count;
 }

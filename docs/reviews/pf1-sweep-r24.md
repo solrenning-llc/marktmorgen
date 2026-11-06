@@ -128,3 +128,27 @@ tests/pf1-sweep-r24.test.ts: real functions over tests/redis-stub.ts, with
 only the Redis pipeline or the Stripe reply replaced by a malformed one, and
 controls for the healthy answers. No new Redis command or Stripe call: the
 fix reads the replies the same commands already return.
+
+Result on main (RED): 35 malformed cases and 3 controls; 34 cases fail, the
+3 controls pass. The one case already closed: a `null` row in Stripe's list
+throws on `row.metadata` before anything is sent.
+
+Fix, all in lib/checkout-recovery.ts with `repliesFor`/`countOf`/
+`UnknownReplyError` from lib/redis-reply.ts:
+
+- F1 `stopLink`: one reply per command, the SET exactly "OK", each erasure
+  note a count; otherwise UnknownReplyError before the email is written. The
+  claims `deliver` took stay in place, which can only hold back this one
+  optional reminder for its week (the side PR #2929 also takes);
+- F2/F3 `stopGrantOf`: the GET reply is text or nothing; anything else
+  throws. `readStopToken` reads the stop mark as exactly 0 or 1;
+  `stopReminders` answers true only on "OK". A Redis failure on the stop
+  write now surfaces as an error (500) instead of "Not found.";
+- F4 `paidSince`: `data` must be a list of objects, and a page with
+  `has_more` and no payment on it is unknown; it throws before any claim,
+  so the checkout is read again on a later pass;
+- F5 `forgetRecoveryPerson`: the DEL count exactly, else UnknownReplyError,
+  which lib/person-erasure.ts records as a step that could not finish.
+
+After the fix: 43 of 43 (35 cases, 3 controls, 5 groups). Mutation: with
+the "OK" check on the stop write removed, the 4 SET cases of F3 fail again.

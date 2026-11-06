@@ -28,6 +28,7 @@ import { CREATOR, type CommunityConfig, addComment, createPost, freshConfig, mem
 import { leadsKey } from "@/lib/contacts";
 import { mintPass, passCookieName } from "@/lib/learn";
 import { productSegment } from "@/lib/product-slug";
+import { MAX_UNLOCK_PRODUCTS, lockedOf, unlockCandidates, unlocksOf } from "@/lib/community-locked";
 import { store as redis } from "./redis-stub";
 import { cookieValues } from "./meeting-withdrawal-page-world";
 import { paidPeriod } from "./billing-period-fixture";
@@ -176,6 +177,41 @@ async function main(): Promise<void> {
   part("The creator chooses it in the studio");
   const studio = readFileSync("components/community-studio.tsx", "utf8");
   is("the space's form offers Hidden and Visible and locked", [studio.includes("Visible and locked"), studio.includes("Hidden")], [true, true]);
+
+  part("Products past the read cap: a space whose products were not read never says access isn't available");
+  // Review of #3007 (6 November 2026): the candidates were every space's products joined and cut at the first 24,
+  // so a space after one with 24 products got "none" while its product was on sale.
+  const fillers: string[] = [];
+  for (let n = 0; n < MAX_UNLOCK_PRODUCTS; n++) fillers.push(await made(`Item ${n}`, "5"));
+  const big = newItemId(), small = newItemId();
+  const capped = (bigNeeds: string[]): CommunityConfig => ({
+    ...freshConfig(store.name),
+    access: [starter, guide, ...fillers],
+    spaces: [
+      { id: general, name: "General", about: "", creatorOnly: false, only: [], level: 0 },
+      { id: big, name: "Big room", about: "", creatorOnly: false, only: bigNeeds, level: 0, shown: true },
+      { id: small, name: "Small room", about: "", creatorOnly: false, only: [guide], level: 0, shown: true },
+    ] as CommunityConfig["spaces"],
+  });
+  const yes = async () => true;
+  store = (await storeForEmail(OWNER))!;
+  const guideLink = { title: "Guide", href: guideHref };
+  is("control: with 23 products in the space before it, the small space names its product", (await unlocksOf(store, capped(fillers.slice(0, MAX_UNLOCK_PRODUCTS - 1)), yes))?.[small], guideLink);
+  is("with 24 products in the space before it, the small space still names its product", (await unlocksOf(store, capped(fillers), yes))?.[small], guideLink);
+  await saveConfig(id, capped(fillers));
+  html = await draw(OUTSIDER);
+  is("the member's page: Unlock with Guide for the small space, never not available", [lockedPart(html).includes("Unlock with Guide"), lockedPart(html).includes(`href="${guideHref}"`)], [true, true]);
+  is("never more than the cap is read", unlockCandidates(lockedOf(capped(fillers), new Set())).length <= MAX_UNLOCK_PRODUCTS, true);
+  // One space per product, more spaces than the cap: the one left unread is "unknown", never "none".
+  const many: CommunityConfig = {
+    ...freshConfig(store.name),
+    access: [starter, guide, ...fillers],
+    spaces: [...fillers, guide].map((product, n) => ({ id: newItemId(), name: `Room ${n}`, about: "", creatorOnly: false, only: [product], level: 0, shown: true })) as CommunityConfig["spaces"],
+  };
+  const ways = (await unlocksOf(store, many, yes))!;
+  const last = many.spaces[many.spaces.length - 1].id;
+  is("a space none of whose products was read is unknown, not none", ways[last], "unknown");
+  is("no space says none while its product is on sale", Object.values(ways).filter((way) => way === "none").length, 0);
   done();
 }
 

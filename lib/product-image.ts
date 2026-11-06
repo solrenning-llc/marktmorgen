@@ -145,8 +145,12 @@ export function imageSrcSet(image: Pick<ProductImage, "path" | "width" | "small"
  * product page's own picture sits inside the card's padding as well.
  */
 export const IMAGE_SIZES = {
-  // From 1024 px the cards go two to a row beside the store's profile (Encanto 3), each at most about 25rem wide.
-  cover: "(min-width: 64rem) 25rem, (max-width: 36rem) calc(100vw - 2rem), 34rem",
+  cover: "(max-width: 36rem) calc(100vw - 2rem), 34rem",
+  /**
+   * A card in the store page's grid: from 1024 px the cards go two to a row beside the store's profile (Encanto 3),
+   * each at most about 25rem wide. Only that grid; a one-column list keeps `cover` (Codex K2 on #2786).
+   */
+  grid: "(min-width: 64rem) 25rem, (max-width: 36rem) calc(100vw - 2rem), 34rem",
   hero: "(max-width: 42rem) calc(100vw - 4rem), 37rem",
   /** Beside the title, or in a list: a few dozen points across. */
   thumb: "6rem",

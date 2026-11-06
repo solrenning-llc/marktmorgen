@@ -459,6 +459,7 @@ export default async function StorePage({ params, searchParams }: Params) {
                             preorder={preorderDay(store, product, soon.has(product.id), coming.days.get(product.id) ?? null)}
                             cart={cartOn && !soon.has(product.id) && cartable(product)}
                             sold={soldLine(soldCounts?.byProduct[product.id])}
+                            grid
                           />
                         ))}
                       </ul>

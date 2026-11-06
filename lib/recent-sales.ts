@@ -149,6 +149,7 @@ export async function recentSales(store: Store, now = Date.now()): Promise<Recen
     ]);
     if (!Array.isArray(reply) || reply.length !== 2) return [];
     const [cached, list] = reply;
+    if (cached !== null && typeof cached !== "string") return [];
     if (typeof cached === "string") {
       const read = JSON.parse(cached) as RecentSale[];
       return Array.isArray(read) ? read.filter((s) => s && typeof s.product === "string" && typeof s.title === "string" && typeof s.country === "string" && Number.isSafeInteger(s.at) && s.at > 0 && s.at * 1000 >= now - RECENT_DAYS * 86_400_000 && s.at * 1000 <= now && store.catalog.items.some(item => item.id === s.product && (item.kind & KIND.hidden) === 0)).slice(0, SHOWN) : [];

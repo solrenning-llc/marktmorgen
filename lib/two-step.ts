@@ -329,7 +329,9 @@ export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "
  *     (the questions the answers and the assistant missed) and "replace";
  *   - events: "cancel" and "delete" (an event, emailing everyone coming) and
  *     "move" (an edit that changes the time, emailing everyone coming);
- *   - community: "report-delete" (a reported post or comment), and, for the
+ *   - community: "report-delete" (a reported post or comment), "held-remove"
+ *     (a member's post or comment waiting for approval, not published:
+ *     app/api/store/community/approval), and, for the
  *     creator inside their own community (app/api/store/community, chat and
  *     the lesson comments, where the owner is known by the address and not
  *     by studioAccess), "email" (an announcement emailed to every member),
@@ -354,7 +356,7 @@ export const LOCKED_ACTIONS: Readonly<Record<string, readonly string[]>> = {
   products: ["remove", "clear", "detach", "replace", "launch", "lesson-remove", "module-remove", "media-remove", "task-remove", "quiz-remove", "withdraw", "cm-delete"],
   page: ["remove", "delete", "clear", "replace"],
   events: ["cancel", "delete", "move"],
-  community: ["report-delete", "email", "delete", "delete-comment", "unsay", "clear"],
+  community: ["report-delete", "held-remove", "email", "delete", "delete-comment", "unsay", "clear"],
   orders: ["remove", "unnote", "undeal", "unpipeline", "fields-remove", "resend"],
   stats: ["remove"],
   draft: ["drop", "segment-remove", "draft-remove"],

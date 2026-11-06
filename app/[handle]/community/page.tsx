@@ -26,6 +26,8 @@ import { communityWords, composerWords } from "@/lib/buyer-words/community";
 import { MAX_POLL_OPTIONS } from "@/lib/community-polls";
 import { LANGUAGES } from "@/lib/store-language";
 import { CommunityComposer, ConfirmDeletes } from "@/components/community-composer";
+import { heldOf } from "@/lib/community-approval";
+import { HeldList } from "@/components/community-held";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -117,6 +119,9 @@ export default async function CommunityPage({ params, searchParams }: Params) {
   const home = `/@${store.handle}/community`;
   const from = space ? "space" : "feed";
   const openTo = await accessProducts(store, config);
+  // A member's own posts waiting for the creator's approval (543 [CM2]): only
+  // theirs, read under their own key, on the first page; null when they could not be read.
+  const held = owner || before ? [] : await heldOf(id, key).then((items) => items.filter((h) => h.kind === "post" && (!space || h.sp === space.id)), () => null);
 
   return (
     <div lang={lang} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
@@ -217,6 +222,8 @@ export default async function CommunityPage({ params, searchParams }: Params) {
               />
             </div>
           ) : null}
+
+          <HeldList store={store} items={held} kind="post" from={from} space={space?.id ?? null} />
 
           {shown.length === 0 ? (
             <div className="st-note text-center">

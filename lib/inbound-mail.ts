@@ -196,18 +196,31 @@ function fileUrl(value: unknown): string | null {
   }
 }
 
-/** The files of a received message, as the sender's API takes them, and the names of the ones left out. */
-async function files(id: string): Promise<{ sent: { filename: string; content: string }[]; left: string[] }> {
+/** How many files one message's list is read for: one page of Resend's list, and no more. */
+const FILES_PAGE = 100;
+
+/**
+ * The files of a received message, as the sender's API takes them, the names of the ones left out,
+ * and whether the list read was the whole list ("all"), plainly not ("more"), or did not say ("unknown").
+ *
+ * Only the first page of FILES_PAGE is read. No cursor is followed: none of Resend's list cursors is
+ * read anywhere in this code, so one is not guessed. The files past that page (has_more true, or a page
+ * longer than asked for) are not dropped quietly: the message says more were sent than could be
+ * attached. A page that does not say whether more exist is never taken for the whole list.
+ */
+async function files(id: string): Promise<{ sent: { filename: string; content: string }[]; left: string[]; rest: "all" | "more" | "unknown" }> {
   const sent: { filename: string; content: string }[] = [];
   const left: string[] = [];
-  const listed = await read(`/emails/receiving/${id}/attachments?limit=100`);
-  const entries = (listed.data as { data?: unknown } | null)?.data;
+  const listed = await read(`/emails/receiving/${id}/attachments?limit=${FILES_PAGE}`);
+  const page = listed.data as { data?: unknown; has_more?: unknown } | null;
+  const entries = page?.data;
   // An error status, or an answer with no list in it, says nothing about the
   // files: never "no files". Thrown, so the message is tried again ("retry")
   // instead of going on with the writer's files quietly left out.
   if (!Array.isArray(entries)) throw new Error(`the list of files answered ${listed.status} without a list`);
+  const rest = page?.has_more === true || entries.length > FILES_PAGE ? "more" : page?.has_more === false ? "all" : "unknown";
   let total = 0;
-  for (const entry of (entries as FileEntry[]).slice(0, 100)) {
+  for (const entry of (entries as FileEntry[]).slice(0, FILES_PAGE)) {
     const name = headerText(typeof entry.filename === "string" && entry.filename ? entry.filename : "file", 150);
     const size = typeof entry.size === "number" && entry.size >= 0 ? entry.size : 0;
     const url = fileUrl(entry.download_url);
@@ -230,7 +243,7 @@ async function files(id: string): Promise<{ sent: { filename: string; content: s
       left.push(name);
     }
   }
-  return { sent, left };
+  return { sent, left, rest };
 }
 
 /**
@@ -294,7 +307,7 @@ export async function forwardInbound(id: string): Promise<"sent" | "skipped" | "
   const html = typeof mail.html === "string" ? mail.html.slice(0, MAX_BODY_CHARS) : "";
   const text = (typeof mail.text === "string" && mail.text.trim() ? mail.text : pageToText(html)).slice(0, MAX_BODY_CHARS);
 
-  let attached: Awaited<ReturnType<typeof files>> = { sent: [], left: [] };
+  let attached: Awaited<ReturnType<typeof files>> = { sent: [], left: [], rest: "all" };
   try {
     attached = await files(id);
   } catch (error) {
@@ -308,6 +321,14 @@ export async function forwardInbound(id: string): Promise<"sent" | "skipped" | "
     `To: ${written.join(", ") || ours}`,
     // A creator has no way into the sender's dashboard, so is not pointed at it.
     ...(attached.left.length ? [`${creator ? "Not attached, too large to send on" : "Not attached (see Resend, Emails, Receiving)"}: ${attached.left.join(", ")}`] : []),
+    // Files past the one page read: said plainly, never left out in silence.
+    ...(attached.rest === "all"
+      ? []
+      : [
+          `${attached.rest === "more" ? "More files were sent than could be attached here" : "Some files may not be attached here"}${
+            creator ? ". Ask the sender to send the rest again." : " (see Resend, Emails, Receiving)"
+          }`,
+        ]),
   ];
   const shown = (sender.name || sender.address || "Someone").replace(/["\\<>]/g, "").slice(0, 60);
   // Which site the message was written to: this one, or the domain of the

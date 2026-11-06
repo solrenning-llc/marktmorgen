@@ -67,12 +67,12 @@ async function main() {
  for(const [i,body] of bads.entries()) {
   listEnvelope=body;const {out,saved,remaining}=await run("unknown"+i,valid,true);
   is("G unknown list: no money-moving POST on unreadable reconciliation",[posts,refunded],[0,0]);
-  is("G unknown list: no settlement while reconciliation is unknown",[out.done.length,saved.r==="done"],[0,false]);
+  is("G unknown list: no settlement while reconciliation is unknown",[typeof out==="object"?out.done.length:out,saved.r==="done"],[0,false]);
   is("G unknown list: keep reconciliation discoverable",remaining,1);
  }
  listEnvelope={object:"list",data:[],has_more:false};const control=await run("emptyknown",valid,true);
  is("G known empty list: actual synthetic refund allowed",[posts,refunded],[1,500]);
- is("G known empty list: real completion is recorded",[control.out.done.length,control.saved.r],[1,"done"]);
+ is("G known empty list: real completion is recorded",[typeof control.out==="object"?control.out.done.length:control.out,control.saved.r],[1,"done"]);
  done();
 }
 void main();

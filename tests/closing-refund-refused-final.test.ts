@@ -58,8 +58,9 @@ async function main() {
   part("Revisor 1 on #2699: a refund Stripe refuses on the closing day is told, never left held");
   const final = await run("refusedfinal", refused, false);
   is("the member is settled as not made automatically", final.saved.r, "over");
-  is("and is told: one unmade row with what is left to give", final.out.unmade.map((u) => u.amount), [500]);
-  is("nothing counted as failed, so the closing can finish", final.out.failed, 0);
+  const out = typeof final.out === "object" && final.out ? final.out : null;
+  is("and is told: one unmade row with what is left to give", out ? out.unmade.map((u: { amount: number }) => u.amount) : out, [500]);
+  is("nothing counted as failed, so the closing can finish", out ? out.failed : out, 0);
   done();
 }
 

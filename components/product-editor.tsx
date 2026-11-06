@@ -62,7 +62,7 @@ import {
   handsOver,
   optionDelivers,
 } from "@/lib/product-option";
-import { activePlan } from "@/lib/product-extras";
+import { activePlan, planPausedByRestore } from "@/lib/product-extras";
 import { activeShipping } from "@/lib/shipping";
 import type { Listing } from "@/lib/store";
 import { LINK_PROBLEMS, type LinkProblem, linkHost } from "@/lib/product-link";
@@ -902,6 +902,21 @@ function OptionsBlock({
     refocusRemove.current = null;
     if (back) removeButtons.current.get(back)?.focus();
   }, [removingId]);
+  // The same for "Put back on sale" when it would stop the payment plan
+  // (planPausedByRestore): it asks first, and focus follows as for "Remove".
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const restoreSaid = useRef<HTMLParagraphElement>(null);
+  const saleButtons = useRef(new Map<string, HTMLButtonElement>());
+  const refocusSale = useRef<string | null>(null);
+  useEffect(() => {
+    if (restoringId) {
+      restoreSaid.current?.focus();
+      return;
+    }
+    const back = refocusSale.current;
+    refocusSale.current = null;
+    if (back) saleButtons.current.get(back)?.focus();
+  }, [restoringId]);
   const [label, setLabel] = useState("");
   const [price, setPrice] = useState("");
   const [details, setDetails] = useState("");
@@ -1357,14 +1372,24 @@ function OptionsBlock({
                   </button>
                   <button
                     type="button"
-                    disabled={busy}
-                    onClick={() =>
+                    disabled={busy || restoringId === option.id}
+                    ref={(button) => {
+                      if (button) saleButtons.current.set(option.id, button);
+                      else saleButtons.current.delete(option.id);
+                    }}
+                    onClick={() => {
+                      // Back on sale with no payment for it in the plan would stop the plan for every price: ask first.
+                      if (option.offSale && planPausedByRestore(product as Listing, option.id)) {
+                        setRestoringId(option.id);
+                        setError(null);
+                        return;
+                      }
                       run(
                         { action: "sale", id: option.id, onSale: option.offSale === true },
                         () => {},
                         option.offSale ? `${option.label} is back on sale.` : `${option.label} is off sale. Anyone who already has it keeps it.`,
-                      )
-                    }
+                      );
+                    }}
                     className="inline-flex min-h-12 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
                   >
                     {option.offSale ? "Put back on sale" : "Take off sale"}
@@ -1405,6 +1430,45 @@ function OptionsBlock({
                   membership={product.recurring !== null}
                 />
                 )}
+
+                {restoringId === option.id ? (
+                  <div className="mt-2 rounded-2xl border-2 border-pink-brand/30 bg-white p-3">
+                    <p ref={restoreSaid} tabIndex={-1} className="text-sm text-ink-soft">
+                      Put <strong className="text-ink">{option.label}</strong> back on sale? The payment plan has no
+                      payment for this price that adds up to it, so the payment plan will stop for every price. To keep
+                      it, first set a payment for this price in the payment plan.
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        aria-busy={busy} disabled={busy}
+                        onClick={() =>
+                          run(
+                            { action: "sale", id: option.id, onSale: true },
+                            () => {
+                              refocusSale.current = option.id;
+                              setRestoringId(null);
+                            },
+                            `${option.label} is back on sale. The payment plan has stopped.`,
+                          )
+                        }
+                        className="btn btn-primary btn-sm"
+                      >
+                        {busy ? "Saving…" : "Put back on sale"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          refocusSale.current = option.id;
+                          setRestoringId(null);
+                        }}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        Keep it off sale
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
 
                 {removingId === option.id ? (
                   <div className="mt-2 rounded-2xl border-2 border-pink-brand/30 bg-white p-3">

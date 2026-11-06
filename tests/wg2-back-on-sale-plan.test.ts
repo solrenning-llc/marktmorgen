@@ -39,5 +39,6 @@ part("The studio asks before it pauses the plan");
 const editor = readFileSync("components/product-editor.tsx", "utf8");
 is("the editor reads the rule", /planPausedByRestore\(/.test(editor), true);
 is("it offers a way to keep the price off sale", editor.includes("Keep it off sale"), true);
-is("it says the plan will stop", /payment plan[^"`]*stop/i.test(editor), true);
+is("it says the plan will stop, and how to keep it", editor.replace(/\s+/g, " ").includes("so the payment plan will stop for every price. To keep it, first set a payment for this price in the payment plan."), true);
+is("it acts at once when the plan goes on: the question is asked only on the rule", /if \(option\.offSale && planPausedByRestore\(product as Listing, option\.id\)\) \{\s*setRestoringId\(option\.id\);/.test(editor), true);
 done();

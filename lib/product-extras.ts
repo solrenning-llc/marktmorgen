@@ -24,7 +24,7 @@
 import type { Listing } from "@/lib/store";
 import { formatMoney } from "@/lib/money";
 import { MIN_BUNDLE_ITEMS } from "@/lib/bundle-rules";
-import { MAX_OPTIONS, OPTION_ID, type ProductOption, optionDelivers } from "@/lib/product-option";
+import { MAX_OPTIONS, OPTION_ID, type ProductOption, optionDelivers, withInvitedOption } from "@/lib/product-option";
 
 export type Bump = {
   /** Another product of the same store. */
@@ -373,6 +373,18 @@ export function planState(product: Listing): { plan: Plan } | { paused: PlanPaus
 export function activePlan(product: Listing): Plan | null {
   const state = planState(product);
   return state && !("paused" in state) ? state.plan : null;
+}
+
+/**
+ * Whether putting this price back on sale stops a payment plan offered now:
+ * the plan has no payment for it, or one that falls short, so planState turns
+ * to "options" or "short" for every price. False when there is no plan, the
+ * plan is paused already, the price is on sale already or the id names none.
+ */
+export function planPausedByRestore(product: Listing, optionId: string): boolean {
+  if (product.options.find((option) => option.id === optionId)?.offSale !== true || activePlan(product) === null) return false;
+  // The same step as an invited member's way in (withInvitedOption): only this price, back on sale.
+  return activePlan(withInvitedOption(product, optionId)) === null;
 }
 
 /**

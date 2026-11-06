@@ -40,13 +40,15 @@ import { givingWords } from "@/lib/buyer-words/giving";
 import {
   type AddResult,
   MAX_LEADS,
+  agreedKey,
   leadsKey,
-  listCounts,
   mailable,
   parseContact,
   upsertContact,
   orderRoom,
+  unsubKey,
 } from "@/lib/contacts";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { noteForErasure } from "@/lib/erasure-index";
 
 export { MAX_LEADS };
@@ -281,22 +283,36 @@ export type UseResult =
   | { ok: true; claim: Claim }
   | { ok: false; reason: "expired" | "spent" };
 
-/** Counts one use of an emailed link, and says whether it is still good. */
+/**
+ * Counts one use of an emailed link, and says whether it is still good.
+ *
+ * Each reply is read only in its exact shape (CX-123 rule 24): a claim that is
+ * not a string or nothing, or a use count that is not a whole number, throws
+ * UnknownReplyError. A count nobody read is never a good link: `Number(x) >
+ * MAX_CLAIM_USES` was false for NaN, so a used-up link answered good again
+ * (sweep A2). The download route says it as a temporary error.
+ */
 export async function spendClaim(token: string): Promise<UseResult> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) {
     return { ok: false, reason: "expired" };
   }
   const key = await claimKey(token);
-  const [raw] = await redisPipeline([["GET", key]]);
-  const claim = parseClaim(raw);
+  const read = repliesFor(await redisPipeline([["GET", key]]), 1);
+  if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("a free copy's claim");
+  const claim = parseClaim(read[0]);
   if (!claim) return { ok: false, reason: "expired" };
 
   const uses = await usesKey(token);
-  const [count] = await redisPipeline([
-    ["INCR", uses],
-    ["EXPIRE", uses, CLAIM_TTL_SECONDS],
-  ]);
-  if (Number(count) > MAX_CLAIM_USES) return { ok: false, reason: "spent" };
+  const counted = repliesFor(
+    await redisPipeline([
+      ["INCR", uses],
+      ["EXPIRE", uses, CLAIM_TTL_SECONDS],
+    ]),
+    2,
+  );
+  const count = counted ? countOf(counted[0]) : null;
+  if (count === null) throw new UnknownReplyError("a free copy link's use count");
+  if (count > MAX_CLAIM_USES) return { ok: false, reason: "spent" };
   return { ok: true, claim };
 }
 
@@ -339,15 +355,39 @@ export async function recordLead(
 
 export type ListSize = { total: number; agreed: number; full: boolean };
 
-/** How many addresses the list holds, and how many may be written to. */
+/** A counter kept with GET/INCR: nothing yet is 0; a whole number as Redis sends it; anything else unknown (null). */
+function counterOf(reply: unknown): number | null {
+  if (reply === null) return 0;
+  if (typeof reply === "number") return Number.isSafeInteger(reply) ? reply : null;
+  if (typeof reply !== "string" || !/^-?\d{1,15}$/.test(reply)) return null;
+  return Number(reply);
+}
+
+/**
+ * How many addresses the list holds, and how many may be written to.
+ *
+ * The same counts as lib/contacts.ts listCounts, read only in their exact
+ * shape: an unknown read throws (UnknownReplyError, or the read's own error),
+ * never a list of 0, because the store export is priced from this total
+ * (lib/store-export.ts exportShape) and the studio shows it (sweep A2).
+ */
 export async function listSize(store: Store): Promise<ListSize> {
-  try {
-    const counts = await listCounts(store.listId);
-    return { total: counts.total, agreed: counts.mailable, full: counts.full };
-  } catch (error) {
-    console.error("could not read a list's size", error);
-    return { total: 0, agreed: 0, full: false };
-  }
+  if (!store.listId || !isRedisConfigured()) return { total: 0, agreed: 0, full: false };
+  const replies = repliesFor(
+    await redisPipeline([
+      ["HLEN", leadsKey(store.listId)],
+      ["GET", agreedKey(store.listId)],
+      ["GET", unsubKey(store.listId)],
+    ]),
+    3,
+  );
+  const total = replies ? countOf(replies[0]) : null;
+  const agreed = replies ? counterOf(replies[1]) : null;
+  const left = replies ? counterOf(replies[2]) : null;
+  if (total === null || agreed === null || left === null) throw new UnknownReplyError("a list's size");
+  const a = Math.min(total, agreed);
+  const l = Math.min(a, Math.max(0, left));
+  return { total, agreed: a - l, full: total >= MAX_LEADS };
 }
 
 /**
@@ -372,8 +412,10 @@ function cell(value: string): string {
  * the ones a creator in Europe may write to about anything new.
  */
 export async function listAsCsv(store: Store, onlyAgreed: boolean): Promise<string> {
-  const fields = await readFields(store.statsId).catch(() => []);
-  const answers = fields.length ? await allValues(store.statsId, fields).catch(() => ({}) as Record<string, Record<string, string>>) : {};
+  // Unreadable fields or answers throw rather than give a file missing columns (sweep A2): the list download says
+  // it could not read the list, and the store export writes this part as unread.
+  const fields = await readFields(store.statsId);
+  const answers = fields.length ? await allValues(store.statsId, fields) : {};
   const rows = [
     // And the store's own fields, each a column of its own (lib/crm-rules.ts).
     ["email", "agreed_to_emails", "agreed_at", "first_at", "last_at", "asked_for", "unsubscribed_at", "name", "tags", "source", "imported_at", ...fields.map((f) => f.name)]
@@ -385,12 +427,15 @@ export async function listAsCsv(store: Store, onlyAgreed: boolean): Promise<stri
   const key = leadsKey(store.listId);
   let cursor = "0";
   // Bounded, so a cursor that never comes back to zero cannot hold the
-  // function forever.
+  // function forever. Each page is read only in its exact shape, and a list
+  // not read to its end throws: never a short file handed over as complete.
   for (let page = 0; page < MAX_LEADS / 500 + 10; page += 1) {
-    const [reply] = await redisPipeline([["HSCAN", key, cursor, "COUNT", 1000]]);
-    if (!Array.isArray(reply) || reply.length < 2) break;
-    cursor = String(reply[0]);
-    const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+    const replies = repliesFor(await redisPipeline([["HSCAN", key, cursor, "COUNT", 1000]]), 1);
+    const reply = replies ? repliesFor(replies[0], 2) : null;
+    const next = reply ? (typeof reply[0] === "string" ? reply[0] : countOf(reply[0])?.toString()) : undefined;
+    const flat = reply ? stringList(reply[1]) : null;
+    if (next === undefined || !/^\d+$/.test(next) || !flat || flat.length % 2 !== 0) throw new UnknownReplyError("a page of a list");
+    cursor = next;
     for (let i = 0; i + 1 < flat.length; i += 2) {
       const email = String(flat[i]);
       const lead = parseContact(flat[i + 1]);
@@ -415,7 +460,7 @@ export async function listAsCsv(store: Store, onlyAgreed: boolean): Promise<stri
           .join(","),
       );
     }
-    if (cursor === "0") break;
+    if (cursor === "0") return `${rows.join("\r\n")}\r\n`;
   }
-  return `${rows.join("\r\n")}\r\n`;
+  throw new UnknownReplyError("a list whose pages did not come to an end");
 }

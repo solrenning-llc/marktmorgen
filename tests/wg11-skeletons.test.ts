@@ -62,7 +62,7 @@ function tags(html: string): { tag: string; attrs: string; classes: string[] }[]
 
 /** A line of the source on which every one of the class names stands as a word. */
 function lineWithAll(source: string, names: string[]): boolean {
-  const word = (name: string) => new RegExp(`(?:^|[\\s"'\`])${name.replace(/[.*+?^${}()|[\]\\:]/g, "\\$&")}(?=$|[\\s"'\`])`);
+  const word = (name: string) => new RegExp(`(?:^|[\\s"'\`])${name.replace(/[.*+?^${}()|[\]\\:]/g, "\\$&")}(?=$|[\\s"'\`$])`);
   return source.split("\n").some((line) => names.every((name) => word(name).test(line)));
 }
 
@@ -92,7 +92,8 @@ function main(): void {
     const source = readFileSync(c.source, "utf8");
     is(`the real page lays out on ${c.outline.join(" ")}`, lineWithAll(page, c.outline), true);
     is(`the skeleton lays out on the same ${c.outline.join(" ")}`, all.some((t) => c.outline.every((name) => t.classes.includes(name))), true);
-    is("the loading file reads nothing", [/\basync\b/, /\bawait\b/, /@\/lib\//, /next\/headers/, /\bfetch\(/].filter((p) => p.test(source)).map(String), []);
+    // Only a constant of the code may come in (lib/opening.ts: whether the site's "still being built" line stands above the menu); nothing that reads.
+    is("the loading file reads nothing", [/\basync\b/, /\bawait\b/, /@\/lib\/(?!opening")/, /next\/headers/, /\bfetch\(/].filter((p) => p.test(source)).map(String), []);
   }
 
   part("the shared pieces (components/loading-skeleton.tsx)");

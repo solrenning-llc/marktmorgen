@@ -665,11 +665,14 @@ export async function readPageVersionsTool(store: Store, id: string, version: nu
     return refused ?? { found: false as const, error: "There is no product with that id in this store. Use list_products for the ids." };
   }
   const kept = store.statsId ? await countVersions(store.statsId, listing.id) : 0;
-  const read = kept === null || !store.statsId ? null : await readVersionsExact(store.statsId, listing.id).catch(() => null);
-  if (!read) {
-    const refused = await settle(settledUnits(addWork(listings, pageVersionsWork(kept ?? 0, false)), most));
+  if (kept === null || !store.statsId) {
+    // Nothing of the versions was read: only the listing and the count are kept.
+    const refused = await settle(settledUnits(addWork(listings, pageVersionsWork(0, false)), most));
     return refused ?? unavailable;
   }
+  const read = await readVersionsExact(store.statsId, listing.id).catch(() => null);
+  // Read but not known: how much was read is not known either, so all that was set aside is kept (Codex J on #1821).
+  if (!read) return (await settle(most)) ?? unavailable;
   const { versions } = read;
   let value: unknown;
   let answer: { found: true; value: unknown } | { found: false; error: string };
@@ -704,11 +707,14 @@ export async function savedBlocksTool(store: Store, hold: Hold) {
   if (settle instanceof Response) return settle;
   const unavailable = { sections: null, note: "The saved sections could not be read just now. Try again in a moment." };
   const held = await countSections(store.statsId);
-  const read = held === null || held > SAVED_SECTIONS_MAX || !store.statsId ? null : await readSectionsExact(store.statsId).catch(() => null);
-  if (!read || read.sections.length > SAVED_SECTIONS_MAX) {
-    const refused = await settle(settledUnits(savedBlocksWork(Math.min(held ?? 0, SAVED_SECTIONS_MAX)), most));
+  if (held === null || held > SAVED_SECTIONS_MAX || !store.statsId) {
+    // Nothing of the sections was read: only the count is kept.
+    const refused = await settle(settledUnits(savedBlocksWork(0), most));
     return refused ?? unavailable;
   }
+  const read = await readSectionsExact(store.statsId).catch(() => null);
+  // Read but not known, or more than a library holds: how much was read is not known, so all that was set aside is kept.
+  if (!read || read.sections.length > SAVED_SECTIONS_MAX) return (await settle(most)) ?? unavailable;
   const value = {
     note: "Sections the creator saved to reuse on any page, newest change first. updated_at is in seconds since 1970 (UTC). Testimonials are counted, not quoted.",
     sections: [...read.sections]

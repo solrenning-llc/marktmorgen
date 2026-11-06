@@ -12,12 +12,13 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 import { dataBytes } from "@/lib/store-data-rules";
 import { takeData } from "@/lib/store-data";
 import type { Broadcast } from "@/lib/broadcasts";
 import { itemFor } from "@/lib/catalog";
-import { LETTER_ID, LETTER_KEEP_DAYS, MAX_LETTER_PRODUCTS, MAX_PUBLISHED_LETTERS, type Letter, letterProducts, parseLetter } from "@/lib/letter-rules";
+import { LETTER_ID, LETTER_KEEP_DAYS, MAX_LETTER_PRODUCTS, MAX_PUBLISHED_LETTERS, LETTER_PREVIEW_MAX, type Letter, isPreview, letterProducts, parseLetter } from "@/lib/letter-rules";
 
 const DAY = 86_400_000;
 const listKey = (sid: string) => `nl:letters:s:${sid}`;
@@ -31,6 +32,13 @@ const recordKey = (id: string) => `nl:letters:i:${id}`;
  */
 export function listScore(publishedAt: number, members: boolean): number {
   return Math.floor(publishedAt) + (members ? 0.5 : 0);
+}
+
+/** Whether a ZSCORE reply is exact: absent (null), or a number Redis wrote, as a number or its text. */
+function scoreOrNone(reply: unknown): boolean {
+  if (reply === null) return true;
+  if (typeof reply === "number") return Number.isFinite(reply);
+  return typeof reply === "string" && reply.trim() !== "" && Number.isFinite(Number(reply));
 }
 
 /** Whether a place in the list is one of an email kept for members. */
@@ -52,7 +60,7 @@ export function letterRoomBytes(letter: Letter): number {
   return dataBytes([JSON.stringify(letter), letter.id], 2);
 }
 
-export type Published = { ok: true; letter: Letter } | { ok: false; reason: "not_sent" | "products" | "kept" | "full" | "too_many" | "unavailable"; message: string };
+export type Published = { ok: true; letter: Letter } | { ok: false; reason: "not_sent" | "products" | "preview" | "kept" | "full" | "too_many" | "unavailable"; message: string };
 
 /**
  * Publishes one email the store sent: a copy of its subject and words as
@@ -68,7 +76,7 @@ export type Published = { ok: true; letter: Letter } | { ok: false; reason: "not
  * published, and that must not open one it could not see. Anything else is
  * refused, never read as "everyone".
  */
-export async function publishLetter(store: Store, broadcast: Broadcast, now = Date.now(), products?: unknown, open = false): Promise<Published> {
+export async function publishLetter(store: Store, broadcast: Broadcast, now = Date.now(), products?: unknown, open = false, preview?: unknown): Promise<Published> {
   if (!isRedisConfigured() || !store.sid) return { ok: false, reason: "unavailable", message: "This can't be saved right now. Try again in a minute." };
   if (!store.listId || broadcast.listId !== store.listId || broadcast.status !== "sent") return { ok: false, reason: "not_sent", message: "Only an email this store has sent can be published." };
   const refuse: Published = { ok: false, reason: "products", message: `Check up to ${MAX_LETTER_PRODUCTS} of this store's products. Reload the page if one was just deleted.` };
@@ -76,27 +84,48 @@ export async function publishLetter(store: Store, broadcast: Broadcast, now = Da
   if (!keep && !Array.isArray(products)) return refuse;
   const ids = keep ? [] : letterProducts(products);
   if (!keep && (ids.length !== (products as unknown[]).length || ids.some((id) => !itemFor(store, id)))) return refuse;
+  // A preview (lib/letter-rules.ts, previewOf): 0 for none, or a whole number from 1 to LETTER_PREVIEW_MAX; anything else is refused, never widened.
+  const noPreview: Published = { ok: false, reason: "preview", message: `Show everyone 1 to ${LETTER_PREVIEW_MAX} parts of it, or none, and only with products checked.` };
+  const previewSaid = preview !== undefined && preview !== null;
+  if (previewSaid && preview !== 0 && !isPreview(preview)) return noPreview;
   const id = letterIdFor(store.sid, broadcast.id);
   try {
     // Entries whose copy has gone by itself leave the count first; the copy
     // already there is read only to keep its products.
-    const [, count, already, before] = await redisPipeline([
+    const commands: (string | number)[][] = [
       ["ZREMRANGEBYSCORE", listKey(store.sid), "-inf", String(now - LETTER_KEEP_DAYS * DAY)],
       ["ZCARD", listKey(store.sid)],
       ["ZSCORE", listKey(store.sid), id],
       ...(keep ? [["GET", recordKey(id)]] : []),
-    ]);
+    ];
+    // Read exactly (Codex J on #2762): one reply for each command, the counts whole, the score absent or a number,
+    // the copy absent or text. Anything else is not "not published" or "not kept": it is refused below and nothing
+    // is written, so an email kept for members is never opened to everyone on a read that could not be trusted.
+    const replies = repliesFor(await redisPipeline(commands), commands.length);
+    if (!replies || countOf(replies[0]) === null || countOf(replies[1]) === null || !scoreOrNone(replies[2]) || (keep && replies[3] !== null && typeof replies[3] !== "string")) {
+      throw new UnknownReplyError("publishing an email: its place and its copy");
+    }
+    const [, count, already, before] = replies;
     let kept: string[] = [];
+    let keptPreview: number | undefined;
     if (!keep && ids.length === 0 && !open && keptByScore(already)) {
       return { ok: false, reason: "kept", message: "This email is on your store for members only. Take it off first if everyone should read it." };
     }
+    // Nothing said, no copy left, but its place says it was kept for members (Codex J on #2762): which products
+    // opened it is lost, so it is refused, never written again for everyone. Taking it off and publishing it with
+    // its products, or for everyone on purpose, still works.
+    if (keep && before === null && keptByScore(already)) return refuse;
     if (keep && typeof before === "string") {
       const named = (JSON.parse(before) as { products?: unknown }).products;
       kept = letterProducts(named);
       // A copy that named products none of which can be read stays shut: it is not published again for everyone.
       if (named !== undefined && kept.length === 0) return refuse;
+      keptPreview = parseLetter(JSON.parse(before))?.preview;
     }
     const chosen = keep ? kept : ids;
+    // Said: taken (0 for none); not said: kept only when the products are kept too.
+    const shown = previewSaid ? (preview === 0 ? undefined : (preview as number)) : keep ? keptPreview : undefined;
+    if (shown !== undefined && chosen.length === 0) return noPreview;
     const letter: Letter = {
       id,
       sid: store.sid,
@@ -105,6 +134,7 @@ export async function publishLetter(store: Store, broadcast: Broadcast, now = Da
       sentAt: broadcast.finishedAt ? broadcast.finishedAt * 1000 : broadcast.sendAt * 1000,
       publishedAt: now,
       ...(chosen.length ? { products: chosen } : {}),
+      ...(chosen.length && shown !== undefined ? { preview: shown } : {}),
     };
     if (already === null && Number(count) >= MAX_PUBLISHED_LETTERS) return { ok: false, reason: "too_many", message: `Your store keeps ${MAX_PUBLISHED_LETTERS} published emails at most. Take one off first.` };
     const room = await takeData(store, [{ until: now + LETTER_KEEP_DAYS * DAY, bytes: letterRoomBytes(letter) }], now);

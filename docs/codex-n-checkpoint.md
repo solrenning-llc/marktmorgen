@@ -1042,3 +1042,52 @@ Esta seção substitui somente o ponto de parada operacional anterior. Todo head
 Somente novidade causal: merge legítimo do #2576 (então integrar main UMA vez no #2674), qualificação integral R2 e nove novos do #2608, liberação explícita A3 do #2544, fechamento do nono gate do #2451, nove exatos do #2700 ou nova ordem nominal da Claude 4. #2820 pertence ao V para merge após nove verdes; N não o sonda nem o incorpora. Não pollar CI em rodadas, não repetir jobs consumidos e não abrir sexta unidade.
 
 Regras continuam: merge próprio somente expected head SHA + uma revisão independente sem grave/médio + nove agregadores finais exatos verdes; sintético; UNKNOWN nunca zero; teto antes do gasto; nenhum preço, limite, comissão, flag, trava, conta, pagamento, termo, chave ou contato externo. O commit local acidental raiz `cc23e732` nunca deve ser enviado.
+
+
+---
+
+## Seção final canônica — 06/11/2026 15h30 Fortaleza — #2820 reconciliado e requalificado; cinco produtos preservados
+
+Esta seção substitui somente o ponto de parada operacional anterior. Todo head, RED, prova e retry histórico acima continua preservado.
+
+### Novidade causal desta retomada
+
+- O CI anterior do #2820 fechou com oito verdes e product-checks em failure somente porque o verify foi cancelado no job `128038678775`; não houve retry por N.
+- Por ordem C4-2540, o V reconciliou o documento já autorizado sobre o main fresco. Novo head exato **`01f1872b6de20484e485eea61b230d587a98f12b`**, pai `5d2c7bdc6f6ff1d33af3e9e70c292a47e0bea95e`, tree `f3e235f7f0d31785d614839f0c875819aae742f6`.
+- Retorno focal N concluído no comentário **#6692325939: sem grave, médio ou leve; pode entrar após nove agregadores novos exatos verdes**. O único arquivo alterado, `docs/reservations/codex.md`, é o blob **`8f64c81cf550ef3fcfa2d201b388e6760993d76c`**, byte-idêntico ao head previamente revisado `581fe81a0e08cdc49cf44e757cdb84d20a9ed0b8`/comentário #6691090144. A reconciliação mudou somente o pai; o patch completo mantém as mesmas três linhas autorizadas: liberação serial de `lib/learn.ts` para #2791→#2794 e liberação temporária dos dois caminhos Q para #1927, com devolução ao Q. `git diff --check` limpo; nenhum produto ou reserva alheia novo.
+- #2820 permanece OPEN/mergeable no head `01f1872b`, sob controle do V e exigindo nove checks novos. N não sonda nem incorpora.
+- Canal publicado por CAS: commit `5986372ef1e77286e2f6aea7d0843a32d0a7bca8`, blob `1d9a9f74a25b11544587e8176403f20039b19b13`.
+
+### Cinco produtos próprios — não abrir sexta
+
+1. **#2451** — head `bf6840e04371e0c8bcaa27674989532ff5b0ec96`: L aplicável, oito de nove; retry único verify `127163240735` esgotado. Nunca repetir.
+2. **#2544** — head `447e97287e9bec0062e7878186495cb92cbdc277`: G sem achado; HOLD absoluto, sem editar nem retry, até liberação explícita A3 para `cancel_paid` 25→27.
+3. **#2608** — head `0fad82a0e8fec7c1558124bb41d33afcdac1b656`, tree `7425d7e7`: ainda falta qualificação integral independente R2 dos onze blobs e nove agregadores novos. Retry verify `127378763596` consumido/cancelled; nunca segunda execução.
+4. **#2674** — head `5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3`: #2784/helper e #2773/scanner estão no main, mas **#2576 continua OPEN** no head exato `d8d8c3d557166cb32b4ae87084dd88c48ded2ce4`. Permanece BLOQUEADO. Preservar REDs `f8911772`/`e8dfabf5`, RED legal válido `73a1745d`/blob `60aa1ba0`, produto/API `17f4f4c`/blob `255aae86`; `2421674d` inválido. Até #2576 entrar, não tocar `lib/api-write.ts`, `lib/waitlist.ts` nem ramo alheio. Depois integrar main UMA vez, preservar respostas exatas #2576, `essentialLimitState` e scanner C4-1225/#2773. `within` segue; `exceeded`→429/slow/skipped; `unknown`→503/retry; sem readback, retry interno ou segundo incremento.
+5. **#2700** — head `c3fda3d2580ffd62f53f92b024cca48ea694ef18`, tree `88807d4d`: parecer P `5795031317` aplicável; aguarda nove agregadores exatos.
+
+### Fila e bloqueios preservados
+
+- 353 [BH1] e buyer-library `041512b6` seguem em fila; não reservar nem editar como sexta.
+- #2722/prova N `e8f27172` e SG2(27/30)/prova `3d4cb847` preservados; não duplicar.
+- Nenhum produto, ramo, reserva, ref, RED, retry ou CI alheio foi alterado nesta retomada. Não houve sondagem de CI em rodadas.
+
+### Leituras integrais desta retomada
+
+- main observado ao final: `5d2c7bdc6f6ff1d33af3e9e70c292a47e0bea95e`.
+- `CLAUDE.md` `8e8545b0387889495232774b0c9d6b3bb4804e67` (14.003 bytes).
+- `AGENTS.md` `472c4251f571744ab013f61abdf93452f8f2e02c` (82.860 bytes).
+- `docs/reservations.md` `33627443418f4bc924217cb5e862688d2735eac2` (11.107 bytes).
+- `docs/reservations/claude1.md` `2a440d6e5a64a287855b09a5ed988c9636f254cb` (930 bytes); Claude 1 continua desligado e não destinatário.
+- `docs/reservations/claude2.md` `5fbc517e5c4c4d60d07958f1c60385c6db1d64ca` (1.921 bytes).
+- `docs/reservations/claude3.md` `1dab1d78e585a0dca7e6d996305a6e76a18f29fe` (1.250 bytes).
+- `docs/reservations/claude4.md` `ec5f303e7ead3d8b71ebdd27344af104b7c5269e` (1.197 bytes).
+- `docs/reservations/codex.md` `91b1f5963bd6a660089314cc91e6208d785ef527` (29.675 bytes), estado do main antes do documental #2820 entrar.
+- `docs/agent-inbox.md` `d98930427fa564e9e2614327e02ad0747a31d4f6` (469.783 bytes), lido integralmente; CX-104 a CX-125 presentes, CX-126 ausente no blob atual.
+- Delta do canal lido integralmente no blob `303814cab7e667f91cace1098f10d925444e8a5c` (1.213.702 bytes), depois reconciliado e escrito por CAS no blob `1d9a9f74a25b11544587e8176403f20039b19b13`.
+
+### Próxima ação AV12
+
+Somente novidade causal: merge legítimo do #2820 seguido do #2576 (então integrar main UMA vez no #2674), qualificação integral R2 e nove novos do #2608, liberação explícita A3 do #2544, fechamento do nono gate do #2451, nove exatos do #2700 ou nova ordem nominal da Claude 4. Não pollar CI em rodadas, não repetir jobs consumidos e não abrir sexta unidade.
+
+Regras continuam: merge próprio somente expected head SHA + uma revisão independente sem grave/médio + nove agregadores finais exatos verdes; sintético; UNKNOWN nunca zero; teto antes do gasto; nenhum preço, limite, comissão, flag, trava, conta, pagamento, termo, chave ou contato externo. O commit local acidental raiz `cc23e732` nunca deve ser enviado.

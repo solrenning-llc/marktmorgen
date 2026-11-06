@@ -153,7 +153,7 @@ export function readSesEvent(message: string): SesEvent | null {
     for (const recipient of list) {
       const address = typeof recipient === "string"
         ? recipient
-        : recipient && typeof recipient === "object"
+        : recipient && typeof recipient === "object" && Object.hasOwn(recipient, "emailAddress")
           ? (recipient as { emailAddress?: unknown }).emailAddress
           : null;
       if (typeof address !== "string" || address.length === 0 || address.length > 320) return null;

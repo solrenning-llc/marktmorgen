@@ -42,7 +42,7 @@
  */
 import { SESSION_COOKIE, normaliseEmail } from "@/lib/auth";
 import { takeBuyerRead } from "@/lib/buyer-actions";
-import { readListings } from "@/lib/catalog";
+import { productIds, readListings } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { importedFrom, importedRead } from "@/lib/imported-purchases";
 import { TOKEN_PATTERN, learnerFrom, passCookieName } from "@/lib/learn";
@@ -50,6 +50,7 @@ import { memberState } from "@/lib/membership-access";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { isMemberPercent, memberOffFrom, qualifyingFor } from "@/lib/member-price-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { onAccount } from "@/lib/stripe-account";
 import { STRIPE_LIST_VERSION, plainObject, readStripePage } from "@/lib/stripe-list";
 import { currentMeta } from "@/lib/tier-rules";
@@ -119,6 +120,17 @@ export function heldFromSessions(rows: readonly unknown[], handles: ReadonlySet<
   return held;
 }
 
+/**
+ * The imported purchases' HGETALL reply, only as a flat list of text fields
+ * and values (rule 24, review L1 on #2999). Any other shape throws: a larger
+ * rule may rest on a purchase not read, so it is unknown, never "none".
+ */
+function importedReply(replies: unknown): string[] {
+  const flat = stringList(repliesFor(replies, 1)?.[0]);
+  if (flat === null || flat.length % 2 !== 0) throw new UnknownReplyError("an address's imported purchases");
+  return flat;
+}
+
 /** The qualifying products this address holds here, or null when that could not be read. */
 async function heldHere(store: Store, email: string, kinds: ReadonlyMap<string, QualifyingKind>): Promise<{ held: Set<string>; complete: boolean } | null> {
   const account = store.stripeAccountId;
@@ -140,7 +152,7 @@ async function heldHere(store: Store, email: string, kinds: ReadonlyMap<string, 
           return readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, STRIPE_LIST_VERSION), plainObject, SESSION_ROW);
         }),
       ),
-      read ? redisPipeline([read]).then(([raw]) => raw) : Promise.resolve(null),
+      read ? redisPipeline([read]).then(importedReply) : Promise.resolve(null),
     ]);
     for (const page of pages) {
       for (const id of heldFromSessions(page.rows, handles, kinds)) held.add(id);
@@ -190,13 +202,18 @@ export async function memberPriceFor(store: Store, product: Listing, cookies: Co
   }
   const kinds = new Map<string, QualifyingKind>();
   for (const listing of listings) kinds.set(listing.id, { recurring: listing.recurring !== null });
-  if (kinds.size === 0) return NONE;
+  // readListings leaves out a product the store has but whose listing could not be read (rule 30, sibling of
+  // review L1 on #2999): a larger rule may rest on it, so it counts toward the most and stops a smaller "yes".
+  const has = new Set(productIds(store));
+  const present = qualifying.filter((id) => has.has(id));
+  const unread = present.some((id) => !kinds.has(id));
+  if (kinds.size === 0) return unread ? UNKNOWN : NONE;
   const found = await heldHere(store, learner.email, kinds);
   if (found === null) return UNKNOWN;
   const percent = memberOffFrom(store.memberPrices, product, found.held);
   // A larger rule may rest on a purchase not read: said as unknown, never as no.
-  const most = memberOffFrom(store.memberPrices, product, new Set(kinds.keys()));
-  if (percent < most && !found.complete) return UNKNOWN;
+  const most = memberOffFrom(store.memberPrices, product, new Set(present));
+  if (percent < most && (!found.complete || unread)) return UNKNOWN;
   return percent > 0 ? { state: "member", percent, email: learner.email } : NONE;
 }
 

@@ -4,7 +4,7 @@ import type { Store } from '@/lib/store';
 import { UnknownReply } from '@/lib/redis-exact';
 import { form, responses } from './form-response-fixture';
 export const state={unavailable:true,denied:false,pdf:0,writes:0,inventoryUnavailable:false,definitionsUnavailable:false,deletionUnavailable:false,missing:false,body:null as Record<string,unknown>|null};
-export const store={sid:'synthetic-store',statsId:'synthetic-stats',email:'owner@example.com',name:'Synthetic store',currency:'USD',language:'en'} as unknown as Store;
+export const store={sid:'synthetic-store',statsId:'synthetic-stats',email:'owner@example.com',name:'Synthetic store',catalog:{items:[]},currency:'USD',language:'en'} as unknown as Store;
 export async function cookies(){return {};}
 export function redirect(url:string):never{throw Error('redirect:'+url);}
 export const useRouter=()=>({refresh(){},push(){}});

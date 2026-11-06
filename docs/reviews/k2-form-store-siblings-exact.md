@@ -39,3 +39,7 @@ The next StudioForms inventory test is now RED: 13 tests, 12 pass, one fails bec
 ## Funnel receiver corroboration
 
 After the helper repair, the same shape proof additionally runs receiverOf from the real funnel-bundle-store: a saved form consumes one slot; unknown HVALS must not invent free slots. Replaying all119 checks against original738 gives57 failures; repaired helper119/119. Three actual consumers encounter the selected unknown reply; the copy/export/receiver section observes18 application commands under its prechecked300 ceiling. This is corroboration added after repair, not a claim that119 preceded that repair. The original117/56 causal commit remains unchanged. One actual root plus real imports0 and directed lint0 for this addition. Studio inventory13/1 is still deliberately RED pending shared-line coordination.
+
+## Healthy HTTP controls
+
+Added explicit healthy edit/delete and CRUD permission-before-mutation controls; the synthetic store now includes its real-shaped empty catalog. Current16Node tests:15pass and ONLY the existing Studio inventory RED fails. Directed lint0 and actual two-root TypeScript/imports0. No production change in this control addition; no new claim of full consumer completion.

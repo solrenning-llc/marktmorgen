@@ -54,3 +54,16 @@ test('unknown form inventory has a status notice and no empty editable inventory
   assert.doesNotMatch(html,/New form/);
  }finally{state.inventoryUnavailable=false;}
 });
+
+for(const remove of [false,true]){
+ test((remove?'confirmed deletion':'healthy editing')+' remains successful',async()=>{
+  state.body=remove?{action:'remove',id:form.id}:{form};state.writes=0;
+  try{const r=await saveForm(request());assert.equal(r.status,200);assert.equal((await r.json()).ok,true);assert.equal(state.writes,1);}
+  finally{state.body=null;state.writes=0;}
+ });
+}
+test('CRUD permission refusal stays before any form mutation',async()=>{
+ state.denied=true;state.writes=0;
+ try{assert.equal((await saveForm(request())).status,403);assert.equal(state.writes,0);}
+ finally{state.denied=false;}
+});

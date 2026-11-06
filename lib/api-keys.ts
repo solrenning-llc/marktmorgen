@@ -206,20 +206,24 @@ export async function makeKey(sid: string, rawName: unknown, now = Date.now(), w
   const id = randomBytes(6).toString("hex");
   const hash = hashOf(key);
   const stored: Stored = { id, hash, name, hint: key.slice(KEY_PREFIX.length, KEY_PREFIX.length + 6), madeAt: Math.floor(now / 1000), usedAt: 0, write, agent, ...(maker ? { maker } : {}) };
-  const [, , after] = await redisPipeline([
+  const created = await redisPipeline([
     ["SET", lookupKey(hash), JSON.stringify({ sid, id })],
     ["HSET", listKey(sid), id, JSON.stringify(stored)],
     ["HLEN", listKey(sid)],
-  ]);
+  ]).catch(() => null);
   // Two tabs pressing "Make a key" at once can both pass the count above.
   // Counted again after writing, and the one just made is taken back if it
   // went over, or if the count cannot be read, so the limit is the limit.
-  const afterCount = countOf(after);
+  const afterCount = countOf(Array.isArray(created) ? created[2] : undefined);
   if (afterCount === null || afterCount > MAX_KEYS) {
     const undone = repliesFor(await redisPipeline([["DEL", lookupKey(hash)], ["HDEL", listKey(sid), id]]).catch(() => null), 2);
     if (!undone || undone.some((reply) => reply !== 0 && reply !== 1)) return { ok: false, reason: "make_unconfirmed" };
     return { ok: false, reason: afterCount === null ? "unavailable" : "full" };
   }
+  const confirmed = repliesFor(created, 3);
+  // Both records are needed to open the key. A readable count alone does
+  // not confirm either write, and an unknown receipt never triggers replay.
+  if (!confirmed || confirmed[0] !== "OK" || (confirmed[1] !== 0 && confirmed[1] !== 1)) return { ok: false, reason: "make_unconfirmed" };
   return { ok: true, key, made: { id, name, hint: stored.hint, madeAt: stored.madeAt, usedAt: 0, write, agent } };
 }
 

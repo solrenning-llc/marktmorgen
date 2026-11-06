@@ -22,6 +22,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { doneLessons, emailKey } from "@/lib/learn";
 import { lessonsInOrder, readCourse } from "@/lib/course";
 import { enroll } from "@/lib/flows";
+import { noteProgress } from "@/lib/course-progress-trigger";
 import { exactReplies, UnknownReply } from "@/lib/redis-exact";
 import type { Store } from "@/lib/store";
 
@@ -64,6 +65,8 @@ export async function noteIfFinished(store: Store, productId: string, courseId: 
     const course = await readCourse(courseId);
     const lessons = course ? lessonsInOrder(course).map(({ lesson }) => lesson.id) : [];
     if (!lessons.length) return false;
+    // A share of the course reached starts what it starts, before and whether or not this was the last lesson (lib/course-progress-trigger.ts; never throws).
+    await noteProgress(store, productId, courseId, email, lessons);
     const done = await doneLessons(courseId, email);
     if (!lessons.every((id) => done.has(id))) return false;
     const claim = await redisPipeline([["SET", finishedKey(courseId, email), "1", "NX", "EX", 400 * 86_400]]);

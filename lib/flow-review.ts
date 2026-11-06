@@ -23,7 +23,7 @@ export function flowConfigurationIssues(flow: Flow, context: FlowReviewContext):
   if (!flow.steps.length) issues.push("This sequence has no steps. Add an email or action before activating.");
   const productExists = (id: string | null) => context.products.some(product => product.id === id);
   if (flow.trigger === "product" && !productExists(flow.productId)) issues.push("The trigger product is unavailable. Choose a product in this store.");
-  if ((flow.trigger === "finished" || flow.trigger === "started") && !context.courses.includes(flow.productId ?? "")) issues.push("The trigger course is unavailable. Choose a current course.");
+  if ((flow.trigger === "finished" || flow.trigger === "started" || flow.trigger === "progress") && !context.courses.includes(flow.productId ?? "")) issues.push("The trigger course is unavailable. Choose a current course.");
   if (flow.trigger === "abandoned" && !productExists(flow.productId)) issues.push("The product of the abandoned checkout is unavailable. Choose a product in this store.");
   if (flow.trigger === "abandoned" && !(flow.goal && ("any" in flow.goal || "productId" in flow.goal))) issues.push("A workflow about an abandoned checkout needs a goal: end it once they buy, so nobody is reminded after paying.");
   if (flow.steps.length > MAX_STEPS) issues.push("This workflow has more than " + MAX_STEPS + " steps. Remove steps before saving.");

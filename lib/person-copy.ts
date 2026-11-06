@@ -96,6 +96,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/form-store.ts": { how: "copied", what: "Your answers to the store's forms" },
   "lib/learn.ts": { how: "copied", what: "Your progress in the store's courses: when you began and came back, and the lessons you finished. The browsers let in with your address and the drip emails already sent are kept as marks" },
   "lib/course-finish.ts": { how: "marks", what: "Marks that you opened and finished a course; the lessons you finished are in your course progress" },
+  "lib/course-progress-trigger.ts": { how: "marks", what: "Marks of the shares of a course you reached, which started a creator's workflows; the lessons you finished are in your course progress" },
   "lib/quiz.ts": { how: "copied", what: "Your quiz tries, answers, results and passes" },
   "lib/assignment.ts": { how: "copied", what: "Work you handed in, and the store's feedback on it" },
   "lib/certificate.ts": { how: "copied", what: "Your certificates" },

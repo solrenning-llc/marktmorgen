@@ -165,6 +165,7 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
     ["SET", `nl:course:${w.courseId}:dripmail:${learner}:${w.modules[0]}`, "1"],
     ["SET", `nl:course:${w.courseId}:open:${learner}`, "1", "EX", 400 * 86_400],
     ["SET", `nl:course:${w.courseId}:fin:${learner}`, "1", "EX", 400 * 86_400],
+    ["HSET", `nl:course:${w.courseId}:pct:${learner}`, "50", "1"],
     ["SET", `nl:course:${w.courseId}:quiz:${w.lessons[0]}:tries:${learner}`, "1"],
     ["SET", `nl:course:${w.courseId}:quiz:${w.lessons[0]}:result:${learner}`, JSON.stringify({
       used: 1,

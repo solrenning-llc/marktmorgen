@@ -87,8 +87,18 @@ export type Otherwise = "skip" | "end" | "jump";
 export type FlowGoal = { productId: string } | { any: true } | { tag: string };
 
 /** What starts a workflow (lib/flows.ts, Flow.trigger). */
-export type FlowTrigger = "joined" | "product" | "bought" | "tagged" | "finished" | "form" | "started" | "abandoned" | "stage" | "signed" | "paid_request";
-export const FLOW_TRIGGERS: readonly FlowTrigger[] = ["joined", "product", "bought", "tagged", "finished", "form", "started", "abandoned", "stage", "signed", "paid_request"];
+export type FlowTrigger = "joined" | "product" | "bought" | "tagged" | "finished" | "form" | "started" | "abandoned" | "stage" | "signed" | "paid_request" | "progress";
+export const FLOW_TRIGGERS: readonly FlowTrigger[] = ["joined", "product", "bought", "tagged", "finished", "form", "started", "abandoned", "stage", "signed", "paid_request", "progress"];
+
+/**
+ * The shares of a course's lessons a workflow can start at (287 [H4-1]; trigger
+ * "progress", lib/course-progress-trigger.ts): a short list, so a student's
+ * marks of the shares reached stay a few bytes, and a choice, never a number
+ * to type. All of the lessons is "finished".
+ */
+export const PROGRESS_PERCENTS: readonly number[] = [10, 25, 50, 75, 90];
+/** One of the shares offered, or null. */
+export const progressPercent = (raw: unknown): number | null => (typeof raw === "number" && PROGRESS_PERCENTS.includes(raw) ? raw : null);
 
 /** The longest label a condition can name; the same as an imported label's (lib/contacts.ts). */
 export const MAX_CONDITION_TAG = 40;
@@ -225,9 +235,9 @@ export function goalClash(trigger: FlowTrigger, productId: string | null, goal: 
   if (!goal) return false;
   // A workflow that starts with a label cannot end at that same label.
   if ("tag" in goal) return trigger === "tagged" && Boolean(tag) && sameTag(goal.tag, tag ?? "");
-  // Somebody who finishes, or opens, a course already has it: "finished" and "started" end where "product" would.
+  // Somebody who finishes, opens or does a share of a course already has it: "finished", "started" and "progress" end where "product" would.
   // An abandoned checkout is about a product they do not have yet, so ending when they get it is its whole point.
-  const aboutProduct = trigger === "product" || trigger === "finished" || trigger === "started";
+  const aboutProduct = trigger === "product" || trigger === "finished" || trigger === "started" || trigger === "progress";
   if ("any" in goal) return trigger === "bought" || (aboutProduct && startsPaid);
   return aboutProduct && goal.productId === productId;
 }

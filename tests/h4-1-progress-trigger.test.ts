@@ -162,8 +162,11 @@ async function main(): Promise<void> {
   try {
     await noteProgress(store, productId, course.id, "dee@example.com", lessons);
   } finally { redis.pipeline = original as typeof redis.pipeline; }
-  is(`the check, beside the runs' own starts, is ${commands} commands, inside a light request`, commands <= 30 + 2 * RUN_START_COMMANDS, true);
-  is(`and ${PROGRESS_TRIGGER_UNITS} public request, priced as a page, is above a light request of those commands`, laterPageCost() * PROGRESS_TRIGGER_UNITS >= request("light", commands), true);
+  // Two runs started, each priced as a run in the day's runs (lib/flow-limits.ts); the check is the rest, and at every share
+  // offered reached at once it marks one more field for each of the others.
+  const check = commands - 2 * RUN_START_COMMANDS + (PROGRESS_PERCENTS.length - 2);
+  is(`the check, beside the runs' own starts, is at most ${check} commands`, check <= 25, true);
+  is(`and ${PROGRESS_TRIGGER_UNITS} public request, priced as a page, is above a light request of those commands`, laterPageCost() * PROGRESS_TRIGGER_UNITS >= request("light", check), true);
   const source = readFileSync("lib/course-progress-trigger.ts", "utf8");
   is("the check takes the store's public requests first", source.indexOf('if (!(await takePublicRequest(store, "buyer", Date.now(), PROGRESS_TRIGGER_UNITS))) {') > 0 && source.indexOf("takePublicRequest(store") < source.indexOf("readFlowListStrict("), true);
   const finish = readFileSync("lib/course-finish.ts", "utf8");

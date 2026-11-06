@@ -21,7 +21,7 @@ import { toast } from "@/components/toast";
 import { MailAccent, MailBodyEditor } from "@/components/mail-designer";
 import { flowConfigurationIssues } from "@/lib/flow-review";
 import type { Flow, FlowCounts, FlowStep } from "@/lib/flows";
-import { flowWaitHours, type FlowAction, type FlowGoal, type FlowTrigger, MAX_CONDITION_TAG, type StepCondition, type StepIf, isCourseIf } from "@/lib/flow-rules";
+import { flowWaitHours, type FlowAction, type FlowGoal, type FlowTrigger, MAX_CONDITION_TAG, PROGRESS_PERCENTS, type StepCondition, type StepIf, isCourseIf } from "@/lib/flow-rules";
 import { MAX_FLOWS, MAX_STEPS } from "@/lib/flow-limits";
 import { type MapStep, WorkflowMap, WorkflowPreview, WorkflowRuns } from "@/components/workflow-tools";
 import type { MailSettings } from "@/lib/store";
@@ -77,6 +77,7 @@ const MESSAGES: Record<string, string> = {
   stage_taken: "Another workflow already starts from that stage. A stage starts one workflow; that one can start others with a step.",
   signed_taken: "Another workflow already starts when someone signs. Signing starts one workflow; that one can start others with a step.",
   paid_request_taken: "Another workflow already starts when someone pays a payment request. Paying one starts one workflow; that one can start others with a step.",
+  percent: "Choose how much of the course starts the workflow, from the list.",
   unknown: "That is not there anymore. Reload the page.",
   send: "The email service did not take it just now. Nothing was sent; try again in a moment.",
   signed_out: "Your session ended. Log in again.",
@@ -1774,6 +1775,8 @@ type FlowDraft = {
   formOutcome: string;
   /** The deal stage that starts it, for "stage". */
   stageId: string;
+  /** The share of the course's lessons that starts it, for "progress" (PROGRESS_PERCENTS). */
+  percent: number;
   active: boolean;
   steps: StepDraft[];
   /** When it ends early: never, once they have bought anything, once they get one product, or once they carry a label. */
@@ -1965,6 +1968,7 @@ function toDraft(flow: FlowRow | null, products: { id: string }[]): FlowDraft {
       formId: "",
       formOutcome: "",
       stageId: "",
+      percent: 50,
       active: false,
       steps: [blankStep("0", "hours", first)],
       goal: "",
@@ -1981,6 +1985,7 @@ function toDraft(flow: FlowRow | null, products: { id: string }[]): FlowDraft {
     formId: flow.formId ?? "",
     formOutcome: flow.formOutcome ?? "",
     stageId: flow.stageId ?? "",
+    percent: flow.percent ?? 50,
     active: flow.active,
     steps: flow.steps.map((s) => stepToDraft(s, first)),
     goal: !flow.goal ? "" : "any" in flow.goal ? "any" : "tag" in flow.goal ? "tag" : "product",
@@ -1989,8 +1994,8 @@ function toDraft(flow: FlowRow | null, products: { id: string }[]): FlowDraft {
   };
 }
 
-/** The triggers that name a product: getting it, finishing or opening a course, leaving its checkout. */
-const productTrigger = (t: FlowTrigger) => t === "product" || t === "finished" || t === "started" || t === "abandoned";
+/** The triggers that name a product: getting it, finishing, opening or doing a share of a course, leaving its checkout. */
+const productTrigger = (t: FlowTrigger) => t === "product" || t === "finished" || t === "started" || t === "abandoned" || t === "progress";
 
 /** The goal a draft stands for, as the server reads it. */
 function goalOf(draft: FlowDraft): FlowGoal | null {
@@ -2090,6 +2095,8 @@ function Flows({
         ? `Starts when someone on your list sends the form “${automation.forms.find((x) => x.id === f.formId)?.name ?? "a form no longer in your store"}”${f.formOutcome ? ` and gets the result “${automation.forms.find((x) => x.id === f.formId)?.outcomes?.find((o) => o.id === f.formOutcome)?.title ?? "a result no longer in the form"}”` : ""}`
       : f.trigger === "finished"
         ? `Starts when someone who agreed to hear from you finishes ${products.find((p) => p.id === f.productId)?.title ?? "a course"}`
+      : f.trigger === "progress"
+        ? `Starts when someone who agreed to hear from you has done ${f.percent ?? "a share"}% of the lessons of ${products.find((p) => p.id === f.productId)?.title ?? "a course"}`
       : f.trigger === "started"
         ? `Starts when someone who agreed to hear from you opens ${products.find((p) => p.id === f.productId)?.title ?? "a course"} for the first time`
       : f.trigger === "abandoned"
@@ -2154,6 +2161,7 @@ function Flows({
         formId: draft.trigger === "form" ? draft.formId : null,
         formOutcome: draft.trigger === "form" ? draft.formOutcome : "",
         stageId: draft.trigger === "stage" ? draft.stageId : "",
+        percent: draft.trigger === "progress" ? draft.percent : null,
         // A new workflow is saved paused whatever is sent; switching on is its own step.
         active: draft.id ? draft.active : false,
         steps: draft.steps.map((s) => {
@@ -2447,9 +2455,9 @@ function Flows({
                 setDraft((current) => {
                   if (!current) return current;
                   const trigger: FlowTrigger =
-                    e.target.value === "product" ? "product" : e.target.value === "bought" ? "bought" : e.target.value === "tagged" ? "tagged" : e.target.value === "finished" ? "finished" : e.target.value === "form" ? "form" : e.target.value === "started" ? "started" : e.target.value === "abandoned" ? "abandoned" : e.target.value === "stage" ? "stage" : e.target.value === "signed" ? "signed" : e.target.value === "paid_request" ? "paid_request" : "joined";
-                  // Finishing and opening are only for a course: the first course, when the product chosen is not one.
-                  const productId = (trigger === "finished" || trigger === "started") && !courses.includes(current.productId) ? (courses[0] ?? current.productId) : current.productId;
+                    e.target.value === "product" ? "product" : e.target.value === "bought" ? "bought" : e.target.value === "tagged" ? "tagged" : e.target.value === "finished" ? "finished" : e.target.value === "form" ? "form" : e.target.value === "started" ? "started" : e.target.value === "abandoned" ? "abandoned" : e.target.value === "stage" ? "stage" : e.target.value === "signed" ? "signed" : e.target.value === "paid_request" ? "paid_request" : e.target.value === "progress" ? "progress" : "joined";
+                  // Finishing, opening and a share are only for a course: the first course, when the product chosen is not one.
+                  const productId = (trigger === "finished" || trigger === "started" || trigger === "progress") && !courses.includes(current.productId) ? (courses[0] ?? current.productId) : current.productId;
                   // A sequence that starts with a purchase cannot end at one.
                   const formId = trigger === "form" && !automation.forms.some((x) => x.id === current.formId) ? (automation.forms[0]?.id ?? "") : current.formId;
                   // A deal stage: the first stage of the first pipeline, when none of the store's is chosen yet.
@@ -2466,6 +2474,7 @@ function Flows({
               <option value="tagged">A sequence gives someone a label</option>
               {courses.length ? <option value="finished">Someone who agreed to hear from you finishes a course</option> : null}
               {courses.length ? <option value="started">Someone who agreed to hear from you opens a course for the first time</option> : null}
+              {courses.length ? <option value="progress">Someone who agreed to hear from you reaches a share of a course</option> : null}
               {products.length ? <option value="abandoned">Someone on your list leaves a checkout unpaid, having agreed to hear from you</option> : null}
               {automation.forms.length ? <option value="form">Someone on your list sends a form</option> : null}
               {automation.stages.length ? <option value="stage">A deal with someone on your list enters a stage</option> : null}
@@ -2542,6 +2551,31 @@ function Flows({
                 When the last lesson is marked done, by a button, a quiz passed or work approved. Each student starts it once.
               </span>
             </label>
+          ) : null}
+          {draft.trigger === "progress" ? (
+            <>
+              <label className="block">
+                <span className="field-label">Which course</span>
+                <select className="field mt-2" value={draft.productId} onChange={(e) => setDraft({ ...draft, productId: e.target.value })}>
+                  {products
+                    .filter((p) => courses.includes(p.id))
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>{p.title}</option>
+                    ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="field-label">How much of it</span>
+                <select className="field mt-2" value={draft.percent} onChange={(e) => setDraft({ ...draft, percent: Number(e.target.value) })}>
+                  {PROGRESS_PERCENTS.map((p) => (
+                    <option key={p} value={p}>{p}% of the lessons done</option>
+                  ))}
+                </select>
+                <span className="mt-2 block text-sm text-ink-soft">
+                  Counts lessons marked done, by a button, a quiz passed or work approved. For example, at 75% you could offer a coaching call. Each student starts it once. For all of the lessons, choose &ldquo;finishes a course&rdquo;.
+                </span>
+              </label>
+            </>
           ) : null}
           {draft.trigger === "started" ? (
             <label className="block">

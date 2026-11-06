@@ -2041,6 +2041,10 @@ export default function PrivacyPage() {
           them. Signing or paying never adds you to the list. The only new things kept for
           it are the sequence&apos;s own record, described above, and its
           emails waiting to be sent.
+          A sequence may also start when you have done a share of a
+          course&apos;s lessons that the creator chose, such as half of them;
+          which of those shares you reached is kept for up to 400 days, and
+          deleted with your course progress.
         </p>
         <p>
           A community&apos;s posts, comments, pictures and member records are

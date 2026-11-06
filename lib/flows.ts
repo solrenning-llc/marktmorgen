@@ -1,6 +1,6 @@
 import { agreementsAllowed } from "@/lib/agreement-rules";
 import { readFlowListStrict } from "@/lib/flow-list";
-import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
+import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS, progressPercent } from "@/lib/flow-rules";
 import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, RUN_KEEP_SECONDS, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
 import { type WaitReason, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
@@ -120,7 +120,9 @@ export type Flow = {
    * agreed to hear from the creator; "paid_request": paid one of the store's
    * payment requests, sent to their address (635 [GL3], lib/payment-flow-
    * trigger.ts), while they are on the list and agreed to hear from the
-   * creator.
+   * creator; "progress": did at least `percent` of the lessons of the course
+   * `productId` is (287 [H4-1], lib/course-progress-trigger.ts), while they
+   * are on the list and agreed to hear from the creator.
    */
   trigger: FlowTrigger;
   productId: string | null;
@@ -128,6 +130,8 @@ export type Flow = {
   tag?: string;
   /** The deal stage that starts it, for "stage": at most one workflow a stage (saveFlow). */
   stageId?: string;
+  /** The share of the course's lessons that starts it, for "progress": one of PROGRESS_PERCENTS. */
+  percent?: number;
   /** The form that starts it, for "form" (lib/forms.ts). */
   formId?: string;
   /**
@@ -256,7 +260,7 @@ const starterOf = (raw: unknown): Flow["starter"] => (raw === "welcome" || raw =
 
 export type FlowResult =
   | { ok: true; flows: Flow[] }
-  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" | "paid_request_taken" };
+  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" | "paid_request_taken" | "percent" };
 
 /**
  * Adds a sequence, or replaces one with the same id. Checked whole every time.
@@ -274,11 +278,14 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   if (!trigger) return { ok: false, reason: "trigger" };
   const courses = new Set(idsOfKind(store, "course"));
   const isCourse = (id: string) => courses.has(id);
-  const aboutProduct = trigger === "product" || trigger === "finished" || trigger === "started" || trigger === "abandoned";
+  const aboutProduct = trigger === "product" || trigger === "finished" || trigger === "started" || trigger === "abandoned" || trigger === "progress";
   const productId = aboutProduct && typeof raw.productId === "string" ? raw.productId : null;
   if ((trigger === "product" || trigger === "abandoned") && !(productId && hasProduct(store, productId))) return { ok: false, reason: "product" };
   // Finishing and opening are things only a course can be done to.
-  if ((trigger === "finished" || trigger === "started") && !(productId && hasProduct(store, productId) && isCourse(productId))) return { ok: false, reason: "product" };
+  if ((trigger === "finished" || trigger === "started" || trigger === "progress") && !(productId && hasProduct(store, productId) && isCourse(productId))) return { ok: false, reason: "product" };
+  // A share of the course: one of those offered, never a number typed (lib/course-progress-trigger.ts).
+  const percent = trigger === "progress" ? progressPercent(raw.percent) : null;
+  if (trigger === "progress" && percent === null) return { ok: false, reason: "percent" };
   const tag = trigger === "tagged" ? cleanTag(raw.tag) : "";
   if (trigger === "tagged" && !tag) return { ok: false, reason: "tag" };
   // A form of the store's own that asks for an address: without one, nobody it starts could be written to.
@@ -348,6 +355,7 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
     ...(formId ? { formId } : {}),
     ...(formOutcome ? { formOutcome } : {}),
     ...(stageId ? { stageId } : {}),
+    ...(percent !== null ? { percent } : {}),
     steps,
     active,
     createdAt: at >= 0 ? flows[at].createdAt : Math.floor(Date.now() / 1000),
@@ -500,7 +508,7 @@ export async function flowsStartedFor(flows: Flow[], email: string): Promise<str
  * Starts whichever sequences this event begins, for this person. Never
  * throws: the list must never cost anyone what they asked for.
  */
-export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string }): Promise<void> {
+export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string; progress?: { productId: string; percents: readonly number[] } }): Promise<void> {
   try {
     if (!store.listId || monthlyAllowance(store) === 0) return;
     // Whether what they just got is sold for money: the store's own index
@@ -521,6 +529,7 @@ export async function enroll(store: Store, email: string, event: { joined: boole
           (f.trigger === "stage" && event.stage && f.stageId === event.stage) ||
           (f.trigger === "signed" && event.signed) ||
           (f.trigger === "paid_request" && event.paidRequest) ||
+          (f.trigger === "progress" && event.progress && f.productId === event.progress.productId && typeof f.percent === "number" && event.progress.percents.includes(f.percent)) ||
           (f.trigger === "form" && event.form && f.formId === event.form && (!f.formOutcome || f.formOutcome === event.formOutcome))),
     );
     if (!flows.length) return;

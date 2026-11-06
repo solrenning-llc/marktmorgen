@@ -1,7 +1,7 @@
 import { MAX_STEP_NEXT_ACTION, MAX_STEP_NEXT_DAYS } from "@/lib/flow-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import type { Flow } from "@/lib/flows";
-import { FLOW_TRIGGERS } from "@/lib/flow-rules";
+import { FLOW_TRIGGERS, progressPercent } from "@/lib/flow-rules";
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 const strings = (value: Record<string, unknown>, keys: string[]) => keys.every(key => typeof value[key] === "string");
 function condition(value: unknown): boolean {
@@ -31,6 +31,7 @@ export function parseFlowList(raw: unknown): Flow[] | null {
     if (typeof flow.trigger !== "string" || !(FLOW_TRIGGERS as readonly string[]).includes(flow.trigger as string) || typeof flow.active !== "boolean") return null;
     if (flow.productId !== null && typeof flow.productId !== "string") return null;
     if (typeof flow.createdAt !== "number" || !Number.isFinite(flow.createdAt)) return null;
+    if (flow.percent !== undefined && progressPercent(flow.percent) === null) return null;
     if ((flow.tag !== undefined && typeof flow.tag !== "string") || (flow.formId !== undefined && typeof flow.formId !== "string") || (flow.formOutcome !== undefined && typeof flow.formOutcome !== "string")) return null;
     if (flow.goal !== undefined && (!record(flow.goal) || ("any" in flow.goal ? flow.goal.any !== true : "tag" in flow.goal ? typeof flow.goal.tag !== "string" : typeof flow.goal.productId !== "string"))) return null;
     if (!Array.isArray(flow.steps)) return null;

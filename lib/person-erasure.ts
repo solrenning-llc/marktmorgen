@@ -68,6 +68,7 @@ import { forgetCrmPerson } from "@/lib/crm";
 import { forgetNotesPerson } from "@/lib/buyer-profile";
 import { forgetFormsPerson } from "@/lib/form-store";
 import { forgetFinishPerson } from "@/lib/course-finish";
+import { forgetProgressPerson } from "@/lib/course-progress-trigger";
 import { forgetQuizPerson } from "@/lib/quiz";
 import { forgetTasksPerson } from "@/lib/assignment";
 import { forgetCertificatesPerson } from "@/lib/certificate";
@@ -133,6 +134,7 @@ export const ERASERS: Eraser[] = [
     run: (s) => forgetLearnerPerson(s.store, s.email, s.courses.map((c) => ({ courseId: c.courseId, moduleIds: c.moduleIds }))),
   },
   { module: "lib/course-finish.ts", run: (s) => forgetFinishPerson(s.courses.map((c) => c.courseId), s.email) },
+  { module: "lib/course-progress-trigger.ts", run: (s) => forgetProgressPerson(s.courses.map((c) => c.courseId), s.email) },
   { module: "lib/quiz.ts", run: (s) => forgetQuizPerson(s.courses.map((c) => ({ courseId: c.courseId, lessonIds: c.lessonIds })), s.learner) },
   {
     module: "lib/assignment.ts",

@@ -31,6 +31,9 @@ import { jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { PageDropIncomplete, dropPage, picturesOfFailedDrop } from "@/lib/sales-page-store";
 import { finishLandingsDrop } from "@/lib/campaign-landing-store";
+
+/** A product's id, as the catalog makes it (lib/sales-page.ts PRODUCT_ID_PATTERN). */
+const PRODUCT_ID = /^[a-z0-9]{6,40}$/;
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -302,7 +305,8 @@ export async function POST(request: NextRequest) {
       result = removed.ok ? { ok: true, product: null } : removed;
       // Asked again for a product already removed whose campaign landings were not confirmed gone then (Codex G,
       // #1947): they are deleted now; not confirmed again, it is said, and can be asked again.
-      if (!removed.ok && removed.reason === "unknown" && id) {
+      // Only a product's own id (never "<product>:gone" or any other key of the family: Codex G, #1947).
+      if (!removed.ok && removed.reason === "unknown" && id && PRODUCT_ID.test(id)) {
         const finished = await finishLandingsDrop(guarded.store.statsId, id, guarded.store).catch(() => null);
         if (finished === null) return Response.json({ ok: false, error: "unavailable", cleanupPending: true }, { status: 503 });
         if (finished === "dropped") result = { ok: true, product: null };

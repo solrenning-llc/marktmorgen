@@ -34,6 +34,12 @@ const landingKey = (statsId: string, productId: string) => `nl:product:landing:$
 const LANDING_SLOT = (productId: string) => `al:${productId}`;
 /** Set in the same step as the landings are dropped with their page: while it is there, no save writes them again. */
 const goneKey = (statsId: string, productId: string) => `${landingKey(statsId, productId)}:gone`;
+/**
+ * The ids a landing record may be kept under: a product's (lib/sales-page.ts) or a site page's (site-<id>). Anything
+ * else, such as "<product>:gone", would name another key of this family (Codex G, #1947: the deletion fence), so it
+ * is never read, written or deleted here.
+ */
+const LANDING_ID = /^(?:site-)?[a-z0-9]{6,40}$/;
 
 /**
  * How long a dropped product's landings stay closed to saves, in seconds: far longer than any request runs, so a save
@@ -281,7 +287,7 @@ function dropped(reply: unknown): boolean {
  * for a product that is no longer in the catalog.
  */
 export async function finishLandingsDrop(statsId: string | null, productId: string, room: DataStore): Promise<"dropped" | "none"> {
-  if (!statsId || !isRedisConfigured()) return "none";
+  if (!statsId || !isRedisConfigured() || !LANDING_ID.test(productId)) return "none";
   const reply: unknown = await redisPipeline([["EXISTS", landingKey(statsId, productId)]]).catch(() => null);
   const held = Array.isArray(reply) && reply.length === 1 && (reply[0] === 0 || reply[0] === 1) ? reply[0] : null;
   if (held === null) throw new LandingsDropUnconfirmed();
@@ -292,7 +298,7 @@ export async function finishLandingsDrop(statsId: string | null, productId: stri
 
 export async function dropLandings(statsId: string | null, productId: string, room: DataStore): Promise<void> {
   const key = dataKey(room);
-  if (!statsId || !key || !isRedisConfigured()) return;
+  if (!statsId || !key || !isRedisConfigured() || !LANDING_ID.test(productId)) return;
   for (let tries = 0; tries < WRITE_TRIES; tries += 1) {
     const now = Date.now();
     const reply: unknown = await redisPipeline([["EVAL", DROP_LANDINGS, 3, key, landingKey(statsId, productId), goneKey(statsId, productId), contentRoomFor(room, now / 1000), monthOf(now), LANDING_SLOT(productId), LANDINGS_GONE_SECONDS]]).catch(() => null);

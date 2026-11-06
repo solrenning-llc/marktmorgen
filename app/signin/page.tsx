@@ -170,7 +170,7 @@ export default async function SignInPage({
   // The button on the site's own address only (lib/google-signin.ts); its notices only where it can be.
   const sent = await headers();
   const google = googleSignInShown(sent.get("x-forwarded-host") ?? sent.get("host"), params.google);
-  const notice = status.startsWith("google-") && !google ? undefined : NOTICES[status];
+  const notice = status.startsWith("google-") && !google ? undefined : Object.hasOwn(NOTICES, status) ? NOTICES[status] : undefined;
   // Somebody who pressed Log in has a store already, or believes so: the page
   // greets them that way, rather than with "Start your store", which reads as
   // if they had pressed the wrong thing. The form, the link and what it opens

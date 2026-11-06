@@ -35,7 +35,7 @@ export default async function CodePage({ searchParams }: { searchParams: Promise
   const email = await heldFor(held);
   if (!email) redirect("/signin?status=expired");
   const status = typeof params.status === "string" ? params.status : "";
-  const notice = NOTICES[status] ?? null;
+  const notice = Object.hasOwn(NOTICES, status) ? NOTICES[status] : null;
   // A request to turn it off without a code, waiting its days (lib/two-step.ts askReset).
   // Unreadable just now (CX-123 rule 24): said so, and no day or address is made up for it.
   const read = await twoStepStatus(email).catch((error: unknown) => {

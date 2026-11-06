@@ -46,7 +46,7 @@ import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
  */
 import { paidStorageBytes } from "@/lib/storage-rules";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
-import { MAX_IMAGE_BYTES } from "@/lib/product-image";
+import { MAX_IMAGE_BYTES, MAX_THUMB_BYTES } from "@/lib/product-image";
 import { ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
 import { TRIAL_ORDERS } from "@/lib/order-rules";
@@ -866,6 +866,18 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: (tier) => (paidStorageBytes(tier) / GB) * STORAGE_PER_GB,
     sources: [{ file: "lib/storage-rules.ts", names: ["PAID_STORAGE_BYTES", "paidStorageBytes"] }],
     basis: "The plan's storage, all used, at the dearest store a file may be in.",
+  },
+  {
+    id: "picture-thumbnails",
+    feature: "The thumbnail copy of a product picture: its Blob put and the checks of its name and bytes (Encanto 5b-2, 6 November 2026)",
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * (BLOB_PUT_TRIES * BLOB_ADVANCED_OP + (2 * BLOB_HEAD_TRIES + 1) * BLOB_SIMPLE_OP + MAX_THUMB_BYTES * BLOB_TRANSFER_PER_BYTE),
+    sources: [
+      { file: "app/api/store/image/upload/route.ts", names: ["studioAccess", "notePictureDoor"] },
+      { file: "lib/studio-route.ts", names: ["countStudio"] },
+      { file: "lib/product-image.ts", names: ["MAX_THUMB_BYTES"] },
+      { file: "app/api/store/image/route.ts", names: ["head(thumbPath)", "firstBytes(thumbPath)"] },
+    ],
+    basis: "Every thumbnail copy is put through its own upload request, a studio request (studioAccess, countStudio), so there are at most the plan's studio figure of them a month, a hard ceiling. Each is counted at its dearest: its put (an Advanced Operation) with every try again the Blob SDK may send (BLOB_PUT_TRIES), Simple Operations: two heads (the one that checks its name is free, and one when it is attached), each with its tries again (BLOB_HEAD_TRIES), and one read when it is attached, a plain fetch and the read of its whole bytes (MAX_THUMB_BYTES) at the dearer Blob transfer rate kept here. Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026. It adds no read on a public page: it replaces a larger copy in the same picture request (lib/picture-served.ts), already counted with the page. The Blob operations of the picture and its smaller copy, uploaded before this, are not counted by this line: that is reported apart (they are not a cost of the thumbnail).",
   },
   {
     id: "picture-uploads",

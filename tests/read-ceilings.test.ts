@@ -335,9 +335,11 @@ async function main(): Promise<void> {
     const keptToClosing = (paidStorageBytes("creator") / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
     const year = worstCost("creator") + providerFeeUsd(PRICES_WITHOUT_COMMISSION.creator.year) + keptToClosing;
     const oneMore = 32 * (heavyWorst - lightWorst);
-    const uploads = COST_LINES.find((l) => l.id === "picture-uploads")?.monthlyUsd("creator") ?? Number.NaN;
+    // Rule 23 (#2801, the thumbnail copy): the US$ 66 is room for the Blob operations of picture uploads, the studio
+    // pictures' line and the thumbnail's; both are left out to show the readings figure is still the one sized under 65.
+    const uploads = ["picture-uploads", "picture-thumbnails"].reduce((sum, id) => sum + (COST_LINES.find((l) => l.id === id)?.monthlyUsd("creator") ?? Number.NaN), 0);
     is("the first year given back stays under the owner's US$ 66 with the day's heavy readings and every picture upload", year < 66, true);
-    is("the readings figure is still the one sized under US$ 65: without the upload line, one more heavy reading a day would pass it", year - uploads < 65 && year - uploads + oneMore >= 65, true);
+    is("the readings figure is still the one sized under US$ 65: without the picture-upload lines, one more heavy reading a day would pass it", year - uploads < 65 && year - uploads + oneMore >= 65, true);
     is("which is fewer than one an hour: the gap is said to Claude 1 and the owner (inbox C4-33), not hidden", HEAVY_READINGS_PER_DAY < 24, true);
   }
   {

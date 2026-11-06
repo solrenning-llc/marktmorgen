@@ -1,0 +1,13 @@
+# K2 independent review — PR #2746
+
+Candidate12ecd8ab2cdcbe116b08630a3cb9a291b30287c0, test blob158ed2827. Full one-path diff read. No serious/medium finding; may merge after nine exact-final-head successful workflows and a fresh clean expected-head merge.
+
+The shared helper paidPeriod defaults to live Date.now and floors to seconds. Rebuilding the same fake subscription across a second changes start/end, so recordState correctly sees a different period and writes. The six fixtures now derive that period from the existing NOW observation. The explicit second-read clock still advances1000ms, and the unchanged assertion expects false. This preserves the original behavior being tested rather than disabling the comparison. Production recordState, samePeriod, subscription logic, shared helper and workflows are unchanged. The mock is local to try/finally.
+
+Durable author REDd653e4ad:73 checks, exactly one failure at 'a second reading writes nothing'; expectedfalse, gottrue. Candidate73/73. The independent runner parses the original pre-RED and candidate TypeScript and compares all68 original is() call expressions including expected values: identical. An additional exit observation checks Date.now function identity when the actual async test reaches its final done() call: restored on both RED and GREEN. The runner retains the real assertions; its optional source override only loads the historical test from git into a temporary file in the detached review copy, removed in finally.
+
+Eight distinct linked groups: renewals3, allowance-window11node:test, plan-standing43, billing-subscription-observation26, billing-cancellation-observation19, billing-sync-observation-flow38, billing-trial-policy93, video-admission12node:test:245 checks passed. With focal73, total318. Some linked negative-path tests emit caught synthetic Stripe500/404 and missing-Blob-credentials warnings; these are not native provider success claims.
+
+Scoped actual TypeScript/config/imports0; directed ESLint0; tracked public-data scanner3821/0; diff-check0. No timeout/sleep/assertion weakening, product change, paid I/O addition, retention/UI change, author ref/CI mutation or new K2 product unit. CI/engineering cost unknown. No full suite/global types/browser/native Redis/live Stripe/Blob/provider/deployment/AAA claim. All five own K2 products remain preserved.
+
+Reproduce: node proofs/k2/review-2746-run.mjs d653e4ad (RED73/1); node proofs/k2/review-2746-run.mjs HEAD (GREEN73/73). Run the same launcher with HEAD followed by the eight .test.ts filenames above for linked checks. The launcher is opt-in, not automatic product test discovery.

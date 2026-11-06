@@ -43,6 +43,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { storeForId } from "@/lib/store";
 import { costsPaused } from "@/lib/plan-standing";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
@@ -526,8 +527,15 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
   // (lib/integration-pause.ts); the daily pass counts it skipped and tries the next day.
   if (costsPaused(store)) return "paused";
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "busy";
-  const [got] = await redisPipeline([["SET", readingKey(statsId), "1", "NX", "EX", 90]]);
-  if (got === null) return "busy";
+  // The reading lock read exactly (lib/claim-mark.ts; CX-123 rule 24): another read's is "busy". An unknown one asks
+  // Meta nothing this time ("busy", tried again later) and is let go only while it holds this read's value.
+  const reading = claimValue();
+  const claimed = await claimMark(readingKey(statsId), 90, reading);
+  if (claimed === "taken") return "busy";
+  if (claimed !== "ours") {
+    await releaseMark(readingKey(statsId), reading);
+    return "busy";
+  }
   const window = readWindow(now);
   const note = async (read: Partial<MetaRead>) => {
     // Written only while that very connection is still there.
@@ -610,7 +618,8 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
     await note({ problem: busy ? "busy" : "error", after: Math.floor(now / 1000) + (busy ? 3600 : 6 * 3600) }).catch(() => false);
     return busy ? "busy" : "error";
   } finally {
-    await redisPipeline([["DEL", readingKey(statsId)]]).catch(() => {});
+    // Only this read's own lock: one that ran out may be the next read's now.
+    await releaseMark(readingKey(statsId), reading);
   }
 }
 

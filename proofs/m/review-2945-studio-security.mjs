@@ -23,7 +23,13 @@ function git(args,options={}){return execFileSync('/usr/bin/git',['--git-dir='+g
 function bytesAt(path){if(!existsSync(path))return 0;const st=lstatSync(path);if(st.isSymbolicLink())return 0;return st.isDirectory()?readdirSync(path).reduce((n,s)=>n+bytesAt(join(path,s)),0):st.size;}
 function preflight(){
  const mem=Number(/MemAvailable:\s+(\d+)/.exec(readFileSync('/proc/meminfo','utf8'))?.[1]||0)*1024;
- if(mem<1.5*1024**3)throw Error('At least 1.5GiB MemAvailable required');
+ const cgroupMaxPath='/sys/fs/cgroup/memory.max',cgroupCurrentPath='/sys/fs/cgroup/memory.current';
+ const maxRaw=readFileSync(cgroupMaxPath,'utf8').trim(),currentRaw=readFileSync(cgroupCurrentPath,'utf8').trim();
+ if(!/^[1-9]\d*$/.test(maxRaw)||!/^\d+$/.test(currentRaw))throw Error('Finite cgroup memory.max/current required; host memory is not cgroup headroom');
+ const cgroupMax=Number(maxRaw),cgroupCurrent=Number(currentRaw);
+ if(!Number.isSafeInteger(cgroupMax)||!Number.isSafeInteger(cgroupCurrent)||cgroupCurrent>cgroupMax)throw Error('Invalid finite cgroup memory measurement');
+ const cgroupHeadroom=cgroupMax-cgroupCurrent;
+ if(cgroupHeadroom<1.5*1024**3)throw Error('At least 1.5GiB current cgroup headroom required');
  if(!readFileSync('/usr/bin/git').subarray(0,4).equals(Buffer.from([127,69,76,70])))throw Error('Native Git ELF required');
  if(!lstatSync(gitDir).isDirectory())throw Error('Ordinary Git directory required; linked-worktree gitfiles unsupported');
  const config=spawnSync('/usr/bin/git',['--git-dir='+gitDir,'config','--local','--no-includes','--name-only','--get-regexp','^(extensions\\.partialclone|remote\\..*\\.(promisor|partialclonefilter)|include(if\\..*)?\\.path)$'],{env:environment,encoding:'utf8',timeout:5000,maxBuffer:4096});
@@ -31,7 +37,7 @@ function preflight(){
  for(const file of ['objects/info/alternates','objects/info/http-alternates'])if(existsSync(join(gitDir,file)))throw Error('Object alternates rejected');
  const pack=join(gitDir,'objects/pack');if(existsSync(pack)&&readdirSync(pack).some(s=>s.endsWith('.promisor')))throw Error('Promisor pack rejected before object reads');
  const objects=bytesAt(join(gitDir,'objects'));if(objects>128*1024**2)throw Error('128MiB object cap');
- console.log('PREFLIGHT '+JSON.stringify({nativeGit:'/usr/bin/git',globalSystemConfig:'ignored',externalProtocols:'blocked',promisorPartial:'rejected',memAvailable:mem,objectBytes:objects,heapLimitMiB:512}));
+ console.log('PREFLIGHT '+JSON.stringify({nativeGit:'/usr/bin/git',globalSystemConfig:'ignored',externalProtocols:'blocked',promisorPartial:'rejected',measuredAtUtc:new Date().toISOString(),hostMemAvailablePath:'/proc/meminfo:MemAvailable',hostMemAvailable:mem,cgroupMaxPath,cgroupMax,cgroupCurrentPath,cgroupCurrent,cgroupHeadroom,objectBytes:objects,heapLimitMiB:512}));
  if(git(['rev-parse',sha+'^{tree}']).trim()!==tree)throw Error('Head tree mismatch');
 }
 function hashBlob(b){return createHash('sha1').update(Buffer.from('blob '+b.length+'\0')).update(b).digest('hex');}

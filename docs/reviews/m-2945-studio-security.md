@@ -164,3 +164,43 @@ Confirmação posterior alcançada pelo root, sem nova consulta deste subagente:
 Portanto, a identidade dos metadados da TREE-base canônica está confirmada pela consulta primária do root; os path/mode/blobSHAs fora das três mudanças são iguais aos do head. O before Page e os demais imports reais usados na prova correspondem ao source closure produtivo da base real. O teste autoral novo foi intencionalmente executado na versão head sobre a Page-base, para observar seu RED; isso não é execução da suíte inteira ou dos testes originais da base.
 
 Essa confirmação não afirma que todos os conteúdos off-graph estejam fisicamente presentes. O uso de write-tree --missing-ok continua somente cálculo de catálogo por path/mode/SHA. O403 anterior e a falta histórica de admissão cgroup não são apagados. O root contabilizou a consulta canônica posterior como27ª consulta do recorte, ainda abaixo de6MiB; não foi feita outra consulta por este subagente nem novo runtime/TypeScript.
+
+
+
+## Publicação B — driver futuro com admissão cgroup
+
+Nesta segunda etapa, somente o driver canônico proofs/m/review-2945-studio-security.mjs e este relatório recebem novos bytes. O driver passa ao blob2d5b7d403f235e1c2a2769ec30ea3c0fd69b7740,11.778 bytes, preservando o executável histórico5a181d4f1c97f8d64ea6bea209e4414db85d9fe3 no ancestral A. A prova07cd84ae4a8e13eb302115104596c018fc67990b permanece idêntica.
+
+A mudança futura do preflight lê memory.max/current do cgroup, exige valores finitos, seguros e consistentes e recusa folga inferior a1.610.612.736 bytes. MemAvailable do host fica somente como metadata. Fora desse guard e dos campos de sua mensagem, o driver é o mesmo: mesmas fontes/pins, cookies, casos,18asserções, gates e guard de transporte.
+
+Esta V2 recebeu somente node --check e lint do JS afetado: sintaxe exit0; ESLint0erros/0warnings no JSON, com o aviso de contexto Next já preservado no stderr. O guardV2 e o fluxo de18checks NÃO foram executados novamente. checkJs:false no check TypeScript separado não valida o tipo do driverJS. Não há nova evidência de execução do driverV2, nem resultado retroativo para seu novo guard.
+
+O resultado histórico18checks/16PASS/2RED foi produzido exclusivamente com driver5a18, com folga do host capturada e admissão cgroup histórica não demonstrada. A compilação strict posterior dos quatro roots tem sua própria medição cgroup válida e zero diagnósticos totais; ela não repara a lacuna histórica do runtime. Não se remove nem reclassifica nenhum dos dois REDs condicionais preexistentes.
+
+A confirmação posterior da TREE-base16269479e5fa4877c96e7cbce6296d6de7b47acb é identidade canônica de metadados, não coleta física de todos os blobs off-graph, suíte-base completa, execução do guardV2 ou aprovação global/CI. Nenhuma regra de negócio, gate, flag, conta ou fornecedor foi alterado.
+
+
+## Unidades posteriores — somente o bloco de admissão de memória
+
+O registro anterior de V2 validada apenas por sintaxe/lint é histórico. Sob nova autorização, apliquei as mesmas oito asserções ao bloco exato de admissão extraído de function preflight dos drivers5a181d4f1c97f8d64ea6bea209e4414db85d9fe3 e2d5b7d403f235e1c2a2769ec30ea3c0fd69b7740. NÃO executei o preflight completo, demais guardas filesystem/Git, jornada18checks, TypeScript, rede ou GitCLI.
+
+readFileSync foi injetado apenas para /proc/meminfo e /sys/fs/cgroup/memory.max/current; qualquer outro path seria recusado. O host sintético informou4.294.967.296 bytes disponíveis em todos os casos, ilustrando por que folga do host não prova folga do cgroup. Não são leituras atuais do sistema nem medição retroativa do runtime18/2.
+
+| Unidade | Esperado | Original5a18 | V22d5 |
+| --- | --- | --- | --- |
+| memory.max igual a max | recusar | aceita, RED | recusa, PASS |
+| memory.current malformado | recusar | aceita, RED | recusa, PASS |
+| memory.max9007199254740992, inteiro inseguro | recusar | aceita, RED | recusa, PASS |
+| memory.current negativo | recusar | aceita, RED | recusa, PASS |
+| memory.current maior que memory.max | recusar | aceita, RED | recusa, PASS |
+| Folga1.610.612.735, um byte abaixo do mínimo | recusar | aceita, RED | recusa, PASS |
+| Teto8.589.934.592 e uso4.000.000.000, folga adequada | aceitar | aceita, PASS | aceita, PASS |
+| Folga exata1.610.612.736, limite mínimo | aceitar | aceita, PASS | aceita, PASS |
+
+Bloco original:8checks,2PASS/6RED. BlocoV2:8checks,8PASS/0RED. O launcher terminou exit0 por confirmar esse RED→GREEN esperado, em0,196s, Node--max-old-space-size64, timeout10s, log1.131bytes<16KiB. Nenhuma correção V2 foi necessária; o blob2d5 permanece igual.
+
+Bloco original: 174 bytes, SHA25637a706e55c5356ab570f8a60c4b2f58b10aef39928e204e839bfe293687543fb. BlocoV2: 832 bytes, SHA256cd2339293f79b155a0e1da6f6323b3f1128f960a72231fc7d78a6168fbf16a26.
+
+Log SHA256ba63db3278df6f08eb09d1c1c4a5bd544d79b9ca787c2960370bd585acd62b2d; resultado JSON SHA256e544b8a93eaa246d16f9159b6c7bcc4d2dc5effe998319e11b329bf3bf72497a. Helpers cgroup-guard-units.* são locais, sem caminho novo de publicação.
+
+Escopo UNIT GUARD ONLY. Não se afirma execução integral da V2 ou das demais guardas; não houve rerun18 nem conserto retroativo da admissão cgroup histórica. Os doisLOWs, cookies, gates e fontes de negócio permanecem iguais. A publicaçãoA criada pelo root fica ancestral imutável: commitbc14bb75e4ce6fcb274cba6ad7b2a47f3e61e756/tree0fe46dfe849c38f245f895c367af82c57a0ca383.

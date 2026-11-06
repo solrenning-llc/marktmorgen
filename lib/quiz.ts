@@ -597,10 +597,24 @@ async function passedExactly(courseId: string, who: string): Promise<Set<string>
 }
 
 /**
- * The lessons whose quizzes this student has passed, and the assignments they have done. A reply in an unknown
- * shape reads as nothing passed: later lessons stay shut until it reads, never opened on a reply that was not read.
+ * The lessons whose quizzes this student has passed, and the assignments they have done, read exactly: a reply in
+ * an unknown shape throws UnknownReplyError. This is what a copy of a person's data reads (lib/person-copy.ts), so
+ * a pass that could not be read makes the copy fail as not done, never a complete copy with the pass left out
+ * (Codex D2 on #2875).
  */
 export async function passedQuizzes(courseId: string, who: string): Promise<Set<string>> {
+  if (!isRedisConfigured()) return new Set();
+  const passed = await passedExactly(courseId, who);
+  if (!passed) throw new UnknownReplyError("a student's passed quizzes");
+  return passed;
+}
+
+/**
+ * The same passes for a gate that decides what a student may open. A reply in an unknown shape reads as nothing
+ * passed: later lessons stay shut until it reads, never opened on a reply that was not read. Never use this for
+ * anything that reports what was passed, such as a data copy; that reads passedQuizzes.
+ */
+export async function passedForGate(courseId: string, who: string): Promise<Set<string>> {
   if (!isRedisConfigured()) return new Set();
   return (await passedExactly(courseId, who)) ?? new Set();
 }
@@ -626,8 +640,9 @@ export async function resetTries(course: Course, who: string, room: DataStore): 
   if (lessons.length === 0) return;
   // What the tries weighed comes back to the store's data room.
   const held = repliesFor(await redisPipeline(lessons.flatMap(({ lesson }) => [["GET", resultKey(course.id, lesson.id, who)], ["GET", triesKey(course.id, lesson.id, who)]])), lessons.length * 2);
-  if (!held) throw new UnknownReplyError("a student's quiz tries");
-  const freed = held.reduce((sum: number, raw) => sum + kept(typeof raw === "number" ? String(raw) : raw), 0);
+  // Each GET answers a string or null; anything else is not evidence of what would be deleted (Codex D2 on #2875).
+  if (!held || held.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a student's quiz tries");
+  const freed = held.reduce((sum: number, raw) => sum + kept(raw), 0);
   if (freed) await giveData(room, [{ slot: TRIES_SLOT(course.id), bytes: freed }]);
   await redisPipeline(
     lessons.flatMap(({ lesson }) => [

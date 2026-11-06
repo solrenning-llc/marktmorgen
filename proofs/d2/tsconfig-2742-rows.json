@@ -1,0 +1,1 @@
+{"extends":"../../tsconfig.json","compilerOptions":{"incremental":false},"include":["../../lib/plan-refund.ts","../../tests/plan-refund-read.test.ts","../../tests/plan-refund-write.test.ts","../../tests/plan-refund-stripe-world.ts","../../tests/d2-review-2742-rows.proof.ts"]}

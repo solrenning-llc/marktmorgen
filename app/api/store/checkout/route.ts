@@ -178,8 +178,15 @@ export async function POST(request: NextRequest) {
   // A call is booked for a time on its own page, never bought without one.
   if (product.call) return away(`/@${store.handle}/book/${product.id}`);
   // Every license key in the pool is given: nobody is charged for one that
-  // does not exist. The creator was emailed when the pool ran low.
-  if (await outOfKeys(store, product).catch(() => false)) return away(`/@${store.handle}?status=soldout`);
+  // does not exist. The creator was emailed when the pool ran low. A count
+  // that could not be read is unknown, never "some left": nothing opens and
+  // the buyer is told plainly (SG2, finding 11).
+  const noKeys = await outOfKeys(store, product).then(
+    (out) => out,
+    () => null,
+  );
+  if (noKeys === null) return away(`/@${store.handle}?status=error`);
+  if (noKeys) return away(`/@${store.handle}?status=soldout`);
 
   // Asked before a gift or a group is written down, so a refused yes leaves
   // nothing behind; the charge itself checks again, with what was added.

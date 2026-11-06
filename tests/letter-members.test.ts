@@ -32,6 +32,7 @@ import type { Broadcast } from "@/lib/broadcasts";
 import { MAX_LETTER_PRODUCTS, membersOnly, parseLetter } from "@/lib/letter-rules";
 import { letterIdFor, listLetters, publishLetter, publishedLetters, readLetter } from "@/lib/letters";
 import { letterReader } from "@/lib/letter-access";
+import { holdsProducts, holdsProductsOrThrow, paidForAny } from "@/lib/community-access";
 import { mintPass, passCookieName } from "@/lib/learn";
 import LetterPage, { generateMetadata } from "@/app/[handle]/letters/[letter]/page";
 import LettersPage from "@/app/[handle]/letters/page";
@@ -324,6 +325,58 @@ async function main(): Promise<void> {
   }
   forgetAnswers();
 
+  part("Codex G return: exact wire rows and bounded reads");
+  for (const [label, payload, endpoint] of [
+    ["empty row", {data:[{}],has_more:false}, "/checkout/sessions"],
+    ["array row", {data:[[]],has_more:false}, "/checkout/sessions"],
+    ["missing has_more", {data:[]}, "/checkout/sessions"],
+    ["string has_more", {data:[],has_more:"false"}, "/checkout/sessions"],
+    ["null entry", {data:[null],has_more:false}, "/checkout/sessions"],
+    ["primitive entry", {data:[0],has_more:false}, "/checkout/sessions"],
+    ["unknown session status", {data:[{...paid("cs_test_badstatus001",club),status:"alien",payment_status:"alien"}],has_more:false}, "/checkout/sessions"],
+    ["intent empty row", {data:[{}],has_more:false}, "/payment_intents"],
+    ["intent array row", {data:[[]],has_more:false}, "/payment_intents"],
+    ["intent missing pagination", {data:[]}, "/payment_intents"],
+    ["intent more pages", {data:[],has_more:true}, "/payment_intents"],
+  ] as const) {
+    forgetAnswers();
+    const answer=globalThis.fetch;
+    globalThis.fetch=(async(input: string | URL | Request, init?:RequestInit)=>{
+      const url=new URL(String(input instanceof Request?input.url:input));
+      if(url.hostname!=="api.stripe.com")return answer(input,init);
+      if(url.pathname.endsWith(endpoint)) return new Response(JSON.stringify(payload),{status:200});
+      if(endpoint==="/payment_intents" && url.pathname.endsWith("/checkout/sessions")) return new Response(JSON.stringify({data:[paid("cs_test_otherCust01",other.product.id)],has_more:false}));
+      return answer(input,init);
+    }) as typeof fetch;
+    try {
+      is(`${label}: reader unknown`,(await letterReader(store,letter,jar({[cookieName]:anaPass}))).state,"unknown");
+      is(`${label}: negative cache absent`,redis.keys().filter(k=>k.startsWith("nl:letters:ok:")).length,0);
+      const html=await render(store,letter.id,{[cookieName]:anaPass});
+      is(`${label}: no false denial or body`,[html.includes("We couldn&#x27;t check your purchase just now"),html.includes("This address has none of these products"),html.includes(SECRET)],[true,false,false]);
+      const key=`nl:g2464:${label}`;
+      is(`${label}: nonstrict refuses`,await holdsProducts(store,[club],"ana@example.com",key,"g"),false);
+      is(`${label}: nonstrict cache absent`,redis.run(["GET",key]),null);
+      let thrown=false;
+      try { await holdsProductsOrThrow(store,[club],"ana@example.com",key+":strict","g"); } catch {thrown=true;}
+      is(`${label}: strict throws`,thrown,true);
+    } finally {globalThis.fetch=answer;forgetAnswers();}
+  }
+  for(const count of [10,11]) {
+    const answer=globalThis.fetch;
+    let piCalls=0;
+    globalThis.fetch=(async(input:string | URL | Request)=>{
+      const url=new URL(String(input instanceof Request?input.url:input));
+      if(url.pathname.endsWith("/checkout/sessions")) return new Response(JSON.stringify({data:Array.from({length:count},(_,i)=>({...paid(`cs_test_bound${i}`,other.product.id),customer:`cus_TestBoundary${i}`})),has_more:false}));
+      piCalls+=1;
+      return new Response(JSON.stringify({data:[],has_more:false}));
+    }) as typeof fetch;
+    try {
+      let result:unknown;
+      try { result=await paidForAny(store,"ana@example.com",new Set([club])); } catch {result="unknown";}
+      is(`${count} customers: result`,result,count===10?false:"unknown");
+      is(`${count} customers: at most ten payment queries`,piCalls,10);
+    } finally {globalThis.fetch=answer;}
+  }
   part("The link form: its field is named and described, and a notice after it is reached");
   const formHtml = await render(store, letter.id);
   is(

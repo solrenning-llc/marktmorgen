@@ -17,6 +17,9 @@
  *     list tried first on every run, and let go only once handled (it never expires); with that list full, the pass
  *     stays on its page;
  *     an anchor in another shape starts no pass (Claude 4 on #2781, C4-20261106-0645-C5-25);
+ *   - the places a purchase handed out are read exactly: a list of them in another shape (null, an odd length, a
+ *     value not text) or one place that does not read is unknown, never "nobody": the refund is not marked, waits to
+ *     be tried again, and a healthy run takes the place back (Codex G on #2781, proof 1e7a4920; C4-20261106-0710-C5-29);
  *   - every read is pinned to the lot's version.
  */
 import { TEST_CONSENT } from "./digital-consent-fixture";
@@ -232,6 +235,40 @@ async function main(): Promise<void> {
   pages = [list([refund("re_C4Full000001", "pi_C4Full000001")])];
   await run();
   is("not kept, not marked, and the anchor stays", [(await redis.pipeline([["HEXISTS", retryKey, "re_C4Full000001"]]))[0], (await redis.pipeline([["HLEN", retryKey]]))[0], await seen("re_C4Full000001"), await anchor()], [0, 100, 0, null]);
+
+  part("group-buy.ts: the places handed out are read exactly (Codex G on #2781, proof 1e7a4920)");
+  await redis.pipeline([["DEL", retryKey]]);
+  for (const [n, bad] of [[0, null], [1, ["odd-field"]], [2, { broken: true }], [3, ["ana", "{not json"]]] as [number, unknown][]) {
+    await redis.pipeline([["DEL", anchorKey], ["DEL", `${anchorKey}:pass`]]);
+    const pi = `pi_GMembersUnknown${n}`;
+    const refundId = `re_GMembersUnknown${n}`;
+    const group = await paidGroup(pi, 10 + n);
+    const email = `holder${n}@example.com`;
+    const sent = await askPlace({ store, id: group, email, product, base: "https://marktmorgen.com/@lotthree", from: '"Lot Three" <hello@marktmorgen.com>', ordersLink: async () => null });
+    const placeToken = mails.filter((m) => m.to[0] === email).at(-1)?.text.match(/\?take=([0-9a-f]{64})/)?.[1] ?? "";
+    const taken = await takePlace({ store, token: placeToken, recordStart: async () => {} });
+    const owner = (await storeForEmail("lotthree@example.com"))!;
+    is(`places ${JSON.stringify(bad)}: a place was taken`, [sent, taken.outcome, (await importedFor(owner, email)).length], ["sent", "taken", 1]);
+    pages = [list([refund(refundId, pi)])];
+    const real = redis.pipeline.bind(redis);
+    let hit = 0;
+    redis.pipeline = async (commands: (string | number)[][]) => {
+      const reply = await real(commands);
+      if (commands[0]?.[0] === "HGETALL" && commands[0]?.[1] === `nl:grp:${group}:m`) {
+        hit += 1;
+        return [bad];
+      }
+      return reply;
+    };
+    try {
+      await revokeRefundedGroups(owner, Date.now() + 30_000, async () => {});
+    } finally {
+      redis.pipeline = real;
+    }
+    is(`places ${JSON.stringify(bad)}: unknown, so not marked; the refund waits to be tried again; the place is still held`, [hit, await seen(refundId), (await redis.pipeline([["HGET", retryKey, refundId]]))[0], (await importedFor((await storeForEmail("lotthree@example.com"))!, email)).length], [1, 0, pi, 1]);
+    await revokeRefundedGroups(owner, Date.now() + 30_000, async () => {});
+    is(`places ${JSON.stringify(bad)}: a healthy run takes the place back and lets the refund go`, [(await importedFor((await storeForEmail("lotthree@example.com"))!, email)).length, await seen(refundId), (await redis.pipeline([["HEXISTS", retryKey, refundId]]))[0]], [0, 1, 0]);
+  }
 
   part("group-buy.ts: an anchor in another shape starts no pass");
   await redis.pipeline([["DEL", retryKey], ["SET", anchorKey, "not a time"]]);

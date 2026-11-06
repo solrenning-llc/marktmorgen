@@ -1320,6 +1320,7 @@
     "components/email-suggestion.tsx",
     "components/email-sync-editor.tsx",
     "components/embed-messenger.tsx",
+    "components/empty-state.tsx",
     "components/exit-offer-editor.tsx",
     "components/exit-offer-slot.tsx",
     "components/exit-offer.tsx",

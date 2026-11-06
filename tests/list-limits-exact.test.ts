@@ -162,6 +162,17 @@ test("the routes answer an unknown read with an honest 503, and the studio says 
   const studio = readFileSync("components/email-studio.tsx", "utf8");
   assert.match(studio, /\bsegment_unavailable: "[^"]+"/, "the email studio names the segment_unavailable refusal in words");
   assert.equal((await readLinks(store.statsId)).length, 1);
+  // A change made whose list cannot be read back says so, never "no links" or "no groups".
+  const code = (await readLinks(store.statsId))[0].code;
+  const ended = await withReply("HVALS", `nl:slink:store:${store.statsId}`, [], () => post(shortLinksRoute, "/api/store/short-links", { action: "remove", code }));
+  assert.deepEqual(ended, { status: 503, body: { ok: false, error: "unread" } });
+  assert.match(shortLinks, /\bunread: "[^"]+"/, "the short links panel names the unread answer in words");
+  const kept = await post(mailRoute, "/api/store/mail", { action: "segment-save", name: "Best", narrow: { minSpent: 100 } });
+  assert.equal(kept.status, 200);
+  const id = (await listSegments(store.listId))[0].id;
+  const removed = await withReply("HVALS", `nl:mail:segs:${store.listId}`, [], () => post(mailRoute, "/api/store/mail", { action: "segment-remove", id }));
+  assert.deepEqual(removed, { status: 503, body: { ok: false, error: "segment_unread" } });
+  assert.match(studio, /\bsegment_unread: "[^"]+"/, "the email studio names the segment_unread answer in words");
 });
 
 // ------------------------------------------------------------ the ten-minute copy (LOW)

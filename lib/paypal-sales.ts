@@ -809,8 +809,15 @@ export async function watchPayPal(
       await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
       continue;
     }
-    // Only what this very payment gave is taken back.
+    // Only what this very payment gave is taken back. A payment refunded in full no longer stands either way, so it
+    // leaves this buyer's own payments too, read exactly, and is never later taken for one that keeps the purchase
+    // (Codex G on #2791).
     if ((v as { job: string }).job !== `paypal:${order}`) {
+      const left = repliesFor(await redisPipeline([["SREM", ownKey(statsId, paid.email, paid.product), order]]), 1);
+      if (!left || (left[0] !== 0 && left[0] !== 1)) {
+        await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
+        continue;
+      }
       await redisPipeline([["ZREM", watchKey(statsId), order]]);
       continue;
     }
@@ -842,6 +849,13 @@ export async function watchPayPal(
         continue;
       }
       if (read) {
+        // A payment already seen refunded in full does not keep it, however long its record stays (Codex G on #2791).
+        const seen = repliesFor(await redisPipeline([["ZSCORE", refundedKey(statsId), other]]), 1);
+        if (!seen || (seen[0] !== null && (typeof seen[0] !== "string" || !Number.isFinite(Number(seen[0]))))) {
+          unread = true;
+          continue;
+        }
+        if (seen[0] !== null) continue;
         kept = read;
         break;
       }

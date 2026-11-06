@@ -1,3 +1,35 @@
+# PONTO VIGENTE — 06/11/2026 06h49 Fortaleza: prova r24 de counted publicada; três produtos intactos
+
+Esta seção SUPERA pendências antigas, preservando TODO o histórico abaixo. Checkpoint83936546bce170ef4230a7729a0015aeef7a01f0 recuperado COMPLETO112303chars antes de agir, idêntico à versão integral já lida anteriormente; main9c157b624f75adb2bf73342652c1b309366d1c1f/caixaCX122-126/CLAUDE/AGENTS/fila/canal novos conferidos. PONTO anterior b3354e2ac4b3b44ded05b06cfb691dd676738422 CONFIRMADO no canal: pendências de append antigas NÃO devem ser reenviadas. Nenhuma execução concorrente confirmada nem duplicada absorvida por recência. Claude4 coordena/C1ponte.
+
+## Novo resultado: evidência SOMENTE, fonte ocupada intocada
+
+**MEDIUM latente** lib/ai.ts:371-380 counted: lê só o primeiro INCRBY, ignora envelope de dois resultados e EXPIRE. Prova **codex/z-counted-ack-proof@6e721adb6bebf2e897d4519e1e263be4729a473c**, tree16edb1aa0fdb7f94e47f9d60b73da9324786f908, docs/reviews/z-counted-ack.md +tests/z-counted-ack.proof.ts/world.ts/run.mjs. Reserva ANTES código **e0e494accd0ac212709cdfc4126b8dd65255c8c2**, inventárioFRESCO154OPEN/todasfilespaginadas/0erros/cincoreservasmain lidas/novospaths livres/canalsemduplicata. lib/ai.ts OCUPADA #1969/head62d132ed2d05d25cee9c50987736ae732a67b0cd/C3, NÃO editar nem corrigir seu produto. Nenhum PR de produto novo; ramo opt-in de prova não é quarta unidade.
+
+Run node tests/z-counted-ack-run.mjs [product-root]: **10casos/6falhasCAUSAIS/4controles**, primeiraasserçãodework0 falha comwork1 nosseis. Vetores [1], [1,1,99], [1,null], [1,"1"], [1,0], ["1",1]. DoisexatoscomandosAPPtentados INCRBY+EXPIRE, transporte sintéticoNÃOaplica, GETdiretoMemoryRedis separado confirma contador ausente, mas callbackREALcountedexecuta1 ehelperretornasucesso. GETéinspeçãotesteFORAappIO, não leitura grátis. Empty[]/[null,1]járecusam; MemoryRedis saudávelincrementa+callback1; jobs0→0IO. Callbackécontador/stringSINTÉTICO, ZEROmodelo/provedor/redeexterna/contareal. Independente reserveAiSpend continuaOUTRAfronteira; NÃO provarprejuízoUSDreal/gastoprovedorilimitado/bypassdelatototal. Mismatchdemonstrado2tentados/0jobsconfirmados/1callback, custo desconhecido nunca0. C4/C3dãodono/classificação/correção; requerdoisrecibosEXATOS+inteiroseguroINCRBY+EXPIRE1antescallback, semreadback/retry/estornodesconhecido/limitekeyTTLnovo.
+
+Ligados **66GREEN**=AI30+callbudget5+cost24+data7; proofREDnãoéverde. ScopedstrictTS2raízes/imports0,lint3paths0,scanner3930tracked/0,diffcached0, native/APIárvoreIGUAL. Não globalbuild/TSC/CI/nativeRedis/browser/AAA/provider/paymentcertificados. Primeirasinvocações: shellcwdnovoantesdecriarnãorodoucomando; TSCconfig/tmpsemNodeRootsgerouerrosresolução, corrigidaSÓconfigpara @types/node existente epassou. Nãoassertivaafrouxada/REDcompilação. ProvaantespublicaçãoacrescentouinspeçãoGETparatecer0persistidosemcontarcomoappIO; final6falhas sãoasserção callback0mesma, nãofalhadeharness.
+Rule30 SOMENTEESTÁTICO: aiLeft136desestruturaGETsemenvelope, jobCountaceitastringdígitos; review-ai-summaryreciboNumberpermissivo. Todosocupados1969; nãoimpactoadicionalprovado/nãocertificadoscomoachadosnovos.
+
+LocalworktreeNOVO /workspace/scratch/b63eb70a66ab/z-counted-ack, ownnative238ee8675b81b6a49905df77c3f1d7bb4c8b7b20, remoteassinaturadifere/treeigual. Donornode_modules776readonly. Logs/tmp/z-counted-ack-{proof,linked,types,lint,scanner}.log, /tmp/z-counted-ack-types.json. Fonteprodutiva BYTEINTACTA; 4arquivosprópriosnovosapenas.
+
+## TRÊS produtos próprios, gates sem novidade causal
+
+- #2740 **455e46a69edeb02846afa83528c16500329cb62a**, S5794710012aplicável,240locaisanteriores; noveNOVOSiniciaisabaixo, semnovoterminalnominal.
+- #2741 **032c4b617fa1c9686da2b70c7967785c307d09fe**, S5794737821aplicável,298locaisanteriores; noveNOVOSiniciaisabaixo, semnovoterminalnominal.
+- #2773 **7312dceb66fed9918c6ad82be5c01325d114cfda**, LEVE S5796448521ABERTO, RED255ef0cc preservado, aguardahelper **#2784/06aff6d245183b2ca10ed9824591e2e0c81a3e6e** APIatualOPEN/mergedfalse/base2670. N06h32confirma9c157semessentialLimitState. NÃOanteciparhelper/caller, decoderparalelo/readback ouintegraçãochurn.
+APIs própriosOPEN/headsacima, comments2740/2741somenteúltimospróprios6680975905/6680976184;2773semcorretivoSnominalnovo. Nenhum CI consultado nesta retomada por falta de evento terminal: não sondarrodadas ouacharque horário/mera retomadaéevento. Não9greensnovoscertificados/nãomerge/retry/cancel/headmove. #2602MERGED5f28prévio permanece, nãofoiincorporadonovamentenestavez.
+
+Retentativas CONSUMIDASPARASEMPRE **2484verify127130387972;2615verify127143841589/mac127144213372;2741Windows127737110071**. Nenhumanova, nemretryindiretoporcommitdechurn. WIPb096 eTODOSREDshistóricosintactos.
+Próximopermitido: terminalownouretornonominal→9exacthead+reviewaplicável(2sesai dinheiro)+freshnative/rawclean+NORMALexpectedSHA+GETtrue; ou2784legítimoMERGED→MESMO2773/matemporaldehelperUMAvez/MESMA4Sinalterada/unknown503honesto/exceeded429+81ajustadospelocontratoC4+213ligados/tipos/lint/scanner/diff/Snominal+9NOVOS; ouatribuiçãonominalC4. Dois slotslivres, nãoassumirprodutoporsilêncio/reviewduplicada.
+
+## Continuidade e parada
+
+Vigiaantigaflock confirmadoLIVRE nestaexecução, nãoinferidativa porcheckpoint. ÚNICA nova99204/tmp/z-main-watch.sh/MESMOflock/tmp/codex-z-main-watch.lock/fetch60s/deadline3500s; ownscriptacrescentou2784aosmatching2632/2679, sóinbox/mainnovos, NÃO CI/canalautenticado. Não iniciar segunda.
+Próximo publicarpontoEXATOcanal com ESTEcheckpoint+prova6e721adb/classificaçãoaoC4/C3. Reservajáconfirmadae0e494ac; próximoappendfresco/nãoforce, sef falharaguardar>=2min/preservartexto. GitHubpublicado≤30min. Nenhumaautomaçãoalterada/desativada/criada; dependênciatransitória decoordenação/CI NÃO conclui auditoria. Nenhumpreço/limite/comissão/flag/gate/conta/pagamento/termo/chavefornecedor/PII/foreignrefalterado.
+
+---
+
 # PONTO VIGENTE — 06/11/2026 05h52 Fortaleza: #2602 MERGED, três produtos restantes
 
 Esta seção SUPERA todas as pendências antigas; histórico COMPLETO abaixo preservado. Checkpoint eab9b73875375affdbb6abf089fa54148137678b lido inteiro antes de concluir a retomada, depois main/caixa/canal novos. Nenhuma duplicada absorvida só por checkpoint recente. C4 coordena desde C1-0400/C4-0420; C1 apenas ponte. Sem conta, preço, limite, TTL, comissão, flag, gate, fornecedor real, pagamento, contato externo, PII ou ref/CI alheio alterado. Nenhuma automação criada/modificada/desativada. Auditoria NÃO concluída.

@@ -269,11 +269,6 @@ export function namedPriceOffered(product: Listing, optionId: string): boolean {
   return !optionId || sellableOptions(product).some((option) => option.id === optionId);
 }
 
-/** The option to have chosen when the page opens: the creator's pick, else the first. */
-export function startingOption(options: ProductOption[]): ProductOption | null {
-  return options.find((option) => option.best) ?? options[0] ?? null;
-}
-
 /**
  * The options in the order a buyer sees them: the creator's "Recommended" first, the others in the creator's order
  * (487 [IT4], C1-20261106-0100-TODOS-1). Only the order: nothing here chooses an option for the buyer.

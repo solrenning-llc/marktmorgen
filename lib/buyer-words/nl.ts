@@ -146,6 +146,7 @@ export const nl: BuyerWords = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent) => `je bespaart ${percent}%`,
   chooseOptionFor: (title) => `Kies een optie voor ${title}`,
+  chooseOne: "Kies er een",
   recommended: "Aanbevolen",
   recommendedAfter: " (aanbevolen)",
   howToPayFor: (title) => `Hoe je ${title} betaalt`,

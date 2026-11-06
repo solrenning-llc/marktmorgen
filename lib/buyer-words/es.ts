@@ -152,6 +152,7 @@ export const es: BuyerWords = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent) => `ahorras un ${percent}\u00a0%`,
   chooseOptionFor: (title) => `Elige una opción de ${title}`,
+  chooseOne: "Elige una",
   recommended: "Recomendado",
   recommendedAfter: " (recomendado)",
   howToPayFor: (title) => `Cómo pagar ${title}`,

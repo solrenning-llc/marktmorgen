@@ -260,7 +260,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           { title: "Add up to 50 options", body: "A name the buyer reads — “1 week,” “Commercial license” — a price for each, and, if you like, a few lines on what each one includes." },
           { title: "Give each option its own delivery", body: "Its own file, up to 5 GB, or its own link. The buyer of the small size never receives the big one. On a course, every option opens the course, and a file or link on one is what that one adds." },
-          { title: "The buyer compares and picks", body: "With what each includes written down, the options stand side by side, and the one you recommend opens chosen. More than six become a list to pick from. What is charged is read from what you saved, never from the page." },
+          { title: "The buyer compares and picks", body: "With what each includes written down, the options stand side by side, and the one you recommend is marked and listed first, while the buyer still picks. More than six become a list to pick from. What is charged is read from what you saved, never from the page." },
         ],
       },
       {

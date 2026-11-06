@@ -1172,6 +1172,9 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/discount/route.ts", names: ["countStudio(store, null, SCHEDULE_UNITS)"] },
       { file: "lib/discount-schedule-rules.ts", names: ["SCHEDULE_UNITS = ACTIVATION_TRIES", "MAX_SCHEDULED_CODES"] },
       { file: "app/api/cron/imports/route.ts", names: ["activateScheduledCodes("] },
+      // The same code scheduled through the API (511 [CK3], unit 3) takes the same SCHEDULE_UNITS studio requests, after its own API requests
+      // (codeScheduleWork) and before Stripe is asked.
+      { file: "app/api/v1/codes/route.ts", names: ["takeAllowance(store, \"studio\", SCHEDULE_UNITS)", "apiReadUnits(codeScheduleWork())"] },
       // The totals of every store take a page of each other store's studio, as the Terms say (C4-4, owner's decision of 4 November 2026, C4-18).
       { file: "app/studio/totals/page.tsx", names: ["countStudio(store, null, STUDIO_PAGE_UNITS)"] },
     ],

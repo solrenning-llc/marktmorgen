@@ -41,6 +41,7 @@ import { SHARE_LIMITS } from "@/lib/funnel-share-rules";
 import { DAY_FIELDS_MAX, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/stats";
 import { DELIVERY_MAX_BYTES, LOG_SIZE, READ_DELIVERIES_CALLS_EACH, RECENT_MESSAGES_MAX } from "@/lib/webhooks";
 import { MAX_CODES } from "@/lib/discount";
+import { MAX_SCHEDULED_CODES } from "@/lib/discount-schedule-rules";
 import { MAX_FLOWS } from "@/lib/flow-limits";
 import { MOVE_BYTES, MOVE_KEY_BYTES, moveReads } from "@/lib/call-moves-read";
 
@@ -490,16 +491,44 @@ export function eventsSentMost(sizes: readonly number[], most: number): number {
 
 /** A discount code as sent; the codes are one page of the creator's Stripe account (lib/discount.ts, MAX_CODES a page). */
 export const CODE_SENT_BYTES = 1_024;
+/**
+ * One field of a store's scheduled codes as kept (lib/discount-schedule.ts): a promotion code id of at most 80
+ * characters and its record (the code's word of at most 40, its start, end, tries and failed mark), at its most.
+ */
+export const SCHEDULE_ENTRY_BYTES = 256;
+/** A store's scheduled codes read whole (HGETALL), at most MAX_SCHEDULED_CODES fields (511 [CK3]). */
+export const SCHEDULES_READ_WORK: ReadWork = { commands: 1, bytes: MAX_SCHEDULED_CODES * SCHEDULE_ENTRY_BYTES, sent: 0, stripePages: 0, roundTrips: 1 };
+/**
+ * The store's schedules held by one hand (lib/discount-schedule.ts, holding): the claim, the claim read back when
+ * its answer is not known, and the release, each a trip of its own.
+ */
+const SCHEDULE_LOCK_WORK: ReadWork = { commands: 3, bytes: 0, sent: 0, stripePages: 0, roundTrips: 3 };
+/** Reading the codes (GET /api/v1/codes): one page of the creator's Stripe account, the store's schedules beside it, and the codes sent. */
 export function codesWork(): ReadWork {
-  return { commands: 0, bytes: 0, sent: MAX_CODES * CODE_SENT_BYTES, stripePages: 1, roundTrips: 0 };
+  return addWork({ commands: 0, bytes: 0, sent: MAX_CODES * CODE_SENT_BYTES, stripePages: 1, roundTrips: 0 }, SCHEDULES_READ_WORK);
 }
 /** Making a code (POST /api/v1/codes): two calls to the creator's Stripe account (the coupon, then its code), and the code sent. */
 export function codeMakeWork(): ReadWork {
   return { commands: 0, bytes: 0, sent: CODE_SENT_BYTES, stripePages: 2, roundTrips: 0 };
 }
-/** Switching a code off (DELETE /api/v1/codes): the codes read to find it, the call that switches it off and the codes read again and sent, at their most. */
+/**
+ * Scheduling a code (POST /api/v1/codes with starts_at, 511 [CK3]): making it, and the call that switches it off
+ * again if Stripe made it live; the lock, the count of the store's schedules, and the schedule and its due time
+ * written in one trip. The job's tries are not here: they are the studio requests taken with it (SCHEDULE_UNITS).
+ */
+export function codeScheduleWork(): ReadWork {
+  return addWork(addWork(codeMakeWork(), { stripePages: 1 }), addWork(SCHEDULE_LOCK_WORK, { commands: 3, roundTrips: 2 }));
+}
+/**
+ * Switching a code off (DELETE /api/v1/codes): the codes read to find it, its schedule dropped first (the lock,
+ * the schedule read, then taken out with its due time in one trip), the call that switches it off and the codes
+ * read again with the store's schedules and sent, at their most.
+ */
 export function codeStopWork(): ReadWork {
-  return { commands: 0, bytes: 0, sent: MAX_CODES * CODE_SENT_BYTES, stripePages: 3, roundTrips: 0 };
+  return addWork(
+    addWork({ commands: 0, bytes: 0, sent: MAX_CODES * CODE_SENT_BYTES, stripePages: 3, roundTrips: 0 }, addWork(SCHEDULE_LOCK_WORK, { commands: 3, bytes: SCHEDULE_ENTRY_BYTES, roundTrips: 2 })),
+    SCHEDULES_READ_WORK,
+  );
 }
 
 // ---------------------------------------------------------------- the store's pages and courses (MCP read tools, 631 [AA1] (a))

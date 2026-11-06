@@ -22,7 +22,7 @@ import {
   DISPUTE_READ_PAGES, EMAILS_BROADCASTS, MAIL_REVENUE_PAGES, MEMBERSHIPS_COLD_WORK, MEMBERSHIP_PAGES, REFUND_READ_PAGES, RENEWAL_PAGES, SALES_PAGES,
   codesWork, emailsWork, eventsWork, listingsWork, mailRevenueColdWork, membershipsWork, numbersWork, productsPageWork, scannedPageWork,
   API_PAGE_ROWS, EMAILS_PROBE_WORK, NUMBERS_KEEP_WORK, NUMBERS_KEPT_BYTES, NUMBERS_SENT_BYTES, addWork, boughtNextWork, keptNumbersWork, listPageMost, settledUnits,
-  EVENTS_PROBE_MOST, LOG_ENTRY_BYTES, codeMakeWork, codeStopWork, eventsSentMost,
+  EVENTS_PROBE_MOST, LOG_ENTRY_BYTES, codeMakeWork, codeScheduleWork, codeStopWork, eventsSentMost,
 } from "@/lib/api-read-rules";
 import { DELIVERY_MAX_BYTES, LOG_SIZE, RECENT_MESSAGES_MAX } from "@/lib/webhooks";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
@@ -493,6 +493,7 @@ test("an API reading that reads more than a page takes further requests that cov
   assert.ok(apiReadUnits(eventsWork()) >= apiReadUnits(eventsWork({ deliveries: LOG_SIZE, bytes: LOG_SIZE * (LOG_ENTRY_BYTES + DELIVERY_MAX_BYTES), sent: eventsSentMost(Array(LOG_SIZE).fill(DELIVERY_MAX_BYTES), RECENT_MESSAGES_MAX) })), "the most holds every measured reading");
   covers(codesWork(), "codes");
   covers(codeMakeWork(), "making a code");
+  covers(codeScheduleWork(), "scheduling a code");
   covers(codeStopWork(), "switching a code off");
   // The bookings at their most; nothing without Stripe.
   covers(bookingsWork(true), "bookings");
@@ -563,6 +564,8 @@ test("an API reading that reads more than a page takes further requests that cov
   assert.ok(apiReadUnits(eventsWork()) >= apiReadUnits(EVENTS_PROBE_MOST), "the most a reading of events takes holds its measuring");
   before("app/api/v1/codes/route.ts", "const refused = await takeMoreApi(store, apiReadUnits(codesWork()));", "listCodes(");
   before("app/api/v1/codes/route.ts", "const refused = await takeMoreApi(store, apiReadUnits(codeMakeWork()));", "createCode(");
+  before("app/api/v1/codes/route.ts", "const refused = await takeMoreApi(store, apiReadUnits(codeScheduleWork()));", 'const paid = await takeAllowance(store, "studio", SCHEDULE_UNITS);');
+  before("app/api/v1/codes/route.ts", 'const paid = await takeAllowance(store, "studio", SCHEDULE_UNITS);', "const made = await scheduleCode(store, asked, window, now);");
   before("app/api/v1/codes/route.ts", "const refused = await takeMoreApi(store, apiReadUnits(codeStopWork()));", "const before = await listCodes(account);");
   before("app/api/mcp/route.ts", "const read = await apiNumbers(store,", "await tool(read.data)");
   before("app/api/mcp/route.ts", "const refused = await read.settle(", "result(id, answer)");

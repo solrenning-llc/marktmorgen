@@ -74,13 +74,13 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "ck3-u3-shop", "CK3 Unit Three Shop", "");
   await ensureStatsId(OWNER);
-  await setSubscription(OWNER, { customerId: "cus_Ck3u3", subscriptionId: "sub_Ck3u3", active: true, tier: "pro", cycle: "month", period: paidPeriod() });
-  await setStripeAccount(OWNER, ACCOUNT, true);
+  await setSubscription(OWNER, { customerId: "cus_Ck3UnitThree1", subscriptionId: "sub_Ck3UnitThree1", active: true, tier: "pro", cycle: "month", period: paidPeriod() });
   const shop = async () => (await storeForEmail(OWNER)) as Store;
-  const store = await shop();
-  const reader = await makeKey(store.sid, "Synthetic reader");
-  const writer = await makeKey(store.sid, "Synthetic writer", Date.now(), true);
+  const reader = await makeKey((await shop()).sid, "Synthetic reader");
+  const writer = await makeKey((await shop()).sid, "Synthetic writer", Date.now(), true);
   if (!reader.ok || !writer.ok) throw new Error("no synthetic keys");
+  await setStripeAccount(OWNER, ACCOUNT, true);
+  const store = await shop();
   const auth = (key: string) => ({ Authorization: `Bearer ${key}`, "Content-Type": "application/json" });
   const list = async () => { const r = await GET(new Request("https://marktmorgen.com/api/v1/codes", { headers: auth(reader.key) })); return { status: r.status, body: (await r.json()) as Record<string, unknown> }; };
   const make = async (body: unknown, key = writer.key) => { const r = await POST(new Request("https://marktmorgen.com/api/v1/codes", { method: "POST", headers: auth(key), body: JSON.stringify(body) })); return { status: r.status, body: (await r.json()) as Record<string, unknown> }; };
@@ -191,7 +191,7 @@ async function main(): Promise<void> {
   part("The route takes every unit before Stripe is asked");
   const route = readFileSync("app/api/v1/codes/route.ts", "utf8");
   const at = (s: string) => route.indexOf(s);
-  is("the API units, then the studio units, then the schedule", at("apiReadUnits(codeScheduleWork())") > 0 && at("apiReadUnits(codeScheduleWork())") < at("countStudio(store, null, SCHEDULE_UNITS)") && at("countStudio(store, null, SCHEDULE_UNITS)") < at("scheduleCode("), true);
+  is("the API units, then the studio units, then the schedule", at("apiReadUnits(codeScheduleWork())") > 0 && at("apiReadUnits(codeScheduleWork())") < at('takeAllowance(store, "studio", SCHEDULE_UNITS)') && at('takeAllowance(store, "studio", SCHEDULE_UNITS)') < at("scheduleCode("), true);
   is("the schedule dropped before a code is switched off", at("dropSchedule(") > 0 && at("dropSchedule(") < at("stopCode("), true);
 
   part("The MCP server stays read only: making or scheduling a code is a draft action, not built");

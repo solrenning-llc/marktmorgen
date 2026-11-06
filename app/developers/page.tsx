@@ -12,9 +12,10 @@ import { SALE_TEXT_LIMITS, SALES_PAGE, SALES_TITLE_IDS } from "@/lib/api-sales";
 import { PLAN_TITLES } from "@/lib/plan";
 import {
   BLOCKED_READ_MAX, BOOKINGS_READ, MEMBERSHIPS_COLD_WORK, MEMBERSHIP_NUMBERS_BYTES, NUMBERS_KEEP_WORK, NUMBERS_KEPT_BYTES, NUMBERS_SENT_BYTES, addWork, apiReadUnits, bookWork,
-  bookingsWork, codeMakeWork, codeStopWork, codesWork, eventsWork, keptNumbersWork, listPageMost, membershipsWork, numbersWork, productsPageWork, scannedPageWork, studentsPageWork,
+  bookingsWork, codeMakeWork, codeScheduleWork, codeStopWork, codesWork, eventsWork, keptNumbersWork, listPageMost, membershipsWork, numbersWork, productsPageWork, scannedPageWork, studentsPageWork,
 } from "@/lib/api-read-rules";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
+import { MAX_AHEAD_SECONDS, MAX_LENGTH_SECONDS, MAX_SCHEDULED_CODES, MIN_LEAD_SECONDS, SCHEDULE_UNITS } from "@/lib/discount-schedule-rules";
 
 /** What each reading that reads more than a page counts as, from the code that takes it (lib/api-read-rules.ts). */
 const STUDENTS_PAGE_COUNTS = 1 + apiReadUnits(studentsPageWork(API_PAGE, 1));
@@ -39,6 +40,7 @@ const NUMBERS_KEPT_MOST = 1 + apiReadUnits(keptNumbersWork(NUMBERS_KEPT_BYTES, N
 const CODES_COUNT = 1 + apiReadUnits(codesWork());
 const CODE_MAKE_COUNT = 1 + apiReadUnits(codeMakeWork());
 const CODE_STOP_COUNT = 1 + apiReadUnits(codeStopWork());
+const CODE_SCHEDULE_COUNT = 1 + apiReadUnits(codeScheduleWork());
 /** The recent events, measured first: an empty log, and the most, LOG_SIZE deliveries at the most each is kept at. */
 const EVENTS_LEAST = 1 + apiReadUnits(eventsWork({ deliveries: 0, bytes: 0, sent: 0 }));
 const EVENTS_MOST_COUNT = 1 + apiReadUnits(eventsWork());
@@ -568,6 +570,23 @@ export default function DevelopersPage() {
           code that cannot be made says why, as <code className="font-mono">error</code> and{" "}
           <code className="font-mono">message</code>; the same letters twice give 409 <code className="font-mono">taken</code>.
         </Endpoint>
+        <h3 className="t-h3 text-ink">A code that starts later</h3>
+        <p>
+          To start a code at a set time, add <code className="font-mono">starts_at</code> and{" "}
+          <code className="font-mono">ends_at</code>, each an ISO 8601 time with its offset, for example{" "}
+          <code className="font-mono">{`{"code": "HOLIDAY25", "percent": 25, "starts_at": "2026-12-24T09:00:00-05:00", "ends_at": "2026-12-27T00:00:00-05:00"}`}</code>.
+          {` The start is at least ${MIN_LEAD_SECONDS / 60} minutes from now and at most ${Math.floor(MAX_AHEAD_SECONDS / 86_400)} days ahead; the end comes after it, at most ${Math.floor(MAX_LENGTH_SECONDS / 86_400)} days later. The code is made switched off on your Stripe account, with the end as its expiry, and is switched on at its start, within about five minutes. A store may have ${MAX_SCHEDULED_CODES} codes waiting at one time.`}
+        </p>
+        <p>
+          {`Setting a code to start later counts as ${n(CODE_SCHEDULE_COUNT)} of your API requests and ${n(SCHEDULE_UNITS)} of your studio requests, one for each try to switch it on, all taken before Stripe is asked. A time without an offset is refused, because it could mean two different moments.`}
+        </p>
+        <p>
+          Every code comes back with <code className="font-mono">state</code>: <code className="font-mono">scheduled</code>{" "}
+          (waiting for its start, with <code className="font-mono">starts_at</code>), <code className="font-mono">starting</code>,{" "}
+          <code className="font-mono">failed</code> (it could not be switched on, so it stays off), <code className="font-mono">live</code>,{" "}
+          <code className="font-mono">ended</code> or <code className="font-mono">off</code>. Switching off a code that is waiting
+          cancels its start.
+        </p>
         <Endpoint method="DELETE" path="/api/v1/codes?id=promo_…">
           Switches one of your store&apos;s codes off. Stripe never deletes a code that may be on a receipt, so it stays in
           the list, switched off. Making and switching off need a key that writes; all three answer 409{" "}

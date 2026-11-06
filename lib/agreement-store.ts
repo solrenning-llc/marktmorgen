@@ -238,6 +238,32 @@ async function recordNames(id: string, n: number, sha256: string): Promise<"yes"
   }
 }
 
+/**
+ * Whether the stored record carries exactly this signature on version n with this fingerprint, read exactly: "yes",
+ * "no" (no record, or one that does not), or "unknown" (no reply, another shape, or a record that does not read).
+ */
+async function recordSigned(id: string, n: number, sha256: string, signature: Signature): Promise<"yes" | "no" | "unknown"> {
+  try {
+    const reply = repliesFor(await redisPipeline([["GET", recordKey(id)]]), 1);
+    if (!reply) return "unknown";
+    if (reply[0] === null) return "no";
+    if (typeof reply[0] !== "string") return "unknown";
+    const raw: unknown = JSON.parse(reply[0]);
+    const own = (value: unknown, name: string): unknown =>
+      value && typeof value === "object" && !Array.isArray(value) ? Object.getOwnPropertyDescriptor(value, name)?.value : undefined;
+    const rows = own(raw, "versions");
+    if (!Array.isArray(rows)) return "unknown";
+    const signed = rows.some((row) => {
+      const mark = own(row, "signature");
+      return own(row, "n") === n && own(row, "sha256") === sha256 &&
+        own(mark, "name") === signature.name && own(mark, "at") === signature.at && own(mark, "sha256") === signature.sha256;
+    });
+    return signed ? "yes" : "no";
+  } catch {
+    return "unknown";
+  }
+}
+
 /** One of this store's agreements, or null: an agreement is only ever found under the store that made it. */
 export async function agreementOf(store: Pick<Store, "sid">, id: string): Promise<Agreement | null> {
   const a = await readAgreement(id);
@@ -387,7 +413,13 @@ export async function signAgreement(store: Store, id: string, input: SignInput, 
     const words = agreementWords(store.language);
     const signature: Signature = { name, at: now, ipHash: signerIpCode(a.id, input.ip), consent: words.consent, consentVersion: CONSENT_VERSION, sha256: version.sha256 };
     const next: Agreement = { ...a, versions: a.versions.map((m) => (m.n === latest.n ? { ...m, signature } : m)), closedAt: now };
-    await saveAgreement(next, now);
+    try {
+      await saveAgreement(next, now);
+    } catch (error) {
+      // The write may have landed and only its reply been lost (Revisor 1 on #2723): read the record back exactly,
+      // and only this very signature on this version counts as signed, so the copies still go out once.
+      if ((await recordSigned(a.id, latest.n, latest.sha256, signature)) !== "yes") throw error;
+    }
     return { ok: true, agreement: next, version, signature };
   } catch (error) {
     console.error("signing an agreement failed", error);

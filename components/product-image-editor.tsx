@@ -12,6 +12,8 @@ import {
   MAX_ALT_LENGTH,
   MAX_SOURCE_BYTES,
   SMALL_LONG_SIDE,
+  THUMB_LONG_SIDE,
+  MAX_THUMB_BYTES,
   imagePath,
   imageUrl,
 } from "@/lib/product-image";
@@ -164,9 +166,27 @@ export function ProductImageEditor({
           small = null;
         }
       }
+      // A third copy for small pictures in lists (Encanto 5b-2, THUMB_LONG_SIDE), made and sent like the smaller
+      // copy; one that cannot be made or sent is simply left out.
+      let thumb: { path: string; width: number } | null = null;
+      if (Math.max(shrunk.width, shrunk.height) > THUMB_LONG_SIDE) {
+        try {
+          const copy = await shrink(file, THUMB_LONG_SIDE, MAX_THUMB_BYTES);
+          const thumbPath = imagePath(folder, freshId(), copy.blob.type);
+          await uploadPresigned(thumbPath, copy.blob, {
+            access: "private",
+            handleUploadUrl: "/api/store/image/upload",
+            clientPayload: JSON.stringify({ productId: product.id }),
+            contentType: copy.blob.type,
+          });
+          thumb = { path: thumbPath, width: copy.width };
+        } catch {
+          thumb = null;
+        }
+      }
       const described = describe ?? alt;
       // The picture's colour, painted under it while it loads (Encanto 5b); none for one with transparency.
-      const problem = await post({ action: "attach", path, width: shrunk.width, height: shrunk.height, alt: described, ...(small ? { small } : {}), ...(shrunk.tone ? { tone: shrunk.tone } : {}) });
+      const problem = await post({ action: "attach", path, width: shrunk.width, height: shrunk.height, alt: described, ...(small ? { small } : {}), ...(thumb ? { thumb } : {}), ...(shrunk.tone ? { tone: shrunk.tone } : {}) });
       if (problem) {
         setError(problem);
         return;

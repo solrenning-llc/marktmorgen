@@ -176,8 +176,11 @@ async function main(): Promise<void> {
     "file/attach del(result.removed.pathname)": "the file the record held, after the record that replaced it was written",
     "site-page del(gone)": "pictures this site page held in the page-picture registry, released after the page was written",
     "podcast del(gone.pathname)": "the audio of the episode the record removed, unless the product's file or another episode still uses it, after it was written",
-    "image dropFresh([path, smallPath])": "only the paths this request took from the picture door",
+    // The thumbnail copy (Encanto 5b-2) goes with the picture and its smaller copy, from the same door.
+    "image dropFresh([path, smallPath, thumbPath])": "only the paths this request took from the picture door",
+    "image dropFresh([smallPath, thumbPath])": "only the paths this request took from the picture door",
     "image dropFresh([smallPath])": "only the paths this request took from the picture door",
+    "image dropFresh([thumbPath])": "only the paths this request took from the picture door",
     "image dropFresh(imagePaths(image))": "only the paths this request took from the picture door",
     // A record held the name the browser sent, so these are safe only because attach puts a name on a product or a
     // link only when this request took it fresh from the door or the record shows it already (since 4 November 2026,

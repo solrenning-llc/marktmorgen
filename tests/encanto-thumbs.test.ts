@@ -8,9 +8,9 @@
  *     narrower than the copies above it); a copy that fails is dropped and never written;
  *   - (2) it lives in the store's picture folder, so the storage meter counts it, and it goes with the picture when
  *     the picture is replaced or deleted, or copied to the pictures' own bucket (imagePaths);
- *   - (3) its cost is written down: every picture upload needs its own studio request (studioAccess, counted against
- *     the plan's studio figure, a hard ceiling a month), so the line `picture-uploads` in tests/plan-cost-registry.ts
- *     counts every upload's Blob operations at that ceiling, from the official price (vercel.com, read 6 Nov 2026);
+ *   - (3) its cost is written down: every thumbnail upload needs its own studio request (studioAccess, counted against
+ *     the plan's studio figure, a hard ceiling a month), so the line `picture-thumbnails` in tests/plan-cost-registry.ts
+ *     counts its Blob operations at that ceiling, from the official price (vercel.com, read 6 Nov 2026);
  *   - (4) pictures from before have none and are served as they were.
  */
 import { readFileSync } from "node:fs";
@@ -55,10 +55,10 @@ is("the route takes it from the picture door with the others", /takePictureDoor\
 is("and checks its size, type and width as the smaller copy's", /copy\.size <= MAX_THUMB_BYTES/.test(route) && /thumbWidth < \(small \? small\.width : width\)/.test(route), true);
 
 part("Its cost, at the plan's studio ceiling, from the official price");
-const line = COST_LINES.find((each) => each.id === "picture-uploads");
-is("a line for every picture upload's Blob operations", Boolean(line), true);
+const line = COST_LINES.find((each) => each.id === "picture-thumbnails");
+is("a line for the thumbnail copy's Blob operations", Boolean(line), true);
 for (const tier of ["creator", "pro", "scale"] as const) {
-  const perRequest = 5 / 1e6 + 7 * (0.4 / 1e6) + (2 * 1_000_000 + 40_000) * (0.1 / 1e9);
+  const perRequest = 5 / 1e6 + 3 * (0.4 / 1e6) + 40_000 * (0.1 / 1e9);
   is(`${tier}: the plan's studio figure, each at the dearest request it may be`, Math.abs((line?.monthlyUsd(tier) ?? 0) - STORE_ALLOWANCES[tier].studio * perRequest) < 1e-9, true);
 }
 is("its source and date are said", /vercel\.com\/docs\/vercel-blob\/usage-and-pricing/.test(line?.basis ?? "") && /6 November 2026/.test(line?.basis ?? ""), true);

@@ -1172,7 +1172,9 @@ export function renewalsFrom(
   const zero = (): Renewals => ({ payments: 0, cents: 0 });
   const out = { d7: zero(), d30: zero(), d90: zero() };
   const by = new Map<string, Renewals>();
-  const bySourceDay: ChannelDays = {};
+  // A channel is a visitor's utm_source, so it can be "__proto__": added up with no prototype (tests/proto-keys.test.ts),
+  // and handed on as an ordinary record of own keys, which a page can take.
+  const bySourceDay: ChannelDays = Object.create(null);
   for (const invoice of invoices) {
     if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
     const meta = invoiceMeta(invoice);
@@ -1199,7 +1201,7 @@ export function renewalsFrom(
     days[day] = (days[day] ?? 0) + cents;
   }
   const bySource = [...by.entries()].map(([source, r]) => ({ source, ...r })).sort((a, b) => b.cents - a.cents || a.source.localeCompare(b.source));
-  return { ...out, bySource, bySourceDay };
+  return { ...out, bySource, bySourceDay: { ...bySourceDay } };
 }
 
 /**
@@ -1505,7 +1507,7 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
     return out;
   };
   const zero = () => ({ sales: 0, cents: 0 });
-  const out: SalesStats = { byDay: {}, byProduct: {}, totals: { d7: zero(), d30: zero(), d90: zero() }, partial, elsewhere: 0, bySource: [], ...(renewals ? { renewals } : {}) };
+  const out: SalesStats = { byDay: {}, byProduct: Object.create(null), totals: { d7: zero(), d30: zero(), d90: zero() }, partial, elsewhere: 0, bySource: [], ...(renewals ? { renewals } : {}) };
   for (const sale of sales) {
     if (sale.currency !== store.currency) {
       out.elsewhere += 1;
@@ -1524,6 +1526,9 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
       out.totals[w].cents += sale.cents;
     }
   }
+  // A product id is read from the sale's metadata, which the creator's own Stripe account can set to "__proto__":
+  // added up with no prototype above, handed on as an ordinary record of own keys.
+  out.byProduct = { ...out.byProduct };
   // What each link brought in, over the same ninety days. Only the store's
   // own currency: the sales in another one are counted in `elsewhere` and
   // left out of every total here, for the reason given on that field.
@@ -1609,18 +1614,19 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
       out.refundDays[day] = (out.refundDays[day] ?? 0) + refund.cents;
     }
     out.takenBackElsewhere = { refunds: refundRows.filter((refund) => refund.currency !== store.currency && dayKey(refund.created) >= cut90).length, disputes: null };
-    out.refundsByProduct = {};
+    const refundsByProduct: NonNullable<SalesStats["refundsByProduct"]> = Object.create(null);
     for (const refund of refundRows) {
       if (refund.currency !== store.currency) continue;
       const sale = byPayment.get(refund.paymentIntent);
       if (!sale?.product) continue;
-      const row = (out.refundsByProduct[sale.product] ??= { refunds: 0, cents: 0 });
+      const row = (refundsByProduct[sale.product] ??= { refunds: 0, cents: 0 });
       row.refunds += 1;
       row.cents += refund.cents;
     }
+    out.refundsByProduct = { ...refundsByProduct };
   }
   // Each channel's money by the day, renewals included.
-  const channelDays: ChannelDays = {};
+  const channelDays: ChannelDays = Object.create(null);
   const addDay = (channel: string, day: string, cents: number) => {
     const days = (channelDays[channel] ??= {});
     days[day] = (days[day] ?? 0) + cents;
@@ -1629,7 +1635,7 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
   for (const [channel, days] of Object.entries(renewals?.bySourceDay ?? {})) {
     for (const [day, cents] of Object.entries(days)) if (day >= cut90) addDay(channel, day, cents);
   }
-  out.channelDays = channelDays;
+  out.channelDays = { ...channelDays };
   out.buyers = buyersFrom(read, store.currency, now);
   out.buyerChannels = buyerChannelsFrom(read, store.currency, now, readPartial);
   if (disputeRead) {
@@ -1900,7 +1906,7 @@ export async function readAllTimeSales(store: Store): Promise<AllTimeSales | nul
     }
   }
   const { sales, partial } = await readPaidSales(store, 0, ALL_TIME_PAGES);
-  const out: AllTimeSales = { totals: { sales: 0, cents: 0 }, byProduct: {}, since: "", partial, currency: store.currency, elsewhere: 0 };
+  const out: AllTimeSales = { totals: { sales: 0, cents: 0 }, byProduct: Object.create(null), since: "", partial, currency: store.currency, elsewhere: 0 };
   for (const sale of sales) {
     if (sale.currency !== store.currency) {
       out.elsewhere += 1;
@@ -1912,6 +1918,7 @@ export async function readAllTimeSales(store: Store): Promise<AllTimeSales | nul
     p.sales += 1;
     p.cents += sale.cents;
   }
+  out.byProduct = { ...out.byProduct };
   if (sales.length) out.since = dayKey(sales[sales.length - 1].created);
   out.together = togetherFrom(sales);
   // What each product's buyers bought later, and how long after (lib/next-bought.ts), kept a week for the studio.
@@ -2144,11 +2151,14 @@ export function postRows(
 
 /** The short links' results (components/short-links.tsx): each campaign tag's visits, sales and money over the 90 days, added up across channels. */
 export function resultsByCampaign(posts: { campaign: string; visits: number; sales: number; cents: number }[]): Record<string, { visits: number; sales: number; cents: number }> {
-  return posts.reduce<Record<string, { visits: number; sales: number; cents: number }>>((all, row) => {
+  // A campaign tag is a visitor's utm_campaign, so it can be "__proto__" or "constructor": added up with no prototype,
+  // then handed to the page as an ordinary record, the only kind a Client Component takes (tests/proto-keys.test.ts).
+  const sums = posts.reduce<Record<string, { visits: number; sales: number; cents: number }>>((all, row) => {
     const sum = all[row.campaign] ?? { visits: 0, sales: 0, cents: 0 };
     all[row.campaign] = { visits: sum.visits + row.visits, sales: sum.sales + row.sales, cents: sum.cents + row.cents };
     return all;
-  }, {});
+  }, Object.create(null));
+  return { ...sums };
 }
 
 /**

@@ -22,19 +22,24 @@ import { done, is, part } from "./check";
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 const hex = (value: string) => createHash("sha256").update(value).digest("hex");
 
-/** Every list of passkeys handed to a component anywhere in the page's tree (the managers' `initial`). */
-function passkeyLists(node: unknown, found: string[][] = [], seen = new Set<unknown>()): string[][] {
+/**
+ * Every list of passkeys handed to a component anywhere in the page's tree (the managers' `initial`). The page's
+ * parts are promises rendered beside each other (WG11 unit 2, step 2): each is waited for, inside the request, as
+ * React waits for them.
+ */
+async function passkeyLists(node: unknown, found: string[][] = [], seen = new Set<unknown>()): Promise<string[][]> {
   if (!node || typeof node !== "object" || seen.has(node)) return found;
   seen.add(node);
+  if (typeof (node as PromiseLike<unknown>).then === "function") return passkeyLists(await node, found, seen);
   if (Array.isArray(node)) {
-    for (const child of node) passkeyLists(child, found, seen);
+    await Promise.all(node.map((child) => passkeyLists(child, found, seen)));
     return found;
   }
   if (isValidElement(node)) {
     const props = node.props as Record<string, unknown>;
     const initial = props.initial;
     if (Array.isArray(initial) && initial.every((p) => p && typeof p === "object" && "synced" in p && "id" in p)) found.push(initial.map((p) => String((p as { id: string }).id)));
-    for (const value of Object.values(props)) passkeyLists(value as ReactNode, found, seen);
+    await Promise.all(Object.values(props).map((value) => passkeyLists(value as ReactNode, found, seen)));
   }
   return found;
 }
@@ -53,13 +58,12 @@ async function main(): Promise<void> {
 
   part("Today, with a passkey whose wait has run out");
   answering(new NextRequest("https://marktmorgen.com/studio", { headers: { cookie: `${SESSION_COOKIE}=${session}` } }));
-  let tree: unknown = null;
+  let lists: string[][] = [];
   try {
-    tree = await StudioPage({ searchParams: Promise.resolve({}) });
+    lists = await passkeyLists(await StudioPage({ searchParams: Promise.resolve({}) }));
   } finally {
     answering(null);
   }
-  const lists = passkeyLists(tree);
   is("the page hands its passkey managers a list", lists.length > 0, true);
   is("the passkey that was removed is in none of them", lists.map((ids) => ids.includes("cred-today-due")), lists.map(() => false));
   is("the other passkey is in each", lists.map((ids) => ids.includes("cred-today-kept")), lists.map(() => true));
@@ -86,14 +90,13 @@ async function main(): Promise<void> {
     return original.call(redis, commands);
   };
   answering(new NextRequest("https://marktmorgen.com/studio", { headers: { cookie: `${SESSION_COOKIE}=${secondSession}` } }));
-  let faultTree: unknown = null;
+  let faultLists: string[][] = [];
   try {
-    faultTree = await StudioPage({ searchParams: Promise.resolve({}) });
+    faultLists = await passkeyLists(await StudioPage({ searchParams: Promise.resolve({}) }));
   } finally {
     redis.pipeline = original;
     answering(null);
   }
-  const faultLists = passkeyLists(faultTree);
   is("the fault happened once, on the removal's first read", faulted, true);
   is("the page still hands its passkey managers a list", faultLists.length > 0, true);
   is("the removed passkey is in none of them", faultLists.map((ids) => ids.includes("cred-fault-due")), faultLists.map(() => false));

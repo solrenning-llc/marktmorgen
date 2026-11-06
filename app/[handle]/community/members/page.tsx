@@ -12,7 +12,7 @@ import { CommunityBar, CreatorBadge, Face, LevelBadge } from "@/components/commu
 import { levelOf, pointsOf } from "@/lib/community-points";
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
-import { MEMBER_LINK_REL, memberLinkLabel, shownLinks } from "@/lib/member-links";
+import { MEMBER_LINK_REL, memberLinkLabels, shownLinks } from "@/lib/member-links";
 
 type Params = { params: Promise<{ handle: string }>; searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
@@ -74,19 +74,20 @@ export default async function CommunityMembersPage({ params, searchParams }: Par
   const profileLinks = (m: (typeof page.members)[number]) => {
     const links = shownLinks(m);
     if (!links.length) return null;
+    const labels = memberLinkLabels(links);
     return (
       // Eight pixels apart across and twenty down, so the 44px each press gets
       // (globals.css, .cm-mini) never overlaps a neighbor's, even wrapped at 320px.
       <ul aria-label={w.linksOf(m.n)} className="mt-1 flex flex-wrap gap-x-2 gap-y-5">
-        {links.map((link) => (
+        {links.map((link, i) => (
           <li key={link.url}>
             <a
               href={link.url}
               rel={MEMBER_LINK_REL}
-              aria-label={w.linkOn(m.n, memberLinkLabel(link))}
+              aria-label={w.linkOn(m.n, labels[i])}
               className="cm-quiet-link cm-mini text-xs font-semibold underline underline-offset-4"
             >
-              {memberLinkLabel(link)}
+              {labels[i]}
             </a>
           </li>
         ))}

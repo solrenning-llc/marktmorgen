@@ -18,7 +18,8 @@ import type { Store } from "@/lib/store";
 import { idsOfKind, readProducts } from "@/lib/catalog";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { MEMBER_RECORD_MAX_BYTES, type Member, directory } from "@/lib/community";
+import { type Member, directory } from "@/lib/community";
+import { MEMBER_ROW_BYTES } from "@/lib/api-read-rules";
 import { allEvents, eventCount } from "@/lib/community-events";
 import { communityOf, eventEntry, lessonBodies, lessonEntries, memberEntry } from "@/lib/community-index";
 import { INDEXED_WORDS_BYTES, type SearchKind, indexWrites, indexedWords, unindexWrites } from "@/lib/community-search";
@@ -68,11 +69,12 @@ export const WALK_COURSE_BYTES = 512_000;
 export const WALK_BODY_BYTES = MAX_BODY_LENGTH * 3;
 export const WALK_EVENT_BYTES = 10_000;
 /**
- * A member's record at its worst, links and answers included
- * (lib/community.ts). Until 6 November 2026 this was 2,000, which three
- * answers of 500 characters alone could pass.
+ * A member's record at its largest, answers and profile links included: the
+ * figure the API's reads of members use (lib/api-read-rules.ts). Until
+ * 6 November 2026 this was 2,000, which three answers of 500 characters
+ * alone could pass.
  */
-export const WALK_MEMBER_BYTES = MEMBER_RECORD_MAX_BYTES;
+export const WALK_MEMBER_BYTES = MEMBER_ROW_BYTES;
 /** Things indexed per paid step. */
 const WALK_BATCH = 50;
 /** Members read per page of the directory. */

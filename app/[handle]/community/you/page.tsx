@@ -12,6 +12,7 @@ import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { levelOf, pointsOf, toNextLevel } from "@/lib/community-points";
 import { MAX_MEMBER_LINKS } from "@/lib/member-links";
+import { MemberLinkBoxes } from "@/components/member-link-boxes";
 
 type Params = { params: Promise<{ handle: string }>; searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
@@ -101,28 +102,15 @@ export default async function CommunityYouPage({ params, searchParams }: Params)
                 <span className="st-muted block text-sm">{w.listMeNote}</span>
               </span>
             </label>
-            <fieldset className="space-y-3">
-              <legend className="st-label">{w.linksLegend}</legend>
-              <p id="you-links-note" className="st-muted text-sm">{w.linksNote}</p>
-              {/* The page says it sends links, so a form from an older page never wipes the ones kept. */}
-              <input type="hidden" name="links" value="1" />
-              {Array.from({ length: MAX_MEMBER_LINKS }, (_, i) => (
-                <div key={i}>
-                  <label htmlFor={`you-link-${i}`} className="block text-sm font-semibold">{w.linkLabel(i + 1)}</label>
-                  <input
-                    id={`you-link-${i}`}
-                    name="link"
-                    type="text"
-                    inputMode="url"
-                    autoComplete="url"
-                    spellCheck={false}
-                    defaultValue={member.s[i]?.url ?? ""}
-                    aria-describedby="you-links-note"
-                    className="st-field mt-2"
-                  />
-                </div>
-              ))}
-            </fieldset>
+            <MemberLinkBoxes
+              kept={member.s.map((link) => link.url)}
+              words={{
+                legend: w.linksLegend,
+                note: w.linksNote,
+                labels: Array.from({ length: MAX_MEMBER_LINKS }, (_, i) => w.linkLabel(i + 1)),
+                refused: w.linkRefused,
+              }}
+            />
             <label className="flex min-h-11 items-start gap-3">
               <input type="checkbox" name="mail" value="1" defaultChecked={member.mail} className="mt-0.5 h-5 w-5 shrink-0" />
               <span>

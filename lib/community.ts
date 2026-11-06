@@ -47,7 +47,7 @@ import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
-import { MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
+import { normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
 import {
   COMMUNITY_ID,
@@ -83,7 +83,7 @@ import { type Poll, parsePoll, pollKeys } from "@/lib/community-polls";
 import { type DmSetting, NO_DM, parseDmSetting } from "@/lib/community-dm";
 import { type ChatSetting, NO_CHAT, parseChatSetting } from "@/lib/community-chat";
 import { claimHandle } from "@/lib/community-mentions";
-import { MAX_MEMBER_LINKS, MAX_MEMBER_LINK_URL, parseMemberLinks } from "@/lib/member-links";
+import { parseMemberLinks } from "@/lib/member-links";
 import type { Social } from "@/lib/store-socials";
 
 /** The author of what the creator writes. Never a member key, which is hex. */
@@ -172,25 +172,6 @@ export type Member = {
   s: Social[];
 };
 
-/**
- * The most a member's record can weigh as kept, in bytes: what reads a page
- * of members is charged at (lib/community-walk.ts). Every text in it is cut
- * by length in UTF-16 units and cleaned of control characters
- * (lib/community-text.ts, cleanText), so a unit is at most three bytes as
- * JSON (a character of the Basic Multilingual Plane, or an escaped quote,
- * tab or newline); the address is not cleaned, so it is counted at six; a
- * link is ASCII. The rest is the keys, numbers,
- * booleans and punctuation, with room.
- */
-const JSON_UNIT_BYTES = 3;
-export const MEMBER_RECORD_MAX_BYTES =
-  400 + // the field names, the numbers, the booleans and the punctuation
-  32 + // k, a hash
-  MAX_EMAIL_LENGTH * 6 + // e, which no cleaning reaches: a control character is a six-byte escape
-  2 * MAX_DISPLAY_NAME * JSON_UNIT_BYTES + // n and h
-  40 + // t
-  MAX_QUESTIONS * ((MAX_ANSWER + MAX_QUESTION) * JSON_UNIT_BYTES + 8) + // q and qq
-  MAX_MEMBER_LINKS * (MAX_MEMBER_LINK_URL + 40); // s
 
 export type CommunityImage = { path: string; w: number; h: number; alt: string };
 

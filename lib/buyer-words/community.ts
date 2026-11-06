@@ -442,6 +442,7 @@ const en = {
   linksNote:
     "Up to three links to your profiles on Instagram, TikTok, YouTube, X, LinkedIn, GitHub and other social networks: paste the address, such as https://www.instagram.com/yourname. Shown beside your name in the member directory, only while you are listed. Leave a box empty to show nothing.",
   linkLabel: (n: number) => `Profile link ${n}`,
+  linkRefused: "Not kept: paste the address of your profile on one of these social networks, such as https://www.instagram.com/yourname. Email addresses, phone numbers and other websites are not kept.",
   linkOn: (name: string, network: string) => `${name} on ${network}`,
   linksOf: (name: string) => `${name}'s profiles elsewhere`,
   emailMe: (store: string) => `Email me ${store}'s announcements and event reminders`,
@@ -1003,6 +1004,7 @@ const es: CommunityWords = {
   linksNote:
     "Hasta tres enlaces a tus perfiles en Instagram, TikTok, YouTube, X, LinkedIn, GitHub y otras redes sociales: pega la dirección, como https://www.instagram.com/tunombre. Se muestran junto a tu nombre en el directorio de miembros, solo mientras apareces en la lista. Deja una casilla vacía para no mostrar nada.",
   linkLabel: (n) => `Enlace de perfil ${n}`,
+  linkRefused: "No se conservará: pega la dirección de tu perfil en una de estas redes sociales, como https://www.instagram.com/tunombre. No se conservan direcciones de email, números de teléfono ni otros sitios web.",
   linkOn: (name, network) => `${network} de ${name}`,
   linksOf: (name) => `Perfiles de ${name} en otros sitios`,
   emailMe: (store) => `Envíame un email con los anuncios y recordatorios de eventos de ${store}`,
@@ -1558,6 +1560,7 @@ const fr: CommunityWords = {
   linksNote:
     `Jusqu'à trois liens vers vos profils sur Instagram, TikTok, YouTube, X, LinkedIn, GitHub et d'autres réseaux sociaux${S}: collez l'adresse, par exemple https://www.instagram.com/votrenom. Affichés à côté de votre nom dans l'annuaire des membres, seulement tant que vous y êtes inscrit. Laissez une case vide pour ne rien afficher.`,
   linkLabel: (n) => `Lien de profil ${n}`,
+  linkRefused: `Ne sera pas gardé${S}: collez l'adresse de votre profil sur l'un de ces réseaux sociaux, par exemple https://www.instagram.com/votrenom. Les adresses e-mail, les numéros de téléphone et les autres sites ne sont pas gardés.`,
   linkOn: (name, network) => `${network} de ${name}`,
   linksOf: (name) => `Profils de ${name} ailleurs`,
   emailMe: (store) => `M'envoyer un e-mail pour les annonces et rappels d'événements de ${store}`,
@@ -2113,6 +2116,7 @@ const de: CommunityWords = {
   linksNote:
     "Bis zu drei Links zu Ihren Profilen auf Instagram, TikTok, YouTube, X, LinkedIn, GitHub und anderen sozialen Netzwerken: Fügen Sie die Adresse ein, etwa https://www.instagram.com/ihrname. Sie stehen neben Ihrem Namen im Mitgliederverzeichnis, nur solange Sie darin gezeigt werden. Lassen Sie ein Feld leer, um nichts zu zeigen.",
   linkLabel: (n) => `Profil-Link ${n}`,
+  linkRefused: "Wird nicht übernommen: Fügen Sie die Adresse Ihres Profils in einem dieser sozialen Netzwerke ein, etwa https://www.instagram.com/ihrname. E-Mail-Adressen, Telefonnummern und andere Websites werden nicht übernommen.",
   linkOn: (name, network) => `${name} auf ${network}`,
   linksOf: (name) => `Profile von ${name} anderswo`,
   emailMe: (store) => `Per E-Mail benachrichtigen: Ankündigungen und Event-Erinnerungen von ${store}`,
@@ -2668,6 +2672,7 @@ const it: CommunityWords = {
   linksNote:
     "Fino a tre link ai tuoi profili su Instagram, TikTok, YouTube, X, LinkedIn, GitHub e altri social network: incolla l'indirizzo, come https://www.instagram.com/tuonome. Compaiono accanto al tuo nome nell'elenco dei membri, solo finché ci sei. Lascia vuota una casella per non mostrare nulla.",
   linkLabel: (n) => `Link al profilo ${n}`,
+  linkRefused: "Non verrà tenuto: incolla l'indirizzo del tuo profilo su uno di questi social network, come https://www.instagram.com/tuonome. Indirizzi email, numeri di telefono e altri siti non vengono tenuti.",
   linkOn: (name, network) => `${network} di ${name}`,
   linksOf: (name) => `Profili di ${name} altrove`,
   emailMe: (store) => `Mandami un'email con gli annunci e i promemoria degli eventi di ${store}`,
@@ -3223,6 +3228,7 @@ const nl: CommunityWords = {
   linksNote:
     "Tot drie links naar je profielen op Instagram, TikTok, YouTube, X, LinkedIn, GitHub en andere sociale netwerken: plak het adres, zoals https://www.instagram.com/jouwnaam. Ze staan naast je naam in de ledenlijst, alleen zolang je in de lijst staat. Laat een vak leeg om niets te tonen.",
   linkLabel: (n) => `Profiellink ${n}`,
+  linkRefused: "Wordt niet bewaard: plak het adres van je profiel op een van deze sociale netwerken, zoals https://www.instagram.com/jouwnaam. E-mailadressen, telefoonnummers en andere websites worden niet bewaard.",
   linkOn: (name, network) => `${name} op ${network}`,
   linksOf: (name) => `Profielen van ${name} elders`,
   emailMe: (store) => `Mail me de aankondigingen en eventherinneringen van ${store}`,
@@ -3778,6 +3784,7 @@ const pt: CommunityWords = {
   linksNote:
     "Até três ligações aos seus perfis no Instagram, TikTok, YouTube, X, LinkedIn, GitHub e noutras redes sociais: cole o endereço, como https://www.instagram.com/oseunome. Aparecem junto ao seu nome na lista de membros, só enquanto estiver na lista. Deixe uma caixa vazia para não mostrar nada.",
   linkLabel: (n) => `Ligação de perfil ${n}`,
+  linkRefused: "Não será mantida: cole o endereço do seu perfil numa destas redes sociais, como https://www.instagram.com/oseunome. Endereços de email, números de telefone e outros sites não são mantidos.",
   linkOn: (name, network) => `${network} de ${name}`,
   linksOf: (name) => `Perfis de ${name} noutros sítios`,
   emailMe: (store) => `Enviem-me um email com os anúncios e lembretes de eventos de ${store}`,

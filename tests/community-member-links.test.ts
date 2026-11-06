@@ -168,7 +168,7 @@ is("the links are a list with its own name", members.includes("<ul") && members.
 // Changed at review (rule 23): the boxes moved into components/member-link-boxes.tsx, which checks each
 // one with the server's own rule as it is typed, so a refused address stays in its box to fix (WCAG 3.3.7).
 const you = readFileSync("app/[handle]/community/you/page.tsx", "utf8") + readFileSync("components/member-link-boxes.tsx", "utf8");
-is("the member's page asks for them in a group with a legend", you.includes("<legend") && you.includes("{w.linksLegend}"), true);
+is("the member's page asks for them in a group with a legend", you.includes("<legend") && you.includes("legend: w.linksLegend"), true);
 // Changed before the first green (rule 23): type="text" with inputMode="url", not type="url", whose
 // browser check refuses "instagram.com/ana" (which the rule keeps) with a bubble screen readers announce unevenly.
 is("one labelled box per link, an address keyboard, no browser check of its own", you.includes('name="link"') && you.includes('type="text"') && you.includes('inputMode="url"') && you.includes("htmlFor={`you-link-${i}`}") && you.includes("MAX_MEMBER_LINKS"), true);

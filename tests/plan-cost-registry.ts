@@ -46,6 +46,7 @@ import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
  */
 import { paidStorageBytes } from "@/lib/storage-rules";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
+import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
 import { TRIAL_ORDERS } from "@/lib/order-rules";
@@ -344,6 +345,14 @@ export const ORIGIN_PER_BYTE = 0.06 / 1e9;
  * (app/api/store/community/image).
  */
 export const BLOB_TRANSFER_PER_BYTE = 0.1 / 1e9;
+/**
+ * Vercel Blob operations, from the official page read on 6 November 2026 (Claude 4, C4-20261106-0830-C5-39;
+ * https://vercel.com/docs/vercel-blob/usage-and-pricing, "Managed Infrastructure pricing", on-demand rates): an
+ * upload (put) is an Advanced Operation, $5.00 per million; a head or a read is a Simple Operation, $0.40 per million.
+ * The operations a plan includes are never counted as zero (rule MR).
+ */
+export const BLOB_ADVANCED_OP = 5 / 1e6;
+export const BLOB_SIMPLE_OP = 0.4 / 1e6;
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */
@@ -846,6 +855,18 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: (tier) => (paidStorageBytes(tier) / GB) * STORAGE_PER_GB,
     sources: [{ file: "lib/storage-rules.ts", names: ["PAID_STORAGE_BYTES", "paidStorageBytes"] }],
     basis: "The plan's storage, all used, at the dearest store a file may be in.",
+  },
+  {
+    id: "picture-uploads",
+    feature: "Pictures uploaded (a product's, a link's, a page's): each copy's Blob put and the checks of its name and bytes (6 November 2026; never counted before)",
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * (BLOB_ADVANCED_OP + 5 * BLOB_SIMPLE_OP + 2 * MAX_IMAGE_BYTES * BLOB_TRANSFER_PER_BYTE),
+    sources: [
+      { file: "app/api/store/image/upload/route.ts", names: ["studioAccess", "notePictureDoor"] },
+      { file: "lib/studio-route.ts", names: ["countStudio"] },
+      { file: "lib/product-image.ts", names: ["MAX_IMAGE_BYTES"] },
+      { file: "lib/uploaded-image.ts", names: ["firstBytes", "reader.cancel()"] },
+    ],
+    basis: "Every copy of a picture (the picture and its smaller copy) is put through its own upload request, and attaching them is one more; each is a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling. Each request is counted at the dearest one may be: one put (an Advanced Operation), five Simple Operations (the head that checks a name is free; a head and a read of the picture and of its smaller copy) and the read of both copies' whole bytes (MAX_IMAGE_BYTES each) at the dearer Blob transfer rate kept here. The read is counted whole: firstBytes reads a stream it cancels after sixteen bytes, and no official page says the Blob honors a byte range with 206 or bills only the bytes sent (Claude 4, C4-20261106-1120-TODOS-63). Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026.",
   },
   {
     id: "free-delivery",

@@ -69,6 +69,136 @@ function headOf(store: Store, variant: NumbersVariant, at: number, digest: strin
   return JSON.stringify([variant, String(store.statsId ?? ""), String(store.stripeAccountId ?? ""), String(store.currency), readsSales(store), at, digest]);
 }
 
+type UnknownRecord = Record<string, unknown>;
+
+const RANGE_KEYS = ["d7", "d30", "d90", "all"] as const;
+const WINDOW_KEYS = ["d7", "d30", "d90"] as const;
+
+function objectOf(value: unknown): value is UnknownRecord {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function safeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
+}
+
+function fields(value: unknown, text: readonly string[] = [], integer: readonly string[] = [], boolean: readonly string[] = []): value is UnknownRecord {
+  if (!objectOf(value)) return false;
+  return text.every((key) => typeof value[key] === "string") &&
+    integer.every((key) => safeInteger(value[key])) &&
+    boolean.every((key) => typeof value[key] === "boolean");
+}
+
+function rows(value: unknown, valid: (row: unknown) => boolean): boolean {
+  return Array.isArray(value) && value.every(valid);
+}
+
+function windows(value: unknown, keys: readonly string[], valid: (window: unknown) => boolean): boolean {
+  return objectOf(value) && keys.every((key) => Object.hasOwn(value, key) && valid(value[key]));
+}
+
+function recordValues(value: unknown, valid: (entry: unknown) => boolean): boolean {
+  return objectOf(value) && Object.values(value).every(valid);
+}
+
+function allNumbersAreSafe(value: unknown): boolean {
+  if (typeof value === "number") return Number.isSafeInteger(value);
+  if (Array.isArray(value)) return value.every(allNumbersAreSafe);
+  if (objectOf(value)) return Object.values(value).every(allNumbersAreSafe);
+  return value === null || typeof value === "string" || typeof value === "boolean";
+}
+
+const money = (value: unknown) => fields(value, [], ["sales", "cents"]);
+const ranked = (value: unknown) => rows(value, (row) => fields(row, ["name"], ["visits"]));
+const totals = (value: unknown) => fields(value, [], ["visitors", "views", "checkouts", "sales", "cents"]);
+const productRow = (value: unknown) => fields(value, [], ["views", "checkouts", "sales", "cents"]);
+
+function attributionTable(value: unknown): boolean {
+  if (!fields(value) || !rows(value.rows, (row) => {
+    if (!fields(row, ["key", "name"]) || !money(row.last) || !money(row.first)) return false;
+    return fields(row.said, [], ["buyers", "cents"]);
+  })) return false;
+  return money(value.unknown) && (value.unknownFirst === undefined || money(value.unknownFirst)) &&
+    rows(value.unknownSaid, (row) => fields(row, ["answer", "name"], ["buyers", "cents"])) && money(value.total);
+}
+
+function buyerChannels(value: unknown): boolean {
+  if (!fields(value, [], [], ["historyPartial"])) return false;
+  const validWindow = (window: unknown) => fields(window, [], ["unidentifiedOrders"]) && rows(window.rows, (row) =>
+    fields(row, ["source"], ["buyers", "repeatBuyers", "orders", "cents", "eligible30", "repeated30"]));
+  if (!WINDOW_KEYS.every((key) => validWindow(value[key]))) return false;
+  if (value.weekly === undefined) return true;
+  if (!fields(value.weekly, ["asOf"], ["unidentifiedOrders"])) return false;
+  return rows(value.weekly.rows, (row) => {
+    if (!fields(row, ["week"], ["buyers"]) || !objectOf(row.observations)) return false;
+    return ["7", "30", "60", "90"].every((age) => fields((row.observations as UnknownRecord)[age], [], ["eligible", "repeated"]));
+  });
+}
+
+function keptWindow(value: unknown): boolean {
+  if (!fields(value) || !rows(value.lines, (line) => {
+    if (!fields(line, ["currency"], ["sales", "salesCents", "renewals", "renewalCents", "refunds", "refundCents", "disputes", "disputeCents"])) return false;
+    return (line.keptCents === null || safeInteger(line.keptCents)) && rows(line.missing, (part) => typeof part === "string");
+  })) return false;
+  return value.byChannel === null || rows(value.byChannel, (row) => fields(row, ["source"], ["keptCents"]));
+}
+
+/** A kept body is usable only when every field that can leave the studio has its StatsData runtime shape. */
+function statsData(value: unknown): value is StatsData {
+  if (!fields(value, ["currency", "since"], ["elsewhere"], ["partial"]) || !allNumbersAreSafe(value)) return false;
+  if (!rows(value.days, (day) => fields(day, ["date"], ["visitors", "views", "checkouts", "sales"]))) return false;
+  if (!windows(value.totals, RANGE_KEYS, totals) || !windows(value.sources, RANGE_KEYS, ranked) ||
+      !windows(value.mediums, RANGE_KEYS, ranked) || !windows(value.campaigns, RANGE_KEYS, ranked)) return false;
+  if (!rows(value.products, (product) => fields(product, ["id", "title"]) && RANGE_KEYS.every((key) => productRow(product[key])))) return false;
+  if (!rows(value.links, (link) => fields(link, ["id", "title"]) && RANGE_KEYS.every((key) => safeInteger(link[key])))) return false;
+  if (!(["ok", "none", "error"] as unknown[]).includes(value.sales)) return false;
+  if (!rows(value.revenueBySource, (row) => fields(row, ["source"], ["cents", "sales", "renewalCents", "renewals"]))) return false;
+  if (!rows(value.firstBySource, (row) => fields(row, ["source"], ["cents", "sales"]))) return false;
+  if (!windows(value.channels, WINDOW_KEYS, (window) => rows(window, (row) =>
+    fields(row, ["source"], ["visits", "checkouts", "free", "sales", "cents"])))) return false;
+  if (!windows(value.posts, WINDOW_KEYS, (window) => rows(window, (row) => {
+    if (!fields(row, ["campaign", "source"], ["visits", "sales", "cents"])) return false;
+    return row.sources === undefined || rows(row.sources, (source) => typeof source === "string");
+  }))) return false;
+  if (!windows(value.countries, RANGE_KEYS, ranked) || !windows(value.devices, RANGE_KEYS, ranked)) return false;
+  const renewals = value.renewals;
+  if (renewals !== null && (!fields(renewals, [], [], ["partial"]) || !WINDOW_KEYS.every((key) => fields(renewals[key], [], ["payments", "cents"])))) return false;
+  if (!windows(value.reach, WINDOW_KEYS, (window) => fields(window, [], ["visitors"]) && rows(window.rows, (row) => {
+    if (!fields(row, ["item", "kind", "title"], ["position", "reached", "clicks"])) return false;
+    return ["product", "link", "part"].includes(row.kind as string);
+  }))) return false;
+  if (!windows(value.previous, WINDOW_KEYS, (window) => fields(window, [], ["visitors", "views", "checkouts"]) &&
+      (window.sales === null || safeInteger(window.sales)) && (window.cents === null || safeInteger(window.cents)))) return false;
+  if (value.previousTrafficAvailable !== undefined && !windows(value.previousTrafficAvailable, WINDOW_KEYS, (available) => typeof available === "boolean")) return false;
+  if (!windows(value.heard, WINDOW_KEYS, (window) => rows(window, (row) => fields(row, ["answer"], ["buyers", "cents"]) &&
+      (row.unknownBuyers === undefined || safeInteger(row.unknownBuyers)) && (row.unknownCents === undefined || safeInteger(row.unknownCents))))) return false;
+  if (value.attribution !== undefined && !windows(value.attribution, WINDOW_KEYS, attributionTable)) return false;
+  if (value.attributionDays !== undefined && !safeInteger(value.attributionDays)) return false;
+  if (!windows(value.searchMisses, WINDOW_KEYS, ranked)) return false;
+  if (!windows(value.ads, WINDOW_KEYS, (window) => rows(window, (row) => fields(row, ["content", "source", "campaign"], ["sales", "cents"])))) return false;
+  if (!windows(value.salesCountries, WINDOW_KEYS, (window) => rows(window, (row) => fields(row, ["country"], ["sales", "cents"])))) return false;
+  if (value.refunds !== null && !windows(value.refunds, WINDOW_KEYS, (window) => rows(window, (row) => fields(row, ["source"], ["refunds", "cents"])))) return false;
+  if (!recordValues(value.refundsByProduct, (row) => fields(row, [], ["refunds", "cents"]))) return false;
+  const takenBackElsewhere = value.takenBackElsewhere;
+  if (takenBackElsewhere !== undefined && takenBackElsewhere !== null &&
+      (!fields(takenBackElsewhere) || !["refunds", "disputes"].every((key) => takenBackElsewhere[key] === null || safeInteger(takenBackElsewhere[key])))) return false;
+  if (value.disputes !== undefined && value.disputes !== null && !windows(value.disputes, WINDOW_KEYS, (window) => rows(window, (row) => fields(row, ["source"], ["disputes", "cents"])))) return false;
+  if (value.disputesComplete !== undefined && typeof value.disputesComplete !== "boolean") return false;
+  if (value.kept !== undefined && value.kept !== null && !windows(value.kept, WINDOW_KEYS, keptWindow)) return false;
+  if (value.paypalDisputesUnread !== undefined && typeof value.paypalDisputesUnread !== "boolean") return false;
+  if (value.channelDays !== undefined && !recordValues(value.channelDays, (days) => recordValues(days, safeInteger))) return false;
+  if (value.refundDays !== undefined && value.refundDays !== null && !recordValues(value.refundDays, safeInteger)) return false;
+  if (value.buyers !== undefined && value.buyers !== null && !windows(value.buyers, WINDOW_KEYS, (window) => fields(window, [], ["buyers", "orders", "cents", "returning", "repeat"]))) return false;
+  if (value.buyerChannels !== undefined && value.buyerChannels !== null && !buyerChannels(value.buyerChannels)) return false;
+  if (value.cashflowComplete !== undefined && typeof value.cashflowComplete !== "boolean") return false;
+  if (value.paymentsComplete !== undefined && typeof value.paymentsComplete !== "boolean") return false;
+  if (value.discounts !== undefined && value.discounts !== null && (!fields(value.discounts, [], [], ["refundsRead"]) ||
+      (value.discounts.rows !== null && !rows(value.discounts.rows, (row) => fields(row, ["kind"], ["sales", "cents", "off", "refunded", "buyers", "again"]))))) return false;
+  if (value.hours !== undefined && value.hours !== null && (!fields(value.hours) || !rows(value.hours.sales, safeInteger) || !rows(value.hours.cents, safeInteger))) return false;
+  if (value.topBuyers !== undefined && !rows(value.topBuyers, (row) => fields(row, ["email", "reference"], ["cents", "orders", "last"]))) return false;
+  return true;
+}
+
 /** The kept copy, when its first line is exactly this store's and this variant's, and less than an hour old; else null. */
 export function openKeptNumbers(store: Store, variant: NumbersVariant, raw: unknown, now = Date.now()): { data: StatsData; at: number } | null {
   if (typeof raw !== "string" || !store.statsId) return null;
@@ -88,8 +218,8 @@ export function openKeptNumbers(store: Store, variant: NumbersVariant, raw: unkn
   const json = raw.slice(end + 1);
   if (digestOf(json) !== digest || raw.slice(0, end) !== headOf(store, variant, at, digest)) return null;
   try {
-    const data = JSON.parse(json) as StatsData;
-    if (!data || typeof data !== "object" || !Array.isArray(data.days) || !data.totals) return null;
+    const data: unknown = JSON.parse(json);
+    if (!statsData(data)) return null;
     return { data, at };
   } catch {
     return null;

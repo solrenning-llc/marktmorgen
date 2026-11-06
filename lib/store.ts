@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 50732)
-Total output lines: 4403
-
 /**
  * A creator's store: the handle, and the few facts the public page shows.
  *
@@ -2204,7 +2201,76 @@ export async function moveAccount(
       // Every lock made to last another term, then each record written only
       // while its lock is still ours (lib/redis-lock.ts). The new address's
       // record only where there is none: a store made there in the meantime
-    …732 tokens truncated…g()}`,
+      // is never written over. A write refused here leaves the old records
+      // as they were, still the account, at its old address.
+      for (const lock of [held, ...moved.map((one) => one.lock)]) {
+        if (!(await holdLock(lock))) throw new StoreBusyError();
+      }
+      if (!(await setIfHeld(held, await ownerKey(to), recordJson(next), { absent: true }))) {
+        return { ok: false, reason: "taken" };
+      }
+      const written: typeof moved = [];
+      for (const one of moved) {
+        if (!(await setIfHeld(one.lock, await ownerKey(storeRef(one.before)), recordJson(one.next)))) {
+          // Everything written so far is taken back, so the account is not
+          // left half at each address.
+          for (const done of written) {
+            await setIfHeld(done.lock, await ownerKey(storeRef(done.before)), recordJson(done.before)).catch(() => false);
+          }
+          await redisPipeline([["DEL", await ownerKey(to)]]).catch(() => {});
+          throw new StoreBusyError();
+        }
+        written.push(one);
+      }
+      const handles = [store.handle, ...store.previousHandles];
+      await redisPipeline([
+        ...handles.map((handle) => ["SET", handleKey(handle), to]),
+        ...(store.sid ? [["SET", storeIdKey(store.sid), to]] : []),
+        ...(moved.length ? [["SADD", await accountKey(to), ...moved.map((one) => one.before.sid)]] : []),
+        ["DEL", await accountKey(from)],
+        ["DEL", await ownerKey(from)],
+      ]);
+      return { ok: true, store: next };
+    });
+  });
+  return result ?? { ok: false, reason: "none" };
+}
+
+export type ReleaseResult =
+  | { ok: true; store: Store }
+  | { ok: false; reason: "none" | "current" | "unknown" };
+
+/**
+ * Lets go of an address the store used before.
+ *
+ * This is the one destructive thing a creator can do to their own audience,
+ * so it is never automatic and never implied: a link still printed under that
+ * name stops working the moment it is released, and a month later the name
+ * may belong to somebody else. It exists because the opposite is worse. An
+ * address mistyped and abandoned a minute later, never published anywhere,
+ * would otherwise sit on a slot for good.
+ *
+ * Freeing the slot costs the name: it goes back on the shelf rather than
+ * staying quietly in this account. That is what keeps the ceiling honest —
+ * nobody can pile up names by releasing them.
+ */
+export async function releaseHandle(
+  email: string,
+  rawHandle: string,
+): Promise<ReleaseResult> {
+  const handle = normaliseHandle(rawHandle);
+
+  const result = await withStore<ReleaseResult>(email, async (store, save) => {
+    if (store.handle === handle) return { ok: false, reason: "current" };
+    if (!store.previousHandles.includes(handle)) {
+      return { ok: false, reason: "unknown" };
+    }
+
+    await redisPipeline([
+      [
+        "SET",
+        handleKey(handle),
+        `${RELEASED_PREFIX}${new Date().toISOString()}`,
         "EX",
         RELEASE_QUARANTINE_DAYS * 24 * 60 * 60,
       ],

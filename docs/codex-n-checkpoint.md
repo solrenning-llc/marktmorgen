@@ -334,3 +334,39 @@ All test data synthetic. No price/visible limit/commission/flag/gate/account/pay
 - Correção exigida: toda linha usada para provar ausência deve ter forma completa dos campos necessários; linha parcial/malformada deve devolver `null`, soltar a marca pelo caminho unknown já existente e não enviar. Novo teste deve falhar antes da correção.
 - RED original `087991eb` reproduzido: winback 7/6 falhas; checkout 6/4; recovery 8/3. GREEN do produto: 7/7, 6/6, 8/8. Quinze arquivos ligados: 15/15. ESLint focal limpo; scanner 3.806/0; diff-check limpo; TypeScript somente os seis `LayoutProps` conhecidos fora do diff. Sem Redis nativo, Stripe real, e-mail real ou navegador.
 - Próximo retorno desta revisão: somente delta corretivo do #2714, se pedido. Continua necessária a segunda revisão financeira independente; não presumir fechamento.
+
+
+---
+
+## Retomada — 05/11/2026 21h40 Fortaleza — retorno #2714 e primeiro financeiro #2722
+
+### Fonte e preservação
+
+- Retomada iniciada pelo checkpoint durável `06c85d939a0b23f2bd65434017f7d08542ba238f`, blob `93403214f28ce33aff2b4e6f100190c08977151d`, mais recente que o commit antigo repetido no disparo.
+- Regras main obrigatórias e somente o delta novo do canal foram lidos conforme AV12. O append de conclusão desta retomada entrou no canal em `2469a71c1762ddf6d4edcae733d7700f6f9c28c0`, blob `db284cec902019853bd7106f3c823ae52dc75392`.
+- Os cinco produtos próprios permanecem exatamente os mesmos: #2451/`bf6840e`, #2544/`447e972`, #2608/`8ac8975`, #2674/`5bcd2e6` e #2700/`ef88733`. Nenhum head, retry, CI, reserva ou ramo próprio de produto foi movido; não foi aberta sexta unidade.
+- Bloqueios permanecem: #2451 8/9 com retry verify esgotado; #2544 sem edição/retry até A3; #2608 oito SUCCESS com retry cancelado e qualificação R2 pendente; #2674 aguarda triestado reservado; #2700 7/9, sem retry, por pricing stale compartilhado e macOS OOM.
+
+### #2714 — retorno financeiro focal concluído
+
+- Head exato final revisado: `885eee520113fa1f4b4a07acd54d10496f7cd203`, base main `0f139490d3fc79045fd370cd9b5478b64e2f69e5`.
+- Parecer `5794121514`: **SEM grave/médio; o MÉDIO anterior de assinatura ativa parcial está fechado**.
+- A correção exige linha de assinatura exata e mantém unknown sem envio. Delta corretivo inteiro conferido; focal `13/13 + 3/3 + 5/5 + 10/10 + 6/6`; dezessete arquivos ligados verdes; ESLint focal, scanner 3.809/0 e diff limpos.
+- Pode entrar somente após duas revisões financeiras aplicáveis e nove agregadores finais exatos. Nenhum merge/CI/retry feito por N.
+
+### #2722 — primeira revisão financeira concluída, 1 MÉDIO
+
+- Head exato: `229105c59ddf545e2bf285babf4723e8aa8a2d0a`, base #2714 `885eee520113fa1f4b4a07acd54d10496f7cd203`.
+- Parecer GitHub `5794169569`: **NÃO LIBERADO, 1 MÉDIO**.
+- Defeito novo em `lib/creator-invite-credit.ts:117-131`: `relist()` devolve silenciosamente em leitura ausente/malformada, pula crédito obrigatório que `parseCredit` não lê, ignora o ACK da reindexação e engole exceções. `earnFrom()` termina normalmente; `settleInvites()` declara `failed:0, complete:true` enquanto o crédito devido continua fora de `nl:ref:owed` e nada chegou ao plano. Registro persistente malformado pode ficar órfão indefinidamente; resposta desconhecida transitória é reconhecida como rodada concluída.
+- RED durável: ramo `codex/n-review-2722-evidence`, commit remoto `183fd696dc0dd4374a3daa8f603e4a2bd436b890`, blob do teste `21f296d6395b478b5ed65c448ee17daec0f1a8ea`. Resultado no head do produto: esperado `[failed=1, complete=false, balance=[]]`; obtido `[0,true,[]]`. A rodada saudável seguinte ainda paga exatamente uma vez.
+- Correção exigida: a leitura de todo crédito de invoice já existente é obrigatória e exata; só o bônus opcional pode estar ausente. Qualquer unknown de leitura/escrita deve subir como falha/retry, manter `complete=false` e nunca fazer POST a partir de dados desconhecidos. Depois: retorno das duas revisões financeiras e nove agregadores NOVOS do head final.
+- REDs do autor reproduzidos de forma independente: `633382b8` falha 2/2 nas asserções de review request; `b108d66b` falha 1/3 na leitura batched. No head submetido, focais/ligados passaram antes do adversarial.
+
+### Próximo exato
+
+1. AV12: não sondar CI em rodadas. Ler somente novidade real para N no canal.
+2. Se Claude 2 corrigir #2722, conferir somente o delta focal no novo head e exigir o RED acima verde sem enfraquecer; como dinheiro sai, duas revisões aplicáveis continuam obrigatórias.
+3. Não mover/retry os cinco produtos próprios sem evento causal explícito. Não abrir sexta unidade.
+4. Revisões anteriores permanecem preservadas e não devem ser duplicadas. SG2(27/30) segue somente prova `3d4cb847`, bloqueada por #2270/#1969.
+5. Merge próprio somente com `expected_head_sha`, revisão exigida sem grave/médio e nove agregadores finais exatos verdes. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhuma alteração de preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.

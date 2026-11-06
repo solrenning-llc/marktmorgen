@@ -12,9 +12,10 @@
  *     to another time" stood alone on their line at 18 px high; each is now at
  *     least 44 px high (min-h-11), as the page's "Back to your purchases" is;
  *   - WCAG 2.4.10 (Section Headings, AAA) and 1.3.1: each purchase and each
- *     booked call was a paragraph in bold, so the list could not be walked
- *     heading by heading; each purchase is now a level-2 heading under the
- *     page's h1, and each call a level-3 heading under "Booked calls".
+ *     booked call, and each agreement waiting to be signed, was a paragraph in
+ *     bold, so the list could not be walked heading by heading; each purchase
+ *     is now a level-2 heading under the page's h1, and each call and each
+ *     agreement a level-3 heading under "Booked calls" and "Waiting on you".
  *
  * Synthetic records and a stand-in Stripe only: nothing real is charged, sent or read.
  */
@@ -27,6 +28,9 @@ import { paidPeriod } from "./billing-period-fixture";
 import { ordersLinkFor } from "@/lib/buyer-orders";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { readSetup } from "@/lib/call-setup";
+import { readDraft as readAgreementDraft } from "@/lib/agreement-rules";
+import { createAgreement, saveAgreement } from "@/lib/agreement-store";
+import { agreementWords } from "@/lib/buyer-words/agreements";
 import { type Store, addDraftProducts, addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 
 const OWNER = "access-owner@example.test";
@@ -132,7 +136,7 @@ test("2.5.5: every link standing alone on the page is at least 44 px high, in ev
   assert.deepEqual(reviews.map((l) => l.text), ["Review Weeknight Dinners", "Review Meal Planner"], "each purchase's review link is checked");
 });
 
-test("2.4.10: each purchase is a section heading under the page's h1, and each booked call one under its own heading", async () => {
+test("2.4.10: each purchase is a section heading under the page's h1, and each booked call and agreement waiting one under its own heading", async () => {
   const store = await shop();
   const drafts = await addDraftProducts(OWNER, [
     { title: "Weeknight Dinners", summary: "", priceCents: 1000, link: "https://example.test/dinners" },
@@ -144,6 +148,11 @@ test("2.4.10: each purchase is a section heading under the page's h1, and each b
   const setup = readSetup({ kind: "weekly", minutes: 30, tz: "UTC", weekly: [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []], noticeHours: 1, horizonDays: 30, bufferMinutes: 0, room: "https://example.test/room", video: false, meet: null, seats: 1, sessions: [] });
   assert.ok(setup && typeof setup === "object");
   await setProductCall(OWNER, call.product.id, setup as never);
+  const draft = readAgreementDraft({ kind: "agreement", email: BUYER, name: "Synthetic Buyer", title: "Coaching terms", body: "One private session.", lines: [{ text: "A private session", quantity: 1, amount: "10" }], consent: true }, "usd");
+  assert.ok(draft.ok);
+  const made = await createAgreement((await storeForEmail(OWNER))!, draft.draft);
+  assert.ok(made.ok);
+  await saveAgreement({ ...made.agreement, sent: [Date.now()] });
   const start = (NOW + 3 * 86_400) * 1000;
   checkouts = [
     ...drafts.ids.map((id, i) => paid(i, 60 * (i + 1), { product: id })),
@@ -154,6 +163,8 @@ test("2.4.10: each purchase is a section heading under the page's h1, and each b
   const words = ordersWords("en");
   assert.equal(headings[0], `h1:${words.pageTitle}`);
   assert.ok(headings.includes(`h2:${words.bookedCalls(1)}`), `the calls have their heading: ${headings.join(" | ")}`);
+  assert.ok(headings.includes(`h2:${words.waiting}`), `what waits on the buyer has its heading: ${headings.join(" | ")}`);
+  assert.ok(headings.includes(`h3:${agreementWords("en").pageTitle("agreement")}: Coaching terms`), `the agreement waiting is a heading under "${words.waiting}": ${headings.join(" | ")}`);
   assert.ok(headings.includes("h3:Coaching call"), `the booked call is a heading under "Booked calls": ${headings.join(" | ")}`);
   for (const title of ["Weeknight Dinners", "Meal Planner"]) assert.ok(headings.includes(`h2:${title}`), `"${title}" is a section heading: ${headings.join(" | ")}`);
   // No level skipped: every heading is at most one level under the one before it.

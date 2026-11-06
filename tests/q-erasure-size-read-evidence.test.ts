@@ -35,6 +35,7 @@ for (const [name, value] of [
   ["infinity", Number.POSITIVE_INFINITY],
   ["negative", -1],
   ["fraction", 1.5],
+  ["work overflow", Number.MAX_SAFE_INTEGER],
   ["unsafe integer", Number.MAX_SAFE_INTEGER + 1],
 ] as const) {
   is(`${name} is refused`, tried(value), "refused");

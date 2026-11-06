@@ -2754,7 +2754,7 @@ export default async function StudioPage({
                 {/* 601 [KB22] U5: only a store with a plan subscription has invoices to read (lib/plan-invoices.ts). */}
                 {store.subscriptionId && store.stripeCustomerId ? (
                   <p className="mt-3">
-                    <Link href={studioPath(store, "", "invoices")} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4">
+                    <Link href={studioPath(store, "", "invoices")} prefetch={false} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4">
                       Your plan&apos;s invoices
                     </Link>
                   </p>

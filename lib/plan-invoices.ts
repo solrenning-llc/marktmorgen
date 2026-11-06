@@ -12,12 +12,15 @@
  * as every page does and as the Terms say, and nothing more of that figure
  * (owner's decision on the studio totals, inbox C4: a page costs what the
  * Terms say). Reading Stripe takes one of the store's ESSENTIAL_PER_DAY
- * billing requests of the day instead (the counter countStudio keeps for
- * "billing"), each priced with a heavy request and two Stripe GETs in
- * tests/plan-cost-registry.ts; tests/plan-cost-registry.test.ts holds
- * PLAN_INVOICES_READ under it. A count that could not be read asks nothing
- * and says so, never "too many". A store with no plan subscription asks
- * Stripe nothing and takes nothing.
+ * requests of the day instead (takeEssential, the counter countStudio keeps
+ * for leaving and paying), each priced with a heavy request and two Stripe
+ * GETs in tests/plan-cost-registry.ts; tests/plan-cost-registry.test.ts
+ * holds PLAN_INVOICES_READ under it. At most PLAN_INVOICES_PER_DAY of them in
+ * 24 hours, counted first on a key of its own, so reading invoices can never
+ * use more than half of that figure and leaving or paying always keeps the
+ * rest. A count that could not be read asks nothing and says so, never "too
+ * many". A store with no plan subscription asks Stripe nothing and takes
+ * nothing.
  *
  * Unknown is never none (lib/stripe-list.ts): an answer Stripe could not
  * give, or gave in another shape, is "unknown"; rows that are not readable
@@ -25,14 +28,17 @@
  */
 import { onPlatformAt } from "@/lib/billing";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store } from "@/lib/store";
-import { essentialLimitState } from "@/lib/request-guard";
+import { essentialLimitState, type LimitState } from "@/lib/request-guard";
 import { ESSENTIAL_PER_DAY } from "@/lib/studio-allowance-rules";
+import { takeEssential } from "@/lib/studio-route";
 import { STRIPE_LIST_VERSION, hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 /** One page of the most recent invoices: two years of a monthly plan. */
 export const PLAN_INVOICES_SHOWN = 24;
-/** What a refusal past the day's billing requests says. */
-export const PLAN_INVOICES_USED = `Your store has used its ${ESSENTIAL_PER_DAY} billing requests for today, so your invoices are not read again until tomorrow (UTC). Nothing was changed.`;
+/** Reads in 24 hours, each also one of ESSENTIAL_PER_DAY: at most half of it, so leaving or paying always keeps the rest. */
+export const PLAN_INVOICES_PER_DAY = 5;
+/** What a refusal says: both counters run 24 hours from their first request, not from midnight. */
+export const PLAN_INVOICES_USED = `Your invoices can be read up to ${PLAN_INVOICES_PER_DAY} times in 24 hours, and only while your store has some of its ${ESSENTIAL_PER_DAY} requests a day for billing, deleting and downloading left. That limit has been reached, so they were not read. Nothing was changed. Try again later today or tomorrow.`;
 
 const INVOICE_ID = /^in_[A-Za-z0-9]{3,250}$/;
 /** Stripe's hosted invoice page and its PDF, at Stripe's own hosts over https only. */
@@ -58,7 +64,7 @@ export type PlanInvoice = {
 export type PlanInvoices =
   /** No plan subscription: Stripe was not asked. */
   | { state: "none" }
-  | { state: "listed"; invoices: PlanInvoice[]; more: boolean; unreadable: number }
+  | { state: "listed"; invoices: PlanInvoice[]; more: boolean; unreadable: number; drafts: number }
   /** The studio's requests are used: Stripe was not asked. */
   | { state: "used"; message: string }
   /** Stripe could not be asked, or answered in another shape. */
@@ -83,7 +89,7 @@ function link(value: unknown, pattern: RegExp): string | null {
  * customer's and this subscription's, with every field shown in a value
  * Stripe gives; drafts are not invoices yet and are left out.
  */
-export function readPlanInvoicePage(page: unknown, owner: Owner): { invoices: PlanInvoice[]; more: boolean; unreadable: number } {
+export function readPlanInvoicePage(page: unknown, owner: Owner): { invoices: PlanInvoice[]; more: boolean; unreadable: number; drafts: number } {
   const read = readStripePage(
     page,
     (row) => {
@@ -116,14 +122,20 @@ export function readPlanInvoicePage(page: unknown, owner: Owner): { invoices: Pl
       page: link(ownField(row, "hosted_invoice_url"), INVOICE_PAGE),
       pdf: link(ownField(row, "invoice_pdf"), INVOICE_PDF),
     }));
-  return { invoices, more: read.hasMore, unreadable: read.unreadable };
+  return { invoices, more: read.hasMore, unreadable: read.unreadable, drafts: read.rows.length - invoices.length };
 }
 
-type Take = () => Promise<"within" | "exceeded" | "unknown">;
+type Take = () => Promise<LimitState>;
 
-/** One of the store's billing requests of the day: the very counter countStudio(store, "billing") takes (lib/studio-route.ts). */
-export function takeBillingRequest(store: Pick<Store, "sid" | "handle">): Promise<"within" | "exceeded" | "unknown"> {
-  return essentialLimitState("studio-essential", store.sid || store.handle, ESSENTIAL_PER_DAY, 86_400);
+/**
+ * One read of the plan's invoices: one of PLAN_INVOICES_PER_DAY on its own
+ * key first, then one of the store's essential requests (takeEssential). A
+ * refusal or an unknown on the first takes nothing from the second.
+ */
+export async function takeInvoicesRead(store: Pick<Store, "sid" | "handle">): Promise<LimitState> {
+  const own = await essentialLimitState("plan-invoices", store.sid || store.handle, PLAN_INVOICES_PER_DAY, 86_400);
+  if (own !== "within") return own;
+  return takeEssential(store);
 }
 
 /**
@@ -132,7 +144,7 @@ export function takeBillingRequest(store: Pick<Store, "sid" | "handle">): Promis
  */
 export async function planInvoicesOf(
   store: Pick<Store, "stripeCustomerId" | "subscriptionId" | "sid" | "handle">,
-  take: Take = () => takeBillingRequest(store),
+  take: Take = () => takeInvoicesRead(store),
 ): Promise<PlanInvoices> {
   const customer = store.stripeCustomerId;
   const subscription = store.subscriptionId;
@@ -141,7 +153,7 @@ export async function planInvoicesOf(
   try {
     taken = await take();
   } catch (error) {
-    console.error("counting the billing request for the plan's invoices failed", error);
+    console.error("counting the read of the plan's invoices failed", error);
     return { state: "unknown" };
   }
   if (taken === "exceeded") return { state: "used", message: PLAN_INVOICES_USED };

@@ -57,27 +57,30 @@ export function PlanInvoicesList({ read }: { read: PlanInvoices }) {
   }
   if (read.state === "used") return <p className="notice notice-warn mt-8" role="status">{read.message}</p>;
   // An empty page that says more follow is not an answer either.
-  if (read.state === "unknown" || (read.invoices.length === 0 && read.unreadable === 0 && read.more)) {
+  if (read.state === "unknown" || (read.invoices.length === 0 && read.unreadable === 0 && read.drafts === 0 && read.more)) {
     return (
       <p className="notice notice-warn mt-8" role="status">
-        Your invoices could not be read just now. Nothing was changed. Reload the page in a minute.
+        Your invoices could not be read just now. Nothing was changed. Try again later.
       </p>
     );
   }
-  const { invoices, more, unreadable } = read;
+  const { invoices, more, unreadable, drafts } = read;
   return (
     <>
       {unreadable > 0 ? (
         <p className="notice notice-warn mt-8" role="status">
-          {`${unreadable === 1 ? "One invoice" : `${unreadable} invoices`} could not be read just now and ${unreadable === 1 ? "is" : "are"} not shown. Reload the page in a minute.`}
+          {`${unreadable === 1 ? "One invoice" : `${unreadable} invoices`} could not be read just now and ${unreadable === 1 ? "is" : "are"} not shown. Try again later.`}
         </p>
       ) : null}
-      {invoices.length === 0 && unreadable === 0 ? (
+      {invoices.length === 0 && unreadable === 0 && !more ? (
         <p className="mt-8 text-ink-soft">There are no invoices for your plan yet.</p>
+      ) : null}
+      {invoices.length === 0 && unreadable === 0 && more && drafts > 0 ? (
+        <p className="mt-8 text-ink-soft">Your most recent invoices are still drafts at Stripe, and older ones are not listed here.</p>
       ) : null}
       {invoices.length > 0 ? (
         <>
-          {more ? <p className="mt-8 text-ink-soft">{`Showing your ${PLAN_INVOICES_SHOWN} most recent invoices.`}</p> : null}
+          {more ? <p className="mt-8 text-ink-soft">{`Showing your most recent invoices, from the last ${PLAN_INVOICES_SHOWN} Stripe made. Older ones are not listed here.`}</p> : null}
           <ul className="mt-6 grid gap-4">
             {invoices.map((invoice) => (
               <Invoice key={invoice.id} invoice={invoice} />

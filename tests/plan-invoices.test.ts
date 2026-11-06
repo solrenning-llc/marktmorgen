@@ -7,9 +7,12 @@
  *   - a store with no plan subscription asks Stripe nothing and takes nothing
  *     from its studio figure: it says, in plain text, that there are none;
  *   - the page costs the studio's figure only what every page costs; one of
- *     the store's billing requests of the day (the counter countStudio keeps
- *     for "billing") is taken before Stripe is asked, and a refusal, or a
- *     count that could not be read, asks nothing;
+ *     PLAN_INVOICES_PER_DAY reads, then one of the store's essential requests
+ *     of the day (the counter countStudio keeps for leaving and paying), is
+ *     taken before Stripe is asked, never more than half of that figure, and
+ *     a refusal, or a count that could not be read, asks nothing;
+ *   - a store named twice or in another shape, or one the person can no
+ *     longer open, never shows another store's invoices;
  *   - Stripe's pages are linked only at Stripe's own https hosts;
  *   - an answer Stripe could not give, or gave in another shape, is said as
  *     "could not be read", never as "no invoices";
@@ -24,8 +27,10 @@ import { openSession, SESSION_COOKIE } from "@/lib/auth";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { STRIPE_LIST_VERSION } from "@/lib/stripe-list";
 import {
+  PLAN_INVOICES_PER_DAY,
   PLAN_INVOICES_SHOWN,
   PLAN_INVOICES_USED,
+  takeInvoicesRead,
   planInvoicesOf,
   readPlanInvoicePage,
   type PlanInvoices,
@@ -33,7 +38,7 @@ import {
 import { PlanInvoicesList } from "@/components/plan-invoices-list";
 import StudioInvoicesPage from "@/app/studio/invoices/page";
 import { ESSENTIAL_PER_DAY } from "@/lib/studio-allowance-rules";
-import { countStudio } from "@/lib/studio-route";
+import { countStudio, takeEssential } from "@/lib/studio-route";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -163,7 +168,8 @@ async function main() {
     const read = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, async () => "exceeded");
     is("said as used", read, { state: "used", message: PLAN_INVOICES_USED });
     is("Stripe is not asked", asked.length, 0);
-    is("the message is shown, never 'no invoices'", [html(read).includes(`its ${ESSENTIAL_PER_DAY} billing requests for today`), html(read).includes("no invoices")], [true, false]);
+    // Changed (rule 23): the refusal names both counters and their 24 hours (review 1), no longer "until tomorrow (UTC)".
+    is("the message is shown, never 'no invoices'", [html(read).includes(`up to ${PLAN_INVOICES_PER_DAY} times in 24 hours`), html(read).includes("no invoices"), html(read).includes("UTC")], [true, false, false]);
     const unknown = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, async () => "unknown");
     is("a count that could not be read asks nothing and is never said as too many", [unknown, asked.length, html(unknown).includes("today")], [{ state: "unknown" }, 0, false]);
     const thrown = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, async () => { throw new Error("redis down"); });
@@ -192,7 +198,11 @@ async function main() {
     is("a complete, empty page: none yet, in plain text", [html(empty).includes("no invoices"), html(empty).includes("<a ")], [true, false]);
     reply = { status: 200, body: { data: Array.from({ length: PLAN_INVOICES_SHOWN }, (_, n) => invoice({ id: `in_Many${String(n).padStart(8, "0")}` })), has_more: true } };
     const many = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, take);
-    is("more than a page: says only the latest are shown", html(many).includes(`your ${PLAN_INVOICES_SHOWN} most recent invoices`), true);
+    // Changed (rule 23): drafts may be among the 24, so the page no longer says it shows exactly 24 (review 1).
+    is("more than a page: says only the latest are shown", html(many).includes(`from the last ${PLAN_INVOICES_SHOWN} Stripe made`), true);
+    reply = { status: 200, body: { data: [invoice({ status: "draft", number: null, hosted_invoice_url: null, invoice_pdf: null })], has_more: true } };
+    const drafts = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, take);
+    is("a page of drafts with more after it: said as drafts, never as unreadable or as none", [drafts.state === "listed" && drafts.drafts, html(drafts).includes("still drafts"), html(drafts).includes("could not be read"), html(drafts).includes("no invoices")], [1, true, false, false]);
     is("a malformed id is never sent to Stripe", [await planInvoicesOf({ stripeCustomerId: "cus_x/../charges", subscriptionId: SUB, sid: "", handle: "x" }, take), asked.some((a) => a.path.includes("charges"))], [{ state: "none" }, false]);
   }
 
@@ -220,22 +230,48 @@ async function main() {
     is("asked for its own customer and subscription", asked.filter((a) => a.path.startsWith("GET /v1/invoices")).map((a) => a.path), [
       `GET /v1/invoices?${new URLSearchParams({ customer: CUS, subscription: SUB, limit: String(PLAN_INVOICES_SHOWN) })}`,
     ]);
-    // Changed (rule 23): the page says the read takes one of the day's billing requests, not studio units.
-    is("the page says what reading them counts", shown.includes(`one of the ${ESSENTIAL_PER_DAY} billing requests your store has each day`), true);
+    // Changed (rule 23): the page says how many reads a day and that canceling keeps the rest (review 1).
+    is("the page says what reading them counts", shown.includes(`up to ${PLAN_INVOICES_PER_DAY} times in 24 hours`) && shown.includes("canceling your plan always keeps the rest"), true);
 
-    // The same counter as cancelling or changing the plan: past it, the page asks Stripe nothing and says why.
-    for (let n = 1; n < ESSENTIAL_PER_DAY; n += 1) await countStudio(store, "billing");
+    // Changed (rule 23, review 1): invoices may use at most PLAN_INVOICES_PER_DAY of the essential requests, never all of them,
+    // so canceling the plan is never shut out by reading invoices.
+    is("the invoices' reads are at most half of the essential figure", PLAN_INVOICES_PER_DAY * 2 <= ESSENTIAL_PER_DAY, true);
+    for (let n = 1; n < PLAN_INVOICES_PER_DAY; n += 1) await StudioInvoicesPage({ searchParams: Promise.resolve({ store: store.sid }) });
     asked.length = 0;
     const used = renderToStaticMarkup((await StudioInvoicesPage({ searchParams: Promise.resolve({ store: store.sid }) })) as React.ReactElement);
-    is("past the day's billing requests: said, and Stripe not asked for invoices", [used.includes("billing requests for today"), asked.filter((a) => a.path.startsWith("GET /v1/invoices")).length], [true, 0]);
-    is("and cancelling the plan is refused the same day, by the same counter", (await countStudio(store, "billing")).ok, false);
+    is("past its reads: said, and Stripe not asked for invoices", [used.includes(`up to ${PLAN_INVOICES_PER_DAY} times in 24 hours`), asked.filter((a) => a.path.startsWith("GET /v1/invoices")).length], [true, 0]);
+    let left = 0;
+    while ((await countStudio(store, "billing")).ok) left += 1;
+    is("canceling or changing the plan still has the rest of the day's figure", left, ESSENTIAL_PER_DAY - PLAN_INVOICES_PER_DAY);
+
+    // The essential figure used by leaving or paying first: no read is taken from it, and Stripe is not asked.
+    const other = { sid: "s_PlanInvoicesOther", handle: "planinvoicesother" };
+    for (let n = 0; n < ESSENTIAL_PER_DAY; n += 1) await takeEssential(other);
+    is("an essential figure already used refuses the read", await takeInvoicesRead(other), "exceeded");
+
+    // Review 1: a store named twice or in another shape, or one no longer open, never falls back to another store.
+    const redirected = async (store: unknown) => {
+      try {
+        await StudioInvoicesPage({ searchParams: Promise.resolve({ store } as { store: string }) });
+        return "drawn";
+      } catch (error) {
+        return String((error as { digest?: unknown }).digest ?? error);
+      }
+    };
+    asked.length = 0;
+    is("a store named twice is sent to the studio", (await redirected([store.sid, store.sid])).includes(";/studio;"), true);
+    is("a store in another shape is sent to the studio", (await redirected("s_../../x")).includes(";/studio;"), true);
+    const gone = await redirected("0123456789abcdef0123456789abcdef");
+    is("a store that cannot be opened draws no other store's invoices: sent to the studio of the one that opened", [gone.startsWith("NEXT_REDIRECT"), gone.includes(`/studio?store=${store.sid};`)], [true, true]);
+    is("and Stripe is not asked for any of them", asked.filter((a) => a.path.startsWith("GET /v1/invoices")).length, 0);
   }
 
   part("The studio links the page only for a store with a plan subscription");
   {
     const studio = readFileSync("app/studio/page.tsx", "utf8");
     is("one link from the plan card", studio.split('studioPath(store, "", "invoices")').length - 1, 1);
-    is("shown only with a plan subscription", /store\.subscriptionId && store\.stripeCustomerId \? \(\s*<p[^>]*>\s*<Link href=\{studioPath\(store, "", "invoices"\)\}/.test(studio), true);
+    // Changed (rule 23, review 1): the link is never prefetched, so drawing the plan card reads nothing.
+    is("shown only with a plan subscription, never prefetched", /store\.subscriptionId && store\.stripeCustomerId \? \(\s*<p[^>]*>\s*<Link href=\{studioPath\(store, "", "invoices"\)\} prefetch=\{false\}/.test(studio), true);
   }
 
   done();

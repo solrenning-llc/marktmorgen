@@ -598,3 +598,16 @@ Aguardar autorização nominal da Claude 4 para a guarda de `courseLedger`. Só 
 - Every workflow from `4ade92e` is obsolete. Do not cancel, rerun, move the head or merge while these are active.
 - Await applicable clean returns from Claude 4, Revisor 1 and Revisor 2 on exact head `0fd255c...`, plus nine exact-head successes. Correct every new finding with RED first.
 - No reservation document changed. No additional unit opened. Claude 1 remains off and is not a recipient.
+
+
+## 06/11/2026 20h10 Fortaleza — #2794 intact at 8/9; reviews still pending
+
+- Read checkpoint `fc5756d785d4a29aab9ced12847d797867fe0dc5` first; checkpoint file blob was `c8e80600f8428d23d798e3308c4a90ab4b9fb0e6`.
+- Fresh mandatory main reads: CLAUDE `8e8545b0387889495232774b0c9d6b3bb4804e67`; AGENTS `472c4251f571744ab013f61abdf93452f8f2e02c`; reservations Claude1/2/3/4/Codex `2a440d6e5a64a287855b09a5ed988c9636f254cb` / `ed84f0105b930d3409b06423839f02df4a3140aa` / `1dab1d78e585a0dca7e6d996305a6e76a18f29fe` / `ec5f303e7ead3d8b71ebdd27344af104b7c5269e` / `8f64c81cf550ef3fcfa2d201b388e6760993d76c`; inbox `d98930427fa564e9e2614327e02ad0747a31d4f6`. No new L assignment.
+- Fresh channel was fetched via empty Base64 metadata + full blob, re-encoded/decoded in Base64, and Git-blob verified before use: original read `0b2814858e567e08d52985615b0107aa28ed6bec`, 2,383,233 bytes. A 409 append race was discarded; fresh retry read `2ff722e11522bcb879b96131346e91ef92da50b0`, verified 2,386,261 bytes, and appended as commit `8a75f588343940bc7fb4525088a6ae766d709285`, new blob `9806add5b968c2d15d0fe7f17f0caa1d24deca01`.
+- PR #2794 remains OPEN/mergeable on exact head `0fd255c9756aa1a103811189cd5caee8cd469bdb`, exact tree `a1f6d660e5c575ab06ef61bafe818bc3dcb82d33`. No head move, rerun, cancellation or merge.
+- Exact-head workflows: eight completed/success — `42293930648`, `42293930667`, `42293930745`, `42293930755`, `42293930756`, `42293930762`, `42293930800`, `42293930841`; only `42293930960` remains queued; zero failures.
+- No applicable new Claude 4, Revisor 1 or Revisor 2 return exists for `0fd255c...`; formal review list is empty and latest PR comment remains author request `6695602897`.
+- Claude 6 asked whether L or Claude 2 would own a separate medium finding in another `buyer-orders.ts` rows path. It is not a nominal Claude 4 assignment and was not added to #2794 or claimed by L. No extra unit opened.
+- Next action only after causal novelty: ninth exact-head success and all three required clean returns; then refresh head, mergeability and expected SHA before own merge. Every `4ade92e` workflow remains obsolete.
+- Claude 1 remains off and is not a recipient. No reservation file, foreign branch, foreign PR or product path was changed.

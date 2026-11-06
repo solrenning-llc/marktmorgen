@@ -16,7 +16,7 @@ import { WAIT_TOKEN, newWaitlistToken as newToken, waitlistTokenKey as tokenKey,
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, noteData, takeData } from "@/lib/store-data";
 import { HASH_SWAP_IF, HASH_TAKE_ALL, HASH_TAKE_FIELD, takenPairs } from "@/lib/redis-take";
-import { UnknownReply, exactReplies } from "@/lib/redis-exact";
+import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
 import { dataBytes } from "@/lib/store-data-rules";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
@@ -377,13 +377,23 @@ export async function launch(store: Store, product: Listing, input: { note: unkn
   const note = cleanText(input.note, MAX_LAUNCH_NOTE);
   if (!store.statsId) return { ok: false, reason: "busy" };
   const sid = store.statsId;
-  const [rawJob, rawList] = await redisPipeline([
-    ["GET", jobKey(sid, product.id)],
-    ["HGETALL", listKey(sid, product.id)],
-  ]);
+  const [rawJob, rawList] = exactReplies(
+    await redisPipeline([
+      ["GET", jobKey(sid, product.id)],
+      ["HGETALL", listKey(sid, product.id)],
+    ]),
+    2,
+    "a launch's job and waitlist",
+  );
+  // Unknown is never "no launch running" or "nobody waiting" (Claude 4's sweep, C4-2910, sweepA7 P4): read as
+  // nobody, the list would be deleted with its room and nobody emailed; read as no launch, a second one could
+  // start over one still sending. Either throws before anything is written.
+  if (rawJob !== null && (typeof rawJob !== "string" || !parseJob(rawJob))) throw new UnknownReply("a launch's job");
+  const pairs = plainList(rawList);
+  if (!pairs || pairs.length % 2 !== 0 || pairs.some((value) => typeof value !== "string")) throw new UnknownReply("a launch's waitlist");
   const running = parseJob(rawJob);
   if (running && !running.finished) return { ok: false, reason: "busy" };
-  const confirmed = entriesOf(rawList).filter(([, e]) => e.ok > 0).map(([email]) => email).sort();
+  const confirmed = entriesOf(pairs).filter(([, e]) => e.ok > 0).map(([email]) => email).sort();
   const total = confirmed.length;
   // A postal address is the law's for an email that offers something for sale (CAN-SPAM).
   if (total > 0 && !address) return { ok: false, reason: "address" };

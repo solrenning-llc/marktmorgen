@@ -10,14 +10,26 @@
  *    told yet": nobody is written to about the allowance on it, the list is
  *    left as it was, and the run says the part is unknown.
  *
+ * 3. The numbers emails (lib/stats-report.ts): whether the creator pressed
+ *    "Stop" (weeklyOff, SISMEMBER) is read exactly, and an answer of another
+ *    shape is never "not stopped": no email goes on it. The week's, the
+ *    month's and the busy day's claims (SET NX) go through claimMark: an
+ *    answer of another shape not read back as ours is never ours.
+ *
  * Confirmed answers (a claim held by another run, a list never written) work
- * as before. Synthetic data only.
+ * as before. Synthetic data only. Part 3 follows the proof Claude 5 wrote in
+ * sweep A6 (tests/sweep-a6-numbers-mail.proof.ts on claude5/sweep-a6 at
+ * 61c3662c: claimWeek firing twice, weeklyOff ignoring the stop, claimMonth and
+ * the busy-day claim).
  */
 import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { sendPaydayEmails } from "@/lib/affiliate-payday";
 import { recordDelivery, rememberFolderOwner, DELIVERY_ALLOWANCE_BYTES } from "@/lib/delivery";
 import { claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, storeForEmail } from "@/lib/store";
 import { GET as usage } from "@/app/api/cron/usage/route";
+import { BUSY_FLOOR, claimMonth, claimWeek, maybeBusyAlert, setWeeklyOff, weeklyOff } from "@/lib/stats-report";
+import { setSubscription } from "@/lib/store";
+import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -157,10 +169,74 @@ async function told(): Promise<void> {
   is("the list holds what it held", await pipeline([["GET", TOLD]]), kept);
 }
 
+async function numbers(): Promise<void> {
+  const owner = "numbers@example.com";
+  await claimHandle(owner, "loaf", "Loaf House", "");
+  await ensureStatsId(owner);
+  await setSubscription(owner, { customerId: "cus_OptOut00001", subscriptionId: "sub_OptOut00001", active: true, period: paidPeriod() });
+  const store = (await storeForEmail(owner))!;
+  const one = (command: string, reply: () => unknown[]) => ({ when: (c: (string | number)[]) => c[0] === command, reply });
+  // SISMEMBER answers 0 or 1: anything else is of another shape.
+  const STOP_MALFORMED: [string, () => unknown[]][] = [
+    ["no reply at all", () => []],
+    ["undefined", () => [undefined]],
+    ["QUEUED", () => ["QUEUED"]],
+    ["2", () => [2]],
+    ["two replies", () => [0, 0]],
+  ];
+
+  part("Numbers emails: the stop read exactly");
+  await setWeeklyOff(store.handle, true);
+  is("stopped (1): off", await weeklyOff(store.handle), true);
+  await setWeeklyOff(store.handle, false);
+  is("not stopped (0): on", await weeklyOff(store.handle), false);
+  for (const [label, reply] of STOP_MALFORMED) {
+    inject = one("SISMEMBER", reply);
+    is(`the stop answered ${label}: never read as "not stopped"`, await weeklyOff(store.handle), true);
+    inject = null;
+  }
+
+  part("Numbers emails: the week's and the month's claims read exactly");
+  is("the week, first: ours", await claimWeek("loaf-week"), true);
+  is("the week, again (nil): not ours", await claimWeek("loaf-week"), false);
+  is("the month, first: ours", await claimMonth("loaf-month", "2026-10"), true);
+  is("the month, again (nil): not ours", await claimMonth("loaf-month", "2026-10"), false);
+  for (const [label, reply] of MALFORMED) {
+    inject = one("SET", reply);
+    is(`the week claimed already, answered ${label}: not ours`, await claimWeek("loaf-week"), false);
+    is(`the week not claimed, answered ${label} and not read back as ours: not ours`, await claimWeek(`loaf-week-${label}`), false);
+    is(`the month claimed already, answered ${label}: not ours`, await claimMonth("loaf-month", "2026-10"), false);
+    is(`the month not claimed, answered ${label} and not read back as ours: not ours`, await claimMonth(`loaf-month-${label}`, "2026-10"), false);
+    inject = null;
+  }
+
+  part("Numbers emails: the busy day's email once a day, on an exact claim");
+  const busy = async () => {
+    const before = sent.length;
+    const said = await maybeBusyAlert(store, BUSY_FLOOR);
+    return { said, emails: sent.slice(before).filter((m) => m.to === owner).length };
+  };
+  is("a busy day: the email goes", await busy(), { said: true, emails: 1 });
+  is("again that day (nil): nothing", await busy(), { said: false, emails: 0 });
+  for (const [label, reply] of MALFORMED) {
+    inject = { when: (c) => c[0] === "SET" && String(c[1]).startsWith("nl:busy:"), reply };
+    is(`the day claimed already, answered ${label}: nothing`, await busy(), { said: false, emails: 0 });
+    inject = null;
+  }
+  await setWeeklyOff(store.handle, true);
+  for (const [label, reply] of STOP_MALFORMED) {
+    await pipeline([["DEL", `nl:busy:${new Date().toISOString().slice(0, 10)}:${store.handle}`]]);
+    inject = one("SISMEMBER", reply);
+    is(`stopped, the stop answered ${label}: no busy-day email`, await busy(), { said: false, emails: 0 });
+    inject = null;
+  }
+}
+
 async function main(): Promise<void> {
   redis.clear();
   await payday();
   await told();
+  await numbers();
   done();
 }
 

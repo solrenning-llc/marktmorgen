@@ -980,3 +980,71 @@ AV12noemptypolling. ReviewisNOWfulfilled,newCItransient; currentcontinuitymustre
 ### Exact continuation receipt — 2026-11-06 15:28 Fortaleza
 Fresh FULL channel blob 130a1579ad41664abdf5a621c557f2be7bc39e34 (1,218,185 characters) read. R2 cycle 144, 15h25, independently names exact db4c763cc as “Sem achado” (main integration only); original sibling findings remain explicitly open and gated to the separate post-merge unit. R2 cycle145 also saw checkpoint497d4dde8, document only, without finding. No duplicate review needed.
 One dependency-state read after that new exact-head review: #2821 remains OPEN/ready, exact db4c763cc7b74737d66c8ec121982721d6aba557, raw mergeable=true/blocked, NOT merged. Nine distinct exact-head workflows: 42270267335 completed/success; other eight in_progress, no failure. Never substitute old70dc nine greens. No rerun, cancellation, head mutation or merge attempted. Next causal action: terminal current-head CI return (diagnose any real failure); if all nine success, fresh raw/native/current-main client-bundle validation, normal expected-SHA merge and GET confirmation. Only after confirmed merge start the C4-2430 sibling consumer-complete correction using immutable9f8 RED. No source work on siblings before the gate. C4-2600 grants one targeted verify retry only if its specific post-backup-run96/96 cancellation occurs, not blanket permission; nothing has been retried here. Foreign executor review2826 already nominally claimed by G, no duplicate review.
+
+
+## COMPLETE CHECKPOINT — 2026-11-06 16:37 Fortaleza — #2821 MERGED; sibling unit durable WIP
+Supersedes previous #2821 waiting state. C4 sole coordinator/C1 OFF; V reservation docs. CX-127 newly read in FULL channel: acknowledge/vigia active679a4e87; channel reads >=2 minutes, own states >=5 minutes, no retry/cancel/paid operations. No automation created/changed/disabled. No subagents. All old heads/REDs preserved.
+
+### Completed #2821
+EXACT db4c763cc7b74737d66c8ec121982721d6aba557 had all NINE DISTINCT workflows completed/success:42270267335,42270267257,42270267124,42270267142,42270266964,42270267401,42270267243,42270267114,42270267190. R2c109 complete5f2 +c12570dc+c144 exactdb4c qualified and no open finding, no duplicate review.
+Frozen fresh main849cef1d131c8fc70e2061e8865b80a1571437ec, native clean union b370d3d2f660c8ab7d39f5f2928a26886c690f08. Actual MAIN269/269 and UNION269/269 client bundles, cached diff-check0. Fresh raw true/clean and main unchanged immediately before NORMAL expected-head merge. MERGED **738a7124c3fd75cdbcf1b3fed4e544cf7d5a8575**, separate GET confirms merged=true, merged_at2026-11-06T19:24:11Z. No main push, headmove, rerun/cancel or bypass. Logs /tmp/k2-2821-{main849,union849}-bundles.log. Own worktree k2-merge-2821-current HEAD849/stagedb370 preserved. Channel completion+next reservation0b46dbe0, earlierqualification679a4e87.
+
+### Current new product unit, after merge gate actually satisfied
+C4-2430 follow-up ONE unit for five siblings. Branch **codex/k-form-store-siblings-exact**, current **ddea6c5fc18e49616fd57d06e9d288eb9accdc04**, tree **f52c1a667e8200f82dc4eb29a1359094ca2b361c** native=GitData. NO PR yet; consumer coverage incomplete, intentionally do NOT ask review/start CI/merge it yet.
+Worktree /workspace/scratch/76b48832dbcf/k2-form-siblings-exact local branch starts738; index contains exactly current public tree f52. Local HEAD still738, index staged; do NOT reset/discard. All actual changes public, remote canonical. Ten paths:
+lib/form-store.ts
+app/api/store/forms/route.ts
+app/api/store/forms/export/route.ts
+app/api/store/forms/response-pdf/route.ts
+tests/k-form-store-sibling-evidence.test.ts
+tests/k-form-store-sibling-shapes.test.ts
+tests/form-response-unavailable-world.tsx
+tests/form-response-unavailable.test.ts
+tests/test-config.mjs
+docs/reviews/k2-form-store-siblings-exact.md
+
+Reservations/PR files/channel audited once before unit:139 open PRs, all139 /files calls succeeded, five reservation documents read fresh on main. Overlaps: #2287 POSTform, #1969StudioForms+StudioEmail, #1965/#2314StudioEmail. No overlaps on current ten own changed paths (test-config touches ONLY own independent alias block).
+Channel product reservation0b46dbe0 before code; free-consumer extension33b23870; own-alias extension84b20a7c (initial409didNOTwrite; >=2min FULLfresh CAS retry). No docs/reservations product edits.
+C4-2610 forms lines in store-copy/funnel-bundle are K2; PAGE lines now C4 B2 per2630, not C5/C2. #2831 pageexport C4, notK2. C4-2630 tells K2 unchanged queue. No other-agent source/ref/CI/PR mutations.
+
+### Durable RED lineage and honest correction of a test mounting mistake
+Original **9f8d9092c5b6fcd1cfd14b0879eb37fb48894db8** proof is byte-identical, preserved as additional parent of newRED **2c2f13b80109aa787ebf167c1dbe14ef0a51c1a9** (parent738+9f8). SAME29checks/5causal failures before;29/29 with helper repair.
+First extra shape proof accidentally matched room admission EVAL instead of actual KEEP_FORM_RESPONSE. Its 111/51 result is NOT entirely causal evidence. Correct matcher committed **0e25f2ecee3ffcec54c8a1942057fd967135ff3a**, explicitly startsWith('-- marktmorgen:form-keep:'); reexecuted against ORIGINAL738 helper:111/53. No assertion weakened; source restored in Python finally.
+Extended SAME shape proof with REAL person COPIERS and REAL storeExport inventory failure cases:
+**d3e4ef90dd6d3246f2a50442a181aeb1bb3f1a68**,117checks/56failures before,117/117after. Source old738 temporarily installed for RED and restored finally; no helper product commit before this RED. Test inventory HVALSnull; known form/emptyanswer controls; unknown copier throws and actual export omits forms + unreadPart4 warning. No source edits needed person-copy/store-export, existing error handling already appropriate.
+Prechecked20applicationcommands/helper scenario;300copy/export total, actually14 commands in last section. MemoryRedis, only selected replies synthetic, no provider allowed. Setup/direct fixtures separate, no nativeRedis/$zero claim.
+Helper WIP **218aa65312baec516e9431f5169b8d54129b3829**, tree3db11fc6 native=API; five helpers:
+- readForms exact envelope and every readable form, never filter away malformed/unknown.
+- readForm exact HGETnull only confirmed absence; malformed other record UnknownReply.
+- responseCounts exact native safe nonnegative numbers, no numeric strings/coercion.
+- addResponse exact LLEN/LINDEX pair and consistent absence/readableoldest BEFORE room reservation; exact list of readable removed records BEFORE any accounting release. Unknown write retains reservation; no follow-on commands after unknown.
+- dropForm exact2 receipts each native0or1 BEFORE any giveData; no falsebool fromunknown.
+No commands, keys, gates, budgets, price, limits or provider IO added.
+
+### Consumer HTTP RED and partial repair; next Studio inventory RED intentionally still fails
+New real CRUD import into existing page/handler test initially failed compilation because syntheticcatalog collided with realstore imported transitively. This is NOT product RED. Synthetic world now has setSitePages (throws on unexpected call), text, configurable body, readForm/readForms/dropForm failures. ONLY own test-config form-response block adds store alias; no foreign alias changed/moved. Real handlers/page/editor unchanged by fixture.
+Canonical **afc70f325a09c207ae7ad42b64e060f25c69be4d**, treec7? see commit:12Node tests/4causal failures+8controls. CSV/PDF unknown definition threw; CRUDedit/delete returned500 instead503.
+SAME12/12 after free consumers repaired: CSV/PDF catch definition-read failure as503unavailable; knownnull retains404. CRUD UnknownReply503unavailable; permissions/healthy downloads remain controls. No writes when unknown. Source paths only as listed.
+NEW discovered StudioForms inventory test added afterwards:13Node/12pass/1causal failure because actual page propagates UnknownReply instead of status notice and suppressing false empty editable inventory. This RED is durable in current **ddea6c5f**, sourceStudioForms unedited pending coordination. Do not call branch entirely green/current product complete.
+
+Current HTTP phase actual eight TSCroots+REALimports0; directed lint0; scanner4079/0; bundles269/269; diff0. NodeHTTP12/12 BEFORE adding new pending StudioRED13/1. Original29/29+shape117/117; forms19/19; nine linked190custom+1NodePASS:
+form-person-room11, form-erasure-discovery19, erasure-exact-replies-forms-comments46, form-capacity12, form-opportunity30, form-response-copy-evidence1Node, store-copy32, funnel-form-review36, funnel-form-setup4.
+Do not sum matcher draft/historical versions as extra passing coverage. No browser/production/provider/nativeRedis/globalAAA claim.
+Logs /dev/shm/k2-sibling-{original-red,shapes-corrected-red,consumer-red,consumer-green,green-final,linked,http-canonical-red,http-green,studio-inventory-red,consumers-types,consumers-lint,consumers-scan,consumers-bundles}.log; /dev/shm files transient, proofs source/commands/report durable.
+Temporary /tmp/k2-http-assembly.mjs only applied exact future store alias before permanentconfig grant; canonicaltestconfig run subsequently reproduced12/4 BEFORE repair. /tmp/k2-focused.mjs and /tmp/k2-scoped.mjs actual aliases/realtsconfig helper existing.
+
+### Exact next work / shared line ownership, no premature partial PR
+Posted request0b46dbe0,33b23870 and latestpoint **46f22a25b69a13bbb3977b512f384b67b85d9493** toC4/C3/N:
+- #1969 StudioForms inventory catch/status + suppress editor until known (current durable13/1RED). NOT edited.
+- #2287 public POSTform readForm.catchnull closed falsely; needs explicit503/unavailable or honesterror before falseSent; actual helperunknown must not proceed enroll/funnel. NOT edited; coordinate specific read/catch lines, preserveCRM changes.
+- #1969/#1965/#2314 StudioEmail automation readForms.catch[]; local notice/disable false choices, coordinateN/C3/C4. NOT edited.
+- public app/[handle]/[slug]/page formsOfcatchnull, resultapp/[handle]/form/[form]/pagecatchnull currently falseabsence; U owns publicpagecoordination, no unilateral source edit.
+- store-copy/funnel-bundle form readers already propagate errors, but full real caller proof remains to finish; no source changes there yet. PagescopeC4B2 stays.
+- app/api/store/form-opportunity current catch502conversion_unconfirmed for definitionUnknownReply: candidate for503 in fullunit; not yet reserved in this newunit/sourceedited. Same-name readPage funcs irrelevant, no foreign source.
+Await line-scope release; no request user permission, no duplicate product. Need consumer-complete tests+quality+mainintegration then ONE PR +independentreview+nine exact. C4-classified siblings remain open until that.
+No more unexplained old2340/2354/2472 recreation; old Kmerged statuses unchanged.
+
+### Environment and continuation
+Rootoverlay63G/100%; /dev/shm4.9G/98%,105M free at19:36UTC. Removed ONLY own reproducible .next caches in old k2-encanto-cta,hero-notice,hero-replay,native-focus-red,notice-line; no source/RED/WIP/foreign work deleted. Those lowerlayer removals did not materially recover space. One subsequent gitfetch exited ENOSPC pack failure; needed738 object was already present, new worktree succeeded using it. No truncated file claimed passed; source/index all match public f52c tree.
+Use remote GitData/guardedJSON read or small scratch; do not delete foreign files/own historicalsource to make space. Do not blame code for disk failure. Pending coordination transient, not a reason to disable continuity.
+CX-127 point46f22a25 posted explicitly “sigo no vigia”, not end. Next channel read no sooner than19:38:33UTC if lastread19:36:33; no current ownCI pending/newPR yet. Publish THIS checkpoint SHA in finalchannelpoint if environment/context forces stop, with exact ENCERRADO wording perCX127. No finalstop without preserving changes; all current code alreadypublicddea. Existing other-nominal reviews claimed, do not duplicate (G2826/U2833/Z2830etc).

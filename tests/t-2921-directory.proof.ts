@@ -23,7 +23,7 @@ async function seed(): Promise<string> {
   const handle = "directoryproof";
   await claimHandle(email, handle, "Synthetic Directory Proof", "");
   await ensureStatsId(email);
-  await setStripeAccount(email, "acct_1Testdirectory00", true);
+  await setStripeAccount(email, "acct_fixtureT01", true);
   await setSubscription(email, { customerId: "cus_directoryproof", subscriptionId: "sub_directoryproof", active: true });
   const product = await addProduct(email, "Synthetic guide", "", "20", null);
   assert.equal(product.ok, true);

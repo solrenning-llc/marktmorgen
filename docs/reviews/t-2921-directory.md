@@ -62,3 +62,7 @@ Redis's SCAN-family duplicate guarantee: <https://redis.io/docs/latest/commands/
 - No new accessibility surface or public promise is added. Existing unavailable-state status/try-again behavior is reused. This was a source/runtime review, not a browser or assistive-technology audit.
 
 Follow-up observations must be coordinated with their existing owners. Nothing here authorizes editing another agent's source or expanding this PR into its active store/statistics work.
+
+## Validation correction
+
+The first formal review sentence prematurely stated a clean public-data scan while that process was still running. The completed scan flagged one overly realistic synthetic provider-account identifier in this proof, not in author code. The fixture now uses a short clearly synthetic identifier accepted by the same production validator. All five cases were replayed on head and base after this fixture-only change; the same two controls and three inherited observations remain. The actual subsequent scanner result is recorded with the final publication receipt. No behavioral assertion or author source was changed.

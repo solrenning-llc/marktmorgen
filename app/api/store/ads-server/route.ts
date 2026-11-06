@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
 import { ensureStatsId, setAdsServer } from "@/lib/store";
 import { type ServerPlatform, SERVER_PLATFORMS, platformsOn, serverSetup, setServerToken, setTestCode } from "@/lib/ad-events";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /**
  * Sending conversions from the server (lib/ad-events.ts): `{ platform, token,
@@ -9,7 +10,9 @@ import { type ServerPlatform, SERVER_PLATFORMS, platformsOn, serverSetup, setSer
  * `token` is empty (Pinterest's also needs its ad account); `{ testCode }`
  * sets or clears Meta's test event code. A setting. Answers which platforms
  * have a token, never a token, and writes the same on the store, so a
- * checkout knows whether to keep anything without asking.
+ * checkout knows whether to keep anything without asking. A setup that
+ * cannot be read exactly answers 503 and writes nothing, neither the setup
+ * nor the store's list.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "settings", 2_000);
@@ -32,6 +35,7 @@ export async function POST(request: NextRequest) {
     await setAdsServer(guarded.ref, platformsOn(setup));
     return Response.json({ ok: true, setup }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    if (error instanceof UnknownReplyError) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     console.error("changing server-sent conversions failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

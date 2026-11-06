@@ -57,7 +57,7 @@ import { keepFor } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
@@ -120,17 +120,45 @@ function parse<T>(raw: unknown, fallback: T): T {
   }
 }
 
-async function readStored(statsId: string): Promise<Stored> {
-  if (!isRedisConfigured()) return {};
-  const [raw] = await redisPipeline([["GET", configKey(statsId)]]);
-  return parse<Stored>(raw, {});
+/**
+ * A kept JSON object read exactly (CX-123 rule 24): nil is nothing kept
+ * (null); a string holding a JSON object is it; anything else (no reply, not
+ * JSON, a list, a number) is unknown and throws, so the setup is never taken
+ * for empty and written back over the tokens it holds.
+ */
+function keptObject(raw: unknown, what: string): Record<string, unknown> | null {
+  if (raw === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = typeof raw === "string" ? JSON.parse(raw) : undefined;
+  } catch {
+    parsed = undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new UnknownReplyError(what);
+  return parsed as Record<string, unknown>;
 }
 
+/** The sealed setup: {} when none is kept; every field a string, or it is unknown. */
+function storedOf(raw: unknown): Stored {
+  const kept = keptObject(raw, "the server conversions' setup") ?? {};
+  if (Object.values(kept).some((v) => typeof v !== "string")) throw new UnknownReplyError("the server conversions' setup");
+  return kept as Stored;
+}
+
+async function readStored(statsId: string): Promise<Stored> {
+  if (!isRedisConfigured()) return {};
+  const replies = repliesFor(await redisPipeline([["GET", configKey(statsId)]]), 1);
+  if (!replies) throw new UnknownReplyError("the server conversions' setup");
+  return storedOf(replies[0]);
+}
+
+/** Read exactly: an unknown setup throws, never an empty one (the route answers 503, the studio says so). */
 export async function serverSetup(statsId: string | null): Promise<ServerSetup> {
   if (!statsId || !isRedisConfigured()) return NO_SETUP;
-  const [raw, lastRaw] = await redisPipeline([["GET", configKey(statsId)], ["GET", lastKey(statsId)]]);
-  const stored = parse<Stored>(raw, {});
-  const last = parse<ServerSetup["last"]>(lastRaw, null);
+  const replies = repliesFor(await redisPipeline([["GET", configKey(statsId)], ["GET", lastKey(statsId)]]), 2);
+  if (!replies) throw new UnknownReplyError("the server conversions' setup");
+  const stored = storedOf(replies[0]);
+  const last = keptObject(replies[1], "the platforms' last answers") as ServerSetup["last"];
   return {
     on: { meta: Boolean(stored.meta), tiktok: Boolean(stored.tiktok), google: Boolean(stored.google), pinterest: Boolean(stored.pinterest && stored.pinterestAccount) },
     pinterestAccount: stored.pinterestAccount ?? "",
@@ -148,7 +176,8 @@ export function platformsOn(setup: ServerSetup): ServerPlatform[] {
  * Keeps a platform's token, sealed, or forgets it (`token` empty). A token
  * that does not look like one is refused, so a pasted pixel id or a sentence
  * is said to be wrong at once rather than failing at the first sale.
- * Pinterest also needs the ad account its events go to.
+ * Pinterest also needs the ad account its events go to. A setup that cannot
+ * be read exactly throws before anything is written (the others' tokens stay).
  */
 export async function setServerToken(
   statsId: string,
@@ -175,7 +204,7 @@ export async function setServerToken(
   return "saved";
 }
 
-/** Meta's test event code, while the creator checks the events arrive (Events Manager, Test events); empty to stop. */
+/** Meta's test event code, while the creator checks the events arrive (Events Manager, Test events); empty to stop. Throws, writing nothing, on a setup that cannot be read. */
 export async function setTestCode(statsId: string, code: unknown): Promise<boolean> {
   const text = typeof code === "string" ? code.trim().toUpperCase() : "";
   if (text && !TEST_CODE.test(text)) return false;
@@ -631,7 +660,9 @@ export async function customerType(store: Store, email: string | null, sessionId
   try {
     const query = new URLSearchParams({ limit: "10", "customer_details[email]": email });
     const listed = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions?${query}`)) as { data?: unknown };
-    const rows = (Array.isArray(listed.data) ? listed.data : []) as AdsSession[];
+    // A list without its rows is not known, never a buyer who had not paid before.
+    if (!Array.isArray(listed.data)) return null;
+    const rows = listed.data as AdsSession[];
     const before = rows.some((row) => row.id !== sessionId && row.payment_status === "paid" && typeof row.created === "number" && row.created < created);
     return before ? "returning" : "new";
   } catch {

@@ -13,7 +13,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { DATA_STEP_BYTES, ENTRY_BYTES, dataBytes } from "@/lib/store-data-rules";
-import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
+import { UnknownReply, exactReplies, plainList, replyCount } from "@/lib/redis-exact";
 import { newItemId } from "@/lib/course";
 import { cleanLine, cleanText } from "@/lib/community-text";
 import {
@@ -520,10 +520,13 @@ export async function markSeen(courseId: string, now = Math.floor(Date.now() / 1
 /** Takes every comment of a course away, with the course, and gives back their room. */
 export async function dropComments(courseId: string, lessonIds: string[], room: DataStore): Promise<void> {
   if (!isRedisConfigured()) return;
-  await redisPipeline([
+  const what = "the deletion of a course's lesson comments";
+  const commands = [
     ...[commentsKey, allKey, repliesKey, namesKey, offKey, seenKey].map((k) => ["DEL", k(courseId)]),
     ...lessonIds.map((l) => ["DEL", lessonKey(courseId, l)]),
-  ]);
+  ];
+  const receipts = exactReplies(await redisPipeline(commands), commands.length, what);
+  if (receipts.some((receipt) => replyCount(receipt, what) > 1)) throw new UnknownReply(what);
   await giveData(room, [{ slot: COMMENTS_SLOT(courseId), bytes: 0, set: true }]);
 }
 

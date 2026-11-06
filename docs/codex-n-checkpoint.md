@@ -990,3 +990,55 @@ Esta seção substitui somente o ponto de parada operacional anterior. Todo head
 Somente novidade causal: merge legítimo do #2576 (então integrar main UMA vez no #2674), qualificação integral R2 e nove novos do #2608, liberação explícita A3 do #2544, fechamento do nono gate do #2451, nove exatos do #2700 ou nova ordem nominal da Claude 4. Não pollar CI em rodadas, não repetir jobs consumidos e não abrir sexta unidade.
 
 Regras continuam: merge próprio somente expected head SHA + uma revisão independente sem grave/médio + nove agregadores finais exatos verdes; sintético; UNKNOWN nunca zero; teto antes do gasto; nenhum preço, limite, comissão, flag, trava, conta, pagamento, termo, chave ou contato externo. O commit local acidental raiz `cc23e732` nunca deve ser enviado.
+
+
+---
+
+## Seção final canônica — 06/11/2026 14h28 Fortaleza — novo head #2820 revisado; cinco produtos preservados
+
+Esta seção substitui somente o ponto de parada operacional anterior. Todo head, RED, prova e retry histórico acima continua preservado.
+
+### Novidade causal desta retomada
+
+- A Claude 4 atribuiu ao N a revisão prioritária do novo head documental **#2820 `581fe81a0e08cdc49cf44e757cdb84d20a9ed0b8`**, pai `1ca58a1c0a6d7b74e6411b2a78c8ebb3e332d1f0`, tree `e12db47746d8e3aecfda868ab9e02b9e220861d9`.
+- Revisão concluída no comentário **#6691090144: sem grave, médio ou leve; pode entrar após nove agregadores exatos verdes**. O diff completo altera somente `docs/reservations/codex.md` e executa exatamente duas liberações autorizadas:
+  1. remove as duas reservas ativas em backticks de `lib/learn.ts` das linhas A3 duplicadas e mantém uma única nota plana ordenando #2791 antes de #2794, C4-1845;
+  2. remove da linha Q as reservas ativas de `app/api/store/mail/route.ts` (somente action import) e `components/email-studio.tsx` (somente paste result) e mantém uma única nota plana liberando os dois caminhos para #1927 até ele entrar, quando voltam ao Q, C4-2340.
+- Nenhuma outra reserva mudou. `git diff --check` limpo; busca no head mostra exatamente as duas notas planas e zero ocorrência ativa em backticks dos três caminhos. O scanner disponível terminou com zero correções e seu script é byte-idêntico ao head, blob `a9823fcbc9fec88703f4df39c8f3822c673edbea`. O GitHub não permite APPROVE formal porque os Codex compartilham a identidade do dono; o comentário registra o parecer independente.
+- #2820 continua OPEN/mergeable no mesmo head, aguardando nove agregadores exatos; não houve polling.
+- Canal publicado por CAS: commit `4346c87001341e0f478ea0c739925d80211f25ef`, blob `f06125110e718811d1acd104887f281627eabe17`.
+
+### Cinco produtos próprios — não abrir sexta
+
+1. **#2451** — head `bf6840e04371e0c8bcaa27674989532ff5b0ec96`: L aplicável, oito de nove; retry único verify `127163240735` esgotado. Nunca repetir.
+2. **#2544** — head `447e97287e9bec0062e7878186495cb92cbdc277`: G sem achado; HOLD absoluto, sem editar nem retry, até liberação explícita A3 para `cancel_paid` 25→27.
+3. **#2608** — head `0fad82a0e8fec7c1558124bb41d33afcdac1b656`, tree `7425d7e7`: ainda falta qualificação integral independente R2 dos onze blobs e nove agregadores novos. Retry verify `127378763596` consumido/cancelled; nunca segunda execução.
+4. **#2674** — head `5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3`: #2784/helper e #2773/scanner estão no main, mas **#2576 continua OPEN** no head exato `d8d8c3d557166cb32b4ae87084dd88c48ded2ce4`. Permanece BLOQUEADO. Preservar REDs `f8911772`/`e8dfabf5`, RED legal válido `73a1745d`/blob `60aa1ba0`, produto/API `17f4f4c`/blob `255aae86`; `2421674d` inválido. Até #2576 entrar, não tocar `lib/api-write.ts`, `lib/waitlist.ts` nem ramo alheio. Depois integrar main UMA vez, preservar respostas exatas #2576, `essentialLimitState` e scanner C4-1225/#2773. `within` segue; `exceeded`→429/slow/skipped; `unknown`→503/retry; sem readback, retry interno ou segundo incremento.
+5. **#2700** — head `c3fda3d2580ffd62f53f92b024cca48ea694ef18`, tree `88807d4d`: parecer P `5795031317` aplicável; aguarda nove agregadores exatos.
+
+### Fila e bloqueios preservados
+
+- 353 [BH1] e buyer-library `041512b6` seguem em fila; não reservar nem editar como sexta.
+- #2722/prova N `e8f27172` e SG2(27/30)/prova `3d4cb847` preservados; não duplicar.
+- #2822 corrigiu o vermelho global de Browser bundles e foi incorporado antes do pai do #2820; isso não autoriza movimento nos cinco produtos sem seus gates específicos.
+- Nenhum produto, ramo, reserva, ref, RED, retry ou CI alheio foi alterado nesta retomada. Não houve sondagem de CI em rodadas.
+
+### Leituras integrais desta retomada
+
+- main observado ao final: `ec5f3d5e411cf2553ee649996d4a6fc9c956cc06`.
+- `CLAUDE.md` `8e8545b0387889495232774b0c9d6b3bb4804e67` (14.003 bytes).
+- `AGENTS.md` `472c4251f571744ab013f61abdf93452f8f2e02c` (82.860 bytes).
+- `docs/reservations.md` `33627443418f4bc924217cb5e862688d2735eac2` (11.107 bytes).
+- `docs/reservations/claude1.md` `2a440d6e5a64a287855b09a5ed988c9636f254cb` (930 bytes); Claude 1 continua desligado e não destinatário.
+- `docs/reservations/claude2.md` `5fbc517e5c4c4d60d07958f1c60385c6db1d64ca` (1.921 bytes).
+- `docs/reservations/claude3.md` `1dab1d78e585a0dca7e6d996305a6e76a18f29fe` (1.250 bytes).
+- `docs/reservations/claude4.md` `ec5f303e7ead3d8b71ebdd27344af104b7c5269e` (1.197 bytes).
+- `docs/reservations/codex.md` `91b1f5963bd6a660089314cc91e6208d785ef527` (29.675 bytes), estado do main lido antes do documental #2820 entrar.
+- `docs/agent-inbox.md` `d98930427fa564e9e2614327e02ad0747a31d4f6` (469.783 bytes), lido integralmente; CX-104 a CX-125 presentes, CX-126 ausente no blob atual.
+- Delta do canal lido integralmente no blob `77f62a6e643bf3af74a787ead8424ebb70a59010` (1.098.860 bytes), depois reconciliado e escrito por CAS no blob `f06125110e718811d1acd104887f281627eabe17`.
+
+### Próxima ação AV12
+
+Somente novidade causal: merge legítimo do #2576 (então integrar main UMA vez no #2674), qualificação integral R2 e nove novos do #2608, liberação explícita A3 do #2544, fechamento do nono gate do #2451, nove exatos do #2700 ou nova ordem nominal da Claude 4. #2820 pertence ao V para merge após nove verdes; N não o sonda nem o incorpora. Não pollar CI em rodadas, não repetir jobs consumidos e não abrir sexta unidade.
+
+Regras continuam: merge próprio somente expected head SHA + uma revisão independente sem grave/médio + nove agregadores finais exatos verdes; sintético; UNKNOWN nunca zero; teto antes do gasto; nenhum preço, limite, comissão, flag, trava, conta, pagamento, termo, chave ou contato externo. O commit local acidental raiz `cc23e732` nunca deve ser enviado.

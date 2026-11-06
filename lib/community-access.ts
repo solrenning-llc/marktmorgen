@@ -54,6 +54,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { orderWrite } from "@/lib/order-data";
 import { type DataStore, DataRoomError } from "@/lib/store-data";
 import { onAccount } from "@/lib/stripe-account";
+// The one Stripe version these lists are read at, so their shape is the one checked here (Revisor 1 on #2464).
+import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import { isSettled } from "@/lib/instant-pay";
 import { isLiveSub } from "@/lib/membership-access";
 import { keptUnlessLost, purchaseRefunded, refundedInFull } from "@/lib/refunds";
@@ -116,9 +118,9 @@ function listOf(listed: unknown, readable: (row: Row) => boolean): { rows: Row[]
   const list = listed && typeof listed === "object" ? (listed as { data?: unknown; has_more?: unknown }) : null;
   if (!list || !Array.isArray(list.data) || typeof list.has_more !== "boolean") throw new UnreadPurchasesError("a reply that is not a list");
   const rows = list.data.filter((row): row is Row => isRecord(row) && readable(row));
-  // An entry that is not the kind asked for (no id, an unknown state, a list in its place) is not a "no" either.
-  if (rows.length !== list.data.length) throw new UnreadPurchasesError("a list with an entry that is not one");
-  return { rows, complete: !list.has_more };
+  // An entry that is not the kind asked for (no id, an unknown state, a list in its place) proves nothing, and is not
+  // a "no" either: the readable ones may still prove a purchase, but the list is not complete (Revisor 1 on #2464).
+  return { rows, complete: !list.has_more && rows.length === list.data.length };
 }
 
 const isRecord = (value: unknown): value is Row => Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -154,7 +156,7 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
     const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
     query.append("expand[]", "data.subscription");
     query.append("expand[]", "data.payment_intent.latest_charge");
-    const listed = listOf(await onAccount("GET", account, `/checkout/sessions?${query}`), isSessionRow);
+    const listed = listOf(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, STRIPE_VERSION), isSessionRow);
     if (!listed.complete) complete = false;
     for (const session of listed.rows) {
       // A membership switched to another tier hands over what it is on now (lib/tier-rules.ts).
@@ -184,7 +186,7 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
   for (const customer of [...customers].slice(0, CUSTOMERS_READ)) {
     const query = new URLSearchParams({ customer, limit: "50" });
     query.append("expand[]", "data.latest_charge");
-    const listed = listOf(await onAccount("GET", account, `/payment_intents?${query}`), isIntentRow);
+    const listed = listOf(await onAccount("GET", account, `/payment_intents?${query}`, undefined, STRIPE_VERSION), isIntentRow);
     if (!listed.complete) complete = false;
     for (const intent of listed.rows) {
       const meta = (intent.metadata ?? {}) as Record<string, string>;

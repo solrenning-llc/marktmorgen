@@ -417,3 +417,12 @@ Local fifth worktree: /dev/shm/codex-q-person-copy-checkout-evidence. Isolated r
 - #2729 `13fe497840020d2c356baa3763b99b5ef1174e95`: rodada nova ativa; confirmação de aplicabilidade S `5794570601` pedida.
 - #2731 `4d700566abcbf09b2ed585b76a6a8d220378e1e1`: corretivo acima, nova revisão+9 obrigatórios.
 - Revisão #2724: Claude6 publicou depois o head `2832cd1e`; retorno Q nominal dos campos Stripe em `39a8e4f9..115f71d3` está pendente e vem antes de nova unidade. Z cuida separadamente de ACK/registro no delta seguinte. Nenhum ramo/CI C6 tocado.
+
+
+## Retorno focal #2724 — 05/11/2026 23h13 Fortaleza
+
+- Revisado o head remoto exato `2832cd1ef741c45113208daa217e8001ae7b6eec`, delta Q de campos decisivos e confirmação de que o corretivo Z posterior não regrediu essa leitura. Anúncio append-only: canal commit `48031f3bcec00cf7ee5ae1bb26d962aefd11ac84`.
+- O corretivo fechou os casos anteriores de status ausente e refund parcial, mas restou 1 MÉDIO na mesma fronteira: `closingKnown` exige string de pagamento não vazia, porém aceita objeto expandido cujo `id` é a string vazia. Um evento lost com charge válido vira leitura `complete=true`, row com `payment_intent:null`; gifts/preorders marcam o evento como lido e a âncora avança, impedindo retry saudável de associar a disputa ao acesso pago.
+- Prova durável própria, produto intacto: ramo `codex/q-review-2724-empty-payment-proof`, commit remoto `554fc38573913df927a3f54f6939a59de9ab9444`, árvore `89a0aa3e13d8bd507fe3ce4498947233bd959d3a`. Teste real TB14: 77 checks, 75 controles passam e 2 falham causalmente: lista completa indevida e âncora pre-order null→timestamp.
+- Parecer GitHub COMMENT bloqueante `5794829222`, ancorado no head exato. Pedido: exigir id de pagamento não vazio/válido tanto na forma string quanto objeto; preservar null explícito como caso conhecido; retornar a MESMA prova 77/77. Q não alterou ramo/CI/produto C6. Z mantém ACK/registro separado.
+- Próxima ação Q nessa revisão somente após head corretivo nominal. Nenhuma revisão limpa/merge alegada.

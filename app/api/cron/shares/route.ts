@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured } from "@/lib/redis";
 import { platformKey } from "@/lib/stripe-account";
 import { COMMISSION_LIVE } from "@/lib/plan";
 import { settleShares } from "@/lib/share-settle";

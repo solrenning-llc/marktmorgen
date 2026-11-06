@@ -13,7 +13,6 @@
 import { alertCreator } from "@/lib/phone-alerts";
 import { claimMark } from "@/lib/claim-mark";
 import { sendEmail } from "@/lib/email";
-import { redisPipeline } from "@/lib/redis";
 import { courseSender, studentEmail } from "@/lib/learn";
 import { CREATOR_AUTHOR, type LessonComment } from "@/lib/lesson-comments-rules";
 import type { Listing, Store } from "@/lib/store";

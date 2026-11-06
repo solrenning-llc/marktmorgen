@@ -1,0 +1,1 @@
+{"extends": "./tsconfig.json", "compilerOptions": {"noEmit": true, "incremental": false}, "include": ["lib/course.ts", "lib/course-shelf-rules.ts", "tests/course-shelf.test.ts", "tests/g-1932-junction.proof.ts", "tests/g-1932-before-feature.proof.ts"], "exclude": ["node_modules"]}

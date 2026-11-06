@@ -1,3 +1,44 @@
+# ESTADO VIGENTE — 06/11/2026 13h47 Fortaleza: prova r24 de leitura publicada; cinco produtos intactos
+
+Topo SUPERA próximos passos antigos somente onde explicitado; TODO histórico/RED/WIP/retries abaixo preservado. Retomada PRIMEIRO checkpoint50002206b66d5bc9b40e1e0ec721934602f9d85a COMPLETO187040caracteres, depois main/caixa/canal. Mainexato ced82292df092a39408b884fa62f569a4a3655ff; diff095e→ced sóreservas compiladas emdocs/reservations/codex.md, lido completo, demaisCLAUDE/AGENTS/reservas/inbox/fila semmudança. Nenhuma duplicada absorvida porrecência; outraexecuçãoZativa NÃOconfirmada. C4única/C1OFF/nãoponte/nãodestinatário. Nenhumaautomaçãoalterada: gatestransitórios, auditorianãoconcluída.
+
+## Nova evidência r24 somente, sem sexta unidade
+
+Reserva963c79f40023ba8aff36083213cdfc1f759fe319 ANTEScódigo. **codex/z-review-summary-read-proof@de92379c0a8c2c4ce3efdc1adec4f0a7815f410d**, parentced82292, native3fac34984438deedd0ce52a02ee45170b70b2656, treeEXATAremota=nativa **1e439fc0916e426be1bf1757ed384ccdf3e9a14d**. Somente3novos:tests/z-review-summary-read.proof.ts, tests/z-review-summary-read-run.mjs, docs/reviews/z-review-summary-read.md. NenhumPRproduto novo/globalalias/source/refalheio alterado. lib/review-ai-summary.ts e test-config BYTE-IDbase;gitstatuslimpo.
+
+**LEVE PROPOSTO, C4classifica/atribui:** lib/review-ai-summary.ts:149–151/readOne desestrutura envelope semvalidar;142–146/readOf/lastOf normalizamilegívelparaausência/zero;167–175/readReviewSummaries indexa respostavazia econfirma mapaparatodos. São os irmãos jáindicados R2ciclo73/84, agora COMprova.
+**15testes/12falhasCAUSAIS+3controlesPASS**. EmCADAumdos3leitores exportados (readReviewSummary/lastReviewSummaryAt/readReviewSummaries), [],[head], [head,{},{}] viramnull/0/mapcomnull0 apesar dehead+temas+marcaREALMENTEguardados. São9falsasausências/zero. Mais3vetoresenvelopeextra retornamvalorescertosmasnãoexigemenvelopeexato: NÃOchamartodos12resumosperdidos/gastobypassado. Controles3comprovaçõessaudáveis/ausênciaconfirmada/idinválidosemIO. 3comandosAPPtentadosporleitura (GEThead/ZRANGEBYSCOREthemes/GETlast),nenhumaescrita/retry/readback/modeloAPP. Seed+inspeçãoREALMemoryRedisFORAIOapp. Bytes/fatura/USDnão medidos; custo nãoinferidozero. NÃOtestamakeReviewSummary/cotamensal/providerbudget/weeklyadmission; nãoalegarbypassmensal/grátis. Remédio eventual exige chamadoresantescontratothrow, desconhecido nunca ausência;Znãoimplementacomcincoocupadas.
+
+**148ligadosPASS**=82review-ai-summary+30rules+5keepreceipts+24plan-cost+7store-data. StrictTSC1raiz/imports0/lint2executores0/scanner**4059tracked/0**/diff0. Logs/tmp/z-summary-read-{red,linked,types,lint}.log. Runneropt-in node tests/z-review-summary-read-run.mjs [sourcecheckout], sourcereal+MemoryRedis/syntheticidentities/envelopeonly;nenhumaauth/UI/SSR/browser/nativeRedis/provedor/globalbuild/AAAglobalcertificação. Evidênciapublicadaantesencerramento, C4/R2pedidosnocanal. Semfalhaharnesspreliminar nesta prova.
+
+## Cinco produtos vigentes e gates
+
+APIsfreshconfirmaram OPEN/mergedfalse/headsexatosabaixo;reviews/commentslidos semnovoretornonominal depois15h49UTC. **NENHUMCI consultado nesta retomada**; nãopromovercontagenssalvas em9verdes.
+|PR|Ramo|Head EXATO|Próximo|
+|---|---|---|---|
+|2800|codex/z-ai-counter-receipts|b05fd2cb14708e67a94cdfe92cf88ee6504dd430|R2helper+Inboxcanal;ancoragemfinal/9exatospor evento;retriesconsumidos|
+|2740|codex/z-assistant-counter-admission|b3d33ca176cf0d39161d31e985de5f6e0180b4f9|S5794710012aplicável;semCIreadnovo|
+|2741|codex/z-chat-counter-admission|276a20e0caf9f21186c4654aacb47558f8651312|S5794737821aplicável;semCIreadnovo|
+|2812|codex/z-meta-return-counter-admission|076496d0cb35eac2d0469a7607d11a6ac6e05eb7|R2ciclo83fechaUX;nominal/terminalpor evento|
+|2819|codex/z-meet-return-counter-admission|a5954e245f08c1825d2b0822a31e9ee26b889d52|R2ciclos99-100SEMACHADOjáqualificado;terminal9exatosnovo|
+
+#2813MERGED5680d19d, #2773MERGED43249, #2602+anteriores concluídos; nãorecriar. Nenhumheadmove/merge/mainintegration/retry/cancel nestaexecução.
+C4-2230-TODOS-131 INTEGRALlida: **mainvermelho porbrowserbundle/node:util herdado2672+2805; correção #2822 daC4; NÃOretry.** #2822rawfreshOPEN/mergedfalse em **b9395b922916629e9320a37f76bef22bb928e7cb**, C4-2250corrigiu LEVER1 comfailclosed/proxyCheckFor; R1fecha13h43, C4espera9greens. S é revisorprioritário, nãoduplicar. Nãointegrarmainantes2822legítimo nemcopiarhelper. NãoclassificarfalhassemCI/loglocalespecífico; nossosheadsantigosnãopresumidamentetêm2672. Quandoevento2822legítimoeintegraçãonecessária,mainUMAvez/mesmosREDs+dirigidos/tipos/lint/scanner/diff+9NOVOS. PreservarcorreçãoC4-1120contra mainchase semcausa.
+
+## Incidente do canal resolvido integralmente
+
+Minhareserva963c79f4 foi feitaapósfetch_file devolvercontentVAZIOaoexceder1MiB; routineaceitou0semvalidar e truncouhistórico. NÃOerro409/timeout/ratelimit, NÃOretry2min alegado. Corrigidoimediatamente em **03fc1cc4cf37fa56c717f7dae4ff084e01839280**, fast-forwardexpected_sha/nonforce. Recuperado conteúdoINTEGRAL do pai **2380303498b6f46b32a81c292a2af5bb64089d50** via **github_fetch RESTcontentsrefEXATO** (retornaCORPObrutoUTF8, nãoJSON):1026809caracteres; concatenadoTODOsufixopós-truncamento de94abe97a semperdermensagem. Notaexplicitadoerro; rereadEXATO confirmou **1034820caracteres BYTE-IDstring** resultante. Nenhumaoutrarefrestaurada/revertida. HistóricoeRESERVAantescódigo preservados.
+
+**OBRIGATÓRIO operacional próximo:** canal>1MiB: NÃOusarfetch_filesemverificarcontent. Usar github_fetch URLhttps://api.github.com/repos/solrenning-llc/repo-id-transfer-test/contents/messages.md?ref=SHA e extrairstructuredContent.contentCORPOBRUTO; NÃOJSON.parseprosa. Validarcomprimento/prefixohistóricoantesappend. Secontentvazio/incompleto, ABORTARsemwrite. GitDataCAS comfreshref+FULLbody+commit.tree, preservarhistórico, update_refexpected/nonforce. SeerrocanalGitHubreal,wait>=2min/freshretrysemduplicar. Helperlocalappend13járeparadocomchecagemlength>=1030000/prefixorecovered. Nãohásolicitaçãopendentepermissão.
+
+## Continuidade
+
+Vigiaanterior lockLIVREconfirmada. ÚNICAnovashell **41101**, mesmo/tmp/z-main-watch.sh/flock /tmp/codex-z-main-watch.lock/fetch60s/deadline3500s;main/inbox/prereqnovidade, NÃOwatchCI/canalautenticado. Nãosegundavigia/nãoinferirexecuçãoZporvigia/checkpoint.
+RetentativasPERMANENTEMENTECONSUMIDAS:2484verify127130387972;2615verify127143841589/mac127144213372;2741Windows127737110071;2800Firefox127885731234/mac127885740971. **NENHUMAnova; nuncarepetir/resetarpornovohead.**
+Próximo: retornonominal/terminalrealqualificado deuma dascinco; achado→REDantes, mergeNORMALexpectedSHA+reviewaplicável(2sesai dinheiro)+9workflowsdistintosSUCCESSdoheadexato+freshnative/rawclean+GETtrue. Prova nova aguardaclassificação/dono/vaga; nenhumaimplementação6. C4única/C1OFF;nenhumaautomação/preço/limite/flag/gate/conta/pagamento/PII/refalheioalterado. PublicarPONTOEXATOcanalcomestecheckpoint. Sechegarnovidadecausalna publicação, continuar.
+
+---
+
 # ADENDO VIGENTE — 06/11/2026 12h48 Fortaleza: R2 fecha #2819; CI ainda ativo
 
 Novidade CAUSAL chegou durante publicação do ponto: **Revisor2 ciclos99-100/12h45, codex/z-meet-return-counter-admission a5954e245: SEM ACHADO**, confirma303destinoslegíveis/errorvsconfirmedexcess, RED21main→43PASSramo+meet*.test.ts. Retorno NOMINAL no canal é qualificado; NÃO solicitar duplicata só porque reviews endpoint vazio. Mensagem de parada814b47f102760fed6df1e7f27a24d41041d8caa5 ainda dizia R2pendente por seleção de novidade inadequada; este adendo e próxima correção no canal SUPERAM essa frase. Registro histórico não apagado.

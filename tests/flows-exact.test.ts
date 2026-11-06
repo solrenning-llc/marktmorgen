@@ -1,0 +1,138 @@
+/**
+ * Sequences read Redis replies only in their exact shape (CX-123 rules 24/30; sweep A2 findings 6 and 7,
+ * docs/reviews/c5-sweep-a2.md on claude5/sweep-a2). Synthetic store, the in-memory Redis double and a stand-in
+ * email provider.
+ *
+ * 1. lib/flows.ts startFlows: the SET NX that makes "each person goes through a sequence once" is claimed only on
+ *    exactly "OK", not claimed on exactly nil, and unknown on anything else: an unknown reply never restarts a run
+ *    (its record and history kept) and never sends the first email again.
+ * 2. lib/flows.ts sendDueSteps: an unknown read of the store's workflows leaves the due batch queued for a later run,
+ *    never dropped; once Redis answers again, the step is sent.
+ * 3. lib/flow-runs.ts siblings: readRun and runPeople throw on an unknown slot rather than answering "no such run" or
+ *    "this run holds no address".
+ */
+import { enroll, readFlows, saveFlow, sendDueSteps } from "@/lib/flows";
+import { listRuns, personOf, readRun, runPeople } from "@/lib/flow-runs";
+import { upsertContact } from "@/lib/contacts";
+import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+import { paidPeriod } from "./billing-period-fixture";
+import { ROOM } from "./data-room";
+import { installSesMailFixture } from "./ses-mail-fixture";
+
+const mail = installSesMailFixture({ fallback: () => new Response(JSON.stringify({ object: "list", data: [], has_more: false })) });
+const got = (subject: string, to: string) => mail.sent.filter((m) => m.subject === subject && JSON.stringify(m).includes(to)).length;
+
+const run = () => sendDueSteps((handle) => storeForHandle(handle), Date.now() + 20_000);
+const original = redis.pipeline.bind(redis);
+const rejects = async (work: () => Promise<unknown>) => {
+  try {
+    await work();
+    return false;
+  } catch {
+    return true;
+  }
+};
+
+async function main(): Promise<void> {
+  redis.clear();
+  mail.configure();
+  await mail.setReady(true, { max24: 50_000, rate: 100 });
+  process.env.STRIPE_SECRET_KEY = "sk_test_flows_exact_only";
+  process.env.RESEND_API_KEY = "re_test_flows_exact_only";
+  const OWNER = "flowsexact@example.com";
+  await claimHandle(OWNER, "flowsexact", "Flows Exact", "");
+  await ensureStatsId(OWNER);
+  await ensureListId(OWNER);
+  await setStripeAccount(OWNER, "acct_1TestFlowsExact01", true);
+  await setSubscription(OWNER, { customerId: "cus_FlowsExact", subscriptionId: "sub_FlowsExact", active: true, tier: "pro", period: paidPeriod() });
+  await setMailSettings(OWNER, { fromName: "Flows Exact", address: "1 Main St, Portland, OR 97201" });
+  const store = (await storeForEmail(OWNER))!;
+  const list = store.listId!;
+  const saved = await saveFlow(store, { name: "Welcome", trigger: "joined", active: true, steps: [{ delayHours: 0, subject: "Day one", body: "Hello." }, { delayHours: 24, subject: "Day two", body: "Again." }] }, { activate: true });
+  const flowId = saved.ok ? saved.flows[0].id : "";
+  is("setup: workflow saved", Boolean(flowId), true);
+  for (const email of ["ana@example.com", "ben@example.com", "cy@example.com"]) await upsertContact(list, email, { agreed: true, explicit: true, source: "free" }, ROOM);
+
+  part("1. Healthy control: a new person starts the sequence once; joining again does not restart it");
+  await enroll(store, "ana@example.com", { joined: true });
+  await run();
+  await enroll(store, "ana@example.com", { joined: true });
+  await run();
+  is("Ana got 'Day one' once", got("Day one", "ana@example.com"), 1);
+  const anaRun = (await listRuns(flowId, 10)).find((r) => r.email === "ana@example.com");
+  is("her run is at step 1", anaRun?.step, 1);
+
+  part("1. The once-only SET NX answers in an unknown shape on a second join: nothing restarts, nothing is sent");
+  await enroll(store, "cy@example.com", { joined: true });
+  await run();
+  const before = (await listRuns(flowId, 10)).find((r) => r.email === "cy@example.com");
+  is("before: Cy's run is at step 1 and got 'Day one' once", [before?.step, got("Day one", "cy@example.com")], [1, 1]);
+  // Cy joins again three days later (another sign-up form, say): the send's own two-day once-only marks are gone.
+  redis.advance(3 * 86_400_000);
+  for (const shape of [[], ["garbled"], [1]] as unknown[][]) {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).startsWith("nl:mail:enr:") && commands[0].includes("NX")) {
+        await original(commands); // runs: the key is already there, Redis would say nil
+        return shape; // the reply is lost or of another shape
+      }
+      return original(commands);
+    }) as typeof redis.pipeline;
+    await enroll(store, "cy@example.com", { joined: true });
+    redis.pipeline = original;
+    const after = (await listRuns(flowId, 10)).find((r) => r.email === "cy@example.com");
+    is(`reply ${JSON.stringify(shape)}: Cy's run is not restarted (same step and start)`, [after?.step, after?.startedAt], [before?.step, before?.startedAt]);
+  }
+  await run();
+  is("'Day one' still went to Cy only once", got("Day one", "cy@example.com"), 1);
+
+  part("2. The workflows GET answers in an unknown shape while Ben's first step is due: the batch stays queued");
+  await enroll(store, "ben@example.com", { joined: true });
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === `nl:mail:flows:${list}`) return [];
+    return original(commands);
+  }) as typeof redis.pipeline;
+  const counts = await run();
+  redis.pipeline = original;
+  is("readFlows answers the saved workflow once the reply is healthy", (await readFlows(list)).length, 1);
+  is("Ben's batch is not counted as dropped", counts.dropped, 0);
+  const [queued] = await original([["ZRANGEBYSCORE", "nl:mail:flowq", "-inf", "+inf"]]);
+  const [leased] = await original([["ZRANGEBYSCORE", "nl:mail:flowq:lease", "-inf", "+inf"]]);
+  is("Ben's step is still queued or reserved", [...(queued as string[]), ...(leased as string[])].filter((m) => m.endsWith("|ben@example.com")).length, 1);
+  is("nothing was sent to Ben while the read was unknown", got("Day one", "ben@example.com"), 0);
+  // The batch was put back for a later run; that run comes (the clock moves past the wait).
+  const realNow = Date.now;
+  Date.now = () => realNow() + 700_000;
+  try {
+    await run();
+  } finally {
+    Date.now = realNow;
+  }
+  is("Healthy control: with Redis healthy again, the due batch runs and Ben gets 'Day one' once", got("Day one", "ben@example.com"), 1);
+  const benRun = (await listRuns(flowId, 10)).find((r) => r.email === "ben@example.com");
+  is("and his run moves on to step 1", [benRun?.status, benRun?.step], ["running", 1]);
+
+  part("3. lib/flow-runs.ts siblings: an unknown slot is never 'no such run' or 'no address'");
+  is("control: readRun reads Ana's run", (await readRun(flowId, personOf("ana@example.com")))?.run.step, 1);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const reply = await original(commands);
+    if (commands.length === 2 && commands[0][0] === "HGETALL" && String(commands[0][1]).startsWith("nl:wf:run:")) return ["garbled", reply[1]];
+    return reply;
+  }) as typeof redis.pipeline;
+  const readRunThrows = await rejects(() => readRun(flowId, personOf("ana@example.com")));
+  redis.pipeline = original;
+  is("readRun throws on an unknown HGETALL slot", readRunThrows, true);
+  const people = await runPeople(flowId);
+  is("control: runPeople names every address", people.map((p) => p.email).sort(), ["ana@example.com", "ben@example.com", "cy@example.com"]);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const reply = await original(commands);
+    if (commands.length > 0 && commands[0][0] === "HGET" && commands[0][2] === "email") return reply.map((r, i) => (i === 0 ? 7 : r));
+    return reply;
+  }) as typeof redis.pipeline;
+  const runPeopleThrows = await rejects(() => runPeople(flowId));
+  redis.pipeline = original;
+  is("runPeople throws on an unknown HGET slot", runPeopleThrows, true);
+  done();
+}
+main();

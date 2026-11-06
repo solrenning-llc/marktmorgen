@@ -57,3 +57,19 @@ Not executed: hosted CI, full production build, browser, screen reader, native R
 | `.github/workflows/product-checks.yml` | `875a808ed53fa24ef6b7c35cf11dd0f291760fef` |
 | `scripts/ci-build.mjs` | `dbb59e3a01cdc8ee0307857f32b7084aaebae273` |
 | `next.config.ts` | `eebe0821f9687a2b5187363b5512dcb0d7a9543a` |
+
+## Focal return on da6988b4
+
+Reviewed return head: `da6988b4f5d2a409c5269482453c5baf3933a436`, tree `8b6158b32c951adc9f589a143d519e921e983602`. The return claim, PR comment `6697413863`, preceded reading the new diff/source/tests. The earlier review, original new-feature RED and TS2737 reproduction above remain intact; this append does not relabel the missing-module replay as a TypeScript RED.
+
+The complete `ac2c48d5..da6988b4` delta is one replacement in `tests/course-access-expiry-rules.test.ts:29`: `0n` becomes `BigInt(0)`. The new test blob is `993d3e8e0c4b45bbcc073e73a379bd0453316e28`. All eleven test cases and assertions are preserved. The module remains byte-identical at `0678b555bdabe6593eabb0031cf22295c7ea0c87`; the real tsconfig remains `f126992ca95c6da5359e547a2e58e92fccd3d02c`, including target ES2017. No new type-guard test, product change or new author TS-RED artifact occurs in this delta.
+
+**Result: the original LEVE TS2737 finding is closed in this exact return. No new grave or medium finding was demonstrated.** The constructor retains the same bigint value in the invalid-input matrix. The contract remains pure, import-free and explicitly inert; this result grants no course access or future integration approval.
+
+Execution used a complete detached return checkout and the recovered own dependencies, with Node 24.22.1. The independent proof and runner were restored unchanged from own review `82ee4207af5482b83772654933756cb1102ac0f5`: proof blob `c661d75c32586744233899972f571c3fa018dc1a`, runner blob `d4b373e969e4375ed2efe8eb0f839819a3f341fc`. The same runner's documented fourth argument pinned the independently verified new author-test blob; neither the original proof, provenance assertions nor repository compiler target was weakened.
+
+The corrected author test again yields eleven named missing-export failures when the new contract is absent and 11/11 passes with the real module, through both native Node and canonical esbuild methods. These are the same eleven cases through repeated methods, not 22 unique cases, and the absent-contract replay is not evidence of TS2737. The unchanged independent proof now passes **5/5 Node tests**: three runtime tests and two real-target compiler assertions. The complete 7x7 endpoint relation, trapping/revoked proxies, explicit-clock behavior and bigint input remain covered. Actual TypeScript over the two author roots with the exact ES2017 config reports zero diagnostics. The constructor-form compiler control remains unchanged; on this corrected source it verifies the same compatible text.
+
+Directed ESLint on the two author files passes. Native `git diff --check ac2c48d5 da6988b4` passes. The repository public-data detector reports five files and zero corrections over the two author files and three own evidence/report files. Runtime/compiler execution retained the original 120-second total deadline and 128-KiB combined-log admission; observed proof output was 22,283 bytes. No productive provider, Redis, HTTP or external network operation was part of those contract/compiler tests. Source recovery used Git separately.
+
+No unrelated cohort/preview tests, full suite, full production build, browser, screen reader, native Redis, actual grants or provider flow was rerun. Current REST PR state and the nine hosted checks could not be verified because reads were rate limited; no OPEN, merge-ready or CI-green claim is made. No author source/ref/PR/CI was changed.

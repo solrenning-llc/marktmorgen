@@ -1,5 +1,5 @@
 import { originFrom } from "@/lib/request-origin";
-import { addComment, deleteComment, dropLessonComments, readComment, setCommentsOn, setHidden } from "@/lib/lesson-comments";
+import { addComment, deleteComment, dropComments, dropLessonComments, readComment, setCommentsOn, setHidden } from "@/lib/lesson-comments";
 import { COMMENT_ID_PATTERN, CREATOR_AUTHOR } from "@/lib/lesson-comments-rules";
 import { tellStudent } from "@/lib/lesson-comment-notify";
 import type { NextRequest } from "next/server";
@@ -236,6 +236,7 @@ export async function POST(request: NextRequest) {
         if (lessonCount(course) > 0) return Response.json({ ok: false, error: "not_empty" }, { status: 400 });
         const result = await setProductCourse(ref, id, null);
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
+        await dropComments(course.id, [], store);
         await dropCourse(course, store);
         if (community) await unindexCourse(community, product.id, course).catch(() => {});
         await registerDrip(store, product, { ...course, modules: [] });

@@ -33,7 +33,8 @@ import { dropPage } from "@/lib/sales-page-store";
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { dropCourse, filesInCourse, readCourse } from "@/lib/course";
+import { dropCourse, filesInCourse, lessonsInOrder, readCourse } from "@/lib/course";
+import { dropComments } from "@/lib/lesson-comments";
 import { exampleTitlesLeft } from "@/lib/course-templates";
 import { dropStream } from "@/lib/stream";
 import { dropStamped } from "@/lib/pdf-stamp";
@@ -310,7 +311,10 @@ export async function POST(request: NextRequest) {
           return [] as string[];
         });
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));
-        if (course) await dropCourse(course, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
+        if (course) {
+          await dropComments(course.id, lessonsInOrder(course).map(({ lesson }) => lesson.id), removed.store);
+          await dropCourse(course, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
+        }
         for (const file of had) {
           // A lesson video the video service keeps is taken away there (lib/stream.ts).
           if (await dropStream(file.pathname, removed.store).catch(() => false)) continue;

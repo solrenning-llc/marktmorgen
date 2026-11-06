@@ -22,6 +22,13 @@ const en = {
   checkoutUnpriced: "Check out",
   /** Said instead of the total when the cart's prices could not be read again. */
   unchecked: "We could not check the prices just now, so no total is shown. The payment page shows the exact total before you pay.",
+  /** Said when products in the cart have not been checked at all (the first read, or one just added, failed): nothing can be paid for yet. */
+  uncheckedSome: (count: number) =>
+    count === 1
+      ? "We could not check 1 product in your cart just now, so you cannot pay yet."
+      : `We could not check ${count} products in your cart just now, so you cannot pay yet.`,
+  /** The button beside either sentence above that reads the cart again. */
+  retry: "Try again",
   note: "You pay once, on Stripe's secure page. Each product is handed over exactly as if you had bought it on its own.",
   empty: "Your cart is empty.",
   gone: "Not available in a cart right now: buy it from its own page.",
@@ -82,6 +89,11 @@ const es: CartWords = {
   checkoutUnpriced: "Pagar",
   /** Said instead of the total when the cart's prices could not be read again. */
   unchecked: "No pudimos comprobar los precios ahora, así que no se muestra ningún total. La página de pago muestra el total exacto antes de que pagues.",
+  uncheckedSome: (count) =>
+    count === 1
+      ? "No pudimos comprobar 1 producto de tu carrito ahora, así que todavía no puedes pagar."
+      : `No pudimos comprobar ${count} productos de tu carrito ahora, así que todavía no puedes pagar.`,
+  retry: "Intentar de nuevo",
   note: "Pagas una sola vez, en la página segura de Stripe. Cada producto se entrega igual que si lo compraras por separado.",
   empty: "Tu carrito está vacío.",
   gone: "No está disponible en un carrito ahora mismo: cómpralo desde su propia página.",
@@ -135,6 +147,11 @@ const fr: CartWords = {
   checkoutUnpriced: "Payer",
   /** Said instead of the total when the cart's prices could not be read again. */
   unchecked: "Nous n'avons pas pu vérifier les prix pour le moment, donc aucun total n'est affiché. La page de paiement affiche le total exact avant que vous payiez.",
+  uncheckedSome: (count) =>
+    count <= 1
+      ? "Nous n'avons pas pu vérifier 1 produit de votre panier pour le moment, vous ne pouvez donc pas encore payer."
+      : `Nous n'avons pas pu vérifier ${count} produits de votre panier pour le moment, vous ne pouvez donc pas encore payer.`,
+  retry: "Réessayer",
   note: "Vous payez une seule fois, sur la page sécurisée de Stripe. Chaque produit est remis exactement comme s'il était acheté seul.",
   empty: "Votre panier est vide.",
   gone: `Pas disponible dans un panier pour l'instant${S}: achetez-le depuis sa propre page.`,
@@ -188,6 +205,11 @@ const de: CartWords = {
   checkoutUnpriced: "Zur Kasse",
   /** Said instead of the total when the cart's prices could not be read again. */
   unchecked: "Wir konnten die Preise gerade nicht prüfen, daher wird keine Summe angezeigt. Die Zahlungsseite zeigt die genaue Summe, bevor Sie bezahlen.",
+  uncheckedSome: (count) =>
+    count === 1
+      ? "Wir konnten 1 Produkt in Ihrem Warenkorb gerade nicht prüfen, daher können Sie noch nicht bezahlen."
+      : `Wir konnten ${count} Produkte in Ihrem Warenkorb gerade nicht prüfen, daher können Sie noch nicht bezahlen.`,
+  retry: "Erneut versuchen",
   note: "Sie bezahlen einmal, auf der sicheren Seite von Stripe. Jedes Produkt wird genau so übergeben, als hätten Sie es einzeln gekauft.",
   empty: "Ihr Warenkorb ist leer.",
   gone: "Gerade nicht im Warenkorb erhältlich: Kaufen Sie es auf seiner eigenen Seite.",
@@ -241,6 +263,11 @@ const it: CartWords = {
   checkoutUnpriced: "Paga",
   /** Said instead of the total when the cart's prices could not be read again. */
   unchecked: "Non è stato possibile controllare i prezzi in questo momento, quindi non è mostrato alcun totale. La pagina di pagamento mostra il totale esatto prima che tu paghi.",
+  uncheckedSome: (count) =>
+    count === 1
+      ? "Non è stato possibile controllare 1 prodotto del tuo carrello in questo momento, quindi non puoi ancora pagare."
+      : `Non è stato possibile controllare ${count} prodotti del tuo carrello in questo momento, quindi non puoi ancora pagare.`,
+  retry: "Riprova",
   note: "Paghi una volta sola, sulla pagina sicura di Stripe. Ogni prodotto viene consegnato esattamente come se lo comprassi da solo.",
   empty: "Il tuo carrello è vuoto.",
   gone: "Al momento non disponibile in un carrello: compralo dalla sua pagina.",
@@ -294,6 +321,11 @@ const nl: CartWords = {
   checkoutUnpriced: "Afrekenen",
   /** Said instead of the total when the cart's prices could not be read again. */
   unchecked: "We konden de prijzen nu niet controleren, dus er wordt geen totaal getoond. De betaalpagina toont het exacte totaal voordat je betaalt.",
+  uncheckedSome: (count) =>
+    count === 1
+      ? "We konden 1 product in je winkelwagen nu niet controleren, dus je kunt nog niet betalen."
+      : `We konden ${count} producten in je winkelwagen nu niet controleren, dus je kunt nog niet betalen.`,
+  retry: "Opnieuw proberen",
   note: "Je betaalt één keer, op de beveiligde pagina van Stripe. Elk product wordt precies zo geleverd als wanneer je het los koopt.",
   empty: "Je winkelwagen is leeg.",
   gone: "Nu niet beschikbaar in een winkelwagen: koop het op zijn eigen pagina.",
@@ -347,6 +379,11 @@ const pt: CartWords = {
   checkoutUnpriced: "Pagar",
   /** Said instead of the total when the cart's prices could not be read again. */
   unchecked: "Não foi possível verificar os preços agora, por isso nenhum total é mostrado. A página de pagamento mostra o total exato antes de pagar.",
+  uncheckedSome: (count) =>
+    count === 1
+      ? "Não foi possível verificar 1 produto do seu carrinho agora, por isso ainda não é possível pagar."
+      : `Não foi possível verificar ${count} produtos do seu carrinho agora, por isso ainda não é possível pagar.`,
+  retry: "Tentar novamente",
   note: "Paga uma única vez, na página segura da Stripe. Cada produto é entregue exatamente como se o comprasse em separado.",
   empty: "O seu carrinho está vazio.",
   gone: "Não está disponível num carrinho neste momento: compre-o na sua própria página.",

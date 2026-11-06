@@ -15,6 +15,8 @@ import { DigitalConsentBox } from "@/components/digital-consent-box";
  */
 const key = (handle: string) => `mm-cart:${handle}`;
 const CHANGED = "mm-cart-changed";
+/** How long the cart waits for its read before it says the prices could not be checked (a stalled connection never answers). */
+const CART_READ_MS = 8_000;
 
 function read(handle: string): string[] {
   try {
@@ -149,6 +151,12 @@ export function CartButton({
   const [bundle, setBundle] = useState<BundleSwap | null>(null);
   const [shipping, setShipping] = useState<ShippingRow | null>(null);
   const [apart, setApart] = useState<Apart | null>(null);
+  // The ids the last read that answered was for; whether the latest read failed or ran out of time; and the count that
+  // "Try again" raises to read the cart once more (with the focus put back on the panel when that read answers).
+  const [checked, setChecked] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [tries, setTries] = useState(0);
+  const retried = useRef(false);
   // Whether anything is handed over digitally: only then is the box to start at once asked for (lib/digital-consent.ts).
   const [digital, setDigital] = useState(true);
   const panel = useRef<HTMLDivElement>(null);
@@ -157,19 +165,29 @@ export function CartButton({
   useEffect(() => {
     if (!open || !wanted) return;
     let live = true;
-    // A read that fails leaves no figure from the read before it on screen: the button then carries no amount and the
-    // panel says the prices could not be checked (Stripe's page shows the exact total before anything is paid).
-    const unpriced = () => {
+    // A read that fails, or does not answer within CART_READ_MS, clears the combined figures of the read before it (the
+    // total, the deal, the "add more" row and shipping): the button then carries no amount and the panel says the prices
+    // could not be checked (Stripe's page shows the exact total before anything is paid). Each line's own price, and the
+    // bundle and suggestion prices, stay from the last read that answered. A product that read never covered is not
+    // offered for payment at all until a read covers it (`unchecked` below).
+    const stop = new AbortController();
+    const fail = () => {
+      if (!live) return;
+      setFailed(true);
       setTotal("");
       setDeal(null);
       setNext(null);
       setShipping(null);
     };
-    fetch(`/api/store/cart?${new URLSearchParams({ handle, ids: wanted })}`)
+    const timer = window.setTimeout(() => {
+      fail();
+      stop.abort();
+    }, CART_READ_MS);
+    fetch(`/api/store/cart?${new URLSearchParams({ handle, ids: wanted })}`, { signal: stop.signal })
       .then((r) => r.json())
       .then((data: { ok?: boolean; items?: Line[]; total?: string; deal?: { percent: number; saved: string } | null; next?: { more: number; percent: number } | null; suggest?: Suggestion[]; bundle?: BundleSwap | null; shipping?: ShippingRow | null; apart?: Apart | null; digital?: boolean }) => {
         if (!live) return;
-        if (!data.ok) return unpriced();
+        if (!data.ok) return fail();
         setLines(data.items ?? []);
         setTotal(data.total ?? "");
         setDeal(data.deal ?? null);
@@ -180,14 +198,22 @@ export function CartButton({
         setApart(data.apart ?? null);
         // Unknown is asked: a cart that does not say is treated as holding something digital.
         setDigital(data.digital !== false);
+        setChecked(wanted);
+        setFailed(false);
+        if (retried.current) {
+          // "Try again" goes once the read answers: the focus goes to the panel, not to the page.
+          retried.current = false;
+          panel.current?.focus();
+        }
       })
-      .catch(() => {
-        if (live) unpriced();
-      });
+      .catch(fail)
+      .finally(() => window.clearTimeout(timer));
     return () => {
       live = false;
+      window.clearTimeout(timer);
+      stop.abort();
     };
-  }, [open, wanted, handle]);
+  }, [open, wanted, handle, tries]);
 
   useEffect(() => {
     if (open) panel.current?.focus();
@@ -197,6 +223,32 @@ export function CartButton({
   const shown = (lines ?? []).filter((line) => ids.includes(line.id));
   const payable = shown.filter((line) => line.ok);
   const held = apart !== null && apart.ids.some((id) => ids.includes(id));
+  // Products no read has answered for yet (the first read, or one just added): never offered for payment until a read
+  // covers them, so the form never posts fewer products than the cart's button counts. Until then the panel says the
+  // prices are being checked or, once the read failed or ran out of time, how many could not be checked, beside a button
+  // that reads the cart again.
+  const covered = checked === null ? [] : checked.split(",");
+  const unchecked = ids.filter((id) => !covered.includes(id));
+  const retry = (
+    <button
+      type="button"
+      className="btn st-btn-ghost btn-sm min-h-11"
+      onClick={() => {
+        retried.current = true;
+        setTries((n) => n + 1);
+      }}
+    >
+      {c.retry}
+    </button>
+  );
+  const waiting = failed ? (
+    <div className="mt-3 space-y-2">
+      <p className="st-note text-sm" role="alert" data-cart-unchecked="">{c.uncheckedSome(unchecked.length)}</p>
+      {retry}
+    </div>
+  ) : (
+    <p className="st-muted mt-3 text-sm" role="status">{c.loading}</p>
+  );
 
   return (
     <div id="cart" className="st-cart">
@@ -222,7 +274,7 @@ export function CartButton({
           {ids.length === 0 ? (
             <p className="st-muted mt-3 text-sm">{c.empty}</p>
           ) : lines === null ? (
-            <p className="st-muted mt-3 text-sm" role="status">{c.loading}</p>
+            waiting
           ) : (
             <>
               <ul className="mt-3 divide-y" style={{ borderColor: "var(--st-line)" }}>
@@ -314,7 +366,7 @@ export function CartButton({
                 : null}
               {/* Always there, so a screen reader hears the sentence when it appears: nothing can be paid for until what cannot go together is taken out (lib/cart-shipping.ts). */}
               <p className={held ? "st-note mt-3 text-sm" : "sr-only"} role="status" data-cart-apart="">{held ? apart.why : ""}</p>
-              {held ? null : payable.length > 0 ? (
+              {held ? null : unchecked.length > 0 ? waiting : payable.length > 0 ? (
                 <form action="/api/store/cart" method="post" target="_top" className="mt-3 space-y-3" data-checkout="">
                   <input type="hidden" name="handle" value={handle} />
                   {payable.map((line) => (
@@ -343,7 +395,10 @@ export function CartButton({
                       <span className="tabular-nums">{total}</span>
                     </p>
                   ) : (
-                    <p className="st-note text-sm" role="alert" data-cart-unpriced="">{c.unchecked}</p>
+                    <>
+                      <p className="st-note text-sm" role="alert" data-cart-unpriced="">{c.unchecked}</p>
+                      {failed ? retry : null}
+                    </>
                   )}
                   {remind ? <AssistReminderBox id={`r-cart-${handle}`} lang={lang} store={remind} /> : null}
                   {/* Asked when anything in the cart is handed over digitally; a cart of shipped products only has nothing to start at once. */}

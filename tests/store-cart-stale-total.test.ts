@@ -290,6 +290,22 @@ async function main() {
     cart.unmount();
   }
 
+  part("After a failure and a retry that answers, the next add shows \"Checking the prices…\", not the old failure");
+  {
+    const slow = later();
+    const cart = await openCart(["a"], [failures[2][1], answer(onlyAWithC), slow.read]);
+    await cart.retry();
+    is("the retry answered", cart.view().button, [c.checkout("$10.00")]);
+    await cart.press((n) => n.type === "button" && n.props?.["aria-label"] === `${c.add}: Product c`);
+    const v = cart.view();
+    is("while the new read runs, no alert from the old failure", v.alerts, []);
+    is("and the panel says the prices are being checked", v.text.includes(c.loading), true);
+    slow.give(aAndC);
+    await cart.settle();
+    is("once it answers, the form posts both", cart.view().posted, ["a", "c"]);
+    cart.unmount();
+  }
+
   part("The first read never answers");
   {
     const cart = await openCart(["a", "b"], [hang()]);

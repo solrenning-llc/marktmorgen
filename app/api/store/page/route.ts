@@ -10,7 +10,7 @@ import { lockedFor } from "@/lib/two-step";
 import { claimNewPictures, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { imagePaths, ownsImagePath } from "@/lib/product-image";
-import { keptPictures } from "@/lib/picture-check";
+import { checkedPictures } from "@/lib/picture-check";
 
 /**
  * Thirty full blocks as JSON, twice — a page and a second version tested
@@ -96,9 +96,7 @@ export async function POST(request: NextRequest) {
       // shared folder, so taking it off later deletes only this page's own (lib/sales-page-store.ts, claimNewPictures).
       // Only those this save takes from the door are checked in the file store, and once (MR audit gap 1): one taken
       // by an earlier save was checked then, so a save tried again never asks Blob about the same picture twice.
-      let taken: string[] = [];
-      const claimed = await claimNewPictures(store.statsId, id, fresh, (paths) => { taken = paths; });
-      if (!(await keptPictures(store.statsId, id, taken)) || !claimed) {
+      if (!(await claimNewPictures(store.statsId, id, fresh, checkedPictures))) {
         return Response.json({ ok: false, error: "pictures" }, { status: 400 });
       }
     }

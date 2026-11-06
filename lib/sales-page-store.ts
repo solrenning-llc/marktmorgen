@@ -103,12 +103,17 @@ export async function claimPictures(statsId: string, productId: string, paths: s
  *
  * Those taken from the door are claimed even when another is refused, so the
  * creator's save tried again still finds them; nothing is deleted here.
- * `onTaken` is told which ones this call took from the door: the route checks
- * those in the file store, once, and lets go of any that is not a picture.
+ * `check` is given the ones this call took from the door, before any of them is
+ * written down as this page's, and answers which are pictures (MR audit gap 1:
+ * each is asked about in the file store once, when taken). Only those become
+ * the page's, so being this page's always means checked (Codex Z on #2843): a
+ * take whose check never finished, a lost reply or a crash, leaves a picture
+ * neither in the door nor owned, refused by every later save, never put on
+ * unchecked.
  * A take from the door that cannot be confirmed throws (takePictureDoor), so
  * the page is refused with server_error before it is written.
  */
-export async function claimNewPictures(statsId: string, pageId: string, paths: string[], onTaken?: (taken: string[]) => void): Promise<boolean> {
+export async function claimNewPictures(statsId: string, pageId: string, paths: string[], check?: (taken: string[]) => Promise<string[]>): Promise<boolean> {
   const unique = [...new Set(paths)];
   if (unique.length === 0) return true;
   // Not known is ours to say, never "add the picture again" (Claude 4 on #2156): it throws, and the route answers
@@ -120,9 +125,10 @@ export async function claimNewPictures(statsId: string, pageId: string, paths: s
   if (unique.some((_, i) => typeof list[i] === "string" && list[i] !== "" && list[i] !== pageId)) return false;
   const unclaimed = unique.filter((_, i) => list[i] !== pageId);
   const taken = await takePictureDoor(unclaimed);
-  const fresh = unclaimed.filter((path) => taken.has(path));
-  // Who put them on asks Blob about these, and only these, once (MR audit gap 1): taken from the door now, never again.
-  onTaken?.(fresh);
+  const tookNow = unclaimed.filter((path) => taken.has(path));
+  // Checked before they are written down as this page's, and only those that are pictures are (Codex Z on #2843).
+  const checked = check && tookNow.length ? new Set(await check(tookNow)) : new Set(tookNow);
+  const fresh = tookNow.filter((path) => checked.has(path));
   if (fresh.length) {
     await redisPipeline(fresh.map((path) => ["HSETNX", picsKey(statsId), path, pageId]));
     const [after] = await redisPipeline([["HMGET", picsKey(statsId), ...fresh]]);

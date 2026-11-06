@@ -452,8 +452,12 @@ async function readPaidExact(order: string): Promise<Paid | null | "unknown"> {
   }
   if (!v || typeof v !== "object" || Array.isArray(v)) return "unknown";
   const r = v as Record<string, unknown>;
-  const text = (key: string) => typeof r[key] === "string";
-  if (r.order !== order || !text("email") || !text("product") || !text("capture") || !Number.isFinite(r.at)) return "unknown";
+  // Each field the watch acts on is real text: an empty capture, email or product would read as "nothing to take
+  // back" or look under the wrong key (Codex G on #2791), so it is unknown.
+  const text = (key: string) => typeof r[key] === "string" && (r[key] as string).trim().length > 0;
+  if (r.order !== order || !text("email") || !(r.email as string).includes("@") || !text("product") || !text("capture") || !Number.isFinite(r.at)) {
+    return "unknown";
+  }
   return v as Paid;
 }
 

@@ -275,3 +275,8 @@ Review P/G2/R2 requested in successfulchannel4d8c5ee44bf1e54aaf5eafaaa31588538df
 ### Exact continuation
 
 TWO ownproducts:2564/5849d1df and2778/07b971f0. Both await ONE actualqualifyingreview+NINE completedSUCCESS exacthead; thenfreshnativeclean/raw/ready/normalexpectedSHA/GETconfirmedmerge. No further merging fromoldgreens or assumedreview. Address findingswithRED first. Up to5slots, nextfreeAX2/VR afterfreshmain/reservations/PRs/channel andRESERVA, no synthetic/artificialunit. Previously separateblogfinding nowhascausalcorrectivecandidate2778; don'tleaveituntracked orcertify before review/CI. Existingunknown-readprooffamily/libraryN/C3 waiting remains asprior. No price/limit/commission/flag/gate/account/payment/term/provider/contact/PII change. No newautomation; CIwaitingistransient, AV12noemptypoll/headchurn. Source remainsGitHub; localworktreesandallREDspreserved.
+
+
+### Nominal review delta immediately after checkpoint
+
+Recovered new Revisor2 channel qualification, 06/11/2026 03h29 cycle23, exact07b971f01: "Sem achado: codex/k-blog-category-focus-evidence 07b971f01 (as categorias do blog passam a quebrar linha em vez de rolar na horizontal no celular; só CSS; reflow coerente com AX274)." Same message also records c1360077e RED as coherent. This is the actual independent no-finding nominal return for #2778, not the older height review. Preserve channel snapshot1f490b778576205e1301a6b80b12d949650be6b6. Under CX116 do not wait duplicate review; source exact07b971f remains unchanged. Nine exact-head workflows still required; no later CI poll performed. #2564 qualification still pending actual M/G2/R2 artifact. Prior point saying both reviews pending is superseded by this delta.

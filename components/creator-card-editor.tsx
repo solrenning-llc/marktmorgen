@@ -51,9 +51,11 @@ export function confirmedRemoval(answer: { card: CreatorCard; removed: unknown }
   return answer.removed !== false && !answer.card.on && TEXT_FIELDS.every((key) => answer.card[key] === "");
 }
 
-export function CreatorCardEditor({ initial, handle, storeName, words, address, look }: { initial: CreatorCard; handle: string; storeName: string; words: ContactWords["card"]; address: string; look: { className: string; style: React.CSSProperties; lang: string } }) {
+export function CreatorCardEditor({ initial, held, handle, storeName, words, address, look }: { initial: CreatorCard; held?: boolean; handle: string; storeName: string; words: ContactWords["card"]; address: string; look: { className: string; style: React.CSSProperties; lang: string } }) {
   const [card, setCard] = useState(initial);
-  const [kept, setKept] = useState(initial.on || Boolean(initial.name));
+  // Delete is offered for every kept card, also one off with no name but an email or a note, and one empty in every
+  // field: the page says whether a record is kept (`held`); without it, any word kept counts (Codex G on #1963).
+  const [kept, setKept] = useState(held ?? (initial.on || TEXT_FIELDS.some((key) => initial[key] !== "")));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [said, setSaid] = useState("");

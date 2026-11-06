@@ -6,7 +6,7 @@ import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { CreatorCardEditor } from "@/components/creator-card-editor";
-import { readCreatorCardForEditing } from "@/lib/creator-card";
+import { readCreatorCardHeld } from "@/lib/creator-card";
 import { contactWords } from "@/lib/buyer-words/contact";
 import { speech } from "@/lib/buyer-words";
 import { lookStyle } from "@/lib/store-look";
@@ -36,7 +36,9 @@ export default async function StudioCardPage({ searchParams }: Params) {
   const { view } = found;
   const { store } = view;
   // Read for certain, or not at all: an unknown read shows the notice below, never an empty card to save over the real one.
-  const card = await readCreatorCardForEditing(store.statsId).catch(() => null);
+  // `held` says whether a card record is kept at all, even one empty in every field, so Delete is offered for it.
+  const read = await readCreatorCardHeld(store.statsId).catch(() => null);
+  const card = read ? read.card : null;
   const address = `${SITE_URL.replace(/^https:\/\//, "")}/@${store.handle}/contact`;
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -59,6 +61,7 @@ export default async function StudioCardPage({ searchParams }: Params) {
             <div className="mt-8">
               <CreatorCardEditor
                 initial={card}
+                held={read?.held}
                 handle={store.handle}
                 storeName={store.name}
                 words={contactWords(store.language).card}

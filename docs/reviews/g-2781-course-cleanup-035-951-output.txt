@@ -1,0 +1,227 @@
+=== g2781-course-cleanup.proof.ts ===
+
+G: removal must include the independent course-access ledger
+  ok    control: real grant and course access before refund
+  ok    control: intended transport boundary reached
+G_COURSE_AFTER {"mode":"control","hit":0,"drops":1,"seen":1,"imported":0,"course":"closed"}
+  ok    control: healthy retry removes refunded course authority
+  ok    imported HDEL response lost: real grant and course access before refund
+  ok    imported HDEL response lost: intended transport boundary reached
+G_COURSE_AFTER {"mode":"imported HDEL response lost","hit":1,"drops":0,"seen":1,"imported":0,"course":"open"}
+  FAIL  imported HDEL response lost: healthy retry removes refunded course authority
+        expected [1,0,"closed"]
+        got      [1,0,"open"]
+  ok    course ledger removal fails: real grant and course access before refund
+  ok    course ledger removal fails: intended transport boundary reached
+G_COURSE_AFTER {"mode":"course ledger removal fails","hit":1,"drops":1,"seen":1,"imported":0,"course":"open"}
+  FAIL  course ledger removal fails: healthy retry removes refunded course authority
+        expected [1,0,"closed"]
+        got      [1,0,"open"]
+
+9 checks, 2 failing.
+
+=== g2781-course-cleanup.proof.ts ===
+
+G: removal must include the independent course-access ledger
+  ok    control: real grant and course access before refund
+  ok    control: intended transport boundary reached
+G_COURSE_AFTER {"mode":"control","hit":0,"drops":1,"seen":1,"imported":0,"course":"closed"}
+  ok    control: healthy retry removes refunded course authority
+  ok    imported HDEL response lost: real grant and course access before refund
+  ok    imported HDEL response lost: intended transport boundary reached
+G_COURSE_AFTER {"mode":"imported HDEL response lost","hit":1,"drops":0,"seen":1,"imported":0,"course":"open"}
+  FAIL  imported HDEL response lost: healthy retry removes refunded course authority
+        expected [1,0,"closed"]
+        got      [1,0,"open"]
+  ok    course ledger removal fails: real grant and course access before refund
+  ok    course ledger removal fails: intended transport boundary reached
+G_COURSE_AFTER {"mode":"course ledger removal fails","hit":1,"drops":1,"seen":1,"imported":0,"course":"open"}
+  FAIL  course ledger removal fails: healthy retry removes refunded course authority
+        expected [1,0,"closed"]
+        got      [1,0,"open"]
+
+9 checks, 2 failing.
+
+=== g2781-member-read.proof.ts ===
+
+G: a valid member survives unknown HGETALL and healthy retry
+  ok    vector0: valid place granted by real functions
+  ok    vector0: unknown member read intercepted exactly once
+  FAIL  vector0: unknown list must not commit handled refund
+        expected [0,null]
+        got      [0,"1793953542"]
+G_MEMBER_AFTER {"n":0,"seen":0,"remaining":[],"displayed":[]}
+  ok    vector0: a healthy retry removes the refunded entitlement
+  ok    vector1: valid place granted by real functions
+  ok    vector1: unknown member read intercepted exactly once
+  FAIL  vector1: unknown list must not commit handled refund
+        expected [0,null]
+        got      [0,"1793953542"]
+G_MEMBER_AFTER {"n":1,"seen":0,"remaining":[],"displayed":[]}
+  ok    vector1: a healthy retry removes the refunded entitlement
+  ok    vector2: valid place granted by real functions
+  ok    vector2: unknown member read intercepted exactly once
+  FAIL  vector2: unknown list must not commit handled refund
+        expected [0,null]
+        got      [0,"1793953542"]
+G_MEMBER_AFTER {"n":2,"seen":0,"remaining":[],"displayed":[]}
+  ok    vector2: a healthy retry removes the refunded entitlement
+
+12 checks, 3 failing.
+
+=== g2781-return-recovery.proof.ts ===
+
+G return: two bounded runs reach the eleventh page
+  ok    first run bounded and later group remains pending
+  ok    second run resumes after first pass while still bounded and revokes
+  ok    close: injection hit exact current boundary and no completion mark
+  ok    close: healthy retry actually closes and completes
+  ok    mapping: injection hit exact current boundary and no completion mark
+  ok    mapping: healthy retry actually closes and completes
+
+6 checks, all passing.
+
+=== stripe-list-lot3.test.ts ===
+
+group-buy.ts: refunds read in another shape never move the anchor
+  ok    refunds answered no data: the anchor stays
+  ok    refunds answered data not a list: the anchor stays
+  ok    refunds answered has_more missing: the anchor stays
+  ok    refunds answered has_more as text: the anchor stays
+  ok    refunds answered not an object: the anchor stays
+  ok    a row not readable: the anchor stays
+
+group-buy.ts: refunds are read to their end
+  ok    each page is read, after the last row of the one before
+  ok    its refund on the third page takes the purchase back
+  ok    the anchor moves once the last page is read
+  ok    each read pinned to the lot's version
+
+group-buy.ts: a readable refund stands beside a row not readable; the anchor does not move
+  ok    the purchase is taken back
+  ok    and the anchor stays
+
+group-buy.ts: more pages than one run reads
+  ok    read up to its own ceiling
+  ok    and the anchor stays
+
+group-buy.ts: a pass longer than one run goes on from where it stopped (Codex G on #2781, M1)
+  ok    the first run reads its ten pages and stops
+  ok    the next reads the newest page, then goes on from where the first stopped
+  ok    and reaches the refund on the eleventh page
+  ok    the anchor moves once the pass reached the end, to the newest refund read
+  ok    and the next pass starts from the top again
+
+group-buy.ts: marked handled only once the work was written (Codex G on #2781, M2)
+  ok    the close fails before it is written: nothing marked handled, the purchase still open, the run stopped on that page
+  ok    the close fails before it is written: the next run takes it back and marks it handled
+  ok    the reply naming its purchase is lost: nothing marked handled, the purchase still open, the refund waits to be tried again
+  ok    the reply naming its purchase is lost: the next run takes it back and marks it handled
+  ok    the reply marking it handled is lost: the purchase is taken back, the refund waits to be marked
+  ok    the reply marking it handled is lost: the next run takes it back and marks it handled
+
+group-buy.ts: a purchase closed halfway has its places taken back (Claude 4 on #2781, M3)
+  ok    a place was taken with the purchase
+  ok    the place still held is taken back
+  ok    and the refund is marked handled
+
+group-buy.ts: one record that does not read never holds back the others (Claude 4 on #2781, proof d6f33d99)
+  ok    the refunded purchase on the next page is taken back after three healthy runs
+  ok    the unreadable one is not marked handled
+  ok    it waits on the list to be tried again, and the pass ended
+  ok    forty days later, with no new refund, it still waits: the list has no expiry
+  ok    once its record reads, the next run takes it back first, marks it and lets it go
+
+group-buy.ts: with the list full, the pass stays on the page it could not hand over
+  ok    not kept, not marked, and the anchor stays
+
+group-buy.ts: the places handed out are read exactly (Codex G on #2781, proof 1e7a4920)
+  ok    places null: a place was taken
+  ok    places null: unknown, so not marked; the refund waits to be tried again; the place is still held
+  ok    places null: a healthy run takes the place back and lets the refund go
+  ok    places ["odd-field"]: a place was taken
+  ok    places ["odd-field"]: unknown, so not marked; the refund waits to be tried again; the place is still held
+  ok    places ["odd-field"]: a healthy run takes the place back and lets the refund go
+  ok    places {"broken":true}: a place was taken
+  ok    places {"broken":true}: unknown, so not marked; the refund waits to be tried again; the place is still held
+  ok    places {"broken":true}: a healthy run takes the place back and lets the refund go
+  ok    places ["ana","{not json"]: a place was taken
+  ok    places ["ana","{not json"]: unknown, so not marked; the refund waits to be tried again; the place is still held
+  ok    places ["ana","{not json"]: a healthy run takes the place back and lets the refund go
+
+group-buy.ts: one place that does not read never holds back the readable ones (Claude 4 on #2781, C4-20261106-0720-TODOS-30)
+  ok    a readable place was taken
+  ok    the readable place is taken back in the same run
+  ok    and the refund is not marked: it waits to be tried again for the one that did not read
+
+group-buy.ts: a place's own record that does not read is unknown, never 'came another way' (Claude 4 on #2781, C4-20261106-0725-C5-31)
+  ok    a place was taken
+  ok    the place's record is where the purchase wrote it
+  ok    a record {not json: unknown, the refund not marked and waiting
+  ok    a record {"job":7}: unknown, the refund not marked and waiting
+  ok    once the record reads, the place loses its access and the refund is let go
+
+group-buy.ts: an anchor in another shape starts no pass
+  ok    nothing is read from a week back
+
+55 checks, all passing.
+reading refunds for group purchases failed StripeListUnreadable: Stripe answered a list in another shape: data is not a list
+    at readStripePage (/tmp/g-2681-proof-8qNToa/3.cjs:16302:77)
+    at readPage2 (/tmp/g-2681-proof-8qNToa/3.cjs:18727:14)
+    at async revokeRefundedGroups (/tmp/g-2681-proof-8qNToa/3.cjs:18764:18)
+    at async main (/tmp/g-2681-proof-8qNToa/3.cjs:63257:5)
+reading refunds for group purchases failed StripeListUnreadable: Stripe answered a list in another shape: data is not a list
+    at readStripePage (/tmp/g-2681-proof-8qNToa/3.cjs:16302:77)
+    at readPage2 (/tmp/g-2681-proof-8qNToa/3.cjs:18727:14)
+    at async revokeRefundedGroups (/tmp/g-2681-proof-8qNToa/3.cjs:18764:18)
+    at async main (/tmp/g-2681-proof-8qNToa/3.cjs:63257:5)
+reading refunds for group purchases failed StripeListUnreadable: Stripe answered a list in another shape: has_more is not true or false
+    at readStripePage (/tmp/g-2681-proof-8qNToa/3.cjs:16303:43)
+    at readPage2 (/tmp/g-2681-proof-8qNToa/3.cjs:18727:14)
+    at async revokeRefundedGroups (/tmp/g-2681-proof-8qNToa/3.cjs:18764:18)
+    at async main (/tmp/g-2681-proof-8qNToa/3.cjs:63257:5)
+reading refunds for group purchases failed StripeListUnreadable: Stripe answered a list in another shape: has_more is not true or false
+    at readStripePage (/tmp/g-2681-proof-8qNToa/3.cjs:16303:43)
+    at readPage2 (/tmp/g-2681-proof-8qNToa/3.cjs:18727:14)
+    at async revokeRefundedGroups (/tmp/g-2681-proof-8qNToa/3.cjs:18764:18)
+    at async main (/tmp/g-2681-proof-8qNToa/3.cjs:63257:5)
+reading refunds for group purchases failed StripeListUnreadable: Stripe answered a list in another shape: not an object
+    at readStripePage (/tmp/g-2681-proof-8qNToa/3.cjs:16299:33)
+    at readPage2 (/tmp/g-2681-proof-8qNToa/3.cjs:18727:14)
+    at async revokeRefundedGroups (/tmp/g-2681-proof-8qNToa/3.cjs:18764:18)
+    at async main (/tmp/g-2681-proof-8qNToa/3.cjs:63257:5)
+
+=== g2781-member-queue-contract.proof.ts ===
+
+G: a valid member survives unknown HGETALL and healthy retry
+  ok    vector0: valid place granted by real functions
+  ok    vector0: unknown member read intercepted exactly once
+  ok    vector0: unknown members are unhandled and durably queued
+G_MEMBER_AFTER {"n":0,"seen":0,"remaining":[],"displayed":[]}
+  ok    vector0: healthy retry removes entitlement and queue item, then completes
+  ok    vector1: valid place granted by real functions
+  ok    vector1: unknown member read intercepted exactly once
+  ok    vector1: unknown members are unhandled and durably queued
+G_MEMBER_AFTER {"n":1,"seen":0,"remaining":[],"displayed":[]}
+  ok    vector1: healthy retry removes entitlement and queue item, then completes
+  ok    vector2: valid place granted by real functions
+  ok    vector2: unknown member read intercepted exactly once
+  ok    vector2: unknown members are unhandled and durably queued
+G_MEMBER_AFTER {"n":2,"seen":0,"remaining":[],"displayed":[]}
+  ok    vector2: healthy retry removes entitlement and queue item, then completes
+
+12 checks, all passing.
+
+
+/tmp/g2781-return-951/tests/g2781-course-cleanup.proof.ts
+   29:20  warning  'openGroup' is defined but never used         @typescript-eslint/no-unused-vars
+   29:31  warning  'readGroup' is defined but never used         @typescript-eslint/no-unused-vars
+   34:10  warning  'advance' is defined but never used           @typescript-eslint/no-unused-vars
+   61:7   warning  'GARBLED' is assigned a value but never used  @typescript-eslint/no-unused-vars
+   98:9   warning  'anchor' is assigned a value but never used   @typescript-eslint/no-unused-vars
+   99:9   warning  'run' is assigned a value but never used      @typescript-eslint/no-unused-vars
+  102:9   warning  'other' is assigned a value but never used    @typescript-eslint/no-unused-vars
+
+✖ 7 problems (0 errors, 7 warnings)
+
+Public data check: 3914 tracked files; 0 file(s) require correction.

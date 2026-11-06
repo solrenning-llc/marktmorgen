@@ -2,6 +2,8 @@ import {join} from 'node:path';
 /** One wiring source for the repository runner and local parallel verification. */
 export function testAliases(file,root,here){
  const aliases={'@':root,'@/lib/redis':['range-traffic-coverage.test.ts','stats-traffic-coverage.test.ts'].includes(file)?join(root,'lib/redis.ts'):join(here,'redis-stub.ts')};
+
+
  if(file==='review-summary-unavailable-page.test.ts'){
   for(const name of ['catalog','studio-route','reviews','review-ai-summary','customer-voice','buyer-orders','purchase-email','ai','mail'])aliases['@/lib/'+name]=join(here,'review-summary-page-world.tsx');
   for(const name of ['studio-header','studio-store-pin','ai-assist','review-studio','review-qr','review-themes','review-ai-summaries'])aliases['@/components/'+name]=join(here,'review-summary-page-world.tsx');
@@ -31,10 +33,11 @@ export function testAliases(file,root,here){
   aliases['next/server']=join(here,'next-server-after-world.ts');
   aliases['@/lib/account-notice']=join(here,'meeting-disabled-world.ts');
  }
- if(file==='letter-members.test.ts'){aliases['next/headers']=join(here,'letter-members-world.ts');aliases['next/server']=join(here,'next-server-after-world.ts');aliases['@/components/store-tracking']=join(here,'letter-members-world.ts');}
+ if(file==='letter-members.test.ts'||file==='bv1-letter-preview.test.ts'){aliases['next/headers']=join(here,'letter-members-world.ts');aliases['next/server']=join(here,'next-server-after-world.ts');aliases['@/components/store-tracking']=join(here,'letter-members-world.ts');}
  if(['public-reads-ceiling.test.ts','draft-view.test.ts','draft-view-move-renew.test.ts','draft-view-waitlist.test.ts'].includes(file))aliases['next/headers']=join(here,'security/next-headers.ts');
  if(['draft-view.test.ts','draft-view-move-renew.test.ts','draft-view-waitlist.test.ts'].includes(file))aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='failure-cleanup-paths.test.ts'||file==='picture-owner-paths.test.ts'||file==='encanto-tone-route.test.ts')for(const name of ['@/lib/blob','@vercel/blob/client'])aliases[name]=join(here,'failure-cleanup-world.ts');
+ if(['review-g2-card-read-completeness.test.ts','creator-card-partial-read-g.test.ts','creator-card-remove-race-g.test.ts','creator-card-reload-delete-g.test.ts','creator-card-reload-held.test.ts'].includes(file))aliases['next/headers']=join(here,'security/next-headers.ts');
  if(file==='meeting-disabled-settings.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');
  if(file==='zoom-arrival.test.ts')aliases['next/navigation']=join(here,'meeting-withdrawal-page-world.ts');
  if(file==='meeting-disabled-withdrawal.test.ts'){
@@ -181,6 +184,12 @@ export function testAliases(file,root,here){
   aliases['@/lib/meta-ads']=join(here,'meta-return-provider-world.ts');
   aliases['next/server']=join(here,'next-server-after-world.ts');
  }
+ if(file==='form-response-unavailable.test.ts'){
+  for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'form-response-unavailable-world.tsx');
+  for(const name of ['studio-route','store-request','form-store','catalog','crm','team','pipeline-access','form-opportunity','form-response-pdf'])aliases['@/lib/'+name]=join(here,'form-response-unavailable-world.tsx');
+  for(const name of ['studio-header','studio-store-pin'])aliases['@/components/'+name]=join(here,'form-response-unavailable-world.tsx');
+ }
+ if(file==='assistant-counter-admission.test.ts')for(const name of ['redis','store','store-assistant','metered-limits'])aliases['@/lib/'+name]=join(here,'assistant-counter-admission-world.ts');
  return aliases;
 }
 export function testEnvironment(env){return{...env,DEMO_STUDIO_ADMIN:'operator@example.test',STRIPE_DEMO_ACCOUNT_ID:'acct_fixtureDemo',NIMBUS_DATA_KEY:env.NIMBUS_DATA_KEY??'tests-only-not-a-real-deployment-secret'};}

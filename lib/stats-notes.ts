@@ -89,6 +89,19 @@ async function readAllNotes(statsId: string): Promise<StatsNote[]> {
   return allNotes(raw);
 }
 
+/**
+ * A write may have landed before a later read became unavailable. One exact
+ * HLEN contains that failure: keep the sole recoverable note, but remove this
+ * attempt when it would grow an existing or already retried unknown history.
+ */
+async function containUnconfirmedAddition(statsId: string, id: string): Promise<void> {
+  const [raw] = exactArray(await redisPipeline([["HLEN", key(statsId)]]), 1);
+  if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 0) throw new Error("Chart notes could not be counted");
+  if (raw <= 1) return;
+  const [removed] = exactArray(await redisPipeline([["HDEL", key(statsId), id]]), 1);
+  if (removed !== 0 && removed !== 1) throw new Error("Chart note cleanup could not be confirmed");
+}
+
 export async function readNotes(statsId: string | null): Promise<StatsNote[]> {
   if (!statsId || !isRedisConfigured()) return [];
   return (await readAllNotes(statsId)).slice(-MAX_NOTES);
@@ -105,25 +118,30 @@ export async function addNote(statsId: string, dayRaw: unknown, textRaw: unknown
   const text = noteText(textRaw);
   if (!day || !text || !isRedisConfigured()) return null;
   const id = randomBytes(4).toString("hex");
-  await redisPipeline([
-    ["HSET", key(statsId), id, JSON.stringify({ day, text })],
-    ["EXPIRE", key(statsId), KEEP_SECONDS],
-  ]);
-  const complete = await readAllNotes(statsId);
-  const notes = complete.slice(-MAX_NOTES);
-  const [raw] = exactArray(await redisPipeline([["HLEN", key(statsId)]]), 1);
-  if (Number(raw) > MAX_NOTES) {
-    // A short read or a concurrent change cannot choose which history to delete.
-    if (Number(raw) !== complete.length) throw new Error("Chart notes changed while being read");
-    const keep = new Set(notes.map((note) => note.id));
-    const [rawKeys] = exactArray(await redisPipeline([["HKEYS", key(statsId)]]), 1);
-    const all = exactArray(rawKeys);
-    const known = new Set(complete.map(note => note.id));
-    if (all.length !== known.size || all.some(field => typeof field !== "string" || !known.has(field)) || new Set(all).size !== all.length) throw new Error("Chart notes changed while being read");
-    const drop = (all as string[]).filter((field) => !keep.has(field));
-    if (drop.length) await redisPipeline([["HDEL", key(statsId), ...drop]]);
+  try {
+    await redisPipeline([
+      ["HSET", key(statsId), id, JSON.stringify({ day, text })],
+      ["EXPIRE", key(statsId), KEEP_SECONDS],
+    ]);
+    const complete = await readAllNotes(statsId);
+    const notes = complete.slice(-MAX_NOTES);
+    const [raw] = exactArray(await redisPipeline([["HLEN", key(statsId)]]), 1);
+    if (Number(raw) > MAX_NOTES) {
+      // A short read or a concurrent change cannot choose which history to delete.
+      if (Number(raw) !== complete.length) throw new Error("Chart notes changed while being read");
+      const keep = new Set(notes.map((note) => note.id));
+      const [rawKeys] = exactArray(await redisPipeline([["HKEYS", key(statsId)]]), 1);
+      const all = exactArray(rawKeys);
+      const known = new Set(complete.map(note => note.id));
+      if (all.length !== known.size || all.some(field => typeof field !== "string" || !known.has(field)) || new Set(all).size !== all.length) throw new Error("Chart notes changed while being read");
+      const drop = (all as string[]).filter((field) => !keep.has(field));
+      if (drop.length) await redisPipeline([["HDEL", key(statsId), ...drop]]);
+    }
+    return notes;
+  } catch (error) {
+    await containUnconfirmedAddition(statsId, id);
+    throw error;
   }
-  return notes;
 }
 
 /** Takes a note away by its id; the list as it is after. */

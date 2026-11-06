@@ -69,16 +69,24 @@ export function changesWhatItDoes(before: Flow, after: Flow): boolean {
 
 /**
  * Pushes a version only while its workflow is still among the list's
- * workflows (ARGV[5] is its id as the saved list writes it) and the list is as
+ * workflows (ARGV[5]: its id, compared with the top-level id of each saved
+ * workflow, never with a step's: Codex G on #1927) and the list is as
  * it was counted from: as long (up to ARGV[4]) and with the same newest entry;
  * the workflow joins the list's index of kept versions in the same step.
  * 1 when kept, 0 when the list changed in between, 2 when the workflow is gone
  * (a save that finishes after its removal never brings its history back: Codex
  * G on #1927). Modelled by lib/redis-memory.ts.
  */
-export const KEEP_FLOW_VERSION = `-- marktmorgen:flow-version-keep:v2
-local flows = redis.call('GET', KEYS[2])
-if not flows or not string.find(flows, ARGV[5], 1, true) then return 2 end
+export const KEEP_FLOW_VERSION = `-- marktmorgen:flow-version-keep:v3
+local raw = redis.call('GET', KEYS[2])
+if not raw then return 2 end
+local ok, flows = pcall(cjson.decode, raw)
+if not ok or type(flows) ~= 'table' then return 2 end
+local found = false
+for _, flow in ipairs(flows) do
+  if type(flow) == 'table' and flow.id == ARGV[5] then found = true break end
+end
+if not found then return 2 end
 local n = redis.call('LLEN', KEYS[1])
 if n > tonumber(ARGV[4]) then n = tonumber(ARGV[4]) end
 if n ~= tonumber(ARGV[1]) then return 0 end
@@ -118,8 +126,7 @@ export async function keepFlowVersion(store: DataStore, listId: string, before: 
     // The first version also takes the workflow's place in the list's index.
     const grown = dataBytes(kept, kept.length) - dataBytes(held, held.length) + (held.length ? 0 : indexBytes(before.id));
     if (grown > 0) await needData(store, [{ slot: SLOT(before.id), bytes: grown }]);
-    const named = `"id":${JSON.stringify(before.id)}`;
-    const reply: unknown = await redisPipeline([["EVAL", KEEP_FLOW_VERSION, 3, key, flowsKey(listId), indexKey(listId), held.length, held[0] ?? "", entry, MAX_FLOW_VERSIONS, named, before.id]]);
+    const reply: unknown = await redisPipeline([["EVAL", KEEP_FLOW_VERSION, 3, key, flowsKey(listId), indexKey(listId), held.length, held[0] ?? "", entry, MAX_FLOW_VERSIONS, before.id, before.id]]);
     const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
     if (answer === 1) {
       if (grown < 0) await giveData(store, [{ slot: SLOT(before.id), bytes: -grown }]);

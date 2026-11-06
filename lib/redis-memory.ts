@@ -141,10 +141,17 @@ export class MemoryRedis {
           const length = items.reduce((sum, item) => sum + Buffer.byteLength(item, "utf8"), 0);
           return [this.run(["DEL", list]), items.length, length, this.run(["SREM", index, flowId])];
         }
-        if (key.startsWith("-- marktmorgen:flow-version-keep:v2\n") && args[0] === "3" && args.length === 10) {
-          const [, list, flows, index, length, head, entry, most, named, flowId] = args;
+        if (key.startsWith("-- marktmorgen:flow-version-keep:v3\n") && args[0] === "3" && args.length === 10) {
+          const [, list, flows, index, length, head, entry, most, id, flowId] = args;
           const saved = this.run(["GET", flows]);
-          if (typeof saved !== "string" || !saved.includes(String(named))) return 2;
+          let listed: unknown = null;
+          try {
+            listed = typeof saved === "string" ? JSON.parse(saved) : null;
+          } catch {
+            listed = null;
+          }
+          // Only a workflow's own top-level id, as cjson.decode and ipairs read the saved array.
+          if (!Array.isArray(listed) || !listed.some((flow) => typeof flow === "object" && flow !== null && (flow as { id?: unknown }).id === id)) return 2;
           const n = Math.min(Number(this.run(["LLEN", list]) ?? 0), Number(most));
           if (n !== Number(length)) return 0;
           if (n > 0 && this.run(["LINDEX", list, "0"]) !== head) return 0;

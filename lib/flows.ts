@@ -530,12 +530,15 @@ async function purgeFlow(store: Store, flow: Flow): Promise<void> {
 export async function forgetStoreWorkflows(store: Store): Promise<void> {
   if (!store.listId || !isRedisConfigured()) return;
   const flows = await readFlowListStrict(store.listId);
+  // Their runs first, while the workflows are still listed, so a run that fails is found again on the next try.
   for (const flow of flows) await purgeFlow(store, flow);
-  // Each workflow's earlier versions go with it (Codex Reviewer 2 on #1927), and so do those of a workflow already
-  // removed, found by the list's index (Codex G on #1927): a failed deletion throws, never left behind.
+  // Then the workflows (Codex G and Revisor 2 on #1927): a save already under way finds its workflow gone and keeps no
+  // version (KEEP_FLOW_VERSION answers 2), and one that kept a version before this is in the list's index.
+  await erase([forgetHeldCommand(store.listId), ["DEL", flowsKey(store.listId)]]);
+  // Last, every workflow's earlier versions, found by the index (it outlives the workflows, so another try finds them
+  // again): those of a workflow already removed too. A failed deletion throws, never left behind.
   const versioned = new Set([...flows.map((flow) => flow.id), ...(await versionedFlowIds(store.listId))]);
   for (const id of versioned) await dropFlowVersions(null, store.listId, id);
-  await erase([forgetHeldCommand(store.listId), ["DEL", flowsKey(store.listId)]]);
 }
 
 /**

@@ -63,3 +63,51 @@ O runner anterior substitui **somente app/studio/page.tsx** pelos bytes de c2e7c
 - O primeiro percurso de ligados completou61 grupos e acabou em ENOSPC antes de compilar wg16-empty-state. O runner passou a apagar SOMENTE cada bundle temporário próprio assim que termina. Os três grupos restantes foram executados com --after=webhook-faq.test.ts, sem repetir os61 já verdes. Não é falha de produto nem remoção de teste.
 
 Sem certificado de CI global, margens, TTFB real, navegador, leitor de tela ou AAA. Esta conclusão histórica retinha o original2aa1; o estado atual é o da atualização focal no início deste documento.
+
+## Adendo G8 — fechamento do LOW no B92, retorno DA (6 de novembro de 2026)
+
+Este adendo preserva integralmente o relatório anterior acima. Ele substitui somente o estado focal do LOW que permanecia aberto na atualização A4; não reapresenta os testes históricos como uma nova execução em DA. Claim do retorno confirmado antes das leituras: `31fb7ab2c7c98db0d681ffa734c51ab99b60d60a`. Fonte atual: `da446403e3549b4e27cba569279177838b148b18`; comparação direta desde `b92b2d7101f7381398f2a7c07e845c3f06f96751`.
+
+**Conclusão focal: o LOW condicional de lista de passkeys obsoleta está fechado no B92 e esse fechamento é transportável para DA por identidade dos bytes de produto.** O reparo é da autora. M não executou novamente a prova, o teste de desempenho, TypeScript ou suíte ligada neste retorno.
+
+### Reparo e alcance causal
+
+Li a diferença inteira da página A4→B92. Em `app/studio/page.tsx:845–849`, os três leitores `removing`, `mayAdd` e `liveStep` continuam começando juntos, porém `passkeysLeft` chama `listPasskeys` somente depois de `Promise.all([removing, mayAdd, liveStep])`. A lista usada em `firstReads.person` é agora esse resultado (`:863–865`). Assim, quando a leitura de remoção própria falha mas um dos gates aplica a remoção, a lista espera também esse gate. O efeito é coerente com o cenário condicional anterior: estado guardado vazio e lista enviada à interface vazia. A comparação A4→B92 contém também 34 linhas adicionadas em `tests/studio-today-removal-order.test.ts`; não reli esse arquivo completo neste retorno e não alego revisão integral desse delta auxiliar. O delta solicitado B92→DA foi conferido integralmente, como descrito abaixo.
+
+A nova execução causal de 14 verificações ocorreu **pelo coordenador ROOT em B92, depois do relatório anterior**, com a MESMA prova de blob `ff41419e69de52ca9b76f3d8d01af1f37d7f9eff` e runner histórico `20015a168e6ac65378bea692e6dd3c1f40eb70d2`. Atestação de ROOT: **14/14**; comandos sintéticos dos três cenários `451/492/486`, quatro e-mails sintéticos no conjunto; terceiro cenário `faulted: true`, backend `[]` e UI `[]`. Não são chamadas a fornecedor ou envios reais. Os logs brutos e a configuração originais foram perdidos na reinicialização do ambiente; estes números são uma atestação histórica do coordenador registrada no checkpoint 997076/canal do retorno, não arquivos de log hoje preservados nem nova medição por M.
+
+ROOT também atesta strict focal de cinco raízes com zero diagnóstico em B92, antes da reinicialização. A lista exata e a configuração não foram recuperadas: página, dois testes da autora e prova própria constam do registro, mas **não invento a quinta raiz**. Esse registro não substitui uma configuração reproduzível disponível nem certifica strict novo em DA.
+
+### Diferença inteira B92→DA e identidade
+
+A API tipada de comparação retornou merge-base=B92, ahead1, behind0 e exatamente um arquivo: `tests/studio-today-trips.test.ts`, duas adições/três remoções. Li os dois conteúdos completos e confirmei que todas as diferenças se limitam a:
+
+- comentário que explica o tempo impresso, sem asserção de duração;
+- remoção de `const MAX_MS = 1050;`;
+- remoção de `is(... ms <= MAX_MS ...)`.
+
+Não há outra mudança de conteúdo no teste. Em DA permanecem `DELAY_MS = 40`, `MAX_STEPS = 20` e `MAX_TRIPS = 65` (`tests/studio-today-trips.test.ts:29–31`), o aquecimento prévio (`:42–44`), o wrapper que contabiliza cada chamada à pipeline e cada passagem de zero para uma chamada em andamento (`:46–60`), a chamada da página real (`:63–65`), a restauração da pipeline e do contexto em `finally` (`:69–72`) e a impressão de `trips/steps/ms` (`:73–74`). As três asserções restantes são efetivas: carregamento da página, `steps <= 20` e `trips <= 65` (`:77–79`). Nenhum limite de etapas ou idas foi aumentado. Não se tornou teste vazio. A contagem por operações e sobreposição continua distinta do relógio de duração; timers e escalonamento continuam parte do ambiente, sem promessa universal de latência ou TTFB.
+
+| Arquivo | Blob B92 | Blob DA | Verificação neste retorno |
+| --- | --- | --- | --- |
+| `app/studio/page.tsx` | `074da3a9d45c6a2eadbd868374beea6454994d79` | `074da3a9d45c6a2eadbd868374beea6454994d79` | Conteúdos completos iguais; identidade de bytes conferida |
+| `tests/studio-today-trips.test.ts` | `3e094905636250043f8d4d1c3c2faa712b288387` | `5611be7711cd1248bdb0ae8c7c821471b54f7218` | Delta integral acima; quatro asserções passam a três |
+
+Como a comparação contém apenas esse teste, nenhum arquivo de produto ou transitivo muda entre B92 e DA. A transferência do resultado causal 14/14 é explícita por identidade, **não nova execução em DA**. O resultado do teste de desempenho original de quatro verificações não é transportado como um novo 3/3.
+
+### Duração: falha histórica nos dois lados, sem ocultação
+
+ROOT atesta as seguintes execuções únicas, anteriores à retirada da asserção de relógio:
+
+| Página e teste usados | Resultado | Idas | Etapas | Duração impressa | Falha |
+| --- | --- | --- | --- | --- | --- |
+| Página B92, teste de desempenho B92 | 3/4 | 65 | 19 | 1141ms | duração acima de 1050ms |
+| Somente página substituída por A4, MESMO teste B92 | 3/4 | 65 | 18 | 1072ms | duração acima de 1050ms |
+
+A falha do relógio ocorreu em ambos os lados. Não se atribui exclusivamente ao host nem se prova aqui uma causa única. Em DA a autora retirou essa condição e conservou as cotas de operações. Isso deixa de garantir o teto de 1050ms pelo teste, e não torna os resultados históricos 3/4 verdes retroativamente. A alegação focal é o fechamento da inconsistência da lista; não é um certificado de desempenho real.
+
+### Proveniência e limites do retorno
+
+Foram realizadas oito leituras tipadas, dentro do teto admitido de oito/2MiB: duas comparações, página B92/DA/A4, teste de desempenho B92/DA e relatório histórico. O relatório histórico de `1139c72a85139e688c0add80cc6650fbce897dab`, blob `e90abd3dcd0a3d69eae5871fda53a4c56a1a3d89`, foi mantido como prefixo integral. Nenhum runner ou teste histórico foi alterado. Não houve nova execução de runtime, strict, suíte completa, navegador, Redis nativo, CI ou produção; nenhuma mutação de fonte/ref da autora nem chamada a provedor.
+
+Este retorno pode fechar o LOW formal 5806799980 no head DA dentro do alcance causal descrito. Não é aprovação dos nove checks, aprovação formal de merge ou confirmação de CI global.

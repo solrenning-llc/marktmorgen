@@ -54,11 +54,16 @@ type Row = Record<string, unknown>;
 const REFUND_STATES = ["succeeded", "failed", "canceled", "pending", "requires_action"];
 /**
  * A charge's refunds, read whole: the page in its exact shape (lib/stripe-list.ts), to its end, every row readable
- * with a state Stripe gives. Anything else throws, and no refund is made on it: "none pending" is a "no", which only a
+ * with a refund's id and a state Stripe gives. Anything else throws, and no refund is made on it: "none pending" is a "no", which only a
  * whole, readable list may say.
  */
 function wholeRefunds(page: unknown): Row[] {
-  const read = readStripePage(page, (row) => typeof ownField(row, "status") === "string" && REFUND_STATES.includes(ownField(row, "status") as string));
+  // A row is a refund only with a refund's own id (Codex CX1 on #2759): another id is not readable, so nothing is made.
+  const read = readStripePage(
+    page,
+    (row) => typeof ownField(row, "status") === "string" && REFUND_STATES.includes(ownField(row, "status") as string),
+    REFUND_ID,
+  );
   if (read.hasMore || read.unreadable) throw new StripeListUnreadable(read.hasMore ? "more refunds than one page" : "a refund not readable");
   return read.rows;
 }

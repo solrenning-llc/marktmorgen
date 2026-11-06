@@ -131,6 +131,13 @@ async function planRefunds(): Promise<void> {
     const result = await refundPlanPayment(store, NOW);
     is(`refunds answered ${label}: nothing made`, [result.ok, made.length], [false, 0]);
   }
+  // Codex CX1 on #2759: a row is a refund only with a refund's own id; any other id is not readable, so no refund.
+  for (const [label, id] of [["a subscription's id", "sub_CX1Wrong0001"], ["underscores only", "___"]]) {
+    made.length = 0;
+    const store = await shopWith({ object: "list", data: [{ id, object: "refund", status: "failed", amount: 6_900 }], has_more: false });
+    const result = await refundPlanPayment(store, NOW);
+    is(`a refund row with ${label} for id: not readable, nothing made`, [result.ok, made.length], [false, 0]);
+  }
   made.length = 0;
   const fine = await shopWith({ object: "list", data: [], has_more: false });
   const fineResult = await refundPlanPayment(fine, NOW);
@@ -249,6 +256,11 @@ async function memberships(): Promise<void> {
   is("a row not readable and none of ours readable: not known", await runningSubscriptions(store), null);
   page = { object: "list", data: ["sub_garbled", { id: "sub_LotOneMine1", metadata: { store: "lotonemembers" } }], has_more: false };
   is("one of ours readable beside a row not readable: at least that one (a yes stands)", ((await runningSubscriptions(store)) ?? 0) >= 1, true);
+  // Codex CX1 on #2759: whose a subscription is cannot be read from a store that is not text, so it is never "none".
+  for (const [label, soldBy] of [["false", false], ["7", 7], ["an object", { handle: "lotonemembers" }]] as [string, unknown][]) {
+    page = { object: "list", data: [{ id: "sub_LotOneOdd01", metadata: { store: soldBy } }], has_more: false };
+    is(`a row whose store is ${label}: not known`, await runningSubscriptions(store), null);
+  }
   page = { object: "list", data: [{ id: "sub_LotOneElse1", metadata: { store: "elsewhere" } }], has_more: false };
   is("read whole and readable, none ours: none", await runningSubscriptions(store), 0);
   is("each read pinned to the lot's version", sent.filter((s) => s.path === "/subscriptions").every((s) => s.version === STRIPE_LIST_VERSION), true);

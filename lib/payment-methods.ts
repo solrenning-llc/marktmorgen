@@ -247,6 +247,8 @@ export async function chargeableCurrencies(store: Store): Promise<Currency[] | n
 const RUNNING = ["active", "trialing", "past_due"] as const;
 /** Pages of a hundred read for each status before giving up on knowing. */
 const RUNNING_PAGES = 10;
+/** A subscription's own id: a row with another id is not readable, never one of this store's nor another's. */
+const SUBSCRIPTION_ID = /^sub_[A-Za-z0-9]{6,128}$/;
 
 /**
  * How many memberships and payment plans of this store are still running on
@@ -274,7 +276,15 @@ export async function runningSubscriptions(store: Store): Promise<number | null>
             undefined,
             STRIPE_LIST_VERSION,
           ),
-          (row) => plainObject(ownField(row, "metadata")),
+          // Whose it is is read from metadata.store: absent is a readable "not this store's"; any store that is not
+          // text is not readable (Codex CX1 on #2759), so the count is never "none" on it.
+          (row) => {
+            const meta = ownField(row, "metadata");
+            if (!plainObject(meta)) return false;
+            const soldBy = ownField(meta, "store");
+            return soldBy === undefined || typeof soldBy === "string";
+          },
+          SUBSCRIPTION_ID,
         );
         unreadable += read.unreadable;
         for (const row of read.rows) {

@@ -1,0 +1,1139 @@
+
+===== g2036-51a-invite-inner-final-head.log =====
+  FAIL  null-member: malformed team is unknown
+        expected "unknown"
+        got      "accepted"
+  FAIL  null-member: unknown gate refuses
+        expected "refused"
+        got      "let-in"
+  FAIL  null-member: owner change refuses before rewriting
+        expected "refused"
+        got      "{\"ok\":false,\"reason\":\"unsent\"}"
+  FAIL  null-member: stored healthy team remains byte-identical
+        expected "{\"members\":[{\"email\":\"g-team-shape-amy@example.test\",\"role\":\"admin\",\"joinedAt\":\"2026-11-06T21:43:19.420Z\"},{\"email\":\"g-team-shape-ben@example.test\",\"role\":\"support\",\"joinedAt\":\"2026-11-06T21:43:19.421Z\"}],\"invites\":[],\"requireTwoStep\":true}"
+        got      "{\"members\":[],\"invites\":[{\"id\":\"1caafc844a67d573\",\"email\":\"g-team-shape-new@example.test\",\"role\":\"support\",\"createdAt\":\"2026-11-06T21:43:19.422Z\",\"expiresAt\":1794606199}]}"
+  FAIL  null-member: known original members remain
+        expected ["g-team-shape-amy@example.test","g-team-shape-ben@example.test"]
+        got      []
+  FAIL  null-member: no second-step flag is lost
+        expected true
+        got      undefined
+G_TEAM_INNER {"label":"null-member","faults":5,"commandsSeen":17,"reading":"accepted","gate":"let-in","result":"{\"ok\":false,\"reason\":\"unsent\"}","original":{"members":[{"email":"g-team-shape-amy@example.test","role":"admin","joinedAt":"2026-11-06T21:43:19.420Z"},{"email":"g-team-shape-ben@example.test","role":"support","joinedAt":"2026-11-06T21:43:19.421Z"}],"invites":[],"requireTwoStep":true},"stored":{"members":[],"invites":[{"id":"1caafc844a67d573","email":"g-team-shape-new@example.test","role":"support","createdAt":"2026-11-06T21:43:19.422Z","expiresAt":1794606199}]}}
+  FAIL  null-invite: malformed team is unknown
+        expected "unknown"
+        got      "accepted"
+  FAIL  null-invite: unknown gate refuses
+        expected "refused"
+        got      "let-in"
+  FAIL  null-invite: owner change refuses before rewriting
+        expected "refused"
+        got      "{\"ok\":false,\"reason\":\"unsent\"}"
+  FAIL  null-invite: stored healthy team remains byte-identical
+        expected "{\"members\":[{\"email\":\"g-team-shape-amy@example.test\",\"role\":\"admin\",\"joinedAt\":\"2026-11-06T21:43:19.428Z\"},{\"email\":\"g-team-shape-ben@example.test\",\"role\":\"support\",\"joinedAt\":\"2026-11-06T21:43:19.428Z\"}],\"invites\":[],\"requireTwoStep\":true}"
+        got      "{\"members\":[],\"invites\":[{\"id\":\"983569bf809a2057\",\"email\":\"g-team-shape-new@example.test\",\"role\":\"support\",\"createdAt\":\"2026-11-06T21:43:19.429Z\",\"expiresAt\":1794606199}]}"
+  FAIL  null-invite: known original members remain
+        expected ["g-team-shape-amy@example.test","g-team-shape-ben@example.test"]
+        got      []
+  FAIL  null-invite: no second-step flag is lost
+        expected true
+        got      undefined
+G_TEAM_INNER {"label":"null-invite","faults":5,"commandsSeen":17,"reading":"accepted","gate":"let-in","result":"{\"ok\":false,\"reason\":\"unsent\"}","original":{"members":[{"email":"g-team-shape-amy@example.test","role":"admin","joinedAt":"2026-11-06T21:43:19.428Z"},{"email":"g-team-shape-ben@example.test","role":"support","joinedAt":"2026-11-06T21:43:19.428Z"}],"invites":[],"requireTwoStep":true},"stored":{"members":[],"invites":[{"id":"983569bf809a2057","email":"g-team-shape-new@example.test","role":"support","createdAt":"2026-11-06T21:43:19.429Z","expiresAt":1794606199}]}}
+  ok    healthy refusal is the explicit mail refusal
+  ok    healthy original members intact
+  ok    healthy rule preserved
+  ok    no provider calls
+
+16 checks, 12 failing.
+
+
+===== g2036-51a-invite-inner-final-old.log =====
+  FAIL  null-member: malformed team is unknown
+        expected "unknown"
+        got      "accepted"
+  FAIL  null-member: unknown gate refuses
+        expected "refused"
+        got      "let-in"
+  FAIL  null-member: owner change refuses before rewriting
+        expected "refused"
+        got      "{\"ok\":false,\"reason\":\"unsent\"}"
+  FAIL  null-member: stored healthy team remains byte-identical
+        expected "{\"members\":[{\"email\":\"g-team-shape-amy@example.test\",\"role\":\"admin\",\"joinedAt\":\"2026-11-06T21:43:26.605Z\"},{\"email\":\"g-team-shape-ben@example.test\",\"role\":\"support\",\"joinedAt\":\"2026-11-06T21:43:26.605Z\"}],\"invites\":[],\"requireTwoStep\":true}"
+        got      "{\"members\":[],\"invites\":[{\"id\":\"9164b1eeca3a7a39\",\"email\":\"g-team-shape-new@example.test\",\"role\":\"support\",\"createdAt\":\"2026-11-06T21:43:26.607Z\",\"expiresAt\":1794606206}]}"
+  FAIL  null-member: known original members remain
+        expected ["g-team-shape-amy@example.test","g-team-shape-ben@example.test"]
+        got      []
+  FAIL  null-member: no second-step flag is lost
+        expected true
+        got      undefined
+G_TEAM_INNER {"label":"null-member","faults":5,"commandsSeen":17,"reading":"accepted","gate":"let-in","result":"{\"ok\":false,\"reason\":\"unsent\"}","original":{"members":[{"email":"g-team-shape-amy@example.test","role":"admin","joinedAt":"2026-11-06T21:43:26.605Z"},{"email":"g-team-shape-ben@example.test","role":"support","joinedAt":"2026-11-06T21:43:26.605Z"}],"invites":[],"requireTwoStep":true},"stored":{"members":[],"invites":[{"id":"9164b1eeca3a7a39","email":"g-team-shape-new@example.test","role":"support","createdAt":"2026-11-06T21:43:26.607Z","expiresAt":1794606206}]}}
+  FAIL  null-invite: malformed team is unknown
+        expected "unknown"
+        got      "accepted"
+  FAIL  null-invite: unknown gate refuses
+        expected "refused"
+        got      "let-in"
+  FAIL  null-invite: owner change refuses before rewriting
+        expected "refused"
+        got      "{\"ok\":false,\"reason\":\"unsent\"}"
+  FAIL  null-invite: stored healthy team remains byte-identical
+        expected "{\"members\":[{\"email\":\"g-team-shape-amy@example.test\",\"role\":\"admin\",\"joinedAt\":\"2026-11-06T21:43:26.611Z\"},{\"email\":\"g-team-shape-ben@example.test\",\"role\":\"support\",\"joinedAt\":\"2026-11-06T21:43:26.611Z\"}],\"invites\":[],\"requireTwoStep\":true}"
+        got      "{\"members\":[],\"invites\":[{\"id\":\"e7acade4da369145\",\"email\":\"g-team-shape-new@example.test\",\"role\":\"support\",\"createdAt\":\"2026-11-06T21:43:26.612Z\",\"expiresAt\":1794606206}]}"
+  FAIL  null-invite: known original members remain
+        expected ["g-team-shape-amy@example.test","g-team-shape-ben@example.test"]
+        got      []
+  FAIL  null-invite: no second-step flag is lost
+        expected true
+        got      undefined
+G_TEAM_INNER {"label":"null-invite","faults":5,"commandsSeen":17,"reading":"accepted","gate":"let-in","result":"{\"ok\":false,\"reason\":\"unsent\"}","original":{"members":[{"email":"g-team-shape-amy@example.test","role":"admin","joinedAt":"2026-11-06T21:43:26.611Z"},{"email":"g-team-shape-ben@example.test","role":"support","joinedAt":"2026-11-06T21:43:26.611Z"}],"invites":[],"requireTwoStep":true},"stored":{"members":[],"invites":[{"id":"e7acade4da369145","email":"g-team-shape-new@example.test","role":"support","createdAt":"2026-11-06T21:43:26.612Z","expiresAt":1794606206}]}}
+  ok    healthy refusal is the explicit mail refusal
+  ok    healthy original members intact
+  ok    healthy rule preserved
+  ok    no provider calls
+
+16 checks, 12 failing.
+
+
+===== g2036-51a-author-red.log =====
+
+a reply with nothing in it
+  FAIL  a reply with nothing in it: the team is not read as empty
+        expected "unknown"
+        got      "read"
+  FAIL  a reply with nothing in it: a teammate is not let past the two-step rule
+        expected "refused"
+        got      "let in"
+  FAIL  a reply with nothing in it: an invitation is refused
+        expected "refused"
+        got      "{\"ok\":false,\"reason\":\"unsent\"}"
+  FAIL  a reply with nothing in it: a removal is refused
+        expected "refused"
+        got      "not"
+  FAIL  a reply with nothing in it: the team is kept whole, with its rule
+        expected "{\"members\":[{\"email\":\"amy-admin@example.com\",\"role\":\"admin\",\"joinedAt\":\"2026-11-06T21:42:30.460Z\"},{\"email\":\"ben-support@example.com\",\"role\":\"support\",\"joinedAt\":\"2026-11-06T21:42:30.461Z\"}],\"invites\":[],\"requireTwoStep\":true}"
+        got      "{\"members\":[],\"invites\":[{\"id\":\"5b299cc2879c50a6\",\"email\":\"new-0@example.com\",\"role\":\"support\",\"createdAt\":\"2026-11-06T21:42:30.463Z\",\"expiresAt\":1794606150}]}"
+
+a number where the team's text was
+  FAIL  a number where the team's text was: the team is not read as empty
+        expected "unknown"
+        got      "read"
+  FAIL  a number where the team's text was: a teammate is not let past the two-step rule
+        expected "refused"
+        got      "let in"
+  FAIL  a number where the team's text was: an invitation is refused
+        expected "refused"
+        got      "{\"ok\":false,\"reason\":\"unsent\"}"
+  FAIL  a number where the team's text was: a removal is refused
+        expected "refused"
+        got      "not"
+  FAIL  a number where the team's text was: the team is kept whole, with its rule
+        expected "{\"members\":[{\"email\":\"amy-admin@example.com\",\"role\":\"admin\",\"joinedAt\":\"2026-11-06T21:42:30.460Z\"},{\"email\":\"ben-support@example.com\",\"role\":\"support\",\"joinedAt\":\"2026-11-06T21:42:30.461Z\"}],\"invites\":[],\"requireTwoStep\":true}"
+        got      "{\"members\":[],\"invites\":[{\"id\":\"a760d3a0f6f2b644\",\"email\":\"new-1@example.com\",\"role\":\"support\",\"createdAt\":\"2026-11-06T21:42:30.465Z\",\"expiresAt\":1794606150}]}"
+
+text that is not JSON
+  FAIL  text that is not JSON: the team is not read as empty
+        expected "unknown"
+        got      "read"
+  FAIL  text that is not JSON: a teammate is not let past the two-step rule
+        expected "refused"
+        got      "let in"
+  FAIL  text that is not JSON: an invitation is refused
+        expected "refused"
+        got      "{\"ok\":false,\"reason\":\"unsent\"}"
+  FAIL  text that is not JSON: a removal is refused
+        expected "refused"
+        got      "not"
+  FAIL  text that is not JSON: the team is kept whole, with its rule
+        expected "{\"members\":[{\"email\":\"amy-admin@example.com\",\"role\":\"admin\",\"joinedAt\":\"2026-11-06T21:42:30.460Z\"},{\"email\":\"ben-support@example.com\",\"role\":\"support\",\"joinedAt\":\"2026-11-06T21:42:30.461Z\"}],\"invites\":[],\"requireTwoStep\":true}"
+        got      "{\"members\":[],\"invites\":[{\"id\":\"59dcf916b37dce5c\",\"email\":\"new-2@example.com\",\"role\":\"support\",\"createdAt\":\"2026-11-06T21:42:30.466Z\",\"expiresAt\":1794606150}]}"
+
+JSON that is not an object
+  FAIL  JSON that is not an object: the team is not read as empty
+        expected "unknown"
+        got      "read"
+  FAIL  JSON that is not an object: a teammate is not let past the two-step rule
+        expected "refused"
+        got      "let in"
+  FAIL  JSON that is not an object: an invitation is refused
+        expected "refused"
+        got      "{\"ok\":false,\"reason\":\"unsent\"}"
+  FAIL  JSON that is not an object: a removal is refused
+        expected "refused"
+        got      "not"
+  FAIL  JSON that is not an object: the team is kept whole, with its rule
+        expected "{\"members\":[{\"email\":\"amy-admin@example.com\",\"role\":\"admin\",\"joinedAt\":\"2026-11-06T21:42:30.460Z\"},{\"email\":\"ben-support@example.com\",\"role\":\"support\",\"joinedAt\":\"2026-11-06T21:42:30.461Z\"}],\"invites\":[],\"requireTwoStep\":true}"
+        got      "{\"members\":[],\"invites\":[{\"id\":\"a9c2dc891f5e1b9b\",\"email\":\"new-3@example.com\",\"role\":\"support\",\"createdAt\":\"2026-11-06T21:42:30.467Z\",\"expiresAt\":1794606150}]}"
+
+members that are not a list
+  FAIL  members that are not a list: the team is not read as empty
+        expected "unknown"
+        got      "read"
+  FAIL  members that are not a list: a teammate is not let past the two-step rule
+        expected "refused"
+        got      "let in"
+  FAIL  members that are not a list: an invitation is refused
+        expected "refused"
+        got      "{\"ok\":false,\"reason\":\"unsent\"}"
+  FAIL  members that are not a list: a removal is refused
+        expected "refused"
+        got      "not"
+  FAIL  members that are not a list: the team is kept whole, with its rule
+        expected "{\"members\":[{\"email\":\"amy-admin@example.com\",\"role\":\"admin\",\"joinedAt\":\"2026-11-06T21:42:30.460Z\"},{\"email\":\"ben-support@example.com\",\"role\":\"support\",\"joinedAt\":\"2026-11-06T21:42:30.461Z\"}],\"invites\":[],\"requireTwoStep\":true}"
+        got      "{\"members\":[],\"invites\":[{\"id\":\"a85fdda5d9006376\",\"email\":\"new-4@example.com\",\"role\":\"support\",\"createdAt\":\"2026-11-06T21:42:30.468Z\",\"expiresAt\":1794606150}]}"
+
+invites that are not a list
+  FAIL  invites that are not a list: the team is not read as empty
+        expected "unknown"
+        got      "read"
+  FAIL  invites that are not a list: a teammate is not let past the two-step rule
+        expected "refused"
+        got      "let in"
+  FAIL  invites that are not a list: an invitation is refused
+        expected "refused"
+        got      "{\"ok\":false,\"reason\":\"unsent\"}"
+  FAIL  invites that are not a list: a removal is refused
+        expected "refused"
+        got      "not"
+  FAIL  invites that are not a list: the team is kept whole, with its rule
+        expected "{\"members\":[{\"email\":\"amy-admin@example.com\",\"role\":\"admin\",\"joinedAt\":\"2026-11-06T21:42:30.460Z\"},{\"email\":\"ben-support@example.com\",\"role\":\"support\",\"joinedAt\":\"2026-11-06T21:42:30.461Z\"}],\"invites\":[],\"requireTwoStep\":true}"
+        got      "{\"members\":[],\"invites\":[{\"id\":\"1febf9e58f9f6213\",\"email\":\"new-5@example.com\",\"role\":\"support\",\"createdAt\":\"2026-11-06T21:42:30.469Z\",\"expiresAt\":1794606150}]}"
+
+a two-step rule that is not true or false
+  FAIL  a two-step rule that is not true or false: the team is not read as empty
+        expected "unknown"
+        got      "read"
+  FAIL  a two-step rule that is not true or false: a teammate is not let past the two-step rule
+        expected "refused"
+        got      "let in"
+  FAIL  a two-step rule that is not true or false: an invitation is refused
+        expected "refused"
+        got      "{\"ok\":false,\"reason\":\"unsent\"}"
+  FAIL  a two-step rule that is not true or false: a removal is refused
+        expected "refused"
+        got      "not"
+  FAIL  a two-step rule that is not true or false: the team is kept whole, with its rule
+        expected "{\"members\":[{\"email\":\"amy-admin@example.com\",\"role\":\"admin\",\"joinedAt\":\"2026-11-06T21:42:30.460Z\"},{\"email\":\"ben-support@example.com\",\"role\":\"support\",\"joinedAt\":\"2026-11-06T21:42:30.461Z\"}],\"invites\":[],\"requireTwoStep\":true}"
+        got      "{\"members\":[],\"invites\":[{\"id\":\"65c2832053896c9d\",\"email\":\"new-6@example.com\",\"role\":\"support\",\"createdAt\":\"2026-11-06T21:42:30.470Z\",\"expiresAt\":1794606150}]}"
+
+No team record at all
+  ok    a store with no team reads as an empty team
+  ok    and its teammates are not held by a rule it does not have
+
+37 checks, 35 failing.
+
+
+===== g2036-51a-team-read-unknown.test.log =====
+
+a reply with nothing in it
+  ok    a reply with nothing in it: the team is not read as empty
+  ok    a reply with nothing in it: a teammate is not let past the two-step rule
+  ok    a reply with nothing in it: an invitation is refused
+  ok    a reply with nothing in it: a removal is refused
+  ok    a reply with nothing in it: the team is kept whole, with its rule
+
+a number where the team's text was
+  ok    a number where the team's text was: the team is not read as empty
+  ok    a number where the team's text was: a teammate is not let past the two-step rule
+  ok    a number where the team's text was: an invitation is refused
+  ok    a number where the team's text was: a removal is refused
+  ok    a number where the team's text was: the team is kept whole, with its rule
+
+text that is not JSON
+  ok    text that is not JSON: the team is not read as empty
+  ok    text that is not JSON: a teammate is not let past the two-step rule
+  ok    text that is not JSON: an invitation is refused
+  ok    text that is not JSON: a removal is refused
+  ok    text that is not JSON: the team is kept whole, with its rule
+
+JSON that is not an object
+  ok    JSON that is not an object: the team is not read as empty
+  ok    JSON that is not an object: a teammate is not let past the two-step rule
+  ok    JSON that is not an object: an invitation is refused
+  ok    JSON that is not an object: a removal is refused
+  ok    JSON that is not an object: the team is kept whole, with its rule
+
+members that are not a list
+  ok    members that are not a list: the team is not read as empty
+  ok    members that are not a list: a teammate is not let past the two-step rule
+  ok    members that are not a list: an invitation is refused
+  ok    members that are not a list: a removal is refused
+  ok    members that are not a list: the team is kept whole, with its rule
+
+invites that are not a list
+  ok    invites that are not a list: the team is not read as empty
+  ok    invites that are not a list: a teammate is not let past the two-step rule
+  ok    invites that are not a list: an invitation is refused
+  ok    invites that are not a list: a removal is refused
+  ok    invites that are not a list: the team is kept whole, with its rule
+
+a two-step rule that is not true or false
+  ok    a two-step rule that is not true or false: the team is not read as empty
+  ok    a two-step rule that is not true or false: a teammate is not let past the two-step rule
+  ok    a two-step rule that is not true or false: an invitation is refused
+  ok    a two-step rule that is not true or false: a removal is refused
+  ok    a two-step rule that is not true or false: the team is kept whole, with its rule
+
+No team record at all
+  ok    a store with no team reads as an empty team
+  ok    and its teammates are not held by a rule it does not have
+
+37 checks, all passing.
+
+
+===== g2036-51a-g2036-copy-recovery-matrix.proof.log =====
+  ok    new destination/applied-empty: the actual copy boundary was faulted
+  ok    new destination/applied-empty: the old member remains the only member
+  ok    new destination/applied-empty: source record stays exact
+  ok    new destination/applied-empty: destination is restored byte for byte
+  ok    new destination/applied-empty: confirmed restoration restores exactly the prior room
+G_COPY_MATRIX {"label":"new destination","mode":"applied-empty","faults":1,"target":null,"before":null,"roomBefore":"176","afterRoom":"176","getterCalls":0}
+  ok    new destination/unapplied-empty: the actual copy boundary was faulted
+  ok    new destination/unapplied-empty: the old member remains the only member
+  ok    new destination/unapplied-empty: source record stays exact
+  ok    new destination/unapplied-empty: destination is restored byte for byte
+  ok    new destination/unapplied-empty: confirmed restoration restores exactly the prior room
+G_COPY_MATRIX {"label":"new destination","mode":"unapplied-empty","faults":1,"target":null,"before":null,"roomBefore":"176","afterRoom":"176","getterCalls":0}
+  ok    new destination/applied-throw: the actual copy boundary was faulted
+  ok    new destination/applied-throw: the old member remains the only member
+  ok    new destination/applied-throw: source record stays exact
+  ok    new destination/applied-throw: destination is restored byte for byte
+  ok    new destination/applied-throw: confirmed restoration restores exactly the prior room
+G_COPY_MATRIX {"label":"new destination","mode":"applied-throw","faults":1,"target":null,"before":null,"roomBefore":"176","afterRoom":"176","getterCalls":0}
+  ok    new destination/unapplied-throw: the actual copy boundary was faulted
+  ok    new destination/unapplied-throw: the old member remains the only member
+  ok    new destination/unapplied-throw: source record stays exact
+  ok    new destination/unapplied-throw: destination is restored byte for byte
+  ok    new destination/unapplied-throw: confirmed restoration restores exactly the prior room
+G_COPY_MATRIX {"label":"new destination","mode":"unapplied-throw","faults":1,"target":null,"before":null,"roomBefore":"176","afterRoom":"176","getterCalls":0}
+  ok    new destination/applied-getter: the actual copy boundary was faulted
+  ok    new destination/applied-getter: the old member remains the only member
+  ok    new destination/applied-getter: source record stays exact
+  FAIL  new destination/applied-getter: destination is restored byte for byte
+        expected null
+        got      "{\"sales0\":\"none\"}"
+  FAIL  new destination/applied-getter: confirmed restoration restores exactly the prior room
+        expected "176"
+        got      "352"
+  FAIL  new destination/applied-getter: receipt validation does not run an accessor
+        expected 0
+        got      1
+G_COPY_MATRIX {"label":"new destination","mode":"applied-getter","faults":1,"target":"{\"sales0\":\"none\"}","before":null,"roomBefore":"176","afterRoom":"352","getterCalls":1}
+  ok    larger prior destination/applied-empty: the actual copy boundary was faulted
+  ok    larger prior destination/applied-empty: the old member remains the only member
+  ok    larger prior destination/applied-empty: source record stays exact
+  ok    larger prior destination/applied-empty: destination is restored byte for byte
+  ok    larger prior destination/applied-empty: confirmed restoration restores exactly the prior room
+G_COPY_MATRIX {"label":"larger prior destination","mode":"applied-empty","faults":1,"target":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","before":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","roomBefore":"368","afterRoom":"368","getterCalls":0}
+  ok    larger prior destination/unapplied-empty: the actual copy boundary was faulted
+  ok    larger prior destination/unapplied-empty: the old member remains the only member
+  ok    larger prior destination/unapplied-empty: source record stays exact
+  ok    larger prior destination/unapplied-empty: destination is restored byte for byte
+  ok    larger prior destination/unapplied-empty: confirmed restoration restores exactly the prior room
+G_COPY_MATRIX {"label":"larger prior destination","mode":"unapplied-empty","faults":1,"target":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","before":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","roomBefore":"368","afterRoom":"368","getterCalls":0}
+  ok    larger prior destination/applied-throw: the actual copy boundary was faulted
+  ok    larger prior destination/applied-throw: the old member remains the only member
+  ok    larger prior destination/applied-throw: source record stays exact
+  ok    larger prior destination/applied-throw: destination is restored byte for byte
+  ok    larger prior destination/applied-throw: confirmed restoration restores exactly the prior room
+G_COPY_MATRIX {"label":"larger prior destination","mode":"applied-throw","faults":1,"target":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","before":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","roomBefore":"368","afterRoom":"368","getterCalls":0}
+  ok    larger prior destination/unapplied-throw: the actual copy boundary was faulted
+  ok    larger prior destination/unapplied-throw: the old member remains the only member
+  ok    larger prior destination/unapplied-throw: source record stays exact
+  ok    larger prior destination/unapplied-throw: destination is restored byte for byte
+  ok    larger prior destination/unapplied-throw: confirmed restoration restores exactly the prior room
+G_COPY_MATRIX {"label":"larger prior destination","mode":"unapplied-throw","faults":1,"target":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","before":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","roomBefore":"368","afterRoom":"368","getterCalls":0}
+  ok    larger prior destination/applied-getter: the actual copy boundary was faulted
+  ok    larger prior destination/applied-getter: the old member remains the only member
+  ok    larger prior destination/applied-getter: source record stays exact
+  FAIL  larger prior destination/applied-getter: destination is restored byte for byte
+        expected "{\"sales0\":\"none\",\"wkshp1\":\"view\"}"
+        got      "{\"sales0\":\"none\"}"
+  ok    larger prior destination/applied-getter: confirmed restoration restores exactly the prior room
+  FAIL  larger prior destination/applied-getter: receipt validation does not run an accessor
+        expected 0
+        got      1
+G_COPY_MATRIX {"label":"larger prior destination","mode":"applied-getter","faults":1,"target":"{\"sales0\":\"none\"}","before":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","roomBefore":"368","afterRoom":"368","getterCalls":1}
+  ok    smaller prior destination/applied-empty: the actual copy boundary was faulted
+  ok    smaller prior destination/applied-empty: the old member remains the only member
+  ok    smaller prior destination/applied-empty: source record stays exact
+  ok    smaller prior destination/applied-empty: destination is restored byte for byte
+  ok    smaller prior destination/applied-empty: confirmed restoration restores exactly the prior room
+G_COPY_MATRIX {"label":"smaller prior destination","mode":"applied-empty","faults":1,"target":"{\"sales0\":\"none\"}","before":"{\"sales0\":\"none\"}","roomBefore":"368","afterRoom":"368","getterCalls":0}
+  ok    smaller prior destination/unapplied-empty: the actual copy boundary was faulted
+  ok    smaller prior destination/unapplied-empty: the old member remains the only member
+  ok    smaller prior destination/unapplied-empty: source record stays exact
+  ok    smaller prior destination/unapplied-empty: destination is restored byte for byte
+  ok    smaller prior destination/unapplied-empty: confirmed restoration restores exactly the prior room
+G_COPY_MATRIX {"label":"smaller prior destination","mode":"unapplied-empty","faults":1,"target":"{\"sales0\":\"none\"}","before":"{\"sales0\":\"none\"}","roomBefore":"368","afterRoom":"368","getterCalls":0}
+  ok    smaller prior destination/applied-throw: the actual copy boundary was faulted
+  ok    smaller prior destination/applied-throw: the old member remains the only member
+  ok    smaller prior destination/applied-throw: source record stays exact
+  ok    smaller prior destination/applied-throw: destination is restored byte for byte
+  ok    smaller prior destination/applied-throw: confirmed restoration restores exactly the prior room
+G_COPY_MATRIX {"label":"smaller prior destination","mode":"applied-throw","faults":1,"target":"{\"sales0\":\"none\"}","before":"{\"sales0\":\"none\"}","roomBefore":"368","afterRoom":"368","getterCalls":0}
+  ok    smaller prior destination/unapplied-throw: the actual copy boundary was faulted
+  ok    smaller prior destination/unapplied-throw: the old member remains the only member
+  ok    smaller prior destination/unapplied-throw: source record stays exact
+  ok    smaller prior destination/unapplied-throw: destination is restored byte for byte
+  ok    smaller prior destination/unapplied-throw: confirmed restoration restores exactly the prior room
+G_COPY_MATRIX {"label":"smaller prior destination","mode":"unapplied-throw","faults":1,"target":"{\"sales0\":\"none\"}","before":"{\"sales0\":\"none\"}","roomBefore":"368","afterRoom":"368","getterCalls":0}
+  ok    smaller prior destination/applied-getter: the actual copy boundary was faulted
+  ok    smaller prior destination/applied-getter: the old member remains the only member
+  ok    smaller prior destination/applied-getter: source record stays exact
+  FAIL  smaller prior destination/applied-getter: destination is restored byte for byte
+        expected "{\"sales0\":\"none\"}"
+        got      "{\"sales0\":\"none\",\"wkshp1\":\"view\"}"
+  FAIL  smaller prior destination/applied-getter: confirmed restoration restores exactly the prior room
+        expected "368"
+        got      "384"
+  FAIL  smaller prior destination/applied-getter: receipt validation does not run an accessor
+        expected 0
+        got      1
+G_COPY_MATRIX {"label":"smaller prior destination","mode":"applied-getter","faults":1,"target":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","before":"{\"sales0\":\"none\"}","roomBefore":"368","afterRoom":"384","getterCalls":1}
+  ok    unrestricted source clears prior/applied-empty: the actual copy boundary was faulted
+  ok    unrestricted source clears prior/applied-empty: the old member remains the only member
+  ok    unrestricted source clears prior/applied-empty: source record stays exact
+  ok    unrestricted source clears prior/applied-empty: destination is restored byte for byte
+  ok    unrestricted source clears prior/applied-empty: confirmed restoration restores exactly the prior room
+G_COPY_MATRIX {"label":"unrestricted source clears prior","mode":"applied-empty","faults":1,"target":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","before":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","roomBefore":"192","afterRoom":"192","getterCalls":0}
+  ok    unrestricted source clears prior/unapplied-empty: the actual copy boundary was faulted
+  ok    unrestricted source clears prior/unapplied-empty: the old member remains the only member
+  ok    unrestricted source clears prior/unapplied-empty: source record stays exact
+  ok    unrestricted source clears prior/unapplied-empty: destination is restored byte for byte
+  ok    unrestricted source clears prior/unapplied-empty: confirmed restoration restores exactly the prior room
+G_COPY_MATRIX {"label":"unrestricted source clears prior","mode":"unapplied-empty","faults":1,"target":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","before":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","roomBefore":"192","afterRoom":"192","getterCalls":0}
+  ok    unrestricted source clears prior/applied-throw: the actual copy boundary was faulted
+  ok    unrestricted source clears prior/applied-throw: the old member remains the only member
+  ok    unrestricted source clears prior/applied-throw: source record stays exact
+  ok    unrestricted source clears prior/applied-throw: destination is restored byte for byte
+  ok    unrestricted source clears prior/applied-throw: confirmed restoration restores exactly the prior room
+G_COPY_MATRIX {"label":"unrestricted source clears prior","mode":"applied-throw","faults":1,"target":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","before":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","roomBefore":"192","afterRoom":"192","getterCalls":0}
+  ok    unrestricted source clears prior/unapplied-throw: the actual copy boundary was faulted
+  ok    unrestricted source clears prior/unapplied-throw: the old member remains the only member
+  ok    unrestricted source clears prior/unapplied-throw: source record stays exact
+  ok    unrestricted source clears prior/unapplied-throw: destination is restored byte for byte
+  ok    unrestricted source clears prior/unapplied-throw: confirmed restoration restores exactly the prior room
+G_COPY_MATRIX {"label":"unrestricted source clears prior","mode":"unapplied-throw","faults":1,"target":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","before":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","roomBefore":"192","afterRoom":"192","getterCalls":0}
+  ok    unrestricted source clears prior/applied-getter: the actual copy boundary was faulted
+  ok    unrestricted source clears prior/applied-getter: the old member remains the only member
+  ok    unrestricted source clears prior/applied-getter: source record stays exact
+  FAIL  unrestricted source clears prior/applied-getter: destination is restored byte for byte
+        expected "{\"sales0\":\"none\",\"wkshp1\":\"view\"}"
+        got      null
+  ok    unrestricted source clears prior/applied-getter: confirmed restoration restores exactly the prior room
+  FAIL  unrestricted source clears prior/applied-getter: receipt validation does not run an accessor
+        expected 0
+        got      1
+G_COPY_MATRIX {"label":"unrestricted source clears prior","mode":"applied-getter","faults":1,"target":null,"before":"{\"sales0\":\"none\",\"wkshp1\":\"view\"}","roomBefore":"192","afterRoom":"192","getterCalls":1}
+  ok    unknown undo/applied-empty: both actual write boundaries were faulted
+  ok    unknown undo/applied-empty: old membership remains
+  ok    unknown undo/applied-empty: source is unchanged
+  ok    unknown undo/applied-empty: actual destination reflects whether undo applied
+  ok    unknown undo/applied-empty: no room refunded on the unconfirmed restoration
+G_COPY_UNKNOWN_UNDO {"mode":"applied-empty","target":null,"chargedRoom":"352","afterRoom":"352","copyFaults":1,"undoFaults":1}
+  ok    unknown undo/unapplied-empty: both actual write boundaries were faulted
+  ok    unknown undo/unapplied-empty: old membership remains
+  ok    unknown undo/unapplied-empty: source is unchanged
+  ok    unknown undo/unapplied-empty: actual destination reflects whether undo applied
+  ok    unknown undo/unapplied-empty: no room refunded on the unconfirmed restoration
+G_COPY_UNKNOWN_UNDO {"mode":"unapplied-empty","target":"{\"sales0\":\"none\"}","chargedRoom":"352","afterRoom":"352","copyFaults":1,"undoFaults":1}
+  ok    unknown undo/applied-throw: both actual write boundaries were faulted
+  ok    unknown undo/applied-throw: old membership remains
+  ok    unknown undo/applied-throw: source is unchanged
+  ok    unknown undo/applied-throw: actual destination reflects whether undo applied
+  ok    unknown undo/applied-throw: no room refunded on the unconfirmed restoration
+G_COPY_UNKNOWN_UNDO {"mode":"applied-throw","target":null,"chargedRoom":"352","afterRoom":"352","copyFaults":1,"undoFaults":1}
+  ok    unknown undo/unapplied-throw: both actual write boundaries were faulted
+  ok    unknown undo/unapplied-throw: old membership remains
+  ok    unknown undo/unapplied-throw: source is unchanged
+  ok    unknown undo/unapplied-throw: actual destination reflects whether undo applied
+  ok    unknown undo/unapplied-throw: no room refunded on the unconfirmed restoration
+G_COPY_UNKNOWN_UNDO {"mode":"unapplied-throw","target":"{\"sales0\":\"none\"}","chargedRoom":"352","afterRoom":"352","copyFaults":1,"undoFaults":1}
+
+124 checks, 10 failing.
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12192:31)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9) {
+  copy: { prior: null, now: '{"sales0":"none"}' },
+  taken: 176
+}
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12192:31)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9) {
+  copy: { prior: null, now: '{"sales0":"none"}' },
+  taken: 176
+}
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12192:31)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9) {
+  copy: { prior: null, now: '{"sales0":"none"}' },
+  taken: 176
+}
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12192:31)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9) {
+  copy: { prior: null, now: '{"sales0":"none"}' },
+  taken: 176
+}
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address Error: G: local accessor receipt cannot be read
+    at Array.get ([stdin]:45861:21)
+    at oneAnswer ([stdin]:12162:62)
+    at copyPipelineAccess ([stdin]:12191:19)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9)
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12192:31)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9) {
+  copy: {
+    prior: '{"sales0":"none","wkshp1":"view"}',
+    now: '{"sales0":"none"}'
+  },
+  taken: 0
+}
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12192:31)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9) {
+  copy: {
+    prior: '{"sales0":"none","wkshp1":"view"}',
+    now: '{"sales0":"none"}'
+  },
+  taken: 0
+}
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12192:31)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9) {
+  copy: {
+    prior: '{"sales0":"none","wkshp1":"view"}',
+    now: '{"sales0":"none"}'
+  },
+  taken: 0
+}
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12192:31)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9) {
+  copy: {
+    prior: '{"sales0":"none","wkshp1":"view"}',
+    now: '{"sales0":"none"}'
+  },
+  taken: 0
+}
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address Error: G: local accessor receipt cannot be read
+    at Array.get ([stdin]:45861:21)
+    at oneAnswer ([stdin]:12162:62)
+    at copyPipelineAccess ([stdin]:12191:19)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9)
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12192:31)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9) {
+  copy: {
+    prior: '{"sales0":"none"}',
+    now: '{"sales0":"none","wkshp1":"view"}'
+  },
+  taken: 16
+}
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12192:31)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9) {
+  copy: {
+    prior: '{"sales0":"none"}',
+    now: '{"sales0":"none","wkshp1":"view"}'
+  },
+  taken: 16
+}
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12192:31)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9) {
+  copy: {
+    prior: '{"sales0":"none"}',
+    now: '{"sales0":"none","wkshp1":"view"}'
+  },
+  taken: 16
+}
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12192:31)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9) {
+  copy: {
+    prior: '{"sales0":"none"}',
+    now: '{"sales0":"none","wkshp1":"view"}'
+  },
+  taken: 16
+}
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address Error: G: local accessor receipt cannot be read
+    at Array.get ([stdin]:45861:21)
+    at oneAnswer ([stdin]:12162:62)
+    at copyPipelineAccess ([stdin]:12191:19)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9)
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12177:33)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9) {
+  copy: { prior: '{"sales0":"none","wkshp1":"view"}', now: null },
+  taken: 0
+}
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12177:33)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9) {
+  copy: { prior: '{"sales0":"none","wkshp1":"view"}', now: null },
+  taken: 0
+}
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12177:33)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9) {
+  copy: { prior: '{"sales0":"none","wkshp1":"view"}', now: null },
+  taken: 0
+}
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12177:33)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9) {
+  copy: { prior: '{"sales0":"none","wkshp1":"view"}', now: null },
+  taken: 0
+}
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address Error: G: local accessor receipt cannot be read
+    at Array.get ([stdin]:45861:21)
+    at oneAnswer ([stdin]:12162:62)
+    at copyPipelineAccess ([stdin]:12176:21)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45871:9)
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12192:31)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45907:7) {
+  copy: { prior: null, now: '{"sales0":"none"}' },
+  taken: 176
+}
+putting back the new address's pipeline access failed Error: putting back the new address's pipeline access could not be confirmed
+    at undoUnconfirmedCopy ([stdin]:12202:27)
+    at async [stdin]:45722:66
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45907:7)
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12192:31)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45907:7) {
+  copy: { prior: null, now: '{"sales0":"none"}' },
+  taken: 176
+}
+putting back the new address's pipeline access failed Error: putting back the new address's pipeline access could not be confirmed
+    at undoUnconfirmedCopy ([stdin]:12202:27)
+    at async [stdin]:45722:66
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45907:7)
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12192:31)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45907:7) {
+  copy: { prior: null, now: '{"sales0":"none"}' },
+  taken: 176
+}
+putting back the new address's pipeline access failed Error: G: second transport failure during undo
+    at store.pipeline ([stdin]:45900:46)
+    at async undoUnconfirmedCopy ([stdin]:12201:25)
+    at async [stdin]:45722:66
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45907:7)
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:12192:31)
+    at async [stdin]:45713:18
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45907:7) {
+  copy: { prior: null, now: '{"sales0":"none"}' },
+  taken: 176
+}
+putting back the new address's pipeline access failed Error: G: second transport failure during undo
+    at store.pipeline ([stdin]:45900:46)
+    at redisPipeline ([stdin]:1839:41)
+    at undoUnconfirmedCopy ([stdin]:12201:31)
+    at [stdin]:45722:72
+    at async withLock ([stdin]:1894:12)
+    at async moveMemberships ([stdin]:45708:18)
+    at async main ([stdin]:45907:7)
+
+
+===== g2036-51a-original-copy-frozen-final.log =====
+
+(A) Making a key on an account with a second step needs a session opened with it
+  ok    an emailed-link session on a passkey account is refused
+  ok    and no key was made
+  ok    the same person with a passkey session makes it
+  ok    an account with no second step at all makes keys as before
+  ok    the owner with no second step yet makes one too
+  ok    each record says whether its session had a second step
+  ok    an old key has no maker
+  ok    the owner, once they have a passkey, is refused from an emailed-link session too
+
+(5) Who made a key is an HMAC under the deployment's secret and the store's id
+  ok    never the address
+  ok    never a plain hash of it either
+  ok    the same person reads differently on another store
+  ok    what is kept is this store's print
+
+(B) The webhook endpoints a key adds are kept with it
+  ok    both added
+  ok    a sale goes to both while nothing is paused
+  ok    a key made with a second step is never paused by the rule
+
+Before saving: which keys and endpoints will pause, and whose
+  ok    three keys and one endpoint would pause: Ned's two, his bot's endpoint, and the old key
+  ok    named by whose
+  ok    the review says the count, endpoints included
+  ok    and whose, with the endpoint, and who gets an email
+  ok    the unrecorded key in words
+  ok    and who has no second step yet
+  ok    a former teammate's key is said to be revocable only
+  ok    the team page draws the switch with its review for the owner
+
+Only the owner, only with their second step, and only for the list reviewed
+  ok    an Admin cannot switch it
+  ok    the owner from an emailed-link session is refused
+  ok    the count is the same
+  ok    but the list is not, so the save is refused with the new review
+  ok    and nothing was saved, paused or held
+
+(4) A save that cannot write the rule undoes its pause, and says so
+  ok    refused as unsaved, undone
+  ok    the rule is off, no key is paused, the endpoint is not held
+  ok    nobody was emailed
+
+(8) A key made after the first pause, as the rule is written, is paused by the second
+  ok    saved, but not finished: four keys paused, Ned's three still to be told
+  ok    the rule is on
+  ok    the late key is paused
+  ok    the page offers to finish
+  ok    pressing again tells who is left, and pauses nothing more
+  ok    pressing once more tells nobody twice
+  ok    one email, to Ned only
+  ok    it names his three keys and the way back
+  ok    its subject is plain
+
+On: the keys made without a second step pause, with their endpoints; the owner's never change
+  ok    Ned's keys are refused by the API, as paused
+  ok    the old key too
+  ok    the owner's own key still works
+  ok    Ned's bot's endpoint is held, the owner's is not
+  ok    so a sale goes to the owner's endpoint only
+  ok    nothing was deleted
+  ok    an endpoint added in the studio, by no key, is never held
+
+The panel shows each person what is paused and whose
+  ok    Ned sees his keys as his, paused, and may turn them on
+  ok    the owner sees them as Ned's and may not turn them on
+  ok    the owner may turn on the old one, whose maker nobody knows
+
+Turned back on by whoever made it, after logging in with a second step, endpoints included
+  ok    Ned from an emailed-link session is held at the team's door
+  ok    Pia cannot turn on Ned's key
+  ok    nor can the owner
+  ok    Ned, with his passkey, turns it back on
+  ok    it works again
+  ok    and so does its endpoint
+  ok    his other key stays paused until he turns it on too
+  ok    the owner turns on the old key
+
+Revoking a key stops its endpoints for good
+  ok    Ned revokes his bot
+  ok    its endpoint is held as revoked, and hears nothing
+  ok    its mark goes with it
+
+Turning the rule off turns nothing back on
+  ok    off, from the owner's passkey session
+  ok    Ned's other key is still paused
+  ok    from an emailed-link session it still needs his second step
+  ok    on again: what was turned on is vouched for, and paused keys are not counted twice
+  ok    so on again pauses nothing and emails nobody
+
+(8) A key made through the route in the instant the rule turned on is paused at once
+  ok    let in while the rule was off, made as it turned on: paused, and the answer says so
+  ok    refused by the API
+  ok    an owner's key never is
+
+(1) A teammate taken off the team has every key paused at once, whatever the rule
+  ok    made with her passkey, it works while she is on the team
+  ok    the rule is off on this store
+  ok    taken off: her key is paused
+  ok    and its endpoint is held
+  ok    her fingerprint is gone from it
+  ok    under the rule it counts as a former teammate's, vouched for or not
+  ok    shown as a former teammate's, never to be turned on
+  ok    an Admin may not revoke it
+  ok    and the route agrees
+  ok    the owner may not turn it on
+  ok    the owner revokes it
+  ok    and its endpoint stops for good
+
+(6) A teammate who moves their address keeps their keys
+  ok    the key follows the new address
+  ok    and still works
+
+G1: a key written after its maker was taken off, as the door let them in before, is theirs who left
+  ok    made, and paused in the same answer
+  ok    refused by the API, held for good
+
+G1: an endpoint written as its key was revoked is sent nothing
+  ok    it is written, and shown as its key's: revoked
+  ok    a sale goes nowhere
+
+G1: a key whose maker left is refused even with no hold written
+  ok    refused
+
+G2: turning a key on while its maker leaves never wins over the leaving
+  ok    the turning on is refused, as the hold changed
+  ok    the key stays held for good, and refused
+  ok    an undo never puts back a key whose maker left
+
+M1: a key made under the earlier secret is still its maker's once NIMBUS_DATA_KEY is set
+  ok    its print is not today's
+  ok    Ada still sees it as hers
+
+M2: a teammate leaving also pauses keys nobody is recorded as having made, without a secret too
+  ok    with no secret, nobody is recorded
+  ok    Ada's legacy key is found and held for good
+  ok    the unrecorded key is paused
+  ok    and the owner may turn it back on
+
+M3: a pause cut short before the rule is saved is undone, key by key
+  ok    refused as unsaved, and undone
+  ok    the key paused before the cut is back on
+  ok    a plan applied and undone leaves nothing
+
+L3: the team unreadable after a failed save: the pause stands, and the answer does not claim it saved
+  ok    answered unsure
+  ok    Dot's key stays paused
+
+L3: two presses at once email a teammate once
+  ok    one email to Dot
+  ok    and his key is told
+
+L1: a test to an endpoint whose key is paused takes nothing
+  ok    refused as held
+  ok    and no delivery was taken
+
+L4: using a key at the instant its maker is rewritten never writes the old maker back
+  ok    the use wrote when it was last used, after the rewrite
+  ok    the rewrite stands
+
+L5: a teammate moved to a role that cannot hand out keys has theirs wait for the owner
+  ok    paused for the role
+  ok    while her role does not allow it, the owner cannot turn it on
+  ok    the owner turns it back on
+  ok    and it works
+
+M4: when the keys cannot follow a move, the membership stays where it was
+G_COPY_APPLIED_REPLY_LOST {"commands":[["HSET","nl:crm:pacc:0fabe18e8b964870b912fd86608c5f02","ada-moved@example.com","{\"sales0\":\"none\"}"]],"from":"ada-admin@example.com","to":"ada-moved@example.com"}
+G_COPY_RESIDUAL {"healthy":false,"memberships":["ada-admin@example.com"],"access":["{\"sales0\":\"none\"}",null],"roomBefore":null,"roomAfter":null}
+  ok    the membership stayed on the old address
+  ok    pipeline access stays only with the address whose membership stayed
+  ok    and the key is still hers there
+  ok    and still works
+
+M5 (b): a teammate's key whose maker matches nobody on the team is refused at the door, at one command more
+  ok    a teammate's key works
+  ok    within an API request's own commands
+  ok    refused, as made by someone who could not be matched to the team (not as one who left)
+  ok    and the endpoints it added would hear nothing
+
+M5 (a), N2: a teammate leaving holds a key whose maker matches nobody, but never for good on a guess
+  ok    the ghost's key is held as unmatched
+  ok    the owner may turn it back on
+  ok    turning it on without saying whose it is is refused
+  ok    the owner may give it to Gia, an Admin
+  ok    given to Gia, it is hers and works
+  ok    and when Gia leaves, it goes with her, for good
+  ok    Fin's is untouched
+
+M6: the owner is told which keys a teammate leaving paused, and each refusal says why
+  ok    one email to the owner
+  ok    it names the key, says why, and how to turn it back on, in plain words
+  ok    the unrecorded key's refusal says the owner can turn it back on
+  ok    a key paused by the rule says whoever made it can turn it on
+  ok    one paused for its maker's role says it waits for the owner
+
+Codex D (#2290): a key nobody is recorded as making is turned on only once the owner says whose it is, so later sweeps still reach it
+  ok    the owner may turn it on, choosing whose it is
+  ok    turning it on without saying whose it is is refused, and it stays paused
+  ok    given to Gia, it is hers and works
+  ok    when her role no longer allows a writer, it waits for the owner again
+  ok    turned back on by the owner once her role allows it
+  ok    and when Gia leaves, it goes with her, for good
+  ok    claimed by the owner as theirs
+  ok    it stays on when a teammate leaves
+
+M5 (c): when the sweep after a removal fails, the route says to repeat it, and repeating finishes it
+  ok    answered: repeat the removal
+  ok    Hal is off the team, and his keys are refused all the same
+  ok    repeated: answered, not a silent 404
+  ok    and the key he made in between is held for good
+
+L5: a role change that cannot be saved undoes its pause; one whose pause fails changes nothing
+  ok    the change is refused
+  ok    and the keys it paused are back on
+  ok    a pause that fails changes no role
+  ok    tried again, it goes through
+  ok    her key and the unrecorded writer wait for the owner
+  ok    and the refusal says so
+
+L7: turning a key back on says it will not be paused by the rule again, before it is done
+  ok    the note for a key paused for its maker's role
+  ok    and for one given to a teammate, it says it becomes theirs and when it stops
+  ok    and for one nobody is recorded as making, it says it becomes theirs too
+  ok    the panel asks with it before turning on
+
+M4: a move whose team cannot be saved puts the keys back on the old address
+  ok    the key still reads as Fin's
+  ok    and works
+
+L6: rewriting who made a key never brings back one revoked meanwhile
+  ok    the revoked key's record stays gone
+
+N1: a key written as its maker is demoted, checked against the old role, is refused at the door by the new one
+  ok    made and not paused by the route, which saw the old role
+  ok    refused at the door: the role does not allow it
+  ok    an Admin's key works again
+
+N3: a demotion that pauses keys nobody is recorded as making tells the owner, and says so plainly
+  ok    one email to the owner, naming the key
+  ok    its refusal says nobody is recorded as its maker, not whose role
+
+N4: removing an address that was never on the team is not found, and touches nothing
+  ok    404 not_found
+  ok    no key paused and nobody emailed
+
+N2: a teammate leaving never reads the team in the middle of a move
+  ok    the move went through
+  ok    and Fin's key was never held
+
+N5: a rewrite that cannot finish throws, so a move is undone
+  ok    the membership stayed on the address before
+  ok    and the key is still Fin's there, and works
+
+N6: the door reads the team as the studio does: a member it would not accept matches nobody
+  ok    a member with a role the studio does not know counts for nothing
+
+The door still fits an API request's own commands
+  ok    at most 20 commands and the take
+
+A1 (2): on a role change, a turned-on key whose maker matches nobody is held again, and the owner told
+  ok    held as unmatched again
+  ok    and the owner is told, with the likely cause
+
+A2: the refusal and the panel name the likely cause and how to check
+  ok    the API says the secret most likely changed, and to check whose it is
+  ok    so does the panel
+
+N5 note: when the first sweep of a removal cannot finish, it is undone and the person stays
+  ok    refused, and Gia stays on the team
+  ok    her key's hold and maker are back, and it works
+
+C3-121 GRAVE: with the rule on, a key without a second step is refused at the door even when no sweep held it
+  ok    the switch answers that it did not finish, the rule on
+  ok    no sweep held Jo's key
+  ok    but the door refuses it, as the rule asks
+  ok    and an endpoint it added hears nothing
+  ok    a key made with a second step still works under the rule
+
+C3-121 MÉDIO (a): a removal whose team cannot be written undoes its first sweep
+  ok    refused, and Leo is still on the team
+  ok    his key is not held for good, keeps its maker, and works
+
+C3-121 MÉDIO (b): a hold written whose answer is lost is undone all the same
+  ok    refused, and Leo is still on the team
+  ok    the hold that was written goes back, and the key works
+  ok    a removal that goes through still holds it for good
+
+The developers page names the answer
+  ok    403 key_paused is listed
+  ok    with what happens to the endpoints a key added
+
+188 checks, all passing.
+a webhook delivery failed Error: MemoryRedis: unsupported EVAL
+    at MemoryRedis.run ([stdin]:34228:121)
+    at [stdin]:35144:65
+    at Array.map (<anonymous>)
+    at pipeline ([stdin]:35144:47)
+    at store.pipeline ([stdin]:149008:21)
+    at redisPipeline ([stdin]:35156:41)
+    at claim ([stdin]:75440:23)
+    at [stdin]:75514:37
+    at soon ([stdin]:75451:12)
+    at emitEvent ([stdin]:75513:9)
+turning on the team's two-step rule failed; its pause is undone Error: a stand-in for a failed write
+    at hook ([stdin]:149166:11)
+    at store.pipeline ([stdin]:149007:19)
+    at redisPipeline ([stdin]:35156:41)
+    at saveTeam ([stdin]:76182:9)
+    at [stdin]:76195:11
+    at async withLock ([stdin]:35226:12)
+    at async setRequireTwoStep ([stdin]:76193:3)
+    at async POST2 ([stdin]:145437:9)
+    at async call2 ([stdin]:149060:22)
+    at async team ([stdin]:149070:55)
+email rejected 422
+a webhook delivery failed Error: MemoryRedis: unsupported EVAL
+    at MemoryRedis.run ([stdin]:34228:121)
+    at [stdin]:35144:65
+    at Array.map (<anonymous>)
+    at pipeline ([stdin]:35144:47)
+    at store.pipeline ([stdin]:149008:21)
+    at redisPipeline ([stdin]:35156:41)
+    at claim ([stdin]:75440:23)
+    at [stdin]:75514:37
+    at soon ([stdin]:75451:12)
+    at emitEvent ([stdin]:75513:9)
+a webhook delivery failed Error: MemoryRedis: unsupported EVAL
+    at MemoryRedis.run ([stdin]:34228:121)
+    at [stdin]:35144:65
+    at Array.map (<anonymous>)
+    at pipeline ([stdin]:35144:47)
+    at store.pipeline ([stdin]:149008:21)
+    at redisPipeline ([stdin]:35156:41)
+    at claim ([stdin]:75440:23)
+    at [stdin]:75514:37
+    at soon ([stdin]:75451:12)
+    at emitEvent ([stdin]:75513:9)
+a webhook delivery failed Error: MemoryRedis: unsupported EVAL
+    at MemoryRedis.run ([stdin]:34228:121)
+    at [stdin]:35144:65
+    at Array.map (<anonymous>)
+    at pipeline ([stdin]:35144:47)
+    at store.pipeline ([stdin]:149008:21)
+    at redisPipeline ([stdin]:35156:41)
+    at claim ([stdin]:75440:23)
+    at [stdin]:75514:37
+    at soon ([stdin]:75451:12)
+    at emitEvent ([stdin]:75513:9)
+pausing API keys before the team's two-step rule failed; the rule was not saved Error: a stand-in for a pipeline cut short
+    at hook ([stdin]:149375:11)
+    at store.pipeline ([stdin]:149007:19)
+    at redisPipeline ([stdin]:35156:41)
+    at swapHolds ([stdin]:74681:27)
+    at applyPause ([stdin]:75854:53)
+    at async POST2 ([stdin]:145431:17)
+    at async call2 ([stdin]:149060:22)
+    at async team ([stdin]:149070:55)
+    at async main ([stdin]:149377:20)
+turning on the team's two-step rule failed and the team could not be read; the pause stands Error: a stand-in for a failed write
+    at hook ([stdin]:149390:13)
+    at store.pipeline ([stdin]:149007:19)
+    at redisPipeline ([stdin]:35156:41)
+    at saveTeam ([stdin]:76182:9)
+    at [stdin]:76195:11
+    at async withLock ([stdin]:35226:12)
+    at async setRequireTwoStep ([stdin]:76193:3)
+    at async POST2 ([stdin]:145437:9)
+    at async call2 ([stdin]:149060:22)
+    at async team ([stdin]:149070:55)
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address PipelineAccessCopyUnconfirmed: copying a teammate's pipeline access could not be confirmed
+    at copyPipelineAccess ([stdin]:47545:31)
+    at async [stdin]:76419:18
+    at async withLock ([stdin]:35226:12)
+    at async moveMemberships ([stdin]:76414:18)
+    at async main ([stdin]:149462:3) {
+  copy: { prior: null, now: '{"sales0":"none"}' },
+  taken: 176
+}
+pausing a former teammate's API keys after taking them off failed; the removal is to be repeated Error: a stand-in for a failed sweep
+    at hook ([stdin]:149564:13)
+    at async store.pipeline ([stdin]:149007:13)
+    at async keyRecords ([stdin]:74663:30)
+    at async Promise.all (index 0)
+    at async [stdin]:75879:29
+    at async withLock ([stdin]:35226:12)
+    at async removeMember ([stdin]:76393:14)
+    at async POST2 ([stdin]:145399:23)
+    at async call2 ([stdin]:149060:22)
+    at async team ([stdin]:149070:55)
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address Error: The records of some API keys kept changing while their maker was rewritten.
+    at rewriteMakers ([stdin]:74716:27)
+    at async movedMaker ([stdin]:75981:3)
+    at async [stdin]:76421:9
+    at async withLock ([stdin]:35226:12)
+    at async moveMemberships ([stdin]:76414:18)
+    at async main ([stdin]:149702:3)
+finishing the team's two-step rule failed; pressing again finishes it Error: a stand-in for the second sweep failing
+    at hook ([stdin]:149781:13)
+    at store.pipeline ([stdin]:149007:19)
+    at redisPipeline ([stdin]:35156:41)
+    at keyRecords ([stdin]:74663:36)
+    at planPause ([stdin]:75849:46)
+    at pauseForRule ([stdin]:75858:42)
+    at finish ([stdin]:145468:21)
+    at POST2 ([stdin]:145449:14)
+    at async call2 ([stdin]:149060:22)
+    at async team ([stdin]:149070:55)
+
+
+===== g2036-51a-types-actual-config.log =====
+
+Strict:3 roots; 753 source files; 0 diagnostics
+
+
+===== g2036-51a-static.log =====
+ESLINT 0
+Directed scanner5 []
+Focal diff 0
+

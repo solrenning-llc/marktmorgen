@@ -26,7 +26,7 @@ import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setPayPalSeller,
 import { type Paid, captureOrder, openOrder, readPaid, stillPending, watchPayPal } from "@/lib/paypal-sales";
 import { handOverPayPal } from "@/lib/paypal-delivery";
 import { readListing } from "@/lib/catalog";
-import { importedKey } from "@/lib/imported-purchases";
+import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { answering } from "./security/next-headers";
 import { store as redis } from "./redis-stub";
@@ -314,6 +314,66 @@ async function main(): Promise<void> {
     is("the page says the payment was received and is being handed over", html.includes(HANDING_OVER), true);
     is("no link to the purchase", html.includes("/@kilnworks/orders") || html.includes("Open what you bought"), false);
     is("no purchase event", page === "crashed" ? null : page.purchaseEvent, false);
+  }
+
+  // The Claude 4 team's regression on #2911 (re-review at 3f5256ed): grantImported writes with HSETNX, so the buyer's
+  // record keeps the FIRST grant's job. A second PayPal purchase of the same product by the same address, or one after
+  // a gift or an import gave it, never finds its own "paypal:<order>" there, and the page said "handing over" forever,
+  // with no link and no purchase event, although the hand-over had run and the buyer holds the product. Real path:
+  // openOrder -> captureOrder -> handOverPayPal, twice.
+  part("A second PayPal purchase of the same product by the same address, handed over: the purchase, its link and the event");
+  {
+    const again = "again@example.com";
+    const buy = async (): Promise<string> => {
+      const opened = await openOrder(store, (await readListing(store, made.product.id))!, BASE, { digitalConsent: TEST_CONSENT });
+      if (!opened.ok) throw new Error(`no order: ${opened.reason}`);
+      captureWith = (o) => ({ status: 201, body: completed(o, "29.00", "COMPLETED", again) });
+      const taken = await captureOrder(store, opened.order);
+      if (!taken.ok) throw new Error(`not paid: ${taken.reason}`);
+      is(`control: ${opened.order} is handed over by the real hand-over`, await handOverPayPal(store, taken.paid), true);
+      return opened.order;
+    };
+    const first = await buy();
+    const second = await buy();
+    const [held] = await redis.pipeline([["HGET", importedKey(store.statsId, again), made.product.id]]);
+    is("control: the buyer's record keeps the first order's grant (HSETNX)", (JSON.parse(String(held)) as { job: string }).job, `paypal:${first}`);
+    const one = await open(first);
+    is("control: the first order shows the purchase and the event", [one !== "crashed" && one.html.includes("Open what you bought"), one === "crashed" ? null : one.purchaseEvent], [true, true]);
+    const two = await open(second);
+    const html = two === "crashed" ? "" : two.html;
+    is("the second order does not say it is being handed over", html.includes(HANDING_OVER), false);
+    is("the second order shows the purchase and its link", html.includes("Glazing guide") && html.includes("Open what you bought"), true);
+    is("the second order sends the purchase event", two === "crashed" ? null : two.purchaseEvent, true);
+  }
+
+  let giftedOrder = "";
+  part("A PayPal purchase of a product the address was given first (a gift), handed over: the purchase, its link and the event");
+  {
+    const gifted = "gifted@example.com";
+    await grantImported(store.statsId, "gift:g1", [{ email: gifted, productId: made.product.id, items: null }], Math.floor(Date.now() / 1000), store.sid);
+    const opened = await openOrder(store, (await readListing(store, made.product.id))!, BASE, { digitalConsent: TEST_CONSENT });
+    if (!opened.ok) throw new Error(`no order: ${opened.reason}`);
+    captureWith = (o) => ({ status: 201, body: completed(o, "29.00", "COMPLETED", gifted) });
+    const taken = await captureOrder(store, opened.order);
+    if (!taken.ok) throw new Error(`not paid: ${taken.reason}`);
+    is("control: handed over by the real hand-over", await handOverPayPal(store, taken.paid), true);
+    giftedOrder = opened.order;
+    const page = await open(opened.order);
+    const html = page === "crashed" ? "" : page.html;
+    is("it does not say it is being handed over", html.includes(HANDING_OVER), false);
+    is("it shows the purchase and its link", html.includes("Open what you bought"), true);
+    is("it sends the purchase event", page === "crashed" ? null : page.purchaseEvent, true);
+  }
+
+  part("Another grant holds the product and this order's standing mark cannot be read: could not check, never delivered");
+  {
+    const undo = failReadsOf(/^nl:ppsell:own:/);
+    const page = await open(giftedOrder);
+    undo();
+    is("the page is drawn", page === "crashed" ? "crashed" : "drawn", "drawn");
+    const html = page === "crashed" ? "" : page.html;
+    is("it says it could not check the payment just now", html.includes(COULD_NOT_CHECK), true);
+    is("no link and no purchase event", [html.includes("Open what you bought"), page === "crashed" ? null : page.purchaseEvent], [false, false]);
   }
 
   part("Handed over, and the product cannot be read: never the error page, never 'not found' for a paid order");

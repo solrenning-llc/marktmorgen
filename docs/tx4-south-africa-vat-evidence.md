@@ -1,0 +1,39 @@
+# TX4: conditional South African VAT compliance work
+
+Evidence read on 05/11/2026 for item 474 [TX4]. This document does not determine the LLC's liability, recipient location, supply classification, intermediary role or filing status. It records conditional recurring work that a complete compliance budget may need to cover. It does not implement tax collection or certify compliance.
+
+## Current threshold and electronic-services evidence
+
+SARS's current [VAT registration page](https://www.sars.gov.za/types-of-tax/value-added-tax/register-for-vat/), read on the evidence date, says non-resident suppliers of certain electronic services become liable for compulsory registration at the end of the month in which relevant taxable supplies exceed R2.3 million. The same page states the general compulsory threshold as taxable supplies exceeding R2.3 million in a consecutive 12-month period.
+
+The change is dated. SARS's [VAT Connect Issue 21](https://www.sars.gov.za/businesses-and-employers/my-business-and-tax/vat-connect-issue-21-september-2026/) records that the 2026 amendment Acts were promulgated on 1 April 2026 and discusses administration of the increased compulsory threshold from R1 million to R2.3 million from that date. By contrast, SARS's still-published [electronic-services FAQ](https://www.sars.gov.za/wp-content/uploads/Ops/Guides/Legal-Pub-FAQs-VAT02-FAQs-VAT-on-Supplies-of-Electronic-Services.pdf) contains the outdated R1 million amount in answers prepared before that increase. This evidence uses the current registration page and the enacted-date update for the present monetary threshold; it uses the FAQ for non-monetary classification guidance only. Future threshold changes, transitional treatment and the LLC's actual consecutive-period totals require fresh confirmation.
+
+The FAQ says a foreign supplier conducts the described South African electronic-services enterprise when services are supplied from an export country and any two out of three circumstances are present: the recipient is a resident of South Africa; payment originates from a registered bank under South African banking law; or the recipient has a business, residential or postal address in South Africa. Those are legal classification inputs, not a conclusion from one proxy. This document does not add customer-data collection, decide conflicts between evidence or determine where any Marktmorgen recipient belongs.
+
+## B2B and intermediary boundaries
+
+SARS's [VAT Connect Issue 19](https://www.sars.gov.za/businesses-and-employers/my-business-and-tax/vat-connect-issue-19-june-2025/) describes the electronic-services regulations effective from 1 April 2025. It says the updated regulation excludes services supplied from an export country by a non-resident solely to VAT-registered vendors in South Africa from the electronic-services definition. It also says those supplies may still fall under imported services rules accounted for by the recipient. Actual recipient registration, sole-supply facts, use or consumption, and imported-services treatment remain unverified.
+
+The same SARS update explains that an intermediary and a foreign principal may agree in writing to treat covered electronic services supplied through the intermediary as made by the intermediary, with both parties jointly and severally liable for the relevant duties and tax. An intermediary is not inferred merely because software lists, hosts or helps deliver an offer. A direct supply and any platform-facilitated supply would need contract- and transaction-level reconciliation.
+
+This evidence does not classify Marktmorgen's supplies, recipients or intermediary role. It does not select a B2B exclusion, imported-services result, written agreement, representative, registration route or contracting model. It does not register, charge, collect, file or pay VAT.
+
+## Returns, periods and payment evidence
+
+SARS's [vendor-obligations page](https://www.sars.gov.za/types-of-tax/value-added-tax/obligations-of-a-vat-vendor/) says a vendor completes a VAT201 return for every tax period and submits it by the applicable due date. It states a general deadline of the 25th day of the following month, or the last business day of that month for eFiling, with qualified business-day rules. Payment and refunds follow the applicable filing route.
+
+Those general dates do not establish the LLC's registration status, assigned category, accounting basis, tax periods, portal notices, returns, corrections or payment position. The LLC's actual tax periods and due dates remain unverified. If the regime applies, recurring work may include authoritative-calendar confirmation, supply and intermediary reconciliation, return preparation, review, submission, payment evidence and correction tracking. An empty internal dataset is not proof that no return or amount is due. No return, calculation or remittance is prepared here.
+
+## Records and currency evidence
+
+SARS's [record-keeping page](https://www.sars.gov.za/client-segments/record-keeping/) describes five years as a general retention period, with qualified extensions for unfiled returns, disputes, audits and investigations. It says records must remain orderly, safe and open to inspection, and that authorisation may be required when electronic records are physically located outside South Africa. The exact rules and permissions for a foreign electronic-services supplier, the LLC's facts, and any longer obligation remain unverified.
+
+That retention evidence is not a deletion schedule. Record work can continue after closure through the applicable retention, audit and dispute periods. This document does not change retention, storage location or deletion code.
+
+SARS's [Binding General Ruling 28, Issue 3](https://www.sars.gov.za/wp-content/uploads/Legal/Rulings/BGR/Legal-R-BGR-28-Electronic-services-Requirements-relating-to-credit-and-debit-notes-exchange-rates-and-advertised-or-quoted-prices.pdf) describes conversion of tax shown in foreign currency to South African rand. It identifies the South African Reserve Bank, Bloomberg and the European Central Bank as permitted exchange rate sources and gives qualified daily or prior-period options. Its continuing application, the selected source, transaction dates, time-of-supply rule and consistency method require current professional confirmation; no exchange rate source or accounting policy is selected here.
+
+## Complete cost remains unknown
+
+The existing `vat-oss-and-local-compliance` line still has null monthly and annual ceilings and `reserveReviewed: false`. The complete cost is unknown, and unknown is not zero. Registration analysis, representative and professional review, return preparation, software, currency work, records, storage, corrections, payment exposure and reserve timing have no complete reviewed ceiling here. They are budget dependencies, not a supplier selection or a new charge. Allocation remains 100% Marktmorgen, with no allocation to Hazelsong. No finite margin or minimum customer base follows from this evidence.
+
+Owner-dependent: verify the current threshold, recipient-location evidence, electronic-services scope, B2B and intermediary treatment, the actual tax calendar, records, currency method, complete monetary ceilings and funded reserve before operation. No registration, submission, payment, account or external contact is performed. No production IO, price, visible limit, commission, terms, flag, gate or commercial-review input changes. The documentary regression checks evidence integrity; it does not test a live return, legal compliance or profitability.

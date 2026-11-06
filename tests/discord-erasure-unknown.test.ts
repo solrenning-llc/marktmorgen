@@ -23,7 +23,7 @@ import { emailKey, storeKey } from "@/lib/learn";
 import { checkMember, forgetDiscordPerson, joinServer, sweepDiscord } from "@/lib/discord-access";
 import { ERASERS } from "@/lib/person-erasure";
 import { COPIERS } from "@/lib/person-copy";
-import type { ErasureScope } from "@/lib/person-erasure";
+import type { ErasureScope } from "@/lib/erasure-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 

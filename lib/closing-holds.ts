@@ -45,6 +45,8 @@
  */
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { signedOf } from "@/lib/redis-count";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type Store, saleHandles, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { standingOf } from "@/lib/plan-standing";
 import { normaliseEmail } from "@/lib/auth";
@@ -139,11 +141,17 @@ export async function startCallBudget(folder: string, calls: number): Promise<vo
  * Takes `n` calls, all or none: from the budget ("calls"), or from the calls
  * set aside for refunds ("rcalls", REFUND_CALLS_PER_MEMBER for each member
  * held with a payment to give back), which nothing else may use.
+ * Throws UnknownReplyError when HINCRBY's total is not a whole number
+ * (CX-123 rule 24): no call is made on it, and nothing is given back, since
+ * it is not known whether the take ran; the callers count the member as not
+ * reached (holdRows marks it to try again, giveBackUnused stops).
  */
 export async function takeCalls(folder: string, n: number, from: "calls" | "rcalls" = "calls"): Promise<boolean> {
   if (n <= 0) return true;
-  const [left] = await redisPipeline([["HINCRBY", workKey(folder), from, -n]]);
-  if (Number(left) >= 0) return true;
+  const replies = repliesFor(await redisPipeline([["HINCRBY", workKey(folder), from, -n]]), 1);
+  const left = replies ? signedOf(replies[0]) : null;
+  if (left === null) throw new UnknownReplyError("a closing's budget of Stripe calls");
+  if (left >= 0) return true;
   await redisPipeline([["HINCRBY", workKey(folder), from, n]]);
   return false;
 }

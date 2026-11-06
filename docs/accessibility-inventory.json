@@ -738,6 +738,12 @@
       "parameters": []
     },
     {
+      "source": "app/help/buyers/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/help/buyers",
+      "parameters": []
+    },
+    {
       "source": "app/help/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/help",
@@ -922,6 +928,12 @@
       "source": "app/signin/rescue/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/signin/rescue",
+      "parameters": []
+    },
+    {
+      "source": "app/studio/add/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/add",
       "parameters": []
     },
     {
@@ -1220,6 +1232,7 @@
   ],
   "componentSources": [
     "components/ad-spend-editor.tsx",
+    "components/add-gallery.tsx",
     "components/affiliate-campaign-links.tsx",
     "components/affiliate-click.tsx",
     "components/affiliate-commission-history.tsx",
@@ -1235,6 +1248,7 @@
     "components/answers-editor.tsx",
     "components/api-key-editor.tsx",
     "components/app-code-invite.tsx",
+    "components/arrival-notice.tsx",
     "components/ask-box.tsx",
     "components/assistant-reminder-box.tsx",
     "components/attribution-table.tsx",
@@ -1277,6 +1291,7 @@
     "components/community-push-toggle.tsx",
     "components/community-room.tsx",
     "components/community-studio.tsx",
+    "components/company-owner-report.tsx",
     "components/confirm-action.tsx",
     "components/contact-box-editor.tsx",
     "components/copy-link.tsx",
@@ -1314,12 +1329,14 @@
     "components/email-suggestion.tsx",
     "components/email-sync-editor.tsx",
     "components/embed-messenger.tsx",
+    "components/empty-state.tsx",
     "components/exit-offer-editor.tsx",
     "components/exit-offer-slot.tsx",
     "components/exit-offer.tsx",
     "components/fair-price-editor.tsx",
     "components/faq-editor.tsx",
     "components/faq-from-inbox.tsx",
+    "components/feature-captures.tsx",
     "components/feature-catalogue.tsx",
     "components/feature-demos.tsx",
     "components/feature-visuals.tsx",
@@ -1370,6 +1387,7 @@
     "components/link-editor.tsx",
     "components/link-picture.tsx",
     "components/link-request-form.tsx",
+    "components/local-clock.tsx",
     "components/local-day.tsx",
     "components/logo.tsx",
     "components/look-editor.tsx",
@@ -1490,6 +1508,7 @@
     "components/site-footer.tsx",
     "components/site-nav.tsx",
     "components/site-pages-editor.tsx",
+    "components/skip-link.tsx",
     "components/slot-picker.tsx",
     "components/socials-editor.tsx",
     "components/stats-panel.tsx",
@@ -1536,6 +1555,7 @@
     "components/tax-editor.tsx",
     "components/team-event-editor.tsx",
     "components/team-manager.tsx",
+    "components/team-two-step-switch.tsx",
     "components/template-library.tsx",
     "components/terms-check-panel.tsx",
     "components/test-counts-notice.tsx",
@@ -1658,6 +1678,7 @@
     "app/api/store/answers/route.ts",
     "app/api/store/api-keys/route.ts",
     "app/api/store/ask/route.ts",
+    "app/api/store/assistant-memory/route.ts",
     "app/api/store/assistant-next/route.ts",
     "app/api/store/assistant-settings/route.ts",
     "app/api/store/assistant/route.ts",
@@ -1895,6 +1916,7 @@
     "app/api/v1/leads/route.ts",
     "app/api/v1/members/route.ts",
     "app/api/v1/products/route.ts",
+    "app/api/v1/sales/route.ts",
     "app/api/v1/stats/route.ts",
     "app/api/v1/store/route.ts",
     "app/api/v1/students/route.ts"
@@ -1961,8 +1983,16 @@
       "status": "not yet reviewed for this programme"
     },
     {
+      "source": "app/help/layout.tsx",
+      "status": "AAA review not completed"
+    },
+    {
       "source": "app/layout.tsx",
       "status": "not yet reviewed for this programme"
+    },
+    {
+      "source": "app/platform/[slug]/layout.tsx",
+      "status": "AAA review not completed"
     },
     {
       "source": "app/signin/layout.tsx",
@@ -1976,6 +2006,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 134
+    "pageTemplates": 136
   }
 }

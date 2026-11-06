@@ -6,7 +6,8 @@ import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { photoUrl } from "@/lib/photo-limits";
-import { EMPTY_PAGE, MAX_BLOCKS } from "@/lib/sales-page";
+import { MAX_BLOCKS } from "@/lib/sales-page";
+import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { readPage } from "@/lib/sales-page-store";
 import { PageEditor } from "@/components/page-editor";
 import { AiOn } from "@/components/ai-assist";
@@ -41,7 +42,11 @@ export default async function StudioSitePage({ searchParams }: Params) {
   const pages = store.sitePages;
   const asked = typeof query.page === "string" ? query.page : "";
   const selected = pages.find((p) => p.id === asked) ?? pages[0] ?? null;
-  const page = selected ? await readPage(store.statsId, siteKey(selected.id)).catch(() => ({ ...EMPTY_PAGE, blocks: [] })) : null;
+  // A read whose answer is not known is said so, and no editor is drawn: an empty one could be saved over the page
+  // (C4-20261106-2610-C6-153, unit B). A page with nothing saved yet is read as empty, as before.
+  const read = selected ? await readPage(store.statsId, siteKey(selected.id)).catch(() => "unread" as const) : null;
+  const unread = read === "unread";
+  const page = unread ? null : read;
   // The products a page's buttons may lead to: published ones.
   const products = store.catalog.head.filter((p) => !p.hidden).map((p) => ({ id: p.id, title: p.title }));
   const base = storeBase(store);
@@ -67,7 +72,11 @@ export default async function StudioSitePage({ searchParams }: Params) {
           <div className="mt-8 grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]">
             <SitePagesList pages={pages} selected={selected?.id ?? null} sid={store.sid} />
             <div className="min-w-0">
-              {selected && page ? (
+              {selected && unread ? (
+                <div className="card p-6 sm:p-8">
+                  <p role="status" className="text-lg font-semibold tracking-[-0.02em] text-ink">{STUDIO_MESSAGES.page_unread}</p>
+                </div>
+              ) : selected && page ? (
                 <>
                   <SitePageSettings key={`settings-${selected.id}-${selected.slug}-${selected.title}`} page={selected} pages={pages} products={products} base={base} sid={store.sid} />
                   <AiOn value={aiAvailableFor(store) ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 }}>

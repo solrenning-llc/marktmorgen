@@ -73,6 +73,8 @@ function main(): void {
     const all = tags(html);
 
     is("exactly one element is busy", count(html, /aria-busy="true"/g), 1);
+    // "Loading" is English on a store in any language: marked as a part in English (AX274, 3.1.2).
+    is("the Loading status is marked lang=\"en\"", /<p role="status" lang="en"/.test(html), true);
     const statuses = [...html.matchAll(/<([a-z][a-z0-9]*)\b([^>]*\brole="status"[^>]*)>([\s\S]*?)<\/\1>/g)];
     is("exactly one status", count(html, /role="status"/g), 1);
     is("the status says Loading", statuses.map((m) => m[3]), ["Loading"]);

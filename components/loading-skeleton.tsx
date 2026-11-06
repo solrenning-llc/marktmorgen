@@ -71,7 +71,7 @@ export function SkeletonCard({ className = "", children }: { className?: string;
 export function LoadingRegion({ className = "", children }: { className?: string; children: ReactNode }) {
   return (
     <div className={className || undefined}>
-      <p role="status" className="sr-only">
+      <p role="status" lang="en" className="sr-only">
         Loading
       </p>
       <div aria-busy="true">{children}</div>

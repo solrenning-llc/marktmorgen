@@ -171,11 +171,38 @@ export const MESSAGES: Record<string, string> = {
   unknown: "That product is no longer in your store. Reload the page.",
   store_full: "Your store is full. Remove something before adding more.",
   none: "This account has no store yet.",
-  // This tab still holds the page being edited: signing in here would leave it (WCAG 2.2.5).
-  signed_out: "Your session ended. Your changes are still here, not saved yet: sign in again in a new tab, then come back to this tab and press Save the page.",
+  // This tab still holds the page being edited: logging in here would leave it (WCAG 2.2.5).
+  signed_out: "Your session ended. Your changes are still here, not saved yet: log in again in a new tab, then come back to this tab and press Save the page.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
+
+/** A Clear refused because the session ended: Clear is offered only with nothing unsaved, when Save the page is off, so it says to press its own Yes again. */
+export const SIGNED_OUT_CLEARING = "Your session ended, so the page was not cleared. Log in again in a new tab, then come back to this tab and press Yes, clear it again.";
+
+/** The words for a refusal from the server, for a save or, `clearing`, for Clear. */
+export function refusalWords(error: string | undefined, clearing: boolean): string {
+  if (error === "signed_out" && clearing) return SIGNED_OUT_CLEARING;
+  return MESSAGES[error ?? ""] ?? MESSAGES.server_error;
+}
+
+/** A refusal, said at once; a session that ended links to the log-in page in a new tab, so this tab keeps the page. */
+export function ErrorNotice({ error }: { error: string }) {
+  return (
+    <p className="notice notice-error mt-4" role="alert">
+      {error}
+      {error === MESSAGES.signed_out || error === SIGNED_OUT_CLEARING ? (
+        <>
+          {" "}
+          <a href="/signin" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-1.5 font-semibold underline underline-offset-4">
+            Log in again in a new tab
+            <NewTab />
+          </a>
+        </>
+      ) : null}
+    </p>
+  );
+}
 
 /** A moment in seconds as the date-and-time field holds it, in the creator's own time zone. */
 function toLocalField(seconds: number): string {
@@ -500,7 +527,13 @@ export function PageEditor({
   const [chosenKind, setChosenKind] = useState<BlockKind | null>(null);
   const [draggingKind, setDraggingKind] = useState<BlockKind | null>(null);
   const [overPlace, setOverPlace] = useState<number | null>(null);
-  const [said, setSaid] = useState("");
+  // The same words said twice are said again, a space apart, so the live region always speaks (as RowEditor's).
+  const [said, setSaidNow] = useState("");
+  const again = useRef(false);
+  const setSaid = (text: string) => {
+    again.current = !again.current;
+    setSaidNow(text ? `${text}${again.current ? "\u00a0" : ""}` : "");
+  };
   const focusNew = useRef<string | null>(null);
   // Places held in a row for a picture still being sent there, by the row's id (lib/row-edit-rules.ts, RowHeld):
   // kept here, not in the row's editor, so closing and reopening the row while it is sent never frees them.
@@ -1061,7 +1094,7 @@ export function PageEditor({
         if (versions !== null) void loadVersions();
         return;
       }
-      setError(data.error === "fast_money" ? fastMoneyMessage((data as { passage?: unknown }).passage, "save") : MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
+      setError(data.error === "fast_money" ? fastMoneyMessage((data as { passage?: unknown }).passage, "save") : refusalWords(data.error, page === null));
     } catch {
       setError(MESSAGES.server_error);
     } finally {
@@ -2432,7 +2465,7 @@ export function PageEditor({
                         type="button"
                         onClick={() => move(index, -1)}
                         aria-disabled={locked || index === 0 || (index === 1 && hasHero) || undefined}
-                        className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper hover:text-ink aria-disabled:cursor-not-allowed aria-disabled:text-ink-mute aria-disabled:hover:bg-transparent"
+                        className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper hover:text-ink"
                         aria-label={`Move block ${index + 1} up`}
                       >
                         <Icon name="chevron-down" size={18} className="rotate-180" />
@@ -2441,7 +2474,7 @@ export function PageEditor({
                         type="button"
                         onClick={() => move(index, 1)}
                         aria-disabled={locked || index === drafts.length - 1 || undefined}
-                        className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper hover:text-ink aria-disabled:cursor-not-allowed aria-disabled:text-ink-mute aria-disabled:hover:bg-transparent"
+                        className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper hover:text-ink"
                         aria-label={`Move block ${index + 1} down`}
                       >
                         <Icon name="chevron-down" size={18} />
@@ -2451,7 +2484,7 @@ export function PageEditor({
                           type="button"
                           onClick={() => duplicate(index)}
                           aria-disabled={drafts.length >= MAX_BLOCKS || undefined}
-                          className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper hover:text-ink aria-disabled:cursor-not-allowed aria-disabled:text-ink-mute aria-disabled:hover:bg-transparent"
+                          className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper hover:text-ink"
                           aria-label={`Duplicate block ${index + 1}, ${kindLabel(block.kind)}`}
                         >
                           <Icon name="copy" size={17} />
@@ -2705,20 +2738,7 @@ export function PageEditor({
         </div>
       )}
 
-      {error ? (
-        <p className="notice notice-error mt-4" role="alert">
-          {error}
-          {error === MESSAGES.signed_out ? (
-            <>
-              {" "}
-              <a href="/signin" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-1.5 font-semibold underline underline-offset-4">
-                Sign in again in a new tab
-                <NewTab />
-              </a>
-            </>
-          ) : null}
-        </p>
-      ) : null}
+      {error ? <ErrorNotice error={error} /> : null}
 
       {drafts.length > 0 ? (
         <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-2xl bg-paper p-4 ring-1 ring-line">
@@ -3999,10 +4019,10 @@ function PicturesEditor({
           </div>
           {single ? null : (
           <div className="flex shrink-0 flex-col items-center">
-            <button type="button" onClick={() => swap(i, -1)} aria-disabled={i === 0 || undefined} className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-white hover:text-ink aria-disabled:cursor-not-allowed aria-disabled:text-ink-mute aria-disabled:hover:bg-transparent" aria-label={`Move picture ${i + 1} earlier`}>
+            <button type="button" onClick={() => swap(i, -1)} aria-disabled={i === 0 || undefined} className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-white hover:text-ink" aria-label={`Move picture ${i + 1} earlier`}>
               <Icon name="chevron-down" size={16} className="rotate-180" />
             </button>
-            <button type="button" onClick={() => swap(i, 1)} aria-disabled={i === items.length - 1 || undefined} className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-white hover:text-ink aria-disabled:cursor-not-allowed aria-disabled:text-ink-mute aria-disabled:hover:bg-transparent" aria-label={`Move picture ${i + 1} later`}>
+            <button type="button" onClick={() => swap(i, 1)} aria-disabled={i === items.length - 1 || undefined} className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-white hover:text-ink" aria-label={`Move picture ${i + 1} later`}>
               <Icon name="chevron-down" size={16} />
             </button>
             <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))} className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label={`Remove picture ${i + 1}`}>

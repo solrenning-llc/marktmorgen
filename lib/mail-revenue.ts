@@ -52,14 +52,16 @@ function mailRevenueEvidence(value: unknown): MailRevenue | null {
   return { by, partial: value.partial };
 }
 
-function visitEvidence(value: unknown, broadcastIds: string[]): Record<string, number> | null {
-  if (!isPlainRecord(value)) return null;
+type VisitEvidence = { known: true; value: Record<string, number>; complete: boolean } | { known: false };
+
+function visitEvidence(value: unknown, broadcastIds: string[]): VisitEvidence {
+  if (!isPlainRecord(value)) return { known: false };
   const by: Record<string, number> = Object.create(null) as Record<string, number>;
   for (const [broadcastId, raw] of Object.entries(value)) {
-    if (!broadcastId || !count(raw)) return null;
+    if (!broadcastId || !count(raw)) return { known: false };
     by[broadcastId] = raw;
   }
-  return broadcastIds.every((id) => Object.hasOwn(by, id)) ? by : null;
+  return { known: true, value: by, complete: broadcastIds.every((id) => Object.hasOwn(by, id)) };
 }
 
 type CacheReply = { known: true; value: string | null } | { known: false };
@@ -202,10 +204,10 @@ export async function readMailVisits(store: Pick<Store, "statsId">, broadcastIds
     let by: Record<string, number> | null = null;
     if (cached.value !== null) {
       const kept = visitEvidence(JSON.parse(cached.value), broadcastIds);
-      if (!kept) return null;
+      if (!kept.known) return null;
       // The cache answers only when it was made for every email asked about:
       // one sent a minute ago is read afresh rather than shown as nothing.
-      by = kept;
+      if (kept.complete) by = kept.value;
     }
     if (!by) {
       const views = await campaignViews(store.statsId, broadcastIds.flatMap(broadcastCampaigns));

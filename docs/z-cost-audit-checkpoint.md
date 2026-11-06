@@ -1,3 +1,7 @@
+# Novidade confirmada — #2724 MERGED legítimo
+
+API confirma merged:true, headEXATOc5b302f8a95260b1451cb9b8488cb4275b6dbcfb, merge **87dd5d939bce0672f967c8e92cbda31f4a870124**. C6canal00h44reportou9/9+Q5795076516+Z5795447659. FoiAUTORquemincorporou, nãoZ. Zvetoresfechados, nãoreabrir2724ou integrarownmainporchurn. Estado2751MED5795470462/provae207e5ownheadsabaixointactos. PONTOanterior b202dddad62731d2a7d82b2197e65cfaa084c931 públicoconfirmado, esta novidade supera sóesperafuturapor2724.
+
 # PONTO VIGENTE — 06/11/2026 00h44 Fortaleza: Z2724 fechado; Z2751 MÉDIO
 
 Esta seção SUPERA as pendências antigas dos mesmos vetores. Ler INTEIRO incluindo histórico abaixo, preservandoheads/REDs/WIP/retries. CP4631 lido completo antesdeagir; main/caixaCodex snapshot50e544418f336789644ad9abcea218fb09858179 e canal5e7dad lidos. Nãoinferiexecuçãoduplicadaporrecência. Cincoown confirmadosAPI OPEN/headinalterado:

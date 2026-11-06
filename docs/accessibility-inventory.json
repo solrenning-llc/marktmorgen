@@ -1412,6 +1412,8 @@
     "components/mark-shipped.tsx",
     "components/meeting-connections.tsx",
     "components/member-discount.tsx",
+    "components/member-price-editor.tsx",
+    "components/member-price-section.tsx",
     "components/more-from.tsx",
     "components/morning-header.tsx",
     "components/mrr-chart.tsx",
@@ -1820,6 +1822,7 @@
     "app/api/store/manage/route.ts",
     "app/api/store/manage/switch/route.ts",
     "app/api/store/member-discount/route.ts",
+    "app/api/store/member-price/route.ts",
     "app/api/store/meta-ads/route.ts",
     "app/api/store/move/open/route.ts",
     "app/api/store/next-offer/route.ts",
@@ -2022,6 +2025,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 137
+    "pageTemplates": 138
   }
 }

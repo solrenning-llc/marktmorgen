@@ -117,6 +117,16 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
     const rows = data.map(obj);
     return rows.every((row): row is Row => row !== null) ? rows : null;
   };
+  const chargeHistoryRow = (row: Row): boolean =>
+    typeof row.id === "string" &&
+    CHARGE_ID.test(row.id) &&
+    typeof row.status === "string" &&
+    typeof row.paid === "boolean" &&
+    typeof row.created === "number" &&
+    Number.isSafeInteger(row.created) &&
+    row.created >= 0;
+  const customerSearchRow = (row: Row): boolean =>
+    typeof row.id === "string" && CUSTOMER_PATTERN.test(row.id) && typeof row.email === "string";
 
   try {
     const sub = await get(`/subscriptions/${encodeURIComponent(subscriptionId)}?expand[]=customer`);
@@ -196,7 +206,7 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
     // The customer's first succeeded charge, if the list shows them all.
     const chargesPage = await get(`/charges?${new URLSearchParams({ customer: customer.id, limit: "100" })}`);
     const chargeRows = list(chargesPage, 100);
-    if (!chargeRows) return { refund: { kind: "unknown", reason: "unreadable" } };
+    if (!chargeRows || chargeRows.some((row) => !chargeHistoryRow(row))) return { refund: { kind: "unknown", reason: "unreadable" } };
     const succeeded = chargeRows.filter((c) => c.status === "succeeded" && c.paid === true && Number.isFinite(num(c.created)));
     const windowStart = nowSeconds - REFUND_DAYS * DAY_SECONDS;
     const oldestListed = succeeded.reduce<Row | null>((a, c) => (!a || num(c.created) < num(a.created) ? c : a), null);
@@ -227,7 +237,7 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
         const found = await get(`/customers/search?${new URLSearchParams({ query: `email:"${email.replace(/["\\]/g, "")}"`, limit: "100" })}`);
         if (found.has_more === true) return { refund: { kind: "unknown", reason: "too_many" } };
         const foundRows = list(found, 100, "search_result");
-        if (!foundRows) return { refund: { kind: "unknown", reason: "unreadable" } };
+        if (!foundRows || foundRows.some((row) => !customerSearchRow(row))) return { refund: { kind: "unknown", reason: "unreadable" } };
         for (const c of foundRows) if (typeof c.email === "string" && normaliseEmail(c.email) === email && idOf(c.id) !== customer.id) others.add(idOf(c.id));
       }
       if (others.size > MAX_OTHER_CUSTOMERS) return { refund: { kind: "unknown", reason: "too_many" } };
@@ -235,7 +245,7 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
         if (!CUSTOMER_PATTERN.test(other)) return { refund: { kind: "unknown", reason: "unreadable" } };
         const page = await get(`/charges?${new URLSearchParams({ customer: other, "created[lt]": String(before), limit: "100" })}`);
         const rows = list(page, 100);
-        if (!rows) return { refund: { kind: "unknown", reason: "unreadable" } };
+        if (!rows || rows.some((row) => !chargeHistoryRow(row))) return { refund: { kind: "unknown", reason: "unreadable" } };
         if (rows.some((c) => c.status === "succeeded" && c.paid === true)) personPaidBefore = true;
         else if (page.has_more === true) return { refund: { kind: "unknown", reason: "too_many" } };
       }
@@ -244,7 +254,9 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       if (!personPaidBefore && typeof fingerprint === "string" && /^[A-Za-z0-9]{4,64}$/.test(fingerprint)) {
         const found = await get(`/charges/search?${new URLSearchParams({ query: `payment_method_details.card.fingerprint:"${fingerprint}" AND status:"succeeded" AND created<${before}`, limit: "10" })}`);
         const foundRows = list(found, 10, "search_result");
-        if (!foundRows) return { refund: { kind: "unknown", reason: "unreadable" } };
+        if (!foundRows || foundRows.some((row) => !chargeHistoryRow(row) || row.status !== "succeeded" || row.paid !== true)) {
+          return { refund: { kind: "unknown", reason: "unreadable" } };
+        }
         if (foundRows.some((c) => idOf(c.id) !== idOf(first!.id) && num(c.created) < before)) personPaidBefore = true;
       }
       if (!personPaidBefore) {

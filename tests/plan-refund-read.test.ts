@@ -163,11 +163,11 @@ async function main() {
   const g = await shop();
   const gTwin = `cus_shop${n}twin`;
   world.customers.set(gTwin, g.email);
-  world.charges.push({ id: `ch_twin${n}`, customer: gTwin, created: NOW - 20 * DAY, status: "succeeded", paid: true, payment_method_details: { card: { fingerprint: "fpother" } } });
+  world.charges.push({ id: `ch_twin${n}0001`, customer: gTwin, created: NOW - 20 * DAY, status: "succeeded", paid: true, payment_method_details: { card: { fingerprint: "fpother" } } });
   pay(g, { at: NOW - 3 * DAY });
   is("another customer with the same address paid before: no second guarantee", (await g.read()).refund, { kind: "none", reason: "guarantee_used" });
   const h = await shop();
-  world.charges.push({ id: `ch_card${n}`, customer: "cus_someoneelse01", created: NOW - 20 * DAY, status: "succeeded", paid: true, payment_method_details: { card: { fingerprint: "fpsamecard" } } });
+  world.charges.push({ id: `ch_card${n}0001`, customer: "cus_someoneelse01", created: NOW - 20 * DAY, status: "succeeded", paid: true, payment_method_details: { card: { fingerprint: "fpsamecard" } } });
   pay(h, { at: NOW - 3 * DAY, card: "fpsamecard" });
   is("the same card paid before on another customer: no second guarantee", (await h.read()).refund, { kind: "none", reason: "guarantee_used" });
   const i = await shop();

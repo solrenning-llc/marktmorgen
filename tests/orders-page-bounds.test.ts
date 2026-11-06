@@ -339,7 +339,7 @@ function costlyLink(index: number): string {
 }
 
 /** The title of each purchase the page lists, in order (not a bundle's or a call's). */
-const listed = (html: string) => [...html.matchAll(/<li class="rounded-2xl p-5"[^>]*><p class="font-semibold">([^<]+)<\/p>/g)].map((m) => m[1]);
+const listed = (html: string) => [...html.matchAll(/<li class="rounded-2xl p-5"[^>]*><h2 class="font-semibold">([^<]+)<\/h2>/g)].map((m) => m[1]);
 
 /** The next batch of older purchases, from where the cursor says (a checkout, lib/buyer-orders.ts olderCursor), as the button asks for it. */
 const older = (from: string, by = token) => olderRoute(new NextRequest(`${ORIGIN}/api/store/orders/older?${new URLSearchParams({ handle: HANDLE, token: by, older: from })}`));

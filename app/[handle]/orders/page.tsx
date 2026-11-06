@@ -77,7 +77,8 @@ function BookedCallCard({ call, store, words }: { call: BookedCall; store: Store
   const locale = speech(store).lang.locale;
   return (
     <li className="rounded-2xl p-5" style={{ border: "1px solid var(--st-line)" }}>
-      <p className="font-semibold">{call.title}</p>
+      {/* A heading under "Booked calls", so the list is walked call by call (WCAG 2.4.10). */}
+      <h3 className="font-semibold">{call.title}</h3>
       <p className="mt-1 text-sm font-semibold" style={{ color: "var(--st-text)" }}>
         {readableTime(call.start, call.buyerTz, locale)}
       </p>
@@ -99,7 +100,7 @@ function BookedCallCard({ call, store, words }: { call: BookedCall; store: Store
         </a>
         {canMove(call.setup, call.start, call.moves) ? (
           <p className="text-center text-sm">
-            <a href={moveLink("", store, call.productId, call.session)} className="st-footer-link font-semibold">
+            <a href={moveLink("", store, call.productId, call.session)} className="st-footer-link inline-flex min-h-11 items-center font-semibold">
               {words.moveCall}
             </a>
           </p>
@@ -350,13 +351,14 @@ function Frame({ store, children }: { store: Store; children: React.ReactNode })
           <p className="st-muted mx-auto mb-4 max-w-xl text-sm" data-while-open>
             {words.whileOpen}
           </p>
-          <Link prefetch={false} href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+          {/* Alone on their line, so at least 44 px high (WCAG 2.5.5), as "Back to your purchases" is. */}
+          <Link prefetch={false} href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
             {said.w.backTo(store.name)}
           </Link>
           {/* Every store this address bought from, in one place (lib/buyer-library.ts). Never on the demo store. */}
           {isHouseStore(store) ? null : (
             <p className="mt-3">
-              <a href={`${SITE_URL}/library`} className="st-footer-link text-sm" data-library-link>
+              <a href={`${SITE_URL}/library`} className="st-footer-link inline-flex min-h-11 items-center text-sm" data-library-link>
                 {words.libraryLink}
               </a>
             </p>
@@ -382,11 +384,12 @@ function WaitingList({ waiting, store, words }: { waiting: Waiting; store: Store
       <h2 id="waiting-title" className="font-display text-xl font-semibold">
         {words.waiting}
       </h2>
+      {/* Each request and agreement a heading under this one, so the list is walked item by item (WCAG 2.4.10). */}
       <ul className="mt-4 space-y-4">
         {waiting.requests.map((request) => (
           <li key={request.id} className="rounded-2xl p-5" style={{ border: "1px solid var(--st-line)" }}>
             {/* In the request's own currency, as its page and Stripe charge it: never the store's currency now. */}
-            <p className="font-semibold">{`${rw.pageTitle}: ${speechFor(store.language, request.currency).money(request.total)}`}</p>
+            <h3 className="font-semibold">{`${rw.pageTitle}: ${speechFor(store.language, request.currency).money(request.total)}`}</h3>
             <p className="st-muted mt-1 text-sm">{request.dueDate ? rw.due(day(request.dueDate)) : rw.until(said.date(request.expiresAt))}</p>
             <Link href={`/@${store.handle}/pay/${request.id}`} className="btn st-btn btn-wrap mt-3 inline-flex min-h-11 items-center [overflow-wrap:anywhere]">
               {words.openRequest(speechFor(store.language, request.currency).money(request.total), request.dueDate ? day(request.dueDate) : "")}
@@ -395,7 +398,7 @@ function WaitingList({ waiting, store, words }: { waiting: Waiting; store: Store
         ))}
         {waiting.agreements.map((agreement) => (
           <li key={agreement.id} className="rounded-2xl p-5" style={{ border: "1px solid var(--st-line)" }}>
-            <p className="font-semibold [overflow-wrap:anywhere]">{`${aw.pageTitle(agreement.kind)}: ${agreement.title}`}</p>
+            <h3 className="font-semibold [overflow-wrap:anywhere]">{`${aw.pageTitle(agreement.kind)}: ${agreement.title}`}</h3>
             <p className="st-muted mt-1 text-sm">{aw.until(said.date(agreement.expiresAt))}</p>
             <Link href={`/@${store.handle}/sign/${agreement.id}`} className="btn st-btn btn-wrap mt-3 inline-flex min-h-11 items-center [overflow-wrap:anywhere]">
               {words.openToSign(agreement.title)}

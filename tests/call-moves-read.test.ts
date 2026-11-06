@@ -2,13 +2,16 @@
  * The bookings' moves are read a hundred keys at an MGET, every MGET in one
  * trip (lib/call-records.ts, readMoves; C3-82, MR, 4 November 2026), with the
  * same answer the one-GET-a-booking reading gave: a move for each session that
- * has a readable one, nothing for a key that is gone, unreadable or not a move.
+ * has a readable one, nothing for a key that is gone or holds no string. A
+ * value that is not a move is unknown and refuses the read (CX-123 rule 24,
+ * tests/call-moves-unknown.test.ts).
  */
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { store as redis } from "./redis-stub";
 import { movedKey, readMoves, writeMove } from "@/lib/call-records";
 import { MOVES_PER_MGET, moveReads } from "@/lib/call-moves-read";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /** Every pipeline the database is sent, as its commands. */
 const trips: (string | number)[][][] = [];
@@ -39,19 +42,14 @@ test("five hundred bookings: five MGETs of a hundred in one trip, and every move
   for (let i = 0; i < 500; i += 1) assert.deepEqual(moves.get(sessions[i]), i % 7 === 0 ? { s: 1_000 + i, e: 2_000 + i, n: i % 3 } : undefined, sessions[i]);
 });
 
-test("a key that is gone, unreadable, not a move or not a string is read as never moved; the others still are", async () => {
+test("a key that is gone or holds no string is read as never moved; the others still are", async () => {
   const sessions = Array.from({ length: 250 }, (_, i) => session(i));
   await writeMove(sessions[0], { s: 10, e: 20, n: 1 });
   await writeMove(sessions[99], { s: 30, e: 40, n: 2 });
   await writeMove(sessions[100], { s: 50, e: 60, n: 0 });
   await writeMove(sessions[249], { s: 70, e: 80, n: 1 });
-  await redis.pipeline([
-    ["SET", movedKey(sessions[1]), "{not json"],
-    ["SET", movedKey(sessions[2]), JSON.stringify({ s: 20, e: 10, n: 1 })],
-    ["SET", movedKey(sessions[3]), JSON.stringify({ s: 10, e: 20, n: 1.5 })],
-    ["SET", movedKey(sessions[4]), "null"],
-    ["HSET", movedKey(sessions[5]), "s", "10"],
-  ]);
+  // MGET answers null for a key that holds no string, as for one that is gone.
+  await redis.pipeline([["HSET", movedKey(sessions[5]), "s", "10"]]);
   trips.length = 0;
   const moves = await readMoves(sessions);
   assert.deepEqual(trips[0].map((c) => c[0]), ["MGET", "MGET", "MGET"]);
@@ -64,6 +62,17 @@ test("a key that is gone, unreadable, not a move or not a string is read as neve
       [sessions[249], { s: 70, e: 80, n: 1 }],
     ].sort(),
   );
+});
+
+test("a value at a move's key that is not a move refuses the whole read, in any MGET of the trip", async () => {
+  const sessions = Array.from({ length: 250 }, (_, i) => session(i));
+  await writeMove(sessions[0], { s: 10, e: 20, n: 1 });
+  for (const [i, raw] of [[1, "{not json"], [2, JSON.stringify({ s: 20, e: 10, n: 1 })], [3, JSON.stringify({ s: 10, e: 20, n: 1.5 })], [4, "null"], [249, JSON.stringify({ s: 10, e: 20 })]] as const) {
+    await redis.pipeline([["SET", movedKey(sessions[i]), raw]]);
+    await assert.rejects(readMoves(sessions), (error: unknown) => error instanceof UnknownReplyError, raw);
+    await redis.pipeline([["DEL", movedKey(sessions[i])]]);
+  }
+  assert.deepEqual([...(await readMoves(sessions)).entries()], [[sessions[0], { s: 10, e: 20, n: 1 }]]);
 });
 
 test("one booking is one MGET; none, or only empty sessions, reads nothing", async () => {

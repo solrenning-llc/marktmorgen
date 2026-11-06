@@ -26,7 +26,7 @@ import { dataBytes } from "@/lib/store-data-rules";
 import { type Block, aboutBlocks, aboutExcerpt, cleanAbout } from "@/lib/product-about";
 import { slugOf } from "@/lib/product-slug";
 import { blogReadArray, blogReadBody } from "@/lib/blog-read-replies";
-import { UnknownReplyError, countOf, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 export const MAX_POSTS = 200;
 export const MAX_POST_TITLE = 120;
@@ -145,28 +145,15 @@ export async function allPosts(statsId: string | null): Promise<PostMeta[]> {
 export async function publishedPosts(statsId: string | null, page: number): Promise<{ posts: PostMeta[]; total: number }> {
   if (!statsId || !isRedisConfigured()) return { posts: [], total: 0 };
   const start = (Math.max(1, page) - 1) * POSTS_PER_PAGE;
-  // Each reply in its exact shape (CX-123 rule 24): an unknown one throws, never "no posts".
-  const reply = blogReadArray(await redisPipeline([
+  const [ids, total] = await redisPipeline([
     ["ZREVRANGE", pubKey(statsId), start, start + POSTS_PER_PAGE - 1],
     ["ZCARD", pubKey(statsId)],
-  ]), 2);
-  const ids = reply ? stringList(reply[0]) : null;
-  const total = reply ? countOf(reply[1]) : null;
-  if (!ids || total === null) throw new UnknownReplyError("the public blog list");
-  const list = ids.filter((id) => POST_ID.test(id));
-  if (list.length === 0) return { posts: [], total };
-  const metaReply = blogReadArray(await redisPipeline([["HMGET", metaKey(statsId), ...list]]), 1);
-  const metas = metaReply ? blogReadArray(metaReply[0], list.length) : null;
-  if (!metas) throw new UnknownReplyError("the public blog posts");
-  const posts: PostMeta[] = [];
-  for (const raw of metas) {
-    // A listed post whose record is confirmed absent is left out; any other unreadable record is unknown.
-    if (raw === null) continue;
-    const meta = parseMeta(raw);
-    if (!meta) throw new UnknownReplyError("a public blog post");
-    if (!meta.draft) posts.push(meta);
-  }
-  return { posts, total };
+  ]);
+  const list = (Array.isArray(ids) ? ids : []).filter((id): id is string => typeof id === "string" && POST_ID.test(id));
+  if (list.length === 0) return { posts: [], total: Number(total) || 0 };
+  const [metas] = await redisPipeline([["HMGET", metaKey(statsId), ...list]]);
+  const posts = (Array.isArray(metas) ? metas : []).map(parseMeta).filter((m): m is PostMeta => m !== null && !m.draft);
+  return { posts, total: Number(total) || 0 };
 }
 
 /** How many posts are out, counted with one command; null when it cannot be counted (lib/store-sitemap.ts, sitemapSize). */

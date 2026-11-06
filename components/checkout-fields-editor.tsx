@@ -77,7 +77,7 @@ export function CheckoutFieldsEditor({ product }: { product: Product }) {
         body: JSON.stringify({ id: product.id, fields: next }),
       });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; at?: number };
-      if (data.ok) {
+      if (response.ok && data.ok === true) {
         setOpen(false);
         toast(confirmation);
         router.refresh();

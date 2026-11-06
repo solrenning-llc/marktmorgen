@@ -106,7 +106,7 @@ async function main(): Promise<void> {
   is("Stripe asked again, and the answer used", [asked.length, healed.state === "ok" ? healed.list[0]?.id : healed.state], [1, "taxreg_J1"]);
 
   part("No Stripe account connected");
-  is("said as none", (await readTaxRegistrations({ stripeAccountId: undefined })).state, "none");
+  is("said as none", (await readTaxRegistrations({ stripeAccountId: null })).state, "none");
 
   part("Places in words, never a bare code");
   is("a state, a province, a country", [placeOf({ country: "US", region: "CA" }), placeOf({ country: "CA", region: "BC" }), placeOf({ country: "DE", region: null })], ["California, United States", "British Columbia, Canada", "Germany"]);

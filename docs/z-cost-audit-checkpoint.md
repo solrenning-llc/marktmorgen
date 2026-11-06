@@ -1,3 +1,41 @@
+# PONTO VIGENTE — 06/11/2026, retomada após06h51: aiLeft provado, três produtos intactos
+
+Topo prevalece; TODO histórico abaixo preservado. Checkpointd157d3310fa91eec064ed814f33b1fda2f078846 recuperadoCOMPLETO118940chars, idênticoaoestadointegraljáconhecido, ANTESdaação. Depois main3345ba8b810853ede5d01f98d3d24fc9b688c878/caixaCX122-CX126/CLAUDE/AGENTS/fila/canalnovos lidos. Instruções/reservas main semdelta9c157→3345, fonteAIbyteidêntica. Nenhuma duplicada descartada porcheckpointrecente ouinferidativa; C4coordena/C1ponte. Nenhumpreço/limite/TTL/coeficiente/comissão/flag/gate/conta/pagamento/termo/chavefornecedor/contato/PII/refalheioalterado.
+
+## Nova prova r24 LEVE proposta: leitura desconhecida da cota afirma saldo positivo
+
+**lib/ai.ts:133-139 aiLeft**, jáhipóteseRule30norelatório6e721adb, agoraPROVADAemhelperREAL. FonteOCUPADA#1969/C3, intocada. ExtensãoMESMOramo **codex/z-counted-ack-proof@ae90333b80679cb3186131539e47ab69f2cf777e**, tree305c37abe361d38d9f750961cd4d107c8d3e1ba8; paiREMOTO6e721adb, ownnativebfadfa3624d5834e4fa4f3b5c2b6bc5ebd0839f4 assinatura difere/treeigual. PreservaORIGINAL tests/z-counted-ack.proof.ts BYTE-IDÊNTICO. Quatrodelta: NOVOtests/z-ai-left-envelope.proof.ts, ownworld/runner, relatório docs/reviews/z-counted-ack.md(apêndice). SemPR/correção/mainintegration/quartaunidade.
+
+ReservaANTEScódigo **60682e492614d26cfe881e70ae35ca7d0d58c1cb**, inventárioFRESCO153OPEN/todas153listasfilespaginadas/0erros/novoarquivo livre/canalsemduplicata. Todasreservasdomain já lidas, diff semdelta; world/runner/report são própriosreservados. Source9c157daownprooféBYTE-IDÊNTICO main3345, nãojunçãochurn.
+
+Run **node tests/z-counted-ack-run.mjs [product-root] z-ai-left-envelope.proof.ts** →**8casos/4falhasCAUSAIS/4controles**. FixtureREALMemoryRediscontém40jobsusados, apenasrespostaGETdeappsubstituída:
+- [null,99]→40disponíveis
+- ["1",99]→39
+- ["01"]→39
+- ["00"]→40
+Todosmesmaasserçãoconservadoraespera0disponívelemleituradesconhecida; falhamcompositivo. Cadaexecuta1GETapp/0writes; setupSET+GETinspeçãodiretossãoFORAappIO, confirmam40continua armazenado, nãocontadoscomoleituragrátis. Controles:ausênciaEXATA[null]40;canônico["1"]39;[]0;[["1"]]0. Nãoaceitar coação Number/extra comoevidência. FuturaAPIunknownexplícitaprecisadecoordenaçãodosconsumidores; provausaassinaturanúmericaATUAL, nãomudacotavisível.
+
+Impactoproposto **LEVE/veracidade saldo**; nãoalegarproviderexpense/novaautorizaçãofinanceira/independentbudgetbypass. ConsumerssomenteLIDOS: app/studio/blog/page42,88levaaiLeftparaAiOn; components/ai-assist.tsx141mostra leftthismonth. Browser/SSR/UIREALNÃOexecutados, helperREALapenas. Primeiraconsultapornomecomponents/ai-on.tsxinexistentenãolêarquivo; gitgrepencontrouai-assist, nenhumaconclusãobaseadanafalha.
+NoMESMOpadrão: countedMEDanterior6e721adbcontinuaABERTO/reproduzidoR2; review-ai-summaryreceiptcontinuaSÓESTÁTICOocupado. C4classifica/dádono, C3tem1969; Znãoedita.
+
+Validações: novos8/4RED;originais10/6REDmesmosvetoresreexecutadosPORmudançane cessária do transporteownparaGET, originaltestblobigual (não18GREEN). **66ligadosGREEN** AI30+callbudget5+cost24+data7. StrictTS3raízes/imports0,lint3paths0,scanner3931tracked/0,diffcached0/treeAPI=native. Nãofornecedor/redeexterna/nativeRedis/browser/AAA/CI/globalbuild/TSCcertificados. SemnovoIO/key/retentionprodutivo. Logs/tmp/z-ai-left-{proof,types,lint,linked,scanner}.log,/tmp/z-counted-ack-original7.log,config/tmp/z-ai-left-types.json. Worktreeownz-counted-ackmesmo/donornode_modules776readonly; worktrees/REDsantigosnãoresetados.
+
+## TRÊS próprios e próxima ação exata
+
+APIsfreshOPEN/headinalterado/commentssemretornonominal:
+- #2740 **455e46a69edeb02846afa83528c16500329cb62a**, S5794710012aplicável,240locaisanteriores; noveNOVOSiniciaisanterioresnão reconsultadossemterminal.
+- #2741 **032c4b617fa1c9686da2b70c7967785c307d09fe**, S5794737821aplicável,298locaisanteriores; noveNOVOSiniciaisanterioresnão reconsultados.
+- #2773 **7312dceb66fed9918c6ad82be5c01325d114cfda**, LEVE S5796448521ABERTO; RED255ef0ccpronto, API#2784aindaOPEN/head06aff6d245183b2ca10ed9824591e2e0c81a3e6e/base2670. N07h24confirmahelperausentemain. Nãoanteciparcaller/helper/decoderparalelo/readback.
+
+NenhumCIconsultado/nemretried/cancel/headmove/merge/produtocódigo. Horário/retomadanãoéterminalcausal. Sem9SUCCESSexatosconfirmados,nãomerge. Nenhumaintegraçãomainporchurn. #2602MERGED5f28préviopreservado.
+RetriesCONSUMIDOSPARASEMPRE **2484verify127130387972,2615verify127143841589/mac127144213372,2741Windows127737110071**. Nenhuma nova usada/compensadaporheadnovo. WIP2602b096 eTODOSREDshistóricosintactos.
+
+Próximo: evento terminalown/reviewnominal→9SUCCESSexacthead+reviewaplicável(2sesai dinheiro)+freshnative/rawclean+NORMALexpectedSHA+GETtrue; ou2784legítimoMERGED→MESMO2773/mainUMAvez necessáriahelper/MESMA4Sinalterada/unknown503honesto/exceeded429+81contrato+213ligados/tipos/lint/scanner/diff/retornoS/9NOVOS; ouatribuiçãoC4. DOISslotslivres,nãoassumirprodutoporsilêncio.
+
+VigiaanteriorflockLIVREconfirmado,nãodeduzidativa porrecência. ÚNICAnova sessão4272/tmp/z-main-watch.sh/MESMOflock/tmp/codex-z-main-watch.lock/fetch60s/deadline3500s/inboxmain+2784,sónovidade; runningconfirmadaem10h41UTC. NãoCI/canalwatchautenticado/nãocriaroutra. Nenhumaautomaçãoalterada/desativada/criada; dependênciastransitóriascoordenação/CI,nãoauditoriaconcluída. AntesencerrarpublicarPONTOEXATO+estecheckpoint+provaLEVEaoC4/C3; falhaGitHubaguardar2min/FULLfresh/nonforce/históricointeiro. Publicações≤30min.
+
+---
+
 # CONFIRMAÇÃO FINAL — prova reproduzida independentemente
 
 Revisor2 canal06h42 reproduziu **MESMA6e721adb/10casos/6falhas**, classificação relatada **médio-baixo** MR/cota mensal, dono indicado Claude3/#1969; concorda que reserveAiSpend mantém teto independente e NÃOháprova de gasto fornecedor semteto. Não conta como revisão GREEN/liberação/correção. Não repetirprovaidêntica semdelta. PONTO EXATO/report confirmado no canal **86ebb22887d69644fde48394d42e8fdbb1b68341**, referenciaCP78f797161bb03888aae573990518dacba52d266f. Essa confirmação resolve a pendência de postagem da seção abaixo; trêsprodutos/heads/REDs/retries imutáveis. Próxima ação só retorno/terminalnominal, controlador2784legítimoMERGED ouatribuiçãoC4; fonteocupada não editada.

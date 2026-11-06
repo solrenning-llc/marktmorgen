@@ -19,6 +19,7 @@
  *     say the same words.
  */
 import { readFileSync } from "node:fs";
+import { mock } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { isPaidUp, renewalInvoicePage, stateOf } from "@/lib/billing";
@@ -129,7 +130,15 @@ async function main() {
     is("not in line for closing", await scored(ENDED_INDEX, storeRef(unpaid)), false);
     is("no longer in the list of stores that pay", (await members(PAYING_INDEX)).includes(storeRef(unpaid)), false);
     is("its billing month is kept", allowanceWindow(unpaid)?.billing, true);
-    is("a second reading writes nothing", await recordState(unpaid, stateOf(subscription("past_due"))), false);
+    // Re-reading the same Stripe fixture must stay unchanged even when the
+    // wall clock crosses a second between the two reads.
+    const secondReadAt = Date.now() + 1_000;
+    const clock = mock.method(Date, "now", () => secondReadAt);
+    try {
+      is("a second reading writes nothing", await recordState(unpaid, stateOf(subscription("past_due"))), false);
+    } finally {
+      clock.mock.restore();
+    }
     await setSubscription(owner, { active: true, tier: "pro", cycle: "month", period: paidPeriod() });
     is("a write that does not say keeps the first day", (await storeForEmail(owner))!.renewalUnpaidSince, since);
     is("paid: written again", await recordState((await storeForEmail(owner))!, stateOf(subscription("active"))), true);

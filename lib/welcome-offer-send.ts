@@ -18,6 +18,7 @@ import { OrdersPausedError } from "@/lib/order-admission";
 import { createHash } from "node:crypto";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type Store, storeForId } from "@/lib/store";
 import { type Listing, readListing, readProduct } from "@/lib/catalog";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
@@ -100,16 +101,46 @@ function moment(seconds: number, language: unknown): string {
   });
 }
 
-/** The reminders now due, a few at a time, from the five-minute job. */
-export async function sendWelcomeReminders(deadline: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<{ sent: number; dropped: number }> {
-  const counts = { sent: 0, dropped: 0 };
+/**
+ * Whether a due entry is still on the list, asked when the claim's reply was
+ * not in its shape: a score is queued, null is gone, anything else (or no
+ * answer at all) is unknown.
+ */
+async function stillDue(member: string): Promise<"queued" | "gone" | "unknown"> {
+  const replies = repliesFor(await redisPipeline([["ZSCORE", DUE_KEY, member]]).catch(() => null), 1);
+  if (!replies) return "unknown";
+  const [score] = replies;
+  if (score === null) return "gone";
+  return typeof score === "string" && score.trim() !== "" && Number.isFinite(Number(score)) ? "queued" : "unknown";
+}
+
+/**
+ * The reminders now due, a few at a time, from the five-minute job.
+ * `unknown` counts the ones tried although Redis did not say, in its own
+ * shape, that this run took them off the list (sent under the same
+ * idempotency key, so never twice); they are never counted as sent.
+ */
+export async function sendWelcomeReminders(deadline: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<{ sent: number; dropped: number; unknown: number }> {
+  const counts = { sent: 0, dropped: 0, unknown: 0 };
   if (!isRedisConfigured() || !isSenderConfigured()) return counts;
   const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, "0", String(nowSeconds), "LIMIT", "0", "25"]]);
+  // Nothing is taken off on a read that is not a list: the entries stay for the next run.
+  if (!Array.isArray(due)) console.error("sending welcome offer reminders: the due list came back in an unknown shape; read again on the next run");
   for (const member of Array.isArray(due) ? (due as unknown[]).map(String) : []) {
     if (Date.now() >= deadline) break;
     // Taken off first: a reminder is tried once, never twice.
-    const [removed] = await redisPipeline([["ZREM", DUE_KEY, member]]);
-    if (!Number(removed)) continue;
+    const claimed = repliesFor(await redisPipeline([["ZREM", DUE_KEY, member]]), 1);
+    const removed = claimed ? claimed[0] : undefined;
+    if (removed === 0) continue;
+    let unsure = false;
+    if (removed !== 1) {
+      // Not said in its shape whether this run took it: still queued waits for the next
+      // run; gone (or not known) is tried now under its idempotency key, never lost.
+      const state = await stillDue(member);
+      if (state === "queued") continue;
+      unsure = true;
+      console.error(`sending a welcome offer reminder: the claim came back in an unknown shape (${state}); tried under its idempotency key`);
+    }
     try {
       const v = JSON.parse(member) as { s?: string; i?: string; h?: string; e?: string; t?: string };
       const store = v.s ? await storeForId(v.s) : null;
@@ -153,7 +184,8 @@ export async function sendWelcomeReminders(deadline: number, nowSeconds = Math.f
         headers: rendered.headers,
         idempotencyKey: `nimbus-wo:${store.statsId}:${v.h}`,
       });
-      if (ok) counts.sent += 1;
+      if (ok && unsure) counts.unknown += 1;
+      else if (ok) counts.sent += 1;
       else counts.dropped += 1;
     } catch (error) {
       console.error("sending a welcome offer reminder failed", error);
@@ -209,9 +241,15 @@ export async function openWelcome(
   }
 }
 
-/** Forgets when one person's welcome offer began and that their reminder was set (lib/person-erasure.ts). */
+/**
+ * Forgets when one person's welcome offer began and that their reminder was set (lib/person-erasure.ts).
+ * Only a count Redis answered in its shape, 0 to 2, is reported; anything else throws, so the erasure
+ * says this module is incomplete and can be run again.
+ */
 export async function forgetWelcomePerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", startKey(statsId, email), remindedKey(statsId, email)]]);
-  return Number(gone) || 0;
+  const replies = repliesFor(await redisPipeline([["DEL", startKey(statsId, email), remindedKey(statsId, email)]]), 1);
+  const gone = replies ? countOf(replies[0]) : null;
+  if (gone === null || gone > 2) throw new UnknownReplyError("a welcome offer's deletion");
+  return gone;
 }

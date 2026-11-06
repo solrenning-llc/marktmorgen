@@ -559,6 +559,7 @@ export function BuyBox({
   place = "",
   consentAgain = false,
   embed = null,
+  stepped = false,
 }: {
   store: Store;
   product: Listing;
@@ -590,7 +591,23 @@ export function BuyBox({
   consentAgain?: boolean;
   /** Opened from a card on one of the creator's listed sites: carried to the checkout, which checks it against the store's list. */
   embed?: { site: string; back: string } | null;
+  /**
+   * Drawn on a card in a list of products (the store page, a collection): where buying asks for the box to start
+   * access at once (lib/digital-consent.ts), the card leads to the product's own buy step instead, so the box, its
+   * note and the closing sentence are drawn once, directly above the Buy button they belong to (Encanto 3,
+   * C4-20261106-0520-TODOS-19), not repeated on every card.
+   */
+  stepped?: boolean;
 }) {
+  // The card's way to the buy step: the words the product page's own buttons use (pageAction), and its name for a
+  // screen reader, so the link says on its own what it is for (WCAG 2.4.9).
+  const toStep = (anchor: string) => (
+    <Link prefetch={false} href={`${productPath(store, product)}${anchor}`} className="btn st-btn btn-block mt-4" data-buy-step="">
+      {pageAction(store, product, remaining, selling, related, soon, preorder).label}
+      <span className="sr-only">{`: ${product.title}`}</span>
+    </Link>
+  );
+  if (soon && !isFree(product) && preorder && stepped) return toStep("#preorder");
   if (soon && !isFree(product)) return preorder ? <PreorderForm store={store} product={product} day={preorder} writes={writes} consentAgain={consentAgain} /> : <WaitlistForm store={store} product={product} writes={writes} />;
   const { w, money } = speech(store);
   const options = sellableOptions(product);
@@ -676,7 +693,7 @@ export function BuyBox({
   // The creator's own PayPal, as well as Stripe or instead of it (lib/paypal-sales.ts).
   const withPayPal = ready && paypalReady(store, product);
   if (!canSellProduct(store, product) || !ready) {
-    if (withPayPal) return <PayPalButton store={store} product={product} alone consentAgain={consentAgain} />;
+    if (withPayPal) return stepped ? toStep("#buy") : <PayPalButton store={store} product={product} alone consentAgain={consentAgain} />;
     /*
       Sellable store, but this one has nothing attached to hand over. Better to
       say so than to take the money and work out the delivery afterward.
@@ -722,6 +739,7 @@ export function BuyBox({
   const formId = `buy-${place}${product.id}`;
   const digitalHere = deliversDigitally(product, null);
   const digitalAdded = !digitalHere && extras.some((extra) => deliversDigitally(extra.target));
+  if (stepped && (digitalHere || digitalAdded)) return toStep("#buy");
   return (
     <>
     <form id={formId} action="/api/store/checkout" method="post" target="_top" className="mt-4" data-checkout="">
@@ -1213,6 +1231,7 @@ export function ProductCard({
         ready={!product.bundle || (bundleItems?.length ?? 0) >= MIN_BUNDLE_ITEMS}
         soon={soon}
         preorder={preorder}
+        stepped
       />
       {cart ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {product.recurring && manageable ? (

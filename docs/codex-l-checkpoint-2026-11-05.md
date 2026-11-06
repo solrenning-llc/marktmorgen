@@ -579,3 +579,22 @@ Aguardar autorização nominal da Claude 4 para a guarda de `courseLedger`. Só 
 - Descrição do PR atualizada; comentário de retorno/revisão `6695177975`. Canal integral reencodado/decodificado em Base64 e Git blob verificado antes do append; publicação final em commit `b3a5118e237219e361b1aff2d0f1aa0cea05c43a`, blob `a827ed8c1a4cfbf5c1d98e1bdfbd5e652f34fc0a`.
 - Nove workflows NOVOS do head final, todos inicialmente pending/queued: `42291568340`, `42291568341`, `42291568328`, `42291568283`, `42291568325`, `42291568161`, `42291567960`, `42291567992`, `42291568086`. Nenhum rerun/cancelamento.
 - Próxima ação: aguardar retorno focal limpo da Claude 4 e pareceres aplicáveis R1+R2 no head final; exigir 9/9 success exatos, head/mergeabilidade frescos e merge com expected head. Não abrir unidade adicional; não tocar #2576/#2827/ramo/CI/reserva alheios; produto nunca edita reservas. Claude 1 continua desligado e não destinatário.
+
+
+## 06/11/2026 18h10 Fortaleza — R2 stale-copy correction promoted
+
+- Own product remains only PR #2794, branch `codex/l-imported-purchases-exact-replies`.
+- Exact head: `0fd255c9756aa1a103811189cd5caee8cd469bdb`.
+- Exact tree: `a1f6d660e5c575ab06ef61bafe818bc3dcb82d33`.
+- Parent: `4ade92eda76a4a0598259ccb4654e2b56a7b54ff`; fast-forward with expected SHA, no force.
+- Revisor 2 found that `4ade92e` had rewritten `lib/buyer-orders.ts` from a stale local copy and thereby lost current-main exact reply hardening in `within` and `ordersGrant`.
+- Corrective final `lib/buyer-orders.ts` blob: `30bf1168394ab5bc67971dfe23bcaa7f15f276a3`; it is exact current-main blob `2cd14768a8e4eda3c6b11e861137aa17d110e72c` plus only `if (raw === null) return null;` in imported `lookUp`.
+- Final `tests/orders-open.test.ts` blob: `a559c093825f39a76086a79bb830d45f3f2f54e1`; it is current main plus only the permanent HKEYS/HGET removal-race test.
+- Other final product blobs remain: `lib/imported-purchases.ts` `8e36e70990e14e6093faac45e1f665a6184cc21b`; `lib/learn.ts` `e94522301f25ada3428392e82f5a68344458ea24`; exact-reply test `b61f2c4b6be323d36a01b72d62e93252920cd518`.
+- GREEN after reconstruction: exact replies 18/18; orders-open 35/35; nine linked suites 350/350; total 403/403. Directed TypeScript, ESLint, `scripts/check_public_data.py` 3,803/0 and `git diff --check` are clean.
+- PR body updated; corrective comment ID `6695602897`.
+- Channel append committed as `b88e387e7086847a5245e51d28b82a4228c673ed` after full >1 MiB blob verification; two earlier 409 races were discarded without rewriting history.
+- Nine new exact-head workflows exist and are all pending: `42293930648`, `42293930667`, `42293930745`, `42293930755`, `42293930756`, `42293930762`, `42293930800`, `42293930841`, `42293930960`.
+- Every workflow from `4ade92e` is obsolete. Do not cancel, rerun, move the head or merge while these are active.
+- Await applicable clean returns from Claude 4, Revisor 1 and Revisor 2 on exact head `0fd255c...`, plus nine exact-head successes. Correct every new finding with RED first.
+- No reservation document changed. No additional unit opened. Claude 1 remains off and is not a recipient.

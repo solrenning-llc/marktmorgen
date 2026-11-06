@@ -302,6 +302,18 @@ async function main() {
     };
     is("an unknown status in a same-address customer's history is unknown", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
   }
+  world.historyReply = {
+    path: "/charges",
+    customer: partialHistory.customer,
+    data: [currentHistory, { ...currentHistory, id: "ch_succeededunpaidown0001", created: NOW - 40 * DAY, status: "succeeded", paid: false }],
+  };
+  is("a succeeded but unpaid charge in this customer's history is unknown", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  world.historyReply = {
+    path: "/charges",
+    customer: unknownOther,
+    data: [{ ...currentHistory, id: "ch_succeededunpaidother0001", customer: unknownOther, created: NOW - 40 * DAY, status: "succeeded", paid: false }],
+  };
+  is("a succeeded but unpaid charge in a same-address customer's history is unknown", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
   world.historyReply = null;
   world.down = true;
   is("Stripe failing: unknown", (await a.read()).refund, { kind: "unknown", reason: "stripe_unread" });

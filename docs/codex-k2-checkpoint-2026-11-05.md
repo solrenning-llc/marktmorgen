@@ -853,3 +853,59 @@ NotifyC5completionandreport20d beforeend; don'twaitforduplicateR2orclaimstackmer
 OneownOPEN2821/5f2 +onecompletednominalforeignreview2790/368. ApplynewR2consumerfindingswithRED; orqualifiedclean+9exact+freshcleanmergeown. Don'trepeat368reviewonunchangedsource or old2811mergedwork.
 Rule30samefile readForms/readForm/responseCounts/addResponse/dropForm stillSTATICCANDIDATESnotnewlyprovedandNOTedited; don'tclaimfullform-storeaudit. flowsC3. FutureC6nominalreviewonlyifasked. #2801/#2803owner-costHOLDunchanged.
 BeforeendingFULLfreshchannelappend2790completion+exact2821pending+thischeckpointSHA. AV12 noemptyCIloop; pendingreview/CItransient, continuityunchanged, noautomationcreated/updated/disabled. Currentactualclocklast16:34:46UTC=13:34:46Fortaleza; olderestimatedtimelabelcorrectionsretained.
+
+
+## COMPLETE CHECKPOINT — 2026-11-06 14:31 Fortaleza — causal main repair in #2821; sibling evidence
+Supersedes prior2821head5f/initialCIpendingonly. C4only/C1OFF/Vreservations. ONEownproductOPEN2821, evidenceunitnotproductPR. PreserveALLoldKheads/REDs/mergedwork; noautomation/subagents/provider/account/price/limit/flag/foreignsource/ref/CIchanges.
+
+### Channel >1MiB: SAFE full read REQUIRED
+Initial fetch_file(messages.md) returned EMPTYcontent with realblob **747d4df92b10abf3ea93d9bd589c4159974f84cf** becauseContentsAPIfile>1MiB. DidNOTWRITEEMPTY/short. raw.githubusercontent.comfallbackfetchfailed400(too large/unsupported), NOTauthenticationfailure.
+**Successful read:** github_fetch URL **https://api.github.com/repos/solrenning-llc/repo-id-transfer-test/git/blobs/<EXACT SHA from fresh fetch_file>** returns structuredContent.content ALREADYDECODED fulltext(1,093,294chars); don'tJSONparse/base64decodeit. OuterstructuredContentmetadatahascontent,title,etc/nestedstructuredContent. ItisNOTrawGitBlobJSON. Fullprefix/historypreserved, no restoring snapshot/copyback ofoldermessages.
+ForEVERYappend: fetch_filefreshforSHA→ifcontent<20000fetchEXACTblobURL→guardFULLlength>20000→appendFULLtext+message withupdate_file expectedsha immediately SAMEexec. Allcurrentappends079e/7c637/bb0d succeededCAS, no409/pendingretry. NeveruseemptyContentsAPIvalue, neveroverwrite1MiBhistory. Newlastfullblob92a8/1,111,334chars+laterappend; freshreadagainbeforeanywrite. PriorZrestoration03fc isotheragenthistory, K2didnotrestoreanything.
+
+### #2821 actual old-head failure, causal corrected-main integration
+Oldexact **5f2cd6dab85de3296fcfd11c90822ec66304274c** terminal **8workflowSUCCESS+1FAIL**. Only failedworkflow42252944945; decodedverifyjob **128012872769** logcomplete:
+Behaviorregressions ALLtestsran; FINAL **Browser bundles268/269,components/blog-editor.tsx,Couldnotresolve node:util**; notourconsumerassertion. Lint0errors37warnings. FF **128012872783SUCCESS**, WK **128012872887SUCCESS**, realRedis128012872902/mobile128012872905SUCCESS; production step skippedinverifyafterglobalbundlefail. No full9green/productionclaim.
+C4 **C4-2230-TODOS-131** says thisisglobalmaininteraction2805+2672; **NOretry**, wait2822. **C4-2350-TODOS-139** confirms2822MERGED **1ca58a1c**, clientbundleszero; integratecorrectedmainONCEthen9NEW. C4-2400othersassignednoK2newscope.
+Freshfrozenmain **ec5f3d5e411cf2553ee649996d4a6fc9c956cc06**, contains2822+2761. MandatoryCLAUDE/AGENTS/allreservations/inbox/queue comparedced→ec5: NOdeltaobserved; priorfullreadsapply. No maincopyofhelper/sourcechangesbyK2.
+CausalNORMALintegration commit **70dc67ef43cb320eef3c743467a10ca7a093ff39**, parentsold5f+ec5, native=GitDatatree **e57a535cfd059c719f0cbff865d11039e9873791**. **ALL12ownpathblobsBYTE-ID5f, includingtests/test-config.mjs**, no conflict/productdelta/reviewchurn. Expectedref5f→70dc,forceFALSE. No retry/cancel/runrestart or parallelmainchasing.
+Toavoidnewdiskheavyworktree, preservedexistingverifiedlocaltreea79 inlocalDETACHEDcommit **4eb1d4550**, then localgitmerge--no-commit--no-ffec5 yieldednativee57clean. ThislocalcommitdoesNOTreplacepublichistory; oldced/a79/5fstilldurable. Local **k2-form-final** HEAD4eb/MERGE_HEADec5/stagedmergedtreee57+NOWsiblingsnewtest/reportonstaging. Don'treset/discard; currentwrite-treewithsiblings80a differspublicproducte57byONLY2evidencefiles. No foreignbranchmodified.
+GitDatatreemadefromfrozenmainbase **e0e87fc6ac90ee660d202896b3a28b6f124e224b** andEXACTown12filesfromnativee57; comparedmatchbeforecommit.
+
+RevalidationAFTERintegration:
+**client-bundles269/269/0fail**,9actualcanonicalfiles **124custom+26NodePASS**:
+k-form-response-read-evidence32;form-response-unavailable6node;form-response-copy-evidence1node;form-opportunity30;forms19;person-copy20;store-export-unknown-size9node;blog-read-unavailable-page10node;redis-reply-envelope23. No assertion/timeoutweakened.
+Actualscopedsource/tsconfig/imports9roots **0diagnostics**, directedlint0, scanner **4065tracked/0corrections**, diff0. Prior24-file308+59qualifiedonpreviousbyte-IDownsourceunchanged; no needblindfullsuite. Sourcefixfrom2822 includedglobally; no payment/provideroperations.
+Logs **/tmp/k2-form-mainfix-{linked,types,bundles,lint,scan}.log**. Originalverifydecodedlogstoredtoolcontext; GitHubjobIDdurable. Comment **6691033387** recordsfailure/integration. PRbodyupdatedtoCURRENT70dc/e57 andseparateevidence.
+
+#### Current PR state and EXACT9 NEW gates
+PR https://github.com/solrenning-llc/marktmorgen/pull/2821
+branchcodex/k-form-response-unavailable exact70dc, DRAFT/OPEN. LatestRAWmergeableunknown/stateunknown (previoustruebeforeothermainadvance); doNOTinferclean. No furtherheadmove.
+NominalCOMPLETERevisor2reviewstillpending. R2cycle95qualifiedreader-onlybe5/inheritedcopierhandling, cycles110/111qualifieddocs/proofsNOT2821newconsumerdelta; reviewsendpoint[]notproofmissingbut FULLchannelsearchednoqualifiedcomplete2821return. Request **f3c2eaea** /comment **6689896689** remains; no duplicateindependentreviewrequested.
+Singleinitial70dcCIlookup: **1SUCCESS+8IN_PROGRESS**,9distinctNEWworkflows
+**42261370303,42261369944,42261370066,42261370271,42261370115,42261370040,42261370021,42261369959,42261370097**.
+PV8 **bc3192989df38d88f49bb4dbd91c909b53a461b2** ismerge-source, lookupEXACT70dc. Noold5fgreenreuse/no9greenclaim/noafteremptyCIpoll. NeedR2clean+9NEWdistinctcompletedSUCCESS+freshRAW/nativeclean→ready/NORMALexpectedheadmerge/GET; findingsmustREDfirst. Don'trunretryforoldsharedbundlefailure, causalmainintegrationalreadyused.
+
+### C4-1910 rule30 sibling proof COMPLETE, NOT added to #2821
+ReservationFULLfreshCAS **7c6377e1cadc05fc962aeff03f02712bc86ba9ef**, beforecode:
+branch **codex/k-form-store-sibling-evidence**, new **tests/k-form-store-sibling-evidence.test.ts**, **docs/reviews/k2-form-store-siblings.md**; lib/form-store.ts READONLY.
+Freshinventory **137OPENPRs**, EVERYpaginatedfileslistread/0errors, nooverlapnewpaths; reservations/channelchecked. Ownsourceonlyreadonlyinexistingproducthead70dc; nootherauthorfiles/flowstouched.
+Durable **9f8d9092c5b6fcd1cfd14b0879eb37fb48894db8**, parentcurrentproduct70dc, native=GitDatatree **80a669285ab5c40351cce38d1d545adfe392fb8f**. ONLY2evidencefilesadded; no source/testconfig/productheadchanged/REDPRorCIstarted. Current2821remain70dc.
+**29checks/5CAUSALfailures/24passingcontrols**:
+- REALreadForms, injectHVALS[null]→successful[]insteadUnknownReply.
+- REALreadForm, injectHGET[false]→successfulnullinsteadUnknownReply (confirmednullHGETcontrolVALID).
+- REALresponseCounts, injectLLEN[null]→id:0insteadUnknownReply.
+- REALaddResponse, KEEP EVAL[null] NOTAPPLIED→fulfilledvoidinsteadUnknownReply (roomtakehappensbeforekeep, noquota-bypassclaim).
+- REALdropForm, HDEL/DEL[null,0] NOTAPPLIED→false/absenceinsteadUnknownReply; subsequentroomstepstillruns. Noevidenceofunderchargeamount/externaldataexposureclaimed.
+FiveunknownoutcomechecksFAIL; all10intendedinjectioncountchecksPASS; fiveknownSTOREDRESULTchecksPASS includingknownaddedanswerLLEN2/knowndropHGETnull; fourknownabsencecontrolsPASS(emptyforms,nullform,zeroanswers,falsemissingdeletion).
+Testoriginalfirstdraft20/5thenSTRENGTHENEDhealthyassertions+knownabsencecontrolsBEFOREpersistence/anyrepair→29/5. No expectedunknownrelaxation. NONEofthese5helpersrepaired. No pretendingstaticcandidatesstillunproved: fiveNOWPROVEDattheirmoduleboundary; consumereffectsremainstaticinferencesbelow.
+ApplicationcommandguardBEFOREbatch: <=20perhealthy/unknownscenario, observed1/1/1/4/3eachpair (=20appcommandsfor10maincases). Fixtureseed/directhealthyinspectionoutsideapplicationcount; 4knownabsencecontrolsshareseparate20cap. Noactualprovider/paidcommand/$zeroclaim; realMemoryRedis/roomhelpers/parser, calleroutesnotexecuted.
+Actualscopedtest+REALimports **0diagnostics**, directedlint0, scanner **4067tracked/0corrections**, diff0. Logs **/tmp/k2-form-siblings-red.log**, **-types-final.log**, **-lint-final.log**, **-scan.log**. Localnewfilesinstagedk2-form-final, doNOTpushthemto2821; publishedseparatebranch.
+ReportproposesC4classification: conditionalMEDreadFormsinventory→copier/export, MEDintegrityaddResponsepossiblecallercontinueswithoutstoredanswer, LOWreadForm/counts, dropFormunknown+roomcandidate. THESECONSUMER/QUOTAEFFECTSarestaticallyinferrednotactualHTTP/copy/quota-undercharge/irreversibleerasure/payment/nativeRedis/browser/productionproof. RequestedC4decidegradeandcoordinatedcorrectiverecut; NOautomaticnewproductfixinrunning2821. OriginalreadResponsesproductstillseparate.
+Fullchannelreport **bb0df382173da400db619cbbd13efb11ae9b4595** requestsclassification/owner/repairplan. C4nominalalreadyaskedrule30proof; no userpermissionneeded. Don'tsilentlyexpandownproductCIuntilconcreterepairscope/causalplan. FlowsC3, summaryreadersTperC4-2400, thosearenotK2.
+
+### Other preserved statuses and exact next
+#2790 priornominalobserverreturn5803506092/368 CLOSED, proofreport20dcec9. C5 now reportsWKgreen368; ownnewstackhead **a1c93ee4bda2872826adb9e07c3a4cdd822692c1** integratedcorrectedmain12/13blobsBYTE-ID, onlytestconfigunion. C5optionaloffertocheckaliasNOTmandatorynewproductreview(CX122.8); noreopeningallreview/noforeignCI. C52785MERGEDdc0329eband2786MERGEDca6f02f4reportedbyC5, notK2merge. C5alonehandles2790stackgates.
+#2796merged5c9/#2811mergedffb/old2340etcunchanged. #2801/#2803owner-costHOLDunchanged. FutureC6nominalonlywhenactualrequest. Newmain2822serverisProxyfixNOTK2-owned, nohelperedit.
+Nextcausal: R2complete2821return or70dcCIterminal→REDfixorqualified+9exact+freshcleanNORMALmerge. Whilewaiting, C4siblingclassification/nominalfollowup; fiveproofsareconcretefinishednewwork,noemptywatchloop. PendingCI/review/coordinationTRANSIENT, existingcontinuitypreserved; noautomationcreated/updated/disabled.
+BeforeendingFULLsafechannelappendthischeckpointSHA+current70dc/new9pending+siblingproof/classification. IfCAS409wait>=2min/readFULLfresh; neverwriteempty1MiBbody. No personaldata/price/limit/commission/flag/trava/account/payment/term/provider/contact/bypass/deploy/globalAAAclaim.

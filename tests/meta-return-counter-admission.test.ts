@@ -1,6 +1,8 @@
 /** Real callback, counter and one-use consent; synthetic auth/funding/provider boundaries. */
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { NextRequest } from "next/server";
 import { finishMetaConnect } from "@/lib/meta-routes";
 import { beginMeta } from "./meta-return-provider-world";
@@ -26,8 +28,12 @@ for (const mode of ["false-set", "null-count", "text-count", "timeout"]) {
     reset(); const req = await request(); state.counter = mode;
     const response = await finishMetaConnect(req);
     assert.equal(state.providerCalls, 0, "an unconfirmed counter must not authorize provider work");
-    assert.equal(response.status, 503);
-    assert.deepEqual(await response.json(), { ok: false, error: "try again in a moment" });
+    assert.equal(response.status, 303);
+    const destination = new URL(response.headers.get("Location")!);
+    assert.equal(destination.pathname, "/studio");
+    assert.equal(destination.searchParams.get("metaads"), "error");
+    assert.equal(destination.hash, "#numbers");
+    assert.equal(await response.text(), "", "a full-page return must not display raw JSON");
     assert.deepEqual([state.accessCalls, state.fundingCalls, state.commands.length], [0, 0, 2]);
     assert.deepEqual(state.commands.map(command => command[0]), ["SET", "INCR"]);
     assert.equal(state.commands[0][3], "EX");
@@ -48,8 +54,9 @@ test("Meta reports only a confirmed excess as slow", async () => {
   reset(); const req = await request(); state.counter = "exceeded";
   const response = await finishMetaConnect(req);
   assert.equal(state.providerCalls, 0);
-  assert.equal(response.status, 429);
-  assert.deepEqual(await response.json(), { ok: false, error: "slow" });
+  assert.equal(response.status, 303);
+  assert.equal(new URL(response.headers.get("Location")!).searchParams.get("metaads"), "limited");
+  assert.equal(await response.text(), "");
   assert.equal(state.commands.length, 2);
 });
 
@@ -75,4 +82,11 @@ test("Meta keeps a confirmed counter, one-use state and its original TTL", async
   assert.equal(state.commands[0][4], 600);
   await finishMetaConnect(req);
   assert.equal(state.providerCalls, 1, "a healthy replay cannot reuse consumed consent");
+});
+
+// Source contract only: the existing studio notice is not a browser/SSR certification.
+test("Meta's existing error notice offers an honest retry instead of a slowdown", () => {
+  const page = readFileSync(join(process.cwd(), "app/studio/page.tsx"), "utf8");
+  assert.match(page, /error:\s*{\s*title: "Something went wrong",\s*body: "Nothing was kept\. Try again in a moment\."/);
+  assert.ok(page.includes('META_NOTICES[typeof params.metaads === "string" ? params.metaads : ""]'));
 });

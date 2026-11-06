@@ -55,8 +55,8 @@ export async function finishMetaConnect(request: NextRequest): Promise<Response>
   if (!isMetaConfigured()) return notFound();
   const origin = originFrom(request);
   const admission = await essentialLimitState("metaads-return", clientAddress(request), 30, 600);
-  if (admission === "unknown") return Response.json({ ok: false, error: "try again in a moment" }, { status: 503 });
-  if (admission === "exceeded") return Response.json({ ok: false, error: "slow" }, { status: 429 });
+  if (admission === "unknown") return away(origin, "/studio?metaads=error#numbers");
+  if (admission === "exceeded") return away(origin, "/studio?metaads=limited");
   const cookie = request.cookies.get(SESSION_COOKIE)?.value ?? "";
   const email = await emailForSession(cookie);
   if (!email) return away(origin, "/signin?status=expired");

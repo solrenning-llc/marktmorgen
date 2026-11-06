@@ -13,7 +13,10 @@
  *   - a monthly plan gets no renewal notice, as before;
  *   - a full period ends where Stripe ends it: a day the next month lacks
  *     is that month's last day (31 Jan + a month is 28 Feb, 29 Feb 2028 + a
- *     year is 28 Feb 2029), never a day of the month after.
+ *     year is 28 Feb 2029), never a day of the month after;
+ *   - and from the subscription's own billing_cycle_anchor when it has one,
+ *     as Stripe counts it: anchored on the 31st, a period ending 28 Feb is
+ *     followed by one ending 31 Mar, not 28 Mar.
  */
 import { dueReminder, fullPeriodAfter, missedReminder } from "@/lib/billing-reminders";
 import { done, is, part } from "./check";
@@ -108,6 +111,32 @@ is("28 Feb 2027 + a year is 28 Feb 2028 (control)", iso(fullPeriodAfter(utc(2027
   const renews = utc(2028, 1, 29);
   const yearly = { ...sub("year", 0), items: { data: [{ current_period_start: utc(2027, 1, 28), current_period_end: renews, price: { lookup_key: "nimbus_labs_creator_year", unit_amount: 29000, recurring: { interval: "year" } } }] }, cancel_at: utc(2029, 1, 28) };
   is("yearly renewing 29 Feb 2028, canceling 28 Feb 2029: noticed on the 30th day", dueReminder(yearly, renews - 30 * DAY + 3600)?.kind, "renewal");
+}
+
+part("the next period ends on the anchor's day, as Stripe ends it");
+{
+  const anchor31 = utc(2027, 0, 31, 9);
+  is("anchored on 31 Jan, a period ending 28 Feb is followed by 31 Mar", iso(fullPeriodAfter(utc(2027, 1, 28, 9), "month", anchor31)), iso(utc(2027, 2, 31, 9)));
+  is("anchored on 31 Jan, a period ending 31 Mar is followed by 30 Apr", iso(fullPeriodAfter(utc(2027, 2, 31, 9), "month", anchor31)), iso(utc(2027, 3, 30, 9)));
+  is("anchored on 30 Jan, a period ending 28 Feb is followed by 30 Mar", iso(fullPeriodAfter(utc(2027, 1, 28), "month", utc(2027, 0, 30))), iso(utc(2027, 2, 30)));
+  is("anchored on 15 Jan, a period ending 15 Feb is followed by 15 Mar (control)", iso(fullPeriodAfter(utc(2027, 1, 15), "month", utc(2027, 0, 15))), iso(utc(2027, 2, 15)));
+  is("anchored on 29 Feb 2028, a year ending 28 Feb 2031 is followed by 29 Feb 2032", iso(fullPeriodAfter(utc(2031, 1, 28, 7), "year", utc(2028, 1, 29, 7))), iso(utc(2032, 1, 29, 7)));
+  is("anchored on 29 Feb 2028, a year ending 28 Feb 2029 is followed by 28 Feb 2030 (control)", iso(fullPeriodAfter(utc(2029, 1, 28), "year", utc(2028, 1, 29))), iso(utc(2030, 1, 28)));
+  is("no anchor: the period's own end day, as before (control)", iso(fullPeriodAfter(utc(2027, 1, 28), "month")), iso(utc(2027, 2, 28)));
+  is("an anchor after the period's end proves nothing: as before (control)", iso(fullPeriodAfter(utc(2027, 1, 28), "month", utc(2027, 2, 31))), iso(utc(2027, 2, 28)));
+  is("an anchor that is not a time: as before (control)", iso(fullPeriodAfter(utc(2027, 1, 28), "month", "31")), iso(utc(2027, 2, 28)));
+
+  // A yearly plan anchored 29 Feb 2028 renewing 28 Feb 2031: Stripe ends that year on 29 Feb 2032.
+  const renews = utc(2031, 1, 28, 7);
+  const yearly = (cancelAt: number) => ({
+    ...sub("year", 0),
+    billing_cycle_anchor: utc(2028, 1, 29, 7),
+    items: { data: [{ current_period_start: utc(2030, 1, 28, 7), current_period_end: renews, price: { lookup_key: "nimbus_labs_creator_year", unit_amount: 29000, recurring: { interval: "year" } } }] },
+    cancel_at: cancelAt,
+  });
+  const noticeDay = renews - 30 * DAY + 3600;
+  is("canceling 28 Feb 2032 (before the anchor's 29 Feb): prorated, no notice", dueReminder(yearly(utc(2032, 1, 28, 12)), noticeDay), null);
+  is("canceling 29 Feb 2032, Stripe's own end: the full year is noticed", dueReminder(yearly(utc(2032, 1, 29, 7)), noticeDay)?.kind, "renewal");
 }
 
 part("monthly");

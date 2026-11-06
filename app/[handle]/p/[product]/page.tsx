@@ -508,7 +508,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
 
   const footer = (
     <div className="mt-10 text-center">
-      <a href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+      <a href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
         {w.everythingFrom(store.name)}
       </a>
       <StoreTracking store={store} presence product={product.id} />

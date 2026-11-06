@@ -245,7 +245,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             <p className="st-muted mt-4 text-sm">{p.refund(store.name)}</p>
             {order.email ? <p className="st-muted mt-4 text-sm">{t.receiptTo(order.email)}</p> : null}
             <div className="mt-8">
-              <a href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+              <a href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
                 {t.backTo(store.name)}
               </a>
               <StoreTracking
@@ -312,7 +312,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             </p>
             {order.email ? <p className="st-muted mt-4 text-sm">{t.receiptTo(order.email)}</p> : null}
             <div className="mt-8">
-              <a href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+              <a href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
                 {t.backTo(store.name)}
               </a>
               <StoreTracking
@@ -388,7 +388,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             )}
             {order.email && !isHouseStore(store) ? <p className="st-muted mt-5 text-sm">{t.groupReceipt(order.email)}</p> : null}
             <div className="mt-8">
-              <a href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+              <a href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
                 {t.backTo(store.name)}
               </a>
               <StoreTracking
@@ -1304,7 +1304,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             {order.state === "paid" && (order.record.metadata as Record<string, string> | null)?.cart === "yes" ? <ClearCart handle={store.handle} /> : null}
             <a
               href={`/@${store.handle}`}
-              className="st-footer-link text-sm font-semibold"
+              className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold"
             >
               {t.backTo(store.name)}
             </a>
@@ -1451,7 +1451,7 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
             </>
           )}
           <div className="mt-8">
-            <a href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+            <a href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
               {t.backTo(store.name)}
             </a>
           </div>

@@ -23,11 +23,13 @@
  * When the period runs (Directive 2011/83/EU arts. 9, 16(a), 16(m), as read
  * for item 91 in lib/digital-consent.ts): 14 days from the contract; digital
  * content whose buyer gave the art. 16(m) yes loses the right once supply
- * begins (at once, or on a pre-order's release day); a membership is at least
- * partly a service, so it keeps the 14 days; a shipped item runs from its
- * receipt, which is not known here, so it is offered longer, never shorter.
- * When a time cannot be read the function stays offered: it is never hidden
- * on a guess. Nothing here decides a refund or its amount.
+ * begins: at once, or when a pre-order is actually handed over (its planned
+ * release day proves nothing, so until then it keeps the 14 days); a
+ * membership is at least partly a service, so it keeps the 14 days; a shipped
+ * item's 14 days run from its receipt (art. 9(2)(b)), which is not known here,
+ * so it stays offered with no end. When a time cannot be read the function
+ * stays offered: it is never hidden on a guess. Nothing here decides a refund
+ * or its amount.
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import type { KeptConsent } from "@/lib/digital-consent";
@@ -39,12 +41,6 @@ export const WITHDRAW_FROM_CONTRACT = "Withdraw from contract here";
 export const CONFIRM_WITHDRAWAL = "Confirm withdrawal";
 /** The withdrawal period, in days from the contract (art. 9(1)). */
 export const WITHDRAWAL_DAYS = 14;
-/**
- * Days added for a shipped item, whose 14 days run from its receipt, which is
- * not known here: offering the function too long harms nobody, too short
- * would take a right away.
- */
-export const SHIPPED_REACH_DAYS = 60;
 
 const DAY = 86_400;
 /** A Stripe checkout or payment reference, or a PayPal order's, as the store keeps it. */
@@ -63,7 +59,7 @@ export type WithdrawalFacts = {
   givenByStore: boolean;
   /** The yes kept on the order (lib/digital-consent.ts, readConsentMeta), or null. */
   consent: KeptConsent | null;
-  /** A pre-order: its release day ("YYYY-MM-DD") when set, and whether it was handed over. */
+  /** A pre-order: its planned release day ("YYYY-MM-DD") when set, and whether it was actually handed over. */
   preorder?: { day: string | null; given: boolean };
   /** Shipped by the creator. */
   shipped?: boolean;
@@ -71,31 +67,21 @@ export type WithdrawalFacts = {
 
 /**
  * Whether the function is offered now, and until when (seconds; null when the
- * end cannot be read, and then it stays offered).
+ * end cannot be read, such as a shipped item's receipt, and then it stays
+ * offered).
  */
 export type WithdrawalWindow = { open: true; until: number | null } | { open: false; why: "not-here" | "supplied" | "ended" };
-
-/** The start of a "YYYY-MM-DD" day in UTC, in seconds, or null. */
-function dayStart(day: string | null): number | null {
-  if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
-  const at = Date.parse(`${day}T00:00:00Z`);
-  return Number.isFinite(at) ? Math.floor(at / 1000) : null;
-}
 
 /** When the withdrawal function is offered for one purchase (see the file's comment). */
 export function withdrawalWindow(facts: WithdrawalFacts, nowSeconds: number): WithdrawalWindow {
   if (facts.kind === "imported" || facts.givenByStore) return { open: false, why: "not-here" };
   const paid = Number.isSafeInteger(facts.paidAt) && facts.paidAt > 0 ? facts.paidAt : null;
   const membership = facts.member || facts.consent?.kind === "membership";
-  let until: number | null = paid === null ? null : paid + WITHDRAWAL_DAYS * DAY;
-  if (facts.shipped) {
-    until = until === null ? null : until + SHIPPED_REACH_DAYS * DAY;
-  } else if (!membership && facts.consent?.kind === "digital") {
-    // The yes ends the right once supply begins: at once, or on a pre-order's release day.
-    if (!facts.preorder || facts.preorder.given) return { open: false, why: "supplied" };
-    const release = dayStart(facts.preorder.day);
-    if (release !== null && until !== null) until = Math.min(until, release);
-  }
+  // A shipped item's 14 days run from its receipt, not known here: no end is invented.
+  if (facts.shipped) return { open: true, until: null };
+  const until: number | null = paid === null ? null : paid + WITHDRAWAL_DAYS * DAY;
+  // The yes ends the right once supply actually begins: at once, or when a pre-order is handed over, never on its planned day.
+  if (!membership && facts.consent?.kind === "digital" && (!facts.preorder || facts.preorder.given)) return { open: false, why: "supplied" };
   if (until !== null && nowSeconds > until) return { open: false, why: "ended" };
   return { open: true, until };
 }

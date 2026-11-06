@@ -80,7 +80,9 @@ themselves or the contract again.
     function is owed after that.
   - **The same content without that consent** (an older order, or a form that did
     not ask): 14 days from the contract.
-  - **A pre-order:** until its release day.
+  - **A pre-order:** 14 days from the contract until it is actually handed over
+    (with the consent, that ends the right). Its planned release day proves no
+    supply, so it ends nothing (Codex N, PR #2827).
   - **A membership** (at least partly a service): 14 days from the contract. The
     right is lost only once the service is fully performed (art. 16(a)), and the
     consumer pays in proportion (art. 14(3)).
@@ -103,9 +105,9 @@ themselves or the contract again.
      proved the address, so name, contract and email are prefilled), in the order
      confirmation email, and on `/@store/manage` for memberships.
    - **When shown:** only while the order's withdrawal period runs, by the kinds
-     above. When the period cannot be known (shipped items), it stays shown with
-     the 14 days counted from the latest date the order could have been received.
-     Unknown never hides it.
+     above. When the period cannot be known (shipped items, whose receipt the
+     code does not know), it stays shown with no end until a receipt date exists
+     (Revisor 1, PR #2827). Unknown never hides it.
    - **Form:** name, the order, and the email for the confirmation, each editable,
      then a button labelled "Confirm withdrawal".
    - **On confirm:**

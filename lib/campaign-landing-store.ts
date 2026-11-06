@@ -273,6 +273,23 @@ function dropped(reply: unknown): boolean {
  * confirmed it throws LandingsDropUnconfirmed: the landings may still be there and their room stays counted, never
  * said to be gone (Codex G2, #1947).
  */
+/**
+ * Finishes the deletion of a removed product's landings that could not be
+ * confirmed when it was removed (Codex G, #1947): "dropped" once they are
+ * confirmed gone, "none" when Redis confirms there are none; anything else
+ * throws LandingsDropUnconfirmed. Used when the same removal is asked again
+ * for a product that is no longer in the catalog.
+ */
+export async function finishLandingsDrop(statsId: string | null, productId: string, room: DataStore): Promise<"dropped" | "none"> {
+  if (!statsId || !isRedisConfigured()) return "none";
+  const reply: unknown = await redisPipeline([["EXISTS", landingKey(statsId, productId)]]).catch(() => null);
+  const held = Array.isArray(reply) && reply.length === 1 && (reply[0] === 0 || reply[0] === 1) ? reply[0] : null;
+  if (held === null) throw new LandingsDropUnconfirmed();
+  if (held === 0) return "none";
+  await dropLandings(statsId, productId, room);
+  return "dropped";
+}
+
 export async function dropLandings(statsId: string | null, productId: string, room: DataStore): Promise<void> {
   const key = dataKey(room);
   if (!statsId || !key || !isRedisConfigured()) return;

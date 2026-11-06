@@ -253,7 +253,7 @@ function typedFree(price: string): boolean {
 async function send(
   payload: Record<string, unknown>,
   currency: Currency,
-): Promise<{ problem: string | null; quiet: string[] }> {
+): Promise<{ problem: string | null; quiet: string[]; pending?: boolean }> {
   const wrong = (message: string) => ({ problem: message, quiet: [] });
   try {
     const response = await fetch("/api/store/product", {
@@ -267,8 +267,9 @@ async function send(
       limit?: number;
       reason?: string;
       quiet?: string[];
+      cleanupPending?: boolean;
     };
-    if (data.ok) return { problem: null, quiet: Array.isArray(data.quiet) ? data.quiet : [] };
+    if (data.ok) return { problem: null, quiet: Array.isArray(data.quiet) ? data.quiet : [], pending: data.cleanupPending === true };
     if (data.error === "link") {
       // The server says which way the link was wrong; the creator gets that
       // sentence rather than a generic failure they cannot act on.
@@ -2004,7 +2005,7 @@ export function ProductEditor({
   async function run(payload: Record<string, unknown>, done: () => void, confirmation?: string) {
     setBusy(true);
     setError(null);
-    const { problem, quiet } = await send(payload, currency);
+    const { problem, quiet, pending } = await send(payload, currency);
     setBusy(false);
     if (problem) {
       setError(problem);
@@ -2014,7 +2015,9 @@ export function ProductEditor({
     // Kept on the page rather than in a toast: each line names a product to go
     // and change, which is not something to read in three seconds.
     setSilenced(quiet);
-    if (confirmation) toast(confirmation);
+    // Removed, but its campaign words could not be confirmed deleted (#1947): said, never a plain "removed".
+    if (pending) toast("Product removed. Its campaign words could not be confirmed deleted just now. They stay counted in your store's data until they are, and they go with your store's data if you close it.");
+    else if (confirmation) toast(confirmation);
     router.refresh();
   }
 

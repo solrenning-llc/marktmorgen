@@ -24,6 +24,8 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
+import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliversDigitally, keepConsentOn, validConsent } from "@/lib/digital-consent";
+import { consentEmailLines } from "@/lib/digital-consent-email";
 import { readListings } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type Grant, MANAGE_TOKEN_PATTERN, grantOf, subsOf } from "@/lib/membership-manage";
@@ -133,6 +135,8 @@ export type YearlyPreview = {
   currency: string;
   trialing: boolean;
   at: number;
+  /** Whether the membership is handed over digitally at once: then the page asks the EU box again (91 [D2-EU-WITHDRAWAL]). */
+  digital: boolean;
 };
 
 export type YearlyProblemReason = "expired" | "gone" | "yearly" | "error";
@@ -182,6 +186,7 @@ export async function previewYearly(store: Store, token: string, subscription: s
         currency: typeof invoice.currency === "string" ? invoice.currency : store.currency,
         trialing: found.trialing,
         at,
+        digital: deliversDigitally(found.product),
       },
     };
   } catch (error) {
@@ -192,10 +197,14 @@ export async function previewYearly(store: Store, token: string, subscription: s
 
 export type YearlyResult =
   | { ok: true; title: string }
-  | { ok: false; reason: "expired" | "gone" | "yearly" | "stale" | "declined" | "busy" | "error" };
+  | { ok: false; reason: "expired" | "gone" | "yearly" | "stale" | "declined" | "busy" | "consent" | "error" };
 
-/** Moves the membership to yearly, at the second the preview was worked out for. */
-export async function switchYearly(store: Store, token: string, subscription: string, at: number): Promise<YearlyResult> {
+/**
+ * Moves the membership to yearly, at the second the preview was worked out
+ * for. It charges at once under new terms, so it asks the buyer's yes again,
+ * as a switch between tiers does (lib/tier-switch.ts; 91 [D2-EU-WITHDRAWAL]).
+ */
+export async function switchYearly(store: Store, token: string, subscription: string, at: number, consent: DigitalConsent | null): Promise<YearlyResult> {
   if (!isRedisConfigured() || !store.stripeAccountId) return { ok: false, reason: "error" };
   const now = Math.floor(Date.now() / 1000);
   if (!Number.isInteger(at) || at > now + 60 || now - at > PREVIEW_SECONDS) return { ok: false, reason: "stale" };
@@ -204,9 +213,13 @@ export async function switchYearly(store: Store, token: string, subscription: st
     return await withLock(`nl:tier:${subscription}:lock`, 60, 5_000, async (): Promise<YearlyResult> => {
       const found = await find(store, token, subscription);
       if ("reason" in found) return { ok: false, reason: found.reason };
+      const digital = deliversDigitally(found.product);
+      if (digital && !validConsent(consent)) return { ok: false, reason: "consent" };
       const account = found.grant.a;
       const price = await yearlyPrice(store, found.product, found.choice.cents);
-      const updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, switchBody(found.itemId, price, at));
+      const body = switchBody(found.itemId, price, at);
+      if (digital && validConsent(consent)) keepConsentOn(body, consent, consentKind(found.product));
+      const updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body);
       if (updated.pending_update) {
         const invoice = updated.latest_invoice as { id?: unknown; status?: unknown } | null;
         if (invoice && typeof invoice.id === "string" && invoice.status === "open") {
@@ -223,7 +236,7 @@ export async function switchYearly(store: Store, token: string, subscription: st
         `/subscriptions/${encodeURIComponent(subscription)}`,
         new URLSearchParams({ "metadata[every]": "year", "metadata[yearly_from]": "month", "metadata[yearly_at]": String(now) }),
       ).catch((error) => console.error("recording a move to yearly failed", error));
-      await tell(store, account, found, updated);
+      await tell(store, account, found, updated, digital && validConsent(consent) ? consentMetaValue(consent, consentKind(found.product)) : "");
       return { ok: true, title: found.product.title };
     });
   } catch (error) {
@@ -234,7 +247,7 @@ export async function switchYearly(store: Store, token: string, subscription: st
 }
 
 /** The member's receipt, in the store's language, and the creator's note, in English. */
-async function tell(store: Store, account: string, found: Found, updated: Record<string, unknown>): Promise<void> {
+async function tell(store: Store, account: string, found: Found, updated: Record<string, unknown>, kept: string): Promise<void> {
   let email = "";
   try {
     const customer = await onAccount("GET", account, `/customers/${encodeURIComponent(found.grant.c)}`);
@@ -261,6 +274,8 @@ async function tell(store: Store, account: string, found: Found, updated: Record
       "",
       paid,
       m.fromNow(priceWords(store, found.choice.cents, "year", store.language)),
+      // The yes given for this move, quoted as a checkout's confirmation quotes it (the durable medium).
+      ...consentEmailLines(store, kept ? { [CONSENT_META]: kept } : null),
       "",
       m.switchedFooter(store.name),
     ].join("\n"),

@@ -24,6 +24,8 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
+import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliversDigitally, keepConsentOn, validConsent } from "@/lib/digital-consent";
+import { consentEmailLines } from "@/lib/digital-consent-email";
 import { readListings } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type Membership, endsAtOf, grantOf, subscriptionCurrency, subsOf } from "@/lib/membership-manage";
@@ -170,6 +172,8 @@ export type Preview = {
   trialing: boolean;
   /** The second the amount is worked out for; the switch uses the same one. */
   at: number;
+  /** Whether the tier is handed over digitally at once: then the page asks the EU box again (91 [D2-EU-WITHDRAWAL]). */
+  digital: boolean;
 };
 
 export type PreviewResult = { ok: true; preview: Preview } | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "error" };
@@ -217,6 +221,7 @@ export async function previewSwitch(store: Store, token: string, subscription: s
         currency: typeof invoice.currency === "string" ? invoice.currency : store.currency,
         trialing: found.trialing,
         at,
+        digital: deliversDigitally(found.to),
       },
     };
   } catch (error) {
@@ -227,14 +232,21 @@ export async function previewSwitch(store: Store, token: string, subscription: s
 
 export type SwitchResult =
   | { ok: true; title: string }
-  | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "stale" | "declined" | "busy" | "error" };
+  | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "stale" | "declined" | "busy" | "consent" | "error" };
 
 /**
  * Makes the switch, at the second the preview was worked out for. The card on
  * file pays the difference at once; if Stripe cannot take it, the change is
  * not made and the invoice is voided, so nothing is owed.
+ *
+ * A switch opens the new tier at once and charges at once, so it asks the
+ * buyer's yes to that again, as every checkout does (91 [D2-EU-WITHDRAWAL];
+ * the owner, C1-20261106-0100-TODOS-1): without a valid `consent` for a tier
+ * handed over digitally, "consent", and nothing is sent to Stripe. The yes is
+ * kept on the subscription in the request that charges (metadata[dc]), and
+ * the receipt quotes it.
  */
-export async function switchTier(store: Store, token: string, subscription: string, target: string, at: number): Promise<SwitchResult> {
+export async function switchTier(store: Store, token: string, subscription: string, target: string, at: number, consent: DigitalConsent | null): Promise<SwitchResult> {
   if (!isRedisConfigured() || !store.stripeAccountId) return { ok: false, reason: "error" };
   const now = Math.floor(Date.now() / 1000);
   if (!Number.isInteger(at) || at > now + 60 || now - at > PREVIEW_SECONDS) return { ok: false, reason: "stale" };
@@ -242,9 +254,13 @@ export async function switchTier(store: Store, token: string, subscription: stri
     return await withLock(`nl:tier:${subscription}:lock`, 60, 5_000, async (): Promise<SwitchResult> => {
       const found = await find(store, token, subscription, target);
       if ("reason" in found) return { ok: false, reason: found.reason };
+      const digital = deliversDigitally(found.to);
+      if (digital && !validConsent(consent)) return { ok: false, reason: "consent" };
       const account = found.grant.a;
       const price = await tierPrice(store, found.to);
-      const updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, switchBody(found.itemId, price, at));
+      const body = switchBody(found.itemId, price, at);
+      if (digital && validConsent(consent)) keepConsentOn(body, consent, consentKind(found.to));
+      const updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body);
       if (updated.pending_update) {
         // Declined, or the bank asked for a step the member was not there to
         // take: nothing changed. The invoice left open is voided so nothing is owed.
@@ -264,7 +280,7 @@ export async function switchTier(store: Store, token: string, subscription: stri
         `/subscriptions/${encodeURIComponent(subscription)}`,
         new URLSearchParams({ "metadata[product]": found.to.id, "metadata[option]": "", "metadata[switched_from]": found.from.id }),
       ).catch((error) => console.error("recording a tier switch failed", error));
-      await tell(store, account, found, updated);
+      await tell(store, account, found, updated, digital && validConsent(consent) ? consentMetaValue(consent, consentKind(found.to)) : "");
       return { ok: true, title: found.to.title };
     });
   } catch (error) {
@@ -275,7 +291,7 @@ export async function switchTier(store: Store, token: string, subscription: stri
 }
 
 /** The member's receipt of the switch and the creator's note of it; and the doors asked again at once. */
-async function tell(store: Store, account: string, found: Found, updated: Record<string, unknown>): Promise<void> {
+async function tell(store: Store, account: string, found: Found, updated: Record<string, unknown>, kept: string): Promise<void> {
   let email = "";
   try {
     const customer = await onAccount("GET", account, `/customers/${encodeURIComponent(found.grant.c)}`);
@@ -313,6 +329,8 @@ async function tell(store: Store, account: string, found: Found, updated: Record
       m.fromNow(tierWords(store, found.to, store.language)),
       "",
       m.switchedOpen,
+      // The yes given for this switch, quoted as a checkout's confirmation quotes it (the durable medium).
+      ...consentEmailLines(store, kept ? { [CONSENT_META]: kept } : null),
       "",
       m.switchedFooter(store.name),
     ].join("\n"),

@@ -566,22 +566,31 @@ export async function forgetInboxPerson(statsId: string | null, email: string): 
   // erasure is said as not done and tried again (lib/person-erasure.ts), never answered as finished.
   const ids = await indexIds(statsId, -1);
   const theirs: Kept[] = [];
+  // Index entries whose conversation answered exactly null: nothing is kept behind them any more
+  // (expired, or deleted by an earlier erasure whose index removal did not finish).
+  const gone: string[] = [];
   for (let i = 0; i < ids.length; i += 200) {
     const chunk = ids.slice(i, i + 200);
-    for (const value of await keptSlots(statsId, chunk)) {
+    const slots = await keptSlots(statsId, chunk);
+    slots.forEach((value, at) => {
+      if (value === null) gone.push(chunk[at]);
       const kept = parseKept(value);
       if (kept && normaliseEmail(kept.email) === address) theirs.push(kept);
-    }
+    });
   }
-  if (!theirs.length) return 0;
-  const done = repliesFor(
-    await redisPipeline([
-      ["DEL", ...theirs.flatMap((c) => [convKey(statsId, c.id), msgKey(statsId, c.id), ...(c.token ? [tokenKey(c.token)] : [])])],
-      ["ZREM", indexKey(statsId), ...theirs.map((c) => c.id)],
-    ]),
-    2,
-  );
-  if (done === null || done.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("the deletion of a person's conversations");
+  // Two steps, in this order, so a failure part-way is always found again by the retry (Codex J on #3113):
+  // a Redis pipeline is not a transaction, and an index entry removed while its records stayed would leave
+  // them kept with nothing pointing to them. First the records, their deletion confirmed; only then the index.
+  if (theirs.length) {
+    const keys = theirs.flatMap((c) => [convKey(statsId, c.id), msgKey(statsId, c.id), ...(c.token ? [tokenKey(c.token)] : [])]);
+    const deleted = countOf(repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0]);
+    if (deleted === null || deleted > keys.length) throw new UnknownReplyError("the deletion of a person's conversations");
+  }
+  const unindex = [...theirs.map((c) => c.id), ...gone];
+  if (unindex.length) {
+    const removed = countOf(repliesFor(await redisPipeline([["ZREM", indexKey(statsId), ...unindex]]), 1)?.[0]);
+    if (removed === null || removed > unindex.length) throw new UnknownReplyError("the removal of a person's conversations from the inbox's index");
+  }
   return theirs.length;
 }
 

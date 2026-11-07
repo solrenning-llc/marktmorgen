@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
 import { readListing } from "@/lib/catalog";
-import { preorderViews, setExpectedDay, soonOne } from "@/lib/preorders";
+import { PreorderDayUnconfirmed, preorderViews, setExpectedDay, soonOne } from "@/lib/preorders";
 import { preorderProblem, readExpectedDay } from "@/lib/preorder-rules";
 import { UnknownReplyError } from "@/lib/redis-reply";
 
@@ -17,7 +17,9 @@ import { UnknownReplyError } from "@/lib/redis-reply";
  * goes on sale.
  *
  * The change saved, its pre-orders read in an unknown shape answer 503
- * "preorders_unread": the counts are not invented as 0 (sweep APP3).
+ * "preorders_unread": the counts are not invented as 0 (sweep APP3). The
+ * change itself not confirmed (its write answered in another shape) answers
+ * 502 "day_unconfirmed", never "Saved." (independent review of #3005).
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "products", 2_000);
@@ -43,6 +45,10 @@ export async function POST(request: NextRequest) {
     const views = await preorderViews(store, [product.id]);
     return Response.json({ ok: true, view: views[product.id] ?? { day: null, waiting: 0, given: 0, refunded: 0 } });
   } catch (error) {
+    if (error instanceof PreorderDayUnconfirmed) {
+      console.error("a pre-order change could not be confirmed saved", error);
+      return Response.json({ ok: false, error: "day_unconfirmed" }, { status: 502 });
+    }
     if (error instanceof UnknownReplyError) {
       console.error("a pre-order change was saved, but its pre-orders could not be read", error);
       return Response.json({ ok: false, error: "preorders_unread" }, { status: 503 });

@@ -9,6 +9,8 @@
  *   2. preordersOf: the copy of a person's data was handed over without their paid pre-orders in it.
  * Now: an unknown read throws UnknownReplyError; the switch answers 503 "preorders_unread" (its day is saved, the
  * counts are not invented); the studio says the pre-orders could not be read; the copy is not made.
+ * And the day's own HSET/HDEL answered in another shape throws PreorderDayUnconfirmed: the switch answers 502
+ * "day_unconfirmed", never ok and never "Saved." (independent review of #3005, LEVE).
  */
 import { createElement } from "react";
 import { readFileSync } from "node:fs";
@@ -20,7 +22,7 @@ import { setSoon } from "@/lib/waitlist";
 import { preorderViews, preordersOf, setExpectedDay } from "@/lib/preorders";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { COPIERS } from "@/lib/person-copy";
-import type { ErasureScope } from "@/lib/person-erasure";
+import type { ErasureScope } from "@/lib/erasure-rules";
 import { POST as preorderRoute } from "@/app/api/store/preorder/route";
 import { WaitlistPanel } from "@/components/waitlist-panel";
 import { store as redis } from "./redis-stub";

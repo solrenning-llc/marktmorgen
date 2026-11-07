@@ -99,10 +99,23 @@ export function preorderDay(store: Store, product: Listing, soon: boolean, day: 
 
 // ------------------------------------------------------------------ the studio
 
-/** Sets the day a coming-soon product is expected, so it takes pre-orders; null stops taking them. */
+/** The expected day's HSET or HDEL answered in another shape: it may or may not have been written, never said saved. */
+export class PreorderDayUnconfirmed extends Error {
+  constructor() {
+    super("the expected day of a pre-order could not be confirmed saved");
+    this.name = "PreorderDayUnconfirmed";
+  }
+}
+
+/**
+ * Sets the day a coming-soon product is expected, so it takes pre-orders; null stops taking them. The write of one
+ * field answers 0 or 1; anything else throws PreorderDayUnconfirmed, so the switch never says "Saved." on it
+ * (independent review of #3005).
+ */
 export async function setExpectedDay(store: Store, productId: string, day: string | null): Promise<void> {
   if (!store.statsId) return;
-  await redisPipeline([day ? ["HSET", dayKey(store.statsId), productId, day] : ["HDEL", dayKey(store.statsId), productId]]);
+  const replies = await redisPipeline([day ? ["HSET", dayKey(store.statsId), productId, day] : ["HDEL", dayKey(store.statsId), productId]]);
+  if (!oneWrite(repliesFor(replies, 1)?.[0])) throw new PreorderDayUnconfirmed();
 }
 
 export type PreorderView = { day: string | null; waiting: number; given: number; refunded: number };

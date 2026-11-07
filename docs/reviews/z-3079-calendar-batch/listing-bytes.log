@@ -1,0 +1,13 @@
+z-3079-listing-bytes.proof.ts
+  ok    healthy writer accepted all valid 50-session call products, and batched reader returns all50
+OBSERVED_BYTES {"perListing":29538,"rawBatch":1476900,"restJSONBytes":1517164,"pricedBatch":819200,"claimedReplyCeiling":1048576}
+  FAIL  actual valid stored listing bytes fit the priced 16KiB per listing
+        expected true
+        got      false
+  FAIL  real returned50-key MGET JSON fits the PR one-MiB claim before any check
+        expected true
+        got      false
+
+3 checks, 2 failing.
+COUNTED_MEMORY_COMMANDS 151
+COUNTED_MOCK_HTTP 0

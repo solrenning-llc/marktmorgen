@@ -1,0 +1,24 @@
+INCOMPLETE RUN, NOT FULL RED. Raw bytes=147304, SHA256=c6b6c1a9563dfb1e2b462c8b1229cff3ff0395304cf8c6afcc57184a6f7b306b. Raw scratch log retained /tmp/z3079-red.log; only diagnostic text clipped for repository.
+calendar-batch-reads.test.ts
+  ok    the stand-in store has every call listing and its calls id
+
+A store at MAX_PRODUCTS call listings and CALENDAR_CALLS bookings makes its file in a few MGETs
+  ok    the file is made, every booking in it with its room
+  FAIL  no listing or room is read with a GET of its own, besides the rooms' making (SET NX and GET)
+        expected [0,500,500]
+        got      [2000,3500,500]
+  FAIL  the listings in 40 MGETs of at most 50, the rooms in 5 of at most 400 keys
+        expected [40,50,5,400]
+        got      [0,null,0,null]
+  ok    measured (5025) within the answer and the making as priced (9 + 5531)
+  FAIL  the making's shape at its worst: 1,081 commands (5,531 when every listing and every room read was a GET)
+        expected 1081
+        got      5531
+  FAIL  and the measured making is within that figure (5025 <= 9 + 1,081)
+        expected true
+        got      false
+
+An MGET reply that is not whole, or holds anything but text or nothing, fails the making as an unknown
+  FAIL  listings: a reply one short fails the making (503), nothing kept
+        expected [503,false,null]
+        got      [200,true,"{\"at\":1794076742678,\"ics\":\"BEGIN:VCALENDAR\\r\\nVERSION:2.0\\r\\nPRODID:-//Marktmorgen//Bookings//EN\\r\\nCALSCALE:GREGORIAN\\r\\nMETHOD:PUBLISH\\r\\nX-WR-CALNAME:Batched Calls bookings\\r\\nREFRESH-INTERVAL;VALUE=DURATION:PT30M\\r\\nX-PUBLISHED-TTL:PT30M\\r\\nBEGIN:VEVENT\\r\\nUID:cs_test_batched000000@marktmorgen.com\\r\\nDTSTAMP:20261107T183902Z\\r\\nSEQUENCE:0\\r\\nDTSTART:20261108T180000Z\\r\\nDTEND:20261108T183000Z\\r\\nSUMMARY:A call that is no longer listed with B 0\\r\\nDESCRIPTION:Booked by:\\\\nB 0 <b0@example.com>\\\\n\\\\nFrom your Marktmorgen studi\\r\\n o.\\r\\nSTATUS:CONFIRMED\\r\\nTRANSP:OPAQUE\\r\\nEND:VEVENT\\r\\nBEGIN:VEVENT\\r\\nUID:cs_test_batched000001@marktmorgen.com\\r\\nDTSTAMP:20261107T183902Z\\r\\nSEQUENCE:0\\r\\nDTSTART:20261108T190000Z\\r\\nDTEND:20261108T193000Z\\r\\nSUMMARY:A call that is no longer listed with B 1\\r\\nDESCRIPTION:Booked by:\\\\nB 1 <b1@example.com>\\\\n\\\\nFrom your Marktmorgen studi\\r\\n o.\\r\\nSTATUS:CONFIRMED\\r\\nTRANSP:OPAQUE\\r\\nEND:VEVENT\\r\\nBEGIN:VEVENT\\r\\nUID:cs_test_batched000002@marktmorgen.com\\r\\nDTSTAMP:20261107T183902Z\\r\\nSEQUENCE:0\\r\\nDTSTART:20261108T200000Z\\r\\nDTEND:20261108T203000Z\\r\\nSUMMARY:A call that is no longer listed with B 2\\r\\nDESCRIPTION:Booked by:\\\\nB 2 <b2@example.com>\\\\n\\\\nFrom your Marktmorgen studi\\r\\n o.\\r\\nSTATUS:CONFIRMED\\r\\nTRANSP:OPAQUE\\r\\nEND:VEVENT\\r\\nBEGIN:VEVENT\\r\\nUID:cs_test_batched000003@marktmorgen.com\\r\\nDTSTAMP:20261107T183902Z\\r\\nSEQUENCE:0\\r\\nDTSTART:20261108T210000Z\\r\\nDTEND:20261108T213000Z\\r\\nSUMMARY:A call that is no longer listed with B 3\\r\\nDESCRIPTION:Booked by:\\\\nB 3 <b3@example.com>\\\\n\\\\nFrom your Marktmorgen studi\\r\\n o.\\r\\nSTATUS:CONFIRMED\\r\\nTRANSP:OPAQUE\\r\\nEND:VEVENT\\r\\nBEGIN:VEVENT\\r\\nUID:cs_test_batched000004@marktmorgen.com\\r\\nDTSTAMP:20261107T183902Z\\r\\nSEQUENCE:0\\r\\nDTSTART:20261108T220000Z\\r\\nDTEND:20261108T223000Z\\r\\nSUMMARY:A call that i [diagnostic truncated, original line chars=146176]

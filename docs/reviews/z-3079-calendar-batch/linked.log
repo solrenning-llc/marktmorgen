@@ -1,0 +1,148 @@
+calendar-room-shape.test.ts
+
+A count read in another shape is unknown: nothing is made
+  ok    the day's tries answered "abc": not made
+  ok    the day's tries answered "-5": not made
+  ok    the day's tries answered "1.5": not made
+  ok    the day's tries answered "": not made
+  ok    the day's tries answered " 3": not made
+  ok    the day's tries answered "1e3": not made
+  ok    the day's own makings answered "abc": not made
+  ok    the day's own makings answered "-5": not made
+  ok    the day's own makings answered "1.5": not made
+  ok    the day's own makings answered "": not made
+
+Control: counts in their shape still leave room
+  ok    a count of digits below the ceiling: the making runs once
+
+11 checks, all passing.
+COUNTED_MEMORY_COMMANDS 85
+COUNTED_MOCK_HTTP 0
+calendar-provider.test.ts
+
+The services' own addresses
+  ok    iCloud
+  ok    Google Calendar
+  ok    Outlook
+  ok    Fastmail and Calendly, bare and under a name
+
+A domain that only ends in the same letters
+  ok    not iCloud
+  ok    not Fastmail, Calendly or Outlook
+  ok    any other address is shown by its own name
+
+7 checks, all passing.
+COUNTED_MEMORY_COMMANDS 0
+COUNTED_MOCK_HTTP 0
+calendar-faq.test.ts
+
+The studio's own words
+  ok    the card's title, field, button and help
+  ok    the card shows once the store has a call product, for the owner and Admins
+  ok    no account and no password, only busy times kept, as the card says
+  ok    a full card says to remove one to add another
+  ok    team hosts read their own calendar, under Your calendar
+  ok    the server reads with the same limits, again every few minutes, and the last good reading stands while a calendar stops answering
+
+The answers
+  ok    four questions
+  ok    the limits from the code
+  ok    connect: the card's own words, in order, once a call is sold
+  ok    try before paying: the one shared answer, in calendar sync's words
+  ok    double bookings: how often a calendar is read and how long a last reading stands, from the code, and team hosts
+  ok    one space between sentences, never two
+  ok    no number of bookings or creators, no percent, no result promised
+
+On the calendar sync page
+  ok    first in the page's own Questions block
+  ok    no question asked twice
+
+15 checks, all passing.
+COUNTED_MEMORY_COMMANDS 0
+COUNTED_MOCK_HTTP 0
+host-calendar-read-evidence.test.ts
+✔ unknown host calendar evidence blocks the host: missing (6.941444ms)
+✔ unknown host calendar evidence blocks the host: null (3.835142ms)
+✔ unknown host calendar evidence blocks the host: short (1.065876ms)
+✔ unknown host calendar evidence blocks the host: extra (1.202392ms)
+✔ unknown host calendar evidence blocks the host: outerExtra (1.710757ms)
+✔ unknown host calendar evidence blocks the host: wrongType (1.405735ms)
+✔ unknown host calendar evidence blocks the host: sparse (0.811237ms)
+✔ unknown host calendar evidence blocks the host: malformedConfig (0.881631ms)
+✔ unknown host calendar evidence blocks the host: unknownSource (0.793736ms)
+✔ unknown host calendar evidence blocks the host: malformedGood (1.327987ms)
+✔ unknown host calendar evidence blocks the host: unreadableGood (0.677078ms)
+✔ unknown host calendar evidence blocks the host: futureGood (1.00515ms)
+✔ unknown host calendar evidence blocks the host: malformedError (1.1564ms)
+✔ confirmed absent settings still mean no external calendar (0.673086ms)
+✔ a complete fresh reading preserves every busy interval (1.600201ms)
+✔ host prefetch refuses unknown evidence: outerExtra (1.896321ms)
+✔ host prefetch refuses unknown evidence: sparse (0.916813ms)
+✔ host prefetch refuses unknown evidence: badValue (0.52415ms)
+✔ complete prefetch keeps explicit nulls and the stored strings (1.29541ms)
+✔ unknown refresh lock never authorizes work or lock deletion: missing (1.47389ms)
+✔ unknown refresh lock never authorizes work or lock deletion: undefined (0.707439ms)
+✔ unknown refresh lock never authorizes work or lock deletion: wrongType (0.971645ms)
+✔ unknown refresh lock never authorizes work or lock deletion: wrongWord (0.491647ms)
+✔ unknown refresh lock never authorizes work or lock deletion: extra (0.741154ms)
+✔ unknown refresh lock never authorizes work or lock deletion: sparse (0.829409ms)
+COUNTED_MEMORY_COMMANDS 0
+COUNTED_MOCK_HTTP 0
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 64.044197
+plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $3.3146
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (83.857789ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (181.56872ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (39.971539ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.678327ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.272415ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.645355ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.86041ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (92.706043ms)
+✔ every store figure taken in the code is a kind a line prices (66.215237ms)
+✔ every email sent names a meter, and each file only the meters it may use (159.681865ms)
+✔ the units a figure is taken in cost at least what they stand for (10.893708ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (2.339491ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.493563ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.390511ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.113082ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.10385ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.774736ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (1.297444ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.163517ms)
+✔ Path push fits its reserved studio requests (0.123605ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.069342ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.066528ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.11952ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (43.278857ms)
+COUNTED_MEMORY_COMMANDS 0
+COUNTED_MOCK_HTTP 0
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 713.24465

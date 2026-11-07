@@ -1,0 +1,20 @@
+z-3079-invalid-listing.proof.ts
+
+Known call controls before unknown listings
+  ok    healthy: one event and the original room
+OBSERVED malformed JSON {"status":200,"missingLabel":true,"room":false,"kept":true,"commands":23}
+  FAIL  malformed JSON: unknown must not become gone/cached without room
+        expected [503,false,false]
+        got      [200,true,true]
+OBSERVED valid JSON not a listing {"status":200,"missingLabel":true,"room":false,"kept":true,"commands":23}
+  FAIL  valid JSON not a listing: unknown must not become gone/cached without room
+        expected [503,false,false]
+        got      [200,true,true]
+OBSERVED another listing under this id {"status":200,"missingLabel":true,"room":false,"kept":true,"commands":23}
+  FAIL  another listing under this id: unknown must not become gone/cached without room
+        expected [503,false,false]
+        got      [200,true,true]
+
+4 checks, 3 failing.
+COUNTED_MEMORY_COMMANDS 167
+COUNTED_MOCK_HTTP 4

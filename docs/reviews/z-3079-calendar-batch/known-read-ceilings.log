@@ -1,0 +1,137 @@
+read-ceilings.test.ts
+
+The booking calendar answers from its last good copy, never from the studio's requests
+  ok    the first answer makes the file, reading Stripe
+  ok    the next answers it from the copy, reading nothing from Stripe
+  ok    and neither took a single studio request
+  ok    past 4 answers in an hour the app is asked to come back, and nothing is read
+
+A sliding hour: an app asking late in an hour is not refused for the next one (light c)
+  ok    within sixty minutes, the 5th is refused
+  ok    just past the hour, at 11:10 (not 12:00), answered again
+  ok    a refusal is taken back from the count
+
+Made again a few times a day at most, each booking that day with its own credit (M3), and the copy stands when it cannot be
+  ok    the day's own 2 makings spent, then a booking each: made for the first 5 (the fifth among them), then the copy
+  ok    the next day the copy has grown old: made again
+  ok    an hour on, nothing changed and the copy young: the copy, nothing made
+  ok    the copy grown old and Stripe down: the copy is answered, not an error
+  ok    no copy at all and Stripe down: the route answers 503
+
+A making that fails is given back once a day; the second failure that day stays counted (inbox C4-53)
+  ok    the first failure gives its making back (1 a day): the day still has one
+  ok    the second failure that day is counted: the day's makings are used
+  ok    so with Stripe back, nothing is made until the next day
+  ok    the given-back count never goes below zero
+  ok    with no making left, an answer takes no count: the pace and one MGET
+  ok    the day's tries, made or failed, never pass the 7 priced makings, own makings left or not
+
+A deleted store's copy is never answered again (M2), by the route itself
+  ok    before: the route answers the file
+  ok    the store deleted (its handle let go): the route answers 404, and the copy is gone
+
+Each count keeps its expiry, and the copy has a size (L3, L4)
+  ok    a count found without an expiry gets one back
+  ok    a file past its ceiling is neither kept nor sent
+
+A new address keeps the last copy (light a)
+  ok    the copy is still there for the new address
+
+Refusals have a ceiling: past CALENDAR_REFUSED_PER_HOUR in an hour the address stops, and the studio says so (C4-33, light a)
+  ok    the 7 refusals the line prices leave the address as it is
+  ok    the refusal that stops it: the pace, its count and the stop, within a refused shape and the stop priced as one more (its token's two reads aside)
+  ok    one more: the address is let go
+  ok    the studio shows no address and says it was stopped, with when
+  ok    the studio makes a new one in its place and keeps saying why
+  ok    a new address the creator asks for clears the note
+  ok    the editor says the rule and how to keep the address: every 15 minutes or less often
+
+The file keeps what is still to come first
+  ok    every event still to come is kept, then the latest past ones
+  ok    the file holds at most CALENDAR_MAX_EVENTS events, the soonest
+  ok    the build's Stripe pages are lib/calls.ts's own
+  ok    the biggest buyers' prints looked up are lib/stats.ts's TOP_BUYERS
+  ok    the members' words looked up are lib/membership-numbers.ts's own bounds
+
+A real making, measured, within its count (M1, light d)
+  ok    each booking adds what the count gives it (0.00 <= 2)
+  ok    forty bookings, measured (19), within the count for forty (122)
+  ok    the shape holds the measured fixed part (10), every listing and every booking at its worst
+
+A store from before lists gets one the first time a reading would name someone, tried once a day: measured, within its shape, priced every day (reviews of fe4cb5e56 and 2c1af02e0)
+  ok    made, measured (6), within LIST_MADE_SHAPE less the lock's other tries and the head's reads (13)
+  ok    once there is one, nothing is written: one read
+  ok    the figures the shape is built from are the code's own
+  ok    priced every day of the month, once a day a store, in the store-readings line
+  ok    and no longer as a one-time line beside it
+  a day's try at a list (store-readings line): $0.0005 a day at most (144 commands)
+
+Every figure costs at least the worst it stands for
+  ok    a store's one-time all-time filling has its own line, once for each store (M4)
+  ok    the feed is a cost line of its own, every try of a making (its own and its credits, a failure given back included) and answer of the month at its worst
+  ok    every light shape is lighter than the heavy ones it is counted apart from
+  ok    the store's readings are a line of their own, every reading of every day at the dearest of its kind (heavy, light)
+  ok    the first year given back stays under US$ 65 with the day's heavy readings
+  FAIL  and one more heavy reading a day would pass it: the figure is the most the margin allows
+        expected true
+        got      false
+  ok    which is fewer than one an hour: the gap is said to Claude 1 and the owner (inbox C4-33), not hidden
+  ok    heavy readings stop at HEAVY_READINGS_PER_DAY, and a refused one is not counted
+  ok    a reading's count, measured: light 3, heavy 5, as READING_COUNT_COMMANDS less its GET and SET
+  ok    refused, with its DECRBY: light 4, heavy 7, inside what KEPT_READINGS_SHAPE prices for a page that reads nothing
+  ok    what is left of the day: two GET, and none left once used
+  ok    a store in its trial or past its plan keeps both, priced for it (M2)
+  calendar feed: a making $0.003447, an answer $0.000236, the month $1.5967
+  store readings: a reading at most $0.003787, the month $0.4084
+  its own once-a-store line (stats-life-fill): a store's first all-time filling $0.0820 once (40806 commands)
+
+The totals: a page of each store's studio, as the Terms say; its numbers from its own readings (M1)
+  ok    one store's visits and sales at the worst refunds (one command of 500 keys), measured (292), within their readings' count (799)
+  ok    the sales reading's bytes hold every PayPal record it reads at its heaviest
+  ok    looked at again within the fresh time: read from what was kept, a few commands
+  ok    the day's readings used and nothing kept: nothing read, said as used (never as no numbers), and no studio request taken for it
+  ok    the totals say a store so left out comes back at 00:00 UTC, on the reader's clock too (C4-33 (3))
+  ok    the page takes a page of each other store's studio and nothing more
+
+A handle taken by another store never brings the old copy back (M2-bis)
+  ok    the first store's copy is made
+  ok    deleted: gone, and the copy, which names buyers, deleted at once (light 1)
+  ok    that answer's commands, with the token's two, within CALENDAR_POLL_SHAPE (8 <= 9)
+  ok    the handle taken by another store: every answer is 404, the fifth too, and never the old copy
+  ok    and nothing of the old copy is kept, nor anyone's address in its place (light e)
+  ok    with the day's makings spent, the old copy is not answered either
+
+A renamed store keeps its feed (L-c)
+  ok    renamed
+  ok    its feed, still under the old handle in its settings, answers: no 404 by mistake
+  ok    the copy, young and unchanged
+  ok    a booking marked under the new handle is read by the calls id: made again at once
+
+A copy is kept only by the store that made it (light 3)
+  ok    it names what the handle led to and the store's own id
+  ok    a copy that names another store's id is not answered
+
+A deletion while the file is being made is not undone (light 2)
+  ok    the file made is neither answered nor kept: the feed is gone
+
+A store deleted from the studio forgets its feed at once (M2-bis, 1; light 6)
+  ok    the studio's delete answers by going back to the studio
+  ok    before: its settings and its copy were kept
+  ok    after: its settings, its copy and its address are gone
+
+77 checks, 1 failing.
+COUNTED_MEMORY_COMMANDS 2345
+COUNTED_MOCK_HTTP 11
+making a booking calendar failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount (/tmp/z-points-0AdkzY/read-ceilings.test.ts.cjs:8947:11)
+    at async readCallSessions (/tmp/z-points-0AdkzY/read-ceilings.test.ts.cjs:54497:19)
+    at async paidCalls (/tmp/z-points-0AdkzY/read-ceilings.test.ts.cjs:54430:11)
+    at async /tmp/z-points-0AdkzY/read-ceilings.test.ts.cjs:122180:45
+    at async bookedCalendarFeed (/tmp/z-points-0AdkzY/read-ceilings.test.ts.cjs:17757:12)
+    at async GET (/tmp/z-points-0AdkzY/read-ceilings.test.ts.cjs:122175:20)
+    at async main (/tmp/z-points-0AdkzY/read-ceilings.test.ts.cjs:126278:23) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+a booking calendar file is larger than its ceiling, so it is neither kept nor sent b53316bbaf8f41969663fcc18ebe341b

@@ -1,0 +1,48 @@
+INCOMPLETE RUN, NOT FULL RED. Raw bytes=8708, SHA256=d0ca0d99137029983eea689ed58cced68770becdfaffcb2c974ab64a10476d28. Raw scratch log retained /tmp/z3079-red-complete.log; only diagnostic text clipped for repository.
+calendar-batch-reads.test.ts
+  ok    the stand-in store has every call listing and its calls id
+
+A store at MAX_PRODUCTS call listings and CALENDAR_CALLS bookings makes its file in a few MGETs
+  ok    the file is made, every booking in it with its room
+  FAIL  no listing or room is read with a GET of its own, besides the rooms' making (SET NX and GET)
+        expected [0,500,500]
+        got      [2000,3500,500]
+  FAIL  the listings in 40 MGETs of at most 50, the rooms in 5 of at most 400 keys
+        expected [40,50,5,400]
+        got      [0,null,0,null]
+  ok    measured (5025) within the answer and the making as priced (9 + 5531)
+  FAIL  the making's shape at its worst: 1,081 commands (5,531 when every listing and every room read was a GET)
+        expected 1081
+        got      5531
+  FAIL  and the measured making is within that figure (5025 <= 9 + 1,081)
+        expected true
+        got      false
+
+An MGET reply that is not whole, or holds anything but text or nothing, fails the making as an unknown
+  FAIL  listings: a reply one short fails the making (503), nothing kept
+        expected [503,false,null]
+        got      [200,true,"{\"at\":1794076800714,\"ics\":\"BEGIN:VCALENDAR\\r\\nVERSION:2.0\\r\\nPRODID:-//Marktmorgen//Bookings//EN\\r\\nCALSCALE:GREGORIAN\\r\\nMETHOD:PUBLISH\\r\\nX-WR-CALNAME:Batched Calls bookings\\r\\nREFRESH-INTERVAL;VALUE=DURATION:PT30M\\r\\nX-PUBLISHED-TTL:PT30M\\r\\nBEGIN:VEVENT\\r\\nUID:cs_test_batched000000@marktmorgen.com\\r\\nDTSTAMP:20261107T184000Z\\r\\nSEQUENCE:0\\r\\nDTSTART:20261108T180000Z\\r\\nDTEND:20261108T183000Z\\r\\nSUMMARY:A call that is no longer listed with B 0\\r\\nDESCRIPTION:Booked by:\\\\nB 0 <b0@example.com>\\\\n\\\\nFrom your Marktmorgen studi\\r\\n o.\\r\\nSTATUS:CONFIRMED\\r\\nTRANSP:OPAQUE\\r\\nEND:VEVENT\\r\\nBEGIN:VEVENT\\r\\nUID:cs_test_batched000001@marktmorgen.com\\r\\nDTSTAMP:20261107T184000Z\\r\\nSEQUENCE:0\\r\\nDTSTART:20261108T190000Z\\r\\nDTEND:20261108T193000Z\\r\\nSUMMARY:A call that is no longer listed with B 1\\r\\nDESCRIPTION:Booked by:\\\\nB 1 <b1@example.com>\\\\n\\\\nFrom your Marktmorgen studi\\r\\n o.\\r\\nSTATUS:CONFIRMED\\r\\nTRANSP:OPAQUE\\r\\nEND:VEVENT\\r\\nBEGIN:VEVENT\\r\\nUID:cs_test_batched000002@marktmorgen.com\\r\\nDTSTAMP:20261107T184000Z\\r\\nSEQUENCE:0\\r\\nDTSTART:20261108T200000Z\\r\\nDTEND:20261108T203000Z\\r\\nSUMMARY:A call that is no longer listed with B 2\\r\\nDESCRIPTION:Booked by:\\\\nB 2 <b2@example.com>\\\\n\\\\nFrom your Marktmorgen studi\\r\\n o.\\r\\nSTATUS:CONFIRMED\\r\\nTRANSP:OPAQUE\\r\\nEND:VEVENT\\r\\nBEGIN:VEVENT\\r\\nUID:cs_test_batched000003@marktmorgen.com\\r\\nDTSTAMP:20261107T184000Z\\r\\nSEQUENCE:0\\r\\nDTSTART:20261108T210000Z\\r\\nDTEND:20261108T213000Z\\r\\nSUMMARY:A call that is no longer listed with B 3\\r\\nDESCRIPTION:Booked by:\\\\nB 3 <b3@example.com>\\\\n\\\\nFrom your Marktmorgen studi\\r\\n o.\\r\\nSTATUS:CONFIRMED\\r\\nTRANSP:OPAQUE\\r\\nEND:VEVENT\\r\\nBEGIN:VEVENT\\r\\nUID:cs_test_batched000004@marktmorgen.com\\r\\nDTSTAMP:20261107T184000Z\\r\\nSEQUENCE:0\\r\\nDTSTART:20261108T220000Z\\r\\nDTEND:20261108T223000Z\\r\\nSUMMARY:A call that i [diagnostic truncated, original line chars=2037]
+  FAIL  listings: a number among the replies fails the making, nothing kept
+        expected [503,false,null]
+        got      [200,true,"{\"at\":1794076800799,\"ics\":\"BEGIN:VCALENDAR\\r\\nVERSION:2.0\\r\\nPRODID:-//Marktmorgen//Bookings//EN\\r\\nCALSCALE:GREGORIAN\\r\\nMETHOD:PUBLISH\\r\\nX-WR-CALNAME:Batched Calls bookings\\r\\nREFRESH-INTERVAL;VALUE=DURATION:PT30M\\r\\nX-PUBLISHED-TTL:PT30M\\r\\nBEGIN:VEVENT\\r\\nUID:cs_test_batched000000@marktmorgen.com\\r\\nDTSTAMP:20261107T184000Z\\r\\nSEQUENCE:0\\r\\nDTSTART:20261108T180000Z\\r\\nDTEND:20261108T183000Z\\r\\nSUMMARY:A call that is no longer listed with B 0\\r\\nDESCRIPTION:Booked by:\\\\nB 0 <b0@example.com>\\\\n\\\\nFrom your Marktmorgen studi\\r\\n o.\\r\\nSTATUS:CONFIRMED\\r\\nTRANSP:OPAQUE\\r\\nEND:VEVENT\\r\\nBEGIN:VEVENT\\r\\nUID:cs_test_batched000001@marktmorgen.com\\r\\nDTSTAMP:20261107T184000Z\\r\\nSEQUENCE:0\\r\\nDTSTART:20261108T190000Z\\r\\nDTEND:20261108T193000Z\\r\\nSUMMARY:A call that is no longer listed with B 1\\r\\nDESCRIPTION:Booked by:\\\\nB 1 <b1@example.com>\\\\n\\\\nFrom your Marktmorgen studi\\r\\n o.\\r\\nSTATUS:CONFIRMED\\r\\nTRANSP:OPAQUE\\r\\nEND:VEVENT\\r\\nBEGIN:VEVENT\\r\\nUID:cs_test_batched000002@marktmorgen.com\\r\\nDTSTAMP:20261107T184000Z\\r\\nSEQUENCE:0\\r\\nDTSTART:20261108T200000Z\\r\\nDTEND:20261108T203000Z\\r\\nSUMMARY:A call that is no longer listed with B 2\\r\\nDESCRIPTION:Booked by:\\\\nB 2 <b2@example.com>\\\\n\\\\nFrom your Marktmorgen studi\\r\\n o.\\r\\nSTATUS:CONFIRMED\\r\\nTRANSP:OPAQUE\\r\\nEND:VEVENT\\r\\nBEGIN:VEVENT\\r\\nUID:cs_test_batched000003@marktmorgen.com\\r\\nDTSTAMP:20261107T184000Z\\r\\nSEQUENCE:0\\r\\nDTSTART:20261108T210000Z\\r\\nDTEND:20261108T213000Z\\r\\nSUMMARY:A call that is no longer listed with B 3\\r\\nDESCRIPTION:Booked by:\\\\nB 3 <b3@example.com>\\\\n\\\\nFrom your Marktmorgen studi\\r\\n o.\\r\\nSTATUS:CONFIRMED\\r\\nTRANSP:OPAQUE\\r\\nEND:VEVENT\\r\\nBEGIN:VEVENT\\r\\nUID:cs_test_batched000004@marktmorgen.com\\r\\nDTSTAMP:20261107T184000Z\\r\\nSEQUENCE:0\\r\\nDTSTART:20261108T220000Z\\r\\nDTEND:20261108T223000Z\\r\\nSUMMARY:A call that i [diagnostic truncated, original line chars=2037]
+  FAIL  rooms: a reply one short fails the making, nothing kept
+        expected [503,false,null]
+        got      [200,true,"{\"at\":1794076800860,\"ics\":\"BEGIN:VCALENDAR\\r\\nVERSION:2.0\\r\\nPRODID:-//Marktmorgen//Bookings//EN\\r\\nCALSCALE:GREGORIAN\\r\\nMETHOD:PUBLISH\\r\\nX-WR-CALNAME:Batched Calls bookings\\r\\nREFRESH-INTERVAL;VALUE=DURATION:PT30M\\r\\nX-PUBLISHED-TTL:PT30M\\r\\nBEGIN:VEVENT\\r\\nUID:cs_test_batched000000@marktmorgen.com\\r\\nDTSTAMP:20261107T184001Z\\r\\nSEQUENCE:0\\r\\nDTSTART:20261108T180000Z\\r\\nDTEND:20261108T183000Z\\r\\nSUMMARY:Call 0 with B 0\\r\\nDESCRIPTION:Booked by:\\\\nB 0 <b0@example.com>\\\\n\\\\nJoin: https://meet.jit.si/i\\r\\n a7xbe47zp523txeee748pbr\\\\nThis is a private Jitsi Meet room (a free video s\\r\\n ervice run by a third party). The first person to open it may be asked to \\r\\n sign in to Jitsi (with a Google account\\\\, for example) to start the meetin\\r\\n g\\\\; everyone else joins without an account once it has started.\\\\n\\\\nFrom yo\\r\\n ur Marktmorgen studio.\\r\\nLOCATION:https://meet.jit.si/ia7xbe47zp523txeee748pbr\\r\\nSTATUS:CONFIRMED\\r\\nTRANSP:OPAQUE\\r\\nEND:VEVENT\\r\\nBEGIN:VEVENT\\r\\nUID:cs_test_batched000001@marktmorgen.com\\r\\nDTSTAMP:20261107T184001Z\\r\\nSEQUENCE:0\\r\\nDTSTART:20261108T190000Z\\r\\nDTEND:20261108T193000Z\\r\\nSUMMARY:Call 1 with B 1\\r\\nDESCRIPTION:Booked by:\\\\nB 1 <b1@example.com>\\\\n\\\\nJoin: https://meet.jit.si/i\\r\\n c3hrxy6p93vu74q4vd94ht5\\\\nThis is a private Jitsi Meet room (a free video s\\r\\n ervice run by a third party). The first person to open it may be asked to \\r\\n sign in to Jitsi (with a Google account\\\\, for example) to start the meetin\\r\\n g\\\\; everyone else joins without an account once it has started.\\\\n\\\\nFrom yo\\r\\n ur Marktmorgen studio.\\r\\nLOCATION:https://meet.jit.si/ic3hrxy6p93vu74q4vd94ht5\\r\\nSTATUS:CONFIRMED\\r\\nTRANSP:OPAQUE\\r\\nEND:VEVENT\\r\\nBEGIN:VEVENT\\r\\nUID:cs_test_batched000002@marktmorgen.com\\r\\nDTSTAMP:20261107T184001Z\\r\\nSEQUENCE:0\\r\\nDTSTART:20261108T200000Z\\r\\nDTEND:20261108T203000 [diagnostic truncated, original line chars=2037]
+COUNTED_MEMORY_COMMANDS 20003
+COUNTED_MOCK_HTTP 5
+making a booking calendar failed Error: Review command ceiling
+    at globalThis.__z2964Count (/tmp/z-points-kkMYWN/calendar-batch-reads.test.ts.cjs:1:367)
+    at MemoryRedis.run (/tmp/z-points-kkMYWN/calendar-batch-reads.test.ts.cjs:271:20)
+    at /tmp/z-points-kkMYWN/calendar-batch-reads.test.ts.cjs:214:72
+    at Array.map (<anonymous>)
+    at MemoryRedis.pipeline (/tmp/z-points-kkMYWN/calendar-batch-reads.test.ts.cjs:214:54)
+    at store.pipeline (/tmp/z-points-kkMYWN/calendar-batch-reads.test.ts.cjs:50671:27)
+    at redisPipeline (/tmp/z-points-kkMYWN/calendar-batch-reads.test.ts.cjs:2151:41)
+    at roomsFor (/tmp/z-points-kkMYWN/calendar-batch-reads.test.ts.cjs:49819:22)
+    at slotRooms (/tmp/z-points-kkMYWN/calendar-batch-reads.test.ts.cjs:50172:23)
+    at /tmp/z-points-kkMYWN/calendar-batch-reads.test.ts.cjs:50497:77
+Error: Review command ceiling
+    at globalThis.__z2964Count (/tmp/z-points-kkMYWN/calendar-batch-reads.test.ts.cjs:1:367)
+    at MemoryRedis.run (/tmp/z-points-kkMYWN/calendar-batch-reads.test.ts.cjs:271:20)
+    at broken (/tmp/z-points-kkMYWN/calendar-batch-reads.test.ts.cjs:50755:75)
+    at async main (/tmp/z-points-kkMYWN/calendar-batch-reads.test.ts.cjs:50761:75)

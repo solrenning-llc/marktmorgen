@@ -340,6 +340,40 @@ for (const apply of [false, true]) {
   }
 }
 
+/** The one-command SET of a membership link answered by `reply`; with `apply`, the SET is still made. */
+function manageSetAnswered(reply: unknown[], apply: boolean) {
+  const original = redis.pipeline;
+  redis.pipeline = async (commands: Command[]) => {
+    if (commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).startsWith("nl:manage:link:")) {
+      if (apply) await original(commands);
+      return reply;
+    }
+    return original(commands);
+  };
+  return () => { redis.pipeline = original; };
+}
+
+for (const apply of [false, true]) {
+  for (const [what, reply] of ODD_SET) {
+    test(`membership: a link SET ${apply ? "made" : "not made"} with ${what} sends no email, keeps no link and answers the same`, async () => {
+      const { fixture, store } = await membersWorld(`uniformmanageset${apply ? "a" : "n"}${ODD_SET.findIndex(([w]) => w === what)}`);
+      const restore = manageSetAnswered(reply, apply);
+      try {
+        const known = await requestManageLink({ store, email: member, ip: "192.0.2.130", origin });
+        const unknown = await requestManageLink({ store, email: stranger, ip: "192.0.2.131", origin });
+        await drain();
+        assert.deepEqual([known, unknown], ["sent", "sent"], "the reply never says whether the address has a membership");
+        assert.equal(fixture.calls.ses, 0, "no paid email was tried with a link Redis did not say it stored");
+        assert.equal(fixture.sent.length, 0);
+        assert.equal(manageLinks(), 0, "a link whose SET was not confirmed is not left behind");
+      } finally {
+        restore();
+        fixture.restore();
+      }
+    });
+  }
+}
+
 // ---- Time --------------------------------------------------------------------------------------------
 
 /**

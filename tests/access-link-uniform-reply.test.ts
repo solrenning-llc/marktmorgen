@@ -378,6 +378,71 @@ test("library: a delivered link is still sent and kept", async () => {
   }
 });
 
+/**
+ * The link's SET answered with anything but exactly "OK" (rule 24; sibling of
+ * signInLinkFor in claude5/signin-link-set-exact and of requestAffiliateLink in
+ * claude5/oracle-siblings-2): no paid email carries a link Redis did not say it
+ * stored, the reply stays "sent" for the holder and a stranger alike, and a SET
+ * that did land but whose answer was lost is removed like an unsent link.
+ */
+const ODD_SET: [string, unknown[]][] = [
+  ["no reply at all", []],
+  ["a null reply", [null]],
+  ["a reply of another word", ["QUEUED"]],
+  ["two replies for one command", ["OK", "OK"]],
+];
+
+/** The one-command SET of a link under `prefix` answered by `reply`; with `apply`, the SET is still made. */
+function linkSetAnswered(prefix: string, reply: unknown[], apply: boolean) {
+  const original = redis.pipeline;
+  redis.pipeline = async (commands: Command[]) => {
+    if (commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).startsWith(prefix)) {
+      if (apply) await original(commands);
+      return reply;
+    }
+    return original(commands);
+  };
+  return () => { redis.pipeline = original; };
+}
+
+for (const apply of [false, true]) {
+  for (const [index, [what, reply]] of ODD_SET.entries()) {
+    test(`community: a link SET ${apply ? "made" : "not made"} with ${what} sends no email, keeps no link and answers the same`, async () => {
+      const { fixture, store } = await communityWorld(`uniformclubset${apply ? "a" : "n"}${index}`);
+      const restore = linkSetAnswered("nl:cm:link:", reply, apply);
+      try {
+        const entitled = await requestCommunityLink({ store, email: buyer, ip: "192.0.2.140", origin });
+        const unentitled = await requestCommunityLink({ store, email: stranger, ip: "192.0.2.141", origin });
+        await drain();
+        assert.deepEqual([entitled, unentitled], ["sent", "sent"], "the reply never says whether the address holds a ticket");
+        assert.equal(fixture.calls.ses, 0, "no paid email was tried with a link Redis did not say it stored");
+        assert.equal(fixture.sent.length, 0);
+        assert.equal(communityLinks(), 0, "a link whose SET was not confirmed is not left behind");
+      } finally {
+        restore();
+        fixture.restore();
+      }
+    });
+
+    test(`library: a link SET ${apply ? "made" : "not made"} with ${what} sends no email, keeps no link and answers the same`, async () => {
+      const { fixture } = await libraryWorld(`uniformlibset${apply ? "a" : "n"}${index}`);
+      const restore = linkSetAnswered("nl:lib:link:", reply, apply);
+      try {
+        const bought = await requestLibraryLink({ email: buyer, ip: "192.0.2.142", origin });
+        const nothing = await requestLibraryLink({ email: stranger, ip: "192.0.2.143", origin });
+        await drain();
+        assert.deepEqual([bought, nothing], ["sent", "sent"], "the reply never says whether the address bought anything");
+        assert.equal(fixture.calls.ses, 0, "no paid email was tried with a link Redis did not say it stored");
+        assert.equal(fixture.sent.length, 0);
+        assert.equal(libraryLinks(), 0, "a link whose SET was not confirmed is not left behind");
+      } finally {
+        restore();
+        fixture.restore();
+      }
+    });
+  }
+}
+
 // ---- How long the answer takes ---------------------------------------------------------------------
 
 /**

@@ -70,6 +70,7 @@ import { POST as ranswers } from "@/app/api/store/answers/route";
 import { POST as rassistant_settings } from "@/app/api/store/assistant-settings/route";
 import { POST as rblog } from "@/app/api/store/blog/route";
 import { POST as rbundle } from "@/app/api/store/bundle/route";
+import { POST as rcampaign_landing } from "@/app/api/store/campaign-landing/route";
 import { POST as rcommunity } from "@/app/api/store/community/route";
 import { POST as rcommunity_chat } from "@/app/api/store/community/chat/route";
 import { POST as rcommunity_events } from "@/app/api/store/community/events/route";
@@ -126,6 +127,7 @@ const ROUTES: Record<string, Handler> = {
   "assistant-settings": rassistant_settings as Handler,
   "blog": rblog as Handler,
   "bundle": rbundle as Handler,
+  "campaign-landing": rcampaign_landing as Handler,
   "community": rcommunity as Handler,
   "community/chat": rcommunity_chat as Handler,
   "community/events": rcommunity_events as Handler,
@@ -317,6 +319,7 @@ async function main(): Promise<void> {
     ["option", { action: "remove", id: "x" }],
     ["podcast", { action: "remove", id: xid, episode: "x" }],
     ["page-funnels", { action: "remove", id: "x" }],
+    ["campaign-landing", { action: "remove", product: xid, campaign: "x" }],
     ["stream/captions", { action: "remove", lessonId: "x", lang: "en" }],
   ];
   for (const [path, body] of plainRoutes) is(`${path}: ${String(body.action)} is refused`, await answer(await (await route(path))(json(`/api/store/${path}`, locked, body))), LOCKED);
@@ -427,6 +430,7 @@ async function main(): Promise<void> {
     "blog": ["act:page:delete"],
     "bundle": ["act:products:clear", "not:a bundle made in the same request is taken back when its pictures fail"],
     "calendar": ["need:settings"],
+    "campaign-landing": ["act:products:remove"],
     "community": ["lockedFor"],
     "community/chat": ["lockedFor"],
     "community/events": ["act:events:cancel", "act:events:delete", "lockedFor"],
@@ -532,6 +536,7 @@ async function main(): Promise<void> {
     "bundle": { clear: "act:products", create: "open:adds", save: "open:edits" },
     "assistant-memory": "need:settings",
     "calendar": "need:settings",
+    "campaign-landing": { remove: "act:products", save: "open:edits" },
     "community": {
       comment: "open:adds", delete: "lockedFor", "delete-comment": "lockedFor", edit: "open:edits", "edit-comment": "open:edits",
       hide: "open:reversible", "hide-comment": "open:reversible", like: "open:adds", "like-comment": "open:adds", mute: "open:reversible",

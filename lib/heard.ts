@@ -23,6 +23,7 @@
  *   day record h:<answer>     answers; hc:<answer> the money of their sales
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
@@ -35,10 +36,20 @@ const SESSION = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 /** An order is asked about on the page the buyer lands on; a month later it is not answered. */
 const ANSWER_WITHIN_SECONDS = 30 * 86400;
 
+/**
+ * Whether the store does not ask: true when its creator switched it off, and
+ * also when the answer is in any other shape than 0 or 1 (CX-123 rule 24, as
+ * weeklyOff in lib/stats-report.ts): an unknown answer is never "not off", so
+ * the buyer is not asked this time, and it is said in the log.
+ */
 export async function heardOff(handle: string): Promise<boolean> {
   if (!isRedisConfigured()) return true;
-  const [member] = await redisPipeline([["SISMEMBER", OFF, handle]]);
-  return Number(member) === 1;
+  const replies = repliesFor(await redisPipeline([["SISMEMBER", OFF, handle]]), 1);
+  const member = replies ? countOf(replies[0]) : null;
+  if (member === 0) return false;
+  if (member === 1) return true;
+  console.error("heard-off: whether the store asks where buyers heard about it is unknown; not asked this time");
+  return true;
 }
 
 export async function setHeardOff(handle: string, off: boolean): Promise<void> {

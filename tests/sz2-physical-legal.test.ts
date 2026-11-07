@@ -127,7 +127,7 @@ const runningSale = recordPrice(history, 1000, saleStart + (MAX_SALE_DAYS - 1) *
 is("on the last day of a long sale its prior price is unchanged", priorLowestPrice(runningSale, saleStart), { cents: 800, complete: true });
 const long = recordPrice(recordPrice([{ at: t0, cents: 500 }], 1000, t0 + DAY), 1200, t0 + 200 * DAY);
 is("steps that ended before the kept period are dropped", long, [{ at: t0 + DAY, cents: 1000 }, { at: t0 + 200 * DAY, cents: 1200 }]);
-is("a clock that goes back never reorders and never drops a price that was applied", recordPrice([{ at: t0, cents: 500 }], 600, t0 - 10), [{ at: t0, cents: 500 }, { at: t0 + 1, cents: 600 }]);
+is("a clock that goes back never reorders, never drops a price and never stamps one later than any time seen", recordPrice([{ at: t0, cents: 500 }], 600, t0 - 10), [{ at: t0, cents: 500 }, { at: t0, cents: 600 }]);
 let busy: PriceStep[] = [];
 let lowest = Infinity;
 for (let i = 0; i < MAX_PRICE_STEPS + 20; i += 1) {
@@ -136,8 +136,46 @@ for (let i = 0; i < MAX_PRICE_STEPS + 20; i += 1) {
   busy = recordPrice(busy, cents, t0 + i * 600);
 }
 is("the history never holds more than its cap", busy.length <= MAX_PRICE_STEPS, true);
-is("merging keeps the lower price, so the prior price is never higher than the truth", priorLowestPrice(busy, t0 + (MAX_PRICE_STEPS + 19) * 600)?.cents, lowest);
+is("merging keeps the lower price, so the prior price is never higher than the truth", priorLowestPrice(busy, t0 + (MAX_PRICE_STEPS + 19) * 600), { cents: lowest, complete: false });
 is("the current price is never merged away", busy[busy.length - 1].cents, 1000 + (((MAX_PRICE_STEPS + 19) * 37) % 300));
 is("a non-integer or negative price is not recorded", recordPrice([{ at: t0, cents: 500 }], -1, t0 + DAY), [{ at: t0, cents: 500 }]);
+
+part("Prior lowest price: same-second changes keep their real time (review J5809017387, MEDIUM)");
+const tS = t0 + 40 * DAY;
+let quick: PriceStep[] = [{ at: t0, cents: 1000 }];
+quick = recordPrice(quick, 500, tS);
+quick = recordPrice(quick, 20, tS);
+quick = recordPrice(quick, 10, tS + 1);
+is("no step is stamped later than the clock that recorded it", quick.every((step) => step.at <= tS + 1), true);
+is("two prices in the same second both stay, in the order applied", quick, [{ at: t0, cents: 1000 }, { at: tS, cents: 500 }, { at: tS, cents: 20 }, { at: tS + 1, cents: 10 }]);
+is("a sale a second later finds the 20 applied before it, not the 500", priorLowestPrice(quick, tS + 1), { cents: 20, complete: true });
+const sameSecond = recordPrice(recordPrice(recordPrice([{ at: t0, cents: 1000 }], 500, tS), 20, tS), 10, tS);
+is("a sale in the same second counts the prices it replaced in that second", priorLowestPrice(sameSecond, tS), { cents: 20, complete: true });
+is("the healthy sequential case is unchanged", priorLowestPrice(recordPrice(recordPrice([{ at: t0, cents: 1000 }], 500, tS), 10, tS + DAY), tS + DAY), { cents: 500, complete: true });
+
+part("Prior lowest price: an unreadable history is never a complete subset (review J5809017387, LOW)");
+const corrupt = [{ at: t0, cents: 1000 }, { at: tS - 5 * DAY, cents: "20" }] as unknown as PriceStep[];
+/** A throw is recorded as a result, so a crash shows as a failing check instead of ending the run. */
+const caught = (read: () => unknown): unknown => {
+  try {
+    return read();
+  } catch {
+    return "threw";
+  }
+};
+is("one unreadable step makes the whole history unreadable, not a complete 1000", caught(() => priorLowestPrice(corrupt, tS)), "unreadable");
+is("a history that is not a list is unreadable", caught(() => priorLowestPrice("x" as unknown as PriceStep[], tS)), "unreadable");
+is("a step that is not a record is unreadable", caught(() => priorLowestPrice([{ at: t0, cents: 1000 }, null] as unknown as PriceStep[], tS)), "unreadable");
+is("recording onto an unreadable history keeps it as it came, never filtered", caught(() => recordPrice(corrupt, 900, tS)), corrupt);
+is("so it still reads as unreadable afterwards", caught(() => priorLowestPrice(recordPrice(corrupt, 900, tS), tS + DAY)), "unreadable");
+
+part("Proposition 65: the site is named on its own (review J5809017387, LOW)");
+is("a longer hostname that only starts with the site does not name it", checkProp65("WARNING: Lead. See www.P65Warnings.ca.gov.example.invalid"), "site");
+is("the site inside another word does not name it", checkProp65("WARNING: Lead. See xwww.P65Warnings.ca.gov"), "site");
+is("the site as a path on another host does not name it", checkProp65("WARNING: Lead. See evil.example/www.P65Warnings.ca.gov"), "site");
+is("the site with a hyphenated suffix does not name it", checkProp65("WARNING: Lead. See www.P65Warnings.ca.gov-x.example"), "site");
+is("the site with https and a path names it", checkProp65("WARNING: Lead. See https://www.P65Warnings.ca.gov/fact-sheets"), null);
+is("the site in parentheses names it", checkProp65("WARNING: Lead (www.P65Warnings.ca.gov)."), null);
+is("the site followed by a comma names it", checkProp65("WARNING: Lead. See www.P65Warnings.ca.gov, thank you."), null);
 
 done();

@@ -64,6 +64,7 @@ async function main(): Promise<void> {
   part("The free trial");
   const trial = { ...studio, allowance: 300, trial: true, reset: "November 20 (UTC)", billing: true };
   const trialNear = mailMonthNotice({ ...trial, used: 240 });
+  is("trial near: title names the trial, not a month", trialNear?.title, "60 emails are left in the free trial");
   is("trial near: the trial's emails", trialNear?.lines[0], "You have sent 240 of the free trial's 300 emails to your list, one-off and sequences together.");
   is("trial near: when the trial ends", trialNear?.lines[1], "The free trial's emails are counted for the whole trial, which ends on November 20 (UTC).");
   const trialOut = mailMonthNotice({ ...trial, used: 300 });
@@ -108,12 +109,12 @@ async function main(): Promise<void> {
   part("The box: a note that can be hidden, never a dialog");
   const box = renderToStaticMarkup(createElement(MailMonthNoticeBox, { notice: out!, hideKey: "mm:mail-month:s1:2026-11-04:out", headingId: "mail-month-heading" }));
   is("a status note", /role="status"/.test(box), true);
-  is("warn colours at 100%", /class="notice notice-warn/.test(box), true);
+  is("warn colors at 100%", /class="notice notice-warn/.test(box), true);
   is("title and lines shown", box.includes("This month&#x27;s emails are used up") && box.includes("Sequence emails wait"), true);
   is("a real button to hide it", /<button type="button"[^>]*>Hide this note<\/button>/.test(box), true);
   is("no dialog, no link away", /dialog|<a\b|autofocus/i.test(box), false);
   const nearBox = renderToStaticMarkup(createElement(MailMonthNoticeBox, { notice: near!, hideKey: null, headingId: "mail-month-heading" }));
-  is("info colours from 80%", /class="notice notice-info/.test(nearBox), true);
+  is("info colors from 80%", /class="notice notice-info/.test(nearBox), true);
   const source = read("components/mail-month-notice.tsx");
   is("browser storage read and written inside try", (source.match(/try \{[^}]*localStorage/g) ?? []).length, 2);
   is("hiding hands focus to the card's heading", /getElementById\(headingId\)\?\.focus\(\)/.test(source), true);
@@ -124,7 +125,7 @@ async function main(): Promise<void> {
   const studioSource = read("components/email-studio.tsx");
   is("the page reads the count exactly, unknown as null", /usedThisMonthExact\(store\.listId, windowId\(store\)\)\.catch\(\(\) => null\)/.test(page), true);
   is("the page builds the notice from the facts it has", /mailMonthNotice\(\{/.test(page), true);
-  is("no count is not '0 of'", /props\.used === null/.test(studioSource) && studioSource.includes("This month's count could not be read just now. Reload the page to try again."), true);
+  is("no count is not '0 of'", /props\.used === null/.test(studioSource) && studioSource.includes("This month&apos;s count could not be read just now. Reload the page to try again."), true);
   is("the composer's count needs a known number", studioSource.includes("month={props.monthKnown && props.used !== null ? { used: props.used, allowance: props.allowance } : null}"), true);
   is("the note sits in the This month card", /<MailMonthNoticeBox\b/.test(studioSource) && /id="mail-month-heading"[^>]*tabIndex=\{-1\}/.test(studioSource), true);
   done();

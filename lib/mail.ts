@@ -18,6 +18,7 @@ import { lookColours } from "@/lib/store-look";
 import { NIMBUS_FROM, type BatchMessage, hasResend, sendListBatch, sendEmail, sentThisMonth } from "@/lib/email";
 import { isSesConfigured, sesBulkRoom, sesReady } from "@/lib/ses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { plainList } from "@/lib/redis-exact";
 import { TRIAL_MONTHLY_EMAILS, canUse, monthlyEmails } from "@/lib/plan";
 import { tokensFor } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
@@ -90,6 +91,28 @@ export async function usedThisMonth(listId: string | null, window: string | null
   if (!listId || !window || !isRedisConfigured()) return 0;
   const [raw] = await redisPipeline([["GET", usedKey(listId, window)]]);
   return Number(raw) || 0;
+}
+
+/**
+ * The month's count for the studio to show (357 [ES3], unit 1), read
+ * exactly: a counter that is not there is 0 (nothing sent), a whole number
+ * from zero is the count, and anything else is unknown (null), never 0:
+ * another shape, a lost or extra reply, or a negative left by a give-back
+ * after the counter expired. Without a month it is unknown too. The send
+ * path keeps usedThisMonth: it holds the month itself before sending.
+ */
+export async function usedThisMonthExact(listId: string | null, window: string | null): Promise<number | null> {
+  if (!listId) return 0;
+  if (!window) return null;
+  if (!isRedisConfigured()) return 0;
+  const replies = plainList(await redisPipeline([["GET", usedKey(listId, window)]]));
+  if (!replies || replies.length !== 1) return null;
+  const [raw] = replies;
+  if (raw === null) return 0;
+  const text = typeof raw === "number" ? String(raw) : raw;
+  if (typeof text !== "string" || !/^(0|[1-9]\d{0,15})$/.test(text)) return null;
+  const value = Number(text);
+  return Number.isSafeInteger(value) ? value : null;
 }
 
 /**

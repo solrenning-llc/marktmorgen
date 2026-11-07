@@ -4,6 +4,8 @@ import { type ImportReportLine, type ImportedStep, SequenceImportBox, reportWord
 import type { LibraryEmailDraft, LibrarySequenceDraft } from "@/lib/template-library-intents";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import { sendCount } from "@/lib/send-count";
+import { MailMonthNoticeBox } from "@/components/mail-month-notice";
+import type { MailMonthNotice } from "@/lib/mail-month-notice";
 import { afterSwitch, emailName, setAsideCount, setAsideNote, takeNewest } from "@/lib/set-aside";
 import { EMAIL_GOALS, type EmailGoal } from "@/lib/ai-rules";
 import { appendSequenceDraft, sequenceDraftSlots, DEFAULT_SEQUENCE_DRAFT, type DraftedStep, SEQUENCE_DRAFT_COUNTS } from "@/lib/sequence-draft";
@@ -323,7 +325,8 @@ export function EmailStudio(props: {
   name: string;
   mail: MailSettings | null;
   counts: { total: number; agreed: number; left: number; mailable: number };
-  used: number;
+  /** List emails sent this month, or null when the count could not be read (357 [ES3]): never shown as 0. */
+  used: number | null;
   allowance: number;
   /** Whether the plan's month can be told (lib/allowance-window.ts windowId); without it no count before sending is shown. */
   monthKnown?: boolean;
@@ -335,6 +338,8 @@ export function EmailStudio(props: {
   currency: string;
   /** The plan above this one, when the store is on Pro and this person may change its plan. */
   moveUp: { action: string; cycle: "month" | "year"; price: string; emails: number; trial: boolean } | null;
+  /** From 80% of the month's list emails, the note for the This month card (357 [ES3], lib/mail-month-notice.ts). */
+  monthNotice?: { notice: MailMonthNotice; hideKey: string | null } | null;
   /** Whether anything on the store is sold for money. */
   sells: boolean;
   flows: FlowRow[];
@@ -439,7 +444,7 @@ export function EmailStudio(props: {
                 products={props.products}
                 links={props.links ?? {}}
                 counts={props.counts}
-                month={props.monthKnown ? { used: props.used, allowance: props.allowance } : null}
+                month={props.monthKnown && props.used !== null ? { used: props.used, allowance: props.allowance } : null}
                 canSend={props.canSend}
                 broadcastUnconfirmed={broadcastUnconfirmed}
                 onBroadcastUnconfirmed={() => setBroadcastUnconfirmed(true)}
@@ -482,15 +487,29 @@ export function EmailStudio(props: {
       </div>
       <div className="min-w-0">
         <div className="card mt-8 p-6 sm:p-8 lg:mt-0">
-          <p className="text-lg font-semibold tracking-[-0.02em] text-ink">This month</p>
-          <p className="mt-2 text-3xl font-semibold tabular-nums">{`${n(props.used)} of ${n(props.allowance)}`}</p>
-          <p className="mt-1 text-sm text-ink-soft">
-            {props.trial
-              ? `emails sent. During the free trial a month holds ${TRIAL_MONTHLY_EMAILS.toLocaleString("en-US")}; the full ${PRO_MONTHLY_EMAILS.toLocaleString("en-US")} opens with your first payment.`
-              : "emails sent, one-off and sequences together. The count starts again on the day your plan's month renews."}
-          </p>
+          {/* Focus comes here when the month's note is hidden (components/mail-month-notice.tsx). */}
+          <p id="mail-month-heading" tabIndex={-1} className="text-lg font-semibold tracking-[-0.02em] text-ink">This month</p>
+          {props.used === null ? (
+            // A count that could not be read is said to be unknown, never "0 of" (357 [ES3]).
+            <>
+              <p className="mt-2 text-3xl font-semibold">Not known right now</p>
+              <p className="mt-1 text-sm text-ink-soft" data-month-unknown>This month&apos;s count could not be read just now. Reload the page to try again.</p>
+            </>
+          ) : (
+            <>
+              <p className="mt-2 text-3xl font-semibold tabular-nums">{`${n(props.used)} of ${n(props.allowance)}`}</p>
+              <p className="mt-1 text-sm text-ink-soft">
+                {props.trial
+                  ? `emails sent. During the free trial a month holds ${TRIAL_MONTHLY_EMAILS.toLocaleString("en-US")}; the full ${PRO_MONTHLY_EMAILS.toLocaleString("en-US")} opens with your first payment.`
+                  : "emails sent, one-off and sequences together. The count starts again on the day your plan's month renews."}
+              </p>
+            </>
+          )}
           {!props.trial && emailEquivalence(props.allowance) ? (
             <p className="mt-2 text-sm text-ink-soft" data-email-equivalence>{emailEquivalence(props.allowance)}</p>
+          ) : null}
+          {props.monthNotice ? (
+            <MailMonthNoticeBox notice={props.monthNotice.notice} hideKey={props.monthNotice.hideKey} headingId="mail-month-heading" />
           ) : null}
           {props.moveUp ? (
             <details className="mt-4">

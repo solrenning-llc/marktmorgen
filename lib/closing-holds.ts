@@ -419,7 +419,16 @@ export async function releaseRestarted(deadline: number, staysOpen: (store: Stor
     if (Date.now() > deadline) break;
     const key = flat[i];
     const endedAt = Number(flat[i + 1]);
-    const store = await storeForEmail(key).catch(() => null);
+    // Only Redis saying the record is not there (nil) is "gone" (rule 24): a record that cannot be read
+    // stays in the line and is tried again tomorrow, so a restarted store's members are never left held.
+    let store: Store | null;
+    try {
+      store = await storeForEmail(key);
+    } catch (error) {
+      console.error("a held store's record could not be read; tried again tomorrow", error);
+      out.push({ key, state: "held" });
+      continue;
+    }
     if (!store) {
       await redisPipeline([["ZREM", HELD_INDEX, key]]);
       out.push({ key, state: "gone" });

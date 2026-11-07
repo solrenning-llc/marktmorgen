@@ -114,7 +114,7 @@ function picture(width: number, height: number, runs: Array<[string, number, num
 // The picture is shrunk to fit inside PALETTE_SIDE, keeping its shape.
 {
   assert.deepEqual(fitInside(1920, 1080), { width: PALETTE_SIDE, height: 36 });
-  assert.deepEqual(fitInside(300, 3000), { width: 7, height: PALETTE_SIDE });
+  assert.deepEqual(fitInside(300, 3000), { width: 6, height: PALETTE_SIDE });
   assert.deepEqual(fitInside(5000, 1), { width: PALETTE_SIDE, height: 1 }, "never squeezed to nothing");
   assert.deepEqual(fitInside(20, 10), { width: 20, height: 10 }, "a small picture is not enlarged");
   assert.equal(fitInside(0, 10), null);

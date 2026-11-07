@@ -12,6 +12,7 @@ import {
   backdropStyle,
   FONTS,
   THEMES,
+  contrast,
   type FontId,
   fontStyle,
   type StoreLook,
@@ -21,6 +22,16 @@ import {
   normaliseHex,
 } from "@/lib/store-look";
 import { MAX_PHOTO_BYTES, PHOTO_SIDE, photoUrl } from "@/lib/photo-limits";
+import {
+  PALETTE_MAX_BYTES,
+  PALETTE_TYPES,
+  type PicturePalette,
+  type PictureProblem,
+  fitInside,
+  paletteFromPixels,
+  pictureProblem,
+  themeForPicture,
+} from "@/lib/image-palette";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
 const MESSAGES: Record<string, string> = {
@@ -93,6 +104,46 @@ function toBase64(blob: Blob): Promise<string> {
   });
 }
 
+/** What the creator reads when a picture gives no colours. */
+const PICTURE_MESSAGES: Record<PictureProblem | "unreadable", string> = {
+  type: "That picture could not be opened. Try a JPEG, PNG or WebP.",
+  empty: "That picture could not be opened. Try a JPEG, PNG or WebP.",
+  too_big: `That picture is larger than ${Math.round(PALETTE_MAX_BYTES / (1024 * 1024))} MB. Try a smaller copy of it.`,
+  unreadable: "We could not find any colors in that picture. Try another one.",
+};
+
+/**
+ * Finds the main colours of a picture right here in the browser (386 [TB12]):
+ * it is drawn small on a canvas that never leaves the page and only the
+ * colours found are kept. Nothing is uploaded, saved or sent.
+ */
+async function readPicture(file: File): Promise<PicturePalette | PictureProblem | "unreadable"> {
+  const problem = pictureProblem(file);
+  if (problem) return problem;
+  const url = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.decoding = "async";
+    image.src = url;
+    await image.decode();
+    const size = fitInside(image.naturalWidth, image.naturalHeight);
+    if (!size) return "unreadable";
+    const canvas = document.createElement("canvas");
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return "unreadable";
+    context.imageSmoothingQuality = "high";
+    context.drawImage(image, 0, 0, size.width, size.height);
+    const pixels = context.getImageData(0, 0, size.width, size.height);
+    return paletteFromPixels(pixels.data, size.width, size.height) ?? "unreadable";
+  } catch {
+    return "unreadable";
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 /** The theme, the colour and the photo of the public page, with a live preview. */
 export function LookEditor({
   look,
@@ -129,6 +180,10 @@ export function LookEditor({
   const [backdrop, setBackdrop] = useState<BackdropId>(look.backdrop);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const fileRef = useRef<HTMLInputElement>(null);
+  const pictureRef = useRef<HTMLInputElement>(null);
+  const [picture, setPicture] = useState<PicturePalette | null>(null);
+  const [pictureNote, setPictureNote] = useState("");
+  const [readingPicture, setReadingPicture] = useState(false);
 
   const preset = ACCENTS.some((option) => option.hex === accent);
   const changed = theme !== look.theme || accent !== look.accent || badge !== look.badge || sold !== look.sold || font !== look.font || backdrop !== look.backdrop;
@@ -195,6 +250,26 @@ export function LookEditor({
       setStatus({ kind: "error", message: MESSAGES.server_error });
     } finally {
       if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  async function choosePicture(file: File | undefined) {
+    if (!file || readingPicture) return;
+    setReadingPicture(true);
+    setPictureNote("Looking for the colors in your picture.");
+    try {
+      const found = await readPicture(file);
+      if (typeof found === "string") {
+        setPicture(null);
+        setPictureNote(PICTURE_MESSAGES[found]);
+        return;
+      }
+      setPicture(found);
+      const count = found.colors.length;
+      setPictureNote(`Found ${count} ${count === 1 ? "color" : "colors"} in your picture. Pick one to use it as your color, then save your look.`);
+    } finally {
+      setReadingPicture(false);
+      if (pictureRef.current) pictureRef.current.value = "";
     }
   }
 
@@ -364,6 +439,51 @@ export function LookEditor({
                   : "The preview shows your page's theme and color, with an example product until you add one."
               }`}
             </p>
+          </fieldset>
+
+          {/* Colours from a picture (386 [TB12]): read in this browser only. */}
+          <fieldset disabled={working || readingPicture} aria-describedby="picture-colors-hint">
+            <legend className="field-label">Colors from a picture</legend>
+            <p id="picture-colors-hint" className="field-hint mt-2">
+              Pick a picture from your device, such as your logo. Its main colors are found right here in your browser: the picture is not uploaded or saved.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2.5">
+              <label className={`btn btn-secondary btn-sm cursor-pointer ${working || readingPicture ? "pointer-events-none opacity-60" : ""}`}>
+                <Icon name="palette" size={16} />
+                {picture ? "Choose another picture" : "Choose a picture"}
+                <input
+                  ref={pictureRef}
+                  type="file"
+                  accept={PALETTE_TYPES.join(",")}
+                  className="sr-only"
+                  onChange={(event) => choosePicture(event.target.files?.[0])}
+                />
+              </label>
+              {picture?.colors.map((found) => (
+                <button
+                  key={found.hex}
+                  type="button"
+                  aria-pressed={accent === found.hex}
+                  onClick={() => setAccent(found.hex)}
+                  className="relative grid h-11 w-11 place-items-center rounded-full ring-1 ring-ink-mute ring-offset-2 transition aria-pressed:ring-2 aria-pressed:ring-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-brand"
+                  style={{ background: found.hex }}
+                >
+                  <span className="sr-only">{`Use ${found.hex}, about ${Math.max(1, Math.round(found.share * 100))}% of your picture`}</span>
+                  {accent === found.hex ? (
+                    <Icon name="check" size={18} className={contrast(found.hex, "#ffffff") >= 3 ? "text-white" : "text-ink"} />
+                  ) : null}
+                </button>
+              ))}
+            </div>
+            <p role="status" aria-live="polite" className="field-hint mt-2">{pictureNote}</p>
+            {picture && themeForPicture(picture) !== theme ? (
+              <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-soft">
+                {`Your picture is mostly ${picture.dark ? "dark" : "light"}, so the ${THEMES.find((option) => option.id === themeForPicture(picture))?.label} theme may suit it.`}
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTheme(themeForPicture(picture))}>
+                  {`Use the ${THEMES.find((option) => option.id === themeForPicture(picture))?.label} theme`}
+                </button>
+              </p>
+            ) : null}
           </fieldset>
 
           {/* Letters */}

@@ -228,6 +228,31 @@ test("a claim reply other than OK or nothing is unknown: nothing is sent", async
   await refuses(isClaims, async () => [], "no claim replies");
 });
 
+// Claude 5's LOW on #2929 @ 62904755: when one claim answers "OK" and the other in another shape, the one taken here
+// must not stay behind: the next pass, read whole, sends this checkout's reminder; and another checkout of the same
+// buyer and product is not held back a week by a once mark no email went with.
+test("an unknown claim gives back the other claim it took, so the next pass sends", async () => {
+  const store = await shop();
+  const { id, email } = fresh();
+  const before = sent.length;
+  await assert.rejects(intercept(isClaims, slotAs(1, "QUEUED"), () => remindAbandoned(store, left(id, email))), UnknownReplyError);
+  assert.deepEqual(sent.slice(before), [], "nothing goes on an unknown claim");
+  assert.equal(await markOf(id), null, "the sent claim taken here is given back");
+  assert.equal(await remindAbandoned(store, left(id, email)), "sent", "the next pass, read whole, sends");
+  assert.deepEqual(sent.slice(before), [email], "once");
+});
+
+test("an unknown sent claim gives back the once-a-week claim it took, so another checkout of the buyer still gets one", async () => {
+  const store = await shop();
+  const { id, email } = fresh();
+  const before = sent.length;
+  await assert.rejects(intercept(isClaims, slotAs(0, "QUEUED"), () => remindAbandoned(store, left(id, email))), UnknownReplyError);
+  assert.deepEqual(sent.slice(before), [], "nothing goes on an unknown claim");
+  const other = `${id}x`;
+  assert.equal(await remindAbandoned(store, left(other, email)), "sent", "the buyer's other checkout of the same product is not held back a week");
+  assert.deepEqual(sent.slice(before), [email], "once");
+});
+
 /**
  * The fifth reply, the erasure check (lib/suppression.ts, HEXISTS), is read
  * as exactly as the other four (CX-116 second money review of #2929, F1):

@@ -1,6 +1,7 @@
 /** Synthetic provider replies only: actual add-on sync must close funded AI admission. */
 import { claimHandle, ensureStatsId, setAssistant, setAssistantPlan, setSubscription, storeForEmail } from "@/lib/store";
-import { readAssistantReturn, syncAssistant, assistantRefusal } from "@/lib/assistant-billing";
+import { ensureAssistantPrice, readAssistantReturn, syncAssistant, assistantRefusal } from "@/lib/assistant-billing";
+import { ASSISTANT_PRICE_CENTS } from "@/lib/store-assistant-rules";
 import { assistantShown, askAssistant } from "@/lib/store-assistant";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -32,6 +33,9 @@ async function main(): Promise<void> {
    */
   const replies: ("own" | string | null)[] = [];
   let cancelSet = false;
+  /** Rule 30 on the add-on's price made at Stripe (POST /prices): answered as written, or with one value not the one written. */
+  let priceAs: "written" | "amount" | "currency" | "interval" = "written";
+  let pricesMade = 0;
   const original = globalThis.fetch;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
@@ -60,6 +64,17 @@ async function main(): Promise<void> {
       is("dispute lookup belongs to this add-on", url.searchParams.get("subscription"), plan.subscriptionId);
       // Stripe's own list shape (lib/stripe-list.ts reads it exactly): each invoice with its id, the charge expanded with its id, has_more.
       return Response.json({ object: "list", data: [{ id: "in_SyncAssist01", charge: { id: "ch_SyncAssist01", disputed } }], has_more: false });
+    }
+    if (method === "GET" && url.pathname === "/v1/prices") return Response.json({ object: "list", data: [], has_more: false });
+    if (method === "GET" && url.pathname === "/v1/products/nimbus_labs_store_assistant") return Response.json({ id: "nimbus_labs_store_assistant", object: "product" });
+    if (method === "POST" && url.pathname === "/v1/prices") {
+      pricesMade += 1;
+      const body = new URLSearchParams(String(init?.body ?? ""));
+      const price: Record<string, unknown> = { id: "price_SyncAssist0" + pricesMade, object: "price", unit_amount: Number(body.get("unit_amount")), currency: body.get("currency"), recurring: { interval: body.get("recurring[interval]") }, lookup_key: body.get("lookup_key"), product: body.get("product") };
+      if (priceAs === "amount") price.unit_amount = 4900;
+      if (priceAs === "currency") price.currency = "eur";
+      if (priceAs === "interval") price.recurring = { interval: "year" };
+      return Response.json(price);
     }
     if (method === "DELETE" && url.pathname === "/v1/subscriptions/sub_SyncAssist01") return Response.json({ id: plan.subscriptionId, status: "canceled" });
     throw new Error("Unexpected provider operation: " + method + " " + url.pathname);
@@ -138,6 +153,20 @@ async function main(): Promise<void> {
     part("Control: the same return with the subscription's own reply grants it");
     const own = await readAssistantReturn((await storeForEmail(owner))!, "cs_test_SyncAssistReturn01");
     is("its own reply is read as before", [own?.subscriptionId, own?.active], [plan.subscriptionId, true]);
+
+    part("Rule 30 on the add-on's price made at Stripe: used only when the reply carries the price just written");
+    for (const [label, as] of [["another amount", "amount"], ["another currency", "currency"], ["a yearly interval", "interval"]] as const) {
+      priceAs = as;
+      const got = await ensureAssistantPrice().then((id) => id, () => "refused");
+      is("a price answered with " + label + " is never used for a checkout, nor kept for the next", got, "refused");
+    }
+    priceAs = "written";
+    const made = await ensureAssistantPrice();
+    is(
+      "control: the price answered as written (" + ASSISTANT_PRICE_CENTS + " cents a month) is used, and kept for the next checkout",
+      [made, await ensureAssistantPrice(), pricesMade],
+      ["price_SyncAssist04", "price_SyncAssist04", 4],
+    );
   } finally {
     globalThis.fetch = original;
   }

@@ -15,6 +15,7 @@ import { readListing } from "@/lib/catalog";
 import { BuyBox, ClicksBox, WaitlistForm } from "@/components/store-product";
 import { AssistReminderBox } from "@/components/assistant-reminder-box";
 import { RatingLine, ReviewsSection } from "@/components/review-list";
+import { Countdown } from "@/components/countdown";
 import type { Summary } from "@/lib/review-summary";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -114,6 +115,24 @@ async function main(): Promise<void> {
   is("and so do words of the narrowest letters", at(126) <= 80, true);
   is("while a real sentence keeps at least 45 characters a line, so the cap does not chop ordinary reading", at(78) >= 45, true);
   is("a centered line stays centered under the cap", /\.st-measure :where\([^)]*\.text-center[^)]*\)\s*\{[^}]*margin-inline:\s*auto/.test(css), true);
+  // A box that centers its words with text-align (the countdown, a "By the numbers" card) but whose capped lines sit
+  // at the left of it would draw them off its middle: the countdown's "Until …" ended about 100 px left of its numbers.
+  const centered = (css.match(/\.st-measure :where\(([^)]*)\)\s*\{\s*margin-inline:\s*auto/)?.[1] ?? "").split(",").map((s) => s.trim());
+  is("the countdown's heading, its \"Until …\" and its note are centered under the cap, like its numbers", centered.includes(".sp-countdown > p"), true);
+  is("and so is a \"By the numbers\" figure in its card", centered.includes(".sp-fact > dd"), true);
+  const countdown = renderToStaticMarkup(createElement(Countdown, { until: 2_000_000_000, now: 1_900_000_000, heading: "Doors close soon", note: "Seats are kept for a week." }));
+  // Each <p> is a direct child of the countdown's box, so ".sp-countdown > p" reaches every one of them.
+  let depth = 0;
+  const pAt: number[] = [];
+  for (const tag of countdown.matchAll(/<(\/?)([a-z]+)[^>]*>/g)) {
+    if (tag[1]) depth--;
+    else {
+      if (tag[2] === "p") pAt.push(depth);
+      depth++;
+    }
+  }
+  is("the countdown is the box that centers them, with its words as its own paragraphs", [countdown.startsWith('<div class="sp-countdown"'), pAt], [true, [1, 1]]);
+  is("and a figure is the dd of its card", /<div key=\{fact\.key\} className="sp-fact">\s*<dt[^>]*>[^<]*<\/dt>\s*<dd>/.test(readFileSync("components/sales-blocks.tsx", "utf8")), true);
   is("the product page, its reviews page and a call's booking page use it", [/<main id="content" className=\{`st-measure /.test(page), /<main id="content" className="st-measure /.test(reviewsPage), /<main id="content" className="st-measure /.test(bookPage)], [true, true, true]);
   // Narrower glyphs still exist (an apostrophe is 0.27ch in Geist): no width holds 80 of any glyph without chopping
   // ordinary sentences, so that case and its alternative are recorded, as AX274 asks.

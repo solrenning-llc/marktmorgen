@@ -36,7 +36,10 @@
  * with no readers yet: the change is made and must not go untold. Each run
  * reads the list again, until it reads, while the notice is still of use
  * (as the hour-before reminder: not once the event has begun), and then
- * sends it like any other. A move's notice still waiting when the event is
+ * sends it like any other. That is new reading: each waiting notice reads
+ * the list (at most RSVP_PAGES HSCAN pages, lib/community-events.ts) every
+ * five minutes, only while the read fails, and never past the event's
+ * start; the notices themselves stay within withinEventWrites. A move's notice still waiting when the event is
  * then called off is dropped: the cancellation's email says all.
  *
  * These are the community's own notices about something a member signed up
@@ -52,7 +55,6 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError } from "@/lib/redis-reply";
 import { type BatchMessage, isSenderConfigured, sendBatch } from "@/lib/email";
 import { BATCH_SIZE, CHECKED_BATCH_SIZE, bodyHtml, render } from "@/lib/mail";
 import { storeSender } from "@/lib/calls";
@@ -159,12 +161,17 @@ function stillUseful(kind: EventMailKind, start: number, now: number): boolean {
   return true;
 }
 
+/** Writes a send's readers down, in order. */
+async function writeReaders(id: string, readers: string[]): Promise<void> {
+  const commands: (string | number)[][] = [["DEL", toKey(id)]];
+  for (let i = 0; i < readers.length; i += 500) commands.push(["RPUSH", toKey(id), ...readers.slice(i, i + 500)]);
+  commands.push(["EXPIRE", toKey(id), KEEP_SECONDS]);
+  await redisPipeline(commands);
+}
+
 /** Writes a send's readers down, in order, and the send with them. */
 async function listReaders(job: EventMailJob, readers: string[]): Promise<void> {
-  const commands: (string | number)[][] = [["DEL", toKey(job.id)]];
-  for (let i = 0; i < readers.length; i += 500) commands.push(["RPUSH", toKey(job.id), ...readers.slice(i, i + 500)]);
-  commands.push(["EXPIRE", toKey(job.id), KEEP_SECONDS]);
-  await redisPipeline(commands);
+  await writeReaders(job.id, readers);
   await save(job);
 }
 
@@ -173,7 +180,10 @@ async function listReaders(job: EventMailJob, readers: string[]): Promise<void> 
  * for again finds it made and starts nothing. Null when there is nobody to
  * send it to, or it was made already. A move's or a cancellation's notice
  * whose list does not read is written down `waiting` (advanceEventJob reads
- * it again); a reminder's throws, and stays queued (runEventQueue).
+ * it again); a reminder's throws, and stays queued (runEventQueue), its claim
+ * given back while nothing of it is written down yet. A reminder made already
+ * whose send was written down but not put among the sends under way (its SADD
+ * failed) is put there now, so it goes out, once.
  */
 async function startJob(
   store: Store,
@@ -185,13 +195,22 @@ async function startJob(
   if (!community) return null;
   const seq = kind === "moved" ? `m${event.moves}` : kind === "cancelled" ? "x" : `${event.start}`;
   const id = createHash("sha256").update(`${community}|${event.id}|${kind}|${seq}`).digest("hex").slice(0, 24);
+  const notice = kind !== "24" && kind !== "1";
   const [claimed] = await redisPipeline([["SET", madeKey(id), "1", "NX", "EX", KEEP_SECONDS]]);
-  if (claimed === null) return null;
+  if (claimed === null) {
+    // Made already. A reminder still "sending" is under way, or was meant to be: only a failed SADD below leaves one
+    // outside nl:cm:evmailq (advanceEventJob takes a send off it only once it is no longer "sending"). Putting it
+    // there again is safe: one run holds a send at a time, and each batch goes under its own key.
+    if (!notice) {
+      const made = await readEventJob(id);
+      if (made && made.status === "sending" && !made.waiting) await redisPipeline([["SADD", JOBS, id]]);
+    }
+    return null;
+  }
   // Who is coming could not be read (rule 30). A reminder's claim is given back, so the send is not made short now
   // nor refused as made later; the caller says it failed, and a due reminder stays queued (runEventQueue). A
   // move's or a cancellation's notice keeps its claim and is written down waiting for its list: the change it
   // tells of is already made.
-  const notice = kind !== "24" && kind !== "1";
   const readers = await rsvpList(community, event.id).then(
     (list) => list.map((r) => r.key),
     async (error: unknown) => {
@@ -218,7 +237,14 @@ async function startJob(
   };
   if (readers === null) return await startWaiting({ ...job, note: WAITING_NOTE, waiting: true });
   if (!readers.length) return null;
-  await listReaders(job, readers);
+  // A reminder whose readers are not written down gives its claim back, as above: nothing of the send exists yet
+  // (the send itself is written after them), so the next run starts it whole. Once the send is written, the claim
+  // stays, and a failed SADD is mended on the next run (above).
+  await writeReaders(id, readers).catch(async (error: unknown) => {
+    if (!notice) await redisPipeline([["DEL", madeKey(id)]]).catch(() => {});
+    throw error;
+  });
+  await save(job);
   await redisPipeline([["SADD", JOBS, id]]);
   return job;
 }
@@ -458,6 +484,11 @@ function parseDue(member: string): Due | null {
   return { member, community, handle, event, mark, start: at };
 }
 
+/** Whether a due entry is still of use at `now`, by its own planned start: a reminder as stillUseful, the phone before the start. */
+function stillDue(due: Due, now: number): boolean {
+  return due.mark === "p" ? now < due.start : stillUseful(due.mark, due.start, now);
+}
+
 export type EventRun = { reminders: number; pushed: number; dropped: number; sends: number };
 
 /**
@@ -487,7 +518,8 @@ export async function runEventQueue(
     }
     if (due.mark !== "p" && !options.mail) continue;
     try {
-      if (!stores.has(due.handle)) stores.set(due.handle, await findStore(due.handle).catch(() => null));
+      // A store that does not load is not a store that is gone: it throws, and the entry stays queued (below).
+      if (!stores.has(due.handle)) stores.set(due.handle, await findStore(due.handle));
       const store = stores.get(due.handle) ?? null;
       const event = store?.community?.id === due.community ? await readEvent(due.community, due.event) : null;
       const current = event && !event.cancelled && event.start === due.start;
@@ -515,9 +547,12 @@ export async function runEventQueue(
       } else counts.dropped += 1;
     } catch (error) {
       console.error("a live event reminder failed", error);
-      // Who is coming could not be read: the reminder stays queued and is tried again on the next run, while it is
-      // still useful (stillUseful), never sent to a short list nor dropped as sent.
-      if (error instanceof UnknownReplyError) continue;
+      // Whatever went wrong on the way (who is coming unread, rule 30; or a timeout or an error status from Redis, the
+      // store or the event not loading, the send not written down): the entry stays queued and is tried again on the
+      // next run, never sent to a short list nor dropped unsent. Only while it is still due, by the entry's own time
+      // (stillDue), so an error that never clears does not hold the queue past it. Never twice: a reminder's send is
+      // made once under its `:made` claim (startJob), and the phone is told once per seed (lib/phone-alerts.ts).
+      if (stillDue(due, Date.now())) continue;
     }
     await redisPipeline([["ZREM", EVENT_QUEUE, member]]);
   }

@@ -51,7 +51,7 @@
  */
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { deriveKey, deriveLegacyKey } from "@/lib/secret-box";
 import { type Member, parseTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
@@ -235,17 +235,21 @@ export async function revokeKey(sid: string, id: string): Promise<boolean> {
 }
 
 /**
- * Every key of a store with who made it and its hold, oldest first, for lib/api-key-pause.ts. `strict` (the
- * studio's list, listKeys): each of the three replies must be a list of fields and values, or this throws
- * (audit SG2, finding 23); otherwise read as before.
+ * Every key of a store with who made it and its hold, oldest first, for lib/api-key-pause.ts and the studio's
+ * list (listKeys). Each of the three replies must be a list of fields and values, and each hold one this file
+ * knows, or this throws (audit SG2, finding 23; CX-123 rule 24): never read as no keys or no hold, which would
+ * let a teammate leaving, a role change or the two-step rule pass over a key that still opens the store.
+ * `_strict` is kept only so callers that asked for this reading still read the same; every read is strict.
  */
-export async function keyRecords(sid: string, strict = false): Promise<KeyRecord[]> {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for callers that pass it (#2899 adds one)
+export async function keyRecords(sid: string, _strict?: true): Promise<KeyRecord[]> {
   if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return [];
-  const [raw, holds, uses] = await redisPipeline([["HGETALL", listKey(sid)], ["HGETALL", holdKey(sid)], ["HGETALL", usedKey(sid)]]);
-  if (strict && [raw, holds, uses].some((reply) => {
+  const replies = repliesFor(await redisPipeline([["HGETALL", listKey(sid)], ["HGETALL", holdKey(sid)], ["HGETALL", usedKey(sid)]]), 3);
+  if (!replies || replies.some((reply) => {
     const flat = stringList(reply);
     return !flat || flat.length % 2 !== 0;
   })) throw new UnknownReplyError("a store's API keys");
+  const [raw, holds, uses] = replies;
   const held = mapOf(holds);
   const used = mapOf(uses);
   const flat = flatOf(raw);
@@ -253,9 +257,8 @@ export async function keyRecords(sid: string, strict = false): Promise<KeyRecord
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const s = parseStored(flat[i + 1]);
     if (!s) continue;
-    const hold = held.get(s.id) ?? "";
     const usedAt = Math.max(s.usedAt, Number(used.get(s.id)) || 0);
-    out.push({ id: s.id, name: s.name, hint: s.hint, madeAt: s.madeAt, usedAt, write: s.write, agent: s.agent, maker: s.maker ?? null, hold: HOLDS.includes(hold) ? (hold as Hold) : null });
+    out.push({ id: s.id, name: s.name, hint: s.hint, madeAt: s.madeAt, usedAt, write: s.write, agent: s.agent, maker: s.maker ?? null, hold: holdOf(held.get(s.id)) });
   }
   return out.sort((a, b) => a.madeAt - b.madeAt);
 }
@@ -298,7 +301,26 @@ for i = 1, n do
 end
 return changed`;
 
-/** Whether each of these keys of a store is in use, paused (held, or its maker gone from the team) or gone (revoked). */
+/** A hold as stored: none (no field), or one this file knows; anything else is unknown and throws (rule 24), never no hold. */
+function holdOf(raw: string | null | undefined): Hold | null {
+  if (raw === null || raw === undefined) return null;
+  if (!HOLDS.includes(raw)) throw new UnknownReplyError("an API key's hold");
+  return raw as Hold;
+}
+
+/** An HMGET's reply: exactly one field for each asked, each its text or nothing (null); anything else throws (rule 24). */
+function fieldsOf(reply: unknown, count: number): (string | null)[] {
+  const slots = repliesFor(reply, count);
+  if (!slots || slots.some((slot) => slot !== null && typeof slot !== "string")) throw new UnknownReplyError("a store's API keys");
+  return slots as (string | null)[];
+}
+
+/**
+ * Whether each of these keys of a store is in use, paused (held, or its maker gone from the team) or gone
+ * (revoked: no record). A reply in another shape, a record that does not read or a hold this file does not know
+ * throws UnknownReplyError (CX-123 rule 24): never "gone", which would fail a webhook delivery for good or pass
+ * over an endpoint, and never "live", which would send to the endpoint of a key that is paused.
+ */
 export async function keyStates(sid: string, ids: string[]): Promise<Map<string, "live" | "paused" | "gone">> {
   const out = new Map<string, "live" | "paused" | "gone">();
   const wanted = [...new Set(ids.filter((id) => ID_PATTERN.test(id)))];
@@ -307,13 +329,21 @@ export async function keyStates(sid: string, ids: string[]): Promise<Map<string,
     for (const id of wanted) out.set(id, "gone");
     return out;
   }
-  const [records, holds, team] = await redisPipeline([["HMGET", listKey(sid), ...wanted], ["HMGET", holdKey(sid), ...wanted], ["GET", teamRecordKey(sid)]]);
-  const { members, requireTwoStep } = parseTeam(team);
+  const replies = repliesFor(await redisPipeline([["HMGET", listKey(sid), ...wanted], ["HMGET", holdKey(sid), ...wanted], ["GET", teamRecordKey(sid)]]), 3);
+  if (!replies) throw new UnknownReplyError("a store's API keys");
+  const records = fieldsOf(replies[0], wanted.length);
+  const holds = fieldsOf(replies[1], wanted.length);
+  const { members, requireTwoStep } = parseTeam(replies[2]);
   wanted.forEach((id, at) => {
-    const stored = parseStored(Array.isArray(records) ? records[at] : null);
-    const hold = Array.isArray(holds) ? String(holds[at] ?? "") : "";
+    const raw = records[at];
+    if (raw === null) {
+      out.set(id, "gone");
+      return;
+    }
+    const stored = parseStored(raw);
+    if (!stored || stored.id !== id) throw new UnknownReplyError("an API key record");
     // The same reading as a request with the key (pauseWhy): its hold, or a maker no longer on the team.
-    out.set(id, !stored ? "gone" : pauseWhy(sid, stored.maker ?? null, HOLDS.includes(hold) ? (hold as Hold) : null, members, stored.write, requireTwoStep === true) ? "paused" : "live");
+    out.set(id, pauseWhy(sid, stored.maker ?? null, holdOf(holds[at]), members, stored.write, requireTwoStep === true) ? "paused" : "live");
   });
   return out;
 }
@@ -331,8 +361,9 @@ export async function rewriteMakers(sid: string, change: (maker: KeyMaker, id: s
   // written back, and one changed meanwhile is read again, a few times at most; still changing after that,
   // this throws, so a caller that must not go on half done (a move) undoes what it did.
   for (let tries = 0; ; tries += 1) {
-    const [raw] = await redisPipeline([["HGETALL", listKey(sid)]]);
-    const flat = flatOf(raw);
+    // The list read in another shape throws (readList, rule 24): never "nothing to rewrite", which would leave
+    // a former teammate's fingerprint on their keys.
+    const flat = await readList(sid);
     const swaps: string[] = [];
     for (let i = 0; i + 1 < flat.length; i += 2) {
       const s = parseStored(flat[i + 1]);

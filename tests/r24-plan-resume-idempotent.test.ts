@@ -14,7 +14,10 @@
  * under its key for a day, so a member who fixes their card must get a new
  * try. After no answer, a 409 or Stripe's own failure, the next try reuses
  * the key (CX-123 rule 24: unknown is never read as declined), and a try
- * whose counter cannot be read exactly sends nothing.
+ * whose counter cannot be read exactly sends nothing. The key a press sends
+ * is written down first (the resume's record), and every later press of the
+ * same pause sends it again, whatever `paused_at` then reads; a record that
+ * cannot be read or written exactly sends nothing (Codex G on #3090).
  *
  * The Stripe stand-in below keeps keys as Stripe does (a saved result per key,
  * a key in flight answered 409, a key reused with other parameters answered
@@ -242,6 +245,54 @@ async function main(): Promise<void> {
   sub = { ...again, metadata: { ...(again.metadata as Record<string, string>), paused_at: String(NOW + 3600) } };
   const offAgain = await resumeMembership(store, token, SUB, early);
   is("the new pause is a resume of its own: a new key, carried out, never the first one's saved answer", [offAgain, keys()[0] !== keys()[1], sub.pause_collection], [{ ok: true }, true, null]);
+
+  part("The resume's record: the key a press sent, written before it is sent (Codex G on #3090)");
+  const record = `nl:tier:resume:${SUB}:${PERIOD_END}:${addMonths(PERIOD_END, 2)}:sent`;
+  const fresh = async (metadata?: Record<string, unknown>) => {
+    reset();
+    await realPipeline([["DEL", record]]);
+    if (metadata) sub = { ...sub, metadata: { ...(sub.metadata as Record<string, unknown>), ...metadata } };
+  };
+  await fresh({ paused_at: 7 });
+  const unreadableFirst = await resume();
+  is("a paused_at that cannot be read, with no resume sent before: nothing is sent, 'try again'", [requests.length, unreadableFirst], [0, { ok: false, reason: "error" }]);
+  await fresh();
+  sub = { ...sub, metadata: { store: "club", product: "prod000001", pause_from: String(PERIOD_END) } };
+  const older = await resume();
+  is("a pause older than paused_at, with no resume sent before, resumes once under the '0' key", [older, charged, keys()[0]?.endsWith(":0:0")], [{ ok: true }, 1, true]);
+  await fresh();
+  plan = ["lost"];
+  await resume();
+  const [written] = (await realPipeline([["GET", record]])) as [string];
+  is("the record holds the exact key sent, before any answer", JSON.parse(written).k, keys()[0]);
+  release();
+  await late;
+  for (const [label, reply] of [
+    ["a record with a field of its own", JSON.stringify({ ...JSON.parse(written), extra: 1 })],
+    ["a record whose key is of another pause", JSON.stringify({ ...JSON.parse(written), k: "nimbus-resume:sub_Other0000001:1:2:0:0" })],
+    ["a record with no time", JSON.stringify({ k: JSON.parse(written).k, p: JSON.parse(written).p })],
+  ] as const) {
+    await fresh();
+    await realPipeline([["SET", record, reply]]);
+    const unread = await resume();
+    is(`${label}: nothing is sent and the answer is "try again"`, [requests.length, unread], [0, { ok: false, reason: "error" }]);
+  }
+  await fresh();
+  hook = (commands) => (commands.some((c) => c[0] === "SET") ? Promise.resolve([null]) : null);
+  const unwritten = await resume();
+  hook = null;
+  is("a record Redis did not write: nothing is sent", [requests.length, unwritten], [0, { ok: false, reason: "error" }]);
+  await fresh();
+  hook = (commands) => (commands.some((c) => c[0] === "SET") ? realPipeline([["SET", record, written]]).then(() => realPipeline(commands)) : null);
+  const raced = await resume();
+  hook = null;
+  is("a record another press wrote meanwhile (NX): nothing is sent", [requests.length, raced], [0, { ok: false, reason: "error" }]);
+  await fresh();
+  hook = (commands) => (commands.some((c) => c[0] === "EXPIRE") ? realPipeline(commands).then((r) => r.map((v, i) => (commands[i][0] === "GET" ? "twelve" : v))) : null);
+  const counterUnread = await resume();
+  hook = null;
+  const [left] = await realPipeline([["GET", record]]);
+  is("no record and a try that cannot be read exactly: nothing is written or sent", [requests.length, counterUnread, left], [0, { ok: false, reason: "error" }, null]);
 
   done();
 }

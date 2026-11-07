@@ -39,7 +39,9 @@ const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
  * a request whose answer never came, or a press held past the lease, from being sent a second time while Stripe
  * still reads the membership as paused (Codex G and Codex T on #3090). What does is the resume's idempotency key
  * (resumeKeyOf): every try of the same resume of the same pause carries the same key, and Stripe answers a repeat
- * with the first result, or 409 while it is still working on it, instead of charging again.
+ * with the first result, or 409 while it is still working on it, instead of charging again. Which key a press sends
+ * is written down before it is sent (the resume's record, resumeSentKey) and every later press of that pause reuses
+ * it, whatever the membership then reads; and once Stripe may have let that key go, nothing is sent again.
  */
 const membershipLockKey = (subscription: string) => `nl:tier:${subscription}:lock`;
 /** Longer than the reads and the change at their ceiling (STRIPE_TIMEOUT_MS, 20 s, lib/fetch-timeout.ts), with room. */
@@ -56,15 +58,26 @@ async function underLock<T>(subscription: string, what: string, work: () => Prom
   }
 }
 
+type PauseSpan = { from: number; until: number };
+
 /**
- * Which pause a resume ends: the membership, when the pause starts and ends, and when it was asked for, so a pause
- * taken off and asked for again (same start) is a resume of its own, never answered with the earlier one's result.
- * A pause with no readable time of asking (one older than that field) is "0": the same pause still names one key.
+ * When the pause a resume ends was asked for (`paused_at`, written by pauseMembership), so a pause taken off and
+ * asked for again (same start and end) is a resume of its own, never answered with the earlier one's result. A field
+ * that is there but not ten-or-so digits is "unreadable": unknown, never another pause (CX-123 rule 24, Codex G on
+ * #3090). "missing" is a pause older than that field, which pauseMembership has written on every pause since.
  */
-function pauseIdOf(subscription: string, pause: { from: number; until: number }, sub: PauseSub): string {
-  const asked: unknown = sub.metadata?.paused_at;
-  return `${subscription}:${pause.from}:${pause.until}:${typeof asked === "string" && /^\d{9,11}$/.test(asked) ? asked : "0"}`;
+type Asked = { known: string } | "missing" | "unreadable";
+function askedOf(sub: PauseSub): Asked {
+  const metadata: unknown = sub.metadata;
+  if (!metadata || typeof metadata !== "object") return "unreadable";
+  if (!Object.prototype.hasOwnProperty.call(metadata, "paused_at")) return "missing";
+  const asked: unknown = (metadata as Record<string, unknown>).paused_at;
+  if (asked === undefined) return "missing";
+  return typeof asked === "string" && /^\d{9,11}$/.test(asked) ? { known: asked } : "unreadable";
 }
+
+/** Which pause a resume ends: the membership, when the pause starts and ends, and when it was asked for ("0": missing). */
+const pauseIdOf = (subscription: string, pause: PauseSpan, asked: string) => `${subscription}:${pause.from}:${pause.until}:${asked}`;
 
 /**
  * The try of one resume of one pause, which its idempotency key carries. It moves on only after Stripe said for
@@ -76,10 +89,7 @@ function pauseIdOf(subscription: string, pause: { from: number; until: number },
  * which Stripe refuses (an idempotency error) rather than carrying out both.
  */
 const resumeTryKey = (pauseId: string) => `nl:tier:resume:${pauseId}`;
-/**
- * Renewed at every try, and longer than the day Stripe keeps a key's result: a counter that ran out (back to try 0)
- * only ever names keys last used more than two days before, never the key of a try whose answer is still unknown.
- */
+/** Renewed at every try, and longer than the day Stripe keeps a key's result. */
 const RESUME_TRY_SECONDS = 2 * 86_400;
 const resumeKeyOf = (pauseId: string, attempt: number) => `nimbus-resume:${pauseId}:${attempt}`;
 
@@ -100,13 +110,83 @@ async function resumeTry(pauseId: string): Promise<number | null> {
 }
 
 /**
- * The next try, after Stripe refused this one for certain. A write that fails leaves the key as it was: the next
- * press repeats it and gets Stripe's saved refusal once more (never a second charge), and moves it on then.
+ * The resume's record: the exact key a press sent for this pause (by the membership and the pause's start and end
+ * only, never by what `paused_at` reads), when it was first sent, and which time of asking it was for. It is written
+ * before the request goes out, and while it is there every press of this pause sends that key again, whatever the
+ * membership reads the next time (Codex G on #3090: a later read of `paused_at` that is unreadable or missing must not
+ * make another key and a second charge). Only a valid `paused_at` other than the record's is another pause (taking a
+ * new one needs the membership read as not paused, so the earlier resume has landed), and only Stripe refusing for
+ * certain takes the record off (nextResumeTry). A record that cannot be read exactly sends nothing.
  */
-async function nextResumeTry(pauseId: string): Promise<void> {
+const resumeSentKey = (subscription: string, pause: PauseSpan) => `nl:tier:resume:${subscription}:${pause.from}:${pause.until}:sent`;
+type Sent = { key: string; asked: string; at: number };
+/**
+ * Kept until the pause has ended, with two days' room: past that there is nothing to resume. Every pause this file
+ * takes ends within 123 days of being asked for (from the end of a monthly period, at most a month away, for at most
+ * PAUSE_CHOICES' 3 months), so 128 days covers it; a pause changed outside this file to run longer keeps its record 128 days.
+ */
+const RESUME_SENT_MAX_SECONDS = 128 * 86_400;
+const sentSeconds = (pause: PauseSpan, now: number) => Math.min(Math.max(pause.until - now, 0) + RESUME_TRY_SECONDS, RESUME_SENT_MAX_SECONDS);
+/**
+ * How long after a key was first sent a press may send it again. Stripe keeps a key's result at least 24 hours and
+ * may let it go after that, and a key sent again once it has gone is a new request (docs.stripe.com/api/idempotent_requests),
+ * which could carry out a second resume and charge again (Codex G on #3090). The time is taken before the first send,
+ * so it is never later than the moment Stripe saved the key, and an hour is left before the 24.
+ */
+const RESUME_REPEAT_MS = 23 * 3_600_000;
+
+/** The resume's record, read exactly: null when there is none, undefined when Redis cannot be asked or answers in another shape. */
+async function sentResume(subscription: string, pause: PauseSpan): Promise<Sent | null | undefined> {
+  try {
+    const replies = repliesFor(await redisPipeline([["GET", resumeSentKey(subscription, pause)]]), 1);
+    if (!replies) return undefined;
+    const [raw] = replies;
+    if (raw === null) return null;
+    if (typeof raw !== "string") return undefined;
+    let value: unknown;
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return undefined;
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const { k, p, s, ...rest } = value as Record<string, unknown>;
+    if (Object.keys(rest).length > 0) return undefined;
+    if (typeof p !== "string" || !/^(?:0|\d{9,11})$/.test(p)) return undefined;
+    if (typeof k !== "string" || !k.startsWith(`nimbus-resume:${pauseIdOf(subscription, pause, p)}:`) || !/^nimbus-resume:[A-Za-z0-9_:]{1,200}$/.test(k)) return undefined;
+    if (typeof s !== "number" || !Number.isSafeInteger(s) || s <= 0) return undefined;
+    return { key: k, asked: p, at: s };
+  } catch (error) {
+    console.error("reading a resume's record failed", error);
+    return undefined;
+  }
+}
+
+/**
+ * Writes the resume's record before its request is sent; true only when Redis said it is written. A record that
+ * was not there is written only if it still is not (NX), so two presses that both found none cannot both send.
+ */
+async function markSent(subscription: string, pause: PauseSpan, sent: Sent, fresh: boolean, now: number): Promise<boolean> {
+  const command: (string | number)[] = ["SET", resumeSentKey(subscription, pause), JSON.stringify({ k: sent.key, p: sent.asked, s: sent.at }), "EX", sentSeconds(pause, now)];
+  if (fresh) command.push("NX");
+  try {
+    const replies = repliesFor(await redisPipeline([command]), 1);
+    return replies !== null && replies[0] === "OK";
+  } catch (error) {
+    console.error("writing a resume's record failed", error);
+    return false;
+  }
+}
+
+/**
+ * The next try, after Stripe refused this one for certain, and the record taken off so the next press sends its new
+ * key. A write that fails leaves the record as it was: the next press repeats the key and gets Stripe's saved refusal
+ * once more (never a second charge), and moves it on then.
+ */
+async function nextResumeTry(subscription: string, pause: PauseSpan, pauseId: string): Promise<void> {
   const key = resumeTryKey(pauseId);
   try {
-    await redisPipeline([["INCR", key], ["EXPIRE", key, RESUME_TRY_SECONDS]]);
+    await redisPipeline([["INCR", key], ["EXPIRE", key, RESUME_TRY_SECONDS], ["DEL", resumeSentKey(subscription, pause)]]);
   } catch (error) {
     console.error("moving a resume to its next try failed; the next press repeats this one", error);
   }
@@ -204,14 +284,40 @@ export async function resumeMembership(store: Store, token: string, subscription
       body.set("proration_behavior", "none");
       body.set("payment_behavior", "error_if_incomplete");
     }
-    // A try that cannot be read is never guessed: guessing a new one could charge again for a resume still pending.
-    const pauseId = pauseIdOf(subscription, pause, found.sub);
-    const attempt = await resumeTry(pauseId);
-    if (attempt === null) return { ok: false, reason: "error" };
+    // A record or a try that cannot be read is never guessed: guessing a new key could charge again for a resume still pending.
+    const sent = await sentResume(subscription, pause);
+    if (sent === undefined) return { ok: false, reason: "error" };
+    const asked = askedOf(found.sub);
+    let pauseId: string;
+    let idempotencyKey: string;
+    if (sent && (typeof asked !== "object" || asked.known === sent.asked)) {
+      // A press of this pause already sent its key, and the read says nothing of another pause: the same key again.
+      if (Date.now() - sent.at > RESUME_REPEAT_MS) {
+        // Stripe may have let the key go, so sending it now could be carried out as a new resume and charge again.
+        console.error(
+          `SEVERE: a resume sent more than 23 hours ago never got a known answer and the membership still reads as paused; nothing is sent again, so it needs a person to check the membership's invoices in Stripe (${subscription}, ${sent.key})`,
+        );
+        return { ok: false, reason: "error" };
+      }
+      pauseId = pauseIdOf(subscription, pause, sent.asked);
+      idempotencyKey = sent.key;
+    } else {
+      // No record, or a record of an earlier pause (a valid paused_at other than its own): a new resume of this pause.
+      if (asked === "unreadable") {
+        console.error(`resuming a membership whose paused_at cannot be read, with no resume of it sent before; nothing is sent (${subscription})`);
+        return { ok: false, reason: "error" };
+      }
+      pauseId = pauseIdOf(subscription, pause, asked === "missing" ? "0" : asked.known);
+      const attempt = await resumeTry(pauseId);
+      if (attempt === null) return { ok: false, reason: "error" };
+      idempotencyKey = resumeKeyOf(pauseId, attempt);
+      const record: Sent = { key: idempotencyKey, asked: asked === "missing" ? "0" : asked.known, at: Date.now() };
+      if (!(await markSent(subscription, pause, record, sent === null, now))) return { ok: false, reason: "error" };
+    }
     try {
-      await onAccount("POST", found.account, `/subscriptions/${encodeURIComponent(subscription)}`, body, undefined, resumeKeyOf(pauseId, attempt));
+      await onAccount("POST", found.account, `/subscriptions/${encodeURIComponent(subscription)}`, body, undefined, idempotencyKey);
     } catch (error) {
-      if (refusedForCertain(error)) await nextResumeTry(pauseId);
+      if (refusedForCertain(error)) await nextResumeTry(subscription, pause, pauseId);
       if (error instanceof StripeError && error.status === 402) return { ok: false, reason: "declined" };
       console.error("resuming a membership failed", error);
       return { ok: false, reason: "error" };

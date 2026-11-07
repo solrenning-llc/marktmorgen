@@ -63,3 +63,38 @@ On genuine primary-runtime recovery:
 No2941 test, type, lint, scanner, client build, browser, hosted CI, account, email or payment execution is certified here. No formal clean review, new graded finding or merge permission is given. Root retains the formal PR/channel responsibility.
 
 Only four own reserved paths are published. The own branch is new after positive API404 and native-absence confirmation, with parent EXACTfd4. Earlier2807/security proofs, commits, refs, raw logs and foreign untracked files remain intact.
+
+
+## Executed continuation after recovery — exact fd4cd750131b226dbac078923f6cb345a03d1936
+
+This English addendum supersedes only the unexecuted qualification above; all original proposed proof/runner/report/output remain intact. The root completed execution serially after C4-3080 stopped parallel agents. C4-3050/3070/3080 still freeze all pushes. No author source/ref/CI was changed.
+
+### What actually ran
+
+The exact proposed proof blob `9ba8cb1e0fa04d3bdba5c8a9054d93e2015a4be2` and runner `d8409489b6690403571186cfeb954a24acef2346` ran **unchanged** against the author's exact Git blobs. Their historical comments/output labels still say PROPOSED/NOT EXECUTED; those labels are preserved as history, not the status of this new execution. Guards passed before each pure graph: global fetch/socket blocked and the same undici dispatcher used by the SDK rejected an unregistered destination. No external IO was attempted.
+
+- Whole author final: **54/54 pass**.
+- Existing independent matrix: **22 checks,15 pass and7 fail**. These are now executed counterexamples, not22 GREEN.
+- Whole author RED859882b0c1bad7de2616cc6167eb5588a64fabc0: the exact permanent test blob4c790bbfc43dc65c550e465371866ed81cf3fae5 is present, but the statically imported new module is absent. Compilation stops before assertions. This is **not54 causal assertion failures**.
+- Actual strict ES2017 TypeScript, real helper/permanent/proof imports: exit0. Scoped lint and runner syntax: exit0. Target/strictness were inherited; no ES2022 override, source shim or assertion change.
+- Each runtime process had a120s limit; actual captured author/proof output totaled6,949 bytes. There were no new cases beyond the22 already proposed and frozen. No global suite, Next build, browser, provider, native Redis or CI was run.
+
+### Findings and their precise reach
+
+**MEDIUM — safe final money can be silently rounded through an unsafe intermediate sum.** `linesOf` checks whether every field and the final net are safe integers, but computes the net in Number arithmetic first. With valid integer sales MAX_SAFE_INTEGER, renewal2 and refund2, the mathematically exact net is MAX_SAFE_INTEGER. The source returns MAX_SAFE_INTEGER-1 and marks the source read. A second case reaches the same error when combining a Stripe sales/refund source with a manual entry. Both final wrong numbers are safe integers, so the final check misses the intermediate precision loss. Two checks fail. Use exact integer arithmetic or reject unsafe intermediate operations before reporting a known amount. These are synthetic extreme-range inputs accepted by this pure rule, not an observed invoice, actual customer balance or payment.
+
+**MEDIUM — duplicate source wrappers can double the same provider event in a known total.** Two ProviderReading entries both labelled stripe, each carrying the same200-cent event/id, each pass their wrapper-local seen set. The month contains two read Stripe sources and a known400-cent total. The contract says the same record twice makes its source unknown; that safeguard does not cross wrapper boundaries. Reject duplicate source wrappers or coalesce/deduplicate them under one source before producing totals. One check fails. This is an unwired input-boundary defect, not evidence that a productive reader currently constructs duplicate wrappers.
+
+**LOW — finite timestamps outside Date's range throw instead of failing closed.** Both an out-of-range reading instant and an out-of-range event instant reach Intl.DateTimeFormat.formatToParts and throw RangeError. The documented outcomes are respectively no result and an unknown source. Two checks fail. Validate Date-range bounds before formatting and preserve unknown behavior.
+
+**LOW — current-month values after the declared reading instant are included as known “so far”.** An event at at+1ms and a manual entry on the next day, still in the same month, are accepted as read and included. Only a later month is rejected. Two checks fail. The EarningsInput contract explicitly says the current month runs to at; either validate that horizon or explicitly settle a different snapshot/input contract before a page can call the values “so far”. Provider timestamps would normally come from a past reading; no productive adapter or actual future record was observed here.
+
+### Cost, provenance and boundary
+
+The complete three-path author delta, pure source,54-test permanent and155-line design were read. A caller search finds the helper only in its own test/module; it remains unwired. No source grade here certifies future Stripe/PayPal reads, manual ledger storage, admissions, retention, erasure/export, CSV or UI.
+
+The design's optionA shares the existing heavy-reading budget and describes additional kept-copy/ledger costs. Its +0 reading cost is a **conditional design delta**, not proof that future productive work is free or already admitted. That integration must measure and reserve its complete graph under the reviewed current model. No new financial severity is assigned to an unimplemented integration in this return; unknown costs remain unknown, never zero. Nothing authorizes changing prices, visible limits, commissions, flags, gates or commercial terms.
+
+Final evidence scanner:4,139 tracked files,zero corrections. Original proof/runner hashes remain byte-identical; final diff check is clean. Only the existing report/output are appended locally.
+
+Disposition: **NOT CLEAN:2 MEDIUM and2 LOW groups**, corresponding to7 failing checks. Preserve the same proof as RED, add permanent coverage and correct this same PR locally. Request focused returns on a new exact consolidated head only after literal MAIN VERDE permits the single push. Two applicable independent opinions, nine final successful checks and fresh clean state remain required. No approval, merge or global legal/financial/accessibility certification is given.

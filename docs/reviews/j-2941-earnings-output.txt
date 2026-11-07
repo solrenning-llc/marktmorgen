@@ -32,3 +32,182 @@ Clean/qualifying opinion: NONE.
 Published proof/runner are PROPOSED and NOT EXECUTED.
 Author54GREEN is a report, not a J verification.
 Module absence is a source receipt, not54 causal assertion failures.
+
+=== Executed serial continuation after recovery; original output above retained ===
+{"snapshot":"fd4cd750131b226dbac078923f6cb345a03d1936","mode":"proof","write":false,"noCheckout":true,"statusBeforeExecution":"PROPOSED_NOT_EXECUTED"}
+EXACT_BLOB lib/earnings-by-month.ts be78e53d6533963e64cff2988a70a169da457526
+NETWORK GUARDS PASS before pure graph
+PASS complete empty source is a confirmed zero
+PASS unread source is not zero
+PASS unread manual entries suppress totals
+PASS currencies remain apart
+PASS duplicate id within one source is unknown
+PASS fractional cents fail closed
+PASS unsafe cents fail closed
+PASS invalid currency fails closed
+PASS unknown zone gives no result
+PASS NaN reading time gives no result
+FAIL finite out-of-Date-range reading time gives no result rather than throwing: RangeError: Invalid time value
+FAIL finite out-of-Date-range event makes its source unknown: RangeError: Invalid time value
+PASS Tokyo changes month before UTC
+PASS New York is October at UTC November midnight
+PASS Kiritimati UTC+14 boundary is included
+PASS reached exactly at a month floor is not complete
+PASS strictly before the floor is complete
+PROPOSED_SOURCE_OVERFLOW_OBSERVATION {"source":"stripe","state":"read","lines":[{"currency":"usd","salesCents":9007199254740991,"renewalCents":2,"enteredCents":0,"refundCents":2,"disputeCents":0,"netCents":9007199254740990}],"leftOut":[]}
+FAIL cross-field intermediate overflow is exact or explicitly unknown: AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+
+  ok(row.state === "unknown" || row.lines.every((line) => BigInt(line.netCents) === exact))
+
+PROPOSED_TOTAL_OVERFLOW_OBSERVATION [{"currency":"usd","salesCents":9007199254740991,"renewalCents":0,"enteredCents":2,"refundCents":2,"disputeCents":0,"netCents":9007199254740990}]
+FAIL cross-source total overflow is exact or explicitly unknown: AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+
+  ok(row.totals === null || row.totals.every((line) => BigInt(line.netCents) === exact))
+
+PROPOSED_DUPLICATE_WRAPPER_OBSERVATION {"month":"2026-11","current":true,"sources":[{"source":"stripe","state":"read","lines":[{"currency":"usd","salesCents":200,"renewalCents":0,"enteredCents":0,"refundCents":0,"disputeCents":0,"netCents":200}],"leftOut":[]},{"source":"stripe","state":"read","lines":[{"currency":"usd","salesCents":200,"renewalCents":0,"enteredCents":0,"refundCents":0,"disputeCents":0,"netCents":200}],"leftOut":[]},{"source":"manual","state":"read","lines":[],"leftOut":[]}],"totals":[{"currency":"usd","salesCents":400,"renewalCents":0,"enteredCents":0,"refundCents":0,"disputeCents":0,"netCents":400}],"leftOut":[]}
+FAIL same Stripe event repeated in two source wrappers is not counted twice: AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+
+  ok(row.totals === null || row.totals.every((line) => line.netCents === 200))
+
+FAIL event after reading instant is not current-month money so far: AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+'read' !== 'unknown'
+
+FAIL future manual day is not current-month money so far: AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+'read' !== 'unknown'
+
+J2941 22 checks, 7 failures.
+{"snapshot":"fd4cd750131b226dbac078923f6cb345a03d1936","mode":"author","write":false,"noCheckout":true,"statusBeforeExecution":"PROPOSED_NOT_EXECUTED"}
+EXACT_BLOB tests/bx2-earnings.test.ts 4c790bbfc43dc65c550e465371866ed81cf3fae5
+EXACT_BLOB tests/check.ts 37a70d6bd5b5d8b2d6cb97bb8d5d95ce10454699
+EXACT_BLOB lib/earnings-by-month.ts be78e53d6533963e64cff2988a70a169da457526
+NETWORK GUARDS PASS before pure graph
+
+Twelve calendar months, newest first, in the store's time zone
+  ok    the count
+  ok    months from 6 November 2026 in UTC
+  ok    on 1 November 01:00 UTC, São Paulo is still in October
+  ok    on 31 October 16:00 UTC, Tokyo is already in November
+  ok    a month's floor: UTC midnight of the 1st less 14 hours, before any zone's midnight
+  ok    the reading starts at the oldest month's floor
+  ok    an unknown time zone gives nothing, never UTC in its place
+  ok    a bad reading time gives nothing
+
+An event falls in the month of its own zone
+  ok    UTC: November
+  ok    São Paulo: October
+  ok    São Paulo: nothing in November
+
+Refunds and disputes are taken off, in the month they were recorded
+  ok    October, every part and the difference
+  ok    a refund in November of an October sale makes November negative, as it was
+  ok    the month's total
+
+Currencies are never added together
+  ok    one line a currency, alphabetical
+  ok    euros alone
+  ok    dollars: Stripe and entered by you, same currency
+
+Entered by you: its own source, never verified, by the date typed
+  ok    the words for each source
+  ok    July
+  ok    August, in pounds
+  ok    entries that could not be read are unknown in every month
+  ok    and the months' totals are not shown
+  ok    a date that does not exist: unknown, never left out quietly
+  ok    a date in a month to come: unknown, never left out quietly
+  ok    no amount: unknown, never left out quietly
+  ok    a fraction of a cent: unknown, never left out quietly
+  ok    no currency: unknown, never left out quietly
+  ok    the same entry twice is unknown, never counted twice
+  ok    an entry before the twelve months is outside them, not an error
+
+A source that could not be read is unknown, never zero
+  ok    every month of Stripe says why
+  ok    no total is shown for a month with a source unknown
+  ok    what was read is still shown, as its own source
+
+A capped list proves only the months it reached
+  ok    September to November are read
+  ok    August, half read, is not shown as a lower number
+  ok    nor any month before it
+  ok    reached exactly at the floor: a record of the same second may be next, so unknown
+  ok    reached a millisecond before the floor: read
+  ok    capped with nothing reached: unknown everywhere
+  ok    a complete list that started later proves only from its start
+
+A record that cannot be understood makes its source unknown
+  ok    a negative amount: unknown in every month
+  ok    an amount that is not whole: unknown in every month
+  ok    a currency that is not three letters: unknown in every month
+  ok    no time: unknown in every month
+  ok    a time in a month to come: unknown in every month
+  ok    the same record twice is unknown, never counted twice
+  ok    a record before the twelve months (read for the oldest month's floor) is left out, not an error
+  ok    a sum past exact integers is unknown, never rounded
+
+A month read in full with nothing in it is a confirmed zero
+  ok    read, with no line
+  ok    and an empty total, not an unknown one
+
+PayPal disputes are not read: said, not hidden
+  ok    read, with disputes left out
+  ok    the month says so too
+
+Nothing ranks or rates the creator by revenue (561 [NE1])
+  ok    the output's fields
+  ok    a month's fields
+  ok    only the newest month is the current one
+
+54 checks, all passing.
+{"snapshot":"859882b0c1bad7de2616cc6167eb5588a64fabc0","mode":"red","write":false,"noCheckout":true,"statusBeforeExecution":"PROPOSED_NOT_EXECUTED"}
+EXACT_BLOB tests/bx2-earnings.test.ts 4c790bbfc43dc65c550e465371866ed81cf3fae5
+✘ [ERROR] Command failed: git show 859882b0c1bad7de2616cc6167eb5588a64fabc0:lib/earnings-by-month.ts
+fatal: path 'lib/earnings-by-month.ts' exists on disk, but not in '859882b0c1bad7de2616cc6167eb5588a64fabc0'
+ [plugin exact-snapshot]
+
+    snapshot:tests/bx2-earnings.test.ts:22:7:
+      22 │ } from "@/lib/earnings-by-month";
+         ╵        ~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  This error came from the "onLoad" callback registered here:
+
+    ../../77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1426:20:
+      1426 │       let promise = setup({
+           ╵                     ^
+
+    at setup (file:///workspace/scratch/72485b6ecfa0/j-review-2941-freeze-local/scripts/j-review-2941-earnings.mjs:28:5)
+    at handlePlugins (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1426:21)
+    at buildOrContextImpl (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1139:5)
+    at Object.buildOrContext (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:963:5)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:2320:15
+    at new Promise (<anonymous>)
+    at Object.build (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:2319:25)
+    at build (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:2170:51)
+    at file:///workspace/scratch/72485b6ecfa0/j-review-2941-freeze-local/scripts/j-review-2941-earnings.mjs:32:22
+
+EXACT_BLOB tests/check.ts 37a70d6bd5b5d8b2d6cb97bb8d5d95ce10454699
+/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1752
+  let error = new Error(text);
+              ^
+
+Error: Build failed with 1 error:
+snapshot:tests/bx2-earnings.test.ts:22:7: ERROR: [plugin: exact-snapshot] Command failed: git show 859882b0c1bad7de2616cc6167eb5588a64fabc0:lib/earnings-by-month.ts
+fatal: path 'lib/earnings-by-month.ts' exists on disk, but not in '859882b0c1bad7de2616cc6167eb5588a64fabc0'
+
+    at failureErrorWithLog (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1752:15)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1211:25
+    at runOnEndCallbacks (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1592:45)
+    at buildResponseToResult (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1209:7)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1236:16
+    at responseCallbacks.<computed> (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:886:9)
+    at handleIncomingPacket (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:941:12)
+    at Socket.readFromStdout (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:864:7)
+    at Socket.emit (node:events:514:28)
+    at addChunk (node:internal/streams/readable:569:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+
+Node.js v24.22.1

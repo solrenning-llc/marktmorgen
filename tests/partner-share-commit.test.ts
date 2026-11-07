@@ -366,6 +366,43 @@ async function main() {
       is("a record read in another shape is answered busy", thrown instanceof LockBusyError, true);
       is("and nothing is written over it", (await readAffiliate(store, p))?.rate, null);
     }
+    {
+      // Codex G's review of #1924 (head 9aaa0011): the write landed, its answer was lost, and every read of the record
+      // after it comes back as text that does not parse. Unreadable text proves no other record stands there: the
+      // outcome stays unknown, so it is answered busy and the address and the code stay claimed for the record.
+      const { store, statsId } = await fixture();
+      let puts = 0;
+      let cut = 0;
+      redis.pipeline = (async (commands: (string | number)[][]) => {
+        const out = await original(commands);
+        if (isPut(commands) && puts === 0) {
+          puts += 1;
+          return [null];
+        }
+        if (puts === 1 && isReadBack(statsId, commands)) {
+          cut += 1;
+          return ["{cut"];
+        }
+        if (puts === 1 && commands.length === 2 && commands[0]?.[0] === "HGET" && commands[0][1] === `nl:aff:${statsId}:people` && commands[1]?.[0] === "GET") {
+          cut += 1;
+          return ["{cut", out[1]];
+        }
+        return out;
+      }) as typeof redis.pipeline;
+      let thrown: unknown = null;
+      try {
+        await acceptPartnership(store, "late@example.test", { percent: 20, products: [A] });
+      } catch (error) {
+        thrown = error;
+      } finally {
+        redis.pipeline = original;
+      }
+      const held = await claims(statsId, "late@example.test");
+      is("unreadable reads: the lost answer and the unreadable reads were reached", [puts, cut > 1], [1, true]);
+      is("unreadable reads: the record that landed is still there", held.record?.status, "approved");
+      is("unreadable reads: answered busy, not expired", thrown instanceof LockBusyError, true);
+      is("unreadable reads: the address and the code still name the record written", [typeof held.id, held.byCode === held.id], ["string", true]);
+    }
   }
 
   done();

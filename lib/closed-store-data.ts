@@ -589,7 +589,16 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
     if (!refs.length) return { ...report, done: true };
     for (const ref of refs) {
       if (Date.now() > deadline) break;
-      const store = await storeForEmail(ref).catch(() => null);
+      let store: Store | null;
+      try {
+        store = await storeForEmail(ref);
+      } catch (error) {
+        // Not read (rule 24): never "no store". It stays in line, moved back a walk so it does not hold the head of
+        // the line, and is prepared once its record reads; only a store Redis says is gone (nil) leaves the line.
+        console.error("a closed store's record could not be read; it waits for the next walk", error);
+        await redisPipeline([["ZADD", DUE_KEY, "XX", now + WALK_GAP_MS, ref]]);
+        continue;
+      }
       if (store) {
         const entry = await prepareStore(store, now);
         await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]]);

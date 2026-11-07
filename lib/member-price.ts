@@ -11,6 +11,7 @@
  *     with it. A pass for some courses only (the browser that paid for
  *     them) proves nothing here: its address was typed at checkout and never
  *     checked, and everything else bought under it may be somebody else's.
+ *     It never hides a signed-in session in the same browser, which does.
  *     The creator on their own store is never a member of it;
  *   - what it holds is read from the creator's own Stripe account, at most
  *     two calls (the address as typed and as kept): a membership counts only
@@ -21,9 +22,10 @@
  *     pre-order bought for others. A purchase the creator brought over from
  *     another platform counts as bought; a gift someone else paid for does
  *     not, nor a PayPal sale, whose refunds and disputes are not read here;
- *   - an answer Stripe does not give, or gives in another shape
- *     (lib/stripe-list.ts), proves nothing, and a check that cannot finish
- *     is "unknown": the normal price is shown and charged.
+ *   - an answer Stripe or the database does not give, or gives in another
+ *     shape (lib/stripe-list.ts, lib/redis-reply.ts), proves nothing, and a
+ *     check that cannot finish is "unknown": the normal price is shown and
+ *     charged.
  *
  * The read is counted before anything about the buyer is read, as
  * MEMBER_PRICE_REQUEST_UNITS of the plan's public requests (the same count
@@ -40,7 +42,7 @@
  *
  * Nothing is kept: no list of members, no answer cached.
  */
-import { SESSION_COOKIE, normaliseEmail } from "@/lib/auth";
+import { SESSION_COOKIE, emailForSession, normaliseEmail } from "@/lib/auth";
 import { takeBuyerRead } from "@/lib/buyer-actions";
 import { readListings } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
@@ -50,6 +52,7 @@ import { memberState } from "@/lib/membership-access";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { isMemberPercent, memberOffFrom, qualifyingFor } from "@/lib/member-price-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor, stringList } from "@/lib/redis-reply";
 import { onAccount } from "@/lib/stripe-account";
 import { STRIPE_LIST_VERSION, plainObject, readStripePage } from "@/lib/stripe-list";
 import { currentMeta } from "@/lib/tier-rules";
@@ -128,7 +131,10 @@ async function heldHere(store: Store, email: string, kinds: ReadonlyMap<string, 
   let complete = true;
   // Stripe keeps the address as it was typed at checkout; both reads and the purchases brought over go at once.
   const variants = [...new Set([email.trim(), normaliseEmail(email)])].slice(0, MEMBER_PRICE_STRIPE_CALLS);
-  const read = [...kinds.values()].some((kind) => !kind.recurring) && isRedisConfigured() ? importedRead(store, email) : null;
+  const read = [...kinds.values()].some((kind) => !kind.recurring) ? importedRead(store, email) : null;
+  // A store that brought buyers over, with no database to read them from: what was brought over is not known.
+  if (read && !isRedisConfigured()) complete = false;
+  const readImported = read && isRedisConfigured() ? read : null;
   try {
     const [pages, imported] = await Promise.all([
       Promise.all(
@@ -140,19 +146,25 @@ async function heldHere(store: Store, email: string, kinds: ReadonlyMap<string, 
           return readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, STRIPE_LIST_VERSION), plainObject, SESSION_ROW);
         }),
       ),
-      read ? redisPipeline([read]).then(([raw]) => raw) : Promise.resolve(null),
+      readImported ? redisPipeline([readImported]).then((replies) => repliesFor(replies, 1)?.[0]) : Promise.resolve(null),
     ]);
     for (const page of pages) {
       for (const id of heldFromSessions(page.rows, handles, kinds)) held.add(id);
       // Only the newest hundred are read: past them, or past a row in another shape, a "no" is not known.
       if (page.hasMore || page.unreadable > 0) complete = false;
     }
-    for (const purchase of importedFrom(imported)) {
-      if (!BOUGHT_JOB.test(purchase.job)) continue;
-      for (const id of [purchase.productId, ...(purchase.items ?? [])]) {
-        const kind = kinds.get(id);
-        // Nothing paid through Stripe keeps a membership running: only a one-off counts.
-        if (kind && !kind.recurring) held.add(id);
+    // HGETALL answers field, value, field, value, all strings: a reply in any other shape (a number, a missing slot, a field with
+    // no value) is not "nothing brought over", only not known (rule 24). An empty list is a real "nothing".
+    const pairs = readImported ? stringList(imported) : [];
+    if (pairs === null || pairs.length % 2 !== 0) complete = false;
+    else {
+      for (const purchase of importedFrom(pairs)) {
+        if (!BOUGHT_JOB.test(purchase.job)) continue;
+        for (const id of [purchase.productId, ...(purchase.items ?? [])]) {
+          const kind = kinds.get(id);
+          // Nothing paid through Stripe keeps a membership running: only a one-off counts.
+          if (kind && !kind.recurring) held.add(id);
+        }
       }
     }
   } catch (error) {
@@ -179,8 +191,21 @@ export async function memberPriceFor(store: Store, product: Listing, cookies: Co
     () => undefined,
   );
   if (learner === undefined) return UNKNOWN;
+  if (!learner || learner.owner) return NONE;
+  let email = learner.email;
+  if (learner.scope !== "all") {
+    // learnerFrom reads a pass for some courses before the session (courses rely on that order); that pass proves nothing here,
+    // but a signed-in session in the same browser proves its own inbox.
+    const signedIn = await emailForSession(cookies.get(SESSION_COOKIE)?.value).then(
+      (found) => found,
+      () => undefined,
+    );
+    if (signedIn === undefined) return UNKNOWN;
+    if (!signedIn) return NONE;
+    email = signedIn;
+  }
   // Only an inbox proved (a link's pass, or signed in), and never the creator, signed in or by a link to their own address.
-  if (!learner || learner.owner || learner.scope !== "all" || normaliseEmail(learner.email) === normaliseEmail(store.email)) return NONE;
+  if (normaliseEmail(email) === normaliseEmail(store.email)) return NONE;
   let listings: Listing[];
   try {
     listings = await readListings(store, qualifying);
@@ -191,13 +216,13 @@ export async function memberPriceFor(store: Store, product: Listing, cookies: Co
   const kinds = new Map<string, QualifyingKind>();
   for (const listing of listings) kinds.set(listing.id, { recurring: listing.recurring !== null });
   if (kinds.size === 0) return NONE;
-  const found = await heldHere(store, learner.email, kinds);
+  const found = await heldHere(store, email, kinds);
   if (found === null) return UNKNOWN;
   const percent = memberOffFrom(store.memberPrices, product, found.held);
   // A larger rule may rest on a purchase not read: said as unknown, never as no.
   const most = memberOffFrom(store.memberPrices, product, new Set(kinds.keys()));
   if (percent < most && !found.complete) return UNKNOWN;
-  return percent > 0 ? { state: "member", percent, email: learner.email } : NONE;
+  return percent > 0 ? { state: "member", percent, email } : NONE;
 }
 
 /** The percentage a product page's form says it showed as the member price; 0 for none or anything else. */

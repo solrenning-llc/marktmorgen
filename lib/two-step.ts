@@ -68,7 +68,7 @@
  */
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, SESSION_TTL_SECONDS, SessionsUnknownError, dropSecondStep, endSession, isMoving, normaliseEmail, openSession, sessionKeyOf } from "@/lib/auth";
-import { UnknownReplyError, countOf, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Held, deleteIfHeldOnly, setIfHeldOnly, withLock } from "@/lib/redis-lock";
@@ -152,8 +152,12 @@ const rescueKey = (token: string) => `nl:2fa:rescue:${sha(`nimbus-2fa-rescue:${t
 const onceKey = (email: string, what: string) => `nl:2fa:once:${sha(`nimbus-2fa-once:${normaliseEmail(email)}:${what}`).slice(0, 40)}`;
 
 async function spendOnce(email: string, what: string, seconds: number): Promise<boolean> {
-  const [taken] = await redisPipeline([["SET", onceKey(email, what), "1", "NX", "EX", seconds]]);
-  return taken !== null;
+  // Fresh only on SET NX's own "OK"; already there only on its null. Anything else is unknown (CX-123 rule 24):
+  // it may have landed for another login, so the code is never taken as fresh on it.
+  const replies = repliesFor(await redisPipeline([["SET", onceKey(email, what), "1", "NX", "EX", seconds]]), 1);
+  if (replies?.[0] === "OK") return true;
+  if (replies && replies[0] === null) return false;
+  throw new UnknownReplyError("a code's once-mark");
 }
 
 /**
@@ -191,28 +195,36 @@ const codeHash = (code: string) => sha(`nimbus-2fa-code:${code.toLowerCase().rep
  */
 type TwoStep = { s: string; since: number; codes: string[]; last: number; reset: number; backup: string };
 
+/**
+ * The record as read: null only when Redis says there is none (GET null). A reply in any other shape, or a
+ * record that does not parse, is unknown and throws (CX-123 rule 24): it is never read as "two-step login is
+ * off", which would open a session on the emailed link alone.
+ */
 function parse(raw: unknown): TwoStep | null {
-  if (typeof raw !== "string") return null;
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("the two-step record");
+  let v: Partial<TwoStep>;
   try {
-    const v = JSON.parse(raw) as Partial<TwoStep>;
-    if (typeof v.s !== "string") return null;
-    return {
-      s: v.s,
-      since: typeof v.since === "number" ? v.since : 0,
-      codes: Array.isArray(v.codes) ? v.codes.filter((c): c is string => typeof c === "string" && /^[0-9a-f]{64}$/.test(c)) : [],
-      last: typeof v.last === "number" ? v.last : -1,
-      reset: typeof v.reset === "number" && v.reset > 0 ? v.reset : 0,
-      backup: typeof v.backup === "string" && EMAIL_PATTERN.test(v.backup) ? v.backup : "",
-    };
+    v = JSON.parse(raw) as Partial<TwoStep>;
   } catch {
-    return null;
+    throw new UnknownReplyError("the two-step record");
   }
+  if (!v || typeof v !== "object" || typeof v.s !== "string") throw new UnknownReplyError("the two-step record");
+  return {
+    s: v.s,
+    since: typeof v.since === "number" ? v.since : 0,
+    codes: Array.isArray(v.codes) ? v.codes.filter((c): c is string => typeof c === "string" && /^[0-9a-f]{64}$/.test(c)) : [],
+    last: typeof v.last === "number" ? v.last : -1,
+    reset: typeof v.reset === "number" && v.reset > 0 ? v.reset : 0,
+    backup: typeof v.backup === "string" && EMAIL_PATTERN.test(v.backup) ? v.backup : "",
+  };
 }
 
 async function read(email: string): Promise<TwoStep | null> {
   if (!isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", recordKey(email)]]);
-  return parse(raw);
+  const replies = repliesFor(await redisPipeline([["GET", recordKey(email)]]), 1);
+  if (!replies) throw new UnknownReplyError("the two-step record");
+  return parse(replies[0]);
 }
 
 
@@ -382,6 +394,13 @@ export async function lockedFor(
   return lockedOut(need, action) && (await lockedUntil(request.cookies.get(SESSION_COOKIE)?.value)) > 0;
 }
 
+/** A time in ms as this code writes it: digits only, no sign, space, exponent or leading zero, and safe; else null. */
+function timeOf(text: unknown): number | null {
+  if (typeof text !== "string" || !/^(0|[1-9][0-9]*)$/.test(text)) return null;
+  const value = Number(text);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
 /**
  * Until when a session is locked, in ms, or 0 for a session that is not.
  *
@@ -394,8 +413,12 @@ export async function lockedUntil(session: string | undefined, now = Date.now())
   if (!session || !/^[0-9a-f]{64}$/.test(session) || !isRedisConfigured()) return 0;
   // One command (MGET): the session's lock, the accounts whose locked sessions are kept locked now, and the
   // session's owner. Every session of every other account stops here (review of #2556 at df8030300: one command).
-  const [reply] = await redisPipeline([["MGET", lockedKey(session), KEPT_ANY_KEY, await sessionKeyOf(session)]]);
-  const [raw, anyKept, ownerRaw] = Array.isArray(reply) && reply.length === 3 ? reply : [undefined, undefined, undefined];
+  const replies = repliesFor(await redisPipeline([["MGET", lockedKey(session), KEPT_ANY_KEY, await sessionKeyOf(session)]]), 1);
+  const values = repliesFor(replies?.[0], 3);
+  // An answer in any other shape is unknown (CX-123 rule 24): locked, never read as a session with no lock.
+  const unknown = () => now + SESSION_TTL_SECONDS * 1000;
+  if (!values || values.some((value) => value !== null && typeof value !== "string")) return unknown();
+  const [raw, anyKept, ownerRaw] = values;
   const owner = typeof ownerRaw === "string" && ownerRaw ? ownerRaw : null;
   if (typeof raw !== "string") {
     // No lock of its own: a lock written before 5 November 2026 lapsed on its day (review of #2556 at
@@ -407,17 +430,23 @@ export async function lockedUntil(session: string | undefined, now = Date.now())
     return keptListed(session, owner, now);
   }
   // "<until>|<opened>"; a value written before 5 November 2026 is "<until>" alone, opened at an unknown time.
-  const [untilText, openedText] = raw.split("|");
-  const until = Number(untilText);
-  if (!Number.isFinite(until)) return 0;
+  const parts = raw.split("|");
+  const [untilText, openedText] = parts;
+  // A lock this code did not write is unknown too: locked, never set free.
+  const until = timeOf(untilText);
+  if (parts.length > 2 || until === null) return unknown();
   if (until > now) return until;
   if (!owner) return 0;
-  const [kept, left] = await redisPipeline([["GET", keptLockedKey(owner)], ["PTTL", lockedKey(session)]]);
+  const second = repliesFor(await redisPipeline([["GET", keptLockedKey(owner)], ["PTTL", lockedKey(session)]]), 2);
+  if (!second) return unknown();
+  const [kept, left] = second;
   if (kept === null) return 0;
-  const since = Number(kept);
-  const opened = openedText === undefined ? 0 : Number(openedText);
-  // A mark in another shape counts as kept (CX-123 rule 24): locked, never set free.
-  if (typeof kept === "string" && Number.isFinite(since) && Number.isFinite(opened) && opened > since) return 0;
+  // The mark and the opening time are read in the grammar this code writes them in (Codex J at f0399d65, Claude 5
+  // at 24ea9aa1): "", " ", "1e2" or "0x10" are no time, and a mark or an opening in another shape counts as kept
+  // (CX-123 rule 24): locked, never set free. An old lock with no opening time was not opened after any mark.
+  const since = timeOf(kept);
+  const opened = openedText === undefined ? null : timeOf(openedText);
+  if (since !== null && opened !== null && opened > since) return 0;
   const ms = countOf(left);
   return now + (ms !== null && ms > 0 ? ms : SESSION_TTL_SECONDS * 1000);
 }

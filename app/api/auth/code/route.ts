@@ -4,6 +4,7 @@ import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, ses
 import { TWO_STEP_COOKIE, enterLocked, finishSignIn, sendRescue, twoStepOn } from "@/lib/two-step";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { pendingRemoval } from "@/lib/passkeys";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /**
  * The second step of logging in (lib/two-step.ts): the code from the app, or
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest) {
       return response;
     } catch (error) {
       console.error("letting somebody in without two-step login failed", error);
-      return away("/signin/code?status=wrong");
+      return away(`/signin/code?status=${error instanceof UnknownReplyError ? "unknown" : "wrong"}`);
     }
   }
   let answer: Awaited<ReturnType<typeof finishSignIn>>;
@@ -67,7 +68,8 @@ export async function POST(request: NextRequest) {
     answer = await finishSignIn(held, code);
   } catch (error) {
     console.error("checking a two-step code failed", error);
-    return away("/signin/code?status=wrong");
+    // Not read (CX-123 rule 24): the code was not judged, so it is not called wrong.
+    return away(`/signin/code?status=${error instanceof UnknownReplyError ? "unknown" : "wrong"}`);
   }
   if (!answer.ok) return away(answer.reason === "expired" ? "/signin?status=expired" : `/signin/code?status=${answer.reason}`);
 
@@ -75,9 +77,14 @@ export async function POST(request: NextRequest) {
   const sessionId = await openSession(answer.email, answer.how);
   // Turned off between the code's check and this session: turning it off closes what it opened
   // (lib/auth.ts dropSecondStep), so this one is closed too, and the person logs in again.
-  if (!(await twoStepOn(answer.email))) {
+  // Unreadable (CX-123 rule 24): not known still on, so the session is closed too, and the person is told so.
+  const stillOn = await twoStepOn(answer.email).catch((error: unknown) => {
+    console.error("reading two-step login after a right code failed", error);
+    return null;
+  });
+  if (stillOn !== true) {
     await endSession(sessionId);
-    return away("/signin?status=expired");
+    return away(stillOn === null ? "/signin?status=login-unknown" : "/signin?status=expired");
   }
   const previous = request.cookies.get(SESSION_COOKIE)?.value;
   if (previous && previous !== sessionId) await endSession(previous);

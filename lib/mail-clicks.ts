@@ -140,11 +140,10 @@ export async function forgetClicksPerson(listId: string | null, rawEmail: string
     try { value = JSON.parse(raw as string); } catch { throw new UnknownReplyError("a link-use contact"); }
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new UnknownReplyError("a link-use contact");
     const kept = value as Record<string, unknown>;
-    // A missing or invalid token field is not evidence that its index is absent.
-    if (typeof kept.t !== "string" || (kept.t !== "" && !UNSUB_TOKEN.test(kept.t))) {
-      throw new UnknownReplyError("a link-use token");
-    }
-    token = kept.t;
+    // Legacy Lead rows have no token. rememberLinkKeys only writes a marker
+    // for UNSUB_TOKEN, so an absent/invalid field has no possible marker.
+    // Still erase the known click set; unknown transport/JSON stays unknown.
+    token = typeof kept.t === "string" && UNSUB_TOKEN.test(kept.t) ? kept.t : "";
   }
   const keys = [usedKey(listId, email), ...(UNSUB_TOKEN.test(token) ? [keyIndex(linkKeyOf(token))] : [])];
   const deleted = repliesFor(await redisPipeline([["DEL", ...keys]]), 1);

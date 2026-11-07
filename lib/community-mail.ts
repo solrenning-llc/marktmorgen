@@ -149,8 +149,17 @@ export async function tokenFor(store: Store, communityId: string, member: Member
   const token = randomBytes(20).toString("hex");
   // Kept for good, once a member: counted in the store's room (lib/order-data.ts).
   await orderWrite(store, [["SET", unsubKey(token), `${communityId}|${member.k}|${store.handle}`]]);
-  await setMemberToken(communityId, member, token);
-  return token;
+  // The token the record holds: ours, or one another send kept first, which is
+  // the link already in an email and is never replaced (Codex G on #3123).
+  const kept = await setMemberToken(communityId, member, token);
+  if (kept !== token) {
+    // Ours was never handed to any email: its record goes, and only it (a
+    // random key this call wrote). A failed delete leaves a record no link
+    // carries, which readCommunityUnsub refuses as not the member's token.
+    await redisPipeline([["DEL", unsubKey(token)]]).catch(() => {});
+  }
+  if (kept === null) throw new Error("a community member with no record has no stop link");
+  return kept;
 }
 
 /** Runs `each` over `items`, a few at a time. */

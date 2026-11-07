@@ -570,9 +570,20 @@ export async function setMail(id: string, member: Member, mail: boolean): Promis
   return (await patchMember(id, member.k, () => ({ mail }))) ?? member;
 }
 
-/** Keeps the unsubscribe token a member's emails carry. */
-export async function setMemberToken(id: string, member: Member, token: string): Promise<void> {
-  await patchMember(id, member.k, () => ({ t: token }));
+/**
+ * Keeps the unsubscribe token a member's emails carry, made once and never
+ * replaced: the token is written only while the record holds none, so two
+ * sends that read the member before either wrote (or one holding an old
+ * snapshot) never undo a link already put in an email (Codex G on #3123).
+ * Answers the token the record holds afterwards, which is `token` or the one
+ * kept before it; null only when Redis said there is no record. Any other
+ * answer throws (CX-123 rule 24).
+ */
+export async function setMemberToken(id: string, member: Member, token: string): Promise<string | null> {
+  const kept = await patchMember(id, member.k, (now) => (now.t ? {} : { t: token }));
+  if (!kept) return null;
+  if (!/^[0-9a-f]{40}$/.test(kept.t)) throw new UnknownReplyError("a community member's stop link");
+  return kept.t;
 }
 
 /** The creator mutes or unmutes, removes or lets back. */

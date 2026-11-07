@@ -32,7 +32,8 @@ export const setMail = async () => {};
 /** Whether a member's stop-link token write is refused, as patchMember refuses an unknown read (lib/community.ts). */
 export let tokenWriteFails = false;
 export const setTokenWriteFails = (fails: boolean) => { tokenWriteFails = fails; };
-export const setMemberToken = async () => { if (tokenWriteFails) throw new Error("synthetic unknown member read"); };
+/** As lib/community.ts answers it: the token the record holds afterwards (here always the one offered). */
+export const setMemberToken = async (_community: string, _member: Member, token: string) => { if (tokenWriteFails) throw new Error("synthetic unknown member read"); return token; };
 export const holdsTicket = async () => true;
 export const mayAttend = async () => true;
 export const readEvent = async () => event;

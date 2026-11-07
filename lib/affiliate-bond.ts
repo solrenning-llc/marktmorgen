@@ -104,10 +104,10 @@ export async function rememberBuyer(store: Store, email: string, affiliateId: st
   }
   // On last click a known buyer moves to the affiliate who brought them back;
   // an unknown one is only added while there is room under the cap.
-  // Each count read exactly (CX-123 rule 24): an unknown answer writes nothing, the buyer falls back to the click
-  // and the code, and the cap is never passed on a count that could not be read.
+  // Each count read exactly (CX-123 rule 24). Whether the buyer is known, unknown: on last click the HSET is right
+  // either way (it moves a known buyer, adds a new one), so it goes ahead only under a cap read exactly, as for a new
+  // buyer (Claude 5 on #2958). An unknown cap writes nothing, so it is never passed on a count that could not be read.
   const known = countOf(repliesFor(await redisPipeline([["HEXISTS", key, field]]), 1)?.[0]);
-  if (known === null || known > 1) return;
   if (known === 1) {
     await orderWrite(store, [["HSET", key, field, affiliateId]]);
     return;

@@ -2,6 +2,7 @@ import {join} from 'node:path';
 /** One wiring source for the repository runner and local parallel verification. */
 export function testAliases(file,root,here){
  const aliases={'@':root,'@/lib/redis':['range-traffic-coverage.test.ts','stats-traffic-coverage.test.ts'].includes(file)?join(root,'lib/redis.ts'):join(here,'redis-stub.ts')};
+ if(file==='stats-notes-read-evidence.test.ts')aliases['@/lib/redis']=join(here,'stats-notes-read-world.ts');
  if(file==='path-weekly-summary-page.test.ts'){
   for(const name of ['ai','path-wording-source','path-scripts','path-growth-facts','path-board','opening','store-checkout','stripe-connect','path-campaign','studio-route','store-allowance','store-allowance-rules','path-plan','larger-plan','path'])aliases['@/lib/'+name]=join(here,'path-weekly-summary-page-world.tsx');
   for(const name of ['path-certificates','path-ai-wording','path-social-scripts','path-growth-missions','path-board','path-checkout-notice','path-missions','path-reminder-button','path-share-card','studio-header','studio-store-pin','path-onboarding'])aliases['@/components/'+name]=join(here,'path-weekly-summary-page-world.tsx');

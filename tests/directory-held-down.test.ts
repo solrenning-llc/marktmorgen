@@ -19,7 +19,7 @@
  */
 import { DIRECTORY_CACHE } from "@/lib/directory-index";
 import * as index from "@/lib/directory-index";
-import { DirectoryBusyError, readDirectory } from "@/lib/affiliate-directory";
+import { DIRECTORY_BUILD_SECONDS, DirectoryBusyError, readDirectory } from "@/lib/affiliate-directory";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { addProduct, claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, setSubscription } from "@/lib/store";
@@ -31,7 +31,7 @@ globalThis.fetch = (async () => new Response(JSON.stringify({ object: "list", da
 
 const original = redis.pipeline.bind(redis);
 type Commands = (string | number)[][];
-const WINDOW_MS = 60_000;
+const WINDOW_MS = DIRECTORY_BUILD_SECONDS * 1000;
 const LAST = ((index as unknown as Record<string, unknown>).DIRECTORY_LAST as string | undefined) ?? "nl:dir:last";
 
 async function counted<T>(run: () => Promise<T>): Promise<{ result: T | string; words: Record<string, number> }> {
@@ -117,7 +117,7 @@ async function main(): Promise<void> {
     advance(1000);
   }
   is("600 of 600 visits see the unchanged list, none told unavailable", shown, 600);
-  is("and the builds stay at most one a minute", builds <= 10, true);
+  is("and the builds stay at most one a window", builds <= Math.ceil(600 / DIRECTORY_BUILD_SECONDS), true);
 
   part("A store taken out while the claim is held is gone at once");
   advance(WINDOW_MS);
@@ -175,7 +175,7 @@ async function main(): Promise<void> {
 
   part("The registry counts the last page");
   const line = (NOT_A_COST as Record<string, string | undefined>).DIRECTORY_BUILDS_PER_HOUR ?? "";
-  is("one build sends at most 12,068 commands, 60 builds an hour, 724,080 an hour", [line.includes("12,068"), line.includes("60 builds"), line.includes("724,080")], [true, true, true]);
+  is("one build sends at most 12,068 commands, 4 builds an hour, 48,272 an hour", [line.includes("12,068"), line.includes("4 builds an hour"), line.includes("48,272")], [true, true, true]);
   is("and a visit while the claim is held reads the last page and the listed set", [line.includes("nl:dir:last"), line.includes("SMISMEMBER")], [true, true]);
 
   done();

@@ -88,12 +88,12 @@ async function main(): Promise<void> {
   await selling("baker@example.com", "breadhouse", "Bread House");
 
   part("The ceiling is named and counted");
-  is("DIRECTORY_BUILD_SECONDS is exported, one build a minute at the most", BUILD_SECONDS, 60);
-  is("DIRECTORY_BUILDS_PER_HOUR follows from it", exported.DIRECTORY_BUILDS_PER_HOUR, 60);
+  is("DIRECTORY_BUILD_SECONDS is exported, one build every 15 minutes at the most", BUILD_SECONDS, 900);
+  is("DIRECTORY_BUILDS_PER_HOUR follows from it", exported.DIRECTORY_BUILDS_PER_HOUR, 4);
   is("DirectoryBusyError is exported", typeof Busy, "function");
   const line = (NOT_A_COST as Record<string, string | undefined>).DIRECTORY_BUILDS_PER_HOUR ?? "";
   is("the registry prices the build rate by name", line.length > 0, true);
-  is("and states the bounded worst case: commands per build and builds per hour", [line.includes("12,068"), line.includes("60 builds"), line.includes("724,080")], [true, true, true]);
+  is("and states the bounded worst case: commands per build and builds per hour", [line.includes("12,068"), line.includes("4 builds an hour"), line.includes("48,272")], [true, true, true]);
   const scanLine = (NOT_A_COST as Record<string, string | undefined>).DIRECTORY_SCAN_PAGES ?? "";
   is("the scan line no longer says the rate is unbounded", scanLine.includes("not bounded yet"), false);
 
@@ -119,10 +119,10 @@ async function main(): Promise<void> {
   const later = await counted(() => attempt());
   is("once the window passed, one build", [later.result, later.words.SSCAN], [["breadhouse"], 1]);
 
-  part("A save every second for ten minutes builds at most once a minute");
+  part("A save every second for an hour builds at most once a window");
   advance(WINDOW_MS);
   let builds = 0;
-  for (let second = 0; second < 600; second += 1) {
+  for (let second = 0; second < 3_600; second += 1) {
     await save("baker@example.com");
     const visit = await counted(() => attempt());
     builds += visit.words.SSCAN ?? 0;
@@ -130,8 +130,8 @@ async function main(): Promise<void> {
     if (!(shown === "busy" || (Array.isArray(shown) && shown.join() === "breadhouse"))) throw new Error(`second ${second}: ${JSON.stringify(shown)}`);
     advance(1000);
   }
-  is("600 saves and 600 visits, at most 10 builds", builds <= 600 / (WINDOW_MS / 1000), true);
-  is("and builds did happen", builds >= 9, true);
+  is("3,600 saves and 3,600 visits, at most one build a window", builds <= 3_600 / (WINDOW_MS / 1000), true);
+  is("and builds did happen", builds >= 3_600 / (WINDOW_MS / 1000) - 1, true);
 
   part("A failed build is not retried inside the window");
   advance(WINDOW_MS);

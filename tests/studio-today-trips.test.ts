@@ -9,26 +9,53 @@
  * network: TTFB 2.18 s).
  *
  * Step 1 of the unit sends the page's own loading together (42 to 19 steps, 1.75 s to about 0.97 s, the same 65
- * trips). The remaining steps are awaits inside the page's JSX, each read only when its section is shown; step 2
- * aims at 12 steps and 0.8 s and tightens the bounds below.
+ * trips). The remaining steps were awaits inside the page's JSX, each read only when its section is shown, one after
+ * another; step 2 makes each such section its own part, rendered beside the others, so they wait together.
+ *
+ * The page is measured as React renders it: the tree it returns is walked, every promise in it is waited for and
+ * every async component in it is run, siblings together, the way React renders a server tree. Calling the page alone
+ * would not wait for those parts.
  *
  * What fails here:
- *   - more than 20 steps one after another at 40 ms a trip (the time is printed, not checked: a clock on a busy
+ *   - more than 12 steps one after another at 40 ms a trip (the time is printed, not checked: a clock on a busy
  *     machine measures the machine, while the steps are counted from the order of the trips);
- *   - more than 65 trips in all: each trip is a request to Upstash, so more of them is more cost per visit (MR);
+ *   - more than 66 trips in all: each trip is a request to Upstash, so more of them is more cost per visit (MR). The
+ *     whole tree takes one trip more than the page alone, the reminder's own read (components/path-studio-reminder.tsx),
+ *     which was always there: 66 on step 1, rendered whole;
  *   - a page that no longer loads for its owner (a redirect or a throw).
  */
+import { isValidElement } from "react";
 import { NextRequest } from "next/server";
 import { answering } from "./security/next-headers";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, claimHandle, ensureStatsId } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import StudioPage from "@/app/studio/page";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 const DELAY_MS = 40;
-const MAX_STEPS = 20;
-const MAX_TRIPS = 65;
+const MAX_STEPS = 12;
+const MAX_TRIPS = 66;
+
+/**
+ * Renders the tree a server component returned, as React does on the server: a promise is waited for, an async
+ * component is run with its props, and the children and element props of everything else are rendered, siblings
+ * together. A part that throws makes the whole render throw, as it fails the page.
+ */
+async function render(node: unknown): Promise<void> {
+  if (node === null || typeof node !== "object") return;
+  if (typeof (node as PromiseLike<unknown>).then === "function") return render(await node);
+  if (Array.isArray(node)) {
+    await Promise.all(node.map(render));
+    return;
+  }
+  if (!isValidElement(node)) return;
+  const { type, props } = node as { type: unknown; props: Record<string, unknown> };
+  if (typeof type === "function" && type.constructor.name === "AsyncFunction") return render(await (type as (p: unknown) => Promise<unknown>)(props));
+  await Promise.all(Object.values(props).map(render));
+}
+
+const open = async (): Promise<void> => render(await StudioPage({ searchParams: Promise.resolve({}) }));
 
 async function main(): Promise<void> {
   redis.clear();
@@ -41,7 +68,7 @@ async function main(): Promise<void> {
 
   // Once without delay, so what a first opening writes (a store's counter, its folders) is already there.
   answering(request());
-  await StudioPage({ searchParams: Promise.resolve({}) });
+  await open();
 
   const original = redis.pipeline.bind(redis);
   let trips = 0;
@@ -62,7 +89,7 @@ async function main(): Promise<void> {
   const started = Date.now();
   try {
     answering(request());
-    await StudioPage({ searchParams: Promise.resolve({}) });
+    await open();
   } catch (error) {
     loaded = false;
     console.error(error);
@@ -77,6 +104,27 @@ async function main(): Promise<void> {
   is("the page loads for its owner", loaded, true);
   is(`at most ${MAX_STEPS} steps one after another`, steps <= MAX_STEPS, true);
   is(`no more than ${MAX_TRIPS} trips in all`, trips <= MAX_TRIPS, true);
+
+  // Codex M on #2900: with the store's cached titles gone (a cold or old cache), the parts that read the cards side by
+  // side must not each repair it. Read in order, the page repaired it once.
+  part("Today with the store's cached titles gone");
+  const catalog = (await storeForEmail(OWNER))?.catalog.id;
+  if (!catalog) throw new Error("setup: catalog");
+  const titles = `nl:catalog:${catalog}:t`;
+  await original([["DEL", titles]]);
+  let repairs = 0;
+  redis.pipeline = async (commands) => {
+    if (commands.some((command) => command[0] === "HSET" && command[1] === titles)) repairs += 1;
+    return original(commands);
+  };
+  try {
+    answering(request());
+    await open();
+  } finally {
+    redis.pipeline = original;
+    answering(null);
+  }
+  is("the titles are repaired once", repairs, 1);
   done();
 }
 

@@ -452,10 +452,27 @@ export async function saveQuiz(courseId: string, lessonId: string, quiz: Quiz, r
   if (grown < 0) await giveData(room, [{ slot: QUIZZES_SLOT(courseId), bytes: -grown }]);
 }
 
+/** What taking a lesson's quiz away frees: its record's bytes, as read before the course is saved without it. */
+export type QuizDrop = { courseId: string; lessonId: string; freed: number };
+
+/**
+ * Reads what taking a lesson's quiz away will free, exactly (CX-123 rules 24 and 30; the sibling of readTaskDrop): a
+ * reply cut short or of another shape throws UnknownReplyError, so a caller reads this before it saves the course
+ * without the quiz, and a read that fails leaves the course, the record and its room as they were. A record that is
+ * there but does not read is still taken away, by its own bytes: that is what the creator asked for.
+ */
+export async function readQuizDrop(courseId: string, lessonId: string): Promise<QuizDrop> {
+  return { courseId, lessonId, freed: kept(await storedQuizRaw(courseId, lessonId)) };
+}
+
+/** Takes the quiz record away and gives back the room read by readQuizDrop. */
+export async function applyQuizDrop(drop: QuizDrop, room: DataStore): Promise<void> {
+  await redisPipeline([["DEL", quizKey(drop.courseId, drop.lessonId)]]);
+  if (drop.freed) await giveData(room, [{ slot: QUIZZES_SLOT(drop.courseId), bytes: drop.freed }]);
+}
+
 export async function dropQuiz(courseId: string, lessonId: string, room: DataStore): Promise<void> {
-  const [before] = await redisPipeline([["GET", quizKey(courseId, lessonId)]]);
-  await redisPipeline([["DEL", quizKey(courseId, lessonId)]]);
-  if (kept(before)) await giveData(room, [{ slot: QUIZZES_SLOT(courseId), bytes: kept(before) }]);
+  await applyQuizDrop(await readQuizDrop(courseId, lessonId), room);
 }
 
 /** The keys a course's quizzes are kept under, so they go when it goes. */

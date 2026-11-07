@@ -36,7 +36,7 @@ import { readTask } from "@/lib/assignment-rules";
 import { tellStudentOfReview } from "@/lib/assignment-notify";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { UnknownReplyError } from "@/lib/redis-reply";
-import { QuizRecordUnreadError, type Quiz, dropQuiz, readQuiz, readQuizFor, resetTries, saveQuiz, setupOf } from "@/lib/quiz";
+import { QuizRecordUnreadError, type Quiz, type QuizDrop, applyQuizDrop, readQuiz, readQuizDrop, readQuizFor, resetTries, saveQuiz, setupOf } from "@/lib/quiz";
 import { CERT_ID_PATTERN, withdrawCertificate } from "@/lib/certificate";
 import { readListing } from "@/lib/catalog";
 import { communityOf, courseChanged, unindexCourse } from "@/lib/community-index";
@@ -300,23 +300,24 @@ export async function POST(request: NextRequest) {
         if (body.quiz === null) {
           const result = editCourse(course, { op: "quiz", lessonId, quiz: null });
           if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
+          // The quiz record is read before the course is saved without it: a reply that is not known keeps the
+          // course, the record and its room as they were, for the next try. A record that does not read still goes.
+          const quizDrop = await readQuizDrop(course.id, lessonId).catch((error: unknown) => (console.error("could not read a lesson's quiz to take it off", error), null));
+          if (!quizDrop) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
           await save(result.course);
-          await dropQuiz(course.id, lessonId, store);
+          await applyQuizDrop(quizDrop, store);
           return Response.json({ ok: true, course: result.course });
         }
         const hadQuiz = !!findLesson(course, lessonId)?.lesson.quiz;
-        // A saved quiz that does not read is saved over, as a new quiz (no legacy setting carried from it); a reply
-        // that is not known changes nothing.
+        // A saved quiz that does not read, or whose record is confirmed absent (GET nil) while the outline says there is
+        // one, is saved over as a new quiz (no legacy setting carried from it); a reply that is not known changes nothing.
         let existingQuiz: Quiz | null = null;
-        let unreadQuiz = false;
         try {
           existingQuiz = hadQuiz ? await readQuizFor(course.id, lessonId) : null;
         } catch (error) {
           if (error instanceof UnknownReplyError) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
           if (!(error instanceof QuizRecordUnreadError)) throw error;
-          unreadQuiz = true;
         }
-        if (hadQuiz && !existingQuiz && !unreadQuiz) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
         const read = readQuiz(body.quiz, existingQuiz);
         if (!read.ok) {
           // Which question, and what is wrong with it, so the studio can say so.
@@ -494,6 +495,12 @@ export async function POST(request: NextRequest) {
       // An assignment that goes with its lesson is read before the course is saved without it (Revisor 1 on #2810): a
       // read that fails keeps the lesson, its assignment and the work handed in, for the next try.
       const taskDrops: TaskDrop[] = [];
+      // The lesson's quiz the same way: read exactly before the course is saved without the lesson.
+      let quizDrop: QuizDrop | null = null;
+      if (edit.op === "lesson-remove") {
+        quizDrop = await readQuizDrop(course.id, edit.lessonId).catch((error: unknown) => (console.error("could not read a removed lesson's quiz", error), null));
+        if (!quizDrop) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      }
       if (edit.op === "lesson-remove" || edit.op === "module-remove") {
         const keptNow = new Set(lessonsInOrder(result.course).map(({ lesson }) => lesson.id));
         for (const { lesson } of lessonsInOrder(course)) {
@@ -508,7 +515,7 @@ export async function POST(request: NextRequest) {
       if (lessons !== courseInfo.lessons) await setCourseLessons(ref, id, lessons);
       if (edit.op === "lesson-remove") {
         await dropBody(course.id, edit.lessonId, store);
-        await dropQuiz(course.id, edit.lessonId, store);
+        if (quizDrop) await applyQuizDrop(quizDrop, store);
       }
       if (edit.op === "lesson-remove" || edit.op === "module-remove") {
         const kept = new Set(lessonsInOrder(result.course).map(({ lesson }) => lesson.id));

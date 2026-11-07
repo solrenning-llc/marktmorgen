@@ -28,6 +28,8 @@
  *   day's clock time is skipped and an hour later is already the next day
  *   (America/Nuuk skips Saturday 11 PM in late March), that next day is not
  *   taken for the open one; the email waits for the next open day after it.
+ *   The lost open day still ends the held stretch, so a setting that keeps
+ *   the rules always gives a day, never "unknown" for good.
  */
 import { isTimeZone, partsIn, zonedToUtc } from "@/lib/call-setup";
 
@@ -43,6 +45,13 @@ const WEEKDAY_NAMES = ["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursday
 /** The order the studio reads them in: the week from Monday. */
 const WEEK_FROM_MONDAY = [1, 2, 3, 4, 5, 6, 0];
 const DAY_MS = 86_400_000;
+/**
+ * How far whenToSend looks for an open day: a held stretch, an open day the
+ * clocks skip past, and another held stretch need at most 2 * MAX_WAIT_DAYS
+ * + 1 days; a year is a bound that is never reached by a setting that keeps
+ * the rules, only there so the search always ends.
+ */
+const SEARCH_DAYS = 366;
 /** The largest instant a Date holds, in milliseconds either side of 1970. */
 const MAX_INSTANT = 8.64e15;
 const DATE_KEY = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -166,18 +175,33 @@ export function whenToSend(rule: NoSendDays | "none" | "unknown", purpose: "mark
   if (!isHeld(today)) return { send: "now" };
   const p = partsIn(due, tz);
   const minute = p.hour * 60 + p.minute;
-  // Seconds are kept, so the wait is whole days of the store's clock.
-  const seconds = due % 60_000;
-  for (let wait = 1; wait <= MAX_WAIT_DAYS; wait += 1) {
+  // Seconds are kept, so the wait is whole days of the store's clock; before
+  // 1970 the remainder is negative, so it is brought back into the minute.
+  const seconds = ((due % 60_000) + 60_000) % 60_000;
+  // Held days in a row since the last open day, the due day counted.
+  let heldInARow = 1;
+  for (let wait = 1; wait <= SEARCH_DAYS; wait += 1) {
     const day = today + wait;
-    if (isHeld(day)) continue;
+    if (isHeld(day)) {
+      heldInARow += 1;
+      // More held days in a row than a setting may have: a kept setting
+      // that breaks the rules, never a guess.
+      if (heldInARow > MAX_WAIT_DAYS) return { send: "unknown" };
+      continue;
+    }
     const d = new Date(day * DAY_MS);
     const at = (m: number) => zonedToUtc(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), m, tz);
     const start = at(minute) ?? at(minute + 60);
     if (start === null) return { send: "unknown" };
     // An hour later can be past midnight, on a day that may be held: never
-    // send on a day other than the open one named.
-    if (localDay(start + seconds, tz) !== day) continue;
+    // send on a day other than the open one named. That open day is lost to
+    // the clocks, not held, so the count of held days starts again after it
+    // and the email waits for the next open day, however far the setting
+    // allows.
+    if (localDay(start + seconds, tz) !== day) {
+      heldInARow = 0;
+      continue;
+    }
     return { send: "later", at: start + seconds, day: keyOf(day) };
   }
   return { send: "unknown" };

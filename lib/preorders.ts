@@ -33,7 +33,7 @@ import { givingWords } from "@/lib/buyer-words/giving";
 import { preorderWords } from "@/lib/buyer-words/preorder";
 import { isSettled } from "@/lib/instant-pay";
 import { formatMoney } from "@/lib/money";
-import { type Preorder, keptDay, parsePreorder, preorderCounts, preorderOpen, preorderProblem } from "@/lib/preorder-rules";
+import { type Preorder, keptDay, parsePreorder, preorderCounts, preorderJob, preorderOpen, preorderProblem, readPreorderJob } from "@/lib/preorder-rules";
 
 const soonKey = (sid: string) => `nl:wl:${sid}:soon`;
 const dayKey = (sid: string) => `nl:wl:${sid}:pre`;
@@ -205,7 +205,7 @@ type Session = {
 };
 
 /** What a paid pre-order checkout says: its product, buyer and payment. Null for anything else. */
-function readSession(store: Store, session: Session): { id: string; productId: string; email: string; at: number; pi: string } | null {
+function readSession(store: Store, session: Session): { id: string; productId: string; email: string; at: number; pi: string; ship: boolean } | null {
   const meta = session.metadata ?? {};
   if (meta.preorder !== "yes" || !saleHandles(store).has(meta.store ?? "")) return null;
   if (!isSettled(session)) return null;
@@ -213,13 +213,13 @@ function readSession(store: Store, session: Session): { id: string; productId: s
   const email = typeof session.customer_details?.email === "string" ? session.customer_details.email.trim() : "";
   const pi = typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent as { id?: unknown } | null)?.id;
   if (!SESSION_ID.test(id) || !email || !meta.product) return null;
-  return { id, productId: meta.product, email, at: typeof session.created === "number" ? session.created : now(), pi: typeof pi === "string" && INTENT_ID.test(pi) ? pi : "" };
+  return { id, productId: meta.product, email, at: typeof session.created === "number" ? session.created : now(), pi: typeof pi === "string" && INTENT_ID.test(pi) ? pi : "", ship: meta.ship === "yes" };
 }
 
 /** Writes a paid pre-order down, once. Returns it as it is kept. */
 async function recordPreorder(store: Store, read: NonNullable<ReturnType<typeof readSession>>): Promise<Preorder> {
   const sid = store.statsId as string;
-  const entry: Preorder = { to: read.email, at: read.at, pi: read.pi };
+  const entry: Preorder = { to: read.email, at: read.at, pi: read.pi, ship: read.ship };
   const [, kept] = await redisPipeline([
     ["HSETNX", entriesKey(sid, read.productId), read.id, JSON.stringify(entry)],
     ["HGET", entriesKey(sid, read.productId), read.id],
@@ -264,7 +264,8 @@ export async function handOverPreorder(store: Store, product: Listing, sessionId
     const entry = await readPreorder(store, product.id, sessionId);
     if (!entry || entry.revoked) return "skip";
     if (entry.given) return "already";
-    await grantImported(sid, `pre:${sessionId}`, [{ email: entry.to, productId: product.id, items: null }], entry.at, store.sid);
+    // Whether it ships goes with the grant, which outlives the entry (Claude 1's H on #2827; lib/preorder-rules.ts).
+    await grantImported(sid, preorderJob(sessionId, entry.ship), [{ email: entry.to, productId: product.id, items: null }], entry.at, store.sid);
     if (!store.pastBuyers) await setPastBuyers(storeRef(store));
     if (product.course) await deps.recordStart(entry.to, product.id, now());
     await redisPipeline([["HSET", entriesKey(sid, product.id), sessionId, JSON.stringify({ ...entry, given: now() } satisfies Preorder)], keep(sid, product.id)]);
@@ -526,7 +527,7 @@ export async function revokeRefundedPreorders(
             }
             job = named;
           }
-          if (job === `pre:${session}`) {
+          if (readPreorderJob(job)?.checkout === session) {
             // The course first, then the purchase (Codex G on #2781; rule 30): a course removal that fails keeps the
             // purchase, so the next run takes both away again; taking a course away twice is harmless.
             try {

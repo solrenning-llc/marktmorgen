@@ -41,11 +41,12 @@ import { paidPeriod } from "./billing-period-fixture";
 import { afterTasks } from "./next-server-after-world";
 import { OrdersMeter, ordersLinkFor, purchasesFor, type Purchase } from "@/lib/buyer-orders";
 import { readListing } from "@/lib/catalog";
-import { confirmPreorder } from "@/lib/preorders";
+import { confirmPreorder, handOverPreorder } from "@/lib/preorders";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { windowOf, withConfirmations, withdraw, withdrawalKey, withdrawalStanding } from "@/lib/withdrawal";
 import { submittedInTime, withdrawalWindow, type WithdrawalFacts } from "@/lib/withdrawal-rules";
 import { WITHDRAWAL_WORDS } from "@/lib/buyer-words/withdrawal";
+import { importedKey } from "@/lib/imported-purchases";
 import { openConversation, readInbox } from "@/lib/inbox";
 import { withinLimit } from "@/lib/request-guard";
 import { NEW_PER_DAY } from "@/lib/inbox-rules";
@@ -328,6 +329,213 @@ test("E: a pre-order handed over with the yes stays offered: its confirmation is
     const pre = (await withConfirmations(await purchasesFor(store, BUYER, meter), meter)).find((p) => p.preorder?.given);
     assert.ok(pre && pre.confirmed !== true, "never confirmed for a pre-order");
     assert.deepEqual(windowOf(pre!), { open: true, until: at(2026, 11, 24, 11, 59, 59) }, "the 14 days stay");
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+// Claude 5's second focal return on df856250, two more MEDIUM findings:
+//
+//   - F: a pre-order withdrawn from before it was handed over keeps that withdrawal once handed over: the record is
+//     read under the checkout (cs_), whatever reference the list gives it, so the function is not offered again, no
+//     second note or acknowledgement goes, and the creator's note names the checkout, which Stripe knows;
+//   - G: a shipped pre-order stays shipped once handed over: its withdrawal period still runs from a receipt not
+//     known here, so the function stays open with no end.
+
+test("F: a pre-order withdrawn from before its hand-over is not offered again after it, and nothing goes twice", async () => {
+  Date.now = () => at(2026, 11, 10, 8) * 1000;
+  try {
+    const { product, token } = await shop();
+    let store = (await storeForEmail(OWNER)) as Store;
+    await redis.pipeline([["SADD", `nl:wl:${store.statsId}:soon`, product]]);
+    const session = preorderSession("prewithdrawn", product, at(2026, 11, 9, 8));
+    sessions = [session];
+    assert.equal(await confirmPreorder(store, session, (await readListing(store, product))!, deps), "sent", "precondition: coming soon, a receipt");
+    const first = await post({ handle: "mara", token, ref: session.id, name: "Ana Souza", email: BUYER });
+    assert.equal(stateOf(first), "done", "precondition: withdrawn from before the hand-over");
+    const notes = (await readInbox(store.statsId!)).length;
+
+    // Released: handed over, it comes back on the list as brought over (and its own email goes to the buyer).
+    await redis.pipeline([["SREM", `nl:wl:${store.statsId}:soon`, product]]);
+    store = (await storeForEmail(OWNER)) as Store;
+    assert.equal(await handOverPreorder(store, (await readListing(store, product))!, session.id, deps), "given", "precondition: handed over");
+    const acks = mails.filter((m) => m.to === BUYER).length;
+    store = (await storeForEmail(OWNER)) as Store;
+    const meter = new OrdersMeter(store);
+    const pre = (await purchasesFor(store, BUYER, meter)).find((p) => p.preorder?.given);
+    assert.ok(pre, "precondition: on the list as handed over");
+
+    const page = await render({ token, ref: pre!.reference });
+    assert.ok(!page.includes('name="ref"'), "the function is not offered again for a contract already withdrawn from");
+    const second = await post({ handle: "mara", token, ref: pre!.reference, name: "Ana Souza", email: BUYER });
+    assert.equal(stateOf(second), "already", "the first statement stands");
+    assert.equal((await readInbox(store.statsId!)).length, notes, "no second note to the creator");
+    assert.equal(mails.filter((m) => m.to === BUYER).length, acks, "no second acknowledgement");
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test("F: the creator's note for a handed-over pre-order names its checkout, which Stripe knows", async () => {
+  Date.now = () => at(2026, 11, 10, 8) * 1000;
+  try {
+    const { product, token } = await shop();
+    let store = (await storeForEmail(OWNER)) as Store;
+    const session = preorderSession("prenote", product, at(2026, 11, 9, 8));
+    sessions = [session];
+    assert.equal(await confirmPreorder(store, session, (await readListing(store, product))!, deps), "given", "precondition: handed over at payment");
+    store = (await storeForEmail(OWNER)) as Store;
+    const pre = (await purchasesFor(store, BUYER, new OrdersMeter(store))).find((p) => p.preorder?.given);
+    assert.ok(pre, "precondition: on the list as handed over");
+    assert.equal(stateOf(await post({ handle: "mara", token, ref: pre!.reference, name: "Ana Souza", email: BUYER })), "done");
+    const inbox = JSON.stringify(await Promise.all((await readInbox(store.statsId!)).map((c) => openConversation(store.statsId!, c.id))));
+    assert.ok(inbox.includes(`order ${session.id}`), `the note names the checkout ${session.id}`);
+    assert.ok(!inbox.includes(`order ${pre!.reference}`) || pre!.reference === session.id, "never a reference Stripe does not know");
+    assert.ok(redis.keys().includes(withdrawalKey(store.sid!, session.id)), "kept under the checkout");
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test("G: a shipped pre-order stays shipped once handed over: open, with no end", async () => {
+  // Paid 20 days before it was read: a sale's 14 days would be over.
+  Date.now = () => at(2026, 11, 29, 8) * 1000;
+  try {
+    const { product } = await shop();
+    let store = (await storeForEmail(OWNER)) as Store;
+    await redis.pipeline([["SADD", `nl:wl:${store.statsId}:soon`, product]]);
+    const session = preorderSession("preship", product, at(2026, 11, 9, 8), { ship: "yes" });
+    sessions = [session];
+    assert.equal(await confirmPreorder(store, session, (await readListing(store, product))!, deps), "sent");
+    const before = (await purchasesFor(store, BUYER, new OrdersMeter(store))).find((p) => p.reference === session.id);
+    assert.deepEqual(before && windowOf(before), { open: true, until: null }, "precondition: shipped, open with no end before the hand-over");
+
+    await redis.pipeline([["SREM", `nl:wl:${store.statsId}:soon`, product]]);
+    store = (await storeForEmail(OWNER)) as Store;
+    assert.equal(await handOverPreorder(store, (await readListing(store, product))!, session.id, deps), "given");
+    store = (await storeForEmail(OWNER)) as Store;
+    const after = (await purchasesFor(store, BUYER, new OrdersMeter(store))).find((p) => p.preorder?.given);
+    assert.ok(after, "precondition: on the list as handed over");
+    assert.equal(after!.shipped, true, "still shipped");
+    assert.deepEqual(windowOf(after!), { open: true, until: null }, "its receipt is not known here: open with no end");
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test("G: a handed-over pre-order whose shipping was never written down is taken as shipped (unknown never closes it)", async () => {
+  Date.now = () => at(2026, 11, 29, 8) * 1000;
+  try {
+    const { product } = await shop();
+    let store = (await storeForEmail(OWNER)) as Store;
+    const session = preorderSession("preold", product, at(2026, 11, 9, 8));
+    sessions = [session];
+    assert.equal(await confirmPreorder(store, session, (await readListing(store, product))!, deps), "given");
+    // An entry written before the shipping was kept with it: no "ship" field.
+    const key = `nl:pre:${store.statsId}:${product}`;
+    const [raw] = await redis.pipeline([["HGET", key, session.id]]);
+    const entry = JSON.parse(String(raw)) as Record<string, unknown>;
+    delete entry.ship;
+    await redis.pipeline([["HSET", key, session.id, JSON.stringify(entry)]]);
+    // And its grant made before the job said whether it ships (Claude 1's H on #2827): the job as it was, "pre:<checkout>".
+    await asOldGrant(store, product, session.id);
+    store = (await storeForEmail(OWNER)) as Store;
+    const pre = (await purchasesFor(store, BUYER, new OrdersMeter(store))).find((p) => p.preorder?.given);
+    assert.ok(pre, "precondition: on the list as handed over");
+    assert.deepEqual(windowOf(pre!), { open: true, until: null }, "not known: kept open");
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test("G: a digital pre-order handed over keeps its 14 days, not an open end", async () => {
+  Date.now = () => at(2026, 11, 10, 8) * 1000;
+  try {
+    const { product } = await shop();
+    let store = (await storeForEmail(OWNER)) as Store;
+    const session = preorderSession("predigital", product, at(2026, 11, 9, 8));
+    sessions = [session];
+    assert.equal(await confirmPreorder(store, session, (await readListing(store, product))!, deps), "given");
+    store = (await storeForEmail(OWNER)) as Store;
+    const pre = (await purchasesFor(store, BUYER, new OrdersMeter(store))).find((p) => p.preorder?.given);
+    assert.ok(pre && pre.shipped !== true, "not shipped");
+    assert.deepEqual(windowOf(pre!), { open: true, until: at(2026, 11, 24, 11, 59, 59) });
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+/** Rewrites a handed-over pre-order's grant to the job it had before it said whether it ships: "pre:<checkout>". */
+async function asOldGrant(store: Store, product: string, checkout: string): Promise<void> {
+  const grantKey = importedKey(store.statsId!, BUYER);
+  const [raw] = await redis.pipeline([["HGET", grantKey, product]]);
+  const grant = JSON.parse(String(raw)) as Record<string, unknown>;
+  grant.job = `pre:${checkout}`;
+  await redis.pipeline([["HSET", grantKey, product, JSON.stringify(grant)]]);
+}
+
+// Claude 1's focal re-review of #2827 (H, MEDIUM): the pre-order's entry expires 400 days after its product's last
+// change, while the grant that keeps the purchase on the buyer's list never does. Whether it ships is kept where the
+// purchase is kept, so an entry gone never turns a known digital purchase into an unknown one.
+test("H: a digital pre-order handed over stays digital once its entry is gone: its 14 days ended, never open again", async () => {
+  // Read 401 days after paying: the store's plan is set up on the day of the read, so only the pre-order is old.
+  Date.now = () => at(2027, 12, 15, 8) * 1000;
+  try {
+    const { product } = await shop();
+    let store = (await storeForEmail(OWNER)) as Store;
+    const session = preorderSession("predigone", product, at(2026, 11, 9, 8));
+    sessions = [session];
+    assert.equal(await confirmPreorder(store, session, (await readListing(store, product))!, deps), "given");
+    // The entry expires (400 days after the product's last pre-order change).
+    await redis.pipeline([["DEL", `nl:pre:${store.statsId}:${product}`]]);
+    store = (await storeForEmail(OWNER)) as Store;
+    const pre = (await purchasesFor(store, BUYER, new OrdersMeter(store))).find((p) => p.preorder?.given);
+    assert.ok(pre, "precondition: still on the list (its grant does not expire)");
+    assert.equal(pre!.shipped === true, false, "still digital");
+    assert.deepEqual(windowOf(pre!), { open: false, why: "ended" }, "its 14 days ended long ago: not offered again");
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test("H: a shipped pre-order handed over stays shipped once its entry is gone: open, with no end", async () => {
+  Date.now = () => at(2026, 11, 29, 8) * 1000;
+  try {
+    const { product } = await shop();
+    let store = (await storeForEmail(OWNER)) as Store;
+    await redis.pipeline([["SADD", `nl:wl:${store.statsId}:soon`, product]]);
+    const session = preorderSession("preshipgone", product, at(2026, 11, 9, 8), { ship: "yes" });
+    sessions = [session];
+    assert.equal(await confirmPreorder(store, session, (await readListing(store, product))!, deps), "sent");
+    await redis.pipeline([["SREM", `nl:wl:${store.statsId}:soon`, product]]);
+    store = (await storeForEmail(OWNER)) as Store;
+    assert.equal(await handOverPreorder(store, (await readListing(store, product))!, session.id, deps), "given");
+    await redis.pipeline([["DEL", `nl:pre:${store.statsId}:${product}`]]);
+    store = (await storeForEmail(OWNER)) as Store;
+    const pre = (await purchasesFor(store, BUYER, new OrdersMeter(store))).find((p) => p.preorder?.given);
+    assert.ok(pre, "precondition: on the list");
+    assert.equal(pre!.shipped, true, "still shipped");
+    assert.deepEqual(windowOf(pre!), { open: true, until: null });
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test("H: an old grant (no shipping in its job) whose entry is gone is not known: kept open, never closed on a guess", async () => {
+  Date.now = () => at(2026, 11, 10, 8) * 1000;
+  try {
+    const { product } = await shop();
+    let store = (await storeForEmail(OWNER)) as Store;
+    const session = preorderSession("preoldgone", product, at(2026, 11, 9, 8));
+    sessions = [session];
+    assert.equal(await confirmPreorder(store, session, (await readListing(store, product))!, deps), "given");
+    await asOldGrant(store, product, session.id);
+    await redis.pipeline([["DEL", `nl:pre:${store.statsId}:${product}`]]);
+    store = (await storeForEmail(OWNER)) as Store;
+    const pre = (await purchasesFor(store, BUYER, new OrdersMeter(store))).find((p) => p.preorder?.given);
+    assert.ok(pre, "precondition: on the list");
+    assert.equal(pre!.checkout, session.id, "the old job still names its checkout");
+    assert.deepEqual(windowOf(pre!), { open: true, until: null }, "not known: kept open");
   } finally {
     Date.now = realNow;
   }

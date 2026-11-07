@@ -95,6 +95,23 @@ themselves or the contract again.
     not carry the art. 8(7) confirmation (the `nl:confirm:` mark written for a
     hand-over does not prove one either), so its confirmation is never taken
     as known and it keeps the 14 days (Claude 5, PR #2827).
+    - The withdrawal is kept and named under the pre-order's checkout (`cs_`),
+      before and after the hand-over, although the list names it differently
+      once handed over. So a statement made before the hand-over still stands
+      after it: the function is not offered again, and no second note or
+      acknowledgement goes. The creator's note names an order their Stripe
+      account knows (`withdrawalReference`; Claude 5's F, PR #2827).
+    - A shipped pre-order stays shipped once handed over (its entry keeps the
+      checkout's `ship`): open with no end, as any shipped item. An entry that
+      does not say, a read that fails or no entry keep it open too, never
+      closed on a guess (Claude 5's G, PR #2827).
+    - Whether it ships is also written into the job of the grant that hands
+      it over (`pre:<checkout>:s` or `:d`, `preorderJob` in
+      lib/preorder-rules.ts). The grant never expires, while the entry does
+      (400 days after the product's last pre-order change), so a digital
+      pre-order stays digital, its 14 days ended, once its entry is gone. Only
+      an older grant whose job does not say falls back to the entry (Claude
+      1's H, PR #2827).
   - **A membership** (at least partly a service): 14 days from the contract. The
     right is lost only once the service is fully performed (art. 16(a)), and the
     consumer pays in proportion (art. 14(3)).

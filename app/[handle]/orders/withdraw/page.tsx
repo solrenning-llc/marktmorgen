@@ -7,7 +7,7 @@ import { lookStyle } from "@/lib/store-look";
 import { speech } from "@/lib/buyer-words";
 import { withdrawalWords } from "@/lib/buyer-words/withdrawal";
 import { type Purchase, OrdersBusy, OrdersLate, findPurchase, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
-import { type WithdrawalOwed, windowOf, withConfirmations, withdrawalStanding } from "@/lib/withdrawal";
+import { type WithdrawalOwed, windowOf, withConfirmations, withdrawalReference, withdrawalStanding } from "@/lib/withdrawal";
 import { lastWithdrawalDay } from "@/lib/withdrawal-rules";
 
 // The longest one opening may run: findPurchase is bounded by DOWNLOAD_LOOKUP_MS.
@@ -82,7 +82,7 @@ export default async function WithdrawPage({ params, searchParams }: Params) {
   let owed: WithdrawalOwed | null = null;
   if (found) {
     try {
-      const standing = await withdrawalStanding(store, found.purchase.reference);
+      const standing = await withdrawalStanding(store, withdrawalReference(found.purchase));
       owed = standing.owed;
       already = standing.at !== null && owed === null;
     } catch {

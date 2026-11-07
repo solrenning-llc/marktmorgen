@@ -6,7 +6,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
-import { type PageReader, listPitches, saveSender, startPitch } from "@/lib/outreach";
+import { type PageReader, linkKey, listPitches, saveSender, startPitch, stopFromLink } from "@/lib/outreach";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -79,4 +79,76 @@ test("healthy control: a kept pitch is listed; a pitch to the same business thre
 test("confirmed absence: a store with no kept pitch has none", async () => {
   const store = await fixture;
   assert.deepEqual(await listPitches({ ...store, statsId: "synthetic-no-pitches" }), []);
+});
+
+// Codex Q on #2870 (LOW): a kept pitch whose times do not read would count as written long ago (sentAt || createdAt
+// is 0), so the wait before the same business is written to again would pass. Every writer keeps createdAt, and a
+// sent or stopped pitch its sentAt; a kept pitch without them is unknown.
+for (const [label, value] of [
+  ["a sent pitch with null times", JSON.stringify({ id: "0000000000000001", domain: "copperoak.com", to: "partnerships@copperoak.com", company: "Copper & Oak", status: "sent", createdAt: null, sentAt: null })],
+  ["a stopped pitch with no sentAt", JSON.stringify({ id: "0000000000000001", domain: "copperoak.com", to: "partnerships@copperoak.com", company: "Copper & Oak", status: "stopped", createdAt: NOW - 3 * 86_400 })],
+  ["a draft with no createdAt", JSON.stringify({ id: "0000000000000001", domain: "copperoak.com", to: "partnerships@copperoak.com", company: "Copper & Oak", status: "draft", sentAt: 0 })],
+] as [string, string][]) {
+  test(`listPitches: ${label} is unknown, never written long ago`, async () => {
+    const store = await fixture;
+    answerHgetall([["0000000000000001", value]]);
+    try { await assert.rejects(() => listPitches(store)); }
+    finally { redis.pipeline = real; }
+  });
+}
+
+// J and Codex Q on #2870 (MEDIUM): the stop link said "done" on a write whose answer was not known. Its receipt is
+// read exactly: one count for each SADD and for the HSET; anything else throws, and the route answers done=0.
+const TOKEN = "a".repeat(32);
+async function seedLink(): Promise<string> {
+  const store = await fixture;
+  redis.run(["SET", linkKey(TOKEN), JSON.stringify({ s: store.statsId, id: "0000000000000001", d: "copperoak.com", n: "Harbor Kitchen" })]);
+  redis.run(["HSET", pitchesKey(store.statsId!), "0000000000000001", pitch("0000000000000001", "sent")]);
+  redis.run(["SREM", `nl:outreach:${store.statsId}:stop`, "copperoak.com"]);
+  redis.run(["SREM", "nl:outreach:stop:all", "copperoak.com"]);
+  return store.statsId!;
+}
+const isStopWrite = (commands: Command[]) => commands.some((c) => c[0] === "SADD");
+
+for (const everyone of [false, true]) {
+  const scope = everyone ? "every store" : "this store";
+  for (const [label, alter] of [
+    ["not applied, no replies", async () => []],
+    ["applied, one reply short", async (commands: Command[]) => (await real(commands)).slice(0, -1)],
+    ["applied, a reply in another shape", async (commands: Command[]) => (await real(commands)).map((r: unknown, i: number) => (i === 0 ? "OK" : r))],
+  ] as [string, (commands: Command[]) => Promise<unknown[]>][]) {
+    test(`stopFromLink (${scope}): ${label} is never "done"`, async () => {
+      await seedLink();
+      redis.pipeline = (async (commands: Command[]) => (isStopWrite(commands) ? alter(commands) : real(commands))) as typeof redis.pipeline;
+      try { await assert.rejects(() => stopFromLink(TOKEN, everyone)); }
+      finally { redis.pipeline = real; }
+    });
+  }
+
+  test(`stopFromLink (${scope}): the pitch read in an unknown shape writes nothing and is never "done"`, async () => {
+    const statsId = await seedLink();
+    const sent: Command[][] = [];
+    redis.pipeline = (async (commands: Command[]) => { sent.push(commands); return commands[0]?.[0] === "HGET" ? [7] : real(commands); }) as typeof redis.pipeline;
+    try { await assert.rejects(() => stopFromLink(TOKEN, everyone)); }
+    finally { redis.pipeline = real; }
+    assert.equal(sent.some(isStopWrite), false);
+    assert.equal(redis.run(["SISMEMBER", `nl:outreach:${statsId}:stop`, "copperoak.com"]), 0);
+  });
+
+  test(`stopFromLink (${scope}): healthy, the stop is kept and said done`, async () => {
+    const statsId = await seedLink();
+    assert.equal(await stopFromLink(TOKEN, everyone), true);
+    assert.equal(redis.run(["SISMEMBER", `nl:outreach:${statsId}:stop`, "copperoak.com"]), 1);
+    assert.equal(redis.run(["SISMEMBER", "nl:outreach:stop:all", "copperoak.com"]), everyone ? 1 : 0);
+    assert.equal(JSON.parse(String(redis.run(["HGET", pitchesKey(statsId), "0000000000000001"]))).status, "stopped");
+  });
+}
+
+test("stopFromLink: a stop on a pitch already stopped (no HSET) still reads its SADD receipts", async () => {
+  const statsId = await seedLink();
+  redis.run(["HSET", pitchesKey(statsId), "0000000000000001", pitch("0000000000000001", "stopped")]);
+  assert.equal(await stopFromLink(TOKEN, false), true);
+  redis.pipeline = (async (commands: Command[]) => (isStopWrite(commands) ? [] : real(commands))) as typeof redis.pipeline;
+  try { await assert.rejects(() => stopFromLink(TOKEN, false)); }
+  finally { redis.pipeline = real; }
 });

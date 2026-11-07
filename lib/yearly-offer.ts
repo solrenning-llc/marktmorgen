@@ -138,7 +138,12 @@ async function soldBefore(store: Store, at: number): Promise<number | null> {
     if (!Array.isArray(listed.data)) throw new Error("Stripe gave a page of earlier checkouts that is not a list");
     const rows = listed.data as (Checkout & { payment_status?: unknown })[];
     const sold = rows.filter((row) => row.payment_status === "paid" && isSale(row) && handles.has(row.metadata?.store ?? ""));
-    if (!sold.length) return 0;
+    // No paid sale on this page is "never sold" only on the last page: with more after it (or no word on
+    // whether there is), an earlier sale may be on the next one, so it is not known and the next pass asks again.
+    if (!sold.length) {
+      if (listed.has_more !== false) throw new Error("Stripe gave a page of earlier checkouts with no sale that is not the last");
+      return 0;
+    }
     return Math.min(...sold.map((row) => (typeof row.created === "number" ? row.created : at)));
   } catch (error) {
     console.error("asking a store's Stripe account about earlier sales failed", store.handle, error);

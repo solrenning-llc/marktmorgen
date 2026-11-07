@@ -1794,11 +1794,11 @@ export type Book = {
   invoicesChecked: boolean;
 };
 
-/** A Stripe reply that cannot be read as Stripe documents it: what is owed on it is not known. */
-class StripeShapeError extends Error {
+/** A Stripe reply not in its exact shape: an UnknownReplyError, with Stripe named in what is logged. */
+class UnknownStripeReplyError extends UnknownReplyError {
   constructor(what: string) {
-    super(`Stripe gave ${what} in a shape that cannot be read`);
-    this.name = "StripeShapeError";
+    super(what);
+    this.message = `Stripe gave ${what} in an unknown shape`;
   }
 }
 
@@ -1809,12 +1809,12 @@ class StripeShapeError extends Error {
  * cannot be read is never "the whole list, and nothing on it", and the affiliate book says refundsChecked false.
  */
 function stripePage(listed: { data?: unknown; has_more?: unknown }, what: string): { rows: Record<string, unknown>[]; next: string | null } {
-  if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") throw new StripeShapeError(what);
+  if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") throw new UnknownStripeReplyError(what);
   const rows = listed.data as unknown[];
-  if (!rows.every((row) => row !== null && typeof row === "object" && !Array.isArray(row))) throw new StripeShapeError(what);
+  if (!rows.every((row) => row !== null && typeof row === "object" && !Array.isArray(row))) throw new UnknownStripeReplyError(what);
   if (!listed.has_more) return { rows: rows as Record<string, unknown>[], next: null };
   const last = (rows.at(-1) as Record<string, unknown> | undefined)?.id;
-  if (typeof last !== "string" || !last) throw new StripeShapeError(`${what} with no last one to go on from`);
+  if (typeof last !== "string" || !last) throw new UnknownStripeReplyError(`${what} with no last one to go on from`);
   return { rows: rows as Record<string, unknown>[], next: last };
 }
 
@@ -1823,19 +1823,66 @@ function paymentOf(raw: unknown, what: string): string {
   if (raw === null) return "";
   if (typeof raw === "string" && raw) return raw;
   if (raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" && (raw as { id: string }).id) return (raw as { id: string }).id;
-  throw new StripeShapeError(what);
+  throw new UnknownStripeReplyError(what);
 }
 
-/** An amount in cents Stripe gave: a whole number, never below zero; anything else throws. */
+/** An amount in cents Stripe gave: a whole number, never below zero; null for anything else. */
+function knownCents(raw: unknown): number | null {
+  return typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0 ? raw : null;
+}
+
+/** An amount in cents Stripe gave (knownCents); anything else throws. */
 function centsOf(raw: unknown, what: string): number {
-  if (typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0) return raw;
-  throw new StripeShapeError(what);
+  const cents = knownCents(raw);
+  if (cents === null) throw new UnknownStripeReplyError(what);
+  return cents;
+}
+
+/**
+ * The one payment intent a paid invoice was paid by, from its expanded `payments` list (API 2026-08-26.dahlia):
+ * the list whole (`has_more` false), each row an invoice payment with a status Stripe gives one, the paid rows
+ * naming a payment intent as an id or expanded, all the same one. Open and canceled attempts are passed over.
+ * Anything else, a charge with no payment intent included, is null: the payment its refund would name is not
+ * known, so the invoice is not counted (recurringReferrals).
+ */
+function invoiceIntentOf(payments: unknown): string | null {
+  if (!payments || typeof payments !== "object" || Array.isArray(payments)) return null;
+  const listed = payments as { data?: unknown; has_more?: unknown };
+  if (!Array.isArray(listed.data) || listed.has_more !== false) return null;
+  const intents = new Set<string>();
+  for (const row of listed.data as unknown[]) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+    const { status, payment } = row as { status?: unknown; payment?: unknown };
+    if (status === "open" || status === "canceled") continue;
+    if (status !== "paid" || !payment || typeof payment !== "object" || Array.isArray(payment)) return null;
+    const raw = (payment as { payment_intent?: unknown }).payment_intent;
+    const id = typeof raw === "string" ? raw : raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as { id?: unknown }).id : undefined;
+    if (typeof id !== "string" || !id) return null;
+    intents.add(id);
+  }
+  return intents.size === 1 ? [...intents][0] : null;
+}
+
+/** An invoice's tax in cents, from `total_taxes` (a list of amounts); null when it cannot be read. */
+function invoiceTaxOf(raw: unknown): number | null {
+  if (!Array.isArray(raw)) return null;
+  let sum = 0;
+  for (const tax of raw as unknown[]) {
+    const cents = tax && typeof tax === "object" ? knownCents((tax as { amount?: unknown }).amount) : null;
+    if (cents === null) return null;
+    sum += cents;
+  }
+  return sum;
 }
 
 /**
  * What has been refunded, by payment, on the creator's account, from the
- * oldest sale on the book on. Pending refunds count: the creator already
- * gave the money back.
+ * oldest sale on the book on. Every refund but a failed or canceled one
+ * counts: a pending one, one that requires action and one whose status
+ * Stripe gives as null (its API reference documents a refund's status as a
+ * nullable string) are money that may go back, so no commission is paid on
+ * it while they stand; once one fails or is canceled it no longer counts.
+ * A status of any other type cannot be read and throws.
  */
 async function refundsSince(store: Store, since: number, deadline?: number): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
   const byIntent = new Map<string, number>();
@@ -1855,8 +1902,8 @@ async function refundsSince(store: Store, since: number, deadline?: number): Pro
     );
     const { rows, next } = stripePage(listed, "a page of refunds");
     for (const refund of rows) {
-      if (typeof refund.status !== "string") throw new StripeShapeError("a refund's status");
-      if (refund.status !== "succeeded" && refund.status !== "pending") continue;
+      if (refund.status !== null && typeof refund.status !== "string") throw new UnknownStripeReplyError("a refund's status");
+      if (refund.status === "failed" || refund.status === "canceled") continue;
       const pi = paymentOf(refund.payment_intent, "a refund's payment");
       const amount = centsOf(refund.amount, "a refund's amount");
       if (pi) byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
@@ -1891,7 +1938,7 @@ export async function disputesSince(store: Store, since: number, deadline?: numb
     );
     const { rows, next } = stripePage(listed, "a page of disputes");
     for (const dispute of rows) {
-      if (typeof dispute.status !== "string") throw new StripeShapeError("a dispute's status");
+      if (typeof dispute.status !== "string") throw new UnknownStripeReplyError("a dispute's status");
       if (!DISPUTE_TAKES.has(dispute.status)) continue;
       const pi = paymentOf(dispute.payment_intent, "a dispute's payment");
       const amount = centsOf(dispute.amount, "a dispute's amount");
@@ -2186,7 +2233,7 @@ type InvoiceLike = {
   status_transitions?: { paid_at?: unknown } | null;
   total_taxes?: { amount?: unknown }[] | null;
   parent?: { subscription_details?: { metadata?: Record<string, string> | null } | null } | null;
-  payments?: { data?: { payment?: { payment_intent?: unknown } | null }[] } | null;
+  payments?: unknown;
 };
 
 /** Whether a payment made at `paidAt` falls within `months` of `from`, both in seconds. */
@@ -2234,15 +2281,26 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
   const titles = new Map((ids.length ? await readListings(store, ids).catch(() => []) : []).map((p) => [p.id, p.title]));
   const lines: Referral[] = [];
   for (const { invoice, meta } of found) {
-    const total = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
-    if (typeof invoice.id !== "string" || invoice.status !== "paid" || total <= 0) continue;
     const paidAt = Number(invoice.status_transitions?.paid_at) || Number(invoice.created) || 0;
     const plan = meta.kind === "plan";
     const months = Number(meta.via_months) || 0;
     const soldAt = Number(meta.via_at) || 0;
     if (!plan && (months < 1 || !soldAt || !withinMonths(soldAt, paidAt, months))) continue;
-    const tax = (invoice.total_taxes ?? []).reduce((sum, t) => sum + (typeof t?.amount === "number" ? t.amount : 0), 0);
-    const pi = invoice.payments?.data?.map((p) => p.payment?.payment_intent).find((x): x is string => typeof x === "string") ?? "";
+    // A payment that counts is read whole or not counted, and the book then says it is not whole
+    // (invoicesChecked false): an amount or a tax that cannot be read is not 0, and a payment whose
+    // payment intent is not known could never be matched to its refund, so nothing is paid on it.
+    const total = knownCents(invoice.amount_paid);
+    if (typeof invoice.id !== "string" || !invoice.id || invoice.status !== "paid" || total === null) {
+      complete = false;
+      continue;
+    }
+    if (total === 0) continue;
+    const tax = invoiceTaxOf(invoice.total_taxes);
+    const pi = invoiceIntentOf(invoice.payments);
+    if (tax === null || pi === null) {
+      complete = false;
+      continue;
+    }
     const affiliate = byId.get(meta.via);
     const buyer = typeof invoice.customer_email === "string" ? invoice.customer_email : "";
     lines.push({

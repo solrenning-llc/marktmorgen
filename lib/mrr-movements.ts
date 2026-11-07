@@ -105,6 +105,14 @@ const ref = (v: unknown, what: string): string => {
   if (typeof id !== "string" || !id) throw new UnreadInvoiceError(what);
   return id;
 };
+/** An object Stripe nests a reference in (`parent` and its details): the object, or undefined when it gave none (absent or null). Anything else throws. */
+const obj = <T,>(v: T, what: string): NonNullable<T> | undefined => {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "object" || Array.isArray(v)) throw new UnreadInvoiceError(what);
+  return v as NonNullable<T>;
+};
+/** A line's subscription item details under its `parent`, read exactly as `obj` reads them. */
+const details = (line: Line) => obj(obj(line.parent, "an invoice line's parent")?.subscription_item_details, "an invoice line's subscription details");
 
 /**
  * What each membership was charged at, and from when, from its invoices.
@@ -115,19 +123,19 @@ export function pricesFrom(invoices: Invoice[], subs: Map<string, Sub>): Map<str
   const out = new Map<string, Entry[]>();
   for (const invoice of invoices) {
     if (!invoice || typeof invoice !== "object") throw new UnreadInvoiceError("an invoice");
-    const fromInvoice = ref(invoice.subscription, "an invoice's subscription") || ref(invoice.parent?.subscription_details?.subscription, "an invoice's subscription");
+    const fromInvoice = ref(invoice.subscription, "an invoice's subscription") || ref(obj(obj(invoice.parent, "an invoice's parent")?.subscription_details, "an invoice's subscription details")?.subscription, "an invoice's subscription");
     const lines = invoice.lines === undefined || invoice.lines === null ? [] : invoice.lines.data;
     if (!Array.isArray(lines)) throw new UnreadInvoiceError("an invoice's lines");
     for (const line of lines as unknown[] as Line[]) {
       if (!line || typeof line !== "object") throw new UnreadInvoiceError("an invoice line");
-      const id = ref(line.subscription, "an invoice line's subscription") || ref(line.parent?.subscription_item_details?.subscription, "an invoice line's subscription") || fromInvoice;
+      const id = ref(line.subscription, "an invoice line's subscription") || ref(details(line)?.subscription, "an invoice line's subscription") || fromInvoice;
       const sub = subs.get(id);
       if (!sub) continue;
       const amount = num(line.amount, "an invoice line's amount");
       if (amount === null) throw new UnreadInvoiceError("an invoice line with no amount");
       if (amount < 0) continue;
       const unit = num(line.price?.unit_amount, "an invoice line's price") || num(line.pricing?.unit_amount_decimal, "an invoice line's decimal price") || 0;
-      const proration = line.proration === true || line.parent?.subscription_item_details?.proration === true;
+      const proration = line.proration === true || details(line)?.proration === true;
       // A line without its price says only what a part of a period cost; that is not a month's worth.
       if (!unit && proration) continue;
       const quantity = num(line.quantity, "an invoice line's quantity") || 1;

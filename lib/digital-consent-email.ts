@@ -17,12 +17,13 @@ import { speechFor } from "@/lib/buyer-words";
 import { parseLanguage } from "@/lib/store-language";
 
 /**
- * The two sentences of 2026-10-30.2, before they named the withdrawal
- * function and where it is (queue item 588 [KB9], unit 2). Sales were closed
+ * The two sentences of 2026-10-30.2, before the membership one named the
+ * withdrawal function and where it is (queue item 588 [KB9], unit 2); the
+ * digital one is unchanged since (tests/kb9-precontract.test.ts). Sales were closed
  * while they were current, but an order kept with them is still quoted with
  * the words it holds, never with today's.
  */
-const BOX_2026_10_30_2: Record<keyof typeof DIGITAL_CONSENT_WORDS, Record<ConsentKind, string>> = {
+export const BOX_2026_10_30_2: Record<keyof typeof DIGITAL_CONSENT_WORDS, Record<ConsentKind, string>> = {
   en: {
     digital: "Start my access before the 14-day cancellation period ends, as soon as it is available. I understand that once access starts, I lose my right to cancel.",
     membership: "Start my membership now, before the 14-day cancellation period ends. I understand that if I cancel within those 14 days, I pay for what I was given until then.",

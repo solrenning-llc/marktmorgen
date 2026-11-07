@@ -156,13 +156,17 @@ export function pathJson(record: PathRecord): string {
 /**
  * The store's path, or null when it has not begun one. The GET answer is read exactly (rule 24): no reply, extra
  * replies or a value that is neither text nor null throws, never "not started". A record kept as text is read by
- * parsePath as before.
+ * parsePath as before; kept text that parsePath does not take for a record throws too, because only this file
+ * writes the key, always as pathJson. Only a GET of null (no key) is "not started".
  */
 export async function readPath(store: Pick<Store, "sid">): Promise<PathRecord | null> {
   if (!SID.test(store.sid) || !isRedisConfigured()) return null;
   const reply = repliesFor(await redisPipeline([["GET", key(store.sid)]]), 1);
   if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError("a store's Path");
-  return parsePath(reply[0]);
+  if (reply[0] === null) return null;
+  const record = parsePath(reply[0]);
+  if (!record) throw new UnknownReplyError("a store's Path");
+  return record;
 }
 
 /**

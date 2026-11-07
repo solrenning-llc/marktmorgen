@@ -244,3 +244,19 @@ test("handing the same file in again into a full data room: the file the earlier
   assert.equal(await counted(w), 1000, "and its bytes stay counted");
   await everyKeptFileCounted(w, "same file, full room");
 });
+
+test("the data room could not be counted and the file cannot be deleted either: it stays counted while it is in the file store", async () => {
+  const w = await world("handindelfail", true);
+  const path = await uploaded(w);
+  failing(takesWorkRoom(w), async () => {
+    throw new Error("Redis request failed with status 502");
+  });
+  setFailDeletes(true);
+  const result = await handIn(w, path);
+  redis.pipeline = realPipeline;
+  assert.equal(result.status, 500, JSON.stringify(result.body));
+  assert.equal(await submissionOf(w.courseId, w.lessonId, emailKey(BUYER)), null, "nothing was handed in");
+  assert.ok(files.has(path), "the file is still in the file store");
+  assert.equal(await counted(w), 1000, "so its bytes are not given back");
+  await everyKeptFileCounted(w, "delete failed");
+});

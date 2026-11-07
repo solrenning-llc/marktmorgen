@@ -286,6 +286,11 @@ export async function handIn(input: {
   now?: number;
   /** The store whose data room the work takes from (DataRoomError when it does not fit). */
   data: DataStore;
+  /**
+   * Called just before the work is written. A failure before it kept nothing; from it on, the work (and the file in
+   * it) may be kept even when the call fails, its answer lost or a step after it failing (CX-123 rule 24).
+   */
+  writing?: () => void;
 }): Promise<HandIn> {
   const { courseId, lessonId, who, task } = input;
   const at = input.now ?? Math.floor(Date.now() / 1000);
@@ -304,6 +309,7 @@ export async function handIn(input: {
   // Its room first: what it weighs over what it replaces, its two places in the lists the first time, its file's entry.
   const grown = recordBytes(JSON.stringify(kept), 3) - (before ? recordBytes(JSON.stringify(before), 3) : 0) + (input.file ? ENTRY_BYTES : 0);
   if (grown > 0) await needData(input.data, [{ slot: TASKS_SLOT(courseId), bytes: grown }]);
+  input.writing?.();
   await redisPipeline([
     ["SET", subKey(courseId, lessonId, who), JSON.stringify(kept)],
     ...(input.file ? [["HSET", filesKey(courseId, lessonId), input.file.path, input.file.bytes]] : []),

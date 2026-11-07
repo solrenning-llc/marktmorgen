@@ -26,14 +26,38 @@ import { done, is, part } from "./check";
 const tall = (cls: string) => /\bmin-h-11\b/.test(cls) && /\binline-flex\b/.test(cls);
 /** 44 px wide as well as tall (2.5.5): a one-letter title is otherwise as narrow as its letter. */
 const square = (cls: string) => tall(cls) && /\bmin-w-11\b/.test(cls);
+/** Text without its markup, dropped one character at a time (no single-pass regex). */
+function words(markup: string): string {
+  let out = "";
+  let inTag = false;
+  for (const ch of markup) {
+    if (ch === "<") inTag = true;
+    else if (ch === ">") inTag = false;
+    else if (!inTag) out += ch;
+  }
+  return out;
+}
+/** Markup without its screen-reader-only spans, cut by index (no single-pass regex). */
+function withoutSrOnly(markup: string): string {
+  const open = '<span class="sr-only">';
+  let out = "";
+  let at = 0;
+  for (let i = markup.indexOf(open); i !== -1; i = markup.indexOf(open, at)) {
+    const end = markup.indexOf("</span>", i);
+    if (end === -1) break;
+    out += markup.slice(at, i);
+    at = end + "</span>".length;
+  }
+  return out + markup.slice(at);
+}
 /** Every <a> in the markup: its class and its words, with what only a screen reader hears. */
 function anchors(html: string): { cls: string; text: string; heard: string }[] {
   return [...html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)].map((m) => {
     const inner = m[2];
     return {
       cls: m[1].match(/class="([^"]*)"/)?.[1] ?? "",
-      text: inner.replace(/<span class="sr-only">[\s\S]*?<\/span>/g, "").replace(/<[^>]+>/g, "").trim(),
-      heard: inner.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim(),
+      text: words(withoutSrOnly(inner)).trim(),
+      heard: words(inner).replace(/\s+/g, " ").trim(),
     };
   });
 }

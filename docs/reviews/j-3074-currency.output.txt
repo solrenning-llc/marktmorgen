@@ -1,0 +1,1024 @@
+EXPLICITINITIALSTATUS
+{"old": 1, "probe": 0, "retained": 0, "types": 0, "lint": 0, "scanner": 0, "diff": 0}
+EXPLICITFINALRUNTIME
+{"head": 0, "old": 1, "probe": 0, "retained": 0}
+
+---head---
+J_3035_FOCAL head r24-currency-unknown.test.ts TARGET 97987f27c6b757890120c0cc88a880e0bcfc845d
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+Healthy control: everything named in dollars reads exactly as before
+  ok    healthy: the reading is complete
+  ok    healthy: two sales and the extra, all in dollars
+  ok    healthy: nothing in another currency
+  ok    healthy: both refunds counted
+  ok    healthy: both renewals counted, the reading complete
+  ok    healthy: one kept line, in dollars, with its figure
+  ok    healthy: the renewal payments read complete
+  ok    control: a sale named in euros is in another currency, as before
+
+Unknown currency: no currency at all
+  ok    no currency at all: the purchase reading says it is incomplete
+  ok    no currency at all: the dollar totals hold only what was paid in dollars
+  ok    no currency at all: never called a sale in another currency
+  ok    no currency at all: the dollar refunds hold only the refund in dollars
+  ok    no currency at all: the dollar disputes hold none
+  ok    no currency at all: never counted as taken back in another currency
+  ok    no currency at all: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    no currency at all: what was kept has only the dollar line, with no figure
+  ok    no currency at all: and says which readings could not be made
+  ok    no currency at all: the renewal payments read is incomplete, never one in dollars
+  ok    no currency at all: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+Unknown currency: a currency of null
+  ok    a currency of null: the purchase reading says it is incomplete
+  ok    a currency of null: the dollar totals hold only what was paid in dollars
+  ok    a currency of null: never called a sale in another currency
+  ok    a currency of null: the dollar refunds hold only the refund in dollars
+  ok    a currency of null: the dollar disputes hold none
+  ok    a currency of null: never counted as taken back in another currency
+  ok    a currency of null: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    a currency of null: what was kept has only the dollar line, with no figure
+  ok    a currency of null: and says which readings could not be made
+  ok    a currency of null: the renewal payments read is incomplete, never one in dollars
+  ok    a currency of null: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+Unknown currency: an empty currency
+  ok    an empty currency: the purchase reading says it is incomplete
+  ok    an empty currency: the dollar totals hold only what was paid in dollars
+  ok    an empty currency: never called a sale in another currency
+  ok    an empty currency: the dollar refunds hold only the refund in dollars
+  ok    an empty currency: the dollar disputes hold none
+  ok    an empty currency: never counted as taken back in another currency
+  ok    an empty currency: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    an empty currency: what was kept has only the dollar line, with no figure
+  ok    an empty currency: and says which readings could not be made
+  ok    an empty currency: the renewal payments read is incomplete, never one in dollars
+  ok    an empty currency: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+Unknown currency: a currency that is a number
+  ok    a currency that is a number: the purchase reading says it is incomplete
+  ok    a currency that is a number: the dollar totals hold only what was paid in dollars
+  ok    a currency that is a number: never called a sale in another currency
+  ok    a currency that is a number: the dollar refunds hold only the refund in dollars
+  ok    a currency that is a number: the dollar disputes hold none
+  ok    a currency that is a number: never counted as taken back in another currency
+  ok    a currency that is a number: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    a currency that is a number: what was kept has only the dollar line, with no figure
+  ok    a currency that is a number: and says which readings could not be made
+  ok    a currency that is a number: the renewal payments read is incomplete, never one in dollars
+  ok    a currency that is a number: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+Unknown currency: a currency that is not a code
+  ok    a currency that is not a code: the purchase reading says it is incomplete
+  ok    a currency that is not a code: the dollar totals hold only what was paid in dollars
+  ok    a currency that is not a code: never called a sale in another currency
+  ok    a currency that is not a code: the dollar refunds hold only the refund in dollars
+  ok    a currency that is not a code: the dollar disputes hold none
+  ok    a currency that is not a code: never counted as taken back in another currency
+  ok    a currency that is not a code: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    a currency that is not a code: what was kept has only the dollar line, with no figure
+  ok    a currency that is not a code: and says which readings could not be made
+  ok    a currency that is not a code: the renewal payments read is incomplete, never one in dollars
+  ok    a currency that is not a code: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+An all-time reading kept without its currency is read again, never taken for dollars
+  ok    a kept reading with no currency: read again
+  ok    a kept reading in dollars that does not say how many sales it left out: read again
+  ok    healthy: a kept reading in dollars is used
+  ok    the funnel is accepted
+
+The offer after paying: healthy control
+  ok    an order in dollars: the offer is charged once
+  ok    control: an order in euros is followed by no offer, as before
+
+The offer after paying: no currency at all
+  ok    no currency at all: no offer is charged, never one in dollars
+
+The offer after paying: a currency of null
+  ok    a currency of null: no offer is charged, never one in dollars
+
+The offer after paying: an empty currency
+  ok    an empty currency: no offer is charged, never one in dollars
+
+The offer after paying: a currency that is a number
+  ok    a currency that is a number: no offer is charged, never one in dollars
+
+The offer after paying: a currency that is not a code
+  ok    a currency that is not a code: no offer is charged, never one in dollars
+
+74 checks, all passing.
+HTTP_MOCK_CALLS 63
+MEMORY_REDIS_RUN 291
+J_CHILD_EXIT 0
+
+---old---
+J_3035_FOCAL old-modules r24-currency-unknown.test.ts TARGET 97987f27c6b757890120c0cc88a880e0bcfc845d
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+Healthy control: everything named in dollars reads exactly as before
+  ok    healthy: the reading is complete
+  ok    healthy: two sales and the extra, all in dollars
+  ok    healthy: nothing in another currency
+  ok    healthy: both refunds counted
+  ok    healthy: both renewals counted, the reading complete
+  ok    healthy: one kept line, in dollars, with its figure
+  ok    healthy: the renewal payments read complete
+  ok    control: a sale named in euros is in another currency, as before
+
+Unknown currency: no currency at all
+  FAIL  no currency at all: the purchase reading says it is incomplete
+        expected true
+        got      false
+  FAIL  no currency at all: the dollar totals hold only what was paid in dollars
+        expected [1,5000]
+        got      [3,12900]
+  ok    no currency at all: never called a sale in another currency
+  FAIL  no currency at all: the dollar refunds hold only the refund in dollars
+        expected 1000
+        got      1600
+  FAIL  no currency at all: the dollar disputes hold none
+        expected 0
+        got      400
+  ok    no currency at all: never counted as taken back in another currency
+  FAIL  no currency at all: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+        expected [2000,true]
+        got      [5000,false]
+  FAIL  no currency at all: what was kept has only the dollar line, with no figure
+        expected [["usd",null]]
+        got      [["usd",15900]]
+  FAIL  no currency at all: and says which readings could not be made
+        expected ["sales","renewals","refunds","disputes"]
+        got      []
+  FAIL  no currency at all: the renewal payments read is incomplete, never one in dollars
+        expected [true,[2000]]
+        got      [false,[2000,3000]]
+  FAIL  no currency at all: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+        expected [1,5000,0,true]
+        got      [3,12900,0,false]
+
+Unknown currency: a currency of null
+  FAIL  a currency of null: the purchase reading says it is incomplete
+        expected true
+        got      false
+  FAIL  a currency of null: the dollar totals hold only what was paid in dollars
+        expected [1,5000]
+        got      [3,12900]
+  ok    a currency of null: never called a sale in another currency
+  FAIL  a currency of null: the dollar refunds hold only the refund in dollars
+        expected 1000
+        got      1600
+  FAIL  a currency of null: the dollar disputes hold none
+        expected 0
+        got      400
+  ok    a currency of null: never counted as taken back in another currency
+  FAIL  a currency of null: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+        expected [2000,true]
+        got      [5000,false]
+  FAIL  a currency of null: what was kept has only the dollar line, with no figure
+        expected [["usd",null]]
+        got      [["usd",15900]]
+  FAIL  a currency of null: and says which readings could not be made
+        expected ["sales","renewals","refunds","disputes"]
+        got      []
+  FAIL  a currency of null: the renewal payments read is incomplete, never one in dollars
+        expected [true,[2000]]
+        got      [false,[2000,3000]]
+  FAIL  a currency of null: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+        expected [1,5000,0,true]
+        got      [3,12900,0,false]
+
+Unknown currency: an empty currency
+  FAIL  an empty currency: the purchase reading says it is incomplete
+        expected true
+        got      false
+  FAIL  an empty currency: the dollar totals hold only what was paid in dollars
+        expected [1,5000]
+        got      [3,12900]
+  ok    an empty currency: never called a sale in another currency
+  FAIL  an empty currency: the dollar refunds hold only the refund in dollars
+        expected 1000
+        got      1600
+  FAIL  an empty currency: the dollar disputes hold none
+        expected 0
+        got      400
+  ok    an empty currency: never counted as taken back in another currency
+  FAIL  an empty currency: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+        expected [2000,true]
+        got      [5000,false]
+  FAIL  an empty currency: what was kept has only the dollar line, with no figure
+        expected [["usd",null]]
+        got      [["usd",15900]]
+  FAIL  an empty currency: and says which readings could not be made
+        expected ["sales","renewals","refunds","disputes"]
+        got      []
+  FAIL  an empty currency: the renewal payments read is incomplete, never one in dollars
+        expected [true,[2000]]
+        got      [false,[2000,3000]]
+  FAIL  an empty currency: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+        expected [1,5000,0,true]
+        got      [3,12900,0,false]
+
+Unknown currency: a currency that is a number
+  FAIL  a currency that is a number: the purchase reading says it is incomplete
+        expected true
+        got      false
+  FAIL  a currency that is a number: the dollar totals hold only what was paid in dollars
+        expected [1,5000]
+        got      [3,12900]
+  ok    a currency that is a number: never called a sale in another currency
+  FAIL  a currency that is a number: the dollar refunds hold only the refund in dollars
+        expected 1000
+        got      1600
+  FAIL  a currency that is a number: the dollar disputes hold none
+        expected 0
+        got      400
+  ok    a currency that is a number: never counted as taken back in another currency
+  FAIL  a currency that is a number: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+        expected [2000,true]
+        got      [5000,false]
+  FAIL  a currency that is a number: what was kept has only the dollar line, with no figure
+        expected [["usd",null]]
+        got      [["usd",15900]]
+  FAIL  a currency that is a number: and says which readings could not be made
+        expected ["sales","renewals","refunds","disputes"]
+        got      []
+  FAIL  a currency that is a number: the renewal payments read is incomplete, never one in dollars
+        expected [true,[2000]]
+        got      [false,[2000,3000]]
+  FAIL  a currency that is a number: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+        expected [1,5000,0,true]
+        got      [3,12900,0,false]
+
+Unknown currency: a currency that is not a code
+  FAIL  a currency that is not a code: the purchase reading says it is incomplete
+        expected true
+        got      false
+  ok    a currency that is not a code: the dollar totals hold only what was paid in dollars
+  FAIL  a currency that is not a code: never called a sale in another currency
+        expected 0
+        got      2
+  ok    a currency that is not a code: the dollar refunds hold only the refund in dollars
+  ok    a currency that is not a code: the dollar disputes hold none
+  FAIL  a currency that is not a code: never counted as taken back in another currency
+        expected [0,0]
+        got      [1,1]
+  FAIL  a currency that is not a code: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+        expected [2000,true]
+        got      [2000,false]
+  FAIL  a currency that is not a code: what was kept has only the dollar line, with no figure
+        expected [["usd",null]]
+        got      [["usd",6000],["dollars",9900]]
+  FAIL  a currency that is not a code: and says which readings could not be made
+        expected ["sales","renewals","refunds","disputes"]
+        got      []
+  FAIL  a currency that is not a code: the renewal payments read is incomplete, never one in dollars
+        expected [true,[2000]]
+        got      [false,[2000]]
+  FAIL  a currency that is not a code: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+        expected [1,5000,0,true]
+        got      [1,5000,2,false]
+
+An all-time reading kept without its currency is read again, never taken for dollars
+  FAIL  a kept reading with no currency: read again
+        expected {"sales":3,"cents":12900}
+        got      {"sales":99,"cents":99900}
+  FAIL  a kept reading in dollars that does not say how many sales it left out: read again
+        expected {"sales":3,"cents":12900}
+        got      {"sales":99,"cents":99900}
+  ok    healthy: a kept reading in dollars is used
+  ok    the funnel is accepted
+
+The offer after paying: healthy control
+  ok    an order in dollars: the offer is charged once
+  ok    control: an order in euros is followed by no offer, as before
+
+The offer after paying: no currency at all
+  FAIL  no currency at all: no offer is charged, never one in dollars
+        expected ["unavailable",0]
+        got      ["done",1]
+
+The offer after paying: a currency of null
+  FAIL  a currency of null: no offer is charged, never one in dollars
+        expected ["unavailable",0]
+        got      ["done",1]
+
+The offer after paying: an empty currency
+  ok    an empty currency: no offer is charged, never one in dollars
+
+The offer after paying: a currency that is a number
+  FAIL  a currency that is a number: no offer is charged, never one in dollars
+        expected ["unavailable",0]
+        got      ["done",1]
+
+The offer after paying: a currency that is not a code
+  ok    a currency that is not a code: no offer is charged, never one in dollars
+
+74 checks, 49 failing.
+HTTP_MOCK_CALLS 62
+MEMORY_REDIS_RUN 324
+J_CHILD_EXIT 1
+
+---probe---
+J_3035_FOCAL head j-3074-currency.proof.ts TARGET 97987f27c6b757890120c0cc88a880e0bcfc845d
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+Healthy control: everything named in dollars reads exactly as before
+  ok    healthy: the reading is complete
+  ok    healthy: two sales and the extra, all in dollars
+  ok    healthy: nothing in another currency
+  ok    healthy: both refunds counted
+  ok    healthy: both renewals counted, the reading complete
+  ok    healthy: one kept line, in dollars, with its figure
+  ok    healthy: the renewal payments read complete
+  ok    control: a sale named in euros is in another currency, as before
+
+Unknown currency: no currency at all
+  ok    no currency at all: the purchase reading says it is incomplete
+  ok    no currency at all: the dollar totals hold only what was paid in dollars
+  ok    no currency at all: never called a sale in another currency
+  ok    no currency at all: the dollar refunds hold only the refund in dollars
+  ok    no currency at all: the dollar disputes hold none
+  ok    no currency at all: never counted as taken back in another currency
+  ok    no currency at all: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    no currency at all: what was kept has only the dollar line, with no figure
+  ok    no currency at all: and says which readings could not be made
+  ok    no currency at all: the renewal payments read is incomplete, never one in dollars
+  ok    no currency at all: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+Unknown currency: trailing newline is not a three-letter code
+  ok    trailing newline is not a three-letter code: the purchase reading says it is incomplete
+  ok    trailing newline is not a three-letter code: the dollar totals hold only what was paid in dollars
+  ok    trailing newline is not a three-letter code: never called a sale in another currency
+  ok    trailing newline is not a three-letter code: the dollar refunds hold only the refund in dollars
+  ok    trailing newline is not a three-letter code: the dollar disputes hold none
+  ok    trailing newline is not a three-letter code: never counted as taken back in another currency
+  ok    trailing newline is not a three-letter code: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    trailing newline is not a three-letter code: what was kept has only the dollar line, with no figure
+  ok    trailing newline is not a three-letter code: and says which readings could not be made
+  ok    trailing newline is not a three-letter code: the renewal payments read is incomplete, never one in dollars
+  ok    trailing newline is not a three-letter code: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+Unknown currency: a currency of null
+  ok    a currency of null: the purchase reading says it is incomplete
+  ok    a currency of null: the dollar totals hold only what was paid in dollars
+  ok    a currency of null: never called a sale in another currency
+  ok    a currency of null: the dollar refunds hold only the refund in dollars
+  ok    a currency of null: the dollar disputes hold none
+  ok    a currency of null: never counted as taken back in another currency
+  ok    a currency of null: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    a currency of null: what was kept has only the dollar line, with no figure
+  ok    a currency of null: and says which readings could not be made
+  ok    a currency of null: the renewal payments read is incomplete, never one in dollars
+  ok    a currency of null: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+Unknown currency: an empty currency
+  ok    an empty currency: the purchase reading says it is incomplete
+  ok    an empty currency: the dollar totals hold only what was paid in dollars
+  ok    an empty currency: never called a sale in another currency
+  ok    an empty currency: the dollar refunds hold only the refund in dollars
+  ok    an empty currency: the dollar disputes hold none
+  ok    an empty currency: never counted as taken back in another currency
+  ok    an empty currency: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    an empty currency: what was kept has only the dollar line, with no figure
+  ok    an empty currency: and says which readings could not be made
+  ok    an empty currency: the renewal payments read is incomplete, never one in dollars
+  ok    an empty currency: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+Unknown currency: a currency that is a number
+  ok    a currency that is a number: the purchase reading says it is incomplete
+  ok    a currency that is a number: the dollar totals hold only what was paid in dollars
+  ok    a currency that is a number: never called a sale in another currency
+  ok    a currency that is a number: the dollar refunds hold only the refund in dollars
+  ok    a currency that is a number: the dollar disputes hold none
+  ok    a currency that is a number: never counted as taken back in another currency
+  ok    a currency that is a number: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    a currency that is a number: what was kept has only the dollar line, with no figure
+  ok    a currency that is a number: and says which readings could not be made
+  ok    a currency that is a number: the renewal payments read is incomplete, never one in dollars
+  ok    a currency that is a number: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+Unknown currency: a currency that is not a code
+  ok    a currency that is not a code: the purchase reading says it is incomplete
+  ok    a currency that is not a code: the dollar totals hold only what was paid in dollars
+  ok    a currency that is not a code: never called a sale in another currency
+  ok    a currency that is not a code: the dollar refunds hold only the refund in dollars
+  ok    a currency that is not a code: the dollar disputes hold none
+  ok    a currency that is not a code: never counted as taken back in another currency
+  ok    a currency that is not a code: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    a currency that is not a code: what was kept has only the dollar line, with no figure
+  ok    a currency that is not a code: and says which readings could not be made
+  ok    a currency that is not a code: the renewal payments read is incomplete, never one in dollars
+  ok    a currency that is not a code: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+An all-time reading kept without its currency is read again, never taken for dollars
+  ok    a kept reading with no currency: read again
+  ok    a kept reading in dollars that does not say how many sales it left out: read again
+  ok    healthy: a kept reading in dollars is used
+  ok    the funnel is accepted
+
+The offer after paying: healthy control
+  ok    an order in dollars: the offer is charged once
+  ok    control: an order in euros is followed by no offer, as before
+
+The offer after paying: no currency at all
+  ok    no currency at all: no offer is charged, never one in dollars
+
+The offer after paying: trailing newline is not a three-letter code
+  ok    trailing newline is not a three-letter code: no offer is charged, never one in dollars
+
+The offer after paying: a currency of null
+  ok    a currency of null: no offer is charged, never one in dollars
+
+The offer after paying: an empty currency
+  ok    an empty currency: no offer is charged, never one in dollars
+
+The offer after paying: a currency that is a number
+  ok    a currency that is a number: no offer is charged, never one in dollars
+
+The offer after paying: a currency that is not a code
+  ok    a currency that is not a code: no offer is charged, never one in dollars
+
+86 checks, all passing.
+HTTP_MOCK_CALLS 72
+MEMORY_REDIS_RUN 316
+J_CHILD_EXIT 0
+
+---retained---
+J_3035_FOCAL head retained-revenue.test.ts TARGET 97987f27c6b757890120c0cc88a880e0bcfc845d
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+The rule, on what it is handed
+  ok    the store's own currency comes first
+  ok    orders, renewals, refunds and disputes reconcile in dollars
+  ok    and in euros on their own line, never converted
+  ok    a sale before the window is left out
+  ok    kept by channel, store currency only, biggest first
+  ok    money with no channel is visible: direct net zero, unrecorded renewals
+  ok    an incomplete refunds reading shows no kept figure and names itself
+  ok    an incomplete disputes reading shows no kept figure and names itself
+  ok    an incomplete renewals reading shows no kept figure and names itself
+  ok    an incomplete sales reading shows no kept figure and names itself
+  ok    disputes that could not be read are missing, not zero
+  ok    a store with no Stripe account has no renewals to read, and is not held back by them
+  ok    a store paid nothing still shows its currency
+  ok    windows start 6, 29 and 89 days back
+  ok    a refund bigger than the window's sales gives a negative kept figure, not a hidden one
+  ok    the dispute states are the affiliate book's
+  ok    every window at once
+
+Read from Stripe, reconciled per currency
+  ok    dollars: paid, renewals, refunded, disputed (lost only; won and an inquiry take nothing)
+  ok    euros on their own line with their own dispute, never added to dollars
+  ok    disputes by the channel of the sale disputed
+  ok    a complete dispute reading says so
+  ok    money with no channel recorded is shown, not folded away
+  ok    kept by channel
+  ok    the panel's data carries the figures, nothing about a buyer
+
+What the page says
+  ok    one line per currency, in its own money
+  ok    says nothing is converted
+  ok    says a channel is not a cause
+  ok    says what disputed means
+  ok    makes no lift or profit claim
+
+A dispute outage is unknown, not zero
+  ok    no kept figure and the reason
+  ok    the page says which reading is missing
+  ok    other figures still show
+  ok    the page limit stops a complete claim after three pages
+
+33 checks, all passing.
+HTTP_MOCK_CALLS 17
+MEMORY_REDIS_RUN 306
+reading disputes failed Error: dispute service unavailable
+    at globalThis.fetch (/dev/shm/j3035-focal-TStmpr/proof.cjs:40093:41)
+    at /dev/shm/j3035-focal-TStmpr/proof.cjs:1:636
+    at /dev/shm/j3035-focal-TStmpr/proof.cjs:33936:29
+    at timed (/dev/shm/j3035-focal-TStmpr/proof.cjs:33886:19)
+    at onAccount (/dev/shm/j3035-focal-TStmpr/proof.cjs:33935:43)
+    at readDisputes (/dev/shm/j3035-focal-TStmpr/proof.cjs:39437:24)
+    at readSales (/dev/shm/j3035-focal-TStmpr/proof.cjs:39522:30)
+    at main (/dev/shm/j3035-focal-TStmpr/proof.cjs:40133:24)
+J_CHILD_EXIT 0
+
+---types---
+{
+  "scope": "direct roots plus imported types; imported dependency bodies not separately checked",
+  "roots": [
+    "lib/stats.ts",
+    "lib/upsell.ts",
+    "tests/r24-currency-unknown.test.ts",
+    "tests/j-3074-currency.proof.ts"
+  ],
+  "sources": 986,
+  "options": {
+    "target": "ES2017",
+    "strict": true,
+    "moduleResolution": "Bundler"
+  },
+  "diagnostics": []
+}
+
+---lint---
+
+---scanner---
+Public data check: 4291 tracked files; 0 file(s) require correction.
+
+---diff---
+
+---head-initial---
+J_3035_FOCAL head r24-currency-unknown.test.ts TARGET 97987f27c6b757890120c0cc88a880e0bcfc845d
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+Healthy control: everything named in dollars reads exactly as before
+  ok    healthy: the reading is complete
+  ok    healthy: two sales and the extra, all in dollars
+  ok    healthy: nothing in another currency
+  ok    healthy: both refunds counted
+  ok    healthy: both renewals counted, the reading complete
+  ok    healthy: one kept line, in dollars, with its figure
+  ok    healthy: the renewal payments read complete
+  ok    control: a sale named in euros is in another currency, as before
+
+Unknown currency: no currency at all
+  ok    no currency at all: the purchase reading says it is incomplete
+  ok    no currency at all: the dollar totals hold only what was paid in dollars
+  ok    no currency at all: never called a sale in another currency
+  ok    no currency at all: the dollar refunds hold only the refund in dollars
+  ok    no currency at all: the dollar disputes hold none
+  ok    no currency at all: never counted as taken back in another currency
+  ok    no currency at all: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    no currency at all: what was kept has only the dollar line, with no figure
+  ok    no currency at all: and says which readings could not be made
+  ok    no currency at all: the renewal payments read is incomplete, never one in dollars
+  ok    no currency at all: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+Unknown currency: a currency of null
+  ok    a currency of null: the purchase reading says it is incomplete
+  ok    a currency of null: the dollar totals hold only what was paid in dollars
+  ok    a currency of null: never called a sale in another currency
+  ok    a currency of null: the dollar refunds hold only the refund in dollars
+  ok    a currency of null: the dollar disputes hold none
+  ok    a currency of null: never counted as taken back in another currency
+  ok    a currency of null: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    a currency of null: what was kept has only the dollar line, with no figure
+  ok    a currency of null: and says which readings could not be made
+  ok    a currency of null: the renewal payments read is incomplete, never one in dollars
+  ok    a currency of null: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+Unknown currency: an empty currency
+  ok    an empty currency: the purchase reading says it is incomplete
+  ok    an empty currency: the dollar totals hold only what was paid in dollars
+  ok    an empty currency: never called a sale in another currency
+  ok    an empty currency: the dollar refunds hold only the refund in dollars
+  ok    an empty currency: the dollar disputes hold none
+  ok    an empty currency: never counted as taken back in another currency
+  ok    an empty currency: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    an empty currency: what was kept has only the dollar line, with no figure
+  ok    an empty currency: and says which readings could not be made
+  ok    an empty currency: the renewal payments read is incomplete, never one in dollars
+  ok    an empty currency: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+Unknown currency: a currency that is a number
+  ok    a currency that is a number: the purchase reading says it is incomplete
+  ok    a currency that is a number: the dollar totals hold only what was paid in dollars
+  ok    a currency that is a number: never called a sale in another currency
+  ok    a currency that is a number: the dollar refunds hold only the refund in dollars
+  ok    a currency that is a number: the dollar disputes hold none
+  ok    a currency that is a number: never counted as taken back in another currency
+  ok    a currency that is a number: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    a currency that is a number: what was kept has only the dollar line, with no figure
+  ok    a currency that is a number: and says which readings could not be made
+  ok    a currency that is a number: the renewal payments read is incomplete, never one in dollars
+  ok    a currency that is a number: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+Unknown currency: a currency that is not a code
+  ok    a currency that is not a code: the purchase reading says it is incomplete
+  ok    a currency that is not a code: the dollar totals hold only what was paid in dollars
+  ok    a currency that is not a code: never called a sale in another currency
+  ok    a currency that is not a code: the dollar refunds hold only the refund in dollars
+  ok    a currency that is not a code: the dollar disputes hold none
+  ok    a currency that is not a code: never counted as taken back in another currency
+  ok    a currency that is not a code: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    a currency that is not a code: what was kept has only the dollar line, with no figure
+  ok    a currency that is not a code: and says which readings could not be made
+  ok    a currency that is not a code: the renewal payments read is incomplete, never one in dollars
+  ok    a currency that is not a code: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+An all-time reading kept without its currency is read again, never taken for dollars
+  ok    a kept reading with no currency: read again
+  ok    a kept reading in dollars that does not say how many sales it left out: read again
+  ok    healthy: a kept reading in dollars is used
+  ok    the funnel is accepted
+
+The offer after paying: healthy control
+  ok    an order in dollars: the offer is charged once
+  ok    control: an order in euros is followed by no offer, as before
+
+The offer after paying: no currency at all
+  ok    no currency at all: no offer is charged, never one in dollars
+
+The offer after paying: a currency of null
+  ok    a currency of null: no offer is charged, never one in dollars
+
+The offer after paying: an empty currency
+  ok    an empty currency: no offer is charged, never one in dollars
+
+The offer after paying: a currency that is a number
+  ok    a currency that is a number: no offer is charged, never one in dollars
+
+The offer after paying: a currency that is not a code
+  ok    a currency that is not a code: no offer is charged, never one in dollars
+
+74 checks, all passing.
+MEMORY_REDIS_RUN 291
+J_CHILD_EXIT 0
+
+---old-initial---
+J_3035_FOCAL old-modules r24-currency-unknown.test.ts TARGET 97987f27c6b757890120c0cc88a880e0bcfc845d
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+Healthy control: everything named in dollars reads exactly as before
+  ok    healthy: the reading is complete
+  ok    healthy: two sales and the extra, all in dollars
+  ok    healthy: nothing in another currency
+  ok    healthy: both refunds counted
+  ok    healthy: both renewals counted, the reading complete
+  ok    healthy: one kept line, in dollars, with its figure
+  ok    healthy: the renewal payments read complete
+  ok    control: a sale named in euros is in another currency, as before
+
+Unknown currency: no currency at all
+  FAIL  no currency at all: the purchase reading says it is incomplete
+        expected true
+        got      false
+  FAIL  no currency at all: the dollar totals hold only what was paid in dollars
+        expected [1,5000]
+        got      [3,12900]
+  ok    no currency at all: never called a sale in another currency
+  FAIL  no currency at all: the dollar refunds hold only the refund in dollars
+        expected 1000
+        got      1600
+  FAIL  no currency at all: the dollar disputes hold none
+        expected 0
+        got      400
+  ok    no currency at all: never counted as taken back in another currency
+  FAIL  no currency at all: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+        expected [2000,true]
+        got      [5000,false]
+  FAIL  no currency at all: what was kept has only the dollar line, with no figure
+        expected [["usd",null]]
+        got      [["usd",15900]]
+  FAIL  no currency at all: and says which readings could not be made
+        expected ["sales","renewals","refunds","disputes"]
+        got      []
+  FAIL  no currency at all: the renewal payments read is incomplete, never one in dollars
+        expected [true,[2000]]
+        got      [false,[2000,3000]]
+  FAIL  no currency at all: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+        expected [1,5000,0,true]
+        got      [3,12900,0,false]
+
+Unknown currency: a currency of null
+  FAIL  a currency of null: the purchase reading says it is incomplete
+        expected true
+        got      false
+  FAIL  a currency of null: the dollar totals hold only what was paid in dollars
+        expected [1,5000]
+        got      [3,12900]
+  ok    a currency of null: never called a sale in another currency
+  FAIL  a currency of null: the dollar refunds hold only the refund in dollars
+        expected 1000
+        got      1600
+  FAIL  a currency of null: the dollar disputes hold none
+        expected 0
+        got      400
+  ok    a currency of null: never counted as taken back in another currency
+  FAIL  a currency of null: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+        expected [2000,true]
+        got      [5000,false]
+  FAIL  a currency of null: what was kept has only the dollar line, with no figure
+        expected [["usd",null]]
+        got      [["usd",15900]]
+  FAIL  a currency of null: and says which readings could not be made
+        expected ["sales","renewals","refunds","disputes"]
+        got      []
+  FAIL  a currency of null: the renewal payments read is incomplete, never one in dollars
+        expected [true,[2000]]
+        got      [false,[2000,3000]]
+  FAIL  a currency of null: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+        expected [1,5000,0,true]
+        got      [3,12900,0,false]
+
+Unknown currency: an empty currency
+  FAIL  an empty currency: the purchase reading says it is incomplete
+        expected true
+        got      false
+  FAIL  an empty currency: the dollar totals hold only what was paid in dollars
+        expected [1,5000]
+        got      [3,12900]
+  ok    an empty currency: never called a sale in another currency
+  FAIL  an empty currency: the dollar refunds hold only the refund in dollars
+        expected 1000
+        got      1600
+  FAIL  an empty currency: the dollar disputes hold none
+        expected 0
+        got      400
+  ok    an empty currency: never counted as taken back in another currency
+  FAIL  an empty currency: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+        expected [2000,true]
+        got      [5000,false]
+  FAIL  an empty currency: what was kept has only the dollar line, with no figure
+        expected [["usd",null]]
+        got      [["usd",15900]]
+  FAIL  an empty currency: and says which readings could not be made
+        expected ["sales","renewals","refunds","disputes"]
+        got      []
+  FAIL  an empty currency: the renewal payments read is incomplete, never one in dollars
+        expected [true,[2000]]
+        got      [false,[2000,3000]]
+  FAIL  an empty currency: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+        expected [1,5000,0,true]
+        got      [3,12900,0,false]
+
+Unknown currency: a currency that is a number
+  FAIL  a currency that is a number: the purchase reading says it is incomplete
+        expected true
+        got      false
+  FAIL  a currency that is a number: the dollar totals hold only what was paid in dollars
+        expected [1,5000]
+        got      [3,12900]
+  ok    a currency that is a number: never called a sale in another currency
+  FAIL  a currency that is a number: the dollar refunds hold only the refund in dollars
+        expected 1000
+        got      1600
+  FAIL  a currency that is a number: the dollar disputes hold none
+        expected 0
+        got      400
+  ok    a currency that is a number: never counted as taken back in another currency
+  FAIL  a currency that is a number: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+        expected [2000,true]
+        got      [5000,false]
+  FAIL  a currency that is a number: what was kept has only the dollar line, with no figure
+        expected [["usd",null]]
+        got      [["usd",15900]]
+  FAIL  a currency that is a number: and says which readings could not be made
+        expected ["sales","renewals","refunds","disputes"]
+        got      []
+  FAIL  a currency that is a number: the renewal payments read is incomplete, never one in dollars
+        expected [true,[2000]]
+        got      [false,[2000,3000]]
+  FAIL  a currency that is a number: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+        expected [1,5000,0,true]
+        got      [3,12900,0,false]
+
+Unknown currency: a currency that is not a code
+  FAIL  a currency that is not a code: the purchase reading says it is incomplete
+        expected true
+        got      false
+  ok    a currency that is not a code: the dollar totals hold only what was paid in dollars
+  FAIL  a currency that is not a code: never called a sale in another currency
+        expected 0
+        got      2
+  ok    a currency that is not a code: the dollar refunds hold only the refund in dollars
+  ok    a currency that is not a code: the dollar disputes hold none
+  FAIL  a currency that is not a code: never counted as taken back in another currency
+        expected [0,0]
+        got      [1,1]
+  FAIL  a currency that is not a code: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+        expected [2000,true]
+        got      [2000,false]
+  FAIL  a currency that is not a code: what was kept has only the dollar line, with no figure
+        expected [["usd",null]]
+        got      [["usd",6000],["dollars",9900]]
+  FAIL  a currency that is not a code: and says which readings could not be made
+        expected ["sales","renewals","refunds","disputes"]
+        got      []
+  FAIL  a currency that is not a code: the renewal payments read is incomplete, never one in dollars
+        expected [true,[2000]]
+        got      [false,[2000]]
+  FAIL  a currency that is not a code: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+        expected [1,5000,0,true]
+        got      [1,5000,2,false]
+
+An all-time reading kept without its currency is read again, never taken for dollars
+  FAIL  a kept reading with no currency: read again
+        expected {"sales":3,"cents":12900}
+        got      {"sales":99,"cents":99900}
+  FAIL  a kept reading in dollars that does not say how many sales it left out: read again
+        expected {"sales":3,"cents":12900}
+        got      {"sales":99,"cents":99900}
+  ok    healthy: a kept reading in dollars is used
+  ok    the funnel is accepted
+
+The offer after paying: healthy control
+  ok    an order in dollars: the offer is charged once
+  ok    control: an order in euros is followed by no offer, as before
+
+The offer after paying: no currency at all
+  FAIL  no currency at all: no offer is charged, never one in dollars
+        expected ["unavailable",0]
+        got      ["done",1]
+
+The offer after paying: a currency of null
+  FAIL  a currency of null: no offer is charged, never one in dollars
+        expected ["unavailable",0]
+        got      ["done",1]
+
+The offer after paying: an empty currency
+  ok    an empty currency: no offer is charged, never one in dollars
+
+The offer after paying: a currency that is a number
+  FAIL  a currency that is a number: no offer is charged, never one in dollars
+        expected ["unavailable",0]
+        got      ["done",1]
+
+The offer after paying: a currency that is not a code
+  ok    a currency that is not a code: no offer is charged, never one in dollars
+
+74 checks, 49 failing.
+MEMORY_REDIS_RUN 324
+J_CHILD_EXIT 1
+
+---probe-initial---
+J_3035_FOCAL head j-3074-currency.proof.ts TARGET 97987f27c6b757890120c0cc88a880e0bcfc845d
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+Healthy control: everything named in dollars reads exactly as before
+  ok    healthy: the reading is complete
+  ok    healthy: two sales and the extra, all in dollars
+  ok    healthy: nothing in another currency
+  ok    healthy: both refunds counted
+  ok    healthy: both renewals counted, the reading complete
+  ok    healthy: one kept line, in dollars, with its figure
+  ok    healthy: the renewal payments read complete
+  ok    control: a sale named in euros is in another currency, as before
+
+Unknown currency: no currency at all
+  ok    no currency at all: the purchase reading says it is incomplete
+  ok    no currency at all: the dollar totals hold only what was paid in dollars
+  ok    no currency at all: never called a sale in another currency
+  ok    no currency at all: the dollar refunds hold only the refund in dollars
+  ok    no currency at all: the dollar disputes hold none
+  ok    no currency at all: never counted as taken back in another currency
+  ok    no currency at all: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    no currency at all: what was kept has only the dollar line, with no figure
+  ok    no currency at all: and says which readings could not be made
+  ok    no currency at all: the renewal payments read is incomplete, never one in dollars
+  ok    no currency at all: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+Unknown currency: trailing newline is not a three-letter code
+  ok    trailing newline is not a three-letter code: the purchase reading says it is incomplete
+  ok    trailing newline is not a three-letter code: the dollar totals hold only what was paid in dollars
+  ok    trailing newline is not a three-letter code: never called a sale in another currency
+  ok    trailing newline is not a three-letter code: the dollar refunds hold only the refund in dollars
+  ok    trailing newline is not a three-letter code: the dollar disputes hold none
+  ok    trailing newline is not a three-letter code: never counted as taken back in another currency
+  ok    trailing newline is not a three-letter code: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    trailing newline is not a three-letter code: what was kept has only the dollar line, with no figure
+  ok    trailing newline is not a three-letter code: and says which readings could not be made
+  ok    trailing newline is not a three-letter code: the renewal payments read is incomplete, never one in dollars
+  ok    trailing newline is not a three-letter code: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+Unknown currency: a currency of null
+  ok    a currency of null: the purchase reading says it is incomplete
+  ok    a currency of null: the dollar totals hold only what was paid in dollars
+  ok    a currency of null: never called a sale in another currency
+  ok    a currency of null: the dollar refunds hold only the refund in dollars
+  ok    a currency of null: the dollar disputes hold none
+  ok    a currency of null: never counted as taken back in another currency
+  ok    a currency of null: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    a currency of null: what was kept has only the dollar line, with no figure
+  ok    a currency of null: and says which readings could not be made
+  ok    a currency of null: the renewal payments read is incomplete, never one in dollars
+  ok    a currency of null: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+Unknown currency: an empty currency
+  ok    an empty currency: the purchase reading says it is incomplete
+  ok    an empty currency: the dollar totals hold only what was paid in dollars
+  ok    an empty currency: never called a sale in another currency
+  ok    an empty currency: the dollar refunds hold only the refund in dollars
+  ok    an empty currency: the dollar disputes hold none
+  ok    an empty currency: never counted as taken back in another currency
+  ok    an empty currency: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    an empty currency: what was kept has only the dollar line, with no figure
+  ok    an empty currency: and says which readings could not be made
+  ok    an empty currency: the renewal payments read is incomplete, never one in dollars
+  ok    an empty currency: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+Unknown currency: a currency that is a number
+  ok    a currency that is a number: the purchase reading says it is incomplete
+  ok    a currency that is a number: the dollar totals hold only what was paid in dollars
+  ok    a currency that is a number: never called a sale in another currency
+  ok    a currency that is a number: the dollar refunds hold only the refund in dollars
+  ok    a currency that is a number: the dollar disputes hold none
+  ok    a currency that is a number: never counted as taken back in another currency
+  ok    a currency that is a number: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    a currency that is a number: what was kept has only the dollar line, with no figure
+  ok    a currency that is a number: and says which readings could not be made
+  ok    a currency that is a number: the renewal payments read is incomplete, never one in dollars
+  ok    a currency that is a number: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+Unknown currency: a currency that is not a code
+  ok    a currency that is not a code: the purchase reading says it is incomplete
+  ok    a currency that is not a code: the dollar totals hold only what was paid in dollars
+  ok    a currency that is not a code: never called a sale in another currency
+  ok    a currency that is not a code: the dollar refunds hold only the refund in dollars
+  ok    a currency that is not a code: the dollar disputes hold none
+  ok    a currency that is not a code: never counted as taken back in another currency
+  ok    a currency that is not a code: the dollar renewals hold only the one in dollars, and the reading says it is incomplete
+  ok    a currency that is not a code: what was kept has only the dollar line, with no figure
+  ok    a currency that is not a code: and says which readings could not be made
+  ok    a currency that is not a code: the renewal payments read is incomplete, never one in dollars
+  ok    a currency that is not a code: all time, the dollar totals hold only the dollar sales, and the reading is incomplete
+
+An all-time reading kept without its currency is read again, never taken for dollars
+  ok    a kept reading with no currency: read again
+  ok    a kept reading in dollars that does not say how many sales it left out: read again
+  ok    healthy: a kept reading in dollars is used
+  ok    the funnel is accepted
+
+The offer after paying: healthy control
+  ok    an order in dollars: the offer is charged once
+  ok    control: an order in euros is followed by no offer, as before
+
+The offer after paying: no currency at all
+  ok    no currency at all: no offer is charged, never one in dollars
+
+The offer after paying: trailing newline is not a three-letter code
+  ok    trailing newline is not a three-letter code: no offer is charged, never one in dollars
+
+The offer after paying: a currency of null
+  ok    a currency of null: no offer is charged, never one in dollars
+
+The offer after paying: an empty currency
+  ok    an empty currency: no offer is charged, never one in dollars
+
+The offer after paying: a currency that is a number
+  ok    a currency that is a number: no offer is charged, never one in dollars
+
+The offer after paying: a currency that is not a code
+  ok    a currency that is not a code: no offer is charged, never one in dollars
+
+86 checks, all passing.
+MEMORY_REDIS_RUN 316
+J_CHILD_EXIT 0
+
+---retained-initial---
+J_3035_FOCAL head retained-revenue.test.ts TARGET 97987f27c6b757890120c0cc88a880e0bcfc845d
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+The rule, on what it is handed
+  ok    the store's own currency comes first
+  ok    orders, renewals, refunds and disputes reconcile in dollars
+  ok    and in euros on their own line, never converted
+  ok    a sale before the window is left out
+  ok    kept by channel, store currency only, biggest first
+  ok    money with no channel is visible: direct net zero, unrecorded renewals
+  ok    an incomplete refunds reading shows no kept figure and names itself
+  ok    an incomplete disputes reading shows no kept figure and names itself
+  ok    an incomplete renewals reading shows no kept figure and names itself
+  ok    an incomplete sales reading shows no kept figure and names itself
+  ok    disputes that could not be read are missing, not zero
+  ok    a store with no Stripe account has no renewals to read, and is not held back by them
+  ok    a store paid nothing still shows its currency
+  ok    windows start 6, 29 and 89 days back
+  ok    a refund bigger than the window's sales gives a negative kept figure, not a hidden one
+  ok    the dispute states are the affiliate book's
+  ok    every window at once
+
+Read from Stripe, reconciled per currency
+  ok    dollars: paid, renewals, refunded, disputed (lost only; won and an inquiry take nothing)
+  ok    euros on their own line with their own dispute, never added to dollars
+  ok    disputes by the channel of the sale disputed
+  ok    a complete dispute reading says so
+  ok    money with no channel recorded is shown, not folded away
+  ok    kept by channel
+  ok    the panel's data carries the figures, nothing about a buyer
+
+What the page says
+  ok    one line per currency, in its own money
+  ok    says nothing is converted
+  ok    says a channel is not a cause
+  ok    says what disputed means
+  ok    makes no lift or profit claim
+
+A dispute outage is unknown, not zero
+  ok    no kept figure and the reason
+  ok    the page says which reading is missing
+  ok    other figures still show
+  ok    the page limit stops a complete claim after three pages
+
+33 checks, all passing.
+MEMORY_REDIS_RUN 306
+reading disputes failed Error: dispute service unavailable
+    at globalThis.fetch (/dev/shm/j3035-focal-tqHLM6/proof.cjs:40093:41)
+    at /dev/shm/j3035-focal-tqHLM6/proof.cjs:33936:29
+    at timed (/dev/shm/j3035-focal-tqHLM6/proof.cjs:33886:19)
+    at onAccount (/dev/shm/j3035-focal-tqHLM6/proof.cjs:33935:43)
+    at readDisputes (/dev/shm/j3035-focal-tqHLM6/proof.cjs:39437:24)
+    at readSales (/dev/shm/j3035-focal-tqHLM6/proof.cjs:39522:30)
+    at main (/dev/shm/j3035-focal-tqHLM6/proof.cjs:40133:24)
+J_CHILD_EXIT 0

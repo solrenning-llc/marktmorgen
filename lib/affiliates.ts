@@ -106,7 +106,7 @@ import {
 import { productIds, readListings } from "@/lib/catalog";
 import type { BookSizes } from "@/lib/api-read-rules";
 import { affiliateForCodes, codeOwners } from "@/lib/affiliate-codes";
-import { type PartnerShare, type ShareProblem, parsePartnerShare, shareOn, shareProblem } from "@/lib/partner-share";
+import { type PartnerShare, type ShareProblem, parsePartnerShare, shareOn, shareProblem, shareReadsExactly } from "@/lib/partner-share";
 import { NO_TERMS, type PartnerTerms, type WaitingChange, changeNeeds, changeOpen, readTerms, settleTerms, shareRunning, stepOf, withStep } from "@/lib/partner-terms-rules";
 import { bondFor, rememberBuyer } from "@/lib/affiliate-bond";
 import { offerPartnership } from "@/lib/partner-invites";
@@ -651,6 +651,26 @@ function exactPairs(replies: unknown): [string, string][] | null {
 }
 
 /**
+ * Whether the fields of a stored record that the cap counts read exactly
+ * (Codex G's review of #1924): its share (shareReadsExactly) and, when it holds
+ * one, its status. parseAffiliate makes a share that does not read null and an
+ * unknown status "pending", and either would drop a running commitment from
+ * the cap as if it were known not to be there. Records from before shares
+ * existed have no share field and still read.
+ */
+function commitmentReads(raw: string): boolean {
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const { share, status } = value as { share?: unknown; status?: unknown };
+    if (!shareReadsExactly(share)) return false;
+    return share === undefined || share === null || status === "pending" || status === "approved" || status === "declined" || status === "removed";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The partners whose shares ride on a sale, read exactly, for the cap a new or
  * raised share is checked against (sharePromiseProblem). A reply in another
  * shape, or a record that does not read, cannot show it holds no share, so it
@@ -663,7 +683,7 @@ async function listPartnersExact(store: Store): Promise<Affiliate[]> {
   const out: Affiliate[] = [];
   for (const [, raw] of read) {
     const affiliate = parseAffiliate(raw);
-    if (!affiliate) throw new LockBusyError("a partner's record could not be read");
+    if (!affiliate || !commitmentReads(raw)) throw new LockBusyError("a partner's record could not be read");
     if (affiliate.share !== null) out.push(affiliate);
   }
   return out;
@@ -857,20 +877,39 @@ return 1`;
 /** One record as it was read: parsed, the exact field it came from (null when absent), and the commitment version read with it. */
 type HeldAffiliate = { affiliate: Affiliate | null; raw: string | null; version: string };
 
+/**
+ * Reads one record and the commitment version, each in its exact shape (a
+ * string, or null when absent). Any other reply is not "no record": it is
+ * unknown, LockBusyError, and nothing is decided or written on it (Codex G's
+ * review of #1924).
+ */
 async function holdAffiliate(store: Store, id: string): Promise<HeldAffiliate> {
   const statsId = store.statsId as string;
-  const [raw, version] = await redisPipeline([
-    ["HGET", peopleKey(statsId), id],
-    ["GET", shareVersionKey(statsId)],
-  ]);
-  const field = typeof raw === "string" ? raw : null;
-  return { affiliate: field === null ? null : parseAffiliate(field), raw: field, version: typeof version === "string" && version ? version : "0" };
+  const both = repliesFor(
+    await redisPipeline([
+      ["HGET", peopleKey(statsId), id],
+      ["GET", shareVersionKey(statsId)],
+    ]),
+    2,
+  );
+  if (!both) throw new LockBusyError("an affiliate's record could not be read");
+  const [raw, version] = both;
+  if ((raw !== null && typeof raw !== "string") || (version !== null && typeof version !== "string")) {
+    throw new LockBusyError("an affiliate's record could not be read");
+  }
+  return { affiliate: raw === null ? null : parseAffiliate(raw), raw, version: version ? version : "0" };
 }
 
-/** True when written; false when the record, or with `fenced` the store's commitments, changed since `held` was read. */
-async function putAffiliate(store: Store, next: Affiliate, held: HeldAffiliate, fenced: boolean): Promise<boolean> {
+/**
+ * "written" when written; "not" when the record, or with `fenced` the store's
+ * commitments, changed since `held` was read; "unknown" when the answer was
+ * lost and reading back could not settle it either way.
+ */
+type PutOutcome = "written" | "not" | "unknown";
+
+async function putAffiliate(store: Store, next: Affiliate, held: HeldAffiliate, fenced: boolean): Promise<PutOutcome> {
   const statsId = store.statsId as string;
-  const [won] = await redisPipeline([
+  const reply = await redisPipeline([
     [
       "EVAL",
       PUT_AFFILIATE,
@@ -884,17 +923,25 @@ async function putAffiliate(store: Store, next: Affiliate, held: HeldAffiliate, 
       JSON.stringify(next),
     ],
   ]);
-  if (won === 0) return false;
+  const replies = repliesFor(reply, 1);
+  const won = replies ? countOf(replies[0]) : null;
+  if (won === 0) return "not";
   if (won !== 1) {
-    // Answered in another shape: the script may have run. Read back what is there; only our own record written in
-    // full proves it was written. Anything else is "not written", and the caller works again on what is there
-    // (Codex G on #1924: an applied invitation must not have its address and code let go).
-    const [there] = await redisPipeline([["HGET", peopleKey(statsId), next.id]]).catch(() => [null]);
-    if (there !== JSON.stringify(next)) return false;
+    // Answered in another shape: the script may have run. Read back what is there: our own record written in full
+    // proves it was written, another record proves ours is not what stands. A read back that is lost, or that says
+    // nothing is there, does not settle it (Codex G's review of #1924): unknown, never "not written", so nothing
+    // claimed for the record is let go on it, and the caller reads the record again before deciding anything.
+    const back = await redisPipeline([["HGET", peopleKey(statsId), next.id]]).then(
+      (answer) => repliesFor(answer, 1),
+      () => null,
+    );
+    const there = back ? back[0] : undefined;
+    if (typeof there !== "string") return "unknown";
+    if (there !== JSON.stringify(next)) return "not";
   }
   // Found again from their own page across every store (lib/affiliate-hub.ts).
   await rememberAffiliate(store.sid, next.email);
-  return true;
+  return "written";
 }
 
 /**
@@ -915,7 +962,7 @@ function startsToCount(before: Affiliate | null, next: Affiliate, nowSeconds: nu
  */
 const CHANGE_TRIES = 3;
 
-/** Gives up a change as busy: nothing was written. */
+/** Gives up a change as busy: nothing was written, or (`unsure`) the last write's outcome is unknown. */
 const busyThrown = (): never => {
   throw new LockBusyError();
 };
@@ -929,7 +976,8 @@ const busyThrown = (): never => {
  * after that read and written only if no partner's commitment moved since, so
  * two partners can never both take the last room on a product. Anything that
  * moved means nothing is written: `work` runs again on what is there now, up
- * to `tries` times in all, and then the answer is `busy()`.
+ * to `tries` times in all, and then the answer is `busy(unsure)`, `unsure`
+ * when the last write's outcome could not be known (putAffiliate).
  */
 async function changeAffiliate<T>(
   store: Store,
@@ -937,11 +985,15 @@ async function changeAffiliate<T>(
   nowSeconds: number,
   work: (held: HeldAffiliate) => Promise<{ next: Affiliate | null; out: T }>,
   capped: (problem: ShareProblem, held: HeldAffiliate) => T,
-  busy: () => T = busyThrown,
+  busy: (unsure: boolean) => T = busyThrown,
   tries = CHANGE_TRIES,
 ): Promise<T> {
+  // Whether the last write tried may have landed: then giving up is not "nothing was written".
+  let unsure = false;
   for (let attempt = 0; attempt < tries; attempt += 1) {
     const held = await holdAffiliate(store, id);
+    // Read in its exact shape: whatever an earlier write did is in what was just read.
+    unsure = false;
     const { next, out } = await work(held);
     if (!next) return out;
     if (next.id !== id) throw new Error("an affiliate record is written under its own id");
@@ -952,14 +1004,16 @@ async function changeAffiliate<T>(
       try {
         problem = await sharePromiseProblem(store, id, next.share as PartnerShare, nowSeconds);
       } catch (error) {
-        if (error instanceof LockBusyError) return busy();
+        if (error instanceof LockBusyError) return busy(false);
         throw error;
       }
       if (problem) return capped(problem, held);
     }
-    if (await putAffiliate(store, next, held, counts)) return out;
+    const put = await putAffiliate(store, next, held, counts);
+    if (put === "written") return out;
+    unsure = put === "unknown";
   }
-  return busy();
+  return busy(unsure);
 }
 
 /** The affiliate this store has under an address, or null. */
@@ -1250,6 +1304,18 @@ export async function acceptPartnership(store: Store, email: string, share: Part
   return openAffiliateLink(store, token);
 }
 
+/**
+ * Whether the record found under a new record's own id is the one this call
+ * wrote: the id was drawn at random and claimed for this address just before,
+ * so a record there with the same id, address and code is this write landed
+ * although its answer was lost (Codex G's review of #1924).
+ */
+function ownRecord(there: string, record: Affiliate): boolean {
+  if (there === JSON.stringify(record)) return true;
+  const found = parseAffiliate(there);
+  return found !== null && found.id === record.id && found.email === record.email && found.code === record.code;
+}
+
 /** Takes back the address and the code claimed for a record that was never written, while they still point to it. */
 async function letGoClaims(store: Store, email: string, code: string, id: string): Promise<void> {
   const statsId = store.statsId as string;
@@ -1397,14 +1463,19 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
         ...(invited && grant.p ? { terms: startedBy(NO_TERMS, grant.p) } : {}),
       };
       const record = affiliate;
-      const made = await changeAffiliate<"made" | "there" | "cap" | "busy">(
+      const made = await changeAffiliate<"made" | "there" | "cap" | "busy" | "unsure">(
         store,
         id,
         nowSeconds,
-        async ({ raw: there }) => (there === null ? { next: record, out: "made" } : { next: null, out: "there" }),
+        // Our own record already there is a write whose answer was lost and that landed (ownRecord): it was made.
+        async ({ raw: there }) =>
+          there === null ? { next: record, out: "made" } : { next: null, out: ownRecord(there, record) ? "made" : "there" },
         () => "cap",
-        () => "busy",
+        (unsure) => (unsure ? "unsure" : "busy"),
       );
+      // The write may have landed: the address and the code stay claimed for it, never let go on an unknown answer
+      // (Codex G's review of #1924), and the link is said busy, to be opened again.
+      if (made === "unsure") throw new LockBusyError("an affiliate's new record could not be confirmed");
       if (made !== "made") {
         // Nothing was written (another partner took the room, or kept moving, between the check above and this
         // write): the address and the code claimed for this record are let go again, so the next link opened for
@@ -1589,14 +1660,17 @@ export async function joinAsBuyer(store: Store, sessionId: string): Promise<Join
         ? { id, email, code, status: "pending", appliedAt: now, decidedAt: 0, note: "Joined after buying", rate: null, paypal: "", share: null, cleared: null, by: null }
         : { id, email, code, status: "approved", appliedAt: now, decidedAt: now, note: "Joined after buying", rate: null, paypal: "", share: null, cleared: null, by: null };
       const record = affiliate;
-      const made = await changeAffiliate<boolean>(
+      const made = await changeAffiliate<boolean | "unsure">(
         store,
         id,
         Math.floor(now / 1000),
-        async ({ raw: there }) => (there === null ? { next: record, out: true } : { next: null, out: false }),
+        // Our own record already there is a write whose answer was lost and that landed (ownRecord): it was made.
+        async ({ raw: there }) => (there === null ? { next: record, out: true } : { next: null, out: ownRecord(there, record) }),
         () => false,
-        () => false,
+        (unsure) => (unsure ? "unsure" : false),
       );
+      // The write may have landed: nothing claimed for it is let go on an unknown answer (Codex G's review of #1924).
+      if (made === "unsure") return { ok: false, reason: "order" };
       if (!made) {
         await letGoClaims(store, email, code, id);
         return { ok: false, reason: "order" };

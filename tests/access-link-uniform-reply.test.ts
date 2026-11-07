@@ -430,6 +430,68 @@ test("library: a buyer's answer takes no longer than a stranger's with a slow pr
   }
 });
 
+// ---- A count that cannot be read ------------------------------------------------------------------
+
+/**
+ * The library's and the podcast's per-connection and per-address counts used
+ * withinLimit, which lets a request through when Redis throws: an unknown
+ * count sent a paid email. Now an unknown count sends nothing and says so the
+ * same way to everyone ("error": try again), before anything about the
+ * address is asked, so it tells nobody who bought what; and a count in
+ * another shape is not said as too many requests.
+ */
+function brokenCounter(prefix: string, how: "throw" | "shape") {
+  const original = redis.pipeline;
+  const state = { hit: 0 };
+  redis.pipeline = async (commands: Command[]) => {
+    if (commands.some((c) => String(c[1] ?? "").startsWith(prefix))) {
+      state.hit += 1;
+      if (how === "throw") throw new Error("synthetic outage");
+      return ["QUEUED", "QUEUED"];
+    }
+    return original(commands);
+  };
+  return { state, restore: () => { redis.pipeline = original; } };
+}
+
+for (const how of ["throw", "shape"] as const) {
+  for (const prefix of ["nl:rl:library-ip:", "nl:rl:library-address:"]) {
+    test(`library: a ${prefix.slice(6, -1)} count that ${how === "throw" ? "cannot be asked" : "comes back in another shape"} sends nothing and answers everyone alike`, async () => {
+      const { fixture } = await libraryWorld(`unk${how}${prefix.length}lib`);
+      const broken = brokenCounter(prefix, how);
+      try {
+        const entitled = await requestLibraryLink({ email: buyer, ip: "192.0.2.100", origin });
+        const unentitled = await requestLibraryLink({ email: stranger, ip: "192.0.2.101", origin });
+        await drain();
+        assert.ok(broken.state.hit > 0, "the count really was asked");
+        assert.equal(entitled, unentitled, "the same answer for a buyer and a stranger");
+        assert.equal(entitled, "error", "an unknown count is said as our error, never as too many requests or as sent");
+        assert.equal(fixture.calls.ses, 0, "and no paid email goes out on it");
+        assert.equal(libraryLinks(), 0);
+      } finally {
+        broken.restore();
+        fixture.restore();
+      }
+    });
+  }
+  test(`podcast: an address count that ${how === "throw" ? "cannot be asked" : "comes back in another shape"} sends nothing and answers everyone alike`, async () => {
+    const { fixture, store, product } = await podcastWorld(`unk${how}pod`);
+    const broken = brokenCounter("nl:rl:podcast-link-address:", how);
+    try {
+      const entitled = await sendFeedLink(podcastInput(store, product, buyer, "192.0.2.102"));
+      const unentitled = await sendFeedLink(podcastInput(store, product, stranger, "192.0.2.103"));
+      await drain();
+      assert.ok(broken.state.hit > 0, "the count really was asked");
+      assert.equal(entitled, unentitled, "the same answer for a holder and a stranger");
+      assert.equal(entitled, "error", "an unknown count is said as our error, never as too many requests or as sent");
+      assert.equal(fixture.calls.ses, 0, "and no paid email goes out on it");
+    } finally {
+      broken.restore();
+      fixture.restore();
+    }
+  });
+}
+
 // ---- What the page says ----------------------------------------------------------------------------
 
 // The notices before this fix promised a link "on its way" to an address that holds the thing.

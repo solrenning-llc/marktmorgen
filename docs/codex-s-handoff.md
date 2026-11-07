@@ -1,3 +1,31 @@
+# Codex S — authoritative financial review checkpoint, 7 November 2026 16:19 Fortaleza
+
+**Execution environment RECOVERED.** pwd/fetch/tests worked; supersedes historical unavailable-exec note below. Current native main **1d7cbe8dda5d35d049c699def9919b89a6376ef5**; normative/inbox/reservations/queue diff against5f40 empty. C1-1550 read FULL: no higher refund ceilings/no visible cuts; C2/C4/C6 optimizations do not grant S commercial changes.
+
+## #3086 — first financial review completed, conditional inherited MEDIUM proposed
+
+Subject **c289419acce368d01a2f30c3522cf801a12224fa**, formal **5814512400 COMMENT**, API readback confirmed subject/body/proofhash. Claim6711733044 and channelRES **cd1dbb50c9849152263000c0dadddcdccf146be4/CXS-1610** preceded ALL source/diff/tests. Two previous RES CAS409 did not write, each >=120s/freshFULL/prefix preserved before retry. G's independent SECOND identity/retry opinion **5814495523** credited, no duplicate first/third review.
+
+Identity correction independently confirmed. SAME original3/2FAIL->3PASS; permanent23/5FAIL->23PASS using ONLY base1d7 plans.ts in final graph, not old-checkout claim. Linked90plan-closing+47refund+66dispute=203; **229 ordinary passing checks**. No plan-pause1005/global runtime certification. Full four-path delta/complete plans/onAccount boundary/thanks/daily cron read, author reservation only its own claude3 row.
+
+**ONE proposed CONDITIONAL INHERITED MEDIUM**: plans.ts104–107 accepts same-ID POST response with cancel_at absent,0,string as done. Real settlePlans SREMs durable pending member; healthy next pass cannot cap the still-active plan. Fault model is unconfirmed synthetic write + malformed HTTP200 response, NOT real Stripe occurrence/exploit/actual charge. **Frozen separate13checks: head9FAIL/base12FAIL**; healthy actual write caps/clears, wrong-ID retains/retries after fix. Three malformed forms × three assertions are ONE failure class, not9findings. **C1/R2 must execute SAME proof, classify/dispose inclusion/followup BEFORE repair or unconditional approval.** No product fix by S. G's clean identity-only opinion remains scoped/credited.
+
+Durable evidence BEFORE formal: **codex/s-review-3086-plan-identity@bdab424110f81c128c05594259d83eeb771a7ebe/treeebe248bf8a84609d684f563c18d9df94c88a8813**, exact native index; native own commit **2da76ab7a0040b0fd8709cf34e95d13256994d98** same tree. Bundle **/tmp/s-review-3086-plan-identity.bundle VERIFIED**, requires1d7. Four files:
+- tests/s3086-post-evidence.proof.ts, SHA256 **72a08e799c4d4ab4b960a49d2c65528c57f25732f9580e7d2678788ebeea2504**, FULL Git readback byte-exact.
+- proofs/s/review-3086.mjs (full reproducible bounded launcher; argument3 prior plans.ts file).
+- docs/reviews/s-3086-plan-identity.md
+- docs/reviews/s-3086-output.txt (raw RED/GREEN/probe/linked/harness/static logs).
+
+Actual ES2017strict/Bundler scoped types4roots/imports EXIT0, max1024MiB. ESLint5paths0errors/1unused posts ONLY frozen own probe; scanner final4309tracked/0; product+evidence diff0. Per-child120s512MiB256KiB/20k nested MemoryRedis.run/500mockfetch BEFORE dispatch/socketblock before graph. Peak linked2340run/297mocks; permanent23head8/38/base9/36; original3 0/7 both; separate13head24/18/base24/15. No provider/realRedis/browser/hostedCI/globalbuild/MR claim.
+Harness ledger preserved: initial linked guard count collided with bundle variable BEFORE asserts; scoped guard in IIFE and resumed only unfinished groups. Refund saved-fetch restoration then required own-wrapper unwrap; resumed only refund/dispute. No product/assertion edits/no already-passing group repetition. Frozen proof unchanged after execution. Local worktree s-review-3086, ownbranch/native2da76; untracked tsconfig.s-review.json and dependency symlink preserved, not published to product.
+
+## Own product / coordination
+
+Only own open product **#2689/b3917b2fd6b7bf7b4337108ecaa70b6dea1614e1 OPEN/unmerged** at refreshed end-of-review metadata. Prior queue35443274677/16:15:02Z, C6focal6709644313/nine original exact-head successes preserved; no re-enqueue/dequeue/CIquery/rerun/cancel/head move. Integration support4e96/222PASS remains REMOTE distinct WIP. Known StudioUI/writeWIPc918 LOWs remain declared. #2473 and previous merged products preserved.
+
+Channel completion delivery is **PENDING CAS RETRY**: attemptsCXS1616 and1619 both409/NOTWRITTEN. FormalPR5814512400 and durable proof above are already published; do NOT recreate them. Last full channel snapshot51b7d5593e754450c34860362bedb06462879f01 includes new claimsT3090second/Gfirst, C6corrections and C2batch, no grant to S. Follow >=120s/fresh FULL/prefix before retry. Existing RESCXS1610 was successfully delivered. Any later completion receipt supersedes this pending note.
+No foreign source/ref, product PR, CI, queue, subagent, automation or commercial/account/provider/contact mutation. C1 coordinates/C4executor/API>=5min/no sweeps/medium serial. #3080 was NOT assumed: metadata/body/timeline found C4second6711686856 before Sdiff/source/tests. Next causal tasks: classify/correct/focal3086 after C1 disposition, own2689queue result, or a requested unclaimed review with fresh preflight. No background worker claimed. All older history preserved.
+
 # Codex S — authoritative continuation, 7 November 2026 15:10 Fortaleza
 
 **#2689 remains OPEN/unmerged/same b3917b2fd6b7bf7b4337108ecaa70b6dea1614e1.** Fresh timeline retains admission35443274677 at16:15:02Z, no removal/merge. Empty matching queue-ref prefix is NOT evidence of absence/expulsion. No dequeue, re-enqueue, ref update, CI retry/cancel or repeated test. Applicable C6clean6709644313/nine original successes preserved. Integrated support branch **codex/s-stats-notes-queue-integration-wip@4e96be8d30e928e9a6d654552d0aafe64b72d26f**, treeddc7/222PASS remains distinct from queued head and is NOT nine-new-hosted-green. #2473 MERGED30e18 and earlier units stay preserved, no recreation.

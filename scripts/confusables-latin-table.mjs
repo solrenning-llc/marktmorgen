@@ -73,6 +73,12 @@ export const EXTRA = [
   // Latin letters drawn as a base letter with a stroke or a hook whose names carry no "WITH" (Claude 5's review of #2579).
   [0x00f0, "d", "LATIN SMALL LETTER ETH"], [0x0138, "k", "LATIN SMALL LETTER KRA"],
   [0x014a, "n", "LATIN CAPITAL LETTER ENG"], [0x014b, "n", "LATIN SMALL LETTER ENG"],
+  // Turned, reversed and open e and o, and the schwa: no "WITH" in their names and no Latin target in
+  // confusables.txt, yet read as e or o in a word (Claude 2's rule-30 note on #2579).
+  [0x0258, "e", "LATIN SMALL LETTER REVERSED E"], [0x0259, "e", "LATIN SMALL LETTER SCHWA"], [0x01dd, "e", "LATIN SMALL LETTER TURNED E"],
+  [0x025b, "e", "LATIN SMALL LETTER OPEN E"], [0x025c, "e", "LATIN SMALL LETTER REVERSED OPEN E"], [0x029a, "e", "LATIN SMALL LETTER CLOSED OPEN E"],
+  [0x018e, "e", "LATIN CAPITAL LETTER REVERSED E"], [0x018f, "e", "LATIN CAPITAL LETTER SCHWA"], [0x0190, "e", "LATIN CAPITAL LETTER OPEN E"],
+  [0x0254, "o", "LATIN SMALL LETTER OPEN O"], [0x0186, "o", "LATIN CAPITAL LETTER OPEN O"],
 ];
 
 /** Below this code point a look-alike is listed one by one in the store assistant's gate; from it on, the gate takes every sign. */

@@ -177,7 +177,11 @@ function closingKnown(event: unknown): boolean {
  * for a charge marked disputed (rare) is Stripe asked for that charge's
  * disputes: a door reading an undisputed payment makes no extra request.
  * A charge not expanded, or not marked, counts as not lost, as with refunds.
- * Throws when Stripe cannot be asked.
+ * Throws when Stripe cannot be asked, and when its answer is not this
+ * charge's own list (rule 30): a reply that is not a list, a row that is not
+ * a dispute object, a row naming another charge or none, and a list not said
+ * to be whole without a lost row of its own. Not paged, so no request is
+ * added: a charge with more disputes than one page holds reads as unknown.
  */
 export async function disputeLost(account: string, payment: unknown): Promise<boolean> {
   const charge = chargeOf(payment);
@@ -185,9 +189,20 @@ export async function disputeLost(account: string, payment: unknown): Promise<bo
   if (lostOnCharge(charge)) return true;
   const id = typeof charge.id === "string" ? charge.id : "";
   if (!CHARGE_ID.test(id)) return false;
-  const listed = await onAccount("GET", account, `/disputes?${new URLSearchParams({ charge: id, limit: "10" })}`);
-  const rows = Array.isArray(listed.data) ? (listed.data as { status?: unknown }[]) : [];
-  return rows.some((row) => !!row && row.status === "lost");
+  const listed: unknown = await onAccount("GET", account, `/disputes?${new URLSearchParams({ charge: id, limit: "10" })}`);
+  // Rule 30: only this charge's own rows, in a list, decide; anything else throws, as Stripe not answering does.
+  if (listed === null || typeof listed !== "object" || !Array.isArray((listed as { data?: unknown }).data)) throw new Error("this charge's disputes could not be read");
+  let lost = false;
+  for (const row of (listed as { data: unknown[] }).data) {
+    if (row === null || typeof row !== "object" || Array.isArray(row)) throw new Error("a dispute listed for this charge could not be read");
+    // Another charge's lost dispute, or one naming none, would close the doors on a buyer who paid.
+    if (idOf((row as { charge?: unknown }).charge) !== id) throw new Error("Stripe listed another charge's dispute");
+    if ((row as { status?: unknown }).status === "lost") lost = true;
+  }
+  // Its own lost dispute is lost whatever else there is; "not lost" only from a list that says, exactly, there is no more.
+  if (lost) return true;
+  if ((listed as { has_more?: unknown }).has_more !== false) throw new Error("this charge's disputes were not read whole");
+  return false;
 }
 
 /**

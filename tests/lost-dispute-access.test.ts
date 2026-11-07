@@ -47,7 +47,7 @@ const intents: Record<string, Record<string, unknown>[]> = {};
 const paymentIntents: Record<string, Record<string, unknown>> = {};
 const invoices: Record<string, Record<string, unknown>> = {};
 /** A charge's disputes, by charge id. */
-const disputes: Record<string, { status: string }[]> = {};
+const disputes: Record<string, { charge: string; status: string }[]> = {};
 /** The closing events of disputes, newest first. */
 let closings: Record<string, unknown>[] = [];
 let disputeReads = 0;
@@ -83,7 +83,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 const charge = (id: string, amount = 4900, disputed = false) => ({ object: "charge", id, amount, amount_refunded: 0, refunded: false, disputed });
 /** A charge with a dispute in this state (or none). */
 const chargeIn = (id: string, status: string | null) => {
-  if (status) disputes[id] = [{ status }];
+  if (status) disputes[id] = [{ charge: id, status }];
   return charge(id, 4900, status !== null);
 };
 const paid = (id: string, product: string, status: string | null, over: Record<string, unknown> = {}) => ({

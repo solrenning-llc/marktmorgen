@@ -43,6 +43,26 @@ export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource
   {name:"null snapshot",body:()=>({ok:true,socials:null})},
   {name:"matching empty profiles",body:value=>({ok:true,socials:value}),confirmed:true},
  ];
+ // The profile-panel button is server-rendered. Before React attaches its
+ // handler, it must say that it is unavailable and a real click must not claim
+ // to have opened anything. This no-script page has no timing assumption.
+ const beforeReady=await browser.newContext({viewport:{width:390,height:900},javaScriptEnabled:false});
+ try{
+  await beforeReady.addCookies([{name:"nl_session",value:fixture.session,url:LOCAL}]);
+  const initial=await beforeReady.newPage();let writes=0;
+  await initial.route("**/api/**",async route=>{
+   if(route.request().method()!=="GET")writes++;
+   await route.abort("blockedbyclient");
+  });
+  await initial.goto(LOCAL+"/studio?store="+fixture.sid,{waitUntil:"domcontentloaded",timeout:60000});
+  const control=initial.getByRole("button",{name:"Loading…",exact:true});
+  await control.waitFor({state:"attached"});
+  is("profile control says its handler is unavailable before hydration",await control.getAttribute("aria-disabled"),"true");
+  is("profile control visibly reports preparation before hydration",(await control.innerText()).trim(),"Loading…");
+  await control.dispatchEvent("click");
+  is("profile panel stays closed before hydration",await initial.locator("form[data-socials-editor]").count(),0);
+  is("profile pre-hydration click starts no API write",writes,0);
+ }finally{await beforeReady.close();}
  for(const width of [390,1280])for(const mode of ["profiles","remove"]){
   const context=await browser.newContext({viewport:{width,height:900}});
   try{

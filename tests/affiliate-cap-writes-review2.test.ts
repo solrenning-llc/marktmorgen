@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   await claimHandle(owner, "coopershop", "Cooper store", "");
   await ensureStatsId(owner);
   await ensureStoreId(owner);
-  await setStripeAccount(owner, "acct_1coopershopxxxxx", true);
+  await setStripeAccount(owner, "acct_1coopersho74fa", true);
   await setSubscription(owner, { customerId: "cus_cooper", subscriptionId: "sub_cooper", active: true, tier: "creator", period: paidPeriod() });
   const p = await addProduct(owner, "Barrel Course", "", "40");
   const P = p.ok ? p.product.id : "";

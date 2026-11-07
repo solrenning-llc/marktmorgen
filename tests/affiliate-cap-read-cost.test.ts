@@ -46,7 +46,7 @@ async function main(): Promise<void> {
   await claimHandle(owner, "turnershop", "Turner store", "");
   await ensureStatsId(owner);
   await ensureStoreId(owner);
-  await setStripeAccount(owner, "acct_1turnershopxxxxx", true);
+  await setStripeAccount(owner, "acct_1turnershoc531", true);
   await setSubscription(owner, { customerId: "cus_turner", subscriptionId: "sub_turner", active: true, tier: "scale", period: paidPeriod() });
   const p = await addProduct(owner, "Lathe Course", "", "40");
   const q = await addProduct(owner, "Bowl Course", "", "40");

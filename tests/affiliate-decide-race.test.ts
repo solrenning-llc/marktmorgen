@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   await claimHandle(owner, "pottershop", "Potter store", "");
   await ensureStatsId(owner);
   await ensureStoreId(owner);
-  await setStripeAccount(owner, "acct_1pottershopxxxxx", true);
+  await setStripeAccount(owner, "acct_1pottersho9b06", true);
   await setSubscription(owner, { customerId: "cus_potter", subscriptionId: "sub_potter", active: true, tier: "creator", period: paidPeriod() });
   const made = await addProduct(owner, "Clay Course", "", "40");
   const P = made.ok ? made.product.id : "";

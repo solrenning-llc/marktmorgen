@@ -49,7 +49,7 @@ async function main(): Promise<void> {
   await claimHandle(owner, "bakershop", "Baker store", "");
   await ensureStatsId(owner);
   await ensureStoreId(owner);
-  await setStripeAccount(owner, "acct_1bakershopxxxxxx", true);
+  await setStripeAccount(owner, "acct_1bakershop0b36", true);
   await setSubscription(owner, { customerId: "cus_baker", subscriptionId: "sub_baker", active: true, tier: "creator", period: paidPeriod() });
   const cookie = `${SESSION_COOKIE}=${await openSession(owner)}`;
   const post = async (body: Record<string, unknown>): Promise<Reply> => {

@@ -53,7 +53,7 @@ async function main(): Promise<void> {
   await claimHandle(owner, "glaziershop", "Glazier store", "");
   await ensureStatsId(owner);
   await ensureStoreId(owner);
-  await setStripeAccount(owner, "acct_1glaziershopxxxx", true);
+  await setStripeAccount(owner, "acct_1glaziersh5808", true);
   await setSubscription(owner, { customerId: "cus_glazier", subscriptionId: "sub_glazier", active: true, tier: "scale", period: paidPeriod() });
   const p = await addProduct(owner, "Glass Course", "", "40");
   const q = await addProduct(owner, "Kiln Course", "", "40");

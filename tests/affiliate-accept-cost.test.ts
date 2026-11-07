@@ -68,7 +68,7 @@ async function main(): Promise<void> {
   await claimHandle(owner, "carvershop", "Carver store", "");
   await ensureStatsId(owner);
   await ensureStoreId(owner);
-  await setStripeAccount(owner, "acct_1carvershopxxxxx", true);
+  await setStripeAccount(owner, "acct_1carversho9537", true);
   await setSubscription(owner, { customerId: "cus_carver", subscriptionId: "sub_carver", active: true, tier: "scale", period: paidPeriod() });
   const p = await addProduct(owner, "Spoon Course", "", "40");
   const q = await addProduct(owner, "Knife Course", "", "40");

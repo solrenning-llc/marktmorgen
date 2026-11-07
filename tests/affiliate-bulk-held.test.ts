@@ -45,7 +45,7 @@ async function main(): Promise<void> {
   await claimHandle(owner, "weavershop", "Weaver store", "");
   await ensureStatsId(owner);
   await ensureStoreId(owner);
-  await setStripeAccount(owner, "acct_1weavershopxxxxx", true);
+  await setStripeAccount(owner, "acct_1weavershocff6", true);
   await setSubscription(owner, { customerId: "cus_weaver", subscriptionId: "sub_weaver", active: true, tier: "creator", period: paidPeriod() });
   const cookie = `${SESSION_COOKIE}=${await openSession(owner)}`;
   const post = async (body: Record<string, unknown>): Promise<Reply> => {

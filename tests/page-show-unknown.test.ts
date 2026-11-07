@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "pageshow", "Page show", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestPageShow001", true);
+  await setStripeAccount(OWNER, "acct_1PageShow0001", true);
   await setSubscription(OWNER, { customerId: "cus_PageShow0001", subscriptionId: "sub_PageShow0001", active: true, period: paidPeriod() });
   const paid = await addProduct(OWNER, "Guide", "A guide.", "19", null);
   const free = await addProduct(OWNER, "Sampler", "A free sampler.", "0", null);

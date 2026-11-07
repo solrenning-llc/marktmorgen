@@ -1,0 +1,18 @@
+import {build} from 'esbuild';
+import {execFileSync,spawnSync} from 'node:child_process';
+import {readFileSync,writeFileSync,mkdtempSync,rmSync} from 'node:fs';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {testAliases,testEnvironment} from '../tests/test-config.mjs';
+const root=process.cwd(),mode=process.argv[2],files=process.argv.slice(3),subject='b7ac83aef7897a1f7d5b531ecf1a5ca736792314',base='a0ea276a2e3850473b082c4e416d5f053938ac93';
+if(!['head','red'].includes(mode)||execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim()!==subject)throw Error('subject/mode');
+if(execFileSync('git',['diff',subject,'--name-only','--','lib','tests/test-config.mjs','tests/plan-cost-registry.ts','tests/paypal-watch-cost.test.ts'],{encoding:'utf8'}).trim())throw Error('changed subject');
+const allowed=new Set(['paypal-watch-cost.test.ts','plan-cost-registry.test.ts','paypal-sales.test.ts','paypal-delivery.test.ts','platform-us-english.test.ts','t-3064-duplicate-scan.proof.ts']);
+if(!files.length||files.some(f=>!allowed.has(f)))throw Error('unadmitted file');
+const out=mkdtempSync(join(tmpdir(),'t3064-'));let failed=0;
+const old=new Set(['lib/paypal-sales.ts','tests/plan-cost-registry.ts']);
+try{for(const file of files){const bundle=join(out,file+'.cjs');
+const banner='globalThis.__tRedis=0;globalThis.__tHTTP=0;let mock=()=>{throw Error("External HTTP forbidden")};Object.defineProperty(globalThis,"fetch",{get(){return (...a)=>{if(++globalThis.__tHTTP>100)throw Error("HTTP ceiling");return mock(...a)}},set(f){mock=f}});for(const n of ["node:http","node:https"]){const m=require(n);m.request=m.get=()=>{throw Error("Network forbidden")}}process.on("exit",()=>console.log("T_BUDGET "+JSON.stringify({redis:globalThis.__tRedis,mockHTTP:globalThis.__tHTTP})));';
+await build({entryPoints:[join(root,'tests',file)],bundle:true,platform:'node',format:'cjs',outfile:bundle,logLevel:'error',alias:testAliases(file,root,join(root,'tests')),banner:{js:banner},plugins:[{name:'bounded',setup(b){b.onLoad({filter:/\.ts$/},a=>{const rel=a.path.slice(root.length+1);let s=readFileSync(a.path,'utf8');if(mode==='red'&&old.has(rel))s=execFileSync('git',['show',base+':'+rel],{encoding:'utf8'});if(rel==='lib/redis-memory.ts')s=s.replace('run(command: (string | number)[]): unknown {','run(command: (string | number)[]): unknown { if(++(globalThis as any).__tRedis>20000)throw Error("Redis ceiling before dispatch");');return {contents:s,loader:'ts'};});}}]});
+const r=spawnSync(process.execPath,['--max-old-space-size=512',bundle],{cwd:root,env:testEnvironment(process.env),timeout:120000,maxBuffer:262144,encoding:'utf8'}),log=(r.stdout??'')+(r.stderr??'');writeFileSync('t-3064-'+mode+'-'+file+'.log',log);console.log(JSON.stringify({file,mode,exit:r.status,summary:log.match(/\d+ checks[^\n]*|ℹ (?:tests|pass|fail) \d+|T_BUDGET .*/g),error:r.error?.message}));if(r.status!==0)failed++;
+}}finally{rmSync(out,{recursive:true,force:true});}process.exitCode=failed?1:0;

@@ -1,3 +1,19 @@
+# Coordination/claim correction — 7 November2026,15:54 Fortaleza
+
+C2-1545 FULL: author CONFIRMS both3079proposedMEDIUMs and is ACTIVELY correcting with RED: chunk by MAX_PRODUCT_BYTES256000/worstJSONescape→2products/MGET, recordinvalid/wrongid→UnreadableMget. Oldreaderkeptwith2909. Authoracknowledgment is NOTindependentR2classification or Zfocalclosure; no newhead/RED/gates assumed. C2-1552 confirms bytes256000not16384 raises inherited model, maystill~66.6year vs65afterO5/O3O4; awaitexactnumbers/owner, noZcost/limit/pricechanges.
+
+C1-20261107-1550-TODOS-10 read FULL: refundceilingsDO NOTRISE, novisiblelimitcuts, reducecostbycode, salesclosed. C2O5+ifneededO3O4, O2CALENDAR_MAX_EVENTSNO; C4privateBlobexportcache; C6imagecheckcache. Proposed100itembatch ininstruction is an estimate, NOTauthoritytoignore validwriterbytes; C2-1552 toldC1safechunk2basedonZproof. NoZgranttoeditthoseforeignsources/tariffs/ceilings/commercialterms.
+
+**3080 failedclaim is NOT active/reservedZ:** attemptedchannelCXZ1548CAS409ref-headchanged/NOwrite, zero3080diff/source/test. FreshFULL1f63fa54after>=120s+>=5min found contemporaneous **ACTIVEG1549/829ad302**, soZabandonsplannedclaim BEFOREcode, respectsG, doesnotinferactivefromcheckpoint. Gfirstmoneyisclaimnotcleanreview. C6requires2butZdidnotstartasecondinparallelhere. This supersedes metadata-only3080nextcandidatebelow.
+
+**3084 also NOTstarted/reservedZ:** metadata/body/timelineEMPTY at15:53, exacte4afa5e4847ecf85db62006f3bfcdf58e226b22d/base1d7cbe8d,6paths/17cases weeklynumbersretry. AttemptCXZ1554RES received409/NOwrite at~18:54UTC, ZEROsource/diff/test/code3084. Wait>=120s and FULL>=5min from18:53 before freshprefix/IDcheck and claim onlyifstillunreserved; genericrequestnotautomaticownership. Body-onlydeclaredteamcopy/releaseMonth/claimlock2877/2986/AIreservationcaveatsnotclosed. No lostWIP or partialreview. A future checkpoint timestamp alone does NOTprove active execution.
+
+FULLdeltaafterownCXZ1543throughC1-1550/C2-1552 read: M3081closed/M3083ACTIVE,N3078P3077proposedinheritedMsR2/C1decisionpending,G3076secondnowdelivered/G3080ACTIVE; C6new3083/3084generic, noZproducttakeover. C4-1547closed5(2878/2560/2967/3053/3058)dueA3B2leases,branchesintact;N3066releasedrecorteanddocstillpending, noZgrant. C3#2517secondactive, securitymain2874/2036C6reportsqueued, notZverifiedmerged. Othernormative/state/proofhistorybelowunchanged.
+
+3079formal5814394539 exactbodyreadback confirmed. CP a49b5e21 FULLreadbackexact+native45d34 same. FindingannouncementCXZ1543/258695ac delivered, latestattempts1548/1554NOTdelivered. NEED finalpoint/claimreceiptbeforeending; evidenceb12dae1c/tree d389f726/native248d93f9 preserved. NoCItestreplay/headmove/authorref/product/mainintegration/queueoperation/provider/account/payment/PII/prices/quotas/flags/gates. Threeownproducts/zeroactiveZreviewatthisinstant; first3079completedNOTCLEAN, ownR2/queueholds unchanged. Serialmedium0agents/no backgroundwatcher; continuityunchanged/transientchannelCASwaitnotprojectcompletion.
+
+---
+
 # Calendar batching financial review NOT CLEAN — 7 November2026,15:46 Fortaleza
 
 Exact **#3079/3be38608661b3f659d3e057bcd248bbe06802b57 review5814394539 COMMENT/readbackEXACT**. TWOproposedMEDIUMs R2/C1sameproof/classificationBEFORErepair, no productive Zfix:

@@ -22,6 +22,17 @@ import {
   type PriceStep,
 } from "@/lib/physical-legal";
 import { MAX_SALE_DAYS } from "@/lib/store-sale";
+import { join } from "node:path";
+import {
+  createCompilerHost,
+  createProgram,
+  flattenDiagnosticMessageText,
+  getDefaultLibFileName,
+  getPreEmitDiagnostics,
+  parseJsonConfigFileContent,
+  readConfigFile,
+  sys,
+} from "typescript";
 import { done, is, part } from "./check";
 
 const DAY = 86_400;
@@ -168,6 +179,51 @@ is("a history that is not a list is unreadable", caught(() => priorLowestPrice("
 is("a step that is not a record is unreadable", caught(() => priorLowestPrice([{ at: t0, cents: 1000 }, null] as unknown as PriceStep[], tS)), "unreadable");
 is("recording onto an unreadable history keeps it as it came, never filtered", caught(() => recordPrice(corrupt, 900, tS)), corrupt);
 is("so it still reads as unreadable afterward", caught(() => priorLowestPrice(recordPrice(corrupt, 900, tS), tS + DAY)), "unreadable");
+
+part("Prior lowest price: a missing slot is unreadable, never a crash, a subset or an empty history (review J5813414204, LOW)");
+/** A list with a missing slot after one real step, as a typed in-memory boundary could hand over. */
+const withHole = (): PriceStep[] => {
+  const list: PriceStep[] = [{ at: t0, cents: 1000 }];
+  list.length = 2;
+  return list;
+};
+const holeFirst = (): PriceStep[] => {
+  const list: PriceStep[] = [];
+  list[1] = { at: t0, cents: 1000 };
+  return list;
+};
+is("a list with a missing slot is unreadable, not a crash", caught(() => priorLowestPrice(withHole(), tS)), "unreadable");
+is("a list whose first slot is missing is unreadable", caught(() => priorLowestPrice(holeFirst(), tS)), "unreadable");
+is("a list of only a missing slot is unreadable, not an empty history", caught(() => priorLowestPrice(new Array<PriceStep>(1), tS)), "unreadable");
+is("recording onto a list with a missing slot keeps it as it came", caught(() => {
+  const kept = recordPrice(withHole(), 900, tS - 1);
+  return [kept.length, 0 in kept, 1 in kept];
+}), [2, true, false]);
+is("so it still reads as unreadable afterward", caught(() => priorLowestPrice(recordPrice(withHole(), 900, tS - 1), tS)), "unreadable");
+is("control: the same real step, dense, still reads as a complete 1000", caught(() => priorLowestPrice([{ at: t0, cents: 1000 }], tS)), { cents: 1000, complete: true });
+is("control: an empty list is still a known empty history", caught(() => priorLowestPrice([], tS)), null);
+is("control: recording onto the dense list still adds the step", caught(() => recordPrice([{ at: t0, cents: 1000 }], 900, tS - 1)), [{ at: t0, cents: 1000 }, { at: tS - 1, cents: 900 }]);
+const untouched = [{ at: t0, cents: 1000 }, { at: tS - 2, cents: 20 }];
+const before = JSON.stringify(untouched);
+priorLowestPrice(untouched, tS);
+recordPrice(untouched, 900, tS - 1);
+is("reading and recording never change the list given", JSON.stringify(untouched), before);
+
+part("Types: the module compiles under the repository's strict settings (review J5813414204, LOW, TS4104)");
+/** The project's own tsconfig options on this module alone, libraries read from node_modules (the test runs from a bundle). */
+const typeErrors = (() => {
+  const libDir = join(process.cwd(), "node_modules/typescript/lib");
+  const config = readConfigFile("tsconfig.json", sys.readFile);
+  const { options } = parseJsonConfigFileContent(config.config, sys, process.cwd());
+  const host = createCompilerHost(options);
+  host.getDefaultLibLocation = () => libDir;
+  host.getDefaultLibFileName = (o) => join(libDir, getDefaultLibFileName(o));
+  const program = createProgram(["lib/physical-legal.ts"], { ...options, noEmit: true, incremental: false }, host);
+  return getPreEmitDiagnostics(program)
+    .filter((d) => d.file?.fileName.endsWith("lib/physical-legal.ts"))
+    .map((d) => `TS${d.code} ${flattenDiagnosticMessageText(d.messageText, " ")}`);
+})();
+is("lib/physical-legal.ts has no type errors (strict, ES2017, bundler)", typeErrors, []);
 
 part("Proposition 65: the site is named on its own (review J5809017387, LOW)");
 is("a longer hostname that only starts with the site does not name it", checkProp65("WARNING: Lead. See www.P65Warnings.ca.gov.example.invalid"), "site");

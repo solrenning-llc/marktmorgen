@@ -393,9 +393,38 @@ export async function lastSeenIn(id: string, emails: string[]): Promise<Map<stri
   return out;
 }
 
+/**
+ * A member's record, or null only when Redis said there is none. A reply in
+ * any other shape (missing, cut short, not a record, a record without its own
+ * yes or no on a mute and a removal, or somebody else's) is thrown (CX-123
+ * rule 24): read as "no record", it let a member the creator took out past
+ * the removal and back in as somebody new (lib/community-access.ts
+ * communityViewer, touchMember's re-read).
+ */
 export async function readMember(id: string, key: string): Promise<Member | null> {
-  const [raw] = await redisPipeline([["HGET", membersKey(id), key]]);
-  return parseMember(raw);
+  const replies = repliesFor(await redisPipeline([["HGET", membersKey(id), key]]), 1);
+  if (!replies) throw new UnknownReplyError("a community member record");
+  const raw = replies[0];
+  if (raw === null) return null;
+  const member = exactMember(raw, key);
+  if (!member) throw new UnknownReplyError("a community member record");
+  return member;
+}
+
+/** The record kept under `key`, when it is one: its own key, and a mute and a removal each a yes or a no. */
+function exactMember(raw: unknown, key: string): Member | null {
+  if (typeof raw !== "string") return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const fields = value as Record<string, unknown>;
+  if (typeof fields.removed !== "boolean" || typeof fields.muted !== "boolean") return null;
+  const member = parseMember(raw);
+  return member && member.k === key ? member : null;
 }
 
 export async function readMembers(id: string, keys: string[]): Promise<Map<string, Member>> {
@@ -459,7 +488,10 @@ export async function touchMember(id: string, email: string, existing: Member | 
     if (at - existing.seen < 3_600) return existing;
     return (await patchMember(id, key, () => ({ seen: at }))) ?? existing;
   }
-  const [size] = await redisPipeline([["HLEN", membersKey(id)]]);
+  // The head count in its exact shape (CX-123 rule 24): read with Number(...), a missing or off-shape
+  // HLEN was NaN, never at the ceiling, and a new record was written whatever the count was.
+  const size = countOf(repliesFor(await redisPipeline([["HLEN", membersKey(id)]]), 1)?.[0]);
+  if (size === null) throw new UnknownReplyError("a community's head count");
   if (Number(size) >= MAX_MEMBERS) return null;
   const member: Member = { k: key, e: normaliseEmail(email), n: "", h: "", dir: false, mail: false, at, seen: at, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
   // HSETNX: two first visits at once make one record, not two. Counted in

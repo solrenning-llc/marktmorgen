@@ -117,12 +117,16 @@ export function CommunityPushToggle({
   }
 
   /**
-   * Off only when both ends are done: the server forgot this device and the
-   * browser dropped its subscription. The server goes first and the browser
-   * is unsubscribed only once it answered { ok: true }, so a failed request
-   * never leaves a device row behind (counted toward the member's devices)
-   * for a browser that no longer listens. Anything else keeps the switch on,
-   * says so, and Turn off can be pressed again (forgetting is idempotent).
+   * Off once the server forgot this device: it answered { ok: true } only
+   * after forgetting it, and pushes go only to the devices it keeps, so
+   * nothing reaches this browser any more. The server goes first and the
+   * browser is unsubscribed only once it answered, so a failed request never
+   * leaves a device row behind (counted toward the member's devices) for a
+   * browser that no longer listens. The browser's subscription is then
+   * dropped quietly, with one more try if the first did not take; a
+   * subscription it still keeps receives nothing. Anything short of the
+   * server's { ok: true } keeps the switch on, says so, and Turn off can be
+   * pressed again (forgetting is idempotent).
    */
   async function turnOff() {
     if (busy) return;
@@ -140,8 +144,8 @@ export function CommunityPushToggle({
         });
         const data = (await response.json().catch(() => null)) as { ok?: unknown; devices?: unknown } | null;
         if (!response.ok || data?.ok !== true) throw new Error("the device was not forgotten");
-        const gone = await subscription.unsubscribe();
-        if (gone !== true) throw new Error("the browser kept the subscription");
+        const drop = () => Promise.resolve().then(() => subscription.unsubscribe()).then((gone) => gone === true, () => false);
+        if (!(await drop())) await drop();
         setCount(typeof data?.devices === "number" ? data.devices : Math.max(0, count - 1));
       } else {
         setCount(Math.max(0, count - 1));

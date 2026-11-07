@@ -134,7 +134,9 @@ async function soldBefore(store: Store, at: number): Promise<number | null> {
       store.stripeAccountId as string,
       `/checkout/sessions?limit=100&status=complete&created[lt]=${at}`,
     );
-    const rows = (Array.isArray(listed.data) ? listed.data : []) as (Checkout & { payment_status?: unknown })[];
+    // A page that is not a list is not "never sold" (CX-123 rule 24): it is not known, and the next pass asks again.
+    if (!Array.isArray(listed.data)) throw new Error("Stripe gave a page of earlier checkouts that is not a list");
+    const rows = listed.data as (Checkout & { payment_status?: unknown })[];
     const sold = rows.filter((row) => row.payment_status === "paid" && isSale(row) && handles.has(row.metadata?.store ?? ""));
     if (!sold.length) return 0;
     return Math.min(...sold.map((row) => (typeof row.created === "number" ? row.created : at)));

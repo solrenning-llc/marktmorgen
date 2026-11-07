@@ -114,7 +114,7 @@ async function main(): Promise<void> {
   is("the store still charges in dollars", await state(), ["usd", false]);
 
   part("The tax route refuses, with nothing changed");
-  await setStripeAccount(owner, "acct_seriescountunknown", true);
+  await setStripeAccount(owner, "acct_1TestSeries01", true);
   for (const [label, bend] of shapes.slice(0, 3)) {
     is(`${label}: 503 unavailable`, await withBent(key, bend, () => send(taxRoute, "tax", taxOn)), [503, "unavailable"]);
   }

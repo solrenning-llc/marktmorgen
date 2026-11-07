@@ -47,7 +47,9 @@ export default async function WaitlistPage({ params, searchParams }: Params) {
 
   const grant = token && WAIT_TOKEN.test(token) ? await readWaitToken(token) : leave && WAIT_TOKEN.test(leave) ? await readWaitToken(leave) : null;
   const productId = grant?.p ?? read("product");
-  const product = productId ? await readListing(store, productId) : null;
+  const listed = productId ? await readListing(store, productId) : null;
+  // A draft is named only through its own wait-list link; the product in the address alone is not known here (MM-SA-30).
+  const product = listed && (!listed.hidden || grant?.p === listed.id) ? listed : null;
   // Empty when the product is gone: each sentence then says "it" its own way.
   const title = product?.title ?? "";
   const said = speech(store);

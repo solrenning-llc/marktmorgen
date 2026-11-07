@@ -187,13 +187,22 @@ export async function forgetPaid(store: Store, email: string): Promise<void> {
   await redisPipeline([["DEL", paidCacheKey(store, email)]]);
 }
 
-/** Takes a course off an address's ledger: a gift taken back by a refund (lib/gifts.ts). */
+/**
+ * Takes a course off an address's ledger: a gift, pre-order, group place or PayPal sale taken back by a refund. Both
+ * replies are read exactly (CX-123 rule 24; Codex G on #2781): the HDEL and the DEL each answer 0 or 1, or this
+ * throws UnknownReplyError, so the caller keeps the refund to be tried again and never reads "taken away" from a
+ * reply it could not read. Running it again is harmless.
+ */
 export async function dropEnrollment(store: Store, email: string, productId: string): Promise<void> {
   if (!isRedisConfigured()) return;
-  await redisPipeline([
-    ["HDEL", ledgerKey(store, email), productId],
-    ["DEL", paidCacheKey(store, email)],
-  ]);
+  const replies = repliesFor(
+    await redisPipeline([
+      ["HDEL", ledgerKey(store, email), productId],
+      ["DEL", paidCacheKey(store, email)],
+    ]),
+    2,
+  );
+  if (!replies || !replies.every((reply) => reply === 0 || reply === 1)) throw new UnknownReplyError("taking a course off a ledger");
 }
 
 type Listed = { data?: unknown };

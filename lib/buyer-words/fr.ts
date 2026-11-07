@@ -46,7 +46,7 @@ export const fr: BuyerWords = {
 
   fairHead: (country, percent) => `Prix juste pour votre pays (${country})${S}: -${percent}${S}%`,
   fairNote: (store, plan) =>
-    `${store} baisse ses prix là où l'argent a moins de valeur. La remise s'applique sur la page de paiement, sans code${plan ? `${S}; le prix réduit concerne le paiement en une fois` : ""}.`,
+    `${store} baisse ses prix là où l'argent a moins de valeur. Ce prix a été fixé automatiquement pour vous, d'après le pays de votre connexion internet. La remise s'applique sur la page de paiement, sans code${plan ? `${S}; le prix réduit concerne le paiement en une fois` : ""}.`,
   saleHead: (name, percent, ends) => `${name ? `${name}${S}: ` : ""}-${percent}${S}% · ${ends}`,
   saleNote: (until, plan) =>
     `Jusqu'au ${until}. La remise s'applique sur la page de paiement, sans code${plan ? `${S}; le prix soldé concerne le paiement en une fois` : ""}.`,
@@ -142,7 +142,8 @@ export const fr: BuyerWords = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store) => `Le blog de ${store}`,
-  blogEmpty: "Rien ici pour le moment.",
+  blogPastEnd: "Aucun article sur cette page",
+  blogPastEndBody: "Cette page se trouve après le dernier article.",
   blogMinutes: (n) => `${n}\u00a0min de lecture`,
   blogNewer: "Articles plus récents",
   blogOlder: "Articles précédents",
@@ -155,6 +156,7 @@ export const fr: BuyerWords = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent) => `soit ${percent}\u00a0% d’économie`,
   chooseOptionFor: (title) => `Choisissez une option pour ${title}`,
+  chooseOne: "Choisissez-en une",
   recommended: "Recommandé",
   recommendedAfter: " (recommandé)",
   howToPayFor: (title) => `Comment payer ${title}`,
@@ -306,6 +308,7 @@ export const fr: BuyerWords = {
   newer: "Plus récents",
   older: "Plus anciens",
   askUnknown: (store) => `Cette page ne le précise pas. Posez la question à ${store} avant d'acheter.`,
+  askTermsCut: () => "Je n'ai pas ici les conditions complètes. Posez la question au créateur avant d'acheter.",
 
   noLongerOnSale: "Ce produit n'est plus en vente.",
   seeStore: (store) => `Voir ${store}`,

@@ -3413,3 +3413,667 @@ Ponto de retomada: C1-1746-TODOS15 mantém pausa de PRs novos; correções receb
 CXM-20261107-1850-C1-4 entregue em b27f549792941187464f6a702e731764472487d7, blob413696fb8d46ffe2a0cfef71b9b72e3e8a103c08. Conteúdo FULL4496399 caracteres relido e exatamente igual ao prefixo integral anterior mais a nova mensagem. Não houve409 nesta entrega.
 
 Delta imediatamente anterior: C1-20261107-1849-C6-18 anuncia FF de3123 e3126, sem force/0main-vermelho. Isso é relato C1 e encaminha os focais aos donos anteriores; M não tocou essas fontes. Três pareceres M3083/3125/3133 publicados; nenhum focal M novo no delta. Pausa de novos PRs permanece,2730reconciliação nominal separada. Sem vigia em fundo e sem automação alterada. Recuperar este MESMO checkpoint na próxima retomada antes de novas ações; não refazer os testes verdes em heads inalterados.
+
+
+## 07/11/2026 — revisão independente do corretivo #3126
+
+Recuperado o MESMO checkpoint777c541313e5afb90071fe0ae90a399e74985501/blob39d7b2dcac1768447aedb751dc3b878034bc53c2,467703 caracteres completos; nenhuma seção anterior removida. Main atual180d248ddf70bfffbedf361bf8beb4992e6f3e60 tem os dez normativos CLAUDE/AGENTS/inbox/fila/índice e todas as reservas BYTE-ID às leituras integrais anteriores. Canal b8ca2702f430280e90f7f45f4a90fc991e45b52c FULL4551937, prefixo4496399 íntegro; delta55538 recuperado, pedidos/claims relevantes lidos. C1-1746 pausa de PR novo segue; nada de unidades grandes/subagentes. #2388/#2402/#2415/#2421 e reservas antigas já encerrados historicamente, não recriados.
+
+C6-1852 pede independente G/M/P/N para3123/3126 após FF C1-1849 porque C2 fez a correção e C6 é autor. G1925 assumiu3123; nenhum claim3126 concorrente/timeline3126 além da primeira C26712813221. M anunciou3126 ANTESdiff/fonte/testes: CXM-20261107-1938-C1-1 commit0a012a71f1f146350f251e04e26e52ca340ea93c/blob2718eb3848c67c9431234ea76f0c2abfb4321dca, conteúdoFULLexato. Header1938 nominal adiantou-se ao relógio posterior22:37:30UTC=19:37:30; sequência real preservada, sem alterar histórico. A primeira C2 é anterior9504; não contar autoria do fix5557 como revisão independente nova.
+
+PR3126 head5557ec81b2024faa049b622c26df7ff3cbbc084e OPEN confirmado, diff3paths inteiro lido:waitlist.ts010e010c111482b225d9c2ada59108b5ae54e740+test72/02c868a2f7125e04c710b0ee05057a85fd4fe5aa+test22/0ac4d091838b8a126f33937df263f331511f671a. Review abrange também correção inicial paraHMGET e data copy. launchTarget distingue loadthrow/unknown vsnil/free/reassigned;listing inexistente só por productIds ou listingSizes0;helpers store/catalog consultados. runLaunches retém JOBS/cursor/lista antesreserveDay/sendBatch se desconhecido; após leitura saudável mesmojob/cursor envia todos. waitlistPlacesOf exige exatamente um slot próprio porproduto,parseválidoounull;copyPerson propaga erro sem cópia incompleta. Sourcechecks+testes de memória, não provaRedis/provider/browser/cronHTTPreal.
+
+**RED causal MESMO72**, só módulo anterior9504Gitblobee8790e70b1d1ad84738fa2eb32de45925a93e4f no grafo final:72/24FAIL→head72PASS; jobGET/storeGET/listingGET(quatroformatos) seguram e retry saudável manda ambos, controles ausência exata removemfila. **MESMO22**, só módulo base09ddGitblobf484d769527b567d2c880af3232e77bc52dff66a no grafo final:22/14FAIL→head22PASS; HMGET desconhecido não pula ninguém e cópia desconhecida falha. Ligados waitlist32+tokens32node+deliverycopy21+personcopy20=105PASS. **TOTAL199 verificações atuais PASS**, REDs separados. Asserções não mudaram. Testdeliverycopy inicialmente ausente da cópia causou erro BUILDANTESspawn; recuperei seu Gitblobhead e rodei sóele+personcopy, sem repetir verdes. Não produtoRED nem execução de outro autor alegada como minha.
+
+Tipos reais3roots739sourcesstrictES2017Bundler/noEmit0diag;lint3paths0erros. Scanner oficial3980tracked0 em SNAPSHOTPARCIAL3980headfiles Gitblob-exatos,344não recuperados; semrepoFULLclaim. Whitespace comparação no-index0diagnósticos/exit1 por diferença, não exit0. Indexlocalexclui extras legados fora de head; nenhuma ref remota alheia alterada. Guardas ANTES20kpipe+20kMemoryRedis.run/100mockfetch/120s512MiB256KiB porfilho/tipos1024MiB, nenhum tetoatingido. Head72counts1377pipe1606run12mock;22/2252684;32/30634610;personcopy1441520. Zero chamada paga/provider/Redisreal/PII/credenciaisreais.
+
+Sem novo achado no delta; MÉDIO C2 de lançamento removido porunknown conferido corrigido. Permanecem explicitamente fora da aprovação global: leaveWaitlistHDEL/confirmSpotHSET semACK,joinHLEN/displayunknown, lista que nunca parseia segura indefinidamente, caminhos erasure/launch irmãos2576, retenção send30dias/job120dias, limpeza dados em gone sóSREM. Não certificar um merge com2576 ou retriesfor ever/universalconsentlegalMR. #2730freshsame83OPEN, jádoispareceresC4/C1 e reconciliação nominal pendente; zero nova fonte/teste/reviewM2730. #3083/#3125/#3133 heads verdes não repetidos. C6-1903 pedido fila3083 é relato autor44checks, não M9CI/fila; G/T3090 decisãoCX116/G3121política/C1, S3096,Z3101 e outrosclaims respeitados. Próximo publicar COMMENT independente3126 exatohead com199PASS e limites, depois canal/recibo. Evidências abaixo persistidas ANTESparecer; nenhum produto/ref/CI/fila/main/merge/subagente/automação nesta execução.
+
+### run.mjs
+```
+import{readFileSync,writeFileSync,mkdirSync,existsSync,symlinkSync}from'node:fs';import{resolve,join}from'node:path';import{createRequire}from'node:module';import{createHash}from'node:crypto';import{spawnSync}from'node:child_process';import{testAliases,testEnvironment}from'./view/tests/test-config.mjs';
+const root=resolve('.'),view=join(root,'view'),deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules';const{build}=createRequire(join(deps,'package.json'))('esbuild');if(!existsSync(join(view,'node_modules')))symlinkSync(deps,join(view,'node_modules'),'dir');mkdirSync('logs',{recursive:true});
+const jobs=process.argv.slice(2);for(const job of jobs){const [mode,test]=job.split(':');
+ const bootstrap=`import{MemoryRedis}from'./lib/redis-memory';import{store as redis}from'./tests/redis-stub';let pc=0,rc=0,hc=0,exceeded=false;const stop=()=>{exceeded=true;throw Error('M_ADMISSION_CEILING')};const pipeline=redis.pipeline,run=MemoryRedis.prototype.run;redis.pipeline=function(c){if(pc+c.length>20000)return stop();pc+=c.length;return pipeline.call(this,c)};MemoryRedis.prototype.run=function(c){if(rc+1>20000)return stop();rc++;return run.call(this,c)};let current=()=>{throw Error('NO_EXTERNAL_NETWORK')};Object.defineProperty(globalThis,'fetch',{configurable:true,get:()=>current,set:f=>{current=(...a)=>{if(hc+1>100)return stop();hc++;return f(...a)}}});process.on('beforeExit',()=>{console.log('M_BUDGET',JSON.stringify({pipelineCommands:pc,memoryRun:rc,httpMockDispatch:hc,exceeded}));if(exceeded)process.exitCode=1});import('./tests/${test}');`;
+ const alias=testAliases(test,view,join(view,'tests'));if(mode==='before')alias['@/lib/waitlist']=join(root,'before-waitlist.ts');if(mode==='base')alias['@/lib/waitlist']=join(root,'base-waitlist.ts');const b=await build({stdin:{contents:bootstrap,resolveDir:view,sourcefile:'m-bootstrap.ts',loader:'ts'},absWorkingDir:view,bundle:true,write:false,platform:'node',format:'cjs',alias,metafile:true,logLevel:'error'});const f=resolve('logs/'+mode+'-'+test+'.cjs');const pin=JSON.parse(readFileSync('head-pins.json','utf8'));let checked=0;for(const input of Object.keys(b.metafile.inputs)){if(input.includes('node_modules')||input==='m-bootstrap.ts')continue;const file=resolve(view,input);const bytes=readFileSync(file);const hash=createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');if(file===join(root,'before-waitlist.ts')){if(hash!=='ee8790e70b1d1ad84738fa2eb32de45925a93e4f')throw Error('Old rule mismatch');}else if(file===join(root,'base-waitlist.ts')){if(hash!=='f484d769527b567d2c880af3232e77bc52dff66a')throw Error('Base mismatch');}else if(input==='tests/m-3125-read-boundaries.proof.ts'){if(hash!=='75911d0e19878f16377b562eb16e954332ae56be')throw Error('Own proof changed');}else if(input==='tests/m-3125-notice-retry.proof.ts'){if(hash!=='2e5977e79a2a9254daa4fbffb7c755b6d525a89b')throw Error('Notice proof changed');}else if(input==='tests/m-3133-multiple-payments.proof.ts'){if(hash!=='2b65432e7692438b40fa60a3f55050a9c57d88ca')throw Error('Own proof changed');}else if(hash!==pin[input])throw Error('Head pin mismatch '+input);checked++;}console.log(JSON.stringify({mode,test,checked}));writeFileSync(f,b.outputFiles[0].text);writeFileSync(f+'.meta.json',JSON.stringify(b.metafile));
+ const p=spawnSync(process.execPath,['--max-old-space-size=512',f],{cwd:view,env:testEnvironment({PATH:'/usr/bin:/bin',TZ:'UTC'}),encoding:'utf8',timeout:120000,maxBuffer:256*1024});const out=(p.stdout||'')+(p.stderr||'');writeFileSync(f+'.log',out);console.log(JSON.stringify({mode,test,exit:p.status,error:p.error?.message,signal:p.signal,tail:out.slice(-1700)}));if(p.error||p.signal)throw Error('Incomplete child');
+}
+
+```
+
+### verify.cjs
+```
+const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');const deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules',root=path.resolve('view'),ts=require(deps+'/typescript');
+const names=['lib/waitlist.ts','tests/waitlist-launch-hold.test.ts','tests/waitlist-unknown-reads.test.ts'];const opts={strict:true,noEmit:true,allowJs:true,target:ts.ScriptTarget.ES2017,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler,skipLibCheck:true,esModuleInterop:true,resolveJsonModule:true,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'@/lib/content-jsx',baseUrl:root,paths:{'@/*':['*']},types:['node','react'],typeRoots:[deps+'/@types'],lib:['lib.esnext.d.ts','lib.dom.d.ts','lib.dom.iterable.d.ts']};
+const p=ts.createProgram(names.map(f=>path.join(root,f)),opts),ds=ts.getPreEmitDiagnostics(p);fs.writeFileSync('types.log',ts.formatDiagnosticsWithColorAndContext(ds,{getCurrentDirectory:()=>root,getCanonicalFileName:f=>f,getNewLine:()=>"\n"})+JSON.stringify({roots:names.length,sources:p.getSourceFiles().length,diagnostics:ds.length}));console.log('types',ds.length);
+const paths=names;const r=cp.spawnSync(process.execPath,['--max-old-space-size=512',deps+'/eslint/bin/eslint.js',...paths],{cwd:root,encoding:'utf8',timeout:120000,maxBuffer:256*1024});fs.writeFileSync('lint.log',(r.stdout||'')+(r.stderr||''));console.log('lint',r.status,r.signal,r.error?.message);
+
+```
+
+### run.log
+```
+{"mode":"before","test":"waitlist-launch-hold.test.ts","checked":206}
+{"mode":"before","test":"waitlist-launch-hold.test.ts","exit":1,"signal":null,"tail":"hort) launched for both\n  ok    (listing: a string cut short) nobody emailed while the read is unknown\n  FAIL  (listing: a string cut short) the launch stays queued, at the start, with its list\n        expected [1,0,false,2]\n        got      [0,0,false,2]\n  FAIL  (listing: a string cut short) the next run sends to both, once\n        expected [2,[\"dana@example.com\",\"hal@example.com\"]]\n        got      [0,[]]\n  ok    (listing: a string cut short) and then it is done and off the queue\n  ok    the product's listing is read from its own record\n  ok    (listing: a pipeline with no reply) launched for both\n  ok    (listing: a pipeline with no reply) nobody emailed while the read is unknown\n  FAIL  (listing: a pipeline with no reply) the launch stays queued, at the start, with its list\n        expected [1,0,false,2]\n        got      [0,0,false,2]\n  FAIL  (listing: a pipeline with no reply) the next run sends to both, once\n        expected [2,[\"dana@example.com\",\"hal@example.com\"]]\n        got      [0,[]]\n  ok    (listing: a pipeline with no reply) and then it is done and off the queue\n\nWhat is gone, exactly, is still finished as before\n  ok    (job gone) launched for both\n  ok    (job gone: Redis's own nil) off the queue, nobody emailed\n  ok    (store gone) launched for both\n  ok    (store gone: its handle is free) off the queue, nobody emailed\n  ok    the product's listing is read from its own record\n  ok    (listing gone) launched for both\n  ok    (listing gone) the product was removed\n  ok    (listing gone: the store no longer has it) off the queue, nobody emailed\n\n72 checks, 24 failing.\nM_BUDGET {\"pipelineCommands\":1180,\"memoryRun\":1372,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"waitlist-launch-hold.test.ts","checked":206}
+{"mode":"head","test":"waitlist-launch-hold.test.ts","exit":0,"signal":null,"tail":"e/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25294:3)\nsending a waitlist launch: its store or product was read in an unknown shape, so it waits UnknownReplyError: Redis answered a waitlist launch's store or product in an unknown shape\n    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25071:114)\n    at async holds (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25273:21)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25294:3)\nsending a waitlist launch: its store or product was read in an unknown shape, so it waits UnknownReplyError: Redis answered a waitlist launch's store or product in an unknown shape\n    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25071:114)\n    at async holds (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25273:21)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25294:3)\nsending a waitlist launch: its store or product was read in an unknown shape, so it waits UnknownReplyError: Redis answered a waitlist launch's store or product in an unknown shape\n    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25071:114)\n    at async holds (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25273:21)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25294:3)\n"}
+{"mode":"head","test":"waitlist-unknown-reads.test.ts","checked":206}
+{"mode":"head","test":"waitlist-unknown-reads.test.ts","exit":0,"signal":null,"tail":"ckDispatch\":4,\"exceeded\":false}\nsending a waitlist launch: its places were read in an unknown shape, so the batch waits UnknownReplyError: Redis answered a launch batch's waitlist places in an unknown shape\n    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-unknown-reads.test.ts.cjs:25048:114)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-unknown-reads.test.ts.cjs:25217:19)\nsending a waitlist launch: its places were read in an unknown shape, so the batch waits UnknownReplyError: Redis answered a launch batch's waitlist places in an unknown shape\n    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-unknown-reads.test.ts.cjs:25048:114)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-unknown-reads.test.ts.cjs:25217:19)\nsending a waitlist launch: its places were read in an unknown shape, so the batch waits UnknownReplyError: Redis answered a launch batch's waitlist places in an unknown shape\n    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-unknown-reads.test.ts.cjs:25048:114)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-unknown-reads.test.ts.cjs:25217:19)\nsending a waitlist launch: its places were read in an unknown shape, so the batch waits UnknownReplyError: Redis answered a launch batch's waitlist places in an unknown shape\n    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-unknown-reads.test.ts.cjs:25048:114)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-unknown-reads.test.ts.cjs:25217:19)\n"}
+{"mode":"head","test":"waitlist.test.ts","checked":206}
+{"mode":"head","test":"waitlist.test.ts","exit":0,"signal":null,"tail":"\nOnly a product coming soon\n  ok    not before it is marked\n  ok    marked\n  ok    an address that is not one\n\nJoining, and confirming\n  ok    Dana joins\n  ok    an email with a button to confirm\n  ok    it says no other email comes unless the box was checked\n  ok    not counted until confirmed\n  ok    the button counts it\n  ok    pressed twice, still one\n  ok    confirmed\n  ok    without the box, not on the creator's list\n  ok    Hal joins and asks to hear more\n  ok    on the creator's list, as he asked\n  ok    Sam joins and never confirms\n  ok    Kim joins, confirms, then leaves\n\nToo many at once\n  ok    the same address, a sixth time in an hour\n\nLaunching\n  ok    a postal address is asked for when anyone will be emailed\n  ok    and nothing changed\n  ok    launched, for everyone confirmed then\n  ok    on sale at once\n  ok    Kim leaves before it goes out\n  ok    a coming-soon sign-up is refused now\n  ok    one batch, to the confirmed who stayed\n  ok    its subject\n  ok    its link and price\n  ok    the note\n  ok    the postal address\n  ok    a one-click way out\n  ok    never to Sam, who did not confirm\n  ok    run again, nothing more\n  ok    the addresses are gone, the count stays\n\nThe words\n  ok    without a price or note\n\n32 checks, all passing.\nM_BUDGET {\"pipelineCommands\":306,\"memoryRun\":346,\"httpMockDispatch\":10,\"exceeded\":false}\n"}
+{"mode":"head","test":"waitlist-tokens.test.ts","checked":13}
+{"mode":"head","test":"waitlist-tokens.test.ts","exit":0,"signal":null,"tail":"haracter (0.21942ms)\n✔ creator grant is byte-bounded (0.153156ms)\n✔ creator grant returns only validated routing data (0.189089ms)\n✔ creator grant rejects conflicting duplicate s (0.121092ms)\n✔ creator grant rejects conflicting duplicate h (0.054828ms)\n✔ creator grant rejects conflicting duplicate p (0.102051ms)\n✔ creator grant rejects conflicting duplicate e (0.068257ms)\n✔ creator grant rejects conflicting duplicate k (0.065891ms)\n✔ creator grant rejects an escaped duplicate routing member (0.088617ms)\n✔ fresh opaque tokens do not carry an email or a reversible Redis key (0.747543ms)\n✔ platform and creator grants cannot cross confirmation or leave flows (0.398089ms)\n✔ platform grant validation rejects expiry, future issuance, unbounded lifetime and wrong identities (0.539853ms)\n✔ malformed or oversized platform records and unknown clocks fail closed (0.206118ms)\n✔ platform grants return only routing data and never imply consent or consumption (0.32618ms)\n✔ platform grant rejects conflicting duplicate scope (0.10967ms)\n✔ platform grant rejects conflicting duplicate version (0.101507ms)\n✔ platform grant rejects conflicting duplicate entryId (0.054149ms)\n✔ platform grant rejects conflicting duplicate generation (0.046897ms)\n✔ platform grant rejects conflicting duplicate k (0.055875ms)\n✔ platform grant rejects conflicting duplicate issuedAt (0.056605ms)\n✔ platform grant rejects conflicting duplicate expiresAt (0.051338ms)\n✔ platform grant rejects an escaped duplicate routing member (0.197063ms)\nM_BUDGET {\"pipelineCommands\":0,\"memoryRun\":0,\"httpMockDispatch\":0,\"exceeded\":false}\nℹ tests 32\nℹ suites 0\nℹ pass 32\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 19.17868\n"}
+✘ [ERROR] Could not resolve "./tests/waitlist-delivery-copy.test.ts"
+
+    m-bootstrap.ts:1:829:
+      1 │ ...cess.exitCode=1});import('./tests/waitlist-delivery-copy.test.ts');
+        ╵                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1752
+  let error = new Error(text);
+              ^
+
+Error: Build failed with 1 error:
+m-bootstrap.ts:1:829: ERROR: Could not resolve "./tests/waitlist-delivery-copy.test.ts"
+    at failureErrorWithLog (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1752:15)
+    at /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1211:25
+    at /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1163:52
+    at buildResponseToResult (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1209:7)
+    at /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1236:16
+    at responseCallbacks.<computed> (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:886:9)
+    at handleIncomingPacket (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:941:12)
+    at Socket.readFromStdout (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:864:7)
+    at Socket.emit (node:events:514:28)
+    at addChunk (node:internal/streams/readable:569:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+
+Node.js v24.22.1
+
+```
+
+### linked.log
+```
+{"mode":"head","test":"waitlist-delivery-copy.test.ts","checked":12}
+{"mode":"head","test":"waitlist-delivery-copy.test.ts","exit":0,"signal":null,"tail":"\nAll seven accepted-request pages avoid an inbox deadline\n  ok    en: complete confirmation status\n  ok    en: keeps the store and spam guidance\n  ok    en: has no unresolved interpolation\n  ok    es: complete confirmation status\n  ok    es: keeps the store and spam guidance\n  ok    es: has no unresolved interpolation\n  ok    fr: complete confirmation status\n  ok    fr: keeps the store and spam guidance\n  ok    fr: has no unresolved interpolation\n  ok    de: complete confirmation status\n  ok    de: keeps the store and spam guidance\n  ok    de: has no unresolved interpolation\n  ok    it: complete confirmation status\n  ok    it: keeps the store and spam guidance\n  ok    it: has no unresolved interpolation\n  ok    nl: complete confirmation status\n  ok    nl: keeps the store and spam guidance\n  ok    nl: has no unresolved interpolation\n  ok    pt: complete confirmation status\n  ok    pt: keeps the store and spam guidance\n  ok    pt: has no unresolved interpolation\n\n21 checks, all passing.\nM_BUDGET {\"pipelineCommands\":0,\"memoryRun\":0,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"person-copy.test.ts","checked":469}
+{"mode":"head","test":"person-copy.test.ts","exit":0,"signal":null,"tail":"\nEvery module the erasure reaches is said\n  ok    each eraser's module has a line in the copy's plan\n  ok    and so does each module that keeps something on purpose\n  ok    and no line names a module that keeps nothing about people\n  ok    each module the copy reads has its reader\n  ok    each line says what it is, in words\n  ok    nothing is pending: the copy is complete\n  ok    no page gives it out yet (its door is the next unit)\n  ok    a task about them, given to a teammate and done\n\nThe copy\n  ok    only reads: nothing in the database changed\n  ok    the conversation is not marked read\n  ok    for this person and store, with the day it was made\n  ok    their place on the list\n  ok    the team's note about them, without who wrote it\n  ok    the deal with them\n  ok    the team's task about them: its words, date, done and when\n  ok    their conversation, both sides, said as you and the store\n  ok    a teammate's address is nowhere in it\n  ok    nor anybody else's\n  ok    what is held only as marks is said in words\n\nNobody's copy for an address the store does not know\n  ok    empty\n\n20 checks, all passing.\nM_BUDGET {\"pipelineCommands\":144,\"memoryRun\":152,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+
+```
+
+### base.log
+```
+{"mode":"base","test":"waitlist-unknown-reads.test.ts","checked":206}
+{"mode":"base","test":"waitlist-unknown-reads.test.ts","exit":1,"signal":null,"tail":"place short) nobody emailed while the batch is unknown\n        expected [0,0]\n        got      [1,1]\n  FAIL  (one place short) nobody passed over: the job waits at the start, the list is kept\n        expected [0,false,2]\n        got      [2,true,0]\n  FAIL  (one place short) the next run sends to both, once\n        expected [2,[\"dana@example.com\",\"hal@example.com\"]]\n        got      [0,[\"dana@example.com\"]]\n  ok    (a place that is a number) launched for both\n  FAIL  (a place that is a number) nobody emailed while the batch is unknown\n        expected [0,0]\n        got      [1,1]\n  FAIL  (a place that is a number) nobody passed over: the job waits at the start, the list is kept\n        expected [0,false,2]\n        got      [2,true,0]\n  FAIL  (a place that is a number) the next run sends to both, once\n        expected [2,[\"dana@example.com\",\"hal@example.com\"]]\n        got      [0,[\"dana@example.com\"]]\n\nThe copy of a person's data: an unknown read is never 'on no waitlist'\n  ok    read as it is, the place is in the copy\n  FAIL  (no reply at all) the copy says it could not be read\n        expected \"could not be read\"\n        got      \"read: 0 place(s)\"\n  FAIL  (a number) the copy says it could not be read\n        expected \"could not be read\"\n        got      \"read: 0 place(s)\"\n  FAIL  (a list) the copy says it could not be read\n        expected \"could not be read\"\n        got      \"read: 0 place(s)\"\n  ok    a confirmed none (null) is still none\n  FAIL  a reply short for the products asked about is unknown\n        expected \"could not be read\"\n        got      \"read\"\n\n22 checks, 14 failing.\nM_BUDGET {\"pipelineCommands\":197,\"memoryRun\":234,\"httpMockDispatch\":2,\"exceeded\":false}\n"}
+
+```
+
+### verify.log
+```
+types 0
+lint 0 null undefined
+
+```
+
+### types.log
+```
+{"roots":3,"sources":739,"diagnostics":0}
+```
+
+### lint.log
+```
+
+```
+
+### scanner.log
+```
+Public data check: 3980 tracked files; 0 file(s) require correction.
+
+```
+
+### verified.json
+```
+{"verified": 3980, "mismatch": [], "unrecovered": 344}
+```
+
+### FULL base-waitlist-unknown-reads.test.ts.cjs.log
+```
+
+The launch email: an unknown read of the batch never skips anyone
+  ok    (no reply at all) launched for both
+  ok    (no reply at all) nobody emailed while the batch is unknown
+  FAIL  (no reply at all) nobody passed over: the job waits at the start, the list is kept
+        expected [0,false,2]
+        got      [2,true,0]
+  FAIL  (no reply at all) the next run sends to both, once
+        expected [2,["dana@example.com","hal@example.com"]]
+        got      [0,[]]
+  ok    (not a list) launched for both
+  ok    (not a list) nobody emailed while the batch is unknown
+  FAIL  (not a list) nobody passed over: the job waits at the start, the list is kept
+        expected [0,false,2]
+        got      [2,true,0]
+  FAIL  (not a list) the next run sends to both, once
+        expected [2,["dana@example.com","hal@example.com"]]
+        got      [0,[]]
+  ok    (one place short) launched for both
+  FAIL  (one place short) nobody emailed while the batch is unknown
+        expected [0,0]
+        got      [1,1]
+  FAIL  (one place short) nobody passed over: the job waits at the start, the list is kept
+        expected [0,false,2]
+        got      [2,true,0]
+  FAIL  (one place short) the next run sends to both, once
+        expected [2,["dana@example.com","hal@example.com"]]
+        got      [0,["dana@example.com"]]
+  ok    (a place that is a number) launched for both
+  FAIL  (a place that is a number) nobody emailed while the batch is unknown
+        expected [0,0]
+        got      [1,1]
+  FAIL  (a place that is a number) nobody passed over: the job waits at the start, the list is kept
+        expected [0,false,2]
+        got      [2,true,0]
+  FAIL  (a place that is a number) the next run sends to both, once
+        expected [2,["dana@example.com","hal@example.com"]]
+        got      [0,["dana@example.com"]]
+
+The copy of a person's data: an unknown read is never 'on no waitlist'
+  ok    read as it is, the place is in the copy
+  FAIL  (no reply at all) the copy says it could not be read
+        expected "could not be read"
+        got      "read: 0 place(s)"
+  FAIL  (a number) the copy says it could not be read
+        expected "could not be read"
+        got      "read: 0 place(s)"
+  FAIL  (a list) the copy says it could not be read
+        expected "could not be read"
+        got      "read: 0 place(s)"
+  ok    a confirmed none (null) is still none
+  FAIL  a reply short for the products asked about is unknown
+        expected "could not be read"
+        got      "read"
+
+22 checks, 14 failing.
+M_BUDGET {"pipelineCommands":197,"memoryRun":234,"httpMockDispatch":2,"exceeded":false}
+
+```
+
+### FULL before-waitlist-launch-hold.test.ts.cjs.log
+```
+
+The job's own read in another shape: the launch waits
+  ok    (job: no reply in its slot) launched for both
+  ok    (job: no reply in its slot) nobody emailed while the read is unknown
+  FAIL  (job: no reply in its slot) the launch stays queued, at the start, with its list
+        expected [1,0,false,2]
+        got      [0,0,false,2]
+  FAIL  (job: no reply in its slot) the next run sends to both, once
+        expected [2,["dana@example.com","hal@example.com"]]
+        got      [0,[]]
+  ok    (job: no reply in its slot) and then it is done and off the queue
+  ok    (job: a number) launched for both
+  ok    (job: a number) nobody emailed while the read is unknown
+  FAIL  (job: a number) the launch stays queued, at the start, with its list
+        expected [1,0,false,2]
+        got      [0,0,false,2]
+  FAIL  (job: a number) the next run sends to both, once
+        expected [2,["dana@example.com","hal@example.com"]]
+        got      [0,[]]
+  ok    (job: a number) and then it is done and off the queue
+  ok    (job: a string cut short) launched for both
+  ok    (job: a string cut short) nobody emailed while the read is unknown
+  FAIL  (job: a string cut short) the launch stays queued, at the start, with its list
+        expected [1,0,false,2]
+        got      [0,0,false,2]
+  FAIL  (job: a string cut short) the next run sends to both, once
+        expected [2,["dana@example.com","hal@example.com"]]
+        got      [0,[]]
+  ok    (job: a string cut short) and then it is done and off the queue
+  ok    (job: a pipeline with no reply) launched for both
+  ok    (job: a pipeline with no reply) nobody emailed while the read is unknown
+  FAIL  (job: a pipeline with no reply) the launch stays queued, at the start, with its list
+        expected [1,0,false,2]
+        got      [0,0,false,2]
+  FAIL  (job: a pipeline with no reply) the next run sends to both, once
+        expected [2,["dana@example.com","hal@example.com"]]
+        got      [0,[]]
+  ok    (job: a pipeline with no reply) and then it is done and off the queue
+
+The store's read in another shape: the launch waits
+  ok    (store: no reply in its slot) launched for both
+  ok    (store: no reply in its slot) nobody emailed while the read is unknown
+  FAIL  (store: no reply in its slot) the launch stays queued, at the start, with its list
+        expected [1,0,false,2]
+        got      [0,0,false,2]
+  FAIL  (store: no reply in its slot) the next run sends to both, once
+        expected [2,["dana@example.com","hal@example.com"]]
+        got      [0,[]]
+  ok    (store: no reply in its slot) and then it is done and off the queue
+  ok    (store: a number) launched for both
+  ok    (store: a number) nobody emailed while the read is unknown
+  FAIL  (store: a number) the launch stays queued, at the start, with its list
+        expected [1,0,false,2]
+        got      [0,0,false,2]
+  FAIL  (store: a number) the next run sends to both, once
+        expected [2,["dana@example.com","hal@example.com"]]
+        got      [0,[]]
+  ok    (store: a number) and then it is done and off the queue
+  ok    (store: a string cut short) launched for both
+  ok    (store: a string cut short) nobody emailed while the read is unknown
+  FAIL  (store: a string cut short) the launch stays queued, at the start, with its list
+        expected [1,0,false,2]
+        got      [0,0,false,2]
+  FAIL  (store: a string cut short) the next run sends to both, once
+        expected [2,["dana@example.com","hal@example.com"]]
+        got      [0,[]]
+  ok    (store: a string cut short) and then it is done and off the queue
+  ok    (store: a pipeline with no reply) launched for both
+  ok    (store: a pipeline with no reply) nobody emailed while the read is unknown
+  FAIL  (store: a pipeline with no reply) the launch stays queued, at the start, with its list
+        expected [1,0,false,2]
+        got      [0,0,false,2]
+  FAIL  (store: a pipeline with no reply) the next run sends to both, once
+        expected [2,["dana@example.com","hal@example.com"]]
+        got      [0,[]]
+  ok    (store: a pipeline with no reply) and then it is done and off the queue
+
+The listing's read in another shape: the launch waits
+  ok    the product's listing is read from its own record
+  ok    (listing: no reply in its slot) launched for both
+  ok    (listing: no reply in its slot) nobody emailed while the read is unknown
+  FAIL  (listing: no reply in its slot) the launch stays queued, at the start, with its list
+        expected [1,0,false,2]
+        got      [0,0,false,2]
+  FAIL  (listing: no reply in its slot) the next run sends to both, once
+        expected [2,["dana@example.com","hal@example.com"]]
+        got      [0,[]]
+  ok    (listing: no reply in its slot) and then it is done and off the queue
+  ok    the product's listing is read from its own record
+  ok    (listing: a number) launched for both
+  ok    (listing: a number) nobody emailed while the read is unknown
+  FAIL  (listing: a number) the launch stays queued, at the start, with its list
+        expected [1,0,false,2]
+        got      [0,0,false,2]
+  FAIL  (listing: a number) the next run sends to both, once
+        expected [2,["dana@example.com","hal@example.com"]]
+        got      [0,[]]
+  ok    (listing: a number) and then it is done and off the queue
+  ok    the product's listing is read from its own record
+  ok    (listing: a string cut short) launched for both
+  ok    (listing: a string cut short) nobody emailed while the read is unknown
+  FAIL  (listing: a string cut short) the launch stays queued, at the start, with its list
+        expected [1,0,false,2]
+        got      [0,0,false,2]
+  FAIL  (listing: a string cut short) the next run sends to both, once
+        expected [2,["dana@example.com","hal@example.com"]]
+        got      [0,[]]
+  ok    (listing: a string cut short) and then it is done and off the queue
+  ok    the product's listing is read from its own record
+  ok    (listing: a pipeline with no reply) launched for both
+  ok    (listing: a pipeline with no reply) nobody emailed while the read is unknown
+  FAIL  (listing: a pipeline with no reply) the launch stays queued, at the start, with its list
+        expected [1,0,false,2]
+        got      [0,0,false,2]
+  FAIL  (listing: a pipeline with no reply) the next run sends to both, once
+        expected [2,["dana@example.com","hal@example.com"]]
+        got      [0,[]]
+  ok    (listing: a pipeline with no reply) and then it is done and off the queue
+
+What is gone, exactly, is still finished as before
+  ok    (job gone) launched for both
+  ok    (job gone: Redis's own nil) off the queue, nobody emailed
+  ok    (store gone) launched for both
+  ok    (store gone: its handle is free) off the queue, nobody emailed
+  ok    the product's listing is read from its own record
+  ok    (listing gone) launched for both
+  ok    (listing gone) the product was removed
+  ok    (listing gone: the store no longer has it) off the queue, nobody emailed
+
+72 checks, 24 failing.
+M_BUDGET {"pipelineCommands":1180,"memoryRun":1372,"httpMockDispatch":0,"exceeded":false}
+
+```
+
+### FULL head-person-copy.test.ts.cjs.log
+```
+
+Every module the erasure reaches is said
+  ok    each eraser's module has a line in the copy's plan
+  ok    and so does each module that keeps something on purpose
+  ok    and no line names a module that keeps nothing about people
+  ok    each module the copy reads has its reader
+  ok    each line says what it is, in words
+  ok    nothing is pending: the copy is complete
+  ok    no page gives it out yet (its door is the next unit)
+  ok    a task about them, given to a teammate and done
+
+The copy
+  ok    only reads: nothing in the database changed
+  ok    the conversation is not marked read
+  ok    for this person and store, with the day it was made
+  ok    their place on the list
+  ok    the team's note about them, without who wrote it
+  ok    the deal with them
+  ok    the team's task about them: its words, date, done and when
+  ok    their conversation, both sides, said as you and the store
+  ok    a teammate's address is nowhere in it
+  ok    nor anybody else's
+  ok    what is held only as marks is said in words
+
+Nobody's copy for an address the store does not know
+  ok    empty
+
+20 checks, all passing.
+M_BUDGET {"pipelineCommands":144,"memoryRun":152,"httpMockDispatch":0,"exceeded":false}
+
+```
+
+### FULL head-waitlist-delivery-copy.test.ts.cjs.log
+```
+
+All seven accepted-request pages avoid an inbox deadline
+  ok    en: complete confirmation status
+  ok    en: keeps the store and spam guidance
+  ok    en: has no unresolved interpolation
+  ok    es: complete confirmation status
+  ok    es: keeps the store and spam guidance
+  ok    es: has no unresolved interpolation
+  ok    fr: complete confirmation status
+  ok    fr: keeps the store and spam guidance
+  ok    fr: has no unresolved interpolation
+  ok    de: complete confirmation status
+  ok    de: keeps the store and spam guidance
+  ok    de: has no unresolved interpolation
+  ok    it: complete confirmation status
+  ok    it: keeps the store and spam guidance
+  ok    it: has no unresolved interpolation
+  ok    nl: complete confirmation status
+  ok    nl: keeps the store and spam guidance
+  ok    nl: has no unresolved interpolation
+  ok    pt: complete confirmation status
+  ok    pt: keeps the store and spam guidance
+  ok    pt: has no unresolved interpolation
+
+21 checks, all passing.
+M_BUDGET {"pipelineCommands":0,"memoryRun":0,"httpMockDispatch":0,"exceeded":false}
+
+```
+
+### FULL head-waitlist-launch-hold.test.ts.cjs.log
+```
+
+The job's own read in another shape: the launch waits
+  ok    (job: no reply in its slot) launched for both
+  ok    (job: no reply in its slot) nobody emailed while the read is unknown
+  ok    (job: no reply in its slot) the launch stays queued, at the start, with its list
+  ok    (job: no reply in its slot) the next run sends to both, once
+  ok    (job: no reply in its slot) and then it is done and off the queue
+  ok    (job: a number) launched for both
+  ok    (job: a number) nobody emailed while the read is unknown
+  ok    (job: a number) the launch stays queued, at the start, with its list
+  ok    (job: a number) the next run sends to both, once
+  ok    (job: a number) and then it is done and off the queue
+  ok    (job: a string cut short) launched for both
+  ok    (job: a string cut short) nobody emailed while the read is unknown
+  ok    (job: a string cut short) the launch stays queued, at the start, with its list
+  ok    (job: a string cut short) the next run sends to both, once
+  ok    (job: a string cut short) and then it is done and off the queue
+  ok    (job: a pipeline with no reply) launched for both
+  ok    (job: a pipeline with no reply) nobody emailed while the read is unknown
+  ok    (job: a pipeline with no reply) the launch stays queued, at the start, with its list
+  ok    (job: a pipeline with no reply) the next run sends to both, once
+  ok    (job: a pipeline with no reply) and then it is done and off the queue
+
+The store's read in another shape: the launch waits
+  ok    (store: no reply in its slot) launched for both
+  ok    (store: no reply in its slot) nobody emailed while the read is unknown
+  ok    (store: no reply in its slot) the launch stays queued, at the start, with its list
+  ok    (store: no reply in its slot) the next run sends to both, once
+  ok    (store: no reply in its slot) and then it is done and off the queue
+  ok    (store: a number) launched for both
+  ok    (store: a number) nobody emailed while the read is unknown
+  ok    (store: a number) the launch stays queued, at the start, with its list
+  ok    (store: a number) the next run sends to both, once
+  ok    (store: a number) and then it is done and off the queue
+  ok    (store: a string cut short) launched for both
+  ok    (store: a string cut short) nobody emailed while the read is unknown
+  ok    (store: a string cut short) the launch stays queued, at the start, with its list
+  ok    (store: a string cut short) the next run sends to both, once
+  ok    (store: a string cut short) and then it is done and off the queue
+  ok    (store: a pipeline with no reply) launched for both
+  ok    (store: a pipeline with no reply) nobody emailed while the read is unknown
+  ok    (store: a pipeline with no reply) the launch stays queued, at the start, with its list
+  ok    (store: a pipeline with no reply) the next run sends to both, once
+  ok    (store: a pipeline with no reply) and then it is done and off the queue
+
+The listing's read in another shape: the launch waits
+  ok    the product's listing is read from its own record
+  ok    (listing: no reply in its slot) launched for both
+  ok    (listing: no reply in its slot) nobody emailed while the read is unknown
+  ok    (listing: no reply in its slot) the launch stays queued, at the start, with its list
+  ok    (listing: no reply in its slot) the next run sends to both, once
+  ok    (listing: no reply in its slot) and then it is done and off the queue
+  ok    the product's listing is read from its own record
+  ok    (listing: a number) launched for both
+  ok    (listing: a number) nobody emailed while the read is unknown
+  ok    (listing: a number) the launch stays queued, at the start, with its list
+  ok    (listing: a number) the next run sends to both, once
+  ok    (listing: a number) and then it is done and off the queue
+  ok    the product's listing is read from its own record
+  ok    (listing: a string cut short) launched for both
+  ok    (listing: a string cut short) nobody emailed while the read is unknown
+  ok    (listing: a string cut short) the launch stays queued, at the start, with its list
+  ok    (listing: a string cut short) the next run sends to both, once
+  ok    (listing: a string cut short) and then it is done and off the queue
+  ok    the product's listing is read from its own record
+  ok    (listing: a pipeline with no reply) launched for both
+  ok    (listing: a pipeline with no reply) nobody emailed while the read is unknown
+  ok    (listing: a pipeline with no reply) the launch stays queued, at the start, with its list
+  ok    (listing: a pipeline with no reply) the next run sends to both, once
+  ok    (listing: a pipeline with no reply) and then it is done and off the queue
+
+What is gone, exactly, is still finished as before
+  ok    (job gone) launched for both
+  ok    (job gone: Redis's own nil) off the queue, nobody emailed
+  ok    (store gone) launched for both
+  ok    (store gone: its handle is free) off the queue, nobody emailed
+  ok    the product's listing is read from its own record
+  ok    (listing gone) launched for both
+  ok    (listing gone) the product was removed
+  ok    (listing gone: the store no longer has it) off the queue, nobody emailed
+
+72 checks, all passing.
+M_BUDGET {"pipelineCommands":1377,"memoryRun":1606,"httpMockDispatch":12,"exceeded":false}
+sending a waitlist launch: its job was read in an unknown shape, so it waits UnknownReplyError: Redis answered a waitlist launch's job in an unknown shape
+    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25058:106)
+    at async holds (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25273:21)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25284:3)
+sending a waitlist launch: its job was read in an unknown shape, so it waits UnknownReplyError: Redis answered a waitlist launch's job in an unknown shape
+    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25058:106)
+    at async holds (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25273:21)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25284:3)
+sending a waitlist launch: its job was read in an unknown shape, so it waits UnknownReplyError: Redis answered a waitlist launch's job in an unknown shape
+    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25058:106)
+    at async holds (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25273:21)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25284:3)
+sending a waitlist launch: its job was read in an unknown shape, so it waits UnknownReplyError: Redis answered a waitlist launch's job in an unknown shape
+    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25058:106)
+    at async holds (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25273:21)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25284:3)
+sending a waitlist launch: its store or product was read in an unknown shape, so it waits UnknownReplyError: Redis answered a waitlist launch's store or product in an unknown shape
+    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25071:114)
+    at async holds (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25273:21)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25286:3)
+sending a waitlist launch: its store or product was read in an unknown shape, so it waits UnknownReplyError: Redis answered a waitlist launch's store or product in an unknown shape
+    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25071:114)
+    at async holds (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25273:21)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25286:3)
+sending a waitlist launch: its store or product was read in an unknown shape, so it waits UnknownReplyError: Redis answered a waitlist launch's store or product in an unknown shape
+    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25071:114)
+    at async holds (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25273:21)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25286:3)
+sending a waitlist launch: its store or product was read in an unknown shape, so it waits UnknownReplyError: Redis answered a waitlist launch's store or product in an unknown shape
+    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25071:114)
+    at async holds (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25273:21)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25286:3)
+sending a waitlist launch: its store or product was read in an unknown shape, so it waits UnknownReplyError: Redis answered a waitlist launch's store or product in an unknown shape
+    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25071:114)
+    at async holds (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25273:21)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25294:3)
+sending a waitlist launch: its store or product was read in an unknown shape, so it waits UnknownReplyError: Redis answered a waitlist launch's store or product in an unknown shape
+    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25071:114)
+    at async holds (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25273:21)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25294:3)
+sending a waitlist launch: its store or product was read in an unknown shape, so it waits UnknownReplyError: Redis answered a waitlist launch's store or product in an unknown shape
+    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25071:114)
+    at async holds (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25273:21)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25294:3)
+sending a waitlist launch: its store or product was read in an unknown shape, so it waits UnknownReplyError: Redis answered a waitlist launch's store or product in an unknown shape
+    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25071:114)
+    at async holds (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25273:21)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-launch-hold.test.ts.cjs:25294:3)
+
+```
+
+### FULL head-waitlist-tokens.test.ts.cjs.log
+```
+✔ legacy store token identities and grants remain compatible after extraction (4.177687ms)
+✔ creator grant rejects missing store id (0.248309ms)
+✔ creator grant rejects missing handle (0.150825ms)
+✔ creator grant rejects missing product (0.195876ms)
+✔ creator grant rejects missing address (0.114956ms)
+✔ creator grant rejects non-string store id (0.136767ms)
+✔ creator grant rejects non-string handle (0.132911ms)
+✔ creator grant rejects non-string product (0.107201ms)
+✔ creator grant rejects non-string address (0.180597ms)
+✔ creator grant rejects empty routing field (0.315214ms)
+✔ creator grant rejects control character (0.21942ms)
+✔ creator grant is byte-bounded (0.153156ms)
+✔ creator grant returns only validated routing data (0.189089ms)
+✔ creator grant rejects conflicting duplicate s (0.121092ms)
+✔ creator grant rejects conflicting duplicate h (0.054828ms)
+✔ creator grant rejects conflicting duplicate p (0.102051ms)
+✔ creator grant rejects conflicting duplicate e (0.068257ms)
+✔ creator grant rejects conflicting duplicate k (0.065891ms)
+✔ creator grant rejects an escaped duplicate routing member (0.088617ms)
+✔ fresh opaque tokens do not carry an email or a reversible Redis key (0.747543ms)
+✔ platform and creator grants cannot cross confirmation or leave flows (0.398089ms)
+✔ platform grant validation rejects expiry, future issuance, unbounded lifetime and wrong identities (0.539853ms)
+✔ malformed or oversized platform records and unknown clocks fail closed (0.206118ms)
+✔ platform grants return only routing data and never imply consent or consumption (0.32618ms)
+✔ platform grant rejects conflicting duplicate scope (0.10967ms)
+✔ platform grant rejects conflicting duplicate version (0.101507ms)
+✔ platform grant rejects conflicting duplicate entryId (0.054149ms)
+✔ platform grant rejects conflicting duplicate generation (0.046897ms)
+✔ platform grant rejects conflicting duplicate k (0.055875ms)
+✔ platform grant rejects conflicting duplicate issuedAt (0.056605ms)
+✔ platform grant rejects conflicting duplicate expiresAt (0.051338ms)
+✔ platform grant rejects an escaped duplicate routing member (0.197063ms)
+M_BUDGET {"pipelineCommands":0,"memoryRun":0,"httpMockDispatch":0,"exceeded":false}
+ℹ tests 32
+ℹ suites 0
+ℹ pass 32
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19.17868
+
+```
+
+### FULL head-waitlist-unknown-reads.test.ts.cjs.log
+```
+
+The launch email: an unknown read of the batch never skips anyone
+  ok    (no reply at all) launched for both
+  ok    (no reply at all) nobody emailed while the batch is unknown
+  ok    (no reply at all) nobody passed over: the job waits at the start, the list is kept
+  ok    (no reply at all) the next run sends to both, once
+  ok    (not a list) launched for both
+  ok    (not a list) nobody emailed while the batch is unknown
+  ok    (not a list) nobody passed over: the job waits at the start, the list is kept
+  ok    (not a list) the next run sends to both, once
+  ok    (one place short) launched for both
+  ok    (one place short) nobody emailed while the batch is unknown
+  ok    (one place short) nobody passed over: the job waits at the start, the list is kept
+  ok    (one place short) the next run sends to both, once
+  ok    (a place that is a number) launched for both
+  ok    (a place that is a number) nobody emailed while the batch is unknown
+  ok    (a place that is a number) nobody passed over: the job waits at the start, the list is kept
+  ok    (a place that is a number) the next run sends to both, once
+
+The copy of a person's data: an unknown read is never 'on no waitlist'
+  ok    read as it is, the place is in the copy
+  ok    (no reply at all) the copy says it could not be read
+  ok    (a number) the copy says it could not be read
+  ok    (a list) the copy says it could not be read
+  ok    a confirmed none (null) is still none
+  ok    a reply short for the products asked about is unknown
+
+22 checks, all passing.
+M_BUDGET {"pipelineCommands":225,"memoryRun":268,"httpMockDispatch":4,"exceeded":false}
+sending a waitlist launch: its places were read in an unknown shape, so the batch waits UnknownReplyError: Redis answered a launch batch's waitlist places in an unknown shape
+    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-unknown-reads.test.ts.cjs:25048:114)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-unknown-reads.test.ts.cjs:25217:19)
+sending a waitlist launch: its places were read in an unknown shape, so the batch waits UnknownReplyError: Redis answered a launch batch's waitlist places in an unknown shape
+    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-unknown-reads.test.ts.cjs:25048:114)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-unknown-reads.test.ts.cjs:25217:19)
+sending a waitlist launch: its places were read in an unknown shape, so the batch waits UnknownReplyError: Redis answered a launch batch's waitlist places in an unknown shape
+    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-unknown-reads.test.ts.cjs:25048:114)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-unknown-reads.test.ts.cjs:25217:19)
+sending a waitlist launch: its places were read in an unknown shape, so the batch waits UnknownReplyError: Redis answered a launch batch's waitlist places in an unknown shape
+    at runLaunches (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-unknown-reads.test.ts.cjs:25048:114)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3126/logs/head-waitlist-unknown-reads.test.ts.cjs:25217:19)
+
+```
+
+### FULL head-waitlist.test.ts.cjs.log
+```
+
+Only a product coming soon
+  ok    not before it is marked
+  ok    marked
+  ok    an address that is not one
+
+Joining, and confirming
+  ok    Dana joins
+  ok    an email with a button to confirm
+  ok    it says no other email comes unless the box was checked
+  ok    not counted until confirmed
+  ok    the button counts it
+  ok    pressed twice, still one
+  ok    confirmed
+  ok    without the box, not on the creator's list
+  ok    Hal joins and asks to hear more
+  ok    on the creator's list, as he asked
+  ok    Sam joins and never confirms
+  ok    Kim joins, confirms, then leaves
+
+Too many at once
+  ok    the same address, a sixth time in an hour
+
+Launching
+  ok    a postal address is asked for when anyone will be emailed
+  ok    and nothing changed
+  ok    launched, for everyone confirmed then
+  ok    on sale at once
+  ok    Kim leaves before it goes out
+  ok    a coming-soon sign-up is refused now
+  ok    one batch, to the confirmed who stayed
+  ok    its subject
+  ok    its link and price
+  ok    the note
+  ok    the postal address
+  ok    a one-click way out
+  ok    never to Sam, who did not confirm
+  ok    run again, nothing more
+  ok    the addresses are gone, the count stays
+
+The words
+  ok    without a price or note
+
+32 checks, all passing.
+M_BUDGET {"pipelineCommands":306,"memoryRun":346,"httpMockDispatch":10,"exceeded":false}
+
+```
+

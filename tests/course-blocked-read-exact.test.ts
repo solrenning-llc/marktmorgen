@@ -16,6 +16,11 @@
  *     a pass that reads it, and no "a module opened" email goes to a removed
  *     student.
  *
+ * And the studio's Students table (app/studio/course/[product]/page.tsx), from
+ * the same studentsOf: an unknown blocked list is said as unknown, in words,
+ * never drawn as "not taken off" with a "Remove access" button that would act on
+ * a guess; a note above the table says why the buttons are not there.
+ *
  * Synthetic store, Stripe answered by a stand-in, no email leaves the test.
  */
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setStripeAccount, storeForEmail } from "@/lib/store";
@@ -25,6 +30,12 @@ import { readListing } from "@/lib/catalog";
 import type { Course } from "@/lib/course";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
+import * as editor from "@/components/course-editor";
+import { studentsOf } from "@/lib/learn";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_course_blocked_read_only";
 
@@ -161,6 +172,30 @@ async function main(): Promise<void> {
   commands.length = 0;
   await sweep();
   is("control: known not blocked, the module email is claimed", claimed("ana@example.com"), true);
+
+  part("Studio Students table: an unknown blocked list is said as unknown");
+  const access = (blocked: boolean | null): string => {
+    try {
+      const element = createElement(editor.StudentAccess as (p: { productId: string; email: string; blocked: boolean | null }) => ReturnType<typeof editor.StudentAccess>, { productId: "p1", email: "ana@example.com", blocked });
+      return renderToStaticMarkup(createElement(AppRouterContext.Provider, { value: { refresh() {}, push() {} } as never }, element));
+    } catch (error) {
+      return `threw: ${String(error)}`;
+    }
+  };
+  const unknownCell = access(null);
+  is("unknown: the cell says access is not known, in words", unknownCell.includes("Access not known"), true);
+  is("unknown: no button that would act on a guess", unknownCell.includes("<button"), false);
+  is("control: known removed, the button lets them back in", access(true).includes("Let back in"), true);
+  is("control: known not removed, the button removes access", access(false).includes("Remove access"), true);
+  const Note = (editor as Record<string, unknown>).StudentsBlockedUnknown as (() => ReturnType<typeof editor.StudentAccess>) | undefined;
+  const note = Note ? renderToStaticMarkup(createElement(Note)) : "";
+  is("the note says the list could not be read, that the buttons are hidden, and how to try again", [note.includes("could not check"), note.includes("buttons"), note.includes("Reload the page")], [true, true, true]);
+  const page = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
+  is("the page reads blockedKnown, draws the note on an unknown list, and hands the cell null", [page.includes("const { students, total, blockedKnown } = await studentsOf(course, 500);"), page.includes("{blockedKnown ? null : <StudentsBlockedUnknown />}"), page.includes("blocked={blockedKnown ? student.blocked : null}")], [true, true, true]);
+  blockedReply = { on: "SMEMBERS", value: null };
+  const read = await studentsOf(course, 500);
+  blockedReply = null;
+  is("studentsOf on an unknown list: blockedKnown false, so the page draws no guess", read.blockedKnown, false);
 
   done();
 }

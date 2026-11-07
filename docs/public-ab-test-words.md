@@ -1,9 +1,0 @@
-# Public A/B explanations follow the current rules
-
-538AB1 corrects the insights explanation, both page-test feature cards and Make version B help. A source audit also found the page coach's paid-product advice still selecting by checkouts; it now uses the same paid explanation. The shared text imports MIN_VIEWS,MIN_SALES,REFUND_DAYS andFALSE_WINNER from headline-test-rules. It distinguishes paid money per visitor, free sign-ups, daily-read decision validity, expected traffic split, Still running and the studio chance as information only. Paid figures remain gross payments; refund waiting does not falsely promise refund subtraction.
-
-No decision function, statistical constant, minimum, price or test counter changes. Existing editing instructions and manual choices remain. The source scan found no additional old fixed-threshold winner description in public blog/comparison/email code; privacy's count-of-checkouts disclosure describes collection, not a paid winner criterion, and is preserved.
-
-Synthetic assertions in the existing headline-test bundle check constant-derived figures, paid/free criteria, display-only chance and shared feature/help consumers. A recursive source guard scans app/lib/components for the old97.5%/95%confidence and checkout-based winner wording, excluding code comments. This is a text drift check, not statistical validation or accessibility certification. Full browser/public matrices and current-head CI are required before incorporation.
-
-No new provider call, read, tracking, email, storage allowance or package. Slightly more public copy has delivery/render costs within existing budgets; unknown total costs are not zero. MR/TX/FX275, all prices/rights/commission/opt-in and gates remain. No maker content or existing buyer language is rewritten. PLANS_ON_SALE=false;OPENING_REQUESTED=false. This separate source branch does not edit PR1216's pause worker or tests; queue position538 and current funded work remain.

@@ -1,7 +1,0 @@
-# Paid new host iCal admission cohort
-
-AB(a),24 October2026. addHostIcs now requires full Store and, after stats/sealing/URL validation, reserves the marked funded Store resource window before DNS/feed read or sealed configuration writes. The sole production caller already supplies full Store. Shared hostSync, booking writes, refunds, removeHostIcs and Google disconnect remain unchanged; recurring refresh and cross-store host cost attribution are unresolved retained obligations. This does not certify full calendar coverage.
-
-Synthetic persisted-Store regression: unmarked path reaches only an injected throwing resolver; funded path refuses without resolver/config mutation; removal remains available. All existing scheduling, Google stale/scope/failure, booking move/refund assertions remain. No real DNS/provider/calendar/account action. Full new-head CI required.
-
-Conditional50/200/500 observations at18 primary-only commands/no replica and PAYG USD0.20/100k: USD0.0018/0.0072/0.018 monthly and USD0.0216/0.0864/0.216 per12worstmonths,either interval. Identical retry17 commands; shared permanent resource field/JSON12288 request bound. Samples are not attempt ceilings. Auth, invalid/failed attempts, abuse, feed bytes, CPU, transfer, persistent configuration, shared host reads, global ceilings/reserve/topology unknown fail. Include100%LLC fixed costs and most onerous taxes. Existing prices, visible rights and identifiers preserved; actual reviews null/three coverages false/sales closed/no60% certification.

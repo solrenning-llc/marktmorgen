@@ -2056,6 +2056,7 @@ a.chip {
 .st-chat-mine {
   background: var(--st-accent-soft);
   color: var(--st-accent-text);
+  border: 1px solid var(--st-accent-text);
 }
 .st-chat-theirs {
   background: var(--st-bg);
@@ -4092,8 +4093,9 @@ a.rv-line:hover {
   border: 1px solid var(--st-line);
   padding: 0.6rem 0.85rem;
 }
+/* The reader's own bubble keeps an edge: the soft accent alone is barely apart from the card (1.4.11). */
 .cm-dm-mine {
-  border-color: transparent;
+  border-color: var(--st-accent-text);
   background: var(--st-accent-soft);
 }
 
@@ -5102,7 +5104,7 @@ html:has([data-product-editor]) {
 }
 /* Their words are capped by the box's own padding instead, so the box keeps the card's width (1.4.8). Out of the
    layer, to win over the padding the box sets for itself; the left padding stays what it was. */
-.st-measure .st-note {
+.st-measure p.st-note {
   padding-inline-end: max(1.25rem, calc(100% - 34ch - 1.25rem));
 }
 .st-measure p.rounded-2xl {

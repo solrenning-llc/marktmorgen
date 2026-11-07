@@ -4,7 +4,7 @@ import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { fromAnotherSite, limited, clientAddress } from "@/lib/request-guard";
 import { readOrder } from "@/lib/store-checkout";
-import { ordersGrant } from "@/lib/buyer-orders";
+import { readOrdersGrant } from "@/lib/buyer-orders";
 import { authorizeUrl, isDiscordConfigured, redirectUri } from "@/lib/discord";
 import { readServer, startTrip } from "@/lib/discord-store";
 import { storeKey } from "@/lib/learn";
@@ -36,12 +36,22 @@ export async function POST(request: NextRequest) {
   if (!isDiscordConfigured() || !store.sid || !(await readServer(storeKey(store)))) return page("off");
   if (!(await withinStore("discord-join", clientAddress(request), 20, 600, store, "buyer"))) return page("failed");
 
+  // "none" (no purchase with Discord access) only when that was read exactly (CX-123 rule 24). What could not be read
+  // just now is "failed" (nothing changed, try again); a purchases link that ran out goes to the orders page's own
+  // expired-link notice and its form for a new link, and an order past its window to that form, because the Discord
+  // page's "expired" speaks of its ten-minute way back. No read is added: the same GET and the same Stripe read.
+  const ordersPage = (status: string) => new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}/orders${status ? `?status=${status}` : ""}`, "Cache-Control": "no-store" } });
   let email: string | null = null;
   if (sessionId) {
     const order = await readOrder(store, sessionId);
+    if (order.state === "error" || order.state === "unavailable") return page("failed");
+    if (order.state === "expired") return ordersPage("");
     email = order.state === "paid" && !order.gift && !order.group ? order.email : null;
   } else if (token) {
-    email = await ordersGrant(store, token);
+    const grant = await readOrdersGrant(store, token);
+    if (grant.state === "unknown") return page("failed");
+    if (grant.state === "none") return ordersPage("expired");
+    email = grant.email;
   }
   if (!email) return page("none");
   const redirect = redirectUri(origin);

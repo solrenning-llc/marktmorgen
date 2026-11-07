@@ -157,7 +157,7 @@ export async function GET(request: NextRequest) {
   }
   // A membership that has ended hands nothing over any more.
   if (order.membership === "ended") return toRenew(request, store, order.product);
-  // A gift is its recipient's, opened from their own email (lib/gifts.ts).
+  // A gift is its recipient's, opened from their own purchases here (lib/gifts.ts).
   if (order.gift) return plain(403, say.gift);
   // Bought for several: each person opens it from their own place (lib/group-buy.ts).
   if (order.group) return plain(403, say.group);

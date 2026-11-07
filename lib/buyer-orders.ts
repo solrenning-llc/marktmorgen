@@ -1189,6 +1189,29 @@ function grantFrom(raw: string, account: string): string | null {
 }
 
 /**
+ * What a purchases link holds, in three states (CX-123 rule 24), read by
+ * ordersGrant itself (its one GET in its exact envelope; no second reading
+ * of the link): "granted" with the address; "none" when the read answered
+ * and grants nothing here (an exact null: the link ran out; or a record
+ * that is not this store's grant); "unknown" when Redis is not set up,
+ * refused, or did not answer in that GET's exact shape (UnknownReplyError).
+ * A caller says "unknown" as could not be checked, never as an expired link
+ * or as no purchase (app/api/store/discord/join/route.ts).
+ */
+export async function readOrdersGrant(store: Store, token: string): Promise<{ state: "granted"; email: string } | { state: "none" } | { state: "unknown" }> {
+  if (!ORDERS_TOKEN_PATTERN.test(token)) return { state: "none" };
+  if (!isRedisConfigured()) return { state: "unknown" };
+  let email: string | null;
+  try {
+    email = await ordersGrant(store, token);
+  } catch (error) {
+    console.error("reading a purchases link failed", error);
+    return { state: "unknown" };
+  }
+  return email ? { state: "granted", email } : { state: "none" };
+}
+
+/**
  * What a download asks for besides its purchase: a product of a bundle by its
  * id (`pid`), and a product ticked at checkout by its key (`item`). Or, to
  * show a bundle's products (bundleFor), which bundle: the one bought

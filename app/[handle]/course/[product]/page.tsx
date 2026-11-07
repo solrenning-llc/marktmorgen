@@ -31,6 +31,11 @@ import { noteIfOpened } from "@/lib/course-finish";
 import { exampleTitlesLeft } from "@/lib/course-templates";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
+import { CourseSurveyBox, CourseSurveySummary, type OwnerSurveyView } from "@/components/course-survey";
+import { readCourseAnswers, readMyAnswer, surveyAnswerCount } from "@/lib/course-survey";
+import { MAX_COURSE_ANSWERS, SURVEY_READ_SLACK, type SurveyAnswer, summarizeSurvey, surveyReadUnits } from "@/lib/course-survey-rules";
+import { countStudio } from "@/lib/studio-route";
+import type { Store } from "@/lib/store";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -51,6 +56,25 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
     title: coursesWords(language).metaCourse,
     robots: { index: false, follow: true },
   };
+}
+
+/**
+ * The answers to a course's survey as its store's owner asked to see them
+ * (285 [SX1]): the count paid from the studio's requests before it is read,
+ * then every answer at its largest paid before they are read, with room for a
+ * few that come in between; past that, nothing is read and the owner is told.
+ */
+async function ownerSurvey(store: Store, courseId: string): Promise<OwnerSurveyView> {
+  try {
+    if (!(await countStudio(store, null, 1)).ok) return { kind: "used" };
+    const count = await surveyAnswerCount(courseId);
+    const most = Math.min(MAX_COURSE_ANSWERS, count + SURVEY_READ_SLACK);
+    if (!(await countStudio(store, null, surveyReadUnits(most))).ok) return { kind: "used" };
+    const read = await readCourseAnswers(courseId, most);
+    return read.ok ? { kind: "shown", summary: summarizeSurvey(read.answers) } : { kind: "changed" };
+  } catch {
+    return { kind: "failed" };
+  }
 }
 
 /** The course's front door: its outline, and for a student, where they are. */
@@ -105,6 +129,15 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const finished = studying && hasFinished(course, done, passed);
   const mustPass = requiredQuizLessons(course).length;
   const certNotice = w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME)[typeof query.cert === "string" ? query.cert : ""] ?? null;
+  // The survey when finishing (285 [SX1]): a student's own answer, read only for them once they finished; unreadable is said, never taken for none.
+  const myAnswer: SurveyAnswer | null | "unread" = await (finished ? readMyAnswer(course.id, who) : Promise.resolve(null)).catch(() => "unread" as const);
+  // The store's owner sees the answers, read only when asked, each time paid from the studio's requests.
+  const surveyAsks = open && access.learner.owner && query.survey === "1";
+  const surveyView: OwnerSurveyView | null = surveyAsks
+    ? await ownerSurvey(store, course.id)
+    : open && access.learner.owner
+      ? { kind: "ask", href: `/@${store.handle}/course/${product.id}?survey=1#survey-answers` }
+      : null;
 
   const all = lessonsInOrder(course);
   const total = lessonCount(course);
@@ -258,6 +291,16 @@ export default async function CoursePage({ params, searchParams }: Params) {
                   )}
                 </div>
               ) : null}
+
+              {finished ? (
+                <CourseSurveyBox
+                  where={{ handle: store.handle, product: product.id }}
+                  mine={myAnswer}
+                  notice={typeof query.sv === "string" ? query.sv : ""}
+                  language={store.language}
+                />
+              ) : null}
+              {surveyView ? <CourseSurveySummary view={surveyView} language={store.language} /> : null}
             </div>
           ) : (
             <div className="mt-6 space-y-6">

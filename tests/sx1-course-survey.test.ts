@@ -19,8 +19,9 @@
  *   - deleting a person takes their answer out, and the copy of a person's
  *     data holds their own answer and nobody else's;
  *   - the route takes a buyer action before it writes, keeps a per-person
- *     limit, asks that the course is finished before an answer is kept, and
- *     never charges a student for removing their own answer; the course page
+ *     limit, asks that the course is finished (after the action is taken,
+ *     before its progress is read) before an answer is kept, and never
+ *     charges a student for removing their own answer; the course page
  *     charges the studio before it reads the answers, and only for the
  *     store's owner;
  *   - nothing about the survey reaches reviews: no public review request
@@ -198,10 +199,13 @@ async function main(): Promise<void> {
   is("her copy holds her two answers", hers.map((a) => a?.score), [9, 4]);
   is("and nothing of Ben's", JSON.stringify(hers).includes("Ben's"), false);
   is("her answer in the first course goes", await forgetSurveyPerson(COURSE, ana, ROOM), 1);
+  is("its room comes back, exactly", withBen - (await used()), SURVEY_ROOM_BYTES);
+  const afterFirst = await used();
   is("and in the second", await forgetSurveyPerson(OTHER, ana, ROOM), 1);
+  // The second course's last answer also closes its place in the room (lib/store-data.ts).
+  is("its room comes back too", afterFirst - (await used()) >= SURVEY_ROOM_BYTES, true);
   is("none left", [await readMyAnswer(COURSE, ana), await readMyAnswer(OTHER, ana)], [null, null]);
   is("Ben's stays", (await readMyAnswer(COURSE, ben))?.score, 10);
-  is("her room comes back", withBen - (await used()), SURVEY_ROOM_BYTES * 2);
   is("deleting her again finds nothing", await forgetSurveyPerson(COURSE, ana, ROOM), 0);
   await forgetSurveyPerson(COURSE, ben, ROOM);
   is("all room back", await used(), empty);
@@ -226,7 +230,8 @@ async function main(): Promise<void> {
   const finished = route.indexOf("hasFinished(course, done, passed)");
   is("a buyer action is taken before answering", take > 0 && take < answer, true);
   is("the per-person limit comes before any read or write", limit > 0 && limit < answer && limit < route.indexOf("await removeMyAnswer(") && limit < route.indexOf("doneLessons("), true);
-  is("an answer is kept only from a student who finished the course", finished > 0 && finished < take && /if \(!hasFinished\(course, done, passed\)\) return back\("unfinished"\)/.test(route), true);
+  is("the buyer action is taken before the student's progress is read", take > 0 && take < route.indexOf("doneLessons("), true);
+  is("an answer is kept only from a student who finished the course", finished > take && finished < answer && /if \(!hasFinished\(course, done, passed\)\) return back\("unfinished"\)/.test(route), true);
   is("removing is not charged a buyer action", /action === "remove"[\s\S]{0,60}removeMyAnswer/.test(route) && route.indexOf("await removeMyAnswer(") < take, true);
   is("a full data room says so", route.includes("error instanceof DataRoomError") && route.includes('back("noroom")'), true);
 

@@ -672,6 +672,18 @@ export default function PrivacyPage() {
           for it gets a notification on their phone with the lesson and the
           start of the comment, without the name.
         </p>
+        <p id="course-survey">
+          <strong className="text-black">The question when you finish a course.</strong>{" "}
+          When a student finishes every lesson of a course, the course page asks
+          one optional question: how likely they are to recommend the course to
+          a friend, from 0 to 10, with a comment if they want. If they answer,
+          we keep the number, the comment and when, under a one-way key made
+          from their email address, until they remove it, the course is
+          deleted or the student&apos;s data is deleted. Only the creator sees
+          the answers, as an average, how many gave each number and the
+          comments, without names or email addresses. Other students never see
+          them, and they are never shown on the store.
+        </p>
         <p>
           <strong className="text-black">A one-click offer after paying.</strong>{" "}
           When a product is followed by a one-click offer, Stripe keeps the

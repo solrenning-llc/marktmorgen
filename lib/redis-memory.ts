@@ -357,6 +357,30 @@ export class MemoryRedis {
           return 1;
         }
 
+        // A student's answer to the survey when finishing a course (lib/course-survey.ts): kept, changed, refused when the course is full.
+        if (key.startsWith("-- marktmorgen:course-survey-set:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, answers, who, value, most] = args;
+          if (this.run(["HEXISTS", answers, who]) === 1) {
+            this.run(["HSET", answers, who, value]);
+            return 2;
+          }
+          const count = Number(this.run(["HLEN", answers]));
+          if (!Number.isFinite(count) || !(Number(most) >= 1)) return 0;
+          if (count >= Number(most)) return 4;
+          this.run(["HSET", answers, who, value]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:course-survey-drop:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, answers, who] = args;
+          return this.run(["HDEL", answers, who]);
+        }
+        if (key.startsWith("-- marktmorgen:course-survey-read:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, answers, most] = args;
+          const count = Number(this.run(["HLEN", answers]));
+          if (count > Number(most)) return [0, count];
+          return [1, this.run(["HGETALL", answers])];
+        }
+
         if (key.startsWith("-- marktmorgen:ab-sale:v1\n") && args[0] === "2" && args.length === 6) {
           const [, target, marker, version, rawCents, rawSquare] = args;
           this.live(target); this.live(marker);

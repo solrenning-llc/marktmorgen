@@ -1284,6 +1284,7 @@
     "components/call-editor.tsx",
     "components/campaign-results.tsx",
     "components/cart-deal-editor.tsx",
+    "components/cart-link-builder.tsx",
     "components/certificate-actions.tsx",
     "components/certificate-validity.tsx",
     "components/chat-summary-editor.tsx",
@@ -1451,6 +1452,7 @@
     "components/path-share-card.tsx",
     "components/path-social-scripts.tsx",
     "components/path-studio-reminder.tsx",
+    "components/path-weekly-summary.tsx",
     "components/pause-editor.tsx",
     "components/payment-comparison.tsx",
     "components/payment-mix.tsx",
@@ -2022,6 +2024,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 137
+    "pageTemplates": 138
   }
 }

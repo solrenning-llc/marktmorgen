@@ -209,9 +209,11 @@ export type ReadingGuard<T> = {
  * was spent; inbox C4-53): the last one kept is shown, stale and `failed`, or
  * ReadingFailed is thrown when there is none. One that stopped before calling
  * anyone (NotRead) gives its unit back. With a `guard` naming people, it is
- * kept by READING_COPY, never over someone deleted since `read` looked.
+ * kept by READING_COPY, never over someone deleted since `read` looked. With
+ * `accept`, a kept copy it refuses (the earnings of another time zone) is
+ * taken as none at all, never shown fresh or stale (review of #3022).
  */
-export async function keptReading<T>(store: Pick<Store, "statsId">, kind: ReadingKind, read: () => Promise<T>, now = Date.now(), fresh = false, guard?: ReadingGuard<T>): Promise<Kept<T> | null> {
+export async function keptReading<T>(store: Pick<Store, "statsId">, kind: ReadingKind, read: () => Promise<T>, now = Date.now(), fresh = false, guard?: ReadingGuard<T>, accept?: (value: unknown) => boolean): Promise<Kept<T> | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   const key = copyKey(kind, store.statsId);
   let kept: Kept<T> | null = null;
@@ -219,7 +221,7 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     const [raw] = await redisPipeline([["GET", key]]);
     if (typeof raw === "string" && raw) {
       const parsed = JSON.parse(raw) as { at?: unknown; value?: unknown; unnamed?: unknown };
-      if (typeof parsed.at === "number" && parsed.value !== undefined) kept = { value: parsed.value as T, at: parsed.at, stale: false, ...(parsed.unnamed === true ? { unnamed: true } : {}) };
+      if (typeof parsed.at === "number" && parsed.value !== undefined && (!accept || accept(parsed.value))) kept = { value: parsed.value as T, at: parsed.at, stale: false, ...(parsed.unnamed === true ? { unnamed: true } : {}) };
     }
   } catch {
     kept = null;

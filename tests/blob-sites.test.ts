@@ -99,22 +99,27 @@ function codeFiles(dir: string): string[] {
   return out;
 }
 
-/** What each file calls from Blob: the names it imports, or for a namespace import the `ns.name(` it uses. */
+/** What one file calls from Blob: the names it imports, or for a namespace import the `ns.name(` it uses; undefined when it does not import Blob. */
+export function blobCallsIn(file: string, source: string): Set<string> | undefined {
+  let ops: Set<string> | undefined;
+  for (const m of source.matchAll(BLOB_IMPORT)) {
+    ops ??= new Set<string>();
+    if (m[1] && m[3] === "@/lib/blob") for (const use of source.matchAll(new RegExp(`\\b${m[1]}\\.(\\w+)\\(`, "g"))) ops.add(use[1]);
+    else if (m[1]) ops.add("*");
+    for (const part of (m[2] ?? "").split(",")) {
+      const name = part.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0].trim();
+      if (name && !NOT_CALLS.has(name) && !part.trim().startsWith("type ")) ops.add(name);
+    }
+  }
+  return ops;
+}
+
 function blobCalls(): Map<string, Set<string>> {
   const found = new Map<string, Set<string>>();
   // lib/blob.ts is the wrapper itself: what it is asked to do is listed at each of its callers.
   for (const file of ["app", "lib", "components", "scripts"].flatMap((dir) => codeFiles(join(root, dir))).filter((f) => f !== "lib/blob.ts")) {
-    const source = readFileSync(join(root, file), "utf8");
-    for (const m of source.matchAll(BLOB_IMPORT)) {
-      const ops = found.get(file) ?? new Set<string>();
-      if (m[1] && m[3] === "@/lib/blob") for (const use of source.matchAll(new RegExp(`\\b${m[1]}\\.(\\w+)\\(`, "g"))) ops.add(use[1]);
-      else if (m[1]) ops.add("*");
-      for (const part of (m[2] ?? "").split(",")) {
-        const name = part.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0].trim();
-        if (name && !NOT_CALLS.has(name) && !part.trim().startsWith("type ")) ops.add(name);
-      }
-      found.set(file, ops);
-    }
+    const ops = blobCallsIn(file, readFileSync(join(root, file), "utf8"));
+    if (ops) found.set(file, ops);
   }
   return found;
 }
@@ -127,6 +132,27 @@ test("every file that calls Blob is listed, with exactly the operations it calls
     assert.ok(found.has(file), `${file} no longer calls Blob: remove it from BLOB_SITES`);
     assert.deepEqual([...found.get(file)!].sort(), Object.keys(ops).sort(), `${file}: the operations it calls`);
   }
+});
+
+test("an import of Blob is seen in either quote style and through a relative path (L1 of the Claude 4 team on #2837)", () => {
+  const seen = (file: string, source: string) => [...(blobCallsIn(file, source) ?? [])].sort();
+  // The cases the review proved blind, each a put the guard must see.
+  assert.deepEqual(seen("lib/takedown.ts", `import { put } from "./blob";\nput("a", "b");`), ["put"], "a relative ./blob from lib/");
+  assert.deepEqual(seen("lib/takedown.ts", `import { put } from '@/lib/blob';\nput("a", "b");`), ["put"], "@/lib/blob in single quotes");
+  assert.deepEqual(seen("lib/mail/x.ts", `import { head as h } from "../blob";`), ["head"], "../blob from a folder of lib/");
+  assert.deepEqual(seen("app/api/x/route.ts", `import { del } from '../../../lib/blob';`), ["del"], "a relative path up to lib/blob");
+  assert.deepEqual(seen("lib/x.ts", `import * as blob from './blob';\nblob.list({});`), ["list"], "a namespace import through ./blob");
+  assert.deepEqual(seen("lib/x.ts", `import { upload } from '@vercel/blob/client';`), ["upload"], "the SDK in single quotes");
+  assert.deepEqual(seen("lib/x.ts", `import {\n  put,\n  type PutBlobResult,\n} from "@vercel/blob";`), ["put"], "a multi-line import, its type left out");
+  // Forms whose names the guard cannot read are never read as "calls nothing" (rule 24): they show as "*", so the file must be listed.
+  assert.deepEqual(seen("lib/x.ts", `const { put } = await import("./blob");`), ["*"], "a dynamic import");
+  assert.deepEqual(seen("lib/x.ts", `export { put } from '@/lib/blob';`), ["*"], "a re-export");
+  assert.deepEqual(seen("lib/x.ts", `export * from "@vercel/blob";`), ["*"], "a re-export of everything");
+  // What is not Blob stays out.
+  assert.equal(blobCallsIn("lib/x.ts", `import { a } from "./blob-cache";\nimport { b } from '@/lib/blobs';`), undefined, "a module whose name only starts with blob");
+  assert.equal(blobCallsIn("components/x.tsx", `import { c } from "./blob";`), undefined, "./blob outside lib/ is another module");
+  assert.equal(blobCallsIn("lib/x.ts", `import type { PutBlobResult } from "@vercel/blob";`), undefined, "a type-only import calls nothing");
+  assert.equal(blobCallsIn("lib/x.ts", `// we used to import { put } from "@/lib/blob" here`), undefined, "an import named in a comment");
 });
 
 test("each priced operation names a line that exists, and each closed one shows its closing code", () => {

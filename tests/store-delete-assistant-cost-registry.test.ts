@@ -10,9 +10,7 @@ import { COST_LINES, NOT_A_COST } from "./plan-cost-registry";
 
 const classifiedNames = ["MEMORY_FORGET_COMMANDS", "FORGET_TRY_COMMANDS", "FORGET_TRIES", "FORGET_PER_RUN"];
 function hasDeletionClassifications(entries: Record<string, string>): boolean {
-  // This is the previous incidental-text contract, retained for the RED.
-  const text = JSON.stringify(entries);
-  return classifiedNames.every(name => text.includes(name));
+  return classifiedNames.every(name => Object.hasOwn(entries, name));
 }
 
 type Command = (string | number)[];
@@ -50,10 +48,10 @@ async function main(): Promise<void> {
     await forgetMemory(statsId, ROOM);
     is("maximum declared stored record is 55,264 bytes", MAX_STORED_MEMORY_BYTES, 55_264);
     is("the real bounded lock path attempts eleven SETs", commands.filter(c => c[0] === "SET").length, 11);
-    is("wire dispatches are fourteen: eleven lock attempts and three EVALs", commands.length, 14);
+    is("external dispatches are fourteen: eleven lock attempts and three EVALs", commands.length, 14);
     is("the declared sixteen is an outer-dispatch ceiling, not a Lua invoice proof", commands.length <= MEMORY_FORGET_COMMANDS, true);
     is("the record is actually removed", (await originalPipeline([["GET", `nl:amem:${statsId}`]]))[0], null);
-    console.log("Observed forgetMemory wire commands/reply bytes:", commands.length, replyBytes);
+    console.log("Observed forgetMemory external dispatches / JSON-serialized stub reply bytes (not RESP, wire or billed bytes):", commands.length, replyBytes);
   } finally {
     Date.now = savedNow;
     Math.random = savedRandom;
@@ -73,10 +71,10 @@ async function main(): Promise<void> {
   const result = await retryStoreForgets(0, Date.now(), async () => { worked += 1; });
   is("expired work deadline still reads all two thousand queue rows", [commands.length, commands[0][0], result.left, worked], [1, "HGETALL", rows, 0]);
   is("the work caps remain eight tries and twenty-five stores", [FORGET_TRIES, FORGET_PER_RUN], [8, 25]);
-  console.log("Observed retry queue rows/wire commands/reply bytes:", rows, commands.length, replyBytes);
+  console.log("Observed retry queue rows / external dispatches / JSON-serialized stub reply bytes (not RESP, wire or billed bytes):", rows, commands.length, replyBytes);
   const route = readFileSync("app/api/store/stores/route.ts", "utf8");
   const admission = route.indexOf('creatorFrom(request, "delete")');
-  is("the first deletion attempt follows the essential delete admission", admission >= 0 && admission < route.indexOf("await forgetMemory("), true);
+  is("the store-deletion caller follows the essential delete admission", admission >= 0 && admission < route.indexOf("await forgetMemory("), true);
   const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
   is("the company retry and assistant-delete sources are explicitly classified, with unknown funding preserved", ["MEMORY_FORGET_COMMANDS", "FORGET_TRY_COMMANDS", "FORGET_TRIES", "FORGET_PER_RUN"].every(name => registry.includes(name)), true);
   const paths = execFileSync("git", ["grep", "-l", "-E", "forgetMemory[[:space:]]*\\(", "--", "app", "lib"], { encoding: "utf8", maxBuffer: 8192 }).trim().split("\n");

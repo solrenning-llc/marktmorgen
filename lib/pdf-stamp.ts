@@ -33,7 +33,7 @@
  */
 import { createHash } from "node:crypto";
 import { stampLine } from "@/lib/pdf-stamp-line";
-import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
+import { PDFDocument, PDFName, PDFOperator, PDFOperatorNames, StandardFonts, degrees, rgb } from "pdf-lib";
 import { deleteFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file-store";
 import { VAULT_PREFIX, isVaultPath, keyName } from "@/lib/vault-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -84,6 +84,13 @@ function writable(text: string): string {
  * Puts the line along the bottom of every page, however the page is turned: a
  * page stored sideways and shown upright gets the line along what the reader
  * sees as its foot, reading left to right. Pure: bytes in, bytes out.
+ *
+ * The line is marked as an artifact of the pagination kind, a footer (ISO
+ * 32000-1, 14.8.2.2), the way lib/tagged-pdf.ts marks what only decorates: in
+ * a creator's tagged PDF a screen reader skips it instead of meeting text that
+ * belongs to no element (PDF/UA, ISO 14289-1, 7.1; AX274). The structure tree
+ * is left as it was. In an untagged PDF the marks change nothing a reader or
+ * a viewer shows.
  */
 export async function stampPdf(bytes: Uint8Array, line: string): Promise<Uint8Array> {
   const doc = await PDFDocument.load(bytes, { updateMetadata: false });
@@ -105,6 +112,10 @@ export async function stampPdf(bytes: Uint8Array, line: string): Promise<Uint8Ar
           : angle === 270
             ? { x: box.x + lift, y: box.y + box.height - inset, rotate: 270 }
             : { x: box.x + inset, y: box.y + lift, rotate: 0 };
+    // `/Artifact << /Type /Pagination /Subtype /Footer >> BDC … EMC`: an inline
+    // property list, written as lib/tagged-pdf.ts writes its marked content.
+    const props = doc.context.obj({ Type: "Pagination", Subtype: "Footer" }) as unknown as PDFName;
+    page.pushOperators(PDFOperator.of(PDFOperatorNames.BeginMarkedContentSequence, [PDFName.of("Artifact"), props]));
     page.drawText(text, {
       x: at.x,
       y: at.y,
@@ -114,6 +125,7 @@ export async function stampPdf(bytes: Uint8Array, line: string): Promise<Uint8Ar
       color: rgb(0.38, 0.38, 0.42),
       opacity: 0.85,
     });
+    page.pushOperators(PDFOperator.of(PDFOperatorNames.EndMarkedContent));
   }
   return doc.save();
 }

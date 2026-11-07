@@ -361,6 +361,11 @@ export type Purchase = {
    * withdrawal function (lib/withdrawal-rules.ts, 588 [KB9]).
    */
   consent?: KeptConsent | null;
+  /**
+   * The order's confirmation email is known to have gone (its nl:confirm: mark read exactly "sent"), set only by
+   * lib/withdrawal.ts (withConfirmations) where the withdrawal function needs it; absent is not known.
+   */
+  confirmed?: boolean;
   /** Shipped by the creator (the checkout's metadata ship=yes): its withdrawal period runs from a receipt not known here. */
   shipped?: boolean;
   /** Paid for with PayPal, into the creator's own PayPal account (lib/paypal-sales.ts). */
@@ -1229,7 +1234,7 @@ export async function findPurchase(
   token: string,
   reference: string,
   want: DownloadWant = {},
-): Promise<{ purchase: Purchase; email: string; listing: (id: string) => Promise<Listing | null> } | null> {
+): Promise<{ purchase: Purchase; email: string; listing: (id: string) => Promise<Listing | null>; meter: OrdersMeter } | null> {
   const kind = referenceKind(reference);
   if (!kind || !ORDERS_TOKEN_PATTERN.test(token)) return null;
   // The grant is one read, paid by the download's own request: a link that opens nothing takes nothing more.
@@ -1239,7 +1244,9 @@ export async function findPurchase(
   const meter = new OrdersMeter(store);
   const found = await withinOpening(lookUp(store, email, kind, reference, meter, want), meter, DOWNLOAD_LOOKUP_MS);
   if (found === "late") throw new OrdersLate();
-  return found;
+  // The lookup's meter goes with what it found, so a caller's further reads of it (the withdrawal function's
+  // confirmation mark, lib/withdrawal.ts) are taken from it before they are made, as the lookup's own were.
+  return found && { ...found, meter };
 }
 
 /** A customer waiting in a batch's address, with how many of its payments taken in one click were shown before. */

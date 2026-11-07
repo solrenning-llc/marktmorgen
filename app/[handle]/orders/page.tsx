@@ -13,7 +13,7 @@ import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { type BookedCall, type Purchase, OrdersBusy, callsFor, canRecover, olderOf, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
-import { windowOf } from "@/lib/withdrawal";
+import { windowOf, withConfirmations } from "@/lib/withdrawal";
 import { withdrawalWords } from "@/lib/buyer-words/withdrawal";
 import { canMove, icsLink, moveLink } from "@/lib/calls";
 import { isVideoRoom, roomKind } from "@/lib/call-rooms";
@@ -174,7 +174,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
       const reading = (async () => {
         // A request is read and shown only where its own page takes payment (lib/payment-requests.ts, requestsOpen);
         // a failure nobody expected is said as "could not be read", never as nothing waiting.
-        const [listed, booked, waits] = await Promise.all([purchasesFor(store, email, meter), callsFor(store, email, meter), waitingFor(store, email, undefined, requestsOpen(store)).catch(() => ({ ...waiting, unread: true }))]);
+        const [listed, booked, waits] = await Promise.all([purchasesFor(store, email, meter).then((listed) => withConfirmations(listed, meter)), callsFor(store, email, meter), waitingFor(store, email, undefined, requestsOpen(store)).catch(() => ({ ...waiting, unread: true }))]);
 
         // A purchase that gives roles in the creator's Discord server: one way in for all of them (lib/discord-rules.ts).
         const discord = isDiscordConfigured() ? await discordFor(store).catch(() => null) : null;

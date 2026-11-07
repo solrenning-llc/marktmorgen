@@ -31,6 +31,10 @@ import { done, is, part } from "./check";
 const DAY = 86_400;
 const PAID = 1_790_000_000;
 const consent = (kind: "digital" | "membership", at = PAID - 60) => ({ version: "2026-10-30.2", at, kind });
+// The period's end for PAID (Monday September 21, 2026, 14:13:20 UTC, already Tuesday September 22 at UTC+14, the latest
+// calendar day anywhere): day 14 is Tuesday October 6, open to its end anywhere on Earth, 11:59:59 UTC on October 7
+// (lib/withdrawal-rules.ts, withdrawalEnd; Claude 5 on #2827 and its focal return). Counted here by hand.
+const END = Date.UTC(2026, 9, 7, 11, 59, 59) / 1000;
 const sale = (over: Partial<Parameters<typeof withdrawalWindow>[0]> = {}) => ({ kind: "sale" as const, paidAt: PAID, member: false, givenByStore: false, consent: null, ...over });
 
 part("The words the law names");
@@ -39,23 +43,23 @@ is("the confirmation's label", CONFIRM_WITHDRAWAL, "Confirm withdrawal");
 is("fourteen days", WITHDRAWAL_DAYS, 14);
 
 part("When it is offered");
-is("digital content without the yes: open for 14 days from the contract", withdrawalWindow(sale(), PAID + DAY), { open: true, until: PAID + 14 * DAY });
-is("and closed after them", withdrawalWindow(sale(), PAID + 14 * DAY + 1), { open: false, why: "ended" });
-is("digital content with the yes, handed over at once: never offered", withdrawalWindow(sale({ consent: consent("digital") }), PAID + 60), { open: false, why: "supplied" });
-is("a membership: 14 days, whatever the yes says (a service, lost only once fully performed)", withdrawalWindow(sale({ member: true, consent: consent("membership") }), PAID + 3 * DAY), { open: true, until: PAID + 14 * DAY });
-is("a membership's yes alone marks it as one", withdrawalWindow(sale({ consent: consent("membership") }), PAID + DAY), { open: true, until: PAID + 14 * DAY });
-is("a pre-order with the yes, release in 5 days: the 14 days, its planned day is not supply", withdrawalWindow(sale({ consent: consent("digital"), preorder: { day: "2026-09-26", given: false } }), PAID + DAY), { open: true, until: PAID + 14 * DAY });
-is("still not handed over after its planned day: still open", withdrawalWindow(sale({ consent: consent("digital"), preorder: { day: "2026-09-26", given: false } }), PAID + 10 * DAY), { open: true, until: PAID + 14 * DAY });
-is("a pre-order whose release is after the 14 days: the 14 days", withdrawalWindow(sale({ consent: consent("digital"), preorder: { day: "2027-03-01", given: false } }), PAID + DAY), { open: true, until: PAID + 14 * DAY });
-is("a pre-order with no day set yet: the 14 days", withdrawalWindow(sale({ consent: consent("digital"), preorder: { day: null, given: false } }), PAID + DAY), { open: true, until: PAID + 14 * DAY });
-is("a pre-order already handed over, with the yes: closed", withdrawalWindow(sale({ consent: consent("digital"), preorder: { day: "2026-09-26", given: true } }), PAID + 2 * DAY), { open: false, why: "supplied" });
-is("a pre-order with a day that does not read: the 14 days, never shorter", withdrawalWindow(sale({ consent: consent("digital"), preorder: { day: "soon", given: false } }), PAID + DAY), { open: true, until: PAID + 14 * DAY });
+is("digital content without the yes: open for 14 days from the contract", withdrawalWindow(sale(), PAID + DAY), { open: true, until: END });
+is("and closed after them", withdrawalWindow(sale(), END + 1), { open: false, why: "ended" });
+is("digital content with the yes, handed over at once, its confirmation sent: never offered", withdrawalWindow(sale({ consent: consent("digital"), confirmed: true }), PAID + 60), { open: false, why: "supplied" });
+is("a membership: 14 days, whatever the yes says (a service, lost only once fully performed)", withdrawalWindow(sale({ member: true, consent: consent("membership") }), PAID + 3 * DAY), { open: true, until: END });
+is("a membership's yes alone marks it as one", withdrawalWindow(sale({ consent: consent("membership") }), PAID + DAY), { open: true, until: END });
+is("a pre-order with the yes, release in 5 days: the 14 days, its planned day is not supply", withdrawalWindow(sale({ consent: consent("digital"), preorder: { day: "2026-09-26", given: false } }), PAID + DAY), { open: true, until: END });
+is("still not handed over after its planned day: still open", withdrawalWindow(sale({ consent: consent("digital"), preorder: { day: "2026-09-26", given: false } }), PAID + 10 * DAY), { open: true, until: END });
+is("a pre-order whose release is after the 14 days: the 14 days", withdrawalWindow(sale({ consent: consent("digital"), preorder: { day: "2027-03-01", given: false } }), PAID + DAY), { open: true, until: END });
+is("a pre-order with no day set yet: the 14 days", withdrawalWindow(sale({ consent: consent("digital"), preorder: { day: null, given: false } }), PAID + DAY), { open: true, until: END });
+is("a pre-order already handed over, with the yes and its confirmation sent: closed", withdrawalWindow(sale({ consent: consent("digital"), preorder: { day: "2026-09-26", given: true }, confirmed: true }), PAID + 2 * DAY), { open: false, why: "supplied" });
+is("a pre-order with a day that does not read: the 14 days, never shorter", withdrawalWindow(sale({ consent: consent("digital"), preorder: { day: "soon", given: false } }), PAID + DAY), { open: true, until: END });
 is("a shipped item: open while its receipt is not known", withdrawalWindow(sale({ shipped: true }), PAID + 20 * DAY), { open: true, until: null });
 is("received on day 70, still open on day 80 (14 days from receipt, art. 9(2)(b))", withdrawalWindow(sale({ shipped: true }), PAID + 80 * DAY), { open: true, until: null });
 is("a shipped item's yes does not close it (it keeps its own right)", withdrawalWindow(sale({ shipped: true, consent: consent("digital") }), PAID + DAY).open, true);
 is("brought over from another platform: not offered", withdrawalWindow(sale({ kind: "imported" }), PAID + DAY), { open: false, why: "not-here" });
 is("given by the creator's tools, no payment: not offered", withdrawalWindow(sale({ givenByStore: true }), PAID + DAY), { open: false, why: "not-here" });
-is("an offer added after paying is its own contract: the same rules", withdrawalWindow(sale({ kind: "upsell" }), PAID + DAY), { open: true, until: PAID + 14 * DAY });
+is("an offer added after paying is its own contract: the same rules", withdrawalWindow(sale({ kind: "upsell" }), PAID + DAY), { open: true, until: END });
 is("an unknown payment time is never read as closed", withdrawalWindow(sale({ paidAt: 0 }), PAID + DAY), { open: true, until: null });
 is("nor a time that is not a whole second", withdrawalWindow(sale({ paidAt: Number.NaN }), PAID + DAY), { open: true, until: null });
 

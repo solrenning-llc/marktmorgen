@@ -31,7 +31,7 @@ import { paidPeriod } from "./billing-period-fixture";
 import { afterTasks } from "./next-server-after-world";
 import { ordersLinkFor, purchasesFor, OrdersMeter } from "@/lib/buyer-orders";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { windowOf, withdrawalKey } from "@/lib/withdrawal";
+import { windowOf, withConfirmations, withdrawalKey } from "@/lib/withdrawal";
 
 /** lib/withdrawal.ts, WITHDRAWAL_ACK_SENDS: the most times one order's acknowledgement is tried. */
 const ACK_SENDS = 3;
@@ -124,11 +124,14 @@ test("an order inside its period gets the function; content handed over after th
     paid("yes", product, NOW - 2 * DAY, { dc: `yes:2026-10-30.2:d:${NOW - 2 * DAY}` }),
     paid("old", product, NOW - 20 * DAY),
   ];
-  const purchases = await purchasesFor(store, BUYER, new OrdersMeter(store));
+  // Its confirmation went (lib/purchase-email.ts marks it "sent"): with the yes, art. 16(m)(iii) is met (Claude 5 on #2827).
+  await redis.pipeline([["SET", `nl:confirm:${sessions[1].id}`, "sent"]]);
+  const meter = new OrdersMeter(store);
+  const purchases = await withConfirmations(await purchasesFor(store, BUYER, meter), meter);
   const open = Object.fromEntries(purchases.map((p) => [p.reference.slice(8, 12), windowOf(p).open]));
   assert.deepEqual(open, { open: true, "yes0": false, "old0": false });
   const page = readFileSync("app/[handle]/orders/page.tsx", "utf8");
-  assert.ok(page.includes("purchases.some((purchase) => windowOf(purchase).open)") && page.includes("withdrawalWords(store.language).withdrawLink"), "the list links the function, by the law's words, when a purchase is inside its period");
+  assert.ok(page.includes("purchases.some((purchase) => windowOf(purchase).open)") && page.includes("withdrawalWords(store.language).withdrawLink") && page.includes("withConfirmations(listed, meter)"), "the list links the function, by the law's words, when a purchase is inside its period");
 });
 
 test("opened from the list with no order chosen, the page lists only the purchases inside their period", async () => {

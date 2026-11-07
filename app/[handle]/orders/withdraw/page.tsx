@@ -7,7 +7,8 @@ import { lookStyle } from "@/lib/store-look";
 import { speech } from "@/lib/buyer-words";
 import { withdrawalWords } from "@/lib/buyer-words/withdrawal";
 import { type Purchase, OrdersBusy, OrdersLate, findPurchase, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
-import { windowOf, withdrawalStanding } from "@/lib/withdrawal";
+import { type WithdrawalOwed, windowOf, withConfirmations, withdrawalStanding } from "@/lib/withdrawal";
+import { lastWithdrawalDay } from "@/lib/withdrawal-rules";
 
 // The longest one opening may run: findPurchase is bounded by DOWNLOAD_LOOKUP_MS.
 export const maxDuration = 30;
@@ -57,7 +58,9 @@ export default async function WithdrawPage({ params, searchParams }: Params) {
       const opened = await openOrders(store, token);
       if (!opened.admitted) trouble = "busy";
       else if (opened.email) {
-        const read = await withinOpening(purchasesFor(store, opened.email, opened.meter), opened.meter);
+        // Each order's confirmation mark, where the yes would end the right, read through the same meter (withConfirmations).
+        const meter = opened.meter;
+        const read = await withinOpening(purchasesFor(store, opened.email, meter).then((listed) => withConfirmations(listed, meter)), meter);
         if (read === "late") trouble = "busy";
         else choices = read.filter((purchase) => windowOf(purchase).open);
       }
@@ -67,6 +70,8 @@ export default async function WithdrawPage({ params, searchParams }: Params) {
   } else {
     try {
       found = await findPurchase(store, token, reference);
+      // Whether its confirmation is known sent, where the yes would end the right, read through the lookup's meter.
+      if (found) found = { ...found, purchase: (await withConfirmations([found.purchase], found.meter))[0] };
     } catch (error) {
       trouble = error instanceof OrdersBusy || error instanceof OrdersLate ? "busy" : "error";
     }
@@ -74,7 +79,7 @@ export default async function WithdrawPage({ params, searchParams }: Params) {
   let already = false;
   // A recorded withdrawal whose acknowledgement or creator's notice is still owed offers the form again, so sending it
   // once more tries what is owed (lib/withdrawal.ts); its first time stands.
-  let owed: "unsent" | "untold" | null = null;
+  let owed: WithdrawalOwed | null = null;
   if (found) {
     try {
       const standing = await withdrawalStanding(store, found.purchase.reference);
@@ -102,7 +107,8 @@ export default async function WithdrawPage({ params, searchParams }: Params) {
               : null;
   // Owed means recorded in time already: the form is offered again whatever the period says now.
   const showForm = Boolean(found && (owed || (window?.open && !already)) && !trouble && state !== "done" && state !== "already");
-  const until = window?.open && window.until !== null ? new Intl.DateTimeFormat(said.lang.locale, { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" }).format(new Date(window.until * 1000)) : null;
+  // The last day of the period, the one it is still open to the end of (lib/withdrawal-rules.ts, withdrawalEnd): its own calendar day, never the UTC day of its last instant.
+  const until = window?.open && window.until !== null ? new Intl.DateTimeFormat(said.lang.locale, { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" }).format(new Date(lastWithdrawalDay(window.until) * 1000)) : null;
 
   return (
     <div lang={said.lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>

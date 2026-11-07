@@ -17366,6 +17366,8 @@ Etiqueta: [LQ15]. Solicitação do dono (28/10/2026, 23h31, horário de Fortalez
 
 345 [RN3]: **Reaberto por decisão do dono em 28/10/2026, 23h31 (LQ15)**. Prevalece sobre LQ14(a) somente neste item; cancelamento preservado como histórico. Mesmo número, texto, escopo, estado e posição anteriores. Motivo do dono: primeiro passo de uma possível receita nova; só sai da fila o que não tem valor. Estudo de temas pagos e venda de modelos de loja entre criadores; escopo RF/TB5 existente integralmente preservado. Não autoriza construir marketplace/temas/cobrança nem ligar comissão geral. Tabela única LQ3 atualizada.
 
+345 [RN3] — lacuna AAA encontrada pelo estudo (docs/paid-themes-study.md, revisão do Claude 3 no #2923, 07/11/2026), registrada para 274 [AX1], sem mudança de código neste registro: lib/store-look.ts deriva a cor de destaque `--st-accent-text` só até 4.5:1 (contra card e item), mas ela é usada em texto pequeno em components/store-cart.tsx (text-xs), components/course-outline.tsx (text-xs) e components/store-product.tsx (text-sm), e o WCAG 1.4.6 (AAA) só aceita 4.5:1 para texto grande; a meta deve subir para 7:1 numa unidade própria de 274 [AX1], conferindo o efeito nos quatro temas e na cor do criador. Estado: na fila; nada corrigido.
+
 ### Pedidos repetidos, VR e limites — LQ13/LQ14/LQ15
 
 **Desfeito por decisão do dono em 28/10/2026, 23h37 (LQ17)**

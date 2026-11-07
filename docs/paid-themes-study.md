@@ -31,7 +31,7 @@ search excerpts; rows marked "secondary" come from non-official pages and are no
 
 | Platform | Who sells | Price to the buyer | Platform share | Quality / accessibility rules | Refunds |
 | --- | --- | --- | --- | --- | --- |
-| Shopify Theme Store | Approved theme partners | One-time, per store; a listing shows US$100 (official help page excerpt); US$140–400 ranges are secondary | 0% until US$1,000,000 gross theme revenue in a calendar year, then 15% for the rest of that year; resets on 1 January; on gross sales, refunds not deducted; billing carries a 2.9% processing fee plus sales tax [S1] | 5-stage review; average Lighthouse accessibility score of at least 90 on home, product, collection and cart pages [S3]; partners must keep shipping updates to stay listed [S4] | Official rule not confirmed; secondary sources say Theme Store purchases are non-refundable [S6]. Free trial of a paid theme before publishing; up to 19 at once [S5] |
+| Shopify Theme Store | Approved theme partners | One-time, per store; a listing shows US$100 (official help page excerpt); US$140–400 ranges are secondary | 0% until US$1,000,000 gross theme revenue in a calendar year, then 15% for the rest of that year; resets on 1 January; on gross sales, refunds not deducted; billing carries a 2.9% processing fee plus sales tax [S1] | 5-stage review [S2]; average Lighthouse accessibility score of at least 90 on home, product, collection and cart pages [S3]; partners must keep shipping updates to stay listed [S4] | Official rule not confirmed; secondary sources say Theme Store purchases are non-refundable [S6]. Free trial of a paid theme before publishing; up to 19 at once [S5] |
 | Kajabi Template Store | Any developer whose template passes Kajabi's review | Set by the developer; secondary sources report about US$23–897 | 10% plus transaction fees per sale [S7] | Kajabi review; developer responsible for bugs and customer service [S7]. No accessibility rule found | Not found |
 | Framer Marketplace | Approved creators (templates, plugins, components) | Set by the creator; no minimum found | 0%: creator keeps 100% [S8]; Framer instead pays referral commission on plan upgrades from templates | Two-stage human review, about 21 days estimated; originality and quality rules [S9]. No accessibility threshold found in the excerpts | Framer does not process refunds; each template shows the creator's refund policy at checkout [S10] |
 | Wix Studio Marketplace | Wix Studio partners | Set by the partner | Partners keep 100% "in 2024"; another Wix page says through mid-2025; current terms unknown [S11] | Wix review | Not found |
@@ -55,10 +55,12 @@ Items from the owner's briefing, checked:
    plan; paid themes, where they exist, come from third parties. Charging a paying Marktmorgen
    customer for a first-party look would be unusual and could lower the value the customer sees.
 2. **Marketplace take rates split into two camps:** 0–5% where the platform earns from the
-   subscription upgrade (Shopify below US$1M, Framer, Wix, Webflow), and 10% at the closest creator
-   comparable (Kajabi, plus transaction fees). The owner's 10% in TM1 matches Kajabi.
-3. **Every marketplace above uses human review.** Marktmorgen cannot (no manual work by the owner),
-   so only data-only themes checked automatically are possible.
+   subscription upgrade (Shopify below US$1M, Framer, Webflow; Wix kept 0% through 2024 or mid-2025,
+   current terms unknown), and 10% at the closest creator comparable (Kajabi, plus transaction
+   fees). The owner's 10% in TM1 matches Kajabi.
+3. **Every curated marketplace above uses human review** (Gumroad, a general store, has no
+   template-specific review). Marktmorgen cannot (no manual work by the owner), so only data-only
+   themes checked automatically are possible.
 4. **No competitor requires AAA.** Shopify's bar is a Lighthouse score of 90 [S3]; a third-party
    vendor estimates that covers a fraction of WCAG 2.2 (secondary, not used). AX274 asks far more.
 5. **Refunds are usually "no refunds" or the creator's own policy.** In the EU, a no-withdrawal rule
@@ -72,15 +74,21 @@ layouts in lib/store-look.ts form, one-time price, as a line on the plan invoice
 
 - Code rule and AX274: compatible if a theme is data only and goes through the same contrast
   derivation and the AX274 pre-publish checks. Observed gap: lib/store-look.ts targets 7:1 only for
-  button text and 4.5:1 for other accent text, while AX274 asks 7:1 for text; any paid theme would
-  inherit this until fixed (not fixed here).
+  button text and 4.5:1 for other accent text (`--st-accent-text`), while AX274 asks 7:1 for text
+  and WCAG 1.4.6 allows 4.5:1 only for large text; that color is used today on small text in
+  components/store-cart.tsx, components/course-outline.tsx and components/store-product.tsx. Any
+  paid theme would inherit this until fixed. Not fixed here; recorded in docs/codex-queue.md under
+  345 [RN3] for 274 [AX1].
 - Manual work: design and per-theme AAA audit would be agent work plus a fixed audit cost
   (unknown, AX274 fixed costs).
 - VR: a paid theme is "real" only when sold, applied and audited in production; nothing on a page
   before that.
 - Tax: Marktmorgen's own electronic supply, same treatment as the plans (TX points 10, 12, 14, 15, 17).
-- Profit: per sale it is clearly positive under the onerous receiving model (table in section 5);
-  demand is unknown, and the market point 1 above argues against it.
+- Profit: per sale it is positive before the unknown costs, counting only receiving costs and
+  taxes (table in section 5). Storage, the AX274 pre-publish checks, the per-theme AAA audit and
+  support are unknown, so under MR ("unknown fails") option 1 does not pass the unit rule either
+  until they are measured and capped. Demand is unknown, and the market point 1 above argues
+  against it.
 
 **Option 2 — creator-to-creator marketplace of themes and store templates** (this is 430 [TM1]
 with 379 [TB5]; RN3 only studies it).
@@ -107,12 +115,27 @@ cost; profit only indirectly (retention). Already the current state.
 
 ## 5. Worst case per sale (arithmetic only, not a review)
 
-Owner-facing rule LC: IRPF 15% on profit and IOF 0.38% on the amount remitted (approximated here
-as the pre-IRPF profit), receiving costs from lib/receiving-costs.ts (dearer provider 6.6% + 30¢ on
-the amount charged with buyer tax on top at 27%, remittance 1.5%, refund reserve 1%, dispute reserve
-1% of the charge plus US$30). Computed outside the code's 27.5% floor, whose removal is pending in
-472 [TX2]. Not included: storage, checks, screenshots, gallery reads, support and every LLC fixed
-cost (FX275), all **unknown**.
+Owner-facing rule LC, through `MOST_CORRECT_READING` in lib/receiving-costs.ts (the code's current
+reading; it has no percentage floor): IRPF 15% on profit and IOF 0.38% on the amount remitted
+(approximated here as the pre-IRPF profit), dearer provider 6.6% + 30¢ on the amount charged with
+buyer tax on top at 27%, remittance 1.5%, refund reserve 1%, dispute reserve 1% of the charge plus
+US$30. Not included: storage, checks, screenshots, gallery reads, support and every LLC fixed cost
+(FX275), all **unknown**.
+
+The table is printed by `node scripts/paid-themes-study.mjs` from tests/paid-themes-study-table.ts,
+which types no fee, reserve or tax rate, and tests/paid-themes-study.test.ts fails if a cell here
+differs. Per column, with C the amount charged (`chargedOf`) and F the fee (price × 10%, rounded
+down):
+
+- Reading A: F − (`providerFeeCents(C)` + dispute reserve on C + US$30 + remittance and refund
+  reserve on F), then IRPF and IOF on a positive result.
+- Reading B: F − (remittance and refund reserve on F + Stripe Tax 0.5% on C), then IRPF and IOF.
+- Break-even fee: the smallest F in whole cents whose reading-A net keeps MR's positive cent
+  (`POSITIVE_NET_CENTS`), as a share of the price.
+- First-party theme: price − `receivingOf(price).totalCents`, then IRPF and IOF.
+
+Rounding: integer cents; every fee, reserve and tax rounded up as lib/receiving-costs.ts does; the
+fee rounded down; break-even rounded up to 0.01%; margins rounded to the nearest percent.
 
 Two readings for the marketplace fee, because who bears the Stripe fee, disputes and the Stripe Tax
 fee on direct charges is not confirmed (SR5: Stripe Tax question still unanswered):
@@ -121,7 +144,7 @@ fee on direct charges is not confirmed (SR5: Stripe Tax question still unanswere
 - **Reading B (structure of a direct charge):** fee, disputes and refunds sit on the seller's account;
   Marktmorgen bears remittance and refund reserve on its fee, plus Stripe Tax 0.5% of the charge.
 
-| Sale price | Marktmorgen net at 10%, reading A | at 10%, reading B | Break-even fee, reading A | First-party theme at that price (option 1) |
+| Sale price | Marktmorgen net at 10%, reading A | at 10%, reading B | Break-even fee, reading A | First-party theme at that price (option 1), receiving and tax only |
 | --- | --- | --- | --- | --- |
 | US$19 | −US$0.62 | US$1.45 | 13.53% | US$13.57 net (71%) |
 | US$49 | −US$0.60 | US$3.76 | 11.33% | US$35.87 net (73%) |
@@ -130,8 +153,11 @@ fee on direct charges is not confirmed (SR5: Stripe Tax question still unanswere
 
 Under reading A, 10% loses money on every sale before any other cost; under reading B it is
 positive before the unknown costs. MR says unknown fails, so **as of today the TM1 fee does not pass
-the unit rule** until Stripe's answer or a test-mode proof shows reading B applies. First-party sales
-pass per sale, but a sale says nothing about volume or the fixed audit and design costs.
+the unit rule** until Stripe's answer or a test-mode proof shows reading B applies, and the unknown
+per-template costs are measured and capped. The first-party figures (71–74%) count receiving costs
+and taxes only: storage, checks, the per-theme audit and support are unknown, so **option 1 does not
+pass the unit rule either** until they are measured and capped; a sale also says nothing about
+volume.
 The prices in this table are calculation points, not proposals.
 
 ## 6. Unknowns (each fails until measured; none is zero)
@@ -144,7 +170,29 @@ The prices in this table are calculation points, not proposals.
   revenue near opening is close to nothing.
 - An owner-free process for copyright complaints and bad-faith listings.
 - Shopify's official refund rule and the current Wix terms; the Shopify median price.
+- Shopify's theme revenue-share page [S1]: read via excerpt only; confirm directly before any decision.
+  Its terms have changed before, and the calendar-year US$1M threshold is the central fact against
+  the briefing's "15%".
 - Whether creators buying templates count as EU consumers often enough to make art. 9a the normal case.
+
+### Scope points of item 345 still open
+
+- **Whole company:** neither option changes the minimum base of paying customers that must cover
+  100% of the LLC fixed costs (FX275) and the funded exposures; a theme or template sale adds no
+  known contribution to it until its own unknown costs are measured. No global result is claimed.
+- **License:** the terms a buyer gets (one store or several, no resale, no redistribution of the
+  seller's images and words, what survives a refund) are not written; a commercial term, so
+  "Depende do dono" before any sale.
+- **Updates and compatibility:** when lib/store-look.ts or the 379 [TB5] importer changes, a sold
+  theme or template must keep importing and keep passing the AX274 checks; who ships the update
+  (Marktmorgen for option 1, the seller for option 2) and what happens to a template that stops
+  passing are unknown.
+- **Taxes for option 2 beyond art. 9a:** US marketplace facilitator laws (TX point 11) and the UK
+  platform rule with no threshold for a non-established supplier (TX point 14) may make Marktmorgen
+  liable for the template sale; buyer tax on top or taken from the seller's payout, never from
+  Marktmorgen's fee. Not studied state by state here; unknown.
+- **Worst-month caps:** TM1 asks for per-plan caps on template quantity, size, gallery reads and
+  imports in the worst month; none is set here, and each stays unknown until measured.
 
 ## 7. Conclusion
 
@@ -155,8 +203,8 @@ The prices in this table are calculation points, not proposals.
 - **Option 1 is not recommended** while competitors include looks in the plan and the per-theme
   audit cost is unknown; per-sale margin alone does not justify it.
 - Every theme, paid or free, must stay data only and pass the same automatic contrast derivation and
-  AX274 checks; the 4.5:1 accent-text target in lib/store-look.ts should be raised to 7:1 in its own
-  unit (not done here).
+  AX274 checks; the 4.5:1 accent-text target (`--st-accent-text`) in lib/store-look.ts should be
+  raised to 7:1 in its own unit (not done here; recorded in docs/codex-queue.md under 345 [RN3]).
 
 ## 8. Depende do dono
 
@@ -169,6 +217,8 @@ The prices in this table are calculation points, not proposals.
    or a fixed refund window. A commercial term, so the owner decides.
 4. **Copyright complaints without manual work:** accept an automatic takedown on notice, or keep the
    marketplace closed until a better owner-free process exists.
+5. **License terms for theme and template sales:** one store or several, resale and redistribution,
+   what survives a refund. A commercial term, so the owner decides before any sale.
 
 ## 9. Sources (all read on 06/11/2026)
 
@@ -190,5 +240,5 @@ The prices in this table are calculation points, not proposals.
 | S14 | Podia Help, Changing your site's colors | https://intercom.help/podia-3dd936dd4247/en/articles/11370342-changing-your-site-s-colors | Official; search excerpt |
 | S15 | Directive 2011/83/EU, arts. 8(7) and 16(m) | https://www.legislation.gov.uk/eudr/2011/83/article/16 | Official archive copy; search excerpt; EUR-Lex original not read |
 
-Calculation script (synthetic, outside the repository): integer cents, ceilings as in
-lib/receiving-costs.ts `pct`, application fee rounded down.
+Calculation: `node scripts/paid-themes-study.mjs` (synthetic; tests/paid-themes-study-table.ts reads
+lib/receiving-costs.ts; held by tests/paid-themes-study.test.ts). Rounding in section 5.

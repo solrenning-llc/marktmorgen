@@ -66,5 +66,5 @@ test("internal consistency and the Shopify direct-read caveat (findings 6 and 7)
   assert.ok(text.includes("Every curated marketplace"));
   assert.doesNotMatch(section(text, "## 3."), /Shopify below US\$1M, Framer, Wix, Webflow/);
   for (const source of text.matchAll(/^\| (S\d+) \|/gm)) assert.ok(text.includes(`[${source[1]}]`), `${source[1]} cited`);
-  assert.match(section(text, "## 6."), /revenue-share page.*read via excerpt only; confirm directly before any decision/s);
+  assert.match(section(text, "## 6."), /revenue-share page[^\n]*read via excerpt only; confirm directly before any decision/);
 });

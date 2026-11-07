@@ -26,8 +26,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  dropLessonRatings,
   forgetLessonRatingsPerson,
   lessonRatingCount,
+  ratedLessonCount,
   rateLesson,
   ratingsOfPerson,
   readLessonRatings,
@@ -54,6 +56,9 @@ import { emailKey } from "@/lib/learn";
 import { dataUsed } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { PERSON_DATA } from "@/lib/person-data";
+import { closingOf, countedInRoom } from "@/lib/data-families";
+import { erasureSize } from "@/lib/person-erasure";
+import type { ErasureScope } from "@/lib/erasure-rules";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 import { done, is, part } from "./check";
@@ -186,6 +191,58 @@ async function main(): Promise<void> {
   is("all room back", await used(), empty);
   is("the index is empty", redis.run(["SCARD", `nl:lr:${COURSE}:ls`]), 0);
 
+  part("A lesson the creator removes takes its ratings with it, and their room comes back");
+  redis.clear();
+  const bare = await used();
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L1, who: ana, score: 4, note: "Good." });
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L1, who: ben, score: 2, note: "" });
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L2, who: ana, score: 5, note: "" });
+  const three = await used();
+  is("both of the removed lesson's ratings go", await dropLessonRatings(COURSE, [L1], ROOM), 2);
+  is("nothing of it is left", [redis.run(["EXISTS", `nl:lr:${COURSE}:l:${L1}`]), await lessonRatingCount(COURSE, L1)], [0, 0]);
+  is("it leaves the course's rated lessons", redis.run(["SMEMBERS", `nl:lr:${COURSE}:ls`]), [L2]);
+  is("their room comes back", three - (await used()), RATING_ROOM_BYTES * 2);
+  is("the other lesson's rating stays", (await readMyRating(COURSE, L2, ana))?.score, 5);
+  is("dropping it again does nothing and gives nothing back", [await dropLessonRatings(COURSE, [L1], ROOM), three - (await used())], [0, RATING_ROOM_BYTES * 2]);
+  is("no lessons, nothing sent", await dropLessonRatings(COURSE, [], ROOM), 0);
+  const realDrop = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:lesson-ratings-drop-lesson:v1"))) return [1, "?"];
+    return realDrop(commands);
+  }) as typeof redis.pipeline;
+  const beforeOdd = await used();
+  let oddThrew = false;
+  try {
+    await dropLessonRatings(COURSE, [L2, "lessonzzz999"], ROOM);
+  } catch {
+    oddThrew = true;
+  }
+  redis.pipeline = realDrop;
+  is("a reply that is not a count is unknown, said so", oddThrew, true);
+  is("and only what was confirmed comes back", beforeOdd - (await used()), RATING_ROOM_BYTES);
+  await forgetLessonRatingsPerson(COURSE, ana, ROOM);
+  redis.run(["DEL", `nl:lr:${COURSE}:l:${L2}`, `nl:lr:${COURSE}:ls`]);
+  is("the room counts ratings, and a store's closing erases them", [countedInRoom(`nl:lr:${COURSE}:l:${L1}`), countedInRoom(`nl:lr:${COURSE}:ls`), closingOf(`nl:lr:${COURSE}:ls`)], [true, true, { how: "erase" }]);
+  void bare;
+
+  part("Deleting a person is priced at every lesson its ratings are kept under, a removed one too");
+  redis.clear();
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L1, who: ana, score: 4, note: "" });
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L2, who: ben, score: 3, note: "" });
+  is("the rated lessons of a course are counted", await ratedLessonCount([COURSE]), 2);
+  is("no course, nothing counted", await ratedLessonCount([]), 0);
+  const scope = { store: ROOM, sid: "s", statsId: "f".repeat(32), listId: null, email: "ana@example.com", person: "p", learner: ana, courses: [{ productId: "p1", courseId: COURSE, lessonIds: [L1], moduleIds: ["m1"] }], productIds: ["p1"], communityId: null } as unknown as ErasureScope;
+  is("the erasure is sized at the course's lessons and every lesson holding a rating", (await erasureSize(scope)).lessons, 1 + 2);
+  redis.run(["SET", `nl:lr:${COURSE}:ls`, "not a set"]);
+  let sizeThrew = false;
+  try {
+    await erasureSize(scope);
+  } catch {
+    sizeThrew = true;
+  }
+  is("a count that cannot be read stops the erasure's sizing, never taken for none", sizeThrew, true);
+  redis.clear();
+
   part("The registries: deletion, the copy and the cost line say what the code does");
   const ratingData = PERSON_DATA.filter((entry) => entry.file === "lib/lesson-rating.ts");
   is("deleting a person erases their ratings", ratingData.map((e) => e.how), ["erased"]);
@@ -205,6 +262,11 @@ async function main(): Promise<void> {
   is("a buyer action is taken before rating", take > 0 && take < rate, true);
   is("the per-person limit comes before any rating read or write", limit > 0 && limit < rate && limit < route.indexOf("await removeMyRating("), true);
   is("removing is not charged a buyer action", /action === "remove"[\s\S]{0,40}removeMyRating/.test(route) && route.indexOf("await removeMyRating(") < take, true);
+  const removing = route.indexOf('if (action === "remove")');
+  is("a student removes their own rating without the lesson being open to them: only who they are is asked", removing > 0 && removing < route.indexOf('access.state !== "open"') && removing < route.indexOf("findLesson(") && removing < route.indexOf("heldBack("), true);
+  is("the store's owner never removes a student's rating", /if \(action === "remove"\) \{[\s\S]{0,400}learner\.owner\) return back\(""\)/.test(route), true);
+  const scored = route.indexOf("parseScore(form.get(\"score\"))");
+  is("a score that is not one is refused before a buyer action is taken", scored > 0 && scored < take, true);
   is("a full data room says so", route.includes("error instanceof DataRoomError") && route.includes('back("noroom")'), true);
 
   part("The lesson page: only the store's owner reads the ratings, the studio paid first");
@@ -213,6 +275,9 @@ async function main(): Promise<void> {
   is("the count is paid for before it is read", page.indexOf("countStudio(store, null, 1)") > 0 && page.indexOf("countStudio(store, null, 1)") < page.indexOf("await lessonRatingCount("), true);
   is("the ratings are paid for before they are read", paid > 0 && paid < page.indexOf("await readLessonRatings("), true);
   is("only the owner, and only when asked", /const ownerAsks = access\.state === "open" && open && access\.learner\.owner && query\.ratings === "1";/.test(page), true);
+  const box = source("components/lesson-rating.tsx");
+  is("asking to see the ratings is a button in a form, never a link a browser fetches ahead", /<Link[^>]*ownerShow|href=\{view\./.test(box) === false && /method="get"[\s\S]{0,300}name="ratings" value="1"/.test(box), true);
+  is("the owner sees only the month of a comment, never the day", /toLocaleDateString\(locale, \{ year: "numeric", month: "long", timeZone: "UTC" \}\)/.test(box) && !/day: "numeric"/.test(box), true);
   is("a student's own rating is read only for that student", /student && open \? readMyRating\(course\.id, lesson\.id, who\)/.test(page), true);
 
   part("Every buyer language says each sentence, with its numbers");
@@ -225,6 +290,8 @@ async function main(): Promise<void> {
     is(`${code}: the length hint carries the limit`, w.noteHint(MAX_RATING_NOTE).includes(String(MAX_RATING_NOTE)), true);
     is(`${code}: each notice has words`, Object.values(w.notices).every((s) => typeof s === "string" && s.length > 3), true);
   }
+  is("the promise is what the page does: no 'at any time' while a closed lesson has no form", /at any time/.test(LESSON_RATING_WORDS.en.note), false);
+  is("and it says deleting one's data removes it", /delete your data/.test(LESSON_RATING_WORDS.en.note), true);
   is("an unknown language speaks English", lessonRatingWords("xx").title, LESSON_RATING_WORDS.en.title);
 
   done();

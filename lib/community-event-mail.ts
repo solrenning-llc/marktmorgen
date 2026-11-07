@@ -168,7 +168,11 @@ async function madeOrTakeOver(id: string, mark: string): Promise<"made" | "ours"
   if (!held || !held.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReplyError("an event email's once-only mark and its send");
   const [was, raw] = held as (string | null)[];
   if (raw !== null) {
-    if (parseJob(raw)?.status === "sending") {
+    // "Made" only when the text read back is this very send (Codex P on #2954): cut text, an id this code never
+    // writes or another send's record is unknown, so the reminder stays due and the mark is not taken over on it.
+    const send = parseJob(raw);
+    if (!send || send.id !== id) throw new UnknownReplyError("an event email's send under its once-only mark");
+    if (send.status === "sending") {
       const added = repliesFor(await redisPipeline([["SADD", JOBS, id]]), 1)?.[0];
       if (countOf(added) === null) throw new UnknownReplyError("an event email's send put in line");
     }

@@ -83,9 +83,14 @@ is("a canceled rerun after a failure leaves the failure as the evidence", action
 is("a canceled trigger with all nine green still evaluates the head, not the trigger",
   decide({ runs: allGreen(), trigger: run(0, stopped), head: HEAD }).action, "close");
 for (const other of ["skipped", "neutral", "stale"]) is(`a ${other} run counts neither way`, action([...allGreen().slice(1), run(0, other)]), "none");
-for (const odd of ["action_required", "startup_failure", "", "weird"]) {
+for (const odd of ["action_required", "", "weird"]) {
   is(`an unexpected conclusion (${odd || "empty"}) never closes and never opens`, action([...allGreen().slice(1), run(0, odd)]), "none");
 }
+// Claude 5 on #3042: a broken workflow file on main gives startup_failure on every later head.
+for (const event of ["push", "schedule"]) {
+  is(`a startup_failure on a ${event} run of the current head: open`, action([...allGreen().slice(1), run(0, "startup_failure", { event })]), "open");
+}
+is("a startup_failure of a pull_request run never opens", action([...allGreen().slice(1), run(0, "startup_failure", { event: "pull_request" })]), "none");
 is("a stale failure on an older head never opens", action([...allGreen(), run(0, "failure", { head_sha: OLD })]), "close");
 is("stale greens on an older head never close", action(REQUIRED.map((_, i) => run(i, "success", { head_sha: OLD }))), "none");
 is("a run of the same name from another file is not the workflow", action([...allGreen().slice(1), run(0, "success", { path: ".github/workflows/copy.yml" })]), "none");
@@ -168,9 +173,10 @@ for (const [what, over] of [
 ] as [string, Partial<Run>][]) {
   is(`an earlier-head failure of ${what} never opens`, action([...restGreen(), run(PC, "failure", { head_sha: OLD, ...over }), run(PC, null)]), "none");
 }
-for (const odd of ["startup_failure", "action_required", "skipped", "neutral", "stale"]) {
+for (const odd of ["action_required", "skipped", "neutral", "stale"]) {
   is(`an earlier-head ${odd} never opens`, action([...restGreen(), run(PC, odd, { head_sha: OLD }), run(PC, null)]), "none");
 }
+is("an earlier-head startup_failure opens like a failure", action([...restGreen(), run(PC, "startup_failure", { head_sha: OLD }), run(PC, null)]), "open");
 is("an earlier-head timed_out opens like a failure", action([...restGreen(), run(PC, "timed_out", { head_sha: OLD, event: "schedule" }), run(PC, null)]), "open");
 is("an earlier-head run still going is no evidence", action([...restGreen(), run(PC, null, { head_sha: OLD }), run(PC, null)]), "none");
 is("closing still needs all nine green on the current head, never on an earlier one",
@@ -185,6 +191,30 @@ is("closing still needs all nine green on the current head, never on an earlier 
 {
   const states: State[] = decide({ runs: [...allGreen().slice(2), run(0, "failure"), run(1, null)], trigger: allGreen()[0], head: HEAD }).states;
   is("earlier heads are read only for workflows neither green nor red on the current head", earlierNeeded(states), [REQUIRED[1].file]);
+}
+
+part("a canceled run with a failed job is red (Claude 5 on #3042: pushes cancel most main runs)");
+{
+  // redJobs: the canceled runs in which a job other than "All checks (…)" ended in failure or timed_out.
+  const b = run(PC, stopped);
+  const d = decide({ runs: [...restGreen(), b], trigger: b, head: HEAD, redJobs: [b.id] });
+  is("canceled on the current head with a failed job: open, that run reported", [d.action, d.red.map((r) => r.id)], ["open", [b.id]]);
+  is("canceled on the current head with no failed job: still nothing", decide({ runs: [...restGreen(), b], trigger: b, head: HEAD, redJobs: [] }).action, "none");
+  const a = run(PC, stopped, { head_sha: OLD });
+  const e = decide({ runs: [...restGreen(), a, run(PC, null)], trigger: restGreen()[0], head: HEAD, redJobs: [a.id] });
+  is("canceled on an earlier head with a failed job, the current head still going: open, with that run", [e.action, e.red.map((r) => r.id)], ["open", [a.id]]);
+  const older = run(PC, "success", { head_sha: OLD });
+  const clean = run(PC, stopped, { head_sha: MID });
+  is("canceled with no failed job on an earlier head is no evidence: the green behind it stands",
+    decide({ runs: [...restGreen(), older, clean, run(PC, null)], trigger: restGreen()[0], head: HEAD, redJobs: [] }).action, "none");
+  const redMid = run(PC, stopped, { head_sha: MID });
+  is("a newer canceled red stands over an older green on earlier heads",
+    decide({ runs: [...restGreen(), older, redMid, run(PC, null)], trigger: restGreen()[0], head: HEAD, redJobs: [redMid.id] }).action, "open");
+  const pr = run(PC, stopped, { event: "pull_request" });
+  is("a canceled pull_request run with a failed job never opens",
+    decide({ runs: [...restGreen(), pr], trigger: pr, head: HEAD, redJobs: [pr.id] }).action, "none");
+  is("a green run named in redJobs is still green: only canceled runs are read that way",
+    decide({ runs: allGreen(), trigger: allGreen()[0], head: HEAD, redJobs: allGreen().map((r) => r.id) }).action, "close");
 }
 
 part("the texts");
@@ -214,7 +244,12 @@ is("it says it changes no price, limit, commission, flag, gate or prohibition", 
 
 async function endToEnd() {
   part("the whole run, against a synthetic GitHub (no network)");
-  const github = (o: { head: string, headRuns: unknown[], older?: Record<string, unknown[][]>, issues?: unknown[], olderReply?: unknown }) => {
+  // Jobs of a run, in the real API shape (GET actions/runs/{id}/jobs); by default a canceled run whose
+  // jobs were canceled and whose aggregator "All checks (…)" failed, as every canceled run's does.
+  const job = (name: string, conclusion: string | null) => ({ id: 1, name, status: conclusion === null ? "in_progress" : "completed", conclusion });
+  const cleanJobs = { total_count: 2, jobs: [job("verify", stopped), job("All checks (product-checks)", "failure")] };
+  const redJobsReply = { total_count: 3, jobs: [job("verify", "success"), job("Mobile render (candidate)", "failure"), job("All checks (product-checks)", "failure")] };
+  const github = (o: { head: string, headRuns: unknown[], older?: Record<string, unknown[][]>, issues?: unknown[], olderReply?: unknown, jobs?: Record<number, unknown> }) => {
     const reads: string[] = [];
     const writes: { method: string, path: string, body: unknown }[] = [];
     const api: Api = async (method, path, body, absentIsNull) => {
@@ -231,6 +266,8 @@ async function endToEnd() {
         const pages = o.older?.[older[1]] ?? [];
         return { total_count: pages.flat().length, workflow_runs: pages[Number(older[2]) - 1] ?? [] };
       }
+      const jobs = /^actions\/runs\/(\d+)\/jobs\?per_page=100$/.exec(path);
+      if (jobs) return o.jobs?.[Number(jobs[1])] ?? cleanJobs;
       if (path === `issues?labels=${LABEL}&state=open&per_page=100`) return o.issues ?? [];
       if (path === `labels/${LABEL}` && absentIsNull) return null;
       if (/^issues\/\d+\/comments\?per_page=100&page=1$/.test(path)) return [];
@@ -261,9 +298,42 @@ async function endToEnd() {
     const created = gh.writes.find((w) => w.path === "issues");
     is("A red behind 100 canceled runs, the trigger being another workflow's green: the issue opens with A's run",
       [Boolean(created), String((created?.body as { body?: string } | undefined)?.body ?? "").includes(a.html_url)], [true, true]);
+    is("canceled runs on earlier heads have their jobs read only up to the bound, then count as before",
+      gh.reads.filter((p) => /^actions\/runs\/\d+\/jobs/.test(p)).length, 10);
     is("only the workflow without a result on the current head is read on earlier heads, page by page",
       gh.reads.filter((p) => p.startsWith("actions/workflows/")),
       ["actions/workflows/product-checks.yml/runs?branch=main&status=completed&per_page=100&page=1", "actions/workflows/product-checks.yml/runs?branch=main&status=completed&per_page=100&page=2"]);
+  }
+  {
+    const b = run(PC, stopped, { id: 7_001 });
+    const gh = github({ head: HEAD, headRuns: [...restGreen(), b], jobs: { [b.id]: redJobsReply }, older: { "product-checks.yml": [[]] } });
+    await alarmRun({ api: gh.api, trigger: b, log: quiet });
+    const created = gh.writes.find((w) => w.path === "issues");
+    is("canceled on the current head, Mobile render failed inside it: the issue opens with that run",
+      [Boolean(created), String((created?.body as { body?: string } | undefined)?.body ?? "").includes(b.html_url)], [true, true]);
+    is("and its jobs were read", gh.reads.includes(`actions/runs/${b.id}/jobs?per_page=100`), true);
+  }
+  {
+    const b = run(PC, stopped, { id: 7_002 });
+    const gh = github({ head: HEAD, headRuns: [...restGreen(), b], older: { "product-checks.yml": [[]] } });
+    await alarmRun({ api: gh.api, trigger: b, log: quiet });
+    is("canceled with only the aggregator failed: nothing opens", gh.writes, []);
+  }
+  {
+    const a = run(PC, stopped, { head_sha: OLD, id: 7_003 });
+    const gh = github({ head: HEAD, headRuns: [...restGreen(), run(PC, null)], jobs: { [a.id]: redJobsReply }, older: { "product-checks.yml": [[a]] } });
+    await alarmRun({ api: gh.api, trigger: restGreen()[0], log: quiet });
+    const created = gh.writes.find((w) => w.path === "issues");
+    is("canceled on an earlier head with a failed job, the current head still going: the issue opens with it",
+      [Boolean(created), String((created?.body as { body?: string } | undefined)?.body ?? "").includes(a.html_url)], [true, true]);
+  }
+  for (const [what, reply] of [["no jobs list", { total_count: 1 }], ["a short page", { total_count: 5, jobs: [job("verify", "failure")] }],
+    ["a job without a conclusion field", { total_count: 1, jobs: [{ id: 1, name: "verify", status: "completed" }] }]] as [string, unknown][]) {
+    const b = run(PC, stopped, { id: 7_100 });
+    const gh = github({ head: HEAD, headRuns: [...restGreen(), b], jobs: { [b.id]: reply } });
+    let threw = false;
+    try { await alarmRun({ api: gh.api, trigger: b, log: quiet }); } catch { threw = true; }
+    is(`an unreadable jobs reply (${what}) fails the run: never green, never red`, [threw, gh.writes], [true, []]);
   }
   {
     const gh = github({ head: HEAD, headRuns: [...restGreen(), run(PC, null)], olderReply: { workflow_runs: "nope" } });

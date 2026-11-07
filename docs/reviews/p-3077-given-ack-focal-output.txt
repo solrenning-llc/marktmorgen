@@ -1,0 +1,349 @@
+
+=== green ===
+{"file":"p-3077-given-ack.proof.ts","old":false,"exit":0}
+  ok    healthy: initial disposition
+  ok    healthy: access granted
+  ok    healthy: given persisted
+  ok    healthy: way-in email attempted after grant
+  ok    healthy: retry completed
+  ok    healthy: one way-in email after retry
+  ok    offshape: initial disposition
+  ok    offshape: access granted
+  ok    offshape: given persisted
+  ok    offshape: way-in email attempted after grant
+  ok    offshape: retry completed
+  ok    offshape: one way-in email after retry
+  ok    lost-ack: initial disposition
+  ok    lost-ack: access granted
+  ok    lost-ack: given persisted
+  ok    lost-ack: way-in email attempted after grant
+  ok    lost-ack: retry completed
+  ok    lost-ack: one way-in email after retry
+
+18 checks, all passing.
+MemoryRedis dispatches: 117 mock HTTP: 3
+{"file":"preorder-given-ack.test.ts","old":false,"exit":0}
+  ok    healthy: first run's answer
+  ok    healthy: access granted
+  ok    healthy: given written
+  ok    healthy: way-in email asked for once the grant stands
+  ok    healthy: retry answers given
+  ok    healthy: still exactly one way-in email after the retry
+  ok    healthy: under the pre-order's own idempotency key
+  ok    offshape: first run's answer
+  ok    offshape: access granted
+  ok    offshape: given written
+  ok    offshape: way-in email asked for once the grant stands
+  ok    offshape: retry answers given
+  ok    offshape: still exactly one way-in email after the retry
+  ok    offshape: under the pre-order's own idempotency key
+  ok    lost-ack: first run's answer
+  ok    lost-ack: access granted
+  ok    lost-ack: given written
+  ok    lost-ack: way-in email asked for once the grant stands
+  ok    lost-ack: retry answers given
+  ok    lost-ack: still exactly one way-in email after the retry
+  ok    lost-ack: under the pre-order's own idempotency key
+  ok    given, email never sent: given written
+  ok    given, email never sent: none before the retry
+  ok    given, email never sent: retry answers given
+  ok    given, email never sent: one way-in email after the retry
+  ok    given, email never sent: under the pre-order's own idempotency key
+
+26 checks, all passing.
+MemoryRedis dispatches: 153 mock HTTP: 4
+{"file":"preorder-record-exact.test.ts","old":false,"exit":0}
+
+Coming soon: a write whose reply is lost is never taken as recorded
+  ok    lost reply, nothing written: confirmPreorder throws, no receipt for an entry that does not exist
+  ok    the webhook's retry records it once and sends the receipt once
+
+Coming soon: every reply in another shape is unknown
+  ok    HSETNX answered OK: thrown, no receipt
+  ok    HSETNX answered null: thrown, no receipt
+  ok    HSETNX answered 2: thrown, no receipt
+  ok    HGET answered a number: thrown, no receipt
+  ok    HGET answered null: thrown, no receipt
+  ok    HGET answered text that is no pre-order: thrown, no receipt
+  ok    EXPIRE answered null: thrown, no receipt
+  ok    the payment's SET answered null: thrown, no receipt
+  ok    the store's SET answered 1: thrown, no receipt
+  ok    one reply short: thrown, no receipt
+  ok    one reply too many: thrown, no receipt
+  ok    not a list: thrown, no receipt
+  ok    retried with real answers: recorded once, receipted once
+  ok    a normal write is recorded and receipted (control)
+
+On sale: a lost record never ends in a skip that drops the paid order
+  ok    lost reply: thrown, nothing handed over, never "skip"
+  ok    the retry hands it over once
+
+Rule 30: the hand-over's "given" write is read exactly too
+  ok    written but answered in another shape: thrown, never "given"; the grant stands, so the way in is emailed; the giving mark let go
+  ok    the retry finds it given: no second grant, no second email
+  ok    not written and answered in another shape: thrown, never "given"
+  ok    the retry marks it given; each email of the way in carries the same idempotency key, so the buyer gets one
+
+22 checks, all passing.
+MemoryRedis dispatches: 210 mock HTTP: 6
+{"file":"preorders.test.ts","old":false,"exit":0}
+
+The expected day
+  ok    today is a day
+  ok    tomorrow is the first day that can be chosen
+  ok    up to 365 days ahead, and no further
+  ok    never a day that does not exist, or anything else
+  ok    taken until the day itself, and not after
+
+What can be pre-ordered
+  ok    a file, a link or a course at one price
+  ok    never something free, a membership, a call, a bundle or a podcast
+  ok    nor several prices, a limited number, license keys or a price the buyer chooses
+  ok    something in it to hand over: a file, a link, or a course with a lesson
+  ok    a pre-order's checkout hands over nothing by itself
+  ok    a kept pre-order reads back, and nonsense does not
+  ok    counted as waiting, handed over or refunded
+
+Paid while it is coming soon
+  ok    the page reads coming soon and the day, in one request
+  ok    and the store page reads every product's
+  ok    a receipt
+  ok    with what, how much, and the day it is expected
+  ok    written down, waiting
+  ok    two waiting, the first kept once
+
+Put on sale
+  ok    its day is let go
+  ok    the one still paid is handed over; the refunded one is not
+  ok    and its buyer is emailed the way in, once
+  ok    with the link to their purchases
+  ok    written down under their address
+  ok    marked given, and the refunded one marked refunded
+  ok    nothing left to hand over, and run again it sends nothing
+
+Paid after it went on sale
+  ok    handed over at once
+  ok    and emailed the way in
+
+Refunded after it was handed over
+  ok    a course removal that fails keeps the purchase for the next run
+  ok    one taken back
+  ok    from its buyer only
+  ok    its course start dropped too
+  ok    and the same refund is read once
+
+32 checks, all passing.
+MemoryRedis dispatches: 133 mock HTTP: 12
+reading the disputes closed as lost failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:12324:11)
+    at async lostDisputesSince ([stdin]:15581:20)
+    at async lostDisputesOrRetry ([stdin]:15609:12)
+    at async revokeRefundedPreorders ([stdin]:60912:16)
+    at async main ([stdin]:61170:3) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+taking a refunded pre-order's course away failed; tried again next run Error: the ledger did not answer
+    at [stdin]:61171:11
+    at revokeRefundedPreorders ([stdin]:60967:21)
+    at async main ([stdin]:61170:3)
+reading the disputes closed as lost failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:12324:11)
+    at async lostDisputesSince ([stdin]:15581:20)
+    at async lostDisputesOrRetry ([stdin]:15609:12)
+    at async revokeRefundedPreorders ([stdin]:60912:16)
+    at async main ([stdin]:61174:25) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the disputes closed as lost failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:12324:11)
+    at async lostDisputesSince ([stdin]:15581:20)
+    at async lostDisputesOrRetry ([stdin]:15609:12)
+    at async revokeRefundedPreorders ([stdin]:60912:16)
+    at async main ([stdin]:61178:43) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+{"file":"preorder-email-copy.test.ts","old":false,"exit":0}
+
+The seven released-preorder pages state durable access without claiming email success
+  ok    en: complete released-preorder status
+  ok    en: keeps ownership and email possibility
+  ok    es: complete released-preorder status
+  ok    es: keeps ownership and email possibility
+  ok    fr: complete released-preorder status
+  ok    fr: keeps ownership and email possibility
+  ok    de: complete released-preorder status
+  ok    de: keeps ownership and email possibility
+  ok    it: complete released-preorder status
+  ok    it: keeps ownership and email possibility
+  ok    nl: complete released-preorder status
+  ok    nl: keeps ownership and email possibility
+  ok    pt: complete released-preorder status
+  ok    pt: keeps ownership and email possibility
+
+The seven waiting-preorder surfaces preserve purchase access and describe release email as an attempt
+  ok    en: waiting phrase 1
+  ok    en: waiting phrase 2
+  ok    en: waiting phrase 3
+  ok    en: waiting phrase 4
+  ok    en: waiting phrase 5
+  ok    en: waiting phrase 6
+  ok    en: waiting phrase 7
+  ok    es: waiting phrase 1
+  ok    es: waiting phrase 2
+  ok    es: waiting phrase 3
+  ok    es: waiting phrase 4
+  ok    es: waiting phrase 5
+  ok    es: waiting phrase 6
+  ok    es: waiting phrase 7
+  ok    fr: waiting phrase 1
+  ok    fr: waiting phrase 2
+  ok    fr: waiting phrase 3
+  ok    fr: waiting phrase 4
+  ok    fr: waiting phrase 5
+  ok    fr: waiting phrase 6
+  ok    fr: waiting phrase 7
+  ok    de: waiting phrase 1
+  ok    de: waiting phrase 2
+  ok    de: waiting phrase 3
+  ok    de: waiting phrase 4
+  ok    de: waiting phrase 5
+  ok    de: waiting phrase 6
+  ok    de: waiting phrase 7
+  ok    it: waiting phrase 1
+  ok    it: waiting phrase 2
+  ok    it: waiting phrase 3
+  ok    it: waiting phrase 4
+  ok    it: waiting phrase 5
+  ok    it: waiting phrase 6
+  ok    it: waiting phrase 7
+  ok    nl: waiting phrase 1
+  ok    nl: waiting phrase 2
+  ok    nl: waiting phrase 3
+  ok    nl: waiting phrase 4
+  ok    nl: waiting phrase 5
+  ok    nl: waiting phrase 6
+  ok    nl: waiting phrase 7
+  ok    pt: waiting phrase 1
+  ok    pt: waiting phrase 2
+  ok    pt: waiting phrase 3
+  ok    pt: waiting phrase 4
+  ok    pt: waiting phrase 5
+  ok    pt: waiting phrase 6
+  ok    pt: waiting phrase 7
+
+Sender refusal does not undo the purchase access shown by the page
+  ok    release still completes after the sender refuses
+  ok    the sender really refused one request
+  ok    the purchase remains granted and marked given
+
+66 checks, all passing.
+MemoryRedis dispatches: 23 mock HTTP: 1
+{"file":"cx1-review-2726-readback.test.ts","old":false,"exit":0}
+  ok    gift extra result: an unknown reread cannot confirm paid delivery
+  ok    gift boolean given: an unknown reread cannot confirm paid delivery
+  ok    gift string given: an unknown reread cannot confirm paid delivery
+  ok    gift valid not-given control: an unknown reread cannot confirm paid delivery
+  ok    gift unreadable slot control: an unknown reread cannot confirm paid delivery
+  ok    preorder extra result: an unknown reread cannot confirm paid delivery
+  ok    preorder boolean given: an unknown reread cannot confirm paid delivery
+  ok    preorder string given: an unknown reread cannot confirm paid delivery
+  ok    preorder valid not-given control: an unknown reread cannot confirm paid delivery
+  ok    preorder unreadable slot control: an unknown reread cannot confirm paid delivery
+
+10 checks, all passing.
+MemoryRedis dispatches: 117 mock HTTP: 0
+
+
+=== red ===
+{"file":"p-3077-given-ack.proof.ts","old":true,"exit":1}
+  ok    healthy: initial disposition
+  ok    healthy: access granted
+  ok    healthy: given persisted
+  ok    healthy: way-in email attempted after grant
+  ok    healthy: retry completed
+  ok    healthy: one way-in email after retry
+  ok    offshape: initial disposition
+  ok    offshape: access granted
+  ok    offshape: given persisted
+  ok    offshape: way-in email attempted after grant
+  ok    offshape: retry completed
+  ok    offshape: one way-in email after retry
+  ok    lost-ack: initial disposition
+  ok    lost-ack: access granted
+  ok    lost-ack: given persisted
+  FAIL  lost-ack: way-in email attempted after grant
+        expected 1
+        got      0
+  ok    lost-ack: retry completed
+  FAIL  lost-ack: one way-in email after retry
+        expected 1
+        got      0
+
+18 checks, 2 failing.
+MemoryRedis dispatches: 105 mock HTTP: 2
+{"file":"preorder-given-ack.test.ts","old":true,"exit":1}
+  ok    healthy: first run's answer
+  ok    healthy: access granted
+  ok    healthy: given written
+  ok    healthy: way-in email asked for once the grant stands
+  ok    healthy: retry answers given
+  ok    healthy: still exactly one way-in email after the retry
+  ok    healthy: under the pre-order's own idempotency key
+  ok    offshape: first run's answer
+  ok    offshape: access granted
+  ok    offshape: given written
+  ok    offshape: way-in email asked for once the grant stands
+  ok    offshape: retry answers given
+  ok    offshape: still exactly one way-in email after the retry
+  ok    offshape: under the pre-order's own idempotency key
+  ok    lost-ack: first run's answer
+  ok    lost-ack: access granted
+  ok    lost-ack: given written
+  FAIL  lost-ack: way-in email asked for once the grant stands
+        expected 1
+        got      0
+  ok    lost-ack: retry answers given
+  FAIL  lost-ack: still exactly one way-in email after the retry
+        expected 1
+        got      0
+  FAIL  lost-ack: under the pre-order's own idempotency key
+        expected ["nimbus-preorder-out:cs_test_recordpre000203"]
+        got      []
+  ok    given, email never sent: given written
+  ok    given, email never sent: none before the retry
+  ok    given, email never sent: retry answers given
+  FAIL  given, email never sent: one way-in email after the retry
+        expected 1
+        got      0
+  FAIL  given, email never sent: under the pre-order's own idempotency key
+        expected ["nimbus-preorder-out:cs_test_recordpre000204"]
+        got      []
+
+26 checks, 5 failing.
+MemoryRedis dispatches: 135 mock HTTP: 2
+
+
+=== types ===
+
+
+=== lint ===
+
+/workspace/scratch/452ffd7d3d6c/p-focal-3077-given-ack/tests/p-3077-given-ack.proof.ts
+  13:20  warning  'part' is defined but never used                 @typescript-eslint/no-unused-vars
+  48:7   warning  'soonKey' is assigned a value but never used     @typescript-eslint/no-unused-vars
+  81:10  warning  'recordAnswers' is defined but never used        @typescript-eslint/no-unused-vars
+  88:7   warning  'receiptsTo' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  91:7   warning  'fields' is assigned a value but never used      @typescript-eslint/no-unused-vars
+
+✖ 5 problems (0 errors, 5 warnings)
+
+
+
+=== scanner ===
+Public data check: 4292 tracked files; 0 file(s) require correction.

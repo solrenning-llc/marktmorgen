@@ -79,6 +79,19 @@ const allKey = (s: string) => `nl:rev:all:${s}`;
 const newKey = (s: string) => `nl:rev:new:${s}`;
 const payKey = (s: string) => `nl:rev:pay:${s}`;
 const lockKey = (s: string, p: string) => `nl:rev:lock:${s}:${p}`;
+/**
+ * How many new photos each review of a product has been granted (MAX_REVIEW_PHOTOS), by review id: a number with
+ * no address, kept beside the product's reviews so that a buyer's delete or a person's erasure, which HDEL the review,
+ * do not reset it (review M1 on #2863). It goes with the product's reviews (dropReviews) or the store; its room is
+ * counted with the reviews' (REVIEWS_SLOT).
+ */
+const photoCountKey = (s: string, p: string) => `nl:rev:${s}:${p}:photos`;
+
+/** A kept photo count, read exactly: nil is none yet; a whole number up to the ceiling is itself; anything else is the ceiling. */
+function keptPhotoCount(raw: unknown): number {
+  if (raw === null) return 0;
+  return typeof raw === "string" && /^\d{1,6}$/.test(raw) ? Math.min(Number(raw), MAX_REVIEW_PHOTOS) : MAX_REVIEW_PHOTOS;
+}
 export const REVIEW_STORES_KEY = "nl:rev:stores";
 
 /** One buyer's review of one product, always the same id, whatever order they write it from. */
@@ -389,17 +402,28 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
     // A new photo's slot is granted here, in the write the words already make, under the product's lock: the count
     // read above and the count written below are of the same moment, so two sends at once cannot both take the last
     // slot. Kept whatever happens to the put afterwards (a failed put still used it: the cost side fails closed).
-    const used = before?.photoPuts ?? 0;
+    // The count is the larger of the review's own and the one kept beside it, which outlives a delete (review M1 on
+    // #2863): writing the review again after deleting it starts from what it had used. Unknown is the ceiling.
+    // Read only when a photo is asked for (no other write needs it), under the same lock.
+    const countRead = input.photo === true ? repliesFor(await redisPipeline([["HGET", photoCountKey(statsId, input.productId), id]]), 1) : null;
+    const countRaw = countRead ? countRead[0] : undefined;
+    const exactCount = countRaw === null || (typeof countRaw === "string" && keptPhotoCount(countRaw) === Number(countRaw));
+    const used = Math.max(before?.photoPuts ?? 0, input.photo === true ? (countRead ? keptPhotoCount(countRaw) : MAX_REVIEW_PHOTOS) : 0);
     const photoGranted = input.photo === true && used < MAX_REVIEW_PHOTOS;
-    if (used > 0 || photoGranted) review.photoPuts = used + (photoGranted ? 1 : 0);
+    const nextPuts = used + (photoGranted ? 1 : 0);
+    if (nextPuts > 0) review.photoPuts = nextPuts;
+    // Written beside the review, in the same request as the review, when a photo was asked for, the kept count was read
+    // exactly and it differs; its room is taken with the review's the first time it is written.
+    const keepCount: (string | number)[][] = input.photo === true && exactCount && nextPuts > 0 && countRaw !== String(nextPuts) ? [["HSET", photoCountKey(statsId, input.productId), id, nextPuts]] : [];
+    const countBytes = keepCount.length && countRaw === null ? dataBytes([id, String(MAX_REVIEW_PHOTOS)]) : 0;
     // When the order was paid: kept from the first writing of the same order, else as the order's proof says.
     const paidAt = before && before.reference === input.reference && before.paidAt ? before.paidAt : input.paidAt;
     if (Number.isSafeInteger(paidAt) && (paidAt as number) > 0) review.paidAt = paidAt;
-    const grown = reviewBytes(review) - reviewBytes(before);
+    const grown = reviewBytes(review) - reviewBytes(before) + countBytes;
     if (grown > 0 && !(await takeData(room, [{ slot: REVIEWS_SLOT(input.productId), bytes: grown }], now)).ok) return { state: "noroom" };
     // Words rewritten (perhaps to take something out): the AI summary built from the old words goes, in the same request.
     // A review hidden or refunded was never counted by one (lib/review-ai-summary-rules.ts, summaryInputs): it takes none away.
-    await write(statsId, review, before && before.text !== review.text && counted(before) ? summaryGone(statsId, review.productId, before.createdAt) : []);
+    await write(statsId, review, [...keepCount, ...(before && before.text !== review.text && counted(before) ? summaryGone(statsId, review.productId, before.createdAt) : [])]);
     await redisPipeline([
       ["ZADD", newKey(statsId), now, `${review.productId}|${id}`],
       ["SADD", REVIEW_STORES_KEY, statsId],
@@ -707,6 +731,7 @@ async function dropReviewRecords(statsId: string, productId: string, members: st
   await redisPipeline([
     ["DEL", productKey(statsId, productId)],
     ["DEL", visibleKey(statsId, productId)],
+    ["DEL", photoCountKey(statsId, productId)],
     ["HDEL", summaryKey(statsId), productId],
     ...summaryGone(statsId, productId, "all"),
     ...(members.length ? [["ZREM", allKey(statsId), ...members], ["ZREM", newKey(statsId), ...members]] : []),
@@ -716,7 +741,9 @@ async function dropReviewRecords(statsId: string, productId: string, members: st
 /**
  * Deletes every review one buyer wrote in this store (lib/person-erasure.ts),
  * as their own delete does: its stars leave the average with it. Returns the
- * photos to delete from the picture folder.
+ * photos to delete from the picture folder. The count of photos each review
+ * was granted (photoCountKey) stays: a number under a one-way id, with no
+ * address or words, kept so the photo ceiling cannot be reset.
  */
 export async function forgetReviewsPerson(statsId: string | null, productIds: string[], email: string, room: DataStore): Promise<{ records: number; photos: string[] }> {
   if (!statsId || !productIds.length || !isRedisConfigured()) return { records: 0, photos: [] };

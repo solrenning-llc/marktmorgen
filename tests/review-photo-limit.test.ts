@@ -4,7 +4,8 @@
  * public figure and ten changes per order an hour, so one buyer could make many puts. Now:
  *
  *   - each review takes at most MAX_REVIEW_PHOTOS new photos over its whole life, counted on the review's own
- *     record (photoPuts) by the write the review already makes, under the product's lock, with no new command;
+ *     record (photoPuts) and on a hash beside it, by the write the review already makes (one more read and write in
+ *     the same requests), under the product's lock;
  *   - the slot is granted by that write BEFORE the put; a write that fails, is busy or has no room never puts;
  *   - a photo past the ceiling is not stored, the words are, and the buyer is told so in plain words;
  *   - a put that fails after its slot was granted keeps the slot used (the cost side fails closed), the words stay

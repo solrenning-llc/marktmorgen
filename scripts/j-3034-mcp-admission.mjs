@@ -1,0 +1,14 @@
+import { build } from "esbuild";
+import { resolve, join } from "node:path";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
+import { testAliases, testEnvironment } from "../tests/test-config.mjs";
+const root=resolve(import.meta.dirname,".."),here=join(root,"tests"),out=mkdtempSync(join(tmpdir(),"j3034-mcp-"));
+const file="j-3034-mcp-admission.proof.ts",bundle=join(out,"proof.cjs");
+const blocked=`const net=require('node:net');net.Socket.prototype.connect=function(){throw Error('REVIEW_SOCKET_BLOCKED')};for(const p of ['node:http','node:https']){const m=require(p);m.request=m.get=function(){throw Error('REVIEW_HTTP_BLOCKED')}};globalThis.fetch=async()=>{throw Error('REVIEW_FETCH_BLOCKED')};`;
+await build({entryPoints:[join(here,file)],bundle:true,platform:"node",format:"cjs",outfile:bundle,alias:testAliases("broadcasts-read-cost-mcp.test.ts",root,here),banner:{js:blocked},logLevel:"error"});
+const result=spawnSync(process.execPath,["--max-old-space-size=512",bundle],{cwd:root,env:testEnvironment(process.env),encoding:"utf8",timeout:120000,maxBuffer:262144});
+process.stdout.write(result.stdout??"");process.stderr.write(result.stderr??"");
+if(result.error)throw result.error;
+console.log("J_CHILD_EXIT",result.status);process.exitCode=result.status??2;

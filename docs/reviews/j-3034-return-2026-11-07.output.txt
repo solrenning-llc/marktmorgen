@@ -1154,3 +1154,31 @@ api: reading recent events failed Error: the recent deliveries could not be meas
     at async main (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:67811:20)
 EXIT 0
 FAILED FILES 0
+
+J MCP pre-admission sibling: 13 checks, 2 causal failures
+J_MCP_RECEIPT {"count":1,"last":false,"measured":2,"generous":27,"allObserved":14,"holdCalls":1,"asked":3,"usedBefore":1,"usedAfter":4,"status":"data"}
+J_MCP_RECEIPT {"count":30,"last":false,"measured":31,"generous":27,"allObserved":72,"holdCalls":1,"asked":6,"usedBefore":1,"usedAfter":7,"status":"data"}
+J_MCP_RECEIPT {"count":30,"last":true,"measured":31,"generous":27,"allObserved":38,"holdCalls":1,"asked":6,"usedBefore":2000,"usedAfter":2000,"status":429}
+{
+  "checks": 13,
+  "pass": 11,
+  "fail": 2,
+  "countedMemoryCommands": 298,
+  "failed": [
+    {
+      "name": "30/false: measuring alone fits the generous initial API budget",
+      "pass": false,
+      "actual": false,
+      "expected": true
+    },
+    {
+      "name": "30/true: measuring alone fits the generous initial API budget",
+      "pass": false,
+      "actual": false,
+      "expected": true
+    }
+  ]
+}
+J_CHILD_EXIT 1
+
+Explicit validation exits: {"types": 0, "lint": 0, "scanner": 0, "diff": 0}

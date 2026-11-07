@@ -24,6 +24,8 @@ const MESSAGES: Record<string, string> = {
   stripe: "Stripe did not answer just now. Try again in a moment.",
   checkout_box:
     "Your codes are on in Stripe, but buyers cannot enter them yet: the code box at checkout could not be switched on just now. Reload this page to try again.",
+  checkout_box_stopped:
+    "The code was switched off. Your other codes are on in Stripe, but buyers cannot enter them yet: the code box at checkout could not be switched on just now. Reload this page to try again.",
   signed_out: "Your session ended. Log in again.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   server_error: "Something went wrong on our side. Try again in a moment.",
@@ -47,6 +49,7 @@ async function send(payload: Record<string, unknown>, currency: Currency): Promi
         const reason = refusal.reason;
         return {problem: reason === "amount" ? amountProblem(currency) : reason === "minimum" ? minimumProblem(currency) : typeof reason === "string" && Object.hasOwn(CODE_PROBLEMS,reason) ? CODE_PROBLEMS[reason as CodeProblem] : CODE_PROBLEMS.shape};
       }
+      if (refusal.error === "checkout_box" && Object.hasOwn(data,"stopped") && (data as {stopped?: unknown}).stopped === true) return {problem:MESSAGES.checkout_box_stopped};
       if (typeof refusal.error === "string" && Object.hasOwn(MESSAGES,refusal.error)) return {problem:MESSAGES[refusal.error]};
     }
     return {problem:"We could not confirm the discount codes. Reload to check their status before trying again."};

@@ -9,7 +9,8 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 const ACTIONS = new Set(["list", "add", "stop"]);
 
 /** A code live on Stripe while the checkout's code box could not be switched on (lib/discount-box.ts). */
-const boxNotOn = () => Response.json({ ok: false, error: "checkout_box" }, { status: 503 });
+/** The box not confirmed on; after a stop, also that the code asked for is off (stopped), as /api/v1/codes says. */
+const boxNotOn = (stopped = false) => Response.json(stopped ? { ok: false, error: "checkout_box", stopped: true } : { ok: false, error: "checkout_box" }, { status: 503 });
 
 /**
  * The creator's discount codes, which live on their own Stripe account.
@@ -87,7 +88,7 @@ export async function POST(request: NextRequest) {
     // never shown as fine; with no live code, a box left on only shows a field
     // Stripe answers for, so the list is said as Stripe has it.
     const live = list.codes.some((entry) => entry.active);
-    if (!(await setDiscountBox(ref, live)) && live) return boxNotOn();
+    if (!(await setDiscountBox(ref, live)) && live) return boxNotOn(action === "stop");
 
     return Response.json({ ok: true, codes: list.codes });
   } catch (error) {

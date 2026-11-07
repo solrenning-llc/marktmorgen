@@ -115,6 +115,8 @@ export async function claimNewPictures(statsId: string, pageId: string, paths: s
   const [owners] = await redisPipeline([["HMGET", picsKey(statsId), ...unique]]);
   if (!Array.isArray(owners) || owners.length !== unique.length) throw new UnknownReplyError("page pictures: HMGET");
   const list = owners;
+  // An owner is a name or nobody (null); any other answer is unknown, and throws as the read above does.
+  if (list.some((owner) => owner !== null && typeof owner !== "string")) throw new UnknownReplyError("page pictures: an owner");
   if (unique.some((_, i) => typeof list[i] === "string" && list[i] !== "" && list[i] !== pageId)) return false;
   const unclaimed = unique.filter((_, i) => list[i] !== pageId);
   const taken = await takePictureDoor(unclaimed);

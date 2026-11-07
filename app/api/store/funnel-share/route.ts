@@ -24,9 +24,23 @@ import {
   calendarMonthOfUse,
 } from "@/lib/funnel-share-rules";
 import { SITE_URL } from "@/lib/site-url";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReply } from "@/lib/redis-exact";
 import { STORE_ID_PATTERN, type Store, accountStores, storeRef } from "@/lib/store";
 
 const refuse = (error: string, status = 400, extra: Record<string, unknown> = {}) => Response.json({ ok: false, error, ...extra }, { status });
+
+/**
+ * A part of the funnel (the funnel, a page or a form) whose read did not come
+ * back in a known shape (lib/funnel-bundle-store.ts collectBundle; the funnel
+ * and page reads throw UnknownReplyError, lib/redis-reply.ts, and the form
+ * read throws UnknownReply, lib/redis-exact.ts, once #2857 lands): nothing
+ * was shared, copied or downloaded from it, and the creator is told so rather
+ * than "gone" or a server error (CX-123 rule 24). `counted` when the try was
+ * already counted toward a monthly figure, which it keeps, as any other failed try.
+ */
+const unread = (counted: boolean) => refuse(counted ? "funnel_unread_counted" : "funnel_unread", 503);
+const isUnread = (error: unknown) => error instanceof UnknownReplyError || error instanceof UnknownReply;
 
 /** A share entry as the studio sees it: never the hash of its code. */
 const shown = (entry: { id: string; name: string; funnelId: string; createdAt: number; expiresAt: number; hint: string }) => ({
@@ -139,6 +153,9 @@ export async function POST(request: NextRequest) {
   const month = monthOfUse(store);
   if (!month) return refuse("unavailable", 503);
 
+  // Whether this attempt was counted against a figure yet: a read that fails after it says the try still counts
+  // (Codex K2 on #2880), and one that fails before it does not.
+  const tried = { counted: false };
   try {
     if (action === "share") {
       const funnelId = text(body.funnel, 10);
@@ -148,6 +165,7 @@ export async function POST(request: NextRequest) {
       const held = await listShares(statsId);
       if (held.length >= limits.shares) return refuse("shares_full", 400, { limit: limits.shares });
       // Links made in the month, revoked ones included: each writes a snapshot.
+      tried.counted = true;
       if (!(await countUse(storeMonthKey(statsId, "share", month), limits.sharesPerMonth, MONTH_USE_SECONDS))) return refuse("shares_month", 429, { limit: limits.sharesPerMonth });
       const collected = await collectBundle(store, funnelId, "share");
       if (!collected) return refuse("unknown", 404);
@@ -171,7 +189,9 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "preview") {
+      tried.counted = true;
       if (!(await countUse(storeUseKey(statsId, "preview"), PREVIEWS_PER_STORE_HOUR, 3_600))) return refuse("busy", 429);
+      tried.counted = true;
       if (!(await countUse(storeMonthKey(statsId, "preview", month), limits.previewsPerMonth, MONTH_USE_SECONDS))) return refuse("previews_month", 429, { limit: limits.previewsPerMonth });
       const source = await sourceOf(body, store, "preview");
       if (!source.ok) return source.response;
@@ -198,12 +218,16 @@ export async function POST(request: NextRequest) {
       if (!FUNNEL_ID.test(funnelId)) return refuse("unknown", 404);
       if (action === "copy-preview") {
         // A preview is the destination's, as a preview of a link or file would be.
+        tried.counted = true;
         if (!(await countUse(storeUseKey(to.statsId, "preview"), PREVIEWS_PER_STORE_HOUR, 3_600))) return refuse("busy", 429);
+        tried.counted = true;
         if (!(await countUse(storeMonthKey(to.statsId, "preview", toMonth), toLimits.previewsPerMonth, MONTH_USE_SECONDS))) return refuse("previews_month", 429, { limit: toLimits.previewsPerMonth });
       } else {
         // Reading it out of this store is one of its exports, bringing it into the other one of its imports;
         // both are counted before anything is written, and kept when it fails.
+        tried.counted = true;
         if (!(await countUse(storeMonthKey(statsId, "export", month), limits.exportsPerMonth, MONTH_USE_SECONDS))) return refuse("exports_month", 429, { limit: limits.exportsPerMonth });
+        tried.counted = true;
         if (!(await countUse(storeMonthKey(to.statsId, "import", toMonth), toLimits.importsPerMonth, MONTH_USE_SECONDS))) return refuse("imports_full", 429, { limit: toLimits.importsPerMonth });
       }
       // The same creator's copy: their about text, videos, deadline and quotes stay; pictures never come along.
@@ -256,6 +280,7 @@ export async function POST(request: NextRequest) {
         if (source.kind === "starter") before = source.before;
       }
       // Counted before anything is written, and kept when it fails: an attempt costs reads as well.
+      tried.counted = true;
       if (!(await countUse(storeMonthKey(statsId, "import", month), limits.importsPerMonth, MONTH_USE_SECONDS))) return refuse("imports_full", 429, { limit: limits.importsPerMonth });
       const result = await importBundle(ref, store, bundle, mapping, name);
       if (!result.ok) return refuse(result.error, result.error === "setup_incomplete" ? 500 : 400, { lines: result.lines ?? [] });
@@ -264,6 +289,7 @@ export async function POST(request: NextRequest) {
 
     return refuse("invalid");
   } catch (error) {
+    if (isUnread(error)) return unread(tried.counted);
     console.error("sharing or bringing in a funnel failed", error);
     return refuse("server_error", 500);
   }
@@ -292,6 +318,7 @@ export async function GET(request: NextRequest) {
     const slug = collected.funnel.slug || "funnel";
     return new Response(json, { headers: fileHeaders("application/json; charset=utf-8", `${slug}.marktmorgen-funnel.json`) });
   } catch (error) {
+    if (isUnread(error)) return unread(true);
     console.error("exporting a funnel failed", error);
     return refuse("server_error", 500);
   }

@@ -13,7 +13,9 @@
  *     network it is on;
  *   - never an email address (other members never see a member's address),
  *     a phone number (WhatsApp) or a website of any kind, so the directory
- *     cannot send people anywhere but those networks' own sites;
+ *     cannot send people anywhere but those networks' own sites; nor a
+ *     network's own link redirector, nor an address that carries another
+ *     address in its path or query;
  *   - without what a share button adds to the query or the fragment (who
  *     shared it, not where it goes), keeping a query that names the profile
  *     (Facebook's profile.php?id=);
@@ -68,6 +70,47 @@ export const MEMBER_LINK_REL = "ugc nofollow noreferrer";
  */
 const SHARE_MARKS = /^(utm_.*|igsh|igshid|si|s|t|_t|_r|mibextid|fbclid|gclid|feature|ref|ref_src|ref_url|is_from_webapp|sender_device)$/i;
 
+/**
+ * A network's own link redirector: on the network's host, but it sends the
+ * reader to another site under a label that says the network (Facebook's
+ * l.php and its l./lm. hosts, Instagram's linkshim and l. host, YouTube's
+ * redirect, LinkedIn's redir). Never anyone's profile.
+ */
+const REDIRECTOR_HOST = /^(l|lm)\.(facebook\.com|fb\.com|instagram\.com)$/;
+const REDIRECTOR_PATH: Partial<Record<SocialNetwork, RegExp>> = {
+  facebook: /^\/(l\.php|flx\/)/i,
+  instagram: /^\/linkshim(\/|$)/i,
+  youtube: /^\/redirect(\/|$)/i,
+  linkedin: /^\/redir(\/|$)/i,
+};
+
+/** The text decoded as far as it goes (at most three times); an escape that does not decode leaves it as it is. */
+function decoded(text: string): string {
+  let out = text;
+  for (let i = 0; i < 3; i += 1) {
+    let next: string;
+    try {
+      next = decodeURIComponent(out);
+    } catch {
+      return out;
+    }
+    if (next === out) return out;
+    out = next;
+  }
+  return out;
+}
+
+/**
+ * Whether a piece of the address carries another address: a scheme's "://"
+ * anywhere, a value starting "//", or a "//" still escaped after decoding
+ * (written more times over, or beside an escape that does not decode), which
+ * is refused rather than read as nothing.
+ */
+function carriesAddress(piece: string): boolean {
+  const text = decoded(piece);
+  return text.includes("://") || text.startsWith("//") || /%2f%2f/i.test(text);
+}
+
 function allowed(network: unknown): network is SocialNetwork {
   return typeof network === "string" && (MEMBER_LINK_NETWORKS as readonly string[]).includes(network);
 }
@@ -84,6 +127,11 @@ function cleaned(network: SocialNetwork, href: string): string {
   for (const key of [...url.searchParams.keys()]) if (SHARE_MARKS.test(key)) url.searchParams.delete(key);
   url.hash = "";
   const host = url.hostname.toLowerCase();
+  // A redirector, or anything that carries another address in its path or
+  // what is left of its query, sends the reader off the network.
+  if (REDIRECTOR_HOST.test(host) || REDIRECTOR_PATH[network]?.test(url.pathname)) return "";
+  if (url.pathname.includes("//") || carriesAddress(url.pathname)) return "";
+  for (const [key, value] of url.searchParams) if (carriesAddress(key) || carriesAddress(value)) return "";
   // Substack's address is the publication's own name under substack.com;
   // everywhere else the network's front page is nobody's profile.
   if (network === "substack" ? host === "substack.com" || host === "www.substack.com" : url.pathname === "/") return "";

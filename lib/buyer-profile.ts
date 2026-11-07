@@ -535,9 +535,12 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
       const listing = await find(given.productId);
       productIds.push(given.productId, ...(given.items ?? []));
       // A sale paid with PayPal is a sale (lib/paypal-sales.ts): its amount, its channel, counted in what they paid.
-      const read = given.job.startsWith("paypal:") ? await readPaid(given.job.slice(7)).catch(() => null) : null;
-      // Only this store's record with a whole amount of cents, a lowercase currency code and a whole time is money (Claude 4 on #2908).
-      const paypal = read && read.store === store.statsId && paidRecordReadable(read) ? read : null;
+      const order = given.job.startsWith("paypal:") ? given.job.slice(7) : "";
+      const read = order ? await readPaid(order).catch(() => null) : null;
+      // Only this store's record of this very order, with a whole amount of cents, a lowercase currency code and a whole
+      // time, is money (Claude 4 and Claude 6 on #2908): the order keys the payment summed into what they paid, so a
+      // record without it, or naming another order, would fold two sales into one.
+      const paypal = read && read.store === store.statsId && read.order === order && paidRecordReadable(read) ? read : null;
       // Its paid record unread (gone, another shape, another store's, a field in another format, or the read failed): the amount is unknown, never $0, and the page says so.
       if (given.job.startsWith("paypal:") && !paypal) partial = true;
       if (paypal) {
@@ -557,7 +560,7 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
           note: "paypal",
         });
         sales.push({ at: paypal.at, source: channel.source, first: channel.first, recorded });
-        charges.set(`paypal:${paypal.order}`, { id: `paypal:${paypal.order}`, cents: paypal.cents, refunded: 0, currency: paypal.currency, at: paypal.at });
+        charges.set(`paypal:${order}`, { id: `paypal:${order}`, cents: paypal.cents, refunded: 0, currency: paypal.currency, at: paypal.at });
         continue;
       }
       orders.push({

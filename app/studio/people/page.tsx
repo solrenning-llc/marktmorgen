@@ -284,7 +284,14 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
   const net = profile.paid - profile.refunded;
   const others = Object.entries(profile.otherCurrencies).filter(([, cents]) => cents !== 0);
   const bought = profile.orders.length > 0;
-  const tiles = [
+  // Nothing read while the reading was partial or Stripe could not be read: unknown, never "$0" or "nothing bought yet".
+  const unread = !bought && (profile.partial || profile.stripeError);
+  const tiles = unread ? [
+    { label: "Spent with you", value: "—", note: "could not be read just now" },
+    { label: "Purchases", value: "—", note: "could not be read just now" },
+    { label: "First purchase", value: "—", note: "could not be read just now" },
+    { label: "Latest purchase", value: "—", note: "could not be read just now" },
+  ] : [
     { label: "Spent with you", value: money(net), note: profile.refunded ? `${money(profile.paid)} paid, ${money(profile.refunded)} given back` : "after any refund" },
     { label: "Purchases", value: String(profile.purchases), note: profile.renewals ? `and ${profile.renewals} later ${profile.renewals === 1 ? "payment" : "payments"}` : "no later payments" },
     { label: "First purchase", value: profile.firstAt ? day(profile.firstAt) : "—", note: !profile.channelKnown ? (profile.firstAt ? "channel not recorded" : "nothing bought yet") : profile.firstChannel ? `found you through ${channelName(profile.firstChannel)}` : "came direct, or from somewhere unnamed" },

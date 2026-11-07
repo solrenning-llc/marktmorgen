@@ -16,7 +16,12 @@
  * creator's own Stripe account: at most MAX_PAGES pages of 100, each read in
  * its exact shape (lib/stripe-list.ts). Stripe down, a page in another shape,
  * a membership that cannot be read or one page too many is said as such:
- * the list is "unknown" or "incomplete", never "nobody waiting". A person's
+ * the list is "unknown" or "incomplete", never "nobody waiting". Whether a
+ * membership was ever paid for is read from its invoices, never from its
+ * status (lib/tier-benefit-rules.ts): its newest invoice comes with the list;
+ * a one-time benefit on a membership whose newest invoice is not paid reads
+ * its newest paid invoice, one read each, at most MAX_PROOF_READS a list,
+ * and one that cannot be read keeps it "unknown", never owed. A person's
  * marks that cannot be read (lib/redis-reply.ts) are "unknown" on each of
  * their rows, never "given" and never "waiting", and nothing is written for
  * them until they can be read.
@@ -50,7 +55,9 @@ import {
   benefitJson,
   benefitText,
   isCadence,
+  needsPaymentProof,
   owedNow,
+  paidAfterTrial,
   parseBenefit,
 } from "@/lib/tier-benefit-rules";
 
@@ -58,7 +65,12 @@ import {
 const MAX_PAGES = 10;
 /** Where the marks are counted in the store's data room. */
 const SLOT = "tb";
+/** Memberships whose earlier payment is read one by one, at most, for the list and for each press; past it they are unknown. */
+const MAX_PROOF_READS = 100;
+/** Of those, read at once. */
+const PROOF_AT_ONCE = 10;
 const SUB_ID = /^sub_[A-Za-z0-9]{6,64}$/;
+const INVOICE_ID = /^in_[A-Za-z0-9]{6,64}$/;
 const PERSON = /^[0-9a-f]{32}$/;
 /** What a running membership can be in on Stripe; the rules decide which of them are owed anything. */
 const RUNNING = new Set(["active", "trialing", "past_due", "unpaid", "paused"]);
@@ -126,7 +138,58 @@ export async function retireBenefit(store: Store, id: unknown, now = Date.now())
 
 // ------------------------------------------------------------------ the members
 
-type Member = MemberLike & { email: string; person: string };
+type Member = MemberLike & { email: string; person: string; trialEnd: number };
+
+const safeWhole = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+
+/**
+ * Whether one invoice of this membership, in its exact shape, proves a
+ * payment (lib/tier-benefit-rules.ts paidAfterTrial); null when it is not
+ * one of this membership's invoices as Stripe gives them.
+ */
+function invoiceProof(raw: unknown, sub: string, trialEnd: number): boolean | null {
+  if (!plainObject(raw)) return null;
+  const id = ownField(raw, "id");
+  const status = ownField(raw, "status");
+  const created = ownField(raw, "created");
+  if (typeof id !== "string" || !INVOICE_ID.test(id) || typeof status !== "string" || !safeWhole(created)) return null;
+  const parent = ownField(raw, "parent");
+  const details = plainObject(parent) ? ownField(parent, "subscription_details") : undefined;
+  const owner = plainObject(details) ? ownField(details, "subscription") : undefined;
+  const ownerId = typeof owner === "string" ? owner : plainObject(owner) ? ownField(owner, "id") : undefined;
+  if (ownerId !== sub) return null;
+  return paidAfterTrial({ status, created }, trialEnd);
+}
+
+/** Whether a membership was paid for after its trial: its newest paid invoice, read in its exact shape; null when not known. */
+async function paidBefore(account: string, member: Member): Promise<boolean | null> {
+  try {
+    const query = new URLSearchParams({ subscription: member.sub, status: "paid", limit: "1" });
+    const read = readStripePage(
+      await onAccount("GET", account, `/invoices?${query}`, undefined, STRIPE_LIST_VERSION),
+      (row) => ownField(row, "status") === "paid" && invoiceProof(row, member.sub, member.trialEnd) !== null,
+      INVOICE_ID,
+    );
+    if (read.unreadable) return null;
+    // Newest first: when the newest paid one is the trial's own, none came after it.
+    if (read.rows.length) return invoiceProof(read.rows[0], member.sub, member.trialEnd);
+    return read.hasMore ? null : false;
+  } catch (error) {
+    if (!(error instanceof StripeListUnreadable)) console.error("reading a membership's paid invoices failed", error);
+    return null;
+  }
+}
+
+/** Reads, for each member who needs it, whether they ever paid; past MAX_PROOF_READS, unknown. */
+async function proveEarlierPayments(account: string | null | undefined, members: Member[]): Promise<void> {
+  const reads = account ? members.slice(0, MAX_PROOF_READS) : [];
+  for (const member of members.slice(reads.length)) member.paidEver = null;
+  for (let i = 0; i < reads.length; i += PROOF_AT_ONCE) {
+    await Promise.all(reads.slice(i, i + PROOF_AT_ONCE).map(async (member) => {
+      member.paidEver = await paidBefore(account!, member);
+    }));
+  }
+}
 
 /** The parts of a subscription row read here; a row without them is unreadable. */
 function legible(row: Record<string, unknown>): boolean {
@@ -146,6 +209,8 @@ async function runningMemberships(store: Store, statsId: string, nowSeconds: num
     for (let page = 0; page < MAX_PAGES; page += 1) {
       const query = new URLSearchParams({ limit: "100" });
       query.append("expand[]", "data.customer");
+      // Its newest invoice: whether the period running now is paid for (lib/tier-benefit-rules.ts).
+      query.append("expand[]", "data.latest_invoice");
       if (after) query.set("starting_after", after);
       const read = readStripePage(await onAccount("GET", account, `/subscriptions?${query}`, undefined, STRIPE_LIST_VERSION), legible, SUB_ID);
       unreadable += read.unreadable;
@@ -160,12 +225,18 @@ async function runningMemberships(store: Store, statsId: string, nowSeconds: num
         const start = typeof startRaw === "number" && Number.isSafeInteger(startRaw) ? startRaw : 0;
         const anchor = typeof anchorRaw === "number" && Number.isSafeInteger(anchorRaw) ? anchorRaw : start;
         const product = productOfSub(row);
+        // No free trial is null; anything else than a time is another shape.
+        const trialRaw = ownField(row, "trial_end");
+        const trialEnd = trialRaw === null ? 0 : safeWhole(trialRaw) ? trialRaw : -1;
+        // Expanded as asked, or null before any invoice; an id alone or anything else is another shape.
+        const latest = ownField(row, "latest_invoice");
+        const paidNow = latest === null ? false : trialEnd < 0 ? null : invoiceProof(latest, row.id, trialEnd);
         // A running membership of this store that cannot be placed proves nothing: counted, so the list says it is not whole.
-        if (!email || !start || !anchor || !product) {
+        if (!email || !start || !anchor || !product || trialEnd < 0 || paidNow === null) {
           unreadable += 1;
           continue;
         }
-        members.push({ sub: row.id, status, product, anchor, start, paused: pausedNow(row as PauseSub, nowSeconds), email, person: personKey(statsId, email) });
+        members.push({ sub: row.id, status, product, anchor, start, paused: pausedNow(row as PauseSub, nowSeconds), paidNow, paidEver: paidNow, trialEnd, email, person: personKey(statsId, email) });
       }
       if (!read.hasMore) return { members, complete: true, unreadable };
       // The last row unreadable: the next page cannot be found from it.
@@ -249,12 +320,22 @@ export type DueView =
 
 /** Who is owed each benefit right now, read from Stripe and the marks. */
 export async function benefitsDue(store: Store, now = Date.now()): Promise<DueView> {
+  return (await readDue(store, now)).view;
+}
+
+/** The view, and the memberships whose payment could not be read (a press says those as unknown, not as not owed). */
+async function readDue(store: Store, now: number): Promise<{ view: DueView; unknown: Set<string> }> {
+  const unknown = new Set<string>();
   const benefits = await readBenefits(store);
-  if (benefits === null) return { state: "unknown", why: "benefits" };
-  if (!benefits.length || !store.statsId) return { state: "none" };
+  if (benefits === null) return { view: { state: "unknown", why: "benefits" }, unknown };
+  if (!benefits.length || !store.statsId) return { view: { state: "none" }, unknown };
   const nowSeconds = Math.floor(now / 1000);
   const read = await runningMemberships(store, store.statsId, nowSeconds);
-  if (read === null) return { state: "unknown", why: "stripe" };
+  if (read === null) return { view: { state: "unknown", why: "stripe" }, unknown };
+  // Only where a one-time benefit could be owed: a monthly one goes by the newest invoice alone.
+  const onceOn = new Set(benefits.filter((b) => b.cadence === "once").map((b) => b.product));
+  await proveEarlierPayments(store.stripeAccountId, read.members.filter((m) => onceOn.has(m.product) && needsPaymentProof(m)));
+  for (const member of read.members) if (member.paidEver === null) unknown.add(member.sub);
   const waiting: Record<string, Waiting> = {};
   const owed: Omit<DueRow, "given">[] = [];
   for (const benefit of benefits) {
@@ -271,7 +352,8 @@ export async function benefitsDue(store: Store, now = Date.now()): Promise<DueVi
     return { ...r, given: held === undefined || held === "unknown" ? "unknown" : (held.get(field(r.benefit, r.sub, r.period)) ?? null) };
   });
   rows.sort((a, b) => (a.until ?? Number.MAX_SAFE_INTEGER) - (b.until ?? Number.MAX_SAFE_INTEGER) || a.from - b.from || a.sub.localeCompare(b.sub));
-  return { state: "ok", benefits, rows, waiting, complete: read.complete, unreadable: read.unreadable };
+  // A membership whose payment could not be read keeps the list from being called whole, like a row that cannot be read.
+  return { view: { state: "ok", benefits, rows, waiting, complete: read.complete, unreadable: read.unreadable + unknown.size }, unknown };
 }
 
 // ------------------------------------------------------------------ the marks
@@ -290,7 +372,7 @@ export async function giveBenefit(store: Store, by: string, benefit: unknown, it
   if (!Array.isArray(items) || items.length > MAX_GIVE_AT_ONCE) return { ok: false, reason: "too_many" };
   if (typeof benefit !== "string" || !BENEFIT_ID.test(benefit) || !store.statsId) return { ok: false, reason: "missing" };
   const statsId = store.statsId;
-  const due = await benefitsDue(store, now);
+  const { view: due, unknown } = await readDue(store, now);
   if (due.state === "unknown") return { ok: false, reason: due.why };
   if (due.state === "none" || !due.benefits.some((b) => b.id === benefit)) return { ok: false, reason: "missing" };
   const rows = new Map(due.rows.filter((r) => r.benefit === benefit).map((r) => [`${r.sub}:${r.period}`, r]));
@@ -308,7 +390,8 @@ export async function giveBenefit(store: Store, by: string, benefit: unknown, it
     if (seen.has(`${sub}:${period}`)) continue;
     seen.add(`${sub}:${period}`);
     const row = rows.get(`${sub}:${period}`);
-    if (!row) result.notOwed += 1;
+    if (!row && unknown.has(sub)) result.unknown += 1;
+    else if (!row) result.notOwed += 1;
     else if (row.given === "unknown") result.unknown += 1;
     else if (row.given) result.already += 1;
     else {
@@ -318,7 +401,7 @@ export async function giveBenefit(store: Store, by: string, benefit: unknown, it
   }
   if (!writes.length) return result;
   const people = [...new Set(writes.map((w) => w.row.person))];
-  // Each person's place in the list is counted again even when it is already there: the room errs fuller, never short.
+  // Each person's place in the list is counted before it is known whether they are in it already; given back below when they were.
   const bytes = writes.reduce((sum, w) => sum + w.bytes, 0) + people.reduce((sum, p) => sum + dataBytes([p], 1), 0);
   // Its room first; nothing is written when it does not fit or cannot be counted.
   const taken = await takeData(store, [{ slot: SLOT, bytes }], now);
@@ -335,6 +418,10 @@ export async function giveBenefit(store: Store, by: string, benefit: unknown, it
       result.already += 1;
       giveBack += w.bytes;
     } else result.unknown += 1;
+  });
+  // Already in the list: their place was counted when they went into it (an unknown answer keeps it counted, fuller, never short).
+  people.forEach((person, j) => {
+    if (replies && countOf(replies[writes.length + j]) === 0) giveBack += dataBytes([person], 1);
   });
   if (giveBack) await giveData(store, [{ slot: SLOT, bytes: giveBack }], now);
   return result;
@@ -367,7 +454,8 @@ export async function forgetBenefitPerson(store: Store, person: string): Promise
   const replies = repliesFor(await redisPipeline([["DEL", key], ["SREM", whoKey(store.statsId), person]]), 2);
   const gone = replies ? countOf(replies[0]) : null;
   if (gone === null || !replies || countOf(replies[1]) === null) throw new UnknownReplyError("deleting a person's benefit marks");
-  let bytes = 0;
+  // Their place in the list too, when it was there to take out.
+  let bytes = countOf(replies[1]) === 1 ? dataBytes([person], 1) : 0;
   if (flat) for (let i = 0; i + 1 < flat.length; i += 2) bytes += dataBytes([flat[i], flat[i + 1]], 1);
   if (bytes) await giveData(store, [{ slot: SLOT, bytes }]);
   return gone;
@@ -376,11 +464,16 @@ export async function forgetBenefitPerson(store: Store, person: string): Promise
 /** Everything a deleted store kept here. */
 export async function forgetStoreBenefits(statsId: string | null): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  const [raw] = await redisPipeline([["SMEMBERS", whoKey(statsId)]]);
+  const [raw] = repliesFor(await redisPipeline([["SMEMBERS", whoKey(statsId)]]), 1) ?? [];
   const listed = stringList(raw);
   // Who has marks unread: nothing is deleted blind, so the marks are not left without their list.
   if (!listed) throw new UnknownReplyError("the people with benefit marks");
   const people = listed.filter((p) => PERSON.test(p));
-  for (let i = 0; i < people.length; i += 500) await redisPipeline([["DEL", ...people.slice(i, i + 500).map((p) => marksKey(statsId, p))]]);
-  await redisPipeline([["DEL", whoKey(statsId), benefitsKey(statsId)]]);
+  const deleted = async (keys: string[], what: string) => {
+    const [reply] = repliesFor(await redisPipeline([["DEL", ...keys]]), 1) ?? [];
+    // An answer in another shape is not done: thrown, so the store's deletion says so; the list stays until the marks went.
+    if (countOf(reply) === null) throw new UnknownReplyError(what);
+  };
+  for (let i = 0; i < people.length; i += 500) await deleted(people.slice(i, i + 500).map((p) => marksKey(statsId, p)), "deleting a deleted store's benefit marks");
+  await deleted([whoKey(statsId), benefitsKey(statsId)], "deleting a deleted store's benefits");
 }

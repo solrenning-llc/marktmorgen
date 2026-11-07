@@ -178,6 +178,7 @@ async function main(): Promise<void> {
   part("Who is still waiting");
   store = (await storeForEmail(owner))!;
   stripeCalls = 0;
+  invoiceCalls = 0;
   const due = await benefitsDue(store, NOW * 1000);
   if (due.state !== "ok") throw new Error(`not read: ${due.state}`);
   const rowsOf = (id: string) => due.rows.filter((r) => r.benefit === id).map((r) => [r.sub, r.email, r.period, r.until, r.given]);
@@ -190,6 +191,7 @@ async function main(): Promise<void> {
   is("who is not owed it yet, counted and said", due.waiting[call.benefit.id], { trial: 1, unpaid: 1, paused: 1 });
   is("read to its end", [due.complete, due.unreadable], [true, 0]);
   is("Stripe read in one page", stripeCalls, 1);
+  is("an earlier payment read only where the newest invoice is not paid (the renewal being retried, the pause): two", invoiceCalls, 2);
 
   part("Marking given, in bulk");
   const by = "team@example.com";

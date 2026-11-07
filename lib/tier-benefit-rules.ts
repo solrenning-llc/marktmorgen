@@ -14,12 +14,20 @@
  *   - Only on the membership it was set on (the product the subscription is
  *     on today, lib/tier-rules.ts productOfSub), and never before it existed.
  *   - Never in a free trial: nothing has been paid for yet.
- *   - "once": owed to a member whose membership has been paid for (running,
- *     or with a renewal Stripe is retrying: the first payment went through).
- *     A pause does not take it away. No date is promised, so none is shown.
+ *   - Only on positive proof of a payment, read from Stripe: a paid invoice
+ *     made after any free trial ended (a trial's own invoice is "paid" with
+ *     nothing charged, so it proves nothing). A status alone proves nothing:
+ *     a membership whose first charge after its trial failed goes from
+ *     trialing to past_due, then unpaid, with nobody having paid (review of
+ *     #3014, Claude 6), and one is "active" for the hour after its trial
+ *     ends before its first invoice is charged. A proof that cannot be read
+ *     is unknown, never owed.
+ *   - "once": owed to a member whose membership has been paid for at least
+ *     once (running, or with a renewal Stripe is retrying). A pause does not
+ *     take it away. No date is promised, so none is shown.
  *   - "monthly": owed for the month running now, counted in calendar months
  *     from the membership's billing anchor, only while the membership is
- *     paid up (active) and not paused. It belongs to that month: the month's
+ *     paid up (active, its newest invoice paid) and not paused. It belongs to that month: the month's
  *     end is shown as "until", which is the creator's own promise of "every
  *     month", not a deadline Marktmorgen made up.
  *   - A retired benefit is still owed for what was owed before it was
@@ -122,12 +130,26 @@ export type MemberLike = {
   start: number;
   /** Inside a pause the member chose (lib/membership-pause-rules.ts pausedNow). */
   paused: boolean;
+  /** Its newest invoice is paid and is not the free trial's: the period running now is paid for. */
+  paidNow: boolean;
+  /** A paid invoice after any free trial was read: paid for at least once. null when it could not be read. */
+  paidEver: boolean | null;
 };
 
-export type NotOwed = "none" | "before" | "retired" | "trial" | "unpaid" | "paused";
+export type NotOwed = "none" | "before" | "retired" | "trial" | "unpaid" | "paused" | "unknown";
 export type Owed = { owed: true; period: string; from: number; until: number | null } | { owed: false; why: NotOwed };
 
 const PAID_ONCE = new Set(["active", "past_due", "unpaid"]);
+
+/** Whether an invoice proves a payment: paid, and made once any free trial was over (0: there was none). */
+export function paidAfterTrial(invoice: { status: string; created: number }, trialEnd: number): boolean {
+  return invoice.status === "paid" && invoice.created >= trialEnd;
+}
+
+/** Whether a one-time benefit needs an earlier payment read for this member: in a state that may have been paid for, its newest invoice not proof. */
+export function needsPaymentProof(member: Pick<MemberLike, "status" | "paidNow">): boolean {
+  return PAID_ONCE.has(member.status) && !member.paidNow;
+}
 
 /** Whether this member is owed this benefit right now, and for which period. */
 export function owedNow(benefit: Benefit, member: MemberLike, now: number): Owed {
@@ -137,6 +159,8 @@ export function owedNow(benefit: Benefit, member: MemberLike, now: number): Owed
     if (benefit.retired && member.start >= benefit.retired) return { owed: false, why: "retired" };
     if (member.status === "trialing") return { owed: false, why: "trial" };
     if (!PAID_ONCE.has(member.status)) return { owed: false, why: "unpaid" };
+    if (member.paidEver === null && !member.paidNow) return { owed: false, why: "unknown" };
+    if (!member.paidNow && !member.paidEver) return { owed: false, why: "unpaid" };
     return { owed: true, period: "once", from: member.start, until: null };
   }
   const window = monthWindow(member.anchor, now);
@@ -146,5 +170,6 @@ export function owedNow(benefit: Benefit, member: MemberLike, now: number): Owed
   if (!window || benefit.since >= window.until) return { owed: false, why: "before" };
   if (member.status !== "active") return { owed: false, why: "unpaid" };
   if (member.paused) return { owed: false, why: "paused" };
+  if (!member.paidNow) return { owed: false, why: "unpaid" };
   return { owed: true, period: `m${window.from}`, from: window.from, until: window.until };
 }

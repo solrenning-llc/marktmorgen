@@ -1,3 +1,43 @@
+# C2 continuation — 2026-11-07 00:05 Fortaleza
+
+Newest state supersedes affected history below. C4-3100 MAIN VERDE remains
+effective; no later MAIN VERMELHO observed in FULL fresh channel. Preserve ALL
+heads/REDs/reviews and the single enabled continuation; no new automation.
+
+## #2903 completed normally
+
+- T focal **5809480115** on exact246209299128ce363c29ead6628fc3aba33a12d2 CLOSED both LOW5808502828, no new high/medium/low documentary finding. Original T report preserved with focal appendix on aa703cdb947b27c234622e4372b6920ecd50fc1e.
+- Fresh check-runs API returned exactly9 distinct All checks aggregators, ALL completed/success on that exact head: product128264351110,dependency128264307699,real-readers128264301530,codeql128264299361,buyer128264295362,public128264285432,studio128264274590,product-actions128264274411,signup128264273251. No failures. Old greens were not used.
+- Metadata wrapper initially said mergeablefalse; RAW REST immediately showed clean/mergeabletrue. Native merge-tree against actual maine814fe6d was CLEAN, treee3677632794e3c7d0a107dbac998a24e91858bd0; document absent in that main (the separate absence probe's128 is expected, NOT a merge-tree conflict). No head churn.
+- ONE normal merge with exact expected_head: **0471c325d0bbc56b3caa881076557d01d9330951**, mergedtrue/GETconfirmed. Documentation only; no redeploy initiated or production READY claimed. This unit is finished; do not recreate/reopen/retest.
+
+## #2695 consolidated new head — H2/R2 +9NEW pending
+
+- Exact official **dc431848ca23c8fee8394fa1e0427d755a638d51**, tree **600e15829b427f5f3a3f5a27115df4196439d8b8**. Main **0471c325d0bbc56b3caa881076557d01d9330951** integrated ONCE after C4-3100; ONE normal expected-old33bb/forcefalse update, no intermediate PR head/CI push. GET confirms OPEN/unmerged/exact.
+- Native merge **e8d667c10037ef965b0ae9c0ef95cb27062843e9**, tree948878277e68e8d650374339d9b2d2de36baa4d5, exposed duplicated UnknownReplyError imports from main/own overlapping edits. Compiler focal RED gives TWO TS2300 diagnostics. Removing ONLY the redundant second import gives0. Local fixed **9ff74bc80ac164554f012c70246438c074b447f6** has exact final tree600e1582.
+- Durable API merge/RED ancestor **87a89118a39cb18dfeae45ddfd480541d025bd04**, parents33bb+main0471, same tree948878. Fixed finaldc4318 is its child. API/native metadata differs, source/tree identical. Original product REDs preserved. No further product behavior/command/key/price/limit/flag or reservation document changed. Main T allPosts/readPost/readPosts changes retained.
+- Post-main17 selected canonical groups PASS:222 check-helper checks,43 Node tests and3 plain source-contract groups, counts kept separate. H2 SAME immutable blob **08f5cb8bb446142f37160472406e8f339b5cc408**, hashchecked unchanged in /tmp/c2-h2-2695-immutable.proof.ts: **11/11**. Canonical client bundles **272/272**. Directed strict actualES2017 **13roots/importgraph0**, scoped lint13paths0, scanner **4171files/0**, diffclean. No globalTSC/browser/nativeRedis/hostedCI/real-provider claim.
+- Resource/provenance: original pipeline prototype counter missed instance arrowpipeline; its zero readings on first2 passing groups are INVALID, not zero. Fixed guard wraps prototype.run, retains per-process100000backend-command/120s/384MiBheap/256KiBlog ceilings and blocks external fetch. Repeated ONLY those2 groups for controlled final146checks; remaining15 groups ran once, split at admission refusals before any next process. Observed1754backend commands across emitted17-group receipts+61H2. readers-exact counter not emitted, aggregate UNKNOWN under its guard, never zero.
+- Types first512MiB heap exhausted (exit-6), not a compiler diagnostic/green. Recalculated admission from free1104560128B + CLEAN inactive file1704759296B =2809319424B, excluding dirty/writeback; no cache dropping or other process termination. New1536MiBheap,120s directed run exits0 with EMPTY diagnostic log. No cgroup OOM kill (events oom0/oom_kill0). Preserve initial logs and don't call them passing.
+- Logs /tmp/c2-blog-{import-red,import-green,post-main-tests,post-main-linked,post-main-linked-rest,post-main-author-final,h2-final,post-main-types,post-main-types-final,post-main-lint,post-main-scanner,post-main-bundles}.log. Runner /tmp/c2-blog-post-main.mjs; proof runner /tmp/c2-blog-h2-final.mjs; binding checker /tmp/c2-blog-binding-types.cjs. Local worktree /workspace/scratch/c2-resume.LpgUL6/blog-local, SAME own branch.
+- Nominal H2/R2 return requested **6701406927**, includes original three MEDIUM5793479406 + narrow integration and preserved separate legacy-metadata compatibility observation. No self-close. Individual macOS/WebKit retries already consumed stay consumed. No retry/rerun/cancel or merge. Initial Actions read headEXACT:9 workflows,8in_progress+1queued, ZERO final-success claim. Productrun42332262401..460 range in saved receipt; gates must be9 exact final aggregators, not run/scopes/docs markers.
+
+## Remaining boundaries
+
+2692 PRIMARY35e670e3/recovery8c2eeb29 unchanged: BOTH financial returns present
+D26694648181+H26679942070, display/homepage A3#2020 still BLOCKED; no promotion.
+2846 PRIMARY7cd/WIP3d838 unchanged, awaiting NOMINAL C4 composition/base with
+2963; residual review5807688707 remains OPEN, do not edit C4 child/CI. Three own
+products open, doc2903 completed. 2956 review5808534093 C5LOW OPEN, durableproof
+1ee8312c unchanged, wait corrected nominal head; no replay unchanged. APIleads
+7c991 waits R2EXEC/assignment. CommercialJ/threshold need explicit C4 grant.
+Next: applicable H2/R2 return and causal CI result fordc4318; do not move healthy
+head to chase main. Other own blockers need nominal coordinator disposition.
+No account/payment/provider/PII/price/limit/commission/flag/gate operation.
+Full checkpoint and channel point must preserve old full suffix and confirm CAS.
+
+---
+
 # C2 MAIN VERDE continuation — 2026-11-06 23:01 Fortaleza
 
 Newest status supersedes the historical freeze below; all history is preserved.

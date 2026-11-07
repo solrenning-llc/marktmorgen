@@ -256,10 +256,11 @@ test("2.4.9: with several booked calls, every link on the page says by itself wh
   const words = ordersWords("en");
   assert.ok(html.includes(words.bookedCalls(3)), "the three calls are listed");
   const links = linkNames(html);
-  // Every link's name is its own: none says the same as another (WCAG 2.4.9), and each holds the words it shows (2.5.3).
+  // Every link's name is its own: none says the same as another (WCAG 2.4.9), and each starts with the words it shows
+  // (2.5.3: its Understanding document asks the visible label to start the name, for speech input and link lists).
   const names = links.map((l) => l.name);
   assert.deepEqual(names.filter((name, i) => names.indexOf(name) !== i), [], `links that say the same: ${names.join(" | ")}`);
-  for (const link of links) assert.ok(link.name.includes(link.text), `"${link.name}" holds the words it shows, "${link.text}"`);
+  for (const link of links) assert.ok(link.name.startsWith(link.text), `"${link.name}" starts with the words it shows, "${link.text}"`);
   // Each call's three links name its product: join, add to the calendar, move.
   const section = html.slice(html.indexOf('<section aria-labelledby="calls-title"'), html.indexOf("</section>", html.indexOf('aria-labelledby="calls-title"')));
   const cards = [...section.matchAll(/<li\b[\s\S]*?<\/li>/g)].map((m) => m[0]);

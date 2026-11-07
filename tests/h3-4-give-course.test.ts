@@ -122,6 +122,8 @@ async function main(): Promise<void> {
       "1 person already has it given: left as they are.",
       "1 person was taken off it: left as they are. Give their access back from that course's students.",
       "1 person's record could not be read just now: left as they are.",
+      // Changed assertion (rule 23, second pre-review of unit 2, LEVE 5): the review now says that buying is not checked.
+      "Whether someone already bought it is not checked here: anyone who did keeps what they paid for and also gets the gift.",
       "No email is sent. They see it the next time they sign in with this address. You can undo this right after.",
     ],
   );

@@ -22,7 +22,7 @@ import { CONTACT_ROW_BYTES, STUDENT_ROW_BYTES } from "@/lib/api-read-rules";
 import { readAddresses, leadsKey, parseContact } from "@/lib/contacts";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { GIVES_PER_DAY, STUDIO_GIVE_JOB, STUDIO_GIVE_PREFIX, grantImported, givenMany, takeGivenMany } from "@/lib/imported-purchases";
-import { takeManyWithin } from "@/lib/request-guard";
+import { giveBackMany, takeMany } from "@/lib/request-guard";
 import { integrationPauseWord } from "@/lib/integration-pause";
 import { DataRoomError } from "@/lib/store-data";
 import { type Store, ensureStatsId, setPastBuyers, storeRef } from "@/lib/store";
@@ -559,16 +559,28 @@ export async function applyGive(store: Store, find: FindGive, ask: GiveAsk, pay:
     statsId = statsId ?? (await ensureStatsId(storeRef(store)))?.statsId ?? null;
     if (!statsId || !store.sid) return refusedAs("unavailable");
     // The store's gifts of the day, the API's count too (GIVES_PER_DAY): all of them or none, never a part.
-    if (!(await takeManyWithin("api-give", store.sid, GIVES_PER_DAY, 86_400, sorted.targets.length))) return refusedAs("daily_limit");
+    const day = await takeMany("api-give", store.sid, GIVES_PER_DAY, 86_400, sorted.targets.length);
+    if (!day) return refusedAs("daily_limit");
     // Marked first, so what is given is read as soon as it is written (lib/learn.ts reads gifts only of a store so marked).
-    if (!store.pastBuyers && !(await setPastBuyers(storeRef(store)))?.pastBuyers) return refusedAs("unavailable");
+    if (!store.pastBuyers && !(await setPastBuyers(storeRef(store)))?.pastBuyers) {
+      await giveBackMany(day, day.n);
+      return refusedAs("unavailable");
+    }
     try {
       wrote = await grantImported(statsId, STUDIO_GIVE_JOB, sorted.targets.map((email) => ({ email, productId: target.productId, items: null })), undefined, store.sid, store);
     } catch (error) {
-      if (error instanceof DataRoomError) return refusedAs("store_full");
-      // The writes may or may not have landed: what reads back decides, person by person.
+      // A full room is refused before any write (needData): nothing was given, so the day is given back whole.
+      if (error instanceof DataRoomError) {
+        await giveBackMany(day, day.n);
+        return refusedAs("store_full");
+      }
+      // The writes may or may not have landed: what reads back decides, person by person, and the day stays taken.
       console.error("giving a course in bulk failed", error);
     }
+    // A grant this write did not make (its HSETNX did not answer 1: another member's gift, or a second click's, was
+    // there first) gave nothing here, so it is not counted in the day; the one that did make it is.
+    const unwritten = wrote ? wrote.filter((made) => !made).length : 0;
+    if (unwritten > 0) await giveBackMany(day, unwritten);
   } else if (statsId) {
     try {
       await takeGivenMany(statsId, sorted.targets, target.productId, STUDIO_GIVE_PREFIX, store);

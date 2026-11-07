@@ -243,6 +243,33 @@ export class MemoryRedis {
           this.run(["EXPIRE", ledger, seconds]); return 1;
         }
 
+        // lib/request-guard.ts TAKE_MANY: the window started (or given its end), a count below zero counted from zero,
+        // then all `n` taken or none, in one step; the window's end in ms when taken, 0 when not.
+        if (key.startsWith("-- marktmorgen:take-many:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, counter, n, limit, window] = args;
+          this.live(counter);
+          this.run(["SET", counter, "0", "EX", window, "NX"]);
+          if (!this.until.has(counter)) this.until.set(counter, this.now() + Number(window) * 1000);
+          const held = this.data.get(counter);
+          if (typeof held !== "string" || !/^-?\d+$/.test(held)) throw new Error("ERR user_script: attempt to compare nil with number");
+          const count = Math.max(0, Number(held)) + Number(n);
+          if (count > Number(limit)) {
+            this.data.set(counter, String(Math.max(0, Number(held))));
+            return 0;
+          }
+          this.data.set(counter, String(count));
+          return this.until.get(counter);
+        }
+        // lib/request-guard.ts GIVE_BACK_MANY: given back only to the window it was taken in, never below zero, never made anew.
+        if (key.startsWith("-- marktmorgen:give-back-many:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, counter, n, ends] = args;
+          this.live(counter);
+          if (!this.data.has(counter) || this.until.get(counter) !== Number(ends)) return 0;
+          const held = Number(this.data.get(counter));
+          if (!Number.isFinite(held) || held < Number(n)) return 0;
+          this.data.set(counter, String(held - Number(n)));
+          return 1;
+        }
         // lib/redis-lock.ts releaseLock and holdLock: the lock deleted, or made to last, only while it holds the token.
         if (key.startsWith("-- marktmorgen:release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, lock, token] = args;

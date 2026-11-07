@@ -96,8 +96,8 @@ function scopesInCode(): Map<string, string[]> {
       if (literals.length) for (const l of literals) { add(l, file); counters.set(l, new Set([...(counters.get(l) ?? []), m[1] ?? "EssentialLimit"])); }
       else add(`<dynamic:${m[2].trim()}>`, file);
     }
-    // takeManyWithin takes many at once from withinLimit's own counter (the same key for the same scope).
-    for (const m of text.matchAll(/\btakeManyWithin\(([^,]+),/g)) {
+    // takeMany and takeManyWithin take many at once from withinLimit's own counter (the same key for the same scope).
+    for (const m of text.matchAll(/\btakeMany(?:Within)?\(([^,]+),/g)) {
       const literals = [...m[1].matchAll(/"([^"]+)"/g)].map((l) => l[1]);
       if (literals.length) for (const l of literals) { add(l, file); counters.set(l, new Set([...(counters.get(l) ?? []), "Limit"])); }
       else add(`<dynamic:${m[1].trim()}>`, file);

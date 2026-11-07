@@ -109,6 +109,15 @@ export function askedCeiling(limit: number): number {
 
 /** A contact added or a product given through the API is this many of the window's API requests, the request included (lib/api-write.ts). */
 export const API_WRITE_UNITS = 5;
+
+/**
+ * Products a store may give in a day, through the API (lib/api-write.ts,
+ * giveAccess) and from the studio's list of students together: one count,
+ * the "api-give" counter (lib/request-guard.ts), named as a literal in both
+ * calls so tests/plan-cost-registry.test.ts classifies it. Here, browser-safe,
+ * so the studio's words say it from this figure (lib/student-bulk-rules.ts).
+ */
+export const GIVES_PER_DAY = 1_000;
 /**
  * A page of sales read through the API (GET /api/v1/sales, lib/api-sales.ts) is this many of the window's API
  * requests, the request included: it may wait on the creator's Stripe account for its whole ceiling while a

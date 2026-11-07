@@ -80,13 +80,8 @@ const IMPORT_JOB = /^[0-9a-f]{24}$/;
 export const STUDIO_GIVE_PREFIX = "studio:";
 export const STUDIO_GIVE_JOB = `${STUDIO_GIVE_PREFIX}students`;
 
-/**
- * Products a store may give in a day, through the API (lib/api-write.ts,
- * giveAccess) and from the studio's list of students together: one count,
- * the "api-give" counter (lib/request-guard.ts), named as a literal in both
- * calls so tests/plan-cost-registry.test.ts classifies it.
- */
-export const GIVES_PER_DAY = 1_000;
+/** Products a store may give in a day, the API and the studio together (lib/store-allowance-rules.ts). */
+export { GIVES_PER_DAY } from "@/lib/store-allowance-rules";
 
 /** Given by the creator, from the API ("api:") or from the studio ("studio:"): shown to the buyer as given by the store, never as a sale. */
 export function isGivenByStore(job: string): boolean {

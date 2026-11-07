@@ -210,7 +210,7 @@ export async function giveAccess(
   const already = (await importedFor({ ...store, statsId, pastBuyers: true }, email)).some((p) => p.productId === product.id);
   if (already) return { ok: true, value: { email, product: product.id, status: "already", emailed: false } };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return fail("unavailable");
-  if (!(await withinLimit("api-give", store.sid, GIVES_PER_DAY, 86_400))) return fail("daily_limit");
+  if (!(await withinLimit("api-give", store.sid, GIVES_PER_DAY, 86_400))) return fail("daily_limit", GIFTS_USED_WORDS);
   const taken = await takeAllowance(store, "api", API_WRITE_UNITS - 1);
   if (!taken.ok) return refusedFigure(taken);
   const [isNew] = await grantImported(statsId, `api:${keyId}`, [{ email, productId: product.id, items }], undefined, store.sid, store);
@@ -260,6 +260,9 @@ export async function takeAccess(store: Store, body: Record<string, unknown>): P
 }
 
 /** What each refusal says, and its status, as the API answers it. */
+/** A gift past the day's count: said as gifts, and as the studio's count too (its list of students gives from the same day). */
+export const GIFTS_USED_WORDS = `That is as many products as a store may give in a day, through the API and the studio's list of students together (${GIVES_PER_DAY.toLocaleString("en-US")}). Try again tomorrow.`;
+
 export const WRITE_ERRORS: Record<WriteError, [number, string]> = {
   unavailable: [503, "The store could not make this change just now. Try again in a moment."],
   email: [400, "Send email: an address."],

@@ -105,25 +105,28 @@ test("Redis 7 independently confirms every invalid command and error",{skip:!pro
  */
 type Step=[(string|number)[],"reply"|"ends"|"error"];
 const took=(key:string,n:number,limit=1000,window=86400):(string|number)[]=>["EVAL",TAKE_MANY,1,key,n,limit,window];
-const SCENARIOS:{name:string;steps:(until:()=>number)=>Step[]}[]=[
- {name:"a first take starts the window",steps:()=>[[took("c",25),"ends"],[["GET","c"],"reply"]]},
- {name:"a take past the limit takes nothing",steps:()=>[[["SET","c","990","EX",86400],"reply"],[took("c",25),"reply"],[["GET","c"],"reply"],[took("c",10),"ends"],[["GET","c"],"reply"]]},
- {name:"a count left below zero with no end is counted from zero and given the window",steps:()=>[[["SET","c","-25"],"reply"],[took("c",1),"ends"],[["GET","c"],"reply"],[["TTL","c"],"reply"]]},
- {name:"a count with no end is given the window",steps:()=>[[["SET","c","5"],"reply"],[took("c",1),"ends"],[["GET","c"],"reply"],[["TTL","c"],"reply"]]},
- {name:"a count that is not a number is never room",steps:()=>[[["SET","c","abc","EX",60],"reply"],[took("c",1),"error"],[["GET","c"],"reply"]]},
- {name:"given back only in the same window, never below zero, never made anew",steps:(until)=>[
+// ENDS stands for the window's end the last TAKE_MANY answered, LATER for a moment after it; each is put in when sent.
+const ENDS="<ends>",LATER="<later>";
+const SCENARIOS:{name:string;steps:Step[]}[]=[
+ {name:"a first take starts the window",steps:[[took("c",25),"ends"],[["GET","c"],"reply"]]},
+ {name:"a take past the limit takes nothing",steps:[[["SET","c","990","EX",86400],"reply"],[took("c",25),"reply"],[["GET","c"],"reply"],[took("c",10),"ends"],[["GET","c"],"reply"]]},
+ {name:"a count left below zero with no end is counted from zero and given the window",steps:[[["SET","c","-25"],"reply"],[took("c",1),"ends"],[["GET","c"],"reply"],[["TTL","c"],"reply"]]},
+ {name:"a count with no end is given the window",steps:[[["SET","c","5"],"reply"],[took("c",1),"ends"],[["GET","c"],"reply"],[["TTL","c"],"reply"]]},
+ {name:"a count that is not a number is never room",steps:[[["SET","c","abc","EX",60],"reply"],[took("c",1),"error"],[["GET","c"],"reply"]]},
+ {name:"given back only in the same window, never below zero, never made anew",steps:[
   [took("c",30),"ends"],
-  [["EVAL",GIVE_BACK_MANY,1,"c",5,until()],"reply"],[["GET","c"],"reply"],
-  [["EVAL",GIVE_BACK_MANY,1,"c",5,until()+1000],"reply"],
-  [["EVAL",GIVE_BACK_MANY,1,"c",26,until()],"reply"],[["GET","c"],"reply"],
-  [["EVAL",GIVE_BACK_MANY,1,"gone",1,until()],"reply"],[["EXISTS","gone"],"reply"],
+  [["EVAL",GIVE_BACK_MANY,1,"c",5,ENDS],"reply"],[["GET","c"],"reply"],
+  [["EVAL",GIVE_BACK_MANY,1,"c",5,LATER],"reply"],
+  [["EVAL",GIVE_BACK_MANY,1,"c",26,ENDS],"reply"],[["GET","c"],"reply"],
+  [["EVAL",GIVE_BACK_MANY,1,"gone",1,ENDS],"reply"],[["EXISTS","gone"],"reply"],
  ]},
 ];
 
 /** Runs a scenario through `send`, returning what is compared at each step. */
-async function runScenario(send:(command:(string|number)[])=>Promise<{ok:boolean;value:unknown}>,steps:(until:()=>number)=>Step[]):Promise<unknown[]>{
+async function runScenario(send:(command:(string|number)[])=>Promise<{ok:boolean;value:unknown}>,steps:Step[]):Promise<unknown[]>{
  let ends=0;const out:unknown[]=[];
- for(const [command,compare] of steps(()=>ends)){
+ for(const [template,compare] of steps){
+  const command=template.map(part=>part===ENDS?ends:part===LATER?ends+1000:part);
   const got=await send(command);
   if(command[0]==="EVAL"&&command[1]===TAKE_MANY&&got.ok&&typeof got.value==="number"&&got.value>0)ends=got.value;
   out.push(compare==="error"?!got.ok:compare==="ends"?got.ok&&Number.isSafeInteger(got.value)&&(got.value as number)>0:got.ok?got.value:"error");

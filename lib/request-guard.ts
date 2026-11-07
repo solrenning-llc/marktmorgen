@@ -190,38 +190,93 @@ export async function withinLimit(scope: string, who: string, limit: number, win
 }
 
 /**
- * Takes `n` at once from a counter of `limit` a window (the same key as
- * withinLimit for the same scope, so both count together): yes only when all
- * `n` fit. Past the limit what was taken is put back and nothing is taken,
- * never a part. Closed when the count is not known (Redis not configured or
- * not answering, a reply of another shape): a bound on what is given away is
- * never opened by a counter out of reach.
+ * Takes `n` at once from withinLimit's counter, in one step on the server
+ * (second pre-review of 279 [H3-4] unit 2): the window started as withinLimit
+ * starts it (SET NX EX), given its end when a count has none, a count below
+ * zero counted from zero, then INCRBY, and past `limit` the same DECRBY,
+ * all before anything else runs on the key. So a window that ends between
+ * two requests can never make the key again with no end and below zero, and
+ * withinLimit asking at the same moment never sees a sum that never stood.
+ * Answers the window's end in ms (PEXPIRETIME) when taken, 0 when not; a
+ * count that is not a number fails (never room).
  */
-export async function takeManyWithin(scope: string, who: string, limit: number, windowSeconds: number, n: number): Promise<boolean> {
-  if (!Number.isSafeInteger(n) || n < 0 || !Number.isSafeInteger(limit) || limit <= 0) return false;
-  if (n === 0) return true;
-  if (!isRedisConfigured()) return false;
-  let key = "";
-  let reply: unknown;
+export const TAKE_MANY = `-- marktmorgen:take-many:v1
+local n, limit, window = tonumber(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3])
+redis.call("SET", KEYS[1], "0", "EX", window, "NX")
+if redis.call("TTL", KEYS[1]) < 0 then redis.call("EXPIRE", KEYS[1], window) end
+if tonumber(redis.call("GET", KEYS[1])) < 0 then redis.call("SET", KEYS[1], "0", "KEEPTTL") end
+local count = redis.call("INCRBY", KEYS[1], n)
+if count > limit then
+  redis.call("DECRBY", KEYS[1], n)
+  return 0
+end
+return redis.call("PEXPIRETIME", KEYS[1])`;
+
+/**
+ * Gives `n` of a take back, only to the window it was taken in (its end the
+ * same as TAKE_MANY answered) and only while the count holds at least `n`:
+ * never to the next day's count, never below zero, and never making a key
+ * that is gone. 1 when given back, 0 when not.
+ */
+export const GIVE_BACK_MANY = `-- marktmorgen:give-back-many:v1
+local n, ends = tonumber(ARGV[1]), tonumber(ARGV[2])
+if redis.call("PEXPIRETIME", KEYS[1]) ~= ends then return 0 end
+local held = tonumber(redis.call("GET", KEYS[1]))
+if held == nil or held < n then return 0 end
+redis.call("DECRBY", KEYS[1], n)
+return 1`;
+
+/** What a take holds: the counter and its window's end, so only that window gets it back (giveBackMany). */
+export type TakenMany = { readonly key: string; readonly ends: number; readonly n: number };
+
+/**
+ * Takes `n` at once from a counter of `limit` a window (the same key as
+ * withinLimit for the same scope, so both count together): the take when all
+ * `n` fit, null otherwise, never a part. Closed when the count is not known
+ * (Redis not configured or not answering, a reply of another shape, a count
+ * that is not a number): a bound on what is given away is never opened by a
+ * counter out of reach. A reply of another shape may have taken: it is kept,
+ * never given back on a guess.
+ */
+export async function takeMany(scope: string, who: string, limit: number, windowSeconds: number, n: number): Promise<TakenMany | null> {
+  if (!Number.isSafeInteger(n) || n < 1 || !Number.isSafeInteger(limit) || limit <= 0 ||
+      !Number.isSafeInteger(windowSeconds) || windowSeconds <= 0 || !isRedisConfigured()) return null;
   try {
-    key = `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
-    reply = await redisPipeline([
-      ["SET", key, "0", "EX", windowSeconds, "NX"],
-      ["INCRBY", key, n],
-    ]);
+    const key = `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
+    const ends = onlyReply(await redisPipeline([["EVAL", TAKE_MANY, 1, key, n, limit, windowSeconds]]));
+    return Number.isSafeInteger(ends) && (ends as number) > 0 ? { key, ends: ends as number, n } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** takeMany as a yes or no: yes only when all `n` fit (`n` of 0 always fits, taking nothing). */
+export async function takeManyWithin(scope: string, who: string, limit: number, windowSeconds: number, n: number): Promise<boolean> {
+  if (n === 0 && Number.isSafeInteger(limit) && limit > 0) return true;
+  return (await takeMany(scope, who, limit, windowSeconds, n)) !== null;
+}
+
+/**
+ * Gives back `n` of a take (at most what it took) when what it was taken for
+ * was not given, in one step (GIVE_BACK_MANY). Whether it was given back; a
+ * failure keeps it taken, so a refusal never opens more than the limit.
+ */
+export async function giveBackMany(taken: TakenMany, n: number): Promise<boolean> {
+  if (!Number.isSafeInteger(n) || n < 1 || n > taken.n || !isRedisConfigured()) return false;
+  try {
+    return onlyReply(await redisPipeline([["EVAL", GIVE_BACK_MANY, 1, taken.key, n, taken.ends]])) === 1;
   } catch {
     return false;
   }
-  let count: number | null = null;
-  try {
-    count = counterReply(reply);
-  } catch {
-    count = null;
-  }
-  if (count !== null && count <= limit) return true;
-  // Past it, or not known: what this call may have added is put back, so a refusal spends nothing.
-  await redisPipeline([["DECRBY", key, n]]).catch(() => undefined);
-  return false;
+}
+
+/** The one reply of a one-command pipeline, read by its own data field (as counterReply reads), or undefined for any other shape. */
+function onlyReply(reply: unknown): unknown {
+  if (!Array.isArray(reply)) return undefined;
+  const length = Object.getOwnPropertyDescriptor(reply, "length");
+  if (!length || !Object.hasOwn(length, "value") || length.value !== 1) return undefined;
+  const only = Object.getOwnPropertyDescriptor(reply, "0");
+  return only && Object.hasOwn(only, "value") ? only.value : undefined;
 }
 
 /** Whether a returned SET NX + INCR reply holds a count within `limit`; no for any other shape or a reply that throws when read. */

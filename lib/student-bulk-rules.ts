@@ -15,6 +15,7 @@
  */
 import { count, labelKey } from "@/lib/bulk-label-rules";
 import { csvLine } from "@/lib/csv";
+import { GIVES_PER_DAY } from "@/lib/store-allowance-rules";
 
 /**
  * Students one page of the list shows, at most: what reading them costs is
@@ -230,7 +231,7 @@ export const GIVE_REFUSALS: Record<GiveRefusal, string> = {
   paused_unpaid: "Nothing was given: your plan's renewal payment did not go through, so new gifts wait until it is paid. Check the notice at the top of your studio. You can still take back a course you gave.",
   paused_disputed: "Nothing was given: a payment for your plan is disputed with your bank, so new gifts wait until it is settled. Check the notice at the top of your studio. You can still take back a course you gave.",
   store_full: "Nothing was given: your store's data room is full. Delete something you no longer need, such as old posts, drafts or contacts, then try again.",
-  daily_limit: "Nothing was given: that is as many as a store may give in a day, here and through the API together (1,000). Try again tomorrow.",
+  daily_limit: `Nothing was given: that is as many as a store may give in a day, here and through the API together (${GIVES_PER_DAY.toLocaleString("en-US")}). Try again tomorrow.`,
   unavailable: "Nothing was given just now. Try again in a minute.",
 };
 
@@ -247,6 +248,13 @@ export type GiveReview = { changes: number; already: number; removed: number; ot
 /** What it did, person by person: as the review, and `unknown` (written, not read back) and `failed` (read back as before). */
 export type GiveDone = { asked: number; changed: string[]; already: string[]; removed: string[]; otherWay: string[]; unread: string[]; unknown: string[]; failed: string[] };
 
+/**
+ * Said in a gift's review: whether someone already bought the course is
+ * Stripe's to say, one call a person, so the review does not ask (no new
+ * read); it says so instead of a count it does not have.
+ */
+export const BOUGHT_NOT_CHECKED = "Whether someone already bought it is not checked here: anyone who did keeps what they paid for and also gets the gift.";
+
 /** The lines a review shows before the creator confirms. */
 export function giveReviewLines(review: GiveReview, change: GiveChange, title: string): string[] {
   const giving = change === "give";
@@ -256,6 +264,7 @@ export function giveReviewLines(review: GiveReview, change: GiveChange, title: s
     review.removed ? `${count(review.removed, "person was", "people were")} taken off it: left as they are. Give their access back from that course's students.` : "",
     review.otherWay ? `${count(review.otherWay, "person has", "people have")} it another way (a sale, an import or a gift): not taken back here.` : "",
     review.unread ? `${count(review.unread, "person's record", "people's records")} could not be read just now: left as they are.` : "",
+    giving && review.changes ? BOUGHT_NOT_CHECKED : "",
     giving ? "No email is sent. They see it the next time they sign in with this address. You can undo this right after." : "No email is sent and nothing is refunded. You can give it again right after.",
   ].filter(Boolean);
 }

@@ -596,7 +596,7 @@ export default function DevelopersPage() {
         <Code>{`{"email": "dana@example.com", "product": "k3j9x2p1ab"}
 
 200  {"data": {"email": "dana@example.com", "product": "k3j9x2p1ab", "status": "taken_back"}}`}</Code>
-        <p>{`A store may give ${GIVES_PER_DAY.toLocaleString("en-US")} products a day through the API. A body is JSON of up to 4,000 bytes.`}</p>
+        <p>{`A store may give ${GIVES_PER_DAY.toLocaleString("en-US")} products a day, through the API and the studio's list of students together: a course given to students in the studio counts in the same day. A body is JSON of up to 4,000 bytes.`}</p>
       </LegalSection>
 
       <LegalSection title="Sales and refunds">

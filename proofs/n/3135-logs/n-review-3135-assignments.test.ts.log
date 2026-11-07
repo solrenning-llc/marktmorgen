@@ -1,0 +1,78 @@
+
+An assignment and its switches
+  ok    an assignment with no prompt is refused
+  ok    the prompt is trimmed, its line ends made plain
+  ok    a switch is on only when it is true
+  ok    a file's name loses what could break a download
+
+A student's file is theirs, for that lesson, of a kind taken
+  ok    a fresh name in their own folder
+  ok    another student's folder
+  ok    a kind that is not taken
+  ok    a folder inside it
+  ok    a way out of it
+  ok    a Word file is taken
+  ok    a web page is not
+  ok    nor anything that only looks like a key
+
+The lesson carries the switches, and a quiz or an assignment
+  ok    the switches are on the lesson
+  ok    taking it off leaves no trace on the lesson
+
+A must-finish assignment holds the rest shut until it is done
+  ok    the next lesson waits on it
+  ok    and the one after
+  ok    the lesson itself is open
+
+Reviewed: waiting, another try, approved
+  ok    the prompt is kept apart from the outline
+  ok    handed in, it waits for the creator
+  ok    and is in the creator's list
+  ok    the lesson is not done yet
+  ok    the next lesson still waits
+  ok    another try asked for
+  ok    nothing waits any more
+  ok    work already answered is not answered twice
+  ok    the old file is handed back to be deleted
+  ok    the second try is counted
+  ok    and the old answer is cleared with it
+  ok    the same file kept is not deleted
+  ok    approved
+  ok    approving finishes the lesson
+  ok    and opens the lessons after it
+
+Not reviewed: handing in is enough
+  ok    done at once
+  ok    the lesson is marked done
+  ok    nothing waits for the creator
+  ok    everything handed in, newest first
+
+What a store's students keep is held to its figure
+  ok    room up to the figure
+  ok    no room past it
+  ok    room given back is room again
+
+Removing an assignment forgets the work and returns its files
+  ok    every file still kept for it, to delete: the replaced one went when it was replaced
+  ok    the student's work is forgotten
+  ok    and the assignment
+
+Uploads never handed in, and doors used once
+  ok    the old one is deleted, the new one left
+  ok    and handed to the deletion once
+  ok    a door is used
+  ok    once
+
+Who hears about it
+  ok    the creator is told
+  ok    not again within the hour
+  ok    at the store's address
+  ok    the student's email is in the store's language
+  ok    with what the creator wrote, and the way back
+
+AI needs something to go on
+  ok    a file alone, with nothing said about it, is not enough
+
+52 checks, all passing.
+N3078_HTTP 2
+N3078_MEMORY_RUN 108

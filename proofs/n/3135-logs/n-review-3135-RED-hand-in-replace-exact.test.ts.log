@@ -1,0 +1,100 @@
+✖ the replaced file's delete failed (read by the creator): its room stays counted, never given back while it is kept (83.878045ms)
+✖ two hand-ins at once over an earlier file (read by the creator): its room is given back once, and one current file is kept (53.450917ms)
+✖ the replaced file's delete failed (done at once): its room stays counted, never given back while it is kept (40.69027ms)
+✖ two hand-ins at once over an earlier file (done at once): its room is given back once, and one current file is kept (24.23851ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 0
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 223.176548
+
+✖ failing tests:
+
+test at ../../../../tmp/n3078-QoAbxo/case.cjs:53767:33
+✖ the replaced file's delete failed (read by the creator): its room stays counted, never given back while it is kept (83.878045ms)
+  AssertionError [ERR_ASSERTION]: both files kept in storage stay counted: 2 kept, 1000 bytes counted
+  
+  1000 !== 2000
+  
+      at TestContext.<anonymous> (/tmp/n3078-QoAbxo/case.cjs:53780:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1000,
+    expected: 2000,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-QoAbxo/case.cjs:53782:33
+✖ two hand-ins at once over an earlier file (read by the creator): its room is given back once, and one current file is kept (53.450917ms)
+  AssertionError [ERR_ASSERTION]: the earlier file is deleted exactly once
+  
+  2 !== 1
+  
+      at TestContext.<anonymous> (/tmp/n3078-QoAbxo/case.cjs:53808:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-QoAbxo/case.cjs:53767:33
+✖ the replaced file's delete failed (done at once): its room stays counted, never given back while it is kept (40.69027ms)
+  AssertionError [ERR_ASSERTION]: both files kept in storage stay counted: 2 kept, 1000 bytes counted
+  
+  1000 !== 2000
+  
+      at TestContext.<anonymous> (/tmp/n3078-QoAbxo/case.cjs:53780:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1000,
+    expected: 2000,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-QoAbxo/case.cjs:53782:33
+✖ two hand-ins at once over an earlier file (done at once): its room is given back once, and one current file is kept (24.23851ms)
+  AssertionError [ERR_ASSERTION]: the earlier file is deleted exactly once
+  
+  2 !== 1
+  
+      at TestContext.<anonymous> (/tmp/n3078-QoAbxo/case.cjs:53808:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+N3078_HTTP 0
+N3078_MEMORY_RUN 572
+could not delete a replaced assignment file Error: the file store is down
+    at del (/tmp/n3078-QoAbxo/case.cjs:2199:26)
+    at deleteFile (/tmp/n3078-QoAbxo/case.cjs:13918:27)
+    at POST (/tmp/n3078-QoAbxo/case.cjs:53637:13)
+    at async handIn2 (/tmp/n3078-QoAbxo/case.cjs:53719:20)
+    at async TestContext.<anonymous> (/tmp/n3078-QoAbxo/case.cjs:53774:24)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+could not delete a replaced assignment file Error: the file store is down
+    at del (/tmp/n3078-QoAbxo/case.cjs:2199:26)
+    at deleteFile (/tmp/n3078-QoAbxo/case.cjs:13918:27)
+    at POST (/tmp/n3078-QoAbxo/case.cjs:53637:13)
+    at async handIn2 (/tmp/n3078-QoAbxo/case.cjs:53719:20)
+    at async TestContext.<anonymous> (/tmp/n3078-QoAbxo/case.cjs:53774:24)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)

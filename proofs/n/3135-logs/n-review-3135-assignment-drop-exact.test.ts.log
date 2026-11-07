@@ -1,0 +1,21 @@
+✔ a healthy read returns every file and forgets the list (9.565932ms)
+✔ a file handed in after the reading stays listed, never lost (Revisor 1 on #2810) (1.593007ms)
+✔ the course route reads the work before it saves the course without the assignment (0.883689ms)
+✔ files: no reply: unknown, and the list of files is kept (0.522156ms)
+✔ files: null: unknown, and the list of files is kept (0.674065ms)
+✔ files: odd list: unknown, and the list of files is kept (0.395602ms)
+✔ files: a size not a whole number: unknown, and the list of files is kept (0.345284ms)
+✔ files: a name not text: unknown, and the list of files is kept (0.508759ms)
+✔ work list: null: unknown, and the list of files is kept (0.718513ms)
+✔ records: one reply missing: unknown, and the list of files is kept (0.688575ms)
+✔ a product's course: every assignment read before the product goes (Revisor 1 on #2810) (2.434692ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 35.628166
+N3078_HTTP 0
+N3078_MEMORY_RUN 46

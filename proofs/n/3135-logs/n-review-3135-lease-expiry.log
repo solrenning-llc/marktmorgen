@@ -1,0 +1,51 @@
+✖ conditional: a delayed hand-in whose lease expires never releases the earlier file twice (76.021976ms)
+✔ the replaced file's delete failed (read by the creator): its room stays counted, never given back while it is kept (28.762782ms)
+✔ two hand-ins at once over an earlier file (read by the creator): its room is given back once, and one current file is kept (613.884894ms)
+✔ the replaced file's delete failed (done at once): its room stays counted, never given back while it is kept (16.422919ms)
+✔ two hand-ins at once over an earlier file (done at once): its room is given back once, and one current file is kept (628.64916ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 4
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1386.029686
+
+✖ failing tests:
+
+test at ../../../../tmp/n3078-GfWwE8/case.cjs:53811:31
+✖ conditional: a delayed hand-in whose lease expires never releases the earlier file twice (76.021976ms)
+  AssertionError [ERR_ASSERTION]: 2 kept files require 2000 counted bytes; actual 1000
+      at TestContext.<anonymous> (/tmp/n3078-GfWwE8/case.cjs:53848:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+N3078_HTTP 0
+N3078_MEMORY_RUN 787
+could not delete a replaced assignment file: its room stays counted Error: the file store is down
+    at del (/tmp/n3078-GfWwE8/case.cjs:2199:26)
+    at deleteFile (/tmp/n3078-GfWwE8/case.cjs:13926:27)
+    at /tmp/n3078-GfWwE8/case.cjs:53676:28
+    at async withLock (/tmp/n3078-GfWwE8/case.cjs:8242:12)
+    at async POST (/tmp/n3078-GfWwE8/case.cjs:53614:22)
+    at async handIn2 (/tmp/n3078-GfWwE8/case.cjs:53766:20)
+    at async TestContext.<anonymous> (/tmp/n3078-GfWwE8/case.cjs:53867:24)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+could not delete a replaced assignment file: its room stays counted Error: the file store is down
+    at del (/tmp/n3078-GfWwE8/case.cjs:2199:26)
+    at deleteFile (/tmp/n3078-GfWwE8/case.cjs:13926:27)
+    at /tmp/n3078-GfWwE8/case.cjs:53676:28
+    at async withLock (/tmp/n3078-GfWwE8/case.cjs:8242:12)
+    at async POST (/tmp/n3078-GfWwE8/case.cjs:53614:22)
+    at async handIn2 (/tmp/n3078-GfWwE8/case.cjs:53766:20)
+    at async TestContext.<anonymous> (/tmp/n3078-GfWwE8/case.cjs:53867:24)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)

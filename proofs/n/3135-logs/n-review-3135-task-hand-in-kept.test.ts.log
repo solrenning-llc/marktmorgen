@@ -1,0 +1,123 @@
+✔ control: a hand-in that goes through keeps its file and counts its bytes (51.714098ms)
+✔ the work's write reached Redis but its answer was lost: the kept file stays counted (12.67047ms)
+✔ the work's write never reached Redis: no file is left in the file store uncounted (11.207097ms)
+✔ the data room could not be counted before the write: the file is deleted and its bytes given back (12.424014ms)
+✔ a lesson nobody reads: marking it passed fails after the write, and the kept file stays counted (13.425607ms)
+✔ a hand-in after a failed one that kept its file: replacing it gives its bytes back once, never below what is kept (9.411001ms)
+✔ handing the same file in again into a full data room: the file the earlier work keeps is never deleted (8.505748ms)
+✔ the data room could not be counted and the file cannot be deleted either: it stays counted while it is in the file store (7.047116ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 143.654555
+N3078_HTTP 0
+N3078_MEMORY_RUN 809
+a hand-in failed after its write: its file and the room it took are kept Error: Redis request failed with status 502
+    at /tmp/n3078-3ec5Al/case.cjs:53837:15
+handing in an assignment failed Error: Redis request failed with status 502
+    at /tmp/n3078-3ec5Al/case.cjs:53837:15
+a hand-in failed after its write: its file and the room it took are kept Error: Redis request failed with status 502
+    at /tmp/n3078-3ec5Al/case.cjs:53851:15
+    at store.pipeline (/tmp/n3078-3ec5Al/case.cjs:53782:14)
+    at redisPipeline (/tmp/n3078-3ec5Al/case.cjs:2147:41)
+    at handIn (/tmp/n3078-3ec5Al/case.cjs:52714:9)
+    at async /tmp/n3078-3ec5Al/case.cjs:53659:20
+    at async withLock (/tmp/n3078-3ec5Al/case.cjs:8242:12)
+    at async POST (/tmp/n3078-3ec5Al/case.cjs:53614:22)
+    at async handIn2 (/tmp/n3078-3ec5Al/case.cjs:53766:20)
+    at async TestContext.<anonymous> (/tmp/n3078-3ec5Al/case.cjs:53853:22)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+handing in an assignment failed Error: Redis request failed with status 502
+    at /tmp/n3078-3ec5Al/case.cjs:53851:15
+    at store.pipeline (/tmp/n3078-3ec5Al/case.cjs:53782:14)
+    at redisPipeline (/tmp/n3078-3ec5Al/case.cjs:2147:41)
+    at handIn (/tmp/n3078-3ec5Al/case.cjs:52714:9)
+    at async /tmp/n3078-3ec5Al/case.cjs:53659:20
+    at async withLock (/tmp/n3078-3ec5Al/case.cjs:8242:12)
+    at async POST (/tmp/n3078-3ec5Al/case.cjs:53614:22)
+    at async handIn2 (/tmp/n3078-3ec5Al/case.cjs:53766:20)
+    at async TestContext.<anonymous> (/tmp/n3078-3ec5Al/case.cjs:53853:22)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+could not count a store's data Error: Redis request failed with status 502
+    at /tmp/n3078-3ec5Al/case.cjs:53862:15
+    at store.pipeline (/tmp/n3078-3ec5Al/case.cjs:53782:14)
+    at redisPipeline (/tmp/n3078-3ec5Al/case.cjs:2147:41)
+    at run (/tmp/n3078-3ec5Al/case.cjs:6275:27)
+    at takeData (/tmp/n3078-3ec5Al/case.cjs:6283:10)
+    at needData (/tmp/n3078-3ec5Al/case.cjs:6286:23)
+    at handIn (/tmp/n3078-3ec5Al/case.cjs:52712:24)
+    at async /tmp/n3078-3ec5Al/case.cjs:53659:20
+    at async withLock (/tmp/n3078-3ec5Al/case.cjs:8242:12)
+    at async POST (/tmp/n3078-3ec5Al/case.cjs:53614:22)
+handing in an assignment failed Error: the store's data room could not be counted
+    at needData (/tmp/n3078-3ec5Al/case.cjs:6289:9)
+    at async handIn (/tmp/n3078-3ec5Al/case.cjs:52712:18)
+    at async /tmp/n3078-3ec5Al/case.cjs:53659:20
+    at async withLock (/tmp/n3078-3ec5Al/case.cjs:8242:12)
+    at async POST (/tmp/n3078-3ec5Al/case.cjs:53614:22)
+    at async handIn2 (/tmp/n3078-3ec5Al/case.cjs:53766:20)
+    at async TestContext.<anonymous> (/tmp/n3078-3ec5Al/case.cjs:53864:22)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+a hand-in failed after its write: its file and the room it took are kept Error: Redis request failed with status 502
+    at /tmp/n3078-3ec5Al/case.cjs:53878:17
+    at store.pipeline (/tmp/n3078-3ec5Al/case.cjs:53782:14)
+    at redisPipeline (/tmp/n3078-3ec5Al/case.cjs:2147:41)
+    at markPassed (/tmp/n3078-3ec5Al/case.cjs:11432:25)
+    at finish (/tmp/n3078-3ec5Al/case.cjs:52730:9)
+    at handIn (/tmp/n3078-3ec5Al/case.cjs:52721:27)
+    at async /tmp/n3078-3ec5Al/case.cjs:53659:20
+    at async withLock (/tmp/n3078-3ec5Al/case.cjs:8242:12)
+    at async POST (/tmp/n3078-3ec5Al/case.cjs:53614:22)
+    at async handIn2 (/tmp/n3078-3ec5Al/case.cjs:53766:20)
+handing in an assignment failed Error: Redis request failed with status 502
+    at /tmp/n3078-3ec5Al/case.cjs:53878:17
+    at store.pipeline (/tmp/n3078-3ec5Al/case.cjs:53782:14)
+    at redisPipeline (/tmp/n3078-3ec5Al/case.cjs:2147:41)
+    at markPassed (/tmp/n3078-3ec5Al/case.cjs:11432:25)
+    at finish (/tmp/n3078-3ec5Al/case.cjs:52730:9)
+    at handIn (/tmp/n3078-3ec5Al/case.cjs:52721:27)
+    at async /tmp/n3078-3ec5Al/case.cjs:53659:20
+    at async withLock (/tmp/n3078-3ec5Al/case.cjs:8242:12)
+    at async POST (/tmp/n3078-3ec5Al/case.cjs:53614:22)
+    at async handIn2 (/tmp/n3078-3ec5Al/case.cjs:53766:20)
+a hand-in failed after its write: its file and the room it took are kept Error: Redis request failed with status 502
+    at /tmp/n3078-3ec5Al/case.cjs:53893:15
+handing in an assignment failed Error: Redis request failed with status 502
+    at /tmp/n3078-3ec5Al/case.cjs:53893:15
+could not count a store's data Error: Redis request failed with status 502
+    at /tmp/n3078-3ec5Al/case.cjs:53927:15
+    at store.pipeline (/tmp/n3078-3ec5Al/case.cjs:53782:14)
+    at redisPipeline (/tmp/n3078-3ec5Al/case.cjs:2147:41)
+    at run (/tmp/n3078-3ec5Al/case.cjs:6275:27)
+    at takeData (/tmp/n3078-3ec5Al/case.cjs:6283:10)
+    at needData (/tmp/n3078-3ec5Al/case.cjs:6286:23)
+    at handIn (/tmp/n3078-3ec5Al/case.cjs:52712:24)
+    at async /tmp/n3078-3ec5Al/case.cjs:53659:20
+    at async withLock (/tmp/n3078-3ec5Al/case.cjs:8242:12)
+    at async POST (/tmp/n3078-3ec5Al/case.cjs:53614:22)
+deleting a task file that was not handed in failed Error: the file store is down
+    at del (/tmp/n3078-3ec5Al/case.cjs:2199:26)
+    at deleteFile (/tmp/n3078-3ec5Al/case.cjs:13926:27)
+    at /tmp/n3078-3ec5Al/case.cjs:53663:30
+    at async /tmp/n3078-3ec5Al/case.cjs:53659:20
+    at async withLock (/tmp/n3078-3ec5Al/case.cjs:8242:12)
+    at async POST (/tmp/n3078-3ec5Al/case.cjs:53614:22)
+    at async handIn2 (/tmp/n3078-3ec5Al/case.cjs:53766:20)
+    at async TestContext.<anonymous> (/tmp/n3078-3ec5Al/case.cjs:53930:22)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+handing in an assignment failed Error: the store's data room could not be counted
+    at needData (/tmp/n3078-3ec5Al/case.cjs:6289:9)
+    at async handIn (/tmp/n3078-3ec5Al/case.cjs:52712:18)
+    at async /tmp/n3078-3ec5Al/case.cjs:53659:20
+    at async withLock (/tmp/n3078-3ec5Al/case.cjs:8242:12)
+    at async POST (/tmp/n3078-3ec5Al/case.cjs:53614:22)
+    at async handIn2 (/tmp/n3078-3ec5Al/case.cjs:53766:20)
+    at async TestContext.<anonymous> (/tmp/n3078-3ec5Al/case.cjs:53930:22)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)

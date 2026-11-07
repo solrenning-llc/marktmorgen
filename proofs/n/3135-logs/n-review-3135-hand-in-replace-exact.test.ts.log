@@ -1,0 +1,34 @@
+✔ the replaced file's delete failed (read by the creator): its room stays counted, never given back while it is kept (63.546455ms)
+✔ two hand-ins at once over an earlier file (read by the creator): its room is given back once, and one current file is kept (618.253351ms)
+✔ the replaced file's delete failed (done at once): its room stays counted, never given back while it is kept (24.728163ms)
+✔ two hand-ins at once over an earlier file (done at once): its room is given back once, and one current file is kept (663.535844ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1384.42393
+N3078_HTTP 0
+N3078_MEMORY_RUN 626
+could not delete a replaced assignment file: its room stays counted Error: the file store is down
+    at del (/tmp/n3078-AXpXDk/case.cjs:2199:26)
+    at deleteFile (/tmp/n3078-AXpXDk/case.cjs:13926:27)
+    at /tmp/n3078-AXpXDk/case.cjs:53676:28
+    at async withLock (/tmp/n3078-AXpXDk/case.cjs:8242:12)
+    at async POST (/tmp/n3078-AXpXDk/case.cjs:53614:22)
+    at async handIn2 (/tmp/n3078-AXpXDk/case.cjs:53766:20)
+    at async TestContext.<anonymous> (/tmp/n3078-AXpXDk/case.cjs:53821:24)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+could not delete a replaced assignment file: its room stays counted Error: the file store is down
+    at del (/tmp/n3078-AXpXDk/case.cjs:2199:26)
+    at deleteFile (/tmp/n3078-AXpXDk/case.cjs:13926:27)
+    at /tmp/n3078-AXpXDk/case.cjs:53676:28
+    at async withLock (/tmp/n3078-AXpXDk/case.cjs:8242:12)
+    at async POST (/tmp/n3078-AXpXDk/case.cjs:53614:22)
+    at async handIn2 (/tmp/n3078-AXpXDk/case.cjs:53766:20)
+    at async TestContext.<anonymous> (/tmp/n3078-AXpXDk/case.cjs:53821:24)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)

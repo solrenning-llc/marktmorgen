@@ -1,9 +1,0 @@
-# Measuring contract activation command work
-
-This check belongs to opening-block item AB(a). It runs only inside the existing disposable loopback Redis CI integration job, with synthetic keys and no supplier account. It executes the actual static application Lua and compares INFO commandstats calls immediately before and after a single activation. No other client work is run inside these serial measurement intervals. INFO observations themselves are excluded; EVAL and every internal command remain included.
-
-The first successful activation must expose all14 command executions from the current source. Identical retry and foreign-subscription refusal must stay at or below14. Missing internal counters, reset/decreasing counters, an unexpected number of EVAL calls or a higher total fail the test. Existing cash/slot/receipt equality and64-concurrent-retry checks remain unchanged. The per-command breakdown is printed into CI logs. These are assertions awaiting complete CI on this head, not a claim of an already observed result.
-
-The official [Redis INFO documentation](https://redis.io/docs/latest/commands/info/) describes per-command calls in commandstats; consulted2026-10-24, official publication date not established. This measures execution count on the pinned CI Redis, not Upstash replication, vendor billing, CPU, transfer or permanent storage. No cost table or ceiling is reduced. The conditional command-only arithmetic and unresolved total monthly/annual costs remain documented in contract-checkout-activation.md. Unknown costs still block a real review. No production request, operation, data field, plan right or supplier setting is added.
-
-AB(a), resource allocation coverage, renewals and reserve reconciliation remain unfinished. Real financial policies remain null; sales stay closed.

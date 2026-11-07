@@ -1,0 +1,15 @@
+✔ an unknown assignment-room read never becomes zero free usage (5.152571ms)
+✔ known assignment-room counts retain their exact boundary (0.686201ms)
+✔ the route says an unread room as unavailable, never as full (0.558071ms)
+✔ the upload route asks the room reader before signing storage IO (0.403384ms)
+✔ a counter below zero is nothing used, never a store locked out (Revisor 1 on #2655) (8.386104ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 49.848459
+N3078_HTTP 0
+N3078_MEMORY_RUN 13

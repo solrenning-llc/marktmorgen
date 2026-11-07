@@ -1,0 +1,115 @@
+✖ conditional: a delayed hand-in whose lease expires never releases the earlier file twice (96.556332ms)
+✖ the replaced file's delete failed (read by the creator): its room stays counted, never given back while it is kept (16.215855ms)
+✖ two hand-ins at once over an earlier file (read by the creator): its room is given back once, and one current file is kept (39.271154ms)
+✖ the replaced file's delete failed (done at once): its room stays counted, never given back while it is kept (15.477317ms)
+✖ two hand-ins at once over an earlier file (done at once): its room is given back once, and one current file is kept (15.877715ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 0
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 226.056628
+
+✖ failing tests:
+
+test at ../../../../tmp/n3078-CXIrzn/case.cjs:53764:31
+✖ conditional: a delayed hand-in whose lease expires never releases the earlier file twice (96.556332ms)
+  AssertionError [ERR_ASSERTION]: 2 kept files require 2000 counted bytes; actual 1000
+      at TestContext.<anonymous> (/tmp/n3078-CXIrzn/case.cjs:53801:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-CXIrzn/case.cjs:53813:33
+✖ the replaced file's delete failed (read by the creator): its room stays counted, never given back while it is kept (16.215855ms)
+  AssertionError [ERR_ASSERTION]: both files kept in storage stay counted: 2 kept, 1000 bytes counted
+  
+  1000 !== 2000
+  
+      at TestContext.<anonymous> (/tmp/n3078-CXIrzn/case.cjs:53826:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1000,
+    expected: 2000,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-CXIrzn/case.cjs:53828:33
+✖ two hand-ins at once over an earlier file (read by the creator): its room is given back once, and one current file is kept (39.271154ms)
+  AssertionError [ERR_ASSERTION]: the earlier file is deleted exactly once
+  
+  2 !== 1
+  
+      at TestContext.<anonymous> (/tmp/n3078-CXIrzn/case.cjs:53854:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-CXIrzn/case.cjs:53813:33
+✖ the replaced file's delete failed (done at once): its room stays counted, never given back while it is kept (15.477317ms)
+  AssertionError [ERR_ASSERTION]: both files kept in storage stay counted: 2 kept, 1000 bytes counted
+  
+  1000 !== 2000
+  
+      at TestContext.<anonymous> (/tmp/n3078-CXIrzn/case.cjs:53826:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1000,
+    expected: 2000,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-CXIrzn/case.cjs:53828:33
+✖ two hand-ins at once over an earlier file (done at once): its room is given back once, and one current file is kept (15.877715ms)
+  AssertionError [ERR_ASSERTION]: the earlier file is deleted exactly once
+  
+  2 !== 1
+  
+      at TestContext.<anonymous> (/tmp/n3078-CXIrzn/case.cjs:53854:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+N3078_HTTP 0
+N3078_MEMORY_RUN 722
+could not delete a replaced assignment file Error: the file store is down
+    at del (/tmp/n3078-CXIrzn/case.cjs:2199:26)
+    at deleteFile (/tmp/n3078-CXIrzn/case.cjs:13918:27)
+    at POST (/tmp/n3078-CXIrzn/case.cjs:53637:13)
+    at async handIn2 (/tmp/n3078-CXIrzn/case.cjs:53719:20)
+    at async TestContext.<anonymous> (/tmp/n3078-CXIrzn/case.cjs:53820:24)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+could not delete a replaced assignment file Error: the file store is down
+    at del (/tmp/n3078-CXIrzn/case.cjs:2199:26)
+    at deleteFile (/tmp/n3078-CXIrzn/case.cjs:13918:27)
+    at POST (/tmp/n3078-CXIrzn/case.cjs:53637:13)
+    at async handIn2 (/tmp/n3078-CXIrzn/case.cjs:53719:20)
+    at async TestContext.<anonymous> (/tmp/n3078-CXIrzn/case.cjs:53820:24)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)

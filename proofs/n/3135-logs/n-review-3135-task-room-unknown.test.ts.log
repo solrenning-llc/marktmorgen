@@ -1,0 +1,20 @@
+✔ control: with the room counter answering as Redis does, the file is handed in and kept (71.801674ms)
+✔ an unknown room reply (a null reply) deletes the uploaded file and hands nothing in (19.899195ms)
+✔ an unknown room reply (a word for a count) deletes the uploaded file and hands nothing in (14.323926ms)
+✔ an unknown room reply (no reply at all) deletes the uploaded file and hands nothing in (19.081476ms)
+✔ an unknown room reply (a count smaller than what was added) deletes the uploaded file and hands nothing in (11.124312ms)
+✔ an unknown room reply (a failed call) deletes the uploaded file and hands nothing in (6.251103ms)
+✔ a reply lost after the room was really taken: the file is deleted, and the bytes it took come back (8.499326ms)
+✔ a reply lost before the room was taken: nothing is given back that never entered (9.087731ms)
+✔ a lost reply whose giving back also fails: the route still answers, the file is deleted, the room only refuses sooner (8.371987ms)
+✔ a full room: refused as before, nothing kept, no mark left (8.009904ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 194.858126
+N3078_HTTP 0
+N3078_MEMORY_RUN 907

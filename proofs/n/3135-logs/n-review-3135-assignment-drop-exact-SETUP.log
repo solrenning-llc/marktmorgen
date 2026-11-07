@@ -1,0 +1,53 @@
+✔ a healthy read returns every file and forgets the list (10.610165ms)
+✔ a file handed in after the reading stays listed, never lost (Revisor 1 on #2810) (1.371489ms)
+✖ the course route reads the work before it saves the course without the assignment (0.607608ms)
+✔ files: no reply: unknown, and the list of files is kept (0.689046ms)
+✔ files: null: unknown, and the list of files is kept (0.528956ms)
+✔ files: odd list: unknown, and the list of files is kept (1.018487ms)
+✔ files: a size not a whole number: unknown, and the list of files is kept (0.48489ms)
+✔ files: a name not text: unknown, and the list of files is kept (0.498814ms)
+✔ work list: null: unknown, and the list of files is kept (0.641909ms)
+✔ records: one reply missing: unknown, and the list of files is kept (0.844076ms)
+✖ a product's course: every assignment read before the product goes (Revisor 1 on #2810) (2.27413ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 9
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 34.587392
+
+✖ failing tests:
+
+test at ../../../../tmp/n3078-xphGva/case.cjs:46445:34
+✖ the course route reads the work before it saves the course without the assignment (0.607608ms)
+  Error: ENOENT: no such file or directory, open 'app/api/store/course/route.ts'
+      at readFileSync (node:fs:483:20)
+      at TestContext.<anonymous> (/tmp/n3078-xphGva/case.cjs:46446:53)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'open',
+    path: 'app/api/store/course/route.ts'
+  }
+
+test at ../../../../tmp/n3078-xphGva/case.cjs:46469:34
+✖ a product's course: every assignment read before the product goes (Revisor 1 on #2810) (2.27413ms)
+  Error: ENOENT: no such file or directory, open 'app/api/store/product/route.ts'
+      at readFileSync (node:fs:483:20)
+      at TestContext.<anonymous> (/tmp/n3078-xphGva/case.cjs:46481:53)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'open',
+    path: 'app/api/store/product/route.ts'
+  }
+N3078_HTTP 0
+N3078_MEMORY_RUN 46

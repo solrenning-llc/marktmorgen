@@ -418,8 +418,12 @@ async function deliver(
   const wasSent = markThere(sent, "the checkout reminder's sent mark");
   const stopped = markThere(off, "the checkout reminder's stop mark");
   const heardThisWeek = markThere(once, "the checkout reminder's once-a-week mark");
-  if (store.listId ? contact !== null && typeof contact !== "string" : countOf(contact) === null) {
-    throw new UnknownReplyError("the list contact for the checkout reminder");
+  // With a list, the contact is its text or nothing; without one, the placeholder is a one-key EXISTS, so exactly 0
+  // or 1 like the other marks (Codex Z on #2929): any other count is unknown.
+  if (store.listId) {
+    if (contact !== null && typeof contact !== "string") throw new UnknownReplyError("the list contact for the checkout reminder");
+  } else {
+    markThere(contact, "the checkout reminder's no-list placeholder");
   }
   // Somebody deleted from this store is never written to again
   // (lib/suppression.ts): HEXISTS answers exactly 1 or 0, and a lost reply

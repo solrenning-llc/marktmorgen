@@ -107,8 +107,10 @@ const fresh = () => {
 const markOf = async (id: string) => (await redis.pipeline([["GET", `nl:recover:sent:${id}`]]))[0];
 
 /** The reminder must reject as unknown, send nothing and leave the checkout unmarked as sent. */
-async function refuses(when: (c: Commands) => boolean, answer: (c: Commands, real: Pipe) => Promise<unknown[]>, label: string) {
-  const store = await shop();
+async function refuses(when: (c: Commands) => boolean, answer: (c: Commands, real: Pipe) => Promise<unknown[]>, label: string, noList = false) {
+  const kept = await shop();
+  // A store with no contact list: the fourth read is then a one-key EXISTS, read as exactly 0 or 1.
+  const store = noList ? { ...kept, listId: null } : kept;
   const { id, email } = fresh();
   const before = sent.length;
   await assert.rejects(intercept(when, answer, () => remindAbandoned(store, left(id, email))), UnknownReplyError, `${label}: must be unknown`);
@@ -166,6 +168,19 @@ test("a cut-short or overlong marks pipeline is unknown", async () => {
 
 test("the list contact of another shape is unknown, never 'still on the list'", async () => {
   for (const value of [undefined, 0, 1, true, ["x"], { unsub: false }]) await refuses(isMarks, slotAs(3, value), `contact ${String(value)}`);
+});
+
+test("with no contact list, the fourth read (a one-key EXISTS) of any other shape is unknown (Codex Z on #2929)", async () => {
+  for (const value of ODD) await refuses(isMarks, slotAs(3, value), `no-list EXISTS ${String(value)}`, true);
+});
+
+test("control: with no contact list, healthy marks send once", async () => {
+  const kept = await shop();
+  const store = { ...kept, listId: null };
+  const { id, email } = fresh();
+  const before = sent.length;
+  await remindAbandoned(store, left(id, email));
+  assert.deepEqual(sent.slice(before), [email]);
 });
 
 test("a claim reply other than OK or nothing is unknown: nothing is sent", async () => {

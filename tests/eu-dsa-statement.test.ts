@@ -17,6 +17,7 @@
  * The email has a text part only, so the text is what is checked.
  */
 import { readFileSync } from "node:fs";
+import { sectionId } from "@/components/legal-page";
 import { addProduct, addStoreLink, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readReport } from "@/lib/takedown-rules";
 import { fileReport, openReport, takeDown } from "@/lib/takedown";
@@ -53,8 +54,15 @@ const NOTICE = {
 const terms = readFileSync("app/terms/page.tsx", "utf8");
 const anchorOf = (title: string) => title.toLowerCase().replace(/^\d+\.\s*/, "").replace(/[’']/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const SECTIONS = ["3. Selling through a Marktmorgen store", "4. Acceptable use", "16. Governing law"];
+// What each kind of action is said to last, as the code makes it last.
+const DURATION: Record<Taken, string> = {
+  product: `How long: until you publish it again. Publishing it again while the notice stands may lead us to suspend your store (Terms, section 3, ${ORIGIN}/terms#selling-through-a-marktmorgen-store).`,
+  link: "How long: for good. The link and its file are deleted, so there is nothing to put back.",
+  store: "How long: until we switch your store back on, for example after your answer below.",
+};
 
-async function emailFor(kind: "copyright" | "other", handle: string): Promise<string> {
+type Taken = "product" | "link" | "store";
+async function emailFor(kind: "copyright" | "other", handle: string, taken: Taken = "product"): Promise<string> {
   const owner = `${handle}@example.com`;
   await claimHandle(owner, handle, "DSA Shop", "");
   await ensureStatsId(owner);
@@ -72,7 +80,7 @@ async function emailFor(kind: "copyright" | "other", handle: string): Promise<st
   if (!opened?.store) throw new Error("opened");
   sent.length = 0;
   const store = (await storeForEmail(owner))!;
-  await takeDown(opened.report, store, { type: "product", id: made.product.id }, ORIGIN);
+  await takeDown(opened.report, store, taken === "product" ? { type: "product", id: made.product.id } : taken === "link" ? { type: "link", id: store.links.find((l) => l.title === "My mixtape")!.id } : { type: "store", on: true }, ORIGIN);
   const mail = sent.find((m) => [m.to].flat().includes(owner));
   if (!mail) throw new Error("no email to the creator");
   is(`${kind}: the email has no HTML part to check apart from its text`, mail.html ?? null, null);
@@ -93,7 +101,9 @@ async function main(): Promise<void> {
     part(`Art. 17(3), a ${kind} notice`);
     is("(a) what was restricted", text.includes('The product "Song Pack", now unpublished'), true);
     is("(a) territorial scope: every country", text.includes("Where: everywhere. It is down for every visitor, in every country."), true);
-    is("(a) duration: no end date, and what changes it", text.includes("How long: we set no end date. We change it only if we decide to, for example after your answer below."), true);
+    // Claude 5's MEDIUM on #2928: the creator can publish a product again at once, so "only we change it" was untrue.
+    is("(a) duration of a product: until it is published again, and what that risks", text.includes(DURATION.product), true);
+    is("(a) no promise that only we can change it", text.includes("We change it only if we decide to"), false);
     is("(b) facts: the notice and the address it named", [text.includes(`${ORIGIN}/@dsa`), text.includes("Harbor Lights")], [true, true]);
     is("(b) that it came from a notice, under which rule", text.includes(kind === "copyright"
       ? `What we relied on: that notice, sent through our form at ${ORIGIN}/report as a copyright notice under the US Digital Millennium Copyright Act (17 U.S.C. § 512(c)(3)).`
@@ -111,6 +121,19 @@ async function main(): Promise<void> {
     is("(f) how to answer us", text.includes(kind === "copyright" ? "counter-notice" : "reply to this email and say why"), true);
     is("(f) judicial redress", text.includes(`You can also take our decision to a court. Section 16 of our Terms, "Governing law", says which law and courts apply (${ORIGIN}/terms#${anchorOf(SECTIONS[2])}).`), true);
     is("(f) no internal complaint system or out-of-court body promised", /complaint-handling|Article 20|Article 21|out-of-court/i.test(text), false);
+  }
+  part("Art. 17(3)(a), the duration said for each kind of action (Claude 5 on #2928)");
+  for (const taken of ["link", "store"] as const) {
+    const text = await emailFor("other", `dsa${taken}x`, taken);
+    is(`${taken}: the duration says what the code does`, text.includes(DURATION[taken]), true);
+    is(`${taken}: no other kind's duration`, (Object.keys(DURATION) as Taken[]).filter((k) => k !== taken).some((k) => text.includes(DURATION[k])), false);
+  }
+
+  part("The anchors the email links to are the ones the Terms page draws (Claude 5's LOW 3 on #2928)");
+  for (const title of SECTIONS) {
+    const line = terms.split("\n").find((l) => l.includes(`title="${title}"`)) ?? "";
+    is(`"${title}" has no id of its own, so its anchor is the one computed from its title`, /\bid=/.test(line), false);
+    is(`"${title}": the test's anchor is the page's own sectionId`, anchorOf(title), sectionId(title));
   }
   done();
 }

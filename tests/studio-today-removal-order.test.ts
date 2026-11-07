@@ -18,7 +18,9 @@
  * no way to turn it on over it, and say it could not be read (CX-123 rule 24, lib/redis-reply.ts).
  *
  * And "Update now" (Claude 5's LEVE 1 on #2835): the day's reading of the store's numbers is taken only once the
- * reads the page waits for have answered, never for a page that ends in its error.
+ * reads the page waits for have answered, never for a page that ends in its error. Nor does the one read made after
+ * it, the products the numbers name (Claude 5's residual LEVE on #2835), end the page in its error once the reading
+ * is spent: the numbers then wait, as when they could not be read, and no product is named gone for it.
  */
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
@@ -27,10 +29,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { answering } from "./security/next-headers";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { REMOVAL_DAYS, listPasskeys } from "@/lib/passkeys";
-import { addProduct, claimHandle, ensureStatsId, setAdsServer, setAssistantPlan, setPixels, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setAdsServer, setProductHidden, setAssistantPlan, setPixels, setSubscription, storeForEmail } from "@/lib/store";
 import { NO_PIXELS } from "@/lib/pixels";
 import StudioPage from "@/app/studio/page";
 import { AppCodeInvite } from "@/components/app-code-invite";
+import { StatsPanel } from "@/components/stats-panel";
 import { TwoStepManager } from "@/components/two-step-manager";
 import { makePasskey } from "./passkey-world";
 import { store as redis } from "./redis-stub";
@@ -315,38 +318,68 @@ async function main(): Promise<void> {
   // Claude 5's LEVE 1 on #2835: "Update now" (numbers=fresh) reads the store's numbers again from the day's own
   // budget (lib/store-readings.ts takeStoreReading). Sent together with the other reads, that reading was taken
   // even when a read the page waits for failed and the page ended in its error; it waits for them now.
-  const freshPage = async (owner: string, fault: boolean): Promise<{ loaded: boolean; spent: number }> => {
+  // And the products the numbers name (Claude 5's residual LEVE on #2835) are read after that reading, from what it
+  // read: one outside the catalog's head (here hidden, so not on the first page) is read from its own record, and a
+  // failure there came after the day's reading was spent and ended the page in its error.
+  type Fault = "none" | "shelf" | "listing";
+  const freshPage = async (owner: string, fault: Fault): Promise<{ loaded: boolean; spent: number; faults: number; panels: Record<string, unknown>[] }> => {
     await claimHandle(owner, owner.split("@")[0].replace(/[^a-z]/g, ""), "Today fresh", "");
     await ensureStatsId(owner);
     await addProduct(owner, "Guide", "", "19", null);
+    let listing = "";
+    if (fault !== "shelf") {
+      const added = await addProduct(owner, "Hidden guide", "", "29", null);
+      if (!added.ok) throw new Error("synthetic product not added");
+      const hidden = await setProductHidden(owner, added.product.id, true);
+      if (!hidden.ok) throw new Error("synthetic product not hidden");
+      const store = (await storeForEmail(owner))!;
+      is(`${owner}: the hidden product is outside the catalog's head (precondition)`, !store.catalog.inline && Boolean(store.catalog.id) && !store.catalog.head.some((l) => l.id === added.product.id), true);
+      listing = `nl:catalog:${store.catalog.id}:l:${added.product.id}`;
+    }
     const ownerSession = await openSession(owner);
     const kept = redis.pipeline;
     let spent = 0;
+    let faults = 0;
     redis.pipeline = async (commands) => {
       if (commands.some((c) => c[0] === "INCRBY" && String(c[1]).startsWith("nl:reading:day:"))) spent += 1;
-      if (fault && commands.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:catalog:"))) throw new Error("SYNTHETIC_PRODUCTS_READ_FAULT");
+      if (fault === "shelf" && commands.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:catalog:"))) throw new Error("SYNTHETIC_PRODUCTS_READ_FAULT");
+      if (fault === "listing" && spent > 0 && commands.some((c) => c[0] === "GET" && String(c[1]) === listing)) {
+        faults += 1;
+        throw new Error("SYNTHETIC_LISTING_READ_FAULT");
+      }
       return kept.call(redis, commands);
     };
     answering(new NextRequest("https://marktmorgen.com/studio?numbers=fresh", { headers: { cookie: `${SESSION_COOKIE}=${ownerSession}` } }));
     let loaded = true;
+    let panels: Record<string, unknown>[] = [];
     try {
-      await words(await StudioPage({ searchParams: Promise.resolve({ numbers: "fresh" }) }));
+      const tree = await StudioPage({ searchParams: Promise.resolve({ numbers: "fresh" }) });
+      await words(tree);
+      panels = await propsOf(tree, StatsPanel);
     } catch {
       loaded = false;
     } finally {
       redis.pipeline = kept;
       answering(null);
     }
-    return { loaded, spent };
+    return { loaded, spent, faults, panels };
   };
+  const productTitles = (panels: Record<string, unknown>[]) =>
+    panels.map((props) => (props.data as { products: { title: string }[] }).products.map((p) => p.title));
   part("Update now, when a read the page waits for fails");
-  const failing = await freshPage("todayfreshfault@example.com", true);
+  const failing = await freshPage("todayfreshfault@example.com", "shelf");
   is("the page ends in its error (precondition)", failing.loaded, false);
   is("the day's reading is not taken for it", failing.spent, 0);
   part("Update now, when every read answers");
-  const healthy = await freshPage("todayfreshok@example.com", false);
+  const healthy = await freshPage("todayfreshok@example.com", "none");
   is("the page loads", healthy.loaded, true);
   is("and the numbers are read again, from the day's budget", healthy.spent, 1);
+  is("and they name both products, the one outside the head read from its record", productTitles(healthy.panels), [["Guide", "Hidden guide"]]);
+  part("Update now, when the products the numbers name fail after the day's reading");
+  const late = await freshPage("todayfreshlate@example.com", "listing");
+  is("the reading was taken, and the products' read failed after it (precondition)", [late.spent, late.faults > 0], [1, true]);
+  is("the page does not end in its error for it", late.loaded, true);
+  is("the numbers wait, as when they could not be read, rather than name a product gone or leave one out", late.panels.length, 0);
 
   part("Today's store writes, when the billing month is read again during the visit");
   await writeOrder(false);

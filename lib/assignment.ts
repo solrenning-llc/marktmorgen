@@ -92,6 +92,23 @@ const FILE_BYTES_TEXT = /^(0|[1-9]\d{0,15})$/;
 /** What removing an assignment will forget, read in full before anything is deleted (readTaskDrop). */
 export type TaskDrop = { courseId: string; lessonId: string; files: string[]; bytes: number; gone: string[]; freed: number };
 
+/** An assignment's files' hash (HGETALL), each file with its size, in its exact shape; anything else throws UnknownReplyError. */
+function handedFilesOf(flat: unknown): { path: string; bytes: number }[] {
+  const pairs: unknown[] | null = Array.isArray(flat)
+    ? flat
+    : flat && typeof flat === "object"
+      ? Object.entries(flat as Record<string, unknown>).flat()
+      : null;
+  if (!pairs || pairs.length % 2 !== 0) throw new UnknownReplyError("the files handed in for an assignment");
+  const out: { path: string; bytes: number }[] = [];
+  for (let i = 0; i < pairs.length; i += 2) {
+    const [name, size] = [pairs[i], pairs[i + 1]];
+    if (typeof name !== "string" || !name || typeof size !== "string" || !FILE_BYTES_TEXT.test(size)) throw new UnknownReplyError("the files handed in for an assignment");
+    out.push({ path: name, bytes: Number(size) });
+  }
+  return out;
+}
+
 /**
  * Reads what removing an assignment will forget: its handed-in files and their sizes, the work handed in, and what
  * the records weigh. Every reply in its exact shape (CX-123 rules 24 and 30; Claude 4 after Codex P on #2655): a
@@ -99,21 +116,9 @@ export type TaskDrop = { courseId: string; lessonId: string; files: string[]; by
  * takes the assignment out of the course (Revisor 1 on #2810), so a read that fails leaves everything findable.
  */
 export async function readTaskDrop(courseId: string, lessonId: string): Promise<TaskDrop> {
-  const flat = repliesFor(await redisPipeline([["HGETALL", filesKey(courseId, lessonId)]]), 1)?.[0];
-  const pairs: unknown[] | null = Array.isArray(flat)
-    ? flat
-    : flat && typeof flat === "object"
-      ? Object.entries(flat as Record<string, unknown>).flat()
-      : null;
-  if (!pairs || pairs.length % 2 !== 0) throw new UnknownReplyError("the files handed in for an assignment");
-  const files: string[] = [];
-  let bytes = 0;
-  for (let i = 0; i < pairs.length; i += 2) {
-    const [name, size] = [pairs[i], pairs[i + 1]];
-    if (typeof name !== "string" || !name || typeof size !== "string" || !FILE_BYTES_TEXT.test(size)) throw new UnknownReplyError("the files handed in for an assignment");
-    files.push(name);
-    bytes += Number(size);
-  }
+  const listed = handedFilesOf(repliesFor(await redisPipeline([["HGETALL", filesKey(courseId, lessonId)]]), 1)?.[0]);
+  const files = listed.map((f) => f.path);
+  const bytes = listed.reduce((sum, f) => sum + f.bytes, 0);
   // Each student's own record, found by the list of all the work handed in.
   const waiting = repliesFor(await redisPipeline([["ZRANGEBYSCORE", allKey(courseId), "-inf", "+inf"]]), 1)?.[0];
   if (!Array.isArray(waiting) || !waiting.every((m) => typeof m === "string")) throw new UnknownReplyError("the work handed in for a course");
@@ -520,6 +525,12 @@ function fileOfRecord(raw: string): { path: string; bytes: number } | null | und
   return { path, bytes: wholeFrom(bytes, 0) ? (bytes as number) : 0 };
 }
 
+/** Whether a listed file sits in exactly this student's own folder for this assignment (taskFolder, any store folder). */
+function inStudentFolder(path: string, courseId: string, lessonId: string, who: string): boolean {
+  const parts = path.split("/");
+  return parts.length === 7 && parts[0] === "stores" && !!parts[1] && parts[2] === "tasks" && parts[3] === courseId && parts[4] === lessonId && parts[5] === who && !!parts[6] && !path.includes("..");
+}
+
 /**
  * Thrown by forgetTasksPerson when it deleted records whose handed-in file it could not read from them: the
  * erasure is incomplete (a file may be left), and is said so, never "done".
@@ -547,7 +558,11 @@ export class TaskRecordUnreadError extends Error {
  * erasure must remove it); the files of the records that do read go to the
  * daily job that deletes uploads nobody kept (staleTaskUploads, as the
  * erasure itself does when the file store does not answer), and it throws
- * TaskRecordUnreadError, so the erasure is said to be incomplete.
+ * TaskRecordUnreadError, so the erasure is said to be incomplete; that
+ * record's file is still found in the assignment's files hash under the
+ * student's own folder, and deleted with it. The deletion's receipt is
+ * read too: a batch that does not answer a count for every command throws
+ * UnknownReplyError, its files left to the daily job (Codex P on #2847).
  */
 export async function forgetTasksPerson(courseId: string, lessonIds: string[], who: string, room: string | null): Promise<{ records: number; files: string[] }> {
   if (!lessonIds.length || !WHO.test(who) || !isRedisConfigured()) return { records: 0, files: [] };
@@ -555,17 +570,36 @@ export async function forgetTasksPerson(courseId: string, lessonIds: string[], w
   if (!raws || !raws.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReplyError("a student's work on a course's assignments");
   const handed = lessonIds.flatMap((lessonId, i) => (typeof raws[i] === "string" ? [{ lessonId, file: fileOfRecord(raws[i] as string) }] : []));
   if (!handed.length) return { records: 0, files: [] };
-  const unread = handed.filter((h) => h.file === undefined).length;
+  const unreadLessons = handed.filter((h) => h.file === undefined).map((h) => h.lessonId);
+  const unread = unreadLessons.length;
   const files = handed.flatMap((h) => (h.file ? [{ lessonId: h.lessonId, ...h.file }] : []));
+  // A record that does not say its file still has it listed in the assignment's files hash, under the student's own
+  // folder (taskFolder): it is taken from there, so neither this run nor the retry leaves it behind (Claude 6 on
+  // #2847). Read exactly, before anything is deleted; read only when a record does not read.
+  if (unread) {
+    const hashes = repliesFor(await redisPipeline(unreadLessons.map((l) => ["HGETALL", filesKey(courseId, l)])), unread);
+    if (!hashes) throw new UnknownReplyError("the files handed in for an assignment");
+    unreadLessons.forEach((lessonId, i) => {
+      for (const f of handedFilesOf(hashes[i])) if (inStudentFolder(f.path, courseId, lessonId, who)) files.push({ lessonId, ...f });
+    });
+  }
   const members = handed.map((h) => `${h.lessonId}|${who}`);
-  await redisPipeline([
+  const batch: (string | number)[][] = [
     ["DEL", ...handed.map((h) => subKey(courseId, h.lessonId, who))],
     ["ZREM", waitingKey(courseId), ...members],
     ["ZREM", allKey(courseId), ...members],
     ...files.map((f) => ["HDEL", filesKey(courseId, f.lessonId), f.path]),
     // Thrown below, the files it read would not reach the erasure: the daily job deletes them instead.
     ...(unread && files.length ? [["ZADD", DOORS_KEY, ...files.flatMap((f) => [0, f.path])]] : []),
-  ]);
+  ];
+  // Every command answers a count (Codex P on #2847). Anything else may have applied all, part or none of the
+  // batch: nothing is sent again on a guess and no room is given back, the files read go to the daily job that
+  // deletes uploads nobody kept, and the erasure is told it could not finish, never "done".
+  const receipt = repliesFor(await redisPipeline(batch), batch.length);
+  if (!receipt || !receipt.every((reply) => countOf(reply) !== null)) {
+    if (files.length) await redisPipeline([["ZADD", DOORS_KEY, ...files.flatMap((f) => [0, f.path])]]);
+    throw new UnknownReplyError("the deletion of a student's work on a course's assignments");
+  }
   const bytes = files.reduce((sum, f) => sum + f.bytes, 0);
   if (room && bytes) await releaseBytes(room, bytes);
   if (unread) throw new TaskRecordUnreadError(unread, handed.length);

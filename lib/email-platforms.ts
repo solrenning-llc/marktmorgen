@@ -219,7 +219,7 @@ const TARGET_ID = /^[A-Za-z0-9_-]{1,64}$/;
 /** The audiences, forms, publications or groups the key can reach, for the creator to pick one. */
 export async function listTargets(provider: EmailProvider, key: string, deadline = Date.now() + 10_000): Promise<Target[]> {
   const path = {
-    mailchimp: `/lists?count=${MAX_TARGETS}&fields=lists.id,lists.name`,
+    mailchimp: `/lists?count=${MAX_TARGETS}&fields=lists.id,lists.name,total_items`,
     kit: `/forms?status=active&per_page=${MAX_TARGETS}`,
     beehiiv: `/publications?limit=${MAX_TARGETS}`,
     mailerlite: `/groups?limit=${MAX_TARGETS}&sort=name`,
@@ -227,10 +227,28 @@ export async function listTargets(provider: EmailProvider, key: string, deadline
   const answer = await call(provider, key, "GET", path, undefined, deadline);
   if (!ok(answer)) throw failure(provider, answer, "key");
   const rows = answer.json[provider === "mailchimp" ? "lists" : provider === "kit" ? "forms" : "data"];
-  const unconfirmed = () => new PlatformError("server", answer.status, `${PROVIDER_NAMES[provider]} returned a destination list we could not confirm. Try again in a moment.`);
+  const unconfirmed = () => new PlatformError("server", answer.status, `${PROVIDER_NAMES[provider]} returned an incomplete or unreadable destination list. Nothing was changed.`);
   // An unreadable page is not an empty list. Reconnecting uses this evidence
   // to retain the chosen destination, so never return a partial page either.
   if (!Array.isArray(rows)) throw unconfirmed();
+  // The callers use absence to clear a saved destination or mark it missing.
+  // A first page cannot prove absence. Stay inside the existing single request
+  // and picker bound: refuse more pages or missing/contradictory metadata.
+  // Sources: Kit forms/pagination; Mailchimp lists; beehiiv publications;
+  // MailerLite groups (official API documentation, checked 2026-11-07).
+  const data = answer.json;
+  const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const pagination = record(data.pagination);
+  const links = record(data.links);
+  const meta = record(data.meta);
+  const complete = provider === "mailchimp"
+    ? Number.isSafeInteger(data.total_items) && data.total_items === rows.length
+    : provider === "kit"
+      ? pagination.has_previous_page === false && pagination.has_next_page === false
+      : provider === "beehiiv"
+        ? data.page === 1 && (data.total_pages === 1 || (rows.length === 0 && data.total_pages === 0)) && Number.isSafeInteger(data.total_results) && data.total_results === rows.length
+        : links.prev === null && links.next === null && meta.current_page === 1 && meta.last_page === 1 && Number.isSafeInteger(meta.total) && meta.total === rows.length;
+  if (!complete || rows.length > MAX_TARGETS) throw unconfirmed();
   const targets: Target[] = [];
   for (const row of rows) {
     if (!row || typeof row !== "object" || Array.isArray(row)) throw unconfirmed();

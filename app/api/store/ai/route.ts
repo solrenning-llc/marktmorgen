@@ -29,7 +29,7 @@ import { formatMoney } from "@/lib/money";
 import { AI_PER_MINUTE, EMAIL_GOALS, type EmailGoal, MAX_AI_NOTES, type ProductKind } from "@/lib/ai-rules";
 import { get } from "@/lib/blob";
 import { imageType, ownsImagePath } from "@/lib/product-image";
-import { imageFolder } from "@/lib/store";
+import { pictureFolders } from "@/lib/store";
 import { findLesson, readBody, readCourse } from "@/lib/course";
 import { DEFAULT_QUIZ_DRAFT, QUIZ_DRAFT_COUNTS } from "@/lib/quiz-draft";
 import { funnelType } from "@/lib/funnel-types";
@@ -183,8 +183,9 @@ export async function POST(request: NextRequest) {
     const product = sitePage ? { title: sitePage.title } : await readListing(store, text(body.product, 40));
     if (!product) return fail("unknown", 404);
     const path = text(body.path, 200);
-    const folder = await imageFolder(guarded.ref);
-    if (!path || !ownsImagePath(path, folder)) return fail("invalid");
+    // Its own folders: the current one and those it had before its owner's address changed (lib/store.ts).
+    const folders = await pictureFolders(store);
+    if (!path || !folders.some((folder) => ownsImagePath(path, folder))) return fail("invalid");
     const found = await get(path, { access: "private" }).catch(() => null);
     if (!found || found.statusCode !== 200 || !found.stream) return fail("invalid");
     const bytes = new Uint8Array(await new Response(found.stream).arrayBuffer());

@@ -94,7 +94,7 @@ import { type Yearly, type YearlyProblem, yearlyProblem } from "@/lib/yearly-pri
 import { type KeySetup, canHaveKeys } from "@/lib/key-setup";
 import { type BundleProblem, bundleProblem, isBundle, pickProblem } from "@/lib/bundle-rules";
 import { offerableAfterPaying } from "@/lib/bundles";
-import { type DisplayStyle, type ProductImage } from "@/lib/product-image";
+import { type DisplayStyle, type ProductImage, IMAGE_FOLDER_PATTERN } from "@/lib/product-image";
 import { type PagePart, USUAL_ORDER, parseOrder } from "@/lib/store-order";
 import { NO_TIPS, type StoreTips, parseTips } from "@/lib/store-tips";
 import { type StoreKit, nextKit, parseKit } from "@/lib/store-kit";
@@ -368,6 +368,13 @@ export type Store = {
   activationTracked?: boolean;
   /** Addresses this store used before. They lead here until it lets them go. */
   previousHandles: string[];
+  /**
+   * The picture folders this store had before its owner's address changed
+   * (moveAccount), newest first, at most MAX_IMAGE_FOLDERS: the pictures
+   * already in its emails are kept there and are still its own
+   * (pictureFolders). Absent for a store whose folder never changed.
+   */
+  imageFolders?: string[];
   /**
    * Addresses this store let go of. They no longer lead here, but sales made
    * under them still carry them in Stripe, so every lookup of a store's sales
@@ -921,6 +928,45 @@ export async function imageFolder(email: string): Promise<string> {
   return (await sha256Hex(`nimbus-images:${email.toLowerCase()}`)).slice(0, 24);
 }
 
+/** The most earlier picture folders a store record keeps (imageFolders). */
+export const MAX_IMAGE_FOLDERS = 10;
+
+/**
+ * The earlier picture folders as written, read exactly: a list of at most
+ * MAX_IMAGE_FOLDERS distinct folders. Anything else is none, so a record
+ * written wrong keeps only the current folder, never every one.
+ */
+function readImageFolders(raw: unknown): string[] | null {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_IMAGE_FOLDERS) return null;
+  if (!raw.every((folder) => typeof folder === "string" && IMAGE_FOLDER_PATTERN.test(folder))) return null;
+  return new Set(raw).size === raw.length ? (raw as string[]) : null;
+}
+
+/**
+ * Every picture folder that is this store's own: the one new pictures go to
+ * first, then the ones it had before its owner's address changed. What a
+ * picture already in its emails is checked against (ownPicturesOnly in
+ * lib/mail-picture-rules.ts); a new picture always goes to the first.
+ */
+export async function pictureFolders(store: Pick<Store, "email" | "sid" | "extra" | "imageFolders">): Promise<string[]> {
+  const now = await imageFolder(storeRef(store));
+  const before = readImageFolders(store.imageFolders) ?? [];
+  return before.includes(now) ? [now] : [now, ...before];
+}
+
+/**
+ * The record's earlier folders once its owner's address changes: the folder
+ * it leaves first, then the ones it had, the newest MAX_IMAGE_FOLDERS. An
+ * account's other stores never change folder (their key holds no address).
+ */
+async function foldersAfterMove(store: Store, next: Store): Promise<Pick<Store, "imageFolders">> {
+  const was = await imageFolder(storeRef(store));
+  const now = await imageFolder(storeRef(next));
+  if (was === now) return {};
+  const before = (readImageFolders(store.imageFolders) ?? []).filter((folder) => folder !== was && folder !== now);
+  return { imageFolders: [was, ...before].slice(0, MAX_IMAGE_FOLDERS) };
+}
+
 function parseStore(raw: unknown): Store | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
@@ -945,6 +991,7 @@ function parseStore(raw: unknown): Store | null {
       releasedHandles: Array.isArray(value.releasedHandles)
         ? value.releasedHandles.filter((h) => typeof h === "string")
         : [],
+      ...((folders) => (folders ? { imageFolders: folders } : {}))(readImageFolders(value.imageFolders)),
       renamedAt: value.renamedAt ?? "",
       stripeAccountId:
         typeof value.stripeAccountId === "string" &&
@@ -2125,6 +2172,8 @@ export type MoveResult =
  * Files already attached keep working. Their paths were written down when they
  * were uploaded and are read back as written, so they stay reachable in the
  * folder of the old address; only new uploads land in the new one. The
+ * folder of the old address is kept in the record (imageFolders), so a picture
+ * already in the store's emails is still its own (pictureFolders). The
  * account's other stores keep their folders as they are, because their keys
  * never held the address.
  */
@@ -2146,7 +2195,8 @@ export async function settleDoubledStore(fromEmail: string, toEmail: string): Pr
   const settled = await withStore(from, (a, _saveA, heldA) =>
     withStore(to, async (b, _saveB, heldB): Promise<string | null> => {
       if (!a.handle || a.handle !== b.handle) return null;
-      if (recordJson({ ...a, email: "" }) !== recordJson({ ...b, email: "" })) return null;
+      // The earlier picture folders are the move's own (moveAccount), as the address is.
+      if (recordJson({ ...a, email: "", imageFolders: undefined }) !== recordJson({ ...b, email: "", imageFolders: undefined })) return null;
       const [points] = await redisPipeline([["GET", handleKey(a.handle)]]);
       const home = typeof points === "string" ? points.toLowerCase() : "";
       if (home !== from && home !== to) return null;
@@ -2191,8 +2241,10 @@ export async function moveAccount(
     // and written under its own lock, taken inside this one, so a change
     // made to one of them in the same instant is neither lost nor undone.
     const refs = (await accountStores(from)).filter((other) => other.extra).map(storeRef);
+    // The pictures already posted stay where they are: the folder they are in is kept as the store's own.
+    const folders = await foldersAfterMove(store, { ...store, email: to });
     return withStores(refs, async (others) => {
-      const next: Store = { ...store, email: to };
+      const next: Store = { ...store, email: to, ...folders };
       const moved = others.map(({ store: other, held: lock }) => ({ before: other, next: { ...other, email: to }, lock }));
       // The same checks as every other write (guardRecord), before anything is
       // written: each record keeps its catalog and every product in it.

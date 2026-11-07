@@ -25,7 +25,7 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { calendarWindow, windowId } from "@/lib/allowance-window";
 import { reservePaidResourceWindow } from '@/lib/contract-resource-window';
 import { admitNonPaying } from "@/lib/free-pool";
-import { type Store, imageFolder, storeRef } from "@/lib/store";
+import { type Store, pictureFolders } from "@/lib/store";
 import { creatorAddress } from "@/lib/mail-from";
 import { type MailTag, taggedLink } from "@/lib/mail-links";
 import { rememberLinkKeys } from "@/lib/mail-clicks";
@@ -412,12 +412,12 @@ export function render(
   /** The reader's link key, when they allowed their link use to be seen (lib/mail-clicks.ts): their links carry it, and the foot says how to stop it. */
   readerKey?: string,
   /**
-   * The store's own picture folder (imageFolder in lib/store.ts), given only
-   * for an email to its list, where "Add a picture" is: only a picture kept
-   * there is drawn. Left out, as for every other email a store sends, each
-   * picture is its description (lib/mail-picture-rules.ts ownPicturesOnly).
+   * The store's own picture folders (pictureFolders in lib/store.ts), given
+   * only for an email to its list, where "Add a picture" is: only a picture
+   * kept there is drawn. Left out, as for every other email a store sends,
+   * each picture is its description (lib/mail-picture-rules.ts ownPicturesOnly).
    */
-  pictures?: string,
+  pictures?: string | readonly string[],
 ): Rendered {
   const fromName = store.mail?.fromName || store.name;
   const address = store.mail?.address ?? "";
@@ -530,8 +530,8 @@ export async function sendTo(
   if (pause === undefined) return { done, rest: emails, stopped: "retry" };
   if (pause) return { done, rest: emails, stopped: "paused", pause };
   const tags = healthTags(store, true, tag?.campaign);
-  // An email to the list may show the pictures kept in the store's own folder, and no other.
-  const pictures = await imageFolder(storeRef(store));
+  // An email to the list may show the pictures kept in the store's own folders, and no other.
+  const pictures = await pictureFolders(store);
   for (let i = 0; i < emails.length; ) {
     const room = await dailyRoom();
     if (room <= 0) return { done, rest: emails.slice(i), stopped: "day" };

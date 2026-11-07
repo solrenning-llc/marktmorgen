@@ -160,12 +160,12 @@ function buttonColours(accent: string): { fill: string; ink: string } {
  * The creator's text as HTML: headings, paragraphs, lists, links, buttons,
  * lines across and the pictures kept for it, nothing else. `accent` is the
  * starting colour of a button, adjusted only when its text cannot reach 7:1.
- * `folder` is the sending store's own picture folder, given only for an
- * email to its list: only a picture kept there is drawn, any other is its
- * description (lib/mail-picture-rules.ts ownPicturesOnly); with no folder,
- * none is drawn.
+ * `folder` is the sending store's own picture folder, or the list of them
+ * (pictureFolders in lib/store.ts), given only for an email to its list: only
+ * a picture kept there is drawn, any other is its description
+ * (lib/mail-picture-rules.ts ownPicturesOnly); with no folder, none is drawn.
  */
-export function bodyHtml(body: string, goesTo?: (href: string) => string, accent = "#4c1d95", folder?: string): string {
+export function bodyHtml(body: string, goesTo?: (href: string) => string, accent = "#4c1d95", folder?: string | readonly string[]): string {
   const colors = buttonColours(accent);
   const out: string[] = [];
   let pictures = 0;

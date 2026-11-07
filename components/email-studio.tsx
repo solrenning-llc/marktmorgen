@@ -366,8 +366,8 @@ export function EmailStudio(props: {
   preset?: { who: Who };
   /** The store's colour for a button in its emails (lib/store-look.ts), so the designer's preview is what is sent. */
   accent?: string;
-  /** The store's own picture folder (imageFolder in lib/store.ts), so the preview draws only the pictures that are sent. */
-  pictures?: string;
+  /** The store's own picture folders (pictureFolders in lib/store.ts), so the preview draws only the pictures that are sent. */
+  pictures?: readonly string[];
 }) {
   const ready = props.mail !== null;
   const [libraryEmail, setLibraryEmail] = useState(props.initialTemplate);
@@ -415,7 +415,7 @@ export function EmailStudio(props: {
   const onWriteUnconfirmed = () => setUncertainList(props.flows);
   return (
     <MailAccent.Provider value={props.accent ?? "#4c1d95"}>
-    <MailPictures.Provider value={props.pictures ?? ""}>
+    <MailPictures.Provider value={props.pictures ?? []}>
     <div className="mt-8 grid items-start gap-x-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
       <div className="min-w-0">
         {ready ? (

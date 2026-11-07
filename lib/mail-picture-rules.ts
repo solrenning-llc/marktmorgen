@@ -51,10 +51,12 @@ const FOLDER = /^[0-9a-f]{24}$/;
 
 /**
  * The email with only the pictures one store may show in it: those kept in
- * `folder`, that store's own picture folder (imageFolder in lib/store.ts).
- * Every other picture becomes its description in brackets, or goes when it
- * has none, as withoutPictures makes them. With no folder, or one not of a
- * folder's shape, none stays.
+ * `folder`, that store's own picture folder (imageFolder in lib/store.ts), or
+ * in any of a list of its own folders (pictureFolders in lib/store.ts: the
+ * current one and those it had before its owner's address changed). Every
+ * other picture becomes its description in brackets, or goes when it has
+ * none, as withoutPictures makes them. With no folder, an empty list, or
+ * ones not of a folder's shape, none stays.
  *
  * "Add a picture" is only in the studio's emails to a store's list, and only
  * keeps a picture in that store's own folder (lib/mail-pictures.ts). Each
@@ -62,13 +64,14 @@ const FOLDER = /^[0-9a-f]{24}$/;
  * a store's other emails (a win-back, an offer, a notice), or one copied from
  * another store, would be a fetch nobody chose and no plan counts.
  */
-export function ownPicturesOnly(body: string, folder?: string): string {
-  const own = folder && FOLDER.test(folder) ? `${SITE_URL}/api/image/${folder}/` : null;
+export function ownPicturesOnly(body: string, folder?: string | readonly string[]): string {
+  const folders: readonly unknown[] = Array.isArray(folder) ? folder : [folder];
+  const own = folders.filter((one): one is string => typeof one === "string" && FOLDER.test(one)).map((one) => `${SITE_URL}/api/image/${one}/`);
   return body
     .split("\n")
     .flatMap((line) => {
       const picture = readPicture(line);
-      if (!picture || (own && picture.url.startsWith(own))) return [line];
+      if (!picture || own.some((start) => picture.url.startsWith(start))) return [line];
       return picture.alt ? [`[${picture.alt}]`] : [];
     })
     .join("\n");

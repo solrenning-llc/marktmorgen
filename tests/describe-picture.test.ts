@@ -54,7 +54,7 @@ async function main(): Promise<void> {
   const big = await describePicture(store, { bytes: new Uint8Array(MAX_DESCRIBED_BYTES + 1), mediaType: "image/jpeg", productTitle: "x", language: "English" });
   is("a picture too large, before the model is asked", [big.ok, asked.length], [false, before]);
   const route = readFileSync("app/api/store/ai/route.ts", "utf8");
-  is("only a picture from the store's own folder", route.includes("if (!path || !ownsImagePath(path, folder)) return fail(\"invalid\");"), true);
+  is("only a picture from the store's own folders", route.includes("const folders = await pictureFolders(store);\n    if (!path || !folders.some((folder) => ownsImagePath(path, folder))) return fail(\"invalid\");"), true);
   done();
 }
 

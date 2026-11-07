@@ -19,11 +19,11 @@ import { readPicture } from "@/lib/mail-picture-rules";
 /** The store's colour for a button in its emails (lib/store-look.ts), for the preview to draw what is sent. */
 export const MailAccent = createContext("#4c1d95");
 /**
- * The store's own picture folder (imageFolder in lib/store.ts), for the
+ * The store's own picture folders (pictureFolders in lib/store.ts), for the
  * preview to draw only the pictures an email to the list shows; with none
  * given, it draws none (lib/mail-picture-rules.ts ownPicturesOnly).
  */
-export const MailPictures = createContext("");
+export const MailPictures = createContext<string | readonly string[]>([]);
 
 const ADDABLE: { kind: MailBlock["kind"]; label: string }[] = [
   { kind: "heading", label: "Heading" },

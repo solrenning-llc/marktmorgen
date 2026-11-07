@@ -3,7 +3,7 @@ import { requestsOpen } from "@/lib/payment-requests";
 import { randomBytes } from "node:crypto";
 import { MAIL_TEMPLATES, serializeMailBlocks } from "@/lib/mail-body";
 import { storeBase } from "@/lib/purchase-email";
-import { imageFolder } from "@/lib/store";
+import { pictureFolders } from "@/lib/store";
 import { starterFlows } from "@/lib/mail-starters";
 import { windowId } from "@/lib/allowance-window";
 import { WHO, type Who } from "@/lib/contacts";
@@ -236,7 +236,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             initialTemplate={emailTemplate ? {label:emailTemplate.label,subject:"",body:serializeMailBlocks(emailTemplate.blocks)} : undefined}
             initialSequence={initialSequence}
             accent={lookColours(store.look).accent}
-            pictures={await imageFolder(view.ref)}
+            pictures={await pictureFolders(store)}
             email={view.email}
             canSend={can(role, "send")}
             canSettings={can(role, "settings")}

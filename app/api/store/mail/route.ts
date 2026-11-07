@@ -6,7 +6,7 @@ import {
   MAX_MAIL_ADDRESS,
   MAX_MAIL_NAME,
   ensureListId,
-  imageFolder,
+  pictureFolders,
   setMailSettings,
   storeForEmail,
   storeForHandle,
@@ -206,7 +206,7 @@ export async function POST(request: NextRequest) {
       const reserved = await reserve(store, 1);
       if (reserved !== "ok") return fail(reserved === "month" ? "allowance" : reserved === "sender" ? "sender" : "day");
       // Drawn as the email to the list is: only the store's own pictures.
-      const r = render(store, `[Test] ${subject}`, content, null, undefined, undefined, undefined, await imageFolder(ref));
+      const r = render(store, `[Test] ${subject}`, content, null, undefined, undefined, undefined, await pictureFolders(store));
       const outcome = await sendBatch(
         // To whoever pressed it: the owner, or the person on their team who is
         // writing the draft.

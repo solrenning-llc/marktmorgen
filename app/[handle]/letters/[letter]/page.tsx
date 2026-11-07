@@ -3,7 +3,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { cache } from "react";
-import { imageFolder, normaliseHandle, storeForPage, storeRef } from "@/lib/store";
+import { normaliseHandle, pictureFolders, storeForPage } from "@/lib/store";
 import { storeRoot } from "@/lib/store-sitemap";
 import { speech } from "@/lib/buyer-words";
 import { letterWords } from "@/lib/buyer-words/letters";
@@ -88,8 +88,8 @@ export default async function LetterPage({ params, searchParams }: Params) {
   const pagePath = `/@${store.handle}/letters/${letter.id}`;
   // Only the start chosen for everyone, and only to somebody who cannot read the whole email.
   const preview = kept ? previewOf(letter) : "";
-  // The email as it went to the list: only the pictures kept in the store's own folder (lib/mail-picture-rules.ts).
-  const pictures = await imageFolder(storeRef(store));
+  // The email as it went to the list: only the pictures kept in the store's own folders (lib/mail-picture-rules.ts).
+  const pictures = await pictureFolders(store);
   return (
     <div lang={say.lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
       <main id="content" className="relative mx-auto max-w-2xl px-4 pb-16 pt-10 sm:pt-14">

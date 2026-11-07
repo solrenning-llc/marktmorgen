@@ -10,7 +10,8 @@
  *    never dropped; once Redis answers again, the step is sent.
  * 3. lib/flow-runs.ts siblings: readRun and runPeople throw on an unknown slot rather than answering "no such run" or
  *    "this run holds no address".
- * 4. sendDueSteps: a workflows reply that is a string but not a JSON list is unknown too, never "no workflows".
+ * 4. sendDueSteps: a workflows reply that is a string but not a JSON list, or a list with any element that is not a
+ *    workflow, is unknown too, never "no workflows" or "this workflow is gone".
  * 5. readRun and listRuns: an HGETALL list of odd length (or, in listRuns, of another shape) is unknown, never
  *    "no such run" or a run left out of the list.
  */
@@ -137,7 +138,7 @@ async function main(): Promise<void> {
   redis.pipeline = original;
   is("runPeople throws on an unknown HGET slot", runPeopleThrows, true);
 
-  part("4. The workflows GET answers a string that is not a JSON list ('{', '{}', '\"x\"') while Dee's first step is due: the batch stays queued");
+  part("4. The workflows GET answers a string that is not a JSON list of workflows ('{', '{}', '\"x\"', '[1]', '[{}]') while Dee's first step is due: the batch stays queued");
   await upsertContact(list, "dee@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
   await enroll(store, "dee@example.com", { joined: true });
   const runAt = async (offsetMs: number) => {
@@ -151,7 +152,9 @@ async function main(): Promise<void> {
   };
   // Each attempt comes after the previous put-back's ten-minute wait.
   let offset = 0;
-  for (const garbled of ["{", "{}", '"x"']) {
+  // Then a JSON list whose elements are not workflows (Claude 4's focal return on #2861): one off-shape element makes
+  // the whole reply unknown, even beside a well-formed workflow, never "this workflow is gone".
+  for (const garbled of ["{", "{}", '"x"', "[1]", "[{}]", '[{"id":5}]', "[null]", '[{"id":"other","steps":[],"active":true},1]']) {
     redis.pipeline = (async (commands: (string | number)[][]) => {
       if (commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === `nl:mail:flows:${list}`) return [garbled];
       return original(commands);

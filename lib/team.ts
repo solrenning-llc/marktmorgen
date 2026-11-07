@@ -38,6 +38,7 @@ import { liveSecondStep } from "@/lib/second-step-gate";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
 import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
@@ -348,11 +349,13 @@ export async function inviteMember(
     if (team.members.length + team.invites.length >= MAX_TEAM) return { ok: false, reason: "full" };
 
     const counter = `nl:rl:team-invite:${store.sid}`;
-    const [, sent] = await redisPipeline([
+    const replies = repliesFor(await redisPipeline([
       ["SET", counter, "0", "EX", 24 * 60 * 60, "NX"],
       ["INCR", counter],
-    ]);
-    if (Number(sent) > INVITES_PER_DAY) return { ok: false, reason: "limited" };
+    ]), 2);
+    // A count in any other shape is unknown (CX-123 rule 24): no invitation is emailed on it.
+    const sent = countOf(replies?.[1]);
+    if (sent === null || sent > INVITES_PER_DAY) return { ok: false, reason: "limited" };
 
     const token = randomBytes(32).toString("hex");
     const invite: Invite = {

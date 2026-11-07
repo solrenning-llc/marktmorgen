@@ -151,16 +151,52 @@ export function searchWindow(now = Date.now()): { from: string; to: string } {
 
 /** Google's rows, made ours: the search, clicks, how often shown, and the average place, rounded to a tenth. */
 export function readRows(json: unknown): SearchRow[] {
-  const rows = (json as { rows?: unknown })?.rows;
-  if (!Array.isArray(rows)) return [];
+  // Google leaves `rows` out when nothing was found; anything else out of its shape is not known, never 0 clicks
+  // or no searches (CX-123 rule 24): thrown, so the caller keeps "Google did not answer" for an hour.
+  if (json === null || typeof json !== "object" || Array.isArray(json)) throw new Error("Search Console answered in a shape that could not be read");
+  const rows = (json as { rows?: unknown }).rows;
+  if (rows === undefined) return [];
+  if (!Array.isArray(rows)) throw new Error("Search Console's rows could not be read");
+  const count = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0;
   return rows
     .map((row) => {
-      const r = row as { keys?: unknown; clicks?: unknown; impressions?: unknown; position?: unknown };
-      const query = Array.isArray(r.keys) && typeof r.keys[0] === "string" ? r.keys[0].slice(0, 200) : "";
-      return { query, clicks: Number(r.clicks) || 0, impressions: Number(r.impressions) || 0, position: Math.round((Number(r.position) || 0) * 10) / 10 };
+      const r = (row ?? {}) as { keys?: unknown; clicks?: unknown; impressions?: unknown; position?: unknown };
+      if (!count(r.clicks) || !count(r.impressions) || !count(r.position)) throw new Error("A Search Console row could not be read");
+      // Its search is the first of its keys, as text (asked by query); one without it is not known (review of Codex J).
+      if (!Array.isArray(r.keys) || typeof r.keys[0] !== "string") throw new Error("A Search Console row came without its search");
+      const query = r.keys[0].slice(0, 200);
+      return { query, clicks: r.clicks as number, impressions: r.impressions as number, position: Math.round((r.position as number) * 10) / 10 };
     })
     .filter((r) => r.query && r.impressions > 0)
     .slice(0, SEARCH_ROWS);
+}
+
+/**
+ * A kept answer, read back only in the shape it was written (Codex T on
+ * #2684): null ("Google did not answer", kept an hour) or the window and its
+ * rows. Anything else is not used (undefined) and Google is asked again.
+ */
+function keptSearches(raw: string): StoreSearches | null | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) return undefined;
+  const v = value as Record<string, unknown>;
+  const day = (d: unknown) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d);
+  const count = (n: unknown) => typeof n === "number" && Number.isFinite(n) && n >= 0;
+  if (!day(v.from) || !day(v.to) || !Array.isArray(v.rows) || v.rows.length > SEARCH_ROWS) return undefined;
+  const rows: SearchRow[] = [];
+  for (const row of v.rows) {
+    if (row === null || typeof row !== "object" || Array.isArray(row)) return undefined;
+    const r = row as Record<string, unknown>;
+    if (typeof r.query !== "string" || !r.query || !count(r.clicks) || !count(r.impressions) || !count(r.position)) return undefined;
+    rows.push({ query: r.query, clicks: r.clicks as number, impressions: r.impressions as number, position: r.position as number });
+  }
+  return { from: v.from as string, to: v.to as string, rows };
 }
 
 /**
@@ -170,13 +206,14 @@ export function readRows(json: unknown): SearchRow[] {
 export async function storeSearches(store: Store, now = Date.now()): Promise<StoreSearches | null> {
   if (!store.statsId || !isRedisConfigured() || !searchConsoleConfigured() || store.domain) return null;
   if (!SITE_URL.startsWith(SEARCH_CONSOLE_SITE.replace(/\/$/, ""))) return null;
-  const [cached, conn] = await redisPipeline([["GET", cacheKey(store.statsId)], ["GET", CONN]]);
+  const reply: unknown = await redisPipeline([["GET", cacheKey(store.statsId)], ["GET", CONN]]);
+  // Two answers or not known: never a guess at the store's searches.
+  if (!Array.isArray(reply) || reply.length !== 2) return null;
+  const [cached, conn] = reply as unknown[];
   if (typeof cached === "string") {
-    try {
-      return JSON.parse(cached) as StoreSearches | null;
-    } catch {
-      // Read again below.
-    }
+    const kept = keptSearches(cached);
+    if (kept !== undefined) return kept;
+    // Not in its shape: read again below.
   }
   let refresh = "";
   try {

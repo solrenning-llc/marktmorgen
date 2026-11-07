@@ -2056,6 +2056,7 @@ a.chip {
 .st-chat-mine {
   background: var(--st-accent-soft);
   color: var(--st-accent-text);
+  border: 1px solid var(--st-accent-text);
 }
 .st-chat-theirs {
   background: var(--st-bg);
@@ -3781,6 +3782,10 @@ a.sp-product:focus-visible {
   min-height: 1.5rem;
   font-size: 0.875rem;
 }
+/* A link on its own, not in a sentence: a 44 px target (WCAG 2.5.5 AAA, 274 [AX1]). */
+a.rv-line {
+  min-height: 2.75rem;
+}
 a.rv-line:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -4088,8 +4093,9 @@ a.rv-line:hover {
   border: 1px solid var(--st-line);
   padding: 0.6rem 0.85rem;
 }
+/* The reader's own bubble keeps an edge: the soft accent alone is barely apart from the card (1.4.11). */
 .cm-dm-mine {
-  border-color: transparent;
+  border-color: var(--st-accent-text);
   background: var(--st-accent-soft);
 }
 
@@ -5069,4 +5075,38 @@ html:has([data-product-editor]) {
       contain-intrinsic-block-size: auto 800px;
     }
   }
+}
+
+/*
+ * A line of text on the store's product page, its reviews page and a call's booking page is at most 80 characters
+ * (WCAG 1.4.8 AAA, 274 [AX1]). 1ch is the width of "0", wider than an average letter: in Chromium 72ch still held
+ * 92-101 letters a line, 56ch at most 78 of real sentences but 126 of narrow letters (i, l, t, f, j, r, s), the store
+ * front's count in the same font. A line holds the cap over its glyphs' width in its own ch, whatever the size, so
+ * 34ch holds 126 x 34 / 56 = 77 and real sentences about 47. The words are capped, each in its own size (a detail is
+ * smaller than its title), never a card, a row or a button (li), so those keep their width. Narrower glyphs:
+ * docs/accessibility-programme.md. :where keeps it at no weight and @layer components puts it under Tailwind's
+ * utilities, so any width a block sets for itself still wins; a centered line stays centered (tests/product-page-accessibility.test.ts), and so do the lines of a box that centers its
+ * words with text-align (the countdown, a "By the numbers" card), which would otherwise sit at the left of it.
+ */
+@layer components {
+  /* In a layer, under Tailwind's utilities: a block's own max-w-*, mx-* or ml-* still wins over the cap. */
+  .st-measure :where(p, dd, blockquote, figcaption, .st-about li, .st-includes li, .sp-faq summary > span, .sp-benefit > span, .sp-fit-side li > span, .sp-inside span.block, .sp-step span.block, .sp-bonus span.block) {
+    max-width: 34ch;
+  }
+  .st-measure :where(p.text-center, li.text-center, .text-center > p, .sp-countdown > p, .sp-fact > dd) {
+    margin-inline: auto;
+  }
+  /* A p drawn as a box or a row keeps its width: the dashed notes, the rounded notices (a package's sessions, the
+     chosen time) and the cart's rows (discount, shipping, Total), which line up with its lines. */
+  .st-measure :where(p.flex, p.grid, p.st-note, p.rounded-2xl) {
+    max-width: none;
+  }
+}
+/* Their words are capped by the box's own padding instead, so the box keeps the card's width (1.4.8). Out of the
+   layer, to win over the padding the box sets for itself; the left padding stays what it was. */
+.st-measure p.st-note {
+  padding-inline-end: max(1.25rem, calc(100% - 34ch - 1.25rem));
+}
+.st-measure p.rounded-2xl {
+  padding-inline-end: max(1rem, calc(100% - 34ch - 1rem));
 }

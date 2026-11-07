@@ -63,7 +63,7 @@ import { LicenceKeyBox } from "@/components/licence-key-box";
 import { reviewable } from "@/lib/review-proof";
 import { DEMO_BOOKED_NOTE, isHouseStore, takesReviews } from "@/lib/house-store";
 import { type Review, readReview, reviewId } from "@/lib/reviews";
-import { REVIEW_NOTICES, ReviewForm } from "@/components/review-form";
+import { REVIEW_NOTICES, ReviewForm, reviewUnavailable } from "@/components/review-form";
 import { type SaleRecord, noteSale } from "@/lib/sale-events";
 import { BundleDelivery } from "@/components/bundle-delivery";
 import type { BundleContents } from "@/lib/bundles";
@@ -72,7 +72,7 @@ import { shippingWords } from "@/lib/buyer-words/shipping";
 import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
 import { activeShipping } from "@/lib/shipping";
 import { ordersWords } from "@/lib/buyer-words/orders";
-import { givingWords, groupLinkBoxWords, licenceKeyBoxWords } from "@/lib/buyer-words/giving";
+import { groupLinkBoxWords, licenceKeyBoxWords } from "@/lib/buyer-words/giving";
 import { speech } from "@/lib/buyer-words";
 import { LANGUAGES } from "@/lib/store-language";
 import { HeardAsk } from "@/components/heard-ask";
@@ -1351,7 +1351,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
         {/* A review sent from here just before the store was switched off: told why it was not saved. */}
         {store.suspended && reviewStatus === "unavailable" ? (
           <p id={reviewProduct ? `r-${reviewProduct}` : "review"} className="st-note mt-6 scroll-mt-6 text-sm" role="alert">
-            {givingWords(store.language).reviewNotices.unavailable ?? REVIEW_NOTICES.unavailable.text}
+            {reviewUnavailable(store.language)}
           </p>
         ) : null}
 

@@ -16,7 +16,18 @@ import { blockWords } from "@/lib/buyer-words/blocks";
  * stays, and so does the way into the members' community. Nothing here is
  * counted: a page that is resting has stopped adding to the month.
  */
-export function StoreResting({ store, suspended = false, buyer = false }: { store: Store; suspended?: boolean; buyer?: boolean }) {
+export function StoreResting({
+  store,
+  suspended = false,
+  buyer = false,
+  notice,
+}: {
+  store: Store;
+  suspended?: boolean;
+  buyer?: boolean;
+  /** What happened to something the visitor just sent (a review refused while the store is off), read before the rest. */
+  notice?: string;
+}) {
   const { w, lang } = speech(store);
   // Switched off after notices about its content (lib/takedown.ts): said as plainly, with no promise of when.
   const bw = blockWords(store.language);
@@ -44,7 +55,13 @@ export function StoreResting({ store, suspended = false, buyer = false }: { stor
           <h1 className="font-display mt-6 text-3xl font-semibold leading-tight tracking-[-0.02em] sm:text-4xl">{store.name}</h1>
           <p className="st-muted mt-1 text-sm font-semibold">@{store.handle}</p>
 
-          <div className="st-note mt-10 text-center" role="status">
+          {notice ? (
+            <p className="st-note mt-10 text-center text-sm font-semibold" role="alert" style={{ color: "var(--st-text)" }}>
+              {notice}
+            </p>
+          ) : null}
+
+          <div className={`st-note ${notice ? "mt-4" : "mt-10"} text-center`} role="status">
             <p className="font-bold" style={{ color: "var(--st-text)" }}>
               {title}
             </p>

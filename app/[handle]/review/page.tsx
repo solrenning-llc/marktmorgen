@@ -11,7 +11,7 @@ import { imageUrl } from "@/lib/product-image";
 import { canRecover } from "@/lib/buyer-orders";
 import { doorFields, openDoor, readDoor } from "@/lib/review-proof";
 import { type Review, readReview, reviewId } from "@/lib/reviews";
-import { REVIEW_NOTICES, ReviewForm } from "@/components/review-form";
+import { REVIEW_NOTICES, ReviewForm, reviewUnavailable } from "@/components/review-form";
 import { productPath } from "@/components/store-product";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -57,7 +57,9 @@ export default async function ReviewPage({ params, searchParams }: Params) {
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
   // Switched off after notices about its content (lib/takedown.ts), as the store's own page: nothing else is read.
-  if (store.suspended) return <StoreResting store={store} suspended />;
+  // A review sent from here was refused for that reason (app/api/store/review, status=unavailable): the
+  // buyer is told it was not saved, as the thank-you page tells them, so the words are not lost unread.
+  if (store.suspended) return <StoreResting store={store} suspended notice={(await searchParams).status === "unavailable" ? reviewUnavailable(store.language) : undefined} />;
 
   const query = await searchParams;
   const get = (name: string) => (typeof query[name] === "string" ? (query[name] as string) : "");

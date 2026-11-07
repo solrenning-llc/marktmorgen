@@ -18,7 +18,8 @@
  *
  * A review sent while the store is off is answered "unavailable", a notice of
  * its own in every buyer language, never "something went wrong, try again";
- * the thank-you page shows no review form for it. The emailed free copy's
+ * the review page and the thank-you page it goes back to say the review was
+ * not saved, and the thank-you page shows no review form for it. The emailed free copy's
  * button (app/api/store/free/download) hands over nothing, lists no one and
  * leaves the link's uses untouched while the store is off.
  */
@@ -60,7 +61,7 @@ async function main(): Promise<void> {
   await ensureListId(owner);
   await setSubscription(owner, { customerId: "cus_of1", subscriptionId: "sub_of1", active: true, tier: "creator", period: paidPeriod() });
   // A connected account, so an order on the review page and route is looked up at Stripe while the store is on.
-  await setStripeAccount(owner, "acct_1Of1Glaze0000000", true);
+  await setStripeAccount(owner, "acct_1Of1Glaze0001", true);
   const paid = await addProduct(owner, "Kiln Secrets Course", "", "49");
   const free = await addProduct(owner, "Glaze Chart Freebie", "", "0");
   if (!paid.ok || !free.ok) throw new Error("products not made");
@@ -226,7 +227,10 @@ async function main(): Promise<void> {
     for (const file of ["app/[handle]/p/[product]/reviews/page.tsx", "app/[handle]/review/page.tsx", "app/[handle]/free/page.tsx", "app/[handle]/left/page.tsx"]) {
       const source = readFileSync(file, "utf8");
       const read = source.indexOf("if (!store) notFound();");
-      const check = source.indexOf("if (store.suspended) return <StoreResting store={store} suspended />;");
+      // Assertion changed (rule 23): it matched the whole line `... suspended />;`; it now matches up to
+      // `suspended`, because the review page also passes `notice` (a refused review was not saved).
+      // Still required: the suspended answer is the very next statement after the store is read.
+      const check = source.indexOf("if (store.suspended) return <StoreResting store={store} suspended");
       is(`${file}: StoreResting suspended right after the store is read`, check > read && read > 0 && between(source.slice(read, check)) === "if (!store) notFound();", true);
     }
   } finally {

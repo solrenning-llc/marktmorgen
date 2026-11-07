@@ -19,6 +19,15 @@ export const REVIEW_NOTICES: Record<string, { text: string; alert?: boolean }> =
 );
 
 /**
+ * The sentence for a review refused because the store is switched off
+ * (app/api/store/review, status=unavailable), in the store's language: the
+ * same words on the review page and on the thank-you page.
+ */
+export function reviewUnavailable(language: unknown): string {
+  return GIVING_WORDS[parseLanguage(language)].reviewNotices.unavailable ?? REVIEW_NOTICES.unavailable.text;
+}
+
+/**
  * The form a buyer reviews one product with: stars, a few words, a photo if
  * they like (components/review-photo-field.tsx), the name to show. Plain HTML that works without JavaScript, posting to
  * /api/store/review with whatever proves the order (lib/review-proof.ts) in

@@ -1608,6 +1608,7 @@
     "components/weekly-team-picker.tsx",
     "components/welcome-countdown.tsx",
     "components/welcome-offer-editor.tsx",
+    "components/who-answers.tsx",
     "components/winback-editor.tsx",
     "components/workflow-tools.tsx",
     "components/yearly-ask-editor.tsx"

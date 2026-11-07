@@ -1,7 +1,9 @@
 /**
  * A Redis read that cannot be understood is not proof that a video has no
- * captions. The studio can distinguish a confirmed empty hash from an
+ * captions. This reader distinguishes a confirmed empty hash from an
  * unavailable/corrupt answer only when the whole pipeline reply is exact.
+ * The studio page still catches this error as an empty result; that UI
+ * fallback is outside this reader's contract and is not fixed by this test.
  */
 import assert from "node:assert/strict";
 import test from "node:test";

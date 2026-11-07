@@ -737,6 +737,9 @@ export async function streamCaptions(pathnames: string[]): Promise<Record<string
   if (!rows) throw new UnknownReplyError("stored captions");
   const out: Record<string, CaptionTrack[]> = {};
   wanted.forEach(({ path }, i) => {
+    // Fail the whole read if any video's stored language is unsupported.
+    // A stale/unknown language is not evidence of an empty caption list;
+    // callers must not act on a partial batch as if it were complete.
     const tracks = exactTracksFrom(rows[i]);
     if (!tracks) throw new UnknownReplyError("stored captions");
     if (tracks.length) out[path] = tracks;

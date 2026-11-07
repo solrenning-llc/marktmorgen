@@ -294,8 +294,20 @@ export async function readEarningsLists(store: Store, since: number): Promise<Pr
  * neither Stripe nor PayPal reads nothing and spends nothing. null for an
  * unknown time zone or a store with no counts. Entries typed by the creator
  * are not built (unit 3): none are given.
+ *
+ * `now` is when the reading begins: the day's heavy reading, the kept copy's
+ * age and where the lists begin (`since`) are from it. The months' own time
+ * (Earnings.at), past which a record makes its source unknown, is when every
+ * list was read: `now` plus the time the reading took, measured on `clock`
+ * (monotonic, so a step of the wall clock never moves it back). Money recorded
+ * while the lists were read is money so far, not a source made unknown; a
+ * record dated after the lists were read still is (#2941). One time for the
+ * whole reading, not one a source: no list can hold a record made after it
+ * was read, so a time a source would only add a check against clocks that
+ * disagree, and the pure rule (lib/earnings-by-month.ts) stays as it is.
  */
-export async function readEarningsYear(store: Store, timeZone: string, now = Date.now(), fresh = false): Promise<Kept<Earnings | null> | null> {
+export async function readEarningsYear(store: Store, timeZone: string, now = Date.now(), fresh = false, clock: () => number = () => performance.now()): Promise<Kept<Earnings | null> | null> {
+  const started = clock();
   const since = readingSince(now, timeZone);
   if (!Number.isFinite(since)) return null;
   if (!readsSales(store)) return { value: earningsByMonth({ at: now, timeZone, providers: [], manual: [] }), at: now, stale: false };
@@ -305,6 +317,9 @@ export async function readEarningsYear(store: Store, timeZone: string, now = Dat
     const providers = await readEarningsLists(store, since);
     // Nothing could be read at all: a failed reading (the last copy is shown), not twelve unknown months kept a day.
     if (providers.length && providers.every((p) => p.lists.every((list) => "unread" in list))) throw new Error("no list of the store's money could be read");
-    return earningsByMonth({ at: now, timeZone, providers, manual: [] });
+    // Taken once every list was read, rounded up to the next millisecond: never before what was read.
+    const took = clock() - started;
+    const at = now + (Number.isFinite(took) && took > 0 ? Math.ceil(took) : 0);
+    return earningsByMonth({ at, timeZone, providers, manual: [] });
   }, now, fresh);
 }

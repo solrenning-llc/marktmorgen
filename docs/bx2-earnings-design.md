@@ -151,7 +151,10 @@ source and currency only).
    make the list unread. Renewals are dated by `status_transitions.paid_at`; until Stripe's retry
    window is proved from dated documentation they are known only from `RENEWAL_PAID_WITHIN_DAYS`
    (27) after the reading's start, which gives up the oldest month, and a renewal read that was
-   paid later than that after its invoice makes the renewals unread. Kept as the fourth reading
+   paid later than that after its invoice makes the renewals unread. The months' own time is
+   when every list was read (`now` plus the time the reading took, on a monotonic clock), not
+   the `now` the reading began at: money recorded while the lists were read is counted, and a
+   record dated after they were read still makes its source unknown. Kept as the fourth reading
    kind (`READING_KINDS` 3 to 4, `HEAVY_KINDS` in lib/store-readings.ts), taken as one of the
    day's two heavy readings before anything is read. Cost, measured: the store-readings line
    +US$ 0.0000011 a month (one more copy kept a day) and the store-data registry, which prices

@@ -4,7 +4,8 @@ import { randomBytes } from "node:crypto";
 import { MAIL_TEMPLATES, serializeMailBlocks } from "@/lib/mail-body";
 import { storeBase } from "@/lib/purchase-email";
 import { starterFlows } from "@/lib/mail-starters";
-import { windowId } from "@/lib/allowance-window";
+import { allowanceWindow, opensAgainWords, windowId } from "@/lib/allowance-window";
+import { mailMonthNotice, shownMonthCount } from "@/lib/mail-month-notice";
 import { WHO, type Who } from "@/lib/contacts";
 import { lookColours } from "@/lib/store-look";
 import type { Metadata } from "next";
@@ -24,7 +25,7 @@ import { broadcastMoney, flowMoney, readMailRevenue, readMailVisits } from "@/li
 import { sellsSomething } from "@/lib/mail-starters";
 import { readFlowStatsStrict } from "@/lib/flow-stats";
 import { readFlowListStrict } from "@/lib/flow-list";
-import { inTrial, monthlyAllowance, usedThisMonth } from "@/lib/mail";
+import { inTrial, monthlyAllowance, usedThisMonthExact } from "@/lib/mail";
 import { healthId, listHealth, pauseForSending, pauseWords, pausedFor } from "@/lib/mail-health";
 import { HEALTH_NOTE, healthAdvice, healthLevels, healthLine } from "@/lib/mail-health-levels";
 import { PRO_MONTHLY_EMAILS, PRO_ON_SALE, hasPro, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";
@@ -64,7 +65,11 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const allowance = monthlyAllowance(store);
   const [counts, used, loadedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
     listCounts(store.listId),
-    usedThisMonth(store.listId, windowId(store)),
+    // Read exactly, by the same read that decides whether a one-off email may go (#2958): a count that could not
+    // be read, a paying month that cannot be told or a negative count is unknown (null), never "0 of" (357 [ES3]).
+    windowId(store) === null && store.listId
+      ? null
+      : usedThisMonthExact(store.listId, windowId(store)).then(shownMonthCount, () => null),
     listBroadcastsStrict(store.listId).catch(() => null),
     readFlowListStrict(store.listId).catch(() => null),
     // The names of the products a flow or a broadcast can be about: one
@@ -107,6 +112,31 @@ export default async function StudioEmailPage({ searchParams }: Params) {
     readMailVisits(store, broadcasts.filter((b) => b.status === "sent" && b.tagged).map((b) => b.id)),
   ]);
   const trial = allowance > 0 && inTrial(store);
+  // The way up for a list that has outgrown Pro, offered beside the
+  // month's count to whoever may change the plan (lib/plan.ts).
+  const moveUp =
+    PLANS_ON_SALE && isBillingConfigured() && PRO_ON_SALE && store.tier === "pro" && store.subscriptionActive && can(role, "billing")
+      ? {
+          action: `/api/billing/switch?store=${store.sid}`,
+          cycle: store.cycle,
+          price: priceWords("scale", store.cycle),
+          emails: SCALE_MONTHLY_EMAILS,
+          trial,
+        }
+      : null;
+  // From 80% of the month's list emails, a note in the "This month" card (357 [ES3], lib/mail-month-notice.ts),
+  // from the numbers already read; it can be hidden in this browser for this store, month and level.
+  const monthWindow = allowanceWindow(store);
+  const notice = mailMonthNotice({
+    used,
+    allowance,
+    reset: monthWindow ? `${opensAgainWords(monthWindow)} (UTC)` : null,
+    billing: monthWindow?.billing ?? false,
+    trial,
+    biggest: store.tier === "scale",
+    moveUp: moveUp ? { emails: moveUp.emails } : null,
+  });
+  const monthNotice = notice ? { notice, hideKey: monthWindow ? `mm:mail-month:${store.sid}:${monthWindow.id}:${notice.level}` : null } : null;
   // Which sent emails are published on the store, and which for members (lib/letters.ts): one read.
   // A failed read is not "not published": the studio says it does not know (null).
   const published = broadcasts.some((b) => b.status === "sent") ? await publishedLetters(store) : new Map<string, { members: boolean }>();
@@ -247,19 +277,8 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             allowance={allowance}
             monthKnown={windowId(store) !== null}
             trial={trial}
-            // The way up for a list that has outgrown Pro, offered beside the
-            // month's count to whoever may change the plan (lib/plan.ts).
-            moveUp={
-              PLANS_ON_SALE && isBillingConfigured() && PRO_ON_SALE && store.tier === "pro" && store.subscriptionActive && can(role, "billing")
-                ? {
-                    action: `/api/billing/switch?store=${store.sid}`,
-                    cycle: store.cycle,
-                    price: priceWords("scale", store.cycle),
-                    emails: SCALE_MONTHLY_EMAILS,
-                    trial,
-                  }
-                : null
-            }
+            moveUp={moveUp}
+            monthNotice={monthNotice}
             products={[...listings].map(([id, title]) => ({ id, title }))}
             broadcastsReadFailed={loadedBroadcasts === null}
             broadcasts={broadcasts.map((b) => ({

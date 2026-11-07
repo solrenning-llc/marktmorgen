@@ -33,9 +33,9 @@
  * creator pays their own affiliates on the day they promise, as their program
  * page says. The directory says so too.
  *
- *   nl:dir:page   the rows, as JSON, kept 10 minutes; dropped whenever a
- *                 creator saves a program that is listed, or was, so taking
- *                 a store out is immediate
+ *   nl:dir:page   the rows, as JSON, kept KEEP_SECONDS (15 minutes); dropped
+ *                 whenever a creator saves a program that is listed, or was,
+ *                 so taking a store out is immediate
  *   nl:dir:last   the last good build's rows with the sid of each, kept
  *                 LAST_KEEP_SECONDS and never dropped by a save: while a
  *                 build is not due, a visit is shown them filtered by the
@@ -63,9 +63,6 @@ export { MIN_CLICKS_FOR_RATES };
 /** Products shown under one program: the rest are on its store. */
 export const PRODUCTS_PER_ROW = 4;
 
-/** How long the rows are kept before they are read again. */
-const KEEP_SECONDS = 600;
-
 /** The most programs read for the page: far past what one page lists. */
 const MAX_ROWS = 2_000;
 
@@ -87,24 +84,30 @@ const SCAN_COUNT = 200;
 export const DIRECTORY_SCAN_PAGES = 64;
 
 /**
- * The fewest seconds between two builds of the directory, for the whole site (MR: a ceiling before every spend).
+ * The fewest seconds between two builds of the directory, for the whole site (MR: a ceiling before every spend): 15
+ * minutes, so at most 4 builds an hour (C1-20261107-1627-C4-5 on #3062: at one a minute, 12,068 commands a build came
+ * to about US$1,042.68 in 30 days, a fixed company cost; at 15 minutes about US$69.51). A creator's change shows at the
+ * next build, so within 15 minutes; a store taken out is gone at once (below).
  * A save drops the kept page and a build that could not read every program's numbers keeps none, so without it
  * every visit after either would build again, and concurrent visits would all build at once. Each build first
  * claims DIRECTORY_BUILD for this long (SET NX EX): the claim is the single-flight lock and the interval in one key,
  * never released early. The claim only spaces the starts: a build still running after it expires does not stop the
- * next one, so it bounds builds to one a minute, not to one at a time. A visit that finds no kept page while the claim
+ * next one, so it bounds builds to one a window, not to one at a time. A visit that finds no kept page while the claim
  * is held is shown the last good build (nl:dir:last) without every store no longer in the listed set (one SMISMEMBER),
  * so a store whose creator has just taken it out is gone at once and the page stays up whatever saves drop it
  * (Claude 6 on #3062); with no last build kept, it is told the list is unavailable just now (DirectoryBusyError),
  * never an empty or partial list. Counted in tests/plan-cost-registry.ts (NOT_A_COST.DIRECTORY_BUILDS_PER_HOUR).
  */
-export const DIRECTORY_BUILD_SECONDS = 60;
+export const DIRECTORY_BUILD_SECONDS = 900;
 
 /** The most builds of the directory in an hour, for the whole site. */
 export const DIRECTORY_BUILDS_PER_HOUR = 3_600 / DIRECTORY_BUILD_SECONDS;
 
+/** How long the rows are kept before they are read again: the build window, so a page is built again when it may be. */
+const KEEP_SECONDS = DIRECTORY_BUILD_SECONDS;
+
 /**
- * How long the last good build is kept (nl:dir:last): past the kept page's own ten minutes, by two build windows, so a
+ * How long the last good build is kept (nl:dir:last): past the kept page's own 15 minutes, by two build windows, so a
  * visit while the next build is not due, or right after one that failed, still has it. Older than that, the visit is
  * told the list is unavailable rather than shown rows from longer ago.
  */
@@ -113,7 +116,7 @@ const LAST_KEEP_SECONDS = KEEP_SECONDS + 2 * DIRECTORY_BUILD_SECONDS;
 /** The page is not kept, no last build is either, and another build holds the claim or one ran less than DIRECTORY_BUILD_SECONDS ago. */
 export class DirectoryBusyError extends Error {
   constructor() {
-    super("The affiliate directory was built less than a minute ago and is not kept: unavailable just now");
+    super("The affiliate directory was built less than 15 minutes ago and is not kept: unavailable just now");
     this.name = "DirectoryBusyError";
   }
 }

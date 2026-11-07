@@ -72,7 +72,7 @@ import { shippingWords } from "@/lib/buyer-words/shipping";
 import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
 import { activeShipping } from "@/lib/shipping";
 import { ordersWords } from "@/lib/buyer-words/orders";
-import { groupLinkBoxWords, licenceKeyBoxWords } from "@/lib/buyer-words/giving";
+import { givingWords, groupLinkBoxWords, licenceKeyBoxWords } from "@/lib/buyer-words/giving";
 import { speech } from "@/lib/buyer-words";
 import { LANGUAGES } from "@/lib/store-language";
 import { HeardAsk } from "@/components/heard-ask";
@@ -676,9 +676,11 @@ export default async function ThanksPage({ params, searchParams }: Params) {
 
   // What this order can be reviewed for, from right here: what was paid
   // for, by this checkout, with money (lib/review-proof.ts has the rule the
-  // form is checked against again when it is sent).
+  // form is checked against again when it is sent). Nothing while the store
+  // is switched off after notices about its content (lib/takedown.ts): the
+  // route takes no review then (app/api/store/review).
   const toReview =
-    order.state === "paid" && sessionId && !booked && !ended && order.amount > 0 && order.email && takesReviews(store)
+    order.state === "paid" && sessionId && !booked && !ended && order.amount > 0 && order.email && takesReviews(store) && !store.suspended
       ? [order.product, ...order.bumps.map((added) => added.product), ...bundled]
           .filter(reviewable)
           .filter((p, i, all) => all.findIndex((q) => q.id === p.id) === i)
@@ -1345,6 +1347,13 @@ export default async function ThanksPage({ params, searchParams }: Params) {
 
         {/* One question, skippable: where they heard of the store (lib/heard.ts). */}
         {askHeard && sessionId ? <HeardAsk handle={store.handle} session={sessionId} storeName={store.name} lang={store.language} /> : null}
+
+        {/* A review sent from here just before the store was switched off: told why it was not saved. */}
+        {store.suspended && reviewStatus === "unavailable" ? (
+          <p id={reviewProduct ? `r-${reviewProduct}` : "review"} className="st-note mt-6 scroll-mt-6 text-sm" role="alert">
+            {givingWords(store.language).reviewNotices.unavailable ?? REVIEW_NOTICES.unavailable.text}
+          </p>
+        ) : null}
 
         {toReview.length > 0 && sessionId ? (
           <section id="review" aria-labelledby="review-title" className="st-card mt-6 scroll-mt-6 p-7 sm:p-10">

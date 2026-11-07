@@ -1,6 +1,6 @@
 import { type NextRequest, after } from "next/server";
 import { isFree, storeForHandle } from "@/lib/store";
-import { recordLead, spendClaim } from "@/lib/free";
+import { readClaim, recordLead, spendClaim } from "@/lib/free";
 import { recordLead as recordAffiliateLead } from "@/lib/affiliate-leads";
 import { scheduleReminder } from "@/lib/welcome-offer-send";
 import { enroll } from "@/lib/flows";
@@ -10,6 +10,7 @@ import { plain, serveFile } from "@/lib/serve-file";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { readListing } from "@/lib/catalog";
 import { givingWords } from "@/lib/buyer-words/giving";
+import { blockWords } from "@/lib/buyer-words/blocks";
 
 /**
  * Hands over a free copy, from the link that was emailed.
@@ -35,16 +36,25 @@ export async function POST(request: NextRequest) {
     return plain(400, "Bad request");
   }
 
+  const expired = () => plain(410, "This link has expired. Ask the store for a new copy.");
+  // The store the link names is read before a use of the link is spent: a store that is gone, or
+  // switched off after notices about its content (lib/takedown.ts), hands nothing over, lists no one,
+  // tells no webhook, and the link keeps its uses for when the store is back.
+  const named = await readClaim(token);
+  if (!named) return expired();
+  const store = await storeForHandle(named.handle);
+  if (!store) return plain(404, "This store is not here anymore.");
+  if (store.suspended) return plain(404, `${blockWords(store.language).unavailableTitle}.`);
+
   const used = await spendClaim(token);
   if (!used.ok) {
     return used.reason === "spent"
       ? plain(429, "This link has been used as many times as it can be. Ask the store for a new copy.")
-      : plain(410, "This link has expired. Ask the store for a new copy.");
+      : expired();
   }
   const { claim } = used;
-
-  const store = await storeForHandle(claim.h);
-  if (!store) return plain(404, "This store is not here anymore.");
+  // The same link names the same store; anything else is a link that changed under it.
+  if (claim.h !== named.handle) return expired();
 
   // Looked up again rather than trusted from the claim: a product the creator
   // has since removed, or started charging for, is not handed out for free

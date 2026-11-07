@@ -63,9 +63,11 @@ export async function POST(request: NextRequest) {
     return new Response(null, { status: 303, headers: { Location: `${origin}${path}`, "Cache-Control": "no-store" } });
   };
 
-  // Switched off after notices about its content (lib/takedown.ts): nothing is saved and Stripe is not asked;
-  // the review page it goes back to says the store is not available.
-  if (store.suspended) return answer("error");
+  // Switched off after notices about its content (lib/takedown.ts): nothing is saved and Stripe is not asked.
+  // The buyer is told so ("unavailable"), never that something went wrong and to try again: the review
+  // page it goes back to says the store is not available, and the thank-you page shows that notice in
+  // place of the form. Deleting one's own review waits too, as it needs the order proved at Stripe.
+  if (store.suspended) return answer("unavailable");
 
   // A field no person can see: whatever filled it in is told it worked.
   if (read("website").trim()) return answer("saved");

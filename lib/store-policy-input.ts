@@ -11,7 +11,7 @@
  *   - the postal address on its emails, when set.
  */
 import type { Store } from "@/lib/store";
-import { readListings, visibleIds } from "@/lib/catalog";
+import { readListingsExact, visibleIds } from "@/lib/catalog";
 import { deliversDigitally } from "@/lib/digital-consent";
 import { sellsThroughPayPal } from "@/lib/paypal-sales";
 import { PIXEL_INFO, PIXEL_KINDS } from "@/lib/pixels";
@@ -37,7 +37,8 @@ export function policyInputFrom(store: Pick<Store, "name" | "pixels" | "mail">, 
 
 /** The input for a store's policy page, read now. */
 export async function policyInput(store: Store): Promise<PolicyFactsInput> {
-  // No catch: a page that could not read the products must not quietly leave out the 14-day rules.
-  const products = await readListings(store, visibleIds(store));
+  // No catch, and every listed product read exactly (readListingsExact): a page that could not read one
+  // must not quietly leave out the 14-day rules or the subscription terms (Codex G's review of #1824).
+  const products = await readListingsExact(store, visibleIds(store));
   return policyInputFrom(store, products as unknown as Sold[], sellsThroughPayPal(store));
 }

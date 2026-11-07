@@ -42,6 +42,7 @@ import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import { StoreFullError } from "@/lib/store-full";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
@@ -704,6 +705,46 @@ export async function readListingsMeasured(store: Store, ids?: Iterable<string>)
     });
   }
   return { listings: asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l)), bytes };
+}
+
+/**
+ * Every listing asked for, in the order asked, or UnknownReplyError: for a
+ * reader whose answer would be wrong with one left out (a store's policy
+ * page, lib/store-policy-input.ts). An id the store does not have, a record
+ * missing from Redis, a reply that is not one exact answer per GET
+ * (repliesFor), or a record that is not that product's listing makes the
+ * whole read unknown, never a shorter list (Codex G's review of #1824).
+ */
+export async function readListingsExact(store: Store, ids: readonly string[]): Promise<Listing[]> {
+  const asked = wanted(store, ids);
+  if (asked.length !== ids.length) throw new UnknownReplyError("a listing read for products the store does not have");
+  const catalog = store.catalog;
+  if (catalog.inline) {
+    const byId = new Map(catalog.inline.map((p) => [p.id, p]));
+    return asked.map((id) => {
+      const product = byId.get(id);
+      if (!product) throw new UnknownReplyError("a listing read with a product missing from the store record");
+      return listingOf(product);
+    });
+  }
+  const found = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  const missing = asked.filter((id) => !found.has(id));
+  if (missing.length) {
+    if (!catalog.id || !isRedisConfigured()) throw new UnknownReplyError("a listing read with no catalog storage");
+    const chunks: string[][] = [];
+    for (let i = 0; i < missing.length; i += 400) chunks.push(missing.slice(i, i + 400));
+    const answers = await Promise.all(chunks.map((chunk) => redisPipeline(chunk.map((id) => ["GET", listingKey(catalog.id!, id)]))));
+    chunks.forEach((chunk, c) => {
+      const replies = repliesFor(answers[c], chunk.length);
+      if (!replies) throw new UnknownReplyError("a listing read");
+      chunk.forEach((id, i) => {
+        const listing = parseListing(parseJson(replies[i]));
+        if (!listing || listing.id !== id) throw new UnknownReplyError("a listing read with a record missing or unreadable");
+        found.set(id, listing);
+      });
+    });
+  }
+  return asked.map((id) => found.get(id)!);
 }
 
 /**

@@ -1,0 +1,18 @@
+✔ releaseBytes, DECRBY answers no reply: not given back, and said so (7.836621ms)
+✔ releaseBytes, DECRBY answers null: not given back, and said so (0.787602ms)
+✔ releaseBytes, DECRBY answers text: not given back, and said so (0.337103ms)
+✔ releaseBytes, DECRBY answers a fraction: not given back, and said so (0.713469ms)
+✔ releaseBytes, DECRBY answers an object: not given back, and said so (0.422931ms)
+✔ releaseBytes, healthy: given back, and a total below zero comes back to zero (0.763553ms)
+✔ undoTakeRoom, DECRBY unknown after the mark was removed: throws UnknownReplyError, never true (1.873137ms)
+✔ applyTaskDrop, DECRBY unknown: the deletion that happened still returns its files, and the reply is logged (3.76224ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 36.951975
+N3078_HTTP 0
+N3078_MEMORY_RUN 36

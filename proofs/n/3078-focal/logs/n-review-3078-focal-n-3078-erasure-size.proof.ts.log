@@ -1,0 +1,20 @@
+✔ control: healthy erasure leaves the other file's 1000 bytes counted (6.976328ms)
+✔ conditional unknown submission bytes never release more than the real removed file (1.986612ms)
+✔ control: unrelated file remains physically indexed (0.309335ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 17.33975
+N3078_HTTP 0
+N3078_SIZE_DIAGNOSTIC 1100 1000
+N3078_MEMORY_RUN 26
+not giving back the room of 1 handed-in file(s) UnknownReplyError: Redis answered whether a handed-in file left the files' hash in an unknown shape
+    at removedBytes (/tmp/n3078-JEuJ9q/case.cjs:46035:92)
+    at forgetTasksPerson (/tmp/n3078-JEuJ9q/case.cjs:46063:32)
+    at async TestContext.<anonymous> (/tmp/n3078-JEuJ9q/case.cjs:46132:9)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)

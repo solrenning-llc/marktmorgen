@@ -1,0 +1,158 @@
+✔ control: a whole-number size is given back, and only it (7.47202ms)
+✖ erasure with a submission size that is text "5000" (Codex N's case): nothing given back, said in the log, the file still removed (1.722712ms)
+✖ erasure with a submission size that is a fraction: nothing given back, said in the log, the file still removed (1.100002ms)
+✖ erasure with a submission size that is a negative: nothing given back, said in the log, the file still removed (0.626844ms)
+✖ erasure with a submission size that is zero: nothing given back, said in the log, the file still removed (0.487772ms)
+✖ erasure with a submission size that is past the safe integers: nothing given back, said in the log, the file still removed (0.586338ms)
+✖ erasure with a submission size that is missing: nothing given back, said in the log, the file still removed (0.550469ms)
+✖ erasure with a submission size that is an object: nothing given back, said in the log, the file still removed (0.575723ms)
+✖ rule 30: a drop whose sizes are not safe positive whole numbers gives none of them back (2.668744ms)
+✔ rule 30: a drop read exactly still gives its file back (1.057016ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 2
+ℹ fail 8
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 49.683206
+
+✖ failing tests:
+
+test at ../../../../tmp/n3078-UVlqHH/case.cjs:46373:36
+✖ erasure with a submission size that is text "5000" (Codex N's case): nothing given back, said in the log, the file still removed (1.722712ms)
+  AssertionError [ERR_ASSERTION]: the 1000 kept bytes stay counted; no unknown size is given back
+  
+  0 !== 1100
+  
+      at TestContext.<anonymous> (/tmp/n3078-UVlqHH/case.cjs:46376:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1100,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-UVlqHH/case.cjs:46373:36
+✖ erasure with a submission size that is a fraction: nothing given back, said in the log, the file still removed (1.100002ms)
+  AssertionError [ERR_ASSERTION]: the 1000 kept bytes stay counted; no unknown size is given back
+  
+  999 !== 1100
+  
+      at TestContext.<anonymous> (/tmp/n3078-UVlqHH/case.cjs:46376:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 999,
+    expected: 1100,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-UVlqHH/case.cjs:46373:36
+✖ erasure with a submission size that is a negative: nothing given back, said in the log, the file still removed (0.626844ms)
+  AssertionError [ERR_ASSERTION]: logged: []
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/tmp/n3078-UVlqHH/case.cjs:46379:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-UVlqHH/case.cjs:46373:36
+✖ erasure with a submission size that is zero: nothing given back, said in the log, the file still removed (0.487772ms)
+  AssertionError [ERR_ASSERTION]: logged: []
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/tmp/n3078-UVlqHH/case.cjs:46379:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-UVlqHH/case.cjs:46373:36
+✖ erasure with a submission size that is past the safe integers: nothing given back, said in the log, the file still removed (0.586338ms)
+  AssertionError [ERR_ASSERTION]: the 1000 kept bytes stay counted; no unknown size is given back
+  
+  0 !== 1100
+  
+      at TestContext.<anonymous> (/tmp/n3078-UVlqHH/case.cjs:46376:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1100,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-UVlqHH/case.cjs:46373:36
+✖ erasure with a submission size that is missing: nothing given back, said in the log, the file still removed (0.550469ms)
+  AssertionError [ERR_ASSERTION]: logged: []
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/tmp/n3078-UVlqHH/case.cjs:46379:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-UVlqHH/case.cjs:46373:36
+✖ erasure with a submission size that is an object: nothing given back, said in the log, the file still removed (0.575723ms)
+  AssertionError [ERR_ASSERTION]: logged: []
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/tmp/n3078-UVlqHH/case.cjs:46379:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-UVlqHH/case.cjs:46382:34
+✖ rule 30: a drop whose sizes are not safe positive whole numbers gives none of them back (2.668744ms)
+  AssertionError [ERR_ASSERTION]: logged: []
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/tmp/n3078-UVlqHH/case.cjs:46389:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+N3078_HTTP 0
+N3078_MEMORY_RUN 131

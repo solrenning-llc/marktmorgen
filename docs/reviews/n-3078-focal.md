@@ -1,0 +1,15 @@
+# N focal #3078 — 370f336ffea1f425fb4960bc0044a0e28c308f1a
+
+Focal finding N5814378860 CLOSED in the bounded bytes-credit case. No new high/medium demonstrated in the two-path corrective delta. This is not global approval of base #3009, the hand-in route, the data-room system, or regional margin.
+
+C1-1737-C6-20 express disposition and author request6712770900 received. Claim6713199813 and channelf5a19953582e6ae9dc0c3f160ce47f32118fe096 BEFORE diff/source/tests (one409 notwritten; >=120s/FULLfresh/prefix preserved). Source/ref/CI/queue author untouched. G5814469021 second financial opinion credited, not reexecuted by N.
+
+Delta: removedBytes now accepts only number/safe integer/>0 with safe accumulated sum when HDEL reply is exactly1. forgetTasksPerson preserves unknown bytes without Number coercion. applyTaskDrop shares the guard. Bad size credits nothing and logs UnknownReplyError; files remain returned for deletion. Conservative overcount is intentional. No new productive IO/key/TTL/retry/admission/cost.
+
+- SAME immutable N proof Gitblob312fe367145dbd403109cc6ba5109d64da63aaad, SHA25620ad86500912e25ae227f2a1cca585897b7d521e6922b218a77b73bd89a4690e: current3/3 PASS,26 MemoryRedis.run incl2 read-only exitdiagnostics,0HTTP. Previous exact old/final3/2PASS1FAIL is historical, NOT rerun. On current unknown-string case counter1100/kept hash1000; healthy counter1000.
+- New permanent4d043fd26432cfbb585e0c6ce7a85fefbe43a5ea copied byte-identically. SAME10 on old source9e7a4cb4216272ec2408f2268f5ec7a33ffca6e2 in final graph:2PASS8FAIL/131run; current10PASS/129run. Source-only overlay, not full historical checkout. Original proof/expectations untouched.
+- Linked canonical17/17 (250run), drop lists7/7 (32), release8/8 (36), assignments51/51 (108run/2mockHTTP). 83 linked +10 permanent +3 original =96 passing assertions/cases, not96 new unique scenarios. Each suite serial and capped before dispatch20k nestedrun/100mockHTTP/120s/512MiB/256KiB, sockets denied before import; no ceiling hit/no real provider.
+- Real strict ES2017/Bundler TypeScript3 roots/813 sources/0diagnostics,260 repo source hashes including ownprobe; all259 candidate repo sources exactly match subject manifest. No global TSC/build/browser/nativeRedis/Lua/AT/MR certificate. Actual types driver included;1024MiB budget for types, runtime512.
+- Lint3paths EXIT0. First lint overlapped local old-source RED overlay, so repeated after restore to qualify final source; no assertions/deadlines changed. Directed official scanner4tracked/0 and directed staged diff--check0, not full repo scanner. Snapshot source7ac672c8e3c53899faf9cbe4ab281400a7fae075; permanent4d043fd2.
+
+Runtime runners use local installed esbuild/typescript dependencies listed in scripts; copy same proof+runner into an exact subject snapshot before replay. Evidence branch tree is ROOT-ONLY and must NEVER be merged as product. No new CI/retry/push product/enqueue/merge. Existing declared route post-write-refund issues remain outside this focal.

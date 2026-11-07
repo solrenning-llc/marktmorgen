@@ -1,0 +1,17 @@
+{
+  "docs/reviews/n-3078-focal.md": "5a529a19eec2c75c15caee89709108211ccc0f502d92f6dba72376837dd8bb3f",
+  "proofs/n/3078-focal/runner.mjs": "5432e237ce1634ec9a7edadcb12211bcad7c2f3345f84fe10f8fd47d121faa75",
+  "proofs/n/3078-focal/types.mjs": "01a291e50e23d9a950fa5e837da8cf27bb577df24ce1a44cc21ec0fba77de8d2",
+  "proofs/n/3078-focal/type-sources.json": "cae9c0e240d749b8ffd4e2601182a61eb8e90b1547e567af15c8427cd507db7d",
+  "proofs/n/3078-focal/type-errors.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "proofs/n/3078-focal/assignment.ts": "691f18890ea702dca50460dfc3f786fa6570eb33544c8431c751f509fd27b7c4",
+  "proofs/n/3078-focal/assignment-erasure-size.test.ts": "0c7a1e9db4f021c6a06618f439d6e7a7528ce5bcec54e992d874fd11fa821687",
+  "proofs/n/3078-focal/n-3078-erasure-size.proof.ts": "20ad86500912e25ae227f2a1cca585897b7d521e6922b218a77b73bd89a4690e",
+  "proofs/n/3078-focal/logs/n-review-3078-focal-assignment-drop-lists-exact.test.ts.log": "009f2789eef606a9ccc1bc678cbb934bab968234ad57b446f1fdc560ce9c3b8f",
+  "proofs/n/3078-focal/logs/n-review-3078-focal-assignment-erasure-size.test.ts.log": "c8520378d3a48e340ba3bb76232484f49cec73311cfb0031bbeb784ead036e28",
+  "proofs/n/3078-focal/logs/n-review-3078-focal-assignment-giveback-once.test.ts.log": "73d1fcb5daac69cc52b368f965ab3b5a91a141d46bd2579317a022b956800c98",
+  "proofs/n/3078-focal/logs/n-review-3078-focal-assignment-release-exact.test.ts.log": "198bf4e39e9276238f6b2e420d31a80a87c8c620c6d020efbc0aa6a08627d2bb",
+  "proofs/n/3078-focal/logs/n-review-3078-focal-assignments.test.ts.log": "a34c2e4593db7c60d19aff7cf30902b5a3661d7210f4aedbe411d3034bad8dc5",
+  "proofs/n/3078-focal/logs/n-review-3078-focal-erasure-size-red.log": "ff41e44f0bc19da465ff1c5cecab722b7d57d4ff4e1b7e20415e7e55e1a25274",
+  "proofs/n/3078-focal/logs/n-review-3078-focal-n-3078-erasure-size.proof.ts.log": "c9f9af86fe07fbd2fe7eb23829de613a1abcdbde7ffeca6de61ed83c6f87d616"
+}

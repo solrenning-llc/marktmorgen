@@ -1,0 +1,20 @@
+✔ control: a whole-number size is given back, and only it (8.913156ms)
+✔ erasure with a submission size that is text "5000" (Codex N's case): nothing given back, said in the log, the file still removed (0.83354ms)
+✔ erasure with a submission size that is a fraction: nothing given back, said in the log, the file still removed (0.559414ms)
+✔ erasure with a submission size that is a negative: nothing given back, said in the log, the file still removed (0.48694ms)
+✔ erasure with a submission size that is zero: nothing given back, said in the log, the file still removed (0.41352ms)
+✔ erasure with a submission size that is past the safe integers: nothing given back, said in the log, the file still removed (0.421081ms)
+✔ erasure with a submission size that is missing: nothing given back, said in the log, the file still removed (0.483886ms)
+✔ erasure with a submission size that is an object: nothing given back, said in the log, the file still removed (1.321249ms)
+✔ rule 30: a drop whose sizes are not safe positive whole numbers gives none of them back (3.585951ms)
+✔ rule 30: a drop read exactly still gives its file back (1.822006ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 38.700207
+N3078_HTTP 0
+N3078_MEMORY_RUN 129

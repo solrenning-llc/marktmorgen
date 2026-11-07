@@ -187,6 +187,12 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
     const claim = claimValue();
     if ((await claimMark(sentKey(account, subId), 90 * 86_400, claim)) !== "ours") continue;
     lookedAt += 1;
+    // What this run holds until the sender is asked (pre-review W1, rule 30): an error thrown before then (Stripe,
+    // cameBack, tokensFor, the link's write, winbackEmail, render) means nothing can have gone, so it is all let go and
+    // the next run, inside the same window, sends the offer once. Once the send has started, nothing is let go here.
+    let sending = false;
+    let once: { key: string; value: string } | null = null;
+    let link = "";
     try {
       const found = await onAccount("GET", account, `/customers/${customer}`);
       const email = typeof found.email === "string" && EMAIL_PATTERN.test(found.email) ? normaliseEmail(found.email) : "";
@@ -206,15 +212,18 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       const unsub = tokens.get(email);
       if (!unsub) continue;
       const onceValue = claimValue();
-      const once = await claimMark(onceKey(statsId, email, product.id), ONCE_PER_DAYS * 86_400, onceValue);
-      if (once !== "ours") {
+      const onceClaim = await claimMark(onceKey(statsId, email, product.id), ONCE_PER_DAYS * 86_400, onceValue);
+      if (onceClaim !== "ours") {
         // Heard one lately, or unknown: nothing is sent. On unknown the membership's own mark is let go, so the next
         // run asks again. A once-mark answered oddly that did land holds this claim's value and reads as ours above.
-        if (once === "unknown") await releaseMark(sentKey(account, subId), claim);
+        if (onceClaim === "unknown") await releaseMark(sentKey(account, subId), claim);
         continue;
       }
+      once = { key: onceKey(statsId, email, product.id), value: onceValue };
 
       const token = randomBytes(20).toString("hex");
+      // Set before the write, so a write that throws after landing is still deleted.
+      link = linkKey(token);
       const grant = { s: statsId, e: email, p: product.id, o: meta.option ?? "", c: store.winback.coupon, pc: store.winback.percent, m: store.winback.months };
       await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", OFFER_DAYS * 86_400], ...noteForErasure(statsId, email, linkKey(token))]);
       const ended = typeof sub.ended_at === "number" ? sub.ended_at : nowSeconds;
@@ -233,6 +242,7 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       const rendered = render(withAddress, mail.subject, mail.body, unsub);
       // The email is taken from the store's figure inside sendEmailOutcome, before the request (unchanged).
       let outcome: SendOutcome;
+      sending = true;
       try {
         outcome = await sendEmailOutcome({ meter: { by: "store", store: store, kind: "email" },
           from: fromLine(withAddress),
@@ -250,23 +260,50 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       }
       if (outcome === "sent") {
         sent += 1;
-        await redisPipeline([["INCR", countKey(statsId)]]);
+        // A count not written never lets a mark go: the email went.
+        await redisPipeline([["INCR", countKey(statsId)]]).catch((error) => console.error("counting a come-back offer failed", store.handle, error));
       } else if (outcome === "refused") {
         // Refused for certain: tried again on the next run, inside the same window.
         // Only our own claims are let go (Revisor 1 on #2719); the offer's link is this run's alone.
-        await releaseMark(sentKey(account, subId), claim);
-        await releaseMark(onceKey(statsId, email, product.id), onceValue);
-        await redisPipeline([["DEL", linkKey(token)]]);
+        await letGo(store, sentKey(account, subId), claim, once, link);
       } else {
         // Not known whether it went (a timeout, a server error, a network error): both marks are kept, so the offer
         // is never sent twice, and so is its link, which the email may already carry.
         console.error("a come-back offer's answer is not known; its marks are kept, so it is not sent again", store.handle);
       }
     } catch (error) {
-      console.error("sending a come-back offer failed", store.handle, error);
+      if (sending) {
+        // Thrown after the sender was asked: it may have gone, so the marks and the link are kept (rule 30).
+        console.error("a come-back offer failed after its send started; its marks are kept", store.handle, error);
+      } else {
+        // Thrown before the sender was asked: nothing went, so this run's marks and link are let go (pre-review W1).
+        console.error("a come-back offer failed before its send; its marks are let go", store.handle, error);
+        await letGo(store, sentKey(account, subId), claim, once, link);
+      }
     }
   }
   return sent;
+}
+
+/**
+ * Lets go of this run's own claims on an offer and deletes the link it made, when the sender was never asked or
+ * refused for certain. Each step on its own: one that fails never keeps the next from running, and nothing here
+ * throws, so a store's other offers still go.
+ */
+async function letGo(store: Store, membershipKey: string, claim: string, once: { key: string; value: string } | null, link: string): Promise<void> {
+  try {
+    await releaseMark(membershipKey, claim);
+  } catch (error) {
+    console.error("letting a come-back offer's mark go failed", store.handle, error);
+  }
+  if (once) {
+    try {
+      await releaseMark(once.key, once.value);
+    } catch (error) {
+      console.error("letting a come-back offer's mark go failed", store.handle, error);
+    }
+  }
+  if (link) await redisPipeline([["DEL", link]]).catch((error) => console.error("deleting a come-back offer's link failed", store.handle, error));
 }
 
 /** How many come-back emails a store has sent. */

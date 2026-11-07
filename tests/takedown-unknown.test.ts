@@ -209,6 +209,17 @@ async function main(): Promise<void> {
   is("one new email, under a key that is not the first takedown's", [sent.length, sent[0]?.key !== firstKey, sent[0]?.key.startsWith(`${firstKey}-`)], [1, true, true]);
   const twiceAgain = await answer({ type: "product", id: near });
   is("and a press after it: nothing more", [twiceAgain.status, twiceAgain.error, sent.length], [409, "nothing", 1]);
+
+  part("Two presses at once take the content down once, write it once and tell the creator once");
+  // Claude 6's focal review of #3087, LEVE 3: two presses at once both saw the product up, both wrote fresh steps
+  // and both went on (or the one that changed nothing deleted the other's steps record blindly).
+  const raced = ids.find((id) => id !== near && id !== far)!;
+  sent.length = 0;
+  tried.length = 0;
+  const strikesBeforeRace = await strikes();
+  const both = await Promise.all([answer({ type: "product", id: raced }), answer({ type: "product", id: raced })]);
+  is("one press takes it down, the other finds nothing left to do", both.map((r) => `${r.status} ${r.error}`).sort(), ["200 null", "409 nothing"]);
+  is("down, written on the record once, one email", [await published(raced), (await strikes()) - strikesBeforeRace, sent.length], ["unpublished", 1, 1]);
   done();
 }
 

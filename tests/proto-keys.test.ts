@@ -29,6 +29,10 @@ import { readAllTimeSales, readSales, readStats, recordHit, renewalsFrom, result
 import { weeklyMessage } from "@/lib/stats-report";
 import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { RightNow, StatsPanel } from "@/components/stats-panel";
+import { newLiveBox, readingAnswered, startReading } from "@/lib/live-box-rules";
 
 const TAGS = ["__proto__", "constructor"] as const;
 const HOST = "marktmorgen.com";
@@ -301,4 +305,50 @@ test("the weekly email names a channel \"__proto__\" or \"constructor\" by its o
   assert.match(text, /^- __proto__: 2 visits$/m);
   assert.match(text, /^- constructor: 1 visit$/m);
   assert.doesNotMatch(text, /function Object|\[object Object\]/);
+});
+
+// Claude 5's second review of #2905 (comment 6702158024), kept with credit: with sourceAlias fixed, a visit from a link
+// tagged utm_source=__proto__ is recorded, and the studio's panel read the source's name as SOURCE_NAMES[name]: for
+// "__proto__" that is Object.prototype, which React refuses as a child, so the whole /studio failed to draw; for
+// "constructor" it is the Object function, drawn as nothing or as its source text. The name must come from the map's
+// own entries only (sourceName), and a tag the map does not know is shown as its own word.
+const sourceSpan = (word: string) => `<span class="min-w-0 truncate font-semibold text-ink">${word}</span>`;
+async function panelWith(sources: string[]): Promise<string> {
+  redis.clear();
+  process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
+  await claimHandle("owner@example.com", "harbor", "Harbor Kitchen", "");
+  await ensureStatsId("owner@example.com");
+  const store = (await storeForEmail("owner@example.com"))!;
+  const at = Date.UTC(2026, 9, 12, 12);
+  let ip = 0;
+  for (const source of sources) await recordHit(store, { kind: "view", source, ip: `192.0.2.${++ip}`, userAgent: BROWSER, country: "US", device: "mobile" }, at);
+  const data = studioStats(store, (await readStats(store, at))!, null, "none", []);
+  return renderToStaticMarkup(createElement(StatsPanel, { data, canExport: false, askHeard: false }));
+}
+const liveWith = (source: string) => {
+  const started = startReading(newLiveBox<{ visitors: number; sources: { source: string; visitors: number }[]; today: null }>(), true)!;
+  const box = readingAnswered(started.box, started.seq, { visitors: 1, sources: [{ source, visitors: 1 }], today: null }, Date.UTC(2026, 9, 12, 12));
+  return renderToStaticMarkup(createElement(RightNow, { currency: "usd", initialBox: box, timeZone: "UTC", now: Date.UTC(2026, 9, 12, 12) }));
+};
+
+for (const tag of TAGS) {
+  test(`the studio's stats panel draws a visit from utm_source "${tag}" under its own word`, async () => {
+    const html = await panelWith([tag, "instagram"]);
+    assert.ok(html.includes(sourceSpan(tag)), `"Where visitors came from" names the source ${tag}`);
+    assert.ok(html.includes(sourceSpan("Instagram")), "a source the map knows keeps its name");
+    assert.doesNotMatch(html, /function Object|\[object Object\]|native code/);
+    nothingShared(["visits"]);
+  });
+
+  test(`the studio's "right now" box names a source "${tag}" by its own word`, () => {
+    const html = liveWith(tag);
+    assert.ok(html.includes(`From ${tag}<`), `the live source is said as ${tag}`);
+    assert.doesNotMatch(html, /function Object|\[object Object\]|native code/);
+  });
+}
+
+test("control: the panel and the right-now box keep the map's names for ordinary sources", async () => {
+  assert.ok((await panelWith(["instagram", "tiktok"])).includes(sourceSpan("TikTok")));
+  assert.ok(liveWith("youtube").includes("From YouTube<"));
+  assert.ok(liveWith("direct").includes("From a direct visit or an app that hides it<"));
 });

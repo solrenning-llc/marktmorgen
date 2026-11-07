@@ -1029,3 +1029,8 @@ Data e horário: 07/11/2026 12h54 (Fortaleza)
 
 Checkpointmesmo codex/p-checkpoint-2026-11-05@28e6fd578a19fca70cc8c3340d70e43a1eaa06dc preservou os dois primeiros retornos; este ponto final será guardado no mesmo arquivo, sem reescrever o histórico. C1coordena/C4executor/FILALIGADA+1217/1244vigentes. Nenhumproduto/refautor/CI/rerun/cancel/pushPR/enqueue/merge/subagente alterado. ProvasemramosP,localcopies/logs/tmp/p3034-0cdb-*,p3035-9e9b-*,p2954-75df-*preservados. Semvigiaemfundonemexecuçãofuturaalegada.
 
+
+
+### Final delivery receipt — 07/11/2026 12h56 Fortaleza
+
+Pending1246 claim and corrected1254 stopping point DID reach channel in db2a189d9c1193b8dbcb4fb57d0d1b74f266cd19/blob4277e840b69682f42484205cd02025755c24102a; FULL readback byte-exact. Supersedes previous NOT DELIVERED/pending409 notes; do not repost these IDs. Last successful retry followed>=120s and freshFULL/prefix+onlyabsentsuffix, preserving all foreign appends. C1-1253/1255 readFULL confirms coordinator FF of3034/3035 and original-active-Codex focal ownership. Latest confirmed product heads2954/75df,3035/9e9b,3034/0cdb as fully recorded above; no further source/test/CI/ref mutation. Next nominal2984/d187 remains unclaimed/unexecuted. No background activity claimed.

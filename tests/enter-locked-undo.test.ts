@@ -5,7 +5,8 @@
  * The first such login writes the day two-step login turns off, then opens a
  * locked session, then tells the sign-in and recovery addresses. When the
  * session does not open (its lock not confirmed, the request failed) or the
- * recovery lock cannot be aligned, nobody got in and nobody was told: the day
+ * recovery lock cannot be aligned, or the recovery address the notice goes to
+ * cannot be read (read before anything is written), nobody got in and nobody was told: the day
  * is taken back, so two-step login never turns off by itself on a login that
  * never happened, and a session opened on the way is taken back too. A day
  * already set by an earlier login is never moved or taken back.
@@ -79,6 +80,8 @@ async function main(): Promise<void> {
     ["the locked session's lock not confirmed", { match: (c) => c[0] === "SET" && String(c[1]).startsWith("nl:2fa:locked:"), reply: [] }],
     ["the locked session's lock request failed", { match: (c) => c[0] === "SET" && String(c[1]).startsWith("nl:2fa:locked:"), reply: "throw" }],
     ["the recovery lock could not be aligned", { match: (c) => c[0] === "SET" && String(c[1]).startsWith("nl:auth:rec:until:"), reply: "throw" }],
+    // Claude 6 on #2948: the notice's recovery address, read after the day was set and the session opened.
+    ["the recovery address could not be read", { match: (c) => c[0] === "GET" && /^nl:auth:rec:[0-9a-f]{40}$/.test(String(c[1])), reply: "throw" }],
   ];
 
   part("A first login without the second step that did not open: the day is taken back, nobody was told");

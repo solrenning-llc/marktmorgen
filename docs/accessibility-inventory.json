@@ -1410,6 +1410,7 @@
     "components/link-editor.tsx",
     "components/link-picture.tsx",
     "components/link-request-form.tsx",
+    "components/list-health-table.tsx",
     "components/local-clock.tsx",
     "components/local-day.tsx",
     "components/logo.tsx",

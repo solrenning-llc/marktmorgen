@@ -55,8 +55,11 @@ LISTERS = {"tests/e2e/skip-content-focus.mjs": ("app/", "components/")}
 LITERAL = re.compile(
     r"""(?:\bfrom\s*|\bimport\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\brequire\.resolve\s*\(\s*|@import\s+(?:url\(\s*)?)(["'])([^"'\n]+)\1""")
 # Imports whose target is computed while running: the graph cannot follow them.
+# A dynamic import or require counts as literal only when its argument is the whole quoted
+# string: anything after the closing quote but ")" or "," (a join, a method) is computed.
 COMPUTED = re.compile(
-    r"""\bimport\s*\(\s*[^"'\s)]|\brequire\s*\(\s*[^"'\s)]|\brequire\.context\b|\bimport\.meta\.glob\b""")
+    r"""\bimport\s*\(\s*[^"'\s)]|\brequire\s*\(\s*[^"'\s)]|\brequire\.context\b|\bimport\.meta\.glob\b"""
+    r"""|\b(?:import|require(?:\.resolve)?)\s*\(\s*(["'])[^"'\n]*\1\s*(?![\s),])""")
 LISTING = re.compile(r"""\b(?:readdirSync|readdir|opendirSync|opendir|globSync|glob)\s*\(""")
 CSS_URL = re.compile(r"""url\(\s*(["']?)(\.{1,2}/[^"')\s]+)\1\s*\)""")
 # A string that names a repository file: "lib/x.ts", "../../lib/x.ts", "seed.ts".

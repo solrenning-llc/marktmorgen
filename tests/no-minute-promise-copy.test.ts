@@ -48,14 +48,15 @@ const AFFILIATE: Record<LanguageCode, string> = {
   pt: "A ligação está a caminho. Vem de Harbor Kitchen através da Marktmorgen. Se não estiver lá, veja no spam.",
 };
 
+/** The feed link says it was tried, not that it is on its way: sending can still fail after the answer. */
 const PODCAST: Record<LanguageCode, string> = {
-  en: "If that address has this podcast, a link to its own feed is on its way. It comes from the store via Marktmorgen. If it is not there, look in spam.",
-  es: "Si esa dirección tiene este pódcast, va en camino un enlace a su propio feed. Lo envía la tienda a través de Marktmorgen. Si no está, mira en spam.",
-  fr: "Si cette adresse possède ce podcast, un lien vers son propre flux est en route. Il vient de la boutique via Marktmorgen. S'il n'est pas là, regardez dans les spams.",
-  de: "Wenn zu dieser Adresse dieser Podcast gehört, ist ein Link zu ihrem eigenen Feed unterwegs. Er kommt vom Shop über Marktmorgen. Falls er nicht da ist, sehen Sie im Spam nach.",
-  it: "Se quell'indirizzo ha questo podcast, un link al suo feed personale è in arrivo. Lo invia il negozio tramite Marktmorgen. Se non c'è, guarda nello spam.",
-  nl: "Als dat adres deze podcast heeft, is er een link naar een eigen feed onderweg. Die komt van de winkel via Marktmorgen. Staat hij er niet, kijk dan bij spam.",
-  pt: "Se esse endereço tem este podcast, uma ligação para o seu próprio feed está a caminho. É enviada pela loja através da Marktmorgen. Se não estiver lá, veja no spam.",
+  en: "If that address has this podcast, we tried to email it a link to its own feed. It comes from the store via Marktmorgen. If nothing arrives in a few minutes, check your spam folder, then ask again.",
+  es: "Si esa dirección tiene este pódcast, intentamos enviarle por email un enlace a su propio feed. Lo envía la tienda a través de Marktmorgen. Si no llega nada en unos minutos, revisa la carpeta de spam y luego vuelve a pedirlo.",
+  fr: "Si cette adresse possède ce podcast, nous avons essayé de lui envoyer par e-mail un lien vers son propre flux. Il vient de la boutique via Marktmorgen. Si rien n'arrive d'ici quelques minutes, regardez dans vos spams, puis redemandez-le.",
+  de: "Wenn zu dieser Adresse dieser Podcast gehört, haben wir versucht, ihr einen Link zu ihrem eigenen Feed per E-Mail zu senden. Er kommt vom Shop über Marktmorgen. Wenn in ein paar Minuten nichts ankommt, sehen Sie im Spam-Ordner nach und fragen Sie dann erneut.",
+  it: "Se quell'indirizzo ha questo podcast, abbiamo provato a inviargli via email un link al suo feed personale. Lo invia il negozio tramite Marktmorgen. Se tra qualche minuto non arriva nulla, controlla la cartella spam, poi richiedilo.",
+  nl: "Als dat adres deze podcast heeft, hebben we geprobeerd er een link naar een eigen feed naartoe te mailen. Die komt van de winkel via Marktmorgen. Komt er binnen een paar minuten niets aan, kijk dan in je spammap en vraag het daarna opnieuw.",
+  pt: "Se esse endereço tem este podcast, tentámos enviar-lhe por email uma ligação para o seu próprio feed. É enviada pela loja através da Marktmorgen. Se nada chegar dentro de alguns minutos, veja a pasta de spam e depois volte a pedir.",
 };
 
 /** An arrival deadline in any of the seven languages. */

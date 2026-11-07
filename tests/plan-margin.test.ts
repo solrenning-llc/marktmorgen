@@ -106,8 +106,9 @@ import { PAID_VIDEO_HOURS, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rul
 import { SETUP_STORAGE_BYTES, SETUP_VIDEO_HOURS, TRIAL_STORAGE_BYTES } from "@/lib/plan-standing";
 import { CLOSING_DAYS, KEEP_NOTHING_FROM, WARN_WEEK_DAYS, keptRoomFor } from "@/lib/plan-closing-rules";
 import { LONGEST_PAUSE_MONTHS, PAID_MONTHS_BEFORE_PAUSE } from "@/lib/plan-pause-rules";
-import { SETUP_VISITS, TRIAL_VISITS, VISITS_INCLUDED, VISIT_CENTS_PER_THOUSAND_OVER } from "@/lib/traffic-rules";
-import { visitCost } from "./traffic-cost";
+import { REQUESTS_PER_VISIT, SETUP_EXTRA_REQUESTS, SETUP_VISITS, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS, VISITS_INCLUDED, VISIT_CENTS_PER_THOUSAND_OVER } from "@/lib/traffic-rules";
+import { readBeaconCost, visitCost } from "./traffic-cost";
+import { readingsAtCeiling } from "./plan-cost-registry";
 import { ORDERS_INCLUDED, ORDER_CENTS_PER_THOUSAND_OVER, TRIAL_ORDERS, freeCopiesLimitFor } from "@/lib/order-rules";
 import { coveredByShare } from "@/lib/orders";
 import { SHARE_PROVED_IN_TEST_MODE, shareOf } from "@/lib/platform-share";
@@ -206,7 +207,18 @@ for (const [schedule, prices] of SCHEDULES) for (const tier of TIERS) {
   });
 }
 
-test("Scale keeps more than Pro does in its own worst month, monthly and yearly, where neither takes a share", () => {
+/**
+ * How far below Pro Scale's share may sit: 0.05 of a percentage point. A
+ * page reading is priced at its measured ceiling of 12 commands (CX-35) and
+ * Scale's own readings ceiling is the largest, which puts it 0.008 point
+ * (month) and 0.015 point (year) under Pro; a difference below 0.05 point
+ * changes no price decision and is under the tables' rounding. Decided for
+ * the owner on 4 November 2026 (inbox C3-64): the cost stays as measured, the
+ * property is held to this tolerance, and no other margin test is loosened.
+ */
+const SCALE_BELOW_PRO_TOLERANCE = 0.0005;
+
+test("Scale keeps no less than Pro, less 0.05 point, in its own worst month, monthly and yearly, where neither takes a share", () => {
   // The dearest plan is the one a heavy sender is on, so it is the last one
   // that may be allowed to be the thinnest. With a share of each sale the
   // comparison is not like for like — Studio is paid a share on top of what
@@ -214,7 +226,7 @@ test("Scale keeps more than Pro does in its own worst month, monthly and yearly,
   for (const cycle of ["month", "year"] as const) {
     const prices = PRICES_WITHOUT_COMMISSION;
     const kept = (tier: Tier) => (netOf(tier, cycle, prices) - worstCost(tier)) / netOf(tier, cycle, prices);
-    assert.ok(kept("scale") >= kept("pro"), `${cycle}: Scale keeps ${(kept("scale") * 100).toFixed(1)}% and Pro ${(kept("pro") * 100).toFixed(1)}%`);
+    assert.ok(kept("scale") >= kept("pro") - SCALE_BELOW_PRO_TOLERANCE, `${cycle}: Scale keeps ${(kept("scale") * 100).toFixed(3)}% and Pro ${(kept("pro") * 100).toFixed(3)}%`);
   }
 });
 
@@ -341,10 +353,12 @@ test("a store that pays nothing can cost next to nothing", () => {
   const watched = SETUP_VIDEO_HOURS * hourCost();
   // And the visits its pages are shown for before they rest.
   const visited = SETUP_VISITS * visitCost();
-  assert.ok(kept + watched + visited < 0.4, `a store with no plan can cost $${(kept + watched + visited).toFixed(2)} a month`);
+  // And its page readings, at their own ceiling (lib/page-read.ts), now priced apart from a visit.
+  const read = readingsAtCeiling(REQUESTS_PER_VISIT * SETUP_VISITS + SETUP_EXTRA_REQUESTS) * readBeaconCost();
+  assert.ok(kept + watched + visited + read < 0.4, `a store with no plan can cost $${(kept + watched + visited + read).toFixed(2)} a month`);
   // A free trial lasts two weeks with a card on file. All it may keep,
   // every hour it may play and every visit it may have, in one month:
-  const trial = (TRIAL_STORAGE_BYTES / GB) * STORAGE_PER_GB + (TRIAL_VIDEO_SECONDS / 3600) * hourCost() + TRIAL_VISITS * visitCost();
+  const trial = (TRIAL_STORAGE_BYTES / GB) * STORAGE_PER_GB + (TRIAL_VIDEO_SECONDS / 3600) * hourCost() + TRIAL_VISITS * visitCost() + readingsAtCeiling(REQUESTS_PER_VISIT * TRIAL_VISITS + TRIAL_EXTRA_REQUESTS) * readBeaconCost();
   assert.ok(trial < 8, `a trial at every limit costs $${trial.toFixed(2)} in a month`);
 });
 

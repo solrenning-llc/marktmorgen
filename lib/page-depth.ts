@@ -17,12 +17,14 @@
  *   nl:depth:<statsId>:<productId>   hash: <blockId> (stopped there); _n (visitors) until 11 October 2026
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { cappedCount } from "@/lib/capped-count";
-import { DEPTH_FIELDS_MAX, DEPTH_RECORD_BYTES } from "@/lib/page-depth-rules";
+import { cappedCount, cappedCountCommand } from "@/lib/capped-count";
+import { DEPTH_FIELDS_MAX, DEPTH_RECORD_BYTES, TIME_RANGES, timeField } from "@/lib/page-depth-rules";
 import { BLOCK_ID_PATTERN } from "@/lib/sales-page";
 import { type WhyNot, isWhyNot } from "@/lib/why-not-rules";
 
 const key = (statsId: string, productId: string) => `nl:depth:${statsId}:${productId}`;
+/** How long measured visitors stayed, by range (639 [GL7](25)), beside the blocks' record. */
+const timeKey = (statsId: string, productId: string) => `nl:depth:${statsId}:${productId}:t`;
 const KEEP_SECONDS = 400 * 86_400;
 
 export { DEPTH_FIELDS_MAX, DEPTH_RECORD_BYTES };
@@ -56,11 +58,35 @@ export function depthField(blockId: string, whyNot = "", video = ""): string | n
   return field;
 }
 
-export async function countDepth(statsId: string | null, productId: string, blockId: string, whyNot = "", video = ""): Promise<void> {
+export async function countDepth(statsId: string | null, productId: string, blockId: string, whyNot = "", video = "", seconds: unknown = undefined): Promise<void> {
   const field = depthField(blockId, whyNot, video);
   if (!statsId || !isRedisConfigured() || !field) return;
   const k = key(statsId, productId);
+  // How long they stayed, in its range (639 [GL7](25)): counted in the same command, in a record of its own,
+  // so a full blocks' record can never push it, or a block, into the overflow field.
+  const time = timeField(seconds);
   try {
+    if (time) {
+      const tk = timeKey(statsId, productId);
+      const both: (string | number)[][] = [["EXPIRE", k, KEEP_SECONDS], ["EXPIRE", tk, KEEP_SECONDS]];
+      let reply: unknown;
+      try {
+        [reply] = await redisPipeline([cappedCountCommand([{ key: k, most: DEPTH_FIELDS_MAX }, { key: tk, most: TIME_RANGES.length }], [{ hash: 0, field, by: 1 }, { hash: 1, field: time, by: 1 }])]);
+      } catch {
+        reply = undefined;
+      }
+      // Only the two counts sent, each a whole number, say which record is new. Any other answer (lost after the
+      // write, empty, cut short) may have made them: both are given their expiry again, never none (Claude 5 on #2571).
+      const exact = Array.isArray(reply) && reply.length === 2 && reply.every((v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0);
+      if (!exact) {
+        await redisPipeline(both);
+        return;
+      }
+      const [count, timeCount] = reply as number[];
+      const expiries = [...(count === 1 ? [both[0]] : []), ...(timeCount === 1 ? [both[1]] : [])];
+      if (expiries.length) await redisPipeline(expiries);
+      return;
+    }
     const [count] = await cappedCount(k, DEPTH_FIELDS_MAX, [{ field, by: 1 }]);
     if (count === 1) await redisPipeline([["EXPIRE", k, KEEP_SECONDS]]);
   } catch {
@@ -83,18 +109,26 @@ export function reachShares(order: string[], stopped: Record<string, number>, vi
 export async function readDepth(
   statsId: string | null,
   productId: string,
-): Promise<{ visitors: number; stopped: Record<string, number>; whyNot: Partial<Record<WhyNot, number>>; videos: Record<string, VideoReach> }> {
-  if (!statsId || !isRedisConfigured()) return { visitors: 0, stopped: {}, whyNot: {}, videos: {} };
-  const [raw] = await redisPipeline([["HGETALL", key(statsId, productId)]]);
+): Promise<{ visitors: number; stopped: Record<string, number>; whyNot: Partial<Record<WhyNot, number>>; videos: Record<string, VideoReach>; time: Record<string, number> }> {
+  if (!statsId || !isRedisConfigured()) return { visitors: 0, stopped: {}, whyNot: {}, videos: {}, time: {} };
+  const [raw, rawTime] = await redisPipeline([["HGETALL", key(statsId, productId)], ["HGETALL", timeKey(statsId, productId)]]);
   const pairs: Record<string, string> = {};
   if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) pairs[String(raw[i])] = String(raw[i + 1]);
   else if (raw && typeof raw === "object") Object.assign(pairs, raw);
   const stopped: Record<string, number> = {};
   const whyNot: Partial<Record<WhyNot, number>> = {};
   const videos: Record<string, VideoReach> = {};
+  const time: Record<string, number> = {};
+  const timeFields = new Set<string>(TIME_RANGES.map((range) => range.field));
+  const timePairs: Record<string, string> = {};
+  if (Array.isArray(rawTime)) for (let i = 0; i + 1 < rawTime.length; i += 2) timePairs[String(rawTime[i])] = String(rawTime[i + 1]);
+  else if (rawTime && typeof rawTime === "object") Object.assign(timePairs, rawTime);
+  for (const [field, value] of Object.entries(timePairs)) if (timeFields.has(field) && Number(value) > 0) time[field] = Number(value);
   let visitors = 0;
   for (const [field, value] of Object.entries(pairs)) {
     if (field === "_n" || !(Number(value) > 0)) continue;
+    // A time field left in the blocks' record by an earlier build is never a visitor of its own.
+    if (timeFields.has(field)) continue;
     const n = Number(value);
     const [head, video] = field.split("!");
     const [block, answer] = head.split("?");
@@ -116,5 +150,5 @@ export async function readDepth(
   }
   // Every visitor counted stopped at exactly one block, so the blocks add up
   // to the visitors; "_n", written until 11 October 2026, said the same.
-  return { visitors, stopped, whyNot, videos };
+  return { visitors, stopped, whyNot, videos, time };
 }

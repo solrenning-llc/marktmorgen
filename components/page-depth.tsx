@@ -1,10 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { READ_SAMPLE } from "@/lib/page-read-sample";
+import { READ_TOKEN_SECONDS } from "@/lib/page-read-sample";
 import { framePlayer, frameTarget, messagePlayer } from "@/lib/player-origin";
 import { WHY_NOT, type WhyNot } from "@/lib/why-not-rules";
 import type { WhyNotWords } from "@/lib/buyer-words/why-not";
+
+/**
+ * How long after the page started measuring its reading is still sent: the
+ * token is good for READ_TOKEN_SECONDS after the page was drawn, which was a
+ * little before, so a minute is kept in hand. A reading that could never
+ * count is not sent at all.
+ */
+export const READ_SEND_MS = (READ_TOKEN_SECONDS - 60) * 1000;
+
+/** Whether a page that started measuring at `since` (performance.now()) may still send its reading. */
+export function stillReadable(since: number, now = performance.now()): boolean {
+  return now - since < READ_SEND_MS;
+}
 
 /** Sends a page's reading to /api/store/read, by beacon where the browser has one. */
 export function sendRead(payload: Record<string, unknown>) {
@@ -36,9 +49,9 @@ export function playerOfOrigin(origin: string): "youtube" | "vimeo" | null {
 }
 
 /**
- * How a sales page was read, for one visitor in READ_SAMPLE, chosen here at
- * random, so the measure stays inside what a visit costs (lib/page-read.ts):
- * sent once, when they leave the page or switch away from it, as one count.
+ * How a sales page was read, for one visitor in READ_SAMPLE, drawn by the
+ * server, which hands only them a token (lib/page-read.ts): sent once, when
+ * they leave the page or switch away from it, as one count.
  *
  *   - the furthest block they saw (lib/page-depth.ts);
  *   - how far into the page's video they got, if they pressed play: the
@@ -62,11 +75,19 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
   }, [asking]);
 
   useEffect(() => {
-    if (!token || Math.random() * READ_SAMPLE >= 1) return;
+    // No token: this visitor was not drawn (or nothing can be signed), so nothing is measured or asked.
+    if (!token) return;
+    // When this page started measuring: past READ_SEND_MS it stops, and asks and sends nothing.
+    const since = performance.now();
     const blocks = [...document.querySelectorAll<HTMLElement>("[data-block]")];
     if (blocks.length === 0 || typeof IntersectionObserver === "undefined") return;
     let furthest = -1;
     let sent = false;
+    // How long the page was open in front of them (639 [GL7](25)): only the time it was visible, added up,
+    // so a tab opened in the background is not counted while it waited. A range is counted, never who.
+    let seenMs = 0;
+    let visibleSince: number | null = document.visibilityState === "visible" ? performance.now() : null;
+    const seenSeconds = () => Math.round((seenMs + (visibleSince === null ? 0 : performance.now() - visibleSince)) / 1000);
     let started = false;
     let sawBuy = false;
     // The video played: its block, and how far into it, the furthest reached.
@@ -167,6 +188,10 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
       } catch {}
       if (!askedBefore) {
         timer = window.setInterval(() => {
+          if (!stillReadable(since)) {
+            window.clearInterval(timer);
+            return;
+          }
           if (sawBuy && !started && document.visibilityState === "visible") {
             window.clearInterval(timer);
             try {
@@ -181,6 +206,7 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
     const send = () => {
       if (sent || furthest < 0) return;
       sent = true;
+      if (!stillReadable(since)) return;
       sendRead({
         t: token,
         k: "d",
@@ -188,15 +214,27 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
         b: blocks[furthest].dataset.block ?? "",
         ...(answer.current ? { w: answer.current } : {}),
         ...(videoBlock && videoAt ? { v: `${videoBlock}.${videoAt}` } : {}),
+        s: seenSeconds(),
       });
     };
     const hidden = () => {
-      if (document.visibilityState === "hidden") send();
+      if (document.visibilityState === "visible") {
+        if (visibleSince === null) visibleSince = performance.now();
+        return;
+      }
+      if (visibleSince !== null) {
+        seenMs += performance.now() - visibleSince;
+        visibleSince = null;
+      }
+      send();
     };
     document.addEventListener("visibilitychange", hidden);
     window.addEventListener("pagehide", send);
+    // Past the token's time nothing more is watched: what is measured then could never be counted.
+    const stop = window.setTimeout(() => watch.disconnect(), READ_SEND_MS);
     return () => {
       watch.disconnect();
+      window.clearTimeout(stop);
       window.clearInterval(timer);
       document.removeEventListener("click", onClick, true);
       window.removeEventListener("message", onMessage);

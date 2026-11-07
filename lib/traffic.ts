@@ -10,6 +10,7 @@
  *   nl:traffic:r:<folder>:<window>   pages drawn and public requests answered
  *   nl:traffic:c:<folder>:<window>   each connection's share of them, by day (MM-SA-01)
  *   nl:traffic:folders:<month>       the stores that had any, that calendar month
+ *   nl:traffic:read:<statsId>:<window> page readings, apart from the requests (lib/page-read.ts)
  *
  * The window is the store's billing month when it pays us, and the calendar
  * month otherwise (lib/allowance-window.ts, since 17 October 2026): one
@@ -40,6 +41,7 @@ import { type AllowanceWindow, WINDOW_ID, allowanceWindow, calendarWindow, keepS
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { admitNonPaying } from "@/lib/free-pool";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
+import { noteReadStore } from "@/lib/page-read";
 import { deriveKey } from "@/lib/secret-box";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { PARTS_PER_VISIT, SHARE_BATCH, clientDayShare, publicVisitLimit, requestLimitFor, shareAddress, visitLimitFor, visitorAddress } from "@/lib/traffic-rules";
@@ -231,49 +233,70 @@ export async function trafficForAdmission(folder: string, month = calendarWindow
  * (lib/traffic-rules.ts).
  */
 export async function isResting(store: Store, now = Date.now(), who: "public" | "buyer" = "public", from: { shared?: boolean } = {}): Promise<boolean> {
+  const at = await restingNow(store, now, who, from);
+  const resting = at === 0;
+  // What a reading of the public page about to be drawn may count, for its
+  // token (lib/page-read.ts, readToken): the window and its ceiling while
+  // the page may be drawn, nothing when it rests or the store is suspended.
+  // Readings are counted apart from the window's requests, so they never make
+  // a page rest (639 [GL7](25)). The page's place among the window's requests
+  // (`at`) is its reading's slot: one request in each READ_SAMPLE may carry a
+  // token (lib/page-read.ts, readSlot), so a window can never be sent more
+  // readings than its ceiling (the review of #2571, 5 November 2026).
+  if (who === "public") {
+    try {
+      noteReadStore(store.statsId, resting || store.suspended ? null : store, now, at);
+    } catch {}
+  }
+  return resting;
+}
+
+/** The page's place among its window's requests, counted (1 or more), or 0 when its pages rest. */
+async function restingNow(store: Store, now: number, who: "public" | "buyer", from: { shared?: boolean }): Promise<number> {
   try {
     const window = allowanceWindow(store, now);
-    if (!window) return true;
-    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return true;
+    if (!window) return 0;
+    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return 0;
     const month = visitLimitFor(store, now / 1000);
     const limit = who === "buyer" ? month : publicVisitLimit(month);
-    if (!Number.isSafeInteger(limit) || limit < 0) return true;
+    if (!Number.isSafeInteger(limit) || limit < 0) return 0;
     const folder = await storeFolder(storeRef(store));
     const traffic = await trafficForAdmission(folder, window.id);
-    if (traffic === null || traffic.visits >= limit) return true;
+    if (traffic === null || traffic.visits >= limit) return 0;
     // The page about to be drawn is one of the window's requests, and one of
     // its connection's share of the day, unless it is asked for by a service
     // many people's apps share (a podcast app's servers), which is bounded
     // by its own feed instead.
-    return !(await countRequest(folder, store, window, who, now, 1, from.shared ? null : await askingConnection()));
-  } catch { return true; }
+    return await countRequest(folder, store, window, who, now, 1, from.shared ? null : await askingConnection());
+  } catch { return 0; }
 }
 
 /**
  * One more request answered for this store's public side, counted in its
- * window: true when it fits, where public pages rest at 95% of the window's
- * requests and what buyers have at all of them (lib/traffic-rules.ts,
- * requestLimitFor). A count that cannot be made is a request refused.
+ * window: its place among the window's requests (its last unit's, 1 or more)
+ * when it fits, where public pages rest at 95% of the window's requests and
+ * what buyers have at all of them (lib/traffic-rules.ts, requestLimitFor);
+ * 0 when it does not. A count that cannot be made is a request refused.
  */
-async function countRequest(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units = 1, client: string | null = null): Promise<boolean> {
+async function countRequest(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units = 1, client: string | null = null): Promise<number> {
   const whole = requestLimitFor(store, now / 1000);
   const limit = who === "buyer" ? whole : publicVisitLimit(whole);
-  if (!Number.isSafeInteger(limit) || limit <= 0 || !FOLDER_PATTERN.test(folder)) return false;
-  if (!Number.isSafeInteger(units) || units < 1) return false;
+  if (!Number.isSafeInteger(limit) || limit <= 0 || !FOLDER_PATTERN.test(folder)) return 0;
+  if (!Number.isSafeInteger(units) || units < 1) return 0;
   // A store that pays nothing answers only while it holds one of the month's places (lib/free-pool-rules.ts).
-  if (!(await admitNonPaying(store, now))) return false;
+  if (!(await admitNonPaying(store, now))) return 0;
   // One connection's share of the day first (lib/traffic-rules.ts, clientDayShare):
   // past it this connection alone is refused, and nothing is counted against the store.
-  if (client && (await overShare(folder, window, whole, client, units, now))) return false;
+  if (client && (await overShare(folder, window, whole, client, units, now))) return 0;
   const key = requestsKey(folder, window.id);
   const reply = await redisPipeline([["INCRBY", key, units]]);
   // Only Redis's own answer to this one command counts (Codex G2 on #2583):
   // one reply, an integer at least `units`. Anything else, a `true`, a text
   // or a second item, is a count that cannot be made: the request is refused.
   const n = Array.isArray(reply) && reply.length === 1 && typeof reply[0] === "number" ? reply[0] : NaN;
-  if (!Number.isSafeInteger(n) || n < units) return false;
+  if (!Number.isSafeInteger(n) || n < units) return 0;
   if (n === units) await redisPipeline([["EXPIRE", key, keepSecondsFor(window, now)]]);
-  return n <= limit;
+  return n <= limit ? n : 0;
 }
 
 /**
@@ -294,7 +317,7 @@ export async function takePublicRequest(store: Store, who: "public" | "buyer" = 
     const window = allowanceWindow(store, now);
     if (!window) return false;
     if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return false;
-    return await countRequest(await storeFolder(storeRef(store)), store, window, who, now, units, from.shared ? null : await askingConnection());
+    return (await countRequest(await storeFolder(storeRef(store)), store, window, who, now, units, from.shared ? null : await askingConnection())) > 0;
   } catch {
     return false;
   }

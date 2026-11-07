@@ -2037,7 +2037,8 @@ export default async function StudioPage({
                     if (on.join() !== store.adsServer.join()) await before.catch(() => null).then(() => setAdsServer(storeRef(store), on)).catch(() => null);
                     return setup;
                   })();
-                  serverWrite.done = setupRead;
+                  // The writes after this one wait for the cart link's too, even when this part writes nothing.
+                  serverWrite.done = Promise.all([before.catch(() => null), setupRead]);
                   return (
                   <ServerEventsEditor
                     setup={await setupRead}

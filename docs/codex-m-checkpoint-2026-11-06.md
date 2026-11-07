@@ -1735,3 +1735,11 @@ GREEN: exactly line 66; only erasure exclusive path removed; retained controls b
 Public data check: 9 tracked files; 0 file(s) require correction.
 
 ```
+
+
+### Recibos 07/11/2026 16h40 — #3093 entregue; pedido nominal2730 precisa reconciliação
+#3093 **M5814592797 COMMENT/FULLbodyreadbackEXATO** em665a9b2a8016b44836f103e6591601749985b2f4, semachadonarevisãoDOCUMENTAL1linha66;Nownerconfirmation6712000368creditada/nãoproduto3066/não9CI. RED1conflict/exit1→GREEN0/exit0,15PASS1skip0fail/scanner9tracked0(comoPARCIAL)/9blobshead+oldexato.Nenhumcode/refautor/CI/queue/mainalterado.EvidênciaANTESformal b3e5167605d6868f163d825e677c4b8c7c4e514b/blob5c3444d1b75ff18dfcd3e846164c65471d467914FULL290107charsEXATO.
+
+FULLnovo apósclaimrevelou **C1-20261107-1633-CX-1 LIDA INTEGRALMENTE**: item3 Mnominalsegunda financeira#2730;itens1–3antesnovasunidades. PedidoapareceuDEPOISclaimdocumental1633efoirecebidodepoisentregardoc(semnovaunidadeantesverificarpedido). PREmetadata+commentsONLY#2730em16h39: OPEN/head83dcd10526fc25cf15d45c19e2691df6c9a2daef; EXISTEM **C4review5794397210** explicitamente2ªrevisãotextodecobrança/same83e **C1review6709325667** READY/moneyCX116same83. Ainda comentárioC6 **6709498255** pedeFFclaude6/c5-fix-2730@561a2dd4d(apenasmainmerge);PRheadcontinua83,nãocertificarcandidatepelo relato. MZEROdiff/fonte/teste2730/ZEROformal3ª;nãoignorarC1nominalnemduplicarparecersemreconciliação. CanalregistrarápedidoC1qualificarseC4opiniãonãocontaoueMdevequalificarnovocandidatoapósFF. Semperguntaraodono;coordenaçãoC1,declarandobloqueioespecíficotemporárioatédisposição. Nãoescolhernovasunidadesenquantoitem3pendente.
+
+M3083metadatafreshOPEN/mesmo1babf986bb0c76c5dcbd1b88d609c4f5e75d0a3f;C6-1620localfixnãoenviado/R2C1classependente,NÃOreplay.M3051GidentityproposedALTOsemnovograntM;1924C1A+BfiladurávelC3disposto,nãoMqueue. C1-1630ano70unidadeC2/nãoMalterarteto;normativosmain09ddbyteidprévios. C2-1636nãoVERDEtarifasdecisãoexternanãogranM. NliberouinboxrecorteleitoresC6eowner3093reitera,Vconsolida,C6novasauditoriasafiliados/licenceDiscord/closingguard/broadcastscheckoutnãoMownership. Semautomação/agendaalterada/semvigiainfundo/serialMédio0agentes. PendênciasTEMPORÁRIASdecoordenação,nãodesabilitarcontinuidadeporisso,nãodeclararprojetofinalizado.

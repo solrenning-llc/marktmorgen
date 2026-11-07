@@ -78,7 +78,7 @@ One studio page, "Earnings", for whoever may see the numbers (`can(role, "stats"
 | Checkouts, extras | The Stripe lists inside `readPaidSales` (lib/stats.ts): checkout sessions and one-click payment intents on the creator's account, 20 pages of 100 each. Never `readPaidSales` itself, which adds the store's PayPal sales to the same list: those are PayPal's, and would be counted twice, once as Stripe | Only to 180 days in `readSales`; the lists take any `since` |
 | Paid invoices of memberships | `readRenewals`, 10 pages, keeps only `subscription_cycle`. The year reading takes every paid invoice of the store's memberships and payment plans, dated by payment: period renewals (`subscription_cycle`), a plan change charged at once (`subscription_update`, lib/tier-switch.ts and lib/yearly-switch.ts), and any other reason, except `subscription_create`, whose payment the checkout already counted (a creator's memberships are opened only by the store's checkout today; one opened another way would have its first invoice counted) | 90 days in `readSales` |
 | Refunds | `readRefunds` / `readStoreRefunds`, 5 pages | 90 days |
-| Disputes, money given back | `readDisputes`, 3 pages, keeps `DISPUTE_TAKES`. The year reading takes every dispute that took money, in the month of its debit, and the money a won dispute gave back (or a refund that failed), in the month of its credit, each from its own balance transaction | 90 days |
+| Disputes, money given back | `readDisputes`, 3 pages, keeps `DISPUTE_TAKES`. The rule takes every dispute that took money, in the month of its debit, and the money a won dispute gave back (or a refund that failed), in the month of its credit, each from its own balance transaction. No code of this repository reads a dispute's balance transactions, so their shape is not confirmed here: until it is, the year reading (unit 2) does not read the disputes list and says Stripe disputes and money given back not read (`notRead`) on every Stripe month, never `DISPUTE_TAKES` and never zero | 90 days |
 | PayPal sales, refunds | `readPayPalSales`, `readPayPalRefundsWithCoverage` | Any `since`, record-capped |
 | Kept copy | `keptReading` (lib/store-readings.ts), kind `sales`, 10 min fresh, a day kept | 90 days |
 
@@ -170,14 +170,20 @@ source and currency only).
    refunds and disputes subtracted, per-month completeness, invalid or duplicate records fail
    closed, confirmed zero apart from unknown, no status fields.
 2. **The year reading** (built): `readEarningsYear(store, timeZone, now)` in lib/earnings-read.ts
-   (lib/stats.ts is another agent's file). It reads the same five Stripe lists with the same paths
-   and page caps (`EARNINGS_STRIPE_PAGES`: 20 + 20 + 10 + 5 + 3 = 58) and the PayPal sales (2,000)
-   and refunds (`PAYPAL_REFUNDS_READ`), but in their exact shape, list by list: lib/stats.ts's
+   (lib/stats.ts is another agent's file). It reads four of the same Stripe lists with the same
+   paths and page caps (`EARNINGS_STRIPE_PAGES`: 20 + 20 + 10 + 5 = 55, within the 58 of
+   `SALES_READ_SHAPE`; the disputes list is not read, see the table above) and the PayPal sales
+   (2,000) and refunds (`PAYPAL_REFUNDS_READ`), but in their exact shape, list by list: lib/stats.ts's
    readers answer one `partial` for two lists together, read PayPal refunds oldest first and take
    an unreadable answer as an empty list, so they cannot say how far back each list was read.
    Each list returns `reachedBack`; a row or record that cannot be read stops its list there (the
    newer months stay known); a page in another shape, an id twice, rows out of order or a failure
-   make the list unread. Renewals are dated by `status_transitions.paid_at`; until Stripe's retry
+   make the list unread. Under the rule's contract of #2941: every record carries its provider's
+   id (`stripe:…`, `paypal:…`); Stripe says disputes and money given back not read
+   (`EARNINGS_STRIPE_NOT_READ`), PayPal its disputes; the invoices taken are every paid invoice
+   of the store's memberships but `subscription_create` (Claude 3's money review of #3022,
+   MEDIUM 1), an invoice of no subscription in either shape is skipped, and one that names a
+   subscription without metadata that can be read stops its list there. Renewals are dated by `status_transitions.paid_at`; until Stripe's retry
    window is proved from dated documentation they are known only from `RENEWAL_PAID_WITHIN_DAYS`
    (27) after the reading's start, which gives up the oldest month, and a renewal read that was
    paid later than that after its invoice makes the renewals unread. The months' own time is

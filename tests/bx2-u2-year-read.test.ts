@@ -446,7 +446,8 @@ async function main(): Promise<void> {
     reset();
     const shop = makeStore();
     stripe["/checkout/sessions"] = [checkout("m0001", Date.UTC(2031, 5, 3), 5000)];
-    stripe["/invoices"] = [invoice("nm0001", Date.UTC(2031, 3, 9), Date.UTC(2031, 3, 9), 1200, { billing_reason: "subscription_update", ...shape })];
+    // Made 9 March: an invoice is known only from RENEWAL_PAID_WITHIN_DAYS after it (5 April), so June and May are read.
+    stripe["/invoices"] = [invoice("nm0001", Date.UTC(2031, 2, 9), Date.UTC(2031, 2, 9), 1200, { billing_reason: "subscription_update", ...shape })];
     const e = (await readEarningsYear(shop, "UTC", NOW))?.value ?? null;
     is(`a paid membership invoice whose store cannot be told (${label}): from it back unknown, the newer months read`, states(e, "stripe").slice(0, 4), ["read", "read", "not_reached", "not_reached"]);
   }

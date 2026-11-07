@@ -2,12 +2,23 @@
  * A store's twelve months of money, read (426 [BX2] unit 2; docs/bx2-earnings-design.md).
  *
  * From the creator's own Stripe account: the store's paid checkouts and the
- * one-click extras after them, its renewals, and the refunds and the disputes
- * that took money on the account; and the PayPal sales and full refunds kept
- * here as each was paid (lib/paypal-sales.ts). The same lists, paths and page
- * caps as the sales reading (lib/stats.ts, readSales), so one reading of the
- * year is at most one SALES_READ_SHAPE (lib/read-ceilings.ts): 58 Stripe pages,
- * 2,000 PayPal sales and PAYPAL_REFUNDS_READ refunds. It is one of the store's
+ * one-click extras after them, every later paid invoice of its memberships and
+ * payment plans, and the refunds on the account; and the PayPal sales and full
+ * refunds kept here as each was paid (lib/paypal-sales.ts). The same lists,
+ * paths and page caps as the sales reading (lib/stats.ts, readSales), less its
+ * disputes, so one reading of the year is within one SALES_READ_SHAPE
+ * (lib/read-ceilings.ts): 55 of its 58 Stripe pages, 2,000 PayPal sales and
+ * PAYPAL_REFUNDS_READ refunds.
+ *
+ * Stripe disputes and money given back (a dispute won, a refund that failed)
+ * are said not read (`notRead`), on every Stripe month. The rule of #2941
+ * (lib/earnings-by-month.ts) counts a dispute in the month the bank took the
+ * money and money given back in the month it came back, each from its own
+ * balance transaction; no code of this repository reads a dispute's balance
+ * transactions, so their shape is not confirmed here and is not guessed, and
+ * DISPUTE_TAKES (which drops a dispute once won) would rewrite a month shown.
+ * Unknown is said, never zero. Every record carries its provider's own id
+ * (`stripe:…`, `paypal:…`), as the rule requires. It is one of the store's
  * HEAVY_READINGS_PER_DAY, taken before anything is read (keptReading), and the
  * months are kept as the fourth kind of reading, "earnings", so looking again
  * does not read again.
@@ -40,15 +51,21 @@ import { type Earnings, type ListReading, type MoneyEvent, type MoneyKind, type 
 import { PAYPAL_REFUNDS_READ, paidKey, refundedKey, salesKey } from "@/lib/paypal-sales";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
-import { DISPUTE_TAKES } from "@/lib/retained-revenue";
 import { readsSales } from "@/lib/stats";
 import { type Store, saleHandles } from "@/lib/store";
 import { keyFor, onAccount } from "@/lib/stripe-account";
 import { STRIPE_LIST_VERSION, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { type Kept, NotRead, keptReading } from "@/lib/store-readings";
 
-/** Pages of a hundred each Stripe list is read for: those of the sales reading (lib/stats.ts, readSales), 58 in all. */
-export const EARNINGS_STRIPE_PAGES = { checkouts: 20, extras: 20, invoices: 10, refunds: 5, disputes: 3 } as const;
+/**
+ * Pages of a hundred each Stripe list is read for: those of the sales reading
+ * (lib/stats.ts, readSales) but its 3 of disputes, which are said not read:
+ * 55 in all, within the 58 SALES_READ_SHAPE charges.
+ */
+export const EARNINGS_STRIPE_PAGES = { checkouts: 20, extras: 20, invoices: 10, refunds: 5 } as const;
+
+/** What a Stripe reading says it does not read, on every Stripe month: disputes and money given back (see above). */
+export const EARNINGS_STRIPE_NOT_READ: readonly MoneyKind[] = ["dispute", "reinstated"];
 /** PayPal sales read at most: those of the sales reading (readPaidSales(store, since, 20)). */
 export const EARNINGS_PAYPAL_SALES = 20 * 100;
 /** PayPal full refunds read at most. */
@@ -71,14 +88,18 @@ const seconds = (value: unknown): number | null => (typeof value === "number" &&
 /** What a row is: money of the store's (an event), not the store's or not money ("skip"), or not readable (null). */
 type Taken = MoneyEvent | "skip" | null;
 
-/** An amount of a row in the smallest unit, its currency and when it was made; null when any of them cannot be read. */
+/**
+ * An amount of a row in the smallest unit, its currency and when it was made,
+ * under the row's id prefixed by its provider ("stripe:…", as the rule of
+ * #2941 requires); null when any of them cannot be read.
+ */
 function money(row: Record<string, unknown>, field: string, at: number): MoneyEvent | null {
   const cents = ownField(row, field);
   const currency = ownField(row, "currency");
   const id = ownField(row, "id");
   if (typeof cents !== "number" || !Number.isSafeInteger(cents) || cents < 0) return null;
-  if (typeof currency !== "string" || !CURRENCY.test(currency) || typeof id !== "string") return null;
-  return { id, at: at * 1000, cents, currency: currency.toLowerCase() };
+  if (typeof currency !== "string" || !CURRENCY.test(currency) || typeof id !== "string" || !ID.test(id)) return null;
+  return { id: `stripe:${id}`, at: at * 1000, cents, currency: currency.toLowerCase() };
 }
 
 /** The row's metadata, a plain object of its own, or null. */
@@ -97,6 +118,25 @@ function invoiceMetadata(row: Record<string, unknown>): Record<string, unknown> 
     if (plainObject(meta)) return meta;
   }
   return null;
+}
+
+/** Present: a value that is neither missing nor null. */
+const present = (value: unknown): boolean => value !== undefined && value !== null;
+
+/**
+ * Whose membership an invoice is: the subscription's metadata it carries (in
+ * either shape invoiceMetadata reads), "none" for an invoice of no
+ * subscription at all (one the creator wrote by hand), or null when it names
+ * a subscription, or carries a parent or subscription details, without
+ * metadata that can be read: the store it belongs to cannot be told.
+ */
+function invoiceMembership(row: Record<string, unknown>): Record<string, unknown> | "none" | null {
+  const meta = invoiceMetadata(row);
+  if (meta) return meta;
+  const parent = ownField(row, "parent");
+  if (present(parent) && (!plainObject(parent) || present(ownField(parent, "subscription_details")))) return null;
+  if (present(ownField(row, "subscription")) || present(ownField(row, "subscription_details"))) return null;
+  return "none";
 }
 
 /** A renewal read that was paid later after its invoice than the reading takes for granted: the renewals are unread. */
@@ -133,15 +173,18 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
       if (ownField(meta, "kind") !== "upsell" || !ours(meta) || status !== "succeeded") return "skip";
       return money(row, "amount", created);
     },
-    // A payment after the first of the store's memberships and payment plans, dated by when it was paid.
+    // Every paid invoice of the store's memberships and payment plans but the first (subscription_create), whose
+    // payment its checkout already counted: period renewals, a plan change charged at once (subscription_update,
+    // lib/tier-switch.ts, lib/yearly-switch.ts) and any other reason (the rule of #2941; Claude 3 on #3022), dated by
+    // when it was paid. An invoice of no subscription is not a membership's; one whose store cannot be told stops the list.
     invoices: (row, created) => {
       const status = text(row, "status");
       const reason = text(row, "billing_reason");
       if (status === null || reason === null) return null;
-      if (status !== "paid" || reason !== "subscription_cycle") return "skip";
-      const meta = invoiceMetadata(row);
-      if (!meta) return null;
-      if (!ours(meta)) return "skip";
+      if (status !== "paid" || reason === "subscription_create") return "skip";
+      const meta = invoiceMembership(row);
+      if (meta === null) return null;
+      if (meta === "none" || !ours(meta)) return "skip";
       const transitions = ownField(row, "status_transitions");
       const paidAt = plainObject(transitions) ? seconds(ownField(transitions, "paid_at")) : null;
       if (paidAt === null || paidAt < created) return null;
@@ -154,12 +197,6 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
       const status = text(row, "status");
       if (status === null) return null;
       return status === "succeeded" || status === "pending" ? money(row, "amount", created) : "skip";
-    },
-    // A dispute the bank is holding or the buyer won (DISPUTE_TAKES, as lib/retained-revenue.ts).
-    disputes: (row, created) => {
-      const status = text(row, "status");
-      if (status === null) return null;
-      return DISPUTE_TAKES.has(status) ? money(row, "amount", created) : "skip";
     },
   };
 }
@@ -250,9 +287,10 @@ const unread = (kind: MoneyKind) => (error: unknown): ListReading => {
 };
 
 /**
- * Every list of the store's money from `since` (ms): Stripe's five, when it
- * has an account, and PayPal's two, when it sells or sold through PayPal (or
- * PayPal could not be read, so it may have). Each list read side by side.
+ * Every list of the store's money from `since` (ms): Stripe's four, when it
+ * has an account, with disputes and money given back said not read, and
+ * PayPal's two, when it sells or sold through PayPal (or PayPal could not be
+ * read, so it may have). Each list read side by side.
  */
 export async function readEarningsLists(store: Store, since: number): Promise<ProviderReading[]> {
   const sinceSec = Math.floor(since / 1000);
@@ -267,9 +305,9 @@ export async function readEarningsLists(store: Store, since: number): Promise<Pr
       stripeList(account, "/payment_intents", "sale", sinceSec, p.extras, take.extras).catch(unread("sale")),
       stripeList(account, "/invoices", "renewal", sinceSec, p.invoices, take.invoices, RENEWAL_SHIFT_MS).catch(unread("renewal")),
       stripeList(account, "/refunds", "refund", sinceSec, p.refunds, take.refunds).catch(unread("refund")),
-      stripeList(account, "/disputes", "dispute", sinceSec, p.disputes, take.disputes).catch(unread("dispute")),
     ]);
-    return { source: "stripe", lists };
+    // Every kind of EXPECTED_KINDS.stripe is a list above or said here, never both (the rule of #2941).
+    return { source: "stripe", lists, notRead: [...EARNINGS_STRIPE_NOT_READ] };
   })();
   const paypal = (async (): Promise<ProviderReading | null> => {
     if (!store.statsId || !isRedisConfigured()) return null;

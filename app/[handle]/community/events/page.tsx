@@ -41,7 +41,8 @@ export default async function CommunityEventsPage({ params, searchParams }: Para
   const id = store.community.id;
   const query = await searchParams;
   const w = communityWords(store.language);
-  const notice = communityNotices(store.language)[typeof query.n === "string" ? query.n : ""] ?? null;
+  const notices = communityNotices(store.language);
+  const notice = typeof query.n === "string" && Object.hasOwn(notices, query.n) ? notices[query.n] : null;
   const beforeRaw = typeof query.before === "string" ? Number(query.before) : NaN;
   const before = Number.isFinite(beforeRaw) && beforeRaw > 0 ? beforeRaw : null;
   const now = eventClock();

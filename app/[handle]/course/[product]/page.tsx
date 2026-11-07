@@ -70,7 +70,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const w = coursesWords(store.language);
 
   const query = await searchParams;
-  const notice = w.linkNotices[typeof query.link === "string" ? query.link : ""] ?? null;
+  const notice = typeof query.link === "string" && Object.hasOwn(w.linkNotices, query.link) ? w.linkNotices[query.link] : null;
   const jar = await cookies();
   const access = await courseAccess(store, product, jar);
   const open = access.state === "open";
@@ -104,7 +104,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const held = studying ? heldBack(course, passed) : new Map<string, string>();
   const finished = studying && hasFinished(course, done, passed);
   const mustPass = requiredQuizLessons(course).length;
-  const certNotice = w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME)[typeof query.cert === "string" ? query.cert : ""] ?? null;
+  const certNotices = w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME);
+  const certNotice = typeof query.cert === "string" && Object.hasOwn(certNotices, query.cert) ? certNotices[query.cert] : null;
 
   const all = lessonsInOrder(course);
   const total = lessonCount(course);

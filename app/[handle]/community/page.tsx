@@ -54,7 +54,7 @@ export default async function CommunityPage({ params, searchParams }: Params) {
   const w = communityWords(store.language);
   const lang = LANGUAGES[store.language].locale;
   const notices = communityNotices(store.language);
-  const notice = notices[word] ?? null;
+  const notice = Object.hasOwn(notices, word) ? notices[word] : null;
 
   if (viewer.state !== "in") {
     const products = (await accessProducts(store, viewer.config)).map((p) => ({ id: p.id, title: p.title, kind: ticketKind(store, p) }));
@@ -68,7 +68,7 @@ export default async function CommunityPage({ params, searchParams }: Params) {
             state={viewer.state}
             email={viewer.state === "out" ? null : viewer.email}
             products={products}
-            link={linkNotices(store.language)[typeof query.link === "string" ? query.link : ""] ?? (word === "out" ? w.sessionEnded : null)}
+            link={(typeof query.link === "string" && Object.hasOwn(linkNotices(store.language), query.link) ? linkNotices(store.language)[query.link] : null) ?? (word === "out" ? w.sessionEnded : null)}
           />
         </main>
       </div>

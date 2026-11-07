@@ -69,7 +69,8 @@ export default async function CommunityEventPage({ params, searchParams }: Param
   const query = await searchParams;
   const w = communityWords(store.language);
   const locale = LANGUAGES[store.language].locale;
-  const notice = communityNotices(store.language)[typeof query.n === "string" ? query.n : ""] ?? null;
+  const notices = communityNotices(store.language);
+  const notice = typeof query.n === "string" && Object.hasOwn(notices, query.n) ? notices[query.n] : null;
   const now = eventClock();
 
   const [allowed, numbers, meetings] = await Promise.all([

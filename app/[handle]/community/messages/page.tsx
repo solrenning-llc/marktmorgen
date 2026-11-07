@@ -48,7 +48,8 @@ export default async function MessagesPage({ params, searchParams }: Params) {
   const id = store.community.id;
   const query = await searchParams;
   const w = communityWords(store.language);
-  const notice = communityNotices(store.language)[typeof query.n === "string" ? query.n : ""] ?? null;
+  const notices = communityNotices(store.language);
+  const notice = typeof query.n === "string" && Object.hasOwn(notices, query.n) ? notices[query.n] : null;
   const [talks, asks] = await Promise.all([inbox(id, key), inbox(id, key, true)]);
   const people = [...talks, ...asks].map((c) => c.other).filter((who) => who !== CREATOR);
   const members = await readMembers(id, people);

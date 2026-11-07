@@ -35,7 +35,7 @@ export default async function CommunityYouPage({ params, searchParams }: Params)
   const query = await searchParams;
   const w = communityWords(store.language);
   const NOTICES = communityNotices(store.language);
-  const notice = NOTICES[typeof query.n === "string" ? query.n : ""] ?? null;
+  const notice = typeof query.n === "string" && Object.hasOwn(NOTICES, query.n) ? NOTICES[query.n] : null;
   const member = viewer.member;
   const points = member ? (await pointsOf(store.community.id, [member.k])).get(member.k) ?? 0 : 0;
   const toNext = toNextLevel(points);

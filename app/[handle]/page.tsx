@@ -160,7 +160,7 @@ export default async function StorePage({ params, searchParams }: Params) {
   // The links on the page now: a scheduled one only inside its window (lib/store-link.ts).
   const links = showingLinks(store.links);
   const bw = blockWords(store.language);
-  const notice = w.notices[typeof query.status === "string" ? query.status : ""] ?? null;
+  const notice = typeof query.status === "string" && Object.hasOwn(w.notices, query.status) ? w.notices[query.status] : null;
   // "Bought 120 times", when the creator shows it and it is worth saying (lib/sold-count.ts).
   const soldLine = (count: number | undefined) => (count && count >= SHOWN_FROM ? w.bought(num(count)) : null);
 

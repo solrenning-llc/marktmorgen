@@ -187,7 +187,7 @@ export default async function CommunityPostPage({ params, searchParams }: Params
   const query = await searchParams;
   const w = communityWords(store.language);
   const notices = communityNotices(store.language);
-  const notice = notices[typeof query.n === "string" ? query.n : ""] ?? null;
+  const notice = typeof query.n === "string" && Object.hasOwn(notices, query.n) ? notices[query.n] : null;
   const all = await readComments(id, post.id);
   const [members, numbers, polls, likes, points] = await Promise.all([
     readMembers(id, [post.a, ...all.map((c) => c.a)]),

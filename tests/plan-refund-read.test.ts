@@ -39,6 +39,8 @@ const world = {
   invoiceListReply: undefined as unknown | undefined,
   /** One exact list/search response used to prove that partial history rows stay unknown. */
   historyReply: null as { path: "/charges" | "/charges/search" | "/customers/search"; customer?: string; data: unknown[] } | null,
+  /** An exact stand-in answer for GET /invoices/<id>, by id: another invoice's, or one with no id (rule 30). */
+  invoiceByIdReply: new Map<string, Record<string, unknown>>(),
   /** A customer's Stripe balance (negative: a credit), 0 when not set. */
   balance: new Map<string, number>(),
   calls: 0,
@@ -81,6 +83,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   const invoice = path.match(/^\/invoices\/(in_\w+)$/);
   if (invoice) {
+    const exact = world.invoiceByIdReply.get(invoice[1]);
+    if (exact) return json(exact);
     const row = world.invoices.find((i) => i.id === invoice[1]);
     if (!row) return json({ error: { message: "No such invoice" } }, 404);
     const sub = world.subs.get(String(row.subscription)) ?? { id: row.subscription, metadata: { store: "another-store" } };
@@ -179,6 +183,20 @@ async function main() {
   pay(again, { at: NOW - 5 * DAY, subscription: "sub_againold0001" });
   pay(again, { at: NOW - 2 * DAY });
   is("the first payment was this store's earlier plan: unknown, never a silent no", (await again.read()).refund, { kind: "unknown", reason: "not_this_store" });
+  // Rule 30: the earlier invoice's reply is for another invoice, or has no id: what it names decides nothing.
+  for (const [label, reply] of [
+    ["another invoice's reply", (id: string) => ({ id: `${id}other`, object: "invoice", subscription: { id: "sub_anotherstore02", metadata: { store: "another-store" } } })],
+    ["a reply with no id", () => ({ object: "invoice", subscription: { id: "sub_anotherstore03", metadata: { store: "another-store" } } })],
+  ] as const) {
+    const misread = await shop();
+    world.subs.set(`sub_${misread.handle}old1`, { id: `sub_${misread.handle}old1`, status: "canceled", customer: misread.customer, metadata: { store: misread.handle } });
+    const earlier = pay(misread, { at: NOW - 5 * DAY, subscription: `sub_${misread.handle}old1` });
+    pay(misread, { at: NOW - 2 * DAY });
+    world.invoiceByIdReply.set(earlier.inv, reply(earlier.inv));
+    is(`the earlier invoice read as ${label}: unknown, never judged as a renewal`, (await misread.read()).refund.kind, "unknown");
+    world.invoiceByIdReply.delete(earlier.inv);
+    is(`and once Stripe answers for it, it is this store's earlier plan (${label})`, (await misread.read()).refund, { kind: "unknown", reason: "not_this_store" });
+  }
   const trial = await shop();
   world.invoices.push({ id: `in_trial${n}`, subscription: trial.subscriptionId, status: "paid", created: NOW - DAY, total: 0, tax: null, billing_reason: "subscription_create", charge: null, lines: { data: [] } });
   is("a trial's invoice paid with no charge: no payment yet", (await trial.read()).refund, { kind: "none", reason: "no_plan_payment" });

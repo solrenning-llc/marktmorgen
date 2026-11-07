@@ -51,6 +51,8 @@ const SUB = "sub_PlanDispute01";
 const ADDON = "sub_PlanDisputeAddon";
 const OTHER = "sub_PlanDisputeOther";
 const BROKEN = "sub_PlanDisputeBroken";
+/** Subscriptions whose reply is set by the test, to prove that a reply for another subscription decides nothing. */
+const misread: Record<string, Record<string, unknown>> = {};
 
 let byId: Record<string, Record<string, unknown>> = {};
 let pages: { data: Record<string, unknown>[]; has_more: boolean }[] = [];
@@ -73,6 +75,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (url.pathname === `/v1/subscriptions/${SUB}`) return Response.json({ id: SUB, metadata: { store: handle }, customer: "cus_PlanDispute01" });
     if (url.pathname === `/v1/subscriptions/${ADDON}`) return Response.json({ id: ADDON, metadata: { store: handle, addon: "assistant" }, customer: "cus_PlanDispute01" });
     if (url.pathname === `/v1/subscriptions/${OTHER}`) return Response.json({ id: OTHER, metadata: { store: handle }, customer: "cus_SomeoneElse" });
+    const subAsked = url.pathname.startsWith("/v1/subscriptions/") ? decodeURIComponent(url.pathname.slice("/v1/subscriptions/".length)) : "";
+    if (subAsked && misread[subAsked]) return Response.json(misread[subAsked]);
     if (url.pathname === `/v1/subscriptions/${BROKEN}`) return new Response(JSON.stringify({ error: { message: "boom" } }), { status: 500 });
   }
   return new Response("{}", { status: 404 });
@@ -199,6 +203,33 @@ async function main() {
     asked.length = 0;
     await syncPlanDisputes(Date.now() + 10_000, NOW);
     is("a decided dispute listed again costs no subscription read", asked.filter((line) => line.startsWith("GET /v1/subscriptions/")).length, 0);
+  }
+
+  part("A reply for another subscription, or with no id, decides nothing (rule 30)");
+  {
+    await setup();
+    const WRONG = "sub_PlanDisputeWrongId";
+    const BARE = "sub_PlanDisputeNoId";
+    const LATER = "sub_PlanDisputeLater";
+    // Stripe answers for this store's own plan when asked about another subscription: never written on this store.
+    misread[WRONG] = { id: SUB, metadata: { store: handle }, customer: "cus_PlanDispute01" };
+    // The same, with no id at all.
+    misread[BARE] = { metadata: { store: handle }, customer: "cus_PlanDispute01" };
+    // Another subscription, of no store: never remembered as unmatched, so the right reply is still read later.
+    misread[LATER] = { id: "sub_PlanDisputeElse", metadata: {}, customer: "cus_SomeoneElse" };
+    pages = [{ data: [dispute("du_WrongId1", "needs_response", WRONG), dispute("du_NoId1", "needs_response", BARE), dispute("du_Later1", "needs_response", LATER)], has_more: false }];
+    const read = await syncPlanDisputes(Date.now() + 10_000, NOW);
+    is("each misread reply is counted as failed, none recorded or unmatched", [read.recorded, read.unmatched, read.failed], [0, 0, 3]);
+    is("no dispute is written on the store from a reply for another subscription", (await storeForEmail(owner))!.planDisputes ?? [], []);
+    is("costs are not paused on a misread reply", costPauseCode((await storeForEmail(owner))!, NOW), null);
+    const seenNow = await redis.run(["HGETALL", "nl:plan-disputes:seen"]);
+    const seenIds = Array.isArray(seenNow) ? (seenNow as unknown[]).filter((_, i) => i % 2 === 0).map(String) : Object.keys((seenNow ?? {}) as object);
+    is("nothing is remembered for a misread dispute", ["du_WrongId1", "du_NoId1", "du_Later1"].filter((id) => seenIds.includes(id)), []);
+    misread[LATER] = { id: LATER, metadata: { store: handle }, customer: "cus_PlanDispute01" };
+    pages = [{ data: [dispute("du_Later1", "needs_response", LATER)], has_more: false }];
+    const later = await syncPlanDisputes(Date.now() + 10_000, NOW + 8 * DAY);
+    is("the right reply, read after the week an unmatched one is asked about, is still written", [later.recorded, (await storeForEmail(owner))!.planDisputes?.map((kept) => kept.id)], [1, ["du_Later1"]]);
+    for (const key of Object.keys(misread)) delete misread[key];
   }
 
   part("Bounded, newest first, and open ones past the window read by id");

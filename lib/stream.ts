@@ -86,7 +86,7 @@ import { VIDEO_RECORD_BYTES } from "@/lib/stream-rules";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { STREAM_PEEK_TIMEOUT_MS, STREAM_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData } from "@/lib/store-data";
 import { type CaptionProblem, type CaptionTrack, MAX_CAPTION_TRACKS, captionLabel, toVtt } from "@/lib/captions";
 import {
@@ -689,6 +689,19 @@ function tracksFrom(flat: unknown): CaptionTrack[] {
   return out.sort((a, b) => a.label.localeCompare(b.label, "en"));
 }
 
+function exactTracksFrom(flat: unknown): CaptionTrack[] | null {
+  const fields = stringList(flat);
+  if (!fields || fields.length % 2 !== 0) return null;
+  const out: CaptionTrack[] = [];
+  for (let i = 0; i < fields.length; i += 2) {
+    const lang = fields[i];
+    const label = captionLabel(lang);
+    if (!label) return null;
+    out.push({ lang, label });
+  }
+  return out.sort((a, b) => a.label.localeCompare(b.label, "en"));
+}
+
 /**
  * One request to the video service about this library, for the captions it
  * writes itself (lib/auto-captions.ts). `status` 0 when it was not reached,
@@ -717,10 +730,18 @@ export async function streamCaptions(pathnames: string[]): Promise<Record<string
     return parts ? [{ path, id: parts.id }] : [];
   });
   if (!wanted.length || !isRedisConfigured()) return {};
-  const rows = await redisPipeline(wanted.map(({ id }) => ["HGETALL", captionsKey(id)]));
+  const rows = repliesFor(
+    await redisPipeline(wanted.map(({ id }) => ["HGETALL", captionsKey(id)])),
+    wanted.length,
+  );
+  if (!rows) throw new UnknownReplyError("stored captions");
   const out: Record<string, CaptionTrack[]> = {};
   wanted.forEach(({ path }, i) => {
-    const tracks = tracksFrom(rows[i]);
+    // Fail the whole read if any video's stored language is unsupported.
+    // A stale/unknown language is not evidence of an empty caption list;
+    // callers must not act on a partial batch as if it were complete.
+    const tracks = exactTracksFrom(rows[i]);
+    if (!tracks) throw new UnknownReplyError("stored captions");
     if (tracks.length) out[path] = tracks;
   });
   return out;

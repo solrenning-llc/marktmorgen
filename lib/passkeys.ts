@@ -405,9 +405,9 @@ const RETELL_MS = 60 * 60 * 1000;
  * What waits to be removed, read exactly (CX-123 rules 24 and 30, as listPasskeys beside it; sweep A5, finding 1): no
  * key is a known "nothing waits"; a record as writeDrop writes it, or an old one (one moment for every passkey), is the
  * record. Anything else (no reply, a reply of another shape, text that is not JSON or not such a record, a moment
- * that is not a number, more passkeys than an account holds) throws UnknownReplyError, so no caller takes "nothing
- * waits" from what it could not read: a passkey set to go never logs in as one that is not (signInWith refuses it),
- * and no removal is applied, kept or called off on it; the record stays as it is for the next read.
+ * that is not a number, no passkey at all or more than an account holds) throws UnknownReplyError, so no caller
+ * takes "nothing waits" from what it could not read: a passkey set to go never logs in as one that is not (signInWith
+ * refuses it), and no removal is applied, kept or called off on it; the record stays as it is for the next read.
  */
 async function readDrop(email: string): Promise<DropRecord | null> {
   if (!isRedisConfigured()) return null;
@@ -446,7 +446,10 @@ async function readDrop(email: string): Promise<DropRecord | null> {
     throw unknown();
   }
   // Never more than an account may hold: a record past it is not one this code wrote, and is never cut down to fit.
-  if (moments.length > MAX_PASSKEYS) throw unknown();
+  // Never fewer than one either (Codex D2 on #2874): writeDrop deletes a record left with no passkey and never stores
+  // it, so only no key (null above) means nothing waits; a record with none in it ({atOf:{}}, an old {ids:[]}) is
+  // not one this code wrote, and taking it as "nothing waits" would let a passkey whose removal is due log in.
+  if (!moments.length || moments.length > MAX_PASSKEYS) throw unknown();
   if (value.told !== undefined && !moment(value.told)) throw unknown();
   let telling: Telling | undefined;
   if (value.telling !== undefined) {
@@ -459,7 +462,7 @@ async function readDrop(email: string): Promise<DropRecord | null> {
     if (!Array.isArray(value.untold) || !value.untold.every((id): id is string => typeof id === "string")) throw unknown();
     untold = value.untold;
   }
-  return moments.length ? dropOf(Object.fromEntries(moments), moment(value.told) ? value.told : 0, { telling, untold }) : null;
+  return dropOf(Object.fromEntries(moments), moment(value.told) ? value.told : 0, { telling, untold });
 }
 
 /**

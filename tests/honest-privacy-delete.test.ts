@@ -16,7 +16,7 @@ import { done, is, part } from "./check";
 type Pipeline = typeof redis.pipeline;
 type Commands = Parameters<Pipeline>[0];
 
-const UNREAD = "could not be read just now";
+const UNREAD = "We could not load that store just now";
 const FOOT = "use the link at the foot of that store";
 const ALL = 'name="scope" value="all"';
 
@@ -67,6 +67,7 @@ async function main(): Promise<void> {
   const failed = await failing(() => page({ store: "harbor" }));
   is("said as not read just now", failed.includes(UNREAD), true);
   is("never told to use the link they just used", failed.includes(FOOT), false);
+  is("a link tries the same store again", failed.includes('href="/privacy/delete?store=harbor"'), true);
 
   part("A store answered in an unknown shape is said so too, never 'no such store' (review of #2970, MEDIUM)");
   for (const [name, prefix, reply] of [

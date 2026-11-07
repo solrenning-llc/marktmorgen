@@ -34,7 +34,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
-import { type Store, storeForHandle, storeForId } from "@/lib/store";
+import { type Store, storeForHandleExact, storeForId } from "@/lib/store";
 import { leadsKey } from "@/lib/contacts";
 import { storesKnownFor } from "@/lib/buyer-library";
 import { erasePerson } from "@/lib/person-erasure";
@@ -126,7 +126,10 @@ export async function askErasureLink(input: { email: string; ip: string; origin:
   if (!(await withinLimit("erase-ip", input.ip, ERASE_ASKS_PER_IP_HOUR, 3_600))) return { status: "limited" };
   if (!(await withinLimit("erase-address", sha(email), ERASE_ASKS_PER_ADDRESS_HOUR, 3_600))) return { status: "limited" };
   if (input.handle) {
-    const store = await storeForHandle(input.handle).catch(() => null);
+    // Read exactly: only a store confirmed not there is "none". A read that fails or answers in an unknown
+    // shape throws to the route's catch (status=error), never "sent" with no link made (review of #2970,
+    // rule 24). It is the store's read, before anything about the address, so it tells nothing about who buys.
+    const store = await storeForHandleExact(input.handle);
     if (store?.sid) {
       // The store's room is read before anything about the address: "full" comes to every address alike.
       const room = await askedRoom(store);

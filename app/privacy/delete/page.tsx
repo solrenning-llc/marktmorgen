@@ -183,8 +183,11 @@ export default async function DeletePage({ searchParams }: Params) {
               ) : null}
               {storeUnread ? (
                 <p className="notice notice-info mb-6" role="status">
-                  That store could not be read just now, so deleting your data from it alone cannot be offered here at the moment. Try again in a moment, or ask
-                  below for every store.
+                  We could not load that store just now, so deleting your data from it alone cannot be offered here at the moment.{" "}
+                  <Link href={`/privacy/delete?store=${encodeURIComponent(handle)}`} className="underline underline-offset-4">
+                    Try again
+                  </Link>
+                  , or ask below for every store.
                 </p>
               ) : null}
               {statusKey === "full" ? (

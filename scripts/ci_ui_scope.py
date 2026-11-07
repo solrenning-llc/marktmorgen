@@ -70,6 +70,8 @@ NAMED = re.compile(r"""[A-Za-z0-9_@.\[\]/-]*[A-Za-z0-9_\]-]\.(?:tsx?|mts|cts|m?j
 # tests/ci-merge-group's twin in scripts/test_ci_ui_scope.py fails when this set and the
 # repository disagree, so a new computed import is reviewed and named, never let through.
 REVIEWED_COMPUTED = frozenset({
+    # Bundles lib/embed-sdk.ts (named in its build call) and requires that bundle.
+    "tests/e2e/accessibility-buyer-actions.mjs",
     "tests/e2e/agreements.mjs",
     "tests/e2e/mobile-render.mjs",
     "tests/e2e/services.mjs",

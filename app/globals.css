@@ -2506,18 +2506,21 @@ select.st-field:not([multiple]),
    1.4.8): the cards (li) keep the grid's columns, their words are capped. Counted in Chromium, 56ch let a real sentence
    reach 81 a line and words of narrow letters (i, l, t, f, j, r) 126; at 34ch they measured 51 and 75.
    Narrower glyphs: docs/accessibility-programme.md (tests/store-front-accessibility.test.ts). */
-[data-store-layout] :where(p, dd, blockquote, figcaption, summary) {
-  max-width: 34ch;
+@layer components {
+  /* In a layer, under Tailwind's utilities: a block's own max-w-* or mx-* still wins over the cap. */
+  [data-store-layout] :where(p, dd, blockquote, figcaption, summary) {
+    max-width: 34ch;
+  }
+  /* A p that is a box, not running text, keeps the column's whole width: the promotion band (p.st-card), the community
+     card (p > a.st-card), the search's line and the cart's total (p.flex). After the cap, at the same weight. */
+  [data-store-layout] :where(p.flex, p.grid, p.st-card, p:has(> .st-card)) {
+    max-width: none;
+  }
+  [data-store-layout] :where(p.text-center, .text-center > p, p.st-note) {
+    margin-inline: auto;
+  }
 }
-/* A p that is a box, not running text, keeps the column's whole width: the promotion band (p.st-card), the community
-   card (p > a.st-card), the search's line and the cart's total (p.flex). After the cap, at the same weight. */
-[data-store-layout] :where(p.flex, p.grid, p.st-card, p:has(> .st-card)) {
-  max-width: none;
-}
-[data-store-layout] :where(p.text-center, .text-center > p, p.st-note) {
-  margin-inline: auto;
-}
-/* A question of the store's FAQ opens from a 44 px row (WCAG 2.5.5), its words centred in it by padding, so the summary
+/* A question of the store's FAQ opens from a 44 px row (WCAG 2.5.5), its words centered in it by padding, so the summary
    stays a list item and keeps its disclosure triangle. The first padding is for a browser without the lh unit. */
 .st-faq > summary {
   min-height: 2.75rem;

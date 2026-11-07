@@ -57,7 +57,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:dun:cards:", "nl:dun:count:", "nl:dun:cursor", "nl:dun:report:", "nl:erase:ix:", "nl:erase:link:", "nl:transparency:", "nl:transparency:acted:", "nl:transparency:since",
   "nl:esync:bad:", "nl:esync:cfg:", "nl:esync:j:", "nl:esync:log:", "nl:esync:q", "nl:esync:seen:",
   "nl:exposure:v1:", "nl:exposure:v1:YYYY-MM", "nl:fair:c:", "nl:firstsale:", "nl:flow-rotate:", "nl:forms:", "nl:free:claim:",
-  "nl:free:in:", "nl:free:n:", "nl:free:uses:", "nl:fshare:", "nl:fshare:n:", "nl:fshares:", "nl:fuse:",
+  "nl:free:in:", "nl:free:n:", "nl:free:uses:", "nl:free-days:", "nl:fshare:", "nl:fshare:n:", "nl:fshares:", "nl:fuse:",
   "nl:fuse:m:", "nl:gift:", "nl:gift:pi:", "nl:goal:", "nl:grp:", "nl:grp:pi:", "nl:grp:take:",
   "nl:gsc:conn", "nl:gsc:q:", "nl:gsc:state:", "nl:health:", "nl:heard:done:", "nl:heard:off",
   "nl:hooks:anchor:", "nl:hooks:cfg:", "nl:hooks:d:", "nl:hooks:evt:", "nl:hooks:log:", "nl:hooks:pos",
@@ -261,7 +261,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:firstsale:": C,
   "nl:flow-rotate:": X(1),
   "nl:form:r:": E, "nl:forms:": E,
-  "nl:free:claim:": T("nl:erase:ix:", 7), "nl:free:in:": Cr(62), "nl:free:n:": C, "nl:free:uses:": X(7),
+  "nl:free:claim:": T("nl:erase:ix:", 7), "nl:free:in:": Cr(62), "nl:free:n:": C, "nl:free:uses:": X(7), "nl:free-days:": X(1),
   "nl:fshare:": T("nl:fshares:"), "nl:fshare:n:": X(62), "nl:fshares:": E, "nl:fuse:": E, "nl:fuse:m:": E,
   // ---------------------------------------------------------------- g-l
   "nl:gift:": er(400), "nl:gift:pi:": X(400),

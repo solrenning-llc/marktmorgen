@@ -34,6 +34,7 @@ import { noteIfOpened } from "@/lib/course-finish";
 import { exampleTitlesLeft } from "@/lib/course-templates";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
+import { WhoAnswers } from "@/components/who-answers";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -281,6 +282,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
                   <input type="hidden" name="from" value="course" />
                   <DigitalConsentBox id={`dc-course-${product.id}`} lang={store.language} refused={query.consent === "needed"} className="mb-5" />
                   <button type="submit" className="btn st-btn btn-lg btn-block">{w.buyCourse(access.state === "ended", price)}</button>
+                  <WhoAnswers store={store} className="st-muted mt-3 text-center text-sm" />
                 </form>
               ) : paypalReady(store, product) ? (
                 <Link href={`/@${store.handle}/p/${productSegment(product)}#buy`} className="btn st-btn btn-lg btn-block">{w.buyWithPayPal(price)}</Link>

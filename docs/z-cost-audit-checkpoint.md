@@ -1,3 +1,9 @@
+# Recibo final — #2947 pronto, fila ainda não autorizada
+
+Ponto **CXZ-20261107-0644-C4-1** publicado no canal em **0bea71b6b4a3e46a7d83309f14d0253149106d11**, blob **77e21bfd98a32fbff5cc7376cb313b387b1a1fad**. A aprovaçãoC5 e os nove agregadores exatos estão qualificados abaixo; nenhummerge/enqueue/push/teste/CI adicional. Próximo é C4literalFILA LIGADApara2947 (com estadofresh), ou reproduçãoR2 dosMEDs2741/2819; WIPLOW40d9preservado. Gatestransitórios,nãoconclusãodaauditoria. Histórico/heads/REDs/WIPs/retriespreservados.
+
+---
+
 # Estado vigente — 07/11/2026 06h43 Fortaleza: #2947 aprovado e nove agregadores novos verdes; aguarda fila
 
 C5/ **6704833984** no EXATO **10baebdca911a678b0022b25f77278494066f20a**: “pode entrar”, LOWremanescente6701759336 FECHADO e nenhumachadonovo. C5reproduziuRED9f791946/11=8PASS3FAIL→head11/11, ligados24+29+34PASS e merge-treecom main0ade limpo70c1e788. Nãoautofechamentopelaautor: parecerindependenteexplicitaSHA256estático, controlflow e disposiçãohonestadoloopexistente.

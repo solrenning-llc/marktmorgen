@@ -307,6 +307,7 @@ export const nl: BuyerWords = {
   seeStore: (store) => `Bekijk ${store}`,
   cardTestMode: "Testmodus: er wordt geen echte kaart belast.",
   cardCheckout: "Veilig betalen via Stripe, in een nieuw tabblad.",
+  cardSoldBy: (store) => `Verkocht door ${store}, die ervoor verantwoordelijk is.`,
   cardOpens: (store) => `Opent in de winkel van ${store}, in een nieuw tabblad.`,
 
   // ---- Email cards (lib/mail-product-price.ts)

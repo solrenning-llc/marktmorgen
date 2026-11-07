@@ -345,6 +345,12 @@ export const en = {
   seeStore: (store: string) => `See ${store}`,
   cardTestMode: "Test mode: no real card is charged.",
   cardCheckout: "Secure checkout by Stripe, in a new tab.",
+  /**
+   * The card in a frame whose button goes straight to paying (a shipped product) has no room for whoAnswers; this
+   * short sentence says the same of the seller and no more (the Terms, section 3). Its title leads to the product's
+   * page, where the whole sentence is.
+   */
+  cardSoldBy: (store: string) => `Sold by ${store}, who is responsible for it.`,
   cardOpens: (store: string) => `Opens on ${store}'s store, in a new tab.`,
 
   // ---- Email cards (lib/mail-product-price.ts) -------------------------------------------

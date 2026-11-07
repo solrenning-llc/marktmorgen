@@ -23,7 +23,12 @@
  *   - it is not drawn where nothing can be paid for now: in test mode, on the
  *     demo store, for a free product, in a store that cannot take payments,
  *     or on a booking page whose calendar is closed;
- *   - the embedded card's pages draw it where a buyer starts paying.
+ *   - the embedded card's pages draw it where a buyer starts paying;
+ *   - the card in a frame, whose button goes straight to paying (a product
+ *     that is shipped, with nothing digital), has no room for the whole
+ *     sentence, so it says a short one of its own in every store language,
+ *     never cut: the card scrolls inside the frame rather than clip it. The
+ *     product's title still leads to its page, where the whole sentence is.
  */
 import { readFileSync } from "node:fs";
 import { renderToReadableStream } from "react-dom/server";
@@ -34,6 +39,7 @@ import RenewPage from "@/app/[handle]/renew/[product]/page";
 import CoursePage from "@/app/[handle]/course/[product]/page";
 import PaymentRequestPage from "@/app/[handle]/pay/[request]/page";
 import CollectionPage from "@/app/[handle]/shop/[collection]/page";
+import EmbedCard from "@/app/embed/[handle]/[product]/page";
 import {
   addProduct,
   claimHandle,
@@ -44,6 +50,8 @@ import {
   setProductCall,
   setProductCourse,
   setProductLink,
+  setProductShipping,
+  setEmbedSites,
   setStripeAccount,
   setSubscription,
   storeForEmail,
@@ -74,6 +82,17 @@ const SAID: Record<LanguageCode, string> = {
   it: `${STORE} è il venditore e risponde di ciò che compri, dei rimborsi e dell'eventuale diritto di recesso. Marktmorgen ospita le pagine del negozio e non è parte del contratto di vendita.`,
   nl: `${STORE} is de verkoper en is verantwoordelijk voor wat je koopt, voor terugbetalingen en voor een eventueel herroepingsrecht. Marktmorgen host de pagina's van de winkel en is geen partij bij de verkoop.`,
   pt: `${STORE} é o vendedor e responde pelo que compra, pelos reembolsos e por qualquer direito de livre resolução que tenha. A Marktmorgen aloja as páginas da loja e não é parte na venda.`,
+};
+
+/** The short sentence the card in a frame says, word for word, in each store language. */
+const SHORT: Record<LanguageCode, string> = {
+  en: `Sold by ${STORE}, who is responsible for it.`,
+  es: `Lo vende ${STORE}, que responde de lo que compras.`,
+  fr: `Vendu par ${STORE}, qui en est responsable.`,
+  de: `${STORE} ist der Verkäufer und dafür verantwortlich.`,
+  it: `Venduto da ${STORE}, che ne risponde.`,
+  nl: `Verkocht door ${STORE}, die ervoor verantwoordelijk is.`,
+  pt: `Vendido por ${STORE}, que responde pelo que compra.`,
 };
 
 /**
@@ -125,13 +144,35 @@ function textOf(html: string): string {
     .replace(/&amp;/g, "&");
 }
 
-/** A page drawn as a browser gets it, as its text. */
-async function drawn(url: string, run: () => Promise<unknown>): Promise<string> {
-  answering(new Request(url));
+/** A page drawn as a browser gets it, as its markup. */
+async function markup(url: string, run: () => Promise<unknown>, init?: RequestInit): Promise<string> {
+  answering(new Request(url, init));
   const node = await run();
   const stream = await renderToReadableStream(node as React.ReactElement, { onError: () => {} });
   await stream.allReady;
-  return textOf(await new Response(stream).text());
+  return new Response(stream).text();
+}
+
+/** A page drawn as a browser gets it, as its text. */
+async function drawn(url: string, run: () => Promise<unknown>): Promise<string> {
+  return textOf(await markup(url, run));
+}
+
+/** The embedded card for a product, as its frame draws it; `query` as the code that opened it put it on the address. */
+const cardHtml = (handle: string, product: string, query: Record<string, string> = {}, referer?: string) => {
+  const search = new URLSearchParams(query).toString();
+  return markup(
+    `https://marktmorgen.com/embed/${handle}/${product}${search ? `?${search}` : ""}`,
+    () => EmbedCard({ params: Promise.resolve({ handle: `@${handle}`, product }), searchParams: Promise.resolve(query) } as Parameters<typeof EmbedCard>[0]),
+    referer ? { headers: { referer } } : undefined,
+  );
+};
+
+/** The opening tag of the element whose own text is exactly `words`, or "" when there is none. */
+function holding(html: string, words: string): string {
+  const at = html.indexOf(`>${words.replace(/&/g, "&amp;").replace(/'/g, "&#x27;")}<`);
+  if (at < 0) return "";
+  return html.slice(html.lastIndexOf("<", at), at + 1);
 }
 
 const productPage = (handle: string, product: string) =>
@@ -263,6 +304,49 @@ async function main(): Promise<void> {
   is("the call's times, drawn in the frame", times.includes("<WhoAnswers store={store}"), true);
   const asPage = embed.slice(embed.indexOf('if (open?.mode === "page") {\n    return'));
   is("the card opened as a page of its own", asPage.slice(0, asPage.indexOf("\n  }\n")).includes("<WhoAnswers store={store}"), true);
+
+  part("The card in a frame, paid straight from its button: a shipped product");
+  const pan = await addProduct(OWNER, "Cast iron pan", "Seasoned and ready to cook on, shipped in a week.", "59", null);
+  if (!pan.ok) throw new Error("no shipped product");
+  const shipped = await setProductShipping(OWNER, pan.product.id, { cents: 0, region: "us", countries: ["US"], note: "" });
+  if (!shipped.ok) throw new Error(`not shipped: ${shipped.reason}`);
+  for (const code of LANGUAGE_CODES) {
+    await setLanguage(OWNER, code);
+    is(`${code}: the short sentence, word for word`, wordsIn(code).cardSoldBy(STORE), SHORT[code]);
+    is(`${code}: never wider than the Terms`, NEVER.filter((words) => SHORT[code].includes(words)), []);
+    const html = await cardHtml("harbor", pan.product.id);
+    is(`${code}: pasted in a frame, the button still goes straight to paying`, html.includes('action="/api/store/checkout"'), true);
+    is(`${code}: and the card says the short sentence`, textOf(html).includes(SHORT[code]), true);
+    const tag = holding(html, SHORT[code]);
+    is(`${code}: on a line that wraps, never cut short`, [tag !== "", /\btruncate\b|line-clamp|text-ellipsis/.test(tag)], [true, false]);
+    // Claude 5 on #3019: the note under the button ("Secure checkout by Stripe, in a new tab.") is never cut either.
+    const noteTag = holding(html, wordsIn(code).cardCheckout);
+    is(`${code}: the checkout note under the button wraps too, never cut short`, [noteTag !== "", /\btruncate\b|line-clamp|text-ellipsis/.test(noteTag)], [true, false]);
+  }
+  await setLanguage(OWNER, "en");
+  const pasted = await cardHtml("harbor", pan.product.id);
+  is("a card that does not fit its frame scrolls inside it, so the sentence is never clipped", [/<div[^>]*class="[^"]*\boverflow-y-auto\b[^"]*"[^>]*data-card-height=/.test(pasted), /<article class="st-card [^"]*\bmin-h-full\b/.test(pasted)], [true, true]);
+  is("the product's title still leads to its own page, where the whole sentence is", new RegExp(`<h1[^>]*><a href="/@harbor/p/[^"?]*${pan.product.id}\\?utm_source=website&amp;utm_medium=buy-button"`).test(pasted), true);
+
+  const listed = await setEmbedSites(OWNER, "https://www.example.com");
+  if (!listed.ok) throw new Error("no listed site");
+  const overlay = await cardHtml("harbor", pan.product.id, { mm: "overlay" }, "https://www.example.com/shop");
+  is("opened by the checkout script over a listed site: paid straight from its button, with the short sentence", [overlay.includes('action="/api/store/checkout"'), textOf(overlay).includes(SHORT.en)], [true, true]);
+  const own = await cardHtml("harbor", pan.product.id, { mm: "page" }, "https://www.example.com/shop");
+  is("as a page of its own, the whole sentence under the card and not the short one", [textOf(own).includes(SAID.en), textOf(own).includes(SHORT.en)], [true, false]);
+  await setEmbedSites(OWNER, "");
+
+  const digital = await cardHtml("harbor", harbor.product);
+  is("a product handed over digitally goes to its buy box, where the whole sentence is, and the card says no short one", [digital.includes('action="/api/store/checkout"'), textOf(digital).includes(SHORT.en)], [false, false]);
+  const unlisted = await cardHtml("harbor", pan.product.id, { mm: "overlay" }, "https://elsewhere.example.net/");
+  is("a card that buys nothing here (a plain link to the product's page) says no short sentence", [unlisted.includes('action="/api/store/checkout"'), textOf(unlisted).includes(SHORT.en)], [false, false]);
+  const demoPan = await addProduct(HOUSE_OWNER, "Cast iron pan", "", "59", null);
+  if (!demoPan.ok) throw new Error("no demo product");
+  await setProductShipping(HOUSE_OWNER, demoPan.product.id, { cents: 0, region: "us", countries: ["US"], note: "" });
+  is("nor does the demo store's card", textOf(await cardHtml("demokitchen", demoPan.product.id)).includes(wordsIn("en").cardSoldBy(STORE)), false);
+  process.env.STRIPE_SECRET_KEY = "sk_test_eu_who_answers_stand_in";
+  is("nor a card in test mode", textOf(await cardHtml("harbor", pan.product.id)).includes(SHORT.en), false);
+  process.env.STRIPE_SECRET_KEY = "sk_live_eu_who_answers_stand_in";
 
   part("Reviewed again once EU VAT art. 9a is built");
   is("docs/eu-vat-article-9a.md names this sentence", readFileSync("docs/eu-vat-article-9a.md", "utf8").includes("whoAnswers"), true);

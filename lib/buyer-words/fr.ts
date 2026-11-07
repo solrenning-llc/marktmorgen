@@ -316,6 +316,7 @@ export const fr: BuyerWords = {
   seeStore: (store) => `Voir ${store}`,
   cardTestMode: `Mode test${S}: aucune vraie carte n'est débitée.`,
   cardCheckout: "Paiement sécurisé par Stripe, dans un nouvel onglet.",
+  cardSoldBy: (store) => `Vendu par ${store}, qui en est responsable.`,
   cardOpens: (store) => `S'ouvre dans la boutique de ${store}, dans un nouvel onglet.`,
 
   // ---- Email cards (lib/mail-product-price.ts)

@@ -6,7 +6,8 @@
  *     imports and the pass throws UnknownReplyError; read again later, it advances and finishes. Only a job that
  *     is truly gone (GET answers nothing) leaves the list. Before, an unknown GET took it off the list for good while
  *     it kept the store's one-import slot for up to 14 days (tests/sweep-a3-import-active.proof.test.ts).
- *   - mailStep: an SPOP answer of unknown shape is not "nobody left to email"; the import stays "mailing" with its
+ *   - mailStep: an answer of unknown shape to the read of the queue (SRANDMEMBER) is not "nobody left to email",
+ *     and one to the SREM that takes those addresses off puts them back; the import stays "mailing" with its
  *     addresses queued, and is marked done only once the queue is empty.
  *   - startImport: an unknown answer to the slot's SET NX is not "claimed"; nothing starts, so one store never runs
  *     two imports at once.
@@ -170,10 +171,10 @@ async function main(): Promise<void> {
   const emptied = await runImport(mailed, Date.now() + 30_000);
   is("done once nobody waits, off the list", [emptied?.state, (await real([["SCARD", `nl:import:${mailed}:mail`]]))[0], await active(mailed)], ["done", 0, 0]);
 
-  part("An unknown SPOP answer leaves the addresses queued and the import mailing");
+  part("An unknown answer to the read of the queue leaves the addresses queued and the import mailing");
   const odd = "f".repeat(24);
   await put(mailing(odd));
-  oddly((command) => command[0] === "SPOP");
+  oddly((command) => command[0] === "SPOP" || command[0] === "SRANDMEMBER");
   const after = await runImport(odd, Date.now() + 30_000);
   redis.pipeline = real;
   is("not done: still mailing, every address still queued, still active", [after?.state, (await readJob(odd))?.state, (await real([["SCARD", `nl:import:${odd}:mail`]]))[0], await active(odd)], ["mailing", "mailing", 3, 1]);

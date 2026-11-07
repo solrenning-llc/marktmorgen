@@ -418,7 +418,14 @@ export async function startImport(
       return { ok: false, reason: "busy" };
     }
     if (other && other.state === "receiving") await cancelJob(other);
-    await redisPipeline([["SET", busyKey(store.sid), id, "EX", KEEP_SECONDS]]);
+    // Freed only while it is still that holder's, in one step on the Redis side, and then claimed with NX again: of
+    // two starts that both read the same finished holder, one claims the slot and the other is told the store is
+    // busy (independent review on #2881, L2). Before, each took it with a plain SET and both ran.
+    if (typeof holder === "string") await freeSlotOf(store.sid, holder);
+    const again = repliesFor(await redisPipeline([["SET", busyKey(store.sid), id, "NX", "EX", KEEP_SECONDS]]), 1);
+    const reclaimed = again?.[0];
+    if (!again || (reclaimed !== "OK" && reclaimed !== null)) throw new UnknownReplyError("the store's import slot");
+    if (reclaimed === null) return { ok: false, reason: "busy" };
   }
   const job: ImportJob = {
     id,
@@ -515,8 +522,16 @@ async function cancelJob(job: ImportJob): Promise<ImportJob> {
 
 /** Lets go of the store's slot, when it is this import's: a newer import's hold is kept. */
 async function releaseBusy(job: ImportJob): Promise<void> {
-  const [holder] = await redisPipeline([["GET", busyKey(job.sid)]]);
-  if (holder === job.id) await redisPipeline([["DEL", busyKey(job.sid)]]);
+  await freeSlotOf(job.sid, job.id);
+}
+
+/**
+ * Deletes the store's slot only while `holder` still holds it, read and deleted in one step on the Redis side
+ * (lib/redis-lock.ts, rule 30 on #2881 L2): never a GET then a DEL, between which another import can take it. When
+ * the step cannot run, the slot is kept, so a start that wanted it is told the store is busy.
+ */
+async function freeSlotOf(sid: string, holder: string): Promise<void> {
+  await releaseLock({ key: busyKey(sid), token: holder, ttlSeconds: KEEP_SECONDS });
 }
 
 /**
@@ -1180,16 +1195,26 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   // written to. A portion not yet open is waited for; nobody is dropped.
   const portion = paused ? MAIL_CHUNK : await rampRoom(job.sid, Math.min(MAIL_CHUNK, waiting));
   if (portion <= 0) return "retry";
-  // SPOP in its exact shape (sweep A3, CX-123 rule 24): a list of addresses, one address, or nothing. Any other
-  // answer is not "nobody popped": the portion is given back and it throws, so the step is left as it was, still
-  // mailing (runImport). Only SCARD says the queue is empty: an empty pop waits for the next pass to count again.
-  const replies = repliesFor(await redisPipeline([["SPOP", mailKey(job.id), portion]]), 1);
-  const popped = replies?.[0];
-  const emails = !replies ? null : popped === null ? [] : typeof popped === "string" ? [popped] : stringList(popped);
+  // The portion is read first and taken off by name after (independent review on #2881, L3): SPOP took addresses
+  // on the server even when its reply came back unreadable, and nobody knew which, so they were neither emailed
+  // nor counted. SRANDMEMBER changes nothing: an answer in any shape but a list of addresses gives the portion back
+  // and throws, the addresses still queued. Only SCARD says the queue is empty: an empty read waits for the next
+  // pass to count again.
+  const read = repliesFor(await redisPipeline([["SRANDMEMBER", mailKey(job.id), portion]]), 1);
+  const emails = read ? stringList(read[0]) : null;
   if (emails === null || emails.length === 0) {
     if (!paused) await rampBack(job.sid, portion);
     if (emails === null) throw new UnknownReplyError("the addresses an import took to email");
     return "retry";
+  }
+  // Then SREM of exactly those, in its exact shape: all of them gone. Any other answer, or a reply lost on the way
+  // back, puts the same addresses back (SADD of one still there changes nothing), gives the portion back and
+  // throws, so the step is left as it was, still mailing (runImport), with every address queued.
+  const taken = countOf(repliesFor(await redisPipeline([["SREM", mailKey(job.id), ...emails]]), 1)?.[0]);
+  if (taken !== emails.length) {
+    await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
+    if (!paused) await rampBack(job.sid, portion);
+    throw new UnknownReplyError("the addresses an import took to email");
   }
   if (paused) {
     job.counts.unmailed += emails.length;

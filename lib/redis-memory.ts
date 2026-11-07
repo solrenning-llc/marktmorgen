@@ -125,6 +125,39 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/agent-book.ts AGENT_BOOK_WRITE: the agent book written only while the writer still holds the store's lock.
+        if (key.startsWith("-- marktmorgen:agent-book-write:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, lock, book, token, json] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(["SET", book, json]);
+          return 1;
+        }
+        // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
+        if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, about, expected, text] = args;
+          const now = this.run(["GET", about]);
+          const held = typeof now === "string" ? now : "";
+          if (held !== expected) return [0, Buffer.byteLength(held, "utf8")];
+          this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
+          return [1];
+        }
+        // lib/paypal-sales.ts PAYPAL_REVOKE: a refunded payment's purchase taken back only while nothing else stands for it.
+        if (key.startsWith("-- marktmorgen:paypal-revoke:v1\n") && args[0] === "2" && args.length >= 5) {
+          const [, imported, own, field, job, ...known] = args;
+          const members = this.run(["SMEMBERS", own]);
+          if ((Array.isArray(members) ? members : []).some((member) => !known.includes(String(member)))) return 0;
+          const raw = this.run(["HGET", imported, field]);
+          if (raw === null || raw === undefined) return 2;
+          let record: unknown;
+          try {
+            record = JSON.parse(String(raw));
+          } catch {
+            return 0;
+          }
+          if (!record || typeof record !== "object" || (record as { job?: unknown }).job !== job) return 0;
+          this.run(["HDEL", imported, field]);
+          return 1;
+        }
         // lib/assistant-memory-store.ts MEMORY_WRITE: the notes written or deleted only while the change's lock is its own.
         if (key.startsWith("-- marktmorgen:amem-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, notes, token, json] = args;
@@ -938,6 +971,41 @@ export class MemoryRedis {
             }
           }
           return taken;
+        }
+        // lib/stock.ts STOCK_ADMIT and STOCK_BIND (513 [PF1], Codex G2's review of #1730, 5 November 2026), step for step.
+        if (key.startsWith("-- marktmorgen:stock-admit:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count), argv = args.slice(1 + count);
+          const n = Number(argv[0]);
+          if (!Number.isInteger(n) || n < 1 || n > 8 || count !== 2 * n || argv.length !== n + 2) return -1;
+          const pending = argv[n + 1];
+          for (const k of keys) this.live(k);
+          let ours = true;
+          for (let i = 0; i < n; i += 1) {
+            if (this.data.get(keys[i]) !== argv[1 + i]) ours = false;
+            const hold = this.data.get(keys[n + i]);
+            if (hold !== undefined && !(hold instanceof Map)) return -1;
+            if (!(hold instanceof Map) || !hold.has(pending)) ours = false;
+          }
+          if (ours) return 1;
+          for (let i = 0; i < n; i += 1) {
+            const hold = this.data.get(keys[n + i]);
+            if (hold instanceof Map) this.run(["HDEL", keys[n + i], pending]);
+          }
+          return 0;
+        }
+        if (key.startsWith("-- marktmorgen:stock-bind:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count), argv = args.slice(1 + count);
+          const n = Number(argv[0]);
+          if (!Number.isInteger(n) || n < 1 || n > 8 || count !== n || argv.length !== 3) return -1;
+          for (const k of keys) this.live(k);
+          for (const k of keys) {
+            const hold = this.data.get(k);
+            if (!(hold instanceof Map) || !hold.has(argv[1]) || !hold.has(argv[2])) return 0;
+          }
+          for (const k of keys) this.run(["HDEL", k, argv[1]]);
+          return 1;
         }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);

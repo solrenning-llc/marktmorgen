@@ -13,11 +13,11 @@ import { join } from "node:path";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { receivingOf } from "@/lib/receiving-costs";
 import { reviewedUnitUnder } from "@/lib/reviewed-receiving";
-import { MOST_TAX_READING } from "./historical-receiving-model";
 import { txCustomerFixture } from "./customer-tax-review-fixture";
 import { ASSISTANT_INPUT_BYTES } from "@/lib/store-assistant-rules";
 import { CENTS_PER_MINUTE, MIN_CENTS } from "@/lib/auto-captions-rules";
 import { ORDER, assistantAt, assistantInputCap, captionsMinimumFor, captionsOptions, captionsPrice, captionsTodayAnyMinimum, captionsWorstBps, figures, perMinuteHolds, proposals, renderLimitsProposal } from "./limits-proposal-table";
+import { MOST_TAX_READING } from "./historical-receiving-model";
 
 const DOC = "docs/limits-proposal-2026-10-18.md";
 const read = (file: string) => readFileSync(join(process.cwd(), file), "utf8");

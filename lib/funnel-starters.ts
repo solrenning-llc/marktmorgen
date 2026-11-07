@@ -596,9 +596,12 @@ FUNNEL_STARTERS.push(
 // FT, common rule 7 of 572–576 (added 7 November 2026): every funnel type
 // (lib/funnel-types.ts) has a campaign with first words. The challenge, the
 // small first purchase, the quiz and the book as a download had a type but
-// no campaign, so a creator who chose one was handed empty pages. These four
-// fill them, built like the others: the strict file, the same preview and
-// mapping to the creator's own products, made as a draft. Nothing is
+// no campaign. These four are those campaigns, built like the others: the
+// strict file, the same preview and mapping to the creator's own products,
+// made as a draft. They are offered only in the campaign gallery: the type
+// picker (components/funnel-type-picker.tsx) does not use them, and a type's
+// pages are still written there, by hand or with the AI draft. TYPE_STARTERS
+// below only names which campaign matches each type. Nothing is
 // counted, priced, dated or promised; a challenge's days open by the course
 // editor's own setting, said first; the quiz's results are a sum anyone can
 // check (lib/forms.ts), and answering it never puts anybody on a list.
@@ -775,9 +778,10 @@ FUNNEL_STARTERS.push(
 );
 
 /**
- * The campaigns that fill each funnel type (lib/funnel-types.ts): each walks
+ * The campaigns that match each funnel type (lib/funnel-types.ts): each walks
  * through the same kinds of product as its type, in the same order. A type
- * added later brings its own campaign with it.
+ * added later brings its own campaign with it. Only tests/ft-type-starters.test.ts
+ * reads it: the type picker does not fill a type's pages from these campaigns.
  */
 export const TYPE_STARTERS: Record<string, string[]> = {
   "lead-magnet": ["guide-signup"],

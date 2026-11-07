@@ -51,9 +51,11 @@ is("a search finds each by its own words", [
 
 part("Every funnel type has a ready campaign of the same shape");
 const typeStarters: Record<string, string[]> | undefined = TYPE_STARTERS;
-// The eight types on main today. A type added later (FT1–FT8) brings its own campaign in its own unit.
-const TYPES_NOW = ["lead-magnet", "training", "challenge", "launch", "book", "first-purchase", "application", "quiz"];
-is("the eight types are still the ones there are", TYPES_NOW.every((id) => FUNNEL_TYPES.some((t) => t.id === id)), true);
+// Changed (rule 23, pre-review of FT rule 7): the list was the eight types on main typed in (TYPES_NOW), so a type
+// added later with no campaign passed. It is now every type there is: a type added later (FT1–FT8) fails here
+// until its own unit brings its campaign. The check that the eight were still there is gone with the typed list.
+const TYPES_NOW = FUNNEL_TYPES.map((t) => t.id);
+is("there are funnel types to check", TYPES_NOW.length > 0, true);
 is("each names at least one campaign that exists", TYPES_NOW.map((id) => Boolean(typeStarters?.[id]?.length) && typeStarters![id].every((sid) => Boolean(funnelStarter(sid)))), TYPES_NOW.map(() => true));
 // The products a type walks through, in order, and the ones its campaigns walk through: a free step stays free, a paid one paid.
 const typeWants = (id: string) => (FUNNEL_TYPES.find((t) => t.id === id)?.slots ?? []).flatMap((slot) => (slot.kind === "product" ? [slot.wants] : []));

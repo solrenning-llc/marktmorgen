@@ -919,6 +919,12 @@ export const COST_LINES: CostLine[] = [
       // MAX_CART limited products, and none for a cart without one. An opening whose answer is unknown asks nothing more: its holds lapse.
       { file: "lib/stock.ts", names: ["withCartStockHolds", "PENDING_MS", "releaseCartStockHolds", "STOCK_ADMIT", "STOCK_BIND", "stripeRefusedOpening"] },
       { file: "app/api/store/free/download/route.ts", names: ["recordAffiliateLead"] },
+      // A PayPal order paid also writes its short line for the sales file in settle's own pipeline (Claude 4's option D,
+      // 1b, 7 November 2026): one SET more an order, at most PAYPAL_SUMMARY_BYTES, inside the order's ORDER_COMPUTE. What
+      // it keeps (2 KB a sale, ending SUMMARY_EARLIER_SECONDS before its record's 400 days) is priced with the records kept
+      // outside the data room (tests/store-data-registry.ts, nl:ppsell:sum:), and deleted with the record (paypalOrderKeys).
+      { file: "lib/paypal-sales.ts", names: ["lineWrite(order, paid, opened.s)", "summaryKey(order)", "paypalOrderKeys"] },
+      { file: "lib/paypal-sale-summary.ts", names: ["PAYPAL_SUMMARY_BYTES", "SUMMARY_EARLIER_SECONDS"] },
     ],
     basis: "The plan's figure, each order at the most one costs. An affiliate's lead for a free product claimed or a booked call (lib/affiliate-leads.ts, 18 October 2026) is three or four commands inside that order's own work, which ORDER_COMPUTE prices at well over a whole page, and no email; what it keeps is in the data room, taken before it is written. Nothing is sold past it: new orders are admitted only while the month's orders and the checkouts held from the last day are under the figure. A place in a purchase for several people is an order of the month it is taken in: inside its checkout's hold for a day, admitted when taken after (since 18 October 2026), its emails access emails. A payment request's record is changed under its own lock (since 18 October 2026, docs/security-audit-2026-10-18.md, MM-SA-02): four commands more a change, at most a dozen changes a request (made, sent, reminded twice, opened, paid, refunded), inside the same ORDER_COMPUTE.",
   },
@@ -1172,11 +1178,20 @@ export const COST_LINES: CostLine[] = [
     // price may drop to it only after scripts/sales-file-fill.mjs, counting, reads every store and finds none left
     // (lib/sales-file-fill.ts nothingLeft). Pricing it honestly here waits for the owner's decision on the first-year
     // refund ceiling (Claude 4 to Claude 1, 7 November 2026); not certified.
+    // Keeping the names (option D, 1c): each product a save writes takes one HSET more and each it drops one HDEL more
+    // (lib/catalog.ts productWrites, productDrops), inside the studio request's own commands (UNIT_COST.studio); the
+    // names' bytes are taken from the data room with the product (productBytes), at most MAX_STORE_NAMES_BYTES a store.
+    // The one-time filling (scripts/sales-file-fill.mjs, lib/sales-file-fill.ts) is the company's, never a store's: run
+    // by hand, FILL_STORES_PER_STEP stores a step and FILL_BATCH sales or LISTING_MGET_KEYS products a command, only
+    // counting unless --write --yes-production, and it prints its own commands and bytes at Upstash's paid rates.
     monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8),
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "studio"] },
       { file: "lib/studio-allowance-rules.ts", names: ["STUDIO_PAGE_UNITS", "ESSENTIAL_PER_DAY", "ESSENTIAL_NEEDS"] },
       { file: "lib/studio-route.ts", names: ["countStudio", "studio-essential"] },
+      { file: "lib/catalog.ts", names: ["namesKey", "MAX_STORE_NAMES_BYTES", "productBytes", "LISTING_MGET_KEYS"] },
+      { file: "lib/sales-file-fill.ts", names: ["FILL_STORES_PER_STEP", "fillSalesFileStep"] },
+      { file: "lib/paypal-sale-summary.ts", names: ["FILL_BATCH", "fillSaleSummaries"] },
       // An active store may clear its assistant notes repeatedly: settings admission takes one studio request first.
       { file: "app/api/store/assistant-memory/route.ts", names: ["guardStoreWrite", "forgetMemory"] },
       { file: "lib/assistant-memory-store.ts", names: ["MEMORY_FORGET_COMMANDS"] },

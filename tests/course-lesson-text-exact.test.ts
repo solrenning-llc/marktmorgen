@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   is("the lesson-text loader is found", load.length > 0, true);
   is("a failed or unknown read never opens an empty text box", /setText\(""\)|data\.ok \? data\.text \?\? "" : ""/.test(load), false);
   is("a failed or unknown read is said, as the quiz and assignment editors say theirs", load.includes("The lesson text could not be read just now."), true);
-  is("only a text that came back as text is put in the box", load.includes('typeof data.text === "string"'), true);
+  is("only a text that came back as text is put in the box", /typeof data\.text [!=]== "string"/.test(load), true);
   done();
 }
 

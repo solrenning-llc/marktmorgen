@@ -130,6 +130,10 @@ export type TakedownAction =
 export async function takeDown(report: Report, store: Store, action: TakedownAction, origin: string): Promise<string | null> {
   const ref = storeRef(store);
   let what = "";
+  // Art. 17(3)(a), how long: what the code makes it last, for each kind (Claude 5's MEDIUM on #2928). A link and its file
+  // are deleted; a product or the media kit is unpublished, and the creator can publish it again (the studio does not
+  // stop them), which Terms section 3 lets us answer by suspending the store; a store stays off until we switch it back.
+  let howLong = "";
   if (action.type === "link") {
     const link = store.links.find((l) => l.id === action.id && !l.header);
     if (!link) return null;
@@ -137,6 +141,7 @@ export async function takeDown(report: Report, store: Store, action: TakedownAct
     if (!done.ok) return null;
     if (done.removed) await del(done.removed.path).catch(() => {});
     what = `The link "${link.title}" (${link.url})`;
+    howLong = "How long: for good. The link and its file are deleted, so there is nothing to put back.";
   } else if (action.type === "product") {
     // Read by id, however far down the store's list it is (lib/catalog.ts).
     const product = await readListing(store, action.id).catch(() => null);
@@ -144,10 +149,12 @@ export async function takeDown(report: Report, store: Store, action: TakedownAct
     const done = await setProductHidden(ref, product.id, true);
     if (!done.ok) return null;
     what = `The product "${product.title}", now unpublished`;
+    howLong = `How long: until you publish it again. Publishing it again while the notice stands may lead us to suspend your store (Terms, section 3, ${origin}/terms#selling-through-a-marktmorgen-store).`;
   } else if (action.type === "kit") {
     if (!store.kit.on) return null;
     await setKit(ref, { ...store.kit, on: false });
     what = "Your media kit, now unpublished";
+    howLong = `How long: until you switch it on again. Switching it on again while the notice stands may lead us to suspend your store (Terms, section 3, ${origin}/terms#selling-through-a-marktmorgen-store).`;
   } else {
     if (Boolean(store.suspended) === action.on) return null;
     await noteTakedown(ref, null, action.on);
@@ -164,6 +171,7 @@ export async function takeDown(report: Report, store: Store, action: TakedownAct
       return "The store's pages and sales are back on.";
     }
     what = "Your store's pages and sales, now switched off";
+    howLong = "How long: until we switch your store back on, for example after your answer below.";
   }
   await noteTakedown(ref, { at: new Date().toISOString(), what, report: report.id });
   await countStep(report, action.type);
@@ -178,7 +186,7 @@ export async function takeDown(report: Report, store: Store, action: TakedownAct
       what,
       "",
       "Where: everywhere. It is down for every visitor, in every country.",
-      "How long: we set no end date. We change it only if we decide to, for example after your answer below.",
+      howLong,
       "",
       report.kind === "copyright" ? `The notice was sent by ${report.name}, who says it uses: ${report.work.slice(0, 600)}` : `The notice says: ${report.work.slice(0, 600)}`,
       "",

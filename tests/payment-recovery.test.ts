@@ -228,6 +228,33 @@ async function main(): Promise<void> {
   state.subs.set("sub_Running000001", { ...running, customer: "cus_Somebody00001", latest_invoice: null });
   is("a membership of another customer is not touched", await finishCardUpdate(store, sessionId), "error");
 
+  part("Rule 30: a Stripe reply decides only when it is the object asked for");
+  state.payDeclines = false;
+  const withId = (row: Record<string, unknown>, id: string | null) => {
+    const copy = { ...row };
+    if (id === null) delete copy.id;
+    else copy.id = id;
+    return copy;
+  };
+  const touched = (mark: number) => posts.slice(mark).map((p) => p.path);
+  const owedElsewhere = { ...running, status: "past_due", customer: "cus_Member000001", latest_invoice: { id: "in_OtherOwed00001", status: "open", amount_due: 4900 } };
+  for (const [label, other] of [["another membership's id", "sub_Another0000001"], ["no id", null]] as const) {
+    state.subs.set("sub_Running000001", withId(owedElsewhere, other));
+    const mark = posts.length;
+    is(`the membership read back with ${label}: no card is set and nothing is paid on it`, [await finishCardUpdate(store, sessionId), touched(mark)], ["error", []]);
+    is(`…and the page does not show it as this membership`, await cardView(store, grant!), null);
+  }
+  state.subs.set("sub_Running000001", { ...running, customer: "cus_Member000001", latest_invoice: null });
+  const saved = state.sessions.get(sessionId)!;
+  for (const [label, other] of [["another page's id", `cs_test_${"d".repeat(20)}9`], ["no id", null]] as const) {
+    state.sessions.set(sessionId, withId(saved, other));
+    const mark = posts.length;
+    is(`Stripe's page read back with ${label}: no card is set from it`, [await finishCardUpdate(store, sessionId), touched(mark)], ["error", []]);
+  }
+  state.sessions.set(sessionId, saved);
+  const mark = posts.length;
+  is("control: its own page and membership still set the card", [await finishCardUpdate(store, sessionId), touched(mark)], ["updated", ["/subscriptions/sub_Running000001"]]);
+
   part("What came back");
   const nowS = Math.floor(Date.now() / 1000);
   const paid = (id: string, attempts: number, cents: number, extra: Record<string, unknown> = {}) => ({

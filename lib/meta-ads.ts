@@ -225,19 +225,29 @@ function parseConnection(raw: unknown, whole = false): Connection | null {
   }
 }
 
+const keptCount = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+
+/**
+ * The last read, only in the shape this code writes (CX-123 rule 24; Claude 6 on #3069): every field present, the day
+ * a date or empty, each figure a non-negative whole number. A record with an amount missing or out of shape is not a
+ * last read (null), never "Read <day>: $0.00 over the last 30 days".
+ */
 function parseRead(raw: unknown): MetaRead | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
-    const v = JSON.parse(raw) as Partial<MetaRead>;
+    const v = JSON.parse(raw) as Record<string, unknown>;
     if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    if (typeof v.day !== "string" || (v.day !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(v.day))) return null;
+    if (v.problem !== "" && v.problem !== "currency" && v.problem !== "busy" && v.problem !== "error") return null;
+    if (![v.at, v.after, v.lines, v.cents, v.campaigns].every(keptCount)) return null;
     return {
-      day: typeof v.day === "string" ? v.day : "",
-      at: Number(v.at) || 0,
-      problem: v.problem === "currency" || v.problem === "busy" || v.problem === "error" ? v.problem : "",
-      after: Number(v.after) || 0,
-      lines: Number(v.lines) || 0,
-      cents: Number(v.cents) || 0,
-      campaigns: Number(v.campaigns) || 0,
+      day: v.day,
+      at: v.at as number,
+      problem: v.problem,
+      after: v.after as number,
+      lines: v.lines as number,
+      cents: v.cents as number,
+      campaigns: v.campaigns as number,
     };
   } catch {
     return null;
@@ -403,12 +413,19 @@ export async function finishMeta(input: {
     owner: input.owner,
     broken: "",
   };
-  await redisPipeline([
-    ["SET", connKey(input.statsId), JSON.stringify(connection)],
-    ["DEL", readKey(input.statsId)],
-    ["SADD", STORES_KEY, input.statsId],
-    ["SADD", userKey(user), input.statsId],
-  ]);
+  // The new connection's write confirmed (CX-123 rule 24; Claude 6 on #3069): "OK" and a count for each other command.
+  // Otherwise it throws before anything of the old connection is given back, unlisted or deleted, so a write that may
+  // not have landed never leaves the kept connection with its token revoked, and the reconnect answers an error.
+  const written = repliesFor(
+    await redisPipeline([
+      ["SET", connKey(input.statsId), JSON.stringify(connection)],
+      ["DEL", readKey(input.statsId)],
+      ["SADD", STORES_KEY, input.statsId],
+      ["SADD", userKey(user), input.statsId],
+    ]),
+    4,
+  );
+  if (!written || written[0] !== "OK" || written.slice(1).some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a Meta connection written");
   // Another person's token in its place: theirs is given back.
   if (before && before.user !== user) {
     await giveBack(input.statsId, before).catch(() => {});

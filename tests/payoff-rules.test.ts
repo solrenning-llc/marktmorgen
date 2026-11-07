@@ -95,7 +95,7 @@ part("Refused while a payment is owed or about to be taken");
 
 part("Refused when nothing is left, or the plan has no end yet");
 {
-  is("a cancelled subscription has nothing left", reason(facts({ status: "canceled" })), "ended");
+  is("a canceled subscription has nothing left", reason(facts({ status: "canceled" })), "ended");
   is("past the plan's end nothing is left", reason(facts({ nowSeconds: at(4) })), "ended");
   is("after the last payment nothing is left", reason(facts({ currentPeriodStart: at(3), paidInvoices: 4, latestInvoice: { status: "paid", subtotalCents: 11_000, taxCents: 0, periodStart: at(3) }, nowSeconds: at(3) + DAY })), "ended");
   is("a plan not yet given its end waits for it", reason(facts({ cancelAt: null })), "unsettled");

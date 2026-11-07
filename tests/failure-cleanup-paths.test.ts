@@ -11,7 +11,8 @@
  *   - a product's picture refused (no such product) with another product's picture named: it stays;
  *   - a smaller copy refused (as wide as the picture) that is another product's smaller copy: it stays;
  *   - an episode refused (no title) naming another episode's audio: the audio stays;
- *   - and what is still cleaned: a picture let in through the door for this request, then refused, is deleted;
+ *   - and what is still cleaned: a picture let in through the door for this request, then refused, is deleted
+ *     (a product that is not there is refused before the door, so its new picture is kept);
  *     once put on something it is never taken as fresh again, and a door asked for a picture already stored is
  *     refused, even in the same second the picture was stored;
  *   - each store's list: a stale note is never taken, one store's doors never push out another's, and the list
@@ -105,7 +106,10 @@ async function main(): Promise<void> {
   is("the door opened for product B's picture", (await ask(lost, { productId: b.product.id })).status, 200);
   files.set(lost, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() + 1 });
   is("put on a product that is not there: refused", await result(await productImage(post("/api/store/image", session, { action: "attach", id: "nope", path: lost, width: 1200, height: 800 }))), [404, "unknown"]);
-  is("and the upload is deleted", files.has(lost), false);
+  // Rule 23 (Claude 5, 7 November 2026): was "and the upload is deleted" (false). A product that is not there is now
+  // refused before the door is touched, as a link is (#2657), so the new picture is kept and can go on another
+  // product (tests/product-image-order.test.ts). A refusal after the take still deletes it (the link's above).
+  is("and the upload is kept, still in the door for another product", files.has(lost), true);
   const kept = picture("1");
   await ask(kept, { productId: b.product.id });
   files.set(kept, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() + 1 });

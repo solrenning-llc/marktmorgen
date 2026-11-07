@@ -82,10 +82,14 @@ export async function POST(request: NextRequest) {
       const store = await storeForEmail(ref);
       if (!store) return Response.json({ ok: false, error: "none" }, { status: 400 });
       const product = await readListing(store, id);
+      // A product that is not there (removed in another tab) is refused before anything is taken from the picture
+      // door, as a link's is (app/api/store/link-image): nothing is put on and nothing is deleted, so the new picture
+      // stays in the door and can still be put on another product. Read once, above; no read is added.
+      if (!product) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
       // A new picture deletes the one there: not from a session let in without its second step (lib/two-step.ts).
-      if ((await lockedFor(request, "products", "replace")) && product?.image) return refusedJson("locked");
+      if ((await lockedFor(request, "products", "replace")) && product.image) return refusedJson("locked");
       // What this product shows now: the only names besides a fresh upload it may be given (picture-door.ts).
-      const own = new Set(imagePaths(product?.image));
+      const own = new Set(imagePaths(product.image));
       const path = text(body.path, 200);
       if (!ownsImagePath(path, await imageFolder(ref))) {
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
@@ -94,10 +98,6 @@ export async function POST(request: NextRequest) {
       const smallPath = sent ? text(sent.path, 200) : "";
       const smallOwned = smallPath !== "" && smallPath !== path && ownsImagePath(smallPath, await imageFolder(ref));
       fresh = await takePictureDoor(smallOwned ? [path, smallPath] : [path]);
-      if (!product) {
-        await dropFresh([path, smallPath]);
-        return Response.json({ ok: false, error: "unknown" }, { status: 404 });
-      }
       // A name in the shared folder that is neither fresh from the door nor this product's own may be another
       // product's, a link's, a page's, a buyer's review photo or an email's picture: refused, and nothing deleted,
       // so replacing or removing this product's picture later can never delete it.

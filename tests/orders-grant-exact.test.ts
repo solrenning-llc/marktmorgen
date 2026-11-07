@@ -108,8 +108,8 @@ for (const [name, reply] of UNKNOWN) {
   });
 }
 
-async function joined(): Promise<string> {
-  const form = new URLSearchParams({ handle: HANDLE, token: TOKEN });
+async function joined(fields: Record<string, string> = { token: TOKEN }): Promise<string> {
+  const form = new URLSearchParams({ handle: HANDLE, ...fields });
   const response = await joinRoute(
     new NextRequest("https://marktmorgen.test/api/store/discord/join", {
       method: "POST",
@@ -132,6 +132,12 @@ test("an exact null is still an expired link everywhere", async () => {
   const response = await downloadRoute(new NextRequest(`https://marktmorgen.test/api/store/download?handle=${HANDLE}&token=${TOKEN}&ref=${REFERENCE}`));
   assert.equal(response.status, 410);
   assert.match(await joined(), /status=none$/);
+});
+
+// Rule 30, the same entry's other door: an order Stripe could not be asked about just now (readOrder "error", here
+// the network refused) is not "no purchase" either.
+test("Discord entry from the thanks page: an order that could not be read is said as not checked", async () => {
+  assert.match(await joined({ session_id: `cs_test_${"GrantExactThanks".padEnd(24, "0")}` }), /status=unchecked$/);
 });
 
 test("the orders page says an unknown grant with its error notice, ahead of the expired one", async () => {

@@ -11,6 +11,7 @@ import {
   verifyDomain,
 } from "@/lib/domains";
 import { proveDomain } from "@/lib/domain-proof";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /**
  * The store's own domain, from the studio:
@@ -78,6 +79,9 @@ export async function POST(request: NextRequest) {
 
     return fail("invalid");
   } catch (error) {
+    // Who holds a domain could not be read (CX-123 rule 24): nothing was sent to Vercel or deleted on it, so the
+    // creator hears the honest "not answering just now, nothing was changed, try again".
+    if (error instanceof UnknownReplyError) return fail("unavailable", 503);
     console.error("a domain action failed", error);
     return fail("server_error", 500);
   }

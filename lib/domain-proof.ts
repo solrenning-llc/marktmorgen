@@ -6,7 +6,7 @@
 import { resolveTxt } from "node:dns/promises";
 import { redisPipeline } from "@/lib/redis";
 import { claimMark } from "@/lib/claim-mark";
-import { UNPROVED, UNPROVED_SECONDS, domainKey, proofRecord } from "@/lib/domains";
+import { UNPROVED, UNPROVED_SECONDS, domainHolder, domainKey, proofRecord } from "@/lib/domains";
 import type { Store } from "@/lib/store";
 
 /** Sets the key to its new value only while it still holds the one expected. */
@@ -27,14 +27,20 @@ const SWAP_KEEPING_TTL = [
 const DNS_TIMEOUT_MS = 4_000;
 
 async function txtRecords(host: string): Promise<string[]> {
+  // The race's timer is cleared once DNS answers, so no 4 s timer outlives the check (C4-3000).
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const answer = await Promise.race([
       resolveTxt(host),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), DNS_TIMEOUT_MS)),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("timeout")), DNS_TIMEOUT_MS);
+      }),
     ]);
     return answer.map((parts) => parts.join(""));
   } catch {
     return [];
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
@@ -47,8 +53,8 @@ export type ProofResult = "proved" | "waiting" | "taken";
  */
 export async function proveDomain(store: Pick<Store, "sid" | "handle" | "previousHandles">, name: string): Promise<ProofResult> {
   const ours = [store.handle, ...store.previousHandles];
-  const [raw] = await redisPipeline([["GET", domainKey(name)]]);
-  let held = typeof raw === "string" ? raw : "";
+  // Read exactly (CX-123 rule 24): a holder that cannot be read throws, never "taken" about the store's own domain.
+  let held = (await domainHolder(name)) ?? "";
   const holder = held.replace(/^\?/, "");
   if (held && !ours.includes(holder)) return "taken";
   // Held under an older address of this same store: moved to the current one.

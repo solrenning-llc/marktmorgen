@@ -5,6 +5,7 @@
  * field asked, each slot a string or nil. Anything else is unknown, never "never made": the plan and the save throw
  * UnknownReplyError, the route answers 503 "unavailable", and nothing is made (sweep APP2 finding 5). Synthetic only.
  */
+import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { POST as funnelPost } from "@/app/api/store/import/funnel/route";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
@@ -106,6 +107,60 @@ async function main(): Promise<void> {
   part("Exact nils still read as not made yet, and the lock was let go");
   is("the new import saves when the ledger answers in its shape", await answer(await post({ action: "save", ...other })), [200, "ok"]);
   is("its funnel is made, its page used again (the same page as before)", await counts(), [2, 2, 1]);
+
+  // Review of #2974 (MEDIUM): an exact-shape reply whose `run:` entry is not one of the three shapes this file writes
+  // ("started"; "funnel" with the funnel's id; "done" with what was made) is unknown too, never "never made": before,
+  // each of these made one more funnel in the store on every press.
+  part("A run entry in a shape this file never writes is unknown, never 'never made'");
+  const exactPipeline = redis.pipeline.bind(redis);
+  const runAs = (entry: string) => async (commands: (string | number)[][]) => {
+    const replies = (await exactPipeline(commands)) as unknown[];
+    const slots = [...(replies[0] as (string | null)[])];
+    slots[0] = entry;
+    return [slots];
+  };
+  const savedRun = ((await exactPipeline([["HGET", `nl:imports:cf:${(await storeForEmail(OWNER))!.sid}`, `run:${(await planFunnelImport((await storeForEmail(OWNER))!, input)).key}`]])) as unknown[])[0] as string;
+  is("control: the first import's run entry is the exact 'done' shape", (JSON.parse(savedRun) as { state?: string }).state, "done");
+  const doneEntry = JSON.parse(savedRun) as Record<string, unknown>;
+  // The route's own save windows (10 a day, the plan's month) are not what this part checks: each route call starts
+  // with them unused, so a 429 can never stand in for the 503.
+  const freshSaveWindows = () => redis.pipeline(redis.keys().filter((k) => /^nl:rlm?:import-cf-save/.test(k)).map((k) => ["DEL", k]));
+  const runShapes: [string, string][] = [
+    ["not JSON", "not json"],
+    ["JSON null", "null"],
+    ["a list", "[]"],
+    ["an unknown state", JSON.stringify({ state: "weird", at: 1 })],
+    ["no state", JSON.stringify({ at: 1 })],
+    ["'done' with an empty funnel", JSON.stringify({ state: "done", funnel: {} })],
+    ["'done' with a funnel id that is not a string", JSON.stringify({ ...doneEntry, funnel: { ...(doneEntry.funnel as object), id: 7 } })],
+    ["'done' without its pages", JSON.stringify({ ...doneEntry, pages: undefined })],
+    ["'done' with a page id that is not a string", JSON.stringify({ ...doneEntry, pages: [1] })],
+    ["'done' with counts that are not numbers", JSON.stringify({ ...doneEntry, bumps: "0" })],
+    ["'funnel' without the funnel's id", JSON.stringify({ state: "funnel", at: 1 })],
+    ["'funnel' with an id that is not a string", JSON.stringify({ state: "funnel", funnel: 7, at: 1 })],
+    ["'funnel' with an empty id", JSON.stringify({ state: "funnel", funnel: "", at: 1 })],
+    ["'started' without its time", JSON.stringify({ state: "started" })],
+  ];
+  for (const [what, entry] of runShapes) {
+    is(`plan: ${what} throws UnknownReplyError`, await withLedgerReply(runAs(entry), () => thrown(async () => planFunnelImport((await storeForEmail(OWNER))!, input))), "UnknownReplyError");
+    is(`save: ${what} throws UnknownReplyError`, await withLedgerReply(runAs(entry), () => thrown(async () => saveFunnelImport((await storeForEmail(OWNER))!, input))), "UnknownReplyError");
+    await freshSaveWindows();
+    is(`route save: ${what} answers 503 'unavailable'`, await withLedgerReply(runAs(entry), async () => answer(await post({ action: "save", ...input }))), [503, "unavailable"]);
+  }
+  is("no funnel, page or form was made by any of them", await counts(), [2, 2, 1]);
+  await freshSaveWindows();
+  is("control: the exact 'done' entry still reads as saved", ((await withLedgerReply(runAs(savedRun), async () => (await post({ action: "save", ...input })).json())) as { again?: boolean }).again, true);
+  is("control: an exact 'started' entry reads as not saved yet", await withLedgerReply(runAs(JSON.stringify({ state: "started", at: 1 })), async () => ((await planFunnelImport((await storeForEmail(OWNER))!, input)).done)), null);
+  is("control: still two funnels", await counts(), [2, 2, 1]);
+
+  // Review of #2974 (LOW): the 503 "unavailable" this route sends on an unknown read is shown to the creator. It must
+  // say what is true for a read that failed for now (and for imports not reachable at all): nothing was made, try
+  // again; never that imports are not switched on.
+  part("What the creator reads on a 503 'unavailable'");
+  const unavailableLine = /\n\s*unavailable: "([^"]*)",/.exec(readFileSync("components/clickfunnels-funnel.tsx", "utf8"))?.[1] ?? "";
+  is("it says nothing was made", unavailableLine.includes("nothing was made"), true);
+  is("it says to try again in a moment", unavailableLine.includes("Try again in a moment."), true);
+  is("it never says imports are not switched on", /not switched on/i.test(unavailableLine), false);
   done();
 }
 

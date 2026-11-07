@@ -111,10 +111,13 @@ before them; never a lower number for them.
 
 **Renewal dates (for the reading unit).** `readRenewals` lists invoices by `created`; a renewal
 paid later after card retries would land in the wrong month or be missed in the oldest one.
-The reading unit dates renewals by payment time (`status_transitions.paid_at`, or the invoice
-payment's `created` on newer API versions) and gives the renewal list a `since` earlier by the
-longest retry window it can prove from Stripe's dated documentation; until proved, the oldest
-month is "could not be read" for renewals (fail closed).
+The reading unit dates renewals by payment time (`status_transitions.paid_at`). No bound on
+how late an invoice is paid is proved (Stripe's retries are the creator's own settings, and
+lib/card-update.ts pays an open invoice whenever the member updates their card: Claude 3 on
+#3022, MEDIUM 2), so none is assumed: the invoices are listed paid only (`status=paid`), from
+the account's first, with no `created[gte]`. Read to the end, every month is known; stopped at
+the cap or at an invoice it cannot date or place, no month is known for Stripe (fail closed).
+History: until 7 Nov 2026 the unit assumed a 27-day bound (`RENEWAL_PAID_WITHIN_DAYS`).
 
 ## Read count per page view, and the cost
 
@@ -171,8 +174,9 @@ source and currency only).
    closed, confirmed zero apart from unknown, no status fields.
 2. **The year reading** (built): `readEarningsYear(store, timeZone, now)` in lib/earnings-read.ts
    (lib/stats.ts is another agent's file). It reads four of the same Stripe lists with the same
-   paths and page caps (`EARNINGS_STRIPE_PAGES`: 20 + 20 + 10 + 5 = 55, within the 58 of
-   `SALES_READ_SHAPE`; the disputes list is not read, see the table above) and the PayPal sales
+   paths and page caps but the invoices (`EARNINGS_STRIPE_PAGES`: 20 + 20 + 13 + 5 = 58, the 58 of
+   `SALES_READ_SHAPE`; the disputes list is not read, see the table above, and its 3 pages go to
+   the invoices, read from the account's first) and the PayPal sales
    (2,000) and refunds (`PAYPAL_REFUNDS_READ`), but in their exact shape, list by list: lib/stats.ts's
    readers answer one `partial` for two lists together, read PayPal refunds oldest first and take
    an unreadable answer as an empty list, so they cannot say how far back each list was read.
@@ -183,10 +187,11 @@ source and currency only).
    (`EARNINGS_STRIPE_NOT_READ`), PayPal its disputes; the invoices taken are every paid invoice
    of the store's memberships but `subscription_create` (Claude 3's money review of #3022,
    MEDIUM 1), an invoice of no subscription in either shape is skipped, and one that names a
-   subscription without metadata that can be read stops its list there. Renewals are dated by `status_transitions.paid_at`; until Stripe's retry
-   window is proved from dated documentation they are known only from `RENEWAL_PAID_WITHIN_DAYS`
-   (27) after the reading's start, which gives up the oldest month, and a renewal read that was
-   paid later than that after its invoice makes the renewals unread. The months' own time is
+   subscription without metadata that can be read stops its list there. Renewals are dated by `status_transitions.paid_at`, with no bound assumed on how
+   late an invoice is paid (Claude 3's review of #3022, MEDIUM 2): the invoices are listed
+   `status=paid` from the account's first, so a renewal paid in any month of the year is read
+   whenever its invoice was made; a list stopped at its 13 pages, or at an invoice it cannot
+   date or place, makes every Stripe month unknown. The months' own time is
    when every list was read (`now` plus the time the reading took, on a monotonic clock), not
    the `now` the reading began at: money recorded while the lists were read is counted, and a
    record dated after they were read still makes its source unknown. Kept as the fourth reading

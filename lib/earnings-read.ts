@@ -6,9 +6,9 @@
  * payment plans, and the refunds on the account; and the PayPal sales and full
  * refunds kept here as each was paid (lib/paypal-sales.ts). The same lists,
  * paths and page caps as the sales reading (lib/stats.ts, readSales), less its
- * disputes, so one reading of the year is within one SALES_READ_SHAPE
- * (lib/read-ceilings.ts): 55 of its 58 Stripe pages, 2,000 PayPal sales and
- * PAYPAL_REFUNDS_READ refunds.
+ * disputes, whose 3 pages go to the invoices, so one reading of the year is
+ * within one SALES_READ_SHAPE (lib/read-ceilings.ts): its 58 Stripe pages,
+ * 2,000 PayPal sales and PAYPAL_REFUNDS_READ refunds.
  *
  * Stripe disputes and money given back (a dispute won, a refund that failed)
  * are said not read (`notRead`), on every Stripe month. The rule of #2941
@@ -39,13 +39,17 @@
  *
  * Renewals are dated by when they were paid (status_transitions.paid_at), not
  * when their invoice was made. Stripe lists invoices by when they were made,
- * so a renewal paid at the start of the year whose invoice was made before
- * it would not be read: until the longest time Stripe can take to collect an
- * invoice is proved from its dated documentation, the renewals are known only
- * from RENEWAL_PAID_WITHIN_DAYS after the reading's start, which gives up the
- * oldest month and no other; and a renewal read that was paid later than that
- * after its invoice shows the assumption does not hold, so the renewals are
- * unread. Nothing here ranks or rates the creator by revenue (561 [NE1]).
+ * and nothing bounds how long after that one is paid: Stripe's retries are
+ * the creator's own settings, and lib/card-update.ts pays an open invoice
+ * whenever the member updates their card (Claude 3 on #3022, MEDIUM 2). So
+ * the invoices are listed paid only (status=paid, so void, open and draft
+ * ones never use the cap) from the account's first, with no created[gte]: a
+ * renewal paid in any month of the year is in the list, whenever its invoice
+ * was made. Read to its end, every month is known; stopped at its cap, or at
+ * an invoice it cannot date or place, any invoice made before it may have
+ * been paid in any month, so no month is known (`reachedBack` null), never
+ * the newer ones taken as read. Nothing here ranks or rates the creator by
+ * revenue (561 [NE1]).
  */
 import { type Earnings, type ListReading, type MoneyEvent, type MoneyKind, type ProviderReading, earningsByMonth, readingSince } from "@/lib/earnings-by-month";
 import { PAYPAL_REFUNDS_READ, paidKey, refundedKey, salesKey } from "@/lib/paypal-sales";
@@ -59,10 +63,11 @@ import { type Kept, NotRead, keptReading } from "@/lib/store-readings";
 
 /**
  * Pages of a hundred each Stripe list is read for: those of the sales reading
- * (lib/stats.ts, readSales) but its 3 of disputes, which are said not read:
- * 55 in all, within the 58 SALES_READ_SHAPE charges.
+ * (lib/stats.ts, readSales) but its 3 of disputes, which are said not read
+ * and go to the invoices (10 to 13), read from the account's first: 58 in all,
+ * the 58 SALES_READ_SHAPE charges, no more.
  */
-export const EARNINGS_STRIPE_PAGES = { checkouts: 20, extras: 20, invoices: 10, refunds: 5 } as const;
+export const EARNINGS_STRIPE_PAGES = { checkouts: 20, extras: 20, invoices: 13, refunds: 5 } as const;
 
 /** What a Stripe reading says it does not read, on every Stripe month: disputes and money given back (see above). */
 export const EARNINGS_STRIPE_NOT_READ: readonly MoneyKind[] = ["dispute", "reinstated"];
@@ -70,14 +75,6 @@ export const EARNINGS_STRIPE_NOT_READ: readonly MoneyKind[] = ["dispute", "reins
 export const EARNINGS_PAYPAL_SALES = 20 * 100;
 /** PayPal full refunds read at most. */
 export const EARNINGS_PAYPAL_REFUNDS = PAYPAL_REFUNDS_READ;
-/**
- * Days within which a renewal is taken to be paid after its invoice was made,
- * NOT proved from Stripe's dated documentation (docs/bx2-earnings-design.md,
- * "Renewal dates"). Under four weeks, so it gives up only the oldest month;
- * a renewal read that took longer makes the renewals unread.
- */
-export const RENEWAL_PAID_WITHIN_DAYS = 27;
-const RENEWAL_SHIFT_MS = RENEWAL_PAID_WITHIN_DAYS * 86_400_000;
 
 const ID = /^[A-Za-z0-9_]{3,255}$/;
 const CURRENCY = /^[A-Za-z]{3}$/;
@@ -139,14 +136,6 @@ function invoiceMembership(row: Record<string, unknown>): Record<string, unknown
   return "none";
 }
 
-/** A renewal read that was paid later after its invoice than the reading takes for granted: the renewals are unread. */
-class RenewalPaidLate extends Error {
-  constructor() {
-    super(`a renewal was paid more than ${RENEWAL_PAID_WITHIN_DAYS} days after its invoice`);
-    this.name = "RenewalPaidLate";
-  }
-}
-
 /** How each Stripe list's rows are read for the store. */
 function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: Record<string, unknown>, created: number) => Taken> {
   const handles = saleHandles(store);
@@ -187,8 +176,8 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
       if (meta === "none" || !ours(meta)) return "skip";
       const transitions = ownField(row, "status_transitions");
       const paidAt = plainObject(transitions) ? seconds(ownField(transitions, "paid_at")) : null;
+      // Paid however late after its invoice: dated by its payment (no bound assumed, Claude 3 on #3022, MEDIUM 2).
       if (paidAt === null || paidAt < created) return null;
-      if ((paidAt - created) * 1000 > RENEWAL_SHIFT_MS) throw new RenewalPaidLate();
       const event = money(row, "amount_paid", paidAt);
       return event && event.cents === 0 ? "skip" : event;
     },
@@ -202,20 +191,29 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
 }
 
 /**
- * One Stripe list since `sinceSec`, newest first, at most `pages` pages of a
- * hundred, in the version its shapes are read in. `shift` (ms) moves where it
- * is known from (renewals: RENEWAL_SHIFT_MS). Throws, so the list is unread,
- * for a page in another shape, an id twice or rows out of order.
+ * How a list is asked for and dated: from the reading's start, its rows dated
+ * when they were made (`made`); or, for the invoices, paid ones only from the
+ * account's first, each dated when it was paid (`paid`), so a stop knows no
+ * month at all (an invoice made before where it stopped may be paid in any).
  */
-async function stripeList(account: string, path: string, kind: MoneyKind, sinceSec: number, pages: number, take: (row: Record<string, unknown>, created: number) => Taken, shift = 0): Promise<ListReading> {
+type ListBy = "made" | "paid";
+
+/**
+ * One Stripe list, newest made first, at most `pages` pages of a hundred, in
+ * the version its shapes are read in: since `sinceSec` when `by` is "made";
+ * paid only, from the account's first, when "paid". Throws, so the list is
+ * unread, for a page in another shape, an id twice or rows out of order.
+ */
+async function stripeList(account: string, path: string, kind: MoneyKind, sinceSec: number, pages: number, take: (row: Record<string, unknown>, created: number) => Taken, by: ListBy = "made"): Promise<ListReading> {
   const events: MoneyEvent[] = [];
   const seen = new Set<string>();
-  const since = sinceSec * 1000 + shift;
-  const stopped = (back: number | null): ListReading => ({ kind, events, since, complete: false, reachedBack: back === null ? null : back * 1000 + shift });
+  const since = by === "paid" ? 0 : sinceSec * 1000;
+  const query = by === "paid" ? "status=paid" : `created[gte]=${sinceSec}`;
+  const stopped = (back: number | null): ListReading => ({ kind, events, since, complete: false, reachedBack: back === null || by === "paid" ? null : back * 1000 });
   let after = "";
   let last: number | null = null;
   for (let page = 0; page < pages; page += 1) {
-    const answer = await onAccount("GET", account, `${path}?limit=100&created[gte]=${sinceSec}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`, undefined, STRIPE_LIST_VERSION);
+    const answer = await onAccount("GET", account, `${path}?limit=100&${query}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`, undefined, STRIPE_LIST_VERSION);
     // The page's own shape (a plain object, data a list, has_more true or false), or it throws.
     const { hasMore, lastId } = readStripePage(answer);
     const data = ownField(answer, "data") as unknown[];
@@ -303,7 +301,7 @@ export async function readEarningsLists(store: Store, since: number): Promise<Pr
     const lists = await Promise.all([
       stripeList(account, "/checkout/sessions", "sale", sinceSec, p.checkouts, take.checkouts).catch(unread("sale")),
       stripeList(account, "/payment_intents", "sale", sinceSec, p.extras, take.extras).catch(unread("sale")),
-      stripeList(account, "/invoices", "renewal", sinceSec, p.invoices, take.invoices, RENEWAL_SHIFT_MS).catch(unread("renewal")),
+      stripeList(account, "/invoices", "renewal", sinceSec, p.invoices, take.invoices, "paid").catch(unread("renewal")),
       stripeList(account, "/refunds", "refund", sinceSec, p.refunds, take.refunds).catch(unread("refund")),
     ]);
     // Every kind of EXPECTED_KINDS.stripe is a list above or said here, never both (the rule of #2941).

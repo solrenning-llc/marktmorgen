@@ -12,6 +12,7 @@
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addProduct, claimHandle, ensureStatsId, setProductFunnel, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { newUpsellKey, takeUpsell } from "@/lib/upsell";
+import { noteCharge } from "@/lib/affiliates";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -132,6 +133,28 @@ async function main(): Promise<void> {
     is(`${label}: the email states no figure as paid`, /Paid:/.test(text), false);
     is(`${label}: no money figure appears anywhere`, /\$\d/.test(text), false);
     is(`${label}: it says honestly that it was charged once`, text.includes("Charged once to the card you had just paid with"), true);
+  }
+
+  part("The affiliate's line on the same payment (noteCharge, Claude 6 on #3053): never booked at 0");
+  // An offer taken through an affiliate's link carries `via`; noteCharge writes that sale in the book.
+  const VIA = "0123456789ab";
+  const line = async (id: string) => (await redis.pipeline([["HGET", `nl:aff:${store.statsId}:sales`, id]]))[0];
+  const note = async (id: string, given: typeof shape): Promise<"booked" | "refused"> => {
+    const pi: Record<string, unknown> = { id, status: "succeeded", created: NOW, metadata: { via: VIA, product: upsell, title: "Starter Kit Guide" }, ...given };
+    try {
+      await noteCharge(store, pi);
+      return "booked";
+    } catch {
+      return "refused";
+    }
+  };
+  is("healthy control: the line is booked at the amount charged", [await note("pi_TestNoteOk000001", { amount: 1900, currency: "usd" }),
+    (JSON.parse(String(await line("pi_TestNoteOk000001"))) as { base?: unknown }).base], ["booked", 1900]);
+  let n = 0;
+  for (const [label, given] of unreadable.filter(([, g]) => "currency" in g && typeof g.currency === "string")) {
+    n += 1;
+    const id = `pi_TestNoteOdd${String(n).padStart(5, "0")}`;
+    is(`${label}: the sale is not booked at 0, and the caller is told`, [await note(id, given), await line(id)], ["refused", null]);
   }
 
   done();

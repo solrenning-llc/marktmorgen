@@ -22,7 +22,7 @@
 import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { traceKey } from "@/lib/community-trace";
-import { forgetMemberRecord, readConfig } from "@/lib/community";
+import { forgetMemberRecord, readConfig, readMember } from "@/lib/community";
 import { forgetHandle } from "@/lib/community-mentions";
 import { forgetCommunityUnsub } from "@/lib/community-mail";
 import { forgetPointsPerson } from "@/lib/community-points";
@@ -60,15 +60,21 @@ export async function forgetCommunityPerson(id: string, who: string, email: stri
     failures.push(error);
     return null;
   });
-  const member = await forgetMemberRecord(id, who).catch((error: unknown) => {
-    failures.push(error);
-    return null;
-  });
-  if (member) records += 1;
-  const handle = member?.h;
-  const unsub = member?.t;
+  // Their record is the only place that names their handle and their unsubscribe token: it is read first and
+  // deleted last, and only once what it names is gone, so a step that fails leaves it for the retry (Claude 6 on #2957).
+  const named = await readMember(id, who).then(
+    (member) => ({ member }),
+    (error: unknown) => {
+      failures.push(error);
+      return null;
+    },
+  );
+  const beforeNamed = failures.length;
+  const handle = named?.member?.h;
+  const unsub = named?.member?.t;
   if (handle) await step(() => forgetHandle(id, handle, who));
   if (unsub) await step(() => forgetCommunityUnsub(unsub));
+  const namedGone = named !== null && failures.length === beforeNamed;
   await step(() => unindexMember(id, who));
   // Their trace (lib/community-trace.ts): what they wrote and did, by reference. DEL's own count only (CX-123 rule 24).
   await step(async () => {
@@ -84,6 +90,9 @@ export async function forgetCommunityPerson(id: string, who: string, email: stri
   await step(() => forgetGrantPerson(id, who));
   await step(() => forgetRsvpsPerson(id, who, email));
   await step(() => forgetAccessPerson(id, email, (config?.spaces ?? []).map((s) => s.id), productIds));
+  if (namedGone) {
+    await step(async () => ((await forgetMemberRecord(id, who)) ? 1 : 0));
+  }
   if (failures.length) throw failures[0];
   return records;
 }

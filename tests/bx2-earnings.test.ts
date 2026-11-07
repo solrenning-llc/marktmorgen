@@ -166,6 +166,67 @@ for (const [what, event] of [
   is("a sum past exact integers is unknown, never rounded", source(huge, "2026-10", "stripe"), { source: "stripe", state: "unknown", why: "too_large" });
 }
 
+part("Codex J's review of #2941 (5808632896; proof codex/j-review-2941-earnings@fee674d4): exact sums, one wrapper a source, Date range, the reading's horizon");
+{
+  const max = Number.MAX_SAFE_INTEGER;
+  // MEDIUM 1: a net computed past exact integers came back one cent short yet safe, and was shown as read.
+  const wide = earningsByMonth(input({ providers: [stripe([
+    list("sale", [{ id: "s", at: utc(2026, 10, 1), cents: max, currency: "usd" }]),
+    list("renewal", [{ id: "n", at: utc(2026, 10, 2), cents: 2, currency: "usd" }]),
+    list("refund", [{ id: "r", at: utc(2026, 10, 3), cents: 2, currency: "usd" }]),
+  ])] }));
+  const wideMonth = source(wide, "2026-10", "stripe") as { state: string; lines?: { netCents: number }[]; why?: string };
+  is("money in past exact integers, then out: the net is exact, never a cent off", wideMonth.state === "read" ? wideMonth.lines![0].netCents : wideMonth.why, max);
+  const across = earningsByMonth(input({
+    providers: [stripe([list("sale", [{ id: "s", at: utc(2026, 10, 1), cents: max, currency: "usd" }]), list("refund", [{ id: "r", at: utc(2026, 10, 2), cents: 2, currency: "usd" }])])],
+    manual: [{ id: "m", date: "2026-10-05", cents: 2, currency: "usd" }],
+  }));
+  is("Stripe's net is exact (max - 2)", (source(across, "2026-10", "stripe") as { lines: { netCents: number }[] }).lines[0].netCents, max - 2);
+  is("the month's total across sources is exact too, never a cent off", month(across, "2026-10").totals, [
+    { currency: "usd", salesCents: max, renewalCents: 0, enteredCents: 2, refundCents: 2, disputeCents: 0, netCents: max },
+  ]);
+  const exactNet = earningsByMonth(input({ providers: [stripe([
+    list("sale", [{ id: "s", at: utc(2026, 10, 1), cents: max - 4, currency: "usd" }]),
+    list("renewal", [{ id: "n", at: utc(2026, 10, 2), cents: 2, currency: "usd" }]),
+    list("refund", [{ id: "r", at: utc(2026, 10, 3), cents: 2, currency: "usd" }]),
+  ])] }));
+  is("control: within exact integers the net is exact", (source(exactNet, "2026-10", "stripe") as { lines: { netCents: number }[] }).lines[0].netCents, max - 4);
+
+  // MEDIUM 2: two wrappers of the same provider each had their own seen ids, so one Stripe payment counted twice.
+  const sale = { id: "same", at: utc(2026, 10, 1), cents: 200, currency: "usd" };
+  const doubled = earningsByMonth(input({ providers: [stripe([list("sale", [sale])]), stripe([list("sale", [sale])])] }));
+  is("one source, said once", month(doubled, "2026-10").sources.map((s) => s.source), ["stripe", "manual"]);
+  is("a provider given twice is unknown, never added twice", source(doubled, "2026-10", "stripe"), { source: "stripe", state: "unknown", why: "invalid" });
+  is("and the month has no total", month(doubled, "2026-10").totals, null);
+  const twoIds = earningsByMonth(input({ providers: [stripe([list("sale", [sale])]), stripe([list("sale", [{ ...sale, id: "other" }])])] }));
+  is("even with different records, a provider given twice is unknown (rule 30)", (source(twoIds, "2026-10", "stripe") as { state: string }).state, "unknown");
+  const paypalTwice = earningsByMonth(input({ providers: [{ source: "paypal", lists: [list("sale", [])] }, { source: "paypal", lists: [list("sale", [])] }] }));
+  is("PayPal given twice is unknown too", (source(paypalTwice, "2026-10", "paypal") as { state: string }).state, "unknown");
+  is("a provider that is not Stripe or PayPal gives nothing, never a total", earningsByMonth(input({ providers: [{ source: "manual" as "stripe", lists: [list("sale", [sale])] }] })), null);
+  const both = earningsByMonth(input({ providers: [stripe([list("sale", [sale])]), { source: "paypal", lists: [list("sale", [{ ...sale, id: "pp" }])] }] }));
+  is("control: Stripe and PayPal once each are both read", month(both, "2026-10").totals!.map((l) => l.netCents), [400]);
+
+  // LOW 3: a finite time outside Date's range reached Intl and threw.
+  is("a reading time outside Date's range gives nothing, never a throw", (() => { try { return earningsByMonth(input({ at: max })); } catch (error) { return String(error); } })(), null);
+  is("and no months for it", (() => { try { return earningsMonths(-max, "UTC"); } catch (error) { return String(error); } })(), []);
+  for (const at of [max, -max]) {
+    const out = (() => { try { return earningsByMonth(input({ providers: [stripe([list("sale", [{ id: "d", at, cents: 100, currency: "usd" }])])] })); } catch (error) { return String(error); } })();
+    is(`a record at ${at > 0 ? "+" : "-"}MAX_SAFE_INTEGER ms: its source unknown, never a throw`, typeof out === "string" ? out : source(out, "2026-10", "stripe"), { source: "stripe", state: "unknown", why: "invalid" });
+  }
+
+  // LOW 4: the current month runs to the reading's time; a record after it is not money "so far".
+  const after = earningsByMonth(input({ providers: [stripe([list("sale", [{ id: "a", at: AT + 1, cents: 200, currency: "usd" }])])] }));
+  is("a record a millisecond after the reading: its source unknown", source(after, "2026-11", "stripe"), { source: "stripe", state: "unknown", why: "invalid" });
+  const atReading = earningsByMonth(input({ providers: [stripe([list("sale", [{ id: "a", at: AT, cents: 200, currency: "usd" }])])] }));
+  is("control: a record at the reading's own time is read", (source(atReading, "2026-11", "stripe") as { lines: { salesCents: number }[] }).lines[0].salesCents, 200);
+  const tomorrow = earningsByMonth(input({ manual: [{ id: "f", date: "2026-11-07", cents: 200, currency: "usd" }] }));
+  is("an entry dated the day after the reading: unknown", source(tomorrow, "2026-11", "manual"), { source: "manual", state: "unknown", why: "invalid" });
+  const today = earningsByMonth(input({ manual: [{ id: "t", date: "2026-11-06", cents: 200, currency: "usd" }] }));
+  is("control: an entry dated the reading's own day is read", (source(today, "2026-11", "manual") as { state: string }).state, "read");
+  const tokyo = earningsByMonth(input({ timeZone: "Asia/Tokyo", at: Date.UTC(2026, 10, 6, 16), manual: [{ id: "t", date: "2026-11-07", cents: 200, currency: "usd" }] }));
+  is("control: the reading's day is the store's own (16:00 UTC on the 6th is the 7th in Tokyo)", (source(tokyo, "2026-11", "manual") as { state: string }).state, "read");
+}
+
 part("A month read in full with nothing in it is a confirmed zero");
 {
   const out = earningsByMonth(input({ providers: [stripe([list("sale", []), list("refund", [])])] }));

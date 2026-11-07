@@ -73,7 +73,7 @@ const en = {
   sent: "Sent",
   emailedLinkTo: (title: string) => `We emailed you a link to ${title}.`,
   emailedLink: "We emailed you a link.",
-  comesFrom: (store: string) => `It comes from ${store} via Marktmorgen and usually arrives within a minute. If it is not there, look in spam.`,
+  comesFrom: (store: string) => `It comes from ${store} via Marktmorgen. If it is not there, look in spam.`,
   joinsOnUse: (store: string) => `Your address joins ${store}'s list only once you use that link, so a mistyped address never ends up on it.`,
   freeGone: "This is no longer offered for free.",
   freeNothing: "There is nothing on this yet. Ask the store about it.",
@@ -128,7 +128,7 @@ const en = {
   notOnListBody: "It was removed already, or the waitlist has done its job and its addresses are gone.",
   almostThere: "Almost there",
   waitSentBody: (title: string, store: string) =>
-    `We emailed you a button to confirm your spot on the waitlist for ${title || "it"}. It comes from ${store} via Marktmorgen and usually arrives within a minute; if it is not there, look in spam.`,
+    `We emailed you a button to confirm your spot on the waitlist for ${title || "it"}. It comes from ${store} via Marktmorgen. If it is not there, look in spam.`,
   waitSentNote: "Your spot counts once you press it, so a mistyped address is never told anything.",
   onTheList: "You are on the list",
   tellWhenOut: (title: string) => `We will tell you when ${title || "it"} is out`,
@@ -420,7 +420,7 @@ const es: GivingWords = {
   sent: "Enviado",
   emailedLinkTo: (title) => `Te hemos enviado por email un enlace a ${title}.`,
   emailedLink: "Te hemos enviado un enlace por email.",
-  comesFrom: (store) => `Llega de ${store} a través de Marktmorgen y suele tardar menos de un minuto. Si no está, mira en spam.`,
+  comesFrom: (store) => `Llega de ${store} a través de Marktmorgen. Si no está, mira en spam.`,
   joinsOnUse: (store) => `Tu dirección solo entra en la lista de ${store} cuando usas ese enlace, así que una dirección mal escrita nunca acaba en ella.`,
   freeGone: "Esto ya no se ofrece gratis.",
   freeNothing: "Todavía no hay nada aquí. Pregunta a la tienda.",
@@ -473,7 +473,7 @@ const es: GivingWords = {
   notOnListBody: "Ya se quitó, o la lista de espera ya cumplió su función y sus direcciones se han borrado.",
   almostThere: "Ya casi está",
   waitSentBody: (title, store) =>
-    `Te hemos enviado por email un botón para confirmar tu plaza en la lista de espera${title ? ` de ${title}` : ""}. Llega de ${store} a través de Marktmorgen y suele tardar menos de un minuto; si no está, mira en spam.`,
+    `Te hemos enviado por email un botón para confirmar tu plaza en la lista de espera${title ? ` de ${title}` : ""}. Llega de ${store} a través de Marktmorgen. Si no está, mira en spam.`,
   waitSentNote: "Tu plaza cuenta cuando lo pulsas, así que a una dirección mal escrita nunca se le avisa de nada.",
   onTheList: "Estás en la lista",
   tellWhenOut: (title) => (title ? `Te avisaremos cuando salga ${title}` : "Te avisaremos cuando salga"),
@@ -743,7 +743,7 @@ const fr: GivingWords = {
   sent: "Envoyé",
   emailedLinkTo: (title) => `Nous vous avons envoyé par e-mail un lien vers ${title}.`,
   emailedLink: "Nous vous avons envoyé un lien par e-mail.",
-  comesFrom: (store) => `Il vient de ${store} via Marktmorgen et arrive généralement en moins d'une minute. S'il n'y est pas, regardez dans les spams.`,
+  comesFrom: (store) => `Il vient de ${store} via Marktmorgen. S'il n'y est pas, regardez dans les spams.`,
   joinsOnUse: (store) =>
     `Votre adresse ne rejoint la liste de ${store} qu'une fois ce lien utilisé, une adresse mal saisie n'y figure donc jamais.`,
   freeGone: "Ce n'est plus proposé gratuitement.",
@@ -796,7 +796,7 @@ const fr: GivingWords = {
   notOnListBody: "Elle a déjà été retirée, ou la liste d'attente a rempli son rôle et ses adresses ont été supprimées.",
   almostThere: "Presque terminé",
   waitSentBody: (title, store) =>
-    `Nous vous avons envoyé par e-mail un bouton pour confirmer votre place sur la liste d'attente${title ? ` de ${title}` : ""}. Il vient de ${store} via Marktmorgen et arrive généralement en moins d'une minute${S}; s'il n'y est pas, regardez dans les spams.`,
+    `Nous vous avons envoyé par e-mail un bouton pour confirmer votre place sur la liste d'attente${title ? ` de ${title}` : ""}. Il vient de ${store} via Marktmorgen. S'il n'y est pas, regardez dans les spams.`,
   waitSentNote: "Votre place compte dès que vous appuyez dessus, une adresse mal saisie ne reçoit donc jamais rien.",
   onTheList: "Vous êtes sur la liste",
   tellWhenOut: (title) => `Nous vous préviendrons à la sortie${title ? ` de ${title}` : ""}`,
@@ -1063,7 +1063,7 @@ const de: GivingWords = {
   sent: "Gesendet",
   emailedLinkTo: (title) => `Wir haben Ihnen einen Link zu ${title} per E-Mail geschickt.`,
   emailedLink: "Wir haben Ihnen einen Link per E-Mail geschickt.",
-  comesFrom: (store) => `Er kommt von ${store} über Marktmorgen und ist meist innerhalb einer Minute da. Falls nicht, sehen Sie im Spam-Ordner nach.`,
+  comesFrom: (store) => `Er kommt von ${store} über Marktmorgen. Falls nicht, sehen Sie im Spam-Ordner nach.`,
   joinsOnUse: (store) =>
     `Ihre Adresse kommt erst auf die Liste von ${store}, wenn Sie diesen Link nutzen, damit eine vertippte Adresse nie darauf landet.`,
   freeGone: "Das wird nicht mehr kostenlos angeboten.",
@@ -1117,7 +1117,7 @@ const de: GivingWords = {
   notOnListBody: "Sie wurde bereits entfernt, oder die Warteliste hat ihren Zweck erfüllt und ihre Adressen sind gelöscht.",
   almostThere: "Fast geschafft",
   waitSentBody: (title, store) =>
-    `Wir haben Ihnen per E-Mail eine Schaltfläche geschickt, mit der Sie Ihren Platz auf der Warteliste${title ? ` für ${title}` : ""} bestätigen. Sie kommt von ${store} über Marktmorgen und ist meist innerhalb einer Minute da; falls nicht, sehen Sie im Spam-Ordner nach.`,
+    `Wir haben Ihnen per E-Mail eine Schaltfläche geschickt, mit der Sie Ihren Platz auf der Warteliste${title ? ` für ${title}` : ""} bestätigen. Sie kommt von ${store} über Marktmorgen. Falls sie nicht da ist, sehen Sie im Spam-Ordner nach.`,
   waitSentNote: "Ihr Platz zählt erst, wenn Sie darauf drücken, damit eine vertippte Adresse nie benachrichtigt wird.",
   onTheList: "Sie stehen auf der Liste",
   tellWhenOut: (title) => `Wir sagen Ihnen Bescheid, wenn ${title || "es"} erscheint`,
@@ -1383,7 +1383,7 @@ const it: GivingWords = {
   sent: "Inviato",
   emailedLinkTo: (title) => `Ti abbiamo inviato via email un link a ${title}.`,
   emailedLink: "Ti abbiamo inviato un link via email.",
-  comesFrom: (store) => `Arriva da ${store} tramite Marktmorgen, di solito entro un minuto. Se non lo trovi, guarda nello spam.`,
+  comesFrom: (store) => `Arriva da ${store} tramite Marktmorgen. Se non lo trovi, guarda nello spam.`,
   joinsOnUse: (store) =>
     `Il tuo indirizzo entra nella lista di ${store} solo quando usi quel link, così un indirizzo scritto male non ci finisce mai.`,
   freeGone: "Non è più offerto gratuitamente.",
@@ -1437,7 +1437,7 @@ const it: GivingWords = {
   notOnListBody: "È già stato rimosso, oppure la lista d'attesa ha fatto il suo lavoro e i suoi indirizzi sono stati cancellati.",
   almostThere: "Ci sei quasi",
   waitSentBody: (title, store) =>
-    `Ti abbiamo inviato via email un pulsante per confermare il tuo posto nella lista d'attesa${title ? ` per ${title}` : ""}. Arriva da ${store} tramite Marktmorgen, di solito entro un minuto; se non la trovi, guarda nello spam.`,
+    `Ti abbiamo inviato via email un pulsante per confermare il tuo posto nella lista d'attesa${title ? ` per ${title}` : ""}. Arriva da ${store} tramite Marktmorgen. Se non la trovi, guarda nello spam.`,
   waitSentNote: "Il tuo posto conta solo quando lo premi, così un indirizzo scritto male non riceve mai niente.",
   onTheList: "Sei nella lista",
   tellWhenOut: (title) => (title ? `Ti avviseremo quando uscirà ${title}` : "Ti avviseremo quando uscirà"),
@@ -1707,7 +1707,7 @@ const nl: GivingWords = {
   sent: "Verstuurd",
   emailedLinkTo: (title) => `We hebben je een link naar ${title} gemaild.`,
   emailedLink: "We hebben je een link gemaild.",
-  comesFrom: (store) => `De e-mail komt van ${store} via Marktmorgen en is er meestal binnen een minuut. Staat hij er niet, kijk dan in je spam.`,
+  comesFrom: (store) => `De e-mail komt van ${store} via Marktmorgen. Staat hij er niet, kijk dan in je spam.`,
   joinsOnUse: (store) => `Je adres komt pas op de lijst van ${store} als je die link gebruikt, dus een verkeerd getypt adres komt er nooit op.`,
   freeGone: "Dit wordt niet meer gratis aangeboden.",
   freeNothing: "Hier staat nog niets op. Vraag het de winkel.",
@@ -1759,7 +1759,7 @@ const nl: GivingWords = {
   notOnListBody: "Het is al verwijderd, of de wachtlijst heeft haar werk gedaan en de adressen zijn gewist.",
   almostThere: "Bijna klaar",
   waitSentBody: (title, store) =>
-    `We hebben je een knop gemaild om je plek op de wachtlijst${title ? ` voor ${title}` : ""} te bevestigen. De e-mail komt van ${store} via Marktmorgen en is er meestal binnen een minuut; staat hij er niet, kijk dan in je spam.`,
+    `We hebben je een knop gemaild om je plek op de wachtlijst${title ? ` voor ${title}` : ""} te bevestigen. De e-mail komt van ${store} via Marktmorgen. Staat hij er niet, kijk dan in je spam.`,
   waitSentNote: "Je plek telt pas als je erop drukt, dus een verkeerd getypt adres krijgt nooit iets te horen.",
   onTheList: "Je staat op de lijst",
   tellWhenOut: (title) => `We laten het je weten als ${title || "het"} uit is`,
@@ -2024,7 +2024,7 @@ const pt: GivingWords = {
   sent: "Enviado",
   emailedLinkTo: (title) => `Enviámos-lhe por email uma ligação para ${title}.`,
   emailedLink: "Enviámos-lhe uma ligação por email.",
-  comesFrom: (store) => `Chega de ${store} através da Marktmorgen e costuma demorar menos de um minuto. Se não estiver lá, veja na pasta de spam.`,
+  comesFrom: (store) => `Chega de ${store} através da Marktmorgen. Se não estiver lá, veja na pasta de spam.`,
   joinsOnUse: (store) =>
     `O seu endereço só entra na lista de ${store} quando utilizar essa ligação, por isso um endereço mal escrito nunca lá fica.`,
   freeGone: "Isto já não é oferecido gratuitamente.",
@@ -2078,7 +2078,7 @@ const pt: GivingWords = {
   notOnListBody: "Já foi removido, ou a lista de espera já cumpriu a sua função e os endereços foram apagados.",
   almostThere: "Está quase",
   waitSentBody: (title, store) =>
-    `Enviámos-lhe por email um botão para confirmar o seu lugar na lista de espera${title ? ` de ${title}` : ""}. Chega de ${store} através da Marktmorgen e costuma demorar menos de um minuto; se não estiver lá, veja na pasta de spam.`,
+    `Enviámos-lhe por email um botão para confirmar o seu lugar na lista de espera${title ? ` de ${title}` : ""}. Chega de ${store} através da Marktmorgen. Se não estiver lá, veja na pasta de spam.`,
   waitSentNote: "O seu lugar só conta quando carregar nele, por isso um endereço mal escrito nunca recebe nada.",
   onTheList: "Está na lista",
   tellWhenOut: (title) => (title ? `Receberá um aviso quando ${title} sair` : "Receberá um aviso quando sair"),

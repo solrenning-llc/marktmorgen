@@ -28,7 +28,7 @@
  *   nl:auth:rec:link:<hash>   a link sent to the recovery address, 15 minutes, spent once
  *   nl:auth:rec:until:<hash>  until when logins through the recovery address are locked
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -82,7 +82,7 @@ export async function startRecoveryAddress(email: string, session: string, raw: 
   if (!address || address.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(address)) return "invalid";
   if (address === normaliseEmail(email)) return "same";
   if (!(await withinLimit("recovery-address", normaliseEmail(email), 5, 60 * 60))) return "limited";
-  const code = String(randomBytes(4).readUInt32BE(0) % 1_000_000).padStart(6, "0");
+  const code = String(randomInt(1_000_000)).padStart(6, "0");
   const sent = await mail(address, `${code} is your code to confirm a recovery address`, [
     `The Marktmorgen account ${normaliseEmail(email)} is choosing this address to get back in if its owner can no longer open their email or lose their phone.`,
     "",
@@ -159,7 +159,7 @@ export async function sendLostEmailLink(signIn: string, ip: string, origin: stri
   if (!address) return;
   const token = randomBytes(32).toString("hex");
   await redisPipeline([["SET", linkKey(token), email, "EX", LINK_SECONDS]]);
-  await mail(address, "Get back into your Marktmorgen account", [
+  const sent = await mail(address, "Get back into your Marktmorgen account", [
     `This is the recovery address of the Marktmorgen account ${email}. Somebody said they can no longer open that inbox and asked for a way in.`,
     "",
     "This link logs you in. It works once, for 15 minutes:",
@@ -169,8 +169,12 @@ export async function sendLostEmailLink(signIn: string, ip: string, origin: stri
     "",
     "If you did not ask for this, ignore it: nothing changes unless the link is used.",
   ]);
+  // An uncertain first response may still have sent the link. Preserve the
+  // security warning, without claiming acceptance the sender did not confirm.
   await mail(email, "Somebody asked to log in to your Marktmorgen account through its recovery address", [
-    `A link was sent to your recovery address (${hideAddress(address)}) because somebody said they can no longer open this inbox.`,
+    sent === true
+      ? `A link was sent to your recovery address (${hideAddress(address)}) because somebody said they can no longer open this inbox.`
+      : `Somebody asked to log in through your recovery address (${hideAddress(address)}). We could not confirm that the email link was sent.`,
     "",
     `When: ${when()} UTC`,
     "",

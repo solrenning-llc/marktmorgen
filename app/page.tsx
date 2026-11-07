@@ -102,7 +102,7 @@ export default function Home() {
     <div className={`${MORNING_FONTS} hm`}>
       <MorningHeader />
 
-      <main id="content" data-static-reading data-home-page className="hm-body">
+      <main id="content" tabIndex={-1} data-static-reading data-home-page className="hm-body">
         <section aria-labelledby="home-hero-heading" className="hm-hero" data-home-hero>
           <div aria-hidden="true" className="hm-sky-layer">
             <div className="hm-blob hm-sun-glow" />
@@ -206,7 +206,7 @@ export default function Home() {
                 <li>{CHECK}Courses, downloads, memberships and calls</li>
                 <li>{CHECK}Money goes to your own Stripe account</li>
               </ul>
-              <a href="/signin" className="hm-plan-button">Start free</a>
+              <a href="/signin" className="hm-plan-button">Start your store</a>
             </div>
           </div>
         </section>

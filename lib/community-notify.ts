@@ -177,8 +177,13 @@ export function noticeKeys(id: string, who: string): string[] {
 
 /** Deletes what one member was told and when they last looked (lib/community-erasure.ts). */
 export async function forgetNoticesPerson(id: string, who: string): Promise<number> {
-  const [gone] = await redisPipeline([["DEL", ...noticeKeys(id, who)]]);
-  return Number(gone) || 0;
+  const reply = await redisPipeline([["DEL", ...noticeKeys(id, who)]]);
+  const length = Array.isArray(reply) ? Object.getOwnPropertyDescriptor(reply, "length") : undefined;
+  const gone = Array.isArray(reply) ? Object.getOwnPropertyDescriptor(reply, "0") : undefined;
+  if (length?.value !== 1 || !gone || !Object.hasOwn(gone, "value") || typeof gone.value !== "number" || !Number.isSafeInteger(gone.value) || gone.value < 0 || gone.value > 2) {
+    throw new Error("Community notice erasure was not confirmed");
+  }
+  return gone.value;
 }
 
 /** Every notice one member has, newest first, for the copy of their data (619 [SZ3]); only reads, never marks them seen. */

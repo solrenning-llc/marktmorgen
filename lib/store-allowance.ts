@@ -101,6 +101,31 @@ export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, 
 }
 
 /**
+ * Counts `n` of a kind that was already used, past the figure if it must
+ * (Claude 4, C4-20261106-1740/1810-C3: a read settled at what it really read,
+ * lib/cart-link-products.ts). Never a way to use more: it is only the true
+ * count of what was already spent, so the figure shows it and the next use is
+ * refused as usual. true once Redis confirms the count, false when it is not
+ * known.
+ */
+export async function forceAllowance(store: AllowanceStore, kind: AllowanceKind, n: number, now = Date.now()): Promise<boolean> {
+  if (!Number.isSafeInteger(n) || n < 1) return false;
+  const window = allowanceWindow(store, now);
+  const id = idOf(store);
+  if (!window || !id || !isRedisConfigured()) return false;
+  try {
+    const k = key(kind, id, window.id);
+    const reply: unknown = await redisPipeline([
+      ["SET", k, "0", "NX", "EX", keepSecondsFor(window, now)],
+      ["INCRBY", k, n],
+    ]);
+    return acknowledgedAllowanceCount(reply, n) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Gives back `n` of a kind that this same use took at `now` and did not need
  * (lib/api-guard.ts, holdMoreApi: a reading set aside at its most, then
  * measured). Only ever what was taken a moment before, in the same window;
@@ -236,6 +261,11 @@ export async function allowancesUsedStrict(store: AllowanceStore, kinds: readonl
   } catch {
     return null;
   }
+}
+
+/** The words a use of `kind` is refused with once the store's figure for it is used, as takeAllowance says them (lib/webhooks.ts, a message not kept). */
+export function allowanceUsedWords(store: AllowanceStore, kind: AllowanceKind, now = Date.now()): string {
+  return usedWords(kind, allowanceFor(store, kind, now / 1000), resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0), standingOf(store, now / 1000), PLANS_ON_SALE, planAboveSold(store.tier ?? "creator"));
 }
 
 /** What has been taken of a kind in the store's window, for the studio; 0 when it cannot be read. */

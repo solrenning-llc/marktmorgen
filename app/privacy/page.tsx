@@ -160,7 +160,10 @@ export default function PrivacyPage() {
           another of the store&apos;s plans, the change is made on the
           creator&apos;s Stripe account, which keeps the record of it, and we
           email the member a receipt and the creator a note with the
-          member&apos;s email address and the two plans. We keep nothing more
+          member&apos;s email address and the two plans. The same goes for a
+          switch to yearly payments. Each asks the box about starting before
+          the 14 days end again, and keeps its answer on the membership (see{" "}
+          <a href="#instant-access" className="underline">Starting before the 14 days end</a>). We keep nothing more
           about it.
         </p>
         <p>
@@ -485,7 +488,8 @@ export default function PrivacyPage() {
           box about starting before a 14-day right to cancel ends. When you
           check it, we write &ldquo;yes&rdquo;, the version and kind of that
           sentence and the time on the order, and the confirmation email quotes
-          it back to you. For a card payment it is kept on the order itself, in
+          it back to you. Switching a membership to another plan or to yearly
+          payments asks the same box again, and the receipt quotes it. For a card payment it is kept on the order itself (on a switch, on the membership), in
           the creator&apos;s own Stripe account, for as long as the creator
           keeps their Stripe records. For a PayPal payment it is kept with our
           own record of that PayPal order, which we keep for 400 days for
@@ -657,6 +661,24 @@ export default function PrivacyPage() {
           on a list so the course stays closed to them. To check who bought a
           course, we ask the creator&apos;s own Stripe account by email address.
         </p>
+        <p id="lesson-places">
+          <strong className="text-black">Where you stopped in a lesson video.</strong>{" "}
+          When a student watches a lesson video a store hosts with us, their
+          own browser keeps where they stopped, so the lesson can offer to
+          continue from there: in its storage, under <code>mm:lp:</code>{" "}
+          followed by the course, the lesson and a code made on our server
+          that cannot be worked out from their email address. It holds the
+          second they reached and when, and nothing else, and is never sent to
+          us. The speed they chose is kept the same way, under{" "}
+          <code>mm:lp-speed</code>. A place is removed when the video is
+          watched to its end and when they press Start over. One older than
+          90 days is never used, and is removed the next time that lesson is
+          opened in that browser. Whenever the course page opens in that
+          browser without confirming their access (because it ended, or
+          because it could not be checked at that moment), all their places in
+          that course are removed. Clearing the browser&apos;s site data
+          removes them at any time.
+        </p>
         <p id="lesson-comments">
           <strong className="text-black">Comments under lessons.</strong>{" "}
           A student who comments under a lesson chooses a name, and we keep that
@@ -798,6 +820,20 @@ export default function PrivacyPage() {
           of the address and network address that asked for a link for one
           hour.
         </p>
+        <p id="members-letters">
+          <strong className="text-black">An email kept for members.</strong>{" "}
+          When a creator publishes an email on their store for the buyers of
+          some products only, we decide who may read it by looking up the
+          email address a person types on the creator&apos;s own Stripe
+          account, on that creator&apos;s list for something free, or among
+          the buyers the creator brought over from another platform, and we
+          email that address a link that works for one hour. The link and the
+          address it was sent to are kept for that hour. Using it sets the
+          same cookie for that store a course and a community use, for 90
+          days. The answer about whether an address may read it is kept for
+          up to five minutes, and, to limit abuse, one-way hashes of the
+          address and network address that asked for a link for one hour.
+        </p>
         <p id="live-events">
           <strong className="text-black">Live events in a community.</strong>{" "}
           When a member says they are coming to a creator&apos;s live event
@@ -820,7 +856,8 @@ export default function PrivacyPage() {
           in as their name in the room, where the others in it see it. A
           replay is a YouTube, Vimeo or Loom video that loads from that
           service only when a member presses play, and so does a video on a
-          creator&apos;s sales page, when a visitor presses play.
+          creator&apos;s sales page, when a visitor presses play or the button
+          that opens it in a window, where it then starts playing.
         </p>
         <p id="imports">
           <strong className="text-black">
@@ -890,7 +927,10 @@ export default function PrivacyPage() {
           email from the store&apos;s name, through our email provider, saying
           what they were given, within the same 20,000 in 30 days as the
           emails above. We keep how many of these a store made each day, for a
-          day, to hold them to their limits.
+          day, to hold them to their limits. Any key of a store, one that only
+          reads included, can also list the store&apos;s sales with each
+          buyer&apos;s email address and name, read from the creator&apos;s own
+          Stripe account when the tool asks; we do not keep that list.
         </p>
         <p id="code-links">
           <strong className="text-black">
@@ -1110,7 +1150,10 @@ export default function PrivacyPage() {
           creator also gets a private address of their own that lists their
           upcoming calls and sessions with the name and email address of each
           buyer, for the calendar app they subscribe with; replacing that
-          address turns the old one off.
+          address turns the old one off. We keep the last copy of that list
+          made for their calendar app for up to 40 days; once the store is
+          deleted or closed, that copy is never shown again, and it is erased
+          within those 40 days.
         </p>
         <p id="webhooks">
           <strong className="text-black">Webhooks a creator adds.</strong> A
@@ -2116,7 +2159,7 @@ export default function PrivacyPage() {
           <p>
             What is deleted: your place on the store&apos;s list and every link
             in its emails to you; what its team noted about you (its fields,
-            notes and deals); your form answers with their quiz results and
+            notes, deals and tasks); your form answers with their quiz results and
             scores, inbox conversations, reviews
             and their photos, and waitlist places; your way through its
             sequences and workflows, and any email still waiting to reach you;

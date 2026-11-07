@@ -45,6 +45,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
@@ -367,11 +368,27 @@ export function memberKey(email: string): string {
 export async function lastSeenIn(id: string, emails: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   if (!emails.length || !isRedisConfigured()) return out;
-  const [raw] = await redisPipeline([["HMGET", membersKey(id), ...emails.map(memberKey)]]);
-  const rows = Array.isArray(raw) ? raw : [];
+  const replies = repliesFor(await redisPipeline([["HMGET", membersKey(id), ...emails.map(memberKey)]]), 1);
+  const rows = replies && repliesFor(replies[0], emails.length);
+  if (!rows) throw new UnknownReplyError("community member activity");
   emails.forEach((email, i) => {
-    const member = parseMember(rows[i]);
-    out.set(email, member && !member.removed ? member.seen || member.at || 0 : 0);
+    const raw = rows[i];
+    if (raw === null) { out.set(email, 0); return; }
+    if (typeof raw !== "string") throw new UnknownReplyError("community member activity record");
+    let member: Partial<Member>;
+    try {
+      const value: unknown = JSON.parse(raw);
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("not a member");
+      member = value as Partial<Member>;
+    } catch {
+      throw new UnknownReplyError("community member activity record");
+    }
+    if (member.k !== memberKey(email) || member.e !== normaliseEmail(email) || typeof member.removed !== "boolean" ||
+        typeof member.seen !== "number" || !Number.isSafeInteger(member.seen) || member.seen < 0 ||
+        typeof member.at !== "number" || !Number.isSafeInteger(member.at) || member.at < 0) {
+      throw new UnknownReplyError("community member activity fields");
+    }
+    out.set(email, member.removed ? 0 : member.seen || member.at);
   });
   return out;
 }
@@ -585,15 +602,25 @@ export async function mailableMembers(id: string): Promise<Member[]> {
 
 // ------------------------------------------------------------------ limits
 
-/** Counts one more of `kind` for this member, and says whether it is allowed. */
+/**
+ * Counts one more of `kind` for this member, and says whether it is allowed.
+ * A count not read in its exact shape is never taken as room, nor said as
+ * the limit reached: it is thrown, and the route answers with its error
+ * (CX-123 rule 24).
+ */
 export async function within(id: string, who: string, kind: RateKind): Promise<boolean> {
   const { limit, seconds } = RATE_LIMITS[kind];
   const key = rateKey(id, who, kind);
-  const [, count] = await redisPipeline([
-    ["SET", key, "0", "EX", seconds, "NX"],
-    ["INCR", key],
-  ]);
-  return Number(count) <= limit;
+  const both = repliesFor(
+    await redisPipeline([
+      ["SET", key, "0", "EX", seconds, "NX"],
+      ["INCR", key],
+    ]),
+    2,
+  );
+  const count = both && (both[0] === "OK" || both[0] === null) ? countOf(both[1]) : null;
+  if (count === null || count < 1) throw new UnknownReplyError(`a community ${kind} count`);
+  return count <= limit;
 }
 
 // ------------------------------------------------------------------ posts
@@ -1029,20 +1056,71 @@ export async function report(id: string, target: ReportTarget, who: string, room
   return "added";
 }
 
-export type QueuedReport = { target: ReportTarget; key: string; at: number; count: number };
+export type QueuedReport = { target: ReportTarget; key: string; at: number; count: number | null };
+
+/** A failed moderation read is never evidence that nobody reported anything. */
+export class ReportQueueReadError extends Error {
+  constructor() {
+    super("The community report queue could not be read completely.");
+    this.name = "ReportQueueReadError";
+  }
+}
+
+async function readReportedRecord<T>(command: (string | number)[], parse: (raw: unknown) => T | null): Promise<T | null> {
+  const reply = await redisPipeline([command]);
+  const slot = Array.isArray(reply) && reply.length === 1 ? Object.getOwnPropertyDescriptor(reply, "0") : undefined;
+  if (!slot || !Object.hasOwn(slot, "value")) throw new ReportQueueReadError();
+  if (slot.value === null) return null;
+  const record = parse(slot.value);
+  if (!record) throw new ReportQueueReadError();
+  return record;
+}
+
+/** Resolve a confirmed report without treating a missing reply as a deleted target. */
+export async function readReportedTarget(id: string, target: ReportTarget): Promise<{ post: Post; comment: Comment | null } | null> {
+  const post = await readReportedRecord(["GET", postKey(id, target.post)], parsePost);
+  if (!post) return null;
+  if (post.id !== target.post) throw new ReportQueueReadError();
+  if (target.kind === "post") return { post, comment: null };
+  const comment = await readReportedRecord(["HGET", commentsKey(id, target.post), target.comment], parseComment);
+  if (!comment) return null;
+  if (comment.id !== target.comment) throw new ReportQueueReadError();
+  return { post, comment };
+}
+
+function reportInteger(raw: unknown): number | null {
+  if (typeof raw !== "number" && (typeof raw !== "string" || !/^(0|[1-9][0-9]*)$/.test(raw))) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
 
 /** The creator's moderation queue, newest report first. */
 export async function reportQueue(id: string, limit = 100): Promise<QueuedReport[]> {
-  const [raw] = await redisPipeline([["ZREVRANGEBYSCORE", reportsKey(id), "+inf", "-inf", "WITHSCORES", "LIMIT", 0, limit]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_REPORT_QUEUE) throw new ReportQueueReadError();
+  const reply = await redisPipeline([["ZREVRANGEBYSCORE", reportsKey(id), "+inf", "-inf", "WITHSCORES", "LIMIT", 0, limit]]);
+  if (!Array.isArray(reply) || reply.length !== 1) throw new ReportQueueReadError();
+  const flat: unknown = reply[0];
+  if (!Array.isArray(flat) || flat.length % 2 !== 0 || flat.length > limit * 2) throw new ReportQueueReadError();
   const rows: { key: string; at: number; target: ReportTarget }[] = [];
+  const seen = new Set<string>();
   for (let i = 0; i + 1 < flat.length; i += 2) {
-    const target = parseTarget(flat[i]);
-    if (target) rows.push({ key: flat[i], at: Math.floor(Number(flat[i + 1]) / 1000), target });
+    const key: unknown = flat[i];
+    const target = typeof key === "string" ? parseTarget(key) : null;
+    const score = reportInteger(flat[i + 1]);
+    if (typeof key !== "string" || !target || score === null || score > 8_640_000_000_000_000 || seen.has(key)) throw new ReportQueueReadError();
+    seen.add(key);
+    rows.push({ key, at: Math.floor(score / 1000), target });
   }
   if (!rows.length) return [];
   const counts = await redisPipeline(rows.map((r) => ["SCARD", reportersKey(id, r.key)]));
-  return rows.map((r, i) => ({ ...r, count: Math.max(1, Number(counts[i]) || 0) }));
+  if (!Array.isArray(counts) || counts.length !== rows.length) throw new ReportQueueReadError();
+  return rows.map((r, i) => {
+    const count = reportInteger(counts[i]);
+    if (count === null) throw new ReportQueueReadError();
+    // Reporter sets expire after 90 days; their absence does not say how
+    // many people originally reported an item that still waits in the queue.
+    return { ...r, count: count === 0 ? null : count };
+  });
 }
 
 /** Takes an item off the queue without touching it: the creator saw nothing wrong. */

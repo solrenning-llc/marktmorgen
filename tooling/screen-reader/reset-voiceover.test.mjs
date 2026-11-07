@@ -59,6 +59,24 @@ test("a verified process disappearing after SIGTERM is stopped evidence",async()
  assert.deepEqual(await resetVoiceOverRunner(f.options),{initialProcesses:1,forcedProcesses:0});
  assert.deepEqual(f.signals,[[42,"SIGTERM"]]);
 });
+test("a never-verified process cannot disappear from the initial inventory",async()=>{
+ const f=fixture(),run=f.options.run;let inventories=0;
+ f.state.running=false;
+ f.options.run=(file,args)=>{
+  if(file.endsWith("pgrep")){
+   inventories++;
+   if(inventories===1)return "42\n43\n";
+   if(inventories===2)return "42\n";
+   throw Object.assign(Error("no process"),{status:1,signal:null});
+  }
+  if(file.endsWith("ps")&&args[1]==="43")throw Object.assign(Error("process disappeared"),{status:1,signal:null});
+  return run(file,args);
+ };
+ let error;
+ try{await resetVoiceOverRunner(f.options);}catch(caught){error=caught;}
+ assert.deepEqual({message:error?.message??null,signals:f.signals},
+  {message:"process disappeared",signals:[]});
+});
 test("foreign or replacement zombie cannot bypass ownership and identity checks",async()=>{
  const foreign=fixture();foreign.state.zombie=true;foreign.state.foreign=true;
  await assert.rejects(resetVoiceOverRunner(foreign.options),/exact Apple executable/);assert.deepEqual(foreign.signals,[]);

@@ -99,7 +99,7 @@ function makeStore(paypal = true): Store {
     handle: "shop",
     previousHandles: ["oldshop"],
     releasedHandles: [],
-    stripeAccountId: "acct_1EarningsStandIn",
+    stripeAccountId: "acct_1EarnStandIn",
     paypalSeller: paypal ? "SELLERSTANDIN01" : null,
     currency: "usd",
   } as unknown as Store;

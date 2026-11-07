@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { receivingOf } from "@/lib/receiving-costs";
 import { reviewedUnitUnder } from "@/lib/reviewed-receiving";
+import { MOST_TAX_READING } from "./historical-receiving-model";
 import { txCustomerFixture } from "./customer-tax-review-fixture";
 import { ASSISTANT_INPUT_BYTES } from "@/lib/store-assistant-rules";
 import { CENTS_PER_MINUTE, MIN_CENTS } from "@/lib/auto-captions-rules";
@@ -60,14 +61,29 @@ test("the current MR unit floor is positive profit, while a loss fails and sales
   assert.equal(PLANS_ON_SALE, false);
 });
 
-test("the Store assistant's input cap: today's keeps 60% with its room at $69, and the largest cap is where one byte more misses", () => {
-  const cap = assistantInputCap(false), room = assistantInputCap(true);
-  assert.ok(room <= cap && ASSISTANT_INPUT_BYTES <= room);
+test("the Store assistant's input cap: today's makes net profit > 0 with its room at $69, and the largest cap is where one byte more misses that", () => {
+  // Until 7 November 2026 this asked today's cap to keep 60% with the add-on's
+  // room, the floor of 18 October 2026. Under the MR rule (owner, 27 October
+  // 2026; AGENTS.md, "MR — Regra de margem vigente"), "qualquer instrução de60%
+  // como piso obrigatório remete a esta seção", the Store assistant included:
+  // the add-on, alone, every reply at its worst, makes net profit > 0 with
+  // ADD_ON_ROOM_CENTS of room, what assistantMeetsFloor() asks; 60% is the
+  // company's real monthly report's goal (owner's decision C2-68, 4 November
+  // 2026; 465 [MR2]). ASSISTANT_INPUT_BYTES, its price and its replies are
+  // unchanged.
+  const profit = assistantInputCap("profit-room");
+  assert.ok(ASSISTANT_INPUT_BYTES <= profit, `today's ${ASSISTANT_INPUT_BYTES} bytes are within the largest cap with a profit, ${profit}`);
+  assert.equal(assistantAt(profit).profitWithRoom, true);
+  assert.equal(assistantAt(profit + 1).profitWithRoom, false);
+  assert.equal(assistantAt(ASSISTANT_INPUT_BYTES).profitWithRoom, true, "today's cap makes net profit > 0 with its room at the price set on 18 October 2026");
+  assert.equal(assistantAt(ASSISTANT_INPUT_BYTES, MOST_TAX_READING).profitWithRoom, true, "and under the reading with more tax too");
+  // The former 60% caps are still rendered as history; the bisection that finds them must stay exact, but they gate nothing.
+  const cap = assistantInputCap("60"), room = assistantInputCap("60-room");
+  assert.ok(room <= cap && cap <= profit);
   assert.equal(assistantAt(cap).meets, true);
   assert.equal(assistantAt(cap + 1).meets, false);
   assert.equal(assistantAt(room).withRoom, true);
   assert.equal(assistantAt(room + 1).withRoom, false);
-  assert.equal(assistantAt(ASSISTANT_INPUT_BYTES).withRoom, true, "today's cap keeps 60% with its room at the price set on 18 October 2026");
 });
 
 test("AI captions: today's price keeps 60% at every length, the lowest that would is listed, and captions are not on sale", () => {

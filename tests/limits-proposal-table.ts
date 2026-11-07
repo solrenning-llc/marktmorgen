@@ -30,6 +30,7 @@ import {
 } from "@/lib/store-assistant-rules";
 import { CENTS_PER_MINUTE, MAX_AUTO_LANGUAGES, MAX_AUTO_MINUTES, MIN_CENTS } from "@/lib/auto-captions-rules";
 import { SIZING_READING, unitUnder } from "./historical-margin-model";
+import { unitUnder as profitUnitUnder, type Reading } from "./historical-receiving-model";
 import { COST_LINES, GB, STORAGE_PER_GB, perPaymentCost } from "./plan-cost-registry";
 
 /** The printed lines, in the order cuts are proposed: least likely to be reached, and least generous at competitors, first. */
@@ -152,17 +153,36 @@ export function proposals(): Proposal[] {
   return TIERS.flatMap((tier) => (["month", "year"] as const).map((cycle) => propose(tier, cycle, PLAN_PRICES[tier][cycle])));
 }
 
-/** The Store assistant at an input cap: whether its month keeps 60%, and with its 25-cent room. */
-export function assistantAt(inputBytes: number): { meets: boolean; withRoom: boolean; netBps: number; aiCents: number } {
+/**
+ * The Store assistant at an input cap. `profitWithRoom` is the rule in force
+ * since the MR rule (AGENTS.md, "MR — Regra de margem vigente (27 de outubro
+ * de 2026)": per unit, net profit greater than zero with the spend floor's
+ * existing room; "qualquer instrução de60% como piso obrigatório remete a esta
+ * seção", the Store assistant included): the month, every reply at its worst,
+ * makes at least a cent of net profit with ADD_ON_ROOM_CENTS of room to spare,
+ * what assistantMeetsFloor() asks. `meets` and `withRoom` are the former 60%
+ * target of 18 October 2026 (with the room for `withRoom`), kept only as
+ * history: they gate nothing.
+ */
+export function assistantAt(inputBytes: number, reading: Reading = SIZING_READING): { meets: boolean; withRoom: boolean; profitWithRoom: boolean; netBps: number; netCents: number; aiCents: number } {
   const hold = aiRequestHoldMicroUsd(ASSISTANT_MODEL, { ...ASSISTANT_REQUEST_SHAPE, inputBytes })!;
   const aiCents = Math.ceil((ASSISTANT_MESSAGES_MONTHLY * (hold + assistantMessageExtraMicroUsd())) / 10_000);
-  const u = unitUnder(ASSISTANT_PRICE_CENTS, aiCents, SIZING_READING, true);
-  return { meets: u.meetsFloor, withRoom: u.meetsFloor && u.usageRoomCents - aiCents >= ADD_ON_ROOM_CENTS, netBps: u.netBps, aiCents };
+  const u = unitUnder(ASSISTANT_PRICE_CENTS, aiCents, reading, true);
+  const p = profitUnitUnder(ASSISTANT_PRICE_CENTS, aiCents, reading, true);
+  return {
+    meets: u.meetsFloor, withRoom: u.meetsFloor && u.usageRoomCents - aiCents >= ADD_ON_ROOM_CENTS,
+    profitWithRoom: p.meetsFloor && p.usageRoomCents - aiCents >= ADD_ON_ROOM_CENTS,
+    netBps: p.netBps, netCents: p.netCents, aiCents,
+  };
 }
-/** The largest input cap, in bytes, that keeps 60% (with the room when asked). */
-export function assistantInputCap(withRoom: boolean): number {
+/** Which test assistantInputCap bisects on: the MR rule in force ("profit-room"), or the former 60% target, history only ("60", "60-room"). */
+export type AssistantCapRule = "profit-room" | "60" | "60-room";
+/** The largest input cap, in bytes, that passes a rule at the sizing reading. */
+export function assistantInputCap(rule: AssistantCapRule): number {
+  const passes = (bytes: number) => { const a = assistantAt(bytes); return rule === "profit-room" ? a.profitWithRoom : rule === "60-room" ? a.withRoom : a.meets; };
   let lo = 0, hi = 16 * ASSISTANT_INPUT_BYTES;
-  while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); const a = assistantAt(mid); if (withRoom ? a.withRoom : a.meets) lo = mid; else hi = mid - 1; }
+  if (passes(hi)) throw new Error("the bisection's upper bound passes: raise it");
+  while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); if (passes(mid)) lo = mid; else hi = mid - 1; }
   return lo;
 }
 
@@ -294,21 +314,26 @@ export function renderLimitsProposal(plansOnSale: boolean, captionsOnSale: boole
   out.push("");
   for (const c of COMPETITORS) out.push(`- **${c.name}**: ${c.figures} Source: ${c.source}`);
   out.push("");
-  const meets = assistantInputCap(false), room = assistantInputCap(true);
+  const profit = assistantInputCap("profit-room"), meets = assistantInputCap("60"), room = assistantInputCap("60-room");
+  const today = assistantAt(ASSISTANT_INPUT_BYTES);
   const rest = ASSISTANT_INPUT_BYTES - ASSISTANT_FACTS_BYTES;
   const perProduct = ASSISTANT_FACTS_BYTES / ASSISTANT_PRODUCTS;
   const factsAt = (cap: number) => Math.max(0, cap - rest);
-  out.push("## Store assistant: the input cap that would keep 60%");
+  const row = (cap: number, label: string) => `| ${count(cap)} ${label} | ${count(factsAt(cap))} | ${Math.min(ASSISTANT_PRODUCTS, Math.floor(factsAt(cap) / perProduct))} | ${usd(assistantAt(cap).netCents)} | ${pctOf(assistantAt(cap).netBps)} |`;
+  out.push("## Store assistant: the input cap the price carries");
   out.push("");
-  out.push(`Today each reply may send the model ${count(ASSISTANT_INPUT_BYTES)} bytes (lib/store-assistant-rules.ts, ASSISTANT_INPUT_BYTES), of which ${count(ASSISTANT_FACTS_BYTES)} are the store's facts; at ${usd(ASSISTANT_PRICE_CENTS)} a month and ${count(ASSISTANT_MESSAGES_MONTHLY)} replies the add-on keeps ${pctOf(assistantAt(ASSISTANT_INPUT_BYTES).netBps)}${assistantAt(ASSISTANT_INPUT_BYTES).withRoom ? ", with its room: no cut to the input is proposed" : ""}. The rows below are the largest caps the price would carry.`);
+  out.push(`Since the MR rule (owner, 27 October 2026; AGENTS.md, "MR — Regra de margem vigente"), the add-on, alone, every reply of its month at its worst, must make a net profit greater than zero with its ${ADD_ON_ROOM_CENTS}¢ room to spare (what assistantMeetsFloor asks); 60% is the goal of the company's real monthly report, not a floor for a unit. The 60% rows below are the former target of 18 October 2026, kept as history only.`);
   out.push("");
-  out.push(`| Input cap | Of which the store's facts | About how many of the ${ASSISTANT_PRODUCTS} products read, at today's average of ${Math.round(perProduct)} bytes each | Net |`);
-  out.push("| --- | --- | --- | --- |");
-  out.push(`| ${count(ASSISTANT_INPUT_BYTES)} (today) | ${count(ASSISTANT_FACTS_BYTES)} | ${ASSISTANT_PRODUCTS} | ${pctOf(assistantAt(ASSISTANT_INPUT_BYTES).netBps)} |`);
-  out.push(`| ${count(meets)} (the largest that keeps 60%) | ${count(factsAt(meets))} | ${Math.floor(factsAt(meets) / perProduct)} | ${pctOf(assistantAt(meets).netBps)} |`);
-  out.push(`| ${count(room)} (the largest that keeps 60% with the add-on's ${ADD_ON_ROOM_CENTS}¢ room, what assistantMeetsFloor asks) | ${count(factsAt(room))} | ${Math.floor(factsAt(room) / perProduct)} | ${pctOf(assistantAt(room).netBps)} |`);
+  out.push(`Today each reply may send the model ${count(ASSISTANT_INPUT_BYTES)} bytes (lib/store-assistant-rules.ts, ASSISTANT_INPUT_BYTES), of which ${count(ASSISTANT_FACTS_BYTES)} are the store's facts; at ${usd(ASSISTANT_PRICE_CENTS)} a month and ${count(ASSISTANT_MESSAGES_MONTHLY)} replies the add-on makes ${usd(today.netCents)} net (${pctOf(today.netBps)})${today.profitWithRoom ? ", a profit with its room: no cut to the input is proposed" : ", short of a profit with its room"}. The rows below are the largest caps the price would carry.`);
   out.push("");
-  out.push(assistantAt(ASSISTANT_INPUT_BYTES).withRoom ? "Nothing is cut: today's cap already keeps 60% with its room at the price set on 18 October 2026." : "The conversation and the rules keep their share; only the catalog text shrinks, so a buyer asking about a product past the cut is told more products exist and is answered less well.");
+  out.push(`| Input cap | Of which the store's facts | About how many of the ${ASSISTANT_PRODUCTS} products read, at today's average of ${Math.round(perProduct)} bytes each | Net a month | Net |`);
+  out.push("| --- | --- | --- | --- | --- |");
+  out.push(row(ASSISTANT_INPUT_BYTES, "(today)"));
+  out.push(row(profit, `(the largest that makes a net profit with the add-on's ${ADD_ON_ROOM_CENTS}¢ room: the floor under the MR rule)`));
+  out.push(row(meets, "(the largest that keeps 60%: the former target, history only)"));
+  out.push(row(room, `(the largest that keeps 60% with the ${ADD_ON_ROOM_CENTS}¢ room: the former target, history only)`));
+  out.push("");
+  out.push(today.profitWithRoom ? "Nothing is cut: today's cap makes a net profit with its room at the price set on 18 October 2026." : "The conversation and the rules keep their share; only the catalog text shrinks, so a buyer asking about a product past the cut is told more products exist and is answered less well.");
   out.push("");
   const price = captionsPrice();
   out.push("## AI captions: the price that would keep 60%");

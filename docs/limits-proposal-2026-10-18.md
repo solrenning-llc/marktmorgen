@@ -48,17 +48,20 @@ Sources:
 - **Kajabi Basic $179, Growth $249, Pro $499 a month**: Contacts 2,500 / 25,000 / 100,000; marketing emails "Unlimited" on all three; products 5 / 50 / unlimited; AI credits 0 / 500 / 1,000. The page shows no figure for bandwidth, video hours or storage. (Its annual column shows $143 / $199 / $399 a month next to "billed annually" at $179 / $249 / $499; the page does not say which applies.) Source: kajabi.com/pricing, read 18 October 2026.
 - **Stan Creator $29 ($300 a year), Creator Pro $99 ($948 a year)**: 0% transaction fees; the FAQ says unlimited products to unlimited customers on either plan; Creator Pro includes "unlimited emails" (email broadcasts and flows on Creator Pro only). No figure for contacts, storage, visits, orders, video hours or AI. Source: Stan's own article "Stan Store Pricing", stan.store/blog/stan-store-pricing/, last updated July 22, 2026, read 18 October 2026 (docs/value-presentation-2026-10-18.md).
 
-## Store assistant: the input cap that would keep 60%
+## Store assistant: the input cap the price carries
 
-Today each reply may send the model 24,576 bytes (lib/store-assistant-rules.ts, ASSISTANT_INPUT_BYTES), of which 16,384 are the store's facts; at $69.00 a month and 700 replies the add-on keeps 60.24%. The rows below are the largest caps the price would carry.
+Since the MR rule (owner, 27 October 2026; AGENTS.md, "MR — Regra de margem vigente"), the add-on, alone, every reply of its month at its worst, must make a net profit greater than zero with its 25¢ room to spare (what assistantMeetsFloor asks); 60% is the goal of the company's real monthly report, not a floor for a unit. The 60% rows below are the former target of 18 October 2026, kept as history only.
 
-| Input cap | Of which the store's facts | About how many of the 40 products read, at today's average of 410 bytes each | Net |
-| --- | --- | --- | --- |
-| 24,576 (today) | 16,384 | 40 | 60.24% |
-| 27,694 (the largest that keeps 60%) | 19,502 | 47 | 60.00% |
-| 24,444 (the largest that keeps 60% with the add-on's 25¢ room, what assistantMeetsFloor asks) | 16,252 | 39 | 60.26% |
+Today each reply may send the model 24,576 bytes (lib/store-assistant-rules.ts, ASSISTANT_INPUT_BYTES), of which 16,384 are the store's facts; at $69.00 a month and 700 replies the add-on makes $41.57 net (60.24%), a profit with its room: no cut to the input is proposed. The rows below are the largest caps the price would carry.
 
-The conversation and the rules keep their share; only the catalog text shrinks, so a buyer asking about a product past the cut is told more products exist and is answered less well.
+| Input cap | Of which the store's facts | About how many of the 40 products read, at today's average of 410 bytes each | Net a month | Net |
+| --- | --- | --- | --- | --- |
+| 24,576 (today) | 16,384 | 40 | $41.57 | 60.24% |
+| 151,050 (the largest that makes a net profit with the add-on's 25¢ room: the floor under the MR rule) | 142,858 | 40 | $0.19 | 0.27% |
+| 27,694 (the largest that keeps 60%: the former target, history only) | 19,502 | 40 | $41.40 | 60.00% |
+| 24,444 (the largest that keeps 60% with the 25¢ room: the former target, history only) | 16,252 | 39 | $41.58 | 60.26% |
+
+Nothing is cut: today's cap makes a net profit with its room at the price set on 18 October 2026.
 
 ## AI captions: the price that would keep 60%
 

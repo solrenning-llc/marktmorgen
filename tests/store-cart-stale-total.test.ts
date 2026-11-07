@@ -45,6 +45,8 @@ const win = Object.assign(new EventTarget(), {
   history: { state: null, replaceState() {} },
 });
 (globalThis as Record<string, unknown>).window = win;
+// The cart's Escape and focus-out listeners (main, AAA 2.1.1/2.4.11) need a document; no key or focus event is sent here.
+(globalThis as Record<string, unknown>).document = { addEventListener() {}, removeEventListener() {}, activeElement: null };
 
 const line = (id: string, price: string) => ({ id, title: `Product ${id}`, href: `/@sweepshop/p/${id}`, price, ok: true });
 const ship = { label: "Shipping", amount: "$5.00", where: "Ships to: United States", notTo: "" };

@@ -165,6 +165,12 @@ export function CartButton({
   // Whether anything is handed over digitally: only then is the box to start at once asked for (lib/digital-consent.ts).
   const [digital, setDigital] = useState(true);
   const panel = useRef<HTMLDivElement>(null);
+  const opener = useRef<HTMLButtonElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  // Once opened, the button stays until the page is left, even with the cart emptied, so the focus always has it to go back to (2.4.3).
+  const [kept, setKept] = useState(false);
+  // Which product's button the focus moves to once one is removed: the next one, or the panel when none is left (2.4.3).
+  const refocus = useRef<number | null>(null);
   const wanted = ids.join(",");
 
   useEffect(() => {
@@ -239,7 +245,37 @@ export function CartButton({
     if (open) panel.current?.focus();
   }, [open]);
 
-  if (ids.length === 0 && notice === null && !restoring) return null;
+  // Escape shuts it from anywhere on the page; from inside it, the focus goes back to its button (2.1.1, 2.4.3). The panel lies
+  // over the page: wherever the focus lands outside the cart, however it got there, it shuts, so it never covers what has the
+  // focus (2.4.11, 2.4.12).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const inside = Boolean(panel.current?.contains(document.activeElement));
+      setOpen(false);
+      if (inside) opener.current?.focus();
+    };
+    const onFocus = (event: FocusEvent) => {
+      if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("focusin", onFocus);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", onFocus);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (refocus.current === null) return;
+    const buttons = panel.current?.querySelectorAll<HTMLButtonElement>("button[data-remove]");
+    const at = refocus.current;
+    refocus.current = null;
+    (buttons && buttons.length > 0 ? buttons[Math.min(at, buttons.length - 1)] : panel.current)?.focus();
+  }, [wanted]);
+
+  if (ids.length === 0 && notice === null && !restoring && !kept) return null;
   const shown = (lines ?? []).filter((line) => ids.includes(line.id));
   const payable = shown.filter((line) => line.ok);
   const held = apart !== null && apart.ids.some((id) => ids.includes(id));
@@ -288,8 +324,12 @@ export function CartButton({
     );
 
   return (
-    <div id="cart" className="st-cart">
-      <button type="button" className="btn st-btn st-cart-open" aria-expanded={open}
+    <div ref={root} id="cart" className="st-cart">
+      <button
+        ref={opener}
+        type="button"
+        className="btn st-btn st-cart-open"
+        aria-expanded={open}
         onClick={() => {
           // Opening the panel reads the cart again: until that read answers, it says the prices are being checked, not
           // what the read before it said.
@@ -304,6 +344,7 @@ export function CartButton({
             setClosed(false);
           }
           setOpen(!open);
+          setKept(true);
         }}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -317,7 +358,14 @@ export function CartButton({
         <div ref={panel} tabIndex={-1} role="region" aria-label={c.title} className="st-card st-cart-panel p-5 text-left">
           <div className="flex items-center justify-between gap-3">
             <p className="font-display text-lg font-semibold">{c.title}</p>
-            <button type="button" className="st-footer-link text-sm font-semibold" onClick={() => setOpen(false)}>
+            <button
+              type="button"
+              className="st-footer-link inline-flex min-h-11 min-w-11 items-center justify-center text-sm font-semibold"
+              onClick={() => {
+                setOpen(false);
+                opener.current?.focus();
+              }}
+            >
               {c.close}
             </button>
           </div>
@@ -333,10 +381,10 @@ export function CartButton({
           ) : (
             <>
               <ul className="mt-3 divide-y" style={{ borderColor: "var(--st-line)" }}>
-                {shown.map((line) => (
+                {shown.map((line, at) => (
                   <li key={line.id} className="flex items-start justify-between gap-3 py-3" style={{ borderColor: "var(--st-line)" }}>
                     <span className="min-w-0">
-                      <a href={line.href} className="st-title-link block font-semibold">{line.title}</a>
+                      <a href={line.href} className="st-title-link flex min-h-11 items-center font-semibold">{line.title}</a>
                       {line.ok ? null : <span className="st-muted block text-xs">{line.soldOut ? c.soldOut : c.gone}</span>}
                       {line.ok && line.ships ? <span className="st-muted block text-xs">{line.ships}</span> : null}
                     </span>
@@ -345,8 +393,15 @@ export function CartButton({
                       <button
                         type="button"
                         aria-label={c.remove(line.title)}
-                        className="grid h-9 w-9 place-items-center rounded-full"
-                        onClick={() => write(handle, read(handle).filter((id) => id !== line.id))}
+                        data-remove=""
+                        className="grid h-11 w-11 place-items-center rounded-full"
+                        onClick={() => {
+                          refocus.current = at;
+                          write(handle, read(handle).filter((id) => id !== line.id));
+                          // Nothing came out (the browser refused to keep it): the focus stays here, and nothing stays armed to move
+                          // it later, on a change the person did not make (3.2.1).
+                          if (read(handle).includes(line.id)) refocus.current = null;
+                        }}
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                           <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -361,7 +416,7 @@ export function CartButton({
                   <p className="text-sm font-semibold">{c.bundleHead}</p>
                   <div className="mt-2 flex items-center justify-between gap-3">
                     <span className="min-w-0">
-                      <a href={bundle.href} className="st-title-link block text-sm font-semibold">{bundle.title}</a>
+                      <a href={bundle.href} className="st-title-link flex min-h-11 items-center text-sm font-semibold">{bundle.title}</a>
                       <span className="st-muted block text-xs">{bundle.holds}</span>
                       <span className="block text-xs font-semibold" style={{ color: "var(--st-accent-text)" }}>{bundle.save}</span>
                     </span>
@@ -395,7 +450,7 @@ export function CartButton({
                           {offered.map((item) => (
                             <li key={item.id} className="flex items-center justify-between gap-3">
                               <span className="min-w-0">
-                                <a href={item.href} className="st-title-link block text-sm font-semibold">{item.title}</a>
+                                <a href={item.href} className="st-title-link flex min-h-11 items-center text-sm font-semibold">{item.title}</a>
                                 <span className="st-muted block text-xs">{item.why}</span>
                               </span>
                               <span className="flex shrink-0 items-center gap-2">

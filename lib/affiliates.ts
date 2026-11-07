@@ -2815,7 +2815,7 @@ export async function bookSize(store: Store): Promise<{ fields: number; rows: nu
   if (!store.statsId || !isRedisConfigured()) return { fields: 0, rows: 0 };
   const statsId = store.statsId;
   try {
-    const counts = (await redisPipeline([
+    const replies = await redisPipeline([
       ["HLEN", peopleKey(statsId)],
       ["HLEN", clicksKey(statsId)],
       ["HLEN", salesKey(statsId)],
@@ -2824,8 +2824,10 @@ export async function bookSize(store: Store): Promise<{ fields: number; rows: nu
       ["HLEN", paidClicksKey(statsId)],
       ["HLEN", leadsKey(statsId)],
       ["ZCARD", paypalRefundedKey(statsId)],
-    ])).map(Number);
-    if (counts.length !== 8 || counts.some((n) => !Number.isSafeInteger(n) || n < 0)) return null;
+    ]);
+    // Each count exactly (rule 24): null or a list is not 0 or a number, and one not known reads nothing.
+    const counts = replies.map(countOf).filter((n): n is number => n !== null);
+    if (replies.length !== 8 || counts.length !== 8) return null;
     const fields = counts.slice(0, 7).reduce((sum, n) => sum + n, 0);
     return { fields, rows: Math.min(counts[7], 500) + Math.min(counts[6], 200) };
   } catch {

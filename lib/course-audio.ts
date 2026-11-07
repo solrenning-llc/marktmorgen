@@ -78,8 +78,9 @@ export type ListenRefused = { ok: false; status: 404 | 410 | 429 | 503; text: st
  *      audio, stops here, before anybody's access is asked.
  *   3. the access requests (accessWork, by the store's courses and their
  *      measured listings): whether the address may still listen (lib/learn.ts
- *      paidCourses, the lesson page's own answer: a refund, an ended
- *      membership or a student taken off the course closes it at once) and
+ *      paidCourses, the lesson page's own answer: a student taken off the
+ *      course closes it at once; a Stripe refund or an ended membership
+ *      within ten minutes, while Stripe's answer is reused) and
  *      the quizzes it passed.
  *
  * Every request is counted in the asking connection's share of the day too,

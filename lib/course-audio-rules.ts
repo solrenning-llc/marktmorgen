@@ -25,9 +25,11 @@ import { EPISODE_TYPES, type Episode } from "@/lib/podcast-rules";
  * can run longer than an hour, and an app that streams it asks the address it
  * was sent to for each next piece while it plays, often after a pause; a
  * shorter life cuts a lesson off in the middle. Access is asked again every
- * time the door is knocked on, so a refund or the switch turned off stops the
- * next fetch at once; an address already handed out cannot be taken back at
- * any length, and this one ends within four hours.
+ * time the door is knocked on, so the switch turned off or a student taken
+ * off stops the next fetch at once, and a Stripe refund or an ended
+ * membership within ten minutes (Stripe's answer is reused that long,
+ * lib/learn.ts PAID_SECONDS); an address already handed out cannot be taken
+ * back at any length, and this one ends within four hours.
  */
 export const COURSE_AUDIO_URL_SECONDS = 4 * 60 * 60;
 
@@ -83,9 +85,14 @@ export const FEED_HEAD_BYTES = 8_192;
  * the passed quizzes (1); the listings twice and the records at
  * ACCESS_RECORD_BYTES; the feed sent at MAX_LESSONS episodes; and, when the
  * kept answer has expired, a page of checkouts for each spelling of the
- * address and up to three calls to ask whether each course's purchase was
- * refunded (lib/refunds.ts purchaseRefunded). An address that bought the
- * same course more than once is asked about each purchase, past that.
+ * address and three calls for each course to ask whether its purchase was
+ * given back (lib/refunds.ts purchaseRefunded). That covers a one-time
+ * purchase (no call, or one for the disputes of a charge marked disputed)
+ * and a payment plan's usual first invoice (the invoice, its payments and
+ * its one payment). Not covered, asked past it: a plan's first invoice whose
+ * payment is disputed (one more), one paid in several payments (up to ten,
+ * each with its own disputes call), and an address that bought the same
+ * course more than once (each purchase asked).
  */
 export function accessWork(courses: number, listingBytes: number): AudioWork {
   return {

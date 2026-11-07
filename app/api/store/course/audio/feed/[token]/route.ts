@@ -10,9 +10,12 @@ import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { productSegment } from "@/lib/product-slug";
 
 /**
- * Never kept by the CDN or the app: a refund, an ended membership, a student
- * taken off the course or the switch turned off empties the feed the next
- * time it is asked for, not hours later. What that costs is the feed built
+ * Never kept by the CDN or the app, so the feed is built on each ask. The
+ * switch turned off, a student taken off the course, or a gift, pre-order,
+ * group place or PayPal sale taken back empties it the next time it is asked
+ * for. A Stripe refund, a dispute or an ended membership empties it within
+ * ten minutes: Stripe's answer about who bought what is reused that long
+ * (lib/learn.ts PAID_SECONDS), as on the lesson page. What that costs is the feed built
  * on each ask, up to FEED_READS_A_DAY times a day for one address (the asks
  * past it are refused before anything of the store's month is taken), each
  * paid for in steps before it reads (lib/course-audio.ts).

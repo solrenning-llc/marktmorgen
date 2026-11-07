@@ -15,8 +15,9 @@
  *     the creator's own feed holds everything; lesson order is kept;
  *   - the switch is off until the creator turns it on, takes its room first,
  *     and anything but its own "on" reads as off;
- *   - the feed: never kept by a cache, so a refund or the switch turned off
- *     counts at once; off is not found, a student's lists their open lessons,
+ *   - the feed: never kept by a cache, so the switch turned off counts at
+ *     once (a Stripe refund within PAID_SECONDS, ten minutes, as Stripe's
+ *     answer is reused that long; a fresh address is asked here); off is not found, a student's lists their open lessons,
  *     a stranger's, a refunded, ended or blocked student's is empty, a forged
  *     token or one naming another store is not found;
  *   - paid in steps, each before what it reads: one request for the listing,
@@ -221,7 +222,7 @@ async function main(): Promise<void> {
   const first = await taken(() => ask(token));
   const xml = await first.response.text();
   is("a student's feed is answered", [first.response.status, first.response.headers.get("content-type")], [200, "application/rss+xml; charset=utf-8"]);
-  is("never kept by a cache, so a refund or the switch counts at once", first.response.headers.get("cache-control"), "private, no-store");
+  is("never kept by a cache, so the switch counts at once (a Stripe refund within PAID_SECONDS, ten minutes)", first.response.headers.get("cache-control"), "private, no-store");
   is("kept out of directories", xml.includes("<itunes:block>Yes</itunes:block>"), true);
   is("their open lessons, through the play door", [xml.includes("/api/store/course/audio/play/"), xml.includes("l1aaaaaaaaaa.mp3"), xml.includes("l3aaaaaaaaaa.m4a"), xml.includes("l4aaaaaaaaaa"), xml.includes("l5aaaaaaaaaa")], [true, true, true, false, false]);
   is("the build took one request, the course's and the access's", first.units, 1 + outlineUnits + accessUnits);

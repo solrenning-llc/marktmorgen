@@ -30,6 +30,7 @@ const KEY = domainKey(NAME);
 
 const vercelCalls: string[] = [];
 let postStatus = 200;
+let deleteStatus = 200;
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input));
   const method = init?.method ?? "GET";
@@ -37,7 +38,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   let body: unknown = {};
   if (method === "GET" && url.pathname === `/v9/projects/prj_exact/domains/${NAME}`) body = { name: NAME, apexName: "example.com", verified: true };
   if (method === "GET" && url.pathname.startsWith("/v6/domains/")) body = { misconfigured: false };
-  const status = method === "POST" ? postStatus : 200;
+  const status = method === "POST" ? postStatus : method === "DELETE" ? deleteStatus : 200;
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }) as typeof fetch;
 
@@ -56,6 +57,7 @@ const reset = (value?: string) => {
   vercelCalls.length = 0;
   dnsAsked = 0;
   postStatus = 200;
+  deleteStatus = 200;
   if (value !== undefined) redis.run(["SET", KEY, value]);
 };
 /** What a call came to: its answer, or "try again" when it said it could not tell (it threw). */
@@ -76,13 +78,19 @@ async function main(): Promise<void> {
 
   part("1. disconnectDomain — healthy controls");
   reset("otherstore");
-  is("held by another store: true, Vercel not asked, its key kept", [await disconnectDomain(NAME, ["mystore"]), vercelCalls, held()], [true, [], "otherstore"]);
+  is("held by another store: removed from this store, Vercel not asked, its key kept", [await disconnectDomain(NAME, ["mystore"]), vercelCalls, held()], ["removed", [], "otherstore"]);
   reset("mystore");
-  is("this store's own proved domain: true, dropped at Vercel, its key gone", [await disconnectDomain(NAME, ["mystore"]), vercelCalls, held()], [true, [vercelDelete], null]);
+  is("this store's own proved domain: removed, dropped at Vercel, its key gone", [await disconnectDomain(NAME, ["mystore"]), vercelCalls, held()], ["removed", [vercelDelete], null]);
   reset("?mystore");
-  is("this store's own claim not proved yet: the same", [await disconnectDomain(NAME, ["mystore"]), vercelCalls, held()], [true, [vercelDelete], null]);
+  is("this store's own claim not proved yet: the same", [await disconnectDomain(NAME, ["mystore"]), vercelCalls, held()], ["removed", [vercelDelete], null]);
   reset();
-  is("held by nobody: true, dropped at Vercel", [await disconnectDomain(NAME, ["mystore"]), vercelCalls, held()], [true, [vercelDelete], null]);
+  is("held by nobody: removed, dropped at Vercel", [await disconnectDomain(NAME, ["mystore"]), vercelCalls, held()], ["removed", [vercelDelete], null]);
+  reset("mystore");
+  deleteStatus = 500;
+  is("Vercel refusing the drop: unavailable (nothing changed), its key kept", [await disconnectDomain(NAME, ["mystore"]), vercelCalls, held()], ["unavailable", [vercelDelete], "mystore"]);
+  reset("mystore");
+  deleteStatus = 404;
+  is("Vercel no longer having it (a retry): removed, its key gone", [await disconnectDomain(NAME, ["mystore"]), vercelCalls, held()], ["removed", [vercelDelete], null]);
 
   part("1. disconnectDomain — the holder read in an unknown shape: nothing sent to Vercel, nothing deleted");
   for (const [shape, reply] of UNKNOWN_READS) {
@@ -99,10 +107,12 @@ async function main(): Promise<void> {
   is("another store took the domain between the read and the let-go: its key kept", held(), "otherstore");
   reset("mystore");
   answer(letGo, () => [], { run: false });
-  is("the let-go's reply lost: not said as done, the key kept for the next try", [await outcome(disconnectDomain(NAME, ["mystore"])), held()], [false, "mystore"]);
+  // Review L1 (Claude 4 team, comment 6696444077): Vercel has already dropped the domain by then, so this is not
+  // "unavailable, nothing changed"; it is its own answer, "unfinished", and the next press lets the key go.
+  is("the let-go's reply lost: unfinished (dropped at Vercel, not unavailable), the key kept for the next try", [await outcome(disconnectDomain(NAME, ["mystore"])), vercelCalls, held()], ["unfinished", [vercelDelete], "mystore"]);
   reset("mystore");
   answer(letGo, THROWS, { run: false });
-  is("the let-go failing: not said as done", [await outcome(disconnectDomain(NAME, ["mystore"])), held()], [false, "mystore"]);
+  is("the let-go failing: unfinished, not said as done", [await outcome(disconnectDomain(NAME, ["mystore"])), vercelCalls, held()], ["unfinished", [vercelDelete], "mystore"]);
 
   part("2. connectDomain — healthy controls");
   reset();

@@ -14,24 +14,96 @@
  * quiz or an assignment the student has not passed yet (lib/quiz.ts,
  * heldBack). The creator's own feed holds every lesson.
  */
-import { type Course, type Lesson, isOpen, lessonsInOrder, opensAt } from "@/lib/course";
+import { type Course, type Lesson, MAX_LESSONS, isOpen, lessonsInOrder, opensAt } from "@/lib/course";
 import { heldBack } from "@/lib/quiz";
 import type { ProductFile } from "@/lib/product-file";
 import { EPISODE_TYPES, type Episode } from "@/lib/podcast-rules";
 
 /**
- * Public requests on the buyers' side one build of a course's feed, or one
- * lesson's audio fetched, takes from the store's month before the course is
- * read: the store, the listing, the student's access, the course and their
- * passed quizzes at their largest (COURSE_AUDIO_READ in
- * tests/plan-cost-registry.ts, held under these units in
- * tests/plan-cost-registry.test.ts).
+ * How long a lesson's signed audio address works, in seconds: four hours, as
+ * a private podcast episode's (app/api/store/podcast/play). A lesson's audio
+ * can run longer than an hour, and an app that streams it asks the address it
+ * was sent to for each next piece while it plays, often after a pause; a
+ * shorter life cuts a lesson off in the middle. Access is asked again every
+ * time the door is knocked on, so a refund or the switch turned off stops the
+ * next fetch at once; an address already handed out cannot be taken back at
+ * any length, and this one ends within four hours.
  */
-export const COURSE_AUDIO_READ_UNITS = 6;
+export const COURSE_AUDIO_URL_SECONDS = 4 * 60 * 60;
+
+/**
+ * Lessons one feed may fetch in a day, at the most: each fetch is paid for
+ * as a whole build (the course and the student's access are asked again), so
+ * an app downloading a long course, or a token passed around, is held to this
+ * many a day. An app that is refused tries again later.
+ */
+export const COURSE_AUDIO_PLAYS_A_DAY = 24;
+
+/**
+ * What one public request on the buyers' side pays for of this feed's reads,
+ * in each of the things it costs (held in tests/plan-cost-registry.test.ts:
+ * each alone costs less than a request).
+ */
+export const AUDIO_UNIT_COMMANDS = 30;
+export const AUDIO_UNIT_BYTES = 1_000_000;
+export const AUDIO_UNIT_SENT = 1_000_000;
+export const AUDIO_UNIT_STRIPE = 4;
+
+/** Reads to be paid for: database commands, bytes read from it, bytes sent on, and Stripe calls waited on. */
+export type AudioWork = { commands: number; bytes: number; sent: number; stripe: number };
+
+/** The public requests that pay for `work`, at least one. */
+export function audioUnits(work: AudioWork): number {
+  const share = work.commands / AUDIO_UNIT_COMMANDS + work.bytes / AUDIO_UNIT_BYTES + work.sent / AUDIO_UNIT_SENT + work.stripe / AUDIO_UNIT_STRIPE;
+  return Math.max(1, Math.ceil(share));
+}
+
+/**
+ * The second step: the course's record, read up to the size it was measured
+ * at, and the size of each of the store's course listings, measured for the
+ * third step (one command each).
+ */
+export function outlineWork(courseBytes: number, courses: number): AudioWork {
+  return { commands: 1 + courses, bytes: Math.max(0, courseBytes), sent: 0, stripe: 0 };
+}
+
+/** What the access step reads beside the listings: the kept answer, the ledger, imported purchases and the community's level records, each at most this (a review ceiling). */
+export const ACCESS_RECORD_BYTES = 64_000;
+/** One episode in the feed, at the most, and the feed's own lines (titles at their longest, escaped). */
+export const EPISODE_SENT_BYTES = 2_048;
+export const FEED_HEAD_BYTES = 8_192;
+
+/**
+ * The third step: whether the address may still listen, as every lesson
+ * door asks it (lib/learn.ts paidCourses), and the quizzes it passed. For a
+ * store with `courses` courses whose listings weigh `listingBytes`: the kept
+ * answer, the ledger, imported purchases and the answer kept again (4), the
+ * community's levels (4), the course listings read twice when the kept
+ * answer has expired (one command each), a blocked check for each course,
+ * the passed quizzes (1); the listings twice and the records at
+ * ACCESS_RECORD_BYTES; the feed sent at MAX_LESSONS episodes; and, when the
+ * kept answer has expired, a page of checkouts for each spelling of the
+ * address and up to three calls to ask whether each course's purchase was
+ * refunded (lib/refunds.ts purchaseRefunded). An address that bought the
+ * same course more than once is asked about each purchase, past that.
+ */
+export function accessWork(courses: number, listingBytes: number): AudioWork {
+  return {
+    commands: 4 + 4 + 2 * courses + courses + 1,
+    bytes: 2 * Math.max(0, listingBytes) + 4 * ACCESS_RECORD_BYTES + MAX_LESSONS * 16,
+    sent: FEED_HEAD_BYTES + MAX_LESSONS * EPISODE_SENT_BYTES,
+    stripe: 2 + 3 * courses,
+  };
+}
 
 /** The lesson's audio: its first file every podcast app plays, or null. */
 export function lessonAudio(lesson: Pick<Lesson, "files">): ProductFile | null {
   return lesson.files.find((f) => (EPISODE_TYPES as readonly string[]).includes(f.contentType)) ?? null;
+}
+
+/** Whether the course has this lesson, with audio: asked before anybody's access is. */
+export function hasLessonAudio(course: Course, lessonId: string): boolean {
+  return lessonsInOrder(course).some(({ lesson }) => lesson.id === lessonId && lessonAudio(lesson) !== null);
 }
 
 export type AudioLesson = { id: string; title: string; hasBody: boolean; file: ProductFile; at: number };
@@ -56,15 +128,18 @@ export function audioLessons(course: Course, who: Listener, nowSeconds = Date.no
   return out;
 }
 
-/** The feed's episodes: each lesson by its title, linking to its page when it has text to read. */
+/**
+ * The feed's episodes: each lesson by its title, linking to its page when it
+ * has text to read. No transcript is claimed for a lesson's audio: the
+ * lesson's text, linked in the notes, is what it has. Written so it holds
+ * whether or not an episode carries a transcript (274 [AX1] B.3).
+ */
 export function audioEpisodes(lessons: AudioLesson[], lessonPage: (lessonId: string) => string): Episode[] {
-  return lessons.map((l) => ({
-    id: l.id,
-    title: l.title,
-    notes: l.hasBody ? lessonPage(l.id) : "",
-    pathname: l.file.pathname,
-    bytes: l.file.bytes,
-    contentType: l.file.contentType,
-    at: l.at,
-  }));
+  return lessons.map((l) => {
+    const episode = Object.assign(
+      { id: l.id, title: l.title, notes: l.hasBody ? lessonPage(l.id) : "", pathname: l.file.pathname, bytes: l.file.bytes, contentType: l.file.contentType, at: l.at },
+      { transcript: null },
+    );
+    return episode;
+  });
 }

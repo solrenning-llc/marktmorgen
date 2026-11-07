@@ -43,9 +43,8 @@ import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
 import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
-import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, COURSE_AUDIO_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
+import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, COURSE_AUDIO_FIRST, COURSE_AUDIO_UNIT_PARTS, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
-import { COURSE_AUDIO_READ_UNITS } from "@/lib/course-audio-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
 import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES } from "./plan-cost-registry";
@@ -257,9 +256,11 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // A certificate's PDF is CERTIFICATE_PDF_UNITS public requests, all taken before it is drawn: more than its CPU, its time and its bytes cost.
   assert.ok(CERTIFICATE_PDF_UNITS * laterPageCost() >= CERTIFICATE_PDF_READ, `${CERTIFICATE_PDF_UNITS} x ${laterPageCost()} < ${CERTIFICATE_PDF_READ}`);
   console.log(`a certificate's PDF: $${CERTIFICATE_PDF_READ.toFixed(6)} at most, counted as ${CERTIFICATE_PDF_UNITS} requests at $${laterPageCost().toFixed(6)}`);
-  // A course's audio feed, built or a lesson fetched, is COURSE_AUDIO_READ_UNITS public requests: more than its reads cost (298 [H5-1]).
-  assert.ok(COURSE_AUDIO_READ_UNITS * laterPageCost() >= COURSE_AUDIO_READ, `${COURSE_AUDIO_READ_UNITS} x ${laterPageCost()} < ${COURSE_AUDIO_READ}`);
-  console.log(`a course's audio feed or lesson: $${COURSE_AUDIO_READ.toFixed(6)} at most, counted as ${COURSE_AUDIO_READ_UNITS} requests at $${laterPageCost().toFixed(6)}`);
+  // A course's audio feed, built or a lesson fetched, pays each step before it reads (298 [H5-1]): its first step is one
+  // public request, and each later step's requests cover what it reads, part by part.
+  assert.ok(COURSE_AUDIO_FIRST <= laterPageCost(), `${COURSE_AUDIO_FIRST} > ${laterPageCost()}`);
+  for (const [part, cost] of Object.entries(COURSE_AUDIO_UNIT_PARTS)) assert.ok(cost <= laterPageCost(), `course audio ${part}: ${cost} > ${laterPageCost()}`);
+  console.log(`a course's audio feed or lesson: first step $${COURSE_AUDIO_FIRST.toFixed(6)}; a request's worth of each part ${Object.entries(COURSE_AUDIO_UNIT_PARTS).map(([k, v]) => `${k} $${v.toFixed(6)}`).join(", ")}; a request $${laterPageCost().toFixed(6)}`);
   // The Store assistant's next product after a purchase is NEXT_OFFER_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(NEXT_OFFER_REQUEST_UNITS * laterPageCost() >= NEXT_OFFER_READ, `${NEXT_OFFER_REQUEST_UNITS} x ${laterPageCost()} < ${NEXT_OFFER_READ}`);
   console.log(`next product after a purchase: $${NEXT_OFFER_READ.toFixed(6)} at most, counted as ${NEXT_OFFER_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);

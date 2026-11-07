@@ -76,9 +76,15 @@ export function parsePodcast(raw: unknown): Podcast | null {
   }
 }
 
+/**
+ * Text made safe for a feed: every character XML 1.0 does not allow is dropped
+ * (C0 controls but tab, new line and return; U+FFFE and U+FFFF; a surrogate
+ * with no partner), since one of them makes a podcast app refuse the whole
+ * feed. Characters past U+FFFF, written as a pair, stay.
+ */
 function xml(text: string): string {
   return text
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "")
+    .replace(/[^\t\n\r -퟿-�\u{10000}-\u{10FFFF}]/gu, "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")

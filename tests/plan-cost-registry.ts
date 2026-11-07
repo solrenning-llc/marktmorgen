@@ -122,6 +122,7 @@ import { MAX_EMAIL_LENGTH } from "@/lib/auth";
 import { MAX_PER_PERSON as REQUESTS_PER_PERSON } from "@/lib/payment-request-rules";
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
+import { AUDIO_UNIT_BYTES, AUDIO_UNIT_COMMANDS, AUDIO_UNIT_SENT, AUDIO_UNIT_STRIPE } from "@/lib/course-audio-rules";
 import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POLL_SHAPE, CALENDAR_REFUSED_PRICED_PER_HOUR, CALENDAR_REFUSED_SHAPE, KEPT_READINGS_SHAPE, LIFE_FILL_SHAPE, LIST_MADE_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE } from "@/lib/read-ceilings";
 import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR } from "@/lib/calendar-sync";
 import { HEAVY_READINGS_PER_DAY, READING_COPY_MAX_BYTES, READING_KEEP_SECONDS, READING_KINDS, STORE_READINGS_PER_DAY } from "@/lib/store-readings";
@@ -616,25 +617,25 @@ export function request(shape: keyof typeof SHAPES, commands: number, bytes = 0)
 }
 
 /**
- * One build of a course's audio feed, or one lesson's audio fetched (298 [H5-1], lib/course-audio.ts
- * openCourseAudio), taken as COURSE_AUDIO_READ_UNITS public requests on the buyers' side before the course is
- * read (held above it in tests/plan-cost-registry.test.ts). Commands: the token's limit (2) and the token (1),
- * the store (2), its count (REQUEST_COMMANDS), the listing and the switch (2), the student's access as every
- * lesson door reads it (lib/learn.ts courseLedger: the kept answer, the ledger, imported purchases and the answer
- * kept again, 4; the community's levels, 4; one blocked check for each course the address holds, at most
- * COURSE_AUDIO_HELD), the course and the passed quizzes (2). Bytes read: the store and the listing at their
- * largest, the course record and the store's course listings at COURSE_AUDIO_COURSE_BYTES each, the ledger and
- * the kept answer at 64 KB each; sent: the feed at MAX_LESSONS episodes of 1 KB; two Stripe list pages waited on
- * when the kept answer has expired (one per spelling of the address). COURSE_AUDIO_HELD and
- * COURSE_AUDIO_COURSE_BYTES are review ceilings, not measurements: the listings and the blocked checks are what
- * every lesson page and lesson download already reads, and a store past them reads more there too.
+ * A course's audio feed and each lesson's audio (298 [H5-1], lib/course-audio.ts openCourseAudio), paid in steps,
+ * each before what it reads. The first step is one public request on the buyers' side: the call, the token (1),
+ * its limit (2), the listing at its largest, the switch and the course's size (2); the store is read before any
+ * count, as at every public door. Each later step takes audioUnits of what it will read (lib/course-audio-rules.ts):
+ * a request for every AUDIO_UNIT_COMMANDS commands, AUDIO_UNIT_BYTES bytes read (with the CPU to parse them, at
+ * COURSE_PARSE_CPU_PER_BYTE, a review ceiling of 50 ms a megabyte of JSON), AUDIO_UNIT_SENT bytes sent and
+ * AUDIO_UNIT_STRIPE Stripe calls waited on. Each part alone costs less than a request
+ * (tests/plan-cost-registry.test.ts), so a step's requests cover its reads at any size the code measures before it
+ * pays: the course record by STRLEN (read with GETRANGE up to that size, never past it), the course listings by
+ * STRLEN, the courses by the store's own index.
  */
-export const COURSE_AUDIO_HELD = 50;
-export const COURSE_AUDIO_COURSE_BYTES = 1_000_000;
-export const COURSE_AUDIO_READ =
-  request("wait", 2 + 1 + 2 + REQUEST_COMMANDS + 2 + 4 + 4 + COURSE_AUDIO_HELD + 2, MAX_STORE_BYTES + MAX_PRODUCT_BYTES + 2 * COURSE_AUDIO_COURSE_BYTES + 2 * 64_000)
-  + MAX_LESSONS * 1_024 * ORIGIN_PER_BYTE
-  + 2 * STRIPE_LIST_PAGE;
+export const COURSE_PARSE_CPU_PER_BYTE = 0.05 / 1_000_000;
+export const COURSE_AUDIO_FIRST = request("light", 1 + 2 + 1 + 2, MAX_PRODUCT_BYTES);
+export const COURSE_AUDIO_UNIT_PARTS = {
+  commands: AUDIO_UNIT_COMMANDS * COMMAND,
+  bytes: AUDIO_UNIT_BYTES * (DB_BYTE + COURSE_PARSE_CPU_PER_BYTE * CPU_SECOND),
+  sent: AUDIO_UNIT_SENT * ORIGIN_PER_BYTE,
+  stripe: AUDIO_UNIT_STRIPE * STRIPE_LIST_PAGE,
+};
 
 /**
  * One of lib/read-ceilings.ts's worst reads, in dollars (C4-4, 4 November 2026):
@@ -1098,9 +1099,9 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/page-read-rules.ts", names: ["COLLECTION_PRODUCTS_PER_UNIT", "collectionUnits", "BUNDLE_ITEMS_PER_UNIT", "bundleItemUnits"] },
       { file: "app/[handle]/shop/[collection]/page.tsx", names: ["collectionUnits(ids.length)", "bundleItemUnits(items.length)"] },
       { file: "app/api/store/licence/route.ts", names: ["takePublicRequest(store, \"buyer\")"] },
-      // A course's audio feed and each lesson's audio take their requests before the course is read (298 [H5-1]; COURSE_AUDIO_READ).
-      { file: "lib/course-audio.ts", names: ["takeBuyerRead(store, COURSE_AUDIO_READ_UNITS)"] },
-      { file: "lib/course-audio-rules.ts", names: ["COURSE_AUDIO_READ_UNITS = 6"] },
+      // A course's audio feed and each lesson's audio pay each step before what it reads (298 [H5-1]; COURSE_AUDIO_UNIT_PARTS).
+      { file: "lib/course-audio.ts", names: ["takeBuyerRead(store, 1)", "takeBuyerRead(store, audioUnits(outlineWork(measured, courses.length)))", "takeBuyerRead(store, audioUnits(accessWork(courses.length,", "[\"GETRANGE\", outlineKey(courseId), 0, measured - 1]", "withinLimit(\"course-audio-play\""] },
+      { file: "lib/course-audio-rules.ts", names: ["AUDIO_UNIT_COMMANDS", "AUDIO_UNIT_BYTES", "AUDIO_UNIT_SENT", "AUDIO_UNIT_STRIPE", "COURSE_AUDIO_PLAYS_A_DAY"] },
       // A community search and its access checks, and the one walk of its archive, paid before they read (4 November 2026).
       { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },
       { file: "app/[handle]/community/search/page.tsx", names: ["searchUnits({ room: config.chat.on, conversations })", "checkUnits(checks)", "{ shared: true }"] },
@@ -1651,6 +1652,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "embed-open": line("embed"), checkout: line("orders"), upsell: line("orders"), "group-place": line("orders"),
   book: line("orders"), "paypal-return": line("orders"),
   "podcast-feed": line("visits"), "<dynamic:allowance[0]>": line("visits"),
+  "course-audio-play": guard("Per course audio feed, a day: each lesson fetched is paid in the store's public requests before it reads (lib/course-audio.ts)."),
   "<dynamic:scope>": guard("withinStore and withinService pass their scope on to withinLimit (lib/metered-limits.ts)."),
   "<dynamic:scope: string>": guard("The definitions of withinLimit, withinMonth, withinStore and withinService themselves (lib/request-guard.ts, lib/metered-limits.ts)."),
   api: line("rest-api"), "studio-essential": line("studio"), "studio-paused": line("studio"), "bundle-picker": line("studio"),

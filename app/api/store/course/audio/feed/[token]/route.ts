@@ -1,7 +1,6 @@
 import type { NextRequest } from "next/server";
 import { openCourseAudio } from "@/lib/course-audio";
 import { audioEpisodes } from "@/lib/course-audio-rules";
-import { FEED_SHARED_SECONDS } from "@/lib/podcast-access";
 import { feedXml } from "@/lib/podcast-rules";
 import { imageUrl } from "@/lib/product-image";
 import { photoUrl } from "@/lib/photo-limits";
@@ -11,14 +10,16 @@ import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { productSegment } from "@/lib/product-slug";
 
 /**
- * Kept by the CDN under the feed's own secret address for a few hours, as a
- * private podcast's is (lib/podcast-access.ts): an app's hourly question is
- * answered without the course being read again. Each lesson's audio is
- * asked about again whenever it is fetched (../../play).
+ * Never kept by the CDN or the app: a refund, an ended membership, a student
+ * taken off the course or the switch turned off empties the feed the next
+ * time it is asked for, not hours later. What that costs is the feed built
+ * on each ask, up to FEED_READS_A_DAY times a day for one address (the asks
+ * past it are refused before anything of the store's month is taken), each
+ * paid for in steps before it reads (lib/course-audio.ts).
  */
 const HEADERS = {
   "Content-Type": "application/rss+xml; charset=utf-8",
-  "Cache-Control": `public, max-age=0, s-maxage=${FEED_SHARED_SECONDS}`,
+  "Cache-Control": "private, no-store",
   "X-Robots-Tag": "noindex, nofollow",
 };
 

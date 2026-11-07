@@ -46,6 +46,7 @@ import { bundleFromMeta } from "@/lib/bundle-rules";
 import { onAccount } from "@/lib/stripe-account";
 import { refundRowKnown } from "@/lib/refunds";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, readStripePage, type StripePage } from "@/lib/stripe-list";
 import { formatMoney } from "@/lib/money";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
@@ -248,8 +249,12 @@ export async function settleGroup(input: {
   if (!group || group.s !== store.statsId || group.p !== product.id) return "skip";
   if (group.paid) return "already";
   const settling = `${groupKey(id)}:settling`;
-  const [claimed] = await redisPipeline([["SET", settling, "1", "NX", "EX", 300]]);
-  if (claimed === null) {
+  // Claimed with this run's own value and read exactly (C4-3000): an answer in another shape is read back, never taken
+  // as ours, and the mark is let go only while it still holds this run's value (lib/claim-mark.ts).
+  const mark = claimValue();
+  const claimed = await claimMark(settling, 300, mark);
+  if (claimed === "unknown") throw new UnknownReplyError("a purchase for several's settling mark");
+  if (claimed === "taken") {
     // Another run is settling it. "already" only once it is paid: confirmGroup (lib/purchase-email.ts) keeps its
     // "sent" mark on "already", so said while the other run may still fail, the paid purchase would never be settled
     // (as deliverGift does since Claude 4 on #2726). Thrown, no "sent" mark is kept and the next run tries again.
@@ -273,14 +278,14 @@ export async function settleGroup(input: {
   const kept: (string | number)[][] = [...(pi ? [["SET", piKey(pi), group.id, "EX", GROUP_KEPT_SECONDS]] : []), ["SET", anyKey(group.s), "1"]];
   const keptReplies = repliesFor(await redisPipeline(kept), kept.length);
   if (!keptReplies || !keptReplies.every((reply) => reply === "OK")) {
-    await redisPipeline([["DEL", settling]]);
+    await releaseMark(settling, mark);
     throw new UnknownReplyError("a paid purchase for several's payment record");
   }
   if (!(await saveGroup(paid, GROUP_KEPT_SECONDS))) {
-    await redisPipeline([["DEL", settling]]);
+    await releaseMark(settling, mark);
     throw new UnknownReplyError("a paid purchase for several's record");
   }
-  await redisPipeline([["DEL", settling]]);
+  await releaseMark(settling, mark);
 
   await sendReceipt({ ...input, group: paid, lead: givingWords(store.language).thanksReceipt(store.name), idempotencyKey: `nimbus-group-receipt:${group.id}` }).catch((error) =>
     console.error("a receipt for several people failed", error),
@@ -345,7 +350,19 @@ export async function resendGroupReceipt(input: { store: Store; session: Session
   return sendReceipt({ ...input, group, lead: givingWords(input.store.language).resentReceipt(input.store.name), again: true });
 }
 
-type Member = { e: string; at: number };
+/**
+ * A place taken: the address, when, and the value only the run that took it wrote (`k`, lib/claim-mark.ts claimValue;
+ * Claude 6 on #2872), so a run lets go of a place's record only while it is its own. Records written before `k` have
+ * none, and no run lets them go.
+ */
+type Member = { e: string; at: number; k?: string };
+
+/**
+ * Deletes a place's record only while it still holds exactly what this run wrote (Claude 6 on #2872; CX-123 rules 25
+ * and 30), in one script, as releaseMark does for a mark: a run whose own write is unknown never deletes the place
+ * another run of the same link holds. The first line names it for the local stand-in (lib/redis-memory.ts).
+ */
+const HDEL_OWN = '-- marktmorgen:hdel-own:v1\nif redis.call("HGET", KEYS[1], ARGV[1]) == ARGV[2] then return redis.call("HDEL", KEYS[1], ARGV[1]) else return 0 end';
 
 function parseMember(raw: unknown): Member | null {
   if (typeof raw !== "string") return null;
@@ -516,16 +533,23 @@ export async function takePlace(input: {
   if (owned === 1) return { outcome: "has", email, group };
 
   const at = now();
-  // Let go of this address's hold on a place it was not given, so its link works again on a later try; the count is
-  // left alone, since whether it moved is unknown: at worst a place stays counted, never one handed out too many.
-  const letGo = () => redisPipeline([["HDEL", membersKey(group.id), who]]);
-  const fresh = repliesFor(await redisPipeline([["HSETNX", membersKey(group.id), who, JSON.stringify({ e: email, at } satisfies Member)]]), 1)?.[0];
+  // The hold carries a value only this run writes, so only this run's own hold is ever let go (Claude 6 on #2872).
+  const hold = JSON.stringify({ e: email, at, k: claimValue() } satisfies Member);
+  const dropOwn: (string | number)[] = ["EVAL", HDEL_OWN, 1, membersKey(group.id), who, hold];
+  // Let go of this address's hold on a place it was not given, so its link works again on a later try, and only while
+  // the record is still this run's own: a hold whose write came back unknown may be another run's of the same link (a
+  // double click), whose place is the one a refund takes back. The count is left alone, since whether it moved is
+  // unknown: at worst a place stays counted, never one handed out too many. When the script cannot run, the hold
+  // stays and the link says "already" with nothing more handed out; never another run's record deleted.
+  const letGo = () => redisPipeline([dropOwn]).catch(() => null);
+  const fresh = repliesFor(await redisPipeline([["HSETNX", membersKey(group.id), who, hold]]), 1)?.[0];
   if (fresh === 0) return { outcome: "already", email, group };
   if (fresh !== 1) {
     await letGo();
     throw new UnknownReplyError("a place's hold");
   }
-  const giveBack = () => redisPipeline([["HDEL", membersKey(group.id), who], ["DECR", takenKey(group.id)]]);
+  // The place given back: this run's own record (the same script) and the count its own INCR moved.
+  const giveBack = () => redisPipeline([dropOwn, ["DECR", takenKey(group.id)]]);
   const count = repliesFor(await redisPipeline([["INCR", takenKey(group.id)]]), 1)?.[0];
   if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) {
     await letGo();

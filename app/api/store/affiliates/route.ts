@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
   // (StudioNotPaidError, 429), or in bulk that part left out and named.
   const charge: Charge = async (units) => {
     const held = await holdStudio(guarded.store, units);
-    return held.ok ? { give: held.give } : null;
+    return held.ok ? { give: held.give, force: held.force } : null;
   };
 
   try {
@@ -203,8 +203,10 @@ export async function POST(request: NextRequest) {
         // Only a pending application goes back: nothing else was decided in bulk.
         return id && v.status === "pending" && Number.isSafeInteger(decidedAt) && decidedAt >= 0 ? [{ id, status: "pending" as const, decidedAt }] : [];
       });
+      // With the studio requests not taken nothing was put back: said as such (429), and the undo stays on the screen.
       const undone = await undoMany(store, before, decision, Date.now(), charge);
-      return Response.json({ ok: true, undone });
+      if (undone.used) return fail("studio_used", 429);
+      return Response.json({ ok: true, undone: undone.undone, left: undone.left });
     }
     // The share of several affiliates at once, and its undo (630 [HN6](4) unit 2).
     if (action === "bulk-rate" || action === "bulk-rate-undo") {
@@ -224,7 +226,9 @@ export async function POST(request: NextRequest) {
         const was = v.rate === null ? null : Number(v.rate);
         return id && (was === null || (Number.isInteger(was) && was >= MIN_COMMISSION && was <= MAX_COMMISSION)) ? [{ id, rate: was }] : [];
       });
-      return Response.json({ ok: true, undone: await undoRates(store, before, rate, charge) });
+      const undone = await undoRates(store, before, rate, charge);
+      if (undone.used) return fail("studio_used", 429);
+      return Response.json({ ok: true, undone: undone.undone, left: undone.left });
     }
     if (action === "approve" || action === "decline" || action === "remove" || action === "restore") {
       // A share that would pass the cap once its holder is approved again: refused, nothing written (lib/affiliates.ts).

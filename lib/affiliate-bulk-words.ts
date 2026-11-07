@@ -49,3 +49,18 @@ export function readHeld(raw: unknown, known: readonly { id: string; email: stri
     return [{ id, email: v.email || known.find((one) => one.id === id)?.email || "", why }];
   });
 }
+
+/**
+ * What an undo in bulk says it did: only those really put back, and how many could not be just now (the Undo stays
+ * for them). `what`: "approve" for applications, "rate" for shares.
+ */
+export function undoWords(undone: number, left: number, what: "approve" | "rate"): string {
+  const thing = (n: number) => (what === "approve" ? (n === 1 ? "application" : "applications") : n === 1 ? "share" : "shares");
+  const back = undone
+    ? `${undone} ${thing(undone)} put back as ${undone === 1 ? "it was" : "they were"}.`
+    : left
+      ? "Nothing was put back yet."
+      : "Nothing to put back: each was changed since.";
+  const rest = left ? ` ${left} could not be put back just now. Press Undo again to try once more.` : "";
+  return back + rest;
+}

@@ -136,11 +136,11 @@ async function main(): Promise<void> {
   part("LIGHT 4. A read that moved more than was taken for it is counted past the figure, never refused");
   await real([["HSET", people, id(3), person(3, "approved", null)], ["HSET", people, id(1), person(1, "approved", null, { percent: 50, products: [P] })]]);
   for (let n = 10; n < 14; n += 1) await real([["HDEL", people, id(n)]]);
-  // Only a few records when counted; 300 wide ones by the time they are read, and the month's figure reached meanwhile.
+  // Only a few records when counted; 2,000 wide ones (some 2.8 MB) by the time they are read, and the month's figure reached meanwhile.
   const wide = "\u0001".repeat(200);
   beforeRead = async () => {
     const writes: (string | number)[][] = [];
-    for (let n = 100; n < 400; n += 1) writes.push(["HSET", people, id(n), person(n, "removed", null, null, wide)]);
+    for (let n = 100; n < 2100; n += 1) writes.push(["HSET", people, id(n), person(n, "removed", null, null, wide)]);
     await real(writes);
     const rest = (await figure()) - (await used());
     if (rest > 0) await takeAllowance(await store(), "studio", rest);

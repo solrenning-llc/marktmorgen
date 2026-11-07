@@ -1675,17 +1675,25 @@ function counted(meter: Meter | undefined, commands: readonly (readonly (string 
 }
 
 /** Studio requests taken before a reading; `give(n)` gives back `n` of them, in the window they were taken in. */
-export type Hold = { give: (units: number) => Promise<void> };
+export type Hold = {
+  /** Gives back `units` taken and not needed, never more than were taken. */
+  give: (units: number) => Promise<void>;
+  /**
+   * Counts `units` more, already used by a read that moved more than was taken for it, past the figure if it must
+   * (lib/store-allowance.ts forceAllowance): a read is never refused after it was made.
+   */
+  force: (units: number) => Promise<void>;
+};
 /** Takes this many of the store's studio requests before the work they pay for: null when they were not taken. */
 export type Charge = (units: number) => Promise<Hold | null>;
 /** For a caller that already paid for the work, or a test of the work alone. */
-const PAID: Charge = async () => ({ give: async () => {} });
+const PAID: Charge = async () => ({ give: async () => {}, force: async () => {} });
 /** Commands one take of studio requests uses itself, and its give-back (lib/studio-route.ts holdStudio). */
 const TAKE_COMMANDS = 6;
 type Taken = { units: number; hold: Hold };
 /** Takes, before the work, the studio requests `commands` commands and `bytes` bytes cost at most, with the take's own. */
 async function take(charge: Charge, commands: number, bytes: number): Promise<Taken | null> {
-  if (commands <= 0 && bytes <= 0) return { units: 0, hold: { give: async () => {} } };
+  if (commands <= 0 && bytes <= 0) return { units: 0, hold: { give: async () => {}, force: async () => {} } };
   const units = bulkUnits(commands + TAKE_COMMANDS, bytes);
   const hold = await charge(units).catch(() => null);
   return hold ? { units, hold } : null;
@@ -1693,13 +1701,14 @@ async function take(charge: Charge, commands: number, bytes: number): Promise<Ta
 /**
  * Once the part is done and measured, gives back what was taken beyond the measure, rounded up: the store pays what
  * was really read and written, never less (coordinator, 2026-11-07). A part that moved more than it took (records
- * added between the count and the read) takes the rest, best effort, since it was read.
+ * added between the count and the read) is counted at what it really read, past the figure if it must (Hold.force,
+ * lib/store-allowance.ts forceAllowance): never refused after the read, since it was read.
  */
-async function settle(charge: Charge, taken: Taken, meter: Meter): Promise<void> {
+async function settle(taken: Taken, meter: Meter): Promise<void> {
   if (meter.unsure) return;
   const needed = bulkUnits(meter.commands + TAKE_COMMANDS, meter.bytes);
   if (needed < taken.units) await taken.hold.give(taken.units - needed).catch(() => {});
-  else if (needed > taken.units) await charge(needed - taken.units).catch(() => null);
+  else if (needed > taken.units) await taken.hold.force(needed - taken.units).catch(() => {});
 }
 
 /** The studio requests a reading needs were not taken (used up, or not counted just now): nothing was read or written. */
@@ -1722,7 +1731,7 @@ async function paidPeople(store: Store, charge: Charge): Promise<Affiliate[]> {
   const taken = await take(charge, 2, readBytes(count));
   if (!taken) throw new StudioNotPaidError();
   const people = await peopleExact(store, meter);
-  await settle(charge, taken, meter);
+  await settle(taken, meter);
   return [...people.values()].map((one) => one.affiliate).sort((a, b) => b.appliedAt - a.appliedAt);
 }
 
@@ -1778,7 +1787,7 @@ async function batchRecords(store: Store, ids: readonly string[], charge: Charge
     throw error;
   });
   if (!records) return "unavailable";
-  await settle(charge, taken, meter);
+  await settle(taken, meter);
   return records;
 }
 
@@ -1797,13 +1806,13 @@ async function withPaidStore(store: Store, charge: Charge, work: (now: Store, lo
     await withPartnerLock(store, async (lock) => {
       entered = true;
       const now = await storeNow(store, meter);
-      await settle(charge, taken, meter);
+      await settle(taken, meter);
       await work(now, lock);
     });
   } finally {
     // The lock never taken: the store was not read, so what was set aside for it is given back. Taken but the store
     // not read exactly: what moved is not known, so nothing is given back.
-    if (!entered) await settle(charge, taken, meter);
+    if (!entered) await settle(taken, meter);
   }
   return true;
 }
@@ -1818,7 +1827,7 @@ async function batchPeople(now: Store, charge: Charge): Promise<Map<string, Read
   const taken = await take(charge, 2, readBytes(count));
   if (!taken) return "used";
   const people = await peopleExact(now, meter);
-  await settle(charge, taken, meter);
+  await settle(taken, meter);
   return people;
 }
 
@@ -1920,7 +1929,7 @@ export async function decideMany(
     // Not reached for an unknown reply, or the lock held elsewhere: nothing was written for them.
     leave(shared.filter((id) => !outcome.has(id)), "unavailable");
   }
-  await settle(charge, writes, wrote);
+  await settle(writes, wrote);
   if (status === "approved") {
     for (const id of asked) {
       const result = outcome.get(id);
@@ -1934,16 +1943,20 @@ export async function decideMany(
  * Puts back how each affiliate stood before a decision in bulk, for those
  * still exactly as that decision left them and within BULK_UNDO_MS of it: a
  * later decision by hand is never overwritten. An approval email already
- * sent is not taken back; the studio says so. Returns how many were put back.
- * One read of them all (HMGET); each part taken first and settled once done, like the decision (decideMany).
+ * sent is not taken back; the studio says so. One read of them all (HMGET); each part taken first and settled once
+ * done, like the decision (decideMany). Returns how many were put back (`undone`), how many could not be just now
+ * (`left`: a reply not understood, or the record changed meanwhile) and whether the studio requests it needs were not
+ * taken (`used`: nothing read or written, so the caller must not say anything was put back).
  */
-export async function undoMany(store: Store, before: Before[], decision: "approve" | "decline", now = Date.now(), charge: Charge = PAID): Promise<number> {
+export async function undoMany(store: Store, before: Before[], decision: "approve" | "decline", now = Date.now(), charge: Charge = PAID): Promise<UndoResult> {
   const left: AffiliateStatus = decision === "approve" ? "approved" : "declined";
   const entries = new Map<string, Before>();
   for (const entry of before.slice(0, MAX_BULK_DECISIONS)) if (entry.status === "pending" && AFFILIATE_ID_PATTERN.test(entry.id)) entries.set(entry.id, entry);
-  if (!entries.size || !store.statsId || !isRedisConfigured()) return 0;
+  if (!entries.size) return { undone: 0, left: 0, used: false };
+  if (!store.statsId || !isRedisConfigured()) return { undone: 0, left: entries.size, used: false };
   const records = await batchRecords(store, [...entries.keys()], charge);
-  if (typeof records === "string") return 0;
+  if (records === "used") return { undone: 0, left: entries.size, used: true };
+  if (records === "unavailable") return { undone: 0, left: entries.size, used: false };
   const writes: BatchWrite[] = [];
   for (const [id, entry] of entries) {
     const read = records.get(id);
@@ -1959,13 +1972,23 @@ export async function undoMany(store: Store, before: Before[], decision: "approv
     });
   }
   const taken = await take(charge, WRITE_COMMANDS * writes.length, writes.reduce((sum, one) => sum + writeBytes(utf8(one.raw), utf8(one.raw) + 64), 0));
-  if (!taken) return 0;
+  if (!taken) return { undone: 0, left: writes.length, used: true };
   const wrote = meterOf();
   let undone = 0;
-  for (const result of (await writeBatch(store, writes, wrote)).values()) if (result && typeof result === "object") undone += 1;
-  await settle(charge, taken, wrote);
-  return undone;
+  let notNow = 0;
+  for (const result of (await writeBatch(store, writes, wrote)).values()) {
+    if (result && typeof result === "object") undone += 1;
+    else if (result === "unavailable") notNow += 1;
+  }
+  await settle(taken, wrote);
+  return { undone, left: notNow, used: false };
 }
+
+/**
+ * What an undo in bulk did: how many were put back, how many could not be just now (an undo may be pressed again for
+ * them), and whether nothing was done because the studio requests it needs were not taken.
+ */
+export type UndoResult = { undone: number; left: number; used: boolean };
 
 /** How one affiliate's own share stood before a change in bulk: what an undo puts back. */
 export type RateBefore = { id: string; rate: number | null };
@@ -2075,7 +2098,7 @@ async function changeRates(store: Store, asks: readonly RateAsk[], charge: Charg
     // Not reached for an unknown reply, or the lock held elsewhere: nothing was written for them.
     leave(judged.map((ask) => ask.id).filter((id) => !outcome.has(id)), "unavailable");
   }
-  await settle(charge, writes, wrote);
+  await settle(writes, wrote);
   return finish();
 }
 
@@ -2094,9 +2117,11 @@ export async function setRatesMany(store: Store, ids: string[], rate: number | n
 
 /**
  * Puts back each share still exactly as the change left it; one changed by hand since is never overwritten. Putting
- * back a higher share is checked against the cap like any raise; over it, or unchecked, it stays.
+ * back a higher share is checked against the cap like any raise; over it, or unchecked, it stays. Returns as undoMany:
+ * `left` counts each one not put back for the cap or a reply not understood, `used` that the studio requests were
+ * not taken for any of them.
  */
-export async function undoRates(store: Store, before: RateBefore[], rate: number | null, charge: Charge = PAID): Promise<number> {
+export async function undoRates(store: Store, before: RateBefore[], rate: number | null, charge: Charge = PAID): Promise<UndoResult> {
   const asks: RateAsk[] = [];
   const seen = new Set<string>();
   for (const entry of before.slice(0, MAX_BULK_DECISIONS)) {
@@ -2104,7 +2129,9 @@ export async function undoRates(store: Store, before: RateBefore[], rate: number
     seen.add(entry.id);
     asks.push({ id: entry.id, rate: entry.rate, when: (a) => a.rate === rate });
   }
-  return (await changeRates(store, asks, charge)).done.length;
+  const { done, held } = await changeRates(store, asks, charge);
+  const left = held.filter((one) => one.why !== "gone").length;
+  return { undone: done.length, left, used: done.length === 0 && held.some((one) => one.why === "used") };
 }
 
 export async function addPayout(

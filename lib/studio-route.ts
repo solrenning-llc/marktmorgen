@@ -39,7 +39,7 @@ import { type Store, STORE_ID_PATTERN, accountStores, ensureStoreId, storeForEma
 import { type Permission, type Role, PERMISSION_WORDS, can } from "@/lib/team-roles";
 import { logTeam, memberStores, roleIn, teamTwoStepBlocks } from "@/lib/team";
 import { withinEssentialLimit } from "@/lib/request-guard";
-import { giveAllowance, takeAllowance } from "@/lib/store-allowance";
+import { forceAllowance, giveAllowance, takeAllowance } from "@/lib/store-allowance";
 import { refreshPeriod } from "@/lib/billing-sync";
 import { ESSENTIAL_NEEDS, ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 
@@ -237,10 +237,14 @@ export async function countStudio(store: Store, need: Need | null, units = 1): P
 
 /**
  * Takes `units` of the store's studio requests before a reading whose size is known only once it is read, at that
- * reading's worst; `give(n)` then gives back, in the same window (the same moment's), what the reading did not need.
+ * reading's worst; `give(n)` then gives back, in the same window (the same moment's), what the reading did not need,
+ * and `force(n)` counts what it read beyond them (forceAllowance).
  * The caller gives back only down to the measured size, never below; a measure it cannot trust gives nothing back.
  */
-export async function holdStudio(store: Store, units: number): Promise<{ ok: true; give: (n: number) => Promise<void> } | { ok: false; message: string }> {
+export async function holdStudio(
+  store: Store,
+  units: number,
+): Promise<{ ok: true; give: (n: number) => Promise<void>; force: (n: number) => Promise<void> } | { ok: false; message: string }> {
   const now = Date.now();
   const current = await refreshPeriod(store);
   const taken = await takeAllowance(current, "studio", units, now);
@@ -249,6 +253,10 @@ export async function holdStudio(store: Store, units: number): Promise<{ ok: tru
     ok: true,
     give: async (n) => {
       if (Number.isSafeInteger(n) && n > 0 && n <= units) await giveAllowance(current, "studio", n, now);
+    },
+    // What a reading moved beyond what was taken for it, counted past the figure if it must: never refused after it.
+    force: async (n) => {
+      if (Number.isSafeInteger(n) && n > 0) await forceAllowance(current, "studio", n, now);
     },
   };
 }

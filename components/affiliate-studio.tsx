@@ -44,7 +44,7 @@ import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
 import { MAX_NOTICE_DAYS, MIN_NOTICE_DAYS, noticeLines } from "@/lib/affiliate-notice";
 import { IDLE_WARN_DAYS, MAX_IDLE_DAYS, MIN_IDLE_DAYS } from "@/lib/affiliate-idle-rules";
-import { type HeldOne, heldLines, readHeld } from "@/lib/affiliate-bulk-words";
+import { type HeldOne, heldLines, readHeld, undoWords } from "@/lib/affiliate-bulk-words";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -143,6 +143,25 @@ async function post(payload: Record<string, unknown>): Promise<string | null> {
     return MESSAGES[data.error ?? ""] ?? MESSAGES.server_error;
   } catch {
     return MESSAGES.server_error;
+  }
+}
+
+/**
+ * An undo in bulk: how many were put back and how many could not be just now, or the refusal's words (429
+ * studio_used: nothing was put back). Never a fixed "put back" line: only what the route says came back is said.
+ */
+async function postUndo(payload: Record<string, unknown>): Promise<{ ok: true; undone: number; left: number } | { ok: false; error: string }> {
+  try {
+    const response = await fetch("/api/store/affiliates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; undone?: number; left?: number };
+    if (data.ok) return { ok: true, undone: Number(data.undone) || 0, left: Number(data.left) || 0 };
+    return { ok: false, error: MESSAGES[data.error ?? ""] ?? MESSAGES.server_error };
+  } catch {
+    return { ok: false, error: MESSAGES.server_error };
   }
 }
 
@@ -263,8 +282,17 @@ export function AffiliateStudio({
 
   async function undoBulk() {
     if (!lastBulk) return;
-    const done = await act("bulk", { action: "bulk-undo", decision: lastBulk.decision, before: lastBulk.before }, "Put back as they were.");
-    if (done) setLastBulk(null);
+    setBusy("bulk");
+    setError(null);
+    const done = await postUndo({ action: "bulk-undo", decision: lastBulk.decision, before: lastBulk.before });
+    setBusy(null);
+    // Refused (no studio requests left, 429): nothing was put back, and the Undo stays while its ten minutes last.
+    if (!done.ok) return setError({ where: "bulk", text: done.error });
+    toast(undoWords(done.undone, done.left, "approve"));
+    // Some could not be put back just now: the Undo stays for them (keepUndo); pressing it again leaves the others.
+    const keepUndo = done.left > 0;
+    if (!keepUndo) setLastBulk(null);
+    router.refresh();
   }
   const [batchDate, setBatchDate] = useState(today);
   const [batchReference, setBatchReference] = useState("");
@@ -573,7 +601,7 @@ export function AffiliateStudio({
             </p>
           ) : (
             <>
-            <ShareMany members={members.filter((row) => row.affiliate.status === "approved").map((row) => ({ id: row.affiliate.id, email: row.affiliate.email, rate: row.affiliate.rate }))} percent={setting.percent} busy={busy} act={act} error={errorAt("bulk-rate")} />
+            <ShareMany members={members.filter((row) => row.affiliate.status === "approved").map((row) => ({ id: row.affiliate.id, email: row.affiliate.email, rate: row.affiliate.rate }))} percent={setting.percent} busy={busy} error={errorAt("bulk-rate")} />
             <ul className="mt-4 space-y-3">
               {members.map((row) => (
                 <Member
@@ -1271,13 +1299,11 @@ function ShareMany({
   members,
   percent,
   busy,
-  act,
   error,
 }: {
   members: { id: string; email: string; rate: number | null }[];
   percent: number;
   busy: string | null;
-  act: (where: string, payload: Record<string, unknown>, confirmation: string) => Promise<boolean>;
   error: React.ReactNode;
 }) {
   const router = useRouter();
@@ -1334,7 +1360,15 @@ function ShareMany({
                 className="btn btn-secondary btn-sm"
                 disabled={busy !== null}
                 onClick={async () => {
-                  if (await act("bulk-rate", { action: "bulk-rate-undo", before: last.before, rate: last.rate }, "Shares put back as they were.")) setLast(null);
+                  setProblem(null);
+                  const done = await postUndo({ action: "bulk-rate-undo", before: last.before, rate: last.rate });
+                  // Refused (429): nothing was put back, and the Undo stays.
+                  if (!done.ok) return setProblem(done.error);
+                  toast(undoWords(done.undone, done.left, "rate"));
+                  // Some left (the cap, or not checked just now): the Undo stays for them (keepUndo).
+                  const keepUndo = done.left > 0;
+                  if (!keepUndo) setLast(null);
+                  router.refresh();
                 }}
               >
                 Undo
@@ -1938,7 +1972,8 @@ export function PartnerOffers({ offers }: { offers: { id: string; words: string;
       if (!data.ok) {
         // Could not be done just now (503), went wrong on our side, or no longer fits the store's cap (409): the offer
         // is still there, so it stays listed.
-        if (response.status >= 500 || response.status === 409) {
+        // No studio requests left to check it (429): nothing changed, the offer stays, to answer later.
+        if (response.status >= 500 || response.status === 409 || response.status === 429) {
           toast(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
           return;
         }

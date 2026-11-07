@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { AFFILIATE_SESSION_SECONDS, type Charge, affiliateCookieName, openAffiliateLink } from "@/lib/affiliates";
-import { givePublicRequests, takePublicRequest } from "@/lib/traffic";
+import { forcePublicRequests, givePublicRequests, holdPublicRequests } from "@/lib/traffic";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 1_000;
@@ -46,7 +46,15 @@ export async function POST(request: NextRequest) {
   // (lib/affiliates.ts paidPeople). Not taken: the page says so ("resting"), nothing read or written, the link kept.
   const charge: Charge = async (units) => {
     const now = Date.now();
-    return (await takePublicRequest(store, "public", now, units)) ? { give: (n) => givePublicRequests(store, n, now) } : null;
+    // Refused, the hold is not left counted (`hold`); given back only up to what was taken; a read that moved more is
+    // counted at what it read, past the window if it must (forcePublicRequests).
+    if (!(await holdPublicRequests(store, units, now))) return null;
+    return {
+      give: async (n) => {
+        if (Number.isSafeInteger(n) && n > 0 && n <= units) await givePublicRequests(store, n, now);
+      },
+      force: (n) => forcePublicRequests(store, n, now),
+    };
   };
   const result = await openAffiliateLink(store, token, charge).catch((error) => {
     console.error("opening an affiliate link failed", error);

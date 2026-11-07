@@ -154,9 +154,10 @@ async function main(): Promise<void> {
   is("nothing read", seen.hgetall, 0);
   is("nobody added", await affiliateByEmail(await store(), "partner3@example.com"), null);
   is("the link kept", typeof (await real([["GET", linkKey(third)]]))[0], "string");
+  // Altered 2026-11-07 (rule 23): words that hold for every reason the requests were not taken, not only the month's.
   is("the page's words for it, in plain English", AFFILIATES_WORDS.en.notices.resting, {
     title: "This store can't take this right now",
-    body: "Accepting checks the store's partners first, and the store has used the requests its plan includes this month, or they could not be counted just now. Nothing was changed. Try again later, or write to the store.",
+    body: "Accepting checks the store's partners first, and the store can't take that many requests right now. Nothing was changed. Try again later, or write to the store.",
   });
   is("and in each of the store's languages", Object.values(AFFILIATES_WORDS).every((words) => typeof words.notices.resting?.title === "string"), true);
 

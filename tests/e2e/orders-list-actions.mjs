@@ -108,6 +108,8 @@ try {
   await page.getByRole("button", { name: "Show bundle products" }).click();
   await page.getByRole("link", { name: "Download", exact: true }).waitFor();
   check("an expanded bundle has only its outer named region", await page.locator("section").count(), 1);
+  // WCAG 2.4.10: the bundle's name a heading under its purchase's h2, each of its products one under that.
+  check("an expanded bundle's name and each of its products are headings, h3 then h4", await page.evaluate(() => [...document.querySelectorAll("h1, h2, h3, h4, h5, h6")].map((node) => `${node.tagName}:${node.textContent}`)), ["H3:Inside this bundle", "H4:A book"]);
 
   for (const theme of ["light", "sand", "bold", "night"]) {
     await page.locator(".st-page").evaluate((node, theme) => { node.className = `st-page st-theme-${theme}`; }, theme);

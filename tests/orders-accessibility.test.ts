@@ -31,7 +31,12 @@ import { readSetup } from "@/lib/call-setup";
 import { readDraft as readAgreementDraft } from "@/lib/agreement-rules";
 import { createAgreement, saveAgreement } from "@/lib/agreement-store";
 import { agreementWords } from "@/lib/buyer-words/agreements";
-import { type Store, addDraftProducts, addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { type Store, addDraftProducts, addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductBundle, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { bundleMeta } from "@/lib/bundle-rules";
+import { saveServer, setProductRoles } from "@/lib/discord-store";
+import { storeKey } from "@/lib/learn";
+import { BundleDelivery } from "@/components/bundle-delivery";
+import { createElement } from "react";
 
 const OWNER = "access-owner@example.test";
 const BUYER = "buyer@example.test";
@@ -53,6 +58,12 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (url.searchParams.has("created[gte]")) return answer({ object: "list", data: checkouts.filter((s) => (s.metadata as Record<string, string>).kind === "call"), has_more: false });
     if (url.searchParams.get("customer_details[email]") !== BUYER) return answer({ object: "list", data: [], has_more: false });
     return answer({ object: "list", data: checkouts, has_more: false });
+  }
+  // One checkout read by its id, as a bundle's own page reads its purchase (lib/buyer-orders.ts, lookUp).
+  const one = /^\/checkout\/sessions\/(cs_[A-Za-z0-9_]+)$/.exec(path);
+  if (one) {
+    const found = checkouts.find((s) => s.id === one[1]);
+    return found ? answer(found) : answer({ error: { type: "invalid_request_error", code: "resource_missing" } }, 404);
   }
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
@@ -173,4 +184,65 @@ test("2.4.10: each purchase is a section heading under the page's h1, and each b
   const move = lonelyLinks(html).find((l) => l.text === words.moveCall);
   assert.ok(move, "the call can be moved, so its link is drawn");
   assert.ok(tall(move.classes), `"${words.moveCall}" is under 44 px high (${move.classes.join(" ")})`);
+});
+
+/** Every heading drawn, in order, as "h<level>:<words>". */
+const headingsOf = (html: string) => [...html.matchAll(/<h([1-6])[^>]*>([^<]*)<\/h\1>/g)].map((m) => `h${m[1]}:${m[2]}`);
+/** No level skipped: every heading is at most one level under the one before it. */
+const noSkip = (headings: string[], where: string) => {
+  for (let i = 1; i < headings.length; i++) assert.ok(Number(headings[i][1]) <= Number(headings[i - 1][1]) + 1, `${where}: level skipped at ${headings[i]} (${headings.join(" | ")})`);
+};
+
+test("2.4.10: the Discord entry, each bundle on a purchase and each product of an open bundle are headings, at the level under the one they sit in", async () => {
+  const previous = [process.env.DISCORD_CLIENT_SECRET, process.env.DISCORD_BOT_TOKEN];
+  process.env.DISCORD_CLIENT_SECRET = "discord_test_orders_access_only";
+  process.env.DISCORD_BOT_TOKEN = "discord_test_orders_access_only";
+  try {
+    const store = await shop();
+    const drafts = await addDraftProducts(OWNER, [
+      { title: "Starter Bundle", summary: "", priceCents: 1000, link: null },
+      { title: "Recipe Cards", summary: "", priceCents: 500, link: "https://example.test/cards" },
+      { title: "Shopping List", summary: "", priceCents: 500, link: "https://example.test/list" },
+    ]);
+    assert.ok(drafts.ok);
+    const [bundle, ...inside] = drafts.ids;
+    assert.ok((await setProductBundle(OWNER, bundle, inside)).ok);
+    const room = storeKey(store);
+    await saveServer(room, { id: "200000000000000001", name: "Access Discord", at: NOW, kick: false });
+    assert.deepEqual(await setProductRoles(room, bundle, ["200000000000000002"]), { ok: true });
+    checkouts = [paid(1, 60, { product: bundle, ...bundleMeta("bundle", inside) })];
+    const words = ordersWords("en");
+
+    // The list: the Discord entry beside the purchases, the bundle's own name under its purchase.
+    const html = await opened(store);
+    const headings = headingsOf(html);
+    assert.ok(html.includes('action="/api/store/discord/join"'), "the Discord entry is the state checked");
+    assert.ok(headings.includes("h2:Discord"), `the Discord entry is a section heading beside the purchases: ${headings.join(" | ")}`);
+    const title = headings.indexOf("h2:Starter Bundle");
+    assert.ok(title >= 0, `the purchase is a section heading: ${headings.join(" | ")}`);
+    assert.equal(headings[title + 1], `h3:${words.whatIsInside}`, `the bundle's name is a heading under its purchase: ${headings.join(" | ")}`);
+    noSkip(headings, "the list");
+
+    // The bundle's own page, for a browser without JavaScript: each product a heading under the page's h1.
+    const link = (await ordersLinkFor(store, BUYER, `${ORIGIN}/@${store.handle}`))!;
+    const view = await page(store, { token: new URL(link).searchParams.get("token")!, bundle: `${checkouts[0].id as string}:main` });
+    const viewed = headingsOf(view);
+    assert.equal(viewed[0], "h1:Inside Starter Bundle", `the bundle's page is the state checked: ${viewed.join(" | ")} ${view.match(/role="alert"[^>]*>([^<]*)/)?.[1] ?? ""}`);
+    for (const product of ["Recipe Cards", "Shopping List"]) assert.ok(viewed.includes(`h2:${product}`), `"${product}" is a section heading on the bundle's page: ${viewed.join(" | ")}`);
+    noSkip(viewed, "the bundle's page");
+
+    // The panel the list's bundle button opens (components/orders-bundle.tsx): each product a heading under the bundle's h3.
+    const panel = renderToStaticMarkup(
+      createElement("div", null, createElement("h2", null, "Starter Bundle"), createElement("h3", null, words.whatIsInside),
+        createElement(BundleDelivery, { storeName: "Access Studio", missing: 0, showHeading: false, titleAs: "h4", lines: inside.map((id, i) => ({ product: { id, title: ["Recipe Cards", "Shopping List"][i], link: null }, download: `/download/${id}`, course: null })) } as Parameters<typeof BundleDelivery>[0])),
+    );
+    const opened4 = headingsOf(panel);
+    assert.deepEqual(opened4.slice(2), ["h4:Recipe Cards", "h4:Shopping List"], `each product of the open bundle is a heading under its name: ${opened4.join(" | ")}`);
+    noSkip(opened4, "the open bundle");
+  } finally {
+    for (const [name, value] of [["DISCORD_CLIENT_SECRET", previous[0]], ["DISCORD_BOT_TOKEN", previous[1]]] as const) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
 });

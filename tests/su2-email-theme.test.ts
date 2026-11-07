@@ -11,7 +11,12 @@
  */
 import { readFileSync } from "node:fs";
 import { render } from "@/lib/mail";
+import * as emailThemeModule from "@/lib/email-theme";
 import { emailColourNotes, emailColourNotice, emailTheme } from "@/lib/email-theme";
+import { MAX_PHOTO_BYTES } from "@/lib/photo-limits";
+import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { TRIAL_MONTHLY_EMAILS, monthlyEmails } from "@/lib/plan";
+import { COST_LINES, nonPayingWorst } from "./plan-cost-registry";
 import { FONTS, THEMES, lookColours, type FontId, type StoreLook, type ThemeId } from "@/lib/store-look";
 import type { Store } from "@/lib/store";
 import { done, is, part } from "./check";
@@ -151,6 +156,33 @@ part("The logo is the store's own photo, served from where it already is, with i
   is("without a photo there is no logo picture", plain.includes("/api/photo/"), false);
   is("without a photo the store's name is written as text instead", walk(plain).texts.some((t) => t.text === "Oven Notes"), true);
   is("with a photo the name is not said twice", walk(a).texts.some((t) => t.text === "Oven Notes"), false);
+}
+
+part("The logo's reads are a costed line with a ceiling before anything is sent (MR; review rv34 of #3030 at ac244fff, MEDIUM)");
+{
+  // Every store email may carry the logo, on by default, and each reader's app may fetch it from the CDN: up to
+  // MAX_PHOTO_BYTES each time. Priced here independently of the registry: the CDN's request (US$2 a million) and its
+  // Fast Data Transfer of the photo (US$0.15 a GB, docs/ses-callback-cost-2026-11-05.md), which the line must cover
+  // at least, for every email of every figure a plan sends, each fetched EMAIL_LOGO_READS times.
+  const reads = (emailThemeModule as Record<string, unknown>).EMAIL_LOGO_READS;
+  is("the reads one email's logo is costed at are a whole number of at least one", typeof reads === "number" && Number.isSafeInteger(reads) && reads >= 1, true);
+  const perRead = 2 / 1_000_000 + MAX_PHOTO_BYTES * (0.15 / 1e9);
+  const line = COST_LINES.find((l) => l.id === "email-logo");
+  is("the registry has a line for the logo in store emails", Boolean(line), true);
+  for (const tier of ["creator", "pro", "scale"] as const) {
+    const emails = monthlyEmails(tier) + STORE_ALLOWANCES[tier].email + STORE_ALLOWANCES[tier].transactional;
+    const floor = emails * (typeof reads === "number" ? reads : 1) * perRead;
+    is(`${tier}: the line prices every email's logo at every read, at least`, line ? line.monthlyUsd(tier) >= floor && floor > 0 : false, true);
+  }
+  is("the line names where the emails are counted before sending and where the logo is drawn",
+    line ? ["lib/mail.ts", "lib/email-theme.ts", "lib/photo-limits.ts", "lib/store-allowance-rules.ts"].every((f) => line.sources.some((s) => s.file === f)) : false, true);
+  const trialEmails = TRIAL_MONTHLY_EMAILS + NON_PAYING_ALLOWANCES.trial.email + NON_PAYING_ALLOWANCES.trial.transactional;
+  const trialFloor = trialEmails * (typeof reads === "number" ? reads : 1) * perRead;
+  const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
+  const nonPaying = registry.slice(registry.indexOf("export function nonPayingWorst"), registry.indexOf("export type AddOnLine"));
+  is("a trial's emails carry the logo too, and its worst window prices them", nonPaying.includes("EMAIL_LOGO_EMAIL") && nonPayingWorst() > trialFloor, true);
+  const one = render(storeWith({ theme: "bold" }, PHOTO), "New loaf", BODY, "tok").html;
+  is("one email draws the logo once, never more, whatever its theme", [...one.matchAll(/\/api\/photo\//g)].length, 1);
 }
 
 part("The text version does not change");

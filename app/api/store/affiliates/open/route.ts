@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { AFFILIATE_SESSION_SECONDS, affiliateCookieName, openAffiliateLink } from "@/lib/affiliates";
-import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 1_000;
 
@@ -37,7 +37,10 @@ export async function POST(request: NextRequest) {
   if (!store) return new Response("No such store.", { status: 404 });
 
   const page = `${origin}/@${store.handle}/affiliates`;
-  if (!(await withinStore("aff-open", `${clientAddress(request)}|${store.handle}`, 20, 600, store))) {
+  const room = await withinStore("aff-open", `${clientAddress(request)}|${store.handle}`, 20, 600, store).catch(unknownLimit);
+  // A count that could not be read is never "too many" (rule 24): the page's own "try again in a moment".
+  if (room === "unknown") return new Response(null, { status: 303, headers: { Location: `${page}?status=error`, "Cache-Control": "no-store" } });
+  if (!room) {
     return new Response(null, { status: 303, headers: { Location: `${page}?status=limited`, "Cache-Control": "no-store" } });
   }
   const result = await openAffiliateLink(store, token).catch((error) => {

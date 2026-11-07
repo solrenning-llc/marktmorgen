@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { SESSION_COOKIE, emailForSession, isFreshSession } from "@/lib/auth";
 import { isRedisConfigured } from "@/lib/redis";
-import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { confirmRecoveryAddress, removeRecoveryAddress, startRecoveryAddress } from "@/lib/recovery-address";
 import { lockedUntil } from "@/lib/two-step";
 import { hasSecondStep, liveSecondStep } from "@/lib/second-step-gate";
@@ -36,7 +36,9 @@ export async function POST(request: NextRequest) {
   } catch {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   }
-  if (!(await withinLimit("recovery-address-change", email, 20, 60 * 60))) return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
+  const room = await withinLimit("recovery-address-change", email, 20, 60 * 60).catch(unknownLimit);
+  if (room === "unknown") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  if (!room) return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
   if (!(await isFreshSession(session))) return Response.json({ ok: false, error: "reauth" }, { status: 403 });
   if ((await hasSecondStep(email)) && (await liveSecondStep(email, session)) === null) return Response.json({ ok: false, error: "second_step" }, { status: 403 });
 

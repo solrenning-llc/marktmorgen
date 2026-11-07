@@ -18,7 +18,7 @@ import { HOLD_SECONDS } from "@/lib/stripe-account";
 import { BUYER_COOKIE, BUYER_COOKIE_SECONDS, newBuyerKey } from "@/lib/learn";
 import { canWrite } from "@/lib/mail";
 import { outOfKeys } from "@/lib/licence-keys";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { readListings, readProduct } from "@/lib/catalog";
 import { bundleReady, chosenItems, deliverableItems, picks } from "@/lib/bundle-rules";
 import { cameFrom } from "@/lib/came-from";
@@ -152,7 +152,10 @@ export async function POST(request: NextRequest) {
   // a limited unit for half an hour, so one connection gets twenty in ten
   // minutes per store: far past any buyer, and short of a script holding
   // every unit to keep real buyers out.
-  if (!(await withinLimit("checkout", `${clientAddress(request)}|${store.handle}`, 20, 600))) {
+  const room = await withinLimit("checkout", `${clientAddress(request)}|${store.handle}`, 20, 600).catch(unknownLimit);
+  // A count that could not be read is never "a lot of tries" (rule 24): the payment page did not open.
+  if (room === "unknown") return away(`/@${store.handle}?status=error`);
+  if (!room) {
     return away(`/@${store.handle}?status=slow`);
   }
 

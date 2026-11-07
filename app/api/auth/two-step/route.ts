@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { SESSION_COOKIE, SessionsUnknownError, dropSecondStep, emailForSession, isFreshSession, sessionMark } from "@/lib/auth";
 import { isRedisConfigured } from "@/lib/redis";
 import { canSeal } from "@/lib/secret-box";
-import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { cancelReset, finishSetup, lockedUntil, replaceCodes, startSetup, turnOff } from "@/lib/two-step";
 import { liveSecondStep, mayAddNow, mayAddSecondStep } from "@/lib/second-step-gate";
 import { LockBusyError } from "@/lib/redis-lock";
@@ -53,7 +53,10 @@ export async function POST(request: NextRequest) {
   } catch {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   }
-  if (!(await withinLimit("two-step-change", email, CHANGES_PER_HOUR, 60 * 60))) {
+  const room = await withinLimit("two-step-change", email, CHANGES_PER_HOUR, 60 * 60).catch(unknownLimit);
+  // A count that could not be read is never "too many changes" (rule 24).
+  if (room === "unknown") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  if (!room) {
     return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
   }
   const code = typeof body.code === "string" ? body.code.slice(0, 40) : "";

@@ -3,7 +3,7 @@ import { canHearResend, forwardInbound, inboundSigned, isInboundConfigured } fro
 import { HEALTH_ID, LIST_TAG, STORE_TAG, heardFromSender, mailReportCampaign } from "@/lib/mail-health";
 import { MAIL_REPORT_TAG, type MailReportEvent, noteMailReportEvent } from "@/lib/mail-report";
 import { redisPipeline } from "@/lib/redis";
-import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 
 /** An announcement names a message; it does not carry it. Anything bigger is not one. */
 const MAX_BODY_BYTES = 256_000;
@@ -43,7 +43,10 @@ function tagOf(tags: unknown, name: string): string {
  */
 export async function POST(request: NextRequest) {
   if (!canHearResend()) return new Response("Not found.", { status: 404 });
-  if (!(await withinLimit("mail-inbound", clientAddress(request), PER_MINUTE, 60))) {
+  const room = await withinLimit("mail-inbound", clientAddress(request), PER_MINUTE, 60).catch(unknownLimit);
+  // A count that could not be read is unknown (rule 24): 503, so the notice is sent again, never "too many".
+  if (room === "unknown") return Response.json({ ok: false }, { status: 503 });
+  if (!room) {
     return Response.json({ ok: false }, { status: 429 });
   }
   let body: string;

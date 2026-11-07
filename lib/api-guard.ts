@@ -15,7 +15,7 @@
 import { type AgentScope, type PauseWhy, keyFromHeader, resolveKey } from "@/lib/api-keys";
 import { agentMay } from "@/lib/api-key-rules";
 import { storeForId, type Store } from "@/lib/store";
-import { BodyTooLarge, limited, withinLimit } from "@/lib/request-guard";
+import { BodyTooLarge, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { giveAllowance, takeAllowance } from "@/lib/store-allowance";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { API_READ_PAUSED_WORDS, API_WRITE_PAUSED_WORDS, integrationPauseWord } from "@/lib/integration-pause";
@@ -144,7 +144,10 @@ async function apiKeyed(
   // Paused by the team's two-step rule (owner C3-100, lib/api-key-pause.ts):
   // the key is real and kept, so its holder is told why and what to do.
   if (found.paused) return apiError(403, "key_paused", KEY_PAUSED_WORDS[found.why ?? "rule"]);
-  if (!(await withinLimit("api", found.id, API_RATE, 60))) {
+  const room = await withinLimit("api", found.id, API_RATE, 60).catch(unknownLimit);
+  // A count that could not be read is never "rate limited" (rule 24).
+  if (room === "unknown") return apiError(503, "unavailable", "The request could not be counted just now. Try again in a minute.", { "Retry-After": "60" });
+  if (!room) {
     return apiError(429, "rate_limited", `At most ${API_RATE} requests a minute per key. Try again in a minute.`, { "Retry-After": "60" });
   }
   const store = await storeForId(found.sid);

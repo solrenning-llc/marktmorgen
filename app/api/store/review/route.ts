@@ -3,7 +3,7 @@ import { type NextRequest, after } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { refreshStoreQuotes } from "@/lib/store-quotes";
 import { ensureStatsId, normaliseHandle, setReviewed, storeForHandle, storeRef } from "@/lib/store";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { type Door, doorFields, openDoor, readDoor } from "@/lib/review-proof";
 import { MAX_REVIEW_PHOTO_BYTES, deleteReview, markOneRefunded, readRating, readReview, reviewId, saveReview, setReviewPhoto } from "@/lib/reviews";
 import { dropReviewPhoto, keepReviewPhoto } from "@/lib/review-photo";
@@ -66,13 +66,17 @@ export async function POST(request: NextRequest) {
   // A field no person can see: whatever filled it in is told it worked.
   if (read("website").trim()) return answer("saved");
 
-  if (!(await withinStore("review", `${clientAddress(request)}|${store.handle}`, IP_LIMIT, 3600, store))) return answer("slow");
+  const counted = await withinStore("review", `${clientAddress(request)}|${store.handle}`, IP_LIMIT, 3600, store).catch(unknownLimit);
+  if (counted === "unknown") return answer("error");
+  if (!counted) return answer("slow");
 
   const opened = await openDoor(store, door);
   if (opened.state !== "ok") return answer(opened.state === "error" ? "error" : opened.state);
   const proof = opened.proof;
   if (!proof.products.some((p) => p.id === productId)) return answer("no");
-  if (!(await withinLimit("review-order", proof.reference, ORDER_LIMIT, 3600))) return answer("slow");
+  const room = await withinLimit("review-order", proof.reference, ORDER_LIMIT, 3600).catch(unknownLimit);
+  if (room === "unknown") return answer("error");
+  if (!room) return answer("slow");
 
   if (!store.statsId) {
     // By the key the store is kept under: an account's other stores are not

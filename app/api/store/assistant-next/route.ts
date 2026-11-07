@@ -1,7 +1,7 @@
 import { withinStore } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 import { dismissNextOffer } from "@/lib/next-offer";
 
 const MAX_BODY_BYTES = 600;
@@ -28,7 +28,9 @@ export async function POST(request: NextRequest) {
   if (!handle) return answer(false, 400);
   const store = await storeForHandle(handle).catch(() => null);
   if (!store) return answer(false, 404);
-  if (!(await withinStore("assist-next-dismiss", `${clientAddress(request)}|${store.handle}`, 20, 600, store, "buyer"))) return answer(false, 429);
+  const room = await withinStore("assist-next-dismiss", `${clientAddress(request)}|${store.handle}`, 20, 600, store, "buyer").catch(unknownLimit);
+  if (room === "unknown") return answer(false, 503);
+  if (!room) return answer(false, 429);
   const done = await dismissNextOffer(store, body.s).catch(() => false);
   return answer(done, done ? 200 : 404);
 }

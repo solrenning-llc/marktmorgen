@@ -4,7 +4,7 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readListings, readProduct } from "@/lib/catalog";
 import { MIN_BUNDLE_ITEMS, deliverableItems } from "@/lib/bundle-rules";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { isSoon } from "@/lib/waitlist";
 import { countHit } from "@/lib/visit";
 import { openOrder, paypalReady } from "@/lib/paypal-sales";
@@ -45,7 +45,9 @@ export async function POST(request: NextRequest) {
   if (!store) return new Response("No such store.", { status: 404 });
   const product = await readProduct(store, productId);
   if (!product) return away(`/@${store.handle}`);
-  if (!(await withinLimit("checkout", `${clientAddress(request)}|${store.handle}`, 20, 600))) return away(`/@${store.handle}?status=slow`);
+  const room = await withinLimit("checkout", `${clientAddress(request)}|${store.handle}`, 20, 600).catch(unknownLimit);
+  if (room === "unknown") return away(`/@${store.handle}?status=error`);
+  if (!room) return away(`/@${store.handle}?status=slow`);
   if (!paypalReady(store, product)) return away(`/@${store.handle}/p/${product.id}`);
   if (await isSoon(store, product.id).catch(() => false)) return away(`/@${store.handle}/p/${product.id}#waitlist`);
   if (product.bundle && deliverableItems(product, await readListings(store, product.bundle)).length < MIN_BUNDLE_ITEMS) {

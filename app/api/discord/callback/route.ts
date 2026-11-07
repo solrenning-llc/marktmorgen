@@ -8,7 +8,7 @@ import { forgetServer, readServer, saveServer, takeTrip } from "@/lib/discord-st
 import { storeKey } from "@/lib/learn";
 import { logTeam } from "@/lib/team";
 import { PERMISSION_WORDS } from "@/lib/team-roles";
-import { clientAddress, withinLimit } from "@/lib/request-guard";
+import { clientAddress, withinLimit, unknownLimit, limitUnknownResponse } from "@/lib/request-guard";
 import { originFrom } from "@/lib/request-origin";
 import { storeForId } from "@/lib/store";
 import { away, resolveAccess, studioPath } from "@/lib/studio-route";
@@ -25,7 +25,9 @@ const CODE = /^[A-Za-z0-9._~-]{1,512}$/;
 export async function GET(request: NextRequest) {
   if (!isDiscordConfigured()) return new Response("Not found.", { status: 404 });
   const origin = originFrom(request);
-  if (!(await withinLimit("discord-return", clientAddress(request), 30, 600))) return away(origin, "/");
+  const counted = await withinLimit("discord-return", clientAddress(request), 30, 600).catch(unknownLimit);
+  if (counted === "unknown") return limitUnknownResponse();
+  if (!counted) return away(origin, "/");
   const params = request.nextUrl.searchParams;
   const trip = await takeTrip(params.get("state") ?? "");
   if (!trip) return away(origin, "/?discord=expired");

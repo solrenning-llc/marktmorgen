@@ -7,7 +7,7 @@ import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { findLesson, isOpen, readCourse } from "@/lib/course";
 import { courseAccess, emailKey, storeKey } from "@/lib/learn";
 import { heldBack, passedQuizzes } from "@/lib/quiz";
-import { limited, withinLimit } from "@/lib/request-guard";
+import { limited, withinLimit, unknownLimit, limitUnknownResponse } from "@/lib/request-guard";
 import { readCourseListing } from "@/lib/catalog";
 import { addComment, commentsOn, deleteComment, readComment, setHidden } from "@/lib/lesson-comments";
 import { COMMENTS_PER_DAY, COMMENTS_PER_MINUTE, COMMENT_ID_PATTERN, CREATOR_AUTHOR } from "@/lib/lesson-comments-rules";
@@ -85,9 +85,11 @@ export async function POST(request: NextRequest) {
   const who = `${storeKey(store)}:${by}`;
   if (!owner) {
     const [minute, day] = await Promise.all([
-      withinLimit("lesson-comment", who, COMMENTS_PER_MINUTE, 60),
-      withinLimit("lesson-comment-day", who, COMMENTS_PER_DAY, 86_400),
+      withinLimit("lesson-comment", who, COMMENTS_PER_MINUTE, 60).catch(unknownLimit),
+      withinLimit("lesson-comment-day", who, COMMENTS_PER_DAY, 86_400).catch(unknownLimit),
     ]);
+    // A count that could not be read is never "a lot of comments" (rule 24): nothing was posted.
+    if (minute === "unknown" || day === "unknown") return limitUnknownResponse();
     if (!minute || !day) return back("slow");
   }
   const parent = field("parent", 20);

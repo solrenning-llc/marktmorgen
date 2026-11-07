@@ -18,7 +18,7 @@
 import { after } from "next/server";
 import { cookies, headers } from "next/headers";
 import { type Store } from "@/lib/store";
-import { clientAddress, withinLimit } from "@/lib/request-guard";
+import { clientAddress, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { isResting, recordVisit } from "@/lib/traffic";
 import { isStorePeople } from "@/lib/visit";
 import { isBot } from "@/lib/source-rules";
@@ -38,7 +38,7 @@ export type ScriptOpen = {
   /** Whether the card may show its buy button and the form its box; false shows the plain link. */
   live: boolean;
   /** Why not, for the page to say nothing more than it must. */
-  reason: "" | "site" | "resting" | "limited";
+  reason: "" | "site" | "resting" | "limited" | "unknown";
 };
 
 /** Whether a Referer is a page of this site (or of the host this request was sent to). */
@@ -80,7 +80,10 @@ export async function readScriptOpen(store: Store, mode: ScriptMode, query: Reco
   });
   // A frame on a site the creator did not list shows the plain link and asks nothing more.
   if (mode === "overlay" && !site) return { ...base, live: false, reason: "site" };
-  if (!(await withinLimit("embed-open", `${ip}|${store.handle}`, OPENS_PER_TEN_MINUTES, 600))) return { ...base, live: false, reason: "limited" };
+  const room = await withinLimit("embed-open", `${ip}|${store.handle}`, OPENS_PER_TEN_MINUTES, 600).catch(unknownLimit);
+  // A count that could not be read (rule 24) shows the plain link as well, said as unknown, never as limited.
+  if (room === "unknown") return { ...base, live: false, reason: "unknown" };
+  if (!room) return { ...base, live: false, reason: "limited" };
   if (await isResting(store).catch(() => true)) return { ...base, live: false, reason: "resting" };
   return { ...base, live: true, reason: "" };
 }

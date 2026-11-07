@@ -28,6 +28,7 @@
  * Nothing here needs Node's own modules, so the proxy can use it as it is.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 type HeaderSource = { headers: Headers };
 
@@ -125,8 +126,11 @@ async function sha256Hex(value: string): Promise<string> {
  * address is kept in the clear. When Redis cannot be asked (it throws) the
  * answer is yes: these limits keep abuse down, and a buyer must never be
  * kept from paying because a counter was out of reach. A reply that did come
- * back in another shape is an unknown count and the answer is no (SG2 17,
- * Claude 1's decision of 05/11/2026). Work that spends money uses
+ * back in another shape is an unknown count (SG2 17, Claude 1's decision of
+ * 05/11/2026): never room and never past the limit, so withinLimit throws
+ * UnknownReplyError and its caller says it could not check just now, never
+ * "too many" (rule 24; follow-up of #2971). A caller that answers it in its
+ * own words reads it with `.catch(unknownLimit)`. Work that spends money uses
  * withinEssentialLimit, which says no on both.
  */
 /** Essential authenticated actions need a confirmed finite allowance before
@@ -185,8 +189,38 @@ export async function withinLimit(scope: string, who: string, limit: number, win
     return true;
   }
   // A reply that came back in another shape, or that cannot even be looked at, is an unknown count, never room
-  // (SG2 17, Claude 1, 05/11/2026; Codex Q on #2670: reading it is outside the catch above).
-  return countWithin(reply, limit);
+  // and never past the limit (SG2 17, Claude 1, 05/11/2026; Codex Q on #2670: reading it is outside the catch above).
+  let count: number | null;
+  try {
+    count = counterReply(reply);
+  } catch {
+    count = null;
+  }
+  if (count === null) throw new UnknownReplyError(`the ${scope} limit's count`);
+  return count <= limit;
+}
+
+/**
+ * withinLimit's (or withinStore's) answer with an unknown count said as
+ * "unknown", for a caller that answers it in its own words: a 503, or its
+ * form's "try again" notice, never its "too many" one. Anything else thrown
+ * is thrown on.
+ */
+export function unknownLimit(error: unknown): "unknown" {
+  if (error instanceof UnknownReplyError) return "unknown";
+  throw error;
+}
+
+/**
+ * The answer of a form or a provider's call whose limit's count could not be
+ * read, where the page it came from has no notice of its own for it: 503,
+ * said plainly and never as "too many", so a person or a sender tries again.
+ */
+export function limitUnknownResponse(): Response {
+  return new Response("This could not be checked just now. Nothing was changed. Try again in a moment.", {
+    status: 503,
+    headers: { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "60", "Cache-Control": "no-store" },
+  });
 }
 
 /** Whether a returned SET NX + INCR reply holds a count within `limit`; no for any other shape or a reply that throws when read. */

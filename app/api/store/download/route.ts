@@ -12,6 +12,7 @@ import { originFrom } from "@/lib/request-origin";
 import type { ProductFile } from "@/lib/product-file";
 import { BUMP_KEYS } from "@/lib/bundle-rules";
 import { ordersWords } from "@/lib/buyer-words/orders";
+import { unknownLimit } from "@/lib/request-guard";
 
 /**
  * Hands the buyer the file they paid for.
@@ -104,7 +105,15 @@ export async function GET(request: NextRequest) {
       status: 429,
       headers: { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "600", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" },
     });
-  if (!(await withinStore("download", `${store.handle}:${link}`, OPENS_PER_HOUR, 3600, store, "buyer"))) return tooOften();
+  const room = await withinStore("download", `${store.handle}:${link}`, OPENS_PER_HOUR, 3600, store, "buyer").catch(unknownLimit);
+  // A count that could not be read is never "too often" (rule 24): "We could not check this order right now".
+  if (room === "unknown") {
+    return new Response(say.error, {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "60", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" },
+    });
+  }
+  if (!room) return tooOften();
   if (token) {
     // Only the purchase asked for is read, by its reference, paid for before each read (lib/buyer-orders.ts, findPurchase):
     // a store with no room left for it is answered as too often, and nothing more is asked of Stripe.

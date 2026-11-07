@@ -1,7 +1,7 @@
 import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
 import { forgetMetaUser, isMetaConfigured, signedUser } from "@/lib/meta-ads";
-import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, limited, withinLimit, unknownLimit, limitUnknownResponse } from "@/lib/request-guard";
 import { SITE_URL } from "@/lib/site-url";
 
 /**
@@ -16,7 +16,9 @@ import { SITE_URL } from "@/lib/site-url";
  */
 export async function POST(request: NextRequest) {
   if (!isMetaConfigured()) return new Response("Not found.", { status: 404 });
-  if (!(await withinLimit("metaads-deauth", clientAddress(request), 60, 600))) return new Response("Too many requests.", { status: 429 });
+  const room = await withinLimit("metaads-deauth", clientAddress(request), 60, 600).catch(unknownLimit);
+  if (room === "unknown") return limitUnknownResponse();
+  if (!room) return new Response("Too many requests.", { status: 429 });
   let raw: unknown = null;
   try {
     const form = await (await limited(request, 8_192)).formData();

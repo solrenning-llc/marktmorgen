@@ -2,7 +2,7 @@ import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
 import { ACCOUNT_NAMES, forgetUser } from "@/lib/meet-connect";
 import { isConfigured, zoomClientId, zoomSigned, zoomValidation } from "@/lib/meet-providers";
-import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 
 /** Zoom's notices are small; anything bigger is not one. */
@@ -33,7 +33,10 @@ const PER_MINUTE = 120;
  */
 export async function POST(request: NextRequest) {
   if (!isConfigured("zoom")) return new Response("Not found.", { status: 404 });
-  if (!(await withinLimit("zoom-notice", clientAddress(request), PER_MINUTE, 60))) {
+  const room = await withinLimit("zoom-notice", clientAddress(request), PER_MINUTE, 60).catch(unknownLimit);
+  // A count that could not be read is unknown (rule 24): 503, so the notice is sent again, never "too many".
+  if (room === "unknown") return Response.json({ ok: false }, { status: 503 });
+  if (!room) {
     return Response.json({ ok: false }, { status: 429 });
   }
   let body: string;

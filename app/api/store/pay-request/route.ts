@@ -2,7 +2,7 @@ import { after, type NextRequest } from "next/server";
 import { withinStore } from "@/lib/metered-limits";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 import { noteCheckoutTrouble } from "@/lib/checkout-trouble";
 import { openRequestCheckout } from "@/lib/payment-requests";
 import { ID_PATTERN } from "@/lib/payment-request-rules";
@@ -36,7 +36,9 @@ export async function POST(request: NextRequest) {
     new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}/pay/${id}${problem ? `?notice=${problem}` : ""}`, "Cache-Control": "no-store" } });
 
   // Twenty a connection in ten minutes per store: far past any buyer, short of a script trying cards.
-  if (!(await withinStore("pay-request", `${clientAddress(request)}|${store.handle}`, 20, 600, store, "buyer"))) return back("limited");
+  const room = await withinStore("pay-request", `${clientAddress(request)}|${store.handle}`, 20, 600, store, "buyer").catch(unknownLimit);
+  if (room === "unknown") return back("error");
+  if (!room) return back("limited");
   const opened = await openRequestCheckout(store, id, linkOrigin(request, store));
   if (opened.ok) return new Response(null, { status: 303, headers: { Location: opened.url, "Cache-Control": "no-store" } });
   if (opened.reason === "error") {

@@ -13,7 +13,7 @@ import { countHit } from "@/lib/visit";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
 import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { readProduct } from "@/lib/catalog";
 import { chargeNow } from "@/lib/call-deposit";
 import { type DepositFigures, depositWithCode, readDepositCode } from "@/lib/deposit-code";
@@ -120,7 +120,9 @@ export async function POST(request: NextRequest) {
   // Each try holds a time for half an hour while Stripe's page is open, so
   // one connection gets fifteen in ten minutes per store: enough to change
   // one's mind many times, not enough to hold a creator's whole week.
-  if (!(await withinLimit("book", `${clientAddress(request)}|${store.handle}`, 15, 600))) return back("slow");
+  const room = await withinLimit("book", `${clientAddress(request)}|${store.handle}`, 15, 600).catch(unknownLimit);
+  if (room === "unknown") return back("error");
+  if (!room) return back("slow");
 
   // A buyer who went back from Stripe's page to pick again lets go of the
   // time they were holding, after that checkout is closed at Stripe.

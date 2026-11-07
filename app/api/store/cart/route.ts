@@ -26,7 +26,7 @@ import { adsCheckout } from "@/lib/ad-events";
 import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
 import { countHit } from "@/lib/visit";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { productSegment } from "@/lib/product-slug";
 import { noteCheckoutTrouble } from "@/lib/checkout-trouble";
 import { assistReminderShown, keepAssistReminder } from "@/lib/assistant-reminder";
@@ -56,7 +56,10 @@ export async function GET(request: NextRequest) {
   const ids = readCartIds((params.get("ids") ?? "").split(","));
   const store = handle ? await storeForHandle(handle) : null;
   if (!store) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
-  if (!(await withinStore("cart-read", `${clientAddress(request)}|${store.handle}`, 120, 600, store))) {
+  const room = await withinStore("cart-read", `${clientAddress(request)}|${store.handle}`, 120, 600, store).catch(unknownLimit);
+  // A count that could not be read is never "slow" (rule 24).
+  if (room === "unknown") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  if (!room) {
     return Response.json({ ok: false, error: "slow" }, { status: 429 });
   }
   const country = readCountry(request.headers.get("x-vercel-ip-country"));
@@ -287,7 +290,9 @@ export async function POST(request: NextRequest) {
   if (!handle || ids.length === 0) return new Response("Bad request", { status: 400 });
   const store = await storeForHandle(handle);
   if (!store) return new Response("No such store.", { status: 404 });
-  if (!(await withinLimit("checkout", `${clientAddress(request)}|${store.handle}`, 20, 600))) return away(`/@${store.handle}?status=slow`);
+  const room = await withinLimit("checkout", `${clientAddress(request)}|${store.handle}`, 20, 600).catch(unknownLimit);
+  if (room === "unknown") return away(`/@${store.handle}?status=error`);
+  if (!room) return away(`/@${store.handle}?status=slow`);
   if (!canSell(store)) return away(`/@${store.handle}`);
 
   const products = (await Promise.all(ids.map((id) => readProduct(store, id).catch(() => null)))).filter((p) => p !== null);

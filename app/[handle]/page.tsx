@@ -79,6 +79,7 @@ import { readAllTimeSales } from "@/lib/stats";
 import { isResting } from "@/lib/traffic";
 import { StoreResting } from "@/components/store-resting";
 import { NewTab } from "@/components/new-tab";
+import { unknownLimit } from "@/lib/request-guard";
 
 /** What a try at "Support my work" may come back with (app/api/store/tip). */
 const TIP_PROBLEMS = new Set(["amount", "limited", "closed", "error"]);
@@ -216,9 +217,9 @@ export default async function StorePage({ params, searchParams }: Params) {
   const searchable = visibleCount(store) > STORE_PAGE_SIZE;
   const searchAllowed =
     wantedSearch !== "" && searchable && searchWords(wantedSearch).length > 0
-      ? await withinStore("store-search", `${(await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"}|${store.handle}`, 30, 600, store)
+      ? await withinStore("store-search", `${(await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"}|${store.handle}`, 30, 600, store).catch(unknownLimit)
       : false;
-  const searching = searchAllowed ? wantedSearch : "";
+  const searching = searchAllowed === true ? wantedSearch : "";
   const results = searching ? await searchStore(store, searching) : null;
   // A search that found nothing is counted, by its words only (lib/stats.ts, countSearchMiss).
   if (results && results.total === 0 && store.statsId && !isBot((await headers()).get("user-agent") ?? "")) {
@@ -416,7 +417,9 @@ export default async function StorePage({ params, searchParams }: Params) {
                           {bw.searchButton}
                         </button>
                       </div>
-                      {wantedSearch && !searchAllowed && searchWords(wantedSearch).length > 0 ? (
+                      {wantedSearch && searchAllowed === "unknown" ? (
+                        <p className="st-note mt-3 text-sm" role="status">{bw.searchUnread}</p>
+                      ) : wantedSearch && !searchAllowed && searchWords(wantedSearch).length > 0 ? (
                         <p className="st-note mt-3 text-sm" role="status">{bw.searchSlow}</p>
                       ) : null}
                       {results ? (

@@ -78,7 +78,7 @@ is("control, address read as none: said, and the turn-on asks for one", [onKnown
 
 part("nor anywhere else on the page");
 const recoveryStep = /\.\.\.\(([^\n]*)\n\s*\? \[\{ key: "recovery"/.exec(page)?.[1] ?? "";
-is("'Keep a way back in' is listed only when its check mark is known: the address read, or a passkey", recoveryStep, 'role === "owner" && (recoveryRead !== null || passkeys.length > 0)');
+is("'Keep a way back in' is listed only when its check mark is known: a way back that was read, or both read as none", recoveryStep, 'role === "owner" && (Boolean(recoveryRead) || passkeys.length > 0 || (recoveryRead !== null && passkeysRead !== null))');
 is("the app's code is offered only when two-step login was read", /\{store && twoStepRead !== null && showAppCodeInvite\(/.test(page), true);
 
 part("with no email, they still read as off and none");

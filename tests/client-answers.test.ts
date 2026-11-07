@@ -200,18 +200,40 @@ async function communityPush() {
     is("and once both are done it is off, with no error", [state().subscribed, !!button(toggle.tree(), t.turnOn), alerts(toggle.tree())], [false, true, []]);
   }
 
-  for (const [label, browser] of [
-    ["unsubscribe() resolves false", async () => false],
-    ["unsubscribe() rejects", async (): Promise<boolean> => { throw new Error("AbortError"); }],
+  // Once the server answered { ok: true } it has forgotten the device, and
+  // pushes go only to the devices it keeps, so nothing reaches this browser
+  // any more: the switch is off, with the server's count, and no error. The
+  // browser's subscription is dropped quietly, with one more try if the first
+  // did not take (review 6698746219 on #2983).
+  for (const [label, browser, droppedAtLast] of [
+    ["unsubscribe() resolves false, then true", [async () => false, async () => true], true],
+    ["unsubscribe() rejects, then true", [async (): Promise<boolean> => { throw new Error("AbortError"); }, async () => true], true],
+    ["unsubscribe() resolves false twice", [async () => false, async () => false], false],
+    ["unsubscribe() rejects twice", [async (): Promise<boolean> => { throw new Error("AbortError"); }], false],
   ] as const) {
-    part(`Notifications off, browser kept the subscription: ${label}`);
-    const { toggle, pressOff, state } = await pushToggle([serverOff], [browser, async () => true]);
+    part(`Notifications off, the server forgot the device but the browser kept the subscription: ${label}`);
+    const { toggle, sent, pressOff, state } = await pushToggle([serverOff], [...browser]);
     await pressOff();
-    is("browser still subscribed", state().subscribed, true);
-    is("told plainly they could not be turned off, as an alert", alerts(toggle.tree()), [t.offFailed]);
-    is("still shown as on, with Turn off to try again", [!!button(toggle.tree(), t.turnOff), !!button(toggle.tree(), t.turnOn)], [true, false]);
+    is("off sent once", sent.map((s) => s.action), ["off"]);
+    is("the browser is asked once more, quietly", [state().unsubscribeCalls, state().subscribed], [2, !droppedAtLast]);
+    is("shown as off, with Turn notifications on", [texts(toggle.tree()).includes(t.onHere), !!button(toggle.tree(), t.turnOff), !!button(toggle.tree(), t.turnOn)], [false, false, true]);
+    is("never told they could not be turned off", alerts(toggle.tree()), []);
+  }
+
+  part("Notifications off, the server forgot the device: the count is the server's");
+  {
+    const { toggle, pressOff } = await pushToggle([json({ ok: true, devices: 2 }, 200)], [async () => false]);
     await pressOff();
-    is("trying again turns it off, with no error", [state().subscribed, !!button(toggle.tree(), t.turnOn), alerts(toggle.tree())], [false, true, []]);
+    (globalThis as Record<string, unknown>).Notification = { permission: "granted", requestPermission: async () => "granted" };
+    (globalThis.navigator as unknown as { serviceWorker: Record<string, unknown> }).serviceWorker.register = async () => ({
+      pushManager: { getSubscription: async () => null, subscribe: async () => ({ endpoint: "https://push.example.test/again", toJSON: () => ({}), unsubscribe: async () => true }) },
+    });
+    (globalThis.navigator as unknown as { serviceWorker: Record<string, unknown> }).serviceWorker.ready = Promise.resolve();
+    // A reply to "on" without a count: the page adds this device to the count it holds.
+    globalThis.fetch = (async () => new Response(JSON.stringify({ ok: true }), { status: 200 })) as typeof fetch;
+    await click(button(toggle.tree(), t.turnOn));
+    await toggle.settle();
+    is("turned on again, the count starts from the server's 2, not the old 1", texts(toggle.tree()).includes(t.onMany.replace("{n}", "3")), true);
   }
 
   part("Notifications off, the browser's registration cannot be read");

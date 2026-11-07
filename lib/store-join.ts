@@ -17,7 +17,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { DataRoomError } from "@/lib/store-data";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { isPaidUp } from "@/lib/billing";
 import { type AddResult, upsertContact } from "@/lib/contacts";
 import type { Store } from "@/lib/store";
@@ -77,7 +77,7 @@ export async function askToJoin(input: { store: Store; email: string; clicks?: b
   if (!(input.fromForm ? listOpen(store) : joinOpen(store)) || !store.statsId) return "closed";
   const email = normaliseEmail(raw);
   if (!(await withinStore("join-ip", `${store.statsId}:${ip}`, 10, 3_600, store))) return "limited";
-  if (!(await withinLimit("join-address", sha(email), 5, 3_600))) return "limited";
+  if (!(await withinEssentialLimit("join-address", sha(email), 5, 3_600))) return "limited";
 
   const token = randomBytes(24).toString("hex");
   const grant: Grant = { s: store.statsId, h: store.handle, e: email, at: new Date().toISOString(), ...(input.clicks ? { k: true } : {}), ...(input.formId && /^[a-z0-9]{10}$/.test(input.formId) ? { f: input.formId, ...(input.formOutcome && /^[a-z0-9]{6}$/.test(input.formOutcome) ? { r: input.formOutcome } : {}) } : {}), ...(input.site && /^https:\/\/[^/\s]{1,300}$/.test(input.site) ? { w: input.site } : {}), ...(input.lead && /^[0-9a-f]{12}$/.test(input.lead) ? { a: input.lead } : {}) };

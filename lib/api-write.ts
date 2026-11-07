@@ -36,7 +36,7 @@ import { reserveMoved } from "@/lib/imports";
 import { storeBase } from "@/lib/purchase-email";
 import { accessWords } from "@/lib/buyer-words/access";
 import { redisPipeline } from "@/lib/redis";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit, withinLimit } from "@/lib/request-guard";
 import { takeAllowance } from "@/lib/store-allowance";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { API_WRITE_UNITS } from "@/lib/store-allowance-rules";
@@ -209,7 +209,7 @@ export async function giveAccess(
   const already = (await importedFor({ ...store, statsId, pastBuyers: true }, email)).some((p) => p.productId === product.id);
   if (already) return { ok: true, value: { email, product: product.id, status: "already", emailed: false } };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return fail("unavailable");
-  if (!(await withinLimit("api-give", store.sid, GIVES_PER_DAY, 86_400))) return fail("daily_limit");
+  if (!(await withinEssentialLimit("api-give", store.sid, GIVES_PER_DAY, 86_400))) return fail("unavailable");
   const taken = await takeAllowance(store, "api", API_WRITE_UNITS - 1);
   if (!taken.ok) return refusedFigure(taken);
   const [isNew] = await grantImported(statsId, `api:${keyId}`, [{ email, productId: product.id, items }], undefined, store.sid, store);

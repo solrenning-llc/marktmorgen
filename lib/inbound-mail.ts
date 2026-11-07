@@ -55,7 +55,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NIMBUS_FROM, RESEND_BASE, headerText, oneAddress, sendEmail } from "@/lib/email";
 import { creatorDomain } from "@/lib/mail-from";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { HANDLE_PATTERN, storeForHandle } from "@/lib/store";
 import { RESEND_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { SITE_URL } from "@/lib/site-url";
@@ -282,7 +282,7 @@ export async function forwardInbound(id: string): Promise<"sent" | "skipped" | "
     }
     const email = found ? oneAddress(found.email) : null;
     if (!found || !email) return "skipped";
-    if (!(await withinLimit("creator-inbound", handle, CREATOR_HOURLY, 3_600))) return "skipped";
+    if (!(await withinEssentialLimit("creator-inbound", handle, CREATOR_HOURLY, 3_600))) return "skipped";
     creator = { name: headerText(found.name, 60).replace(/["\\<>]/g, "") || handle, email, address: `${handle}@${creators}` };
     store = found;
   }

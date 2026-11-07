@@ -21,7 +21,7 @@
 import { countNotice, countStep } from "@/lib/transparency";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { type Store, noteTakedown, removeStoreLink, setKit, setProductHidden, storeForHandle, storeRef } from "@/lib/store";
@@ -44,7 +44,7 @@ export type FileResult = "sent" | "limited" | "error";
 /** Keeps a notice and sends it to the support inbox with the link that acts on it. */
 export async function fileReport(input: ReportInput, ip: string, origin: string): Promise<FileResult> {
   if (!isRedisConfigured() || !isSenderConfigured()) return "error";
-  if (!(await withinLimit("report", ip, 5, 3_600))) return "limited";
+  if (!(await withinEssentialLimit("report", ip, 5, 3_600))) return "error";
   const id = randomBytes(8).toString("hex");
   const token = randomBytes(24).toString("hex");
   const report: Report = { ...input, id, at: new Date().toISOString(), handle: handleIn(input.url) };

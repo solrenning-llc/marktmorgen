@@ -32,7 +32,7 @@ import { isHouseStore } from "@/lib/house-store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { DataRoomError, monthOf, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit, withinLimit } from "@/lib/request-guard";
 import { SITE_URL } from "@/lib/site-url";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { chatWords } from "@/lib/buyer-words/chat";
@@ -178,7 +178,7 @@ async function open(input: NewInput): Promise<{ ok: true; conversation: Kept; me
   if (!email) return { ok: false, reason: "email" };
   const text = messageText(input.text);
   if (text.length < MIN_MESSAGE) return { ok: false, reason: "short" };
-  if (!(await withinLimit("inbox-new", statsId, NEW_PER_DAY, 86_400))) return { ok: false, reason: "limited" };
+  if (!(await withinEssentialLimit("inbox-new", statsId, NEW_PER_DAY, 86_400))) return { ok: false, reason: "limited" };
   const now = input.now ?? Date.now();
   // One of the store's inbox messages for its window (lib/store-allowance-rules.ts), before it is written.
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "closed" };
@@ -316,7 +316,7 @@ export async function visitorSend(
 /** One email to whoever has the conversation (the owner when nobody does), at most every half hour for one conversation. */
 async function tellTeam(store: Store, conversation: Kept, text: string): Promise<void> {
   if (!isSenderConfigured() || !store.statsId) return;
-  if (!(await withinLimit("inbox-tell", `${store.statsId}:${conversation.id}`, 1, 1_800))) return;
+  if (!(await withinEssentialLimit("inbox-tell", `${store.statsId}:${conversation.id}`, 1, 1_800))) return;
   const to = conversation.assigned || store.email;
   const who = conversation.name || conversation.email;
   const sid = store.sid ? `store=${store.sid}&` : "";
@@ -382,7 +382,7 @@ export async function replyTo(store: Store, id: string, by: string, textRaw: unk
   if (text.length < MIN_MESSAGE) return { ok: false, reason: "short" };
   const conversation = await readKept(statsId, id);
   if (!conversation) return { ok: false, reason: "none" };
-  if (!(await withinLimit("inbox-reply", statsId, 400, 86_400))) return { ok: false, reason: "limited" };
+  if (!(await withinEssentialLimit("inbox-reply", statsId, 400, 86_400))) return { ok: false, reason: "limited" };
   const message: Message = { at: now, from: "store", text, by };
   const next = await write(store, statsId, store.handle, { ...conversation, lastAt: now, lastFrom: "store", unread: 0 }, message, true, now);
   const w = chatWords(store.language);
@@ -444,7 +444,7 @@ export async function writeToAffiliate(
   if (!email) return { ok: false, reason: "email" };
   const text = messageText(textRaw);
   if (text.length < MIN_MESSAGE) return { ok: false, reason: "short" };
-  if (!(await withinLimit("inbox-new", `${statsId}:affiliates`, AFFILIATE_MESSAGES_PER_DAY, 86_400))) return { ok: false, reason: "limited" };
+  if (!(await withinEssentialLimit("inbox-new", `${statsId}:affiliates`, AFFILIATE_MESSAGES_PER_DAY, 86_400))) return { ok: false, reason: "limited" };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "closed" };
   if (!(await takeAllowance(store, "inbox", 1, now)).ok) return { ok: false, reason: "limited" };
   const conversation: Kept = {

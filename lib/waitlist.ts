@@ -18,7 +18,7 @@ import { takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { fromLine, releaseDay, render, reserveDay } from "@/lib/mail";
 import { upsertContact } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
@@ -106,7 +106,7 @@ export async function joinWaitlist(input: {
   const email = normaliseEmail(raw);
   const sid = store.statsId;
   if (!(await withinStore("waitlist-ip", `${sid}:${ip}`, 10, 3_600, store))) return "limited";
-  if (!(await withinLimit("waitlist-address", sha(email), 5, 3_600))) return "limited";
+  if (!(await withinEssentialLimit("waitlist-address", sha(email), 5, 3_600))) return "limited";
 
   const [existing, size] = await redisPipeline([
     ["HGET", listKey(sid, product.id), email],

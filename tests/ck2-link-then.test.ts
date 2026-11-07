@@ -24,11 +24,17 @@
  *   - every write is a compare-and-swap of the whole record: a record changed
  *     since it was read is never written over, and an unknown reply is never
  *     taken for a write;
- *   - opening a link still reads one record, as before.
+ *   - opening a link still reads one record, as before;
+ *   - third pre-review: what the panel saw includes where its date goes; the
+ *     route reads its clock after the record; a refusal for a change keeps the
+ *     date form and what was typed unless the page chosen no longer fits; the
+ *     panel starts on the server's clock, says when "Goes to" cancels a date,
+ *     says a date that came while it was open, and keeps the focus.
  */
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
-import { CACHE_SECONDS, MAX_THEN_MS, MIN_THEN_MS, linkCache, readSeen, readThen, targetNow } from "@/lib/short-link-rules";
+import { CACHE_SECONDS, MAX_THEN_MS, MIN_THEN_MS, linkCache, readSeen, readThen, seenAt, targetNow } from "@/lib/short-link-rules";
+import * as rules from "@/lib/short-link-rules";
 import { addLink, findLink, linkKey, readLinks, retarget, setThen, swapLink } from "@/lib/short-links";
 import { GET } from "@/app/l/[code]/route";
 import { POST } from "@/app/api/store/short-links/route";
@@ -103,9 +109,26 @@ async function main(): Promise<void> {
     ],
   );
   is(
-    "what the panel saw, read: the date it showed (or none) and whether it had passed there",
-    [readSeen({ at: NOW, passed: true }), readSeen({ at: null, passed: false }), readSeen({ at: "x", passed: true }), readSeen({ at: NOW }), readSeen(undefined), readSeen({ at: 1.5, passed: false })],
-    [{ at: NOW, passed: true }, { at: null, passed: false }, null, null, null, null],
+    "what the panel saw, read: the date it showed (or none), whether it had passed there, and where it goes",
+    // Rule 23 (third pre-review of 510 [CK2]): what the panel saw now carries the page its date goes to (`to`);
+    // the first two were read without it and are now sent with it; the two new ones are refused for lacking it.
+    [
+      readSeen({ at: NOW, passed: true, to: { kind: "store" } }),
+      readSeen({ at: null, passed: false, to: null }),
+      readSeen({ at: "x", passed: true, to: null }),
+      readSeen({ at: NOW }),
+      readSeen(undefined),
+      readSeen({ at: 1.5, passed: false, to: null }),
+      readSeen({ at: NOW, passed: true }),
+      readSeen({ at: NOW, passed: false, to: null }),
+      readSeen({ at: null, passed: false, to: { kind: "store" } }),
+    ],
+    [{ at: NOW, passed: true, to: { kind: "store" } }, { at: null, passed: false, to: null }, null, null, null, null, null, null, null],
+  );
+  is(
+    "what a panel sees of a link includes where its date goes",
+    [seenAt(link, NOW), seenAt(link, NOW + 600_000), seenAt({ then: undefined }, NOW)],
+    [{ at: NOW + 600_000, passed: false, to: { kind: "store" } }, { at: NOW + 600_000, passed: true, to: { kind: "store" } }, { at: null, passed: false, to: null }],
   );
 
   part("Setting it, opening it, taking it back");
@@ -127,8 +150,10 @@ async function main(): Promise<void> {
   const lifetime = [...plain.cache.matchAll(/(?:s-maxage|stale-while-revalidate)=(\d+)/g)].reduce((sum, m) => sum + Number(m[1]) * 1000, 0);
   is("an answer kept before the date was set runs out before the soonest date one may set", [lifetime, keptAt + lifetime < keptAt + MIN_THEN_MS], [360_000, true]);
 
-  const none = { at: null, passed: false };
-  const saw = (at: number, passed: boolean) => ({ at, passed });
+  // Rule 23 (third pre-review): every view now names where its date goes, `to`; null with no date.
+  const none = { at: null, passed: false, to: null };
+  const toStore = { kind: "store" } as const;
+  const saw = (at: number, passed: boolean, to: { kind: "store" } | { kind: "product"; id: string } = toStore) => ({ at, passed, to });
   const now = Date.now();
   const set = await setThen(mine.statsId, code, { at: now + 3_600_000, target: { kind: "store" } }, guide, now, none);
   is("set: the list shows when and where to", thenOf(set), { at: now + 3_600_000, target: { kind: "store" } });
@@ -183,7 +208,7 @@ async function main(): Promise<void> {
   const again = past();
   const setAgain = await setThen(mine.statsId, code, { at: again + MIN_THEN_MS, target: { kind: "product", id: "guide" } }, guide, again, none);
   is("past its date again, it opens the product", [thenOf(setAgain), (await open(code)).to], [{ at: again + MIN_THEN_MS, target: { kind: "product", id: "guide" } }, product("guide")]);
-  const changedAfter = await retarget(mine.statsId, code, { kind: "product", id: "extra" }, () => true, Date.now(), saw(again + MIN_THEN_MS, true));
+  const changedAfter = await retarget(mine.statsId, code, { kind: "product", id: "extra" }, () => true, Date.now(), saw(again + MIN_THEN_MS, true, { kind: "product", id: "guide" }));
   is("after the date, \"Goes to\" changes the page it opens, and the date is spent", [targetOf(changedAfter), thenOf(changedAfter), (await open(code)).to], [{ kind: "product", id: "extra" }, "none", product("extra")]);
   await retarget(mine.statsId, code, { kind: "product", id: "guide" }, () => true, Date.now(), none);
 
@@ -217,7 +242,7 @@ async function main(): Promise<void> {
     return { status: response.status, body: (await response.json()) as { ok?: boolean; error?: string; now?: unknown; links?: { code: string; then?: unknown }[] } };
   };
   const when = Date.now() + 86_400_000;
-  const seenNone = { at: null, passed: false };
+  const seenNone = { at: null, passed: false, to: null };
   const soon = await post({ action: "then", code: fresh.link.code, then: { at: Date.now() + 120_000, target: { kind: "store" } }, seen: seenNone });
   is("a date two minutes away is refused as the date", [soon.status, soon.body.error], [400, "when"]);
   const saved = await post({ action: "then", code: fresh.link.code, then: { at: when, target: { kind: "store" } }, seen: seenNone });
@@ -229,6 +254,77 @@ async function main(): Promise<void> {
   await setThen(mine.statsId, fresh.link.code, { at: when, target: { kind: "product", id: "guide" } }, guide, Date.now(), seenNone);
   const stale = await post({ action: "target", code: fresh.link.code, target: { kind: "store" }, seen: seenNone });
   is("a change from a panel that did not see the date: 409 changed, with the links and the server's clock", [stale.status, stale.body.error, stale.body.links?.find((l) => l.code === fresh.link.code)?.then, typeof stale.body.now], [409, "changed", { at: when, target: { kind: "product", id: "guide" } }, "number"]);
+
+  part("Third pre-review: the date's page, seen; the route's clock");
+  const dated = await addLink(mine, { name: "June drop", place: "instagram", target: { kind: "store" } }, guide, 7000);
+  if (!dated.ok) throw new Error("no third link");
+  const at3 = Date.now() + 86_400_000;
+  await setThen(mine.statsId, dated.link.code, { at: at3, target: { kind: "product", id: "guide" } }, guide, Date.now(), none);
+  const record3 = async () => String((await redisPipeline([["GET", linkKey(dated.link.code)]]))[0]);
+  const kept3 = await record3();
+  const otherPage = await setThen(mine.statsId, dated.link.code, null, guide, Date.now(), { at: at3, passed: false, to: { kind: "store" } });
+  is("the same date going to another page than the panel showed: changed, nothing written", [otherPage.ok ? "ok" : otherPage.reason, await record3()], ["changed", kept3]);
+  const otherPage2 = await retarget(mine.statsId, dated.link.code, { kind: "product", id: "guide" }, guide, Date.now(), { at: at3, passed: false, to: { kind: "product", id: "other" } });
+  is("\"Goes to\" on the same date with another page shown: changed", otherPage2.ok ? "ok" : otherPage2.reason, "changed");
+  const samePage = await setThen(mine.statsId, dated.link.code, null, guide, Date.now(), { at: at3, passed: false, to: { kind: "product", id: "guide" } });
+  is("the date and its page as the panel showed them: taken back", samePage.ok ? samePage.links.find((l) => l.code === dated.link.code)?.then ?? "none" : samePage.reason, "none");
+
+  // The record is read, then the date comes while the store is read: the page is chosen on the clock after both.
+  const due = Date.now() + 3_600_000;
+  await setThen(mine.statsId, dated.link.code, { at: due, target: { kind: "product", id: "guide" } }, guide, Date.now(), none);
+  const realNow = Date.now;
+  const realPipe = redis.pipeline;
+  let clockAt = due - 1;
+  Date.now = () => clockAt;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const reply = await realPipe(commands);
+    if (String(commands[0]?.[0]) === "GET" && String(commands[0]?.[1]) === linkKey(dated.link.code)) clockAt = due + 1;
+    return reply;
+  }) as typeof redis.pipeline;
+  let late: Response | undefined;
+  try {
+    late = await GET(new Request(`https://marktmorgen.com/l/${dated.link.code}`) as never, { params: Promise.resolve({ code: dated.link.code }) });
+  } finally {
+    Date.now = realNow;
+    redis.pipeline = realPipe;
+  }
+  is(
+    "the route reads its clock after the record and the store: the date that came meanwhile is honored",
+    [late?.headers.get("location"), late?.headers.get("cache-control")],
+    ["https://marktmorgen.com/@harbor/p/guide?utm_source=instagram&utm_medium=post&utm_campaign=june-drop", STANDARD],
+  );
+
+  part("Third pre-review: the panel's rules");
+  const r = rules as unknown as Record<string, ((...args: unknown[]) => unknown) | undefined>;
+  const day = 86_400_000;
+  const plainLink = { code: "abcdef", name: "june-drop", place: "instagram", target: { kind: "store" }, made: 1 };
+  const fits = (fresh: unknown, chosen: unknown, at: number) => (r.dateFormFits ? r.dateFormFits(fresh, chosen, at) : "missing");
+  is(
+    "after a refusal for a change, the date form stays while the page chosen still fits",
+    [
+      fits(plainLink, { kind: "product", id: "guide" }, NOW),
+      fits({ ...plainLink, target: { kind: "product", id: "guide" } }, { kind: "product", id: "guide" }, NOW),
+      fits({ ...plainLink, then: { at: NOW + day, target: { kind: "product", id: "guide" } } }, { kind: "product", id: "extra" }, NOW),
+      fits({ ...plainLink, then: { at: NOW - day, target: { kind: "product", id: "guide" } } }, { kind: "product", id: "guide" }, NOW),
+      fits({ ...plainLink, then: { at: NOW - day, target: { kind: "product", id: "guide" } } }, { kind: "store" }, NOW),
+      fits(undefined, { kind: "store" }, NOW),
+    ],
+    // Fits; the link now opens the page chosen; a date of its own is set (no form then); past its date it opens the page chosen; past its date, another page fits; the link is gone.
+    [true, false, false, false, true, false],
+  );
+  const coming = { ...plainLink, then: { at: NOW + 1000, target: { kind: "product", id: "guide" } } };
+  const reached = (list: unknown, from: number, to: number) => (r.datesReached ? (r.datesReached(list, from, to) as { code: string }[]).map((l) => l.code) : "missing");
+  is(
+    "the dates a panel's clock passed between two moments: said when they come",
+    [reached([coming, plainLink], NOW, NOW + 999), reached([coming, plainLink], NOW, NOW + 1000), reached([coming], NOW + 1000, NOW + 2000)],
+    [[], ["abcdef"], []],
+  );
+  const canceled = (before: unknown, after: unknown, at: number) => (r.dateCanceledBy ? r.dateCanceledBy(before, after, at) : "missing");
+  is(
+    "\"Goes to\" the page of a coming date cancels it, and the panel can tell",
+    [canceled(coming, { ...plainLink, target: { kind: "product", id: "guide" } }, NOW), canceled(coming, coming, NOW), canceled(plainLink, plainLink, NOW), canceled(coming, undefined, NOW)],
+    [true, false, false, false],
+  );
 
   part("Words and wiring");
   const panel = readFileSync("components/short-links.tsx", "utf8");
@@ -251,6 +347,17 @@ async function main(): Promise<void> {
   is("an alert is not read twice: a focused message carries no role=alert", /role="alert"/.test(panel), false);
   is("a field's mark clears when it changes", /setProblemOn\(""\)/.test(panel), true);
   is("the panel explains each refusal", ["same", "when", "changed", "gone"].map((reason) => new RegExp(`\\b${reason}: "`).test(panel)), [true, true, true, true]);
+  is(
+    "third pre-review: a refusal for a date keeps the form and what was typed, closing it only when the page chosen no longer fits",
+    [/if \(refused === "changed"\) \{\s*\/\/[^\n]*\n\s*setDating\(""\)/.test(panel), /dateFormFits\(/.test(panel)],
+    [false, true],
+  );
+  is("third pre-review: a refusal that brings no links does not say they are shown", [/answer\.error === "changed" && !answer\.links/.test(panel), /\bstale: "[^"]*Reload the page/.test(panel)], [true, true]);
+  is("third pre-review: \"Goes to\" says when it cancels a date", [/dateCanceledBy\(/.test(panel), /change you set for a date is canceled/i.test(panel)], [true, true]);
+  is("third pre-review: a date that comes while the panel is open is said in a live region, the focus kept", [/aria-live="polite"/.test(panel), /datesReached\(/.test(panel), /document\.activeElement/.test(panel)], [true, true, true]);
+  is("third pre-review: any saved change clears a refusal beside a link", /if \(answer\.ok && answer\.links\) \{[^}]*setRowProblem\(null\)/.test(panel), true);
+  const studio = readFileSync("app/studio/page.tsx", "utf8");
+  is("third pre-review: the panel starts on the server's clock", [/<ShortLinks\s+now=\{todayNow\(\)\}/.test(studio), /now: serverStart/.test(panel)], [true, true]);
   const route = readFileSync("app/l/[code]/route.ts", "utf8");
   is("the route reads the time once and keeps the CDN inside the date", [/targetNow\(/.test(route), /linkCache\(/.test(route), /never keeps it past the date/.test(route)], [true, true, false]);
 

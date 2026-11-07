@@ -37,10 +37,11 @@ import {
   studentsCsv,
   type StudentLine,
 } from "@/lib/student-bulk-rules";
-import { accessStates, applyAccess, readAccessAsk, studentList } from "@/lib/student-bulk";
+import { accessStates, applyAccess, readAccessAsk, reviewAccess, studentList } from "@/lib/student-bulk";
 import { emailKey, markLesson, setBlocked, studentsOf, touchStudent } from "@/lib/learn";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { leadsKey, upsertContact } from "@/lib/contacts";
+import { allowanceUsed } from "@/lib/store-allowance";
 import { redisPipeline } from "@/lib/redis";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setMailSettings, setProductCourse, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -80,7 +81,11 @@ async function main(): Promise<void> {
   );
   is("no label filter: nobody is left out for labels", filterStudents(lines, 5, { progress: "any", access: "any", label: "" }).labelsUnknown, 0);
   is("the undo is the opposite change", [oppositeAccess("revoke"), oppositeAccess("grant")], ["grant", "revoke"]);
-  is("studio requests taken before the work, by how much there is", [accessUnits(1), accessUnits(10), accessUnits(11), accessUnits(MAX_STUDENT_ACTION), listUnits(0), listUnits(100), labelUnits(100)], [1, 1, 2, 50, 0, 5, 4]);
+  is(
+    "studio requests taken before the work, by how much there is: a change's writes (two commands a person) and its read-back, twenty commands to a request",
+    [accessUnits(1), accessUnits(10), accessUnits(11), accessUnits(100), accessUnits(MAX_STUDENT_ACTION), listUnits(0), listUnits(100), labelUnits(100)],
+    [1, 2, 2, 11, 51, 0, 5, 4],
+  );
   is("one page of students is a bounded read", STUDENTS_PER_PAGE, 100);
   is(
     "who is asked, read safely: each address once, in lower case; nothing else",
@@ -108,6 +113,18 @@ async function main(): Promise<void> {
     "a change that did not land says so",
     accessSummary({ asked: 1, changed: [], already: [], notStudent: [], unread: [], unknown: [], failed: ["a@x.co"] }, "grant").words,
     "Nothing was changed. 1 was left out: 1 student's access did not change, because something went wrong; try again.",
+  );
+  // Codex J, review 5808577854 on #3035 (LOW): a write that could not be read back may have landed.
+  const unconfirmedOnly = accessSummary({ asked: 1, changed: [], already: [], notStudent: [], unread: [], unknown: ["a@x.co"], failed: [] }, "revoke");
+  is(
+    "a change that could not be confirmed is never said as nothing changed, in full or in the short live line",
+    [unconfirmedOnly.words.startsWith("Nothing was changed."), unconfirmedOnly.short.startsWith("Nothing was changed."), unconfirmedOnly.words.includes("it may or may not be removed")],
+    [false, false, true],
+  );
+  is(
+    "nor when some of it did not land either",
+    accessSummary({ asked: 2, changed: [], already: [], notStudent: [], unread: [], unknown: ["a@x.co"], failed: ["b@x.co"] }, "grant").short.startsWith("Nothing was changed."),
+    false,
   );
   const csv = studentsCsv([line("ana@example.com", 5, false, ["VIP"]), line("cy@example.com", 0, true, null)], "=SUM(1,2)", 5);
   is("the file: a header, one line a student, every cell quoted and never a formula", csv.split("\r\n"), [
@@ -250,6 +267,93 @@ async function main(): Promise<void> {
   is("taken before writing, by how many it changes", [paid.kind, paidUnits], ["done", accessUnits(2)]);
   await setBlocked(store, course.id, "ana@example.com", false);
   await setBlocked(store, course.id, "ben@example.com", false);
+
+  part("Every access read and write is paid for before it happens (Codex P, review 5808427711 on #3035)");
+  // A studio request is priced at twenty commands (tests/plan-cost-registry.ts, UNIT_COST.studio).
+  const STUDIO_COMMANDS = 20;
+  const studentsKeyOf = `nl:course:${course.id}:students`;
+  const metered = (answer: boolean | ((paidSoFar: number) => boolean) = true) => {
+    const log = { events: [] as string[], commands: 0, paid: 0, uncovered: [] as string[] };
+    redis.pipeline = async (commands: (string | number)[][]) => {
+      log.commands += commands.length;
+      const kinds = commands.map((c) => String(c[0])).join("+");
+      log.events.push(kinds);
+      if (log.commands > STUDIO_COMMANDS * log.paid) log.uncovered.push(`${kinds} at ${log.commands} commands with ${log.paid} requests taken`);
+      return pipeline(commands);
+    };
+    const pay = async (units: number): Promise<{ ok: true } | { ok: false; reason: string; message: string }> => {
+      if (!(typeof answer === "function" ? answer(log.paid) : answer)) return { ok: false, reason: "used", message: `No room for ${units}.` };
+      log.paid += units;
+      log.events.push(`pay ${units}`);
+      return { ok: true };
+    };
+    return { log, pay };
+  };
+  const reads = (events: string[]) => events.filter((e) => e.includes("HMGET") || e.includes("SMISMEMBER"));
+
+  const two = metered();
+  const twoDone = await applyAccess(store, course.id, { change: "revoke", emails: ["ana@example.com", "ben@example.com"], expect: 2 }, two.pay);
+  redis.pipeline = pipeline;
+  is("a change: paid for before its first read, and every command it sends is covered", [twoDone.kind, two.log.events[0]?.startsWith("pay "), two.log.uncovered], ["done", true, []]);
+  await setBlocked(store, course.id, "ana@example.com", false);
+  await setBlocked(store, course.id, "ben@example.com", false);
+
+  const hundred = Array.from({ length: 100 }, (_, i) => `s${String(i).padStart(3, "0")}@example.com`);
+  for (const email of hundred) await touchStudent(course.id, email, now, ROOM);
+  const big = metered();
+  const bigDone = await applyAccess(store, course.id, { change: "revoke", emails: hundred, expect: 100 }, big.pay);
+  redis.pipeline = pipeline;
+  is(
+    "a hundred people: the reads, the writes and the read-back are all inside the requests taken first",
+    [bigDone.kind, bigDone.kind === "done" ? bigDone.done.changed.length : -1, big.log.uncovered, big.log.commands <= STUDIO_COMMANDS * big.log.paid],
+    ["done", 100, [], true],
+  );
+  await applyAccess(store, course.id, { change: "grant", emails: hundred, expect: 100 }, async () => ({ ok: true }));
+
+  const noRead = metered(false);
+  const noReadDone = await applyAccess(store, course.id, { change: "revoke", emails: ["ana@example.com", "ben@example.com"], expect: 2 }, noRead.pay);
+  redis.pipeline = pipeline;
+  is("studio requests refused before the read: nothing is read and nothing written", [noReadDone.kind, reads(noRead.log.events), await blocked()], ["refused", [], ["dee@example.com"]]);
+  const noWrite = metered((paidSoFar) => paidSoFar === 0);
+  const noWriteDone = await applyAccess(store, course.id, { change: "revoke", emails: ["ana@example.com", "ben@example.com"], expect: 2 }, noWrite.pay);
+  redis.pipeline = pipeline;
+  is("refused after the read: nothing is written", [noWriteDone.kind, noWrite.log.uncovered, await blocked()], ["refused", [], ["dee@example.com"]]);
+  await setBlocked(store, course.id, "ana@example.com", false);
+  await setBlocked(store, course.id, "ben@example.com", false);
+
+  const ask = { change: "revoke" as const, emails: ["ana@example.com", "ben@example.com", "zed@example.com"], expect: null };
+  const look = metered();
+  const looked = await reviewAccess(course.id, ask, look.pay);
+  redis.pipeline = pipeline;
+  is(
+    "a review: paid for before it reads, every command covered, and it says what it would do",
+    [look.log.events[0]?.startsWith("pay "), look.log.uncovered, looked],
+    [true, [], { kind: "review", review: { changes: 2, already: 0, notStudent: 1, unread: 0 } }],
+  );
+  const noLook = metered(false);
+  const notLooked = await reviewAccess(course.id, ask, noLook.pay);
+  redis.pipeline = pipeline;
+  is("a review refused its studio requests reads nothing", [(notLooked as { kind?: string }).kind, reads(noLook.log.events)], ["refused", []]);
+
+  // Through the route: past the one request every studio write takes for its session, store and role
+  // (lib/studio-route.ts, studioAccess), the access read's own request is taken before it, on review and on apply.
+  const takenBeforeRead = async (body: Record<string, unknown>) => {
+    const before = await allowanceUsed(store, "studio");
+    let atRead = -1;
+    redis.pipeline = async (commands: (string | number)[][]) => {
+      if (atRead < 0 && commands.some((c) => c[0] === "HMGET" && c[1] === studentsKeyOf)) {
+        redis.pipeline = pipeline;
+        atRead = (await allowanceUsed(store, "studio")) - before;
+      }
+      return pipeline(commands);
+    };
+    const answer = await post(body);
+    redis.pipeline = pipeline;
+    return [answer.status, atRead];
+  };
+  is("the route's review takes its studio requests before it reads", await takenBeforeRead({ action: "review", id, change: "revoke", emails: ["ana@example.com"] }), [200, 2]);
+  is("the route's change takes its studio requests before it reads", await takenBeforeRead({ action: "apply", id, change: "revoke", emails: ["ana@example.com"], expect: 1 }), [200, 2]);
+  await setBlocked(store, course.id, "ana@example.com", false);
 
   part("The screen");
   const html = renderToStaticMarkup(

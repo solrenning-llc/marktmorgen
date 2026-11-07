@@ -46,7 +46,7 @@ export const fr: BuyerWords = {
 
   fairHead: (country, percent) => `Prix juste pour votre pays (${country})${S}: -${percent}${S}%`,
   fairNote: (store, plan) =>
-    `${store} baisse ses prix là où l'argent a moins de valeur. La remise s'applique sur la page de paiement, sans code${plan ? `${S}; le prix réduit concerne le paiement en une fois` : ""}.`,
+    `${store} baisse ses prix là où l'argent a moins de valeur. Ce prix a été fixé automatiquement pour vous, d'après le pays de votre connexion internet. La remise s'applique sur la page de paiement, sans code${plan ? `${S}; le prix réduit concerne le paiement en une fois` : ""}.`,
   saleHead: (name, percent, ends) => `${name ? `${name}${S}: ` : ""}-${percent}${S}% · ${ends}`,
   saleNote: (until, plan) =>
     `Jusqu'au ${until}. La remise s'applique sur la page de paiement, sans code${plan ? `${S}; le prix soldé concerne le paiement en une fois` : ""}.`,

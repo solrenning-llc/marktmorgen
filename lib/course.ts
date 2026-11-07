@@ -21,6 +21,7 @@ import { type ProductFile, parseProductFile } from "@/lib/product-file";
 import { type QuizSetup, parseSetup as parseQuizSetup } from "@/lib/quiz";
 import { type TaskSetup, parseTaskSetup } from "@/lib/assignment-rules";
 import { randomLetters } from "@/lib/random-letters";
+import { UnknownReply, exactReplies } from "@/lib/redis-exact";
 
 export const MAX_MODULES = 30;
 export const MAX_LESSONS = 200;
@@ -528,6 +529,21 @@ export async function readCourse(id: string): Promise<Course | null> {
   if (!isRedisConfigured() || !COURSE_ID_PATTERN.test(id)) return null;
   const [raw] = await redisPipeline([["GET", courseKey(id)]]);
   return parseCourse(raw);
+}
+
+/**
+ * Reads one course while preserving the difference between confirmed absence
+ * and an incomplete or unreadable storage reply. Destructive callers use this
+ * before removing the only identity that lets a later request try again.
+ */
+export async function readCourseExact(id: string): Promise<Course | null> {
+  const what = "the course being removed";
+  if (!isRedisConfigured() || !COURSE_ID_PATTERN.test(id)) throw new UnknownReply(what);
+  const [raw] = exactReplies(await redisPipeline([["GET", courseKey(id)]]), 1, what);
+  if (raw === null) return null;
+  const course = parseCourse(raw);
+  if (!course || course.id !== id) throw new UnknownReply(what);
+  return course;
 }
 
 /** Several at once, for the pages that show every course of a store. */

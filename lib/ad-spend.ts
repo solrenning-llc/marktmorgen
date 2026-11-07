@@ -14,6 +14,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type AdSpend, MAX_SPEND_ENTRIES, readSpend } from "@/lib/ad-spend-rules";
 import { metaLines } from "@/lib/meta-ads";
 
@@ -21,44 +22,79 @@ const key = (statsId: string) => `nl:stats:${statsId}:spend`;
 const ID = /^[a-f0-9]{8}$/;
 const KEEP_SECONDS = 400 * 86_400;
 
-export function parseSpends(raw: unknown): AdSpend[] {
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+/**
+ * The typed entries of a hash's fields and values, whole or not at all (CX-123 rule 24; Codex Z on #2924): every
+ * field an id and every value an entry this code writes, or null (unknown), never the other entries as if they were
+ * all of it.
+ */
+export function parseSpends(raw: unknown): AdSpend[] | null {
+  if (!Array.isArray(raw) || raw.length % 2 !== 0) return null;
   const out: AdSpend[] = [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    if (!ID.test(flat[i])) continue;
+  for (let i = 0; i + 1 < raw.length; i += 2) {
+    const [field, text] = [raw[i], raw[i + 1]];
+    if (typeof field !== "string" || !ID.test(field) || typeof text !== "string") return null;
     let value: unknown;
     try {
-      value = JSON.parse(flat[i + 1]);
+      value = JSON.parse(text);
     } catch {
-      continue;
+      return null;
     }
-    if (!value || typeof value !== "object") continue;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     // Read back through the same rule it was written by, with no "now": a kept entry is never refused for its age.
     const v = value as Record<string, unknown>;
     const read = readSpend({ channel: v.channel, campaign: v.campaign, cents: v.cents, from: v.from, to: v.to }, Number.MAX_SAFE_INTEGER);
-    if (read.ok) out.push({ id: flat[i], ...read.spend });
+    if (!read.ok) return null;
+    out.push({ id: field, ...read.spend });
   }
   return out.sort((a, b) => a.from.localeCompare(b.from) || a.id.localeCompare(b.id)).slice(-MAX_SPEND_ENTRIES);
 }
 
-/** The typed lines only. */
+/** The typed lines only, read exactly (CX-123 rule 24): a hash reply, or a member of it, in another shape throws, never "no lines". */
 async function typedSpends(statsId: string): Promise<AdSpend[]> {
-  const [raw] = await redisPipeline([["HGETALL", key(statsId)]]);
-  return parseSpends(raw);
+  const spends = parseSpends(stringList(repliesFor(await redisPipeline([["HGETALL", key(statsId)]]), 1)?.[0]));
+  if (!spends) throw new UnknownReplyError("the ad spend typed");
+  return spends;
 }
 
-/** Every line: the typed ones, then those read from Meta while the store is connected. */
+/** What spend was read: every line known, or the typed ones with Meta's unread (`metaUnread`), never Meta's as 0. */
+export type SpendRead = { spends: AdSpend[]; metaUnread: boolean };
+
+/** What every page or answer says when Meta's lines could not be read: the figures that use spend are incomplete. */
+export const META_SPEND_UNREAD = "Ad spend from your Meta ad account could not be read just now, so the figures that use ad spend leave it out. Reload to try again.";
+
+/**
+ * Every line: the typed ones, then those read from Meta while the store is
+ * connected. Meta's lines that cannot be read just now leave `metaUnread` set
+ * and the typed lines alone, for the caller to say so; typed lines that
+ * cannot be read throw (UnknownReplyError).
+ */
+export async function readSpendLines(statsId: string | null): Promise<SpendRead> {
+  if (!statsId || !isRedisConfigured()) return { spends: [], metaUnread: false };
+  const [typed, meta] = await Promise.all([
+    typedSpends(statsId),
+    metaLines(statsId).catch((error: unknown) => {
+      console.error("reading Meta's ad spend lines failed", error);
+      return null;
+    }),
+  ]);
+  return meta ? { spends: [...typed, ...meta], metaUnread: false } : { spends: typed, metaUnread: true };
+}
+
+/**
+ * The lines alone, for callers that cannot yet say a part is missing
+ * (app/studio/page.tsx, app/api/cron/weekly/route.ts, both held by other
+ * work): Meta's unread lines are left out there. New callers use
+ * readSpendLines and say META_SPEND_UNREAD.
+ */
 export async function readSpends(statsId: string | null): Promise<AdSpend[]> {
-  if (!statsId || !isRedisConfigured()) return [];
-  const [typed, meta] = await Promise.all([typedSpends(statsId), metaLines(statsId).catch(() => [])]);
-  return [...typed, ...meta];
+  return (await readSpendLines(statsId)).spends;
 }
 
 export async function addSpend(
   statsId: string,
   input: { channel: unknown; campaign?: unknown; cents: unknown; from: unknown; to: unknown },
   now = Date.now(),
-): Promise<{ ok: true; spends: AdSpend[] } | { ok: false; reason: "channel" | "amount" | "days" | "unavailable" }> {
+): Promise<({ ok: true } & SpendRead) | { ok: false; reason: "channel" | "amount" | "days" | "unavailable" }> {
   const read = readSpend(input, now);
   if (!read.ok) return read;
   if (!isRedisConfigured()) return { ok: false, reason: "unavailable" };
@@ -75,10 +111,10 @@ export async function addSpend(
     const drop = (Array.isArray(all) ? (all as unknown[]).map(String) : []).filter((field) => !keep.has(field));
     if (drop.length) await redisPipeline([["HDEL", key(statsId), ...drop]]);
   }
-  return { ok: true, spends: await readSpends(statsId) };
+  return { ok: true, ...(await readSpendLines(statsId)) };
 }
 
-export async function removeSpend(statsId: string, id: unknown): Promise<AdSpend[]> {
+export async function removeSpend(statsId: string, id: unknown): Promise<SpendRead> {
   if (typeof id === "string" && ID.test(id) && isRedisConfigured()) await redisPipeline([["HDEL", key(statsId), id]]);
-  return readSpends(statsId);
+  return readSpendLines(statsId);
 }

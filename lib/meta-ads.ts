@@ -248,8 +248,17 @@ async function readConnection(statsId: string): Promise<Connection | null> {
  */
 export async function metaLines(statsId: string): Promise<AdSpend[]> {
   if (!isRedisConfigured()) return [];
-  const [conn, raw] = await redisPipeline([["EXISTS", connKey(statsId)], ["GET", linesKey(statsId)]]);
-  return Number(conn) ? parseLines(raw) : [];
+  // Read exactly (CX-123 rule 24): no lines only when the store is confirmed not connected or nothing was read yet;
+  // a reply in another shape throws, so the figures that use spend say it is unread instead of leaving it out as 0.
+  const replies = repliesFor(await redisPipeline([["EXISTS", connKey(statsId)], ["GET", linesKey(statsId)]]), 2);
+  const connected = replies ? countOf(replies[0]) : null;
+  if (!replies || connected === null || connected > 1) throw new UnknownReplyError("Meta's ad spend lines");
+  const raw = replies[1];
+  if (connected === 0 || raw === null) return [];
+  // Every member whole, or none read (Codex Z on #2924): one line in another shape is not the rest as all of it.
+  const lines = parseLines(raw);
+  if (!lines) throw new UnknownReplyError("Meta's ad spend lines");
+  return lines;
 }
 
 /** What the studio shows; null while the deployment has no Meta app, so nothing about it is shown. */
@@ -593,8 +602,12 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
     // range) would show a cost lower than Meta's, so the read is not taken.
     const said = rows.reduce((sum, row) => sum + minorUnits(row.spend, account.currency), 0);
     if (!Number.isSafeInteger(said) || said !== fresh.reduce((sum, line) => sum + line.cents, 0)) throw new MetaError("busy", "Meta's ad spend did not add up");
-    const [rawKept] = await redisPipeline([["GET", linesKey(statsId)]]);
-    const merged = mergeLines(parseLines(rawKept), fresh, window.from, window.to);
+    // The kept lines read exactly (Claude 6 on #2924): nil is none kept; any other shape, a member included, is not
+    // read, so the write below never replaces the older lines with the fresh window alone.
+    const keptReply = repliesFor(await redisPipeline([["GET", linesKey(statsId)]]), 1);
+    const kept = !keptReply ? null : keptReply[0] === null ? [] : parseLines(keptReply[0]);
+    if (!kept) throw new UnknownReplyError("the Meta ad spend lines kept");
+    const merged = mergeLines(kept, fresh, window.from, window.to);
     const still = await readConnection(statsId);
     if (!still || still.connectedAt !== c.connectedAt || still.account !== c.account) return "none";
     await redisPipeline([["SET", linesKey(statsId), JSON.stringify(merged), "EX", KEEP_SECONDS]]);

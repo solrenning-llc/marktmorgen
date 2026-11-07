@@ -1431,3 +1431,173 @@ Public data check: 4005 tracked files; 0 file(s) require correction.
 ```
 {"verified": 4005, "unmatched": [], "scanner_exit": 0}
 ```
+
+
+## Retomada 07/11/2026 16h08 Fortaleza — privacidade #3085
+
+CXM-20261107-1604-C1-1 **ab1e7ed1860a294a97b32c605ac1f753d59ea978/blob4f6af18693d0b35e69af82a518c4f0fb24a0d0d3 FULL4038559charsEXATO** entregue ANTESdiff/fonte/testes3085, retirouM3082semterceiraopinião(C6primeira/C4segunda preservadas),RES3085novopedidoC6-1603feitoANTESencerrarcomoCPanteriorcogitava. Nãoexecutar3084J,nãoreview3M3082,nãoabrirgrandeprodutoforaAV10. C1-1550tetosnãoaumentam/semcortevisívelLIDA;semgrantMparaC2/C4/C6custos. C3-1601#1924agora26068eae44greensRELATADOS,nãocertificadonovoheadM(último5de1parecer5813793096),decisãoA/Bskip/filadurávelC1pendente. #3051GidentityALTOpermanece;3077P/3078N/3080G/3083MherdadoscondicionaisC1classeantesfixconformeC6-1555/56. Produtosownold2388etc nãorecriar.
+
+### #3085 exato60c0b49ee43851cdc316dd03e16987615e6b65e0
+PedidoC6-1603,MclaimANTESsource,2filesautorais SOMENTELEITURA. Store-readingsf1643b1801c745d532922317826e058c97002932/test15c88612d6393c62f8cfebf4633b5e6aaac2097e04. Base1d7cbe8dda5d35d049c699def9919b89a6376ef5/readings0ae0dbd8a565d0b7cd0f53b13f832f7417a64acd. Cópia m-review-3085/view3977headGitblobmatch,nãofontealterada;grafos222(permanente)/465(erase70)/283(numbers23)todosinputsheadverificadossalvooldreadingsGitblobexato. Canonicaltestaliases/Redisfixture,bootstrapprecontaantesrealpipeline/Memorynested/mockfetch;teste15interceptafakerepliessemrealdispatch(nãoafirmar4commandscontamleiturasfakes). SAMEfinal15withSÓoldmoduleemgrafofinal=8FAIL→head15PASS. Ligados readings-erasure70PASS+studio-numbers-kept23PASS=>108atuaisPASS. GuardasANTES20kpipe+20kMemoryRedis.runinclnested/500mockHTTP/120s512MiB256KiBporfilho;nuncaexcedidas. Old/new15=4/4/0cada;70=2949/3300/69;23=73/78/0. Cópialocalpreparesession62386concluídaANTESbuild. Numbers23bundlefaltoutoast/sales-goal-cardANTESexecução:recuperadossó2headGitblobs,repetidoAPENASesteligadonãoexecutado,15e70nãorerun. ErrorsetupnãoREDproduto. Log70Blobcredentialsnãoexistem:clienteBlobrecusaANTESIO,fixturecatch/fallbackcleanupesperado/70exit0,nenhumachave/envprodsolicitada,nãocertificaprovendorrealsucesso.
+
+SourcehelperrepliesForsemcodeexecutado/reflexãoProxy(inutilhelperpinned),countOfnonnegativeSafeInteger,limiteDEL<=3;throwqualquerunknown/unexpectedshape/extra,valid0..3nãoaltera. Sourceperson-erasureERASERS187mapestore-readings,try/catch301–305adicionamodulefailed,e318–324retornaokfalse/incomplete;erro nãoéfinished0. 70executajornadashealthy/suppression/cache/controllership,masfalhanovocaso15testadodiretamenteemforgetReadingsPerson,nãoalegarHTTPpublicdoorrealnemnovainjeçãoerasePersoninteiro. NotDoneforgetStoreReadingsignoreDEL/desconhecido0seunconfigured/listSegments/filterevarredura17outrasC6 ficamseparados/nãofechadosglobalmente. Nenhumachadonestepequenodelta;semcertificarerasegeral/400diasreal.
+
+Tipos3raízes1041sourcesstrictES2017Bundler0diagnósticos,1024MiB120sorçadoANTESclaim. Lint3filesinclligado70exit0/scanneroficial3977tracked0/todos3977Gitblobsheadexatos. Whitespaceproductdiffsemoutput(code1porqueconteúdomuda). NãofullrepoCI/novegreens/LuaRedisreal/provedor/browser/UI/screenreader/MRglobal. SerialMédio0agentes. Próximopreflighthead/timeline(esperarcadência~19:09Z),formalCOMMENTscoped+canalrecibo+CPlastreceipt. Nenhumsource/refautor/CI/fila/mainmutado,nempushprodutoM. Retomadasrepetidasmesmarodadanãoduplicam. Continuidadeexistenteinalterada,nãoautomação nova/nãodesabilitarporholdtemporário.
+
+### run.mjs
+```
+import{readFileSync,writeFileSync,mkdirSync,existsSync,symlinkSync}from'node:fs';import{resolve,join}from'node:path';import{createRequire}from'node:module';import{createHash}from'node:crypto';import{spawnSync}from'node:child_process';import{testAliases,testEnvironment}from'./view/tests/test-config.mjs';
+const root=resolve('.'),view=join(root,'view'),deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules';const{build}=createRequire(join(deps,'package.json'))('esbuild');if(!existsSync(join(view,'node_modules')))symlinkSync(deps,join(view,'node_modules'),'dir');mkdirSync('logs',{recursive:true});
+const jobs=process.argv.slice(2);for(const job of jobs){const [mode,test]=job.split(':');
+ const bootstrap=`import{MemoryRedis}from'./lib/redis-memory';import{store as redis}from'./tests/redis-stub';let pc=0,rc=0,hc=0,exceeded=false;const stop=()=>{exceeded=true;throw Error('M_ADMISSION_CEILING')};const pipeline=redis.pipeline,run=MemoryRedis.prototype.run;redis.pipeline=function(c){if(pc+c.length>20000)return stop();pc+=c.length;return pipeline.call(this,c)};MemoryRedis.prototype.run=function(c){if(rc+1>20000)return stop();rc++;return run.call(this,c)};let current=()=>{throw Error('NO_EXTERNAL_NETWORK')};Object.defineProperty(globalThis,'fetch',{configurable:true,get:()=>current,set:f=>{current=(...a)=>{if(hc+1>500)return stop();hc++;return f(...a)}}});process.on('beforeExit',()=>{console.log('M_BUDGET',JSON.stringify({pipelineCommands:pc,memoryRun:rc,httpMockDispatch:hc,exceeded}));if(exceeded)process.exitCode=1});import('./tests/${test}');`;
+ const alias=testAliases(test,view,join(view,'tests'));if(mode==='before')alias['@/lib/store-readings']=join(root,'before-readings.ts');const b=await build({stdin:{contents:bootstrap,resolveDir:view,sourcefile:'m-bootstrap.ts',loader:'ts'},absWorkingDir:view,bundle:true,write:false,platform:'node',format:'cjs',alias,metafile:true,logLevel:'error'});const f=resolve('logs/'+mode+'-'+test+'.cjs');const pin=JSON.parse(readFileSync('head-pins.json','utf8'));let checked=0;for(const input of Object.keys(b.metafile.inputs)){if(input.includes('node_modules')||input==='m-bootstrap.ts')continue;const file=resolve(view,input);const bytes=readFileSync(file);const hash=createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');if(file===join(root,'before-readings.ts')){if(hash!=='0ae0dbd8a565d0b7cd0f53b13f832f7417a64acd')throw Error('Old rule mismatch');}else if(input!=='tests/m-3051-payout-values.proof.ts'&&hash!==pin[input])throw Error('Head pin mismatch '+input);checked++;}console.log(JSON.stringify({mode,test,checked}));writeFileSync(f,b.outputFiles[0].text);writeFileSync(f+'.meta.json',JSON.stringify(b.metafile));
+ const p=spawnSync(process.execPath,['--max-old-space-size=512',f],{cwd:view,env:testEnvironment({PATH:'/usr/bin:/bin',TZ:'UTC'}),encoding:'utf8',timeout:120000,maxBuffer:256*1024});const out=(p.stdout||'')+(p.stderr||'');writeFileSync(f+'.log',out);console.log(JSON.stringify({mode,test,exit:p.status,error:p.error?.message,signal:p.signal,tail:out.slice(-1700)}));if(p.error||p.signal)throw Error('Incomplete child');
+}
+
+```
+
+### verify.cjs
+```
+const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');const deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules',root=path.resolve('view'),ts=require(deps+'/typescript');
+const names=['lib/store-readings.ts','tests/store-readings-forget-exact.test.ts','tests/readings-erasure.test.ts'];const opts={strict:true,noEmit:true,allowJs:true,target:ts.ScriptTarget.ES2017,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler,skipLibCheck:true,esModuleInterop:true,resolveJsonModule:true,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'@/lib/content-jsx',baseUrl:root,paths:{'@/*':['*']},types:['node','react'],typeRoots:[deps+'/@types'],lib:['lib.esnext.d.ts','lib.dom.d.ts','lib.dom.iterable.d.ts']};
+const p=ts.createProgram(names.map(f=>path.join(root,f)),opts),ds=ts.getPreEmitDiagnostics(p);fs.writeFileSync('types.log',ts.formatDiagnosticsWithColorAndContext(ds,{getCurrentDirectory:()=>root,getCanonicalFileName:f=>f,getNewLine:()=>"\n"})+JSON.stringify({roots:names.length,sources:p.getSourceFiles().length,diagnostics:ds.length}));console.log('types',ds.length);
+const paths=names;const r=cp.spawnSync(process.execPath,['--max-old-space-size=512',deps+'/eslint/bin/eslint.js',...paths],{cwd:root,encoding:'utf8',timeout:120000,maxBuffer:256*1024});fs.writeFileSync('lint.log',(r.stdout||'')+(r.stderr||''));console.log('lint',r.status,r.signal,r.error?.message);
+
+```
+
+### run.log
+```
+{"mode":"before","test":"store-readings-forget-exact.test.ts","checked":222}
+{"mode":"before","test":"store-readings-forget-exact.test.ts","exit":1,"signal":null,"tail":"  FAIL  forgetReadingsPerson, null: never reported as a finished count\n        expected true\n        got      false\n  FAIL  forgetReadingsPerson, text: never reported as a finished count\n        expected true\n        got      false\n  FAIL  forgetReadingsPerson, fractional: never reported as a finished count\n        expected true\n        got      false\n  FAIL  forgetReadingsPerson, negative: never reported as a finished count\n        expected true\n        got      false\n  FAIL  forgetReadingsPerson, more than the three keys: never reported as a finished count\n        expected true\n        got      false\n  FAIL  forgetReadingsPerson, true: never reported as a finished count\n        expected true\n        got      false\n  FAIL  forgetReadingsPerson, empty reply: never reported as a finished count\n        expected true\n        got      false\n  FAIL  forgetReadingsPerson, second reply: never reported as a finished count\n        expected true\n        got      false\n  ok    forgetReadingsPerson, not a list: never reported as a finished count\n  ok    forgetReadingsPerson: 0 removed is 0\n  ok    forgetReadingsPerson: 1 removed is 1\n  ok    forgetReadingsPerson: 2 removed is 2\n  ok    forgetReadingsPerson: 3 removed is 3\n  ok    forgetReadingsPerson: the kept copies there go, counted\n  ok    forgetReadingsPerson: none left is none\n\n15 checks, 8 failing.\nM_BUDGET {\"pipelineCommands\":4,\"memoryRun\":4,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"store-readings-forget-exact.test.ts","checked":222}
+{"mode":"head","test":"store-readings-forget-exact.test.ts","exit":0,"signal":null,"tail":"  ok    forgetReadingsPerson, null: never reported as a finished count\n  ok    forgetReadingsPerson, text: never reported as a finished count\n  ok    forgetReadingsPerson, fractional: never reported as a finished count\n  ok    forgetReadingsPerson, negative: never reported as a finished count\n  ok    forgetReadingsPerson, more than the three keys: never reported as a finished count\n  ok    forgetReadingsPerson, true: never reported as a finished count\n  ok    forgetReadingsPerson, empty reply: never reported as a finished count\n  ok    forgetReadingsPerson, second reply: never reported as a finished count\n  ok    forgetReadingsPerson, not a list: never reported as a finished count\n  ok    forgetReadingsPerson: 0 removed is 0\n  ok    forgetReadingsPerson: 1 removed is 1\n  ok    forgetReadingsPerson: 2 removed is 2\n  ok    forgetReadingsPerson: 3 removed is 3\n  ok    forgetReadingsPerson: the kept copies there go, counted\n  ok    forgetReadingsPerson: none left is none\n\n15 checks, all passing.\nM_BUDGET {\"pipelineCommands\":4,\"memoryRun\":4,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"readings-erasure.test.ts","checked":465}
+{"mode":"head","test":"readings-erasure.test.ts","exit":0,"signal":null,"tail":"ng kept naming them, and nothing shown naming them\n  ok    the copy's step could not run: not \"gone\" (the address would answer 404), but nothing or the old copy\n  ok    its reply anything but 0, 1 or 2: the file made is not answered as kept\n  ok    the feed's read not whole: nothing answered, and the store not taken for gone (its copy stays)\n  ok    nor when it is not a list\n\nMembers: what an erased member wrote when leaving never comes back, from the cache or from Stripe (Codex E2 on 88888331d)\n  ok    control: the reading holds what they wrote, and the cache too\n  ok    the erasure takes the kept reading and the cache it is made from\n  ok    read again from Stripe, which keeps it: neither shown nor kept, nor cached\n  ok    control: what they wrote is read\n  ok    their words go by their customer's address; another member's stay\n  ok    the erasure ran between the look among the deleted people and the copies kept\n  ok    nothing kept or cached names their words, nor is shown\n\n70 checks, all passing.\nM_BUDGET {\"pipelineCommands\":2949,\"memoryRun\":3300,\"httpMockDispatch\":69,\"exceeded\":false}\ndeleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.\n    at resolveBlobAuth (/workspace/scratch/d1ece80b1417/m-review-3085/logs/head-readings-erasure.test.ts.cjs:43891:9)\n    at async requestApi (/workspace/scratch/d1ece80b1417/m-review-3085/logs/head-readings-erasure.test.ts.cjs:44060:16)\n    at async del (/workspace/scratch/d1ece80b1417/m-review-3085/logs/head-readings-erasure.test.ts.cjs:45239:3)\n"}
+✘ [ERROR] Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" (originally "@/components/toast")
+
+    components/stats-panel.tsx:31:22:
+      31 │ import { toast } from "@/components/toast";
+         ╵                       ~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/components/toast" was remapped to "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+✘ [ERROR] Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/sales-goal-card" (originally "@/components/sales-goal-card")
+
+    components/stats-panel.tsx:34:30:
+      34 │ import { SalesGoalCard } from "@/components/sales-goal-card";
+         ╵                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/components/sales-goal-card" was remapped to "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/sales-goal-card" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+✘ [ERROR] Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" (originally "@/components/toast")
+
+    components/weekly-team-picker.tsx:4:22:
+      4 │ import { toast } from "@/components/toast";
+        ╵                       ~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/components/toast" was remapped to "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+✘ [ERROR] Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" (originally "@/components/toast")
+
+    components/chat-summary-editor.tsx:4:22:
+      4 │ import { toast } from "@/components/toast";
+        ╵                       ~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/components/toast" was remapped to "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+✘ [ERROR] Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" (originally "@/components/toast")
+
+    components/no-count-toggle.tsx:4:22:
+      4 │ import { toast } from "@/components/toast";
+        ╵                       ~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/components/toast" was remapped to "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+✘ [ERROR] Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" (originally "@/components/toast")
+
+    components/weekly-ai-toggle.tsx:4:22:
+      4 │ import { toast } from "@/components/toast";
+        ╵                       ~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/components/toast" was remapped to "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+✘ [ERROR] Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" (originally "@/components/toast")
+
+    components/attribution-table.tsx:7:22:
+      7 │ import { toast } from "@/components/toast";
+        ╵                       ~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/components/toast" was remapped to "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+✘ [ERROR] Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" (originally "@/components/toast")
+
+    components/numbers-notes.tsx:4:22:
+      4 │ import { toast } from "@/components/toast";
+        ╵                       ~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/components/toast" was remapped to "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+✘ [ERROR] Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" (originally "@/components/toast")
+
+    components/ad-spend-editor.tsx:4:22:
+      4 │ import { toast } from "@/components/toast";
+        ╵                       ~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/components/toast" was remapped to "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1752
+  let error = new Error(text);
+              ^
+
+Error: Build failed with 9 errors:
+components/ad-spend-editor.tsx:4:22: ERROR: Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" (originally "@/components/toast")
+components/attribution-table.tsx:7:22: ERROR: Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" (originally "@/components/toast")
+components/chat-summary-editor.tsx:4:22: ERROR: Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" (originally "@/components/toast")
+components/no-count-toggle.tsx:4:22: ERROR: Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" (originally "@/components/toast")
+components/numbers-notes.tsx:4:22: ERROR: Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3085/view/components/toast" (originally "@/components/toast")
+...
+    at failureErrorWithLog (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1752:15)
+    at /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1211:25
+    at /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1163:52
+    at buildResponseToResult (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1209:7)
+    at /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1236:16
+    at responseCallbacks.<computed> (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:886:9)
+    at handleIncomingPacket (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:941:12)
+    at Socket.readFromStdout (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:864:7)
+    at Socket.emit (node:events:514:28)
+    at addChunk (node:internal/streams/readable:569:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+
+Node.js v24.22.1
+
+```
+
+### numbers-kept.log
+```
+{"mode":"head","test":"studio-numbers-kept.test.ts","checked":283}
+{"mode":"head","test":"studio-numbers-kept.test.ts","exit":0,"signal":null,"tail":"id as used, with when it comes back\n  ok    ReadingsUsed, not null or an error\n  ok    they come back at the next 00:00 UTC\n  ok    said in UTC and on the reader's clock\n  ok    a time on the reader's clock, or UTC before the page runs\n\nUpdate now only while the day has a reading left\n  ok    the day used: nothing left\n  ok    light ones left, the heavy ones used\n  ok    both left\n\nThe studio says it\n  ok    the panel's reading line: the time on the creator's clock, Update now or when they come back\n  ok    Update now reads again from the day's own budget, and is offered by what is left (heavy for a store that reads sales)\n  ok    a store whose sales are used and none kept is said so, not as an error\n\nThe rule, in words ready for the help (lib/help-content.ts is another agent's file today; inbox C4-33 (5))\n  ok    in plain words, with the figures\n\nA heavy reading that fails after calling Stripe is counted, and said so; one stopped before is given back (inbox C4-53)\n  ok    a failure after the call: the kept reading shown, marked failed\n  ok    and the day's heavy reading counted\n  ok    one stopped before calling anyone: given back, nothing below zero\n  ok    with no copy to show, the failure is said as one that was counted\n  ok    the creator reads it: failed, counted, and what is left today\n  ok    selling not configured: nothing called, the reading given back\n  ok    the studio's page passes the failure and what is left to the line\n  ok    the totals never say to reload, nor that a try was counted, which is not always so\n  ok    and with none left, 0 readings\n\n23 checks, all passing.\nM_BUDGET {\"pipelineCommands\":73,\"memoryRun\":78,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+
+```
+
+### types.log
+```
+{"roots":3,"sources":1041,"diagnostics":0}
+```
+
+### lint.log
+```
+
+```
+
+### scanner.log
+```
+Public data check: 3977 tracked files; 0 file(s) require correction.
+
+```
+
+### verified.json
+```
+{"verified": 3977, "unmatched": [], "scanner_exit": 0}
+```

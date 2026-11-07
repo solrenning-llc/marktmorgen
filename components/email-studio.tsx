@@ -2572,7 +2572,7 @@ function Flows({
                   ))}
                 </select>
                 <span className="mt-2 block text-sm text-ink-soft">
-                  Counts lessons marked done, by a button, a quiz passed or work approved. For example, at 75% you could offer a coaching call. Each student starts it once. For all of the lessons, choose &ldquo;finishes a course&rdquo;.
+                  Counts lessons marked done, by a button, a quiz passed or work approved. For example, at 75% you could offer a coaching call. Each student starts it once. If you turn it on later, students already past this share start it the next time they mark a lesson done, unless another workflow at this share already started for them. For all of the lessons, choose &ldquo;finishes a course&rdquo;. On a course with fewer than ten lessons, 90% is reached only with the last lesson, at the same time as &ldquo;finishes a course&rdquo;.
                 </span>
               </label>
             </>

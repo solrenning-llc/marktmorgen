@@ -16,9 +16,17 @@
  * Once per person per course per share: a hash of the shares a student
  * reached, one field each (HSETNX), kept 400 days like the finish mark, so a
  * lesson marked undone and done again starts nothing twice; and each workflow
- * starts once per person besides (lib/flows.ts, enroll's claim). Only the
- * shares a switched-on workflow of this course waits for are marked, so a
- * workflow added later still starts for whoever reaches its share after.
+ * starts once per person besides (lib/flows.ts, enroll's claim). A share's
+ * mark stays only when every workflow waiting for it took the student; when
+ * one did not (not on the list yet, the day's runs used up, no room, a read
+ * not known), the marks just taken are given back (HDEL), so the next lesson
+ * done tries again. Only the shares a switched-on workflow of this course
+ * waits for are marked, so a workflow switched on later starts, at their
+ * next lesson done, for whoever is already past its share and has no mark
+ * of it, that is, no other workflow at that share started for them (the
+ * studio says so). On a course of fewer than ten lessons, nine
+ * tenths is reached only with the last lesson, at the same moment as
+ * finishing it (lib/course-finish.ts).
  * Only for somebody on the list who agreed to hear from the creator
  * (lib/flows.ts, enroll): reaching a share never puts anybody on the list.
  * The emails go out through the sequence's own sending, each taken from the
@@ -91,8 +99,15 @@ export async function noteProgress(store: Store, productId: string, courseId: st
     // Every claim a 0 or a 1, and the mark kept for its time: otherwise nothing is known to be new.
     if (replies.slice(0, -1).some((r) => r !== 0 && r !== 1) || replies.at(-1) !== 1) throw new UnknownReply("a student's course share marks");
     const fresh = reached.filter((_, i) => replies[i] === 1);
-    if (fresh.length) await enroll(store, email, { joined: false, progress: { productId, percents: fresh } });
-    return { state: "checked", milestones: fresh };
+    if (!fresh.length) return { state: "checked", milestones: [] };
+    if (await enroll(store, email, { joined: false, progress: { productId, percents: fresh } })) return { state: "checked", milestones: fresh };
+    // The workflows did not all take the student now (not on the list yet, the day's runs used up, no room, a read not
+    // known): the shares' marks are given back, so a later lesson done tries again. Unknown is never "already started";
+    // each workflow still starts once per person, by its own claim (lib/flows.ts).
+    const what = "giving back a student's course share marks";
+    const [given] = exactReplies(await redisPipeline([["HDEL", key, ...fresh.map(String)]]), 1, what);
+    if (typeof given !== "number" || !Number.isSafeInteger(given) || given < 0 || given > fresh.length) throw new UnknownReply(what);
+    return { state: "checked", milestones: [] };
   } catch (error) {
     console.error("checking a course share's workflows failed", error);
     return { state: "not_checked", milestones: [] };

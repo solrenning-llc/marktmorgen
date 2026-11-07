@@ -506,11 +506,16 @@ export async function flowsStartedFor(flows: Flow[], email: string): Promise<str
 
 /**
  * Starts whichever sequences this event begins, for this person. Never
- * throws: the list must never cost anyone what they asked for.
+ * throws: the list must never cost anyone what they asked for. Says whether
+ * every sequence it begins now has this person in it, started now or
+ * before; false when none was found, one could not be started (not someone
+ * who may be written to, the day's runs used up, no room) or something was
+ * not known, so a once-mark taken before it is given back
+ * (lib/course-finish.ts, lib/course-progress-trigger.ts).
  */
-export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string; progress?: { productId: string; percents: readonly number[] } }): Promise<void> {
+export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string; progress?: { productId: string; percents: readonly number[] } }): Promise<boolean> {
   try {
-    if (!store.listId || monthlyAllowance(store) === 0) return;
+    if (!store.listId || monthlyAllowance(store) === 0) return false;
     // Whether what they just got is sold for money: the store's own index
     // knows, so "bought" costs no read.
     const paid = Boolean(event.productId) && idsOfKind(store, "paid").includes(event.productId as string);
@@ -532,14 +537,17 @@ export async function enroll(store: Store, email: string, event: { joined: boole
           (f.trigger === "progress" && event.progress && f.productId === event.progress.productId && typeof f.percent === "number" && event.progress.percents.includes(f.percent)) ||
           (f.trigger === "form" && event.form && f.formId === event.form && (!f.formOutcome || f.formOutcome === event.formOutcome))),
     );
-    if (!flows.length) return;
+    if (!flows.length) return false;
     const address = normaliseEmail(email);
     // Only someone who may be written to starts one; their one start is not
     // spent on a moment they could not have received it.
-    if (!(await isMailable(store.listId, address))) return;
-    await startFlows(store, flows, [address]);
+    if (!(await isMailable(store.listId, address))) return false;
+    let short = false;
+    await startFlows(store, flows, [address], () => { short = true; });
+    return !short;
   } catch (error) {
     console.error("starting a sequence failed", error);
+    return false;
   }
 }
 
@@ -547,9 +555,10 @@ export async function enroll(store: Store, email: string, event: { joined: boole
  * Starts these sequences for these people, each person once per sequence:
  * the start is claimed before anything is lined up, so a sequence that
  * starts another, or a label given twice, never starts anybody a second time.
- * Says how many starts were new.
+ * Says how many starts were new; `onShort` is told when somebody claimed
+ * was not started after all (the day's runs used up, no room).
  */
-async function startFlows(store: Store, flows: Flow[], addresses: string[]): Promise<number> {
+async function startFlows(store: Store, flows: Flow[], addresses: string[], onShort?: () => void): Promise<number> {
   if (!store.listId || !addresses.length) return 0;
   const now = Math.floor(Date.now() / 1000);
   let started = 0;
@@ -563,6 +572,7 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     const admitted = await admitRuns(store.listId, dailyRunLimit(store), claimed.length, now);
     const fresh = claimed.slice(0, admitted);
     const refused = claimed.slice(admitted);
+    if (refused.length) onShort?.();
     if (refused.length) await redisPipeline(refused.map((address) => ["DEL", enrolledKey(flow.id, address)])).catch(() => {});
     if (!fresh.length) continue;
     // Each run takes room in the store's data room before it starts, at the
@@ -570,6 +580,7 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     // it does not start, and its start and its place in the day go back.
     const room = await takeData(store, [{ until: runGoneBy(flow, now) * 1000, bytes: fresh.length * runBytes(flow) }]);
     if (!room.ok) {
+      onShort?.();
       await redisPipeline(fresh.map((address) => ["DEL", enrolledKey(flow.id, address)])).catch(() => {});
       await refuseRuns(store.listId, fresh.length, now);
       continue;

@@ -9,7 +9,10 @@
  * to hear from the creator; nobody else is written to.
  *
  * A student finishes once: a flag kept for 400 days says it happened, so a
- * lesson marked undone and done again does not start anything twice.
+ * lesson marked undone and done again does not start anything twice. The
+ * flag stays only when the workflows took the student; otherwise it is
+ * given back, so somebody who finished before agreeing to hear from the
+ * creator starts them at their next lesson done.
  *
  * Opening a course for the first time (added 17 October 2026) starts the
  * sequences that start "when someone opens" it, in the same way and once,
@@ -71,8 +74,12 @@ export async function noteIfFinished(store: Store, productId: string, courseId: 
     if (!lessons.every((id) => done.has(id))) return false;
     const claim = await redisPipeline([["SET", finishedKey(courseId, email), "1", "NX", "EX", 400 * 86_400]]);
     if (!confirmedClaim(claim)) return false;
-    await enroll(store, email, { joined: false, finished: productId });
-    return true;
+    if (await enroll(store, email, { joined: false, finished: productId })) return true;
+    // Finishing started nothing for them now (not on the list yet, the day's runs used up, no workflow known): the mark
+    // is given back, so it is never taken for "already started" and their next lesson done tries again; each workflow
+    // still starts once per person, by its own claim (lib/flows.ts).
+    await redisPipeline([["DEL", finishedKey(courseId, email)]]);
+    return false;
   } catch (error) {
     console.error("noting a finished course failed", error);
     return false;

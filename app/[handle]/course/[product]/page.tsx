@@ -25,7 +25,7 @@ import { canManage } from "@/lib/membership-manage";
 import { CourseOutline, WithDay } from "@/components/course-outline";
 import { readListing } from "@/lib/catalog";
 import { membershipLine, speech } from "@/lib/buyer-words";
-import { coursesWords } from "@/lib/buyer-words/courses";
+import { coursesWords, noticeFor } from "@/lib/buyer-words/courses";
 import { productSegment } from "@/lib/product-slug";
 import { noteIfOpened } from "@/lib/course-finish";
 import { exampleTitlesLeft } from "@/lib/course-templates";
@@ -70,7 +70,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const w = coursesWords(store.language);
 
   const query = await searchParams;
-  const notice = w.linkNotices[typeof query.link === "string" ? query.link : ""] ?? null;
+  const notice = noticeFor(w.linkNotices, query.link);
   const jar = await cookies();
   const access = await courseAccess(store, product, jar);
   const open = access.state === "open";
@@ -104,7 +104,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const held = studying ? heldBack(course, passed) : new Map<string, string>();
   const finished = studying && hasFinished(course, done, passed);
   const mustPass = requiredQuizLessons(course).length;
-  const certNotice = w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME)[typeof query.cert === "string" ? query.cert : ""] ?? null;
+  const certNotice = noticeFor(w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME), query.cert);
 
   const all = lessonsInOrder(course);
   const total = lessonCount(course);

@@ -9,8 +9,10 @@
  * person's access is read (unknown is never changed by guess), the count the
  * creator confirmed must be the count it would change now (otherwise nothing
  * is written and the review is answered again), and the studio requests the
- * change uses are taken. After it, each person is read back: only what reads
- * back as asked is said as done. No email is sent and nothing is refunded.
+ * change uses are taken: the read's own before it is read, on a review too,
+ * and the writes' and read-back's before the first write. After it, each
+ * person is read back: only what reads back as asked is said as done. No
+ * email is sent and nothing is refunded.
  */
 import { readAddresses, leadsKey, parseContact } from "@/lib/contacts";
 import { type Course } from "@/lib/course";
@@ -28,6 +30,7 @@ import {
   MAX_STUDENT_ACTION,
   STUDENTS_PER_PAGE,
   type StudentLine,
+  accessReadUnits,
   accessUnits,
   labelUnits,
   listUnits,
@@ -165,30 +168,35 @@ function sortOut(states: Map<string, AccessState>, ask: AccessAsk) {
 
 const reviewOf = (s: ReturnType<typeof sortOut>): AccessReview => ({ changes: s.targets.length, already: s.already.length, notStudent: s.notStudent.length, unread: s.unread.length });
 
-/** What the change would do, with nothing written. */
-export async function reviewAccess(courseId: string, ask: AccessAsk): Promise<AccessReview> {
-  return reviewOf(sortOut(await accessStates(courseId, ask.emails), ask));
+/** Asked for the studio requests a part of the work takes, before it is done. */
+export type AccessPay = (units: number) => Promise<{ ok: true } | { ok: false; reason: string; message: string }>;
+
+/** The studio requests a part of the work needed were not given: nothing more was read or written. */
+type AccessRefused = { kind: "refused"; reason: string; message: string };
+
+/** What the change would do, with nothing written. `pay` is asked for the read's studio requests before it reads. */
+export async function reviewAccess(courseId: string, ask: AccessAsk, pay: AccessPay): Promise<{ kind: "review"; review: AccessReview } | AccessRefused> {
+  const paid = await pay(accessReadUnits(ask.emails.length));
+  if (!paid.ok) return { kind: "refused", reason: paid.reason, message: paid.message };
+  return { kind: "review", review: reviewOf(sortOut(await accessStates(courseId, ask.emails), ask)) };
 }
 
 export type AccessApplied =
   | { kind: "done"; done: AccessDone }
   /** The count it would change now is not the one confirmed: nothing written; this is what it would do now. */
   | { kind: "stale"; review: AccessReview }
-  /** The studio requests it needs were not given: nothing written. */
-  | { kind: "refused"; reason: string; message: string };
+  | AccessRefused;
 
 /**
- * The change, for those it applies to now. `pay` is asked for accessUnits of
- * them before the first write. Each person's write is setBlocked, at most
- * ACCESS_WRITES_AT_ONCE at a time; then each is read back, and only those read
- * back as asked are `changed`.
+ * The change, for those it applies to now. `pay` is asked for accessReadUnits
+ * of everyone asked before their access is read, then for accessUnits of those
+ * it changes before the first write (their writes and the read-back). Each
+ * person's write is setBlocked, at most ACCESS_WRITES_AT_ONCE at a time; then
+ * each is read back, and only those read back as asked are `changed`.
  */
-export async function applyAccess(
-  store: Store,
-  courseId: string,
-  ask: AccessAsk,
-  pay: (units: number) => Promise<{ ok: true } | { ok: false; reason: string; message: string }>,
-): Promise<AccessApplied> {
+export async function applyAccess(store: Store, courseId: string, ask: AccessAsk, pay: AccessPay): Promise<AccessApplied> {
+  const readPaid = await pay(accessReadUnits(ask.emails.length));
+  if (!readPaid.ok) return { kind: "refused", reason: readPaid.reason, message: readPaid.message };
   const sorted = sortOut(await accessStates(courseId, ask.emails), ask);
   if (ask.expect !== sorted.targets.length) return { kind: "stale", review: reviewOf(sorted) };
   const result: AccessDone = { asked: ask.emails.length, changed: [], already: sorted.already, notStudent: sorted.notStudent, unread: sorted.unread, unknown: [], failed: [] };

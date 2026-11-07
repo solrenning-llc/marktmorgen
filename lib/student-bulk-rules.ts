@@ -27,14 +27,31 @@ const MAX_ADDRESS = 254;
 /** The longest body a change sends: every address at its longest, quoted and separated, and the rest of the request. */
 export const MAX_STUDENT_BODY_BYTES = 1_000 + MAX_STUDENT_ACTION * (MAX_ADDRESS * 6 + 3);
 
+/** Commands a studio request is priced at (tests/plan-cost-registry.ts, UNIT_COST.studio). */
+export const STUDIO_REQUEST_COMMANDS = 20;
+/** Commands one person's change of access sends: setBlocked's own two (lib/learn.ts). */
+export const ACCESS_WRITE_COMMANDS = 2;
+
+const people = (n: number) => Math.max(0, Math.floor(n));
+/** Commands reading the access of `n` people sends: a command pair (HMGET, SMISMEMBER) per ACCESS_READ_BATCH. */
+const readCommands = (n: number) => 2 * Math.ceil(people(n) / ACCESS_READ_BATCH);
+
 /**
- * Studio requests a change of access takes before it writes: each person is
- * about two commands (the write of their access and their share of the reads
- * around it), and a studio request is priced at twenty commands
- * (tests/plan-cost-registry.ts, UNIT_COST.studio). At least one.
+ * Studio requests taken before the access of `n` people is read, on a review
+ * and before a change: the read's own commands, twenty to a request. At least
+ * one.
  */
-export function accessUnits(people: number): number {
-  return Math.max(1, Math.ceil(Math.max(0, Math.floor(people)) / 10));
+export function accessReadUnits(n: number): number {
+  return Math.max(1, Math.ceil(readCommands(n) / STUDIO_REQUEST_COMMANDS));
+}
+/**
+ * Studio requests a change of access takes after its read and before it
+ * writes: each person's write (ACCESS_WRITE_COMMANDS) and the read-back of
+ * them all, twenty commands to a request. At least one. With the read's own
+ * (accessReadUnits), the whole change is paid for before each part of it.
+ */
+export function accessUnits(n: number): number {
+  return Math.max(1, Math.ceil((ACCESS_WRITE_COMMANDS * people(n) + readCommands(n)) / STUDIO_REQUEST_COMMANDS));
 }
 /** Studio requests taken before a page's rows are read: one command a row (what each marked done), twenty to a request. */
 export function listUnits(rows: number): number {
@@ -142,7 +159,15 @@ export function accessReviewLines(review: AccessReview, change: AccessChange): s
 /** What a change did, in one short sentence and in full, with why each person left out was left out. */
 export function accessSummary(result: AccessDone, change: AccessChange): { short: string; words: string } {
   const changed = result.changed.length;
-  const head = changed === 0 ? "Nothing was changed." : change === "revoke" ? `Access removed for ${count(changed, "student", "students")}.` : `Access given back to ${count(changed, "student", "students")}.`;
+  // A write that could not be read back may have landed: never "Nothing was changed." then.
+  const head =
+    changed > 0
+      ? change === "revoke"
+        ? `Access removed for ${count(changed, "student", "students")}.`
+        : `Access given back to ${count(changed, "student", "students")}.`
+      : result.unknown.length
+        ? "No change could be confirmed."
+        : "Nothing was changed.";
   const left = result.already.length + result.notStudent.length + result.unread.length + result.unknown.length + result.failed.length;
   if (left === 0) return { short: head, words: head };
   const why = [

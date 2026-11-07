@@ -15,7 +15,7 @@
  * Synthetic data only, through the real route.
  */
 import { NextRequest } from "next/server";
-import { POST as courseRoute } from "@/app/api/store/course/route";
+import { GET as courseRead, POST as courseRoute } from "@/app/api/store/course/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { findLesson, readCourse } from "@/lib/course";
 import { readListing } from "@/lib/catalog";
@@ -46,6 +46,11 @@ async function main(): Promise<void> {
   const call = async (body: Record<string, unknown>) => {
     const response = await courseRoute(new NextRequest("https://marktmorgen.com/api/store/course", { method: "POST", headers, body: JSON.stringify(body) }));
     return { status: response.status, body: (await response.json()) as { ok?: boolean; error?: string } };
+  };
+  /** What the studio's quiz editor reads when it opens a lesson's quiz. */
+  const opened = async (lessonId: string) => {
+    const response = await courseRead(new NextRequest(`https://marktmorgen.com/api/store/course?id=${id}&lessonId=${lessonId}&quiz=1`, { headers }));
+    return { status: response.status, body: (await response.json()) as { ok?: boolean; quiz?: unknown; unread?: boolean } };
   };
 
   const made = await addProduct(OWNER, "Quiz course", "", "40");
@@ -131,9 +136,16 @@ async function main(): Promise<void> {
   const missing = await lessonWithQuiz("Record missing");
   redis.run(["DEL", quizKey(missing)]);
   is("the outline still says there is a quiz, the record is absent", [await hasQuiz(missing), kept(missing)], [true, false]);
+  const editor = await opened(missing);
+  is("the studio's editor is told the saved questions cannot be read, so it opens a fresh quiz to save over them (never \"could not be read just now\" for good)", [editor.status, editor.body.ok, editor.body.quiz, editor.body.unread], [200, true, null, true]);
   const again = await call({ action: "quiz", id, lessonId: missing, quiz: { ...QUIZ, passPercent: 80 } });
   is("saved as a new quiz, never a 503 for good", [again.status, again.body.ok, kept(missing)], [200, true, true]);
   const unknownSave = await withQuizReply(missing, [], () => call({ action: "quiz", id, lessonId: missing, quiz: { ...QUIZ, passPercent: 90 } }));
+  const reopened = await opened(missing);
+  is("once saved, the editor reads it as it is", [reopened.body.unread, (reopened.body.quiz as { passPercent?: number } | null)?.passPercent], [undefined, 80]);
+  const plain = await call({ action: "edit", id, op: "lesson-add", moduleId, title: "No quiz" });
+  const plainId = (await readCourse(courseId))!.modules.flatMap((m) => m.lessons).find((l) => l.title === "No quiz")?.id;
+  is("a lesson the outline gives no quiz opens as no quiz, not as unread", [plain.body.ok, plainId ? (await opened(plainId)).body : null], [true, { ok: true, quiz: null }]);
   is("an unknown reply while saving still changes nothing", [unknownSave.status, (JSON.parse(String(redis.run(["GET", quizKey(missing)]))) as { passPercent?: number } | null)?.passPercent], [503, 80]);
 
   done();

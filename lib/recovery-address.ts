@@ -32,7 +32,7 @@ import { createHash, randomBytes, randomInt } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { withinLimit } from "@/lib/request-guard";
 import { LOCKED_LIST } from "@/lib/locked-words";
 
@@ -263,10 +263,20 @@ export async function alignRecoveryLock(email: string, until: number, now = Date
   return kept(await redisPipeline([["SET", untilKey(email), String(until), "EX", seconds]]));
 }
 
-/** Ends the lock (the sign-in inbox, a passkey or a code logged in). True when there was one. */
+/**
+ * Ends the lock (the sign-in inbox, a passkey or a code logged in). False only when the delete answered a
+ * confirmed 0 (there was none); true when there was one, or when its answer is not known (no answer, another
+ * shape, an error), so the caller goes on as if there was one: what the recovery address opened is logged out and
+ * the owner told, never left alive in silence (Claude 6 on #2883, rule 24).
+ */
 export async function endRecoveryLock(email: string): Promise<boolean> {
-  const [removed] = await redisPipeline([["DEL", untilKey(email)]]);
-  return Number(removed) === 1;
+  try {
+    const [removed] = await redisPipeline([["DEL", untilKey(email)]]);
+    return countOf(removed) !== 0;
+  } catch (error) {
+    console.error("ending the recovery login's lock could not be confirmed", error);
+    return true;
+  }
 }
 
 /**

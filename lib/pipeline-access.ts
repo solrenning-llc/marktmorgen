@@ -77,9 +77,15 @@ export async function readPipelineAccess(statsId: string | null, email: string):
 /** Every teammate's restrictions, by address. */
 export async function readAllPipelineAccess(statsId: string | null): Promise<Record<string, AccessMap | null>> {
   if (!statsId || !isRedisConfigured()) return {};
-  const [raw] = await redisPipeline([["HGETALL", accessKey(statsId)]]);
+  const reply: unknown = await redisPipeline([["HGETALL", accessKey(statsId)]]);
+  // Only the exact answer of the one HGETALL: a flat list of strings of even length, or an object of strings. Anything
+  // else is not "nobody is restricted": it throws, so the Team page says it could not read them (Claude 5 on #2036).
+  const raw = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+  const flat = Array.isArray(raw) && raw.length % 2 === 0 && raw.every((v) => typeof v === "string");
+  const keyed = !Array.isArray(raw) && raw !== null && typeof raw === "object" && Object.values(raw as Record<string, unknown>).every((v) => typeof v === "string");
+  if (!flat && !keyed) throw new Error("pipeline access could not be read");
   const out: Record<string, AccessMap | null> = {};
-  const pairs: [string, unknown][] = Array.isArray(raw) ? raw.flatMap((v, i) => (i % 2 === 0 ? [[String(v), raw[i + 1]] as [string, unknown]] : [])) : raw && typeof raw === "object" ? Object.entries(raw as Record<string, unknown>) : [];
+  const pairs: [string, unknown][] = Array.isArray(raw) ? raw.flatMap((v, i) => (i % 2 === 0 ? [[String(v), raw[i + 1]] as [string, unknown]] : [])) : Object.entries(raw as Record<string, unknown>);
   for (const [email, value] of pairs) out[email] = mapOf(value);
   return out;
 }

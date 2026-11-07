@@ -164,20 +164,21 @@ export function parseTeam(raw: unknown): Team {
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw unknown();
   const value = parsed as { members?: unknown; invites?: unknown; requireTwoStep?: unknown };
+  // Every team record ever written carries both lists (saveTeam): one without them, or {}, is not an empty team,
+  // which would let a member past the owner's second step or be written back with nobody on it (Codex G on #2036).
   for (const entries of [value.members, value.invites]) {
-    if (entries === undefined) continue;
     if (!Array.isArray(entries)) throw unknown();
     for (const entry of entries as unknown[]) if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw unknown();
   }
   if (value.requireTwoStep !== undefined && typeof value.requireTwoStep !== "boolean") throw unknown();
   const members: Member[] = [];
-  for (const entry of (value.members ?? []) as Record<string, unknown>[]) {
+  for (const entry of value.members as Record<string, unknown>[]) {
     const role = parseTeamRole(entry.role);
     if (typeof entry.email !== "string" || !EMAIL_PATTERN.test(entry.email) || !role) continue;
     members.push({ email: normaliseEmail(entry.email), role, joinedAt: typeof entry.joinedAt === "string" ? entry.joinedAt : "" });
   }
   const invites: Invite[] = [];
-  for (const entry of (value.invites ?? []) as Record<string, unknown>[]) {
+  for (const entry of value.invites as Record<string, unknown>[]) {
     const role = parseTeamRole(entry.role);
     if (typeof entry.id !== "string" || !INVITE_ID.test(entry.id) || typeof entry.email !== "string" || !role) continue;
     invites.push({

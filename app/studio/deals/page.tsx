@@ -80,10 +80,12 @@ export default async function StudioDealsPage({ searchParams }: Params) {
           <div className="mt-8">
             {restricted && access === null ? <p className="notice notice-warn">Your access to this store&apos;s pipelines could not be read just now, so none is shown. Reload the page in a moment, or ask the store&apos;s owner.</p> : available ? <DealsBoard key={(store.sid || store.handle) + ":" + dealActionFilter(query.followup)} deals={shown.deals} versions={Object.fromEntries(shown.deals.map(d => [d.id, inventory.versions[d.id] ?? ""]))} stages={shown.stages} pipelines={shown.pipelines} pipelineMax={Math.max(0, pipelineLimit(store) - hidden)} viewOnly={viewOnly} someHidden={restricted} othersHidden={hidden > 0} fields={fields} currency={store.currency} assignees={assignees} today={today} initialFilter={dealActionFilter(query.followup)} requestHref={can(view.role, "send") ? studioPath(store, "", "requests") : undefined} /> : <DealsUnavailable storeId={store.sid} buyersHref={studioPath(store, "", "people")} fields={fields} followup={dealActionFilter(query.followup)} />}
           </div>
-          {/* 639 [GL7](9): the deals' value by where their people first came from; streamed in after the board. */}
-          {available ? (
+          {/* 639 [GL7](9): the deals' value by where their people first came from; streamed in after the board. Only the
+              deals and stages this person may see, so a hidden pipeline adds nothing to it (Claude 5 on #2036); someone
+              restricted who sees no deal gets no table, and the creator's sales are not read for it. */}
+          {available && (!restricted || shown.deals.length > 0) ? (
             <Suspense fallback={<DealChannelsWaiting />}>
-              <DealChannelsLoader store={store} deals={inventory.deals} stages={inventory.stages} />
+              <DealChannelsLoader store={store} deals={shown.deals} stages={shown.stages} />
             </Suspense>
           ) : null}
         </main>

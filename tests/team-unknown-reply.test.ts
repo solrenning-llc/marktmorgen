@@ -164,11 +164,12 @@ for (const [label, shape] of SHAPES) {
 }
 
 test("parseTeam: only null is no team; any other shape is unknown, never an empty team", () => {
-  for (const raw of [undefined, 0, 7, true, ["x"], { members: [] }, "", "{", "null", "[]", "7", '"team"', '{"members":5}', '{"invites":{}}', '{"members":[null]}', '{"members":["ana@example.test"]}', '{"invites":[7]}', '{"requireTwoStep":"yes"}']) {
+  for (const raw of [undefined, 0, 7, true, ["x"], { members: [] }, "", "{", "{}", '{"members":[]}', '{"invites":[]}', "null", "[]", "7", '"team"', '{"members":5}', '{"invites":{}}', '{"members":[null]}', '{"members":["ana@example.test"]}', '{"invites":[7]}', '{"requireTwoStep":"yes"}']) {
     assert.throws(() => parseTeam(raw), { name: "UnknownReplyError" }, `parseTeam(${JSON.stringify(raw)})`);
   }
+  // A record without both lists ("{}" among them) is unknown too: every team ever written carries both (Codex G on #2036).
   // The healthy shapes read as before: members and invitations the studio does not accept are left out.
-  assert.deepEqual(parseTeam("{}"), { members: [], invites: [] });
+  assert.deepEqual(parseTeam(JSON.stringify({ members: [], invites: [] })), { members: [], invites: [] });
   assert.deepEqual(
     parseTeam(JSON.stringify({ members: [{ email: "Ana@Example.test", role: "editor", joinedAt: "2026-11-01" }, { email: "not an address", role: "editor" }, { email: "cy@example.test", role: "king" }], invites: [], requireTwoStep: true })),
     { members: [{ email: "ana@example.test", role: "editor", joinedAt: "2026-11-01" }], invites: [], requireTwoStep: true },

@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   is("not here for 30 days or more, or never", seen("away30"), ["month@example.com", "long@example.com", "never@example.com"]);
   is("not here for 90 days or more, or never", seen("away90"), ["long@example.com", "never@example.com"]);
   is("each choice is said in plain words", Object.values(SEEN_WORDS).every((words) => /^(Here|Not here) /.test(words)), true);
-  is("a course that can be given: not a membership, not a call, and a course", [givable({ course: { id: "c", lessons: 1 }, recurring: null, call: null }), givable({ course: { id: "c", lessons: 1 }, recurring: { interval: "month" }, call: null }), givable({ course: null, recurring: null, call: null })], [true, false, false]);
+  is("a course that can be given: not a membership, not a call, and a course", [givable({ course: { id: "c" }, recurring: null, call: null }), givable({ course: { id: "c" }, recurring: { interval: "month" }, call: null }), givable({ course: null, recurring: null, call: null })], [true, false, false]);
   is(
     "studio requests, at the most each step can take: every read before reading, every write and read back before writing",
     [giveReadUnits(1), giveReadUnits(18), giveReadUnits(19), giveReadUnits(500), giveWriteUnits(1, "give"), giveWriteUnits(10, "give"), giveWriteUnits(11, "give"), giveWriteUnits(500, "give"), giveWriteUnits(1, "takeback"), giveWriteUnits(500, "takeback")],

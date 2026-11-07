@@ -396,10 +396,10 @@ export async function applyGive(store: Store, target: GiveTarget, ask: GiveAsk, 
   const writePaid = await pay(giveWriteUnits(sorted.targets.length, ask.change));
   if (!writePaid.ok) return { kind: "refused", reason: writePaid.reason, message: writePaid.message };
 
-  let statsId = store.statsId;
+  let statsId: string | null = store.statsId;
   if (giving) {
     if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return refusedAs("unavailable");
-    statsId = statsId ?? (await ensureStatsId(storeRef(store)))?.statsId;
+    statsId = statsId ?? (await ensureStatsId(storeRef(store)))?.statsId ?? null;
     if (!statsId || !store.sid) return refusedAs("unavailable");
     // Marked first, so what is given is read as soon as it is written (lib/learn.ts reads gifts only of a store so marked).
     if (!store.pastBuyers && !(await setPastBuyers(storeRef(store)))?.pastBuyers) return refusedAs("unavailable");

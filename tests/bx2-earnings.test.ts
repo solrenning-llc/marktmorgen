@@ -214,6 +214,13 @@ part("Codex J's review of #2941 (5808632896; proof codex/j-review-2941-earnings@
     is(`a record at ${at > 0 ? "+" : "-"}MAX_SAFE_INTEGER ms: its source unknown, never a throw`, typeof out === "string" ? out : source(out, "2026-10", "stripe"), { source: "stripe", state: "unknown", why: "invalid" });
   }
 
+  // Rule 30 siblings of LOW 3: a time inside Date's range whose year is not four digits.
+  const bc = Date.UTC(2026, 10, 3) - Date.UTC(2026, 0, 1) + Date.UTC(-2025, 0, 1); // 3 November of 2026 BC (proleptic year -2025)
+  const ancient = earningsByMonth(input({ providers: [stripe([list("sale", [{ id: "bc", at: bc, cents: 100, currency: "usd" }])])] }));
+  is("a record from 2026 BC is before every month shown, never counted in November 2026", (source(ancient, "2026-11", "stripe") as { lines: unknown[] }).lines, []);
+  is("a reading in year 1 gives nothing, never a throw", (() => { try { return earningsByMonth(input({ at: new Date(0).setUTCFullYear(1, 0, 15) })); } catch (error) { return String(error); } })(), null);
+  is("a reading in year 10000 gives nothing, never a throw", (() => { try { return earningsByMonth(input({ at: Date.UTC(10000, 0, 15) })); } catch (error) { return String(error); } })(), null);
+
   // LOW 4: the current month runs to the reading's time; a record after it is not money "so far".
   const after = earningsByMonth(input({ providers: [stripe([list("sale", [{ id: "a", at: AT + 1, cents: 200, currency: "usd" }])])] }));
   is("a record a millisecond after the reading: its source unknown", source(after, "2026-11", "stripe"), { source: "stripe", state: "unknown", why: "invalid" });

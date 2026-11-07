@@ -96,8 +96,11 @@ export default async function GroupPage({ params, searchParams }: Params) {
 
   // The link from a place's email: the place is taken now, once.
   let taken: Taken | null = null;
+  // A run that threw (a reply it could not read) or found a place it cannot confirm is said as not confirmed, never as
+  // an expired link nor as a place taken.
+  let unconfirmed = false;
   if (PLACE_TOKEN.test(token)) {
-    taken = await takePlace({
+    const tried = await takePlace({
       store,
       token,
       recordStart: async (email, productId, start) => {
@@ -108,7 +111,9 @@ export default async function GroupPage({ params, searchParams }: Params) {
       console.error("taking a place failed", error);
       return null;
     });
-    if (taken && taken.outcome !== "gone" && taken.outcome !== "full" && taken.outcome !== "resting") {
+    taken = tried;
+    unconfirmed = !tried || tried.outcome === "pending";
+    if (taken && (taken.outcome === "taken" || taken.outcome === "already" || taken.outcome === "has")) {
       const link = (await ordersLinkFor(store, taken.email, base).catch(() => null)) ?? `${base}/orders`;
       const email = taken.email;
       return shell(
@@ -136,6 +141,8 @@ export default async function GroupPage({ params, searchParams }: Params) {
       ? g.groupNotices.full
       : taken?.outcome === "resting"
         ? g.groupNotices.resting
+      : unconfirmed
+        ? g.groupNotices.unconfirmed
       : taken?.outcome === "gone" || (token && !taken)
         ? g.groupNotices.expired
         : status !== "expired" ? g.groupNotices[status] ?? null : null;

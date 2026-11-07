@@ -483,6 +483,8 @@ export async function askPlace(input: {
 export type Taken =
   | { outcome: "taken" | "already" | "has"; email: string; group: Group }
   | { outcome: "full" | "resting"; email: string; group: Group }
+  /** The address holds a record of a place but the product is not on it: nothing can be confirmed yet. */
+  | { outcome: "pending"; email: string; group: Group }
   | { outcome: "gone" };
 
 /** Whether the room its checkout held for its places is still held now (lib/order-admission.ts). */
@@ -493,7 +495,10 @@ export function placesHeld(group: Pick<Group, "h">, nowMs = Date.now()): boolean
 /**
  * Opens the link from a place's email: takes a place for its address, once.
  * "already" is the same address opening its link again; "has" is an address
- * that owns the product some other way, which takes no place.
+ * that owns the product some other way, which takes no place; "pending" is an
+ * address holding a record of a place whose product is not on it (another run
+ * still handing it over, or a record a give-back could not remove), which is
+ * never said to be a place taken.
  */
 export async function takePlace(input: {
   store: Store;
@@ -522,7 +527,8 @@ export async function takePlace(input: {
   const mine = looked?.[0];
   const owned = looked?.[1];
   if (!looked || (mine !== 0 && mine !== 1) || (owned !== 0 && owned !== 1)) throw new UnknownReplyError("a place's holder");
-  if (mine === 1) return { outcome: "already", email, group };
+  // "already" only when the product is on the address: a record without it is never said to be a place taken.
+  if (mine === 1) return { outcome: owned === 1 ? "already" : "pending", email, group };
   // Given it some other way already: no place is used for it.
   if (owned === 1) return { outcome: "has", email, group };
 
@@ -534,7 +540,7 @@ export async function takePlace(input: {
   // the record is still this run's own: a hold whose write came back unknown may be another run's of the same link (a
   // double click), whose place is the one a refund takes back. The count is left alone, since whether it moved is
   // unknown: at worst a place stays counted, never one handed out too many. When the script cannot run, the hold
-  // stays and the link says "already" with nothing more handed out; never another run's record deleted.
+  // stays and the link says "pending" with nothing more handed out; never another run's record deleted.
   const letGo = () => redisPipeline([dropOwn]).catch(() => null);
   const fresh = repliesFor(await redisPipeline([["HSETNX", membersKey(group.id), who, hold]]), 1)?.[0];
   if (fresh === 0) return { outcome: "already", email, group };
@@ -542,8 +548,15 @@ export async function takePlace(input: {
     await letGo();
     throw new UnknownReplyError("a place's hold");
   }
-  // The place given back: this run's own record (the same script) and the count its own INCR moved.
-  const giveBack = () => redisPipeline([dropOwn, ["DECR", takenKey(group.id)]]);
+  // The place given back: this run's own record (the same script) and the count its own INCR moved. Upstash runs each
+  // command of a pipeline on its own, so the script can fail while the DECR lands and the call throws: the run keeps
+  // its answer ("full", "resting", "has") and tries the script once more alone, never the DECR again (whether it
+  // moved is unknown; at worst a place stays counted). A record the retry cannot remove reads "pending", never
+  // "already" (#2872 review).
+  const giveBack = async () => {
+    const replies = repliesFor(await redisPipeline([dropOwn, ["DECR", takenKey(group.id)]]).catch(() => null), 2);
+    if (!replies || (replies[0] !== 0 && replies[0] !== 1)) await letGo();
+  };
   const count = repliesFor(await redisPipeline([["INCR", takenKey(group.id)]]), 1)?.[0];
   if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) {
     await letGo();

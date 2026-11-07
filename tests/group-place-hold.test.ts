@@ -12,6 +12,7 @@ import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccoun
 import { readListing } from "@/lib/catalog";
 import { placesTaken, settleGroup, startGroup, takePlace } from "@/lib/group-buy";
 import { importedFor } from "@/lib/imported-purchases";
+import { GIVING_WORDS } from "@/lib/buyer-words/giving";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -191,6 +192,11 @@ async function main(): Promise<void> {
   is("the third address is told full, nothing handed over", [stuckFirst, await owns("max@example.com")], ["full", []]);
   is("opened again it is 'pending', never 'already', and nothing is handed over", [await take(stuckLink), await owns("max@example.com")], ["pending", []]);
   is("no place counted past the two paid for", await placesTaken(stuck.id), 2);
+  is(
+    "the page says 'not confirmed' in every buyer language, never 'expired' nor 'the place is yours'",
+    Object.values(GIVING_WORDS).every((w) => Boolean(w.groupNotices.unconfirmed?.title && w.groupNotices.unconfirmed?.body) && w.groupNotices.unconfirmed.title !== w.groupNotices.expired.title),
+    true,
+  );
   done();
 }
 

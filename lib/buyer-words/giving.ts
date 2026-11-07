@@ -183,6 +183,10 @@ const en = {
       title: "That link has expired",
       body: "It works for 24 hours. Type your address again below and a new one comes right away.",
     },
+    unconfirmed: {
+      title: "We could not confirm your place just now",
+      body: "Nothing was charged to you. Open the link from your email again in a few minutes; it works for 24 hours. If it still does not work, ask the store for help.",
+    },
     resting: {
       title: "This store is resting for now",
       body: "No place was taken or lost. The store hands out places again when its next month begins, or sooner: come back then and type your address below for a new link.",
@@ -524,6 +528,10 @@ const es: GivingWords = {
       title: "Ese enlace ha caducado",
       body: "Funciona durante 24 horas. Vuelve a escribir tu dirección abajo y te llegará uno nuevo enseguida.",
     },
+    unconfirmed: {
+      title: "No pudimos confirmar tu plaza ahora mismo",
+      body: "No se te ha cobrado nada. Vuelve a abrir el enlace de tu email dentro de unos minutos; funciona durante 24 horas. Si sigue sin funcionar, pide ayuda a la tienda.",
+    },
     resting: {
       title: "Esta tienda está en pausa por ahora",
       body: "No se ha ocupado ni perdido ninguna plaza. La tienda vuelve a repartir plazas cuando empieza su próximo mes, o antes: vuelve entonces y escribe tu dirección abajo para recibir un enlace nuevo.",
@@ -847,6 +855,10 @@ const fr: GivingWords = {
       title: "Ce lien a expiré",
       body: "Il fonctionne pendant 24 heures. Saisissez de nouveau votre adresse ci-dessous et un nouveau lien arrive aussitôt.",
     },
+    unconfirmed: {
+      title: "Nous n'avons pas pu confirmer votre place pour le moment",
+      body: `Rien ne vous a été débité. Rouvrez le lien de votre e-mail dans quelques minutes${S}; il fonctionne pendant 24 heures. S'il ne fonctionne toujours pas, demandez de l'aide à la boutique.`,
+    },
     resting: {
       title: "Cette boutique est en pause pour le moment",
       body: `Aucune place n'a été prise ni perdue. La boutique distribue de nouveau des places au début de son prochain mois, ou avant${S}: revenez alors et saisissez votre adresse ci-dessous pour recevoir un nouveau lien.`,
@@ -1168,6 +1180,10 @@ const de: GivingWords = {
       title: "Dieser Link ist abgelaufen",
       body: "Er funktioniert 24 Stunden lang. Geben Sie Ihre Adresse unten erneut ein, und ein neuer kommt sofort.",
     },
+    unconfirmed: {
+      title: "Wir konnten Ihren Platz gerade nicht bestätigen",
+      body: "Ihnen wurde nichts berechnet. Öffnen Sie den Link aus Ihrer E-Mail in ein paar Minuten erneut; er funktioniert 24 Stunden lang. Wenn er dann noch nicht funktioniert, bitten Sie den Shop um Hilfe.",
+    },
     resting: {
       title: "Dieser Shop pausiert gerade",
       body: "Kein Platz wurde vergeben oder ist verloren. Der Shop vergibt wieder Plätze, wenn sein nächster Monat beginnt, oder früher: Kommen Sie dann zurück und geben Sie unten Ihre Adresse für einen neuen Link ein.",
@@ -1487,6 +1503,10 @@ const it: GivingWords = {
     expired: {
       title: "Quel link è scaduto",
       body: "Funziona per 24 ore. Scrivi di nuovo il tuo indirizzo qui sotto e ne arriva subito uno nuovo.",
+    },
+    unconfirmed: {
+      title: "Non siamo riusciti a confermare il tuo posto in questo momento",
+      body: "Non ti è stato addebitato nulla. Riapri il link della tua email tra qualche minuto; funziona per 24 ore. Se continua a non funzionare, chiedi aiuto al negozio.",
     },
     resting: {
       title: "Questo negozio è in pausa per ora",
@@ -1810,6 +1830,10 @@ const nl: GivingWords = {
       title: "Die link is verlopen",
       body: "Hij werkt 24 uur. Vul je adres hieronder opnieuw in en er komt meteen een nieuwe.",
     },
+    unconfirmed: {
+      title: "We konden je plek nu niet bevestigen",
+      body: "Er is niets bij je afgeschreven. Open de link uit je e-mail over een paar minuten opnieuw; hij werkt 24 uur. Werkt hij dan nog steeds niet, vraag de winkel om hulp.",
+    },
     resting: {
       title: "Deze winkel rust even",
       body: "Er is geen plaats genomen of verloren. De winkel geeft weer plaatsen uit wanneer zijn volgende maand begint, of eerder: kom dan terug en vul hieronder je adres in voor een nieuwe link.",
@@ -2128,6 +2152,10 @@ const pt: GivingWords = {
     expired: {
       title: "Essa ligação expirou",
       body: "Funciona durante 24 horas. Introduza novamente o seu endereço abaixo e chega logo uma nova.",
+    },
+    unconfirmed: {
+      title: "Não foi possível confirmar o seu lugar neste momento",
+      body: "Nada lhe foi cobrado. Abra novamente a ligação do seu email dentro de alguns minutos; funciona durante 24 horas. Se continuar a não funcionar, peça ajuda à loja.",
     },
     resting: {
       title: "Esta loja está em pausa por agora",

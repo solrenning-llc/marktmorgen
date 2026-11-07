@@ -1221,6 +1221,9 @@ export async function storeIdExists(sid: string): Promise<boolean> {
   return Number(n) === 1;
 }
 
+/** The key of a store's id, for a reader that must tell a store confirmed gone from one not read (lib/plan-disputes.ts). */
+export const storeIdKeyOf = (sid: string): string => storeIdKey(sid);
+
 /**
  * The store with this id, or null. The id comes from a cookie, a link or a
  * team record, so the store found is checked to carry that very id.

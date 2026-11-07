@@ -173,7 +173,8 @@ async function main() {
     await setup();
     pages = [{ data: [dispute("du_Plan1", "needs_response", SUB), dispute("du_Addon1", "needs_response", ADDON), dispute("du_NoInvoice", "needs_response", null), dispute("du_Other1", "needs_response", OTHER), dispute("du_Broken1", "needs_response", BROKEN)], has_more: false }];
     const first = await syncPlanDisputes(Date.now() + 10_000, NOW);
-    is("counts", first, { seen: 5, recorded: 1, unmatched: 3, reread: 0, failed: 1, complete: true });
+    // du_Broken1 failed, so the run is not complete: it is read again next run (Claude 5's LOW on #2884).
+    is("counts", first, { seen: 5, recorded: 1, unmatched: 3, reread: 0, failed: 1, complete: false });
     const after = (await storeForEmail(owner))!;
     is("the plan's dispute is written down", after.planDisputes?.map((kept) => [kept.id, kept.status, kept.coversUntil]), [["du_Plan1", "open", NOW + 20 * DAY]]);
     is("and pauses the store's costs", costPauseCode(after, NOW), "plan_disputed");

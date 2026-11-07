@@ -27,9 +27,11 @@ Product implementation remains blocked for three independent reasons:
 - `tests/plan-cost-registry.ts` is changed by open PRs #2848, #2849, and
   #2852; and
 - the current scheduled reports use `meter: { by: "company" }`, while E8 says
-  the send is inside an allowance and HX1 says report emails count against the
-  store's service-email allowance. The repository has no approved rule choosing
-  that allowance or funding the full fan-out.
+  the send is inside an allowance and HX1 already assigns report emails to the
+  store's service-email allowance, independently of marketing. That category is
+  decided; the exact existing counter, atomic fan-out debit, and complete
+  query/render/storage funding still need verification. The current company
+  meter does not implement that assignment.
 
 Unknown funding is therefore not zero and cannot be treated as admission.
 
@@ -37,14 +39,14 @@ Unknown funding is therefore not zero and cannot be treated as admission.
 
 | Capability | Current source | What exists now | E8/HX1 delta |
 | --- | --- | --- | --- |
-| Fixed scheduled reports | `app/api/cron/weekly/route.ts`, `app/api/cron/monthly/route.ts`, `vercel.json` | Weekly job runs hourly on Monday and Tuesday; monthly job runs hourly on the first and second day. Each run stops after 25 stores or 45 seconds. | No creator-defined schedule or saved report configuration. These process/time bounds do not bound arbitrary custom reports over a billing month. |
+| Fixed scheduled reports | `app/api/cron/weekly/route.ts`, `app/api/cron/monthly/route.ts`, `vercel.json` | Weekly job runs hourly on Monday and Tuesday; monthly job runs hourly on the first and second day. A run handles at most 25 claimed reports and checks elapsed time against 45 seconds before another folder iteration. Skipped folders do not count as claimed reports, and a current store's nested reads/sends can outlast that checkpoint. | No creator-defined schedule or saved report configuration. These soft loop checks are not a hard total I/O/wall-clock ceiling or a monthly custom-report budget. |
 | Fixed report content | `lib/stats-report.ts` | Weekly and monthly message builders select a fixed set of numbers. Unknown financial coverage is described as unavailable rather than reported as zero. | E8 needs an explicit, bounded selection of report fields. HX1 names visits, sales, revenue net of refunds, subscribers, and aggregate affiliate numbers by period. |
 | Creator recipient | weekly/monthly cron routes | The store owner receives the fixed report. | E8 must define whether every custom report includes the creator or only explicitly selected recipients. |
 | Team recipients | `weeklyTeam`, `MAX_WEEKLY_TEAM` in `lib/stats-report.ts` | Weekly only; selected addresses are rechecked against current team membership and the `stats` permission before each send. Maximum five chosen team members. | Monthly reports do not use this list. External recipients are absent. HX1 allows up to three confirmed addresses beyond the team and requires confirmation, immediate opt-out, and revocation. |
 | Unsubscribe | `weeklyToken`, `weeklyMemberToken`, `/api/store/weekly` | Owner and weekly team copies have stop links. | There is no scoped external-recipient invitation, confirmation, version, expiry, or report-specific authorization lifecycle. |
 | Custom period | `app/api/store/stats/range/route.ts`, `lib/stats.ts` | An authenticated creator can read a UTC date range kept for at most 400 days. | The range is requested interactively and is not saved or scheduled. |
 | Custom presentation | `components/custom-range.tsx`, `lib/custom-range-view.ts`, `lib/channel-reports.ts` | The creator can filter/sort loaded channels and products, select chart metrics/grouping, and download CSV reports. | These browser-local choices are not a durable report schema and are not an email renderer. |
-| Cost ownership | `lib/email.ts`, `tests/plan-cost-registry.ts` | Scheduled reports are classified as company email. List, store, transactional, and company meters are different accounting paths. | No current store allowance is taken for scheduled reports. Calling this “inside the allowance” would be false until a rule and atomic admission exist. |
+| Cost ownership | `lib/email.ts`, `tests/plan-cost-registry.ts` | Scheduled reports are classified as company email. List, store, transactional, and company meters are different accounting paths. | HX1 already selects the store service-email category, independently of marketing. No current store allowance is taken for these scheduled reports; the exact counter mapping and atomic admission must be verified before claiming that assignment is implemented. |
 | Stored state | `tests/store-data-registry.ts` | Fixed report sent/off/team keys are registered and bounded. | No key family or byte/retention bound exists for custom definitions, recipients, invitations, delivery receipts, retry state, or generated artifacts. |
 
 The HighLevel gap matrix already classifies H08 as partial: fixed dashboards,
@@ -60,8 +62,10 @@ recurring custom report.
 
 `readNumbers` calls `readStats` and, for a connected sales source,
 `readSales`. The latter can read sales, renewals, refunds, disputes, and PayPal
-coverage. The fixed jobs currently rely on their run schedule and wall-clock
-budget as company work. There is no E8-specific per-store reservation that
+coverage. The fixed jobs currently rely on their run schedule, a claimed-report
+count and an elapsed-time check between folder iterations as company work.
+That check does not interrupt a current store's nested I/O. There is no
+E8-specific per-store reservation that
 counts the selected query before those reads.
 
 ### Custom-period reader
@@ -93,11 +97,11 @@ small set of output fields after a full read does not reduce the read cost.
 
 | Cost surface | What must be bounded before the spend | Current blocker |
 | --- | --- | --- |
-| Schedule | Runs per store and billing window; UTC/time-zone rule; catch-up behavior; global queue size; stores and reports per invocation; function duration. | Existing cron bounds a run, not the lifetime/monthly population of custom schedules. |
+| Schedule | Runs per store and billing window; UTC/time-zone rule; catch-up behavior; global queue size; stores and reports per invocation; function duration. | Existing cron limits claimed reports and checks time between iterations; it supplies neither a hard current-I/O cutoff nor a lifetime/monthly budget for custom schedules. |
 | Query | Exact reader, period, Redis commands/bytes, provider pages/bytes, and whether metrics can share one read. | No E8 cost line or pre-read debit. `readRange` can be large; `readNumbers` reads more than a selected minimal report may need. |
 | Configuration | Number and maximum serialized bytes of report definitions, metric identifiers, period, schedule, authorization version, and retention/deletion. | No schema, data-registry family, or storage admission. A value is not free because it is small. |
 | Recipients | Creator, current team, and external confirmed addresses; invitation, confirmation, opt-out, replacement, and revocation records; exact fan-out. | HX1 says up to three external addresses beyond the team, but E8 has no approved combined fan-out or storage model. |
-| Email | Every invitation, confirmation if any, report copy, retry, and failure notice; sender/fallback cost; unknown delivery result. | Current scheduled reports use the company meter. E8/HX1 requires a store allowance decision and an atomic debit before each accepted provider send. |
+| Email | Every invitation, confirmation if any, report copy, retry, and failure notice; sender/fallback cost; unknown delivery result. | Current scheduled reports use the company meter. HX1 already assigns the store service-email allowance, independently of marketing; the exact existing counter and atomic debit for the complete fan-out must still be verified before provider dispatch. That email category alone does not fund query, rendering or storage. |
 | Rendering | Text and accessible HTML bytes/CPU. A PDF would add generation CPU/memory, validation, storage, attachment bytes, and egress. | No funded PDF or PDF/UA pipeline exists. HX1 requires the accessible email/text path even if PDF is later approved. |
 | Retry/idempotency | Durable report occurrence, recipient occurrence, provider attempt identity, uncertain acceptance, backoff, expiry, and cleanup. | Fixed `claimWeek`/`claimMonth` is not a per-report/per-recipient delivery ledger. A lost provider response cannot authorize an unbounded resend. |
 | Privacy and authorization | Store isolation, minimum recipient data, exact `stats` permission for team, explicit external confirmation, immediate opt-out, retention and erasure. | External recipients are not part of the current model. No buyer identity or order-level data may be added to the report. |
@@ -111,10 +115,13 @@ No runtime branch should be opened until these decisions are explicit:
 1. **Scope composition.** Confirm whether E8 is implemented once as the shared
    engine for HX1/D8, with HX1's external-recipient rules, or whether E8 stops
    at creator/current-team recipients. Do not build two schedulers.
-2. **Allowance.** Choose the existing store allowance that pays for report
-   copies, invitations, and retries, or authorize a separately reviewed funded
-   allowance. The current company meter cannot silently become “inside the
-   franchise.”
+2. **Allowance implementation.** Preserve HX1's already chosen store
+   service-email category, independently of marketing. Verify its exact existing
+   counter, applicable states, and atomic debit for report copies, invitations,
+   confirmations and retries across the complete fan-out. Do not reopen that
+   category decision or invent an unlimited/new allowance. The current company
+   meter cannot silently count as implementation; query/render/storage also
+   require their own complete funding before work.
 3. **Entitlement.** Confirm which existing tiers/trial states may save and run
    a report. This audit does not infer a plan right from the queue wording.
 4. **Metric contract.** Freeze the allowed fields and each field's completeness

@@ -1,10 +1,19 @@
 /** Assistant-note deletion cost traceability. Real helpers; synthetic Redis and clock only. */
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { MAX_STORED_MEMORY_BYTES, MEMORY_FORGET_COMMANDS, forgetMemory } from "@/lib/assistant-memory-store";
 import { FORGET_PER_RUN, FORGET_TRIES, retryStoreForgets } from "@/lib/store-forget-retry";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 import { done, is } from "./check";
+import { COST_LINES, NOT_A_COST } from "./plan-cost-registry";
+
+const classifiedNames = ["MEMORY_FORGET_COMMANDS", "FORGET_TRY_COMMANDS", "FORGET_TRIES", "FORGET_PER_RUN"];
+function hasDeletionClassifications(entries: Record<string, string>): boolean {
+  // This is the previous incidental-text contract, retained for the RED.
+  const text = JSON.stringify(entries);
+  return classifiedNames.every(name => text.includes(name));
+}
 
 type Command = (string | number)[];
 const originalPipeline = redis.pipeline.bind(redis);
@@ -70,6 +79,17 @@ async function main(): Promise<void> {
   is("the first deletion attempt follows the essential delete admission", admission >= 0 && admission < route.indexOf("await forgetMemory("), true);
   const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
   is("the company retry and assistant-delete sources are explicitly classified, with unknown funding preserved", ["MEMORY_FORGET_COMMANDS", "FORGET_TRY_COMMANDS", "FORGET_TRIES", "FORGET_PER_RUN"].every(name => registry.includes(name)), true);
+  const paths = execFileSync("git", ["grep", "-l", "-E", "forgetMemory[[:space:]]*\\(", "--", "app", "lib"], { encoding: "utf8", maxBuffer: 8192 }).trim().split("\n");
+  const callers = paths.filter(path => /\bforgetMemory\s*\(/.test(readFileSync(path, "utf8").replace(/\bfunction\s+forgetMemory\s*\(/g, "function declaration("))).sort();
+  is("all direct production callers are inventoried", callers, ["app/api/store/assistant-memory/route.ts", "app/api/store/stores/route.ts", "lib/store-forget-retry.ts"]);
+  const studio = COST_LINES.find(line => line.id === "studio");
+  is("the live-store forget route is cited by the studio cost line", studio?.sources.some(source => source.file === "app/api/store/assistant-memory/route.ts" && source.names.includes("guardStoreWrite") && source.names.includes("forgetMemory")), true);
+  is("the shared constant classifies live-store and company callers separately", ["app/api/store/assistant-memory/route.ts", "app/api/store/stores/route.ts", "lib/store-forget-retry.ts"].every(path => NOT_A_COST.MEMORY_FORGET_COMMANDS.includes(path)), true);
+  is("all four explicit classification keys are present", hasDeletionClassifications(NOT_A_COST), true);
+  const omitted = { ...NOT_A_COST };
+  delete omitted.MEMORY_FORGET_COMMANDS;
+  is("a name mentioned by another entry cannot replace its own classification key", hasDeletionClassifications(omitted), false);
+  is("the queue sample is explicitly serialized stub JSON, not billed transport bytes", NOT_A_COST.FORGET_PER_RUN.includes("JSON-serialized stub reply") && NOT_A_COST.FORGET_PER_RUN.includes("not RESP, wire or billed bytes"), true);
   done();
 }
 

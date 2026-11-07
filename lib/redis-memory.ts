@@ -125,6 +125,39 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/agent-book.ts AGENT_BOOK_WRITE: the agent book written only while the writer still holds the store's lock.
+        if (key.startsWith("-- marktmorgen:agent-book-write:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, lock, book, token, json] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(["SET", book, json]);
+          return 1;
+        }
+        // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
+        if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, about, expected, text] = args;
+          const now = this.run(["GET", about]);
+          const held = typeof now === "string" ? now : "";
+          if (held !== expected) return [0, Buffer.byteLength(held, "utf8")];
+          this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
+          return [1];
+        }
+        // lib/paypal-sales.ts PAYPAL_REVOKE: a refunded payment's purchase taken back only while nothing else stands for it.
+        if (key.startsWith("-- marktmorgen:paypal-revoke:v1\n") && args[0] === "2" && args.length >= 5) {
+          const [, imported, own, field, job, ...known] = args;
+          const members = this.run(["SMEMBERS", own]);
+          if ((Array.isArray(members) ? members : []).some((member) => !known.includes(String(member)))) return 0;
+          const raw = this.run(["HGET", imported, field]);
+          if (raw === null || raw === undefined) return 2;
+          let record: unknown;
+          try {
+            record = JSON.parse(String(raw));
+          } catch {
+            return 0;
+          }
+          if (!record || typeof record !== "object" || (record as { job?: unknown }).job !== job) return 0;
+          this.run(["HDEL", imported, field]);
+          return 1;
+        }
         // lib/assistant-memory-store.ts MEMORY_WRITE: the notes written or deleted only while the change's lock is its own.
         if (key.startsWith("-- marktmorgen:amem-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, notes, token, json] = args;

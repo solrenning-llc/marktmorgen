@@ -27,6 +27,21 @@ import { saleClock, saleOff, salePrice } from "@/lib/store-sale";
 /** The most reviews read for one check: an ad quotes one, and the newest are the ones a creator picks from. */
 export const AD_REVIEWS = 50;
 
+/**
+ * The most one review record weighs as read (lib/review-summary.ts Review at every field's longest, three bytes a
+ * character): held by tests/ad-context-cost.test.ts against a review written at its longest.
+ */
+export const AD_REVIEW_BYTES = 8_000;
+
+/** What one studio request covers of what the database moves (UNIT_COST.studio in tests/plan-cost-registry.ts; held by the same test). */
+export const STUDIO_REQUEST_BYTES = 50_000;
+
+/**
+ * The studio requests a check of an ad's words takes besides the request that asks for it, before anything is read:
+ * its reviews at their heaviest (Claude 5 on #1950). A check reads them all, so it is counted at all of them.
+ */
+export const AD_CONTEXT_UNITS = Math.ceil((AD_REVIEWS * AD_REVIEW_BYTES) / STUDIO_REQUEST_BYTES);
+
 type Facts = Pick<Store, "currency" | "domain" | "sale" | "subscriptionActive" | "tier">;
 
 /** The price a buyer pays today, sale included, or null when there is no single one. Pure. */

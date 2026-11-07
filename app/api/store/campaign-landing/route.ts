@@ -1,13 +1,14 @@
 import type { NextRequest } from "next/server";
-import { adContext } from "@/lib/ad-context";
+import { AD_CONTEXT_UNITS, adContext } from "@/lib/ad-context";
 import { checkAdText } from "@/lib/ad-creative-check";
 import { CAMPAIGN_TAG, LANDING_REFUSALS, landingFrom, landingPage } from "@/lib/campaign-landing";
-import { LandingsUnreadable, LandingsWriteUnconfirmed, MAX_LANDINGS, readLandings, removeLanding, saveLanding } from "@/lib/campaign-landing-store";
+import { LandingIdInvalid, LandingsGone, LandingsUnreadable, LandingsWriteUnconfirmed, MAX_LANDINGS, readLandings, removeLanding, saveLanding } from "@/lib/campaign-landing-store";
+import { studioRefusal } from "@/lib/person-tasks";
 import { readListing } from "@/lib/catalog";
 import { readPage } from "@/lib/sales-page-store";
 import { StoreFullError } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { jsonAccess } from "@/lib/studio-route";
+import { countStudio, jsonAccess } from "@/lib/studio-route";
 import { saleClock } from "@/lib/store-sale";
 
 /**
@@ -64,6 +65,12 @@ export async function POST(request: NextRequest) {
       await removeLanding(statsId, product.id, campaign, store);
       return Response.json({ ok: true, landings: await readLandings(store.statsId, product.id) }, { headers: NO_STORE });
     }
+    // The check reads the product's reviews: they are counted first, at their heaviest (AD_CONTEXT_UNITS).
+    const counted = await countStudio(store, null, AD_CONTEXT_UNITS);
+    if (!counted.ok) {
+      const refused = studioRefusal(counted.reason, counted.message);
+      return Response.json(refused.body, { status: refused.status, headers: NO_STORE });
+    }
     const now = saleClock();
     const ad = { headline: text(body.headline, 2_000), text: text(body.text, 2_000), description: "", button: text(body.button, 200) };
     const check = checkAdText(ad, await adContext(store, product, now));
@@ -83,6 +90,9 @@ export async function POST(request: NextRequest) {
     // Not read exactly: nothing was saved (Codex G and J, #1947/#1950). Its answer lost: it may have been, so the page is read again.
     if (error instanceof LandingsUnreadable) return Response.json({ ok: false, error: "unavailable", message: error.message }, { status: 503 });
     if (error instanceof LandingsWriteUnconfirmed) return Response.json({ ok: false, error: "unconfirmed", message: error.message }, { status: 503 });
+    // The product's page was deleted while this was saved: nothing was kept, and the reason is said (Claude 5 on #1950).
+    if (error instanceof LandingsGone) return Response.json({ ok: false, error: "gone", message: "This product's page was removed, so the landing page was not saved. Reload the page." }, { status: 410 });
+    if (error instanceof LandingIdInvalid) return Response.json({ ok: false, error: "unknown", message: error.message }, { status: 400 });
     console.error("saving a campaign landing failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

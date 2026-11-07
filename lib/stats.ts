@@ -35,7 +35,7 @@ import { type Together, parseTogether, togetherFrom } from "@/lib/also-bought";
 import { keepPaths, pathsFrom } from "@/lib/next-bought";
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount } from "@/lib/stripe-account";
 import type { Listing, Store } from "@/lib/store";
@@ -646,6 +646,18 @@ const LIFE_MAX_FIELDS = 2000;
 const LIFE_KEEP_PER_KIND = 300;
 
 /**
+ * The all-time record's HGETALL read exactly (CX-123 rule 24): its field and value strings, an even number of them
+ * ([] for a record not there yet), or it throws. A loose read took any other answer for an empty record, so one
+ * already filled was filled again and every count it holds was doubled (review of #2905).
+ */
+async function readLifeFlat(life: string): Promise<string[]> {
+  const [raw] = repliesFor(await redisPipeline([["HGETALL", life]]), 1) ?? [undefined];
+  const flat = stringList(raw);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("the all-time record");
+  return flat;
+}
+
+/**
  * The store's all-time record. The first time it is read it is filled from
  * the days still kept from before it started counting — once, under a lock,
  * and marked so it never happens twice.
@@ -653,9 +665,8 @@ const LIFE_KEEP_PER_KIND = 300;
 async function readLife(store: Store, now: number): Promise<(WindowStats & { since: string }) | null> {
   const statsId = store.statsId as string;
   const life = lifeKey(statsId);
-  let [raw] = await redisPipeline([["HGETALL", life]]);
-  let fields = new Map(pairs(raw));
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  let flat = await readLifeFlat(life);
+  let fields = new Map(pairs(flat));
   const text = (name: string) => {
     const at = flat.indexOf(name);
     return at >= 0 && at % 2 === 0 ? flat[at + 1] : "";
@@ -703,12 +714,11 @@ async function readLife(store: Store, now: number): Promise<(WindowStats & { sin
         ...(visitors ? [["HINCRBY", life, "u", visitors]] : []),
         ["HSET", life, "since", first || started, "filled", today],
         ["HSETNX", life, "started", started],
-        ["DEL", lifeLockKey(statsId)],
       ]);
-      [raw] = await redisPipeline([["HGETALL", life]]);
-      fields = new Map(pairs(raw));
-      flat.length = 0;
-      flat.push(...(Array.isArray(raw) ? (raw as unknown[]).map(String) : []));
+      // Let go only while it holds this read's value: a fill that outlasted its 60 seconds never frees another's.
+      await releaseMark(lifeLockKey(statsId), mine);
+      flat = await readLifeFlat(life);
+      fields = new Map(pairs(flat));
     }
   }
 

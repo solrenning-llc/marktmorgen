@@ -157,19 +157,25 @@ export const FEED_READS_A_DAY = 8;
 
 /**
  * A feed about to be put together: counted, and refused past
- * FEED_READS_A_DAY in a day. One command, and a second with a day's first,
- * because this runs every time a feed is put together and is part of what
- * that costs. A count that cannot be kept or read never lets the feed
- * through (CX-123 rule 24): it throws, and the feed answers a server error
- * that the app asks again after, never "Too many requests" for hours.
+ * FEED_READS_A_DAY in a day. Two commands in one request each time, the
+ * count and its expiry (EXPIRE NX), because this runs every time a feed is
+ * put together and is part of what that costs (tests/traffic-cost.ts,
+ * COMMANDS.feed): sent with every count, an expiry lost once is given again
+ * by the next, so no day key outlives its two days (finding L1 of Claude 4's
+ * team on #2888). A count or an expiry that cannot be kept or read never
+ * lets the feed through (CX-123 rule 24): it throws, and the feed answers a
+ * server error that the app asks again after, never "Too many requests" for
+ * hours. EXPIRE NX answers 1 when it set the expiry and 0 when one was
+ * already there, which the day's first count cannot be.
  */
 export async function feedReadAllowed(token: string, now = Date.now()): Promise<boolean> {
   if (!isRedisConfigured()) return true;
   const key = `nl:pod:n:${sha(token).slice(0, 32)}:${new Date(now).toISOString().slice(0, 10)}`;
-  const reply = repliesFor(await redisPipeline([["INCR", key]]), 1);
+  const reply = repliesFor(await redisPipeline([["INCR", key], ["EXPIRE", key, 2 * 86_400, "NX"]]), 2);
   const count = reply ? countOf(reply[0]) : null;
   if (count === null || count < 1) throw new UnknownReplyError("a podcast feed's day count");
-  if (count === 1) await redisPipeline([["EXPIRE", key, 2 * 86_400]]);
+  const expiry = reply ? countOf(reply[1]) : null;
+  if (expiry === null || expiry > 1 || (count === 1 && expiry !== 1)) throw new UnknownReplyError("a podcast feed's day count expiry");
   return count <= FEED_READS_A_DAY;
 }
 

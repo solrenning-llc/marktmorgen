@@ -121,22 +121,26 @@ test(`healthy control: a feed is put together ${FEED_READS_A_DAY} times a day an
   assert.ok(typeof ttl === "number" && ttl > 86_400, "the day's count expires");
 });
 
+// The count is sent with its expiry in one request (INCR, EXPIRE NX), so each reply is the whole request's: the
+// count's slot unknown beside a good expiry, or the wrong number of replies.
 const unknownCounts: [string, () => unknown][] = [
   ["no reply", () => []],
-  ["null", () => [null]],
-  ["a string", () => ["3"]],
-  ["a list", () => [[]]],
-  ["undefined", () => [undefined]],
-  ["a fraction", () => [1.5]],
-  ["a negative", () => [-1]],
-  ["true", () => [true]],
-  ["two replies", () => [1, 1]],
+  ["null", () => [null, 1]],
+  ["a string", () => ["3", 1]],
+  ["a list", () => [[], 1]],
+  ["undefined", () => [undefined, 1]],
+  ["a fraction", () => [1.5, 1]],
+  ["a negative", () => [-1, 1]],
+  ["true", () => [true, 1]],
+  ["only the count", () => [1]],
+  ["one reply too many", () => [1, 1, 1]],
   ["not a list", () => null],
 ];
+const isDayCount = (commands: Commands) => commands[0]?.[0] === "INCR" && String(commands[0][1]).startsWith("nl:pod:n:");
 
 for (const [label, reply] of unknownCounts) test(`a feed's day count answered as ${label} never lets the feed through`, async () => {
   redis.clear();
-  answer((c) => one(c, "INCR", "nl:pod:n:"), reply);
+  answer(isDayCount, reply);
   try {
     await assert.rejects(feedReadAllowed("c".repeat(48)), UnknownReplyError);
   } finally { redis.pipeline = original; }

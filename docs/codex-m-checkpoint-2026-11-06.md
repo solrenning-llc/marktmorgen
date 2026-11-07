@@ -722,3 +722,100 @@ Mavailablefornominalnewcorrective/independentaskedfreeunitafterpreflight; don'ti
 
 
 Final receipt 2026-11-07 17:41 UTC: **CXM-20261107-1440-C1-1@7e1e9d9fe0ced47696cf4820c5842b4ccc5584a6/blob76e957e7845843dd68da4dd3dc4189fbf19b811b** FULLimmutable readbackEXACT/prefixandallothermessagespreserved. Initial1438CAS409NOWRITE, retry>=136s/freshFULLand>=5minfrompriorread successful. Mavailability/exactdecisionspublished, no tests/source/diff/ref/CI/productworkperformed. Finalread H2-1436 withdrew3069claimtoC6-1434; C6-1438thoughtH2first, coordinationnotedinMmessagewithouttakingunit. PendingC1decision1924,Gidentity3051classification,CX118lease/newnominal. Existingcontinuationunchanged/no watcherafterforegroundend. No globalprojectcompletionclaim.
+
+
+## Retomada 07/11/2026 15h42 Fortaleza — segunda revisão financeira #3077
+
+Codex M; C1 coordenador/C4 executor. Serial/Médio/zero subagentes. Reserva canal CXM-20261107-1533-C1-1 entregue ANTES diff/fonte/testes, commit3e340e0189cee1083748078f1454c906c2333990/blob96b62a85906e9bfbf8737119233cf6eb173fd0b9 FULL exato; tentativa1531 FIRST recebeu409/não publicada; esperou143s e reconheceu P1532 FIRST, M SECOND. Não repetiu fontes/branches antigas, nenhum produto próprio novo. Maincc140a943f3be9e15b86e2989c40deda116efe61 DEZ normas/inbox/reservas/fila byte-id previamente lidas; fila a8b69b93463e7ff275eb128b94d813c140dffa8b/rescodex3e9fb80fc14284d0edd65627c8f45718e3305939. C1-1450 bot/1453 leases/C4-1511/1523 só destinatários; não grant M nem mudança de teto. FILALIGADA/não merge direto, C1-1217 e1330 economiaAPI>=5min respeitados.
+
+### #3077 exato69b5ea461bd3978203829d298dee78f7cace0774
+Duas fontes autorais SOMENTE LEITURA lib/preorders.ts4e2420cb3b4098f6c6221120b7eb7434d8309144 e tests/preorder-record-exact.test.ts8e188a00b0280dfc076687d461249c562abb5821. Base5f40db3076d055411b48c19b9f952668b89d8f93/preorderse9f260afcb890d0525bd3f51748e8a7266426fe9. SAME final22checks com SÓ módulo antigo =16FAIL; head22PASS; ligados preorders32PASS+emailcopy66PASS =>120 atuaisPASS. RED não inclui preparação esbuild com arquivos ausentes: três builds recusados antesexecução, recuperados SÓ blobs exatos do head; nenhum stub de negócio inventado. 404Stripe logs em preorders são mockcases esperados,32checks/exit0. Alias Redis canonical/test-config3d25065d9fc211649a1aad676a0f64e057badb5b, runtime Node24.22.1. Cada input compilado404 verificado pelo Gitblob hash contrahead. Antes/atual maxpipeline220/167, MemoryRedis.run300/208, mocks17/6;32=106/133/12;66=15/23/1. Guardas ANTES dispatch20kcommands+20kMemoryRedis.run(incluindo nested)/500mockHTTP/120s512MiB256KiB porfilho,semHTTP/Redis/providerreal. Tipos ES2017 strictBundler4raízes/979fontes0diagnósticos; lint4files0; scanneroficial3965tracked0; TODOS3965blobsdo snapshot hashmatchhead, nenhumunmatched. TS/lint só scoped; não fullCI/novechecks/produção/RedisLua/browser/webhook. confirmPreorderOnce/finally DELquando throw e jobcatch left++ lidos no source, não executados endpointHTTP.
+
+Preflightfinal headpermanece69b5+OPEN. P5814311731 publicadoantesvereditoM: MÉDIO PROPOSTO HERDADO, HSETgivenaplica mastransportrejeita→saiANTESsendOut; retrygiven→already/zeroemailattempt,grantpreservado. SAMEP18/head2FAIL/base3FAIL, não executado M/não duplicado/não novoachadoM. C6-1536reconhece e pedeC1decisão antesfix no mesmoPR/followup. M fecha somente defeito original de record/given-returnshape, nenhum achadoadicional próprio; semaprovaçãofinanceiraglobal enquanto classificação/disposiçãoPpendente. Não certificaemaildedup real: testepermanentechaveestável não provaprovendor/inbox. Nenhum ref/código/testeautor/CI/queue alterado. Evidência/runnerlocal m-review-3077 abaixo; próxima ação formal COMMENT+canalrecibo, depoisrevisãopedida livrecompreflight, sem duplicar P/G/N/Z. #1924C1decisão/#3051Gidentity continuamholdhistórico, não relabelclosed.
+
+### run.mjs
+```
+import{readFileSync,writeFileSync,mkdirSync,existsSync,symlinkSync}from'node:fs';import{resolve,join}from'node:path';import{createRequire}from'node:module';import{createHash}from'node:crypto';import{spawnSync}from'node:child_process';import{testAliases,testEnvironment}from'./view/tests/test-config.mjs';
+const root=resolve('.'),view=join(root,'view'),deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules';const{build}=createRequire(join(deps,'package.json'))('esbuild');if(!existsSync(join(view,'node_modules')))symlinkSync(deps,join(view,'node_modules'),'dir');mkdirSync('logs',{recursive:true});
+const jobs=process.argv.slice(2);for(const job of jobs){const [mode,test]=job.split(':');
+ const bootstrap=`import{MemoryRedis}from'./lib/redis-memory';import{store as redis}from'./tests/redis-stub';let pc=0,rc=0,hc=0,exceeded=false;const stop=()=>{exceeded=true;throw Error('M_ADMISSION_CEILING')};const pipeline=redis.pipeline,run=MemoryRedis.prototype.run;redis.pipeline=function(c){if(pc+c.length>20000)return stop();pc+=c.length;return pipeline.call(this,c)};MemoryRedis.prototype.run=function(c){if(rc+1>20000)return stop();rc++;return run.call(this,c)};let current=()=>{throw Error('NO_EXTERNAL_NETWORK')};Object.defineProperty(globalThis,'fetch',{configurable:true,get:()=>current,set:f=>{current=(...a)=>{if(hc+1>500)return stop();hc++;return f(...a)}}});process.on('beforeExit',()=>{console.log('M_BUDGET',JSON.stringify({pipelineCommands:pc,memoryRun:rc,httpMockDispatch:hc,exceeded}));if(exceeded)process.exitCode=1});import('./tests/${test}');`;
+ const alias=testAliases(test,view,join(view,'tests'));if(mode==='before')alias['@/lib/preorders']=join(root,'before-preorders.ts');const b=await build({stdin:{contents:bootstrap,resolveDir:view,sourcefile:'m-bootstrap.ts',loader:'ts'},absWorkingDir:view,bundle:true,write:false,platform:'node',format:'cjs',alias,metafile:true,logLevel:'error'});const f=resolve('logs/'+mode+'-'+test+'.cjs');const pin=JSON.parse(readFileSync('head-pins.json','utf8'));let checked=0;for(const input of Object.keys(b.metafile.inputs)){if(input.includes('node_modules')||input==='m-bootstrap.ts')continue;const file=resolve(view,input);const bytes=readFileSync(file);const hash=createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');if(file===join(root,'before-preorders.ts')){if(hash!=='e9f260afcb890d0525bd3f51748e8a7266426fe9')throw Error('Old rule mismatch');}else if(input!=='tests/m-3051-payout-values.proof.ts'&&hash!==pin[input])throw Error('Head pin mismatch '+input);checked++;}console.log(JSON.stringify({mode,test,checked}));writeFileSync(f,b.outputFiles[0].text);writeFileSync(f+'.meta.json',JSON.stringify(b.metafile));
+ const p=spawnSync(process.execPath,['--max-old-space-size=512',f],{cwd:view,env:testEnvironment({PATH:'/usr/bin:/bin',TZ:'UTC'}),encoding:'utf8',timeout:120000,maxBuffer:256*1024});const out=(p.stdout||'')+(p.stderr||'');writeFileSync(f+'.log',out);console.log(JSON.stringify({mode,test,exit:p.status,error:p.error?.message,signal:p.signal,tail:out.slice(-1700)}));if(p.error||p.signal)throw Error('Incomplete child');
+}
+
+```
+
+### verify.cjs
+```
+const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');const deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules',root=path.resolve('view'),ts=require(deps+'/typescript');
+const names=['lib/preorders.ts','tests/preorder-record-exact.test.ts','tests/preorders.test.ts','tests/preorder-email-copy.test.ts'];const opts={strict:true,noEmit:true,allowJs:true,target:ts.ScriptTarget.ES2017,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler,skipLibCheck:true,esModuleInterop:true,resolveJsonModule:true,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'@/lib/content-jsx',baseUrl:root,paths:{'@/*':['*']},types:['node','react'],typeRoots:[deps+'/@types'],lib:['lib.esnext.d.ts','lib.dom.d.ts','lib.dom.iterable.d.ts']};
+const p=ts.createProgram(names.map(f=>path.join(root,f)),opts),ds=ts.getPreEmitDiagnostics(p);fs.writeFileSync('types.log',ts.formatDiagnosticsWithColorAndContext(ds,{getCurrentDirectory:()=>root,getCanonicalFileName:f=>f,getNewLine:()=>"\n"})+JSON.stringify({roots:names.length,sources:p.getSourceFiles().length,diagnostics:ds.length}));console.log('types',ds.length);
+const paths=names;const r=cp.spawnSync(process.execPath,['--max-old-space-size=512',deps+'/eslint/bin/eslint.js',...paths],{cwd:root,encoding:'utf8',timeout:120000,maxBuffer:256*1024});fs.writeFileSync('lint.log',(r.stdout||'')+(r.stderr||''));console.log('lint',r.status,r.signal,r.error?.message);
+
+```
+
+### run.log
+```
+{"mode":"before","test":"preorder-record-exact.test.ts","checked":404}
+{"mode":"before","test":"preorder-record-exact.test.ts","exit":1,"signal":null,"tail":"ted [\"unconfirmed\",0]\n        got      [\"sent\",1]\n  FAIL  the payment's SET answered null: thrown, no receipt\n        expected [\"unconfirmed\",0]\n        got      [\"sent\",1]\n  FAIL  the store's SET answered 1: thrown, no receipt\n        expected [\"unconfirmed\",0]\n        got      [\"sent\",1]\n  FAIL  one reply short: thrown, no receipt\n        expected [\"unconfirmed\",0]\n        got      [\"sent\",1]\n  FAIL  one reply too many: thrown, no receipt\n        expected [\"unconfirmed\",0]\n        got      [\"sent\",1]\n  FAIL  not a list: thrown, no receipt\n        expected [\"unconfirmed\",0]\n        got      [\"sent\",1]\n  ok    retried with real answers: recorded once, receipted once\n  ok    a normal write is recorded and receipted (control)\n\nOn sale: a lost record never ends in a skip that drops the paid order\n  FAIL  lost reply: thrown, nothing handed over, never \"skip\"\n        expected [\"unconfirmed\",false,0]\n        got      [\"skip\",false,0]\n  ok    the retry hands it over once\n\nRule 30: the hand-over's \"given\" write is read exactly too\n  FAIL  written but answered in another shape: thrown, never \"given\"; the grant stands, so the way in is emailed; the giving mark let go\n        expected [\"unconfirmed\",true,1,null]\n        got      [\"given\",true,1,null]\n  ok    the retry finds it given: no second grant, no second email\n  FAIL  not written and answered in another shape: thrown, never \"given\"\n        expected [\"unconfirmed\",false]\n        got      [\"given\",false]\n  ok    the retry marks it given; each email of the way in carries the same idempotency key, so the buyer gets one\n\n22 checks, 16 failing.\nM_BUDGET {\"pipelineCommands\":220,\"memoryRun\":300,\"httpMockDispatch\":17,\"exceeded\":false}\n"}
+{"mode":"head","test":"preorder-record-exact.test.ts","checked":404}
+{"mode":"head","test":"preorder-record-exact.test.ts","exit":0,"signal":null,"tail":"recorded\n  ok    lost reply, nothing written: confirmPreorder throws, no receipt for an entry that does not exist\n  ok    the webhook's retry records it once and sends the receipt once\n\nComing soon: every reply in another shape is unknown\n  ok    HSETNX answered OK: thrown, no receipt\n  ok    HSETNX answered null: thrown, no receipt\n  ok    HSETNX answered 2: thrown, no receipt\n  ok    HGET answered a number: thrown, no receipt\n  ok    HGET answered null: thrown, no receipt\n  ok    HGET answered text that is no pre-order: thrown, no receipt\n  ok    EXPIRE answered null: thrown, no receipt\n  ok    the payment's SET answered null: thrown, no receipt\n  ok    the store's SET answered 1: thrown, no receipt\n  ok    one reply short: thrown, no receipt\n  ok    one reply too many: thrown, no receipt\n  ok    not a list: thrown, no receipt\n  ok    retried with real answers: recorded once, receipted once\n  ok    a normal write is recorded and receipted (control)\n\nOn sale: a lost record never ends in a skip that drops the paid order\n  ok    lost reply: thrown, nothing handed over, never \"skip\"\n  ok    the retry hands it over once\n\nRule 30: the hand-over's \"given\" write is read exactly too\n  ok    written but answered in another shape: thrown, never \"given\"; the grant stands, so the way in is emailed; the giving mark let go\n  ok    the retry finds it given: no second grant, no second email\n  ok    not written and answered in another shape: thrown, never \"given\"\n  ok    the retry marks it given; each email of the way in carries the same idempotency key, so the buyer gets one\n\n22 checks, all passing.\nM_BUDGET {\"pipelineCommands\":167,\"memoryRun\":208,\"httpMockDispatch\":6,\"exceeded\":false}\n"}
+{"mode":"head","test":"preorders.test.ts","checked":404}
+{"mode":"head","test":"preorders.test.ts","exit":0,"signal":null,"tail":"gs/head-preorders.test.ts.cjs:60964:21)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3077/logs/head-preorders.test.ts.cjs:61167:3)\nreading the disputes closed as lost failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.\n    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3077/logs/head-preorders.test.ts.cjs:12324:11)\n    at async lostDisputesSince (/workspace/scratch/d1ece80b1417/m-review-3077/logs/head-preorders.test.ts.cjs:15581:20)\n    at async lostDisputesOrRetry (/workspace/scratch/d1ece80b1417/m-review-3077/logs/head-preorders.test.ts.cjs:15609:12)\n    at async revokeRefundedPreorders (/workspace/scratch/d1ece80b1417/m-review-3077/logs/head-preorders.test.ts.cjs:60909:16)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3077/logs/head-preorders.test.ts.cjs:61171:25) {\n  status: 404,\n  code: 'unknown',\n  stripeMessage: 'Stripe gave no reason.'\n}\nreading the disputes closed as lost failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.\n    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3077/logs/head-preorders.test.ts.cjs:12324:11)\n    at async lostDisputesSince (/workspace/scratch/d1ece80b1417/m-review-3077/logs/head-preorders.test.ts.cjs:15581:20)\n    at async lostDisputesOrRetry (/workspace/scratch/d1ece80b1417/m-review-3077/logs/head-preorders.test.ts.cjs:15609:12)\n    at async revokeRefundedPreorders (/workspace/scratch/d1ece80b1417/m-review-3077/logs/head-preorders.test.ts.cjs:60909:16)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3077/logs/head-preorders.test.ts.cjs:61175:43) {\n  status: 404,\n  code: 'unknown',\n  stripeMessage: 'Stripe gave no reason.'\n}\n"}
+✘ [ERROR] Could not resolve "./tests/preorder-email-copy.test.ts"
+
+    m-bootstrap.ts:1:829:
+      1 │ ...process.exitCode=1});import('./tests/preorder-email-copy.test.ts');
+        ╵                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1752
+  let error = new Error(text);
+              ^
+
+Error: Build failed with 1 error:
+m-bootstrap.ts:1:829: ERROR: Could not resolve "./tests/preorder-email-copy.test.ts"
+    at failureErrorWithLog (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1752:15)
+    at /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1211:25
+    at /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1163:52
+    at buildResponseToResult (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1209:7)
+    at /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1236:16
+    at responseCallbacks.<computed> (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:886:9)
+    at handleIncomingPacket (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:941:12)
+    at Socket.readFromStdout (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:864:7)
+    at Socket.emit (node:events:514:28)
+    at addChunk (node:internal/streams/readable:569:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+
+Node.js v24.22.1
+
+```
+
+### email-copy.log
+```
+{"mode":"head","test":"preorder-email-copy.test.ts","checked":404}
+{"mode":"head","test":"preorder-email-copy.test.ts","exit":0,"signal":null,"tail":"\n  ok    en: waiting phrase 3\n  ok    en: waiting phrase 4\n  ok    en: waiting phrase 5\n  ok    en: waiting phrase 6\n  ok    en: waiting phrase 7\n  ok    es: waiting phrase 1\n  ok    es: waiting phrase 2\n  ok    es: waiting phrase 3\n  ok    es: waiting phrase 4\n  ok    es: waiting phrase 5\n  ok    es: waiting phrase 6\n  ok    es: waiting phrase 7\n  ok    fr: waiting phrase 1\n  ok    fr: waiting phrase 2\n  ok    fr: waiting phrase 3\n  ok    fr: waiting phrase 4\n  ok    fr: waiting phrase 5\n  ok    fr: waiting phrase 6\n  ok    fr: waiting phrase 7\n  ok    de: waiting phrase 1\n  ok    de: waiting phrase 2\n  ok    de: waiting phrase 3\n  ok    de: waiting phrase 4\n  ok    de: waiting phrase 5\n  ok    de: waiting phrase 6\n  ok    de: waiting phrase 7\n  ok    it: waiting phrase 1\n  ok    it: waiting phrase 2\n  ok    it: waiting phrase 3\n  ok    it: waiting phrase 4\n  ok    it: waiting phrase 5\n  ok    it: waiting phrase 6\n  ok    it: waiting phrase 7\n  ok    nl: waiting phrase 1\n  ok    nl: waiting phrase 2\n  ok    nl: waiting phrase 3\n  ok    nl: waiting phrase 4\n  ok    nl: waiting phrase 5\n  ok    nl: waiting phrase 6\n  ok    nl: waiting phrase 7\n  ok    pt: waiting phrase 1\n  ok    pt: waiting phrase 2\n  ok    pt: waiting phrase 3\n  ok    pt: waiting phrase 4\n  ok    pt: waiting phrase 5\n  ok    pt: waiting phrase 6\n  ok    pt: waiting phrase 7\n\nSender refusal does not undo the purchase access shown by the page\n  ok    release still completes after the sender refuses\n  ok    the sender really refused one request\n  ok    the purchase remains granted and marked given\n\n66 checks, all passing.\nM_BUDGET {\"pipelineCommands\":15,\"memoryRun\":23,\"httpMockDispatch\":1,\"exceeded\":false}\n"}
+
+```
+
+### types.log
+```
+{"roots":4,"sources":979,"diagnostics":0}
+```
+
+### lint.log
+```
+
+```
+
+### scanner.log
+```
+Public data check: 3965 tracked files; 0 file(s) require correction.
+
+```
+
+### verified.json
+```
+{"verified": 3965, "unmatched": [], "scanner_exit": 0}
+```

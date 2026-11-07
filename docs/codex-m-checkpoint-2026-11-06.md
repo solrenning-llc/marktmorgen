@@ -2112,3 +2112,538 @@ export class UnknownReplyError extends Error {
 
 Snapshot validation: {"verified_exact_head_blobs": 3974, "mismatches": [], "unrecovered_head_files": 331, "own_proof_exact": true}
 
+
+
+## Retomada 07/11/2026 18h42 Fortaleza — segunda revisão independente #3125
+
+Recibo #3083 M5815109910 COMMENT noEXATOe2025a33ebede416e492f341989f4ce94418639e/FULLbodyreadbackEXATO, MEDherdadoFECHADO. Introprecedentecontou376não recuperados PORERROnarrativo; JSONverificadodamesmaexecução e relatórioverídico são331. Corrigido porAPÊNDICE, semregravarhistórico/provas. CanalCXM-1835-C1-2 96e5e967a929b9ed2241c9d59a8ba5f1596e24c0/blobf564047b75b3fcc4037283fb291a122a1e31936d/FULL4468134exatoentregou3083eRES3125ANTESdiff/fonte/testes3125. CanalFULL5dbaf623/blobúltimo/FULL4481485prefixopreservadolido atéC2-1840: nenhumclaimsegundo3125concorrente;GconfirmaM3125claim; C1-1746pausaPRnovovigente. #2730mesmo83doispareceresC4/C1,semterceiroduplicado;revisõespedidaspermitidasindependentementedanominalreconciliação.
+
+#3125 OPEN/head3b4c03840ce0b5180133df8f24f2b058e31980fb/base09dd1ece44482e239e4d10bd690d9e46ab1e2fcc. PrimeiroC26712780970creditado, nãoMexecução dele. Diffinteiro3paths:contacts63994be2b89e6432b2f401022e15d6043954bccf,+upsert94b1fb686ca0f40669916839c7df1e3a1284b538,+listf5097b949e9ae6af5d6cda15e36fc9b3744f46e4;contatosbefore72606ba3b88895fcb0bca7d9d9b185ea11d417e1. Fontefullnosmétodosafetados/helpersparse/CAS/replies+callersheardFromSender/inbound500/releaseSeen/broadcastaudienceantesdespacho/thanks+buyer-list+store-join+waitlistcatch/verify-mailloopcatch. NãocertificarHTTPe2e/callersinteirosuniversais. forEachContactrecusaenvelopepaginado/odd/nontext/getter/hole/unfinished; upsert3respostasexatasHGETstring|null,sizecount,suppressed0|1anteswrite;stopWritingthrowbeforeseenmark.
+
+MESMOauthor28:onlyoldcontacts24FAIL→head28PASS. MESMOauthor16:old14FAIL→head16PASS. Own11frozenGitblob75911d0e19878f16377b562eb16e954332ae56be:old8FAIL→head11PASS(accessorsemexecutar,hole,unsubbytespreservados,2ªpáginaUnknownnãoaudiênciaparcial,healthymultipage). Own6frozen2e5977e79a2a9254daa4fbffb7c755b6d525a89b:old3FAIL→head6PASS(realheardFromSenderunknownHGETrecusaANTESseen/contatowrite, retryhealthycomplained+unsub,counted e próximaignored). Ligadoscontacts-room11+crm-contact-writes57+broadcast-send-time-suppression9+bulk-labels130PASS. TOTAL268atualPASS (44+17+207). REDsseparados. Primeirobuildown11pinmissing foiSETUPANTESspawncorrigido com hashownexplicit;contacts-room e bulk falharam só ENOENT de arquivosreadFileSync antesdeterminar,filesthanks/importrecuperadosdosGitblobsheadverificados e sóesses2rerun PASS;logsprimeirosretidos. NãoprodutoREDnemasserçãoeditada.
+
+**mail-health234INCONCLUSIVO, NÃO GREEN**: teto500fetchmockinterceptionatingidoM_ADMISSION_CEILING;4assertionsfalharamnoquartofinal, process.exit(1)antesbeforeExitbudgetprint. Erro403localérespostaSESsintéticafabricadapeloprópriocódigoapóskeymocknegado; NENHUMAAPI/chave/conta real. Nãoaumenteitetonemr erodei234paraempurrarverde;prova6pequenasemHTTPtestaexatocaminhoderetrynecessário. Independência/nãorepetiralegaçãoC2de234PASSminha. GuardasANTES20kpipe+20kMemoryRedisnested500mock/120s512MiB256KiB;todoogrãfobundlehashANTESspawn. Demaiscompletednenhumtetoatingiu. Tipos5roots414sourcesstrictES2017Bundler0diagnostics/lint5roots0;repetiSÓpeloown6adicionadonãoparaapagarerro. ScannerOFICIAL3979tracked0(finalsnapshot3977headfilesEXATOS+2own,347unrecovered), removidos3extrasLEGACYdoINDEXlocalapenasantesúltimoscanner, nãofontesautor. Diffcontactswhitespace0. Semrepofull/build/browser/RedisLua/providerreal/legalcompliancecert.
+
+NoNOVOachadonoDELTA. MantémTODOSherdadosC2/PR: importContactsHMGETloose→2438Q, JSONstringinválidoupsert,readUnsubTokenunknown→notfound,upsertraceeCASfallbackprévio(#3116siblingfix),listCountsfalse0;LOWintroduzidopagecapconservador/scanrepeat jáC2documentados,nãoautobaixadosnemmaiscertificaçãoconsentuniversal. NãoMfontefix/limite/preço/flags/gates/termos/fornecedor/conta/dadospessoais. C1pausasemPRprodutonovo, revisãoexistenteonly. SerialMédio0subagentes/0CIqueries/queue/ref/main/pushproduto. EvidênciasíntegrasabaixoANTESparecer. Próximopublicar2ªCOMMENTnoEXATO3b4ccom268PASS+234INCONCLUSIVO e limites,canalrecibo.
+
+### run.mjs
+```
+import{readFileSync,writeFileSync,mkdirSync,existsSync,symlinkSync}from'node:fs';import{resolve,join}from'node:path';import{createRequire}from'node:module';import{createHash}from'node:crypto';import{spawnSync}from'node:child_process';import{testAliases,testEnvironment}from'./view/tests/test-config.mjs';
+const root=resolve('.'),view=join(root,'view'),deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules';const{build}=createRequire(join(deps,'package.json'))('esbuild');if(!existsSync(join(view,'node_modules')))symlinkSync(deps,join(view,'node_modules'),'dir');mkdirSync('logs',{recursive:true});
+const jobs=process.argv.slice(2);for(const job of jobs){const [mode,test]=job.split(':');
+ const bootstrap=`import{MemoryRedis}from'./lib/redis-memory';import{store as redis}from'./tests/redis-stub';let pc=0,rc=0,hc=0,exceeded=false;const stop=()=>{exceeded=true;throw Error('M_ADMISSION_CEILING')};const pipeline=redis.pipeline,run=MemoryRedis.prototype.run;redis.pipeline=function(c){if(pc+c.length>20000)return stop();pc+=c.length;return pipeline.call(this,c)};MemoryRedis.prototype.run=function(c){if(rc+1>20000)return stop();rc++;return run.call(this,c)};let current=()=>{throw Error('NO_EXTERNAL_NETWORK')};Object.defineProperty(globalThis,'fetch',{configurable:true,get:()=>current,set:f=>{current=(...a)=>{if(hc+1>500)return stop();hc++;return f(...a)}}});process.on('beforeExit',()=>{console.log('M_BUDGET',JSON.stringify({pipelineCommands:pc,memoryRun:rc,httpMockDispatch:hc,exceeded}));if(exceeded)process.exitCode=1});import('./tests/${test}');`;
+ const alias=testAliases(test,view,join(view,'tests'));if(mode==='before')alias['@/lib/contacts']=join(root,'before-contacts.ts');const b=await build({stdin:{contents:bootstrap,resolveDir:view,sourcefile:'m-bootstrap.ts',loader:'ts'},absWorkingDir:view,bundle:true,write:false,platform:'node',format:'cjs',alias,metafile:true,logLevel:'error'});const f=resolve('logs/'+mode+'-'+test+'.cjs');const pin=JSON.parse(readFileSync('head-pins.json','utf8'));let checked=0;for(const input of Object.keys(b.metafile.inputs)){if(input.includes('node_modules')||input==='m-bootstrap.ts')continue;const file=resolve(view,input);const bytes=readFileSync(file);const hash=createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');if(file===join(root,'before-contacts.ts')){if(hash!=='72606ba3b88895fcb0bca7d9d9b185ea11d417e1')throw Error('Old rule mismatch');}else if(input==='tests/m-3125-read-boundaries.proof.ts'){if(hash!=='75911d0e19878f16377b562eb16e954332ae56be')throw Error('Own proof changed');}else if(input==='tests/m-3125-notice-retry.proof.ts'){if(hash!=='2e5977e79a2a9254daa4fbffb7c755b6d525a89b')throw Error('Notice proof changed');}else if(hash!==pin[input])throw Error('Head pin mismatch '+input);checked++;}console.log(JSON.stringify({mode,test,checked}));writeFileSync(f,b.outputFiles[0].text);writeFileSync(f+'.meta.json',JSON.stringify(b.metafile));
+ const p=spawnSync(process.execPath,['--max-old-space-size=512',f],{cwd:view,env:testEnvironment({PATH:'/usr/bin:/bin',TZ:'UTC'}),encoding:'utf8',timeout:120000,maxBuffer:256*1024});const out=(p.stdout||'')+(p.stderr||'');writeFileSync(f+'.log',out);console.log(JSON.stringify({mode,test,exit:p.status,error:p.error?.message,signal:p.signal,tail:out.slice(-1700)}));if(p.error||p.signal)throw Error('Incomplete child');
+}
+
+```
+
+### verify.cjs
+```
+const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');const deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules',root=path.resolve('view'),ts=require(deps+'/typescript');
+const names=['lib/contacts.ts','tests/contacts-upsert-read-evidence.test.ts','tests/contacts-list-read-evidence.test.ts','tests/m-3125-read-boundaries.proof.ts','tests/m-3125-notice-retry.proof.ts'];const opts={strict:true,noEmit:true,allowJs:true,target:ts.ScriptTarget.ES2017,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler,skipLibCheck:true,esModuleInterop:true,resolveJsonModule:true,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'@/lib/content-jsx',baseUrl:root,paths:{'@/*':['*']},types:['node','react'],typeRoots:[deps+'/@types'],lib:['lib.esnext.d.ts','lib.dom.d.ts','lib.dom.iterable.d.ts']};
+const p=ts.createProgram(names.map(f=>path.join(root,f)),opts),ds=ts.getPreEmitDiagnostics(p);fs.writeFileSync('types.log',ts.formatDiagnosticsWithColorAndContext(ds,{getCurrentDirectory:()=>root,getCanonicalFileName:f=>f,getNewLine:()=>"\n"})+JSON.stringify({roots:names.length,sources:p.getSourceFiles().length,diagnostics:ds.length}));console.log('types',ds.length);
+const paths=names;const r=cp.spawnSync(process.execPath,['--max-old-space-size=512',deps+'/eslint/bin/eslint.js',...paths],{cwd:root,encoding:'utf8',timeout:120000,maxBuffer:256*1024});fs.writeFileSync('lint.log',(r.stdout||'')+(r.stderr||''));console.log('lint',r.status,r.signal,r.error?.message);
+
+```
+
+### run.log
+```
+{"mode":"before","test":"contacts-upsert-read-evidence.test.ts","checked":179}
+{"mode":"before","test":"contacts-upsert-read-evidence.test.ts","exit":1,"signal":null,"tail":"26-11-07T21:37:33.908Z\\\",\\\"titles\\\":[],\\\"ids\\\":[],\\\"source\\\":\\\"import\\\",\\\"unsub\\\":false,\\\"unsubAt\\\":\\\"\\\",\\\"t\\\":\\\"\\\",\\\"name\\\":\\\"\\\",\\\"tags\\\":[],\\\"importedAt\\\":\\\"\\\"}\"]\n\nWhether the address was deleted, answered as two\n  FAIL  two: unknown, never \"never deleted\" (nothing written)\n        expected [\"threw\",null]\n        got      [\"written\",\"{\\\"agreed\\\":true,\\\"agreedAt\\\":\\\"2026-11-07T21:37:33.908Z\\\",\\\"firstAt\\\":\\\"2026-11-07T21:37:33.908Z\\\",\\\"lastAt\\\":\\\"2026-11-07T21:37:33.908Z\\\",\\\"titles\\\":[],\\\"ids\\\":[],\\\"source\\\":\\\"import\\\",\\\"unsub\\\":false,\\\"unsubAt\\\":\\\"\\\",\\\"t\\\":\\\"\\\",\\\"name\\\":\\\"\\\",\\\"tags\\\":[],\\\"importedAt\\\":\\\"\\\"}\"]\n\nWhether the address was deleted, answered as a list\n  FAIL  a list: unknown, never \"never deleted\" (nothing written)\n        expected [\"threw\",null]\n        got      [\"written\",\"{\\\"agreed\\\":false,\\\"agreedAt\\\":\\\"\\\",\\\"firstAt\\\":\\\"2026-11-07T21:37:33.908Z\\\",\\\"lastAt\\\":\\\"2026-11-07T21:37:33.908Z\\\",\\\"titles\\\":[],\\\"ids\\\":[],\\\"source\\\":\\\"import\\\",\\\"unsub\\\":false,\\\"unsubAt\\\":\\\"\\\",\\\"t\\\":\\\"\\\",\\\"name\\\":\\\"\\\",\\\"tags\\\":[],\\\"importedAt\\\":\\\"\\\"}\"]\n\nWhether the address was deleted, answered as true\n  FAIL  true: unknown, never \"never deleted\" (nothing written)\n        expected [\"threw\",null]\n        got      [\"written\",\"{\\\"agreed\\\":false,\\\"agreedAt\\\":\\\"\\\",\\\"firstAt\\\":\\\"2026-11-07T21:37:33.908Z\\\",\\\"lastAt\\\":\\\"2026-11-07T21:37:33.908Z\\\",\\\"titles\\\":[],\\\"ids\\\":[],\\\"source\\\":\\\"import\\\",\\\"unsub\\\":false,\\\"unsubAt\\\":\\\"\\\",\\\"t\\\":\\\"\\\",\\\"name\\\":\\\"\\\",\\\"tags\\\":[],\\\"importedAt\\\":\\\"\\\"}\"]\n\nA new address with every reply in shape is still written\n  ok    a sign-up with the box checked joins\n\n28 checks, 24 failing.\nM_BUDGET {\"pipelineCommands\":95,\"memoryRun\":157,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"contacts-upsert-read-evidence.test.ts","checked":179}
+{"mode":"head","test":"contacts-upsert-read-evidence.test.ts","exit":0,"signal":null,"tail":"cribed, answered as no reply at all\n  ok    no reply at all: unknown, never \"not on the list\" (nothing written)\n  ok    no reply at all: the row is exactly as it was: still unsubscribed, the complaint and the token kept\n\nThe pipeline answers fewer replies than it was sent\n  ok    two replies for three commands: unknown, never \"never deleted\"\n  ok    the deleted person was not put back\n  ok    one reply for three commands: unknown\n  ok    nobody was written\n\nThe list's size answered as nothing\n  ok    nothing: unknown, never room on the list\n\nThe list's size answered as text\n  ok    text: unknown, never room on the list\n\nThe list's size answered as a negative count\n  ok    a negative count: unknown, never room on the list\n\nThe list's size answered as a fraction\n  ok    a fraction: unknown, never room on the list\n\nThe list's size answered as a list\n  ok    a list: unknown, never room on the list\n\nWhether the address was deleted, answered as nothing\n  ok    nothing: unknown, never \"never deleted\" (nothing written)\n\nWhether the address was deleted, answered as text\n  ok    text: unknown, never \"never deleted\" (nothing written)\n\nWhether the address was deleted, answered as two\n  ok    two: unknown, never \"never deleted\" (nothing written)\n\nWhether the address was deleted, answered as a list\n  ok    a list: unknown, never \"never deleted\" (nothing written)\n\nWhether the address was deleted, answered as true\n  ok    true: unknown, never \"never deleted\" (nothing written)\n\nA new address with every reply in shape is still written\n  ok    a sign-up with the box checked joins\n\n28 checks, all passing.\nM_BUDGET {\"pipelineCommands\":64,\"memoryRun\":126,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"before","test":"contacts-list-read-evidence.test.ts","checked":179}
+{"mode":"before","test":"contacts-list-read-evidence.test.ts","exit":1,"signal":null,"tail":"xample.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\",\"reader.one@example.com\",\"reader.two@example.com\"]\n\n16 checks, 14 failing.\nM_BUDGET {\"pipelineCommands\":438,\"memoryRun\":455,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"contacts-list-read-evidence.test.ts","checked":179}
+{"mode":"head","test":"contacts-list-read-evidence.test.ts","exit":0,"signal":null,"tail":"as a list\n  ok    a list: unknown, never \"not on the list\" (the notice is heard again)\n\nstopWriting: the row answered as an object\n  ok    an object: unknown, never \"not on the list\" (the notice is heard again)\n\nstopWriting: the row answered as true\n  ok    true: unknown, never \"not on the list\" (the notice is heard again)\n\nstopWriting: the row answered as no reply at all\n  ok    no reply at all: unknown, never \"not on the list\" (the notice is heard again)\n\nstopWriting: the row answered as two replies for one command\n  ok    two replies for one command: unknown, never \"not on the list\" (the notice is heard again)\n\naudience: an HSCAN page answered as no page\n  ok    no page: unknown, never the end of the list\n\naudience: an HSCAN page answered as an empty reply\n  ok    an empty reply: unknown, never the end of the list\n\naudience: an HSCAN page answered as a cursor alone\n  ok    a cursor alone: unknown, never the end of the list\n\naudience: an HSCAN page answered as a cursor that is not one\n  ok    a cursor that is not one: unknown, never the end of the list\n\naudience: an HSCAN page answered as the fields not a list\n  ok    the fields not a list: unknown, never the end of the list\n\naudience: an HSCAN page answered as a field without its value\n  ok    a field without its value: unknown, never the end of the list\n\naudience: an HSCAN page answered as a field that is not text\n  ok    a field that is not text: unknown, never the end of the list\n\naudience: an HSCAN page answered as a page that never ends\n  ok    a page that never ends: unknown, never the end of the list\n\n16 checks, all passing.\nM_BUDGET {\"pipelineCommands\":229,\"memoryRun\":246,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+file:///workspace/scratch/d1ece80b1417/m-review-3125/run.mjs:5
+ const alias=testAliases(test,view,join(view,'tests'));if(mode==='before')alias['@/lib/contacts']=join(root,'before-contacts.ts');const b=await build({stdin:{contents:bootstrap,resolveDir:view,sourcefile:'m-bootstrap.ts',loader:'ts'},absWorkingDir:view,bundle:true,write:false,platform:'node',format:'cjs',alias,metafile:true,logLevel:'error'});const f=resolve('logs/'+mode+'-'+test+'.cjs');const pin=JSON.parse(readFileSync('head-pins.json','utf8'));let checked=0;for(const input of Object.keys(b.metafile.inputs)){if(input.includes('node_modules')||input==='m-bootstrap.ts')continue;const file=resolve(view,input);const bytes=readFileSync(file);const hash=createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');if(file===join(root,'before-contacts.ts')){if(hash!=='72606ba3b88895fcb0bca7d9d9b185ea11d417e1')throw Error('Old rule mismatch');}else if(hash!==pin[input])throw Error('Head pin mismatch '+input);checked++;}console.log(JSON.stringify({mode,test,checked}));writeFileSync(f,b.outputFiles[0].text);writeFileSync(f+'.meta.json',JSON.stringify(b.metafile));
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     ^
+
+Error: Head pin mismatch tests/m-3125-read-boundaries.proof.ts
+    at file:///workspace/scratch/d1ece80b1417/m-review-3125/run.mjs:5:902
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+Node.js v24.22.1
+
+```
+
+### linked.log
+```
+{"mode":"head","test":"m-3125-read-boundaries.proof.ts","checked":179}
+{"mode":"head","test":"m-3125-read-boundaries.proof.ts","exit":0,"signal":null,"tail":"\nAn executable or missing pipeline slot cannot erase unsubscribe evidence\n  ok    upsert rejects an accessor reply\n  ok    the accessor is never invoked\n  ok    the saved unsubscribe remains byte-identical\n  ok    a same-length hole is not a deletion-check reply\n  ok    a hole cannot replace an unsubscribe\n\nA complaint's read does not execute reply code\n  ok    complaint read rejects an accessor\n  ok    complaint read invokes no accessor\n\nAn unknown later page cannot return a successful partial audience\n  ok    audience rejects after one valid page then an unknown page\n  ok    the unknown second page was reached\n  ok    healthy multi-page audience remains complete\n  ok    healthy cursor terminates after its final page\n\n11 checks, all passing.\nM_BUDGET {\"pipelineCommands\":11,\"memoryRun\":11,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"contacts-room.test.ts","checked":179}
+{"mode":"head","test":"contacts-room.test.ts","exit":1,"signal":null,"tail":"  ok    a store record has an `order` field, which is why it was taken for an order's\n\nThe whole store as the room: charged before writing\n  ok    a sign-up takes room in the contacts' slot\n  ok    an import takes room too\n  ok    a label set takes what it grows the record by\n\nAn order's write: marked by orderRoom, charged where an order's records are\n  ok    counted with the order's records\n  ok    and not twice in the contacts' slot\nError: ENOENT: no such file or directory, open 'app/[handle]/thanks/page.tsx'\n    at readFileSync (node:fs:483:20)\n    at main (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-contacts-room.test.ts.cjs:12949:50) {\n  errno: -2,\n  code: 'ENOENT',\n  syscall: 'open',\n  path: 'app/[handle]/thanks/page.tsx'\n}\n"}
+{"mode":"head","test":"crm-contact-writes.test.ts","checked":419}
+{"mode":"head","test":"crm-contact-writes.test.ts","exit":0,"signal":null,"tail":"ve or clear stays uncertain\n  ok    unknown save or clear is never retried\n  ok    unknown save or clear stays uncertain\n  ok    unknown save or clear is never retried\n  ok    unknown save or clear stays uncertain\n  ok    unknown save or clear is never retried\n  ok    unknown save or clear stays uncertain\n  ok    unknown save or clear is never retried\n  ok    unknown save or clear stays uncertain\n  ok    unknown save or clear is never retried\n  ok    unknown save or clear stays uncertain\n  ok    unknown save or clear is never retried\n  ok    unknown save or clear stays uncertain\n  ok    unknown save or clear is never retried\n  ok    unknown save or clear stays uncertain\n  ok    unknown save or clear is never retried\n  ok    unknown save or clear stays uncertain\n  ok    unknown save or clear is never retried\n  ok    numeric acknowledgement confirms save or clear\n  ok    numeric acknowledgement confirms save or clear\n\nApplied writes with lost replies are not rolled back\n  ok    applied value is still uncertain\n  ok    applied value is preserved\n  ok    applied save is attempted once\n  ok    applied clear is still uncertain\n  ok    cleared value is not recreated\n  ok    applied clear is attempted once\n\nInvalid person and value are refused before storage\n  ok    invalid person refused\n  ok    invalid number refused\n  ok    validation refusals perform no writes\n\nAPI reports unknown contact writes without claiming success\n  ok    API exposes uncertain write\n  ok    client recognizes recovery state\n  ok    route attempts write once\n  ok    applied contact value remains\n\n57 checks, all passing.\nM_BUDGET {\"pipelineCommands\":70,\"memoryRun\":70,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"mail-health.test.ts","checked":246}
+{"mode":"head","test":"mail-health.test.ts","exit":1,"signal":null,"tail":"ion remains taken\n  ok    unconfirmed portion checkpoints sent no provider batch\n  ok    no computed read or write acknowledgement was invoked\n  ok    confirmed absence still permits the requested audience\n  ok    a known portion with confirmed write grants its exact amount\n  ok    existing 180-day portion retention is unchanged\n  FAIL  essential email still uses its existing path\n        expected [true,1]\n        got      [false,0]\n\n234 checks, 4 failing.\nbatch refused with its tags; sending it without them 422\nAmazon could not be asked for a key Error: M_ADMISSION_CEILING\n    at stop (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:26617:9)\n    at current (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:26636:30)\n    at /workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:10230:19\n    at timed (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:9231:19)\n    at sesCredentials (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:10228:28)\n    at call (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:10286:22)\n    at askAccount (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:10321:28)\n    at sesState (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:10356:23)\n    at async sesReady (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:10375:17)\n    at async viaAmazon (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:15303:19)\nAmazon SES would not say what the account may do 403\n"}
+{"mode":"head","test":"broadcast-send-time-suppression.test.ts","checked":243}
+{"mode":"head","test":"broadcast-send-time-suppression.test.ts","exit":0,"signal":null,"tail":"\nThe list as it was written down when the email started\n\nThen, before it goes, people change their minds\n  ok    one leaves through the link in an earlier email\n  ok    one bounces for good\n  ok    one marks an email as spam\n\nWhat goes out\n  ok    only the two who still may be written to\n  ok    each with the one-click unsubscribe header and a working link\n  ok    the broadcast completes through SES without Resend fallback\n  ok    advancing it again sends nothing more\n\nNobody who left is put back by the send\n  ok    still unsubscribed, still stopped as bounced\n  ok    and a second unsubscribe of the same address is the same\n\n9 checks, all passing.\nM_BUDGET {\"pipelineCommands\":170,\"memoryRun\":185,\"httpMockDispatch\":4,\"exceeded\":false}\n"}
+{"mode":"head","test":"bulk-labels.test.ts","checked":420}
+{"mode":"head","test":"bulk-labels.test.ts","exit":1,"signal":null,"tail":"space/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:46021:15)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:80984:19) {\n  taken: {\n    ok: false,\n    reason: 'full',\n    used: 0,\n    room: 135000000,\n    message: \"Your store's data room is full (0 KB of 135 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts.\"\n  }\n}\nchanging labels in bulk stopped part way Error: injected: the read failed\n    at store.pipeline (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:80755:13)\n    at redisPipeline (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:2118:41)\n    at casWrite (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:45806:26)\n    at async changeLabels (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:45856:17)\n    at async applyBulk (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:46021:15)\n    at async POST (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:77175:19)\n    at async post (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:80688:22)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:81016:25)\nError: ENOENT: no such file or directory, open 'app/studio/import/page.tsx'\n    at readFileSync (node:fs:483:20)\n    at main (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:81060:101) {\n  errno: -2,\n  code: 'ENOENT',\n  syscall: 'open',\n  path: 'app/studio/import/page.tsx'\n}\n"}
+
+```
+
+### recovered-linked.log
+```
+{"mode":"head","test":"contacts-room.test.ts","checked":179}
+{"mode":"head","test":"contacts-room.test.ts","exit":0,"signal":null,"tail":"  ok    a store record has an `order` field, which is why it was taken for an order's\n\nThe whole store as the room: charged before writing\n  ok    a sign-up takes room in the contacts' slot\n  ok    an import takes room too\n  ok    a label set takes what it grows the record by\n\nAn order's write: marked by orderRoom, charged where an order's records are\n  ok    counted with the order's records\n  ok    and not twice in the contacts' slot\n  ok    the thanks page marks its writes with orderRoom, never the older `{ order: store }`\n  ok    the older form is no longer read as an order's\n\nA paste that fills the room partway: what went in is said, and nothing else is written\n  ok    some went in, the rest are said to be left out, and why\n  ok    the paste starts the ramp for those added, full or not, and says so\n  ok    a file of contacts that fills the room starts the ramp for those already in\n\n11 checks, all passing.\nM_BUDGET {\"pipelineCommands\":41,\"memoryRun\":61,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"bulk-labels.test.ts","checked":420}
+{"mode":"head","test":"bulk-labels.test.ts","exit":0,"signal":null,"tail":"5/logs/head-bulk-labels.test.ts.cjs:43288:38)\n    at async needContacts (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:45691:18)\n    at async changeLabels (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:45845:7)\n    at async applyBulk (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:46021:15)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:80984:19) {\n  taken: {\n    ok: false,\n    reason: 'full',\n    used: 0,\n    room: 135000000,\n    message: \"Your store's data room is full (0 KB of 135 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts.\"\n  }\n}\nchanging labels in bulk stopped part way Error: injected: the read failed\n    at store.pipeline (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:80755:13)\n    at redisPipeline (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:2118:41)\n    at casWrite (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:45806:26)\n    at async changeLabels (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:45856:17)\n    at async applyBulk (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:46021:15)\n    at async POST (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:77175:19)\n    at async post (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:80688:22)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-bulk-labels.test.ts.cjs:81016:25)\n"}
+
+```
+
+### own-before.log
+```
+{"mode":"before","test":"m-3125-read-boundaries.proof.ts","checked":179}
+{"mode":"before","test":"m-3125-read-boundaries.proof.ts","exit":1,"signal":null,"tail":"t      \"{\\\"agreed\\\":true,\\\"agreedAt\\\":\\\"2026-11-01T00:00:00Z\\\",\\\"firstAt\\\":\\\"2026-11-07T21:39:30.793Z\\\",\\\"lastAt\\\":\\\"2026-11-07T21:39:30.793Z\\\",\\\"titles\\\":[],\\\"ids\\\":[],\\\"source\\\":\\\"buyer\\\",\\\"unsub\\\":false,\\\"unsubAt\\\":\\\"\\\",\\\"t\\\":\\\"\\\",\\\"name\\\":\\\"\\\",\\\"tags\\\":[],\\\"importedAt\\\":\\\"\\\"}\"\n  FAIL  a same-length hole is not a deletion-check reply\n        expected true\n        got      false\n  FAIL  a hole cannot replace an unsubscribe\n        expected \"{\\\"agreed\\\":true,\\\"unsub\\\":true,\\\"unsubAt\\\":\\\"2026-11-02T00:00:00Z\\\",\\\"agreedAt\\\":\\\"2026-11-01T00:00:00Z\\\",\\\"t\\\":\\\"abababababababababababababababababababab\\\",\\\"gone\\\":\\\"complained\\\",\\\"ids\\\":[],\\\"titles\\\":[],\\\"tags\\\":[]}\"\n        got      \"{\\\"agreed\\\":true,\\\"agreedAt\\\":\\\"2026-11-01T00:00:00Z\\\",\\\"firstAt\\\":\\\"2026-11-07T21:39:30.796Z\\\",\\\"lastAt\\\":\\\"2026-11-07T21:39:30.796Z\\\",\\\"titles\\\":[],\\\"ids\\\":[],\\\"source\\\":\\\"buyer\\\",\\\"unsub\\\":true,\\\"unsubAt\\\":\\\"2026-11-02T00:00:00Z\\\",\\\"gone\\\":\\\"complained\\\",\\\"t\\\":\\\"abababababababababababababababababababab\\\",\\\"name\\\":\\\"\\\",\\\"tags\\\":[],\\\"importedAt\\\":\\\"\\\"}\"\n\nA complaint's read does not execute reply code\n  FAIL  complaint read rejects an accessor\n        expected true\n        got      false\n  FAIL  complaint read invokes no accessor\n        expected 0\n        got      1\n\nAn unknown later page cannot return a successful partial audience\n  FAIL  audience rejects after one valid page then an unknown page\n        expected true\n        got      false\n  ok    the unknown second page was reached\n  ok    healthy multi-page audience remains complete\n  ok    healthy cursor terminates after its final page\n\n11 checks, 8 failing.\nM_BUDGET {\"pipelineCommands\":14,\"memoryRun\":14,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+
+```
+
+### notice.log
+```
+{"mode":"before","test":"m-3125-notice-retry.proof.ts","checked":181}
+{"mode":"before","test":"m-3125-notice-retry.proof.ts","exit":1,"signal":null,"tail":"  FAIL  the delivery notice is unacknowledged on an unknown row\n        expected true\n        got      false\n  FAIL  no seen marker or contact write precedes the refusal\n        expected 0\n        got      1\n  ok    unknown read preserves the actual stored row\n  FAIL  a healthy notice retry remains countable\n        expected \"counted\"\n        got      \"ignored\"\n  ok    the healthy retry keeps the complaint and unsubscribes\n  ok    the following duplicate does not recount it\n\n6 checks, 3 failing.\nM_BUDGET {\"pipelineCommands\":22,\"memoryRun\":22,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"m-3125-notice-retry.proof.ts","checked":181}
+{"mode":"head","test":"m-3125-notice-retry.proof.ts","exit":0,"signal":null,"tail":"  ok    the delivery notice is unacknowledged on an unknown row\n  ok    no seen marker or contact write precedes the refusal\n  ok    unknown read preserves the actual stored row\n  ok    a healthy notice retry remains countable\n  ok    the healthy retry keeps the complaint and unsubscribes\n  ok    the following duplicate does not recount it\n\n6 checks, all passing.\nM_BUDGET {\"pipelineCommands\":21,\"memoryRun\":21,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+
+```
+
+### final-verify.log
+```
+types 0
+lint 0 null undefined
+
+```
+
+### types.log
+```
+{"roots":5,"sources":414,"diagnostics":0}
+```
+
+### lint.log
+```
+
+```
+
+### scanner-subject.log
+```
+Public data check: 3979 tracked files; 0 file(s) require correction.
+
+```
+
+### verified.json
+```
+{"verified": 3977, "mismatch": [], "unrecovered": 347}
+```
+
+### logs/head-mail-health.test.ts.cjs.log
+```
+
+Where the lines are
+  ok    no email sent, no line crossed
+  ok    one mistyped address in thirty is nobody's bad list
+  ok    twenty-four bounces are still under the floor, whatever the share
+  ok    twenty-five of a thousand is 2.5%: over
+  ok    twenty-five of two thousand is 1.25%: a large list with a few dead addresses is left alone
+  ok    four spam reports are under the floor
+  ok    five in five thousand is 0.1%: over
+  ok    five in ten thousand is 0.05%: under the sender's own line
+  ok    the published sentence carries the same numbers
+
+A list email says whose it is
+  ok    a store is counted under its own id
+  ok    it went
+  ok    carrying the store and the list, as tags the reader never sees
+  ok    and what was sent is counted for the store
+
+A sender that will not take the tags still sends the email
+  ok    the Resend-specific retry goes all the same
+  ok    the tagged request is refused and one untagged retry is accepted
+
+Only the sender is believed
+  ok    with no signing secret set, there is nothing here
+  ok    signed with another secret: refused
+  ok    and nobody was taken off for it
+
+An address that bounced for good is not written to again
+  ok    heard, without the settings that receiving mail needs
+  ok    off the list
+  ok    counted with those who left
+  ok    and counted once for the store
+  ok    the same announcement again changes nothing
+  ok    nor does the same address bouncing a second time
+  ok    an import does not bring it back
+  ok    the next email leaves it out
+  ok    only that person's own yes, given since, puts them back
+
+What is not a bad address
+  ok    a full mailbox may yet deliver: left alone
+  ok    a login link to a mistyped address is nobody's bad list
+  ok    a tag that is not an id is not followed anywhere
+  ok    an announcement of something else is acknowledged and left
+
+Marked as spam is leaving
+  ok    heard, in the other shape tags are written in
+  ok    off the list, and counted apart from bounces
+  ok    their own unsubscribe, already made, is not counted as anything
+
+A handful of bad addresses pauses nobody
+  ok    not paused
+  ok    twenty-four bounces of a thousand: still sending
+
+One more, and the store waits by itself
+  ok    paused, for bounces
+  ok    for seven days
+  ok    said in words a creator can read
+  ok    a list email is held, whole
+  ok    and nothing is taken from the store's month for it
+  ok    a bounce that arrives meanwhile is counted, and the pause keeps its own end
+
+What a store cannot run without still goes
+  ok    a login link is sent all the same
+
+A broadcast waits, and goes on by itself
+  ok    it waits, and says until when
+  ok    nobody was written to, and nobody was dropped
+  ok    the bad addresses are not among those it will go to
+  ok    after seven days the pause is over
+  ok    and it finishes without anyone pressing anything
+  ok    to everyone still on the list, once
+
+Too many spam reports do the same
+  ok    five in five thousand
+  ok    one store's pause is not another's
+  ok    and when its week is over it starts again with a hundred people, not everyone
+
+Addresses brought in from elsewhere go out in portions that double
+  ok    a store that brought nothing in sends everything at once
+  ok    a few people added by hand start nothing
+  ok    after a file is brought in: a hundred first
+  ok    and then nobody, until the next portion opens
+  ok    a quarter of an hour later: two hundred, taken as they are asked for
+  ok    a batch that did not go out is given back to its portion
+  ok    doubling each time, and after the last portion everything at once again
+  ok    which is seven portions in all, as the published sentence says
+
+A broadcast to a list just brought in
+  ok    the first hundred go, and the rest wait with the reason
+  ok    pressing on before the quarter hour sends nobody else
+  ok    the store is paused at the twenty-fifth, with a hundred written to and not four hundred and fifty
+  ok    what comes in late from the same emails is not held against it when its week is over
+  ok    the next portion does not open over a pause
+
+A good list is through it by itself
+  FAIL  100, then 200 more, then the rest: nobody pressed anything
+        expected [[100,300,450],"sent",""]
+        got      [[100,300,300,300,300,300],"failed","Sending could not be confirmed. Some emails may already have gone out. Automatic retries are stopped to avoid sending twice. The saved recipient list is retained."]
+  FAIL  to everyone, once
+        expected 450
+        got      372
+
+Unconfirmed health-pause evidence cannot admit list email
+  ok    lost reply: no invented permission or health pause
+  ok    lost reply: actual list sender waits with every recipient intact
+  ok    lost reply: no extra read, reservation, ramp change or provider work
+  ok    not an array: no invented permission or health pause
+  ok    not an array: actual list sender waits with every recipient intact
+  ok    not an array: no extra read, reservation, ramp change or provider work
+  ok    null envelope: no invented permission or health pause
+  ok    null envelope: actual list sender waits with every recipient intact
+  ok    null envelope: no extra read, reservation, ramp change or provider work
+  ok    empty: no invented permission or health pause
+  ok    empty: actual list sender waits with every recipient intact
+  ok    empty: no extra read, reservation, ramp change or provider work
+  ok    extra entry: no invented permission or health pause
+  ok    extra entry: actual list sender waits with every recipient intact
+  ok    extra entry: no extra read, reservation, ramp change or provider work
+  ok    sparse: no invented permission or health pause
+  ok    sparse: actual list sender waits with every recipient intact
+  ok    sparse: no extra read, reservation, ramp change or provider work
+  ok    inherited absence: no invented permission or health pause
+  ok    inherited absence: actual list sender waits with every recipient intact
+  ok    inherited absence: no extra read, reservation, ramp change or provider work
+  ok    computed absence: no invented permission or health pause
+  ok    computed absence: actual list sender waits with every recipient intact
+  ok    computed absence: no extra read, reservation, ramp change or provider work
+  ok    undefined entry: no invented permission or health pause
+  ok    undefined entry: actual list sender waits with every recipient intact
+  ok    undefined entry: no extra read, reservation, ramp change or provider work
+  ok    numeric entry: no invented permission or health pause
+  ok    numeric entry: actual list sender waits with every recipient intact
+  ok    numeric entry: no extra read, reservation, ramp change or provider work
+  ok    invalid JSON: no invented permission or health pause
+  ok    invalid JSON: actual list sender waits with every recipient intact
+  ok    invalid JSON: no extra read, reservation, ramp change or provider work
+  ok    JSON null: no invented permission or health pause
+  ok    JSON null: actual list sender waits with every recipient intact
+  ok    JSON null: no extra read, reservation, ramp change or provider work
+  ok    JSON array: no invented permission or health pause
+  ok    JSON array: actual list sender waits with every recipient intact
+  ok    JSON array: no extra read, reservation, ramp change or provider work
+  ok    missing fields: no invented permission or health pause
+  ok    missing fields: actual list sender waits with every recipient intact
+  ok    missing fields: no extra read, reservation, ramp change or provider work
+  ok    wrong reason: no invented permission or health pause
+  ok    wrong reason: actual list sender waits with every recipient intact
+  ok    wrong reason: no extra read, reservation, ramp change or provider work
+  ok    string expiration: no invented permission or health pause
+  ok    string expiration: actual list sender waits with every recipient intact
+  ok    string expiration: no extra read, reservation, ramp change or provider work
+  ok    negative expiration: no invented permission or health pause
+  ok    negative expiration: actual list sender waits with every recipient intact
+  ok    negative expiration: no extra read, reservation, ramp change or provider work
+  ok    fractional count: no invented permission or health pause
+  ok    fractional count: actual list sender waits with every recipient intact
+  ok    fractional count: no extra read, reservation, ramp change or provider work
+  ok    unsafe count: no invented permission or health pause
+  ok    unsafe count: actual list sender waits with every recipient intact
+  ok    unsafe count: no extra read, reservation, ramp change or provider work
+  ok    missing sent: no invented permission or health pause
+  ok    missing sent: actual list sender waits with every recipient intact
+  ok    missing sent: no extra read, reservation, ramp change or provider work
+  ok    negative sent: no invented permission or health pause
+  ok    negative sent: actual list sender waits with every recipient intact
+  ok    negative sent: no extra read, reservation, ramp change or provider work
+  ok    oversized record: no invented permission or health pause
+  ok    oversized record: actual list sender waits with every recipient intact
+  ok    oversized record: no extra read, reservation, ramp change or provider work
+  ok    unknown health evidence sent no list batch
+  ok    health evidence getters were never invoked
+  ok    confirmed absence: exact existing state
+  ok    known current pause: exact existing state
+  ok    known complaint pause: exact existing state
+  ok    known expired pause: exact existing state
+  ok    the existing display wrapper keeps its nullable contract
+  FAIL  an essential login link is still available while list health is unconfirmed
+        expected [true,1]
+        got      [false,0]
+
+Unconfirmed portion reads never release the requested audience
+  ok    lost reply: no confirmed portion capacity
+  ok    lost reply: sender keeps its recipient waiting without unknown acceptance
+  ok    lost reply: only existing reader calls, with no reservation or write
+  ok    not an array: no confirmed portion capacity
+  ok    not an array: sender keeps its recipient waiting without unknown acceptance
+  ok    not an array: only existing reader calls, with no reservation or write
+  ok    null envelope: no confirmed portion capacity
+  ok    null envelope: sender keeps its recipient waiting without unknown acceptance
+  ok    null envelope: only existing reader calls, with no reservation or write
+  ok    empty: no confirmed portion capacity
+  ok    empty: sender keeps its recipient waiting without unknown acceptance
+  ok    empty: only existing reader calls, with no reservation or write
+  ok    extra entry: no confirmed portion capacity
+  ok    extra entry: sender keeps its recipient waiting without unknown acceptance
+  ok    extra entry: only existing reader calls, with no reservation or write
+  ok    sparse: no confirmed portion capacity
+  ok    sparse: sender keeps its recipient waiting without unknown acceptance
+  ok    sparse: only existing reader calls, with no reservation or write
+  ok    inherited absence: no confirmed portion capacity
+  ok    inherited absence: sender keeps its recipient waiting without unknown acceptance
+  ok    inherited absence: only existing reader calls, with no reservation or write
+  ok    computed absence: no confirmed portion capacity
+  ok    computed absence: sender keeps its recipient waiting without unknown acceptance
+  ok    computed absence: only existing reader calls, with no reservation or write
+  ok    undefined: no confirmed portion capacity
+  ok    undefined: sender keeps its recipient waiting without unknown acceptance
+  ok    undefined: only existing reader calls, with no reservation or write
+  ok    numeric coercion: no confirmed portion capacity
+  ok    numeric coercion: sender keeps its recipient waiting without unknown acceptance
+  ok    numeric coercion: only existing reader calls, with no reservation or write
+  ok    invalid JSON: no confirmed portion capacity
+  ok    invalid JSON: sender keeps its recipient waiting without unknown acceptance
+  ok    invalid JSON: only existing reader calls, with no reservation or write
+  ok    JSON null: no confirmed portion capacity
+  ok    JSON null: sender keeps its recipient waiting without unknown acceptance
+  ok    JSON null: only existing reader calls, with no reservation or write
+  ok    JSON array: no confirmed portion capacity
+  ok    JSON array: sender keeps its recipient waiting without unknown acceptance
+  ok    JSON array: only existing reader calls, with no reservation or write
+  ok    missing fields: no confirmed portion capacity
+  ok    missing fields: sender keeps its recipient waiting without unknown acceptance
+  ok    missing fields: only existing reader calls, with no reservation or write
+  ok    string size: no confirmed portion capacity
+  ok    string size: sender keeps its recipient waiting without unknown acceptance
+  ok    string size: only existing reader calls, with no reservation or write
+  ok    unknown size: no confirmed portion capacity
+  ok    unknown size: sender keeps its recipient waiting without unknown acceptance
+  ok    unknown size: only existing reader calls, with no reservation or write
+  ok    fractional left: no confirmed portion capacity
+  ok    fractional left: sender keeps its recipient waiting without unknown acceptance
+  ok    fractional left: only existing reader calls, with no reservation or write
+  ok    negative left: no confirmed portion capacity
+  ok    negative left: sender keeps its recipient waiting without unknown acceptance
+  ok    negative left: only existing reader calls, with no reservation or write
+  ok    left above size: no confirmed portion capacity
+  ok    left above size: sender keeps its recipient waiting without unknown acceptance
+  ok    left above size: only existing reader calls, with no reservation or write
+  ok    negative opening: no confirmed portion capacity
+  ok    negative opening: sender keeps its recipient waiting without unknown acceptance
+  ok    negative opening: only existing reader calls, with no reservation or write
+  ok    unsafe opening: no confirmed portion capacity
+  ok    unsafe opening: sender keeps its recipient waiting without unknown acceptance
+  ok    unsafe opening: only existing reader calls, with no reservation or write
+  ok    oversized record: no confirmed portion capacity
+  ok    oversized record: sender keeps its recipient waiting without unknown acceptance
+  ok    oversized record: only existing reader calls, with no reservation or write
+
+Unconfirmed portion writes grant no dispatch and are never refunded
+  ok    empty: sender waits with the whole recipient list
+  ok    empty: no allowance increment or rollback command
+  ok    empty: applied uncertain portion remains taken
+  ok    null: sender waits with the whole recipient list
+  ok    null: no allowance increment or rollback command
+  ok    null: applied uncertain portion remains taken
+  ok    boolean: sender waits with the whole recipient list
+  ok    boolean: no allowance increment or rollback command
+  ok    boolean: applied uncertain portion remains taken
+  ok    lowercase: sender waits with the whole recipient list
+  ok    lowercase: no allowance increment or rollback command
+  ok    lowercase: applied uncertain portion remains taken
+  ok    extra entry: sender waits with the whole recipient list
+  ok    extra entry: no allowance increment or rollback command
+  ok    extra entry: applied uncertain portion remains taken
+  ok    computed: sender waits with the whole recipient list
+  ok    computed: no allowance increment or rollback command
+  ok    computed: applied uncertain portion remains taken
+  ok    lost acknowledgement: sender waits with the whole recipient list
+  ok    lost acknowledgement: no allowance increment or rollback command
+  ok    lost acknowledgement: applied uncertain portion remains taken
+  ok    unconfirmed portion checkpoints sent no provider batch
+  ok    no computed read or write acknowledgement was invoked
+  ok    confirmed absence still permits the requested audience
+  ok    a known portion with confirmed write grants its exact amount
+  ok    existing 180-day portion retention is unchanged
+  FAIL  essential email still uses its existing path
+        expected [true,1]
+        got      [false,0]
+
+234 checks, 4 failing.
+batch refused with its tags; sending it without them 422
+Amazon could not be asked for a key Error: M_ADMISSION_CEILING
+    at stop (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:26617:9)
+    at current (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:26636:30)
+    at /workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:10230:19
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:9231:19)
+    at sesCredentials (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:10228:28)
+    at call (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:10286:22)
+    at askAccount (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:10321:28)
+    at sesState (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:10356:23)
+    at async sesReady (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:10375:17)
+    at async viaAmazon (/workspace/scratch/d1ece80b1417/m-review-3125/logs/head-mail-health.test.ts.cjs:15303:19)
+Amazon SES would not say what the account may do 403
+
+```
+
+### tests/m-3125-read-boundaries.proof.ts Gitblob 75911d0e19878f16377b562eb16e954332ae56be
+```ts
+import { audience, leadsKey, stopWriting, upsertContact } from "@/lib/contacts";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+
+const list = "m-3125-boundaries";
+const email = "reader@example.com";
+const row = JSON.stringify({ agreed: true, unsub: true, unsubAt: "2026-11-02T00:00:00Z", agreedAt: "2026-11-01T00:00:00Z", t: "ab".repeat(20), gone: "complained", ids: [], titles: [], tags: [] });
+const original = redis.pipeline;
+const input = { agreed: true, explicit: true, source: "buyer" as const, at: "2026-11-01T00:00:00Z" };
+async function rejected(run: () => Promise<unknown>): Promise<boolean> {
+  try { await run(); return false; } catch { return true; } finally { redis.pipeline = original; }
+}
+async function seed() {
+  redis.clear();
+  await original.call(redis, [["HSET", leadsKey(list), email, row]]);
+}
+async function main() {
+  part("An executable or missing pipeline slot cannot erase unsubscribe evidence");
+  await seed();
+  let getter = 0;
+  redis.pipeline = (async (commands) => {
+    const replies = await original.call(redis, commands);
+    if (commands.length === 3 && commands[0][0] === "HGET") Object.defineProperty(replies, "0", { get() { getter++; return null; } });
+    return replies;
+  }) as typeof redis.pipeline;
+  is("upsert rejects an accessor reply", await rejected(() => upsertContact(list, email, input, null)), true);
+  is("the accessor is never invoked", getter, 0);
+  is("the saved unsubscribe remains byte-identical", (await original.call(redis, [["HGET", leadsKey(list), email]]))[0], row);
+  await seed();
+  redis.pipeline = (async (commands) => {
+    const replies = await original.call(redis, commands);
+    if (commands.length === 3 && commands[0][0] === "HGET") delete replies[2];
+    return replies;
+  }) as typeof redis.pipeline;
+  is("a same-length hole is not a deletion-check reply", await rejected(() => upsertContact(list, email, input, null)), true);
+  is("a hole cannot replace an unsubscribe", (await original.call(redis, [["HGET", leadsKey(list), email]]))[0], row);
+
+  part("A complaint's read does not execute reply code");
+  await seed();
+  getter = 0;
+  redis.pipeline = (async (commands) => {
+    if (commands.length === 1 && commands[0][0] === "HGET") {
+      const replies: unknown[] = [null];
+      Object.defineProperty(replies, "0", { get() { getter++; return null; } });
+      return replies;
+    }
+    return original.call(redis, commands);
+  }) as typeof redis.pipeline;
+  is("complaint read rejects an accessor", await rejected(() => stopWriting(list, email, "complained")), true);
+  is("complaint read invokes no accessor", getter, 0);
+
+  part("An unknown later page cannot return a successful partial audience");
+  const first = JSON.stringify({ agreed: true, unsub: false, tags: [], ids: [], titles: [] });
+  let pages = 0;
+  redis.pipeline = (async (commands) => {
+    if (commands[0][0] === "HSCAN") return ++pages === 1 ? [["7", [email, first]]] : [null];
+    return original.call(redis, commands);
+  }) as typeof redis.pipeline;
+  is("audience rejects after one valid page then an unknown page", await rejected(() => audience(list)), true);
+  is("the unknown second page was reached", pages, 2);
+  pages = 0;
+  redis.pipeline = (async (commands) => {
+    if (commands[0][0] === "HSCAN") return ++pages === 1 ? [["7", [email, first]]] : [["0", ["other@example.com", first]]];
+    return original.call(redis, commands);
+  }) as typeof redis.pipeline;
+  const actual = await audience(list);
+  redis.pipeline = original;
+  is("healthy multi-page audience remains complete", actual, [email, "other@example.com"]);
+  is("healthy cursor terminates after its final page", pages, 2);
+  done();
+}
+void main();
+
+```
+
+### tests/m-3125-notice-retry.proof.ts Gitblob 2e5977e79a2a9254daa4fbffb7c755b6d525a89b
+```ts
+import { heardFromSender } from "@/lib/mail-health";
+import { leadsKey } from "@/lib/contacts";
+import { store as redis } from "./redis-stub";
+import { done, is } from "./check";
+
+const id = "ab".repeat(16), list = "cd".repeat(16), email = "reader@example.com";
+const row = JSON.stringify({ agreed: true, unsub: false, ids: [], tags: [], titles: [] });
+const original = redis.pipeline;
+async function main() {
+  redis.clear();
+  await original.call(redis, [["HSET", leadsKey(list), email, row]]);
+  let writes = 0, refused = false;
+  redis.pipeline = (async commands => {
+    writes += commands.filter(c => c[0] === "SET" || c[0] === "HSET" || c[0] === "EVAL").length;
+    if (commands.length === 1 && commands[0][0] === "HGET" && commands[0][1] === leadsKey(list)) return [{ wrong: true }];
+    return original.call(redis, commands);
+  }) as typeof redis.pipeline;
+  try { await heardFromSender({ store: id, list, to: email, kind: "complained", permanent: true }); } catch { refused = true; } finally { redis.pipeline = original; }
+  is("the delivery notice is unacknowledged on an unknown row", refused, true);
+  is("no seen marker or contact write precedes the refusal", writes, 0);
+  is("unknown read preserves the actual stored row", (await original.call(redis, [["HGET", leadsKey(list), email]]))[0], row);
+  is("a healthy notice retry remains countable", await heardFromSender({ store: id, list, to: email, kind: "complained", permanent: true }), "counted");
+  const saved = JSON.parse((await original.call(redis, [["HGET", leadsKey(list), email]]))[0] as string);
+  is("the healthy retry keeps the complaint and unsubscribes", [saved.unsub, saved.gone], [true, "complained"]);
+  is("the following duplicate does not recount it", await heardFromSender({ store: id, list, to: email, kind: "complained", permanent: true }), "ignored");
+  done();
+}
+void main();
+
+```
+

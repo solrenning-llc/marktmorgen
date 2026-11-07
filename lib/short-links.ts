@@ -25,7 +25,7 @@
  */
 import { randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { CODE, CODE_LETTERS, MAX_LINKS, type ShortLink, linkName, linkPlace, readTarget } from "@/lib/short-link-rules";
 
 export { type LinkTarget, type ShortLink, shortUrl, landingUrl } from "@/lib/short-link-rules";
@@ -115,7 +115,13 @@ export async function addLink(
     // not added to the store's list on it (CX-123 rule 24).
     if (replies?.[0] === null) continue;
     if (replies?.[0] !== "OK") return { ok: false, reason: "unavailable" };
-    await redisPipeline([["HSET", storeKey(store.statsId), code, JSON.stringify(kept)]]);
+    // HSET answers how many fields it added: any other reply is unknown, and the link is taken back from both places,
+    // so neither "made" is said nor a working code is left outside the store's list (Claude 6 on #2892, CX-123 rule 24).
+    const listed = countOf(repliesFor(await redisPipeline([["HSET", storeKey(store.statsId), code, JSON.stringify(kept)]]), 1)?.[0]);
+    if (listed === null) {
+      await redisPipeline([["DEL", linkKey(code)], ["HDEL", storeKey(store.statsId), code]]);
+      return { ok: false, reason: "unavailable" };
+    }
     // The list as it is after, for the panel; when it cannot be read the panel keeps its own and adds this one.
     const after = await readLinks(store.statsId).catch((error: unknown) => {
       if (error instanceof UnknownReplyError) return null;

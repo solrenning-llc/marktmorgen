@@ -366,7 +366,13 @@ export async function saveSegment(store: Store, raw: Record<string, unknown>): P
   const same = existing.find((s) => s.name.toLowerCase() === name.toLowerCase());
   if (!same && existing.length >= MAX_SEGMENTS) return { ok: false, reason: "full" };
   const segment: Segment = { id: same?.id ?? randomBytes(6).toString("hex"), name, who, productId, notProductId, label, ...narrow };
-  await redisPipeline([["HSET", segmentsKey(store.listId), segment.id, JSON.stringify(segment)]]);
+  const written = countOf(repliesFor(await redisPipeline([["HSET", segmentsKey(store.listId), segment.id, JSON.stringify(segment)]]), 1)?.[0]);
+  // HSET answers how many fields it added: any other reply is unknown, never "saved". The group read before is put back
+  // (or a new one taken back), so "not saved" stays true (Claude 6 on #2892, CX-123 rule 24).
+  if (written === null) {
+    await redisPipeline([same ? ["HSET", segmentsKey(store.listId), same.id, JSON.stringify(same)] : ["HDEL", segmentsKey(store.listId), segment.id]]);
+    return { ok: false, reason: "unavailable" };
+  }
   // The groups as they are after; when they cannot be read, those read before with this one in its place.
   const after = await listSegmentsKnown(store.listId);
   return { ok: true, segments: after ?? [...existing.filter((s) => s.id !== segment.id), segment].sort(byName) };

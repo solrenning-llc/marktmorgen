@@ -38,8 +38,33 @@ async function main(): Promise<void> {
   }
   part("Controls");
   is("no invitation on either product: 0, nothing deleted", await attempt((n) => Array(n).fill(null)), { result: 0, deletes: 0 });
-  // Added after the RED: a field holding a record that no longer reads is still the person's, so it is deleted and counted.
-  is("a field whose record does not read is still deleted and counted", await attempt((n) => ["not json", ...Array(n - 1).fill(null)]), { result: 1, deletes: 3 });
+  // Added after the RED: a field holding a record that no longer reads is still the person's, so it is deleted (its field,
+  // schedule and checkout mark). Claude 5 on #2685: its link's token is in the record, so the link cannot be deleted and the
+  // erasure is not finished: it throws after deleting what it can, never "ok" with the link kept (the link runs out at its
+  // own expiry). Changed from { result: 1, deletes: 3 } on purpose.
+  is("a field whose record does not read is deleted, and the erasure is not finished", await attempt((n) => ["not json", ...Array(n - 1).fill(null)]), { result: "threw", deletes: 3 });
+  is("an unreadable record \"{\" alike", await attempt((n) => ["{", ...Array(n - 1).fill(null)]), { result: "threw", deletes: 3 });
+
+  part("The deletes' replies are read exactly");
+  {
+    const real = redis.pipeline.bind(redis);
+    redis.run(["HSET", "nl:mv:st1", "x", "y"]);
+    const good = JSON.stringify({ e: "person@example.com", p: "prod1", r: 1, t: "tok_reply_lost", kept: 0 });
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands[0]?.[0] === "HMGET") return [[good, null]];
+      await real(commands);
+      return commands.map(() => null);
+    }) as typeof redis.pipeline;
+    let result: number | "threw";
+    try {
+      result = await forgetInvitesPerson({ sid: "sid1", statsId: "st1" }, ["prod1", "prod2"], "person@example.com");
+    } catch {
+      result = "threw";
+    } finally {
+      redis.pipeline = real;
+    }
+    is("deletes answered with nothing: not reported as done", result, "threw");
+  }
   done();
 }
 

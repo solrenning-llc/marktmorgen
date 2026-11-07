@@ -307,15 +307,20 @@ export async function keptAlready(store: Store, email: string, productId: string
   if (!account || !EMAIL_PATTERN.test(email)) return false;
   // CX-123 rule 24 (rule 30 of Claude 4's sweep, C4-2890): a list without its data is unknown, never "not kept": it
   // throws, and sendMoveReminders puts the reminder back an hour instead of emailing someone who kept it.
+  // A page cut short (has_more not false) is not the whole list (Claude 5 on #2685): "not kept" is read only from whole
+  // lists, as liveMembership does; a live membership found on a page read is kept all the same.
   const customers = await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: "10" })}`);
   if (!Array.isArray(customers.data)) throw new Error("a member's customers did not read");
+  let whole = customers.has_more === false;
   for (const customer of customers.data as { id?: unknown }[]) {
     if (typeof customer.id !== "string") continue;
     const subs = await onAccount("GET", account, `/subscriptions?customer=${customer.id}&status=all&limit=100`);
     if (!Array.isArray(subs.data)) throw new Error("a member's subscriptions did not read");
     const list = subs.data as { status?: unknown; metadata?: Record<string, string> | null }[];
     if (list.some((s) => LIVE.has(String(s.status)) && s.metadata?.product === productId)) return true;
+    if (subs.has_more !== false) whole = false;
   }
+  if (!whole) throw new Error("a member's lists did not read whole");
   return false;
 }
 
@@ -547,12 +552,19 @@ export async function forgetInvitesPerson(store: Pick<Store, "sid" | "statsId">,
   const held = fields.flatMap((field, i) => (rows[i] === null ? [] : [{ field, invite: parseInvite(rows[i]) }]));
   if (!held.length) return 0;
   const links = held.flatMap((h) => (h.invite ? [linkKey(h.invite.t)] : []));
-  await redisPipeline([
+  const deletes: (string | number)[][] = [
     ["HDEL", invitesKey(statsId), ...held.map((h) => h.field)],
     ...(links.length ? [["DEL", ...links]] : []),
     ["ZREM", DUE_KEY, ...held.map((h) => `${store.sid}|${h.field}`)],
     // The checkout their link last opened, kept a day so it is not opened twice.
     ["DEL", ...held.map((h) => openKey(statsId, h.field))],
-  ]);
+  ];
+  // Each delete answered with its count (Claude 5 on #2685): a reply out of shape is not "deleted", so the erasure lists
+  // this part as not finished.
+  const done = repliesFor(await redisPipeline(deletes), deletes.length);
+  if (!done || done.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("deleting a person's invitations");
+  // A record that did not read held its link's token, so that link could not be deleted: the rest is gone, but the erasure
+  // is not finished, never "ok" with the link kept (it runs out at its own expiry, linkSeconds).
+  if (held.some((h) => !h.invite)) throw new UnknownReplyError("a person's invitation link: its record did not read");
   return held.length;
 }

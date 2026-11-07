@@ -28,6 +28,11 @@ const KEEP_SECONDS = 400 * 86_400;
  * all of it.
  */
 export function parseSpends(raw: unknown): AdSpend[] | null {
+  return parseAllSpends(raw)?.slice(-MAX_SPEND_ENTRIES) ?? null;
+}
+
+/** Every typed entry of a hash, whole or not at all (as parseSpends), before the list is cut to the newest. */
+function parseAllSpends(raw: unknown): AdSpend[] | null {
   if (!Array.isArray(raw) || raw.length % 2 !== 0) return null;
   const out: AdSpend[] = [];
   for (let i = 0; i + 1 < raw.length; i += 2) {
@@ -46,12 +51,19 @@ export function parseSpends(raw: unknown): AdSpend[] | null {
     if (!read.ok) return null;
     out.push({ id: field, ...read.spend });
   }
-  return out.sort((a, b) => a.from.localeCompare(b.from) || a.id.localeCompare(b.id)).slice(-MAX_SPEND_ENTRIES);
+  return out.sort(byDay);
 }
+
+const byDay = (a: AdSpend, b: AdSpend) => a.from.localeCompare(b.from) || a.id.localeCompare(b.id);
 
 /** The typed lines only, read exactly (CX-123 rule 24): a hash reply, or a member of it, in another shape throws, never "no lines". */
 async function typedSpends(statsId: string): Promise<AdSpend[]> {
-  const spends = parseSpends(stringList(repliesFor(await redisPipeline([["HGETALL", key(statsId)]]), 1)?.[0]));
+  return (await keptSpends(statsId)).slice(-MAX_SPEND_ENTRIES);
+}
+
+/** Every typed entry kept, read exactly, before the list is cut to the newest. */
+async function keptSpends(statsId: string): Promise<AdSpend[]> {
+  const spends = parseAllSpends(stringList(repliesFor(await redisPipeline([["HGETALL", key(statsId)]]), 1)?.[0]));
   if (!spends) throw new UnknownReplyError("the ad spend typed");
   return spends;
 }
@@ -81,13 +93,26 @@ export async function readSpendLines(statsId: string | null): Promise<SpendRead>
 }
 
 /**
- * The lines alone, for callers that cannot yet say a part is missing
- * (app/studio/page.tsx, app/api/cron/weekly/route.ts, both held by other
- * work): Meta's unread lines are left out there. New callers use
- * readSpendLines and say META_SPEND_UNREAD.
+ * The lines alone, for a caller that cannot yet say a part is missing
+ * (app/studio/page.tsx, held by other work): Meta's unread lines are left out
+ * there. New callers use readSpendLines and say META_SPEND_UNREAD.
  */
 export async function readSpends(statsId: string | null): Promise<AdSpend[]> {
   return (await readSpendLines(statsId)).spends;
+}
+
+/**
+ * The spend for the weekly email (app/api/cron/weekly/route.ts): every line,
+ * or none at all when any part could not be read, typed or Meta's, so the
+ * figures that use ad spend are left out of it, never shown with one part as
+ * all of it or everything as $0 (Claude 5 on #2924).
+ */
+export async function spendsForReport(statsId: string | null): Promise<AdSpend[]> {
+  const read = await readSpendLines(statsId).catch((error: unknown) => {
+    console.error("reading ad spend for the weekly email failed", error);
+    return null;
+  });
+  return read && !read.metaUnread ? read.spends : [];
 }
 
 export async function addSpend(
@@ -98,20 +123,26 @@ export async function addSpend(
   const read = readSpend(input, now);
   if (!read.ok) return read;
   if (!isRedisConfigured()) return { ok: false, reason: "unavailable" };
+  // What is kept is read exactly before anything is written (Claude 5 on #2924): a list that cannot be read refuses
+  // the add, so a refusal always means nothing was saved and the creator is never led to save the same line again.
+  const before = await keptSpends(statsId);
   const id = randomBytes(4).toString("hex");
   await redisPipeline([
     ["HSET", key(statsId), id, JSON.stringify(read.spend)],
     ["EXPIRE", key(statsId), KEEP_SECONDS],
   ]);
-  const spends = await typedSpends(statsId);
-  const [count] = await redisPipeline([["HLEN", key(statsId)]]);
-  if (Number(count) > MAX_SPEND_ENTRIES) {
-    const keep = new Set(spends.map((s) => s.id));
-    const [all] = await redisPipeline([["HKEYS", key(statsId)]]);
-    const drop = (Array.isArray(all) ? (all as unknown[]).map(String) : []).filter((field) => !keep.has(field));
-    if (drop.length) await redisPipeline([["HDEL", key(statsId), ...drop]]);
+  const known = [...before, { id, ...read.spend }].sort(byDay);
+  const keep = known.slice(-MAX_SPEND_ENTRIES);
+  const drop = known.slice(0, known.length - keep.length).map((s) => s.id);
+  if (drop.length) await redisPipeline([["HDEL", key(statsId), ...drop]]);
+  try {
+    return { ok: true, ...(await readSpendLines(statsId)) };
+  } catch (error) {
+    // Saved: a read after the write that fails answers the lines known from the read before it, never "not saved".
+    console.error("reading the ad spend back after adding failed", error);
+    const meta = await metaLines(statsId).catch(() => null);
+    return { ok: true, spends: [...keep, ...(meta ?? [])], metaUnread: !meta };
   }
-  return { ok: true, ...(await readSpendLines(statsId)) };
 }
 
 export async function removeSpend(statsId: string, id: unknown): Promise<SpendRead> {

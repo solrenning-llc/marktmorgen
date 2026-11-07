@@ -422,11 +422,15 @@ async function giveBack(statsId: string, c: Connection): Promise<void> {
 
 /** Disconnects: gives the permission back to Meta, then forgets the connection and every line read. */
 export async function disconnectMeta(statsId: string): Promise<MetaAccount | null | false> {
-  const c = await readConnection(statsId);
+  if (!isRedisConfigured()) return false;
+  // Read exactly (Claude 5 on #2924, rule 24): false only when the store is confirmed not connected; an unknown
+  // reply, or a deletion not answered in its shape, throws, so the studio is told it could not be done, never
+  // "disconnected" with the connection, its token and its lines still kept.
+  const c = await exactConnection(statsId);
   if (!c) return false;
   // Forgotten here whatever Meta says: a give-back that fails must not keep a connection the creator ended.
   await giveBack(statsId, c).catch((error) => console.error("giving the Meta permission back failed", error));
-  await forget(statsId, c.user);
+  confirmDeleted(await forget(statsId, c.user), 5, "a Meta connection's deletion");
   return c.accounts.find((a) => a.id === c.account) ?? null;
 }
 

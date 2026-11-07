@@ -10,7 +10,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { claimWeek, readNumbers, weeklyMessage, weeklyOff, weeklyToken } from "@/lib/stats-report";
 import { weeklySummary } from "@/lib/numbers-ask";
 import { aiAvailableFor } from "@/lib/ai";
-import { readSpends } from "@/lib/ad-spend";
+import { spendsForReport } from "@/lib/ad-spend";
 import { recordSample } from "@/lib/benchmarks";
 import { weeklyMemberToken, weeklyTeam } from "@/lib/stats-report";
 import { readTeam } from "@/lib/team";
@@ -76,7 +76,8 @@ export async function GET(request: NextRequest) {
       await recordSample(store, data);
       const token = weeklyToken(store.handle);
       const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
-      const spends = await readSpends(store.statsId).catch(() => []);
+      // Every line, or none when a part could not be read: the ad figures are then left out, never shown as $0.
+      const spends = await spendsForReport(store.statsId);
       const goal = (await readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: UNKNOWN_SALES_GOAL_CENTS }))).cents;
       const message = withGoalAvailability(data && token ? weeklyMessage(store, data, stopUrl, spends, goal) : null, goal);
       if (!message) {

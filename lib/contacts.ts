@@ -35,6 +35,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
 import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
@@ -962,17 +963,50 @@ return 0`;
  * stays is lib/suppression.ts's fingerprint, written before this by the
  * erasure, so the address is never written to again. Answers how many
  * records went. Safe to run twice.
+ *
+ * Every read and receipt only in its exact shape (lib/redis-reply.ts): one in
+ * another shape is unknown and throws, so the erasure says this part did not
+ * finish, never "no row" or "deleted". A row that does not read is kept under
+ * the address itself, so it is deleted by its key without reading it; what it
+ * would have told (its unsubscribe link's record, its place in the counts) is
+ * then unknown, and that throws too: the erasure is said as incomplete, never
+ * done (Claude 5's review of #2700). A retry finds no row and answers none:
+ * a token record that row may once have had stays, found only by a full scan,
+ * and leads nowhere (readUnsubToken needs the row's own token to match).
  */
 export async function forgetContactPerson(listId: string | null, rawEmail: string): Promise<number> {
   if (!listId || !isRedisConfigured()) return 0;
   const email = normaliseEmail(rawEmail);
-  const [raw] = await redisPipeline([["HGET", leadsKey(listId), email]]);
+  const read = repliesFor(await redisPipeline([["HGET", leadsKey(listId), email]]), 1);
+  const raw = read?.[0];
+  if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a contact's read");
+  if (raw === null) return 0;
   const contact = parseContact(raw);
-  if (!contact) return 0;
+  if (!contact) {
+    const gone = countOf(repliesFor(await redisPipeline([["HDEL", leadsKey(listId), email]]), 1)?.[0]);
+    if (gone === null || gone > 1) throw new UnknownReplyError("an unreadable contact's deletion");
+    throw new UnreadableContactError();
+  }
   const commands: (string | number)[][] = [["HDEL", leadsKey(listId), email]];
   if (contact.t) commands.push(["DEL", tokenKey(contact.t)]);
   if (contact.agreed) commands.push(["EVAL", DECR_TO_ZERO, 1, agreedKey(listId)]);
   if (contact.agreed && contact.unsub) commands.push(["EVAL", DECR_TO_ZERO, 1, unsubKey(listId)]);
-  await redisPipeline(commands);
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  const counts = replies?.map(countOf);
+  if (!counts || counts.some((n) => n === null) || (counts[0] as number) > 1 || (contact.t && (counts[1] as number) > 1)) {
+    throw new UnknownReplyError("a contact's deletion");
+  }
   return contact.t ? 2 : 1;
+}
+
+/**
+ * A contact row that did not read was deleted by its key, but what it held
+ * elsewhere (its unsubscribe link's record, its place in the list's counts)
+ * cannot be known: the erasure is incomplete, never said as done.
+ */
+export class UnreadableContactError extends Error {
+  constructor() {
+    super("A contact row that does not read was deleted; its unsubscribe link's record and the list's counts are unknown");
+    this.name = "UnreadableContactError";
+  }
 }

@@ -21,6 +21,8 @@ import {
   undoRates,
   invitePartner,
   partnerShareProblem,
+  commissionProblem,
+  commissionRaised,
   readAffiliate,
   releaseHold,
   removePayout,
@@ -111,22 +113,41 @@ export async function POST(request: NextRequest) {
       // empty is not "no program yet": a cut would skip the notice its affiliates were promised. Nothing is saved.
       const fresh = await storeForEmail(guarded.ref);
       if (!fresh) return fail("unavailable", 503);
-      const before = fresh.affiliates;
       const terms = (s: { percent: number; rates: Record<string, number>; days: number }) => ({ percent: s.percent, rates: s.rates, days: s.days });
-      // A cut waits the longer of the notice the program had, as its affiliates were told, and the one chosen now;
-      // and never ends before a notice already running.
-      const plan = before
-        ? planTerms(terms(before), terms(setting), Math.max(notice, before.notice ?? 0), Math.floor(Date.now() / 1000), before.pending ?? null)
-        : { current: terms(setting), pending: null };
-      // Not sent: kept as it was. Switched on or changed: a warning given before now is set aside (idleStep).
-      // Never while the program credits memberships, whose sales are not written down (idleRemovalAllowed).
-      const idle = !idleRemovalAllowed(setting) ? 0 : body.idle === undefined ? (before?.idle ?? 0) : readIdleDays(body.idle);
-      // Switched on, changed, or the program switched back on after a pause (when no link could earn): the count starts now.
-      const restart = idle !== (before?.idle ?? 0) || (setting.enabled && before?.enabled === false);
-      const idleOn = idle > 0 ? (restart ? Math.floor(Date.now() / 1000) : (before?.idleOn ?? 0)) : 0;
-      const result = await setAffiliateSetting(guarded.ref, { ...setting, ...plan.current, notice, pending: plan.pending, idle, idleOn });
-      if (!result.ok) return fail(result.reason);
-      return Response.json({ ok: true });
+      // What is saved, worked out from the store as read: the same whether it is read once, or again under the lock.
+      const nextOf = (now: NonNullable<typeof fresh>) => {
+        const before = now.affiliates;
+        // A cut waits the longer of the notice the program had, as its affiliates were told, and the one chosen now;
+        // and never ends before a notice already running.
+        const plan = before
+          ? planTerms(terms(before), terms(setting), Math.max(notice, before.notice ?? 0), Math.floor(Date.now() / 1000), before.pending ?? null)
+          : { current: terms(setting), pending: null };
+        // Not sent: kept as it was. Switched on or changed: a warning given before now is set aside (idleStep).
+        // Never while the program credits memberships, whose sales are not written down (idleRemovalAllowed).
+        const idle = !idleRemovalAllowed(setting) ? 0 : body.idle === undefined ? (before?.idle ?? 0) : readIdleDays(body.idle);
+        // Switched on, changed, or the program switched back on after a pause (when no link could earn): the count starts now.
+        const restart = idle !== (before?.idle ?? 0) || (setting.enabled && before?.enabled === false);
+        const idleOn = idle > 0 ? (restart ? Math.floor(Date.now() / 1000) : (before?.idleOn ?? 0)) : 0;
+        return { ...setting, ...plan.current, notice, pending: plan.pending, idle, idleOn };
+      };
+      const save = async (next: ReturnType<typeof nextOf>) => {
+        const result = await setAffiliateSetting(guarded.ref, next);
+        return result.ok ? Response.json({ ok: true }) : fail(result.reason);
+      };
+      const next = nextOf(fresh);
+      // A commission that goes up anywhere (the program's, or a product's) is checked against the 90% cap on every
+      // product with partners, under the program's partner lock, the store and its people read again exactly now
+      // (#2995 follow-up). Over it: 409, nothing saved. A program with no records yet has no partners to check.
+      if (!fresh.statsId || !commissionRaised(fresh.affiliates, next)) return save(next);
+      return await withPartnerLock(fresh, async (held) => {
+        const now = await storeForEmail(guarded.ref);
+        if (!now || now.statsId !== fresh.statsId) return fail("unavailable", 503);
+        const again = nextOf(now);
+        const problem = await commissionProblem(now, { terms: again });
+        if (problem) return fail(`share_${problem}`, 409);
+        if (!(await holdLock(held))) return fail("unavailable", 503);
+        return save(again);
+      });
     }
 
     const store = await storeForEmail(guarded.ref);
@@ -176,8 +197,9 @@ export async function POST(request: NextRequest) {
       if (action === "bulk-rate") {
         const ids = Array.isArray(body.ids) ? body.ids.slice(0, MAX_BULK_DECISIONS).map((id) => text(id, 20)).filter(Boolean) : [];
         if (!ids.length) return fail("unknown");
-        const before = await setRatesMany(store, ids, rate);
-        return before ? Response.json({ ok: true, before }) : fail("rate");
+        // Those whose new share would pass the cap, or could not be checked just now, keep theirs and are named.
+        const changed = await setRatesMany(store, ids, rate);
+        return changed ? Response.json({ ok: true, before: changed.before, refused: changed.refused }) : fail("rate");
       }
       const sent = Array.isArray(body.before) ? body.before.slice(0, MAX_BULK_DECISIONS) : [];
       const before = sent.flatMap((raw: unknown) => {
@@ -318,6 +340,8 @@ export async function POST(request: NextRequest) {
     }
     // The partner lock stayed taken, or was lost before a share was written: nothing was saved, an offer is kept.
     if (error instanceof LockBusyError) return fail("unavailable", 503);
+    // A commission or a share that would pass the 90% cap once written (lib/affiliates.ts): nothing was saved.
+    if (error instanceof ShareCapError) return fail(`share_${error.problem}`, 409);
     console.error("changing the affiliate programme failed", error);
     return fail("server_error", 500);
   }

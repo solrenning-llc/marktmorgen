@@ -144,7 +144,10 @@ async function main(): Promise<void> {
   await setAffiliateSetting(owner, { ...settled });
 
   part("2. Healthy: a cut saved with 30 days' notice waits");
-  await a.post({ ...terms, percent: 30, notice: 30 });
+  // Rule 23 (#2995 follow-up): raising the commission is now checked against the 90% cap, and the course's partners
+  // (80 + 1%) would make 30% promise 111% of a sale. They are removed first, so what is tested here stays the notice.
+  for (const partner of [first, second]) if (partner.ok) await a.post({ action: "remove", id: partner.affiliate.id });
+  is("(raised to 30%: nobody shares in the course any more)", (await a.post({ ...terms, percent: 30, notice: 30 })).body.ok, true);
   is("saved with notice", (await a.post({ ...terms, percent: 10, notice: 30 })).body.ok, true);
   const waiting = (await storeForEmail(owner))!.affiliates;
   is("today 30%, 10% pending", [waiting.percent, waiting.pending?.percent], [30, 10]);
@@ -161,8 +164,8 @@ async function main(): Promise<void> {
   is("the terms are as they were: 30% today, nothing pending, the notice not skipped", [now.percent, now.pending ?? null], [30, null]);
 
   part("3. Answering an invitation while the inviting store's id read is lost or fails");
-  // A product of its own: the first one already promises more than the 90% cap after the commission was raised to
-  // 30% above, and an acceptance is checked against the cap again (tests/affiliate-partner-accept-cap.test.ts).
+  // A product of its own, as before: an acceptance is checked against the cap again
+  // (tests/affiliate-partner-accept-cap.test.ts), and this keeps it clear of the course's history.
   const other = await addProduct(owner, "Pan Sauces", "", "40");
   const spare = other.ok ? other.product.id : "";
   const invited = "guest@example.com";

@@ -75,7 +75,7 @@
  */
 import { rememberAffiliate } from "@/lib/affiliate-hub";
 import { type Paid, paypalPaymentId, readPayPalRefunds, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
-import { saleHandles, storeForId } from "@/lib/store";
+import { saleHandles, storeForEmail, storeForId, storeRef } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -92,6 +92,7 @@ import { isSettled } from "@/lib/instant-pay";
 import { SITE_URL } from "@/lib/site-url";
 import {
   AFFILIATE_CODE_PATTERN,
+  type AffiliateSetting,
   MAX_AFFILIATES,
   MAX_COMMISSION,
   MIN_COMMISSION,
@@ -102,9 +103,10 @@ import {
   readViaCookie,
 } from "@/lib/affiliate-setting";
 import { productIds, readListings } from "@/lib/catalog";
+import type { HeldOne, HeldWhy } from "@/lib/affiliate-bulk-words";
 import type { BookSizes } from "@/lib/api-read-rules";
 import { affiliateForCodes, codeOwners } from "@/lib/affiliate-codes";
-import { type PartnerShare, type ShareProblem, parsePartnerShare, shareOn, shareProblem } from "@/lib/partner-share";
+import { MAX_COMMITTED_SHARE, type PartnerShare, type ShareProblem, parsePartnerShare, shareOn, shareProblem } from "@/lib/partner-share";
 import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { bondFor, rememberBuyer } from "@/lib/affiliate-bond";
 import { offerPartnership } from "@/lib/partner-invites";
@@ -371,10 +373,26 @@ export function payAddress(affiliate: Pick<Affiliate, "email" | "paypal">): stri
 /**
  * Sets, or clears with null, the share one affiliate earns. Written over exactly the record read (changeAffiliate),
  * so a share or a decision written meanwhile is kept.
+ *
+ * A share that only goes down is written at once: it never raises what a sale promises. Any other change (up, from
+ * the program's to their own, or back to the program's, which may be higher) is checked first, under the program's
+ * partner lock, against the partners and the commission read exactly now (commissionProblem, #2995 follow-up): over
+ * the 90% cap on a product with partners, ShareCapError and nothing written. Unknown reply: UnknownReplyError; the
+ * lock not held: LockBusyError; nothing written either way.
  */
 export async function setAffiliateRate(store: Store, id: string, rate: number | null): Promise<Affiliate | null> {
   if (rate !== null && (!Number.isInteger(rate) || rate < MIN_COMMISSION || rate > MAX_COMMISSION)) return null;
-  return (await changeAffiliate(store, id, (affiliate) => ({ ...affiliate, rate })))?.next ?? null;
+  const lowers = (a: Affiliate) => rate !== null && a.rate !== null && rate <= a.rate;
+  const plain = await changeAffiliate(store, id, (affiliate) => (lowers(affiliate) ? { ...affiliate, rate } : null));
+  if (!plain) return null;
+  if (plain.next) return plain.next;
+  if (plain.before.rate === rate) return plain.before;
+  return withPartnerLock(store, async (held) => {
+    const problem = await commissionProblem(await storeNow(store), { rate: { id, rate } });
+    if (problem) throw new ShareCapError(problem);
+    if (!(await holdLock(held))) throw new LockBusyError("the partner lock was lost before an affiliate's share was written");
+    return (await changeAffiliate(store, id, (affiliate) => ({ ...affiliate, rate })))?.next ?? null;
+  });
 }
 
 /**
@@ -419,14 +437,87 @@ export async function withPartnerLock<T>(store: Store, work: (held: Held) => Pro
  * when the people could not be read exactly: never "nobody".
  */
 export async function partnerShareProblem(store: Store, share: PartnerShare, self: string | null): Promise<ShareProblem | null> {
+  // The commission as it is now, not as the request read it before the lock: a raise saved meanwhile counts.
+  const now = await storeNow(store);
+  const people = await listAffiliates(now);
   const others: Record<string, number[]> = {};
-  for (const other of await listPartners(store)) {
+  for (const other of people) {
     if (other.id === self || other.status !== "approved" || !other.share) continue;
     for (const product of other.share.products) (others[product] ??= []).push(other.share.percent);
   }
+  // The most an affiliate can earn on each product: the program's, the product's, or one affiliate's own (rule 30).
   const affiliatePercent: Record<string, number> = {};
-  for (const product of share.products) affiliatePercent[product] = commissionRate(store.affiliates, product);
+  for (const product of share.products) affiliatePercent[product] = topCommission(now.affiliates, people, product);
   return shareProblem({ percent: share.percent, products: share.products, others, affiliatePercent });
+}
+
+/**
+ * The store as it is this moment, read again, never the copy a request read before taking the partner lock. Throws
+ * UnknownReplyError when it cannot be read, or reads as another program: the cap is never checked against a guess.
+ */
+async function storeNow(store: Store): Promise<Store> {
+  const now = await storeForEmail(storeRef(store));
+  if (!now || now.statsId !== store.statsId) throw new UnknownReplyError("the store's affiliate commission");
+  return now;
+}
+
+type CommissionTerms = Pick<AffiliateSetting, "percent" | "rates">;
+
+/**
+ * The most any affiliate can earn on one product: the program's share, the product's own, or one affiliate's own
+ * (lib/affiliate-setting.ts commissionRate), whatever their status, since a decision can make anybody approved again.
+ * A product set to 0% stays out for everyone.
+ */
+export function topCommission(terms: CommissionTerms, people: Pick<Affiliate, "rate">[], product: string): number {
+  let top = commissionRate(terms, product);
+  for (const person of people) if (person.rate !== null) top = Math.max(top, commissionRate(terms, product, person.rate));
+  return top;
+}
+
+/** Whether `after` pays more than `before` anywhere: the program's share, or any product's own. */
+export function commissionRaised(before: CommissionTerms, after: CommissionTerms): boolean {
+  if (after.percent > before.percent) return true;
+  for (const id of new Set([...Object.keys(before.rates), ...Object.keys(after.rates)])) {
+    if (commissionRate(after, id) > commissionRate(before, id)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether moving from (`terms`, `people`) to (`nextTerms`, `nextPeople`) makes a product with approved partners
+ * promise more than MAX_COMMITTED_SHARE of a sale: its partners' shares plus the most an affiliate can earn on it.
+ * Only a rise is refused: a change that lowers what a product promises, or leaves it, passes even where an older
+ * state is already over the cap, so a creator can always come back under it.
+ */
+export function commissionCapProblem(input: {
+  terms: CommissionTerms;
+  people: Affiliate[];
+  nextTerms: CommissionTerms;
+  nextPeople: Affiliate[];
+}): ShareProblem | null {
+  const partners = new Map<string, number>();
+  for (const person of input.nextPeople) {
+    if (person.status !== "approved" || !person.share) continue;
+    for (const product of person.share.products) partners.set(product, (partners.get(product) ?? 0) + person.share.percent);
+  }
+  for (const [product, shared] of partners) {
+    const before = shared + topCommission(input.terms, input.people, product);
+    const after = shared + topCommission(input.nextTerms, input.nextPeople, product);
+    if (after > MAX_COMMITTED_SHARE && after > before) return "committed";
+  }
+  return null;
+}
+
+/**
+ * Whether a change of commission may be saved (#2995 follow-up): the program's terms (`terms`) or one affiliate's
+ * own share (`rate`), against `now` (the store read under the partner lock, which the caller holds) and the
+ * program's people read exactly now. Throws UnknownReplyError when the people could not be read.
+ */
+export async function commissionProblem(now: Store, change: { terms?: CommissionTerms; rate?: { id: string; rate: number | null } }): Promise<ShareProblem | null> {
+  const people = await listAffiliates(now);
+  const rate = change.rate;
+  const nextPeople = rate ? people.map((person) => (person.id === rate.id ? { ...person, rate: rate.rate } : person)) : people;
+  return commissionCapProblem({ terms: now.affiliates, people, nextTerms: change.terms ?? now.affiliates, nextPeople });
 }
 
 /**
@@ -1435,15 +1526,35 @@ export type RateBefore = { id: string; rate: number | null };
  * sales from now on, and a sale keeps the share it was made at. Returns how
  * each stood before, leaving out those already at it.
  */
-export async function setRatesMany(store: Store, ids: string[], rate: number | null): Promise<RateBefore[] | null> {
+export async function setRatesMany(store: Store, ids: string[], rate: number | null): Promise<{ before: RateBefore[]; refused: HeldOne[] } | null> {
   if (rate !== null && (!Number.isInteger(rate) || rate < MIN_COMMISSION || rate > MAX_COMMISSION)) return null;
   const before: RateBefore[] = [];
+  const refused: HeldOne[] = [];
   for (const id of [...new Set(ids)].slice(0, MAX_BULK_DECISIONS)) {
     const affiliate = await readAffiliate(store, id);
     if (!affiliate || affiliate.status !== "approved" || affiliate.rate === rate) continue;
-    if (await setAffiliateRate(store, id, rate)) before.push({ id, rate: affiliate.rate });
+    // Over the cap on a product with partners, or not checked just now: this one keeps their share, the rest go on,
+    // and the studio names who and why (lib/affiliate-bulk-words.ts).
+    const why = await heldWhy(() => setAffiliateRate(store, id, rate));
+    if (why) refused.push({ id, email: affiliate.email, why });
+    else before.push({ id, rate: affiliate.rate });
   }
-  return before;
+  return { before, refused };
+}
+
+/**
+ * Runs one change of a bulk action: null when it was written, or why it was not, for those the cap or an unknown
+ * reply stops ("cap", "unavailable"). A change that wrote nothing for another reason (the record gone) is said as
+ * "unavailable" too: nothing was done for that person. Any other error is thrown.
+ */
+async function heldWhy(work: () => Promise<unknown>): Promise<HeldWhy | null> {
+  try {
+    return (await work()) ? null : "unavailable";
+  } catch (error) {
+    if (error instanceof ShareCapError) return "cap";
+    if (error instanceof UnknownReplyError || error instanceof LockBusyError) return "unavailable";
+    throw error;
+  }
 }
 
 /** Puts back each share still exactly as the change left it; one changed by hand since is never overwritten. */
@@ -1452,7 +1563,8 @@ export async function undoRates(store: Store, before: RateBefore[], rate: number
   for (const entry of before.slice(0, MAX_BULK_DECISIONS)) {
     const affiliate = await readAffiliate(store, entry.id);
     if (!affiliate || affiliate.rate !== rate) continue;
-    if (await setAffiliateRate(store, entry.id, entry.rate)) undone += 1;
+    // Putting back a higher share is checked against the cap like any raise; over it, or unchecked, it stays.
+    if ((await heldWhy(() => setAffiliateRate(store, entry.id, entry.rate))) === null) undone += 1;
   }
   return undone;
 }

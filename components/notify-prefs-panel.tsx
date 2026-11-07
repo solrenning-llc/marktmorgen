@@ -100,6 +100,8 @@ export function NotifyPrefsPanel({ off: initial, stopped: initiallyStopped }: { 
     } else {
       // Not confirmed either way: the stop link is now not known, so the notice says so and keeps the way to start them again.
       if (data?.error === "unconfirmed") setStopped("unknown");
+      // Read back by the server, still stopped: a notice that said "could not read" now says it holds, with the same way out.
+      else if (data?.error === "not_changed") setStopped(true);
       setSaid({ ok: false, text: data ? refusal(data) : UNCONFIRMED });
     }
   }

@@ -262,6 +262,9 @@ async function main(): Promise<void> {
   const panelSource = readFileSync("components/notify-prefs-panel.tsx", "utf8");
   is("the panel says not changed yet in its own words", panelSource.includes('case "not_changed":') && panelSource.includes("Not changed yet"), true);
   is("and unconfirmed in its own words, without saying not changed", panelSource.includes('case "unconfirmed":') && panelSource.includes("We could not confirm these emails started again"), true);
+  // Review of #3013 (7 November 2026): "not_changed" is the server reading the stop link back, still held, so a panel
+  // that said it could not read it ("unknown") now says it holds; "unconfirmed" leaves it unknown.
+  is("not changed: the panel shows the stop link as holding, unconfirmed: as unknown", [panelSource.includes('else if (data?.error === "not_changed") setStopped(true);'), panelSource.includes('if (data?.error === "unconfirmed") setStopped("unknown");')], [true, true]);
 
   part("The studio page never hides the stop link when it could not be read");
   const pageSource = readFileSync("app/studio/notifications/page.tsx", "utf8");

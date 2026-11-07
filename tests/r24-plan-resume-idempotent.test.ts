@@ -271,12 +271,19 @@ async function main(): Promise<void> {
     ["a record with a field of its own", JSON.stringify({ ...JSON.parse(written), extra: 1 })],
     ["a record whose key is of another pause", JSON.stringify({ ...JSON.parse(written), k: "nimbus-resume:sub_Other0000001:1:2:0:0" })],
     ["a record with no time", JSON.stringify({ k: JSON.parse(written).k, p: JSON.parse(written).p })],
+    // Codex G on #3090 (review 5815152306): a send time later than now is unknown, with no room for clocks.
+    ["a record whose send time is a minute in the future", JSON.stringify({ ...JSON.parse(written), s: Date.now() + 60_000 })],
+    ["a record whose send time is two days in the future", JSON.stringify({ ...JSON.parse(written), s: Date.now() + 2 * DAY * 1000 })],
   ] as const) {
     await fresh();
     await realPipeline([["SET", record, reply]]);
     const unread = await resume();
     is(`${label}: nothing is sent and the answer is "try again"`, [requests.length, unread], [0, { ok: false, reason: "error" }]);
   }
+  await fresh();
+  await realPipeline([["SET", record, JSON.stringify({ ...JSON.parse(written), s: Date.now() })]]);
+  const justSent = await resume();
+  is("a record sent just now (not in the future, inside the window) repeats its own key once", [justSent, keys(), charged], [{ ok: true }, [JSON.parse(written).k], 1]);
   await fresh();
   hook = (commands) => (commands.some((c) => c[0] === "SET") ? Promise.resolve([null]) : null);
   const unwritten = await resume();

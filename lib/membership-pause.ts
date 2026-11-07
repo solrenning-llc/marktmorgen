@@ -132,8 +132,17 @@ const sentSeconds = (pause: PauseSpan, now: number) => Math.min(Math.max(pause.u
  * may let it go after that, and a key sent again once it has gone is a new request (docs.stripe.com/api/idempotent_requests),
  * which could carry out a second resume and charge again (Codex G on #3090). The time is taken before the first send,
  * so it is never later than the moment Stripe saved the key, and an hour is left before the 24.
+ *
+ * A record whose time reads later than now proves nothing about that window (CX-123 rule 24; Codex G on #3090): its
+ * age would read negative, as recent, and keep a press repeating the key well past the day Stripe keeps it. It is
+ * unknown, and nothing is sent. No room is left for clocks: the time is written by this code's own clock just before
+ * the send and read back by a later press, so a later time means a clock that went back or a record that is not what
+ * was written; any room would also come out of the hour left before Stripe's 24. A press refused this way changes
+ * nothing, and the member can press again once the record reads as written.
  */
 const RESUME_REPEAT_MS = 23 * 3_600_000;
+/** Whether a press may send the record's key again: only from a first send that is not in the future and at most RESUME_REPEAT_MS ago. */
+const insideRepeatWindow = (sentAt: number, now: number) => sentAt <= now && now - sentAt <= RESUME_REPEAT_MS;
 
 /** The resume's record, read exactly: null when there is none, undefined when Redis cannot be asked or answers in another shape. */
 async function sentResume(subscription: string, pause: PauseSpan): Promise<Sent | null | undefined> {
@@ -292,7 +301,13 @@ export async function resumeMembership(store: Store, token: string, subscription
     let idempotencyKey: string;
     if (sent && (typeof asked !== "object" || asked.known === sent.asked)) {
       // A press of this pause already sent its key, and the read says nothing of another pause: the same key again.
-      if (Date.now() - sent.at > RESUME_REPEAT_MS) {
+      const clock = Date.now();
+      if (sent.at > clock) {
+        // A first send in the future is unknown, never proof of being inside the window: nothing is sent.
+        console.error(`resuming a membership whose resume record reads a send time in the future; nothing is sent (${subscription}, ${sent.key})`);
+        return { ok: false, reason: "error" };
+      }
+      if (!insideRepeatWindow(sent.at, clock)) {
         // Stripe may have let the key go, so sending it now could be carried out as a new resume and charge again.
         console.error(
           `SEVERE: a resume sent more than 23 hours ago never got a known answer and the membership still reads as paused; nothing is sent again, so it needs a person to check the membership's invoices in Stripe (${subscription}, ${sent.key})`,

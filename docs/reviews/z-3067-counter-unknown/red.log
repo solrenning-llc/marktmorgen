@@ -1,0 +1,124 @@
+limit-unknown.test.ts
+
+withinLimit: an unreadable count is unknown, never past the limit and never room
+  FAIL  an unreadable count is unknown
+        expected "unknown"
+        got      "answered false"
+  FAIL  a cut-short reply is unknown
+        expected "unknown"
+        got      "answered false"
+  ok    a count past the limit is still a no
+  ok    the last count within is still a yes
+  ok    Redis that cannot be asked still lets the request through
+  ok    the real counter still counts
+
+withinStore: the short window's unknown count is passed on, never said as spent
+  FAIL  unknown
+        expected "unknown"
+        got      "answered false"
+  ok    past the short window is still a no
+
+A form whose limit is checked inside its library function: the honest error notice, never "limited"
+  FAIL  unknown: the library page says it did not work, try again
+        expected "http://localhost:3000/library?status=error"
+        got      "http://localhost:3000/library?status=limited"
+  ok    past the limit: still "limited"
+
+A store route read by code (withinStore): 503, never 429
+  FAIL  unknown: 503
+        expected 503
+        got      429
+  ok    past the limit: still 429
+
+A provider's callback: 503, so it is sent again, never "Too many requests"
+  FAIL  unknown: 503
+        expected 503
+        got      429
+  FAIL  unknown: never says too many
+        expected false
+        got      true
+  ok    past the limit: still 429
+  ok    within: on to its own checks (a bad signature is 400)
+
+Resend's webhook: 503 for an unknown count, so Resend sends it again
+  FAIL  unknown: 503
+        expected 503
+        got      429
+  ok    past the limit: still 429
+
+Logging in with Google: "did not work just now", never "Too many tries"
+  FAIL  unknown: the error notice
+        expected "https://marktmorgen.com/signin?status=google-error"
+        got      "https://marktmorgen.com/signin?status=google-slow"
+  ok    past the limit: still google-slow
+
+20 checks, 9 failing.
+COUNTED_MEMORY_COMMANDS 14
+COUNTED_MOCK_HTTP 0
+request-guard-shape.test.ts
+
+withinLimit: only the exact reply is read
+  FAIL  withinLimit, an empty reply: unknown, never room
+        expected "unknown"
+        got      false
+  FAIL  withinLimit, only the SET's answer: unknown, never room
+        expected "unknown"
+        got      false
+  FAIL  withinLimit, a third answer: unknown, never room
+        expected "unknown"
+        got      false
+  FAIL  withinLimit, a SET answered false: unknown, never room
+        expected "unknown"
+        got      false
+  FAIL  withinLimit, a count that is null: unknown, never room
+        expected "unknown"
+        got      false
+  FAIL  withinLimit, a count written as text: unknown, never room
+        expected "unknown"
+        got      false
+  FAIL  withinLimit, a count of zero: unknown, never room
+        expected "unknown"
+        got      false
+  FAIL  withinLimit, a count that is true: unknown, never room
+        expected "unknown"
+        got      false
+  FAIL  withinLimit, a fractional count: unknown, never room
+        expected "unknown"
+        got      false
+  FAIL  withinLimit, a negative count: unknown, never room
+        expected "unknown"
+        got      false
+  FAIL  withinLimit, a reply that is not a list: unknown, never room
+        expected "unknown"
+        got      false
+  FAIL  withinLimit, a returned list whose shape cannot be inspected: unknown, never room
+        expected "unknown"
+        got      false
+  ok    withinLimit: the first of the window (SET "OK", count 1) is within
+  ok    withinLimit: the last within (SET null, count 5) is within
+  ok    withinLimit: past the limit (count 6) is refused as before
+  ok    withinLimit: Redis that cannot be asked still lets the request through, as before
+  ok    withinLimit: the real counter still counts
+
+withinMonth: only the exact reply is read
+  ok    withinMonth, an empty reply: refused, never room
+  ok    withinMonth, only the SET's answer: refused, never room
+  ok    withinMonth, a third answer: refused, never room
+  ok    withinMonth, a SET answered false: refused, never room
+  ok    withinMonth, a count that is null: refused, never room
+  ok    withinMonth, a count written as text: refused, never room
+  ok    withinMonth, a count of zero: refused, never room
+  ok    withinMonth, a count that is true: refused, never room
+  ok    withinMonth, a fractional count: refused, never room
+  ok    withinMonth, a negative count: refused, never room
+  ok    withinMonth, a reply that is not a list: refused, never room
+  ok    withinMonth, a returned list whose shape cannot be inspected: refused, never room
+  ok    withinMonth: the first of the window (SET "OK", count 1) is within
+  ok    withinMonth: the last within (SET null, count 5) is within
+  ok    withinMonth: past the limit (count 6) is refused as before
+  ok    withinMonth: Redis that cannot be asked still lets the request through, as before
+  ok    withinMonth: the real counter still counts
+
+34 checks, 12 failing.
+COUNTED_MEMORY_COMMANDS 4
+COUNTED_MOCK_HTTP 0

@@ -1,0 +1,356 @@
+cart-offers.test.ts
+  ok    the course's three offers are accepted
+  ok    a funnel may offer the same product for less after a no
+  ok    and the pastry course's one
+  ok    the bundle holds the kit, the notes and the checklist
+
+Whose offers follow a cart
+  ok    no product in it has offers: none
+  ok    the course, second in the cart, has them: its own
+  ok    its first offer is in the cart: still the course, its next offers are left
+  ok    every offer it could lead to is in the cart: none, and no card is kept for nothing
+  ok    every offer it could lead to is in a bundle in the cart: none, and no card is kept for nothing
+  ok    the first with offers decides: the pastry course's only offer is in the cart, so none, never the course's instead
+
+The cart's checkout keeps the card only when offers follow
+  ok    as for one product: a customer is made, the card kept for payments made while the buyer is there, the browser's key and whose offers
+  ok    the order is still the cart's, with its deal
+  ok    without offers: no customer, no card kept, no key
+  ok    a product named that is not in the cart: nothing kept either
+
+Whose offers, read back from the checkout
+  ok    a cart's line, first or added: believed
+  ok    anything else: nothing
+
+A cart with a product that has offers: the first offer not in it
+  ok    the thanks page shows the course's first offer, the kit
+  ok    yes to it charges the kit at the offer's own price: the cart's 10% is not taken off again
+  ok    on the card just used, as the same "upsell" payment the numbers already count, after this order
+  ok    pressed again: done, and charged once
+  ok    the kit taken leads to the end: nothing more is shown
+
+Passed over: in the cart, bought before, turned down
+  ok    the kit is in the cart and the notes were bought before: the checklist is the one shown
+  ok    neither can be answered instead
+  ok    no thanks to the checklist charges nothing
+  ok    and nothing is left: none shown, and the checklist is never asked again
+  ok    the no is kept
+  ok    what the buyer owns cannot be read in full: nothing shown, nothing can be answered
+  ok    a cart's checkout that named no product: nothing
+
+Every protection of the offers after one product
+  ok    another browser: nothing shown, nothing charged
+  ok    after the hour: nothing
+  ok    paid with Klarna, which one click cannot charge again: nothing
+  ok    a checkout naming a product that is not one of its lines: nothing
+  ok    the bank asks to confirm: sent there, nothing delivered yet
+  ok    and nothing more is offered meanwhile
+
+Turned down in this order: never again, not even for less
+  ok    the kit first
+  ok    no thanks to it
+  ok    the same kit for less is passed over: the checklist is next
+  ok    and the cheaper kit cannot be answered instead
+
+On the page too: the hour, and a method one click cannot charge again
+  ok    after the hour, the page shows nothing
+  ok    paid with Klarna (the page's eligible is false), nothing
+
+The store's month of requests used: nothing is read, nothing is offered
+  ok    the page shows no offer, and the answer is refused
+  ok    and the buyer's purchases were never read from Stripe
+
+Its reads are counted, and the studio says it
+  ok    what the buyer owns counts as many public requests as the next product after a purchase
+  ok    counted before it is read
+  ok    the cart's form sets the browser's secret as one product's does
+  ok    the thanks page passes the cart's named product and the address paid with
+  ok    the studio says so in one sentence
+
+47 checks, all passing.
+COUNTED_MEMORY_COMMANDS 660
+COUNTED_MOCK_HTTP 42
+traffic.test.ts
+
+What a plan covers, and where a month's visits stop
+  ok    a larger plan covers more
+  ok    public pages rest at 95% of the figure, the rest kept for buyers' pages
+  ok    a figure that is not one rests everything
+  ok    in words
+  ok    the price visits were billed at did not keep the floor
+
+Who a visitor is, for a day
+  ok    an old-style address is itself
+  ok    a new-style address is its network: one subscriber's every address is one visitor
+  ok    another network is another visitor
+  ok    an old address written the new way is the old address
+  ok    what is not an address is kept as it came, and nothing is one visitor
+
+A visit is one person, one day, one store
+  ok    the first time somebody comes it is a visit
+  ok    however many pages they open that day, it is the one
+  ok    somebody else is another
+  ok    every address of one new-style network is one visitor
+  ok    the next day the same person is a visit again
+  ok    and at another store, a visit to that store
+  ok    the stores visited in a month are known, and whose each is
+  ok    a visit belongs to the billing month of its moment
+  ok    what is kept of a visitor is a few letters, not their address
+
+Who is never counted
+  ok    a robot that says it is one
+  ok    the store's owner, looking at their own store
+  ok    somebody signed in who is not the owner is a visitor like any other
+  ok    and so is anybody else
+
+Paid plans also have a finite visit threshold
+  ok    each paid plan is held to its published counted-visit threshold
+  ok    at five million visits its public pages rest
+  ok    a paid store is checked with the same strict read
+
+A store with no plan to charge rests at the visits it has
+  ok    before a plan, and after one, it has a few hundred
+  ok    one short of where public pages stop, its pages are open
+  ok    there, its public pages rest; buyers' pages go on to the whole figure
+  ok    at the whole figure, they rest too
+  ok    which is asked in one read
+  ok    a store whose plan ended is held to the same figure
+  ok    a free trial has its own figure, whichever plan it is a trial of, no more than the smallest plan's
+  ok    and rests there
+  ok    a paid Scale plan starts its own billing month, below its own larger threshold
+  ok    when the month turns, so are a resting store's
+  ok    an acknowledged unused month remains open
+
+Visits past a plan are never billed: pages rest instead
+  ok    under 95% of the figure, every page is open
+  ok    at 95%, public pages rest and buyers' pages stay open
+  ok    at the whole figure, buyers' pages rest too
+  ok    and no line is put on any invoice for it
+  ok    a yearly plan's month starts on the day of the month its year began
+  ok    the same visits on a larger plan are inside it
+  ok    a creator is written to about a month once
+
+What a page sends to the database is inside what a visit is costed at
+  ok    a full page of a store that pays is drawn in a few reads
+  ok    counting it a second time that day is inside the model
+  ok    and what somebody new to the day adds is too
+  ok    a product's page is drawn inside it
+  ok    and saying it was opened is too, with the product's own visitor
+  ok    and how a page was read is too, without reading the store
+  ok    the visit this is all worked out for is a heavy one
+
+Where it is counted, and where a store rests
+  ok    the front page's count is a visit too, and any other page's is only that
+  ok    a page other than the front one says only that it was opened
+  ok    p: somebody who arrives straight at it is counted
+  ok    book: somebody who arrives straight at it is counted
+  ok    free: somebody who arrives straight at it is counted
+  ok    waitlist: somebody who arrives straight at it is counted
+  ok    the store's page rests with the store, before anything else is read for it
+  ok    a product's page rests with the store, before anything else is read for it
+  ok    a resting page keeps the way back to what a buyer has, and counts nothing
+  ok    orders: what a buyer has is never part of the rest
+  ok    manage: what a buyer has is never part of the rest
+  ok    download: what a buyer has is never part of the rest
+  ok    orders: an opening takes ORDERS_OPEN_UNITS buyer requests before its grant is read, and its meter takes more as buyer requests
+  ok    courses, the community and podcasts rest only at the whole figure
+  ok    the daily job writes and never bills visits, and it is scheduled
+
+What the pages say
+  ok    the Terms give finite plan visit thresholds, and say nothing is billed
+  ok    what a visit is, and who is never counted
+  ok    and what happens with no paid plan
+  ok    the help pages disclose counted visits, page pauses and that nothing is billed
+  ok    the price list says it beside the plan, with no price past it
+  ok    the store feature page discloses finite public-page visits
+  ok    the privacy policy says what is kept of a visitor for the count, and for how long
+  ok    the studio shows visits and their finite threshold
+  ok    a plan's price is far more than its visits cost us
+
+75 checks, all passing.
+COUNTED_MEMORY_COMMANDS 1928
+COUNTED_MOCK_HTTP 0
+plan-refund-route.test.ts
+
+Only from the review page, only by the owner
+  ok    no pass: nothing refunded, told on the review page
+  ok    a made-up pass: nothing refunded
+  ok    an admin of the store: refused before anything
+
+Confirmed on the review page
+  ok    refunded and ended
+  ok    one refund, for the amount shown; the plan ended
+  ok    one email, to the store's own address
+  ok    it says the amount and that the plan ended
+  ok    sent under the refund's own key, so a retry never sends it twice
+  ok    the same pass again: nothing more
+
+Another amount than the page showed
+  ok    the policy gives another amount now: nothing refunded, the new one shown
+  ok    and the stop set for it taken back
+  ok    an older copy of the page, once a newer one was opened: refused
+
+Not owed
+  ok    outside the window: told why on the review page, nothing changed
+
+Pressed twice, or answered part way
+  ok    two presses at once: one refund, and the second told it is being handled, never 'nothing'
+  ok    the refund write fails after we set the stop: 'could not confirm', the stop kept
+  ok    the refund write fails, the creator had set the stop: 'could not confirm', not 'nothing'
+  ok    the stop cannot be set: nothing was done, told so
+  ok    the store fails before any money moves: told nothing was done, never a raw error
+
+The words
+  ok    every reason is said in plain words, with the way to support
+  ok    part of a refund made: said so, with the stop kept and the way to support
+  ok    a renewal or a switch is refused with words true inside the window too (owner, 31/10/2026 15h41)
+  ok    the guarantee is once per person
+  ok    the window is the policy's
+  ok    not decidable: support, never a no
+  ok    what happens to the store uses the closing rules' own days
+  ok    the add-on is mentioned only when the store has it
+  ok    the letter's pending wording
+  ok    what happens says closing stops the renewals sold on the creator's own Stripe, never that it is untouched
+
+28 checks, all passing.
+COUNTED_MEMORY_COMMANDS 341
+COUNTED_MOCK_HTTP 77
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:17606:11)
+    at async refundPlanPayment (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18108:24)
+    at async refundAndEndPlan (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18503:18)
+    at async POST (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18557:13)
+    at async post (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18721:20)
+    at async main (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18772:92) {
+  status: 500,
+  code: 'api_error'
+}
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:17606:11)
+    at async refundPlanPayment (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18108:24)
+    at async refundAndEndPlan (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18503:18)
+    at async POST (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18557:13)
+    at async post (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18721:20)
+    at async main (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18777:100) {
+  status: 500,
+  code: 'api_error'
+}
+setting a plan to stop before its refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:17606:11)
+    at async setCancelAtPeriodEnd (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:17695:24)
+    at async refundAndEndPlan (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18497:9)
+    at async POST (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18557:13)
+    at async post (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18721:20)
+    at async main (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18782:61) {
+  status: 500,
+  code: 'api_error'
+}
+plan-refund: the refund request failed part way Error: a stand-in store failure
+    at store.pipeline (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18788:83)
+    at redisPipeline (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:9159:41)
+    at writeNote (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18307:32)
+    at refundAndEndPlan (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18477:11)
+    at async POST (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18557:13)
+    at async post (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18721:20)
+    at async main (/tmp/z-points-zBydC8/plan-refund-route.test.ts.cjs:18791:18)
+plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (103.145838ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (152.141999ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (51.029102ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (28.510962ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.668689ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.206963ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.711265ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (553.788693ms)
+✔ every store figure taken in the code is a kind a line prices (91.264922ms)
+✔ every email sent names a meter, and each file only the meters it may use (197.631946ms)
+✔ the units a figure is taken in cost at least what they stand for (34.721283ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (9.961338ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.375233ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.9816ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.230913ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.213329ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (1.396465ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (4.336108ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.195805ms)
+✔ Path push fits its reserved studio requests (0.118329ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.094057ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.184892ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.455428ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (55.321564ms)
+COUNTED_MEMORY_COMMANDS 0
+COUNTED_MOCK_HTTP 0
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1329.945301
+platform-us-english.test.ts
+
+American English guard distinguishes prose from compatibility identifiers
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    existing non-English buyer copy is outside this policy
+  ok    mixed buyer dictionaries retain other languages
+  ok    separate foreign buyer declarations remain unchanged
+  ok    American prose passes
+  ok    single-word test title is also checked
+  ok    test output titles are also platform-maintained text
+  ok    test data can exercise a forbidden sample
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+
+All current app, component, library and test-diagnostic sources
+  ok    real source inventory is scanned
+  ok    platform prose and diagnostic titles use American spelling
+
+42 checks, all passing.
+COUNTED_MEMORY_COMMANDS 0
+COUNTED_MOCK_HTTP 0

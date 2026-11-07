@@ -1,0 +1,87 @@
+limit-unknown.test.ts
+
+withinLimit: an unreadable count is unknown, never past the limit and never room
+  ok    an unreadable count is unknown
+  ok    a cut-short reply is unknown
+  ok    a count past the limit is still a no
+  ok    the last count within is still a yes
+  ok    Redis that cannot be asked still lets the request through
+  ok    the real counter still counts
+
+withinStore: the short window's unknown count is passed on, never said as spent
+  ok    unknown
+  ok    past the short window is still a no
+
+A form whose limit is checked inside its library function: the honest error notice, never "limited"
+  ok    unknown: the library page says it did not work, try again
+  ok    past the limit: still "limited"
+
+A store route read by code (withinStore): 503, never 429
+  ok    unknown: 503
+  ok    past the limit: still 429
+
+A provider's callback: 503, so it is sent again, never "Too many requests"
+  ok    unknown: 503
+  ok    unknown: never says too many
+  ok    past the limit: still 429
+  ok    within: on to its own checks (a bad signature is 400)
+
+Resend's webhook: 503 for an unknown count, so Resend sends it again
+  ok    unknown: 503
+  ok    past the limit: still 429
+
+Logging in with Google: "did not work just now", never "Too many tries"
+  ok    unknown: the error notice
+  ok    past the limit: still google-slow
+
+20 checks, all passing.
+COUNTED_MEMORY_COMMANDS 14
+COUNTED_MOCK_HTTP 0
+sending a library link failed UnknownReplyError: Redis answered the library-ip limit's count in an unknown shape
+    at withinLimit (/tmp/z-points-yTPqMz/limit-unknown.test.ts.cjs:10391:30)
+    at async requestLibraryLink (/tmp/z-points-yTPqMz/limit-unknown.test.ts.cjs:18321:8)
+    at async POST (/tmp/z-points-yTPqMz/limit-unknown.test.ts.cjs:18370:17)
+    at async main (/tmp/z-points-yTPqMz/limit-unknown.test.ts.cjs:20322:18)
+request-guard-shape.test.ts
+
+withinLimit: only the exact reply is read
+  ok    withinLimit, an empty reply: unknown, never room
+  ok    withinLimit, only the SET's answer: unknown, never room
+  ok    withinLimit, a third answer: unknown, never room
+  ok    withinLimit, a SET answered false: unknown, never room
+  ok    withinLimit, a count that is null: unknown, never room
+  ok    withinLimit, a count written as text: unknown, never room
+  ok    withinLimit, a count of zero: unknown, never room
+  ok    withinLimit, a count that is true: unknown, never room
+  ok    withinLimit, a fractional count: unknown, never room
+  ok    withinLimit, a negative count: unknown, never room
+  ok    withinLimit, a reply that is not a list: unknown, never room
+  ok    withinLimit, a returned list whose shape cannot be inspected: unknown, never room
+  ok    withinLimit: the first of the window (SET "OK", count 1) is within
+  ok    withinLimit: the last within (SET null, count 5) is within
+  ok    withinLimit: past the limit (count 6) is refused as before
+  ok    withinLimit: Redis that cannot be asked still lets the request through, as before
+  ok    withinLimit: the real counter still counts
+
+withinMonth: only the exact reply is read
+  ok    withinMonth, an empty reply: refused, never room
+  ok    withinMonth, only the SET's answer: refused, never room
+  ok    withinMonth, a third answer: refused, never room
+  ok    withinMonth, a SET answered false: refused, never room
+  ok    withinMonth, a count that is null: refused, never room
+  ok    withinMonth, a count written as text: refused, never room
+  ok    withinMonth, a count of zero: refused, never room
+  ok    withinMonth, a count that is true: refused, never room
+  ok    withinMonth, a fractional count: refused, never room
+  ok    withinMonth, a negative count: refused, never room
+  ok    withinMonth, a reply that is not a list: refused, never room
+  ok    withinMonth, a returned list whose shape cannot be inspected: refused, never room
+  ok    withinMonth: the first of the window (SET "OK", count 1) is within
+  ok    withinMonth: the last within (SET null, count 5) is within
+  ok    withinMonth: past the limit (count 6) is refused as before
+  ok    withinMonth: Redis that cannot be asked still lets the request through, as before
+  ok    withinMonth: the real counter still counts
+
+34 checks, all passing.
+COUNTED_MEMORY_COMMANDS 4
+COUNTED_MOCK_HTTP 0

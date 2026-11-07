@@ -10,12 +10,14 @@
  * PDF with a guessed number: the route answers 503.
  * Synthetic data only: Stripe and the database are stand-ins.
  */
+import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { PDFDocument } from "pdf-lib";
 import {
   RECEIPT_NUMBER,
   RECEIPT_NUMBER_BYTES,
   RECEIPT_NUMBER_COMMANDS,
+  RECEIPT_NUMBER_MAX,
   RECEIPT_SLOT,
   assignReceiptNumber,
   receiptCounterKey,
@@ -241,7 +243,7 @@ async function main(): Promise<void> {
   const counter = receiptCounterKey(third.sid);
   const roomNow = async () => (await redis.pipeline([["HGET", thirdRoom, "#"], ["HGET", thirdRoom, RECEIPT_SLOT]])).map((v) => Number(v ?? 0));
   is("the store's first sale is numbered", await assignReceiptNumber(third, "cs_test_thirdstore00000001"), { ok: true, number: "R-000001" });
-  for (const bad of ["abc", "1.5", "007", "9999999999999"]) {
+  for (const bad of ["abc", "1.5", "007", "-3", String(RECEIPT_NUMBER_MAX), "9999999999999"]) {
     await redis.pipeline([["SET", counter, bad]]);
     const held = await roomNow();
     const tries = [await assignReceiptNumber(third, "cs_test_thirdstore00000002"), await assignReceiptNumber(third, "cs_test_thirdstore00000002")];
@@ -255,6 +257,7 @@ async function main(): Promise<void> {
   is("and the room untouched", await roomNow(), heldTyped);
   await redis.pipeline([["DEL", counter], ["SET", counter, "7"]]);
   is("a whole count still gives the next number", await assignReceiptNumber(third, "cs_test_thirdstore00000002"), { ok: true, number: "R-000008" });
+  is("its bound on the count is RECEIPT_NUMBER_MAX's", [RECEIPT_NUMBER.includes(`#count <= ${String(RECEIPT_NUMBER_MAX).length} and tonumber(count) < ${RECEIPT_NUMBER_MAX}`), readFileSync("lib/redis-memory.ts", "utf8").includes(`\\d{0,${String(RECEIPT_NUMBER_MAX).length - 1}}$/.test(count) && Number(count) < ${RECEIPT_NUMBER_MAX.toLocaleString("en-US").replaceAll(",", "_")})`)], [true, true]);
   is("the script reads the count before it takes any room", RECEIPT_NUMBER.indexOf("'GET', KEYS[3]") > 0 && RECEIPT_NUMBER.indexOf("'GET', KEYS[3]") < RECEIPT_NUMBER.indexOf("receiptRoom(ARGV[1]"), true);
 
   part("Its cost: inside the receipt's studio requests");

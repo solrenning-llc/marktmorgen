@@ -49,7 +49,7 @@ export const RECEIPT_KEYS_BYTES = dataBytes([`nl:rcpt:n:${"x".repeat(32)}`, `nl:
 /**
  * The database commands one numbering is billed, at the most (Upstash bills
  * a script's inner commands beside the EVAL): the EVAL, the read of the
- * sale's field, the count's EXISTS, the room's steps (its total, its list of
+ * sale's field, the count's GET, the room's steps (its total, its list of
  * expiring months, DATA_EXPIRED_COMMANDS for the months over it takes off
  * however long the store sat idle, the list written back, the slot read and
  * written, the total written), the INCR and the HSET, with one to spare: 10
@@ -82,7 +82,10 @@ const UNKNOWN: ReceiptNumbered = { ok: false, reason: "unknown" };
  * reference, ARGV[4] what a number takes, ARGV[5] what the keys take with
  * the first. Answers {2, n} for a number already given, {3, n} for one given
  * now, and the room's own {0, total} (full: nothing written) or {-1, total}
- * (unreadable). Modelled by lib/redis-memory.ts.
+ * (unreadable). A count that is not a whole number below RECEIPT_NUMBER_MAX
+ * (or of another type, which Redis refuses) is unreadable before any room is
+ * taken, so no try spends room without a number (review of #3001, L1).
+ * Modelled by lib/redis-memory.ts.
  */
 export const RECEIPT_NUMBER = `-- marktmorgen:receipt-number:v1
 local function receiptRoom(limit, month, size)
@@ -99,7 +102,13 @@ end
 local size = tonumber(ARGV[4])
 local keys = tonumber(ARGV[5])
 if not size or not keys then return {-1, 0} end
-if redis.call('EXISTS', KEYS[3]) == 0 then size = size + keys end
+-- The count is read before any room is taken: one INCR cannot add to, or that would pass RECEIPT_NUMBER_MAX, takes nothing.
+local count = redis.call('GET', KEYS[3])
+if not count then
+  size = size + keys
+elseif count ~= '0' and not (string.match(count, '^[1-9]%d*$') and #count <= 12 and tonumber(count) < 999999999999) then
+  return {-1, 0}
+end
 local taken = receiptRoom(ARGV[1], ARGV[2], tostring(size))
 if taken[1] ~= 1 then return taken end
 local n = redis.call('INCR', KEYS[3])

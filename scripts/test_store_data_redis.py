@@ -195,7 +195,7 @@ def main():
         print("PASS: one receipt number bills at most RECEIPT_NUMBER_COMMANDS (%d; %d measured), however long the store sat idle" % (ceiling, most))
 
         # A count Redis cannot add to takes no room and gives no number (review of #3001, L1, comment 6704251804).
-        for bad in ("abc", "1.5", "007", "9999999999999"):
+        for bad in ("abc", "1.5", "007", "-3", "999999999999", "9999999999999"):
             redis.command("DEL", room, numbers, counter)
             redis.command("SET", counter, bad)
             assert number("cs_test_bad") == [-1, 0] and number("cs_test_bad") == [-1, 0]

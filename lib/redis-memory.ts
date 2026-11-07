@@ -892,7 +892,11 @@ export class MemoryRedis {
             return Number.isSafeInteger(n) && n >= 1 ? [2, n] : [-1, 0];
           }
           if (!Number.isFinite(Number(entry)) || !Number.isFinite(Number(keys))) return [-1, 0];
-          const size = Number(entry) + (this.run(["EXISTS", counter]) === 0 ? Number(keys) : 0);
+          // The count read before any room is taken (GET refuses another type, as Redis does); one INCR cannot add to, or
+          // that would pass RECEIPT_NUMBER_MAX (999,999,999,999), takes nothing.
+          const count = this.run(["GET", counter]);
+          if (count !== null && count !== "0" && !(typeof count === "string" && /^[1-9]\d{0,11}$/.test(count) && Number(count) < 999_999_999_999)) return [-1, 0];
+          const size = Number(entry) + (count === null ? Number(keys) : 0);
           const taken = this.storeData([room, limit, "0", month, "a", "rcpt", String(size)]);
           if (!Array.isArray(taken) || taken[0] !== 1) return taken;
           const n = Number(this.run(["INCR", counter]));

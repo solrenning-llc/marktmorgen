@@ -32,6 +32,16 @@ const real = redis.pipeline.bind(redis);
 /** While set, the reply to each command it matches is replaced by what it returns. */
 let bend: ((command: (string | number)[], reply: unknown) => unknown) | null = null;
 redis.pipeline = (async (commands: Commands) => {
+  const [only] = commands;
+  // The webhook queue's lease (lib/webhooks.ts LEASE_SCRIPT), modelled as tests/webhooks-delivery.test.ts does, so
+  // emitEvent's first try really runs and the hold below is proven by it (Claude 2 on #3096, comment 6712352850).
+  if (commands.length === 1 && only[0] === "EVAL" && String(only[1]).includes('redis.call("ZSCORE", KEYS[1], ARGV[1])')) {
+    const [, , , key, member, now, until] = only.map(String);
+    const [due] = await real([["ZSCORE", key, member]]);
+    if (due === null || due === undefined || Number(due) > Number(now)) return [0];
+    await real([["ZADD", key, Number(until), member]]);
+    return [1];
+  }
   const replies = await real(commands);
   if (bend) commands.forEach((c, i) => { replies[i] = bend!(c, replies[i]); });
   return replies;
@@ -145,14 +155,16 @@ async function main(): Promise<void> {
   const deliveryOf = async (tail: string) => {
     const id = `dlv_${createHash("sha256").update(`${eventId}|${endpointOf(tail)}`).digest("hex").slice(0, 24)}`;
     const [raw, due] = await real([["GET", `nl:hooks:d:${id}`], ["ZSCORE", QUEUE_KEY, `${store3.statsId}|${id}`]]);
-    const delivery = typeof raw === "string" ? (JSON.parse(raw) as { state: string; attempts: number }) : null;
+    const delivery = typeof raw === "string" ? (JSON.parse(raw) as { state: string; attempts: number; lastError: string }) : null;
     return { delivery, queued: due !== null };
   };
+  // Both first tries ran (the lease is modelled). No network here: the studio endpoint's try was made and could not
+  // reach it; the unread key's try read the key again first (attempt, heldNow) and never called its endpoint.
   const studio = await deliveryOf("/studio");
-  is("the studio endpoint's delivery was written and is on the queue", [studio.delivery !== null, studio.queued], [true, true]);
-  // Its try reads the key again first (attempt, heldNow) and sends nothing until it reads as in use.
+  is("the studio endpoint's delivery was tried and waits for its next try", [studio.delivery?.state, studio.delivery?.attempts, studio.queued, /could not be read/.test(studio.delivery?.lastError ?? "")], ["retrying", 1, true, false]);
   const held = await deliveryOf("/unread");
-  is("the unread key's endpoint is held back, not dropped: written, never sent, still on the queue", [held.delivery?.state, held.delivery?.attempts, held.queued], ["queued", 0, true]);
+  is("the unread key's endpoint is held back, not dropped: its try counted, the endpoint never called, still on the queue",
+    [held.delivery?.state, held.delivery?.attempts, held.queued, /could not be read/.test(held.delivery?.lastError ?? "")], ["retrying", 1, true, true]);
   is("the paused key's endpoint gets nothing, as before", (await deliveryOf("/paused")).delivery, null);
 
   done();

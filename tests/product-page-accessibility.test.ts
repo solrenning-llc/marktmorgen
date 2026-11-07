@@ -178,7 +178,8 @@ async function main(): Promise<void> {
   part("2.5.5, LOW 2: the cart panel's own controls are 44 px");
   const cart = readFileSync("components/store-cart.tsx", "utf8");
   is("each line's remove button is 44 × 44 px", /className="grid h-11 w-11 place-items-center rounded-full"/.test(cart), true);
-  is("the panel's Close is 44 px tall", /className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold" onClick=\{\(\) => setOpen\(false\)\}/.test(cart), true);
+  // main made it 44 × 44 px and gives the focus back to the button that opened the panel (store-cart.tsx).
+  is("the panel's Close is 44 px tall", /className="st-footer-link inline-flex min-h-11 [^"]*items-center[^"]*"\s*onClick=\{\(\) => \{\s*setOpen\(false\);/.test(cart), true);
 
   done();
 }

@@ -2,8 +2,10 @@
  * The pricing optimization of 18 October 2026 (docs/pricing-optimization-2026-10-18.md):
  * an ANALYSIS, no price, limit, gate or tax assumption in code changes. The
  * program's input must be what the repository's margin code gives today, every
- * solution in its output must keep 60% under that code and equal the
- * exhaustive search, and the document must be what renders today. Regenerate
+ * solution in its output must make a net profit with the spend floor's room
+ * under that code (the MR rule, AGENTS.md, since 7 November 2026 here; until
+ * then 60%) and equal the exhaustive search, and the document must be what
+ * renders today. Regenerate
  * all three with `node scripts/pricing-optimization.mjs` (needs python3 with
  * scipy). This test needs no Python: it checks the solver's output, it does
  * not run the solver.
@@ -14,7 +16,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { PLAN_PRICES, TIERS } from "@/lib/plan";
-import { MOST_TAX_READING } from "./historical-margin-model";
 import {
   DOC_FILE, ELASTICITIES, INPUT_FILE, SAFETY_CENTS, dataset, exhaustive, hedonic, keeps, linearityGap, milpInput, milpOutput, minimaxRegret, ones,
   renderPricingOptimization, unitAt, verified,
@@ -43,15 +44,25 @@ test("the program's input is what the repository's margin code gives today (run 
   assert.ok(linearityGap() < SAFETY_CENTS, "the linear usage stays strictly inside the deducted safety reserve");
 });
 
-test("every solution keeps 60% at full use on both intervals, fails the most-tax gate, respects the plan order, and equals the exhaustive search", () => {
+test("every solution makes net profit > 0 with the spend floor's room at full use on both intervals, respects the plan order, and equals the exhaustive search, while nothing is on sale", () => {
+  // Until 7 November 2026 each solution had to keep 60% on both intervals and
+  // fail the most-tax gate. The MR rule (owner, 27 October 2026; AGENTS.md,
+  // "MR — Regra de margem vigente"): per unit, net profit > 0 with the spend
+  // floor's existing room; "qualquer instrução de60% como piso obrigatório
+  // remete a esta seção" (owner's decision C2-68: "pricing-optimization nºs 4
+  // e 6 ... trocar pela regra MR (lucro > 0 com a folga em toda unidade)").
+  // With that floor the most-tax reading makes a profit at the top of the
+  // grid, so it no longer fails every solution by itself; the document prints
+  // what it gives, and sales stay closed by the gates in code, which this
+  // analysis does not touch.
+  assert.equal(PLANS_ON_SALE, false);
   const out = milpOutput();
   assert.equal(out.solutions.length, ELASTICITIES.length * 2);
   for (const sol of out.solutions) {
     assert.match(sol.status, /optimal/i, `${sol.scenario} ${sol.alternative}`);
     const v = verified(sol);
     for (const x of v) {
-      assert.ok(x.keeps && x.month.netBps >= 6_000 && x.year.netBps >= 6_000, `${sol.scenario} ${sol.alternative} ${x.tier}`);
-      assert.equal(unitAt(x.tier, "month", x.monthCents, x.shares, 0, MOST_TAX_READING).meetsFloor, false);
+      assert.ok(x.keeps && x.month.netCents > 0 && x.year.netCents > 0, `${sol.scenario} ${sol.alternative} ${x.tier}`);
       if (sol.alternative === "A") assert.deepEqual(x.shares, ones(), "A cuts nothing");
       const ex = exhaustive(x.tier, sol.alternative, Number(sol.scenario))!;
       assert.equal(x.monthCents, ex.monthCents, `${sol.scenario} ${sol.alternative} ${x.tier} matches the exhaustive search`);
@@ -60,10 +71,12 @@ test("every solution keeps 60% at full use on both intervals, fails the most-tax
   }
 });
 
-test("the recommendation keeps every #553 figure and 60% on both intervals", () => {
+test("the recommendation keeps every #553 figure and makes net profit > 0 with the spend floor's room on both intervals", () => {
+  // Until 7 November 2026: "and 60% on both intervals". The MR rule replaces it (see above).
   for (const tier of TIERS) {
     const r = minimaxRegret(tier);
     assert.ok(keeps(tier, r.monthCents, ones()));
+    for (const cycle of ["month", "year"] as const) assert.ok(unitAt(tier, cycle, r.monthCents, ones()).netCents > 0, `${tier} ${cycle}`);
     assert.ok(r.regret >= 0 && r.regret < 1);
   }
 });
@@ -80,6 +93,8 @@ test("every competitor figure has its page and its day, and the regression repor
 test("the document is what the numbers render today", () => {
   assert.equal(read(DOC_FILE), renderPricingOptimization(), `${DOC_FILE} is stale: run node scripts/pricing-optimization.mjs`);
   assert.match(read(DOC_FILE), /\*\*An analysis for the owner, not a change\.\*\*/);
+  // Since the MR rule it says which floor it holds every plan to, and that nothing in it is in force.
+  assert.match(read(DOC_FILE), /\*\*The floor, since the MR rule\.\*\*[^\n]*net profit greater than zero[^\n]*spend floor's existing room; 60% is the goal of the company's real monthly report[^\n]*\*\*Nothing here is in force\*\*/);
 });
 
 test('the exhaustive C oracle keeps the solver raw share floor and the same five-cent linear budgets',()=>{

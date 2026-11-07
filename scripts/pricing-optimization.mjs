@@ -11,6 +11,8 @@
  *      renderPricingOptimization(), which checks every solution again.
  *
  * tests/pricing-optimization.test.ts fails when any of them is stale.
+ * The floor every plan is held to is the table's: since 7 November 2026 the
+ * MR rule (AGENTS.md), net profit > 0 with the spend floor's room, not 60%.
  *
  *   node scripts/pricing-optimization.mjs
  */

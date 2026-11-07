@@ -8,6 +8,11 @@ scenario and alternative, each plan's monthly price and the share of each
 #553 figure. tests/pricing-optimization.test.ts checks every solution again
 with the repository's code and against an exhaustive search.
 
+Every room and alternative A's feasibility come from the input, so the
+program holds each plan to the floor the table holds it to: since 7 November
+2026 the MR rule (AGENTS.md), a net profit greater than zero with the spend
+floor's room on both intervals, no longer 60%.
+
     python3 scripts/pricing-optimization-milp.py
 
 Needs numpy and scipy (scipy.optimize.milp, the HiGHS solver).

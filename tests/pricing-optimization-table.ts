@@ -27,7 +27,19 @@ import { HISTORICAL_MARGIN_NOTICE } from "./historical-margin-model";
  *
  * writes the input, runs the solver and writes docs/pricing-optimization-2026-10-18.md;
  * tests/pricing-optimization.test.ts fails when any of the three files is
- * stale or a solution stops keeping 60%.
+ * stale or a solution stops making a profit with its room.
+ *
+ * The floor, since 7 November 2026: the MR rule (AGENTS.md, "MR — Regra de
+ * margem vigente (27 de outubro de 2026)"): per unit, net profit greater
+ * than zero with the spend floor's existing room; 60% is the goal of the
+ * company's real monthly report, not a per-unit gate, and "qualquer
+ * instrução de60% como piso obrigatório remete a esta seção" (owner's
+ * decision C2-68, docs/agent-inbox.md: "pricing-optimization nºs 4 e 6 ...
+ * trocar pela regra MR (lucro > 0 com a folga em toda unidade)"). Until
+ * then every plan here had to keep 60%, and at the Vercel rates priced at
+ * the top of their official range alternative A (every #553 figure kept)
+ * had no Store price on the grid that did. The solver, the exhaustive search and
+ * every check below read the same unitUnder, so they stay on one rule.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -38,8 +50,9 @@ import { MAX_TEAM } from "@/lib/team";
 import { PAID_STORAGE_BYTES } from "@/lib/storage-rules";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TOP_HEIGHT, viewingBytes } from "@/lib/stream-rules";
-import { assessMinimumCustomerBase } from "./historical-margin-model";
-import { MOST_TAX_READING, SIZING_READING, unitUnder, type UnitResult } from "./historical-margin-model";
+// unitUnder from the receiving model, not the 60% archive (tests/historical-margin-model.ts): its floor is MR's net >= 1 cent, its usageRoomCents the room to that cent.
+import { MOST_TAX_READING, SIZING_READING, unitUnder, type UnitResult } from "./historical-receiving-model";
+import { unitUnder as formerUnitUnder } from "./historical-margin-model";
 import { ORDER, figures, tidy, usageCents, type Printed } from "./limits-proposal-table";
 import { FETCHED_AHEAD, GB, PER_EMAIL } from "./plan-cost-registry";
 import { CREDIT_AMOUNTS, creditOption } from "./pack-cost-decomposition-table";
@@ -237,7 +250,7 @@ export function unitAt(tier: Tier, cycle: Cycle, monthCents: number, shares: Sha
   if (!u) { u = unitUnder(priceOf(cycle, monthCents), usageFor(tier, cycle, shares, storeEmails), reading, true); memo.set(key, u); }
   return u;
 }
-/** Both intervals keep 60% at full use with the spend floor test's room (25¢ a month, $1 a year). */
+/** Both intervals make a net profit (at least a cent) at full use with the spend floor test's room (25¢ a month, $1 a year): the MR rule. */
 export function keeps(tier: Tier, monthCents: number, shares: Shares, storeEmails = 0): boolean {
   return (["month", "year"] as const).every((c) => { const u = unitAt(tier, c, monthCents, shares, storeEmails); return u.meetsFloor && u.usageRoomCents - u.usageCents >= PLAN_ROOM[c]; });
 }
@@ -254,7 +267,7 @@ export function printedShares(tier: Tier, shares: Shares): Shares {
 /** The monthly prices looked at: every $X9 from $9 to three times today's price. */
 export function grid(tier: Tier): number[] {
   const out: number[] = [];
-  // Up to three times today's price since 4 November 2026 (C4-4): with the calendar feed's and the store readings' own lines, Store's 60% floor passed twice its price. Looked at only.
+  // Up to three times today's price since 4 November 2026 (C4-4): with the calendar feed's and the store readings' own lines, Store's former 60% floor passed twice its price. Looked at only.
   for (let c = 900; c <= 3 * PLAN_PRICES[tier].month; c += 1000) out.push(c);
   return out;
 }
@@ -344,7 +357,7 @@ export function exhaustive(tier: Tier, alt: Alternative, e: number): { monthCent
   }
   return best;
 }
-/** One figure cut to a tenth of #553's, every other kept: the lowest price that keeps 60%, and the profit index over A's best per scenario. */
+/** One figure cut to a tenth of #553's, every other kept: the lowest price that makes a profit with the room, and the profit index over A's best per scenario. */
 export function eachCut(tier: Tier): { id: Printed; figure: string; monthCents: number; ratio: Record<string, number> }[] {
   return ORDER.filter((id) => firstFigure(tier, id) > 0).map((id) => {
     const shares = printedShares(tier, { ...ones(), [id]: ALTERNATIVES.C });
@@ -383,27 +396,32 @@ export function regretAt(tier: Tier, monthCents: number): number {
   const feasible = grid(tier).filter((m) => keeps(tier, m, ones()));
   return Math.max(...ELASTICITIES.map((e) => 1 - profit(tier, monthCents, ones(), e) / Math.max(...feasible.map((m) => profit(tier, m, ones(), e)))));
 }
-/** The lowest price on the grid that keeps 60% at every #553 figure. */
+/** The lowest price on the grid that makes a profit with the room at every #553 figure. */
 export const lowestA = (tier: Tier) => grid(tier).find((m) => keeps(tier, m, ones()))!;
+/** History only: the lowest price on the grid that kept the former 60% target (18 October 2026) with the room at every #553 figure, null when none did. */
+export function formerLowestA(tier: Tier): number | null {
+  const kept = (m: number) => (["month", "year"] as const).every((c) => { const u = formerUnitUnder(priceOf(c, m), usageFor(tier, c, ones()), SIZING_READING, true); return u.meetsFloor && u.usageRoomCents - u.usageCents >= PLAN_ROOM[c]; });
+  return grid(tier).find(kept) ?? null;
+}
 
-/** Customers needed per $100 a month of company fixed cost, at a plan's price and full use (lib/customer-base-rules.ts). */
+/**
+ * Customers needed per $100 a month of company fixed cost, at a plan's price
+ * and full use: lib/customer-base-rules.ts's own formula since MR (its
+ * percentage floor is zero), ceil(fixed × months ÷ net) over the worst of the
+ * monthly and the yearly unit, none finite when a unit makes no profit. That
+ * file's assessor also needs reviewed TX evidence, which this dated sizing
+ * model does not have, so the formula is applied here to the sizing
+ * reading's net; it is a scale, not a reviewed base.
+ */
 export function basePerHundred(tier: Tier, monthCents: number, shares = ones()): number | null {
-  const unit = (c: Cycle) => {
-    const u = unitAt(tier, c, monthCents, shares);
-    return {
-      months: (c === "year" ? 12 : 1) as 1 | 12,
-      scenario: {
-        collectedRevenueCents: u.revenueCents, refundableRevenueCents: 0, taxesCeilingCents: u.taxCents,
-        costCeilings: { infrastructure: u.usageCents, storageDeliveryVideo: 0, email: 0, ai: 0, paymentAndFx: u.feeCents + u.remittanceCents, supportAndOperations: 0, acquisitionAndAffiliates: 0, fixedBusinessCosts: 0, postCancellation: 0, refundAndDisputeFees: u.refundReserveCents + u.disputeReserveCents, other: 0 },
-        allCostsBounded: true, allTaxesReviewed: true, revenueCollected: true,
-      },
-    };
-  };
-  const r = assessMinimumCustomerBase([unit("month"), unit("year")], {
-    monthlyFixedCostsCeilingCents: 10_000, monthlyFixedTaxesCeilingCents: 0, allFixedCostsBounded: true, allFixedTaxesReviewed: true,
-    fixedCostsEvidence: "hypothetical: $100 a month, to scale the count; not a reviewed budget", fixedTaxEvidence: "hypothetical: none", reviewedPayingCustomers: 0,
-  });
-  return r.status === "calculated" ? r.minimumCustomers : null;
+  const fixedCents = 10_000;
+  let minimum = 1;
+  for (const c of ["month", "year"] as const) {
+    const net = unitAt(tier, c, monthCents, shares).netCents;
+    if (net <= 0) return null;
+    minimum = Math.max(minimum, Math.floor((fixedCents * months(c) + net - 1) / net));
+  }
+  return minimum;
 }
 
 // ------------------------------------------------------------- superiority in the band (alternative B)
@@ -441,7 +459,7 @@ export function comparisons(tier: Tier): Comparison[] {
   out.push({ attribute: "fee", ours: "0% of a sale", best: `${Math.min(...fees)}%`, bestFrom: plans.filter((p) => p.feePct === Math.min(...fees)).map((p) => `${p.vendor} ${p.plan}`).join(", "), unlimitedIn: [], meets: true, priced: false, target: 0 });
   return out;
 }
-/** The lowest $X9 price at which the plan keeps 60% with its metered attributes raised to the band's largest finite figure (each alone, and all together). */
+/** The lowest $X9 price at which the plan makes a profit with the room with its metered attributes raised to the band's largest finite figure (each alone, and all together). */
 export function superiorityPrice(tier: Tier, which: Attribute[]): { monthCents: number; shares: Shares; storeEmails: number } | null {
   const shares = ones();
   let storeEmails = 0;
@@ -485,6 +503,7 @@ const usd2 = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { mini
 const pctOf = (bps: number) => `${(bps / 100).toFixed(2)}%`;
 const f3 = (n: number) => n.toFixed(3);
 const num = (n: number) => n.toLocaleString("en-US");
+const minus = (n: number) => String(n).replace("-", "−");
 const showShares = (tier: Tier, s: Shares) => ORDER.filter((id) => firstFigure(tier, id) > 0 && s[id] < 1).map((id) => `${id} ${num(Math.round(firstFigure(tier, id) * s[id] * (id === "storage" ? 1 / GB : 1)))}${id === "storage" ? " GB" : ""}`).join(", ") || "every #553 figure";
 
 export function renderPricingOptimization(): string {
@@ -500,6 +519,8 @@ export function renderPricingOptimization(): string {
   push("");
   push("**An analysis for the owner, not a change.** No price, limit, gate or tax assumption in code changes with it, and `PLANS_ON_SALE` stays false. Every margin is the repository's own (lib/receiving-costs.ts `unitUnder` under the sizing reading; tests/limits-proposal-table.ts `usageCents`; lib/customer-base-rules.ts `assessMinimumCustomerBase`); every competitor figure is in the dataset with its page and the day it was read. **Demand is unknown**: every profit below is under a labeled constant-elasticity scenario, not a forecast.");
   push("");
+  push(`**The floor, since the MR rule.** Unlike the 60% target the notice above names, this analysis was re-run on 7 November 2026 under the [MR rule](../AGENTS.md#mr--regra-de-margem-vigente-27-de-outubro-de-2026) (owner, 27 October 2026): every plan, alone, at full use of every figure, must make a net profit greater than zero (at least a cent) on both intervals with the spend floor's existing room; 60% is the goal of the company's real monthly report, not a floor for a plan. Under the former 60% target the lowest price on the grid that kept every #553 figure was ${TIERS.map((t) => `${PLAN_TITLES[t]}: ${formerLowestA(t) === null ? "none up to " + usd(grid(t)[grid(t).length - 1]) : usd(formerLowestA(t)!)}`).join(", ")}${TIERS.some((t) => formerLowestA(t) === null) ? ", so alternative A had no solution" : ""}. The readings are the dated sizing and most-tax models of 18 October 2026, not the TX reading. **Nothing here is in force**: no price, limit, flag or gate changes, and nothing opens a sale.`);
+  push("");
 
   // ---------------- recommendation first
   push("## The recommendation, per plan");
@@ -513,15 +534,17 @@ export function renderPricingOptimization(): string {
   }
   push("");
   const credits = CREDIT_AMOUNTS.map((a) => creditOption(a));
-  push(`**Usage above the included figures: prepaid credits** (docs/pack-cost-decomposition-2026-10-18.md, option 3), sold at ${credits.map((c) => usd(c.amountCents)).join(", ")}, each keeping 60% however it is spent (${credits.map((c) => pctOf(c.worst.netBps)).join(", ")} on its dearest-to-serve resource), at the rates of that document's table (list email ${credits.map((c) => usd2(c.rates.find((r) => r.pack.id === "list-email")!.centsPerDisplay)).join(", ")} per 1,000).`);
+  push(`**Usage above the included figures: prepaid credits** (docs/pack-cost-decomposition-2026-10-18.md, option 3), sold at ${credits.map((c) => usd(c.amountCents)).join(", ")}, each keeping that document's former 60% target however it is spent (it is not re-run here under the MR rule) (${credits.map((c) => pctOf(c.worst.netBps)).join(", ")} on its dearest-to-serve resource), at the rates of that document's table (list email ${credits.map((c) => usd2(c.rates.find((r) => r.pack.id === "list-email")!.centsPerDisplay)).join(", ")} per 1,000).`);
   push("");
   push("| Plan | Today's price: worst regret across the four scenarios | Today's price over the band's median | Today's price over the regression's prediction |");
   push("| --- | --- | --- | --- |");
   for (const tier of TIERS) push(`| ${PLAN_TITLES[tier]} | ${(regretAt(tier, PLAN_PRICES[tier].month) * 100).toFixed(1)}% | ${(PLAN_PRICES[tier].month / anchorCents(tier)).toFixed(2)}× | ${(PLAN_PRICES[tier].month / Math.round(predictedFor(tier).usd * 100)).toFixed(2)}× |`);
   push("");
-  push(`The minimax-regret price hedges between scenarios in which demand barely falls with price (where higher is better without end) and scenarios in which it falls fast (where the lowest price that keeps 60%, about today's, is best). **If the owner reads the competitor evidence above (today's prices are already well above the band medians and above what the regression predicts for plans with these attributes) as a sign that demand is elastic, the scenario-best prices are instead the lowest that keep 60% with every #553 figure (${TIERS.map((t) => `${PLAN_TITLES[t]} ${usd(lowestA(t))}`).join(", ")})**, and the table above says how much regret today's prices carry. No data decides between them yet.`);
+  const elastic = ELASTICITIES.filter((e) => e < -1);
+  const bestA = (e: number) => TIERS.map((t) => `${PLAN_TITLES[t]} ${usd(exhaustive(t, "A", e)!.monthCents)}`).join(", ");
+  push(`The minimax-regret price hedges between scenarios in which demand barely falls with price (where higher is better without end) and scenarios in which it falls fast (where a price near the low end of the grid is best). **If the owner reads the competitor evidence above (today's prices are already well above the band medians and above what the regression predicts for plans with these attributes) as a sign that demand is elastic, the scenario-best prices with every #553 figure are instead ${elastic.map((e) => `${bestA(e)} at ε ${minus(e)}`).join("; ")}** (the lowest that make a profit with the room: ${TIERS.map((t) => `${PLAN_TITLES[t]} ${usd(lowestA(t))}`).join(", ")}), and the table above says how much regret today's prices carry. No data decides between them yet.`);
   push("");
-  push("How each figure was chosen: the price is the **minimax-regret** price over the four demand scenarios among the prices that keep 60% at full use of every #553 figure (alternative A below, the owner's rule \"não remover limites visíveis\"); the limits are #553's, because no scenario here gives demand a reason to value a cut, and cutting is the owner's decision (alternative C prices it); credits are the decomposition's best structural option. **None of it is in force.**");
+  push("How each figure was chosen: the price is the **minimax-regret** price over the four demand scenarios among the prices that make a net profit with the room at full use of every #553 figure (alternative A below, the owner's rule \"não remover limites visíveis\"); the limits are #553's, because no scenario here gives demand a reason to value a cut, and cutting is the owner's decision (alternative C prices it); credits are the decomposition's best structural option. **None of it is in force.**");
   push("");
 
   // ---------------- dataset
@@ -586,9 +609,9 @@ export function renderPricingOptimization(): string {
   // ---------------- the program
   push("## 3. The optimization");
   push("");
-  push("**Decisions.** For each plan, its monthly price on the grid of every $X9 from $9 to twice today's (the year at ten monthly payments, Marktmorgen's convention), and the share of each of #553's eight per-use figures (visits, orders, list emails, AI, storage, video hours, access emails, store emails).");
+  push("**Decisions.** For each plan, its monthly price on the grid of every $X9 from $9 to three times today's (the year at ten monthly payments, Marktmorgen's convention), and the share of each of #553's eight per-use figures (visits, orders, list emails, AI, storage, video hours, access emails, store emails).");
   push("");
-  push("**Constraints.** Every plan, alone, at full use of every figure, keeps 60% on both intervals with the spend floor test's room (25¢ a month, $1 a year), under the sizing reading: the program's room per price is `unitUnder`'s, less " + `${SAFETY_CENTS}¢` + " of safety for rounding, and its usage is linear in the shares, with coefficients read from `usageCents` (the largest gap between that line and `usageCents` at today's figures is " + `${linearityGap()}¢` + "). Prices rise from Store to Studio to Scale; no figure of a plan is above the same figure of the plan above it. The number of plans stays three. Then each solution, as a page would print it, is checked again by `unitUnder` itself.");
+  push("**Constraints.** Every plan, alone, at full use of every figure, makes a net profit greater than zero (at least a cent) on both intervals with the spend floor test's room (25¢ a month, $1 a year), under the sizing reading (the MR rule; until 7 November 2026 this was 60%): the program's room per price is `unitUnder`'s, less " + `${SAFETY_CENTS}¢` + " of safety for rounding, and its usage is linear in the shares, with coefficients read from `usageCents` (the largest gap between that line and `usageCents` at today's figures is " + `${linearityGap()}¢` + "). Prices rise from Store to Studio to Scale; no figure of a plan is above the same figure of the plan above it. The number of plans stays three. Then each solution, as a page would print it, is checked again by `unitUnder` itself.");
   push("");
   push("**Objective.** Demand at each price is q = (price ÷ the band's median price)^ε, one scenario for each ε in −0.5, −1, −1.5 and −2; the objective is the sum over plans of q times the monthly payment's net at full use: **a profit index in dollars per customer the band's median price would bring**, comparable within a scenario only. No scenario is a measurement: no sale has ever been open.");
   push("");
@@ -596,7 +619,7 @@ export function renderPricingOptimization(): string {
   push("");
   push(`Solver: ${solutions.solver}.`);
   push("");
-  push("| Scenario | Alternative | Store | Studio | Scale | Each plan keeps 60% (checked) | Same as the exhaustive search |");
+  push("| Scenario | Alternative | Store | Studio | Scale | Each plan makes a profit with the room (checked) | Same as the exhaustive search |");
   push("| --- | --- | --- | --- | --- | --- | --- |");
   for (const sol of solutions.solutions) {
     const v = verified(sol);
@@ -604,11 +627,13 @@ export function renderPricingOptimization(): string {
     push(`| ε = ${sol.scenario} | ${sol.alternative} | ${v.map((x) => `${usd(x.monthCents)}${sol.alternative === "C" ? ` (${showShares(x.tier, x.shares)})` : ""}`).join(" | ")} | ${v.every((x) => x.keeps) ? "yes" : "**no**"} (${v.map((x) => `${pctOf(x.month.netBps)} / ${pctOf(x.year.netBps)}`).join("; ")}) | ${same ? "yes" : "**no**"} |`);
   }
   push("");
-  push(`**What the scenarios agree on, and where they part.** Under A the lowest price that keeps 60% with every #553 figure is ${TIERS.map((t) => `${PLAN_TITLES[t]} ${usd(lowestA(t))}`).join(", ")} (today ${TIERS.map((t) => usd(PLAN_PRICES[t].month)).join(", ")}): nothing near the band medians is possible without cutting figures. With |ε| at most 1 (−0.5, −1), constant-elasticity demand has no finite best price, and the program goes to the top of the grid: that is the model's shape, not a finding that the market would pay it. With |ε| above 1 (−1.5, −2) the best price is that lowest one. So the scenarios disagree on direction and agree only on the floor.`);
+  const aboveMedian = TIERS.filter((t) => lowestA(t) > anchorCents(t));
+  const atFloor = elastic.every((e) => TIERS.every((t) => exhaustive(t, "A", e)!.monthCents === lowestA(t)));
+  push(`**What the scenarios agree on, and where they part.** Under A the lowest price that makes a profit with the room with every #553 figure is ${TIERS.map((t) => `${PLAN_TITLES[t]} ${usd(lowestA(t))}`).join(", ")} (today ${TIERS.map((t) => usd(PLAN_PRICES[t].month)).join(", ")}): ${aboveMedian.length ? `above the band's median price for ${aboveMedian.map((t) => PLAN_TITLES[t]).join(" and ")}, so nothing near that median is possible there without cutting figures` : "at or below the band's median price for every plan"}. With |ε| at most 1 (−0.5, −1), constant-elasticity demand has no finite best price, and the program goes to the top of the grid: that is the model's shape, not a finding that the market would pay it. With |ε| above 1 (${elastic.map(minus).join(", ")}) the best price is ${atFloor ? "that lowest one" : `above that lowest one (${elastic.map((e) => `${bestA(e)} at ε ${minus(e)}`).join("; ")}): with a floor this low, the net a customer brings grows faster with the price than demand falls, up to a point`}. So the scenarios disagree on direction.`);
   push("");
-  push("**Usage above the included figures, and its billing structure.** Not in the program, because the demand for usage is not known even in scenario form. docs/pack-cost-decomposition-2026-10-18.md chose the structure (prepaid credits: no non-payment exposure, fixed cents spread over larger amounts) and priced each rate at the lowest that keeps 60%; under the same logic as above, that floor is the best price when demand for usage falls fast with its price (|ε| above 1), and no finite best exists otherwise.");
+  push("**Usage above the included figures, and its billing structure.** Not in the program, because the demand for usage is not known even in scenario form. docs/pack-cost-decomposition-2026-10-18.md chose the structure (prepaid credits: no non-payment exposure, fixed cents spread over larger amounts) and priced each rate at the lowest that keeps its former 60% target; it is not re-run here under the MR rule, and with no demand for usage, not even in scenario form, no best price for it is drawn here.");
   push("");
-  push("**Minimax regret** (alternative A): for each price that keeps 60%, its largest shortfall from each scenario's best, as a share of that best; the price with the smallest is the recommendation.");
+  push("**Minimax regret** (alternative A): for each price that makes a profit with the room, its largest shortfall from each scenario's best, as a share of that best; the price with the smallest is the recommendation.");
   push("");
   push("| Plan | Price | Worst regret | Regret at ε −0.5 / −1 / −1.5 / −2 | Customers needed per $100 a month of fixed cost |");
   push("| --- | --- | --- | --- | --- |");
@@ -630,9 +655,9 @@ export function renderPricingOptimization(): string {
   for (const tier of TIERS) push(`| ${PLAN_TITLES[tier]} | ` + ELASTICITIES.map((e) => { const a = exhaustive(tier, "A", e)!, c = exhaustive(tier, "C", e)!; return `${(c.profit / a.profit).toFixed(2)}× (${usd(c.monthCents)} against ${usd(a.monthCents)})`; }).join(" | ") + " |");
   push("");
 
-  push("**Each cut alone.** The same, one figure at a time cut to a tenth of #553's (rounded down as a page prints it), every other kept: the lowest price that keeps 60%, and the profit index over A's best in the two scenarios where a cut can lower the price.");
+  push("**Each cut alone.** The same, one figure at a time cut to a tenth of #553's (rounded down as a page prints it), every other kept: the lowest price that makes a profit with the room, and the profit index over A's best in the two scenarios where a cut can lower the price.");
   push("");
-  push("| Plan | Figure cut to a tenth | Its figure after the cut | Lowest price that keeps 60% | ε −1.5: over A | ε −2: over A |");
+  push("| Plan | Figure cut to a tenth | Its figure after the cut | Lowest price that makes a profit with the room | ε −1.5: over A | ε −2: over A |");
   push("| --- | --- | --- | --- | --- | --- |");
   for (const tier of TIERS) for (const c of eachCut(tier)) push(`| ${PLAN_TITLES[tier]} | ${c.id} | ${c.figure} | ${usd(c.monthCents)} | ${c.ratio["-1.5"].toFixed(2)}× | ${c.ratio["-2"].toFixed(2)}× |`);
   push("");
@@ -652,10 +677,14 @@ export function renderPricingOptimization(): string {
     const priced = comparisons(tier).filter((c) => c.priced && c.target !== null);
     const each = priced.map((c) => ({ c, s: superiorityPrice(tier, [c.attribute]) }));
     const all = superiorityPrice(tier, priced.map((c) => c.attribute));
-    push(`${tier === "creator" ? "Store carries no list email at #553 and lib/plan.ts gates broadcasts to Studio (`canUse`), so its list-email line also needs that gate opened. " : ""}Raised to the band's best finite figure, the lowest price that keeps 60%: ${each.map(({ c, s }) => `${c.attribute} ${s ? usd(s.monthCents) : "none"}`).join("; ")}; all of them together ${all ? `**${usd(all.monthCents)} a month**` : "none"} (today ${usd(PLAN_PRICES[tier].month)}). ${comparisons(tier).some((c) => c.unlimitedIn.length) ? `Where a competitor in the band prints \"unlimited\" (${[...new Set(comparisons(tier).filter((c) => c.unlimitedIn.length).map((c) => c.attribute))].join(", ")}), superiority is infeasible at any price under the 60% rule: an unlimited allowance cannot be held to 60% at full use.` : ""}`);
+    push(`${tier === "creator" ? "Store carries no list email at #553 and lib/plan.ts gates broadcasts to Studio (`canUse`), so its list-email line also needs that gate opened. " : ""}Raised to the band's best finite figure, the lowest price that makes a profit with the room: ${each.map(({ c, s }) => `${c.attribute} ${s ? usd(s.monthCents) : "none"}`).join("; ")}; all of them together ${all ? `**${usd(all.monthCents)} a month**` : "none"} (today ${usd(PLAN_PRICES[tier].month)}). ${comparisons(tier).some((c) => c.unlimitedIn.length) ? `Where a competitor in the band prints \"unlimited\" (${[...new Set(comparisons(tier).filter((c) => c.unlimitedIn.length).map((c) => c.attribute))].join(", ")}), superiority is infeasible at any price under the MR rule, as it was under the former 60% target: an unlimited allowance used in full has no bounded cost, so no price makes a profit on it.` : ""}`);
     push("");
   }
-  push("So \"superior on every attribute to the best competitor in its band\" is **infeasible** for every plan (an unlimited figure in every band), and on the finite metered figures alone it costs the prices above, far above both the band and the scenarios' best prices. Where Marktmorgen is ahead without it: 0% of a sale (tied with the best in each band), 2,000 products, 100,000 contacts (above every finite figure in the Store and Studio bands).");
+  const together = TIERS.map((t) => superiorityPrice(t, comparisons(t).filter((c) => c.priced && c.target !== null).map((c) => c.attribute))?.monthCents ?? null);
+  const overMedian = TIERS.every((t, i) => together[i] !== null && together[i]! > anchorCents(t));
+  const overElastic = TIERS.every((t, i) => together[i] !== null && elastic.every((e) => together[i]! > exhaustive(t, "A", e)!.monthCents));
+  const allAbove = overMedian || overElastic ? `, above ${[overMedian ? "the band's median price" : "", overElastic ? "the best prices of the scenarios in which demand falls fast (|ε| above 1)" : ""].filter(Boolean).join(" and ")} for every plan` : "";
+  push(`So "superior on every attribute to the best competitor in its band" is **infeasible** for every plan (an unlimited figure in every band), and on the finite metered figures alone it costs the prices above${allAbove}. Where Marktmorgen is ahead without it: 0% of a sale (tied with the best in each band), 2,000 products, 100,000 contacts (above every finite figure in the Store and Studio bands).`);
   push("");
 
   // ---------------- zero-cost features
@@ -688,7 +717,8 @@ export function renderPricingOptimization(): string {
   push("- **The regression.** A small, chosen, observational sample; attributes coded from what each page lists; fees that sometimes include processing. It is a diagnostic.");
   push("- **Pages not read.** Linktree's and Shopify's prices did not render or were not stated; Stripe's pricing page refused the fetch (docs/pack-cost-decomposition-2026-10-18.md). Gumroad and Whop sell with no subscription, so they are not in the bands.");
   push("- **Fixed costs.** Not reviewed for Marktmorgen; the base is per $100 a month.");
-  push("- **The gate.** Under the most-tax reading no plan keeps 60% at any price here (the recommendation table), so nothing opens.");
+  const gate = TIERS.map((t) => { const m = minimaxRegret(t).monthCents; const u = unitAt(t, "month", m, ones(), 0, MOST_TAX_READING); return `${PLAN_TITLES[t]} at ${usd(m)} ${u.meetsFloor ? "makes" : "does not make"} a profit (${pctOf(u.netBps)})`; });
+  push(`- **The gate.** Under the most-tax reading, at the recommended prices, ${gate.join("; ")} (the recommendation table). Whatever it says, nothing opens here: \`PLANS_ON_SALE\` stays false, and the tax gate, art. 9a and the commercial review are unchanged.`);
   push("");
   return HISTORICAL_MARGIN_NOTICE + out.join("\n");
 }

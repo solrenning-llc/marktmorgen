@@ -18,7 +18,7 @@ async function source() {
 function pay(session: Record<string, unknown>, email = "buyer@example.test") {
   Object.assign(session, { status: "complete", payment_status: "paid", amount_total: 4000, customer_details: { email },
     payment_intent: { object: "payment_intent", status: "succeeded", amount_received: 4000, currency: "usd",
-      latest_charge: { object: "charge", paid: true, amount: 4000, amount_refunded: 0, currency: "usd", refunded: false } },
+      latest_charge: { object: "charge", paid: true, amount: 4000, amount_refunded: 0, currency: "usd", refunded: false, disputed: false } },
     shipping_details: { name: "Original Buyer", address: { line1: "1 Original Street", city: "Test City", country: "US" } } });
 }
 

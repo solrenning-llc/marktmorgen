@@ -2549,13 +2549,19 @@ select.st-field:not([multiple]),
     max-width: 34ch;
   }
   /* A p that is a box, not running text, keeps the column's whole width: the promotion band (p.st-card), the community
-     card (p > a.st-card), the search's line and the cart's total (p.flex). After the cap, at the same weight. */
-  [data-store-layout] :where(p.flex, p.grid, p.st-card, p:has(> .st-card)) {
+     card (p > a.st-card), the search's line and the cart's total (p.flex), a note box (p.st-note). After the cap, at
+     the same weight. */
+  [data-store-layout] :where(p.flex, p.grid, p.st-card, p:has(> .st-card), p.st-note) {
     max-width: none;
   }
-  [data-store-layout] :where(p.text-center, .text-center > p, p.st-note) {
+  [data-store-layout] :where(p.text-center, .text-center > p) {
     margin-inline: auto;
   }
+}
+/* A note box (dashed) keeps the column's width, as on the product page; its words are capped by its own end padding.
+   Out of the layer, to win over the padding the box sets for itself. */
+[data-store-layout] p.st-note {
+  padding-inline-end: max(1.25rem, calc(100% - 34ch - 1.25rem));
 }
 /* A question of the store's FAQ opens from a 44 px row (WCAG 2.5.5), its words centered in it by padding, so the summary
    stays a list item and keeps its disclosure triangle. The first padding is for a browser without the lh unit. */

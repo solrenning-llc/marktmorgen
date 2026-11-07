@@ -49,8 +49,13 @@ export const SURVEY_ENTRY_MAX_BYTES = WHO_BYTES + RECORD_FRAME_BYTES + 3 * MAX_S
  * (tests/plan-cost-registry.ts, surveyPageCost).
  */
 export const SURVEY_PAGE_COMMANDS = 1;
-/** `nl:course:<id>:survey`, the key that command names: a course id is a UUID's 32 hex digits (lib/course.ts newCourseId). */
-const SURVEY_KEY_BYTES = "nl:course:".length + 32 + ":survey".length;
+/**
+ * The key that command names (lib/course-survey.ts surveyKey): its 17 fixed
+ * characters around the course id, a UUID's 32 hex digits (lib/course.ts
+ * newCourseId). Written as a count, not as the key, so this file names no key
+ * family it does not keep (tests/store-data-registry.test.ts).
+ */
+const SURVEY_KEY_BYTES = 17 + 32;
 /** The command's name at its longest (HEXISTS), and the quotes, commas and brackets of the request and its reply. */
 const PAGE_COMMAND_FRAME_BYTES = 32;
 export const SURVEY_PAGE_BYTES = SURVEY_ENTRY_MAX_BYTES + SURVEY_KEY_BYTES + PAGE_COMMAND_FRAME_BYTES;

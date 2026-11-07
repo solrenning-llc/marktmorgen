@@ -1840,6 +1840,16 @@ a.chip {
     transform: scaleX(1);
   }
 }
+/* 654 [WG14] (b1): the line under a Path milestone's heading (components/path-milestone.tsx). Complete by default, which is
+   what a creator who asks for less motion sees; drawn once, left to right, only when motion is welcome. */
+.mm-milestone-line {
+  transform-origin: left;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .mm-milestone-line {
+    animation: nb-draw 480ms ease-out 1 both;
+  }
+}
 @keyframes nb-spin {
   to {
     transform: rotate(360deg);

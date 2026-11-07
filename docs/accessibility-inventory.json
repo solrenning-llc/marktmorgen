@@ -1461,6 +1461,7 @@
     "components/path-certificates.tsx",
     "components/path-checkout-notice.tsx",
     "components/path-growth-missions.tsx",
+    "components/path-milestone.tsx",
     "components/path-missions.tsx",
     "components/path-onboarding.tsx",
     "components/path-reminder-button.tsx",

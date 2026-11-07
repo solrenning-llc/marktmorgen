@@ -636,6 +636,19 @@ export async function readBody(courseId: string, lessonId: string): Promise<stri
   return typeof raw === "string" ? raw : "";
 }
 
+/**
+ * A lesson's text read exactly, for the studio's editor (rule 24): the text, ""
+ * when none is kept, and null when the reply is neither, so an unknown read is
+ * never opened as an empty lesson whose Save would write over the real text.
+ */
+export async function readBodyExact(courseId: string, lessonId: string): Promise<string | null> {
+  if (!isRedisConfigured() || !COURSE_ID_PATTERN.test(courseId) || !ITEM_ID_PATTERN.test(lessonId)) return null;
+  const replies = await redisPipeline([["GET", bodyKey(courseId, lessonId)]]);
+  if (!Array.isArray(replies) || replies.length !== 1) return null;
+  const [raw] = replies;
+  return typeof raw === "string" ? raw : raw === null ? "" : null;
+}
+
 /** Many lessons' text at once, a hundred to a command: for a store's whole export (lib/store-export.ts). */
 /** Lesson bodies read together, across courses: how many a command. Each is at most MAX_BODY_LENGTH, so one command carries a few megabytes at the most. */
 export const BODIES_PER_READ = 500;

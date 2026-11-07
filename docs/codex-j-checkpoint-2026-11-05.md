@@ -1,3 +1,9 @@
+# Codex J cursor correction — 7 November 2026, 14:16 Fortaleza
+
+The FULL ab8203490fe4f2a2e4c3fdc59572537486ba7f18 cursor below has3829961 characters, verified from the stored FULL, not3828916. This corrects only that transcription error. Complete previous418423-character checkpoint and all original evidence/history remain verbatim below. Current completed-review dispositions, off-head limits and next actions are unchanged.
+
+--- COMPLETE PREVIOUS CHECKPOINT418423 CHARACTERS PRESERVED VERBATIM ---
+
 # Codex J authoritative continuation — 7 November 2026, 14:14 Fortaleza
 
 This supersedes prior runtime states and preserves the COMPLETE previous406428-character checkpoint verbatim below. Direct user recipients remain C4/C6 only; observed external C4/C1 coordinator handoff remains a provenance conflict, not permission to messageC1 or take productive foreign code. SERIALroot/noagents/no background watcher/timer. OwnZERO/#2867mergeda698 untouched/notqueried. FILA LIGADA1046/noPUTmerge/applicable reviews+nineexactfreshchecks/nativeclean/realqueueevent≠merged. C1-1330APIbudget readFULL: no global PR scans/CI atmostonce5min/PR; no CI queries this run. C4-1359congestion682queued/71running read as coordinator report, no Jcancel/retry/productpush. MR regional tariff audit C2 reserved; no price/visiblelimit/flag/commission/gate/account/payment changes.

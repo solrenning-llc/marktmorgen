@@ -147,6 +147,39 @@ async function main(): Promise<void> {
     is(`${label}: not checked, nothing started`, [result.state, result.milestones, await flowsStartedFor(flows, email)], ["not_checked", [], []]);
   }
 
+  part("A share whose workflows did not start is not kept as reached");
+  // The share's mark is taken before the workflows are asked; when they did not take the student (not on the list yet,
+  // the day's runs used up, the workflows not known on their own read), the mark is given back, so a later lesson done
+  // tries again. Each workflow still starts once per person, by its own claim (lib/flows.ts).
+  const marks = (email: string) => redis.run(["HLEN", `nl:course:${course.id}:pct:${emailKey(email)}`]);
+  is("somebody not on the list keeps no mark of the share", marks("cy@example.com"), 0);
+  await upsertContact(list, "cy@example.com", { agreed: true, explicit: true, productId, title: "Bread Course", source: "buyer" }, ROOM);
+  await markLesson(course.id, "cy@example.com", lessons[2], true, ROOM);
+  await noteIfFinished(store, productId, course.id, "cy@example.com");
+  is("and once they agreed, their next lesson done starts the workflows of the shares they passed", await flowsStartedFor(flows, "cy@example.com"), [halfId, mostId]);
+  const refusing = async (email: string, match: (c: (string | number)[]) => boolean, reply: unknown, skip = 0) => {
+    for (const id of lessons.slice(0, 2)) await markLesson(course.id, email, id, true, ROOM);
+    await upsertContact(list, email, { agreed: true, explicit: true, productId, title: "Bread Course", source: "buyer" }, ROOM);
+    let seen = 0;
+    redis.pipeline = (async (commands: (string | number)[][]) => (commands.some(match) && seen++ >= skip ? reply : original(commands))) as typeof redis.pipeline;
+    try {
+      return await noteProgress(store, productId, course.id, email, lessons);
+    } finally {
+      redis.pipeline = original as typeof redis.pipeline;
+    }
+  };
+  const retried: [string, string, (c: (string | number)[]) => boolean, unknown, number][] = [
+    ["the day's runs used up", "runs@example.com", (c) => c[0] === "HINCRBY" && c[2] === "started", [1_000_000, 1], 0],
+    ["the workflows, unknown on their second read", "second@example.com", (c) => c[0] === "GET" && String(c[1]).startsWith("nl:mail:flows:"), [42], 1],
+  ];
+  for (const [label, email, match, reply, skip] of retried) {
+    const result = await refusing(email, match, reply, skip);
+    is(`${label}: nothing started and nothing reported`, [result.milestones, await flowsStartedFor(flows, email)], [[], []]);
+    is(`${label}: the share's mark is given back`, marks(email), 0);
+    is(`${label}: the next lesson done starts it`, (await noteProgress(store, productId, course.id, email, lessons)).milestones, [50]);
+    is(`${label}: once`, [await flowsStartedFor(flows, email), (await noteProgress(store, productId, course.id, email, lessons)).milestones], [[halfId], []]);
+  }
+
   part("What it costs");
   let commands = 0;
   const counting = (async (c: (string | number)[][]) => { commands += c.length; return original(c); }) as typeof redis.pipeline;

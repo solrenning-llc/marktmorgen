@@ -122,6 +122,15 @@ async function main(): Promise<void> {
   await noteIfFinished(store, courseId, course.id, "cy@example.com");
   await run();
   is("somebody who never agreed to hear from the creator is not written to", to("You finished it"), ["ana@example.com"]);
+  // The finish's mark is given back when finishing started nothing (not on the list then, the day's runs used up, the
+  // workflows not known), so it is not taken for "already started": once they agree, their next lesson done starts it, once.
+  await upsertContact(store.listId as string, "cy@example.com", { agreed: true, explicit: true, productId: courseId, title: "Weeknight Course", source: "buyer" }, ROOM);
+  await markLesson(course.id, "cy@example.com", two, false, ROOM);
+  await markLesson(course.id, "cy@example.com", two, true, ROOM);
+  is("who finished before agreeing starts it at their next lesson done", await noteIfFinished(store, courseId, course.id, "cy@example.com"), true);
+  is("and only once", await noteIfFinished(store, courseId, course.id, "cy@example.com"), false);
+  await run();
+  is("written to once", to("You finished it"), ["ana@example.com", "cy@example.com"]);
 
   mail.restore();
   done();

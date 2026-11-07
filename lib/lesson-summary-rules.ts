@@ -103,7 +103,7 @@ export const SUMMARY_REASONS: Record<SummaryProblem, string> = {
 const LINK = /https?:\/\/|\bwww\.|[^\s@<>()]+@[^\s@<>()]+\.[a-z]{2,}/i;
 /** Pressure a summary may repeat only when the lesson itself says it, in every language a store speaks. */
 const PRESSURE =
-  /\b(hurry|last chance|limited time|act now|don'?t miss|miss out|only today|ends soon|while (?:it|they) lasts?|before it'?s gone|running out|few left|countdown|date prisa|[uú]ltima oportunidad|d[eé]p[eê]chez-vous|derni[eè]re chance|beeil dich|letzte chance|affrettati|ultima occasione|schiet op|laatste kans|apresse-se|[uú]ltima oportunidade)\b/gi;
+  /(?<![\p{L}\p{N}])(hurry|last chance|limited time|act now|don'?t miss|miss out|only today|ends soon|while (?:it|they) lasts?|before it'?s gone|running out|few left|countdown|date prisa|[uú]ltima oportunidad|d[eé]p[eê]chez-vous|derni[eè]re chance|beeil dich|letzte chance|affrettati|ultima occasione|schiet op|laatste kans|apresse-se|[uú]ltima oportunidade)(?![\p{L}\p{N}])/giu;
 
 /**
  * A summary as it may be kept, or why not. Spaces inside a line become one

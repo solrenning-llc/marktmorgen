@@ -101,6 +101,8 @@ async function main() {
   is("a deal word the lesson never says is refused", checkSummary("Buy now with a discount on the course.", TEXT), { ok: false, reason: "not_in_lesson" });
   is("pressure the lesson never puts is refused", checkSummary("Hurry, the price on the page goes up.", TEXT), { ok: false, reason: "pressure" });
   is("so is a last chance", checkSummary("This is your last chance to price a first product.", TEXT), { ok: false, reason: "pressure" });
+  is("in a store language too, accents and all", checkSummary("Es tu última oportunidad de poner un precio.", TEXT), { ok: false, reason: "pressure" });
+  is("pressure the lesson itself says may be repeated", checkSummary("Do not wait for a last chance to set a price.", `${TEXT} Never wait for a last chance to set a price.`).ok, true);
   is("markup is refused, never cleaned", checkSummary("This lesson <b>prices</b> a first product.", TEXT), { ok: false, reason: "markup" });
   is("nothing is not a summary", checkSummary(undefined, TEXT), { ok: false, reason: "empty" });
   is("spaces only are not a summary", checkSummary("   \n  ", TEXT), { ok: false, reason: "empty" });

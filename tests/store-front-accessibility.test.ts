@@ -123,17 +123,17 @@ async function main(): Promise<void> {
   is("its standalone links (blog, \"Get it again\", affiliates, report, delete, the search's \"Show every product\") are 2.75rem tall", [/display:\s*inline-flex/.test(footer), /min-height:\s*2\.75rem/.test(footer)], [true, true]);
   const news = rule(css, /\.st-announce a/);
   is("the creator's line of news, as a link, is 2.75rem tall without growing the band", [/display:\s*inline-flex/.test(news), /min-height:\s*2\.75rem/.test(news), /margin-block:\s*-0\.75rem/.test(news)], [true, true, true]);
-  // In CSS, not as min-h-11 on the summary: tests/tap-targets.test.ts asks such a box to centre with flex, which would
+  // In CSS, not as min-h-11 on the summary: tests/tap-targets.test.ts asks such a box to center with flex, which would
   // take away the summary's disclosure triangle.
   const question = rule(css, /\.st-faq > summary/);
-  is("each question of the store's FAQ opens from a 44 px row, its words centred in it", [/<details key=\{item\.q\} className="st-card st-faq /.test(page), /min-height:\s*2\.75rem/.test(question), /calc\(\(2\.75rem - 1lh\) \/ 2\)/.test(question)], [true, true, true]);
+  is("each question of the store's FAQ opens from a 44 px row, its words centered in it", [/<details key=\{item\.q\} className="st-card st-faq /.test(page), /min-height:\s*2\.75rem/.test(question), /calc\(\(2\.75rem - 1lh\) \/ 2\)/.test(question)], [true, true, true]);
 
   part("1.4.6: \"Previous\" and \"Next\" that cannot be pressed are still readable at 7:1");
   const off = rule(css, /\.st-pager-off/);
-  is("drawn in the muted colour, with no opacity that fades it below 7:1", [/color:\s*var\(--st-muted\)/.test(off), /opacity/.test(off)], [true, false]);
-  is("told apart from a pressable one by its dashed edge, not by colour (1.4.1)", /border:\s*1px dashed/.test(off), true);
+  is("drawn in the muted color, with no opacity that fades it below 7:1", [/color:\s*var\(--st-muted\)/.test(off), /opacity/.test(off)], [true, false]);
+  is("told apart from a pressable one by its dashed edge, not by color (1.4.1)", /border:\s*1px dashed/.test(off), true);
   const muted = THEMES.map((theme) => { const c = lookColours({ theme: theme.id, accent: "#5a36ee" }); return Math.min(contrast(c.muted, c.bg), contrast(c.muted, c.card)); });
-  is("the muted colour reaches 7:1 on the page and the card in every theme", muted.every((ratio) => ratio >= 7), true);
+  is("the muted color reaches 7:1 on the page and the card in every theme", muted.every((ratio) => ratio >= 7), true);
 
   part("1.4.8: a line of the store front's sentences is at most 80 characters");
   const measure = css.match(/\[data-store-layout\] :where\(([^)]*)\)\s*\{([^}]*)\}/);
@@ -149,7 +149,7 @@ async function main(): Promise<void> {
   is("so a real sentence stays at or under 80 characters a line", at(81) <= 80, true);
   is("and so do words of the narrowest letters", at(126) <= 80, true);
   is("while a real sentence keeps at least 45 characters a line, so the cap does not chop ordinary reading", at(81) >= 45, true);
-  is("a centred line, and a note box, stay centred under the cap", /\[data-store-layout\] :where\([^)]*\.text-center > p[^)]*\.st-note[^)]*\)\s*\{[^}]*margin-inline:\s*auto/.test(css), true);
+  is("a centered line, and a note box, stay centered under the cap", /\[data-store-layout\] :where\([^)]*\.text-center > p[^)]*\.st-note[^)]*\)\s*\{[^}]*margin-inline:\s*auto/.test(css), true);
   // Narrower glyphs still exist (an apostrophe is 0.27ch in Geist; a hair space is narrower): no width holds 80 of
   // any glyph without chopping ordinary sentences, so that case and its alternative are recorded, as AX274 asks.
   const programme = readFileSync("docs/accessibility-programme.md", "utf8");

@@ -4871,3 +4871,7 @@ void main();
 
 ```
 
+
+
+### Entrega do parecer e canal pendente — 07/11/2026,20h36 Fortaleza
+M5815582088 publicado noEXATOc56698c00839189dfde7b5462105ef84e3af987d, FULLbodyrelidoEXATO;247PASS/types8400/lint0/scannerparcial39810. CanalCXM-20261107-2036-C1-2 tentouCAS:409NÃOAPLICADO por outro commit concorrente, não publicado. Aguardar>=120s/relerFULL+IDausente antesretry; não refazer testes/review por isso. Delta atéC6-2035/G-2033/C4-2035 lido, nenhum novo nominal M. Fonte/hash de todos arquivos preservados. #3135N+P não Mterceiro; #3136irmãoC6 aindaSEMPR atébaseadmitida; pausaSUSPENSA2014. Sem vigia em fundo/automação alterada.

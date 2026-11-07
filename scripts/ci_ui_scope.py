@@ -94,11 +94,22 @@ RENAMED_LOADER = re.compile(
 # require reached through a member or an index (Codex G's sixth return on #3037): require.call,
 # .apply, .bind, require["call"], require?.call. Only require.resolve with one whole literal is
 # followed (COMPUTED reads its argument); any other member of require is computed.
-INDIRECT_REQUIRE = re.compile(r"""\brequire\s*(?:\?\.\s*(?!\()|\.\s*)(?!resolve\b)[A-Za-z_$]|\brequire\s*(?:\?\.\s*)?\[""")
+# The resolver itself reached any other way (Codex G's seventh return on #3037):
+# require.resolve.call/.apply/.bind, require.resolve["call"], require.resolve?.(…), an alias
+# (`const find = require.resolve`), require?.resolve, `require . resolve` and require?.(…).
+# So the one exception is the exact direct call `require.resolve(`; every other `.`, `?.` or
+# `[` after require is computed.
+INDIRECT_REQUIRE = re.compile(r"""\brequire(?!\.resolve\s*\()\s*(?:\?\.|\.|\[)""")
+# The same for import.meta: a plain member (url, dirname, filename, env) is not a load, and
+# only the exact direct call `import.meta.resolve(` is read by COMPUTED. import.meta.resolve
+# reached through call/apply/bind, an alias, an index, destructuring or ?. is computed.
+INDIRECT_META_RESOLVE = re.compile(
+    r"""\bimport(?!\.meta\.resolve\s*\()\s*\.\s*meta\b(?!\s*\.\s*(?!resolve\b)[A-Za-z_$])""")
 
 
 def computed(code):
-    if COMPUTED.search(code) or RENAMED_LOADER.search(code) or INDIRECT_REQUIRE.search(code):
+    if (COMPUTED.search(code) or RENAMED_LOADER.search(code) or INDIRECT_REQUIRE.search(code)
+            or INDIRECT_META_RESOLVE.search(code)):
         return True
     if any(not BOUND_TO_REQUIRE.search(code[:m.start()]) and not CALLED_WITH_LITERAL.match(code, m.start())
            for m in CREATE_REQUIRE.finditer(code)):

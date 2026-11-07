@@ -293,6 +293,53 @@ test("affiliates: a delivered link is still sent and kept", async () => {
   }
 });
 
+/**
+ * The link's SET answered with anything but exactly "OK" (rule 24; sibling of
+ * signInLinkFor in claude5/signin-link-set-exact): no paid email carries a link
+ * Redis did not say it stored, the reply stays "sent" for both addresses, and a
+ * SET that did land but whose answer was lost is removed like an unsent link.
+ */
+const ODD_SET: [string, unknown[]][] = [
+  ["no reply at all", []],
+  ["a null reply", [null]],
+  ["a reply of another word", ["QUEUED"]],
+  ["two replies for one command", ["OK", "OK"]],
+];
+
+/** The one-command SET of an affiliate link answered by `reply`; with `apply`, the SET is still made. */
+function affiliateSetAnswered(reply: unknown[], apply: boolean) {
+  const original = redis.pipeline;
+  redis.pipeline = async (commands: Command[]) => {
+    if (commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).startsWith("nl:aff:link:")) {
+      if (apply) await original(commands);
+      return reply;
+    }
+    return original(commands);
+  };
+  return () => { redis.pipeline = original; };
+}
+
+for (const apply of [false, true]) {
+  for (const [what, reply] of ODD_SET) {
+    test(`affiliates: a link SET ${apply ? "made" : "not made"} with ${what} sends no email, keeps no link and answers the same`, async () => {
+      const { fixture, store } = await affiliatesWorld(`uniformaffset${apply ? "a" : "n"}${ODD_SET.findIndex(([w]) => w === what)}`, false, false);
+      const restore = affiliateSetAnswered(reply, apply);
+      try {
+        const known = await requestAffiliateLink({ store, email: member, note: "", ip: "192.0.2.120", origin });
+        const unknown = await requestAffiliateLink({ store, email: stranger, note: "", ip: "192.0.2.121", origin });
+        await drain();
+        assert.deepEqual([known, unknown], ["sent", "sent"], "the reply never says whether the address is in the programme");
+        assert.equal(fixture.calls.ses, 0, "no paid email was tried with a link Redis did not say it stored");
+        assert.equal(fixture.sent.length, 0);
+        assert.equal(affiliateLinks(), 0, "a link whose SET was not confirmed is not left behind");
+      } finally {
+        restore();
+        fixture.restore();
+      }
+    });
+  }
+}
+
 // ---- Time --------------------------------------------------------------------------------------------
 
 /**

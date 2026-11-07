@@ -62,7 +62,8 @@ import {
 import { COURSE_SURVEY_WORDS, courseSurveyWords } from "@/lib/buyer-words/course-survey";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import { emailKey } from "@/lib/learn";
-import { DataRoomError, dataUsed, needData } from "@/lib/store-data";
+import { DataRoomError, dataKey, dataUsed, needData } from "@/lib/store-data";
+import { newCourseId } from "@/lib/course";
 import { dataBytes } from "@/lib/store-data-rules";
 import { PERSON_DATA } from "@/lib/person-data";
 import { store as redis } from "./redis-stub";
@@ -281,7 +282,8 @@ async function main(): Promise<void> {
   await answerSurvey({ room: ROOM, courseId: COURSE, who: ana, score: 9, note: "" });
   const beforeOdd = await used();
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:course-survey-drop-all:v1"))) return ["x"];
+    // Regra 23: was the v1 header; the drop and its room's give-back are one script now (v2).
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:course-survey-drop-all:v2"))) return ["x"];
     return realGive(commands);
   }) as typeof redis.pipeline;
   let oddDrop = false;
@@ -293,14 +295,63 @@ async function main(): Promise<void> {
   redis.pipeline = realGive;
   is("an odd reply to dropping a course's survey is unknown", oddDrop, true);
   is("and gives no room back", await used(), beforeOdd);
+  // The room comes back in the same step as the delete: a room step that cannot be made deletes nothing, and a
+  // give-back is never lost after the answers went, so dropping again always leaves the room level (pre-review on 8aba2d700).
+  redis.clear();
+  const level = await used();
+  await answerSurvey({ room: ROOM, courseId: COURSE, who: ana, score: 9, note: "" });
+  await answerSurvey({ room: ROOM, courseId: COURSE, who: ben, score: 3, note: "" });
+  const roomKey = dataKey(ROOM)!;
+  const heldTotal = redis.run(["HGET", roomKey, "#"]);
+  redis.run(["HSET", roomKey, "#", "not a count"]);
+  let unreadRoom = false;
+  try {
+    await dropCourseSurvey(COURSE, ROOM);
+  } catch {
+    unreadRoom = true;
+  }
+  redis.run(["HSET", roomKey, "#", String(heldTotal)]);
+  is("a room that cannot be read deletes nothing and says so", [unreadRoom, await surveyAnswerCount(COURSE)], [true, 2]);
+  const sentDrop: (string | number)[][][] = [];
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    sentDrop.push(commands);
+    // A give-back sent on its own fails, as giveData's would, silently.
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-data:"))) throw new Error("down");
+    return realGive(commands);
+  }) as typeof redis.pipeline;
+  let lostGive: unknown = null;
+  try {
+    lostGive = await dropCourseSurvey(COURSE, ROOM);
+  } catch (error) {
+    lostGive = error;
+  }
+  redis.pipeline = realGive;
+  await dropCourseSurvey(COURSE, ROOM).catch(() => 0);
+  is("a drop is one command, its room's give-back inside it", [lostGive, sentDrop.length, sentDrop.flat().length], [2, 1, 1]);
+  is("and once the answers are gone the room is level, dropping again changes nothing", [await surveyAnswerCount(COURSE), await used()], [0, level]);
   const productRoute = source("app/api/store/product/route.ts");
   const courseRoute = source("app/api/store/course/route.ts");
   // Inside the removal's own check, before the product goes: a failure keeps the product for another try, as its comments do.
+  // Regra 23: these were exact-text patterns that broke as soon as another drop (296 [SQ7] ratings) joined the same try; they
+  // now say only what matters: inside the try, once, after every other drop of the check (a single step that is retried, so
+  // a failure in the larger drops before it never loses the answers), and nowhere only logged. The count went from 2 to 1.
   const check = productRoute.slice(productRoute.indexOf("await removeProduct(ref, id, async"), productRoute.indexOf("result = removed.ok"));
-  is("removing a product drops its course's survey in the removal's check, beside its comments", /await dropCourseSurvey\(found\.id, store\);\n\s*await dropComments\(found\.id/.test(check), true);
-  is("and a course already gone too", /await dropCourseSurvey\(going\.course\.id, store\);\n\s*await dropCommentsAfterCourseGone\(going\.course\.id, store\)/.test(check), true);
-  is("a failure there is never only logged", !/dropCourseSurvey\([^)]*\)\.catch/.test(productRoute) && (productRoute.match(/dropCourseSurvey\(/g) ?? []).length === 2, true);
-  is("turning a course off drops its survey in the same try as its comments, 503 on failure", /try \{\n\s*await dropCourseSurvey\(course\.id, store\);\n\s*await dropComments\(course\.id, \[\], store\);\n\s*\} catch \{\n\s*return Response\.json\(\{ ok: false, error: "unavailable" \}, \{ status: 503 \}\);/.test(courseRoute), true);
+  const surveyAt = check.indexOf("await dropCourseSurvey(going.course.id, store);");
+  const checkTry = check.indexOf("try {");
+  const checkCatch = check.indexOf("} catch {", checkTry);
+  is(
+    "removing a product drops its course's survey in the removal's check, after everything else it drops there",
+    surveyAt > checkTry && surveyAt < checkCatch && check.slice(checkTry, surveyAt).includes("await dropComments(found.id") && check.slice(checkTry, surveyAt).includes("await dropCommentsAfterCourseGone(going.course.id") && !/await drop/.test(check.slice(surveyAt + 1, checkCatch)),
+    true,
+  );
+  is("a failure there is never only logged, and it is dropped once", !/dropCourseSurvey\([^)]*\)\.catch/.test(productRoute) && (productRoute.match(/dropCourseSurvey\(/g) ?? []).length === 1, true);
+  const disable = courseRoute.slice(courseRoute.indexOf('if (action === "disable")'), courseRoute.indexOf("await setProductCourse(ref, id, null)"));
+  const disableTries = [...disable.matchAll(/try \{([\s\S]*?)\} catch \{\s*return Response\.json\(\{ ok: false, error: "unavailable" \}, \{ status: 503 \}\);/g)].map((m) => m[1]);
+  is(
+    "turning a course off drops its survey in a try that answers 503 on failure, after its comments",
+    disableTries.some((body) => body.includes("await dropCourseSurvey(course.id, store);")) && disable.indexOf("await dropCourseSurvey(course.id, store);") > disable.indexOf("await dropComments(course.id, [], store);"),
+    true,
+  );
   is("and only there", (courseRoute.match(/dropCourseSurvey\(/g) ?? []).length === 1, true);
 
   part("What a course page adds to each of its views, and where that is paid");
@@ -323,7 +374,16 @@ async function main(): Promise<void> {
   is("whether one is kept is one command that returns no comment", looked.map((c) => c[0]), ["HEXISTS"]);
   is("reading one's own is one command", ownRead.map((c) => c[0]), ["HGET"]);
   is("a page view adds at most the commands the cost line prices", Math.max(looked.length, ownRead.length) <= SURVEY_PAGE_COMMANDS, true);
-  is("and at most the bytes it prices: one answer at its largest", SURVEY_PAGE_BYTES >= SURVEY_ENTRY_MAX_BYTES, true);
+  // Regra 23: was SURVEY_ENTRY_MAX_BYTES alone; the key the command names and the command's own name are sent too.
+  is("and at most the bytes it prices: one answer at its largest, the course's key and the command", SURVEY_PAGE_BYTES >= SURVEY_ENTRY_MAX_BYTES + `nl:course:${newCourseId()}:survey`.length + "HEXISTS".length, true);
+  const coursePage = source("app/[handle]/course/[product]/page.tsx");
+  const surveyRead = coursePage.slice(coursePage.indexOf("const surveyWho"), coursePage.indexOf("const surveyAsks"));
+  // A view with the access open is counted where the page rests (isResting); any other browser pays a buyer request first.
+  is(
+    "a view without the access open pays a buyer request before the survey is read, and a refused one reads nothing",
+    /surveyPaid = !surveyWho \|\| open \|\| \(await takePublicRequest\(store, "buyer"\)\)/.test(surveyRead) && /!surveyPaid\s*\?\s*"unread"/.test(surveyRead) && surveyRead.indexOf("surveyPaid =") < surveyRead.indexOf("hasAnswer(course.id, surveyWho)"),
+    true,
+  );
   const costLine = source("tests/plan-cost-registry.ts");
   is("the public requests line prices it for every request of the window", /limit \* surveyPageCost\(\)/.test(costLine) && costLine.includes(`{ file: "lib/course-survey-rules.ts", names: ["SURVEY_PAGE_COMMANDS", "SURVEY_PAGE_BYTES"] }`), true);
 

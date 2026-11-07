@@ -20,13 +20,14 @@ const script = read("scripts/stale_pr_report.mjs");
 const triggers = workflow.split("\njobs:\n")[0] + "\n";
 
 part("the workflow runs only once a day and by hand");
-const events = [...(/\non:\n((?: .*\n)+)/.exec(triggers)?.[1] ?? "").matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1]);
+const onBlock = "\n" + (/\non:\n((?: .*\n)+)/.exec(triggers)?.[1] ?? "");
+const events = [...onBlock.matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1]);
 is("its only triggers are schedule and workflow_dispatch", events, ["schedule", "workflow_dispatch"]);
 const crons = [...triggers.matchAll(/^ {4}- cron: '([^']+)'$/gm)].map((m) => m[1]);
 is("one daily cron, at a minute other than :00", [crons.length, /^([1-5]?[0-9]) ([0-9]|1[0-9]|2[0-3]) \* \* \*$/.test(crons[0] ?? ""),
   (crons[0] ?? "").split(" ")[0] !== "0"], [1, true, true]);
 is("no pull_request, push, merge_group or workflow_run trigger",
-  /\n {2}(pull_request|pull_request_target|push|merge_group|workflow_run|issues|issue_comment):/.test(triggers), false);
+  /\n {2}(pull_request|pull_request_target|push|merge_group|workflow_run|issues|issue_comment):/.test(onBlock), false);
 
 part("minimal permissions, pinned actions, no secret, and not a required check");
 is("permissions are contents, pull-requests and checks read, and issues write, nothing else, and no job widens them",

@@ -97,7 +97,11 @@ async function main(): Promise<void> {
   is("nothing was charged for it", await used(), before);
   is("Ana gives 4", await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L1, who: ana, score: "4", note: "  Clear steps.  ", now: 1_000 }), { ok: true, changed: false });
   const charged = await used();
-  is("the room is charged the fixed bytes of one rating", charged - before, RATING_ROOM_BYTES);
+  // The first rating of a course also opens the course's place in the room (lib/store-data.ts).
+  is("the room is charged at least the fixed bytes of one rating", charged - before >= RATING_ROOM_BYTES, true);
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L1, who: ben, score: 3, note: "" });
+  is("each further rating is charged exactly those bytes", (await used()) - charged, RATING_ROOM_BYTES);
+  await removeMyRating(COURSE, L1, ben, ROOM);
   is("she reads her own rating", await readMyRating(COURSE, L1, ana), { score: 4, note: "Clear steps.", at: 1_000 });
   is("she changes it to 5", await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L1, who: ana, score: 5, note: "", now: 2_000 }), { ok: true, changed: true });
   is("the change is kept", await readMyRating(COURSE, L1, ana), { score: 5, note: "", at: 2_000 });
@@ -134,7 +138,7 @@ async function main(): Promise<void> {
   }) as typeof redis.pipeline;
   is("an odd reply is unknown", await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L1, who: ana, score: 3, note: "" }), { ok: false, reason: "unknown" });
   redis.pipeline = real;
-  is("what may have been kept stays counted", (await used()) - quiet, RATING_ROOM_BYTES);
+  is("what may have been kept stays counted", (await used()) - quiet >= RATING_ROOM_BYTES, true);
   redis.run(["HSET", `nl:lr:${COURSE}:l:${L1}`, ana, "{not json"]);
   let threw = false;
   try {

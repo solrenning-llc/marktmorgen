@@ -39,6 +39,7 @@ import { attemptOf, passedQuizzes } from "@/lib/quiz";
 import { submissionsOf } from "@/lib/assignment";
 import { certificatesOf } from "@/lib/certificate";
 import { lessonComments } from "@/lib/lesson-comments";
+import { ratingsOfPerson } from "@/lib/lesson-rating";
 import { bondRecordOf } from "@/lib/affiliate-bond";
 import { readLeads } from "@/lib/affiliate-leads";
 import { importedFrom, importedKey } from "@/lib/imported-purchases";
@@ -100,6 +101,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/assignment.ts": { how: "copied", what: "Work you handed in, and the store's feedback on it" },
   "lib/certificate.ts": { how: "copied", what: "Your certificates" },
   "lib/lesson-comments.ts": { how: "copied", what: "Your comments under lessons" },
+  "lib/lesson-rating.ts": { how: "copied", what: "Your ratings of lessons, with your comments" },
   "lib/community-erasure.ts": { how: "copied", what: "Your community profile, points, notifications, private messages, what you said in its room, the events you said you are coming to, and your posts, comments, likes, votes and reports" },
   "lib/waitlist.ts": { how: "copied", what: "Your places on the store's waitlists" },
   "lib/affiliate-bond.ts": { how: "copied", what: "Which affiliate brought you to the store" },
@@ -270,6 +272,13 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
         // Only their own: the replies under them are other people's words.
         for (const comment of await lessonComments(c.courseId, lessonId)) if (comment.by === s.learner) out.push({ course: c.productId, lesson: lessonId, name: comment.name, text: comment.text, at: iso(comment.at) });
       }
+    }
+    return out;
+  },
+  "lib/lesson-rating.ts": async (s) => {
+    const out: unknown[] = [];
+    for (const c of s.courses) {
+      for (const { lesson, rating } of await ratingsOfPerson(c.courseId, s.learner)) out.push({ course: c.productId, lesson, score: rating.score, comment: rating.note, at: iso(rating.at) });
     }
     return out;
   },

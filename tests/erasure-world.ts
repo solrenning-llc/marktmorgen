@@ -27,6 +27,7 @@ import { markPassed } from "@/lib/quiz";
 import { handIn, takeRoom } from "@/lib/assignment";
 import { issueCertificate } from "@/lib/certificate";
 import { addComment } from "@/lib/lesson-comments";
+import { rateLesson } from "@/lib/lesson-rating";
 import { CREATOR_AUTHOR } from "@/lib/lesson-comments-rules";
 import { freshConfig, saveConfig, touchMember } from "@/lib/community";
 import { indexMember } from "@/lib/community-index";
@@ -186,6 +187,9 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
   const asked = await addComment({ room: ROOM, courseId: w.courseId, lessonId: w.lessons[0], by: learner, text: "How long does this take?", name: "Tess" });
   if (!asked.ok) throw new Error("no comment");
   await addComment({ room: ROOM, courseId: w.courseId, lessonId: w.lessons[0], by: CREATOR_AUTHOR, text: "About an hour.", parent: asked.comment.id });
+  // A rating of a lesson, with its comment (lib/lesson-rating.ts, 296 [SQ7]).
+  const rated = await rateLesson({ room: ROOM, courseId: w.courseId, lessonId: w.lessons[0], who: learner, score: 4, note: "Clear steps." });
+  if (!rated.ok) throw new Error("no rating");
 
   // The community (lib/community*.ts, lib/chat-grant.ts).
   const id = w.communityId;

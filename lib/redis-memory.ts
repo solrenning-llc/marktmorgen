@@ -247,6 +247,32 @@ export class MemoryRedis {
           const [, lock, token, seconds] = args;
           return this.run(["GET", lock]) === token ? this.run(["EXPIRE", lock, seconds]) : 0;
         }
+        // A student's lesson rating (lib/lesson-rating.ts): kept, changed, refused when the lesson is full.
+        if (key.startsWith("-- marktmorgen:lesson-rating-set:v1\n") && args[0] === "2" && args.length === 7) {
+          const [, ratings, index, who, value, most, lesson] = args;
+          if (this.run(["HEXISTS", ratings, who]) === 1) {
+            this.run(["HSET", ratings, who, value]);
+            return 2;
+          }
+          const count = Number(this.run(["HLEN", ratings]));
+          if (!Number.isFinite(count) || !(Number(most) >= 1)) return 0;
+          if (count >= Number(most)) return 4;
+          this.run(["HSET", ratings, who, value]);
+          this.run(["SADD", index, lesson]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:lesson-rating-drop:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, ratings, index, who, lesson] = args;
+          const gone = this.run(["HDEL", ratings, who]);
+          if (this.run(["HLEN", ratings]) === 0) this.run(["SREM", index, lesson]);
+          return gone;
+        }
+        if (key.startsWith("-- marktmorgen:lesson-rating-read:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, ratings, most] = args;
+          const count = Number(this.run(["HLEN", ratings]));
+          if (count > Number(most)) return [0, count];
+          return [1, this.run(["HGETALL", ratings])];
+        }
         // The fenced writes of lib/redis-lock.ts that never fall back: modeled step for step.
         if (key.startsWith("-- marktmorgen:fenced-set:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, target, token, value] = args;

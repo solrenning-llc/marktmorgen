@@ -31,6 +31,11 @@ import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
 import { StampedPlayer } from "@/components/video-stamp";
 import { videoStampText } from "@/lib/video-stamp";
+import { LessonRatingBox, LessonRatingSummary, type OwnerRatingView } from "@/components/lesson-rating";
+import { lessonRatingCount, readLessonRatings, readMyRating } from "@/lib/lesson-rating";
+import { type LessonRating, MAX_LESSON_RATINGS, RATING_READ_SLACK, ratingReadUnits, summarize } from "@/lib/lesson-rating-rules";
+import { countStudio } from "@/lib/studio-route";
+import type { Store } from "@/lib/store";
 
 type Params = {
   params: Promise<{ handle: string; product: string; lesson: string }>;
@@ -73,6 +78,25 @@ function sizeIn(language: LanguageCode, locale: string, w: CoursesWords, bytes: 
 }
 
 /** One lesson: its video, its text, its downloads, and the way on. */
+/**
+ * A lesson's ratings as its store's owner asked to see them (296 [SQ7]):
+ * the count paid from the studio's requests before it is read, then every
+ * rating at its largest paid before they are read, with room for a few that
+ * come in between; past that, nothing is read and the owner is told.
+ */
+async function ownerRatings(store: Store, courseId: string, lessonId: string): Promise<OwnerRatingView> {
+  try {
+    if (!(await countStudio(store, null, 1)).ok) return { kind: "used" };
+    const count = await lessonRatingCount(courseId, lessonId);
+    const most = Math.min(MAX_LESSON_RATINGS, count + RATING_READ_SLACK);
+    if (!(await countStudio(store, null, ratingReadUnits(most))).ok) return { kind: "used" };
+    const read = await readLessonRatings(courseId, lessonId, most);
+    return read.ok ? { kind: "shown", summary: summarize(read.ratings) } : { kind: "changed" };
+  } catch {
+    return { kind: "failed" };
+  }
+}
+
 export default async function LessonPage({ params, searchParams }: Params) {
   const { handle: raw, product: productId, lesson: lessonId } = await params;
   const decoded = decodeURIComponent(raw);
@@ -128,6 +152,16 @@ export default async function LessonPage({ params, searchParams }: Params) {
     lesson.task && student ? submissionOf(course.id, lesson.id, who) : Promise.resolve<Submission | null>(null),
   ]);
   const quizMode = access.state === "open" && access.learner.owner ? "owner" : student && open ? "student" : "visitor";
+  // A student's own rating of this lesson (296 [SQ7]); nobody else's is ever read for them. Unreadable is said, never taken for none.
+  const myRating: LessonRating | null | "unread" = await (student && open ? readMyRating(course.id, lesson.id, who) : Promise.resolve(null)).catch(() => "unread" as const);
+  // The store's owner sees the lesson's ratings, read only when asked, each time paid from the studio's requests.
+  const ownerSees = access.state === "open" && open && access.learner.owner;
+  const ownerAsks = access.state === "open" && open && access.learner.owner && query.ratings === "1";
+  const ratingView: OwnerRatingView | null = ownerAsks
+    ? await ownerRatings(store, course.id, lesson.id)
+    : ownerSees
+      ? { kind: "ask", href: `${base}/${lesson.id}?ratings=1#ratings` }
+      : null;
   // A student sees only the questions their try draws from a bank (lib/quiz.ts).
   const asked = quiz && attempt && quizMode === "student" ? studentQuiz(quiz, course.id, lesson.id, who, attempt) : null;
   // Comments are for the course's students and its creator; a visitor on a
@@ -373,6 +407,16 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 <Link href={`${base}/${previous.lesson.id}`} className="st-footer-link text-sm font-semibold">{w.previousLesson}</Link>
               ) : null}
             </div>
+
+            {student && open ? (
+              <LessonRatingBox
+                where={{ handle: store.handle, product: product.id, lesson: lesson.id }}
+                mine={myRating}
+                notice={typeof query.r === "string" ? query.r : ""}
+                language={store.language}
+              />
+            ) : null}
+            {ratingView ? <LessonRatingSummary view={ratingView} language={store.language} /> : null}
           </article>
 
           <aside className="st-card h-fit p-5 sm:p-6 lg:row-span-2">

@@ -645,6 +645,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:leave:@lib/leave-flow.ts": short("Leavers counted a month", "day", 62, 128),
   "nl:lc:@lib/lesson-comment-notify.ts": short("A student told of an answer, once in a while", "buyer", 1),
   "nl:lc:@lib/lesson-comments.ts": { what: "Lesson comments", room: ["lib/lesson-comments.ts"] },
+  "nl:lr:@lib/lesson-rating.ts": { what: "Lesson ratings and the lessons that hold one", room: ["lib/lesson-rating.ts"] },
   "nl:keys:@lib/licence-keys.ts": { what: "License keys: the pool, every key added, who got which", room: ["lib/licence-keys.ts"], parts: [item(512, "A key given: its record and who got it.", "membership"), capped(64 * KB, "The refunds already handled (sixty-one days after the last one read) and the marks.")] },
   // ---------------------------------------------------------------- lib/ m
   "nl:mail:clk:@lib/mail-clicks.ts": short("The emails whose links a person used, ninety days", "monthly", 90, 128, MAIL("list")),

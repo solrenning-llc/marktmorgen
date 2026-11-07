@@ -72,6 +72,7 @@ import { forgetQuizPerson } from "@/lib/quiz";
 import { forgetTasksPerson } from "@/lib/assignment";
 import { forgetCertificatesPerson } from "@/lib/certificate";
 import { forgetLessonCommentsPerson } from "@/lib/lesson-comments";
+import { forgetLessonRatingsPerson } from "@/lib/lesson-rating";
 import { forgetCommunityPerson } from "@/lib/community-erasure";
 import { forgetWaitlistPerson } from "@/lib/waitlist";
 import { forgetBondPerson } from "@/lib/affiliate-bond";
@@ -152,6 +153,14 @@ export const ERASERS: Eraser[] = [
     run: async (s) => {
       let records = 0;
       for (const c of s.courses) records += await forgetLessonCommentsPerson(c.courseId, c.lessonIds, s.learner, s.store);
+      return records;
+    },
+  },
+  {
+    module: "lib/lesson-rating.ts",
+    run: async (s) => {
+      let records = 0;
+      for (const c of s.courses) records += await forgetLessonRatingsPerson(c.courseId, s.learner, s.store);
       return records;
     },
   },

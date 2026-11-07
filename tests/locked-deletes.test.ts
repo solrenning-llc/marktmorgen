@@ -435,6 +435,7 @@ async function main(): Promise<void> {
     "community/rsvp": ["not:a member taking back their own place at an event"],
     "course": ["act:products:lesson-remove", "act:products:module-remove", "act:products:media-remove", "act:products:task-remove", "act:products:quiz-remove", "act:products:withdraw", "act:products:cm-delete", "lockedFor"],
     "course/comment": ["lockedFor"],
+    "course/rating": ["not:a student changing or taking back their own rating of a lesson"],
     "course/task": ["not:a student replacing or taking back their own handed-in work"],
     "creator-card": ["act:page:remove"],
     "crm": ["act:orders:undeal", "act:orders:unpipeline", "lockedFor"],
@@ -606,6 +607,7 @@ async function main(): Promise<void> {
     "team": { invite: "need:team", leave: "open:a member leaving a team they were invited to, which deletes nothing of the store", remove: "need:team", revoke: "need:team", role: "need:team", "two-step": "need:team" },
     "waitlist": { launch: "act:products", soon: "open:takes the mark off and emails nobody on the waitlist; paid pre-orders get the fixed delivery email" },
     "webhooks": "need:settings",
+    "course/rating": "not:a student changing or taking back their own rating of a lesson",
     "course/task": "not:a student replacing or taking back their own handed-in work",
   };
   const ACTION = /\b(?:action|asked|op)\s*[!=]==\s*"([a-z][a-z0-9-]*)"|\bcase\s+"([a-z][a-z0-9-]*)"/g;

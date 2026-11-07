@@ -5,8 +5,8 @@ import { refreshStoreQuotes } from "@/lib/store-quotes";
 import { ensureStatsId, normaliseHandle, setReviewed, storeForHandle, storeRef } from "@/lib/store";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { type Door, doorFields, openDoor, readDoor } from "@/lib/review-proof";
-import { MAX_REVIEW_PHOTO_BYTES, deleteReview, markOneRefunded, readRating, readReview, reviewId, saveReview, setReviewPhoto } from "@/lib/reviews";
-import { dropReviewPhoto, keepReviewPhoto } from "@/lib/review-photo";
+import { MAX_REVIEW_PHOTO_BYTES, type ReviewPhoto, deleteReview, markOneRefunded, readRating, readReview, reviewId, saveReview, setReviewPhoto } from "@/lib/reviews";
+import { checkReviewPhoto, dropReviewPhoto, putReviewPhoto } from "@/lib/review-photo";
 import { costsPaused } from "@/lib/plan-standing";
 
 /** The words, and a photo shrunk by the buyer's browser (lib/review-photo.ts) sent as text. */
@@ -105,14 +105,17 @@ export async function POST(request: NextRequest) {
     }
     const rating = readRating(read("rating"));
     if (rating === null) return answer("rating");
-    // A photo is checked and kept before the words are, so a photo that cannot be used changes nothing.
+    // A photo is checked first, with no network, so a photo that cannot be used changes nothing.
     // While the store's plan renewal is unpaid or its plan payment disputed
     // (232 [CA1] 4b), a new photo is new storage nobody is paying for: the
     // words are still saved, the photo is not kept, and the buyer is told.
     const photoPaused = Boolean(read("photo")) && costsPaused(store);
     const sentPhoto = photoPaused ? "" : read("photo");
-    const photo = sentPhoto ? await keepReviewPhoto(storeRef(store), sentPhoto) : null;
-    if (photo === "photo") return answer("photo");
+    const checked = sentPhoto ? checkReviewPhoto(sentPhoto) : null;
+    if (checked === "photo") return answer("photo");
+    // The words are written first, and that same write grants the photo one of the review's MAX_REVIEW_PHOTOS
+    // slots (C4-20261106-2720-C5-160): the put, a paid operation, is made only after a write that granted it.
+    // A write that failed, was busy or had no room never puts.
     const saved = await saveReview(statsId, {
       productId,
       email: proof.email,
@@ -122,14 +125,30 @@ export async function POST(request: NextRequest) {
       text: read("text"),
       name: read("name"),
       paidAt: proof.paidAt,
+      photo: checked !== null,
     }, store);
     const written = saved.state === "created" || saved.state === "updated";
-    if (!written) await dropReviewPhoto(photo);
+    const granted = written && saved.photoGranted;
+    let photo: ReviewPhoto | null = null;
+    // Past the ceiling: the words are saved, the photo is not stored, and the buyer is told.
+    const photoLimit = written && checked !== null && !granted;
+    let photoFailed = false;
+    if (granted && checked) {
+      try {
+        photo = await putReviewPhoto(storeRef(store), checked);
+      } catch (error) {
+        // The slot stays used (the cost side fails closed); the words stay saved; the buyer is told the photo was not added.
+        console.error("keeping a review's photo failed", error);
+        photoFailed = true;
+      }
+    }
     // The new photo goes on; one taken off, or replaced, is deleted after the write.
     if (written && (photo || read("photo_remove") === "yes")) {
       const changed = await setReviewPhoto(statsId, productId, id, photo);
-      if (typeof changed === "string") await dropReviewPhoto(photo);
-      else await dropReviewPhoto(changed.removed);
+      if (typeof changed === "string") {
+        await dropReviewPhoto(photo);
+        if (photo) photoFailed = true;
+      } else await dropReviewPhoto(changed.removed);
     }
     // The store page reads ratings only once a store has any (lib/store.ts, reviewed).
     if ((saved.state === "created" || saved.state === "updated") && !store.reviewed) {
@@ -137,7 +156,9 @@ export async function POST(request: NextRequest) {
     }
     // "What buyers say" on the store page, kept on the store's record (lib/store-quotes.ts).
     if (saved.state === "created" || saved.state === "updated") after(() => refreshStoreQuotes(store));
-    if ((saved.state === "created" || saved.state === "updated") && photoPaused) return answer("photoPaused");
+    if (written && photoFailed) return answer("photoFailed");
+    if (photoLimit) return answer("photoLimit");
+    if (written && photoPaused) return answer("photoPaused");
     if (saved.state === "created") return answer("saved");
     if (saved.state === "updated") return answer("updated");
     return answer(saved.state === "invalid" ? "rating" : saved.state);

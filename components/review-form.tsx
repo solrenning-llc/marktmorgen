@@ -7,7 +7,7 @@ import { ReviewPhotoField } from "@/components/review-photo-field";
 import { imageUrl } from "@/lib/product-image";
 
 /** Notices that report something done, rather than something that went wrong. */
-const DONE = new Set(["saved", "updated", "deleted", "photoPaused"]);
+const DONE = new Set(["saved", "updated", "deleted", "photoPaused", "photoLimit"]);
 
 /**
  * What happened to the last thing sent, in the buyer's words: the notices a

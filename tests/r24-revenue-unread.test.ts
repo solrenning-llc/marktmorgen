@@ -277,6 +277,29 @@ for (const [shape, v] of [["negative", -1], ["fractional", 1.5]] as [string, unk
   is("an invoice whose 'more lines' is not a yes or no: refused", beaMoves(julyWith("no")), "refused");
 }
 
+// The interval count is a whole number from 1 (Claude 5's focal return on #3048, LOW 1).
+const yearly = (count: unknown) => beaInvoices(beaLine(at(2026, 7, 5), 36000, { price: { unit_amount: 36000, recurring: { interval: "year", interval_count: count } } }));
+is("healthy: an interval count of 1 reads", typeof beaMoves(yearly(1)), "object");
+is("healthy: no interval count (null) reads as one", beaMoves(yearly(null)), beaMoves(yearly(1)));
+for (const [shape, v] of [["0", 0], ["negative", -2], ["fractional", 1.5], ["text", "one"]] as [string, unknown][]) {
+  is(`an interval count that is ${shape}: refused, never one or a made-up price`, beaMoves(yearly(v)), "refused");
+}
+// Another business's invoice on the same Stripe account with more than 10 lines
+// holds no member's line: it is passed over, never a reason to hide every movement
+// (LOW 2). One that may hold a member's line is still refused.
+{
+  const withOther = (other: Record<string, unknown>): Invoice[] => [...beaInvoices(beaLine(at(2026, 7, 5), 3000)), other as Invoice];
+  const others = { data: [{ ...line(at(2026, 7, 9)), subscription: "sub_someone_else", amount: 900 }, { ...line(at(2026, 7, 9)), subscription: null, amount: 100 }], has_more: true };
+  is("another business's invoice with more lines: passed over, July still moves", beaMoves(withOther({ created: at(2026, 7, 9), subscription: null, customer: "cus_other", lines: others })), moved);
+  is("an invoice of the member's own subscription with more lines: refused", beaMoves(withOther({ created: at(2026, 7, 9), subscription: "sub_bea", lines: others })), "refused");
+  is("an invoice of the member as customer with more lines: refused", beaMoves(withOther({ created: at(2026, 7, 9), subscription: null, customer: "cus_bea", lines: others })), "refused");
+  is(
+    "an invoice with a member's line among those given and more to come: refused",
+    beaMoves(withOther({ created: at(2026, 7, 9), subscription: null, customer: "cus_other", lines: { ...others, data: [...others.data, beaLine(at(2026, 7, 9), 3000)] } })),
+    "refused",
+  );
+}
+
 process.env.STRIPE_SECRET_KEY = "sk_test_r24_revenue_stand_in";
 const NOW = Date.parse("2026-10-13T12:00:00Z");
 const S = NOW / 1000;

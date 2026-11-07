@@ -12,13 +12,18 @@
  *   nl:mail:bc:<id>:to     who it goes to, in order (a list)
  *   nl:mail:bcs:<listId>   the store's broadcasts, newest first
  *   nl:mail:queue          broadcasts waiting or under way
+ *   nl:mail:bc:<id>:go     where its links were sent since it went out (lib/sent-links.ts)
+ *
+ * A reader that shows a list of them and none of their bodies reads each one
+ * without it (readBroadcastHeads), paying for that first.
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { hasPlaceholder } from "@/lib/mail-body";
 import { randomBytes, randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { needData, takeData } from "@/lib/store-data";
-import { dataBytes } from "@/lib/store-data-rules";
+import { dataBytes, utf8Length } from "@/lib/store-data-rules";
+import { repliesFor } from "@/lib/redis-reply";
 import { WHO, type Who, audience, readTags } from "@/lib/contacts";
 import { PORTION_NOTE, pauseNote } from "@/lib/mail-health";
 import { BATCH_SIZE, MAX_MAIL_BODY, MAX_SUBJECT, SENDER_WAIT_NOTE, monthlyAllowance, sendTo, usedThisMonth } from "@/lib/mail";
@@ -29,7 +34,8 @@ import { allowancesUsedStrict, giveAllowance, giveAllowanceIn, holdAllowanceAt, 
 import { paypalKept } from "@/lib/paypal-sales";
 import type { Store } from "@/lib/store";
 import { hasProduct, idsOfKind } from "@/lib/catalog";
-import { broadcastCampaign, isOwnLink, variantCampaign } from "@/lib/mail-links";
+import { type MailTag, broadcastCampaign, isOwnLink, variantCampaign } from "@/lib/mail-links";
+import { EMAIL_GROWTH_BYTES, sentLinkKey, sentLinksFor, sentLinksReady, studioReadUnits, wireOf } from "@/lib/sent-links";
 import { type Counted, type SubjectTest, MIN_TEST_REACH, chooseSubject, newTest, parseTest, partAt, splitFor } from "@/lib/mail-test";
 import { campaignViews, readPaidSales } from "@/lib/stats";
 import { moneyByCampaign } from "@/lib/mail-revenue";
@@ -94,6 +100,13 @@ export type Broadcast = {
    * email with one subject, which is every email made before this existed.
    */
   test: SubjectTest | null;
+  /**
+   * Whether its links go through one signed redirect each, so the creator
+   * can change where they lead after it went out (lib/sent-links.ts, 124
+   * [F2-EDIT-SENT-LINKS]). Absent on every email made before 6 November
+   * 2026, whose links go straight to the address: those cannot be changed.
+   */
+  links?: true;
   /**
    * Studio requests held for the readings of the store's buyers its list
    * needs when the scheduled job makes it (a narrowed email: READS_HELD
@@ -186,7 +199,7 @@ const QUEUE = "nl:mail:queue";
 const bcKey = (id: string) => `nl:mail:bc:${id}`;
 const toKey = (id: string) => `nl:mail:bc:${id}:to`;
 /** Every key a broadcast keeps, by its id: for a closed store (lib/closed-store-data.ts). */
-export const broadcastKeys = (id: string): string[] => [bcKey(id), toKey(id), `${bcKey(id)}:lock`];
+export const broadcastKeys = (id: string): string[] => [bcKey(id), toKey(id), `${bcKey(id)}:lock`, sentLinkKey(id)];
 const listKey = (listId: string) => `nl:mail:bcs:${listId}`;
 const lockKey = (id: string) => `nl:mail:bc:${id}:lock`;
 export const BROADCAST_ID = /^[0-9a-f]{24}$/;
@@ -223,22 +236,6 @@ async function save(b: Broadcast): Promise<void> {
   if (!Array.isArray(response) || response.length !== 1 || response[0] !== "OK") throw new Error("Campaign progress write could not be confirmed");
 }
 
-/**
- * How many of the newest `limit` broadcasts there are and how many bytes
- * their records hold, before they are read: for a reading that pays for its
- * size first (lib/mcp-tools.ts, emailsTool). Null when a size did not come back.
- */
-export async function broadcastSizes(listId: string | null, limit = 30): Promise<{ count: number; bytes: number } | null> {
-  if (!listId || !isRedisConfigured()) return { count: 0, bytes: 0 };
-  const [ids] = await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]);
-  const list = Array.isArray(ids) ? (ids as string[]) : [];
-  if (!list.length) return { count: 0, bytes: 0 };
-  const lengths = (await redisPipeline(list.map((id) => ["STRLEN", bcKey(id)]))).map(Number);
-  if (lengths.some((n) => !Number.isSafeInteger(n) || n < 0)) return null;
-  // A broadcast added between this and the reading is a few bytes more, bounded by how fast a store writes them.
-  return { count: list.length, bytes: lengths.reduce((a, b) => a + b, 0) };
-}
-
 /** The store's broadcasts, newest first. */
 export async function listBroadcasts(listId: string | null, limit = 30): Promise<Broadcast[]> {
   if (!listId || !isRedisConfigured()) return [];
@@ -250,8 +247,11 @@ export async function listBroadcasts(listId: string | null, limit = 30): Promise
 }
 
 
-/** Shared strict validation for studio history and executable campaign records. */
-function parseStoredBroadcast(raw: unknown, id: string, listId?: string): Broadcast {
+/**
+ * Shared strict validation for studio history and executable campaign records. `head`: a record read
+ * without its body (BROADCAST_HEADS), whose body string comes back emptied, and only so.
+ */
+function parseStoredBroadcast(raw: unknown, id: string, listId?: string, head = false): Broadcast {
   const nonnegative = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
   const association = (value: unknown) => value === null || typeof value === "string" && value.length > 0;
   const statuses = new Set(["scheduled", "sending", "sent", "waiting", "cancelled", "failed"]);
@@ -260,7 +260,7 @@ function parseStoredBroadcast(raw: unknown, id: string, listId?: string): Broadc
   if (!record || typeof record !== "object" || Array.isArray(record)) throw new Error("Invalid campaign record");
   const value = record as Record<string, unknown>;
   const b = parse(raw);
-  if (!b || b.id !== id || typeof b.listId !== "string" || !b.listId.trim() || (listId !== undefined && b.listId !== listId) || typeof b.handle !== "string" || !b.handle.trim() || typeof b.subject !== "string" || !b.subject.trim() || typeof b.body !== "string" || !b.body.trim() || !association(b.productId) || !statuses.has(b.status) || !nonnegative(b.createdAt) || !b.createdAt || !nonnegative(b.sendAt) || !b.sendAt || !nonnegative(b.finishedAt) || !nonnegative(b.total) || !nonnegative(b.sent) || b.sent > b.total || !nonnegative(b.failures) || typeof b.listed !== "boolean" || typeof b.note !== "string") throw new Error("Invalid campaign fields");
+  if (!b || b.id !== id || typeof b.listId !== "string" || !b.listId.trim() || (listId !== undefined && b.listId !== listId) || typeof b.handle !== "string" || !b.handle.trim() || typeof b.subject !== "string" || !b.subject.trim() || typeof b.body !== "string" || (head ? b.body !== "" : !b.body.trim()) || !association(b.productId) || !statuses.has(b.status) || !nonnegative(b.createdAt) || !b.createdAt || !nonnegative(b.sendAt) || !b.sendAt || !nonnegative(b.finishedAt) || !nonnegative(b.total) || !nonnegative(b.sent) || b.sent > b.total || !nonnegative(b.failures) || typeof b.listed !== "boolean" || typeof b.note !== "string") throw new Error("Invalid campaign fields");
   // These fields were absent in older campaigns; explicit malformed values are not legacy defaults.
   if (value.who !== undefined && !WHO.includes(value.who as Who) || value.notProductId !== undefined && !association(value.notProductId) || value.tagged !== undefined && typeof value.tagged !== "boolean" || value.test !== undefined && value.test !== null && b.test === null) throw new Error("Invalid campaign options");
   if (value.label !== undefined && value.label !== null && (typeof value.label !== "string" || readTags([value.label])[0] !== value.label)) throw new Error("Invalid campaign label");
@@ -297,6 +297,181 @@ export async function listBroadcastsStrict(listId: string | null, limit = 30): P
   const rows = await redisPipeline(ids.map(id => ["GET", bcKey(id as string)]));
   if (!Array.isArray(rows) || rows.length !== ids.length) throw new Error("Campaign records are incomplete");
   return ids.map((id, i) => parseStoredBroadcast(rows[i], id as string, listId));
+}
+
+/** A one-off email as a list of them shows it: every field but its body. */
+export type BroadcastHead = Omit<Broadcast, "body">;
+/** The store's newest emails without their bodies, or why none was read. */
+export type BroadcastHeads = { ok: true; heads: BroadcastHead[] } | { ok: false; refused: string };
+/** Takes `units` studio requests (or other requests counted as they are) before what they pay for is read. */
+export type PayFirst = (units: number) => Promise<{ ok: true } | { ok: false; message: string }>;
+/** Takes what reading again the emails of `sizes` (without their bodies) up to EMAIL_GROWTH_BYTES more comes to: `units` in studio requests. */
+export type Regrow = (units: number, sizes: readonly number[]) => Promise<{ ok: true } | { ok: false; message: string }>;
+
+/**
+ * KEYS the emails' records. ARGV[1] "size" or "read", and after "read" the
+ * most bytes to answer of each, in order. Each record is answered without
+ * its body: the JSON as stored, its body's string emptied. The body's string
+ * starts at the first `"body":"` (a key: inside any string a quote is
+ * escaped, so no value holds those characters) and ends at its first quote
+ * not escaped (an even number of backslashes before it). "size" answers each
+ * one's length in bytes so; "read" answers each up to its bound. -1 for a
+ * record that is not there, -2 for one with no body or an empty one (never
+ * written: createBroadcast refuses an empty body). Nothing is written and
+ * no body leaves the database. One GET a key inside, billed one by one. The
+ * first line names it for the local stand-in (lib/redis-memory.ts).
+ */
+export const BROADCAST_HEADS = `-- marktmorgen:broadcast-heads:v1
+local function head(raw)
+  local s, e = string.find(raw, '"body":"', 1, true)
+  if not s then return nil end
+  local p = e + 1
+  while true do
+    local q = string.find(raw, '"', p, true)
+    if not q then return nil end
+    local k = 0
+    while string.byte(raw, q - 1 - k) == 92 do k = k + 1 end
+    if k % 2 == 0 then
+      if q == e + 1 then return nil end
+      return string.sub(raw, 1, e) .. string.sub(raw, q)
+    end
+    p = q + 1
+  end
+end
+local out = {}
+for i = 1, #KEYS do
+  local raw = redis.call("GET", KEYS[i])
+  local h = raw and head(raw)
+  if not raw then out[i] = -1
+  elseif not h then out[i] = -2
+  elseif ARGV[1] == "size" then out[i] = #h
+  else out[i] = string.sub(h, 1, tonumber(ARGV[i + 1])) end
+end
+return out`;
+
+/** The script as it is sent, with its count of keys, its mode and the take's slack. */
+const HEADS_SCRIPT_WIRE = utf8Length(JSON.stringify(BROADCAST_HEADS)) + 64;
+/** One email in the script's call: its key and its bound, as sent. */
+const HEAD_ARG_BYTES = 128;
+
+/**
+ * The studio requests reading the emails whose sizes without their bodies
+ * are `sizes` comes to (readBroadcastHeads), each up to its size and
+ * `growth` bytes more, both ways as JSON (wireOf), with the script's call
+ * and each GET inside it billed, and the take itself (studioReadUnits). 0
+ * when there is nothing to read. Held over what is measured in
+ * tests/broadcasts-read-cost-email-page.test.ts.
+ */
+export function broadcastHeadsUnits(sizes: readonly number[], growth = 0): number {
+  const read = sizes.filter((size) => Number.isSafeInteger(size) && size > 0);
+  if (!read.length) return 0;
+  return studioReadUnits(broadcastHeadsBytes(read, growth), 1 + read.length);
+}
+
+/**
+ * The bytes reading the emails whose sizes without their bodies are `sizes`
+ * moves, both ways as JSON: the script's call, each one's key and bound, and
+ * each one up to its size and `growth` bytes more as it crosses (wireOf). 0
+ * when there is nothing to read. Its commands are 1 + sizes.length (the
+ * script and each GET inside it).
+ */
+export function broadcastHeadsBytes(sizes: readonly number[], growth = 0): number {
+  const read = sizes.filter((size) => Number.isSafeInteger(size) && size > 0);
+  return read.length ? HEADS_SCRIPT_WIRE + read.reduce((sum, size) => sum + HEAD_ARG_BYTES + wireOf(size + growth), 0) : 0;
+}
+
+/** The emails a reading will read, newest first, and each one's size without its body, as measured (measureBroadcastHeads). */
+export type MeasuredHeads = { listId: string | null; ids: string[]; sizes: number[] };
+
+/** The script's answer for `keys`: one slot a key, or it throws. */
+async function headsOf(keys: string[], bounds: number[] | null): Promise<unknown[]> {
+  const reply = repliesFor(await redisPipeline([["EVAL", BROADCAST_HEADS, keys.length, ...keys, ...(bounds ? ["read", ...bounds] : ["size"])]]), 1);
+  const slots = reply ? repliesFor(reply[0], keys.length) : null;
+  if (!slots) throw new Error("Campaign records are incomplete");
+  return slots;
+}
+
+/** One record read without its body, checked as listBroadcastsStrict checks it: null when it is not one (or was read short). */
+function headOf(raw: unknown, id: string, listId: string): BroadcastHead | null {
+  try {
+    const b: Partial<Broadcast> = parseStoredBroadcast(raw, id, listId, true);
+    delete b.body;
+    return b as BroadcastHead;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The store's newest `limit` emails without their bodies, for a page or a
+ * reading that shows none of them (regra 30, the siblings of #3034's
+ * reading): the studio's email page, Marktmorgen Path's evidence after a
+ * sale and the chart's marks. The list (one LRANGE) and each one's size
+ * without its body (BROADCAST_HEADS "size", inside the caller's own
+ * requests) first; then what reading them comes to (broadcastHeadsUnits) is
+ * taken through `pay`, and only then is each read, no further than its size.
+ * One that grew since (its send moving on: its count, its note) is read once
+ * more up to EMAIL_GROWTH_BYTES further, paid first. All or nothing, as
+ * listBroadcastsStrict: an index or a record that is not one throws, never a
+ * shorter list. Without what `pay` takes, nothing is read and the refusal
+ * says why.
+ */
+export async function readBroadcastHeads(listId: string | null, pay: PayFirst, limit = 30): Promise<BroadcastHeads> {
+  const measured = await measureBroadcastHeads(listId, limit);
+  if (!measured.ids.length) return { ok: true, heads: [] };
+  const paid = await pay(broadcastHeadsUnits(measured.sizes));
+  if (!paid.ok) return { ok: false, refused: paid.message };
+  return readMeasuredHeads(measured, pay);
+}
+
+/**
+ * The store's newest `limit` emails and each one's size without its body,
+ * before any is read (one LRANGE, then BROADCAST_HEADS "size"): for a
+ * reading that pays for them first (readBroadcastHeads, and get_emails in
+ * lib/mcp-tools.ts, which sets them aside with the rest of what it reads).
+ * An index or a record that is not one throws.
+ */
+export async function measureBroadcastHeads(listId: string | null, limit = 30): Promise<MeasuredHeads> {
+  if (!listId) return { listId, ids: [], sizes: [] };
+  if (!isRedisConfigured()) throw new Error("Campaign storage is unavailable");
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Invalid campaign history limit");
+  const index = repliesFor(await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]), 1);
+  if (!index || !Array.isArray(index[0])) throw new Error("Campaign index is unavailable");
+  const ids: unknown[] = index[0];
+  if (ids.length > limit || ids.some((id) => typeof id !== "string" || !BROADCAST_ID.test(id)) || new Set(ids).size !== ids.length) throw new Error("Campaign index is incomplete");
+  if (!ids.length) return { listId, ids: [], sizes: [] };
+  const sized = await headsOf((ids as string[]).map(bcKey), null);
+  if (sized.some((size) => typeof size !== "number" || !Number.isSafeInteger(size) || size <= 0)) throw new Error("Campaign records are incomplete");
+  return { listId, ids: ids as string[], sizes: sized as number[] };
+}
+
+/**
+ * The emails measured, each read no further than its size, once what that
+ * comes to was paid for by the caller; only those, whatever was listed
+ * since. One that grew since (its send moving on: its count, its note) is
+ * read once more up to EMAIL_GROWTH_BYTES further, after `regrow` took what
+ * that comes to (broadcastHeadsUnits with EMAIL_GROWTH_BYTES, in studio
+ * requests; a caller that counts in other requests prices it from the sizes
+ * it is handed, with broadcastHeadsBytes). All or nothing: a record that is
+ * still not one throws.
+ */
+export async function readMeasuredHeads(measured: MeasuredHeads, regrow: Regrow): Promise<BroadcastHeads> {
+  const { listId, ids: wanted, sizes } = measured;
+  if (!listId || !wanted.length) return { ok: true, heads: [] };
+  if (wanted.length !== sizes.length) throw new Error("Campaign records are incomplete");
+  const first = await headsOf(wanted.map(bcKey), sizes);
+  const heads = wanted.map((id, i) => headOf(first[i], id, listId));
+  const again = wanted.flatMap((id, i) => (heads[i] ? [] : [{ i, id, size: sizes[i] }]));
+  if (again.length) {
+    // Grown since its size was asked, or not one: read once more, paid first, no further than a send can write on it.
+    const grown = again.map(({ size }) => size);
+    const more = await regrow(broadcastHeadsUnits(grown, EMAIL_GROWTH_BYTES), grown);
+    if (!more.ok) return { ok: false, refused: more.message };
+    const second = await headsOf(again.map(({ id }) => bcKey(id)), again.map(({ size }) => size + EMAIL_GROWTH_BYTES));
+    again.forEach(({ i, id }, j) => (heads[i] = headOf(second[j], id, listId)));
+  }
+  if (heads.some((head) => head === null)) throw new Error("Invalid campaign record");
+  return { ok: true, heads: heads as BroadcastHead[] };
 }
 
 /**
@@ -420,6 +595,8 @@ export async function createBroadcast(
     listed: false,
     tagged: true,
     test,
+    // Its links can be changed after it went out only when they can be signed here (lib/sent-links.ts).
+    ...(sentLinksReady() ? { links: true as const } : {}),
   };
   // What the scheduled job's readings of the buyers will cost at the most, held in the month it goes out, before
   // anything is written. Given back if its room in the data room is not there (below), so a refusal holds nothing.
@@ -689,16 +866,12 @@ export async function advanceBroadcast(
         b = { ...b, status: "waiting", note: "The recipient list could not be read completely. Nothing more was sent. It will be checked again automatically." };
         break;
       }
-      const result = await sendTo(
-        store,
-        emails,
-        subject,
-        b.body,
-        `bc:${id}:${b.sent}`,
-        // Only an email made since links were tagged: one scheduled before
-        // goes out exactly as it was written and scheduled.
-        b.tagged ? { medium: "broadcast", campaign } : undefined,
-      );
+      // Only an email made since links were tagged: one scheduled before
+      // goes out exactly as it was written and scheduled.
+      const tag: MailTag | undefined = b.tagged ? { medium: "broadcast", campaign } : undefined;
+      // And only one made since links could be changed after sending sends them through their redirect (lib/sent-links.ts).
+      const via = tag && b.links === true ? sentLinksFor(store.handle, id, campaign, b.body) : undefined;
+      const result = await sendTo(store, emails, subject, b.body, `bc:${id}:${b.sent}`, tag && via ? { ...tag, via } : tag);
       // Whatever went before a stop counts, so the next run starts after it.
       const processed = emails.length - result.rest.length;
       if (processed > 0) b = { ...b, sent: b.sent + processed };

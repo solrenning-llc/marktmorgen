@@ -16,9 +16,9 @@ import { readFileSync } from "node:fs";
 import { GET as eventsRead } from "@/app/api/v1/events/route";
 import { POST as mcp } from "@/app/api/mcp/route";
 import { makeKey } from "@/lib/api-keys";
-import { EMAILS_PROBE_WORK, EVENTS_PROBE_MOST, MAIL_REVENUE_BYTES, addWork, apiReadUnits, emailsWork, eventsSentMost, eventsWork, settledUnits } from "@/lib/api-read-rules";
+import { EMAILS_HEADS_WORK, EMAILS_PROBE_WORK, EVENTS_PROBE_MOST, MAIL_REVENUE_BYTES, addWork, apiReadUnits, emailsWork, eventsSentMost, eventsWork, settledUnits } from "@/lib/api-read-rules";
 import { bundleMeta } from "@/lib/bundle-rules";
-import { broadcastSizes } from "@/lib/broadcasts";
+import { broadcastHeadsBytes, measureBroadcastHeads } from "@/lib/broadcasts";
 import { flowsBytes } from "@/lib/flows";
 import { keptMailRevenueBytes } from "@/lib/mail-revenue";
 import {
@@ -290,15 +290,17 @@ async function main(): Promise<void> {
   const broadcastId = "b".repeat(24);
   await redis.pipeline([
     ["LPUSH", `nl:mail:bcs:${store.listId}`, broadcastId],
-    ["SET", `nl:mail:bc:${broadcastId}`, JSON.stringify({ id: broadcastId, listId: store.listId, handle: HANDLE, subject: "Synthetic news", body: "Hello", productId: null, notProductId: null, who: "all", narrow: null, status: "sent", total: 10, sent: 10, sendAt: 1_790_000_000, finishedAt: 1_790_000_100, tagged: true })],
+    ["SET", `nl:mail:bc:${broadcastId}`, JSON.stringify({ id: broadcastId, listId: store.listId, handle: HANDLE, subject: "Synthetic news", body: "Hello", productId: null, notProductId: null, who: "all", narrow: null, status: "sent", createdAt: 1_790_000_000, total: 10, sent: 10, sendAt: 1_790_000_000, finishedAt: 1_790_000_100, note: "", failures: 0, listed: true, tagged: true })],
   ]);
   const by: Record<string, { sales: number; cents: number }> = {};
   for (let i = 0; JSON.stringify({ by, partial: false }).length < 172_000; i += 1) by[`b-${String(i).padStart(24, "0")}x${"y".repeat(10)}`] = { sales: 1, cents: 99_999 };
   await redis.pipeline([["SET", `nl:stats:${store.statsId}:mailsales:v2`, JSON.stringify({ by, partial: false }), "EX", 600]]);
   const copy = (await keptMailRevenueBytes(store))!;
-  const sizesNow = (await broadcastSizes(store.listId, 30))!;
+  // Regra 23: get_emails measures and reads its emails without their bodies, priced as they cross (lib/broadcasts.ts, #3034's siblings),
+  // and reads them as listBroadcastsStrict does, so the synthetic record carries every field createBroadcast writes.
+  const sizesNow = await measureBroadcastHeads(store.listId, 30);
   const flowBytes = (await flowsBytes(store.listId))!;
-  const emails = (revenueBytes: number) => addWork(EMAILS_PROBE_WORK, emailsWork({ broadcasts: sizesNow.count, broadcastBytes: sizesNow.bytes, flowBytes, revenueBytes }));
+  const emails = (revenueBytes: number) => addWork(EMAILS_PROBE_WORK, addWork(emailsWork({ broadcasts: sizesNow.ids.length, broadcastBytes: broadcastHeadsBytes(sizesNow.sizes), flowBytes, revenueBytes }), EMAILS_HEADS_WORK));
   before = await used();
   const answered = await tool(key, "get_emails");
   const emailsTook = (await used()) - before;
@@ -306,7 +308,10 @@ async function main(): Promise<void> {
   is("answered", answered.result?.isError, false);
   is("the copy is the size asked", copy >= 172_000, true);
   is("the requests taken are what the copy read costs, with the door's", emailsTook, 1 + apiReadUnits(emails(copy)));
-  is("more than its old 64 KB price", emailsTook > 1 + apiReadUnits(emails(MAIL_REVENUE_BYTES)), true);
+  // Regra 23 (#3034's siblings): was `emailsTook > 1 + apiReadUnits(emails(MAIL_REVENUE_BYTES))`. Reading the emails without their bodies adds
+  // the script's two calls and its bytes, which carry the 64 KB price over the same whole request as the copy's (both 5 here), so what is held is
+  // that the copy's own bytes, not 64 KB, are in what is priced, and never less than the 64 KB price.
+  is("the copy's own bytes are priced, not its old 64 KB", [emails(copy).bytes - emails(MAIL_REVENUE_BYTES).bytes, emailsTook >= 1 + apiReadUnits(emails(MAIL_REVENUE_BYTES))], [copy - MAIL_REVENUE_BYTES, true]);
   await leave(apiReadUnits(emails(copy)));
   commands = [];
   const short = await tool(key, "get_emails");

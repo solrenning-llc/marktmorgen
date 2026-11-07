@@ -24,8 +24,10 @@ import { type CapturedMail, installSesMailFixture } from "./ses-mail-fixture";
 const OWNER = "owner@example.com";
 const mail = installSesMailFixture();
 const subjectsOf = (messages: CapturedMail[]) => [...new Set(messages.map((message) => message.subject))];
+// A link sent through its redirect (lib/sent-links.ts) carries the tagged address it was sent with in its `u`.
+const sentTo = (href: string) => (href.includes("/go/") ? new URL(href.replace(/&amp;/g, "&")).searchParams.get("u") ?? "" : href);
 const campaignsOf = (messages: CapturedMail[]) => [...new Set(messages.flatMap((message) =>
-  [...message.html.matchAll(/utm_campaign=([a-z0-9-]+)/g)].map((found) => found[1])
+  [...message.html.matchAll(/href="([^"]+)"/g)].flatMap((link) => [...sentTo(link[1]).matchAll(/utm_campaign=([a-z0-9-]+)/g)].map((found) => found[1]))
 ))];
 const today = () => new Date().toISOString().slice(0, 10);
 

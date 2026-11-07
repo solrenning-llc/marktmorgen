@@ -27,7 +27,7 @@ is("remembered under a key of its own", LESSON_FOCUS_KEY, "mm:lesson-focus");
 is("on only when the browser kept exactly 'on'", [readLessonFocus("on"), readLessonFocus("off"), readLessonFocus(""), readLessonFocus(null), readLessonFocus(undefined), readLessonFocus("ON"), readLessonFocus("true")], [true, false, false, false, false, false, false]);
 
 part("Which keys leave focus mode");
-const esc = { key: "Escape", defaultPrevented: false, isComposing: false, typing: false, fullScreen: false };
+const esc = { key: "Escape", defaultPrevented: false, isComposing: false, typing: false, fullScreen: false, dialogOpen: false };
 is("Esc leaves it", leavesFocus(true, esc), true);
 is("Esc does nothing while it is off", leavesFocus(false, esc), false);
 is("another key does not leave it", [leavesFocus(true, { ...esc, key: "f" }), leavesFocus(true, { ...esc, key: "Enter" }), leavesFocus(true, { ...esc, key: "Esc" })], [false, false, false]);
@@ -35,6 +35,7 @@ is("not while typing into a field (Esc belongs to the field)", leavesFocus(true,
 is("not while a word is being composed", leavesFocus(true, { ...esc, isComposing: true }), false);
 is("not when something on the page already used the key", leavesFocus(true, { ...esc, defaultPrevented: true }), false);
 is("not while a video is in full screen (Esc leaves full screen first)", leavesFocus(true, { ...esc, fullScreen: true }), false);
+is("not while a dialog is open, such as the store's chat or assistant (Esc closes that first)", leavesFocus(true, { ...esc, dialogOpen: true }), false);
 is("fields that take typing", [typingInto("INPUT", false, "text"), typingInto("TEXTAREA", false), typingInto("SELECT", false), typingInto("DIV", true), typingInto("input", false, "email")], [true, true, true, true, true]);
 is("controls that do not take typing", [typingInto("BUTTON", false), typingInto("A", false), typingInto("INPUT", false, "checkbox"), typingInto("INPUT", false, "radio"), typingInto("INPUT", false, "submit"), typingInto("DIV", false), typingInto("BODY", false)], [false, false, false, false, false, false, false]);
 
@@ -62,12 +63,17 @@ is("on: the note says what happened and how to leave, as a status", on.includes(
 is("off: the status is there, empty, so a change is read out", off.includes(`role="status"`), true);
 is("the button is a real button, at least 44 pixels each way", [/<button type="button"/.test(off), off.includes("min-h-11"), off.includes("min-w-11")], [true, true, true]);
 is("the button names the parts it hides", off.includes(`aria-controls="lesson-focus-path lesson-focus-list lesson-focus-comments"`), true);
+const restored = draw(true, "");
+is("on, restored from the kept choice: the note shows, but nothing is announced", [restored.includes(en.onNote), /<p role="status"[^>]*><\/p>/.test(restored)], [true, true]);
+is("the button looks like the store's other buttons, not a link", [off.includes("btn st-btn-ghost"), off.includes("st-footer-link")], [true, false]);
 const noBelow = renderToStaticMarkup(createElement(FocusLayout, { on: true, message: "", words: en, onToggle: () => undefined, ...parts, below: null }));
 is("with no comments, only two parts are hidden, and named", [count(noBelow, " hidden=\"\""), noBelow.includes(`aria-controls="lesson-focus-path lesson-focus-list"`)], [2, true]);
 
 part("No movement");
 const source = readFileSync("components/lesson-focus.tsx", "utf8");
 is("no transition or animation in the component", /transition|animate-|duration-|keyframes/.test(source), false);
+is("a dialog open on the page owns Esc: the page asks for one before leaving", source.includes('dialogOpen: Boolean(document.querySelector(OPEN_DIALOG))'), true);
+is("the kept choice turns it on without announcing it; only a press announces", /if \(kept\) {\s*setOn\(true\);\s*}/.test(source), true);
 is("the choice is kept only in the browser's own storage, behind try", [source.includes("localStorage"), /try\s*{[^}]*localStorage/.test(source), /fetch\(|sendBeacon|document\.cookie/.test(source)], [true, true, false]);
 
 part("The words, in every language");

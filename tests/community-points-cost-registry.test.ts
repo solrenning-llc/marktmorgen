@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -10,6 +11,9 @@ const script = points.match(/export const REMOVE_POINT = `([\s\S]*?)`;/)?.[1];
 assert.ok(script);
 
 function assertRemovalCost(script: string) {
+  // The five-command review covers these exact bytes, including control flow.
+  // A changed script requires a new manual cost review, not an automatic hash refresh.
+  assert.equal(createHash("sha256").update(script).digest("hex"), "11e5c41a2c42ab4c6fae8ae3129960073c50f67dcb642362aba81a76e6a33daa", "review any script change before retaining its five-command cost");
   // Count actual command sites, including mutually exclusive writes. Merely
   // counting helper invocations would miss commands added inside a helper.
   const commands = [...script.matchAll(/\bredis\.call\('([A-Z]+)'/g)].map((match) => match[1]);

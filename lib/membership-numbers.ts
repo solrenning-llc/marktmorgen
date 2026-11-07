@@ -34,7 +34,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { keepUnlessErased, suppressedAmong } from "@/lib/suppression";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
-import { type Invoice, type Movements, movementsFrom, pricesFrom } from "@/lib/mrr-movements";
+import { type Invoice, type Movements, movementsFrom, pricesFrom, UnreadInvoiceError } from "@/lib/mrr-movements";
 import { LEAVE_NAMES, LEAVE_REASONS, type LeaveReason, isLeaveReason, isOwnReasonId } from "@/lib/leave-rules";
 
 const MAX_PAGES = 20;
@@ -622,16 +622,21 @@ async function readMemberships(
     query.append("expand[]", "data.customer");
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", store.stripeAccountId, `/subscriptions?${query}`);
-    const rows = (Array.isArray(listed.data) ? listed.data : []) as Raw[];
+    // A page in an unknown shape is a reading not made (CX-123 rule 24), said as Stripe not answering, never as a
+    // whole list with no members and nothing recurring.
+    if (!Array.isArray(listed.data)) throw new Error("Stripe gave a page of memberships that is not a list");
+    if (typeof listed.has_more !== "boolean") throw new Error("Stripe gave whether there are more memberships in a shape that cannot be read");
+    const rows = listed.data as Raw[];
     for (const raw of rows) {
       const sub = readSub(raw, handles);
       if (sub) subs.push(sub);
     }
-    const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") {
+    if (!listed.has_more) {
       complete = true;
       break;
     }
+    const last = rows[rows.length - 1];
+    if (!last || typeof last.id !== "string") throw new Error("Stripe gave a page of memberships with no last one to go on from");
     after = last.id;
   }
   const named = await withoutErasedWords(store, subs, Math.floor(now / 1000));
@@ -642,16 +647,26 @@ async function readMemberships(
     const invoices: Invoice[] = [];
     let page = "";
     const since = Math.floor(now / 1000) - 400 * DAY;
+    // Drawn only from the whole list (CX-123 rule 24): Stripe lists the newest first, so a list cut short would
+    // leave out the oldest invoices, and a member would seem new or never to have changed price.
+    let whole = false;
     for (let n = 0; n < MAX_PAGES; n += 1) {
       const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
       if (page) query.set("starting_after", page);
       const listed = await onAccount("GET", store.stripeAccountId, `/invoices?${query}`);
-      const rows = (Array.isArray(listed.data) ? listed.data : []) as (Invoice & { id?: unknown })[];
+      if (!Array.isArray(listed.data)) throw new UnreadInvoiceError("a page of invoices that is not a list");
+      if (typeof listed.has_more !== "boolean") throw new UnreadInvoiceError("whether there are more invoices");
+      const rows = listed.data as (Invoice & { id?: unknown })[];
       invoices.push(...rows);
+      if (!listed.has_more) {
+        whole = true;
+        break;
+      }
       const last = rows[rows.length - 1];
-      if (listed.has_more !== true || !last || typeof last.id !== "string") break;
+      if (!last || typeof last.id !== "string") throw new UnreadInvoiceError("a page of invoices with no last invoice to go on from");
       page = last.id;
     }
+    if (!whole) throw new UnreadInvoiceError(`more invoices than ${MAX_PAGES} pages`);
     const byId = new Map(subs.map((s) => [s.id, s]));
     numbers.movements = movementsFrom(subs, pricesFrom(invoices, byId), store.currency, Math.floor(now / 1000));
   } catch (error) {

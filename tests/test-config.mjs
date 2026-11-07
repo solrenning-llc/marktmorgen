@@ -81,7 +81,7 @@ export function testAliases(file,root,here){
  if(file==='path-growth-facts.test.ts')for(const name of ['redis','catalog','broadcasts','reviews'])aliases['@/lib/'+name]=join(here,'path-growth-world.ts');
  if(file==='path-reminder-push.test.ts')aliases['@/lib/web-push']=join(here,'path-push-world.ts');
  if(['access-link-uniform-reply.test.ts','buyer-library.test.ts','number-gates-c.test.ts'].includes(file))aliases['next/server']=join(here,'next-server-after-world.ts');
- if(file==='oracle-siblings-uniform-reply.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
+ if(['oracle-siblings-uniform-reply.test.ts','tiers.test.ts','yearly-switch.test.ts','membership-pause.test.ts','buyer-help-promises.test.ts','cx1-review-2764-charge-reply.test.ts','cx1-review-2764-invoice.test.ts','cx1-review-2764-stripe-version.test.ts','cx1-review-2764-transport.test.ts'].includes(file))aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='digital-consent.test.ts'||file==='checkout-key-count.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='cart-physical.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='cart-stock.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');

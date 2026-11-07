@@ -41,7 +41,7 @@ import { requestOrdersLink } from "@/lib/buyer-orders";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setAffiliateSetting, setCommunity, setLanguage, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
-import { afterTasks } from "./next-server-after-world";
+import { afterTasks, runAfterTasks } from "./next-server-after-world";
 import { done, is, part } from "./check";
 
 type Command = (string | number)[];
@@ -220,7 +220,11 @@ async function main(): Promise<void> {
     counter = { match: setIncr("nl:rl:aff:ip:"), reply: ["OK", 1] };
     {
       const sent = mails.length;
-      is("a confirmed count within both ceilings: the link is emailed", [await ask(), mails.length - sent], ["sent", 1]);
+      const got = await ask();
+      // Whether the address is in the programme, the link and its email run after the answer since 07/11/2026
+      // (lib/after-answer.ts, the affiliate-link oracle fix): run before the email is counted.
+      await runAfterTasks();
+      is("a confirmed count within both ceilings: the link is emailed", [got, mails.length - sent], ["sent", 1]);
     }
     counter = { match: setIncr("nl:rl:aff:ip:"), reply: [null, 11] };
     is("a confirmed count past the connection's ceiling is limited, as before", await ask(), "limited");

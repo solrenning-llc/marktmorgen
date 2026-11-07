@@ -18,6 +18,7 @@ import { pauseMembership, resumeMembership } from "@/lib/membership-pause";
 import { membershipsFor, requestManageLink } from "@/lib/membership-manage";
 import { claimHandle, ensureStatsId, setLanguage, setPauseMonths, setStripeAccount, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { runAfterTasks } from "./next-server-after-world";
 import { done, is, part } from "./check";
 
 const DAY = 86_400;
@@ -122,6 +123,9 @@ async function main(): Promise<void> {
 
   part("Through the member's own link");
   await requestManageLink({ store, email: "member@example.com", ip: "203.0.113.9", origin: "https://marktmorgen.com" });
+  // The membership search, the link and its email run after the answer since 07/11/2026 (lib/after-answer.ts, the
+  // membership-link timing fix): run before the email is looked at.
+  await runAfterTasks();
   const token = emails.at(-1)?.text.match(/token=([0-9a-f]{64})/)?.[1] ?? "";
   const listed = await membershipsFor(store, token);
   is("the page offers the pause, from the end of what was paid for", [listed?.[0]?.canPause, listed?.[0]?.periodEnd], [true, PERIOD_END]);

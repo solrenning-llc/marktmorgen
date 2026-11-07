@@ -30,6 +30,7 @@ import { upsertContact } from "@/lib/contacts";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setProductYearly, setStripeAccount, setSubscription, setYearlyAsk, storeForEmail } from "@/lib/store";
 import { redisPipeline } from "@/lib/redis";
 import { store as redis } from "./redis-stub";
+import { runAfterTasks } from "./next-server-after-world";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
@@ -171,7 +172,11 @@ async function main(): Promise<void> {
   await setProductYearly(OWNER, product, { cents: 20000 });
   let store = (await storeForEmail(OWNER))!;
   subs = [member("sub_Dana00000001", "cus_Dana000001", "dana@example.com")];
-  is("the link is emailed", await requestManageLink({ store, email: "dana@example.com", ip: "203.0.113.9", origin: "https://marktmorgen.com" }), "sent");
+  const linkAsked = await requestManageLink({ store, email: "dana@example.com", ip: "203.0.113.9", origin: "https://marktmorgen.com" });
+  // The membership search, the link and its email run after the answer since 07/11/2026 (lib/after-answer.ts, the
+  // membership-link timing fix): run before the email is looked at.
+  await runAfterTasks();
+  is("the link is emailed", linkAsked, "sent");
   const token = /token=([0-9a-f]{64})/.exec(mails[0].text)![1];
   const listed = (await membershipsFor(store, token))!;
   is("the membership offers paying yearly, with what it saves", listed.map((m) => m.yearly), [{ cents: 20000, saving: 4000, monthly: 2000 }]);

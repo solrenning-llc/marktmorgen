@@ -118,6 +118,7 @@ import { leadWords } from "@/lib/buyer-words/affiliate-leads";
 import { formatMoney } from "@/lib/money";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { idleStep, readIdleDays } from "@/lib/affiliate-idle-rules";
+import { afterAnswer } from "@/lib/after-answer";
 
 /** How long the emailed link to apply or sign in keeps working. */
 export const AFFILIATE_LINK_SECONDS = 24 * 60 * 60;
@@ -653,6 +654,14 @@ export function recruitLink(store: Store, code: string): string {
  * Emails a link to the address typed. Opening it is what makes the
  * application — so every applicant has proved the address is theirs — and it
  * is also how a returning affiliate signs in to see their numbers.
+ *
+ * "sent" is the answer to every address, and at once, right after the limits:
+ * whether the address is already in the programme, the link and its email run
+ * only after the answer is sent (lib/after-answer.ts). A new applicant's email
+ * may use only the asked share of the store's access emails, so whether it
+ * could go out says whether the address was in the programme; neither the
+ * answer's words nor its time may say it, and an email that could not go out
+ * is said only in the server's log.
  */
 export async function requestAffiliateLink(input: {
   store: Store;
@@ -677,35 +686,54 @@ export async function requestAffiliateLink(input: {
   if (byAddress === null) return "error";
   if (!byAddress) return "limited";
 
+  const note = input.note.replace(/\s+/g, " ").trim().slice(0, MAX_NOTE_LENGTH);
+  // From here the answer is "sent" whatever happens, and at once: whether the
+  // address is in the programme, the link and its email are all after it.
+  afterAnswer("sending an affiliate link", () => sendAffiliateLink(store, email, note, origin, input.by));
+  return "sent";
+}
+
+/** The link itself: a returning affiliate's way in, or a new applicant's application. */
+async function sendAffiliateLink(store: Store, email: string, note: string, origin: string, by: string | undefined): Promise<void> {
   const [known] = await redisPipeline([["HGET", emailsKey(store.statsId as string), email]]);
   const token = randomBytes(32).toString("hex");
-  const note = input.note.replace(/\s+/g, " ").trim().slice(0, MAX_NOTE_LENGTH);
-  const recruiter = input.by ? await recruiterFor(store, input.by, email) : null;
+  const recruiter = by ? await recruiterFor(store, by, email) : null;
   const grant: LinkGrant = { s: store.statsId as string, e: email, n: note, ...(recruiter ? { r: recruiter.id } : {}) };
-  await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", AFFILIATE_LINK_SECONDS]]);
+  let sent = false;
+  try {
+    await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", AFFILIATE_LINK_SECONDS]]);
 
-  const name = store.name;
-  const a = affiliatesWords(store.language);
-  const link = `${origin}/@${store.handle}/affiliates?token=${token}`;
-  // A new applicant's address is one only they have said is theirs: it takes
-  // only the share of access emails kept for those (ASKED_SHARE_BPS).
-  const sent = await sendEmail({ meter: { by: "store", store: store, kind: "transactional", asked: typeof known !== "string" },
-    from: `"${displayName(name)} via Marktmorgen" <${senderAddress()}>`,
-    to: email,
-    subject: typeof known === "string" ? a.yourPageFor(name) : a.linkSubjectNew(name),
-    text: [
-      typeof known === "string" ? a.linkIntroKnown(name) : a.linkIntroNew(name),
-      "",
-      link,
-      "",
-      typeof known === "string" ? a.linkShowsKnown : a.linkAboutNew(name, store.affiliates.days),
-      "",
-      a.paidByStore(name),
-      "",
-      a.linkExpires,
-    ].join("\n"),
-  });
-  return sent ? "sent" : "error";
+    const name = store.name;
+    const a = affiliatesWords(store.language);
+    const link = `${origin}/@${store.handle}/affiliates?token=${token}`;
+    // A new applicant's address is one only they have said is theirs: it takes
+    // only the share of access emails kept for those (ASKED_SHARE_BPS).
+    sent = await sendEmail({ meter: { by: "store", store: store, kind: "transactional", asked: typeof known !== "string" },
+      from: `"${displayName(name)} via Marktmorgen" <${senderAddress()}>`,
+      to: email,
+      subject: typeof known === "string" ? a.yourPageFor(name) : a.linkSubjectNew(name),
+      text: [
+        typeof known === "string" ? a.linkIntroKnown(name) : a.linkIntroNew(name),
+        "",
+        link,
+        "",
+        typeof known === "string" ? a.linkShowsKnown : a.linkAboutNew(name, store.affiliates.days),
+        "",
+        a.paidByStore(name),
+        "",
+        a.linkExpires,
+      ].join("\n"),
+    });
+  } finally {
+    // A link whose email did not go out opens nothing: it is removed at once,
+    // not left for its day. When the send's outcome was unknown, an email that
+    // did arrive then holds a link that no longer opens, and asking again sends
+    // a new one. Removal is best effort: the day's expiry still ends it.
+    if (!sent) {
+      await redisPipeline([["DEL", linkKey(token)]]).catch((error) => console.error("removing an unsent affiliate link failed", error));
+    }
+  }
+  if (!sent) console.error("an affiliate link was not sent");
 }
 
 export type InviteResult = "sent" | "waiting" | "email" | "owner" | "unavailable" | "full" | "error";

@@ -160,8 +160,9 @@ async function runningMemberships(store: Store, statsId: string, nowSeconds: num
         const trialRaw = ownField(row, "trial_end");
         const start = typeof startRaw === "number" && Number.isSafeInteger(startRaw) ? startRaw : 0;
         const anchor = typeof anchorRaw === "number" && Number.isSafeInteger(anchorRaw) ? anchorRaw : start;
-        // No trial is null on Stripe; anything else that is not a whole second is not read as "no trial".
-        const trialEnd = trialRaw === null || trialRaw === undefined ? 0 : typeof trialRaw === "number" && Number.isSafeInteger(trialRaw) && trialRaw > 0 ? trialRaw : -1;
+        // No trial is null on Stripe, which always sends the field: a row without it, or with anything that is not
+        // a whole second, is not read as "no trial" (Claude 3's focal return on #3014).
+        const trialEnd = trialRaw === null ? 0 : typeof trialRaw === "number" && Number.isSafeInteger(trialRaw) && trialRaw > 0 ? trialRaw : -1;
         const product = productOfSub(row);
         // A running membership of this store that cannot be placed proves nothing: counted, so the list says it is not whole.
         if (!email || !start || !anchor || !product || trialEnd < 0) {

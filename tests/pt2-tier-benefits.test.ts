@@ -47,6 +47,8 @@ const sub = (id: string, email: string, product: string, extra: Record<string, u
   status: "active",
   start_date: ANCHOR,
   billing_cycle_anchor: ANCHOR,
+  // Stripe always sends trial_end: null when there was no trial.
+  trial_end: null,
   metadata: { store: "benefitstore", product },
   customer: { id: `cus_${id.slice(4)}`, email },
   items: { data: [{ price: { unit_amount: 1000, currency: "usd", metadata: {}, recurring: { interval: "month", interval_count: 1 } }, current_period_end: NOW + 10 * DAY }] },

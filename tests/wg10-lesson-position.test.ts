@@ -81,7 +81,7 @@ is("two removed", forgetCoursePlaces(device, "c1", ADA), 2);
 is("the other student's, the other course's, the speed and the rest stay", [...keys.keys()].sort(), [`mm:lp:c1:l1:${BEN}`, `mm:lp:c2:l1:${ADA}`, "mm:lp-speed", "other"].sort());
 
 part("The player as drawn");
-const words = { label: "Where you stopped", stopped: (at: string) => `You stopped at ${at} last time.`, resume: (at: string) => `Continue at ${at}`, startOver: "Start over" };
+const words = { label: "Where you stopped", stopped: "You stopped at {at} last time.", resume: "Continue at {at}", startOver: "Start over" };
 const html = renderToStaticMarkup(createElement(LessonPlayer, { courseId: "c1", lessonId: "l1", learner: ADA, words, src: "/v.mp4", controls: true, preload: "metadata", className: "w-full" }));
 is("the same video, with its own controls", /<video[^>]*src="\/v\.mp4"[^>]*controls=""/.test(html), true);
 is("nothing offered before the browser has read the device", html.includes("Continue at"), false);

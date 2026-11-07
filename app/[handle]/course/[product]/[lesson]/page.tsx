@@ -32,6 +32,7 @@ import { NewTab } from "@/components/new-tab";
 import { StampedPlayer } from "@/components/video-stamp";
 import { LessonPlayer } from "@/components/lesson-player";
 import { devicePlaceKey } from "@/lib/lesson-position";
+import { resumeWordsOf } from "@/lib/lesson-position-rules";
 import { videoStampText } from "@/lib/video-stamp";
 
 type Params = {
@@ -162,7 +163,8 @@ export default async function LessonPage({ params, searchParams }: Params) {
   // Where the student stopped, kept on their device and offered back (650 [WG10], components/lesson-player.tsx),
   // under a key only the server can make (lib/lesson-position.ts); never for the creator or a visitor.
   const placeKey = student ? devicePlaceKey(course.id, student.email) : null;
-  const resumeWords = { label: w.resumeLabel, stopped: w.resumeStopped, resume: w.resumeContinue, startOver: w.resumeStartOver };
+  // Plain text only: a function cannot cross to the client player (Claude 5 on #2728).
+  const resumeWords = resumeWordsOf(w);
   const moduleNumber = course.modules.findIndex((m) => m.id === unit.id) + 1;
 
   return (

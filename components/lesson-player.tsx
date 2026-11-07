@@ -11,10 +11,11 @@ import {
   readSpeed,
   resumeFrom,
   saveDue,
+  sayAt,
   writePlace,
+  type ResumeWords,
 } from "@/lib/lesson-position-rules";
 
-type Words = { label: string; stopped: (at: string) => string; resume: (at: string) => string; startOver: string };
 
 /** The browser's storage, or null where it is blocked (a private window, a setting): then nothing is kept. */
 function storage(): Storage | null {
@@ -45,7 +46,7 @@ export function LessonPlayer({
   learner,
   words,
   ...video
-}: { courseId: string; lessonId: string; learner: string | null; words: Words } & Omit<ComponentProps<"video">, "ref">) {
+}: { courseId: string; lessonId: string; learner: string | null; words: ResumeWords } & Omit<ComponentProps<"video">, "ref">) {
   const ref = useRef<HTMLVideoElement>(null);
   const [offer, setOffer] = useState<number | null>(null);
   const key = learner ? positionKey(courseId, lessonId, learner) : null;
@@ -185,9 +186,9 @@ export function LessonPlayer({
     <>
       {offer !== null ? (
         <div role="group" aria-label={words.label} data-lesson-resume="" className="flex flex-wrap items-center gap-3 bg-black p-3 text-sm text-white">
-          <p className="min-w-0 flex-1">{words.stopped(clockOf(offer))}</p>
+          <p className="min-w-0 flex-1">{sayAt(words.stopped, clockOf(offer))}</p>
           <button type="button" className="btn st-btn" onClick={() => choose(offer)}>
-            {words.resume(clockOf(offer))}
+            {sayAt(words.resume, clockOf(offer))}
           </button>
           <button type="button" className="btn st-btn" onClick={() => choose(null)}>
             {words.startOver}

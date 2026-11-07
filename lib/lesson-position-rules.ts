@@ -130,3 +130,23 @@ export function forgetCoursePlaces(store: PlaceStorage, courseId: string, learne
   for (const key of mine) store.removeItem(key);
   return mine.length;
 }
+
+/** Where the time goes in the resume words: put in on the student's device (sayAt), where the time is read. */
+export const RESUME_AT = "{at}";
+
+/**
+ * The resume offer's words, plain text only: the lesson page (a Server Component) hands them to the client player, and
+ * React's Flight refuses a function crossing that line (Claude 5 on #2728), so the sentences that take the time carry
+ * RESUME_AT where it goes.
+ */
+export type ResumeWords = { label: string; stopped: string; resume: string; startOver: string };
+
+/** The resume offer's words from a language's course words, each sentence with RESUME_AT where the time goes. */
+export function resumeWordsOf(w: { resumeLabel: string; resumeStopped: (at: string) => string; resumeContinue: (at: string) => string; resumeStartOver: string }): ResumeWords {
+  return { label: w.resumeLabel, stopped: w.resumeStopped(RESUME_AT), resume: w.resumeContinue(RESUME_AT), startOver: w.resumeStartOver };
+}
+
+/** A resume sentence with the time put in where RESUME_AT stands. */
+export function sayAt(sentence: string, at: string): string {
+  return sentence.split(RESUME_AT).join(at);
+}

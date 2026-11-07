@@ -1,6 +1,6 @@
 import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
-import { forgetMetaUser, isMetaConfigured, signedUser } from "@/lib/meta-ads";
+import { MetaIncompleteForget, forgetMetaUser, isMetaConfigured, signedUser } from "@/lib/meta-ads";
 import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
 import { SITE_URL } from "@/lib/site-url";
 
@@ -33,11 +33,17 @@ export async function POST(request: NextRequest) {
     forgot = await forgetMetaUser(user);
   } catch (error) {
     console.error("forgetting a Meta user failed", error);
+    // The stores this pass did forget are told now: the next pass reads them as gone (Claude 5 on #2869).
+    if (error instanceof MetaIncompleteForget) tell(error.forgot);
     return Response.json({ error: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }
+  tell(forgot);
+  const code = `meta-${Date.now().toString(36)}-${forgot.length}`;
+  return Response.json({ url: `${SITE_URL}/privacy#meta-ads`, confirmation_code: code }, { headers: { "Cache-Control": "no-store" } });
+}
+
+function tell(forgot: { owner: { email: string; handle: string } }[]): void {
   if (forgot.length) after(async () => {
     for (const store of forgot) await noticeCreator(store.owner, { kind: "metaads-disconnected", byMeta: true });
   });
-  const code = `meta-${Date.now().toString(36)}-${forgot.length}`;
-  return Response.json({ url: `${SITE_URL}/privacy#meta-ads`, confirmation_code: code }, { headers: { "Cache-Control": "no-store" } });
 }

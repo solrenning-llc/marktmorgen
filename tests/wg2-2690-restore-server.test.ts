@@ -32,8 +32,17 @@ process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
 process.env.STRIPE_SECRET_KEY = "sk_test_wg2_2690_restore_server_only";
 
 let stripeCalls = 0;
+/** Any request to Stripe, read by its whole host (stripe.com or a subdomain), never as a substring of the URL. */
+const isStripeHost = (u: string): boolean => {
+  try {
+    const host = new URL(u).hostname;
+    return host === "stripe.com" || host.endsWith(".stripe.com");
+  } catch {
+    return false;
+  }
+};
 globalThis.fetch = (async (input: string | URL | Request) => {
-  if (String(input).includes("stripe.com")) stripeCalls += 1;
+  if (isStripeHost(String(input instanceof Request ? input.url : input))) stripeCalls += 1;
   return new Response(JSON.stringify({ error: { message: "no stand-in" } }), { status: 404 });
 }) as typeof fetch;
 

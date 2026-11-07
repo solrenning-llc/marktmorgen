@@ -93,7 +93,7 @@ async function main(): Promise<void> {
   is("DirectoryBusyError is exported", typeof Busy, "function");
   const line = (NOT_A_COST as Record<string, string | undefined>).DIRECTORY_BUILDS_PER_HOUR ?? "";
   is("the registry prices the build rate by name", line.length > 0, true);
-  is("and states the bounded worst case: commands per build and builds per hour", [line.includes("12,068"), line.includes("4 builds an hour"), line.includes("48,272")], [true, true, true]);
+  is("and states the bounded worst case: commands per build and builds per hour", [line.includes("12,070"), line.includes("4 builds an hour"), line.includes("48,280")], [true, true, true]);
   const scanLine = (NOT_A_COST as Record<string, string | undefined>).DIRECTORY_SCAN_PAGES ?? "";
   is("the scan line no longer says the rate is unbounded", scanLine.includes("not bounded yet"), false);
 

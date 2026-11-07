@@ -86,7 +86,8 @@ export const DIRECTORY_SCAN_PAGES = 64;
 /**
  * The fewest seconds between two builds of the directory, for the whole site (MR: a ceiling before every spend): 15
  * minutes, so at most 4 builds an hour (C1-20261107-1627-C4-5 on #3062: at one a minute, 12,068 commands a build came
- * to about US$1,042.68 in 30 days, a fixed company cost; at 15 minutes about US$69.51). A creator's change shows at the
+ * to about US$1,042.68 in 30 days, a fixed company cost; at 15 minutes, with the listed-set check after each build, 12,070
+ * commands a build, about US$69.52). A creator's change shows at the
  * next build, so within 15 minutes; a store taken out is gone at once (below).
  * A save drops the kept page and a build that could not read every program's numbers keeps none, so without it
  * every visit after either would build again, and concurrent visits would all build at once. Each build first
@@ -333,14 +334,31 @@ export async function readDirectory(): Promise<DirectoryRow[]> {
       )
     ).filter((row): row is DirectoryRow => row !== null),
   );
+  const built = rows.map((row) => sidOf.get(row) ?? "");
   if (!partial) {
-    const last = { sids: rows.map((row) => sidOf.get(row) ?? ""), rows };
     await redisPipeline([
       ["SET", DIRECTORY_CACHE, JSON.stringify(rows), "EX", KEEP_SECONDS],
-      ["SET", DIRECTORY_LAST, JSON.stringify(last), "EX", LAST_KEEP_SECONDS],
+      ["SET", DIRECTORY_LAST, JSON.stringify({ sids: built, rows }), "EX", LAST_KEEP_SECONDS],
     ]).catch(() => null);
   }
-  return rows;
+  // A creator who unchecked "List my program" while this build ran leaves the page at once (Claude 6 on #3118): the
+  // build read the store before the save's SREM and DEL, and its SET above may have written the store back. So the
+  // listed set is asked once, after the SETs: a store no longer in it drops the kept page, and so does a reply in any
+  // other shape (then the build is unknown). Against the save's SREM-then-DEL this is linearizable: an SREM before
+  // this check is seen here; one after it is followed by the save's own DEL. The last good build (nl:dir:last) is
+  // filtered the same way whenever it is shown (lastDirectory).
+  if (!built.length) return rows;
+  let listed: boolean[] | null = null;
+  try {
+    listed = await stillListed(built);
+  } catch {
+    listed = null;
+  }
+  if (listed && listed.every(Boolean)) return rows;
+  if (!partial) await redisPipeline([["DEL", DIRECTORY_CACHE]]);
+  if (!listed) throw new UnknownReplyError("the directory's listed set after a build (SMISMEMBER)");
+  const still = listed;
+  return rows.filter((_, at) => still[at]);
 }
 
 /**

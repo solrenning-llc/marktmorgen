@@ -175,7 +175,7 @@ async function main(): Promise<void> {
 
   part("The registry counts the last page");
   const line = (NOT_A_COST as Record<string, string | undefined>).DIRECTORY_BUILDS_PER_HOUR ?? "";
-  is("one build sends at most 12,068 commands, 4 builds an hour, 48,272 an hour", [line.includes("12,068"), line.includes("4 builds an hour"), line.includes("48,272")], [true, true, true]);
+  is("one build sends at most 12,070 commands, 4 builds an hour, 48,280 an hour", [line.includes("12,070"), line.includes("4 builds an hour"), line.includes("48,280")], [true, true, true]);
   is("and a visit while the claim is held reads the last page and the listed set", [line.includes("nl:dir:last"), line.includes("SMISMEMBER")], [true, true]);
 
   done();

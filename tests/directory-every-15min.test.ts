@@ -9,7 +9,7 @@
  * Now: the claim and the kept page both last 15 minutes. A visit while the page is kept sends one GET. A save that can
  * change the page still drops it, but the next build waits for the claim: until then the visit is shown the last good
  * build without every store no longer in the listed set, so a store taken out is gone at once and a creator's other
- * change shows within 15 minutes. At most 4 builds an hour: 34,755,840 commands in 30 days, about US$69.51.
+ * change shows within 15 minutes. At most 4 builds an hour: 34,761,600 commands in 30 days, about US$69.52 (12,070 a build with the listed-set check after it, Claude 6 on #3118).
  */
 import * as directory from "@/lib/affiliate-directory";
 import { readDirectory } from "@/lib/affiliate-directory";
@@ -167,13 +167,13 @@ async function main(): Promise<void> {
 
   part("The registry prices 4 builds an hour from the repository's own rate");
   const line = (NOT_A_COST as Record<string, string | undefined>).DIRECTORY_BUILDS_PER_HOUR ?? "";
-  const perMonth = 12_068 * 4 * 24 * 30;
-  is("34,755,840 commands in 30 days", perMonth, 34_755_840);
+  const perMonth = 12_070 * 4 * 24 * 30;
+  is("34,761,600 commands in 30 days", perMonth, 34_761_600);
   const cost = dollars((perMonth * UPSTASH_MICRO_USD_PER_MILLION_COMMANDS) / 1_000_000);
-  is("about US$69.51 at the repository's rate", cost, "US$69.51");
+  is("about US$69.52 at the repository's rate", cost, "US$69.52");
   is(
-    "the line states 15 minutes, 4 builds, 48,272 an hour, 34,755,840 in 30 days and the dollars",
-    [line.includes("DIRECTORY_BUILD_SECONDS = 900"), line.includes("4 builds an hour"), line.includes("48,272"), line.includes("34,755,840"), line.includes(cost)],
+    "the line states 15 minutes, 4 builds, 48,280 an hour, 34,761,600 in 30 days and the dollars",
+    [line.includes("DIRECTORY_BUILD_SECONDS = 900"), line.includes("4 builds an hour"), line.includes("48,280"), line.includes("34,761,600"), line.includes(cost)],
     [true, true, true, true, true],
   );
   is("and no longer the minute's figures", [line.includes("60 builds"), line.includes("724,080"), line.includes("1,042.68")], [false, false, false]);

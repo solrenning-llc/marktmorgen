@@ -99,8 +99,11 @@ function parseAdding(raw: unknown): Adding | null {
     throw unknown();
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw unknown();
-  if (typeof value.from !== "number" || typeof value.to !== "number" || !(value.to > value.from) || value.from < 0) throw unknown();
-  if (typeof value.customerId !== "string" || typeof value.subscriptionId !== "string" || typeof value.at !== "number") throw unknown();
+  // Whole cents and a whole time only (Claude 5 on #2944): a fraction or a figure past any number is not a line this
+  // code wrote, and read as one it would be taken for carried out, or past what is owed, and the month begun again.
+  const whole = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n);
+  if (!whole(value.from) || !whole(value.to) || !(value.to > value.from) || value.from < 0) throw unknown();
+  if (typeof value.customerId !== "string" || typeof value.subscriptionId !== "string" || !whole(value.at)) throw unknown();
   // Optional in records written before they were kept: what was used, and the line's words.
   const used = typeof value.amount === "number" ? value.amount : typeof value.seconds === "number" ? value.seconds : 0;
   return {
@@ -305,7 +308,11 @@ export async function settleUsage(meter: Meter, folder: string, month: string, f
     customerId: store.stripeCustomerId,
     subscriptionId: store.subscriptionId,
   };
-  await redisPipeline([["SET", addingKey(meter, folder, month), JSON.stringify(adding), "EX", KEEP_SECONDS]]);
+  // The line written down is what stops a second charge if this run ends before the figure is: Stripe is asked only
+  // once it is known to be there, an exact "OK" (CX-123 rule 24; Claude 5 on #2944). Any other answer throws and
+  // nothing is charged; a write that landed with its answer lost is finished by the next run, as any unfinished line.
+  const wrote = repliesFor(await redisPipeline([["SET", addingKey(meter, folder, month), JSON.stringify(adding), "EX", KEEP_SECONDS]]), 1);
+  if (!wrote || wrote[0] !== "OK") throw new UnknownReplyError("a usage line written down before its charge");
   if (!(await carryOut(meter, folder, month, adding))) return { ...out, state: "failed" };
   await redisPipeline([
     ["SET", billedKey(meter, folder, month), owed, "EX", KEEP_SECONDS],

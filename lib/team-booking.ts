@@ -54,14 +54,23 @@ export type TeamBusy = Busy & { hosts?: string[]; claim?: string };
 /** Every team kept for this store's calls, raw, by product. */
 export async function readTeams(store: Pick<Store, "callsId">): Promise<Map<string, unknown>> {
   const out = new Map<string, unknown>();
-  if (!store.callsId || !isRedisConfigured()) return out;
-  const [raw] = await redisPipeline([["HGETALL", teamKey(store.callsId)]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]) : [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
+  if (!store.callsId) return out;
+  const unreadable = () => new Error("The team booking configuration could not be read.");
+  if (!isRedisConfigured()) throw unreadable();
+  const reply = await redisPipeline([["HGETALL", teamKey(store.callsId)]]);
+  if (!Array.isArray(reply) || reply.length !== 1) throw unreadable();
+  const entry = Object.getOwnPropertyDescriptor(reply, "0");
+  if (!entry || !Object.hasOwn(entry, "value") || !Array.isArray(entry.value) || entry.value.length % 2 !== 0) throw unreadable();
+  const flat: unknown[] = entry.value;
+  for (let i = 0; i < flat.length; i += 2) {
+    const key = Object.getOwnPropertyDescriptor(flat, String(i));
+    const value = Object.getOwnPropertyDescriptor(flat, String(i + 1));
+    if (!key || !Object.hasOwn(key, "value") || typeof key.value !== "string" || !key.value || out.has(key.value) ||
+      !value || !Object.hasOwn(value, "value") || typeof value.value !== "string") throw unreadable();
     try {
-      out.set(String(flat[i]), JSON.parse(String(flat[i + 1])));
+      out.set(key.value, JSON.parse(value.value));
     } catch {
-      // A team that cannot be read is no team.
+      throw unreadable();
     }
   }
   return out;
@@ -93,12 +102,12 @@ export async function possibleHosts(store: Pick<Store, "email" | "sid">): Promis
  * "closed" for a team event type the plan or the team no longer allows.
  */
 export async function activeTeam(store: Store, product: CallListing, nowSeconds = Date.now() / 1000): Promise<TeamSetup | null | "closed"> {
-  if (!store.callsId || product.call.kind !== "weekly" || product.call.seats !== 1 || !isRedisConfigured()) return null;
+  if (!store.callsId || product.call.kind !== "weekly" || product.call.seats !== 1) return null;
   const teams = await readTeams(store);
   const raw = teams.get(product.id);
   if (raw === undefined) return null;
   const team = parseTeamSetup(raw, product.call);
-  if (!team) return null;
+  if (!team) return "closed";
   const limits = teamLimitsFor(store, nowSeconds);
   if (teamOrder(teams).indexOf(product.id) >= limits.eventTypes) return "closed";
   const allowed = new Set(await possibleHosts(store));

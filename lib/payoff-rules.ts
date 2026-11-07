@@ -27,6 +27,15 @@
  *     (lib/refunds.ts) come first;
  *   - "discounted": a discount means the payments left may not all be the
  *     same amount;
+ *   - "paused": collection is paused (pause_collection), so what Stripe
+ *     does with the next invoices is not the plan's plain schedule;
+ *   - "scheduled": a subscription schedule is attached and may change the
+ *     price, the quantity or the end on its own;
+ *   - "update_pending": an update waits on a payment (pending_update) and
+ *     would change the subscription once it is paid;
+ *   - "customer_balance": the customer holds a credit or owes an amount on
+ *     the creator's account, which Stripe applies to the next invoice, so
+ *     the payoff charge and that invoice would not be what the words say;
  *   - "mismatch": two sources disagree (the payments counted from the dates
  *     and the paid invoices, the period Stripe is in and the one the dates
  *     say, the plan's end and the one it must have, the item and the
@@ -34,10 +43,15 @@
  *   - "too_large": above the largest single charge Stripe takes;
  *   - "not_plan": not a payment plan (a membership that ends by itself is
  *     not one; it is paid for time, not for a product already delivered);
- *   - "unknown": a fact is missing or malformed.
+ *   - "unknown": a fact is missing or malformed, the tax behavior included.
  *
- * The total is quoted before tax; when the payments carry tax, the words say
- * so, since the tax is worked out again when the buyer pays.
+ * The total is the payments left at the plan's own price. The words follow
+ * the price's tax behavior, never the tax on the latest invoice: a price with
+ * tax included says so and is all the buyer pays; a price with tax on top
+ * says tax may be added, worked out again when the buyer pays, even when the
+ * latest invoice carried none (a tax that starts to apply would otherwise be
+ * hidden). A price whose tax behavior is not known (Stripe's "unspecified",
+ * or not read) is refused.
  */
 import { CURRENCIES, formatMoney } from "@/lib/money";
 import { addPeriods } from "@/lib/plans";
@@ -77,7 +91,13 @@ export type PayoffFacts = {
   currency: string;
   /** Whether any discount applies to the subscription or its customer. */
   discounted: boolean;
-  /** The subscription's latest invoice. */
+  /**
+   * The subscription's latest invoice. periodStart is the subscription line's
+   * own period (lines.data[0].period.start), not invoice.period_start, which
+   * for a subscription invoice is the period before the one it bills.
+   * taxCents is read so a malformed invoice refuses; it never decides the
+   * tax words (taxBehavior does).
+   */
   latestInvoice: { status: string; subtotalCents: number; taxCents: number; periodStart: number } | null;
   /** This subscription's invoices paid with an amount above zero. */
   paidInvoices: number;
@@ -85,10 +105,34 @@ export type PayoffFacts = {
   openInvoices: number;
   /** Whether any payment of the plan was refunded, in whole or in part, or disputed. */
   givenBack: boolean;
+  /** The plan price's tax_behavior; "unknown" when not read or Stripe's "unspecified". */
+  taxBehavior: "inclusive" | "exclusive" | "unknown";
+  /** Whether subscription.pause_collection is set; null when not read. */
+  paused: boolean | null;
+  /** Whether subscription.schedule is set; null when not read. */
+  scheduled: boolean | null;
+  /** Whether subscription.pending_update is set; null when not read. */
+  pendingUpdate: boolean | null;
+  /** customer.balance on the creator's account, in the smallest unit: below zero a credit, above zero owed; NaN when not read. */
+  customerBalanceCents: number;
   nowSeconds: number;
 };
 
-export type PayoffRefusal = "owing" | "due_soon" | "unsettled" | "ended" | "given_back" | "discounted" | "mismatch" | "too_large" | "not_plan" | "unknown";
+export type PayoffRefusal =
+  | "owing"
+  | "due_soon"
+  | "unsettled"
+  | "ended"
+  | "given_back"
+  | "discounted"
+  | "paused"
+  | "scheduled"
+  | "update_pending"
+  | "customer_balance"
+  | "mismatch"
+  | "too_large"
+  | "not_plan"
+  | "unknown";
 
 export type PayoffQuote = {
   ok: true;
@@ -98,15 +142,15 @@ export type PayoffQuote = {
   paid: number;
   /** Payments still to come, the ones the payoff replaces. */
   remaining: number;
-  /** One payment, before tax. */
+  /** One payment at the plan's own price: tax included when taxBehavior is "inclusive", before tax when "exclusive". */
   eachCents: number;
-  /** What the buyer pays now, before tax: remaining × each, nothing added. */
+  /** What the buyer pays now, at the same tax behavior: remaining × each, nothing added. */
   totalCents: number;
   currency: string;
   /** When the next automatic payment would have been taken. */
   nextDueAt: number;
-  /** Whether the payments carry tax, worked out again when the buyer pays. */
-  taxed: boolean;
+  /** The price's tax behavior, which decides the words: tax included, or tax on top worked out when the buyer pays. */
+  taxBehavior: "inclusive" | "exclusive";
 };
 
 const whole = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n);
@@ -130,6 +174,10 @@ export function payoffQuote(f: PayoffFacts): PayoffQuote | { ok: false; reason: 
   const invoice = f.latestInvoice;
   if (!invoice || !whole(invoice.subtotalCents) || !whole(invoice.taxCents) || invoice.taxCents < 0 || !whole(invoice.periodStart)) return no("unknown");
   if (!whole(f.itemCount) || f.itemCount < 1 || !whole(f.quantity) || f.quantity < 1) return no("unknown");
+  if (f.taxBehavior !== "inclusive" && f.taxBehavior !== "exclusive") return no("unknown");
+  const taxBehavior = f.taxBehavior;
+  if (typeof f.paused !== "boolean" || typeof f.scheduled !== "boolean" || typeof f.pendingUpdate !== "boolean") return no("unknown");
+  if (!whole(f.customerBalanceCents)) return no("unknown");
   const rule = CURRENCIES.find((c) => c.code === f.currency);
   if (!rule) return no("unknown");
   if (!whole(f.unitAmountCents) || f.unitAmountCents < rule.minCharge || f.unitAmountCents > rule.maxPrice) return no("unknown");
@@ -139,6 +187,12 @@ export function payoffQuote(f: PayoffFacts): PayoffQuote | { ok: false; reason: 
   if (invoice.status !== "paid" || f.openInvoices > 0) return no("owing");
   if (f.givenBack) return no("given_back");
   if (f.discounted) return no("discounted");
+  // Anything that lets Stripe charge something other than the plan's plain
+  // next payment, or apply money to it, comes before the payoff.
+  if (f.paused) return no("paused");
+  if (f.scheduled) return no("scheduled");
+  if (f.pendingUpdate) return no("update_pending");
+  if (f.customerBalanceCents !== 0) return no("customer_balance");
 
   // The count starts at the first payment, after a trial when there was one,
   // exactly as lib/plans.ts counts the plan's end.
@@ -162,16 +216,16 @@ export function payoffQuote(f: PayoffFacts): PayoffQuote | { ok: false; reason: 
   if (nextDueAt - f.nowSeconds < PAYOFF_QUIET_SECONDS) return no("due_soon");
   const totalCents = remaining * f.unitAmountCents;
   if (!whole(totalCents) || totalCents > STRIPE_MAX_CHARGE) return no("too_large");
-  return { ok: true, payments: f.payments, paid, remaining, eachCents: f.unitAmountCents, totalCents, currency: f.currency, nextDueAt, taxed: invoice.taxCents > 0 };
+  return { ok: true, payments: f.payments, paid, remaining, eachCents: f.unitAmountCents, totalCents, currency: f.currency, nextDueAt, taxBehavior };
 }
 
 /**
  * The sentence the buyer confirms before paying off. Only for the flow that
  * charges this total and then ends the plan, so no later payment is taken.
  */
-export function payoffWords(quote: PayoffQuote, taxed: boolean = quote.taxed): string {
+export function payoffWords(quote: PayoffQuote): string {
   const total = formatMoney(quote.totalCents, quote.currency);
-  const tax = taxed ? ", plus any tax, worked out when you pay" : "";
+  const tax = quote.taxBehavior === "inclusive" ? ", tax included" : ", plus any tax, worked out when you pay";
   const head = quote.remaining === 1
     ? `Pay the last payment now: ${total}, the same as that payment`
     : `Pay the ${quote.remaining} payments left now: ${total} in all, the same as those payments`;

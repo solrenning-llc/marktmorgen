@@ -1,3 +1,13 @@
+# Calendar focal final delivery receipt — 7 November 2026
+
+The nominal focal #3079 review 5814501573 was read back exactly. Evidence branch codex/z-review-3079-focal@9cbc8f579e8d4aaae5a8f589e7bd1a7ae4221811 is durable; local worktree d3ad34ff6b42aa4abf71b221b13516fe7ec4369d is clean. Both local reader causes are corrected, with financial clearance still conditional: inherited byte pricing, uncapped meeting records and the separate 77/1 maximality test remain open for C1/author disposition. No global MR clearance or merge is asserted.
+
+The complete channel is now retrievable with github_fetch_blob despite raw/Contents size failures. Blob 51b7d5593e754450c34860362bedb06462879f01 was read in full (4,074,920 characters) and preserves the prior full prefix. C4-1618 cost study and pending owner decision were read; this does not authorize Z to raise ceilings or prices. The 16:22 write attempt also returned CAS 409 and changed nothing. No restored, empty or truncated channel content was written. Further channel writes require the existing >=120-second error delay and >=5-minute full-read cadence, a fresh immutable blob, full-prefix preservation and an absent message ID.
+
+Status at 16:23 Fortaleza: both original and nominal focal reviews are delivered; channel stopping-point delivery remains pending after the above CAS rejection. There are zero active Z reviews, three own product units, no watcher in the background and no change to recurring continuity. All previous heads, REDs, WIPs and consumed retries remain preserved below. Do not start a duplicate execution solely from this recent checkpoint.
+
+---
+
 # Calendar nominal focal DELIVERED; no active Z review — 7 November2026,16:14 Fortaleza
 
 This supersedes ACTIVEstatus87dfd28e below. **#3079 EXACT8a1e6ab7d52f2f51e30b531f3246c2168b1a195c focal5814501573COMMENT delivered:** M1localMGETreplybound andM2invalidrecordreader causes CORRECTED; NOnewHIGH/MEDIUMdemonstrated8pathdelta, **NOTunqualifiedfinancialMRclearance**. Inherited16KiBdbBytesvsMAX_PRODUCT_BYTES256k,meetingrecordswithoutwritecap andreadceilings77/1maximalityC4-53remainOPEN/C1C2donodisposition. C1-1550ceilingsnorisiblecutsuntouched. Original5814394539/b12historiespreserved; sourcefixauthorC2notZ. Needformalbodyreadback+finaldeliverypoint/exactreceipt beforeend.

@@ -36,6 +36,7 @@ import {
   summaryVersion,
   transcriptOf,
   type LessonSummary,
+  type SummaryRead,
 } from "@/lib/lesson-summary-rules";
 import { done, is, part } from "./check";
 
@@ -52,6 +53,8 @@ const LESSON = [
 ];
 const VTT = vttOf(...LESSON);
 const TEXT = LESSON.join(" ");
+const TITLE = "Pricing your first product";
+const r = (summary: LessonSummary | null): SummaryRead => (summary ? { state: "ok", summary } : { state: "absent" });
 
 const textOf = (raw: unknown) => {
   const read = transcriptOf(raw);
@@ -84,10 +87,13 @@ async function main() {
   is("so a file under the cap in letters but over it in bytes is refused", textOf(wide), "refused: too_long");
 
   part("A lesson version is the hash of its transcript");
-  const v1 = await summaryVersion(TEXT);
+  const v1 = await summaryVersion(TITLE, TEXT);
   is("written as t1: and 64 hex digits", /^t1:[0-9a-f]{64}$/.test(v1), true);
-  is("the same words are the same version", await summaryVersion(TEXT), v1);
-  is("one word changed is another version", (await summaryVersion(`${TEXT} Extra.`)) === v1, false);
+  is("the same words are the same version", await summaryVersion(TITLE, TEXT), v1);
+  is("one word changed is another version", (await summaryVersion(TITLE, `${TEXT} Extra.`)) === v1, false);
+  is("a new title is another version: the summary is asked for again", (await summaryVersion("Pricing, part one", TEXT)) === v1, false);
+  is("the same words in another Unicode form are the same version (NFC)", await summaryVersion(TITLE.normalize("NFD"), "Caf\u0065\u0301 ".repeat(1)), await summaryVersion(TITLE, "Caf\u00e9 "));
+  is("title and words cannot trade places to make the same version", (await summaryVersion("ab", "c")) === (await summaryVersion("a", "bc")), false);
 
   part("A summary says only what the lesson says");
   const honest = "This lesson prices a first product. Start from what an hour of your work is worth to the buyer. Write the price on the page and ask five buyers.";
@@ -103,6 +109,85 @@ async function main() {
   is("so is a last chance", checkSummary("This is your last chance to price a first product.", TEXT), { ok: false, reason: "pressure" });
   is("in a store language too, accents and all", checkSummary("Es tu última oportunidad de poner un precio.", TEXT), { ok: false, reason: "pressure" });
   is("pressure the lesson itself says may be repeated", checkSummary("Do not wait for a last chance to set a price.", `${TEXT} Never wait for a last chance to set a price.`).ok, true);
+  const SAY = `${TEXT} Students set a price today and test it this week, and the course runs on any browser.`;
+  const pressure: [string, string][] = [
+    ["en", "Don\u2019t miss the lesson on prices."],
+    ["en", "Before it\u2019s gone, set a price."],
+    ["en", "Set a price while it\u2019s open."],
+    ["en", "Act fast and set a price."],
+    ["en", "It is now or never for your price."],
+    ["en", "Limited spots for the price lesson."],
+    ["en", "Limited time to set a price."],
+    ["en", "Today only: set a price."],
+    ["es", "No te lo pierdas: pon un precio."],
+    ["es", "Tiempo limitado para poner un precio."],
+    ["es", "Plazas limitadas en la clase de precios."],
+    ["es", "¡Corre a poner un precio!"],
+    ["es", "Date prisa con el precio."],
+    ["es", "Solo hoy: pon un precio."],
+    ["es", "Es ahora o nunca para tu precio."],
+    ["fr", "Ne manquez pas la leçon sur les prix."],
+    ["fr", "Durée limitée pour fixer un prix."],
+    ["fr", "Places limitées pour la leçon."],
+    ["fr", "Dépêchez-vous de fixer un prix."],
+    ["fr", "C\u2019est votre dernière chance de fixer un prix."],
+    ["fr", "Aujourd\u2019hui seulement : fixez un prix."],
+    ["fr", "C\u2019est maintenant ou jamais."],
+    ["de", "Nicht verpassen: setze einen Preis."],
+    ["de", "Begrenzte Zeit, um einen Preis zu setzen."],
+    ["de", "Begrenzte Plätze in der Lektion."],
+    ["de", "Sei schnell und setze einen Preis."],
+    ["de", "Beeil dich mit dem Preis."],
+    ["de", "Letzte Chance für deinen Preis."],
+    ["de", "Nur heute: setze einen Preis."],
+    ["de", "Jetzt oder nie für deinen Preis."],
+    ["it", "Non perdere la lezione sui prezzi."],
+    ["it", "Tempo limitato per fissare un prezzo."],
+    ["it", "Posti limitati alla lezione."],
+    ["it", "Affrettati a fissare un prezzo."],
+    ["it", "Ultima occasione per il prezzo."],
+    ["it", "Solo oggi: fissa un prezzo."],
+    ["it", "Ora o mai più per il prezzo."],
+    ["nl", "Mis het niet: kies een prijs."],
+    ["nl", "Beperkte tijd om een prijs te kiezen."],
+    ["nl", "Beperkte plaatsen in de les."],
+    ["nl", "Schiet op met je prijs."],
+    ["nl", "Laatste kans voor je prijs."],
+    ["nl", "Alleen vandaag: kies een prijs."],
+    ["nl", "Nu of nooit voor je prijs."],
+    ["pt", "Não perca a aula sobre preços."],
+    ["pt", "Tempo limitado para definir um preço."],
+    ["pt", "Vagas limitadas na aula."],
+    ["pt", "Corra para definir um preço."],
+    ["pt", "Última oportunidade para o preço."],
+    ["pt", "Só hoje: defina um preço."],
+    ["pt", "É agora ou nunca para o seu preço."],
+  ];
+  for (const [language, sentence] of pressure) {
+    is(`pressure (${language}): ${sentence}`, checkSummary(sentence, SAY), { ok: false, reason: "pressure" });
+  }
+  const neutral: [string, string][] = [
+    ["es", "El programa corre en cualquier navegador."],
+    ["pt", "Que a aula corra bem para todos."],
+    ["de", "Du lernst schnell, wie man einen Preis setzt."],
+    ["it", "Non perdere tempo a cercare: il prezzo è nella pagina."],
+    ["en", "The lesson shows how the price was set."],
+    ["fr", "La leçon montre comment fixer un prix."],
+    ["nl", "De les laat zien hoe je een prijs kiest."],
+  ];
+  for (const [language, sentence] of neutral) {
+    is(`a neutral sentence with a word of the list passes (${language}): ${sentence}`, checkSummary(sentence, SAY).ok, true);
+  }
+  is("a curly apostrophe the lesson says is the lesson's own", checkSummary("Don\u2019t miss the price on the page.", `${TEXT} Don't miss the price on the page.`).ok, true);
+
+  part("Numbers in words and promised results");
+  is("a number in words the lesson never says is refused", checkSummary("Most creators charged five hundred dollars.", TEXT), { ok: false, reason: "not_in_lesson" });
+  is("a number in words the lesson says passes", checkSummary("Ask five buyers what they think.", TEXT).ok, true);
+  is("a dozen counts too", checkSummary("Ask a dozen buyers.", TEXT), { ok: false, reason: "not_in_lesson" });
+  is("a promised result is refused", checkSummary("You will double your sales with this price.", TEXT), { ok: false, reason: "promise" });
+  is("so is a guaranteed result", checkSummary("This price is guaranteed to sell.", TEXT), { ok: false, reason: "promise" });
+  is("so is earning", checkSummary("You will earn more from your first product.", TEXT), { ok: false, reason: "promise" });
+  is("a promise the lesson itself makes may be repeated", checkSummary("You will double your sales.", `${TEXT} You will double your sales.`).ok, true);
   is("markup is refused, never cleaned", checkSummary("This lesson <b>prices</b> a first product.", TEXT), { ok: false, reason: "markup" });
   is("nothing is not a summary", checkSummary(undefined, TEXT), { ok: false, reason: "empty" });
   is("spaces only are not a summary", checkSummary("   \n  ", TEXT), { ok: false, reason: "empty" });
@@ -111,7 +196,7 @@ async function main() {
   is("a sentence too long to read easily is refused (cognitive guidance, AX274)", checkSummary(runOn, TEXT), { ok: false, reason: "long_sentence" });
   is("spaces inside a line are made one, paragraphs kept, nothing else changed", checkSummary("  This lesson prices   a first product.\n\n\n\nAsk five buyers.  ", TEXT), { ok: true, text: "This lesson prices a first product.\n\nAsk five buyers." });
   is("an unreadable transcript passes nothing", checkSummary(honest, ""), { ok: false, reason: "not_in_lesson" });
-  for (const reason of ["empty", "too_long", "markup", "link", "pressure", "not_in_lesson", "long_sentence"] as const) {
+  for (const reason of ["empty", "too_long", "markup", "link", "pressure", "promise", "not_in_lesson", "long_sentence"] as const) {
     is(`the studio has plain words for ${reason}`, typeof SUMMARY_REASONS[reason] === "string" && SUMMARY_REASONS[reason].length > 20, true);
   }
   is("the length words quote the real cap, never a typed figure", SUMMARY_REASONS.too_long.includes(MAX_SUMMARY_CHARS.toLocaleString("en-US")), true);
@@ -119,43 +204,54 @@ async function main() {
 
   part("Nothing is shown before the creator approves it");
   const at = 1_800_000_000;
-  const made = editSummary(null, { kind: "generated", text: honest, version: v1, transcript: TEXT }, at);
+  const made = editSummary(r(null), { kind: "generated", text: honest, version: v1, transcript: TEXT }, at);
   is("a new summary is a draft", made.ok && made.summary.state, "draft");
   const draft = made.ok ? made.summary : (null as unknown as LessonSummary);
   is("a draft is not shown", shownSummary(draft, v1), null);
   is("a draft for this version asks for no other summary", needsSummary({ state: "ok", summary: draft }, v1), false);
-  const approved = editSummary(draft, { kind: "approve", version: v1 }, at + 1);
+  const approved = editSummary(r(draft), { kind: "approve", version: v1 }, at + 1);
   is("approved, it is shown", approved.ok ? shownSummary(approved.summary, v1) : "refused", honest);
   const live = approved.ok ? approved.summary : draft;
-  is("a second summary for the same version is refused: one call a version", editSummary(live, { kind: "generated", text: honest, version: v1, transcript: TEXT }, at + 2), { ok: false, reason: "same_version" });
-  is("a model's summary that fails the rule is never kept", editSummary(null, { kind: "generated", text: "Earn 500 dollars a week.", version: v1, transcript: TEXT }, at), { ok: false, reason: "not_in_lesson" });
+  is("a second summary for the same version is refused: one call a version", editSummary(r(live), { kind: "generated", text: honest, version: v1, transcript: TEXT }, at + 2), { ok: false, reason: "same_version" });
+  is("a model's summary that fails the rule is never kept", editSummary(r(null), { kind: "generated", text: "Earn 500 dollars a week.", version: v1, transcript: TEXT }, at), { ok: false, reason: "not_in_lesson" });
 
   part("A lesson that changed hides its old summary until a new one is approved");
-  const v2 = await summaryVersion(`${TEXT} A new example was added.`);
+  const v2 = await summaryVersion(TITLE, `${TEXT} A new example was added.`);
   is("the old summary is not shown for the new version", shownSummary(live, v2), null);
   is("a new summary is asked for", needsSummary({ state: "ok", summary: live }, v2), true);
-  is("the old summary cannot be approved for the new version", editSummary(draft, { kind: "approve", version: v2 }, at + 3), { ok: false, reason: "stale" });
-  const remade = editSummary(live, { kind: "generated", text: honest, version: v2, transcript: `${TEXT} A new example was added.` }, at + 4);
+  is("the old summary cannot be approved for the new version", editSummary(r(draft), { kind: "approve", version: v2 }, at + 3), { ok: false, reason: "stale" });
+  const remade = editSummary(r(live), { kind: "generated", text: honest, version: v2, transcript: `${TEXT} A new example was added.` }, at + 4);
   is("a new version's summary is a draft again", remade.ok && [remade.summary.state, remade.summary.version === v2], ["draft", true]);
 
   part("The creator's edit goes back to a draft and passes the same rule");
-  const edited = editSummary(live, { kind: "edit", text: "Start from what one hour of your work is worth. Then ask five buyers.", transcript: TEXT }, at + 5);
+  const edited = editSummary(r(live), { kind: "edit", text: "Start from what one hour of your work is worth. Then ask five buyers.", transcript: TEXT }, at + 5);
   is("an edit is a draft again, marked edited", edited.ok && [edited.summary.state, edited.summary.edited], ["draft", true]);
   is("so it is hidden until approved", edited.ok ? shownSummary(edited.summary, v1) : "refused", null);
-  is("an edit with a number the lesson never says is refused", editSummary(live, { kind: "edit", text: "Charge 99 dollars.", transcript: TEXT }, at + 5), { ok: false, reason: "not_in_lesson" });
-  is("there is nothing to edit before a summary exists", editSummary(null, { kind: "edit", text: honest, transcript: TEXT }, at), { ok: false, reason: "none" });
+  is("an edit with a number the lesson never says is refused", editSummary(r(live), { kind: "edit", text: "Charge 99 dollars.", transcript: TEXT }, at + 5), { ok: false, reason: "not_in_lesson" });
+  is("there is nothing to edit before a summary exists", editSummary(r(null), { kind: "edit", text: honest, transcript: TEXT }, at), { ok: false, reason: "none" });
+
+  part("A kept record that cannot be read takes no action");
+  for (const action of [
+    { kind: "generated", text: honest, version: v1, transcript: TEXT },
+    { kind: "edit", text: honest, transcript: TEXT },
+    { kind: "approve", version: v1 },
+    { kind: "off" },
+    { kind: "on" },
+  ] as const) {
+    is(`${action.kind} on an unreadable record is refused, never written over it`, editSummary({ state: "unknown" }, action, at), { ok: false, reason: "unknown" });
+  }
 
   part("Turned off, nothing is shown and nothing new is written");
-  const off = editSummary(live, { kind: "off" }, at + 6);
+  const off = editSummary(r(live), { kind: "off" }, at + 6);
   is("off hides it", off.ok ? shownSummary(off.summary, v1) : "refused", null);
   const offSummary = off.ok ? off.summary : live;
   is("off asks for no new summary, even when the lesson changes", needsSummary({ state: "ok", summary: offSummary }, v2), false);
-  is("a summary arriving while off is refused", editSummary(offSummary, { kind: "generated", text: honest, version: v2, transcript: TEXT }, at + 7), { ok: false, reason: "off" });
-  is("off can be chosen before any summary exists", editSummary(null, { kind: "off" }, at).ok, true);
-  const on = editSummary(offSummary, { kind: "on" }, at + 8);
+  is("a summary arriving while off is refused", editSummary(r(offSummary), { kind: "generated", text: honest, version: v2, transcript: TEXT }, at + 7), { ok: false, reason: "off" });
+  is("off can be chosen before any summary exists", editSummary(r(null), { kind: "off" }, at).ok, true);
+  const on = editSummary(r(offSummary), { kind: "on" }, at + 8);
   is("back on, it is a draft to approve again, never shown at once", on.ok && [on.summary.state, shownSummary(on.summary, v1)], ["draft", null]);
-  const emptyOn = editSummary(null, { kind: "off" }, at);
-  const backOn = emptyOn.ok ? editSummary(emptyOn.summary, { kind: "on" }, at + 1) : null;
+  const emptyOn = editSummary(r(null), { kind: "off" }, at);
+  const backOn = emptyOn.ok ? editSummary(r(emptyOn.summary), { kind: "on" }, at + 1) : null;
   is("back on with no text yet asks for a summary", backOn?.ok ? needsSummary({ state: "ok", summary: backOn.summary }, v1) : "refused", true);
 
   part("What is kept is read strictly");

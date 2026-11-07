@@ -51,7 +51,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
       { status: 200 },
     );
   }
-  if (url.hostname.endsWith("resend.com")) emails += 1;
+  if (url.hostname === "api.resend.com") emails += 1;
   return new Response("{}", { status: 404 });
 }) as typeof fetch;
 

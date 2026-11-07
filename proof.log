@@ -1,0 +1,29 @@
+✔ control: confirmed current token and index are deleted, retry remains idempotent (1.907197ms)
+✖ a token replaced after GET remains discoverable or the erasure reports uncertainty (1.631332ms)
+✔ unknown token read never deletes the only index and reports completion (0.647821ms)
+✔ unknown DEL acknowledgement never becomes confirmed zero records (0.481072ms)
+SYNTHETIC_COMMANDS 11
+ℹ tests 4
+ℹ suites 0
+ℹ pass 3
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19.7529
+
+✖ failing tests:
+
+test at ../../../tmp/n-2608-proof-md6y4c/proof.cjs:172:30
+✖ a token replaced after GET remains discoverable or the erasure reports uncertainty (1.631332ms)
+  AssertionError [ERR_ASSERTION]: {"afterFirst":{"index":null,"grant":true},"afterRetry":{"index":null,"grant":true},"refused":false}
+      at TestContext.<anonymous> (/tmp/n-2608-proof-md6y4c/proof.cjs:187:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

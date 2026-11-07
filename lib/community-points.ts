@@ -29,6 +29,7 @@
  *   nl:cm:<id>:unl:<member>   when each reward reached this member (hash)
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { LEVELS, MAX_LEVEL, MAX_REWARDS, type Reward, levelOf, parseRewards, toNextLevel } from "@/lib/community-levels";
 
@@ -249,12 +250,15 @@ export async function forgetPointsPerson(id: string, who: string, now = Date.now
   if (!COMMUNITY.test(id) || !MEMBER.test(who) || !isRedisConfigured()) return 0;
   const today = dayOf(now);
   const days = Array.from({ length: DAYS_KEPT + 1 }, (_, i) => dayKey(id, today - i));
-  const replies = await redisPipeline([
+  const commands = [
     ["ZREM", allKey(id), who],
     ...days.map((key) => ["ZREM", key, who]),
     ["DEL", unlockedKey(id, who), boardKey(id, "7"), boardKey(id, "30"), boardKey(id, "all")],
-  ]);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  ];
+  // Each ZREM's and the DEL's own count only (CX-123 rule 24): any other answer throws, so the member's deletion is never reported done on it.
+  const counts = repliesFor(await redisPipeline(commands), commands.length)?.map(countOf);
+  if (!counts || counts.some((n) => n === null)) throw new UnknownReplyError("a member's points forgotten");
+  return (counts as number[]).reduce((sum, n) => sum + n, 0);
 }
 
 const STORED_PRODUCT = /^[a-z0-9]{6,40}$/;

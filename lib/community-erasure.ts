@@ -20,6 +20,7 @@
  * so before anyone deletes.
  */
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { traceKey } from "@/lib/community-trace";
 import { forgetMemberRecord, readConfig } from "@/lib/community";
 import { forgetHandle } from "@/lib/community-mentions";
@@ -34,24 +35,55 @@ import { forgetRsvpsPerson } from "@/lib/community-events";
 import { forgetAccessPerson } from "@/lib/community-access";
 import { unindexMember } from "@/lib/community-index";
 
-/** Deletes one person from one community. Answers how many records went. */
+/**
+ * Deletes one person from one community. Answers how many records went.
+ *
+ * Every step runs, whatever an earlier one answered: one step whose answer
+ * came back in an unknown shape (CX-123 rule 24) does not leave the steps after
+ * it undone in this pass. Then, if any step could not finish, this throws the
+ * first such error, so the erasure is said as not finished (lib/person-erasure.ts)
+ * and a retry, keyed by the same member, reaches what is left.
+ */
 export async function forgetCommunityPerson(id: string, who: string, email: string, productIds: string[]): Promise<number> {
-  const config = await readConfig(id).catch(() => null);
-  const member = await forgetMemberRecord(id, who);
-  let records = member ? 1 : 0;
-  if (member?.h) records += await forgetHandle(id, member.h, who);
-  if (member?.t) records += await forgetCommunityUnsub(member.t);
-  await unindexMember(id, who);
-  // Their trace (lib/community-trace.ts): what they wrote and did, by reference.
-  const [traced] = await redisPipeline([["DEL", traceKey(id, who)]]);
-  records += Number(traced) || 0;
-  records += await forgetPointsPerson(id, who);
-  records += await forgetNoticesPerson(id, who);
-  records += await forgetPushPerson(id, who);
-  records += await forgetDmPerson(id, who);
-  records += await forgetChatPerson(id, who);
-  records += await forgetGrantPerson(id, who);
-  records += await forgetRsvpsPerson(id, who, email);
-  records += await forgetAccessPerson(id, email, (config?.spaces ?? []).map((s) => s.id), productIds);
+  const failures: unknown[] = [];
+  let records = 0;
+  const step = async (run: () => Promise<number | void>) => {
+    try {
+      const gone = await run();
+      if (typeof gone === "number") records += gone;
+    } catch (error) {
+      failures.push(error);
+    }
+  };
+  // An unreadable configuration is not "no spaces": the access answers kept by space would stay behind.
+  const config = await readConfig(id).catch((error: unknown) => {
+    failures.push(error);
+    return null;
+  });
+  const member = await forgetMemberRecord(id, who).catch((error: unknown) => {
+    failures.push(error);
+    return null;
+  });
+  if (member) records += 1;
+  const handle = member?.h;
+  const unsub = member?.t;
+  if (handle) await step(() => forgetHandle(id, handle, who));
+  if (unsub) await step(() => forgetCommunityUnsub(unsub));
+  await step(() => unindexMember(id, who));
+  // Their trace (lib/community-trace.ts): what they wrote and did, by reference. DEL's own count only (CX-123 rule 24).
+  await step(async () => {
+    const traced = countOf(repliesFor(await redisPipeline([["DEL", traceKey(id, who)]]), 1)?.[0]);
+    if (traced === null) throw new UnknownReplyError("a member's trace deleted");
+    return traced;
+  });
+  await step(() => forgetPointsPerson(id, who));
+  await step(() => forgetNoticesPerson(id, who));
+  await step(() => forgetPushPerson(id, who));
+  await step(() => forgetDmPerson(id, who));
+  await step(() => forgetChatPerson(id, who));
+  await step(() => forgetGrantPerson(id, who));
+  await step(() => forgetRsvpsPerson(id, who, email));
+  await step(() => forgetAccessPerson(id, email, (config?.spaces ?? []).map((s) => s.id), productIds));
+  if (failures.length) throw failures[0];
   return records;
 }

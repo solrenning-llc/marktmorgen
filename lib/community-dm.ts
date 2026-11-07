@@ -49,6 +49,7 @@
  * is what makes one conversation rather than two halves of one.
  */
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf as replyCount, repliesFor } from "@/lib/redis-reply";
 import { countOf, holdsAll } from "@/lib/community-search";
 import { CREATOR } from "@/lib/community";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
@@ -460,6 +461,10 @@ export async function conversationsOf(id: string, who: string): Promise<{ reques
 
 /** How many conversations and requests one member is in: what deleting them goes through (lib/community-erasure.ts). */
 export async function dmCount(id: string, who: string): Promise<number> {
-  const [mine, asked] = await redisPipeline([["ZCARD", inboxKey(id, who)], ["ZCARD", askedKey(id, who)]]);
-  return (Number(mine) || 0) + (Number(asked) || 0);
+  // Each ZCARD's own count only (CX-123 rule 24): a person's erasure is never sized as 0 on an unknown answer.
+  const exact = repliesFor(await redisPipeline([["ZCARD", inboxKey(id, who)], ["ZCARD", askedKey(id, who)]]), 2);
+  const mine = replyCount(exact?.[0]);
+  const asked = replyCount(exact?.[1]);
+  if (mine === null || asked === null) throw new UnknownReplyError("a member's conversations count");
+  return mine + asked;
 }

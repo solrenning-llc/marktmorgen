@@ -554,5 +554,10 @@ export async function forgetAccessPerson(id: string, email: string, spaceIds: st
     ["DEL", okKey(id, email), ...spaceIds.map((space) => `nl:cm:${id}:sp:ok:${space}:${key}`), ...productIds.map((p) => `nl:cm:${id}:sg:${p}:${key}`)],
     ["HDEL", `nl:cm:${id}:wel`, key],
   ]);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  // DEL's and HDEL's own counts only (CX-123 rule 24): any other answer throws, so the erasure is never reported done on it.
+  const exact = repliesFor(replies, 2);
+  const removed = countOf(exact?.[0]);
+  const welcomed = countOf(exact?.[1]);
+  if (removed === null || welcomed === null) throw new UnknownReplyError("the community access answers forgotten");
+  return removed + welcomed;
 }

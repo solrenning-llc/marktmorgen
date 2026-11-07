@@ -46,6 +46,7 @@
  */
 import { answerModel, askModel, counted, jsonIn } from "@/lib/ai";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { membershipNumbers } from "@/lib/membership-numbers";
 import { sellsMemberships } from "@/lib/membership-manage";
 import { STORE_PAGE, missedQuestions } from "@/lib/answers";
@@ -295,11 +296,18 @@ function parseSummary(raw: unknown): VoiceSummary | null {
  */
 export async function forgetVoicePerson(statsId: string | null, now = Date.now()): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [, gone] = await redisPipeline([
-    ["DEL", lockKey(statsId)],
-    ["DEL", ...keptMonths(now).map((month) => voiceKey(statsId, month))],
-  ]);
-  return Number(gone) || 0;
+  const replies = repliesFor(
+    await redisPipeline([
+      ["DEL", lockKey(statsId)],
+      ["DEL", ...keptMonths(now).map((month) => voiceKey(statsId, month))],
+    ]),
+    2,
+  );
+  // Both DELs' own counts only: any other answer throws (CX-123 rule 24), so the erasure is never reported done on it.
+  const locked = countOf(replies?.[0]);
+  const gone = countOf(replies?.[1]);
+  if (locked === null || gone === null) throw new UnknownReplyError("the customer voice summaries deleted");
+  return gone;
 }
 
 /** This month's summary, or last month's while this month has none yet. */

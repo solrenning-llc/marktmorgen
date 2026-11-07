@@ -36,6 +36,7 @@
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import type { AttributionRule } from "@/lib/affiliate-setting";
 import { orderWrite } from "@/lib/order-data";
 import type { Store } from "@/lib/store";
@@ -141,8 +142,10 @@ export async function forgetBuyer(store: Store, email: string): Promise<boolean>
  */
 export async function forgetBondPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["HDEL", bondKey(statsId), buyerHash(statsId, email)]]);
-  return Number(gone) || 0;
+  // HDEL's own count only: any other answer throws (CX-123 rule 24), so the erasure is never reported done on it.
+  const gone = countOf(repliesFor(await redisPipeline([["HDEL", bondKey(statsId), buyerHash(statsId, email)]]), 1)?.[0]);
+  if (gone === null) throw new UnknownReplyError("the affiliate bond forgotten");
+  return gone;
 }
 
 /**

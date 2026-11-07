@@ -21,7 +21,7 @@ seven languages, published titles and the absent-store fallback.
 
 ## Sibling search
 
-Static search covered the 47 `generateMetadata` declarations under
+Static search covered the 49 `generateMetadata` declarations under
 `app/[handle]`, including literal general not-found titles and the booking
 fallback. The following are coordination leads, not a claim that their current
 owners or latest heads have been reviewed. No sibling product file is changed.

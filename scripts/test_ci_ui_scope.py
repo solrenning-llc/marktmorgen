@@ -177,6 +177,27 @@ class Graph(WithSyntheticSuite):
             "import.meta by index": {"app/page.tsx": "export default import.meta['resolve']('../lib/' + leaf);"},
             "import.meta destructured": {"app/page.tsx": "const { resolve } = import.meta;\nexport default resolve('../lib/' + leaf);"},
             "import.meta?.resolve": {"app/page.tsx": "export default import.meta?.resolve('../lib/' + leaf);"},
+            # Codex G's eighth return on #3037 (review 5815583086): whitespace, a comment or a
+            # newline inside `import.meta.url` or `require.resolve` is valid JavaScript and hid
+            # the load. The code is now read in one canonical form before every rule.
+            "new URL with import.meta . url": {"app/page.tsx": "import { readFileSync } from 'node:fs';\nexport default readFileSync(new URL('../lib/' + leaf + '.cjs', import.meta . url), 'utf8');"},
+            "new URL with import . meta . url": {"app/page.tsx": "import { readFileSync } from 'node:fs';\nexport default readFileSync(new URL('../lib/' + leaf + '.cjs', import . meta . url), 'utf8');"},
+            "new URL with import/**/.meta.url": {"app/page.tsx": "export default new URL('../lib/' + leaf, import/**/.meta.url);"},
+            "new URL with import.meta/* x */.url": {"app/page.tsx": "export default new URL('../lib/' + leaf, import.meta/* x */.url);"},
+            "new URL with import.meta.url over lines": {"app/page.tsx": "export default new URL('../lib/' + leaf, import\n  .meta\n  .url);"},
+            "new URL with a line comment inside import.meta.url": {"app/page.tsx": "export default new URL('../lib/' + leaf, import // x\n.meta.url);"},
+            "require /*x*/ .resolve.call": {"app/page.tsx": "export default require /*x*/ .resolve.call(null, '../lib/' + leaf);"},
+            "require.resolve.call over lines": {"app/page.tsx": "export default require\n  .resolve\n  .call(null, '../lib/' + leaf);"},
+            "require /*x*/ (computed)": {"app/page.tsx": "export default require /*x*/ ('../lib/' + leaf);"},
+            "import.meta /*x*/ .resolve.call": {"app/page.tsx": "export default import.meta /*x*/ .resolve.call(import.meta, '../lib/' + leaf);"},
+            # Fail closed: an identifier spelled with escapes, require named by a string, or
+            # require or import.meta used in a way no rule reads as a literal edge.
+            "require spelled with a unicode escape": {"app/page.tsx": "export default \\u0072equire('../lib/' + leaf);"},
+            "require indexed by its name": {"app/page.tsx": "export default module['require']('../lib/' + leaf);"},
+            "require in a sequence": {"app/page.tsx": "export default (0, require)('../lib/' + leaf);"},
+            "require returned as a value": {"app/page.tsx": "export function find() { return require }\nexport default find()('../lib/' + leaf);"},
+            "import.meta under another name": {"app/page.tsx": "const meta = import.meta;\nexport default new URL('../lib/' + leaf, meta.url);"},
+            "require kept as a value by satisfies": {"app/page.tsx": "const load = require satisfies Function;\nexport default load('../lib/' + leaf);"},
             "computed import in a component": {"components/c.tsx": "export const c = await import(`../lib/${leaf}.ts`);",
                                                "app/page.tsx": 'import { c } from "@/components/c";\nexport default c;'},
             "unresolved import": {"app/page.tsx": 'import "@/lib/missing";'},
@@ -228,10 +249,32 @@ class Graph(WithSyntheticSuite):
         self.assertIn("lib/b.ts", reachable(*tree(page)))
         self.assertFalse(unaffected(["lib/b.ts"], page))
         self.assertTrue(unaffected(["lib/c.ts"], page))
+        # The same edge spelled over spaces and a newline is followed, not dropped.
+        spaced = dict(page, **{"app/page.tsx": BASE["app/page.tsx"] + "\nexport const p = require\n  . resolve ('../lib/b');"})
+        self.assertIn("lib/b.ts", reachable(*tree(spaced)))
+        self.assertFalse(unaffected(["lib/b.ts"], spaced))
+        self.assertTrue(unaffected(["lib/c.ts"], spaced))
+        # A comment between the tokens of an assigned require is read as written too, where
+        # it looks like require passed on as a value: that fails closed (the suites run).
+        commented = dict(page, **{"app/page.tsx": BASE["app/page.tsx"] + "\nexport const p = require /*x*/\n  .resolve('../lib/b');"})
+        with self.assertRaises(Uncertain):
+            unaffected(["lib/c.ts"], commented)
         for code in ("require.resolve ('../lib/b')", "import.meta.url", "import.meta.dirname",
-                     "import.meta.resolve ('../lib/b')", "require('../lib/b')[key]"):
+                     "import.meta.resolve ('../lib/b')", "require('../lib/b')[key]",
+                     # Codex G's literal controls on #3037 (review 5815583086), also when
+                     # spelled with spaces, comments or newlines: still one precise edge.
+                     "new URL('../lib/message.cjs', import.meta.url)",
+                     "new URL('../lib/message.cjs', import . meta . url)",
+                     "new URL('../lib/b', import/**/.meta\n  .url)",
+                     "require /*x*/ ('../lib/b')", "require\n  .resolve('../lib/b')",
+                     "const ok = 'no-require-imports';", "if (typeof require === 'function') {}",
+                     "const require = createRequire(import.meta.url);",
+                     # The word in prose, in a regular expression, and "resolve" as a key.
+                     "<p>Sales filters require a complete purchase reading.</p>",
+                     "ok(/require|gives up/.test(text));",
+                     'type Hooks = Pick<SafeFetchOptions, "resolve" | "agent">;'):
             with self.subTest(code=code):
-                self.assertFalse(ui.computed(code))
+                self.assertFalse(ui.computed("\n".join(ui.code_lines(code))))
 
     def test_unreadable_file_raises(self):
         files = list(BASE) + ["lib/ghost.ts"]

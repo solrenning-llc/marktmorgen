@@ -518,8 +518,28 @@ async function runClaimed(statsId: string, id: string, now = Date.now()): Promis
   }
   const config = await readConfig(delivery.statsId);
   const endpoint = config?.endpoints.find((e) => e.id === delivery.endpoint);
-  const store = endpoint && config?.handle ? await storeForHandle(config.handle).catch(() => null) : null;
-  const done = await attempt(delivery, endpoint, store && store.statsId === delivery.statsId ? store : null, now);
+  // Rule 24: a store that could not be read (a timeout) is unknown, not gone. Nothing is sent and no try is
+  // counted; the delivery is tried again on the schedule instead of being failed and taken off the queue.
+  let unread = false;
+  let store: Store | null = null;
+  if (endpoint && config?.handle) {
+    try {
+      store = await storeForHandle(config.handle);
+    } catch (error) {
+      console.error("a webhook delivery's store could not be read", error);
+      unread = true;
+    }
+  }
+  let done: Delivery;
+  if (unread) {
+    const retryIn = delivery.type === "test" ? undefined : RETRY_MINUTES[delivery.attempts];
+    done =
+      retryIn !== undefined
+        ? { ...delivery, state: "retrying", next: now + retryIn * 60_000, lastAt: now, lastStatus: 0, lastError: "The store could not be read just now; tried again later." }
+        : { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: "The store could not be read just now." };
+  } else {
+    done = await attempt(delivery, endpoint, store && store.statsId === delivery.statsId ? store : null, now);
+  }
   const commands: (string | number)[][] = [["SET", deliveryKey(id), JSON.stringify(done), "EX", DELIVERY_SECONDS]];
   commands.push(
     done.state === "retrying" ? ["ZADD", QUEUE_KEY, done.next, `${statsId}|${id}`] : ["ZREM", QUEUE_KEY, `${statsId}|${id}`],

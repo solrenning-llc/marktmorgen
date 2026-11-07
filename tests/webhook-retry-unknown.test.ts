@@ -102,7 +102,8 @@ async function main(): Promise<void> {
   is("it does not say the store could not be found", /could not be found/.test(unread.lastError), false);
   is("it says the store could not be read", /could not be read/.test(unread.lastError), true);
   is("nothing was sent, and no try was counted", [received.length - sentBefore, unread.attempts], [0, 1]);
-  is(`tried again ${RETRY_MINUTES[1]} minutes later`, Math.round((unread.next - later) / 60_000), RETRY_MINUTES[1]);
+  // runClaimed reads its own clock (deliverDue does not pass `now` on), so the wait is from the try itself.
+  is(`tried again ${RETRY_MINUTES[1]} minutes later`, Math.round((unread.next - unread.lastAt) / 60_000), RETRY_MINUTES[1]);
 
   part("Read again, the event is sent: it was not lost");
   later = unread.next + 1_000;

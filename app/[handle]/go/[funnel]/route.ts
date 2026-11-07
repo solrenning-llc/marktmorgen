@@ -14,7 +14,8 @@ import { readPageFunnelsStrict, stepStates } from "@/lib/page-funnel-store";
  * An inactive funnel is unavailable, without redirecting to any public step.
  * An address no funnel has leads to the store, and only on a whole reading:
  * a reading out of shape is unknown, never "no funnel has it", so the route
- * says try again later and sends nobody anywhere (CX-123 rule 24).
+ * says try again later and sends nobody anywhere (CX-123 rule 24). The same
+ * holds for the funnel's product steps.
  */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ handle: string; funnel: string }> }) {
   const { handle: raw, funnel: slug } = await params;
@@ -29,12 +30,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (store.suspended) return away(`/@${store.handle}`);
 
   // A store without a stats id has never kept a funnel; any other reading is exact or unknown.
+  const later = () =>
+    new Response("Try again later", { status: 503, headers: { "Retry-After": "60", "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
   const funnels = store.statsId ? await readPageFunnelsStrict(store.statsId).catch(() => null) : [];
-  if (funnels === null) return new Response("Try again later", { status: 503, headers: { "Retry-After": "60", "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
+  if (funnels === null) return later();
   const funnel = funnels.find((f) => f.slug === slug.toLowerCase()) ?? null;
   if (!funnel) return away(`/@${store.handle}`);
   if (!funnel.on) return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
-  const states = await stepStates(store, funnel);
+  // A product the store still lists whose listing cannot be read is unknown, never "a deleted product".
+  const states = await stepStates(store, funnel, { strictProducts: true }).catch(() => null);
+  if (states === null) return later();
   const first = nextOpen(funnel, -1, (step) => states.find((s) => s.step === step)?.open ?? false);
   const path = first >= 0 ? states[first].path : null;
   if (!path) return away(`/@${store.handle}`);

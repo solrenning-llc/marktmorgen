@@ -1,0 +1,22 @@
+// Builds and runs one proof file in tests/ with the aliases tests/test-config.mjs gives embed-library-unknown.test.ts
+// (next/headers and next/server worlds), without editing any tracked file. Usage: node c3-2910.mjs <file.ts>
+import { mkdtempSync, rmSync, copyFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { spawnSync } from "node:child_process";
+const root = process.cwd();
+const here = join(root, "tests");
+const { build } = await import(pathToFileURL(join(root, "node_modules/esbuild/lib/main.js")).href);
+const { testAliases, testEnvironment } = await import(pathToFileURL(join(here, "test-config.mjs")).href);
+const out = mkdtempSync(join(tmpdir(), "c3-2910-"));
+const src = process.argv[2];
+const entry = join(here, "zz-c3-rev-2910.proof.ts");
+copyFileSync(src, entry);
+let status = 1;
+try {
+  const bundle = join(out, "proof.cjs");
+  await build({ entryPoints: [entry], bundle: true, platform: "node", format: "cjs", outfile: bundle, logLevel: "error", alias: testAliases(process.env.ALIAS_AS || "embed-library-unknown.test.ts", root, here) });
+  status = spawnSync(process.execPath, [bundle], { stdio: "inherit", env: testEnvironment(process.env) }).status ?? 1;
+} finally { rmSync(out, { recursive: true, force: true }); rmSync(entry, { force: true }); }
+process.exit(status);

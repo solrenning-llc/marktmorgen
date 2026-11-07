@@ -1,0 +1,172 @@
+/**
+ * Claude 3, CX-116 second money review of #2872: N2 and its class, synthetic only (in-memory Redis, email stand-in).
+ * No reply is altered in P1/P2; every multi-command give-back is split into its commands, and another address's WHOLE
+ * takePlace runs between them (nested up to DEPTH), as Upstash runs a pipeline's commands one at a time.
+ * P1. N2: a purchase for 2, al and bo hold it; ce and the injected takers past the places paid for.
+ * P2. The same, plus a whole take injected right before every count heal (PLACES_HEAL) runs.
+ * P3. L1 + concurrency: the first INCR lands with an unknown reply (a count leaked), then the same adversary.
+ * P4. N1 + concurrency: a grant that did not land gives its place back, split, with a take between.
+ * Safety in every part: never more holders than places paid; count never below the holders.
+ */
+import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { readListing } from "@/lib/catalog";
+import { placesTaken, settleGroup, startGroup, takePlace } from "@/lib/group-buy";
+import { importedFor } from "@/lib/imported-purchases";
+import { paidPeriod } from "./billing-period-fixture";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+
+type Command = (string | number)[];
+const real = redis.pipeline.bind(redis);
+const outcome = <T>(p: Promise<T>): Promise<T | "threw"> => p.then((v) => v, () => "threw" as const);
+globalThis.fetch = (async () => new Response(JSON.stringify({ id: "email_1" }), { status: 200 })) as typeof fetch;
+
+async function main(): Promise<void> {
+  redis.clear();
+  process.env.STRIPE_SECRET_KEY = "sk_test_c3proof_2872_only";
+  process.env.RESEND_API_KEY = "re_test_c3proof_only";
+  const OWNER = "c3proof2872@example.com";
+  await claimHandle(OWNER, "cthreeproof", "C3 Proof", "");
+  await ensureStatsId(OWNER);
+  await setStripeAccount(OWNER, "acct_1TestCthreeP01", true);
+  await setSubscription(OWNER, { customerId: "cus_CthreeProof01", subscriptionId: "sub_CthreeProof01", active: true, period: paidPeriod() });
+  const made = await addProduct(OWNER, "Glaze Guide", "", "49", null);
+  if (!made.ok) throw new Error("no product");
+  await setProductLink(OWNER, made.product.id, "https://example.com/guide");
+  let store = (await storeForEmail(OWNER))!;
+  const product = (await readListing(store, made.product.id))!;
+  const base = "https://marktmorgen.com/@cthreeproof";
+  const from = '"C3 Proof" <hello@marktmorgen.com>';
+  let n = 0;
+  const paidGroup = async (people: number) => {
+    const started = await startGroup(store, product, String(people));
+    if (!started.ok) throw new Error("no group");
+    n += 1;
+    const session = {
+      id: "cs_test_" + String(n).padStart(24, "c"), object: "checkout.session", status: "complete", payment_status: "paid",
+      created: Math.floor(Date.now() / 1000), amount_total: 4900 * people, currency: "usd",
+      payment_intent: `pi_CthreeProof${String(n).padStart(6, "0")}`,
+      metadata: { store: "cthreeproof", product: product.id, group: started.group.id, people: String(people) },
+      customer_details: { email: "payer@example.com" },
+    };
+    if ((await settleGroup({ store, product, base, from, session: session as never })) !== "settled") throw new Error("not settled");
+    store = (await storeForEmail(OWNER))!;
+    const id = started.group.id;
+    const link = async (email: string) => {
+      const t = Buffer.from((id.slice(-6) + email).padEnd(32, "x").slice(0, 32)).toString("hex");
+      await real([["SET", `nl:grp:take:${t}`, JSON.stringify({ g: id, e: email }), "EX", 3600]]);
+      return t;
+    };
+    return { id, link };
+  };
+  const take = async (token: string) => {
+    const r = await outcome(takePlace({ store, token, recordStart: async () => {} }));
+    return r === "threw" ? r : r.outcome;
+  };
+  const owns = async (email: string) => (await importedFor({ ...store, pastBuyers: true }, email)).map((p) => p.productId);
+  const holders = async (emails: string[]) => (await Promise.all(emails.map(owns))).filter((o) => o.length).length;
+
+  /** The adversary: splits every give-back of group `id`, and (when `atHeal`) runs a take before every heal. */
+  const DEPTH = 3;
+  const adversary = (g: { id: string; link: (e: string) => Promise<string> }, atHeal: boolean, log: string[], names: string[]) => {
+    let depth = 0;
+    let next = 0;
+    const injected = async () => {
+      const email = `inj${next++}-${g.id.slice(-4)}@example.com`.toLowerCase();
+      names.push(email);
+      depth += 1;
+      const r = await take(await g.link(email));
+      depth -= 1;
+      log.push(`${email.split("-")[0]}:${r}`);
+    };
+    const isGiveBack = (cs: Command[]) =>
+      cs.length === 2 && cs.some((c) => c[0] === "DECR" && c[1] === `nl:grp:${g.id}:n`) && cs.some((c) => c[0] === "EVAL" && c[3] === `nl:grp:${g.id}:m`);
+    const isHeal = (cs: Command[]) => cs.length === 1 && cs[0][0] === "EVAL" && String(cs[0][1]).startsWith("-- marktmorgen:places-heal:v1") && cs[0][3] === `nl:grp:${g.id}:n`;
+    redis.pipeline = (async (cs: Command[]) => {
+      if (depth < DEPTH && isGiveBack(cs)) {
+        const first = await real([cs[0]]);
+        await injected();
+        const second = await real([cs[1]]);
+        return [...first, ...second];
+      }
+      if (atHeal && depth < DEPTH && isHeal(cs)) await injected();
+      return real(cs);
+    }) as typeof redis.pipeline;
+  };
+  const restore = () => {
+    redis.pipeline = real;
+  };
+
+  for (const atHeal of [false, true]) {
+    part(`P${atHeal ? 2 : 1}. purchase for 2, al and bo hold it; ce past the places paid for, every give-back split${atHeal ? ", a take before every heal" : ""}`);
+    const g = await paidGroup(2);
+    const k = atHeal ? 2 : 1;
+    is("al and bo take the two places", [await take(await g.link(`al${k}@example.com`)), await take(await g.link(`bo${k}@example.com`))], ["taken", "taken"]);
+    const log: string[] = [];
+    const names = [`al${k}@example.com`, `bo${k}@example.com`, `ce${k}@example.com`];
+    adversary(g, atHeal, log, names);
+    const ce = await take(await g.link(`ce${k}@example.com`));
+    restore();
+    console.log(`        ce: ${ce} | injected: ${log.join(" ")} | counted: ${await placesTaken(g.id)}`);
+    is("a later address is told full", await take(await g.link(`late${atHeal ? 2 : 1}@example.com`)), "full");
+    names.push(`late${atHeal ? 2 : 1}@example.com`);
+    is("never more than 2 people hold the product", (await holders(names)) <= 2, true);
+    is("two places still counted for al and bo", await placesTaken(g.id), 2);
+  }
+
+  part("P3. L1 + concurrency: the first INCR lands with an unknown reply, then takes under the adversary");
+  {
+    const g = await paidGroup(2);
+    redis.pipeline = (async (cs: Command[]) => {
+      const ran = await real(cs);
+      return cs.map((c, i) => (c[0] === "INCR" && c[1] === `nl:grp:${g.id}:n` ? { unexpected: true } : ran[i]));
+    }) as typeof redis.pipeline;
+    const ivy1 = await take(await g.link("ivy@example.com"));
+    restore();
+    const log: string[] = [];
+    const names = ["ivy@example.com", "jo@example.com", "kim@example.com", "lu@example.com"];
+    adversary(g, true, log, names);
+    const seq = [ivy1, await take(await g.link("ivy@example.com")), await take(await g.link("jo@example.com"))];
+    restore();
+    seq.push(await take(await g.link("kim@example.com")), await take(await g.link("lu@example.com")));
+    console.log(`        ivy, ivy, jo, kim, lu: ${seq.join(" ")} | injected: ${log.join(" ")} | counted: ${await placesTaken(g.id)}`);
+    const h = await holders(names);
+    is("never more than 2 people hold the product", h <= 2, true);
+    is("both paid places are held in the end (none lost)", h, 2);
+  }
+
+  part("P4. N1 + concurrency: al holds; ce's grant does not land, its give-back split with a take between");
+  {
+    const g = await paidGroup(2);
+    is("al takes", await take(await g.link("al4@example.com")), "taken");
+    const log: string[] = [];
+    const names = ["al4@example.com", "ce4@example.com", "di4@example.com", "ed4@example.com"];
+    let once = true;
+    const inner = () => {
+      adversary(g, true, log, names);
+      const adv = redis.pipeline;
+      redis.pipeline = (async (cs: Command[]) => {
+        if (once && cs.length === 1 && cs[0][0] === "EVAL" && JSON.stringify(cs[0]).includes(`group:${g.id}`)) {
+          once = false;
+          return [{ unexpected: true }];
+        }
+        return adv(cs);
+      }) as typeof redis.pipeline;
+    };
+    inner();
+    const ce = await take(await g.link("ce4@example.com"));
+    restore();
+    const rest = [await take(await g.link("di4@example.com")), await take(await g.link("ed4@example.com"))];
+    console.log(`        ce: ${ce} | injected: ${log.join(" ")} | di, ed: ${rest.join(" ")} | counted: ${await placesTaken(g.id)}`);
+    const h = await holders(names);
+    is("never more than 2 people hold the product", h <= 2, true);
+    is("both paid places are held in the end (none lost)", h, 2);
+  }
+
+  done();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

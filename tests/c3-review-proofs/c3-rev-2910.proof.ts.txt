@@ -1,0 +1,127 @@
+/**
+ * Claude 3, second independent money review (CX-116) of #2910 at a0dd635e5812fb47bf12df026047c5761c6b2491.
+ * Synthetic store, synthetic Redis stub (tests/redis-stub), no network. Same world as tests/embed-library-unknown.test.ts.
+ *
+ *   A. A product record that answers out of shape (no reply, a number) is taken for a product that is not there: the
+ *      card says "no longer on sale" (rule 24, the same class #2910 closed for the store's own key).
+ *   B. The not-on-sale box of a store in German draws the store's sentence with no lang of its own (3.1.2).
+ *   C. A pasted card and a pasted sign-up form read Redis on every view with no counted window taken, and #2910 reads
+ *      the store's address key twice per view (lib/store-exact.ts, then storeForPage).
+ */
+import { renderToReadableStream } from "react-dom/server";
+import { NextRequest } from "next/server";
+import EmbedCard from "@/app/embed/[handle]/[product]/page";
+import EmbedJoin from "@/app/embed/[handle]/join/page";
+import { addProduct, claimHandle, ensureStatsId, setLanguage, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { wordsIn } from "@/lib/buyer-words";
+import { paidPeriod } from "./billing-period-fixture";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+import { answering } from "./security/next-headers";
+
+type Command = (string | number)[];
+const real = redis.pipeline.bind(redis);
+let inject: { when: (c: Command) => boolean; reply: () => unknown[] } | null = null;
+let log: Command[] | null = null;
+redis.pipeline = (async (batch: Command[]) => {
+  if (log) log.push(...batch);
+  if (inject && batch.some(inject.when)) return inject.reply();
+  return real(batch);
+}) as typeof redis.pipeline;
+globalThis.fetch = (async () => {
+  throw new Error("No external provider in this proof");
+}) as typeof fetch;
+
+async function html(node: React.ReactElement): Promise<string> {
+  const stream = await renderToReadableStream(node, { onError: () => {} });
+  await stream.allReady;
+  return new Response(stream).text();
+}
+const text = (markup: string) => markup.replace(/<[^>]*>/g, " ").replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/\s+/g, " ");
+const getOf = (prefix: string) => (c: Command) => c[0] === "GET" && typeof c[1] === "string" && c[1].startsWith(prefix);
+
+async function main(): Promise<void> {
+  process.env.STRIPE_SECRET_KEY = "sk_test_c3_rev_2910_stand_in";
+  redis.clear();
+  const owner = "c3-rev-2910@example.test";
+  await claimHandle(owner, "cthreerev", "C3 Rev Store", "");
+  await ensureStatsId(owner);
+  await setSubscription(owner, { customerId: "cus_C3Rev29100001", subscriptionId: "sub_C3Rev29100001", active: true, tier: "scale", cycle: "month", period: paidPeriod() });
+  await setStripeAccount(owner, "acct_1C3Rev2910Unk01", true);
+  const ids: string[] = [];
+  for (let i = 0; i < 26; i += 1) {
+    const made = await addProduct(owner, `Guide ${i + 1}`, "A synthetic guide.", "40", null);
+    if (!made.ok) throw new Error("product fixture");
+    await setProductLink(owner, made.product.id, `https://example.test/guide-${i + 1}`);
+    ids.push(made.product.id);
+  }
+  let store = (await storeForEmail(owner))!;
+  const inHead = new Set(store.catalog.head.map((l) => l.id));
+  const fromHead = ids.find((id) => inHead.has(id))!;
+  const ownRecord = ids.find((id) => !inHead.has(id))!;
+  if (!ownRecord || store.catalog.inline) throw new Error("catalog fixture");
+  const w = wordsIn(store.language);
+  const raw = async (handle: string, product: string) => {
+    answering(new NextRequest(`https://marktmorgen.com/embed/${handle}/${product}`));
+    return html((await EmbedCard({ params: Promise.resolve({ handle, product }), searchParams: Promise.resolve({}) } as never)) as React.ReactElement);
+  };
+  const card = async (handle: string, product: string) => text(await raw(handle, product));
+
+  part("A. The card: a product record that answered out of shape");
+  const productRead = getOf(`nl:catalog:${store.catalog.id}:l:${ownRecord}`);
+  is("control: a product the store does not have says it is no longer on sale", (await card("cthreerev", "p_missing_product")).includes(w.noLongerOnSale), true);
+  inject = { when: productRead, reply: () => { throw new Error("synthetic Redis failure"); } };
+  is("control: a product record whose read failed says it could not be loaded", (await card("cthreerev", ownRecord).catch(() => "threw")).includes("could not be loaded just now"), true);
+  inject = null;
+  for (const [name, reply] of [
+    ["no reply for the product's record", () => []],
+    ["a number for the product's record", () => [7]],
+  ] as const) {
+    inject = { when: productRead, reply };
+    const shown = await card("cthreerev", ownRecord);
+    inject = null;
+    is(`${name}: never says the product is no longer on sale`, shown.includes(w.noLongerOnSale), false);
+    is(`${name}: says it could not be loaded just now`, shown.includes("could not be loaded just now"), true);
+  }
+
+  part("B. The not-on-sale box of a store in German");
+  await setLanguage(owner, "de");
+  store = (await storeForEmail(owner))!;
+  const de = wordsIn("de");
+  const healthyDe = await raw("cthreerev", fromHead);
+  is("control: the card itself carries the store's lang", /lang="de/.test(healthyDe), true);
+  inject = { when: productRead, reply: () => { throw new Error("synthetic Redis failure"); } };
+  const unreadDe = await raw("cthreerev", ownRecord);
+  inject = null;
+  is("control: the German sentence is drawn", text(unreadDe).includes(de.cardUnread), true);
+  is("the German 'could not be loaded' sentence sits inside an element whose lang is German", /lang="de/.test(unreadDe), true);
+  const goneDe = await raw("cthreerev", "p_missing_product");
+  is("the German 'no longer on sale' sentence sits inside an element whose lang is German", text(goneDe).includes(de.noLongerOnSale) && /lang="de/.test(goneDe), true);
+  await setLanguage(owner, "en");
+  store = (await storeForEmail(owner))!;
+
+  part("C. What a pasted card and a pasted form read on every view");
+  log = [];
+  await card("cthreerev", fromHead);
+  const cardCommands = log;
+  log = null;
+  const handleKeyReads = cardCommands.filter(getOf("nl:store:handle:cthreerev")).length;
+  const writes = cardCommands.filter((c) => /^(INCR|INCRBY|HINCRBY|EVAL|EVALSHA|SET|ZADD|ZINCRBY|PFADD)$/i.test(String(c[0])));
+  console.log(`  info  one pasted card view: ${cardCommands.length} Redis commands: ${cardCommands.map((c) => c[0]).join(", ")}`);
+  is("a pasted card view reads the store's address key once", handleKeyReads, 1);
+  is("a pasted card view takes from a counted window (some counter written) for what it reads", writes.length > 0, true);
+  log = [];
+  answering(new NextRequest("https://marktmorgen.com/embed/cthreerev/join"));
+  await html((await EmbedJoin({ params: Promise.resolve({ handle: "cthreerev" }), searchParams: Promise.resolve({}) } as never)) as React.ReactElement);
+  const joinCommands = log;
+  log = null;
+  console.log(`  info  one pasted sign-up form view: ${joinCommands.length} Redis commands: ${joinCommands.map((c) => c[0]).join(", ")}`);
+  is("a pasted sign-up form view reads the store's address key once", joinCommands.filter(getOf("nl:store:handle:cthreerev")).length, 1);
+
+  done();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

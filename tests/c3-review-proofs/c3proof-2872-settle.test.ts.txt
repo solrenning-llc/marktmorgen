@@ -1,0 +1,92 @@
+/**
+ * Claude 3, CX-116 on #2872: the M1 re-tell path after a run that fully SUCCEEDED, whose caller's "sent" mark write
+ * (lib/purchase-email.ts confirmGift/confirmGroup, reply never read) did not land. Synthetic only.
+ * Once the giving/settling mark ran out (300 s) and within the day, the next run tells again and answers "sent", so
+ * confirmPurchase runs settleAdmitted a second time for the same checkout: another checkout's held room in that hour
+ * is given back, and the store can admit one order past its figure. On the base the second run answers "already".
+ */
+import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
+import { readListing } from "@/lib/catalog";
+import { startGift } from "@/lib/gifts";
+import { startGroup } from "@/lib/group-buy";
+import { confirmPurchase } from "@/lib/purchase-email";
+import { ADMITTED_FIELD, admitOrders } from "@/lib/order-admission";
+import { paidPeriod } from "./billing-period-fixture";
+import { store as redis, advance } from "./redis-stub";
+import { done, is, part } from "./check";
+
+type Command = (string | number)[];
+const real = redis.pipeline.bind(redis);
+globalThis.fetch = (async (input: string | URL | Request) =>
+  new URL(String(input)).hostname === "api.resend.com"
+    ? new Response(JSON.stringify({ id: "email_1" }), { status: 200 })
+    : new Response(JSON.stringify({ error: { message: "no stand-in" } }), { status: 404 })) as typeof fetch;
+const outcome = <T>(p: Promise<T>): Promise<T | "threw"> => p.then((v) => v, () => "threw" as const);
+
+async function main(): Promise<void> {
+  redis.clear();
+  process.env.STRIPE_SECRET_KEY = "sk_test_c3proof_settle_only";
+  process.env.RESEND_API_KEY = "re_test_c3proof_settle";
+  const OWNER = "c3settle@example.com";
+  await claimHandle(OWNER, "cthreesettle", "C3 Settle", "");
+  await ensureStatsId(OWNER);
+  await setStripeAccount(OWNER, "acct_1TestCthreeS01", true);
+  await setSubscription(OWNER, { customerId: "cus_CthreeSettle1", subscriptionId: "sub_CthreeSettle1", active: true, period: paidPeriod() });
+  const made = await addProduct(OWNER, "Glaze Guide", "", "49", null);
+  if (!made.ok) throw new Error("no product");
+  await setProductLink(OWNER, made.product.id, "https://example.com/guide");
+  const store = (await storeForEmail(OWNER))!;
+  const product = (await readListing(store, made.product.id))!;
+  const folder = await storeFolder(OWNER);
+  const held = async (hour: number) => Number((await real([["HGET", `nl:orders:open:${folder}`, String(hour)]]))[0] ?? 0);
+  let n = 0;
+  const session = (meta: Record<string, string>, hour: number, people = 1) => {
+    n += 1;
+    return {
+      id: "cs_test_" + String(n).padStart(24, "s"), object: "checkout.session", status: "complete", payment_status: "paid",
+      created: Math.floor(Date.now() / 1000), amount_total: 4900 * people, currency: "usd",
+      payment_intent: `pi_CthreeSettle${String(n).padStart(6, "0")}`,
+      metadata: { store: "cthreesettle", product: product.id, [ADMITTED_FIELD]: String(hour), ...meta },
+      customer_details: { email: "payer@example.com" },
+    };
+  };
+
+  for (const kind of ["gift", "group"] as const) {
+    part(`${kind}: two checkouts admitted in one hour; this one confirmed in full, its "sent" mark write did not land`);
+    const a = await admitOrders(store, 1);
+    const b = await admitOrders(store, 1);
+    if (!a.ok || !b.ok || a.hour === null || a.hour !== b.hour) throw new Error(`no admission ${JSON.stringify([a, b])}`);
+    const hour = a.hour;
+    const before = await held(hour);
+    let meta: Record<string, string>;
+    if (kind === "gift") {
+      const g = await startGift(store, product, { to: `friend-${n}@example.com`, from: "Ana", message: "" });
+      if (!g.ok) throw new Error("no gift");
+      meta = { gift: g.gift.id };
+    } else {
+      const g = await startGroup(store, product, "2");
+      if (!g.ok) throw new Error("no group");
+      meta = { group: g.group.id, people: "2" };
+    }
+    const s = session(meta, hour, kind === "group" ? 2 : 1);
+    redis.pipeline = (async (cs: Command[]) => {
+      if (cs.length === 1 && cs[0][0] === "SET" && cs[0][1] === `nl:confirm:${s.id}`) return [{ unexpected: true }];
+      return real(cs);
+    }) as typeof redis.pipeline;
+    const first = await outcome(confirmPurchase(store, s.id, s as never));
+    redis.pipeline = real;
+    const afterFirst = await held(hour);
+    advance(301_000);
+    const second = await outcome(confirmPurchase(store, s.id, s as never));
+    const afterSecond = await held(hour);
+    console.log(`        held in hour: ${before} -> ${afterFirst} -> ${afterSecond} | runs: ${first} ${second}`);
+    is("the first run confirms and gives back its own hold once", [first, afterFirst], ["sent", before - 1]);
+    is("the second run never gives back another checkout's hold", afterSecond, before - 1);
+  }
+  done();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

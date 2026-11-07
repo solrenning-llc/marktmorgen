@@ -1,0 +1,82 @@
+/**
+ * Claude 3, CX-116 on #2872: the per-purchase daily email counter of askPlace (lib/group-buy.ts) when its EXPIRE is
+ * answered in an unknown shape and did NOT land. Synthetic only (in-memory Redis, email stand-in).
+ * Control: the cap resets the next day. Fault: the counter keeps no expiry, so after the cap the link page says
+ * "slow" every later day, and the paid places nobody took yet can never be handed out. Only the cap's decision is
+ * checked (it comes before the email): in this harness the email itself is not accepted, so the others read
+ * "unavailable", which still counts one email for the day as the code does.
+ */
+import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { readListing } from "@/lib/catalog";
+import { askPlace, settleGroup, startGroup } from "@/lib/group-buy";
+import { paidPeriod } from "./billing-period-fixture";
+import { store as redis, advance } from "./redis-stub";
+import { done, is, part } from "./check";
+
+type Command = (string | number)[];
+const real = redis.pipeline.bind(redis);
+globalThis.fetch = (async (input: string | URL | Request) =>
+  new URL(String(input)).hostname === "api.resend.com"
+    ? new Response(JSON.stringify({ id: "email_1" }), { status: 200 })
+    : new Response(JSON.stringify({ error: { message: "no stand-in" } }), { status: 404 })) as typeof fetch;
+
+async function main(): Promise<void> {
+  redis.clear();
+  process.env.STRIPE_SECRET_KEY = "sk_test_c3proof_mailcap_only";
+  process.env.RESEND_API_KEY = "re_test_c3proof_mailcap";
+  const OWNER = "c3mailcap@example.com";
+  await claimHandle(OWNER, "cthreemail", "C3 Mail", "");
+  await ensureStatsId(OWNER);
+  await setStripeAccount(OWNER, "acct_1TestCthreeM01", true);
+  await setSubscription(OWNER, { customerId: "cus_CthreeMail01", subscriptionId: "sub_CthreeMail01", active: true, period: paidPeriod() });
+  const made = await addProduct(OWNER, "Glaze Guide", "", "49", null);
+  if (!made.ok) throw new Error("no product");
+  await setProductLink(OWNER, made.product.id, "https://example.com/guide");
+  let store = (await storeForEmail(OWNER))!;
+  const product = (await readListing(store, made.product.id))!;
+  const base = "https://marktmorgen.com/@cthreemail";
+  const from = '"C3 Mail" <hello@marktmorgen.com>';
+  let n = 0;
+  const paidGroup = async (people: number) => {
+    const started = await startGroup(store, product, String(people));
+    if (!started.ok) throw new Error("no group");
+    n += 1;
+    const session = {
+      id: "cs_test_" + String(n).padStart(24, "m"), object: "checkout.session", status: "complete", payment_status: "paid",
+      created: Math.floor(Date.now() / 1000), amount_total: 4900 * people, currency: "usd",
+      payment_intent: `pi_CthreeMail${String(n).padStart(6, "0")}`,
+      metadata: { store: "cthreemail", product: product.id, group: started.group.id, people: String(people) },
+      customer_details: { email: "payer@example.com" },
+    };
+    if ((await settleGroup({ store, product, base, from, session: session as never })) !== "settled") throw new Error("not settled");
+    store = (await storeForEmail(OWNER))!;
+    return started.group.id;
+  };
+  const ask = (id: string, email: string) => askPlace({ store, id, email, product, base, from, ordersLink: async () => null });
+
+  for (const fault of [false, true]) {
+    part(fault ? "Fault: the day's email counter EXPIRE answered in another shape, NOT landed" : "Control: the day's email counter expires");
+    const id = await paidGroup(2);
+    if (fault) {
+      redis.pipeline = (async (cs: Command[]) => {
+        if (cs.length === 1 && cs[0][0] === "EXPIRE" && cs[0][1] === `nl:grp:${id}:mail`) return [{ unexpected: true }];
+        return real(cs);
+      }) as typeof redis.pipeline;
+    }
+    const day1: string[] = [];
+    for (let i = 0; i < 17; i += 1) day1.push(await ask(id, `p${i}-${fault ? "f" : "c"}@example.com`));
+    redis.pipeline = real;
+    console.log("        day 1:", day1.join(" "));
+    is("day 1: the first 16 pass the cap, the 17th is slow (the cap is 2*3+10)", [day1.slice(0, 16).every((r) => r !== "slow"), day1[16]], [true, "slow"]);
+    advance(2 * 86_400_000);
+    const later = await ask(id, `later-${fault ? "f" : "c"}@example.com`);
+    console.log("        two days later:", later);
+    is("two days later, a new address on the link page passes the day's cap (not slow)", later !== "slow", true);
+  }
+  done();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

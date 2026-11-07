@@ -1,0 +1,84 @@
+/**
+ * Claude 3, second independent money review (CX-116) of #2910 at a0dd635e5812fb47bf12df026047c5761c6b2491, rule 30.
+ * The cart's checkout (app/api/store/cart/route.ts POST) reads the coming-soon set with soonState(...).catch(() => empty):
+ * a failed or out-of-shape SMEMBERS lets a coming-soon product be paid for as a normal purchase. Stripe mocked, Redis
+ * stubbed, no network; same world as tests/cart-stock.test.ts.
+ */
+import { NextRequest } from "next/server";
+import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { setSoon } from "@/lib/waitlist";
+import { POST as payCart } from "@/app/api/store/cart/route";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+import { paidPeriod } from "./billing-period-fixture";
+import { TEST_CONSENT } from "./digital-consent-fixture";
+
+type Command = (string | number)[];
+let opened = 0;
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input));
+  const method = init?.method ?? "GET";
+  if (url.hostname === "api.stripe.com" && url.pathname === "/v1/checkout/sessions" && method === "POST") {
+    opened += 1;
+    const id = `cs_test_c3rev2910${String(opened).padStart(8, "0")}`;
+    return new Response(JSON.stringify({ id, url: `https://checkout.stripe.com/c/pay/${id}` }));
+  }
+  if (url.hostname === "api.stripe.com") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
+  return new Response("{}", { status: 404 });
+}) as typeof fetch;
+
+const real = redis.pipeline.bind(redis);
+let inject: { when: (c: Command) => boolean; reply: () => unknown[] } | null = null;
+redis.pipeline = (async (batch: Command[]) => {
+  if (inject && batch.some(inject.when)) return inject.reply();
+  return real(batch);
+}) as typeof redis.pipeline;
+
+async function main(): Promise<void> {
+  redis.clear();
+  process.env.STRIPE_SECRET_KEY = "sk_test_only";
+  const OWNER = "c3-cart-2910@example.test";
+  await claimHandle(OWNER, "cthreecart", "C3 Cart", "");
+  await ensureStatsId(OWNER);
+  await setStripeAccount(OWNER, "acct_1TestC3Cart0001", true);
+  await setSubscription(OWNER, { customerId: "cus_C3Cart00001", subscriptionId: "sub_C3Cart00001", active: true, period: paidPeriod() });
+  const made: Record<string, string> = {};
+  for (const title of ["Guide", "Upcoming"]) {
+    const added = await addProduct(OWNER, title, "", "20", null);
+    if (!added.ok) throw new Error(`no ${title}`);
+    made[title] = added.product.id;
+    await setProductLink(OWNER, added.product.id, `https://example.com/${title.toLowerCase()}`);
+  }
+  const store = (await storeForEmail(OWNER))!;
+  await setSoon(store, made.Upcoming, true);
+  const pay = async (ids: string[]) => {
+    const form = new URLSearchParams({ handle: "cthreecart", dc: "yes", dc_v: TEST_CONSENT.version });
+    for (const id of ids) form.append("id", id);
+    const answer = await payCart(new NextRequest("https://marktmorgen.com/api/store/cart", { method: "POST", headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com", "content-type": "application/x-www-form-urlencoded" }, body: form.toString() }));
+    const where = new URL(answer.headers.get("location") ?? "https://x/");
+    return where.hostname === "checkout.stripe.com" ? "stripe" : where.search || where.pathname;
+  };
+  const soonRead = (c: Command) => c[0] === "SMEMBERS" && c[1] === `nl:wl:${store.statsId}:soon`;
+
+  part("Controls");
+  is("a cart of a product on sale opens Stripe's checkout", await pay([made.Guide]), "stripe");
+  is("a cart holding a coming-soon product opens nothing", await pay([made.Guide, made.Upcoming]), "?cart=changed");
+
+  part("The coming-soon set could not be read, or answered out of shape");
+  for (const [name, reply] of [
+    ["a failed request", () => { throw new Error("synthetic Redis failure"); }],
+    ["a number for the set", () => [7, []]],
+    ["no reply at all", () => []],
+  ] as const) {
+    inject = { when: soonRead, reply };
+    const to = await pay([made.Guide, made.Upcoming]);
+    inject = null;
+    is(`${name}: a coming-soon product is never sent to Stripe's checkout`, to === "stripe", false);
+  }
+  done();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

@@ -127,7 +127,10 @@ const runningSale = recordPrice(history, 1000, saleStart + (MAX_SALE_DAYS - 1) *
 is("on the last day of a long sale its prior price is unchanged", priorLowestPrice(runningSale, saleStart), { cents: 800, complete: true });
 const long = recordPrice(recordPrice([{ at: t0, cents: 500 }], 1000, t0 + DAY), 1200, t0 + 200 * DAY);
 is("steps that ended before the kept period are dropped", long, [{ at: t0 + DAY, cents: 1000 }, { at: t0 + 200 * DAY, cents: 1200 }]);
-is("a clock that goes back never reorders and never drops a price that was applied", recordPrice([{ at: t0, cents: 500 }], 600, t0 - 10), [{ at: t0, cents: 500 }, { at: t0 + 1, cents: 600 }]);
+// Rule 23: this assertion changed. It expected the new step a second after the last ({ at: t0 + 1 }), a time in the
+// future that Codex J's review 5809017387 showed can push a price applied before a sale past the sale's start. A step
+// is now never put after the time it was applied: a clock that went back records it at the last step's own time.
+is("a clock that goes back never reorders, never drops a price that was applied, and never dates it in the future", recordPrice([{ at: t0, cents: 500 }], 600, t0 - 10), [{ at: t0, cents: 500 }, { at: t0, cents: 600 }]);
 let busy: PriceStep[] = [];
 let lowest = Infinity;
 for (let i = 0; i < MAX_PRICE_STEPS + 20; i += 1) {
@@ -139,5 +142,71 @@ is("the history never holds more than its cap", busy.length <= MAX_PRICE_STEPS, 
 is("merging keeps the lower price, so the prior price is never higher than the truth", priorLowestPrice(busy, t0 + (MAX_PRICE_STEPS + 19) * 600)?.cents, lowest);
 is("the current price is never merged away", busy[busy.length - 1].cents, 1000 + (((MAX_PRICE_STEPS + 19) * 37) % 300));
 is("a non-integer or negative price is not recorded", recordPrice([{ at: t0, cents: 500 }], -1, t0 + DAY), [{ at: t0, cents: 500 }]);
+
+
+part("Codex J's review of #2934 (5809017387; proof codex/j-review-2934-physical-legal@8b5996de)");
+{
+  const T = 1_794_009_600;
+  // MEDIUM: two changes in one second were dated T and T+1, so a price applied before a sale at T+1 was left out.
+  let same = recordPrice([], 1000, T - 40 * DAY);
+  same = recordPrice(same, 500, T);
+  same = recordPrice(same, 20, T);
+  same = recordPrice(same, 10, T + 1);
+  is("two prices in one second keep their real time and order", same, [{ at: T - 40 * DAY, cents: 1000 }, { at: T, cents: 500 }, { at: T, cents: 20 }, { at: T + 1, cents: 10 }]);
+  is("a sale the next second finds the price applied last before it", priorLowestPrice(same, T + 1), { cents: 20, complete: true });
+  let sequential = recordPrice([], 1000, T - 40 * DAY);
+  sequential = recordPrice(sequential, 20, T - 2);
+  sequential = recordPrice(sequential, 10, T);
+  is("control: changes seconds apart", priorLowestPrice(sequential, T), { cents: 20, complete: true });
+  // Rule 30: the sale's own price recorded in the same second as the change before it.
+  let together = recordPrice([], 1000, T - 40 * DAY);
+  together = recordPrice(together, 20, T);
+  together = recordPrice(together, 10, T);
+  is("a price replaced in the very second the sale starts was applied before it", priorLowestPrice(together, T), { cents: 20, complete: true });
+  is("control: the sale's own price is still left out", priorLowestPrice([{ at: T - 40 * DAY, cents: 1000 }, { at: T, cents: 10 }], T), { cents: 1000, complete: true });
+  const future = recordPrice(recordPrice(recordPrice([], 1000, T), 900, T), 800, T);
+  is("no step is ever dated after the time it was recorded", future.every((step) => step.at <= T), true);
+
+  // Conditional LOW: an unreadable step was filtered out and the rest certified complete.
+  const unreadable: [string, unknown][] = [
+    ["a price that is text", [{ at: T - 40 * DAY, cents: 1000 }, { at: T - 2, cents: "20" }]],
+    ["a fraction of a cent", [{ at: T - 40 * DAY, cents: 1000 }, { at: T - 2, cents: 20.5 }]],
+    ["a negative price", [{ at: T - 40 * DAY, cents: 1000 }, { at: T - 2, cents: -20 }]],
+    ["a time that is not whole", [{ at: T - 40 * DAY, cents: 1000 }, { at: T - 2.5, cents: 20 }]],
+    ["no time", [{ at: T - 40 * DAY, cents: 1000 }, { cents: 20 }]],
+    ["a step that is not a record", [{ at: T - 40 * DAY, cents: 1000 }, null]],
+    ["a history that is not a list", { at: T - 40 * DAY, cents: 1000 }],
+  ];
+  const safely = <R>(run: () => R): R | string => {
+    try {
+      return run();
+    } catch (error) {
+      return String(error);
+    }
+  };
+  for (const [what, raw] of unreadable) {
+    is(`${what}: no prior price at all, never a known one from what was left`, safely(() => priorLowestPrice(raw as PriceStep[], T)), null);
+    is(`${what}: the next price starts the history again, said as incomplete`, safely(() => recordPrice(raw as PriceStep[], 900, T)), [{ at: T, cents: 900 }]);
+  }
+
+  // Conditional LOW: a hostname that only begins with the site was taken as naming it.
+  for (const [what, warning] of [
+    ["a longer hostname", "WARNING: Cancer - www.P65Warnings.ca.gov.example.invalid"],
+    ["a hostname ending in it", "WARNING: Cancer - evilwww.P65Warnings.ca.gov"],
+    ["a hostname that goes on with a hyphen", "WARNING: Cancer - www.P65Warnings.ca.gov-example.invalid"],
+    ["the site as a user name before another host", "WARNING: Cancer - https://www.P65Warnings.ca.gov@example.invalid"],
+    ["a subdomain of another host", "WARNING: Cancer - sub.www.P65Warnings.ca.gov"],
+  ] as const) {
+    is(`${what} does not name the site`, checkProp65(warning), "site");
+  }
+  for (const [what, warning] of [
+    ["the site alone", "WARNING: Cancer - www.P65Warnings.ca.gov"],
+    ["the site ending a sentence", "WARNING: Cancer. Go to www.P65Warnings.ca.gov."],
+    ["the site as an https link", "WARNING: Cancer. See https://www.P65Warnings.ca.gov/product"],
+    ["the site in parentheses", "WARNING: Cancer (www.p65warnings.ca.gov)"],
+  ] as const) {
+    is(`control: ${what} names it`, checkProp65(warning), null);
+  }
+}
 
 done();

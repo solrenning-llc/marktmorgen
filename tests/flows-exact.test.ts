@@ -48,7 +48,7 @@ async function main(): Promise<void> {
   await claimHandle(OWNER, "flowsexact", "Flows Exact", "");
   await ensureStatsId(OWNER);
   await ensureListId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestFlowsExact01", true);
+  await setStripeAccount(OWNER, "acct_1TestFlowsEx01", true);
   await setSubscription(OWNER, { customerId: "cus_FlowsExact", subscriptionId: "sub_FlowsExact", active: true, tier: "pro", period: paidPeriod() });
   await setMailSettings(OWNER, { fromName: "Flows Exact", address: "1 Main St, Portland, OR 97201" });
   const store = (await storeForEmail(OWNER))!;

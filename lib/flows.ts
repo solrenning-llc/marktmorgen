@@ -236,13 +236,21 @@ function parseFlows(raw: unknown): Flow[] {
 
 /**
  * The store's workflows for the sender (sendDueSteps): none only when Redis says exactly nil; a reply that is missing
- * or of another shape throws, so the due batch goes back in the queue for a later run instead of being dropped
- * (CX-123 rule 24).
+ * or of another shape, or a string that is not a JSON list, throws, so the due batch goes back in the queue for a
+ * later run instead of being dropped (CX-123 rule 24; a garbled '{' or '{}' is unknown, not "no workflows": #2861).
  */
 async function readFlowsExact(listId: string): Promise<Flow[]> {
   const reply = repliesFor(await redisPipeline([["GET", flowsKey(listId)]]), 1);
   if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError("the store's workflows");
-  return parseFlows(reply[0]);
+  if (reply[0] === null) return [];
+  let list: unknown;
+  try {
+    list = JSON.parse(reply[0]);
+  } catch {
+    throw new UnknownReplyError("the store's workflows");
+  }
+  if (!Array.isArray(list)) throw new UnknownReplyError("the store's workflows");
+  return list as Flow[];
 }
 
 export class FlowWriteUnconfirmed extends Error {

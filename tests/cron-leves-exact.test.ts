@@ -12,12 +12,18 @@
  *    (lib/community-files.ts): a ZREM answered in another shape than 0 or 1
  *    may have taken the picture off the list; it is put back, so a later
  *    sweep deletes it and gives its place back, rather than leaving it kept
- *    and counted for ever. A list of pictures answered in another shape is
- *    unknown, never "none to sweep".
+ *    and counted for ever; a ZREM that throws (a timeout after it was sent)
+ *    is the same. A list of pictures answered in another shape is unknown,
+ *    never "none to sweep", and the courses job says so in its log and
+ *    answer rather than "0 swept".
+ *
+ * The quiet pass's place past the end of the day's list is unknown too: the
+ * list only grows within a day, so this pass never wrote it.
  *
  * Synthetic data only; the healthy and confirmed answers work as before.
  */
 import { GET as quiet } from "@/app/api/cron/quiet/route";
+import { GET as courses } from "@/app/api/cron/courses/route";
 import { rememberFolderOwner } from "@/lib/delivery";
 import { claimHandle, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { communityFolder } from "@/lib/community-image";
@@ -89,6 +95,17 @@ async function quietPass(): Promise<void> {
     inject = null;
   }
 
+  part("Quiet pass: a place past the day's list was not written by this pass");
+  // Within one UTC day the list only grows (SADD only, kept 400 days), so a place past its end is unknown (V-2902).
+  is("the place at the end (3 of 3): the day's walk is done, nothing read", await (async () => {
+    await pipeline([["SET", at, "3"]]);
+    return run();
+  })(), { status: 200, looked: [], place: "3", failed: 0 });
+  for (const past of ["4", "999999999"]) {
+    await pipeline([["SET", at, past]]);
+    is(`the place ${past} with 3 stores: nothing read, the place left as it was`, await run(), { status: 503, looked: [], place: past, failed: null });
+  }
+
   part("Quiet pass: a store that cannot be read is never passed over");
   const middle = stores[1].ownerKey;
   let failures = 0;
@@ -134,6 +151,38 @@ async function pictures(): Promise<void> {
     inject = null;
     is(`ZREM landed, answered ${label}: the picture is listed again for a later sweep, its place still counted`, [swept, await listed(p), await picturesKept(folder)], [0, true, kept]);
     await pipeline([["ZREM", "nl:cimg:doors", p]]);
+  }
+
+  part("Pictures: a ZREM carried out and then thrown never loses the picture");
+  {
+    // A timeout after the command was sent: Redis took it off the list, the answer never came (C5-2902).
+    const p = path(20);
+    await noteCommunityUpload(p, "member", now - 2 * 86_400_000);
+    await takePicturePlace(p, 50);
+    const kept = await picturesKept(folder);
+    inject = (commands) =>
+      commands.length === 1 && commands[0][0] === "ZREM" ? pipeline(commands).then(() => Promise.reject(new Error("the database did not answer in time"))) : null;
+    const swept = await sweepCommunityUploads(now).catch(() => -1);
+    inject = null;
+    is("ZREM landed, then threw: listed again for a later sweep, its place still counted", [swept, await listed(p), await picturesKept(folder)], [0, true, kept]);
+    is("the later sweep deletes it and gives its place back once", [await sweepCommunityUploads(now), await listed(p), await picturesKept(folder)], [1, false, kept - 1]);
+  }
+
+  part("Pictures: the courses job says when the list could not be read");
+  {
+    inject = (commands) => (commands.length === 1 && commands[0][0] === "ZRANGEBYSCORE" ? Promise.resolve(["QUEUED"]) : null);
+    const errors: string[] = [];
+    const log = console.error;
+    console.error = (...args: unknown[]) => { errors.push(args.map(String).join(" ")); };
+    const response = await courses({ headers: new Headers(), nextUrl: new URL("https://marktmorgen.com/api/cron/courses") } as unknown as Parameters<typeof courses>[0]).finally(() => {
+      console.error = log;
+    });
+    inject = null;
+    const body = (await response.json()) as { unusedPictures?: unknown; picturesFailed?: unknown };
+    is("the job answers that the pictures were not swept, never 0 swept", [body.unusedPictures, body.picturesFailed], [null, true]);
+    is("and says it in the log", errors.some((e) => e.includes("community pictures")), true);
+    const healthy = (await (await courses({ headers: new Headers(), nextUrl: new URL("https://marktmorgen.com/api/cron/courses") } as unknown as Parameters<typeof courses>[0])).json()) as Record<string, unknown>;
+    is("healthy: the count, and no failure said", [healthy.unusedPictures, "picturesFailed" in healthy], [0, false]);
   }
 
   part("Pictures: the list read exactly");

@@ -32,6 +32,8 @@ import { StoreResting } from "@/components/store-resting";
 import { StoreTracking } from "@/components/store-tracking";
 import { JsonLd } from "@/components/structured-data";
 import { collectionPath, listedItems } from "@/components/store-collections";
+import { WhoAnswers } from "@/components/who-answers";
+import { sellsThroughPayPal } from "@/lib/paypal-sales";
 
 type Params = {
   params: Promise<{ handle: string; collection: string }>;
@@ -198,6 +200,8 @@ export default async function CollectionPage({ params }: Params) {
             />
           ))}
         </ul>
+        {/* Before paying for any of them, as the store page says it (components/who-answers.tsx). */}
+        {selling || sellsThroughPayPal(store) ? <WhoAnswers store={store} className="st-muted mt-6 text-center text-sm" /> : null}
         <div className="mt-12 text-center">
           <Link href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
             {w.everythingFrom(store.name)}

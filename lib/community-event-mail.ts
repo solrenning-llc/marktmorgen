@@ -55,12 +55,13 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { type BatchMessage, isSenderConfigured, sendBatch } from "@/lib/email";
 import { BATCH_SIZE, CHECKED_BATCH_SIZE, bodyHtml, render } from "@/lib/mail";
 import { storeSender } from "@/lib/calls";
 import { SITE_URL } from "@/lib/site-url";
-import type { Store } from "@/lib/store";
-import { type CommunityConfig, type Member, readConfig, readMembers } from "@/lib/community";
+import { type Store, handleLeadsToStore, storeHandleKey } from "@/lib/store";
+import { type CommunityConfig, type Member, readConfigExact, readMembers } from "@/lib/community";
 import { holdsTicket } from "@/lib/community-access";
 import { tokenFor } from "@/lib/community-mail";
 import { alertCreator } from "@/lib/phone-alerts";
@@ -75,6 +76,7 @@ import {
   lengthIn,
   mayAttend,
   readEvent,
+  readEventExact,
   rsvpList,
   rsvpNumbers,
   stillGoing,
@@ -357,8 +359,48 @@ async function recipientBatch(id: string, start: number, count: number): Promise
 }
 
 /**
+ * Whether a handle is known to lead to no store (rule 24): its key read whole, and empty or let go (a store deleted
+ * or closed holds its addresses back, lib/store.ts). A reply missing, cut short or of another shape is not known.
+ */
+async function handleGone(handle: string): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["GET", storeHandleKey(handle)]]), 1);
+  if (!reply) return false;
+  return reply[0] === null || (typeof reply[0] === "string" && !handleLeadsToStore(reply[0]));
+}
+
+type JobTarget = { store: Store; config: CommunityConfig; event: CommunityEvent } | "gone" | "unknown";
+
+/**
+ * What a send is about, read again: its store, its community's setup and its event; "gone" only when one of them is
+ * known to be gone (the store's address leads nowhere, or the store read whole has no such community, or the setup's
+ * or the event's key answered exactly nil); "unknown" when any of them does not read (rules 24 and 30): a load that
+ * throws, a store that answers nothing while its address still leads to one, a reply lost or in another shape.
+ */
+async function jobTarget(job: EventMailJob, load: (handle: string) => Promise<Store | null>): Promise<JobTarget> {
+  try {
+    const store = await load(job.handle);
+    if (!store) return (await handleGone(job.handle)) ? "gone" : "unknown";
+    if (store.community?.id !== job.community) return "gone";
+    const config = await readConfigExact(job.community);
+    if (!config) return "gone";
+    const event = await readEventExact(job.community, job.event);
+    return event ? { store, config, event } : "gone";
+  } catch (error) {
+    console.error("an event send could not read its store or its event", error);
+    return "unknown";
+  }
+}
+
+const UNREAD_NOTE = "We couldn't read the store or the event just now. The send is still pending.";
+
+/**
  * Moves one send on for as long as `deadline` allows. Safe to call from two
- * places at once: only one holds the send at a time.
+ * places at once: only one holds the send at a time. A send whose store or
+ * event does not read is left as it is, to be moved on by a later run, while
+ * it is still of use (a reminder by its own window, a notice as the
+ * hour-before reminder: until the event begins); only one known to be gone is
+ * closed. Each batch is sent under its own key, so going on later never sends
+ * twice.
  */
 export async function advanceEventJob(
   id: string,
@@ -373,17 +415,28 @@ export async function advanceEventJob(
       await redisPipeline([["SREM", JOBS, id]]);
       return job;
     }
-    const store = await load(job.handle).catch(() => null);
-    const config = store?.community?.id === job.community ? await readConfig(job.community) : null;
-    const event = config ? await readEvent(job.community, job.event) : null;
     const finish = async (status: "sent" | "failed", note: string) => {
       job = { ...(job as EventMailJob), status, note };
       await save(job);
       await redisPipeline([["DEL", toKey(id)], ["SREM", JOBS, id]]);
       return job;
     };
-    if (!store || !config || !event) return await finish("failed", "The event is not there anymore.");
     const reminder = job.kind === "24" || job.kind === "1";
+    const target = await jobTarget(job, load);
+    if (target === "gone") return await finish("failed", "The event is not there anymore.");
+    if (target === "unknown") {
+      // Kept as it is, its place in nl:cm:evmailq too, while it is of use, by the start it was made for.
+      if (stillUseful(reminder ? job.kind : "1", job.start, Date.now())) {
+        if (job.note !== UNREAD_NOTE) {
+          job = { ...job, note: UNREAD_NOTE };
+          await save(job);
+        }
+        return job;
+      }
+      if (reminder) return await finish("sent", "No longer due.");
+      return await finish("failed", "We couldn't read the store or the event before the event's time. Nobody else was emailed.");
+    }
+    const { store, config, event } = target;
     // A reminder for a time the event has left, or for an event called off, is no use.
     if (reminder && (event.cancelled || event.start !== job.start || !stillUseful(job.kind, event.start, Date.now()))) {
       return await finish("sent", "No longer due.");
@@ -560,7 +613,13 @@ export async function runEventQueue(
     const [ids] = await redisPipeline([["SMEMBERS", JOBS]]);
     for (const id of Array.isArray(ids) ? (ids as string[]) : []) {
       if (Date.now() > deadline) break;
-      if (await advanceEventJob(id, findStore, deadline)) counts.sends += 1;
+      // Each send in its own try: one that throws on the way (Redis, the members, the email service) is left as it is,
+      // its lock given back, and moved on by a later run; the sends after it in this round still go on.
+      try {
+        if (await advanceEventJob(id, findStore, deadline)) counts.sends += 1;
+      } catch (error) {
+        console.error("an event send failed", error);
+      }
     }
   }
   return counts;

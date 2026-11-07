@@ -208,6 +208,21 @@ export async function readEvent(id: string, event: string): Promise<CommunityEve
   return parseEvent(raw);
 }
 
+/**
+ * The event, read exactly (rules 24 and 30): null only when its GET answered exactly nil, so the event is gone (or
+ * its id names none). A lost reply, one in another shape or a value that does not parse throws UnknownReplyError:
+ * an event that did not read is not one that is gone, so what would be closed because it is gone is kept.
+ */
+export async function readEventExact(id: string, event: string): Promise<CommunityEvent | null> {
+  if (!ITEM_ID.test(event)) return null;
+  const replies = repliesFor(await redisPipeline([["GET", eventKey(id, event)]]), 1);
+  if (!replies) throw new UnknownReplyError("a live event");
+  if (replies[0] === null) return null;
+  const parsed = parseEvent(replies[0]);
+  if (!parsed) throw new UnknownReplyError("a live event");
+  return parsed;
+}
+
 export async function readEvents(id: string, ids: string[]): Promise<CommunityEvent[]> {
   const wanted = ids.filter((e) => ITEM_ID.test(e));
   if (!wanted.length) return [];

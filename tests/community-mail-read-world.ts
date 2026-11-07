@@ -25,6 +25,7 @@ export const event = { id: "c".repeat(12), title: "Synthetic event", start: Date
 export const store = { handle: "synthetic", name: "Synthetic store", email: "owner@example.com", language: "en",
   community: { id: "d".repeat(32), on: true }, mail: { fromName: "Synthetic store" } } as Store;
 export const readConfig = async () => config;
+export const readConfigExact = readConfig;
 export const readMembers = async (_community: string, keys: string[]) => new Map(members.filter(m => keys.includes(m.k)).map(m => [m.k, m]));
 export const mailableMembers = async () => members;
 export const readMember = async () => null;
@@ -33,6 +34,7 @@ export const setMemberToken = async () => {};
 export const holdsTicket = async () => true;
 export const mayAttend = async () => true;
 export const readEvent = async () => event;
+export const readEventExact = readEvent;
 export const rsvpList = async () => members.map(m => ({ key: m.k }));
 export const rsvpNumbers = async () => ({ going: 2 });
 export const stillGoing = async () => new Set(members.map(m => m.k));

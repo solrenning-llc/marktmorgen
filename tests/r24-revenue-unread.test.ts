@@ -267,7 +267,15 @@ for (const [shape, v] of [["negative", -1], ["fractional", 1.5]] as [string, unk
   is(`a quantity that is ${shape}: refused`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { quantity: v }))), "refused");
 }
 // Stripe embeds at most 10 lines in an invoice; more of them is a list cut short, not the whole invoice.
-is("an invoice whose lines say there are more: refused, never read as all of them", beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000), { lines: { data: [beaLine(at(2026, 7, 5), 3000)], has_more: true } })), "refused");
+{
+  const julyWith = (has_more: unknown): Invoice[] => {
+    const [june, , august] = beaInvoices(beaLine(at(2026, 7, 5), 3000));
+    return [june, { created: at(2026, 7, 5), lines: { data: [beaLine(at(2026, 7, 5), 3000)], has_more } } as Invoice, august];
+  };
+  is("healthy: an invoice whose lines say there are no more (false) reads", beaMoves(julyWith(false)), moved);
+  is("an invoice whose lines say there are more: refused, never read as all of them", beaMoves(julyWith(true)), "refused");
+  is("an invoice whose 'more lines' is not a yes or no: refused", beaMoves(julyWith("no")), "refused");
+}
 
 process.env.STRIPE_SECRET_KEY = "sk_test_r24_revenue_stand_in";
 const NOW = Date.parse("2026-10-13T12:00:00Z");

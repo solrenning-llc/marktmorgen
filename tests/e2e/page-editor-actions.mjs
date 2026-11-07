@@ -117,7 +117,8 @@ try {
     await page.keyboard.press("Enter");
     await settled();
     said.push(await status());
-    is(`after removal ${i + 1}, the focus is on the block now in its place`, await page.evaluate(() => document.activeElement?.getAttribute("aria-controls")?.startsWith("panel-") ?? false), true);
+    // The first removal leaves hero, Text, Questions: the other Text now stands at 2. The second leaves hero, FAQ: the Questions block stands at 2.
+    is(`after removal ${i + 1}, the focus is on the block now in its place`, await page.evaluate(() => ({ controls: document.activeElement?.getAttribute("aria-controls")?.startsWith("panel-") ?? false, label: document.activeElement?.querySelector("span")?.textContent ?? null })), { controls: true, label: i === 0 ? "2. Text" : "2. Questions" });
   }
   is("the same removal said twice is said again: the same words, a different text in the live region", [said[0].trim() === said[1].trim(), said[0] === said[1], said[0].trim()], [true, false, "Removed Text from position 2. Undo, at the top of the editor, brings it back."]);
   await page.evaluate(() => window.harness.mount(["hero", "text", "text", "faq"].map((kind) => window.harness.block(kind))));

@@ -2647,3 +2647,747 @@ void main();
 
 ```
 
+
+
+## Retomada 07/11/2026 18h48 Fortaleza — segunda revisão financeira/acesso #3133
+
+#3125 M5815135067 COMMENT/FULLbodyreadbackEXATO no3b4c03840ce0b5180133df8f24f2b058e31980fb:268PASS/234INCONCLUSIVOdemockguard,medsC2anteriorespreservados,nãoaprovaçãolegalglobal. CanalCXM-1843-C1-3 **56a08389054c36285353dadaa7d1dc63cfbdf281/blob9f19a2635898dc6b61f5ff9ec6c6ad0f4a064583/FULL4486203EXATO** entregou3125eRESsegunda3133ANTESdiff/fonte/testes. C1pausa1746PRprodutonovoinalterada/serialMédio0subagentes. Nenhuma própriaunidadeprodutonovaparareserva/PR. #2730pedidoantigo83comC4+C1readycontinuanãoterceiro/reconciliaçãonominalaguardaC1;nãofalsofimdetodooprojeto.
+
+#3133 EXATO502220fbc4d8ed2580e138c9629869dbe0baf110/base0dd9aba5b7b6afd52a166abed33b03310a1b1a63;FRESHfinalOPEN/samehead/timeline3itenssemoutrosegundo. PrimeiraC26712933681+focal6713221897lidos/creditados,nãoduasindependentes. Diff8arquivosinteiro(2rowsdocsC3+librefunds+6tests) lido: declarações/fixturesid/charge corrigidasSEMexpectativamudada. Código owninvoice/id PaymentIntent/charge e wholeinvoice_payments;disputeLostcadaowncharge/dataarray/wholebool, ownlostretémtruecomhas_moretrueapóslertodasrows. NúmerodeGETnãoaumentanocaminhorevisado, nenhumaPOSTdedinheiro. onAccountconfirmadoStripe-Account+methodGETnoexecutado. CallerskeptUnlessLost/purchaseRefundedmantêmacessoemunknown;givenBackpropaga→preorderleft/retry,eofferRefundeddownloadnãoentregaquandoerro;sourcecheckscallersnãoHTTPjobcompleto.
+
+CausalSAME35 Gitblob5a69fd3844a12aadde40f1b8b0122ceb77602d9f: ONLYoldrefunds09ddGitblob60e1b9b78da02732a2d8b4f94b9cafce117dc90e→10FAIL;head8df1adbd6dae2a8689b70e138274b044589e8f68→35PASS. SAME83dispute75ba6badb00499870f7039595ea0e65451de11c6, mesmoOLD09ddmodulenografofinal→40FAIL;head83PASS(nãoalegarqueexecuteifa2REDbranch). Ligadosaccess31+lostaccess37+lostdoors28PASS; own12frozenGitblob2b65432e7692438b40fa60a3f55050a9c57d88caPASS:2paidrowsambosrefund→true,umpartial→false,umJSONnull→false;cada4GET/todasaccountcerta/0POST. **TOTAL226headassertionsPASS**, REDsseparados. InputhashesverificadosANTESspawn. Linksrefund35+lostdoors28exit0resumonotailomitido masFULLlogincluídoabaixo.
+
+**lost-dispute-cursorINCONCLUSIVO**:100mockguardatingido,loopcatchgeralogM_ADMISSIONaté256KiBmaxBuffer→ENOBUFS/SIGTERMantesdone. Nenhumaasserçãoficougreenpororáculomudado;NÃOrerun/nãoaumenteitetonemoutput. Este élimiteDAEXECUÇÃO,nãonovoachadoproduto/REDdoPR. Logcapturado265kcomhash/primeiro+último4kabaixo(DECLARADAMENTEexcerpt),middlelocalreproduzível/nãoalegarFULLlogduráveldessecursor. Testscompletadosnenhumtetoatingiu. GuardaANTES20kpipe+20kMemoryRedisnested100mockHTTP120s512MiB256KiB;tipos1024MiB. HTTPsófixturesglobaisfechados,0provider/Redisreais/credenciaisreais.
+
+Tipos8rootsprimeiropasso1206sources2TS2307porDOISinputssnapshotfaltantesaffiliate-bulk-words/api-guard,nãodefautordoPR. RecupereiDOSHEADGitblobsbdc2281ef74e79152f12439b40e2cabd0b65f15c/e06c0fff0446fd5ee507203aefc53ff5e3353e45, sótypesrerun8roots1208sources**0diagnostics**(nãofiltrado/noEmit). Lint8paths0errors(rodadoantesinputsmasarquivoanalisadosidênticos,semrepetirlint). ScannerFINALOFICIAL3980tracked0:3979headfilesEXATOS+1own,345headunrecovered, PARTIALnãorepoFULL. Fontewhitespacegitdiffnoindexemitiu0diagnostics/exit1diferenças(normalsemdiffscheckfailure),nãoexit0inventado.
+
+SemNOVOachadoG/Mnodelta;MEDC2disputeidentity/wholelistfechadoPORC2einpendentementeconferidopelos83M. LOWsC2continuamstatusunknown(dadoownchargeintegroulistafull),sessãoPIsemvínculorevalidado,paidnonPIsafeunknown,isOwnhelperduplicação,invoiceoptionalpolicy;nenhumautobaixa/reclassificaçãoMsemnovaevidênciaincidência. NãoalegarStripeumadisputasemfonteoficialC2disse, Mnãoverificou/contribuiupolítica. SemcertMRglobal/custosintegração/legal/nineCI/merge-tree/main/queue. C1eautorconduzem9head/gatesindependentes;Mnãoenfileirou/incorporou/nãoTOCOUREFalheia. PróximoformalCOMMENTsegundaMoneyexact502220apósCPFULLreadback;canalreciboeparadarevisõesdestaexecução. Nenhumaautomação/vigiafundo criada/alterada,nãoafirmarprojetofinalizado nemdesabilitarporpausatemporária.
+
+### run.mjs
+```
+import{readFileSync,writeFileSync,mkdirSync,existsSync,symlinkSync}from'node:fs';import{resolve,join}from'node:path';import{createRequire}from'node:module';import{createHash}from'node:crypto';import{spawnSync}from'node:child_process';import{testAliases,testEnvironment}from'./view/tests/test-config.mjs';
+const root=resolve('.'),view=join(root,'view'),deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules';const{build}=createRequire(join(deps,'package.json'))('esbuild');if(!existsSync(join(view,'node_modules')))symlinkSync(deps,join(view,'node_modules'),'dir');mkdirSync('logs',{recursive:true});
+const jobs=process.argv.slice(2);for(const job of jobs){const [mode,test]=job.split(':');
+ const bootstrap=`import{MemoryRedis}from'./lib/redis-memory';import{store as redis}from'./tests/redis-stub';let pc=0,rc=0,hc=0,exceeded=false;const stop=()=>{exceeded=true;throw Error('M_ADMISSION_CEILING')};const pipeline=redis.pipeline,run=MemoryRedis.prototype.run;redis.pipeline=function(c){if(pc+c.length>20000)return stop();pc+=c.length;return pipeline.call(this,c)};MemoryRedis.prototype.run=function(c){if(rc+1>20000)return stop();rc++;return run.call(this,c)};let current=()=>{throw Error('NO_EXTERNAL_NETWORK')};Object.defineProperty(globalThis,'fetch',{configurable:true,get:()=>current,set:f=>{current=(...a)=>{if(hc+1>100)return stop();hc++;return f(...a)}}});process.on('beforeExit',()=>{console.log('M_BUDGET',JSON.stringify({pipelineCommands:pc,memoryRun:rc,httpMockDispatch:hc,exceeded}));if(exceeded)process.exitCode=1});import('./tests/${test}');`;
+ const alias=testAliases(test,view,join(view,'tests'));if(mode==='before')alias['@/lib/refunds']=join(root,'before-refunds.ts');const b=await build({stdin:{contents:bootstrap,resolveDir:view,sourcefile:'m-bootstrap.ts',loader:'ts'},absWorkingDir:view,bundle:true,write:false,platform:'node',format:'cjs',alias,metafile:true,logLevel:'error'});const f=resolve('logs/'+mode+'-'+test+'.cjs');const pin=JSON.parse(readFileSync('head-pins.json','utf8'));let checked=0;for(const input of Object.keys(b.metafile.inputs)){if(input.includes('node_modules')||input==='m-bootstrap.ts')continue;const file=resolve(view,input);const bytes=readFileSync(file);const hash=createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');if(file===join(root,'before-refunds.ts')){if(hash!=='60e1b9b78da02732a2d8b4f94b9cafce117dc90e')throw Error('Old rule mismatch');}else if(input==='tests/m-3125-read-boundaries.proof.ts'){if(hash!=='75911d0e19878f16377b562eb16e954332ae56be')throw Error('Own proof changed');}else if(input==='tests/m-3125-notice-retry.proof.ts'){if(hash!=='2e5977e79a2a9254daa4fbffb7c755b6d525a89b')throw Error('Notice proof changed');}else if(input==='tests/m-3133-multiple-payments.proof.ts'){if(hash!=='2b65432e7692438b40fa60a3f55050a9c57d88ca')throw Error('Own proof changed');}else if(hash!==pin[input])throw Error('Head pin mismatch '+input);checked++;}console.log(JSON.stringify({mode,test,checked}));writeFileSync(f,b.outputFiles[0].text);writeFileSync(f+'.meta.json',JSON.stringify(b.metafile));
+ const p=spawnSync(process.execPath,['--max-old-space-size=512',f],{cwd:view,env:testEnvironment({PATH:'/usr/bin:/bin',TZ:'UTC'}),encoding:'utf8',timeout:120000,maxBuffer:256*1024});const out=(p.stdout||'')+(p.stderr||'');writeFileSync(f+'.log',out);console.log(JSON.stringify({mode,test,exit:p.status,error:p.error?.message,signal:p.signal,tail:out.slice(-1700)}));if(p.error||p.signal)throw Error('Incomplete child');
+}
+
+```
+
+### verify.cjs
+```
+const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');const deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules',root=path.resolve('view'),ts=require(deps+'/typescript');
+const names=['lib/refunds.ts','tests/refunds-own-reply.test.ts','tests/dispute-lost-own-reply.test.ts','tests/access-revocation.test.ts','tests/lost-dispute-access.test.ts','tests/lost-dispute-doors.test.ts','tests/tb14-lost-disputes.test.ts','tests/m-3133-multiple-payments.proof.ts'];const opts={strict:true,noEmit:true,allowJs:true,target:ts.ScriptTarget.ES2017,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler,skipLibCheck:true,esModuleInterop:true,resolveJsonModule:true,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'@/lib/content-jsx',baseUrl:root,paths:{'@/*':['*']},types:['node','react'],typeRoots:[deps+'/@types'],lib:['lib.esnext.d.ts','lib.dom.d.ts','lib.dom.iterable.d.ts']};
+const p=ts.createProgram(names.map(f=>path.join(root,f)),opts),ds=ts.getPreEmitDiagnostics(p);fs.writeFileSync('types.log',ts.formatDiagnosticsWithColorAndContext(ds,{getCurrentDirectory:()=>root,getCanonicalFileName:f=>f,getNewLine:()=>"\n"})+JSON.stringify({roots:names.length,sources:p.getSourceFiles().length,diagnostics:ds.length}));console.log('types',ds.length);
+const paths=names;const r=cp.spawnSync(process.execPath,['--max-old-space-size=512',deps+'/eslint/bin/eslint.js',...paths],{cwd:root,encoding:'utf8',timeout:120000,maxBuffer:256*1024});fs.writeFileSync('lint.log',(r.stdout||'')+(r.stderr||''));console.log('lint',r.status,r.signal,r.error?.message);
+
+```
+
+### run.log
+```
+{"mode":"before","test":"refunds-own-reply.test.ts","checked":14}
+{"mode":"before","test":"refunds-own-reply.test.ts","exit":1,"signal":null,"tail":"ore: not refunded, so nothing closes on this buyer\n        expected false\n        got      true\n  ok    no has_more: no more than 3 requests\n  ok    no data array: not refunded, so nothing closes on this buyer\n  ok    no data array: no more than 3 requests\n\nThe payment read answers for another payment, or with another payment's charge\n  FAIL  another payment's reply, refunded: not refunded, so nothing closes on this buyer\n        expected false\n        got      true\n  ok    another payment's reply, refunded: no more than 2 requests\n  FAIL  a payment reply with no id, refunded: not refunded, so nothing closes on this buyer\n        expected false\n        got      true\n  ok    a payment reply with no id, refunded: no more than 2 requests\n  FAIL  this payment's reply with another payment's refunded charge: not refunded, so nothing closes on this buyer\n        expected false\n        got      true\n  ok    this payment's reply with another payment's refunded charge: no more than 2 requests\n\n35 checks, 10 failing.\nM_BUDGET {\"pipelineCommands\":0,\"memoryRun\":0,\"httpMockDispatch\":48,\"exceeded\":false}\nreading a payment plan's first payment failed TypeError: Cannot read properties of null (reading 'payment_intent')\n    at planRefundedInFull (/workspace/scratch/d1ece80b1417/m-review-3133/logs/before-refunds-own-reply.test.ts.cjs:2257:30)\n    at async judged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/before-refunds-own-reply.test.ts.cjs:2339:20)\n    at async notJudged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/before-refunds-own-reply.test.ts.cjs:2343:15)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/before-refunds-own-reply.test.ts.cjs:2373:3)\n"}
+{"mode":"head","test":"refunds-own-reply.test.ts","checked":14}
+{"mode":"head","test":"refunds-own-reply.test.ts","exit":0,"signal":null,"tail":"w-3133/logs/head-refunds-own-reply.test.ts.cjs:2361:20)\n    at async notJudged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2365:15)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2406:3)\nreading a payment plan's first payment failed Error: Stripe answered for another payment\n    at /workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2286:44\n    at async Promise.all (index 0)\n    at async planRefundedInFull (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2283:21)\n    at async judged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2361:20)\n    at async notJudged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2365:15)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2407:3)\nreading a payment plan's first payment failed Error: Stripe answered with another payment's charge\n    at /workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2289:17\n    at async Promise.all (index 0)\n    at async planRefundedInFull (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2283:21)\n    at async judged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2361:20)\n    at async notJudged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2365:15)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2408:3)\n"}
+{"mode":"before","test":"dispute-lost-own-reply.test.ts","checked":14}
+{"mode":"before","test":"dispute-lost-own-reply.test.ts","exit":1,"signal":null,"tail":"re as text: the doors stay open for a buyer who paid\n  FAIL  has_more as text: givenBack cannot say either, so nothing is handed over on it\n        expected \"unknown\"\n        got      false\n  ok    has_more as text: one request a reading, as today (four readings)\n  ok    has_more true with this charge's own lost row: lost, the rest cannot undo it\n\nA row that is not an object\n  FAIL  a row that is text: disputeLost cannot say, so it throws\n        expected \"unknown\"\n        got      false\n  ok    a row that is text: the doors stay open for a buyer who paid\n  FAIL  a row that is text: givenBack cannot say either, so nothing is handed over on it\n        expected \"unknown\"\n        got      false\n  ok    a row that is text: one request a reading, as today (four readings)\n  FAIL  a row that is null: disputeLost cannot say, so it throws\n        expected \"unknown\"\n        got      false\n  ok    a row that is null: the doors stay open for a buyer who paid\n  FAIL  a row that is null: givenBack cannot say either, so nothing is handed over on it\n        expected \"unknown\"\n        got      false\n  ok    a row that is null: one request a reading, as today (four readings)\n  FAIL  a row that is an array: disputeLost cannot say, so it throws\n        expected \"unknown\"\n        got      false\n  ok    a row that is an array: the doors stay open for a buyer who paid\n  FAIL  a row that is an array: givenBack cannot say either, so nothing is handed over on it\n        expected \"unknown\"\n        got      false\n  ok    a row that is an array: one request a reading, as today (four readings)\n\n83 checks, 40 failing.\nM_BUDGET {\"pipelineCommands\":0,\"memoryRun\":0,\"httpMockDispatch\":92,\"exceeded\":false}\n"}
+{"mode":"head","test":"dispute-lost-own-reply.test.ts","checked":14}
+{"mode":"head","test":"dispute-lost-own-reply.test.ts","exit":0,"signal":null,"tail":"\n  ok    no has_more: disputeLost cannot say, so it throws\n  ok    no has_more: the doors stay open for a buyer who paid\n  ok    no has_more: givenBack cannot say either, so nothing is handed over on it\n  ok    no has_more: one request a reading, as today (four readings)\n  ok    has_more as text: disputeLost cannot say, so it throws\n  ok    has_more as text: the doors stay open for a buyer who paid\n  ok    has_more as text: givenBack cannot say either, so nothing is handed over on it\n  ok    has_more as text: one request a reading, as today (four readings)\n  ok    has_more true with this charge's own lost row: lost, the rest cannot undo it\n\nA row that is not an object\n  ok    a row that is text: disputeLost cannot say, so it throws\n  ok    a row that is text: the doors stay open for a buyer who paid\n  ok    a row that is text: givenBack cannot say either, so nothing is handed over on it\n  ok    a row that is text: one request a reading, as today (four readings)\n  ok    a row that is null: disputeLost cannot say, so it throws\n  ok    a row that is null: the doors stay open for a buyer who paid\n  ok    a row that is null: givenBack cannot say either, so nothing is handed over on it\n  ok    a row that is null: one request a reading, as today (four readings)\n  ok    a row that is an array: disputeLost cannot say, so it throws\n  ok    a row that is an array: the doors stay open for a buyer who paid\n  ok    a row that is an array: givenBack cannot say either, so nothing is handed over on it\n  ok    a row that is an array: one request a reading, as today (four readings)\n\n83 checks, all passing.\nM_BUDGET {\"pipelineCommands\":0,\"memoryRun\":0,\"httpMockDispatch\":92,\"exceeded\":false}\n"}
+{"mode":"head","test":"access-revocation.test.ts","checked":273}
+{"mode":"head","test":"access-revocation.test.ts","exit":0,"signal":null,"tail":"pt\n  ok    a membership is not judged by this rule\n  ok    no account to ask: not refunded\n\nA course bought once\n  ok    opens\n  ok    refunded in full: shut, though the thanks page wrote it down\n  ok    refunded in part: still open\n  ok    bought again after the refund: open again\n  ok    taken off the course by the creator: shut\n\nA course sold as a membership\n  ok    active: open\n  ok    trialing: open\n  ok    past_due: open\n  ok    canceled: shut\n  ok    unpaid: shut\n  ok    incomplete_expired: shut\n\nA community\n  ok    a paid purchase lets in\n  ok    refunded in full: not let in\n  ok    a membership canceled: not let in\n  ok    a membership running: let in\n  ok    bought in one click after paying for something else: let in\n  ok    and not once that payment is refunded\n  ok    a purchase from another store opens nothing here\n  ok    Stripe cannot be asked: nobody is let in on a guess\n  ok    and that answer was not kept: the next request asks again\n\n31 checks, all passing.\nM_BUDGET {\"pipelineCommands\":102,\"memoryRun\":138,\"httpMockDispatch\":31,\"exceeded\":false}\nchecking community access failed StripeError: Stripe request failed (500 unknown): down\n    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-access-revocation.test.ts.cjs:5731:11)\n    at async paidForAny (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-access-revocation.test.ts.cjs:48707:27)\n    at async ticketFor (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-access-revocation.test.ts.cjs:48776:120)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-access-revocation.test.ts.cjs:48953:62) {\n  status: 500,\n  code: 'unknown',\n  stripeMessage: 'down'\n}\n"}
+{"mode":"head","test":"lost-dispute-access.test.ts","checked":427}
+{"mode":"head","test":"lost-dispute-access.test.ts","exit":0,"signal":null,"tail":"    lost, written on the charge: closed\n  ok    won, written on the charge: open\n  ok    lost, read from Stripe: closed\n  ok    needs_response: open\n  ok    under_review: open\n  ok    warning_needs_response: open\n  ok    warning_under_review: open\n  ok    warning_closed: open\n  ok    won: open\n  ok    prevented: open\n  ok    never disputed: open\n  ok    and no extra request for it\n\nA payment plan, by its first invoice's payment\n  ok    its first payment lost to a dispute: closed\n  ok    still under review: open\n\nA course\n  ok    lost to a dispute: shut, though the thanks page wrote it down\n  ok    needs_response: still open\n  ok    under_review: still open\n  ok    warning_needs_response: still open\n  ok    warning_under_review: still open\n  ok    warning_closed: still open\n  ok    won: still open\n  ok    prevented: still open\n  ok    bought twice, one lost: the other stands\n  ok    bought again after the lost dispute: open again\n\nA community\n  ok    lost to a dispute: not let in\n  ok    a dispute that still needs an answer: let in\n  ok    one lost, another won: let in\n  ok    bought in one click after paying, that payment lost: not let in\n  ok    and let in while the creator won it\n\nThe download\n  ok    lost to a dispute: the link closes\n  ok    under review: still handed over\n  ok    an offer after paying, lost: closed; won: open\n\nThe list of purchases\n  ok    the lost one leaves the list, the one under review stays\n\nA license key\n  ok    the five-minute job revokes the one lost\n  ok    lost: revoked; won and another sale's: valid\n  ok    a closing read once\n\n37 checks, all passing.\nM_BUDGET {\"pipelineCommands\":178,\"memoryRun\":262,\"httpMockDispatch\":65,\"exceeded\":false}\n"}
+{"mode":"head","test":"lost-dispute-doors.test.ts","checked":473}
+{"mode":"head","test":"lost-dispute-doors.test.ts","exit":0,"signal":null,"tail":"rak_event_read permission'\n}\nreading a payment's dispute failed StripeError: Stripe request failed (429 unknown): rate limited\n    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:5832:11)\n    at async disputeLost (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:13718:18)\n    at async keptUnlessLost (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:13732:12)\n    at async paidForAny (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:49662:11)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:125362:32) {\n  status: 429,\n  code: 'unknown',\n  stripeMessage: 'rate limited'\n}\nreading a payment's dispute failed StripeError: Stripe request failed (429 unknown): rate limited\n    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:5832:11)\n    at async disputeLost (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:13718:18)\n    at async keptUnlessLost (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:13732:12)\n    at async purchaseFromIntent (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:61942:9)\n    at async purchasesFor (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:62050:24)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:125363:18) {\n  status: 429,\n  code: 'unknown',\n  stripeMessage: 'rate limited'\n}\n"}
+{"mode":"head","test":"lost-dispute-cursor.test.ts","checked":423}
+{"mode":"head","test":"lost-dispute-cursor.test.ts","exit":null,"error":"spawnSync /opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node ENOBUFS","signal":"SIGTERM","tail":" at onAccount (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2203:43)\n    at refundsOf (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59795:26)\n    at async readRefunds (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59770:16)\n    at async syncMeetings (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59751:45)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59991:5)\nreading a store's refunds for meetings failed Error: M_ADMISSION_CEILING\n    at stop (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:60131:9)\n    at current (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:60150:30)\n    at /workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2204:29\n    at timed (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2145:19)\n    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2203:43)\n    at refundsOf (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59795:26)\n    at async readRefunds (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59770:16)\n    at async syncMeetings (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59751:45)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59991:5)\n"}
+file:///workspace/scratch/d1ece80b1417/m-review-3133/run.mjs:6
+ const p=spawnSync(process.execPath,['--max-old-space-size=512',f],{cwd:view,env:testEnvironment({PATH:'/usr/bin:/bin',TZ:'UTC'}),encoding:'utf8',timeout:120000,maxBuffer:256*1024});const out=(p.stdout||'')+(p.stderr||'');writeFileSync(f+'.log',out);console.log(JSON.stringify({mode,test,exit:p.status,error:p.error?.message,signal:p.signal,tail:out.slice(-1700)}));if(p.error||p.signal)throw Error('Incomplete child');
+                                                                                                                                                                                                                                                                                                                                                                                                         ^
+
+Error: Incomplete child
+    at file:///workspace/scratch/d1ece80b1417/m-review-3133/run.mjs:6:394
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+Node.js v24.22.1
+
+```
+
+### own.log
+```
+{"mode":"head","test":"m-3133-multiple-payments.proof.ts","checked":14}
+{"mode":"head","test":"m-3133-multiple-payments.proof.ts","exit":0,"signal":null,"tail":"  ok    both: only all own payments refunded closes access\n  ok    both: exactly invoice + list + two intent reads\n  ok    both: every read names this connected account\n  ok    both: this decision makes no payment mutation\n  ok    partial: only all own payments refunded closes access\n  ok    partial: exactly invoice + list + two intent reads\n  ok    partial: every read names this connected account\n  ok    partial: this decision makes no payment mutation\n  ok    unreadable: only all own payments refunded closes access\n  ok    unreadable: exactly invoice + list + two intent reads\n  ok    unreadable: every read names this connected account\n  ok    unreadable: this decision makes no payment mutation\n\n12 checks, all passing.\nM_BUDGET {\"pipelineCommands\":0,\"memoryRun\":0,\"httpMockDispatch\":12,\"exceeded\":false}\n"}
+
+```
+
+### verify.log
+```
+types 2
+lint 0 null undefined
+
+```
+
+### types.log
+```
+[96mlib/affiliates.ts[0m:[93m106[0m:[93m39[0m - [91merror[0m[90m TS2307: [0mCannot find module '@/lib/affiliate-bulk-words' or its corresponding type declarations.
+
+[7m106[0m import type { HeldOne, HeldWhy } from "@/lib/affiliate-bulk-words";
+[7m   [0m [91m                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[96mlib/api-read.ts[0m:[93m18[0m:[93m26[0m - [91merror[0m[90m TS2307: [0mCannot find module '@/lib/api-guard' or its corresponding type declarations.
+
+[7m18[0m import { apiError } from "@/lib/api-guard";
+[7m  [0m [91m                         ~~~~~~~~~~~~~~~~~[0m
+{"roots":8,"sources":1206,"diagnostics":2}
+```
+
+### lint.log
+```
+
+```
+
+### scanner.log
+```
+Public data check: 3978 tracked files; 0 file(s) require correction.
+
+```
+
+### verified.json
+```
+{"verified": 3977, "mismatch": [], "unrecovered": 347}
+```
+
+### tests/m-3133-multiple-payments.proof.ts Gitblob 2b65432e7692438b40fa60a3f55050a9c57d88ca
+```ts
+import { purchaseRefunded } from "@/lib/refunds";
+import { done, is } from "./check";
+
+process.env.STRIPE_SECRET_KEY = "sk_test_m_3133_synthetic";
+const account = "acct_m3133", invoice = "in_m3133invoice01", first = "pi_m3133first01", second = "pi_m3133second01";
+const session = { mode: "subscription", invoice, metadata: { kind: "plan" } };
+let mode: "both" | "partial" | "unreadable" = "both";
+let calls: { method: string; account: string | null; path: string }[] = [];
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(input instanceof Request ? input.url : String(input));
+  const path = url.pathname.replace(/^\/v1/, "");
+  calls.push({ method: init?.method ?? "GET", account: new Headers(init?.headers).get("Stripe-Account"), path });
+  if (path === `/invoices/${invoice}`) return Response.json({ id: invoice, payment_intent: null });
+  if (path === "/invoice_payments") return Response.json({ data: [first, second].map(id => ({ invoice, status: "paid", payment: { payment_intent: id } })), has_more: false });
+  if (path.startsWith("/payment_intents/")) {
+    const id = path.slice("/payment_intents/".length);
+    if (id === second && mode === "unreadable") return Response.json(null);
+    const back = id === second && mode === "partial" ? 500 : 1000;
+    return Response.json({ id, object: "payment_intent", latest_charge: { id: `ch_${id.slice(3)}`, object: "charge", payment_intent: id, amount: 1000, amount_refunded: back, refunded: back === 1000, disputed: false } });
+  }
+  return Response.json({ error: { message: "unexpected synthetic path" } }, { status: 404 });
+}) as typeof fetch;
+async function main() {
+  const prior = console.error;
+  console.error = () => {};
+  try {
+    for (const [variant, expected] of [["both", true], ["partial", false], ["unreadable", false]] as const) {
+      mode = variant;
+      calls = [];
+      is(`${variant}: only all own payments refunded closes access`, await purchaseRefunded(account, session), expected);
+      is(`${variant}: exactly invoice + list + two intent reads`, calls.length, 4);
+      is(`${variant}: every read names this connected account`, calls.every(call => call.account === account), true);
+      is(`${variant}: this decision makes no payment mutation`, calls.every(call => call.method === "GET"), true);
+    }
+  } finally { console.error = prior; }
+  done();
+}
+void main();
+
+```
+
+### tests/refunds-own-reply.test.ts Gitblob 5a69fd3844a12aadde40f1b8b0122ceb77602d9f
+```ts
+/**
+ * Rule 30 in the refund rule every door uses (lib/refunds.ts, purchaseRefunded for a payment plan): a Stripe reply
+ * decides only when it is the object asked for, and a list decides only when it is whole. The same reading of
+ * `/invoices/{id}` and `/invoice_payments` as the closing refunds (lib/closing-refunds.ts, Claude 6's money review of
+ * #3097), and of the payment read for its charge.
+ *
+ * A payment plan is judged by its first invoice's payment. Another invoice's reply, one with no id, another invoice's
+ * listed payment, another payment's reply or charge, a paid payment whose intent does not read, or a list that does
+ * not say it is whole, would judge this purchase by someone else's money, or by part of its own: a refund made on
+ * another payment would read as this buyer's, so the course, the community, the download and the order list would
+ * close on a buyer who paid, and the purchase email would tell them "refunded". Each must read as Stripe not having
+ * answered, which closes nothing here (as everywhere in lib/refunds.ts), with no request beyond the ones made today.
+ *
+ * Synthetic only: Stripe is a stand-in fetch and Redis is tests/redis-stub.ts. Nothing real is reached.
+ */
+import { purchaseRefunded } from "@/lib/refunds";
+import { done, is, part } from "./check";
+
+process.env.STRIPE_SECRET_KEY = "sk_test_refunds_own_reply_synthetic";
+
+const ACCOUNT = "acct_refundown01";
+const INVOICE = "in_refundown0001";
+const OTHER_INVOICE = "in_refundother01";
+const INTENT = "pi_refundown0001";
+const OTHER_INTENT = "pi_refundother01";
+
+type World = { invoice: unknown; listed: unknown; intent: (id: string) => unknown };
+let world: World;
+let calls: string[] = [];
+
+globalThis.fetch = (async (input: string | URL | Request) => {
+  const url = new URL(String(input instanceof Request ? input.url : input));
+  const path = url.pathname.replace(/^\/v1/, "");
+  calls.push(path);
+  if (path === `/invoices/${INVOICE}`) return Response.json(world.invoice);
+  if (path === "/invoice_payments") return Response.json(world.listed);
+  if (path.startsWith("/payment_intents/")) return Response.json(world.intent(decodeURIComponent(path.slice("/payment_intents/".length))));
+  if (path === "/disputes") return Response.json({ object: "list", data: [], has_more: false });
+  return Response.json({ error: { message: "unexpected synthetic request" } }, { status: 404 });
+}) as typeof fetch;
+
+/** A charge refunded in full or not at all, naming its own payment. */
+const charge = (pi: string, refunded: boolean) => ({ object: "charge", id: `ch_${pi.slice(3)}`, payment_intent: pi, amount: 2000, amount_refunded: refunded ? 2000 : 0, refunded, disputed: false });
+/** Each payment's own reply: this buyer's payment not refunded, another payment refunded in full. */
+const intents = (id: string) => ({ id, object: "payment_intent", latest_charge: charge(id, id === OTHER_INTENT) });
+/** The same, with this buyer's payment refunded in full too. */
+const allRefunded = (id: string) => ({ id, object: "payment_intent", latest_charge: charge(id, true) });
+
+const plan = { mode: "subscription", invoice: INVOICE, payment_intent: null, metadata: { kind: "plan" } };
+const ownInvoice = { id: INVOICE, object: "invoice", payment_intent: INTENT };
+const namesNone = { id: INVOICE, object: "invoice", payment_intent: null };
+const row = (over: Record<string, unknown> = {}) => ({ id: "inpay_refundown1", object: "invoice_payment", invoice: INVOICE, status: "paid", payment: { type: "payment_intent", payment_intent: INTENT }, ...over });
+const whole = (...data: unknown[]) => ({ object: "list", data, has_more: false });
+
+async function judged(next: World): Promise<{ refunded: boolean; calls: string[] }> {
+  world = next;
+  calls = [];
+  const refunded = await purchaseRefunded(ACCOUNT, plan);
+  return { refunded, calls };
+}
+
+/** A reply that is not the object asked for, or a list not whole: not refunded, and no request beyond today's. */
+async function notJudged(what: string, next: World, most: number) {
+  const got = await judged(next);
+  is(`${what}: not refunded, so nothing closes on this buyer`, got.refunded, false);
+  is(`${what}: no more than ${most} requests`, got.calls.length <= most, true);
+}
+
+async function main() {
+  part("Controls: every reply is the object asked for");
+  let got = await judged({ invoice: ownInvoice, listed: null, intent: allRefunded });
+  is("the invoice names this payment, refunded in full: refunded", got.refunded, true);
+  is("two requests, as today", got.calls, [`/invoices/${INVOICE}`, `/payment_intents/${INTENT}`]);
+  got = await judged({ invoice: ownInvoice, listed: null, intent: intents });
+  is("the invoice names this payment, not refunded: kept", got.refunded, false);
+  got = await judged({ invoice: { ...ownInvoice, payment_intent: { id: INTENT, object: "payment_intent" } }, listed: null, intent: allRefunded });
+  is("the invoice's payment expanded as an object: read by its id", got.refunded, true);
+  got = await judged({ invoice: namesNone, listed: whole(row()), intent: allRefunded });
+  is("the invoice names none, its own paid payment listed and refunded: refunded", got.refunded, true);
+  is("three requests, as today", got.calls, [`/invoices/${INVOICE}`, "/invoice_payments", `/payment_intents/${INTENT}`]);
+  got = await judged({ invoice: namesNone, listed: whole(row({ invoice: { id: INVOICE, object: "invoice" } })), intent: allRefunded });
+  is("the listed payment names this invoice as an expanded object: refunded", got.refunded, true);
+  got = await judged({ invoice: namesNone, listed: whole(row({ invoice: undefined })), intent: allRefunded });
+  is("a listed payment that does not say its invoice (as the list was asked for this one): refunded", got.refunded, true);
+  got = await judged({ invoice: namesNone, listed: whole(row()), intent: intents });
+  is("its own paid payment listed, not refunded: kept", got.refunded, false);
+  got = await judged({ invoice: namesNone, listed: whole(row({ status: "open" }), row({ status: "canceled" })), intent: allRefunded });
+  is("a whole list with no paid payment: kept, today's answer", got.refunded, false);
+  is("and no payment read for it", got.calls, [`/invoices/${INVOICE}`, "/invoice_payments"]);
+
+  part("The invoice read answers with another invoice, whose payment was refunded");
+  await notJudged("another invoice", { invoice: { id: OTHER_INVOICE, object: "invoice", payment_intent: OTHER_INTENT }, listed: null, intent: intents }, 2);
+
+  part("The invoice read answers with no id, naming a refunded payment");
+  await notJudged("no id", { invoice: { object: "invoice", payment_intent: OTHER_INTENT }, listed: null, intent: intents }, 2);
+
+  part("The invoice read answers with JSON null");
+  await notJudged("JSON null", { invoice: null, listed: null, intent: intents }, 2);
+
+  part("The invoice names none, and the list holds another invoice's paid payment, refunded");
+  await notJudged("another invoice's row", { invoice: namesNone, listed: whole(row({ invoice: OTHER_INVOICE, payment: { type: "payment_intent", payment_intent: OTHER_INTENT } })), intent: intents }, 3);
+
+  part("The list holds this invoice's refunded payment and a paid payment whose intent does not read");
+  await notJudged("a paid row with no readable intent", { invoice: namesNone, listed: whole(row(), row({ id: "inpay_refundown2", payment: { type: "payment_intent", payment_intent: null } })), intent: allRefunded }, 3);
+  await notJudged("a listed payment that is not an object", { invoice: namesNone, listed: whole(row(), "inpay_refundown2"), intent: allRefunded }, 3);
+
+  part("The list is not said to be whole");
+  await notJudged("has_more true", { invoice: namesNone, listed: { object: "list", data: [row()], has_more: true }, intent: allRefunded }, 3);
+  await notJudged("no has_more", { invoice: namesNone, listed: { object: "list", data: [row()] }, intent: allRefunded }, 3);
+  await notJudged("no data array", { invoice: namesNone, listed: { object: "list", has_more: false }, intent: allRefunded }, 3);
+
+  part("The payment read answers for another payment, or with another payment's charge");
+  await notJudged("another payment's reply, refunded", { invoice: ownInvoice, listed: null, intent: () => allRefunded(OTHER_INTENT) }, 2);
+  await notJudged("a payment reply with no id, refunded", { invoice: ownInvoice, listed: null, intent: () => ({ object: "payment_intent", latest_charge: charge(INTENT, true) }) }, 2);
+  await notJudged("this payment's reply with another payment's refunded charge", { invoice: ownInvoice, listed: null, intent: (id: string) => ({ id, object: "payment_intent", latest_charge: charge(OTHER_INTENT, true) }) }, 2);
+
+  done();
+}
+
+void main();
+
+```
+
+### tests/dispute-lost-own-reply.test.ts Gitblob 75ba6badb00499870f7039595ea0e65451de11c6
+```ts
+/**
+ * Rule 30 in the dispute rule every door uses (lib/refunds.ts, disputeLost): Stripe's list of a charge's disputes
+ * decides only from rows that are this charge's own, and decides "not lost" only when the list says it is whole.
+ *
+ * A charge marked disputed is asked about with `GET /disputes?charge=`. Before this unit any row with status "lost"
+ * closed the doors, whoever's charge it named, and a list not said to be whole, or not a list at all, read as "not
+ * lost". So another charge's lost dispute, or a row naming no charge, would close the course, the community, the
+ * download, the order list and the booked call on a buyer who paid; and a reply that is not a whole list would let a
+ * pre-order be handed over, or an offer's file be downloaded, on a payment the bank may have taken back.
+ *
+ * Each such reply must read as Stripe not having answered: disputeLost() throws, so the doors that let in
+ * (keptUnlessLost, purchaseRefunded) stay open as they do when Stripe is slow, and the readings that hand something
+ * over (givenBack: the pre-order job, the offer download) wait and read again. No request beyond the one made today.
+ *
+ * Synthetic only: Stripe is a stand-in fetch and Redis is tests/redis-stub.ts. Nothing real is reached.
+ */
+import { disputeLost, givenBack, keptUnlessLost, purchaseRefunded } from "@/lib/refunds";
+import { done, is, part } from "./check";
+
+process.env.STRIPE_SECRET_KEY = "sk_test_dispute_lost_own_reply_synthetic";
+
+const ACCOUNT = "acct_disputeown01";
+const CHARGE = "ch_disputeown0001";
+const OTHER_CHARGE = "ch_disputeother01";
+const INTENT = "pi_disputeown0001";
+
+let listed: unknown;
+let calls: string[] = [];
+
+globalThis.fetch = (async (input: string | URL | Request) => {
+  const url = new URL(String(input instanceof Request ? input.url : input));
+  const path = url.pathname.replace(/^\/v1/, "");
+  calls.push(`${path}?charge=${url.searchParams.get("charge") ?? ""}`);
+  if (path === "/disputes") return Response.json(listed);
+  return Response.json({ error: { message: "unexpected synthetic request" } }, { status: 404 });
+}) as typeof fetch;
+
+/** This buyer's payment, not refunded, its charge marked disputed: the only kind of payment Stripe is asked about. */
+const payment = { id: INTENT, object: "payment_intent", latest_charge: { object: "charge", id: CHARGE, payment_intent: INTENT, amount: 2000, amount_refunded: 0, refunded: false, disputed: true } };
+const session = { mode: "payment", payment_intent: payment, metadata: {} };
+
+const dispute = (over: Record<string, unknown> = {}) => ({ id: "du_disputeown01", object: "dispute", charge: CHARGE, payment_intent: INTENT, amount: 2000, status: "lost", ...over });
+const whole = (...data: unknown[]) => ({ object: "list", data, has_more: false });
+
+type Read = { lost: boolean | "unknown"; door: boolean; given: boolean | "unknown"; calls: number };
+
+/** One reading of the same reply by each kind of caller: disputeLost itself, a door that lets in, and givenBack. */
+async function read(reply: unknown): Promise<Read> {
+  listed = reply;
+  calls = [];
+  const lost = await disputeLost(ACCOUNT, payment).catch(() => "unknown" as const);
+  const kept = await keptUnlessLost(ACCOUNT, payment);
+  const door = await purchaseRefunded(ACCOUNT, session);
+  if (kept !== door) throw new Error("keptUnlessLost and purchaseRefunded disagree on one payment");
+  const given = await givenBack(ACCOUNT, payment).catch(() => "unknown" as const);
+  return { lost, door, given, calls: calls.length };
+}
+
+/** A reply that is not this charge's whole list: never "lost" from it, never "not lost" either, one request a reading. */
+async function notJudged(what: string, reply: unknown) {
+  const got = await read(reply);
+  is(`${what}: disputeLost cannot say, so it throws`, got.lost, "unknown");
+  is(`${what}: the doors stay open for a buyer who paid`, got.door, false);
+  is(`${what}: givenBack cannot say either, so nothing is handed over on it`, got.given, "unknown");
+  is(`${what}: one request a reading, as today (four readings)`, got.calls, 4);
+}
+
+async function main() {
+  const original = console.error;
+  console.error = () => {};
+  try {
+    part("Controls: this charge's own whole list");
+    let got = await read(whole(dispute()));
+    is("its own lost dispute: lost", got.lost, true);
+    is("and the doors close", got.door, true);
+    is("and it is given back", got.given, true);
+    is("one request a reading", got.calls, 4);
+    got = await read(whole(dispute({ charge: { id: CHARGE, object: "charge" } })));
+    is("its own lost dispute with the charge expanded: lost", [got.lost, got.door, got.given], [true, true, true]);
+    got = await read(whole(dispute({ status: "won" }), dispute({ id: "du_disputeown02", status: "needs_response" })));
+    is("a whole list with no lost row: not lost", got.lost, false);
+    is("and the doors stay open", got.door, false);
+    is("and it is not given back", got.given, false);
+    got = await read(whole());
+    is("a whole empty list: not lost", [got.lost, got.door, got.given], [false, false, false]);
+    is("and the request named this charge", calls.every((call) => call === `/disputes?charge=${CHARGE}`), true);
+
+    part("A row naming another charge, lost");
+    await notJudged("another charge's lost row", whole(dispute({ charge: OTHER_CHARGE })));
+    await notJudged("another charge's lost row, expanded", whole(dispute({ charge: { id: OTHER_CHARGE, object: "charge" } })));
+    await notJudged("another charge's lost row beside this charge's won one", whole(dispute({ status: "won" }), dispute({ id: "du_disputeown02", charge: OTHER_CHARGE })));
+    await notJudged("another charge's won row (its list is not this charge's)", whole(dispute({ charge: OTHER_CHARGE, status: "won" })));
+
+    part("A row naming no charge, lost");
+    await notJudged("a lost row with no charge", whole(dispute({ charge: undefined })));
+    await notJudged("a lost row with a null charge", whole(dispute({ charge: null })));
+    await notJudged("a lost row with an empty charge", whole(dispute({ charge: "" })));
+
+    part("A reply that is not a list");
+    await notJudged("JSON null", null);
+    await notJudged("an empty object", {});
+    await notJudged("a bare array", [dispute({ status: "won" })]);
+    await notJudged("data that is not an array", { object: "list", data: "du_disputeown01", has_more: false });
+    await notJudged("data null", { object: "list", data: null, has_more: false });
+
+    part("A list not said to be whole");
+    await notJudged("has_more true, no lost row on this page", { object: "list", data: [dispute({ status: "won" })], has_more: true });
+    await notJudged("no has_more", { object: "list", data: [dispute({ status: "won" })] });
+    await notJudged("has_more as text", { object: "list", data: [], has_more: "false" });
+    got = await read({ object: "list", data: [dispute()], has_more: true });
+    is("has_more true with this charge's own lost row: lost, the rest cannot undo it", [got.lost, got.door, got.given], [true, true, true]);
+
+    part("A row that is not an object");
+    await notJudged("a row that is text", whole(dispute({ status: "won" }), "du_disputeown02"));
+    await notJudged("a row that is null", whole(null));
+    await notJudged("a row that is an array", whole([dispute()]));
+  } finally {
+    console.error = original;
+  }
+  done();
+}
+
+void main();
+
+```
+
+### FULL head-refunds-own-reply.test.ts.cjs.log
+```
+
+Controls: every reply is the object asked for
+  ok    the invoice names this payment, refunded in full: refunded
+  ok    two requests, as today
+  ok    the invoice names this payment, not refunded: kept
+  ok    the invoice's payment expanded as an object: read by its id
+  ok    the invoice names none, its own paid payment listed and refunded: refunded
+  ok    three requests, as today
+  ok    the listed payment names this invoice as an expanded object: refunded
+  ok    a listed payment that does not say its invoice (as the list was asked for this one): refunded
+  ok    its own paid payment listed, not refunded: kept
+  ok    a whole list with no paid payment: kept, today's answer
+  ok    and no payment read for it
+
+The invoice read answers with another invoice, whose payment was refunded
+  ok    another invoice: not refunded, so nothing closes on this buyer
+  ok    another invoice: no more than 2 requests
+
+The invoice read answers with no id, naming a refunded payment
+  ok    no id: not refunded, so nothing closes on this buyer
+  ok    no id: no more than 2 requests
+
+The invoice read answers with JSON null
+  ok    JSON null: not refunded, so nothing closes on this buyer
+  ok    JSON null: no more than 2 requests
+
+The invoice names none, and the list holds another invoice's paid payment, refunded
+  ok    another invoice's row: not refunded, so nothing closes on this buyer
+  ok    another invoice's row: no more than 3 requests
+
+The list holds this invoice's refunded payment and a paid payment whose intent does not read
+  ok    a paid row with no readable intent: not refunded, so nothing closes on this buyer
+  ok    a paid row with no readable intent: no more than 3 requests
+  ok    a listed payment that is not an object: not refunded, so nothing closes on this buyer
+  ok    a listed payment that is not an object: no more than 3 requests
+
+The list is not said to be whole
+  ok    has_more true: not refunded, so nothing closes on this buyer
+  ok    has_more true: no more than 3 requests
+  ok    no has_more: not refunded, so nothing closes on this buyer
+  ok    no has_more: no more than 3 requests
+  ok    no data array: not refunded, so nothing closes on this buyer
+  ok    no data array: no more than 3 requests
+
+The payment read answers for another payment, or with another payment's charge
+  ok    another payment's reply, refunded: not refunded, so nothing closes on this buyer
+  ok    another payment's reply, refunded: no more than 2 requests
+  ok    a payment reply with no id, refunded: not refunded, so nothing closes on this buyer
+  ok    a payment reply with no id, refunded: no more than 2 requests
+  ok    this payment's reply with another payment's refunded charge: not refunded, so nothing closes on this buyer
+  ok    this payment's reply with another payment's refunded charge: no more than 2 requests
+
+35 checks, all passing.
+M_BUDGET {"pipelineCommands":0,"memoryRun":0,"httpMockDispatch":41,"exceeded":false}
+reading a payment plan's first payment failed Error: Stripe answered for another invoice
+    at planRefundedInFull (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2264:43)
+    at async judged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2361:20)
+    at async notJudged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2365:15)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2391:3)
+reading a payment plan's first payment failed Error: Stripe answered for another invoice
+    at planRefundedInFull (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2264:43)
+    at async judged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2361:20)
+    at async notJudged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2365:15)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2393:3)
+reading a payment plan's first payment failed Error: Stripe answered for another invoice
+    at planRefundedInFull (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2264:43)
+    at async judged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2361:20)
+    at async notJudged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2365:15)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2395:3)
+reading a payment plan's first payment failed Error: Stripe listed another invoice's payment
+    at planRefundedInFull (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2273:85)
+    at async judged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2361:20)
+    at async notJudged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2365:15)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2397:3)
+reading a payment plan's first payment failed Error: a paid payment of this invoice names no payment intent that reads
+    at planRefundedInFull (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2277:40)
+    at async judged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2361:20)
+    at async notJudged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2365:15)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2399:3)
+reading a payment plan's first payment failed Error: a payment listed for this invoice could not be read
+    at planRefundedInFull (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2272:85)
+    at async judged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2361:20)
+    at async notJudged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2365:15)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2400:3)
+reading a payment plan's first payment failed Error: this invoice's payments were not read whole
+    at planRefundedInFull (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2280:44)
+    at async judged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2361:20)
+    at async notJudged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2365:15)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2402:3)
+reading a payment plan's first payment failed Error: this invoice's payments were not read whole
+    at planRefundedInFull (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2280:44)
+    at async judged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2361:20)
+    at async notJudged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2365:15)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2403:3)
+reading a payment plan's first payment failed Error: this invoice's payments could not be read
+    at planRefundedInFull (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2270:95)
+    at async judged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2361:20)
+    at async notJudged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2365:15)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2404:3)
+reading a payment plan's first payment failed Error: Stripe answered for another payment
+    at /workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2286:44
+    at async Promise.all (index 0)
+    at async planRefundedInFull (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2283:21)
+    at async judged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2361:20)
+    at async notJudged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2365:15)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2406:3)
+reading a payment plan's first payment failed Error: Stripe answered for another payment
+    at /workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2286:44
+    at async Promise.all (index 0)
+    at async planRefundedInFull (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2283:21)
+    at async judged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2361:20)
+    at async notJudged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2365:15)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2407:3)
+reading a payment plan's first payment failed Error: Stripe answered with another payment's charge
+    at /workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2289:17
+    at async Promise.all (index 0)
+    at async planRefundedInFull (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2283:21)
+    at async judged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2361:20)
+    at async notJudged (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2365:15)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-refunds-own-reply.test.ts.cjs:2408:3)
+
+```
+
+### FULL head-lost-dispute-doors.test.ts.cjs.log
+```
+
+The license key job, when the closing events cannot be read
+  ok    a full refund still revokes its key
+  ok    and the anchor is not moved, so the disputes are read next run
+
+A dispute lost for less than the charge (an exchange rate, or part of the order: Stripe's amount cannot tell)
+  ok    4900 charged, 4870 lost: closed, as the whole
+  ok    lost for a small part: closed too
+  ok    lost for the whole price: closed
+  ok    won: open
+  ok    the key job: lost for less and lost for the whole both revoke
+  ok    and no charge is read for them
+
+The closing events and the job's time
+  ok    past the job's deadline: nothing is read, and the read is not complete, so the job keeps its place
+  ok    the pages read are in the cost registry, by name
+  ok    in time: one page read, each lost dispute a row marked lost on its charge
+  ok    past the deadline after /refunds, no job reads the closing events
+  ok    and neither the key job nor the review job moves its place
+  ok    the key stays until a run in time reads its dispute
+  ok    the next run in time revokes it
+
+A dispute that cannot be read keeps the door open, as a refund read does
+  ok    the community lets in
+  ok    the list of purchases still shows the order and the offer
+  ok    no dispute is read for an offer of another product
+
+The meeting of a paid call
+  ok    the job looks up the calls lost, not the won one
+  ok    and their meetings end; the won call's stays
+  ok    a lost dispute spends no making of the store's calendar feed
+  ok    the store is not in MEET_STORES by its bookings
+  ok    so before its feed is read, its refunds are not
+  ok    its feed made, the store's refunds are read for two days
+  ok    a call refunded in full tells the store's calendar feed its bookings changed, one making
+  ok    a meeting further ahead keeps its later score: the feed never lowers it
+
+A review's verified buyer
+  ok    proved: lost is refunded, under review is not
+  ok    the job marks a review whose payment was lost
+
+28 checks, all passing.
+M_BUDGET {"pipelineCommands":324,"memoryRun":438,"httpMockDispatch":37,"exceeded":false}
+reading the disputes closed as lost failed StripeError: Stripe request failed (403 invalid_request_error): This API key does not have the rak_event_read permission
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:5832:11)
+    at async lostDisputesSince (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:13786:20)
+    at async lostDisputesOrRetry (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:13814:12)
+    at async revokeRefunded (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:56556:31)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:125306:15) {
+  status: 403,
+  code: 'invalid_request_error',
+  stripeMessage: 'This API key does not have the rak_event_read permission'
+}
+reading a payment's dispute failed StripeError: Stripe request failed (429 unknown): rate limited
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:5832:11)
+    at async disputeLost (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:13718:18)
+    at async keptUnlessLost (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:13732:12)
+    at async paidForAny (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:49662:11)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:125362:32) {
+  status: 429,
+  code: 'unknown',
+  stripeMessage: 'rate limited'
+}
+reading a payment's dispute failed StripeError: Stripe request failed (429 unknown): rate limited
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:5832:11)
+    at async disputeLost (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:13718:18)
+    at async keptUnlessLost (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:13732:12)
+    at async purchaseFromIntent (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:61942:9)
+    at async purchasesFor (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:62050:24)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-doors.test.ts.cjs:125363:18) {
+  status: 429,
+  code: 'unknown',
+  stripeMessage: 'rate limited'
+}
+
+```
+
+### CAPPED cursor log: INCONCLUSIVE
+{"bytes": 262722, "sha256": "955360fbbae176f5aac388b0bbdca10391e10ff40870b885064ae409920c73f8", "first_and_last_4000_only": true}
+```
+
+Without a place kept, the same newest pages every run
+  ok    each run reads the newest pages and is never complete
+
+With the job's place kept
+  ok    reading keeps no place by itself: only the job's confirmation does (review of #2158)
+  ok    the first run reads as many pages as it may, not complete, and keeps where it stopped
+  ok    the next run reads on from there and reaches the end
+  ok    every lost dispute read once, across the two runs
+  ok    the end hands back the newest closing of the whole sweep, so the job's place moves past every page
+  ok    and the place is let go
+
+The review job keeps its place too (inbox C4-21)
+  ok    its first run is not complete, so it keeps only the window it started from (review of #2158)
+  ok    its next run, five minutes later, reads on in that window, reaches the end and moves its place past the newest closing
+
+A dispute that closes while a sweep goes on over several runs (review of #2158, inbox C4-24)
+  ok    the run that went on from the kept place moves the place no further than the newest closing it read
+  ok    so the next run reads from the top, where the dispute that closed meanwhile is
+
+Through a real job with a limit on its lookups (review of #2158, inbox C4-24)
+  ok    a run that could look up only some of the rows it read keeps no place past the others
+reading the disputes closed as lost failed Error: M_ADMISSION_CEILING
+    at stop (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:60131:9)
+    at current (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:60150:30)
+    at /workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2204:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2145:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2203:43)
+    at lostDisputesSince (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2367:26)
+    at async lostDisputesOrRetry (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2395:12)
+    at async refundsOf (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59797:31)
+    at async readRefunds (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59770:16)
+    at async syncMeetings (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59751:45)
+reading a store's refunds for meetings failed Error: M_ADMISSION_CEILING
+    at stop (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:60131:9)
+    at current (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:60150:30)
+    at /workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2204:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2145:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2203:43)
+    at refundsOf (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59795:26)
+    at async readRefunds (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59770:16)
+    at async syncMeetings (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59751:45)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59991:5)
+reading a store's refunds for meetings failed Error: M_ADMISSION_CEILING
+    at stop (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:60131:9)
+    at current (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:60150:30)
+    at /workspace/s
+... log middle omitted; output cap/ENOBUFS, not GREEN ...
+atch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2145:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2203:43)
+    at refundsOf (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59795:26)
+    at async readRefunds (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59770:16)
+    at async syncMeetings (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59751:45)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59991:5)
+reading a store's refunds for meetings failed Error: M_ADMISSION_CEILING
+    at stop (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:60131:9)
+    at current (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:60150:30)
+    at /workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2204:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2145:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2203:43)
+    at refundsOf (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59795:26)
+    at async readRefunds (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59770:16)
+    at async syncMeetings (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59751:45)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59991:5)
+reading a store's refunds for meetings failed Error: M_ADMISSION_CEILING
+    at stop (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:60131:9)
+    at current (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:60150:30)
+    at /workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2204:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2145:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2203:43)
+    at refundsOf (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59795:26)
+    at async readRefunds (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59770:16)
+    at async syncMeetings (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59751:45)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59991:5)
+reading a store's refunds for meetings failed Error: M_ADMISSION_CEILING
+    at stop (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:60131:9)
+    at current (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:60150:30)
+    at /workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2204:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2145:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:2203:43)
+    at refundsOf (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59795:26)
+    at async readRefunds (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59770:16)
+    at async syncMeetings (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59751:45)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3133/logs/head-lost-dispute-cursor.test.ts.cjs:59991:5)
+
+```
+
+
+### FINAL types-initial-incomplete.log
+```
+[96mlib/affiliates.ts[0m:[93m106[0m:[93m39[0m - [91merror[0m[90m TS2307: [0mCannot find module '@/lib/affiliate-bulk-words' or its corresponding type declarations.
+
+[7m106[0m import type { HeldOne, HeldWhy } from "@/lib/affiliate-bulk-words";
+[7m   [0m [91m                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[96mlib/api-read.ts[0m:[93m18[0m:[93m26[0m - [91merror[0m[90m TS2307: [0mCannot find module '@/lib/api-guard' or its corresponding type declarations.
+
+[7m18[0m import { apiError } from "@/lib/api-guard";
+[7m  [0m [91m                         ~~~~~~~~~~~~~~~~~[0m
+{"roots":8,"sources":1206,"diagnostics":2}
+```
+
+### FINAL types-only.cjs
+```
+const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');const deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules',root=path.resolve('view'),ts=require(deps+'/typescript');
+const names=['lib/refunds.ts','tests/refunds-own-reply.test.ts','tests/dispute-lost-own-reply.test.ts','tests/access-revocation.test.ts','tests/lost-dispute-access.test.ts','tests/lost-dispute-doors.test.ts','tests/tb14-lost-disputes.test.ts','tests/m-3133-multiple-payments.proof.ts'];const opts={strict:true,noEmit:true,allowJs:true,target:ts.ScriptTarget.ES2017,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler,skipLibCheck:true,esModuleInterop:true,resolveJsonModule:true,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'@/lib/content-jsx',baseUrl:root,paths:{'@/*':['*']},types:['node','react'],typeRoots:[deps+'/@types'],lib:['lib.esnext.d.ts','lib.dom.d.ts','lib.dom.iterable.d.ts']};
+const p=ts.createProgram(names.map(f=>path.join(root,f)),opts),ds=ts.getPreEmitDiagnostics(p);fs.writeFileSync('types.log',ts.formatDiagnosticsWithColorAndContext(ds,{getCurrentDirectory:()=>root,getCanonicalFileName:f=>f,getNewLine:()=>"\n"})+JSON.stringify({roots:names.length,sources:p.getSourceFiles().length,diagnostics:ds.length}));console.log('types',ds.length);
+
+```
+
+### FINAL types-final-status.log
+```
+types 0
+
+```
+
+### FINAL types.log
+```
+{"roots":8,"sources":1208,"diagnostics":0}
+```
+
+### FINAL scanner-final.log
+```
+Public data check: 3980 tracked files; 0 file(s) require correction.
+
+```
+
+### FINAL verified.json
+```
+{"verified": 3979, "mismatch": [], "unrecovered": 345}
+```
+

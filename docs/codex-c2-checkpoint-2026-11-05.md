@@ -1,3 +1,284 @@
+# C2 independent second financial review3009 — 2026-11-07 16:12 Fortaleza
+
+Newest section supersedes affected pending review status; COMPLETE 234109-character prior suffix retained exactly. Claude1 coordinates; C4 executor/ownership intact. Serial Medium/0subagents.
+
+- #3009 EXACT ee4576909c3e18cd11428aab0f0b7d1fce653773 SECOND financial formal5814485484 COMMENT complete INLINE proof/launcher/logs. NOT UNCONDITIONALLY CLEARED: proposed MEDIUM new markUntold recovery HGET throws before returnCredit(certain). Two confirmed credits of unsent first buyer remain0; healthy retry marks buyer cap-untold. SAME final33/head3FAIL+30controls; ONLYoldclosing599cc in finalgraph33/8OTHERfail, THREE target assertions PASS. Malformed-slot control restores2/no false cap marker. One causal case/3asserts, not3findings. R2 execute SAME proof+C1 classify/dispose BEFORE fix/clearance. New HGET boundary absent oldmodule; sibling HSETNX transport failure inherited/unproved separately. No author edits/selfclose.
+- Claim6711674748 BEFOREsource/diff; channelRES d0b04f9883244e316944cf7fdba103b270dcd69b ID CXC2-20261107-1605-C1-1 BEFOREevidence/execution. Initial1601CAS409 did NOTwrite; >=120s/FULLfresh>=5min/prefixo beforeSUCCESS. Requested classification progress6711776415. No second concurrent claim at final head/timeline16:09. Metadata mergeabletrue then; old normalizedfalse was NOT a demonstrated conflict.
+- SAME final permanents OLDproductive599cc in FINALgraph: lists7/4FAIL->7PASS; release8/8FAIL->8PASS; ownmarks52/24FAIL->52PASS. Linked11+5+10+14+6=46PASS; 113permanent/linkedPASS. Own33/3 separateNOTGREEN. Strict actual3roots/importgraph ES2017/bundler EXIT0/emptylog preadmitted1024MiB120s6711776415; lint7files0/syntax0/diff0; FULLscanner4260tracked0 incl3ownfiles.
+- Count1965 observedMemoryRedis.run inclnested/setup/old/new/harness15/superseded80; finalown88 and ONLYoldclosing86. Initial Proxy get trap was Promise then-assimilation HARNESS notproductRED. Earlier31 sent1 expectation invalid for unavailable sender fixture; final33 uses capclassification controls BOTHshape/throw, all logs qualified in full report. Continuous crossrestartguard NOTclaimed: an80-call restart had fresh20kperprocess rather than sharedremaining; corrected C2_USED carries observedprior count forfinal88+86. All below20k,120s512MiB256KiB pertest; types1024MiB preadmitted; no paid/native/provider/globalMR/sessioncost cert.
+- LOCAL evidencecommit9e3644978316bb370f28304014c0369aaa88aaf7/tree34ddae886bae5572ac644c1e0f334053587b29fe ONLYthreeownpaths in /workspace/scratch/c2-resume.LpgUL6/review-3009. NOT remotely ref-fetchable; complete sources/logs durable INLINE5814485484 and BELOW. Source/ref/CIauthor untouched. C6 first6710992236 credited, existing doublegiveback3078/N/G and HSCANcursorLOW separated/unreplayed. C6 sibling post-handIn cleanup now3088, not closed byC2.
+- Freshmain fetched1d7cbe8dda5d35d049c699def9919b89a6376ef5; rules472c/8e85/d989 BYTE-ID. FULLfreshchannel read throughC6-1609/V/S/L1610. C1-1450 botlegitimate/C1-1550 no highercaps orvisiblecuts readFULL; costoptimizations belongClaude2/C4/C6 notCXC2. G/S3086,M3085,J3084,othersclaims preserved. No globalPRsweep/CIqueries thisrun. C1-1330 >=5minreads (CASwait>=120sANDfreshFULL respectingcadence).
+- Own2846 currentGETOPEN/unmerged3d838 inthisrun; C4/C6financials knownpresent/C6reportsqueued, NOT C2added_to_merge_queue/gates/MERGEDcert. Neverreenqueue/healthyheadmove. Own2695dc/C5MED+WG16 and2692PRIMARY35e6/recovery8c2BOTH D2H2/displayA3 remain latestknown blocked/no grant; not freshlyexecuted. Focal2956closed5813872368;3007same42b3/proposedresidual5813915398 remainsR2/C1.2963/3047/2927completedno replay.
+- Singlecontinuity enabled/scheduleunchanged; no backgroundwatcher. No newproduct/push/refalheio/CIretrycancel/mainintegration/merge/enqueue/provider/price/limits/flags/PII. QueueLIGADA/C1expectedhead+reviews+9exact/NOdirectmerge unchanged. Next useful SAMEproofR2/C1 disposition3009 or3007, real ownreturn/grant or requested freefinancialreview aftercurrentFULL/claimRES; don't replay unchanged or thirdreview.
+
+## Complete independent report and evidence
+
+# Codex C2: independent second financial review of #3009
+
+Exact head: ee4576909c3e18cd11428aab0f0b7d1fce653773. Claude 1 coordinates; Claude 4 owns the product. Claim6711674748 preceded source/diff; channel RES d0b04f9883244e316944cf7fdba103b270dcd69b preceded evidence/execution. Initial channel CAS409 did not write; waited and reread FULL before successful CAS. No author source/ref/CI changed.
+
+## Verdict
+
+NOT unconditionally cleared. The assignment list, signed give-back and own untold-mark changes are confirmed, but one MEDIUM PROPOSED remains on the new markUntold read-back path. R2 should execute this SAME proof, and C1 should classify and decide scope BEFORE any correction. This is not the already reported double give-back now in #3078, nor C6's nonterminal HSCAN cursor note. No HIGH demonstrated in this review.
+
+## Proposed MEDIUM: a thrown recovery HGET strands certain unsent email credit
+
+lib/closing-buyers.ts:83-92, specifically await HGET at87 before cleanup91. Start with two members, credit2, and two units required per buyer. The first buyer takes2 with a confirmed reply, entering the local going batch. The second cannot take2 (negative decrement is restored), so markUntold writes its own marker. The write lands but its acknowledgment is out of shape; the recovery HGET throws a synthetic timeout. The exception bypasses returnCredit(folder,certain), and the first buyer's two known credits stay spent even though send has not been reached. The closing caller catches the exception and holds, without restoring that credit. On the next healthy run, the first buyer has no credit and gets a durable x: marker: an otherwise covered service notice is classified as cap-untold.
+
+Independent SAME final probe33: head3 failures+30 controls. The three failures are ONE causal mode: counter expected2/actual0, next-run untold expected0/actual1, first buyer's durable untold marker expectedfalse/actualtrue. The matching malformed-HGET-slot control restores2, holds, and does not misclassify the first buyer on retry. The old main599cc closing-buyers module alone in the final graph does not perform this HGET: all THREE target assertions pass. Its full33 has8 different failures for missing new marks/read-back behavior; NOT an old33GREEN claim. Thus the added HGET introduces this additional exception boundary. The sibling HSETNX transport exception and broader credit/network cleanup predate the change; they are not separately proved or certified fixed here.
+
+No real email was sent. The healthy retry control uses the repository's unavailable sender path; the cap classification is tested BEFORE delivery. An earlier assertion expecting sent1 was too broad for this fixture and was replaced with untold0, with the control run on BOTH failure forms. Earlier31-check run and logs retained, excluded from final causal conclusion. Suggestion only: one cleanup boundary for read-back failures (including throws) that returns only certain earlier credits exactly once, never the unknown write/take. Keep the ambiguous marker and no auto-retry of unknown mutations. No fix implemented.
+
+## Executed validation
+
+- SAME final permanent tests, old productive modules from main599cc in the final graph: assignment-drop-lists7/4FAIL ->7PASS; release8/8FAIL ->8PASS; closing-told-own-mark52/24FAIL ->52PASS. All67 final assertions pass. The52 includes later HSCAN and P read-back regressions; it is NOT the original25 asserted with old counts.
+- Directed linked: assignment-drop-exact11, assignment-room-exact5, task-room-unknown10, sg2-l8-credit-giveback14, person-copy-kept6 =46PASS. Thus113 permanent/linked PASS, final own33/3 separate and not counted green.
+- Own controls verify matching ceil(bytes), one-shot DEL before give-back, applied DECRBY/lost acknowledgment/repeated undo without a second debit, Proxy descriptor refusal without trap execution, accessor refusal, two independent18-byte marks, own read-back once, no recount on retry, credit refund on malformed read-back.
+- Strict actual import graph from three roots (two changed modules + own proof), repository ES2017/bundler strict options,1024MiB/120s pre-admitted6711776415: EXIT0/emptylog. ESLint five author paths +two own files EXIT0/emptylog; launcher syntax EXIT0; git diff-check0. No whole-app build/client-bundles/CI certification.
+- Execution bookkeeping:1965 observed MemoryRedis.run calls including setup/nested, old modules, initial incomplete harness15 and superseded80-call run. Initial harness Proxy get trap was triggered by Promise then-assimilation BEFORE product parser; corrected only to a descriptor trap. That incomplete run is NOT product RED. Final own88; same proof old-closing86. Per-process guard BEFORE each MemoryRedis.run,120s/512MiB/256KiB tests,20k ceiling. Restart admission now carries prior count through C2_USED; one earlier80-call restart used a fresh per-process ceiling, NOT a continuously shared session counter. Observed total is1965, NOT paid/provider or native Redis usage. No further test replay needed.
+
+## Financial and scope limits
+
+releaseBytes now confirms only exact signed safe integers and logs unknown. undoTakeRoom debits only after DEL1, retaining the conservative failure direction. Drop lists reject executable/partial envelopes before deletion in callers. No new healthy-path Redis commands were added by these changes; ambiguous marks add one HGET (nonzero), grow1 to18bytes, and read legacy markers. I read the existing6-command/2KiB registry envelope but did NOT certify aggregate repeated monthly exposure or current regional MR coverage. Known C6 double give-back (#3078), negative-counter SET0 races, over-limit loose DECRBY, post-handIn cleanup and HSCAN nonterminal-empty-page note remain separate/open, without a third reproduction. Queue/gates/main integration remain author's responsibility. No price/cap/flag/account/provider/PII change, real provider, native Redis, browser/AT, or full hosted CI tested.
+
+## Complete opt-in proof
+
+```typescript
+/** Independent, opt-in, synthetic review of #3009. No production edits. */
+import {createHash} from 'node:crypto';
+import {readTaskDrop, releaseBytes, takeRoom, undoTakeRoom} from '@/lib/assignment';
+import {tellBuyers, toldKey} from '@/lib/closing-buyers';
+import {creditKey, startClosingCredit} from '@/lib/closing-credit';
+import {workKey} from '@/lib/closing-holds';
+import {claimHandle, storeFolder, storeForEmail, storeRef} from '@/lib/store';
+import {UnknownReplyError} from '@/lib/redis-reply';
+import {store as redis} from '../../tests/redis-stub';
+import {is, done} from '../../tests/check';
+type Batch=(string|number)[][];
+const pipe=redis.pipeline.bind(redis);
+let swap: null|((b:Batch, next:()=>Promise<unknown[]>)=>Promise<unknown[]>)=null;
+const seen:Batch=[];
+redis.pipeline=async b=>{seen.push(...b);return swap?swap(b,()=>pipe(b)):pipe(b);};
+const outcome=async(fn:()=>Promise<unknown>)=>{try{return await fn();}catch(e){return e instanceof UnknownReplyError?'unknown':'thrown';}};
+async function main(){
+ redis.clear();
+ const room='c2-room', key=`nl:tasks:bytes:${room}`, path='stores/test/tasks/review.pdf';
+ await pipe([['SET',key,1000]]);
+ is('fractional positive input takes its ceiling',await takeRoom(room,1.2,2000,path),true);
+ is('matching release uses the same ceiling',await undoTakeRoom(room,1.2,path),true);
+ is('healthy room returns exactly to its initial value',(await pipe([['GET',key]]))[0],'1000');
+ is('second undo cannot give back twice',await undoTakeRoom(room,1.2,path),false);
+ is('second undo leaves room intact',(await pipe([['GET',key]]))[0],'1000');
+ const mark=`nl:tasks:taken:${createHash('sha256').update(path).digest('hex').slice(0,40)}`;
+ await takeRoom(room,20,2000,path);
+ let attempts=0;
+ swap=async(b,next)=>{const r=await next();if(b[0]?.[0]==='DECRBY'){attempts++;return [null];}return r;};
+ is('applied DECRBY with lost reply is unknown',await outcome(()=>undoTakeRoom(room,20,path)),'unknown');
+ swap=null;
+ is('lost reply was one debit only',attempts,1);
+ is('mark consumed before give-back',(await pipe([['GET',mark]]))[0],null);
+ is('retry after lost reply does not debit',await undoTakeRoom(room,20,path),false);
+ is('counter after retry is initial value',(await pipe([['GET',key]]))[0],'1000');
+ let traps=0;
+ const proxy=new Proxy([0],{getOwnPropertyDescriptor(){traps++;throw Error('trap');}});
+ swap=async(b,next)=>b[0]?.[0]==='DECRBY'?proxy:next();
+ is('proxy envelope is not a confirmed give-back',await releaseBytes(room,1),false);
+ swap=null;is('proxy traps never execute',traps,0);
+ await pipe([['HSET','nl:course:crs_c2:task:lsn_c2:files','file.pdf','3']]);
+ const bad=['file.pdf','3'];Object.defineProperty(bad,'0',{get(){traps++;return 'file.pdf';}});
+ swap=async(b,next)=>b[0]?.[0]==='HGETALL'?[bad]:next();
+ is('accessor in files list is unknown',await outcome(()=>readTaskDrop('crs_c2','lsn_c2')),'unknown');
+ swap=null;is('list accessor never executes',traps,0);
+ process.env.COMPANY_POSTAL_ADDRESS='1 Test Street, Testville, DE 19901, USA';
+ await claimHandle('c2-review@example.test','c2reviewclosing','C2 Review','');
+ const shop=await storeForEmail('c2-review@example.test');if(!shop)throw Error('seed');
+ const folder=await storeFolder(storeRef(shop)), told=toldKey(folder), work=workKey(folder), credit=creditKey(folder);
+ const tell=()=>tellBuyers(shop,Date.UTC(2026,10,1),Date.UTC(2026,11,1),'',Date.now()+60000);
+ async function seed(n:number){swap=null;await pipe([['DEL',told,work],['HSET',work,'m:sub_first','first@example.test','m:sub_second','second@example.test']]);await startClosingCredit(folder,n);}
+ for(const kind of ['shape','throw'] as const){
+  await seed(2);let reads=0;
+  swap=async(b,next)=>{
+   if(b[0]?.[0]==='HSETNX'&&b[0][1]===told){await next();return [undefined];}
+   if(b[0]?.[0]==='HGET'&&b[0][1]===told){reads++;if(kind==='throw')throw Error('synthetic read timeout');return [undefined];}
+   return next();
+  };
+  const start=seen.length;
+  is(`${kind}: round rejects before sending`,await outcome(tell),kind==='shape'?'unknown':'thrown');
+  swap=null;
+  is(`${kind}: exactly one recovery read`,reads,1);
+  is(`${kind}: first buyer was never marked as sent`,(await pipe([['HGET',told,'first@example.test']]))[0],null);
+  is(`${kind}: no notice was marked sent`,seen.slice(start).some(c=>c[0]==='HSET'&&c[1]===told),false);
+  // Normative assertion: certain credit belongs to an unsent first buyer in BOTH failure forms.
+  is(`${kind}: certain unsent credit is returned`,(await pipe([['GET',credit]]))[0],'2');
+  const next=await tell();
+  is(`${kind}: healthy retry should not classify first buyer as cap-untold`,next.untold,0);
+  is(`${kind}: first buyer should not be durably labelled cap-untold`,(await pipe([['HGET',told,'first@example.test']]))[0]?.toString().startsWith('x:')===true,false);
+ }
+ await seed(0);let reads=0;const marks:string[]=[];
+ swap=async(b,next)=>{if(b[0]?.[0]==='HSETNX'&&b[0][1]===told){marks.push(String(b[0][3]));await next();return [null];}if(b[0]?.[0]==='HGET'&&b[0][1]===told)reads++;return next();};
+ const lost=await tell();swap=null;
+ is('applied marks with lost acknowledgments are counted',lost.untold,2);
+ is('one read-back per ambiguous mark',reads,2);
+ is('own mark bytes and format',marks.every(m=>m.length===18&&/^x:[0-9a-f]{16}$/.test(m)),true);
+ is('two independent marks differ',new Set(marks).size,2);
+ is('second healthy round does not recount marks',(await tell()).untold,0);
+ done();
+}
+void main();
+```
+
+## Complete bounded launcher
+
+C2_USED is the number previously observed in this review before a resumed run. Default runs the permanent/linked matrix and diagnostic; --own-only repeats ONLY diagnostic when changed, --own-baseline uses the SAME diagnostic with ONLY old closing-buyers in the final graph. Test exit1 must include a completed check summary. Expect diagnostic to remain RED until the author provides a correction and independent disposition.
+
+```javascript
+import {createRequire} from 'node:module';
+import {readFileSync,mkdtempSync,rmSync,writeFileSync} from 'node:fs';
+import {execFileSync,spawnSync} from 'node:child_process';
+import {dirname,resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
+const root=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
+const {build}=createRequire(root+'/package.json')('esbuild');
+const {testAliases,testEnvironment}=await import(root+'/tests/test-config.mjs');
+const temp=mkdtempSync('/tmp/c2-3009-');let used=Number(process.env.C2_USED||0);
+if(!Number.isSafeInteger(used)||used<0||used>=20000)throw Error('invalid admitted count');
+const cases=[
+ ['old','assignment-drop-lists-exact.test.ts',1],['head','assignment-drop-lists-exact.test.ts',0],
+ ['old','assignment-release-exact.test.ts',1],['head','assignment-release-exact.test.ts',0],
+ ['old','closing-told-own-mark.test.ts',1],['head','closing-told-own-mark.test.ts',0],
+ ['head','own',1],['head','assignment-drop-exact.test.ts',0],['head','assignment-room-exact.test.ts',0],
+ ['head','task-room-unknown.test.ts',0],['head','sg2-l8-credit-giveback.test.ts',0],['head','person-copy-kept.test.ts',0]
+];
+try{for(const [mode,file,expected] of (process.argv.includes('--own-baseline')?[['old-closing','own',1]]:process.argv.includes('--own-only')?cases.filter(c=>c[1]==='own'):cases)){
+ if(used>=20000)throw Error('total ceiling before dispatch');
+ const outfile=temp+'/run.cjs', logs=`/tmp/c2-3009-${mode}-${file}.log`;
+ await build({entryPoints:[root+(file==='own'?'/proofs/c2/review-3009.proof.ts':'/tests/'+file)],outfile,bundle:true,platform:'node',format:'cjs',logLevel:'error',metafile:true,alias:testAliases(file,root,root+'/tests'),banner:{js:'globalThis.fetch=async()=>{throw Error("External IO forbidden")};'},plugins:[{name:'bounded-read-only',setup(b){
+ b.onLoad({filter:/\/lib\/(assignment|closing-buyers)\.ts$/},a=>(mode==='old'||(mode==='old-closing'&&a.path.endsWith('/closing-buyers.ts')))?{contents:execFileSync('git',['show','599cc66292ce6e97f2dcb1edd68c2a87979dd80a:lib/'+a.path.split('/').at(-1)],{cwd:root,encoding:'utf8'}),loader:'ts',resolveDir:dirname(a.path)}:undefined);
+ b.onLoad({filter:/\/lib\/redis-memory\.ts$/},a=>({contents:readFileSync(a.path,'utf8')+'\nconst c2Run=MemoryRedis.prototype.run;let c2Count=0;MemoryRedis.prototype.run=function(...a){if(c2Count>=Number(process.env.C2_LEFT))throw Error("C2 ceiling BEFOREdispatch");c2Count++;return c2Run.apply(this,a)};process.on("exit",()=>console.log("C2_COMMANDS="+c2Count));',loader:'ts',resolveDir:dirname(a.path)}));
+ }}]});
+ const r=spawnSync(process.execPath,['--max-old-space-size=512',outfile],{cwd:root,env:{...testEnvironment(process.env),C2_LEFT:String(20000-used)},encoding:'utf8',timeout:120000,maxBuffer:262144});
+ const log=(r.stdout||'')+(r.stderr||'');writeFileSync(logs,log);const counter=log.match(/C2_COMMANDS=(\d+)/);if(!counter)throw Error('missing counter '+file);used+=Number(counter[1]);
+ console.log(JSON.stringify({mode,file,exit:r.status,commands:Number(counter[1]),checks:log.match(/\d+ checks, [^\n]+|# tests \d+|# fail \d+/g),logs}));
+ if(r.error||r.status!==expected||(file==='own'&&!/\d+ checks,/.test(log))){console.log(log.slice(-9000));throw Error('unexpected status or incomplete proof');}
+}console.log('TOTAL_QUALIFIED_MEMORY_RUN='+used);}finally{rmSync(temp,{recursive:true,force:true});}
+```
+
+## Final diagnostic output
+
+```text
+  ok    fractional positive input takes its ceiling
+  ok    matching release uses the same ceiling
+  ok    healthy room returns exactly to its initial value
+  ok    second undo cannot give back twice
+  ok    second undo leaves room intact
+  ok    applied DECRBY with lost reply is unknown
+  ok    lost reply was one debit only
+  ok    mark consumed before give-back
+  ok    retry after lost reply does not debit
+  ok    counter after retry is initial value
+  ok    proxy envelope is not a confirmed give-back
+  ok    proxy traps never execute
+  ok    accessor in files list is unknown
+  ok    list accessor never executes
+  ok    shape: round rejects before sending
+  ok    shape: exactly one recovery read
+  ok    shape: first buyer was never marked as sent
+  ok    shape: no notice was marked sent
+  ok    shape: certain unsent credit is returned
+  ok    shape: healthy retry should not classify first buyer as cap-untold
+  ok    shape: first buyer should not be durably labelled cap-untold
+  ok    throw: round rejects before sending
+  ok    throw: exactly one recovery read
+  ok    throw: first buyer was never marked as sent
+  ok    throw: no notice was marked sent
+  FAIL  throw: certain unsent credit is returned
+        expected "2"
+        got      "0"
+  FAIL  throw: healthy retry should not classify first buyer as cap-untold
+        expected 0
+        got      1
+  FAIL  throw: first buyer should not be durably labelled cap-untold
+        expected false
+        got      true
+  ok    applied marks with lost acknowledgments are counted
+  ok    one read-back per ambiguous mark
+  ok    own mark bytes and format
+  ok    two independent marks differ
+  ok    second healthy round does not recount marks
+
+33 checks, 3 failing.
+C2_COMMANDS=88
+giving back 20 bytes of a store's task room: unknown reply, not counted as given back
+giving back 1 bytes of a store's task room: unknown reply, not counted as given back
+a closing store's buyers' emails were not sent (retry); tried again tomorrow
+```
+
+## Old-closing SAME final diagnostic output
+
+```text
+  ok    fractional positive input takes its ceiling
+  ok    matching release uses the same ceiling
+  ok    healthy room returns exactly to its initial value
+  ok    second undo cannot give back twice
+  ok    second undo leaves room intact
+  ok    applied DECRBY with lost reply is unknown
+  ok    lost reply was one debit only
+  ok    mark consumed before give-back
+  ok    retry after lost reply does not debit
+  ok    counter after retry is initial value
+  ok    proxy envelope is not a confirmed give-back
+  ok    proxy traps never execute
+  ok    accessor in files list is unknown
+  ok    list accessor never executes
+  FAIL  shape: round rejects before sending
+        expected "unknown"
+        got      {"done":false,"after":"","pages":0,"sent":0,"untold":0}
+  FAIL  shape: exactly one recovery read
+        expected 1
+        got      0
+  ok    shape: first buyer was never marked as sent
+  ok    shape: no notice was marked sent
+  ok    shape: certain unsent credit is returned
+  ok    shape: healthy retry should not classify first buyer as cap-untold
+  ok    shape: first buyer should not be durably labelled cap-untold
+  FAIL  throw: round rejects before sending
+        expected "thrown"
+        got      {"done":false,"after":"","pages":0,"sent":0,"untold":0}
+  FAIL  throw: exactly one recovery read
+        expected 1
+        got      0
+  ok    throw: first buyer was never marked as sent
+  ok    throw: no notice was marked sent
+  ok    throw: certain unsent credit is returned
+  ok    throw: healthy retry should not classify first buyer as cap-untold
+  ok    throw: first buyer should not be durably labelled cap-untold
+  FAIL  applied marks with lost acknowledgments are counted
+        expected 2
+        got      0
+  FAIL  one read-back per ambiguous mark
+        expected 2
+        got      0
+  FAIL  own mark bytes and format
+        expected true
+        got      false
+  FAIL  two independent marks differ
+        expected 2
+        got      1
+  ok    second healthy round does not recount marks
+
+33 checks, 8 failing.
+C2_COMMANDS=86
+giving back 20 bytes of a store's task room: unknown reply, not counted as given back
+giving back 1 bytes of a store's task room: unknown reply, not counted as given back
+a closing store's buyers' emails were not sent (retry); tried again tomorrow
+a closing store's buyers' emails were not sent (retry); tried again tomorrow
+a closing store's buyers' emails were not sent (retry); tried again tomorrow
+a closing store's buyers' emails were not sent (retry); tried again tomorrow
+```
+
+
+---
+
 # C2 focal2956 and focal3007 — 2026-11-07 14:09 Fortaleza
 
 Newest status supersedes affected historical pending findings; COMPLETE prior suffix retained.

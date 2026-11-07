@@ -16,12 +16,24 @@
  * Rule 30, same file and flow: unblock() answered "They can write to you
  * again." on an SREM reply nobody could read. It now throws the same way.
  *
+ * Rule 30, the community's other consent writes: lib/community.ts
+ * patchMember() read a member's record with HGET and took any reply that was
+ * not a string for "no such member", so setMail() (a community email's stop
+ * link) and moderateMember() (mute) wrote nothing and still answered: the
+ * one-click stop said "Unsubscribed." while the announcements stayed on. For
+ * those two, a reply that is neither a record nor an exact null now throws
+ * UnknownReplyError before any write; the stop door answers 503 "We could not
+ * save that just now" (as the reminder and review stops already do), and the
+ * community route's own catch says "Nothing was changed".
+ *
  * Synthetic only: the in-memory Redis stand-in, with one reply made unknown
  * or one command lost.
  */
 import { NextRequest } from "next/server";
 import { decline, declinedBy, inbox, parseDmSetting, send, unblock } from "@/lib/community-dm";
-import { freshConfig, readMember, saveConfig } from "@/lib/community";
+import { freshConfig, moderateMember, readMember, saveConfig } from "@/lib/community";
+import { stopAnnouncements } from "@/lib/community-mail";
+import { POST as unsubscribeRoute } from "@/app/api/mail/unsubscribe/route";
 import { communityViewer } from "@/lib/community-access";
 import { communityWords } from "@/lib/buyer-words/community";
 import { emailKey, mintPass, passCookieName } from "@/lib/learn";
@@ -40,15 +52,41 @@ type Command = (string | number)[];
  * happen); without it, the command runs and only its reply is unknown.
  */
 let swap: { match: (command: Command) => boolean; bad: unknown; lost?: boolean } | null = null;
-const real = redis.pipeline.bind(redis);
+const stub = redis.pipeline.bind(redis);
+/**
+ * The stand-in runs only the EVALs it knows; lib/community.ts patchMember's
+ * compare-and-set of a member's record (CAS_MEMBER) is run here, with the
+ * same plain commands the script runs, one command at a time.
+ */
+const isMemberCas = (c: Command) => c[0] === "EVAL" && String(c[1]).includes('if cur ~= ARGV[2] then return 0 end');
+async function memberCas(c: Command): Promise<number> {
+  const [, , , members, dir, key, raw, next, listed, at] = c;
+  const [cur] = await stub([["HGET", members, key]]);
+  if (cur !== raw) return 0;
+  await stub([["HSET", members, key, next], listed === "1" ? ["ZADD", dir, at, key] : ["ZREM", dir, key]]);
+  return 1;
+}
+const real = async (commands: Command[]): Promise<unknown[]> => {
+  if (!commands.some(isMemberCas)) return stub(commands);
+  const out: unknown[] = [];
+  for (const command of commands) out.push(isMemberCas(command) ? await memberCas(command) : (await stub([command]))[0]);
+  return out;
+};
+/** Matches only the nth command `match` picks (1 is the first), counting from when it is made. */
+const nth = (match: (command: Command) => boolean, n: number) => {
+  let count = 0;
+  return (command: Command) => match(command) && (count += 1) === n;
+};
 redis.pipeline = (async (commands: Command[]) => {
   if (!swap) return real(commands);
   const rule = swap;
-  const kept = rule.lost ? commands.filter((c) => !rule.match(c)) : commands;
+  // Decided once per command, so a counting match is asked exactly once each.
+  const picked = commands.map((c) => rule.match(c));
+  const kept = rule.lost ? commands.filter((_, i) => !picked[i]) : commands;
   const replies = await real(kept);
   let at = 0;
-  return commands.map((command) => {
-    if (rule.match(command)) {
+  return commands.map((_, i) => {
+    if (picked[i]) {
       if (!rule.lost) at += 1;
       return rule.bad;
     }
@@ -203,6 +241,55 @@ async function main(): Promise<void> {
     swap = null;
     is("Ana is still declined", await send(cid, setting, ANA, viewer.key, "still?", ROOM), { ok: false, reason: "declined" });
     is("control: the second try unblocks", await read("unblock"), { status: 303, notice: "dmunblocked", body: "" });
+  }
+
+  part("Rule 30: a community email's stop link is never said done on a member record nobody could read");
+  {
+    const CM = "cmstoprcpt";
+    const KEY = "f".repeat(32);
+    const TOKEN = "e".repeat(40);
+    const member = { k: KEY, e: "stop@dmdeclinercpt.example", n: "Stop", h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: TOKEN, q: [], qa: 0, qq: [] };
+    await real([["HSET", `nl:cm:${CM}:m`, KEY, JSON.stringify(member)], ["SET", `nl:cm:unsub:${TOKEN}`, `${CM}|${KEY}|stopclub`]]);
+    // The first HGET finds the link's member; the second is the read before the write.
+    const writeRead = (command: Command) => command[0] === "HGET" && command[1] === `nl:cm:${CM}:m`;
+    for (const [label, bad] of UNKNOWN.filter(([, bad]) => bad !== null)) {
+      swap = { match: nth(writeRead, 2), bad };
+      const got = await outcome(() => stopAnnouncements(TOKEN));
+      swap = null;
+      is(`the record's read answered ${label}: unknown, not stopped`, got, "threw UnknownReplyError");
+    }
+    is("the announcements are still on, as nothing was written", (await readMember(CM, KEY))?.mail, true);
+    const oneClick = () =>
+      unsubscribeRoute(
+        new NextRequest(`https://marktmorgen.com/api/mail/unsubscribe?c=${TOKEN}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: "https://marktmorgen.com", Host: "marktmorgen.com" },
+          body: "List-Unsubscribe=One-Click",
+        }),
+      );
+    swap = { match: nth(writeRead, 2), bad: { result: "lost" } };
+    const failed = await outcome(oneClick);
+    swap = null;
+    is(
+      "one-click stop on an unknown read: 503 'could not save', never 'Unsubscribed.'",
+      typeof failed === "string" ? failed : [failed.status, await failed.text()],
+      [503, "We could not save that just now. Please try again in a minute."],
+    );
+    is("still on", (await readMember(CM, KEY))?.mail, true);
+    const ok = await oneClick();
+    is("control: exact replies, 'Unsubscribed.'", [ok.status, await ok.text()], [200, "Unsubscribed."]);
+    is("control: the announcements are off", (await readMember(CM, KEY))?.mail, false);
+
+    part("Rule 30: a mute is never said done on a member record nobody could read");
+    for (const [label, bad] of UNKNOWN.filter(([, bad]) => bad !== null)) {
+      swap = { match: nth(writeRead, 1), bad };
+      const got = await outcome(() => moderateMember(CM, KEY, { muted: true }));
+      swap = null;
+      is(`the record's read answered ${label}: unknown, not muted`, got, "threw UnknownReplyError");
+    }
+    is("not muted, as nothing was written", (await readMember(CM, KEY))?.muted, false);
+    is("control: an absent member is still null (nothing to mute)", await moderateMember(CM, "0".repeat(32), { muted: true }), null);
+    is("control: exact replies mute", (await moderateMember(CM, KEY, { muted: true }))?.muted, true);
   }
 
   done();

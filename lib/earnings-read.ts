@@ -2,12 +2,18 @@
  * A store's twelve months of money, read (426 [BX2] unit 2; docs/bx2-earnings-design.md).
  *
  * From the creator's own Stripe account: the store's paid checkouts and the
- * one-click extras after them, its renewals, and the refunds and the disputes
- * that took money on the account; and the PayPal sales and full refunds kept
- * here as each was paid (lib/paypal-sales.ts). The same lists, paths and page
- * caps as the sales reading (lib/stats.ts, readSales), so one reading of the
- * year is at most one SALES_READ_SHAPE (lib/read-ceilings.ts): 58 Stripe pages,
- * 2,000 PayPal sales and PAYPAL_REFUNDS_READ refunds. It is one of the store's
+ * one-click extras after them, every paid invoice of its memberships and
+ * payment plans but the first (`subscription_create`, which its checkout
+ * already counted), and the refunds on the account; and the PayPal sales and
+ * full refunds kept here as each was paid (lib/paypal-sales.ts). Stripe's
+ * disputes are said not read, with the money given back (`reinstated`): the
+ * design reads them only from their own balance transactions, whose shape is
+ * not confirmed here, and never through DISPUTE_TAKES, which drops a dispute
+ * once won and would rewrite a month already shown (docs/bx2-earnings-design.md,
+ * "Units" 2). The same lists, paths and page caps as the sales reading
+ * (lib/stats.ts, readSales), less the disputes, so one reading of the year is
+ * within one SALES_READ_SHAPE (lib/read-ceilings.ts): 55 of its 58 Stripe
+ * pages, 2,000 PayPal sales and PAYPAL_REFUNDS_READ refunds. It is one of the store's
  * HEAVY_READINGS_PER_DAY, taken before anything is read (keptReading), and the
  * months are kept as the fourth kind of reading, "earnings", so looking again
  * does not read again.
@@ -22,7 +28,9 @@
  *   - read to its end: every month from the reading's start is known;
  *   - stopped at its cap, or at a record it cannot read: every record newer
  *     than where it stopped was read, so the months wholly after it are known
- *     (`reachedBack`) and the rest unknown, never a lower amount;
+ *     (`reachedBack`) and the rest unknown, never a lower amount; the paid
+ *     invoices, dated by payment and listed by when they were made, know no
+ *     month when they stop (`reachedBack` null);
  *   - answered in another shape, out of order, with an id twice, or failed:
  *     unread, and every month of its source unknown.
  *
@@ -34,21 +42,23 @@
  * from RENEWAL_PAID_WITHIN_DAYS after the reading's start, which gives up the
  * oldest month and no other; and a renewal read that was paid later than that
  * after its invoice shows the assumption does not hold, so the renewals are
- * unread. Nothing here ranks or rates the creator by revenue (561 [NE1]).
+ * unread. Every record carries its provider's id (`stripe:…`, `paypal:…`), and
+ * the reading's time is taken once every list was read, so a record made while
+ * it ran is money so far. Nothing here ranks or rates the creator by revenue
+ * (561 [NE1]).
  */
 import { type Earnings, type ListReading, type MoneyEvent, type MoneyKind, type ProviderReading, earningsByMonth, readingSince } from "@/lib/earnings-by-month";
 import { PAYPAL_REFUNDS_READ, paidKey, refundedKey, salesKey } from "@/lib/paypal-sales";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
-import { DISPUTE_TAKES } from "@/lib/retained-revenue";
 import { readsSales } from "@/lib/stats";
 import { type Store, saleHandles } from "@/lib/store";
 import { keyFor, onAccount } from "@/lib/stripe-account";
 import { STRIPE_LIST_VERSION, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { type Kept, NotRead, keptReading } from "@/lib/store-readings";
 
-/** Pages of a hundred each Stripe list is read for: those of the sales reading (lib/stats.ts, readSales), 58 in all. */
-export const EARNINGS_STRIPE_PAGES = { checkouts: 20, extras: 20, invoices: 10, refunds: 5, disputes: 3 } as const;
+/** Pages of a hundred each Stripe list is read for: those of the sales reading (lib/stats.ts, readSales), less its 3 of disputes (said not read): 55 in all. */
+export const EARNINGS_STRIPE_PAGES = { checkouts: 20, extras: 20, invoices: 10, refunds: 5 } as const;
 /** PayPal sales read at most: those of the sales reading (readPaidSales(store, since, 20)). */
 export const EARNINGS_PAYPAL_SALES = 20 * 100;
 /** PayPal full refunds read at most. */
@@ -78,7 +88,7 @@ function money(row: Record<string, unknown>, field: string, at: number): MoneyEv
   const id = ownField(row, "id");
   if (typeof cents !== "number" || !Number.isSafeInteger(cents) || cents < 0) return null;
   if (typeof currency !== "string" || !CURRENCY.test(currency) || typeof id !== "string") return null;
-  return { id, at: at * 1000, cents, currency: currency.toLowerCase() };
+  return { id: `stripe:${id}`, at: at * 1000, cents, currency: currency.toLowerCase() };
 }
 
 /** The row's metadata, a plain object of its own, or null. */
@@ -133,12 +143,16 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
       if (ownField(meta, "kind") !== "upsell" || !ours(meta) || status !== "succeeded") return "skip";
       return money(row, "amount", created);
     },
-    // A payment after the first of the store's memberships and payment plans, dated by when it was paid.
+    // Every paid invoice of the store's memberships and payment plans but the first, whose payment the checkout
+    // already counted (renewals, a switch charged at once, any other reason), dated by when it was paid.
     invoices: (row, created) => {
       const status = text(row, "status");
       const reason = text(row, "billing_reason");
       if (status === null || reason === null) return null;
-      if (status !== "paid" || reason !== "subscription_cycle") return "skip";
+      if (status !== "paid" || reason === "subscription_create") return "skip";
+      // An invoice of no subscription (one the creator sent by hand, or a quote's): not a membership's.
+      const parent = ownField(row, "parent");
+      if (parent === null || (plainObject(parent) && typeof ownField(parent, "type") === "string" && ownField(parent, "type") !== "subscription_details")) return "skip";
       const meta = invoiceMetadata(row);
       if (!meta) return null;
       if (!ours(meta)) return "skip";
@@ -155,26 +169,22 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
       if (status === null) return null;
       return status === "succeeded" || status === "pending" ? money(row, "amount", created) : "skip";
     },
-    // A dispute the bank is holding or the buyer won (DISPUTE_TAKES, as lib/retained-revenue.ts).
-    disputes: (row, created) => {
-      const status = text(row, "status");
-      if (status === null) return null;
-      return DISPUTE_TAKES.has(status) ? money(row, "amount", created) : "skip";
-    },
   };
 }
 
 /**
  * One Stripe list since `sinceSec`, newest first, at most `pages` pages of a
  * hundred, in the version its shapes are read in. `shift` (ms) moves where it
- * is known from (renewals: RENEWAL_SHIFT_MS). Throws, so the list is unread,
- * for a page in another shape, an id twice or rows out of order.
+ * is known from (renewals: RENEWAL_SHIFT_MS). `byPayment`: its records are
+ * dated otherwise than the order it is listed in (paid invoices, by payment),
+ * so when it stops it knows no month (`reachedBack` null). Throws, so the list
+ * is unread, for a page in another shape, an id twice or rows out of order.
  */
-async function stripeList(account: string, path: string, kind: MoneyKind, sinceSec: number, pages: number, take: (row: Record<string, unknown>, created: number) => Taken, shift = 0): Promise<ListReading> {
+async function stripeList(account: string, path: string, kind: MoneyKind, sinceSec: number, pages: number, take: (row: Record<string, unknown>, created: number) => Taken, shift = 0, byPayment = false): Promise<ListReading> {
   const events: MoneyEvent[] = [];
   const seen = new Set<string>();
   const since = sinceSec * 1000 + shift;
-  const stopped = (back: number | null): ListReading => ({ kind, events, since, complete: false, reachedBack: back === null ? null : back * 1000 + shift });
+  const stopped = (back: number | null): ListReading => ({ kind, events, since, complete: false, reachedBack: back === null || byPayment ? null : back * 1000 + shift });
   let after = "";
   let last: number | null = null;
   for (let page = 0; page < pages; page += 1) {
@@ -250,9 +260,11 @@ const unread = (kind: MoneyKind) => (error: unknown): ListReading => {
 };
 
 /**
- * Every list of the store's money from `since` (ms): Stripe's five, when it
- * has an account, and PayPal's two, when it sells or sold through PayPal (or
- * PayPal could not be read, so it may have). Each list read side by side.
+ * Every list of the store's money from `since` (ms): Stripe's four, when it
+ * has an account, with its disputes and money given back said not read; and
+ * PayPal's two, when it sells or sold through PayPal (or PayPal could not be
+ * read, so it may have), with its disputes said not read. Each list read side
+ * by side.
  */
 export async function readEarningsLists(store: Store, since: number): Promise<ProviderReading[]> {
   const sinceSec = Math.floor(since / 1000);
@@ -265,11 +277,11 @@ export async function readEarningsLists(store: Store, since: number): Promise<Pr
     const lists = await Promise.all([
       stripeList(account, "/checkout/sessions", "sale", sinceSec, p.checkouts, take.checkouts).catch(unread("sale")),
       stripeList(account, "/payment_intents", "sale", sinceSec, p.extras, take.extras).catch(unread("sale")),
-      stripeList(account, "/invoices", "renewal", sinceSec, p.invoices, take.invoices, RENEWAL_SHIFT_MS).catch(unread("renewal")),
+      stripeList(account, "/invoices", "renewal", sinceSec, p.invoices, take.invoices, RENEWAL_SHIFT_MS, true).catch(unread("renewal")),
       stripeList(account, "/refunds", "refund", sinceSec, p.refunds, take.refunds).catch(unread("refund")),
-      stripeList(account, "/disputes", "dispute", sinceSec, p.disputes, take.disputes).catch(unread("dispute")),
     ]);
-    return { source: "stripe", lists };
+    // Disputes are read only from their own balance transactions, not confirmed here; money given back goes with them.
+    return { source: "stripe", lists, notRead: ["dispute", "reinstated"] };
   })();
   const paypal = (async (): Promise<ProviderReading | null> => {
     if (!store.statsId || !isRedisConfigured()) return null;
@@ -302,9 +314,11 @@ export async function readEarningsYear(store: Store, timeZone: string, now = Dat
   return keptReading(store, "earnings", async () => {
     // Selling not configured on our side: nothing is called, so the reading's unit is given back (inbox C4-53).
     if (store.stripeAccountId && !keyFor(store.stripeAccountId)) throw new NotRead("selling is not configured");
+    const started = Date.now();
     const providers = await readEarningsLists(store, since);
     // Nothing could be read at all: a failed reading (the last copy is shown), not twelve unknown months kept a day.
     if (providers.length && providers.every((p) => p.lists.every((list) => "unread" in list))) throw new Error("no list of the store's money could be read");
-    return earningsByMonth({ at: now, timeZone, providers, manual: [] });
+    // The reading's time, taken once every list was read: a record made while it ran is money so far, not after it.
+    return earningsByMonth({ at: now + Math.max(0, Date.now() - started), timeZone, providers, manual: [] });
   }, now, fresh);
 }

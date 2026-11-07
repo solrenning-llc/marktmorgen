@@ -162,7 +162,7 @@ async function main(): Promise<void> {
   const pages = Object.values(EARNINGS_STRIPE_PAGES).reduce((a, b) => a + b, 0);
   is("Stripe pages: checkouts 20, extras 20, invoices 10, refunds 5; disputes not read (their balance transactions' shape is not confirmed)", EARNINGS_STRIPE_PAGES, { checkouts: 20, extras: 20, invoices: 10, refunds: 5 });
   is("their sum, 55, is within SALES_READ_SHAPE's 58 pages", [pages, pages <= SALES_READ_SHAPE.stripePages], [55, true]);
-  is("never DISPUTE_TAKES (it drops a dispute once won, so a month shown would be rewritten)", /DISPUTE_TAKES/.test(readFileSync("lib/earnings-read.ts", "utf8")), false);
+  is("never DISPUTE_TAKES (it drops a dispute once won, so a month shown would be rewritten)", /import\s*\{[^}]*\bDISPUTE_TAKES\b|DISPUTE_TAKES\.has/.test(readFileSync("lib/earnings-read.ts", "utf8")), false);
   is("PayPal: 2,000 sales and PAYPAL_REFUNDS_READ refunds", [EARNINGS_PAYPAL_SALES, EARNINGS_PAYPAL_REFUNDS], [2000, PAYPAL_REFUNDS_READ]);
   is("the renewals' window before the oldest month is under four weeks, so only the oldest month is given up for it", RENEWAL_PAID_WITHIN_DAYS < 28 && RENEWAL_PAID_WITHIN_DAYS > 0, true);
 

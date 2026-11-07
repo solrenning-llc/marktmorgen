@@ -20,8 +20,15 @@ const NOV = Date.UTC(2026, 10, 3);
 const NONE = "No notice has been counted yet";
 const UNREAD = "could not be read just now";
 
-async function page(): Promise<string> {
-  return renderToStaticMarkup(await TransparencyPage());
+/** The page as rendered on the day `now` (the page reads the clock itself). */
+async function page(now = NOV): Promise<string> {
+  const realNow = Date.now;
+  Date.now = () => now;
+  try {
+    return renderToStaticMarkup(await TransparencyPage());
+  } finally {
+    Date.now = realNow;
+  }
 }
 
 /** Runs `work` with every pipeline whose first command is `command` answered by `answer`. */
@@ -88,6 +95,57 @@ async function main(): Promise<void> {
   is("an unknown year: said as not read just now", zero.includes(UNREAD), true);
   const healthy = await page();
   is("healthy: the table is shown", [healthy.includes("<td>1</td>"), healthy.includes(UNREAD)], [true, false]);
+  part("A start day that is no real day, or out of range, is unknown (review 5807744601, Claude 5 LEVE 1)");
+  for (const [name, day] of [
+    ["an impossible day", "2026-99-99"],
+    ["a day that does not exist", "2026-02-30"],
+    ["a day after today", "2026-11-04"],
+    ["a far-future day", "9999-01-01"],
+    ["a day before counting could have begun", "1000-01-01"],
+  ] as const) {
+    const sent: number[] = [];
+    const got = await answering("GET", () => [day], async () => {
+      const original: Pipeline = redis.pipeline;
+      redis.pipeline = (async (commands: Commands) => (sent.push(commands.length), original.call(redis, commands))) as Pipeline;
+      try {
+        return await throws(() => transparencyCounts(NOV));
+      } finally {
+        redis.pipeline = original;
+      }
+    });
+    is(`${name}: refused as unknown`, got, "unknown reply");
+    is(`${name}: no year read from it`, sent.length, 0);
+    is(`${name}: the page says not read, and does not crash`, await answering("GET", () => [day], async () => {
+      try {
+        return (await page()).includes(UNREAD) ? "unread" : "no unread message";
+      } catch (error) {
+        return error instanceof Error ? `${error.name}: ${error.message}` : "other error";
+      }
+    }), "unread");
+  }
+  is("control: today is a valid start day", (await answering("GET", () => ["2026-11-03"], () => transparencyCounts(NOV))).since, "2026-11-03");
+  is("control: the first day of 2026 is a valid start day", (await answering("GET", () => ["2026-01-01"], () => transparencyCounts(NOV))).since, "2026-01-01");
+
+  part("A year's counts with a field we never write, or a field twice, are unknown");
+  for (const [name, reply] of [
+    ["a field we never write", ["notice:copyrigh", "4"]],
+    ["the same field twice", ["notice:copyright", "1", "notice:copyright", "2"]],
+  ] as const) {
+    const got = await answering("HGETALL", (commands) => commands.map((_, i) => (i === 0 ? reply : [])), () => throws(() => transparencyCounts(NOV)));
+    is(`${name}: refused as unknown`, got, "unknown reply");
+  }
+  is("control: every field we write is read", (await answering("HGETALL", (commands) => commands.map(() => ["notice:other", "2", "acted:other", "1", "step:store", "1"]), () => transparencyCounts(NOV))).years[0].notices.other, 2);
+
+  part("A year whose counts may have expired is never shown as zeros (Claude 5 LEVE 2)");
+  const later = Date.UTC(2033, 1, 1);
+  const old = await transparencyCounts(later);
+  is("the start day is still said", old.since, "2026-11-03");
+  is("years whose counts may have expired are not listed", old.years.map((y) => y.year).includes("2026"), false);
+  is("years still kept are listed", old.years[0].year, "2033");
+  const oldPage = await page(later);
+  is("the page has no 2026 table", oldPage.includes('id="year-2026"'), false);
+  is("the page says older years are no longer kept", oldPage.includes("are no longer kept"), true);
+  is("control: today, 2026 is listed and nothing is said to be gone", [(await page()).includes('id="year-2026"'), (await page()).includes("are no longer kept")], [true, false]);
   done();
 }
 

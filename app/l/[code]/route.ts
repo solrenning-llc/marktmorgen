@@ -21,8 +21,13 @@ export async function GET(_request: NextRequest, { params }: Params) {
   const cache = `public, max-age=0, s-maxage=${CACHE_SECONDS}, stale-while-revalidate=60`;
   const ended = () => new Response(null, { status: 302, headers: { Location: `${SITE_URL}/l/ended`, "Cache-Control": cache } });
   if (!CODE.test(code)) return ended();
-  const link = await findLink(code).catch(() => null);
-  const store = link ? await storeForId(link.sid).catch(() => null) : null;
+  let link, store;
+  try {
+    link = await findLink(code);
+    store = link ? await storeForId(link.sid) : null;
+  } catch {
+    return new Response("This link is unavailable right now. Please try again.", { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
   if (!link || !store || store.statsId !== link.statsId) return ended();
   return new Response(null, { status: 302, headers: { Location: landingUrl(storeBase(store), link), "Cache-Control": cache } });
 }

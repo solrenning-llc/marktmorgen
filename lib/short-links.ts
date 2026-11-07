@@ -43,8 +43,8 @@ function parse(raw: unknown): Kept | null {
     if (typeof v.code !== "string" || !CODE.test(v.code) || typeof v.sid !== "string" || typeof v.statsId !== "string") return null;
     const name = linkName(v.name);
     const target = readTarget(v.target, () => true);
-    if (!name || !target) return null;
-    return { code: v.code, name, place: linkPlace(v.place), target, made: Number(v.made) || 0, sid: v.sid, statsId: v.statsId };
+    if (!name || !target || typeof v.made !== "number" || !Number.isSafeInteger(v.made) || v.made < 0 || !v.sid || !v.statsId) return null;
+    return { code: v.code, name, place: linkPlace(v.place), target, made: v.made, sid: v.sid, statsId: v.statsId };
   } catch {
     return null;
   }
@@ -52,27 +52,54 @@ function parse(raw: unknown): Kept | null {
 
 const shown = ({ code, name, place, target, made }: Kept): ShortLink => ({ code, name, place, target, made });
 
+async function one(command: (string | number)[]): Promise<unknown> {
+  const replies = await redisPipeline([command]);
+  if (!Array.isArray(replies) || replies.length !== 1) throw new Error("Short link response is incomplete");
+  return replies[0];
+}
+
+function record(raw: unknown): Kept | null {
+  if (raw === null) return null;
+  const kept = parse(raw);
+  if (!kept) throw new Error("Short link record is unavailable");
+  return kept;
+}
+
+const confirmedCount = (raw: unknown) => raw === 0 || raw === 1;
+
 /** How many short links a store has made, in one command: what the path's post-link missions count (lib/path-facts.ts). */
 export async function countLinks(statsId: string | null): Promise<number> {
-  if (!statsId || !isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["HLEN", storeKey(statsId)]]);
-  const n = Number(raw);
-  return Number.isSafeInteger(n) && n > 0 ? n : 0;
+  if (!statsId) return 0;
+  if (!isRedisConfigured()) throw new Error("Short link count is unavailable");
+  const raw = await one(["HLEN", storeKey(statsId)]);
+  const n = typeof raw === "number" ? raw : typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : NaN;
+  if (!Number.isSafeInteger(n) || n < 0) throw new Error("Short link count is unconfirmed");
+  return n;
 }
 
 /** A store's links, the newest first. */
 export async function readLinks(statsId: string | null): Promise<ShortLink[]> {
-  if (!statsId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HVALS", storeKey(statsId)]]);
-  const list = (Array.isArray(raw) ? (raw as unknown[]) : []).map(parse).filter((l): l is Kept => Boolean(l && l.statsId === statsId));
+  if (!statsId) return [];
+  if (!isRedisConfigured()) throw new Error("Short link inventory is unavailable");
+  const raw = await one(["HVALS", storeKey(statsId)]);
+  if (!Array.isArray(raw)) throw new Error("Short link inventory is incomplete");
+  const list: Kept[] = [];
+  const codes = new Set<string>();
+  for (let i = 0; i < raw.length; i += 1) {
+    const kept = record(raw[i]);
+    if (!kept || kept.statsId !== statsId || codes.has(kept.code)) throw new Error("Short link inventory is invalid");
+    codes.add(kept.code); list.push(kept);
+  }
   return list.sort((a, b) => b.made - a.made || a.code.localeCompare(b.code)).map(shown);
 }
 
 /** The link a code names, with its store, or null. */
 export async function findLink(code: string): Promise<(ShortLink & { sid: string; statsId: string }) | null> {
-  if (!CODE.test(code) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", linkKey(code)]]);
-  return parse(raw);
+  if (!CODE.test(code)) return null;
+  if (!isRedisConfigured()) throw new Error("Short link is unavailable");
+  const kept = record(await one(["GET", linkKey(code)]));
+  if (kept && kept.code !== code) throw new Error("Short link identity is unconfirmed");
+  return kept;
 }
 
 export type AddResult = { ok: true; link: ShortLink; links: ShortLink[] } | { ok: false; reason: "name" | "taken" | "target" | "full" | "unavailable" };
@@ -97,9 +124,10 @@ export async function addLink(
     // randomInt draws each letter evenly; a byte taken modulo 31 would favour the first eight.
     const code = Array.from({ length: 6 }, () => ALPHABET[randomInt(ALPHABET.length)]).join("");
     const kept: Kept = { code, name, place: linkPlace(input.place), target, made: now, sid: store.sid, statsId: store.statsId };
-    const [got] = await redisPipeline([["SET", linkKey(code), JSON.stringify(kept), "NX"]]);
+    const got = await one(["SET", linkKey(code), JSON.stringify(kept), "NX"]).catch(() => undefined);
     if (got === null) continue;
-    await redisPipeline([["HSET", storeKey(store.statsId), code, JSON.stringify(kept)]]);
+    if (got !== "OK") return { ok: false, reason: "unavailable" };
+    if (!confirmedCount(await one(["HSET", storeKey(store.statsId), code, JSON.stringify(kept)]))) throw new Error("Short link index write is unconfirmed");
     return { ok: true, link: shown(kept), links: await readLinks(store.statsId) };
   }
   return { ok: false, reason: "unavailable" };
@@ -109,19 +137,24 @@ export async function addLink(
 export async function retarget(statsId: string, code: unknown, target: unknown, isProduct: (id: string) => boolean): Promise<ShortLink[] | null> {
   if (typeof code !== "string" || !CODE.test(code)) return null;
   const next = readTarget(target, isProduct);
-  const [raw] = await redisPipeline([["HGET", storeKey(statsId), code]]);
-  const kept = parse(raw);
+  const kept = record(await one(["HGET", storeKey(statsId), code]));
+  if (kept && kept.code !== code) throw new Error("Short link identity is unconfirmed");
   if (!next || !kept || kept.statsId !== statsId) return null;
   const changed = JSON.stringify({ ...kept, target: next });
-  await redisPipeline([["SET", linkKey(code), changed], ["HSET", storeKey(statsId), code, changed]]);
+  const replies = await redisPipeline([["SET", linkKey(code), changed], ["HSET", storeKey(statsId), code, changed]]);
+  if (!Array.isArray(replies) || replies.length !== 2 || replies[0] !== "OK" || !confirmedCount(replies[1])) throw new Error("Short link change is unconfirmed");
   return readLinks(statsId);
 }
 
 /** Ends a link: from now on it opens the page that says so. */
 export async function removeLink(statsId: string, code: unknown): Promise<ShortLink[]> {
   if (typeof code === "string" && CODE.test(code)) {
-    const [raw] = await redisPipeline([["HGET", storeKey(statsId), code]]);
-    if (parse(raw)?.statsId === statsId) await redisPipeline([["DEL", linkKey(code)], ["HDEL", storeKey(statsId), code]]);
+    const kept = record(await one(["HGET", storeKey(statsId), code]));
+    if (kept && kept.code !== code) throw new Error("Short link identity is unconfirmed");
+    if (kept?.statsId === statsId) {
+      const replies = await redisPipeline([["DEL", linkKey(code)], ["HDEL", storeKey(statsId), code]]);
+      if (!Array.isArray(replies) || replies.length !== 2 || !confirmedCount(replies[0]) || !confirmedCount(replies[1])) throw new Error("Short link removal is unconfirmed");
+    }
   }
   return readLinks(statsId);
 }

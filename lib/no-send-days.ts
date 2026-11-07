@@ -22,7 +22,12 @@
  *   when the clocks go forward moves an hour later.
  * - A setting that could not be read, or a kept one that breaks these
  *   rules, gives "unknown": the caller sends nothing now and tries again,
- *   never guesses.
+ *   never guesses. So does a clock that is not a time (NaN, infinite or out
+ *   of the Date range): nothing here throws.
+ * - The day given is the day the instant falls on there: when the open
+ *   day's clock time is skipped and an hour later is already the next day
+ *   (America/Nuuk skips Saturday 11 PM in late March), that next day is not
+ *   taken for the open one; the email waits for the next open day after it.
  */
 import { isTimeZone, partsIn, zonedToUtc } from "@/lib/call-setup";
 
@@ -38,11 +43,13 @@ const WEEKDAY_NAMES = ["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursday
 /** The order the studio reads them in: the week from Monday. */
 const WEEK_FROM_MONDAY = [1, 2, 3, 4, 5, 6, 0];
 const DAY_MS = 86_400_000;
+/** The largest instant a Date holds, in milliseconds either side of 1970. */
+const MAX_INSTANT = 8.64e15;
 const DATE_KEY = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /** What a creator set. `weekdays` and `dates` are sorted, each once. */
 export type NoSendDays = { timeZone: string; weekdays: number[]; dates: string[] };
-export type NoSendProblem = "shape" | "time_zone" | "weekdays" | "dates" | "too_many_dates" | "too_long";
+export type NoSendProblem = "shape" | "time_zone" | "weekdays" | "dates" | "too_many_dates" | "too_long" | "unknown";
 export type NoSendRead = { ok: true; rule: NoSendDays } | { ok: false; why: Exclude<NoSendProblem, "too_long"> } | { ok: false; why: "too_long"; from: string };
 export type SendDecision = { send: "now" } | { send: "later"; at: number; day: string } | { send: "unknown" };
 
@@ -65,6 +72,11 @@ function keyOf(day: number): string {
 /** The weekday (0 is Sunday) of a calendar day number. */
 function weekdayOf(day: number): number {
   return new Date(day * DAY_MS).getUTCDay();
+}
+
+/** Whether `ms` is an instant a Date can hold: a finite number within its range. */
+function isInstant(ms: unknown): ms is number {
+  return typeof ms === "number" && Number.isFinite(ms) && Math.abs(ms) <= MAX_INSTANT;
 }
 
 /** The calendar day a clock in `tz` shows at instant `ms`. */
@@ -93,8 +105,10 @@ function tooLongFrom(weekdays: readonly number[], dates: ReadonlySet<number>, fr
 /**
  * What the studio sends, as kept, or why not. Dates already gone in the
  * store's time zone are dropped; the rest are checked against today there.
+ * A `now` that is not a time gives "unknown", never an error.
  */
 export function readNoSendDays(raw: unknown, now: number): NoSendRead {
+  if (!isInstant(now)) return { ok: false, why: "unknown" };
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, why: "shape" };
   const input = raw as { timeZone?: unknown; weekdays?: unknown; dates?: unknown };
   if (!isTimeZone(input.timeZone)) return { ok: false, why: "time_zone" };
@@ -136,12 +150,15 @@ function wellFormed(rule: NoSendDays): boolean {
  * "now" when it is about an order, when nothing is set, or when its day is
  * open in the store's time zone; "later" with the instant on the next open
  * day, at the same clock time (an hour later when the clocks skip that
- * time); "unknown" when the setting could not be read or a kept one breaks
- * the rules, so the caller sends nothing now, drops nothing and tries again.
+ * time, and the next open day after that when an hour later is already
+ * another day); "unknown" when the setting could not be read, a kept one
+ * breaks the rules or `due` is not a time, so the caller sends nothing now,
+ * drops nothing and tries again. An email about an order, or with nothing
+ * set, goes now without its day being looked at.
  */
 export function whenToSend(rule: NoSendDays | "none" | "unknown", purpose: "marketing" | "service", due: number): SendDecision {
   if (purpose === "service" || rule === "none") return { send: "now" };
-  if (rule === "unknown" || !wellFormed(rule)) return { send: "unknown" };
+  if (rule === "unknown" || !wellFormed(rule) || !isInstant(due)) return { send: "unknown" };
   const tz = rule.timeZone;
   const held = new Set(rule.dates.map((key) => dayNumber(key) as number));
   const isHeld = (day: number) => rule.weekdays.includes(weekdayOf(day)) || held.has(day);
@@ -158,6 +175,9 @@ export function whenToSend(rule: NoSendDays | "none" | "unknown", purpose: "mark
     const at = (m: number) => zonedToUtc(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), m, tz);
     const start = at(minute) ?? at(minute + 60);
     if (start === null) return { send: "unknown" };
+    // An hour later can be past midnight, on a day that may be held: never
+    // send on a day other than the open one named.
+    if (localDay(start + seconds, tz) !== day) continue;
     return { send: "later", at: start + seconds, day: keyOf(day) };
   }
   return { send: "unknown" };
@@ -180,6 +200,7 @@ export const NO_SEND_PROBLEMS = {
   weekdays: "Leave at least one day of the week open, so emails can go out.",
   dates: `Type each date as year-month-day, like 2026-12-25, within the next year.`,
   too_many_dates: `Pick at most ${MAX_NO_SEND_DATES} dates.`,
+  unknown: "These settings could not be checked just now. Try again in a moment.",
   too_long: (from: string) => `From ${dayWords(from)}, that holds emails for more than ${MAX_WAIT_DAYS} days in a row. Open at least one day in that stretch, so emails do not pile up.`,
 };
 

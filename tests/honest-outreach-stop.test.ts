@@ -35,6 +35,28 @@ async function failing<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
+/** Runs `work` with every pipeline of two SISMEMBERs (whether the stop already holds) thrown, as a lost connection would be. */
+async function stateFailing<T>(work: () => Promise<T>): Promise<T> {
+  const original: Pipeline = redis.pipeline;
+  redis.pipeline = (async (commands: Commands) => {
+    if (commands.length === 2 && commands.every((command) => command[0] === "SISMEMBER")) throw new Error("connection reset");
+    return original.call(redis, commands);
+  }) as Pipeline;
+  try {
+    return await work();
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
+/** The scopes of the stop forms a page offers, each carrying this link. */
+function scopes(html: string, token = TOKEN): string[] {
+  const forms = [...html.matchAll(/<form\b[^>]*action="\/api\/outreach\/stop"[^>]*>[\s\S]*?<\/form>/g)].map((m) => m[0]);
+  return forms.filter((form) => form.includes(`name="p" value="${token}"`)).map((form) => /name="scope" value="([^"]*)"/.exec(form)?.[1] ?? "").sort();
+}
+
+const STOPPED_CLAIMS = ["cannot write to you again", "Nobody here can write to you"];
+
 async function main(): Promise<void> {
   redis.clear();
   part("Confirmed absence stays honest");
@@ -50,6 +72,16 @@ async function main(): Promise<void> {
   const failed = await failing(() => page());
   is("not 'not one we know'", failed.includes(UNKNOWN), false);
   is("said as not read just now", failed.includes(UNREAD), true);
+
+  part("A read that fails never takes the stop buttons away, nor says a stop holds (Codex K2 MEDIUM)");
+  is("the link's read failing: both stop buttons stay", scopes(failed), ["all", "store"]);
+  is("the link's read failing: no stop is said to hold", STOPPED_CLAIMS.some((claim) => failed.includes(claim)), false);
+  const state = await stateFailing(() => page());
+  is("the stop state's read failing: said as not read just now", state.includes(UNREAD), true);
+  is("the stop state's read failing: both stop buttons stay", scopes(state), ["all", "store"]);
+  is("the stop state's read failing: no stop is said to hold", STOPPED_CLAIMS.some((claim) => state.includes(claim)), false);
+  is("control: healthy, both stop buttons", scopes(healthy), ["all", "store"]);
+  is("control: a link that is not there offers no button", scopes(unknown), []);
   done();
 }
 

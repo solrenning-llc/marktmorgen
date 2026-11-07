@@ -51,6 +51,12 @@ part("In the studio");
 const studio = readFileSync("app/studio/card/page.tsx", "utf8");
 is("for those who may change the store's pages, as the route", studio.includes('"page");') && readFileSync("app/api/store/creator-card/route.ts", "utf8").includes('jsonAccess(request, "page")') && readFileSync("app/api/store/creator-card/route.ts", "utf8").includes('guardStoreWrite(request, "page"'), true);
 is("a link to the card once it is shown", studio.includes("{card?.on ? (") && studio.includes("Open your card at"), true);
+is("says whether visitors can leave their details under it, and where to turn that on", studio.includes("{contactOpen(store) ? (") && studio.includes("your store&apos;s contact form lets visitors leave their name") && studio.includes('<Link href={`${studioPath(store)}#contact`}') && studio.includes("Turn on the contact form"), true);
+// Independent review of #1965: "off" is only the creator's own switch; switched on but unable to take messages (the store
+// switched off, no email, sending unavailable) says so, and never offers to turn on what is already on.
+is("the form said off only when its switch is off", studio.includes(") : !store.contact.on ? ("), true);
+const unavailable = studio.slice(studio.indexOf("function contactUnavailableWords"), studio.indexOf("export default"));
+is("switched on but unavailable: said so, with why, and no turning it on", [unavailable.includes("contact form is on, but"), unavailable.includes("is off"), unavailable.includes("Turn on"), unavailable.includes("switched off"), unavailable.includes("email address")], [true, false, false, true, true]);
 is("said when it cannot be read", studio.includes("Your card could not be read just now. Nothing was changed."), true);
 const site = readFileSync("app/studio/site/page.tsx", "utf8");
 is("reached from Your pages, for the same people", site.includes('"page");') && site.includes('<Link href={studioPath(store, "", "card")}') && site.includes("Set up your business card"), true);

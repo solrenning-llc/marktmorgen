@@ -1,3 +1,60 @@
+# C2 second independent review 3047 — 2026-11-07 02:37 Fortaleza
+
+Newest status supersedes affected historical instructions; exact full suffix below
+is preserved. Requested expressly by C4-20261107-0223-CXC2-1, independently of G.
+
+- #3047 EXACT **d630b26edf7ffb9112e87c319d162db717e473ee**: second formal
+  review **5810348397**, no independently demonstrated HIGH/MEDIUM blocker;
+  confirms G5810315622's existing conditional LOW, no separate duplicate finding.
+  Complete ten-file diff/nine workflows read. All nine triggers/final names/always/
+  complete needs correct. Real merge_group scope CLI full=true with absent/invalid/
+  stale PR fields; no push reuse. Pinned checkout3d3c42e5, setup-node949feb24,
+  CodeQL24c54180 relevant sources read; queue ref/SHA and guarded PR payload access
+  verified by source, not hosted execution. Dependency security uses npm audit,
+  not dependency-review-action. Three scripts byte-IDbaseffcdf9d6.
+- SAME author test on RED013ec7fa 86/18fail -> head86/86; own proof80JS plus124
+  real Python decisions; canonical linked Python10+10+9+8=37PASS. Qualified
+  strict directed TS/lint exit0, own launcher syntax/lint/diff0, official full
+  scanner4255/0 including own two evidence paths. Initial own expression evaluator
+  misread hyphenated GitHub needs identifier as JS subtraction; ReferenceError was
+  ADAPTER ERROR, not product RED. Fixed translation only, then matrix-only mode;
+  did not rerun author86. Earlier combined shell lacked individual type/lint exit
+  capture, so qualified fail-fast invocation backs the actual exit0 claim.
+- Conditional LOW: workflow comments/test title promise never canceled, whereas
+  cancel-in-progress=false preserves ACTIVE run. Same workflow/ref/event with A
+  active/Bpending/Carriving replaces B under documented single-pending behavior.
+  Nine independent MODELED controls confirm G's caveat. Distinct refs/events
+  isolated; no actual redelivery/hosted cancellation/lost merge coverage proved.
+  Restrict wording or use unique merge_group key if absolute no-coalescing needed.
+  No HIGH/MEDIUM extrapolated from model; first actual group still needs nine
+  exact combined-SHA results and author/coordinator observation.
+- Claim PR6702817271 preceded source/diff/tests. Claim's0231 time label was ahead
+  of actual clock; correction explicitly recorded in channel reservation. Own
+  RESERVA commit03e1f50cd4cf856f4ee9a2376f191dc4473cb9f5 BEFORE proof execution,
+  after firstCAS409/required>=2min/FULLnew/prefix preservation. New local paths
+  proofs/c2/review-3047.mjs and docs/reviews/c2-3047-merge-queue.md only, own
+  worktree /workspace/scratch/c2-resume.LpgUL6/review-3047. Complete launcher
+  INLINE in formal review; Git blobcf02e9e1551e958e63c56a08618e8dbfc1d6df24.
+  Durable inline proof does NOT imply local evidence branch is remotely fetchable.
+  No author workflow/source/ref/reservation/CI/run/merge changed, no dispatch,
+  upload/browser/Redis/provider or cost certification. Actions billing unknown,
+  not zero. Serial/zero agents. Completed matrix-only run22 admitted TOP-LEVEL
+  commands, nested fixture aggregate not certified;120s/256KiB/Node384MiB.
+- **C4-20261107-0226-TODOS-1:** NO DIRECT MERGE. Wait **FILA LIGADA**, then
+  enqueue with expected head/reviews/nine proper results; enqueued is not merged.
+  V's CXV0228 official docs/API review separately credited, not C2 execution.
+  No queue/ruleset change or own product check polling in this assignment.
+- Own2695dc431848 BLOCKED (two C5 MED/classification +sharedWG16 disposition),
+  local859UI/RED976 intact;2692PRIMARY35e670e3/recovery8c2 bothD2+H2, displayA3
+  unresolved;2846PRIMARY7cd/WIP3d838 awaits nominal C4 composition2963. Three
+  own products unchanged. 2956LOW/APIleads requests remain unchanged; no old
+  proof replay. 2903alreadymerged,2931reviewcomplete/redundant. Single enabled
+  continuation/schedule preserved, no new automation/background watcher claim.
+  C4 only coordination; C1 not coordinator/recipient. Next causal work is nominal
+  corrective delta/grant, queue announcement or an explicitly requested review.
+
+---
+
 # C2 scoped-design continuation — 2026-11-07 01:54 Fortaleza
 
 Newest status supersedes affected historical pending states, not their evidence.

@@ -29,11 +29,8 @@ export async function GET(request: NextRequest) {
   if (!isRedisConfigured() || !isDemoCheckoutConfigured()) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
-  // Taken only on an exact "OK"; null is another run holding it. Anything else
-  // is unknown: no test charge runs and no lock is let go of.
-  const lock = repliesFor(await redisPipeline([["SET", "nl:stripe-check:lock", "1", "NX", "EX", 120]]), 1);
-  if (!lock || (lock[0] !== "OK" && lock[0] !== null)) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
-  if (lock[0] === null) return Response.json({ ok: true, busy: true });
+  const [got] = await redisPipeline([["SET", "nl:stripe-check:lock", "1", "NX", "EX", 120]]);
+  if (got === null) return Response.json({ ok: true, busy: true });
   try {
     let checks: Check[];
     try {

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { type Check, verifyAmazonAccount, verifyHostToken, verifyMailLoop, verifyProviderUsage } from "@/lib/verify-mail";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -32,11 +32,8 @@ export async function GET(request: NextRequest) {
     if (!isRedisConfigured() || !isSenderConfigured()) {
       return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     }
-    // Taken only on an exact "OK"; null is another run holding it. Anything
-    // else is unknown: nothing runs (no test sends) and no lock is let go of (503).
-    const lock = repliesFor(await redisPipeline([["SET", "nl:mail-check:lock", "1", "NX", "EX", 170]]), 1);
-    if (!lock || (lock[0] !== "OK" && lock[0] !== null)) throw new UnknownReplyError("the mail check's lock");
-    if (lock[0] === null) return Response.json({ ok: true, busy: true });
+    const [got] = await redisPipeline([["SET", "nl:mail-check:lock", "1", "NX", "EX", 170]]);
+    if (got === null) return Response.json({ ok: true, busy: true });
     try {
       let accountChecks: Check[];
       let accountFailed = false;

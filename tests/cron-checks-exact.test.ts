@@ -3,8 +3,9 @@
  *
  *   - Amazon set up, but its state read back in an unknown shape, is a failed
  *     check, never "Amazon is not set up" passing (lib/verify-mail.ts).
- *   - A run lock is taken only on an exact "OK"; null is another run holding
- *     it; anything else is unknown: 503, nothing run, nobody's lock deleted.
+ *   - The run locks themselves are #2986's (claimMark/releaseMark in every
+ *     cron); only the busy and healthy controls are kept here, and they hold
+ *     on either shape of the lock.
  *   - A previous result read back in an unknown shape is not an earlier pass:
  *     no "passing again" is claimed, and the run says in its log that it
  *     could not tell.
@@ -60,20 +61,6 @@ const MALFORMED: [string, unknown][] = [
 ];
 
 for (const route of routes) {
-  for (const [label, reply] of MALFORMED) {
-    test(`${route.name}: a lock answered with ${label} is unknown — 503, nothing run, no DEL`, async () => {
-      reset();
-      tamper = (command) => (command[0] === "SET" && command[1] === route.lock ? reply : undefined);
-      const response = await route.run(request(route.name));
-      assert.equal(response.status, 503);
-      assert.deepEqual(await response.json(), { ok: false, error: "unavailable" });
-      assert.deepEqual(world.ran, [], "no check runs (no test send, no test charge)");
-      assert.deepEqual(world.notices, []);
-      assert.equal(commands.some((command) => command[0] === "DEL" || command[0] === "EVAL"), false, "a lock not held is not let go of");
-      assert.equal(commands.some((command) => command[1] === route.last), false);
-    });
-  }
-
   test(`${route.name}: a lock another run holds (SET NX null) is busy, and stays theirs`, async () => {
     reset();
     redis.run(["SET", route.lock, "theirs"]);

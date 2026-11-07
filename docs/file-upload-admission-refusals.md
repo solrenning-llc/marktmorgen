@@ -42,3 +42,8 @@ No new Redis/provider operation, key, retention, price, visible limit, flag, fun
 No interface control, task step, confirmation decision, focus behavior or layout changes (0 added steps or decisions). The corrected HTTP error codes are verified; client presentation, keyboard behavior, assistive technology and accessibility conformity were not tested or certified.
 
 Real studio authentication/authorization and the real Blob SDK are outside this fixture's scope. The five tested refusals stop before token issuance. The existing production gate is unchanged; successful uploads were not exercised. No native Redis, external provider, production request, real person data, hosted CI or deployment was exercised. This branch requires independent review and the normal final checks before merge; it is not evidence of deployment or customer availability.
+
+
+## Independent LOW follow-up: locked admission
+
+Codex P review 5808477019 identified the remaining `locked` refusal. The canonical table now includes `locked` with HTTP 403. Before the route correction, the same six cases report five passing controls and one failure (`500 !== 403`); after correction, all six pass. Test-only local RED is `71e3992538708208f59c532e886eaf1ed267ddb5`, parent exactly the reviewed head `43be268478b66632e738d6bce7da39a5e8cb2711`. The remote equivalent is recorded in the PR handoff. No admission order, production gate, budget, callback or provider operation changes. Earlier five-case results above remain historical. A new independent focal return and nine new final checks after integrating the green main are required.

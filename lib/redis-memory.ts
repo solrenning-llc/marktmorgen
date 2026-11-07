@@ -268,6 +268,15 @@ export class MemoryRedis {
           this.run(["SET", target, value]);
           return 1;
         }
+        // lib/assistant-reminder.ts FORGET_IF_SAME: a note and its yeses deleted only while the note holds what was read.
+        if (key.startsWith("-- marktmorgen:assist-remind-forget:v1\n") && Number(args[0]) >= 1 && args.length >= Number(args[0]) + 1) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, count + 1);
+          const read = args.slice(count + 1);
+          const members = this.data.has(keys[0]) ? (this.run(["SMEMBERS", keys[0]]) as string[]) : [];
+          if (members.length !== read.length || members.some((member) => !read.includes(member))) return -1;
+          return this.run(["DEL", ...keys]);
+        }
         if (key.startsWith("-- marktmorgen:fenced-del:v1\n") && Number(args[0]) >= 2 && args.length === Number(args[0]) + 2) {
           const count = Number(args[0]);
           const lock = args[1];

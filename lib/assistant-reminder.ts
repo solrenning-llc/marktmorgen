@@ -19,6 +19,7 @@
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
 import { isSenderConfigured } from "@/lib/email";
 import { withinLimit } from "@/lib/request-guard";
 import { createHash } from "node:crypto";
@@ -67,6 +68,23 @@ const SESSION = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 const QUEUE = "nl:assist:remindq";
 const whoKey = (statsId: string, email: string) =>
   `nl:assist:remindwho:${statsId}:${createHash("sha256").update(`nimbus-assist-remind:${statsId}:${normaliseEmail(email)}`).digest("hex").slice(0, 32)}`;
+
+/**
+ * One address's note of checkouts (KEYS[1]) and their yeses (KEYS[2..]) deleted in one step, only while the note
+ * still holds exactly the checkouts read (ARGV): a yes noted since then is not left without its note. Answers how
+ * many keys went, or -1 when the note changed. Billed as the EVAL, its SMEMBERS and its DEL.
+ */
+const FORGET_IF_SAME = [
+  "-- marktmorgen:assist-remind-forget:v1",
+  "local members = redis.call('SMEMBERS', KEYS[1])",
+  "if #members ~= #ARGV then return -1 end",
+  "local read = {}",
+  "for _, member in ipairs(ARGV) do read[member] = true end",
+  "for _, member in ipairs(members) do if not read[member] then return -1 end end",
+  "return redis.call('DEL', unpack(KEYS))",
+].join("\n");
+/** How many times the note is read again when a yes keeps landing during the erasure; then the part is not finished. */
+const FORGET_ROUNDS = 3;
 
 const bytes = (text: string) => new TextEncoder().encode(text).byteLength;
 const clip = (text: string, max: number) => text.replace(/\s+/g, " ").trim().slice(0, max);
@@ -154,10 +172,22 @@ export async function keepAssistReminder(input: { store: Store; session: string;
 export async function forgetAssistReminderPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !email || !isRedisConfigured()) return 0;
   const who = whoKey(statsId, email);
-  const [members] = await redisPipeline([["SMEMBERS", who]]);
-  const sessions = (Array.isArray(members) ? members : []).map(String).filter((s) => SESSION.test(s));
-  const [gone] = await redisPipeline([["DEL", who, ...sessions.map(assistRemindKey)]]);
-  return Number(gone) || 0;
+  // A yes written while this runs adds its checkout to the note: the deletion then finds the note changed and the
+  // note is read again, so no yes is ever left holding the address without its note (the sibling of #2998).
+  for (let round = 0; round < FORGET_ROUNDS; round += 1) {
+    const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", who]]), 1)?.[0]);
+    // Never "nothing kept" on a reply of another shape (CX-123 rule 24): thrown, so the erasure says this part did
+    // not finish (lib/person-erasure.ts), and the note stays for the next one.
+    if (!members) throw new UnknownReplyError("the note of a person's checkout reminders");
+    if (!members.length) return 0;
+    const keys = [who, ...members.filter((s) => SESSION.test(s)).map(assistRemindKey)];
+    const gone = repliesFor(await redisPipeline([["EVAL", FORGET_IF_SAME, keys.length, ...keys, ...members]]), 1)?.[0];
+    if (gone === -1) continue;
+    const count = countOf(gone);
+    if (count === null || count > keys.length) throw new UnknownReplyError("the deletion of a person's checkout reminders");
+    return count;
+  }
+  throw new Error(`a person's checkout reminder note changed in each of ${FORGET_ROUNDS} rounds`);
 }
 
 /**

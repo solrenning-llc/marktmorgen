@@ -16,7 +16,8 @@
  * opened with.
  *
  *   nl:dir:listed   set  the sid of every store whose creator said yes
- *   nl:dir:page     the directory's rows, kept a few minutes; dropped on every save
+ *   nl:dir:page     the directory's rows, kept a few minutes; dropped on a save that can change them
+ *   nl:dir:last     the last good build's rows with the sid of each, shown filtered while a build is not due
  *   nl:dir:build    the claim of the last build, held DIRECTORY_BUILD_SECONDS whatever dropped the page
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -29,10 +30,29 @@ const LISTED = "nl:dir:listed";
 export const DIRECTORY_CACHE = "nl:dir:page";
 
 /**
- * The claim lib/affiliate-directory.ts takes before it builds the rows (SET NX EX): one build at a time for the
+ * The claim lib/affiliate-directory.ts takes before it builds the rows (SET NX EX): one build start at a time for the
  * whole site, and none again until it expires, whether a save dropped the page or a build kept none.
  */
 export const DIRECTORY_BUILD = "nl:dir:build";
+
+/**
+ * The last good build of the directory, with the sid of each row (lib/affiliate-directory.ts, readDirectory). A save
+ * never drops it: a visit that finds no kept page while DIRECTORY_BUILD is held is shown these rows, filtered by one
+ * SMISMEMBER against the listed set, so a store just taken out is gone at once and the page stays up (Claude 6 on
+ * #3062: one account saving in a loop could otherwise keep the page "unavailable").
+ */
+export const DIRECTORY_LAST = "nl:dir:last";
+
+/** Which of these sids are in the listed set now, one flag each. Any reply but a list of 0 and 1, one a sid, is unknown. */
+export async function stillListed(sids: string[]): Promise<boolean[]> {
+  if (!sids.length) return [];
+  const replies = repliesFor(await redisPipeline([["SMISMEMBER", LISTED, ...sids]]), 1);
+  const flags = replies ? replies[0] : null;
+  if (!Array.isArray(flags) || flags.length !== sids.length || flags.some((flag) => flag !== 0 && flag !== 1)) {
+    throw new UnknownReplyError("the directory's SMISMEMBER");
+  }
+  return flags.map((flag) => flag === 1);
+}
 
 /**
  * How many programs the directory lists before search engines are asked to
@@ -60,10 +80,17 @@ export function wouldList(store: Store): boolean {
  * of the programme, not only when the answer changed, because the cost of
  * being certain is one command and the cost of drift is a list that quietly
  * stops matching the consents behind it.
+ *
+ * The kept page is dropped only when the save can change it: the store would
+ * be listed after the save, or was before it (`before`, the store as it was;
+ * unknown counts as listed). A store that is not listed and stays so changes
+ * nothing the directory shows, so its saves never drop the page (Claude 6 on
+ * #3062: any account could otherwise drop it in a loop).
  */
-export async function rememberListing(store: Store): Promise<void> {
+export async function rememberListing(store: Store, before?: Store | null): Promise<void> {
   if (!store.sid || !isRedisConfigured()) return;
-  await redisPipeline([[wouldList(store) ? "SADD" : "SREM", LISTED, store.sid], ["DEL", DIRECTORY_CACHE]]);
+  const shown = wouldList(store) || before === undefined || before === null || wouldList(before);
+  await redisPipeline([[wouldList(store) ? "SADD" : "SREM", LISTED, store.sid], ...(shown ? [["DEL", DIRECTORY_CACHE]] : [])]);
 }
 
 /** Takes a store out, whatever it had said. For a store being deleted. */

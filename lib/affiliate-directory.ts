@@ -34,8 +34,12 @@
  * page says. The directory says so too.
  *
  *   nl:dir:page   the rows, as JSON, kept 10 minutes; dropped whenever a
- *                 creator saves their program, so taking a store out is
- *                 immediate
+ *                 creator saves a program that is listed, or was, so taking
+ *                 a store out is immediate
+ *   nl:dir:last   the last good build's rows with the sid of each, kept
+ *                 LAST_KEEP_SECONDS and never dropped by a save: while a
+ *                 build is not due, a visit is shown them filtered by the
+ *                 listed set, so a store taken out is gone at once
  *   nl:dir:build  the claim of the last build, kept DIRECTORY_BUILD_SECONDS:
  *                 the page is built at most once in that time, site-wide
  */
@@ -48,7 +52,7 @@ import { activePlan } from "@/lib/product-extras";
 import { canSell } from "@/lib/store-checkout";
 import { isHouseStore } from "@/lib/house-store";
 import { imageUrl } from "@/lib/product-image";
-import { DIRECTORY_BUILD, DIRECTORY_CACHE, listedStores, wouldList } from "@/lib/directory-index";
+import { DIRECTORY_BUILD, DIRECTORY_CACHE, DIRECTORY_LAST, listedStores, stillListed, wouldList } from "@/lib/directory-index";
 import type { LanguageCode } from "@/lib/store-language";
 import { programNumbers } from "@/lib/affiliates";
 import { MIN_CLICKS_FOR_RATES } from "@/lib/affiliate-directory-rules";
@@ -87,17 +91,26 @@ export const DIRECTORY_SCAN_PAGES = 64;
  * A save drops the kept page and a build that could not read every program's numbers keeps none, so without it
  * every visit after either would build again, and concurrent visits would all build at once. Each build first
  * claims DIRECTORY_BUILD for this long (SET NX EX): the claim is the single-flight lock and the interval in one key,
- * never released early. A visit that finds no kept page while the claim is held is told the list is unavailable
- * just now (DirectoryBusyError): never the page from before the save, which may still list a store whose creator
- * has just taken it out, and never an empty or partial list. Counted in tests/plan-cost-registry.ts
- * (NOT_A_COST.DIRECTORY_BUILDS_PER_HOUR).
+ * never released early. The claim only spaces the starts: a build still running after it expires does not stop the
+ * next one, so it bounds builds to one a minute, not to one at a time. A visit that finds no kept page while the claim
+ * is held is shown the last good build (nl:dir:last) without every store no longer in the listed set (one SMISMEMBER),
+ * so a store whose creator has just taken it out is gone at once and the page stays up whatever saves drop it
+ * (Claude 6 on #3062); with no last build kept, it is told the list is unavailable just now (DirectoryBusyError),
+ * never an empty or partial list. Counted in tests/plan-cost-registry.ts (NOT_A_COST.DIRECTORY_BUILDS_PER_HOUR).
  */
 export const DIRECTORY_BUILD_SECONDS = 60;
 
 /** The most builds of the directory in an hour, for the whole site. */
 export const DIRECTORY_BUILDS_PER_HOUR = 3_600 / DIRECTORY_BUILD_SECONDS;
 
-/** The page is not kept and another build holds the claim, or one ran less than DIRECTORY_BUILD_SECONDS ago. */
+/**
+ * How long the last good build is kept (nl:dir:last): past the kept page's own ten minutes, by two build windows, so a
+ * visit while the next build is not due, or right after one that failed, still has it. Older than that, the visit is
+ * told the list is unavailable rather than shown rows from longer ago.
+ */
+const LAST_KEEP_SECONDS = KEEP_SECONDS + 2 * DIRECTORY_BUILD_SECONDS;
+
+/** The page is not kept, no last build is either, and another build holds the claim or one ran less than DIRECTORY_BUILD_SECONDS ago. */
 export class DirectoryBusyError extends Error {
   constructor() {
     super("The affiliate directory was built less than a minute ago and is not kept: unavailable just now");
@@ -271,11 +284,11 @@ export async function readDirectory(): Promise<DirectoryRow[]> {
       // Read again below.
     }
   }
-  // One build at a time, and at most one per DIRECTORY_BUILD_SECONDS: "OK" is ours, null (NX) is held by another or a
-  // recent build, anything else is unknown and nothing is built.
+  // At most one build start per DIRECTORY_BUILD_SECONDS: "OK" is ours, null (NX) is held by another or a recent build
+  // (the last good page is then shown, filtered), anything else is unknown and nothing is built.
   const claimed = repliesFor(await redisPipeline([["SET", DIRECTORY_BUILD, "1", "NX", "EX", DIRECTORY_BUILD_SECONDS]]), 1);
   if (!claimed || (claimed[0] !== "OK" && claimed[0] !== null)) throw new UnknownReplyError("the directory's build claim (SET NX)");
-  if (claimed[0] === null) throw new DirectoryBusyError();
+  if (claimed[0] === null) return lastDirectory();
   // SSCAN may return a member more than once, in a page or across pages: each store is one row (Codex T on #2921).
   const sids = new Set<string>();
   let cursor = "0";
@@ -294,21 +307,59 @@ export async function readDirectory(): Promise<DirectoryRow[]> {
   // A failed numbers read still shows the row without numbers, but that page is
   // not kept for the next visitors.
   let partial = false;
+  // Each row's sid, kept with the last good build so a visit while a build is not due can drop a store taken out.
+  const sidOf = new Map<DirectoryRow, string>();
   const rows = sortRows(
     (
       await Promise.all(
         stores.map(async (store) => {
           const row = store ? directoryRow(store) : null;
-          if (!row || !store || !store.affiliates.numbers) return row;
+          if (!row || !store) return row;
+          if (!store.affiliates.numbers) {
+            sidOf.set(row, store.sid);
+            return row;
+          }
           const numbers = await programNumbers(store).catch(() => {
             partial = true;
             return null;
           });
-          return { ...row, numbers: directoryNumbers(numbers) };
+          const counted = { ...row, numbers: directoryNumbers(numbers) };
+          sidOf.set(counted, store.sid);
+          return counted;
         }),
       )
     ).filter((row): row is DirectoryRow => row !== null),
   );
-  if (!partial) await redisPipeline([["SET", DIRECTORY_CACHE, JSON.stringify(rows), "EX", KEEP_SECONDS]]).catch(() => null);
+  if (!partial) {
+    const last = { sids: rows.map((row) => sidOf.get(row) ?? ""), rows };
+    await redisPipeline([
+      ["SET", DIRECTORY_CACHE, JSON.stringify(rows), "EX", KEEP_SECONDS],
+      ["SET", DIRECTORY_LAST, JSON.stringify(last), "EX", LAST_KEEP_SECONDS],
+    ]).catch(() => null);
+  }
   return rows;
+}
+
+/**
+ * The last good build, without every store no longer in the listed set, for a visit while a build is not due. Nothing
+ * is kept from it. A confirmed absence (no last build) is DirectoryBusyError; a reply in any other shape, or rows that
+ * do not match their sids, is UnknownReplyError, never the rows unfiltered or an empty list.
+ */
+async function lastDirectory(): Promise<DirectoryRow[]> {
+  const replies = repliesFor(await redisPipeline([["GET", DIRECTORY_LAST]]), 1);
+  if (!replies) throw new UnknownReplyError("the directory's last page (GET)");
+  const [reply] = replies;
+  if (reply === null) throw new DirectoryBusyError();
+  let last: unknown = null;
+  try {
+    last = typeof reply === "string" ? JSON.parse(reply) : null;
+  } catch {
+    last = null;
+  }
+  const { sids, rows } = (last ?? {}) as { sids?: unknown; rows?: unknown };
+  if (!Array.isArray(sids) || !Array.isArray(rows) || sids.length !== rows.length || sids.some((sid) => typeof sid !== "string" || !sid)) {
+    throw new UnknownReplyError("the directory's last page (GET)");
+  }
+  const listed = await stillListed(sids as string[]);
+  return (rows as DirectoryRow[]).filter((_, at) => listed[at]);
 }

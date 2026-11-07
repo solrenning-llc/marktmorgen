@@ -114,7 +114,7 @@ test("search engines are asked to show it only once there is a catalog", () => {
 
 test("the index is written where the program is saved", () => {
   const source = readFileSync(join(process.cwd(), "lib/store.ts"), "utf8");
-  assert.match(source, /rememberListing\(next\)/, "the index has to be kept in step where the programme is saved");
+  assert.match(source, /rememberListing\(next, before\)/, "the index has to be kept in step where the programme is saved");
 });
 
 test("only the directory and the index read the consent", () => {

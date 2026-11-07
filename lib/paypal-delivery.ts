@@ -9,7 +9,7 @@
 import { ordersLinkFor } from "@/lib/buyer-orders";
 import { type Listing, readListing, readListings } from "@/lib/catalog";
 import { dropEnrollment, recordEnrollment } from "@/lib/learn";
-import { type Paid, deliverPayPal, readPaid, watchPayPal } from "@/lib/paypal-sales";
+import { type Paid, deliverPayPal, handOverKey, readPaidExact, watchPayPal } from "@/lib/paypal-sales";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { fromStore, storeBase } from "@/lib/purchase-email";
@@ -18,12 +18,21 @@ import { creditPayPalSale } from "@/lib/affiliates";
 import { emitEvent } from "@/lib/webhooks";
 
 /**
- * Paid PayPal orders whose hand-over waited on a product that could not be read, scored by when they were last
- * tried: the sweep tries them again (handOverAgain) until they are handed over (Claude 5's ALTO, CX-123 rule 24).
+ * Paid PayPal orders still owed their hand-over (handOverKey in lib/paypal-sales.ts): settle puts each one there with
+ * the writes that take it off pending, before anything is handed over, and handOverPayPal takes it out once it is
+ * handed over (Claude 5's MEDIUM on #2909). The sweep tries again (handOverAgain) those whose score is
+ * HAND_OVER_GRACE_SECONDS old, so it does not hand over an order whose return is handing it over at that moment.
  */
-const handOverKey = (statsId: string) => `nl:ppsell:handover:${statsId}`;
+const HAND_OVER_GRACE_SECONDS = 600;
 /** How many of them one sweep of a store tries. */
 const HAND_OVER_BATCH = 25;
+/** The score of an order to be tried at the next sweep: due now, behind those due before it. */
+const dueNow = () => String(Math.floor(Date.now() / 1000) - HAND_OVER_GRACE_SECONDS);
+
+/** Takes a handed-over order out of the list. Not known whether it left: it stays, and the next try finds it handed over. */
+async function handedOver(statsId: string, order: string): Promise<void> {
+  await redisPipeline([["ZREM", handOverKey(statsId), order]]).catch((error) => console.error("taking a handed-over PayPal order out of the list failed", order, error));
+}
 
 /**
  * Gives the buyer what they paid for and emails the receipt. False when the product is gone (Redis answered that
@@ -38,11 +47,14 @@ export async function handOverPayPal(store: Store, paid: Paid): Promise<boolean>
     product = await readListing(store, paid.product);
     bundled = new Map(product?.bundle?.length ? (await readListings(store, product.bundle)).map((listing) => [listing.id, listing]) : []);
   } catch (error) {
-    if (store.statsId && isRedisConfigured()) await redisPipeline([["ZADD", handOverKey(store.statsId), String(Math.floor(Date.now() / 1000)), paid.order]]);
+    // Already in the list since it was written down (settle): this only makes it due at the next sweep, and the
+    // read's own error is the one thrown, whatever this answers.
+    if (store.statsId && isRedisConfigured()) await redisPipeline([["ZADD", handOverKey(store.statsId), dueNow(), paid.order]]).catch(() => undefined);
     throw error;
   }
   if (!product) {
     console.error("a PayPal purchase named a product the store no longer has", store.handle, paid.order);
+    if (store.statsId) await handedOver(store.statsId, paid.order);
     return false;
   }
   const base = storeBase(store);
@@ -73,33 +85,41 @@ export async function handOverPayPal(store: Store, paid: Paid): Promise<boolean>
     channel: paid.meta?.channel ?? null,
     paid_at: new Date(paid.at * 1000).toISOString(),
   }, paid.at * 1000).catch((error) => console.error("telling the webhooks of a PayPal sale failed", error));
+  if (store.statsId) await handedOver(store.statsId, paid.order);
   return true;
 }
 
 /**
- * Tries again the orders handOverPayPal kept, oldest try first, a few a sweep. One handed over, or whose product
- * Redis answers is gone, leaves the list; one whose paid record is not there any more (erased, or past its time)
- * leaves it too, with nothing to hand over; one that still does not read is tried again at the next sweep. The list
- * itself read in another shape throws UnknownReplyError. Returns how many were handed over.
+ * Tries again the orders still owed their hand-over, oldest try first, a few a sweep, once their grace is over. One
+ * handed over, or whose product Redis answers is gone, leaves the list; one whose paid record Redis answers is not
+ * there any more (erased, or past its time) leaves it too, with nothing to hand over; one whose paid record or product
+ * does not read, or reads in another shape, is kept and tried again at the next sweep (Claude 6's MEDIUM on #2909:
+ * unknown is never "no paid record"). The list itself read in another shape throws UnknownReplyError. Returns how
+ * many were handed over.
  */
 async function handOverAgain(store: Store, deadline: number): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
   const key = handOverKey(store.statsId);
-  const read = repliesFor(await redisPipeline([["ZRANGEBYSCORE", key, "-inf", "+inf", "LIMIT", 0, HAND_OVER_BATCH]]), 1);
+  const read = repliesFor(await redisPipeline([["ZRANGEBYSCORE", key, "-inf", dueNow(), "LIMIT", 0, HAND_OVER_BATCH]]), 1);
   const orders = read ? stringList(read[0]) : null;
   if (!orders) throw new UnknownReplyError("the PayPal orders waiting to be handed over");
   let handed = 0;
   for (const order of orders) {
     if (Date.now() >= deadline) break;
     try {
-      const paid = await readPaid(order);
-      if (paid && (await handOverPayPal(store, paid))) handed += 1;
-      if (!paid) console.error("a PayPal order waiting to be handed over has no paid record any more", store.handle, order);
-      await redisPipeline([["ZREM", key, order]]);
+      const paid = await readPaidExact(order);
+      if (paid === "unknown") throw new UnknownReplyError("a PayPal order's paid record");
+      if (paid === null) {
+        console.error("a PayPal order waiting to be handed over has no paid record any more", store.handle, order);
+        await redisPipeline([["ZREM", key, order]]);
+        continue;
+      }
+      // Handed over, or its product gone: handOverPayPal takes it out of the list.
+      if (await handOverPayPal(store, paid)) handed += 1;
     } catch (error) {
       // Still unknown: kept, moved behind the others, tried at the next sweep.
       console.error("handing over a PayPal purchase again failed; tried again at the next sweep", store.handle, order, error);
-      await redisPipeline([["ZADD", key, String(Math.floor(Date.now() / 1000)), order]]).catch(() => undefined);
+      await redisPipeline([["ZADD", key, dueNow(), order]]).catch(() => undefined);
     }
   }
   return handed;

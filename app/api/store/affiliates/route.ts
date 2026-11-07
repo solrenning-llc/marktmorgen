@@ -253,7 +253,10 @@ export async function POST(request: NextRequest) {
       // Somebody who already has a store here is asked in their own studio
       // instead of an inbox (lib/partner-invites.ts). The agreement moves; it
       // is not skipped. Their own store is never offered a partnership.
-      const theirs = to ? await storeForEmail(to).catch(() => null) : null;
+      // A record that cannot be read is not "no store here" (rule 24): nothing is sent, and the creator is
+      // asked to try again, rather than the offer going to an inbox that has a studio.
+      const theirs = to ? await storeForEmail(to).catch(() => undefined) : null;
+      if (theirs === undefined) return fail("server_error", 503);
       const alreadyHere = Boolean(theirs && theirs.sid !== store.sid);
       const sent = await invitePartner({ store, email: to, share, titles, origin, alreadyHere });
       if (sent === "sent" || sent === "waiting") return Response.json({ ok: true, waiting: sent === "waiting" });

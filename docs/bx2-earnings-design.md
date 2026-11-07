@@ -35,6 +35,12 @@ One studio page, "Earnings", for whoever may see the numbers (`can(role, "stats"
   not be read" for that source, with no amount at all (not a lower number), and the month's
   total is shown only when every source of that month was read. A month read in full with
   nothing in it says "Nothing recorded", which is a confirmed zero.
+- **Exact, once, so far** (Codex J's review of #2941): every difference is worked out exactly,
+  never rounded, and a sum past exact integers is unknown; each provider is given once, and a
+  provider given twice is unknown rather than added twice; the reading's time is taken once
+  every list was read, and a record after it (or an entry dated after its day in the store's
+  zone) makes its source unknown; a time outside a date's range, or in a year not of four
+  digits, gives nothing or an unknown source, never an error.
 - **561 [NE1] (no earnings claims), respected**: no "best month", no growth percentage, no
   projection, no goal celebration, no comparison with other creators, no badge, level or status
   by revenue. The rule's output has no such field (held by a test). The page carries the NE1

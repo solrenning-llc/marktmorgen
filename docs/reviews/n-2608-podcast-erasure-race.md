@@ -72,3 +72,44 @@ node proofs/n/2608-podcast-erasure-race.mjs /absolute/existing/node_modules
 Current expected exit status is 1. Source snapshots are pinned read-only
 evidence, not an alternate product implementation. Only this small received
 finding was investigated under C4-3080; no broad sweep or parallel agents.
+
+## 6 November, 22:30 Fortaleza — recovered C4 review and directed F2 replay
+
+The PR timeline contains C4's independent review comment **6694994605**, on
+the exact 0fad head, with two LOW findings. The older checkpoint that only
+listed an outstanding R2 review was incomplete: preserve this qualified C4
+review as well. It does not close the subsequently reported erasure findings.
+
+- F1: an unknown essential count is shown as limited/too many. C4's original
+  proof is `claude4/review-n-c2-proofs@dfd140d47`,
+  `tests/c4-rev3-2608-unknown-says-limited.test.ts`,
+  blob `faa62c6f4cc502adb4563004cd717d98bf48f18b`.
+- F2: unknown grant evidence becomes absence/404. Original C4 route proof:
+  `tests/c4-rev3-2608-feed-unknown-404.test.ts`,
+  blob `ed8ca79be50a578dbdc6ae8e07d232c6bf1cb02a`.
+
+N read both original proofs but did not execute their NextRequest route or
+full contact-send fixtures. Credit and the LOW classification remain C4's.
+N independently executed ONE new library-only F2 case against the unchanged
+source: the same canonical grant first reads successfully, then its GET
+envelope gets one extra reply; readFeedToken returns null instead of unknown.
+**One test / one causal failure, two pipeline commands plus one direct setup
+Map write.** This is not a second new finding or independent HTTP404 proof.
+
+The four earlier erasure cases did NOT execute again; the runner's new
+allowlisted Node name filter selected only this case. No product/interface,
+registry, alias/config, reference, provider, permission or admission changed.
+Budget admitted before this run: one case, at most ten commands, 120 seconds,
+128 KiB captured output. All these bounds were respected; network stayed
+blocked. Node syntax and git diff checks passed. No product type/lint/full
+scanner/linked/nine-CI claim is added. No corrective GREEN is claimed.
+
+Directed command (current expected exit status 1):
+
+```sh
+node proofs/n/2608-podcast-erasure-race.mjs /absolute/existing/node_modules 'C4 F2:'
+```
+
+C6 separately announced mail-clicks head 768b2894d with consent/race changes.
+That occupied source was not edited or tested by N; #2700 still needs explicit
+ownership/order coordination. The source remained frozen under C4-3080/3090.

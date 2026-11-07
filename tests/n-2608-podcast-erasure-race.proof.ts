@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {createHash} from 'node:crypto';
-import {forgetPodcastPerson,tokenKey} from '@/lib/podcast-access';
+import {forgetPodcastPerson,readFeedToken,tokenKey} from '@/lib/podcast-access';
 import {data,trace,reset,onRead,override} from './n-2608-world';
 const store={statsId:'podcast-proof-store'} as Parameters<typeof forgetPodcastPerson>[0];
 const pid='a'.repeat(32),email='reader@example.test';
@@ -32,4 +32,14 @@ test('unknown token read never deletes the only index and reports completion',as
 test('unknown DEL acknowledgement never becomes confirmed zero records',async()=>{
  seed();override((commands,real)=>commands[0][0]==='DEL'?[undefined]:real);
  await assert.rejects(forgetPodcastPerson(store,[pid],email));
+});
+
+test('C4 F2: an extra grant reply is unknown rather than confirmed absence',async()=>{
+ reset();data.set(tokenKey(first),JSON.stringify({s:'proof-store',h:'proofshop',p:pid,e:email}));
+ assert.notEqual(await readFeedToken(first),null,'the exact same stored grant is healthy');
+ override((commands,real)=>commands[0][0]==='GET'?[...real,null]:real);
+ let unknown=false;
+ let result:unknown;
+ try{result=await readFeedToken(first);}catch{unknown=true;}
+ assert.ok(unknown||result!==null,'an extra pipeline reply cannot prove that a healthy stored grant is absent');
 });

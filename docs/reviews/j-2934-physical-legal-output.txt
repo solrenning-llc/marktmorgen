@@ -1,0 +1,407 @@
+FILE sz2-physical-legal.test.ts STATUS 0
+NETWORK CONTROL PASS before graph
+
+GPSR: the area and a complete record
+  ok    the area is the 27 EU states plus Iceland, Liechtenstein and Norway
+  ok    Germany, France and Norway are in it
+  ok    the US, the UK and Switzerland are not
+  ok    a stored record reads back, country upper-cased
+  ok    an EU manufacturer with type, picture and a stated 'no warnings' has no gaps
+  ok    so no country is closed
+
+GPSR: what is missing
+  ok    no record at all lists every gap
+  ok    no picture is a gap (art. 19(c))
+  ok    a manufacturer outside the area needs an EU responsible person
+  ok    its EU/EEA countries close, the rest keep selling
+  ok    a responsible person outside the area does not count
+  ok    an EU responsible person with a web contact page closes the gap
+  ok    a responsible person without postal and electronic address is a gap
+  ok    empty warnings without the 'none' statement is a gap: never inferred
+  ok    warnings text closes it
+  ok    an electronic address that is neither email nor https is a gap
+  ok    http (not https) is not a contact page
+  ok    a field with a control character is dropped, so it becomes a gap
+  ok    whitespace is folded
+  ok    an unknown country is a gap
+  ok    garbage from storage reads as no record
+
+California Proposition 65 text (the creator's, checked, never written by the code)
+  ok    only when the product ships to the US
+  ok    empty is fine: nothing is shown
+  ok    WARNING: with the site
+  ok    CA WARNING: is accepted
+  ok    CALIFORNIA WARNING: is accepted
+  ok    no signal word first
+  ok    the signal word in lower case is not the signal word
+  ok    no P65Warnings site
+  ok    too long
+  ok    a control character
+
+Unit price (computed from the price charged, never typed)
+  ok    250 g at 2.49 is 9.96 per kilogram
+  ok    0.75 L at 12.99 is 17.32 per liter
+  ok    a decimal comma reads the same
+  ok    33 cl at 1.99 is 6.03 per liter (6.0303..., rounded)
+  ok    half a cent rounds up: 2 kg at 0.01
+  ok    1 kg at 5.00 is the selling price itself
+  ok    150 cm² at 3.00 is 200.00 per square meter
+  ok    2.5 m at 10.00 is 4.00 per meter
+  ok    500 cm³ at 1.00 is 2,000.00 per cubic meter
+  ok    zero quantity is not a quantity
+  ok    more than three decimals is refused
+  ok    an unknown unit is refused
+  ok    a negative amount is refused
+  ok    no quantity, no unit price
+  ok    an absurd result is refused rather than shown wrong
+  ok    the unit is written out for screen readers (3.1.4)
+  ok    liter
+
+Prior lowest price (98/6/EC art. 6a; CJEU C-330/23)
+  ok    the same price again adds no step
+  ok    the lowest price of the 30 days before, not the price the day before
+  ok    the sale price itself (from the start) is not part of its prior price
+  ok    a later sale, 45 days in: the 800 ended before its window
+  ok    a window that starts before the first price is flagged incomplete
+  ok    no price before the start: nothing to show
+  ok    an empty history: nothing to show
+  ok    the window is 30 days
+  ok    kept for the window plus the longest sale, so a running sale still finds its prior price
+  ok    on the last day of a long sale its prior price is unchanged
+  ok    steps that ended before the kept period are dropped
+  ok    a clock that goes back never reorders and never drops a price that was applied
+  ok    the history never holds more than its cap
+  ok    merging keeps the lower price, so the prior price is never higher than the truth
+  ok    the current price is never merged away
+  ok    a non-integer or negative price is not recorded
+
+64 checks, all passing.
+FILE j-2934-physical-legal.proof.ts STATUS 1
+NETWORK CONTROL PASS before graph
+SAME_SECOND_HISTORY [{"at":1790553600,"cents":1000},{"at":1794009600,"cents":500},{"at":1794009601,"cents":20},{"at":1794009602,"cents":10}] {"cents":500,"complete":true}
+✔ healthy unit-price and sequential history controls (2.543145ms)
+✖ two legitimate changes in one second cannot inflate the next sale's prior lowest price (2.826633ms)
+✖ an unreadable history step cannot certify a complete known prior price (0.423614ms)
+✖ warning shape must name the intended site rather than a suffix hostname (1.038342ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 1
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16.40732
+
+✖ failing tests:
+
+test at ../../../../tmp/j2934-HROvTR/j-2934-physical-legal.proof.ts.cjs:140:27
+✖ two legitimate changes in one second cannot inflate the next sale's prior lowest price (2.826633ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    {
+  +   cents: 500,
+  -   cents: 20,
+      complete: true
+    }
+
+      at TestContext.<anonymous> (/tmp/j2934-HROvTR/j-2934-physical-legal.proof.ts.cjs:146:25)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: [Object],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/j2934-HROvTR/j-2934-physical-legal.proof.ts.cjs:148:27
+✖ an unreadable history step cannot certify a complete known prior price (0.423614ms)
+  AssertionError [ERR_ASSERTION]: malformed price evidence must not become a complete known reference
+      at TestContext.<anonymous> (/tmp/j2934-HROvTR/j-2934-physical-legal.proof.ts.cjs:151:25)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/j2934-HROvTR/j-2934-physical-legal.proof.ts.cjs:153:27
+✖ warning shape must name the intended site rather than a suffix hostname (1.038342ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  null !== 'site'
+
+      at TestContext.<anonymous> (/tmp/j2934-HROvTR/j-2934-physical-legal.proof.ts.cjs:155:25)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 'site',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+FILE shipping.test.ts STATUS 0
+NETWORK CONTROL PASS before graph
+
+Read safely
+  ok    a cost, a region and a note
+  ok    a list of countries, kept to those Stripe ships to, once each
+  ok    nothing else is shipping
+  ok    where it goes, in the reader's language
+
+Unknown stored shipping never becomes free or digital
+  ok    unverified charge is not shipping
+  ok    unverified physical product is not offered as digital
+  ok    unverified charge is not shipping
+  ok    unverified physical product is not offered as digital
+  ok    unverified charge is not shipping
+  ok    unverified physical product is not offered as digital
+  ok    unverified charge is not shipping
+  ok    unverified physical product is not offered as digital
+  ok    unverified charge is not shipping
+  ok    unverified physical product is not offered as digital
+  ok    unverified charge is not shipping
+  ok    unverified physical product is not offered as digital
+  ok    unverified charge is not shipping
+  ok    unverified physical product is not offered as digital
+  ok    unverified charge is not shipping
+  ok    unverified physical product is not offered as digital
+  ok    unverified charge is not shipping
+  ok    unverified physical product is not offered as digital
+  ok    unverified charge is not shipping
+  ok    unverified physical product is not offered as digital
+  ok    unverified charge is not shipping
+  ok    unverified physical product is not offered as digital
+  ok    unverified charge is not shipping
+  ok    unverified physical product is not offered as digital
+  ok    unverified charge is not shipping
+  ok    unverified physical product is not offered as digital
+  ok    malformed physical record refuses the product
+  ok    malformed physical record refuses the product
+  ok    malformed physical record refuses the product
+  ok    malformed physical record refuses the product
+  ok    malformed physical record refuses the product
+  ok    malformed physical record refuses the product
+  ok    verified physical facts retain identifier price and creator reference
+  ok    explicit numeric zero remains free physical shipping
+  ok    older digital records still read without shipping
+
+Only on something sold once that hands over nothing else
+  ok    not on a product that already hands something over
+  ok    the rules, said
+  ok    saved on a product with nothing else
+  ok    then no link can be put on it
+  ok    its prices are versions of the same thing, each shipped
+  ok    and nothing can be attached to one of them either
+
+Inventory references preserve product and price identifiers
+  ok    inventory references retain case and creator language
+  ok    unknown, oversized or multiline references are refused
+  ok    bad optional metadata does not disable physical shipping
+  ok    reference is saved
+  ok    reference survives a catalog round trip without changing IDs
+  ok    older clients may edit shipping without erasing a reference
+  ok    invalid write is refused
+  ok    refused edit leaves the existing shipping unchanged
+  ok    an explicit empty reference clears it without disabling shipping
+
+Physical variant references keep each existing price ID
+  ok    a new physical variant stores its reference
+  ok    a physical variant accepts its own inventory reference
+  ok    variant reference survives storage with the same IDs and price
+  ok    older option edits preserve a variant reference
+  ok    an oversized variant reference refuses the whole edit
+  ok    refused variant edits preserve label price and reference
+  ok    unknown reference input does not create another variant
+  ok    a digital price cannot acquire a physical inventory reference
+  ok    bad optional variant metadata preserves the price option
+  ok    explicitly clearing a variant reference keeps shipping and all IDs
+
+Its checkout
+  ok    it can be sold
+  ok    the version picked, at its price
+  ok    Stripe asks for an address in one of its countries
+  ok    and adds the shipping as its own line
+  ok    the order says it is shipped
+  ok    with tax on: shipping taxed as shipping, the book as goods
+  ok    never as a gift
+
+Where it is going
+  ok    read from either of Stripe's places
+  ok    in the confirmation email, with who sends it
+
+Marked as shipped
+  ok    a tracking link is an https address, or nothing
+  ok    a link that is not one is refused
+  ok    tracking URLs cannot carry credentials
+  ok    unreviewed pending storage is explicit unavailability before marking
+  ok    unreviewed storage never creates a physical shipment mark
+
+Never-activated deployments retain the original guarded one-shot action
+  ok    the default action marks and uses the guarded SES sender
+  ok    a new legacy mark keeps SET NX first without an extra GET
+  ok    the original claim retains its 400-day expiry
+  ok    legacy acceptance is truthful, never a pending source
+  ok    a second press reads the original winner and sends nothing more
+  ok    an occupied claim needs only the original SET and GET
+  ok    no queue or budget-pool is silently created
+  ok    the legacy path does not bypass the Resend guard
+  ok    an invalid recipient still permits the old shipment record without mail
+  ok    concurrent legacy presses return one stored winner and invoke only one accepted send
+  ok    legacy unknown claim ACK never authorizes email
+  ok    legacy unknown claim ACK never authorizes email
+  ok    legacy unknown claim ACK never authorizes email
+  ok    legacy unknown claim ACK never authorizes email
+  ok    legacy unknown claim ACK never authorizes email
+  ok    legacy unknown claim ACK never authorizes email
+  ok    legacy unknown claim ACK never authorizes email
+  ok    legacy unknown claim ACK never authorizes email
+  ok    legacy unknown claim ACK never authorizes email
+  ok    a committed lost ACK never sends
+  ok    retry after a lost ACK returns its stored winner without sending
+  ok    retired cannot fall back to a new legacy mark
+  ok    unknown lifecycle cannot become legacy
+  ok    provider uncertainty preserves the shipment without inventing a queue
+  ok    unknown durable claim acknowledgment refuses before mail
+  ok    unknown durable claim acknowledgment refuses before mail
+  ok    unknown durable claim acknowledgment refuses before mail
+  ok    unknown durable claim acknowledgment refuses before mail
+  ok    unknown durable claim acknowledgment refuses before mail
+  ok    unknown durable claim acknowledgment refuses before mail
+  ok    unknown durable claim acknowledgment refuses before mail
+  ok    claim transport failure refuses before mail
+
+A single durable shipment claim requires exactly one reply
+  ok    an unknown outer claim cannot grant success or email
+  ok    unknown claims are neither retried nor destructively removed
+  ok    an unknown outer claim cannot grant success or email
+  ok    unknown claims are neither retried nor destructively removed
+  ok    an unknown outer claim cannot grant success or email
+  ok    unknown claims are neither retried nor destructively removed
+  ok    an unknown outer claim cannot grant success or email
+  ok    unknown claims are neither retried nor destructively removed
+  ok    an unknown outer claim cannot grant success or email
+  ok    unknown claims are neither retried nor destructively removed
+  ok    an unknown outer claim cannot grant success or email
+  ok    unknown claims are neither retried nor destructively removed
+  ok    an unknown outer claim cannot grant success or email
+  ok    unknown claims are neither retried nor destructively removed
+  ok    an unknown outer claim cannot grant success or email
+  ok    unknown claims are neither retried nor destructively removed
+  ok    an unknown outer claim cannot grant success or email
+  ok    unknown claims are neither retried nor destructively removed
+  ok    an unknown outer claim cannot grant success or email
+  ok    unknown claims are neither retried nor destructively removed
+  ok    an unknown outer claim cannot grant success or email
+  ok    unknown claims are neither retried nor destructively removed
+
+An occupied shipment claim needs a readable existing record
+  ok    an unreadable occupied claim never fabricates shipment success
+  ok    an unreadable occupied claim never fabricates shipment success
+  ok    an unreadable occupied claim never fabricates shipment success
+  ok    an unreadable occupied claim never fabricates shipment success
+  ok    an unreadable occupied claim never fabricates shipment success
+  ok    an unreadable occupied claim never fabricates shipment success
+  ok    an unreadable occupied claim never fabricates shipment success
+  ok    an unreadable occupied claim never fabricates shipment success
+  ok    an unreadable occupied claim never fabricates shipment success
+  ok    a readable occupied claim returns its original record without another email
+
+An active funded shipment without a recipient still requires an exact claim ACK
+  ok    a malformed no-recipient claim cannot confirm a shipment
+  ok    malformed no-recipient claims add no re-read, outbox work or email
+  ok    a malformed no-recipient claim cannot confirm a shipment
+  ok    malformed no-recipient claims add no re-read, outbox work or email
+  ok    a malformed no-recipient claim cannot confirm a shipment
+  ok    malformed no-recipient claims add no re-read, outbox work or email
+  ok    a malformed no-recipient claim cannot confirm a shipment
+  ok    malformed no-recipient claims add no re-read, outbox work or email
+  ok    a malformed no-recipient claim cannot confirm a shipment
+  ok    malformed no-recipient claims add no re-read, outbox work or email
+  ok    a malformed no-recipient claim cannot confirm a shipment
+  ok    malformed no-recipient claims add no re-read, outbox work or email
+  ok    a malformed no-recipient claim cannot confirm a shipment
+  ok    malformed no-recipient claims add no re-read, outbox work or email
+  ok    a malformed no-recipient claim cannot confirm a shipment
+  ok    malformed no-recipient claims add no re-read, outbox work or email
+  ok    a malformed no-recipient claim cannot confirm a shipment
+  ok    malformed no-recipient claims add no re-read, outbox work or email
+  ok    a malformed no-recipient claim cannot confirm a shipment
+  ok    malformed no-recipient claims add no re-read, outbox work or email
+  ok    a malformed no-recipient claim cannot confirm a shipment
+  ok    malformed no-recipient claims add no re-read, outbox work or email
+  ok    a malformed no-recipient claim cannot confirm a shipment
+  ok    malformed no-recipient claims add no re-read, outbox work or email
+  ok    a malformed no-recipient claim cannot confirm a shipment
+  ok    malformed no-recipient claims add no re-read, outbox work or email
+  ok    a malformed no-recipient claim cannot confirm a shipment
+  ok    malformed no-recipient claims add no re-read, outbox work or email
+  ok    a malformed no-recipient claim cannot confirm a shipment
+  ok    malformed no-recipient claims add no re-read, outbox work or email
+  ok    a no-recipient claim transport exception returns unknown
+  ok    a committed mark with an extra reply remains unconfirmed and is never deleted
+  ok    one real OK still confirms the no-recipient mark without sending
+  ok    the no-recipient mark keeps its existing TTL
+
+The active producer deadline begins before the Stripe read
+  ok    the original pre-await timestamp is preserved in the real enqueue argument
+  ok    an unknown durable ACK after the delayed read still authorizes no mark
+  ok    the buyer gets one email, with unchanged tracking and address
+  ok    and never a second one
+  ok    no unbudgeted Resend fallback was used
+  ok    an order that was not shipped cannot be marked
+
+182 checks, all passing.
+FILE store-sale.test.ts STATUS 0
+NETWORK CONTROL PASS before graph
+
+Reading it
+  ok    the name tidied
+  ok    a percentage not offered is no sale
+  ok    an end before the start is no sale
+  ok    without its coupon, no sale
+
+When it applies
+  ok    while it runs
+  ok    not before
+  ok    not at its end
+  ok    not on a membership
+  ok    not on a call
+  ok    not where the buyer names the price
+  ok    not with price options
+  ok    not on something free
+  ok    only the products picked
+
+The price shown
+  ok    30% off $49
+  ok    rounded to the cent as Stripe rounds
+  ok    nothing off is the price
+  ok    how long is left
+
+The checkout
+  ok    the sale's coupon, with no code box
+  ok    the price sent is the product's; Stripe takes the sale off
+  ok    after it ends, nothing comes off
+
+20 checks, all passing.

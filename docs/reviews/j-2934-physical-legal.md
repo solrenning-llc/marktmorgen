@@ -60,3 +60,22 @@ O acesso ao PDF S6 não fecha a conferência integral de S1–S8 e não equivale
 ## Continuação necessária
 
 No mesmo executor recuperado e com controles de rede fail-hard antes de carregar o grafo: confirmar head nominal, preservar o permanente inteiro RED/final, executar matriz independente adequada ao contrato esclarecido e conferir os tipos reais ES2017, lint, scanner, diff e discovery. Só depois podem existir graus funcionais e parecer completo. Não houve tentativa de contornar o bloqueio para obter resultados.
+
+
+## Executed technical continuation — exact 3dc42b26dfd191b6d727c2ab6f916c668d8ca8fa
+
+This English addendum supersedes the earlier unexecuted status only. C4-3080/3090 apply: root-only serial, Medium effort, requested review only; no push/PR/main integration/merge/CI change. All earlier report text and refs remain preserved.
+
+**NOT CLEAN: one MEDIUM technical finding and two conditional LOW input-validation findings.** This pure module remains unwired; no real price, checkout, shipping gate or customer data changed. No legal-compliance approval is given.
+
+1. **MEDIUM — same-second price changes can overstate the prior lowest price.** recordPrice appends every changed value at max(now,last.at+1). With a known1000-cent price from40days earlier, legitimate changes500 then20 within secondT, and sale10 atT+1, it invents timestampsT,T+1,T+2. priorLowestPrice(history,T+1) then certifies500/complete:true, while20 really applied before that sale. The new proof observes exactly that output, against expected20. The healthy sequential history control passes. This contradicts the stated conservative/never-higher property without needing a clock rollback, legal interpretation or productive price change. Preserve the applied-time/order semantics without manufacturing a future timestamp; resolve same-time sequencing before integration.
+2. **Conditional LOW — malformed history can become a complete known reference.** steps filters an unreadable cents:"20" entry, leaving an old1000-cent entry; priorLowestPrice returns a complete known amount. This is a deliberately malformed typed boundary; no existing reader is claimed to produce it. A future decoder must either reject the whole unknown history or enforce a validated-only contract; it must not silently certify completeness from a filtered subset.
+3. **Conditional LOW — the warning shape accepts a suffix hostname.** checkProp65 accepts www.P65Warnings.ca.gov.example.invalid as naming the P65Warnings site. The healthy exact-site text passes. This is a text-shape weakness, not an SSRF/open redirect: nothing fetches/parses that text as a navigation URL here. CodeQL's generic URL-security description is therefore not adopted. The exact standalone site token/boundary contract should be clarified before rendering; no legal sufficiency, chemical requirement or statutory warning text is certified.
+
+Actual evidence: author64/64; linked shipping182+store-sale20=202PASS;266ordinaryPASS overall. Independent4tests:1healthy controlPASS/3causalFAIL, separate from ordinary GREEN. No assertion was weakened. The exact original RED470b599e70c425a9ee8587c5d7f68680c277e8f9 had been resolved as new-module absent in the earlier report; this continuation did not replay it or call that64 assertion failures.
+
+Actual ES2017 strict types/transitive imports and scoped lint/syntax pass. Canonical aliases/testEnvironment are retained. Global fetch, socket and TLS controls run before every graph, with a transport negative control. All data is synthetic; zero network/provider/account/payment. Four additional cases,120s/process and256KiB capture, no global suite, browser or hosted CI. Types do not raise the target or suppress diagnostics. Author source/ref/CI remain read-only.
+
+Legal source verification remains explicitly INCOMPLETE. Several primary texts were blocked in the author's study and previous review; this bounded technical continuation did not conduct a new legal research project. The observations above concern code invariants and declared shape contracts only. No law, gate, commercial term, price or visible limit change is authorized.
+
+Correct the same PR locally, add permanent regressions, and request a focused return on a new exact head after literal MAIN VERDE permits one consolidated push. Nine final successful checks, applicable independent opinions and fresh clean state remain necessary. New evidence remains LOCAL/not remotely fetchable during freeze.

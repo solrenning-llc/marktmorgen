@@ -1177,9 +1177,12 @@ export default async function StudioPage({
         left: readsSales(current) ? left.heavyLeft : left.anyLeft,
       }
     : null;
-  const statListings = current && visits && salesRead ? await readListings(current, [...new Set([...productsInStats(current, visits, salesRead.value), ...reachProducts(visits)])]) : [];
+  // Read after the day's reading, from what it read, so it cannot be waited for before it: when the products it names
+  // could not be read (one outside the catalog's head is read from its own record), the numbers wait, as when they
+  // could not be read, rather than end the page or name a product "no longer in your store" (Claude 5 on #2835).
+  const statListings = current && visits && salesRead ? await readListings(current, [...new Set([...productsInStats(current, visits, salesRead.value), ...reachProducts(visits)])]).catch(() => null) : [];
   const counted =
-    current && visits && salesRead
+    current && visits && salesRead && statListings
       ? studioStats(current, visits, salesRead.value, salesRead.state, statListings)
       : null;
   // Its rates beside those of stores its size (lib/benchmarks.ts): this page's numbers are kept as the
@@ -1632,9 +1635,9 @@ export default async function StudioPage({
                         storeUrl: current ? storeBase(current) : undefined,
                         reminders: current ? current.recovery.enabled : undefined,
                         may: { settings: may("settings"), page: may("page"), draft: may("draft") },
-                        pages: statListings.filter((l) => l.page).map((l) => l.id),
+                        pages: (statListings ?? []).filter((l) => l.page).map((l) => l.id),
                         promotionProducts: current && (may("page") || may("draft"))
-                          ? statListings.filter((product) => !product.hidden).map((product) => ({ id: product.id, title: product.title, url: `${storeBase(current)}/p/${productSegment(product)}` }))
+                          ? (statListings ?? []).filter((product) => !product.hidden).map((product) => ({ id: product.id, title: product.title, url: `${storeBase(current)}/p/${productSegment(product)}` }))
                           : [],
                       }}
                       weeklyAi={may("settings") && aiAvailableFor(store) && store ? store.weeklyAi : undefined}

@@ -254,6 +254,12 @@ export async function moveToMonthly(store: Store, customer: string, subscription
         // with no automatic retry, and the daily job reads the membership again before anything else.
         return { ok: false, reason: (await record(FALLBACK_CHECK_KEY, check)) ? "unknown" : "unknown-unrecorded" };
       }
+      // A 200 whose body is not this membership (JSON null, another membership, no id, not an object) says nothing of
+      // what Stripe did, and the move may have been made and the month charged: the same as no answer, never "error"
+      // with nothing kept, never a void or a retry of the year on it, never a second move (Claude 6 on #3098).
+      if (!isOwnReply(updated, subscription)) {
+        return { ok: false, reason: (await record(FALLBACK_CHECK_KEY, check)) ? "unknown" : "unknown-unrecorded" };
+      }
       const latest = updated.latest_invoice && typeof updated.latest_invoice === "object" ? (updated.latest_invoice as InvoiceRead) : null;
       const latestId = typeof latest?.id === "string" && INVOICE_PATTERN.test(latest.id) && latest.id !== failedInvoice ? latest.id : "";
       if (updated.pending_update) {

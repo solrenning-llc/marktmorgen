@@ -222,6 +222,20 @@ for (const [shape, v] of notObjects) {
   is(`July's line with its own id, its parent ${shape}: refused, not read as "no proration"`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { parent: v }))), "refused");
 }
 
+// The same holds for the other objects a line nests what it is read by (rule
+// 30): its price, the price's recurring terms, its decimal pricing and its
+// period. Absent or null is "none there", read as before; any other shape is
+// refused, never read as "no price", "the membership's own terms" or "no time".
+is("healthy: the line's price null, read from its amount", beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { price: null }))), moved);
+is("healthy: the line's recurring terms null, read by the membership's", beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { price: { unit_amount: 3000, recurring: null } }))), moved);
+is("healthy: the line's decimal pricing null", beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { pricing: null }))), moved);
+for (const [shape, v] of notObjects) {
+  is(`July's line, its price ${shape}: refused, never read as no price`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { price: v }))), "refused");
+  is(`July's line, its recurring terms ${shape}: refused`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { price: { unit_amount: 3000, recurring: v } }))), "refused");
+  is(`July's line, its decimal pricing ${shape}: refused`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { price: null, pricing: v }))), "refused");
+  is(`July's line, its period ${shape}: refused, never read as the invoice's date`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { period: v }))), "refused");
+}
+
 process.env.STRIPE_SECRET_KEY = "sk_test_r24_revenue_stand_in";
 const NOW = Date.parse("2026-10-13T12:00:00Z");
 const S = NOW / 1000;

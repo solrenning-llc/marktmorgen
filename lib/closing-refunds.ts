@@ -169,7 +169,11 @@ async function intentOf(account: string, invoice: string, count: () => void): Pr
     if ((row as { status?: unknown }).status !== "paid") continue;
     const id = idOf(((row as { payment?: unknown }).payment as { payment_intent?: unknown } | null)?.payment_intent);
     if (typeof id === "string" && INTENT_ID.test(id)) return id;
+    // A paid payment whose intent does not read is not "paid by nothing" (Claude 6 and Codex G on #3097/#3120).
+    throw new Error("a paid payment of this invoice names no payment intent that reads");
   }
+  // "None" only from a whole list: one that says, exactly, that there is no more.
+  if ((listed as { has_more?: unknown }).has_more !== false) throw new Error("this invoice's payments were not read whole");
   return "";
 }
 

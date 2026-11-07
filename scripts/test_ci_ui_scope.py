@@ -125,6 +125,11 @@ class Graph(WithSyntheticSuite):
             "concatenated require in a component": {"components/c.tsx": "export const c = require('../lib/' + leaf);",
                                                     "lib/index.ts": "export const unused = true;",
                                                     "app/page.tsx": 'import { c } from "@/components/c";\nexport default c;'},
+            # Codex G's third return on #3037: resolving a computed name is a computed import too.
+            "computed require.resolve in a page": {"app/page.tsx": "import { readFileSync } from 'node:fs';\nexport default JSON.parse(readFileSync(require.resolve(spec), 'utf8')).b;"},
+            "computed import.meta.resolve": {"app/page.tsx": "export default import.meta.resolve(spec);"},
+            "computed new URL from import.meta.url": {"components/c.tsx": "export const c = new URL(spec, import.meta.url);",
+                                                      "app/page.tsx": 'import { c } from "@/components/c";\nexport default c;'},
             "method on the specifier": {"app/page.tsx": "export default await import('../lib/b'.concat(x));"},
             "computed import in a component": {"components/c.tsx": "export const c = await import(`../lib/${leaf}.ts`);",
                                                "app/page.tsx": 'import { c } from "@/components/c";\nexport default c;'},
@@ -162,6 +167,7 @@ class Graph(WithSyntheticSuite):
 
     def test_a_whole_literal_dynamic_import_is_still_followed(self):
         for code in ("await import('../lib/b')", "await import( '../lib/b' )", "require('../lib/b')",
+                     "require.resolve('../lib/b')", "new URL('./a.png', import.meta.url)",
                      "await import('../lib/b', { with: {} })"):
             with self.subTest(code=code):
                 self.assertFalse(ui.COMPUTED.search(code))

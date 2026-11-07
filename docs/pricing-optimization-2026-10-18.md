@@ -246,7 +246,7 @@ Store carries no list email at #553 and lib/plan.ts gates broadcasts to Studio (
 | products | 2,000 products | 150 | Podia Shaker | Stan Creator Pro, Thinkific Start, Thinkific Grow, Podia Earthquaker | **no** |
 | fee | 0% of a sale | 0% | Stan Creator Pro, Beacons Creator Max, Kajabi Basic, ClickFunnels Launch, ClickFunnels Scale, Teachable Builder, Teachable Growth, Systeme.io Unlimited, Podia Shaker, Podia Earthquaker | — | yes |
 
-Raised to the band's best finite figure, the lowest price that keeps 60%: list-email $6,899; storage $1,469; video $589; all of them together **$7,499 a month** (today $449). Where a competitor in the band prints "unlimited" (list-email, storage, contacts, seats, products), superiority is infeasible at any price under the 60% rule: an unlimited allowance cannot be held to 60% at full use.
+Raised to the band's best finite figure, the lowest price that keeps 60%: list-email $6,899; storage $1,469; video $589; all of them together **$7,509 a month** (today $449). Where a competitor in the band prints "unlimited" (list-email, storage, contacts, seats, products), superiority is infeasible at any price under the 60% rule: an unlimited allowance cannot be held to 60% at full use.
 
 **Scale**
 

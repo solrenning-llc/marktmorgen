@@ -142,6 +142,18 @@ export class MemoryRedis {
           this.run(["HDEL", imported, field]);
           return 1;
         }
+        // lib/mail-poll-votes.ts POLL_OPEN: a poll written down only while its list keeps fewer than the most at once.
+        if (key.startsWith("-- marktmorgen:mail-poll-open:v1\n") && args[0] === "2" && args.length === 10) {
+          const [, record, index, now, id, most, json, seconds, until, indexSeconds] = args;
+          const kept = this.run(["GET", record]);
+          if (kept !== null && kept !== undefined) return [1, kept];
+          this.run(["ZREMRANGEBYSCORE", index, "-inf", now]);
+          if ((this.run(["ZSCORE", index, id]) ?? null) === null && Number(this.run(["ZCARD", index])) >= Number(most)) return [0];
+          this.run(["SET", record, json, "EX", seconds]);
+          this.run(["ZADD", index, until, id]);
+          this.run(["EXPIRE", index, indexSeconds]);
+          return [2, json];
+        }
         // lib/assistant-memory-store.ts MEMORY_WRITE: the notes written or deleted only while the change's lock is its own.
         if (key.startsWith("-- marktmorgen:amem-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, notes, token, json] = args;

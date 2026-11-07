@@ -486,7 +486,9 @@ export type SendOutcome = {
   done: string[];
   /** Addresses not tried, because the send stopped before them. */
   rest: string[];
-  stopped: "allowance" | "day" | "sender" | "paused" | "portion" | "retry" | "refused" | null;
+  // "poll_full": the list keeps the most polls at once, so an email with a new one does not go (lib/mail-poll-votes.ts);
+  // "poll_failed": its poll could not be written down just now, so nothing went.
+  stopped: "allowance" | "day" | "sender" | "paused" | "portion" | "retry" | "refused" | "poll_full" | "poll_failed" | null;
   /** Why and until when, for a send stopped as "paused" (lib/mail-health.ts). */
   pause?: Pause;
   /**
@@ -532,7 +534,8 @@ export async function sendTo(
   if (pause === undefined) return { done, rest: emails, stopped: "retry" };
   if (pause) return { done, rest: emails, stopped: "paused", pause };
   const tags = healthTags(store, true, tag?.campaign);
-  if (poll && !(await openPoll(store.listId as string, store.handle, pollId as string, poll))) return { done, rest: emails, stopped: "retry" };
+  const opened = poll ? await openPoll(store.listId as string, store.handle, pollId as string, poll) : "ok";
+  if (opened !== "ok") return { done, rest: emails, stopped: opened === "full" ? "poll_full" : "poll_failed" };
   const pollNote = poll ? pollWords(store.language).emailNote(store.mail?.fromName || store.name) : "";
   for (let i = 0; i < emails.length; ) {
     const room = await dailyRoom();
@@ -555,7 +558,7 @@ export async function sendTo(
     const links = new Map<string, string[]>();
     if (poll) {
       for (const email of chunk) {
-        const own = voteLinks(store.listId as string, pollId as string, email, poll.answers.length);
+        const own = voteLinks(store.listId as string, store.handle, pollId as string, email, poll.answers.length);
         if (!own) {
           await release(store, chunk.length);
           await rampBack(watched, chunk.length);

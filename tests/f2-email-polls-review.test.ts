@@ -138,23 +138,23 @@ async function main(): Promise<void> {
   is("it says its poll could not be written down, not that the service asked to slow down", [paused.note.includes("poll could not be written down"), paused.note.includes("slow down")], [true, false]);
 
   part("The store's public request comes before anything of the poll is read");
-  const [open] = (await redis.pipeline([["ZRANGE", `nl:mpoll:ix:${list2}`, 0, 0]])) as [string[]];
+  const [open] = (await redis.pipeline([["ZREVRANGE", `nl:mpoll:ix:${list2}`, 0, 0]])) as [string[]];
   const ballot = voteLinks(list2, fresh.handle, open[0], "ana@example.com", 2)![0];
   is("the link names its store, signed", new URL(ballot).searchParams.get("h"), fresh.handle);
   is("another store's name breaks the signature", await press(ballot.replace(`h=${fresh.handle}`, "h=poll-other")), "status 404");
-  await setSubscription(OWNER, { customerId: "cus_PollReview01", subscriptionId: "sub_PollReview01", active: false, tier: "pro", period: paidPeriod() });
-  const lapsed = (await storeForEmail(OWNER))!;
-  is("this store's requests are refused now", await takePublicRequest(lapsed).catch(() => false), false);
+  // The store's window of requests is used up: every count comes back past any limit.
   const touched: string[] = [];
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    for (const c of commands) for (const part of c.slice(1)) if (String(part).startsWith("nl:mpoll:")) touched.push(String(c[0]));
+    for (const c of commands) for (const word of c.slice(1)) if (String(word).startsWith("nl:mpoll:")) touched.push(String(c[0]));
+    if (commands.length === 1 && commands[0][0] === "INCRBY" && String(commands[0][1]).startsWith("nl:traffic:r:")) return [1e12];
     return pipe.call(redis, commands);
   }) as typeof redis.pipeline;
+  const refused = await takePublicRequest(fresh).catch(() => false);
   const shown = await page(ballot);
   const pressed = await press(ballot);
   redis.pipeline = pipe;
+  is("this store's requests are refused now", refused, false);
   is("the page and the button read nothing of the poll", [touched, shown.includes("could not be recorded"), pressed], [[], true, "failed"]);
-  await setSubscription(OWNER, { customerId: "cus_PollReview01", subscriptionId: "sub_PollReview01", active: true, tier: "pro", period: paidPeriod() });
 
   part("The limit of presses a connection is said");
   let last = "";

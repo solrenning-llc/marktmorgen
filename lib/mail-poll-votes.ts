@@ -5,9 +5,10 @@
  *
  *   - Each reader's copy carries their own links: a key for the reader made
  *     from the list and their address with a secret (it cannot be turned
- *     back into the address, or made from one without the secret), and a
- *     signature over the poll and that key. A link with another key, another
- *     poll or a wrong signature records nothing. Nothing in it can be guessed.
+ *     back into the address, or made from one without the secret), the
+ *     store's handle, and a signature over the poll, the store and that key.
+ *     A link with another key, another poll, another store or a wrong
+ *     signature records nothing. Nothing in it can be guessed.
  *   - A link opens a page (app/poll); only the button on it records, so a
  *     mail scanner that opens every link records nothing, and nothing is
  *     inferred from an email being opened: there is no pixel.
@@ -16,44 +17,73 @@
  *     while the poll is open.
  *   - Open POLL_OPEN_DAYS from the first send, then closed; everything it
  *     keeps is gone by itself POLL_KEEP_DAYS later.
- *   - The creator sees the totals only (pollResults), never who picked what.
+ *   - A list keeps at most MAX_POLLS_KEPT polls at once, counted and written
+ *     in one step (POLL_OPEN): a poll is never deleted while it is kept, so a
+ *     reader never finds an open poll gone; a new one past the cap is
+ *     refused, and a poll leaves the count when its time is over.
+ *   - The creator sees the totals only (pollResults), never who picked what,
+ *     and only from POLL_MIN_SHOWN answers: below it, a total would say what
+ *     one of a few readers picked.
  *   - Each page and each answer is one of the store's public requests
- *     (lib/traffic.ts, takePublicRequest), taken before anything is read or
- *     written; a refused one records nothing.
+ *     (lib/traffic.ts, takePublicRequest), taken after the store is found
+ *     from the signed link and before anything of the poll is read or
+ *     written; a refused one reads and records nothing.
  *
  *   nl:mpoll:<list>:<poll>     the poll: store, question, answers, when (JSON)
  *   nl:mpoll:v:<list>:<poll>   reader's key -> the place of their answer
- *   nl:mpoll:ix:<list>         the list's polls, by when they were first sent,
- *                              at most MAX_POLLS_KEPT; the oldest goes whole
+ *   nl:mpoll:ix:<list>         the list's polls, by when they are gone, at
+ *                              most MAX_POLLS_KEPT at once
  *
  * Deleted with the person (forgetPollPerson, lib/person-erasure.ts) and with
  * the store: every key is named by its list (lib/data-families.ts, CLOSING).
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
+import { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { deriveKey } from "@/lib/secret-box";
 import { SITE_URL } from "@/lib/site-url";
-import { MAX_POLL_ANSWER, MAX_POLL_ANSWERS, MAX_POLL_QUESTION, type MailPoll } from "@/lib/mail-poll";
+import { MAX_POLL_ANSWER, MAX_POLL_ANSWERS, MAX_POLL_QUESTION, POLL_MIN_SHOWN, type MailPoll } from "@/lib/mail-poll";
 
 /** How long a poll takes answers after its email first went out. */
 export const POLL_OPEN_DAYS = 30;
 /** How long its totals stay in the studio once it closed; then all of it is gone. */
 export const POLL_KEEP_DAYS = 60;
-/** The polls a list keeps at once; a new one beyond them deletes the oldest whole. */
+/** The polls a list keeps at once; a new one beyond them is refused until one is gone. */
 export const MAX_POLLS_KEPT = 20;
+/** The fewest answers a poll's totals are shown at (lib/mail-poll.ts). */
+export { POLL_MIN_SHOWN };
 /** What one poll's record weighs at the most: its key, the store's handle, its question, its answers and two times, as JSON. */
 export const POLL_RECORD_BYTES = 64 + 64 + MAX_POLL_QUESTION * 4 + MAX_POLL_ANSWERS * (MAX_POLL_ANSWER * 4 + 8) + 64;
 const POLL_SECONDS = (POLL_OPEN_DAYS + POLL_KEEP_DAYS) * 86_400;
 /**
+ * Writes a poll down while its list keeps fewer than the most at once, in one
+ * step, so two emails can never take the list past it. A poll already there
+ * is answered as it is; polls whose time is over leave the count first (their
+ * keys are gone by themselves by then). Nothing kept is ever deleted.
+ * KEYS: the record, the list's polls. ARGV: now, the poll, the most, the
+ * record, its seconds, when it is gone, the list's polls' seconds.
+ * Answers {1, kept} when it was there, {2, written} when written, {0} when full.
+ */
+export const POLL_OPEN = `-- marktmorgen:mail-poll-open:v1
+local kept = redis.call('GET', KEYS[1])
+if kept then return {1, kept} end
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', ARGV[1])
+if not redis.call('ZSCORE', KEYS[2], ARGV[2]) and redis.call('ZCARD', KEYS[2]) >= tonumber(ARGV[3]) then return {0} end
+redis.call('SET', KEYS[1], ARGV[4], 'EX', ARGV[5])
+redis.call('ZADD', KEYS[2], ARGV[6], ARGV[2])
+redis.call('EXPIRE', KEYS[2], ARGV[7])
+return {2, ARGV[4]}`;
+/**
  * The most an email with a poll adds to sending it, counted in the list-email
- * line (tests/plan-cost-registry.ts): openPoll's eight commands (SET, GET,
- * ZADD, EXPIRE, ZCARD and, past MAX_POLLS_KEPT, ZRANGEBYSCORE, DEL, ZREM) and
- * one read a sequence's round takes first (125 unit 2); its record sent and
- * read back. Taken as if every email had to write its poll down.
+ * line (tests/plan-cost-registry.ts): POLL_OPEN's EVAL and its seven
+ * commands (GET, ZREMRANGEBYSCORE, ZSCORE, ZCARD, SET, ZADD, EXPIRE), and one
+ * read a sequence's round takes first (125 unit 2); the script, the record
+ * sent and read back, and the keys and numbers with them (256 bytes). Taken
+ * as if every email had to write its poll down.
  */
 export const POLL_SEND_COMMANDS = 9;
-export const POLL_SEND_BYTES = 2 * POLL_RECORD_BYTES;
+export const POLL_SEND_BYTES = 2 * POLL_RECORD_BYTES + POLL_OPEN.length + 256;
 
 export const POLL_ID = /^[0-9a-f]{24}$/;
 export const POLL_LIST = /^[0-9a-f]{32}$/;
@@ -73,22 +103,22 @@ export function voterOf(listId: string, email: string): string | null {
   return mac(`voter:${listId}:${normaliseEmail(email)}`);
 }
 
-const signatureOf = (listId: string, pollId: string, voter: string) => mac(`vote:${listId}:${pollId}:${voter}`);
+const signatureOf = (listId: string, handle: string, pollId: string, voter: string) => mac(`vote:${listId}:${handle}:${pollId}:${voter}`);
 
 /** One reader's link to one answer of a poll. */
-export type Ballot = { listId: string; pollId: string; voter: string; signature: string; answer: number };
+export type Ballot = { listId: string; handle: string; pollId: string; voter: string; signature: string; answer: number };
 
 /** The address of a ballot's page. */
 export function ballotUrl(ballot: Ballot, extra = ""): string {
-  return `${SITE_URL}/poll?l=${ballot.listId}&p=${ballot.pollId}&v=${ballot.voter}&s=${ballot.signature}&a=${ballot.answer}${extra}`;
+  return `${SITE_URL}/poll?l=${ballot.listId}&h=${ballot.handle}&p=${ballot.pollId}&v=${ballot.voter}&s=${ballot.signature}&a=${ballot.answer}${extra}`;
 }
 
 /** This reader's links, one an answer, or null when they cannot be signed (no secret): then the email does not go. */
-export function voteLinks(listId: string, pollId: string, email: string, answers: number): string[] | null {
+export function voteLinks(listId: string, handle: string, pollId: string, email: string, answers: number): string[] | null {
   const voter = voterOf(listId, email);
-  const signature = voter ? signatureOf(listId, pollId, voter) : null;
+  const signature = voter && HANDLE_PATTERN.test(handle) ? signatureOf(listId, handle, pollId, voter) : null;
   if (!voter || !signature) return null;
-  return Array.from({ length: answers }, (_, answer) => ballotUrl({ listId, pollId, voter, signature, answer }));
+  return Array.from({ length: answers }, (_, answer) => ballotUrl({ listId, handle, pollId, voter, signature, answer }));
 }
 
 /** A ballot from a page's address, or null when it is not one this site signed. */
@@ -97,13 +127,13 @@ export function readBallot(query: { [key: string]: string | string[] | undefined
     const value = query instanceof URLSearchParams ? query.get(name) : query[name];
     return typeof value === "string" ? value.slice(0, 80) : "";
   };
-  const listId = get("l"), pollId = get("p"), voter = get("v"), signature = get("s"), raw = get("a");
-  if (!POLL_LIST.test(listId) || !POLL_ID.test(pollId) || !HEX32.test(voter) || !HEX32.test(signature) || !/^[0-9]$/.test(raw)) return null;
+  const listId = get("l"), handle = get("h"), pollId = get("p"), voter = get("v"), signature = get("s"), raw = get("a");
+  if (!POLL_LIST.test(listId) || !HANDLE_PATTERN.test(handle) || !POLL_ID.test(pollId) || !HEX32.test(voter) || !HEX32.test(signature) || !/^[0-9]$/.test(raw)) return null;
   const answer = Number(raw);
   if (answer >= MAX_POLL_ANSWERS) return null;
-  const expected = signatureOf(listId, pollId, voter);
+  const expected = signatureOf(listId, handle, pollId, voter);
   if (!expected || !timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) return null;
-  return { listId, pollId, voter, signature, answer };
+  return { listId, handle, pollId, voter, signature, answer };
 }
 
 /** A poll as it is kept. */
@@ -123,37 +153,38 @@ function parseRecord(raw: unknown): PollRecord | null | "bad" {
 
 /**
  * Writes the poll down before its email goes, once (a later batch finds it
- * there), and keeps its place in the list's polls, deleting the oldest past
- * MAX_POLLS_KEPT. Says whether the poll as it is now kept is this one; when
- * it cannot say, the email does not go.
+ * there), in one step with its place among the list's polls (POLL_OPEN):
+ * "ok" when the poll as it is kept is this one, "full" when the list keeps
+ * MAX_POLLS_KEPT polls already (nothing is deleted for it), "failed" when it
+ * cannot say. Only on "ok" does the email go.
  */
-export async function openPoll(listId: string, handle: string, pollId: string, poll: MailPoll, now = Math.floor(Date.now() / 1000)): Promise<boolean> {
-  if (!POLL_LIST.test(listId) || !POLL_ID.test(pollId) || !isRedisConfigured() || !deriveKey("mail-poll")) return false;
+export async function openPoll(listId: string, handle: string, pollId: string, poll: MailPoll, now = Math.floor(Date.now() / 1000)): Promise<"ok" | "full" | "failed"> {
+  if (!POLL_LIST.test(listId) || !POLL_ID.test(pollId) || !HANDLE_PATTERN.test(handle) || !isRedisConfigured() || !deriveKey("mail-poll")) return "failed";
+  const until = now + POLL_SECONDS;
   try {
     const record = JSON.stringify({ h: handle, q: poll.question, a: poll.answers, at: now, closes: now + POLL_OPEN_DAYS * 86_400 });
-    const [, kept] = await redisPipeline([
-      ["SET", recordKey(listId, pollId), record, "NX", "EX", POLL_SECONDS],
-      ["GET", recordKey(listId, pollId)],
-      ["ZADD", indexKey(listId), "NX", now, pollId],
-      ["EXPIRE", indexKey(listId), POLL_SECONDS],
-    ]);
-    const found = parseRecord(kept);
-    if (!found || found === "bad" || found.question !== poll.question || found.answers.join("\n") !== poll.answers.join("\n")) return false;
-    const [count] = await redisPipeline([["ZCARD", indexKey(listId)]]);
-    const over = Number(count) - MAX_POLLS_KEPT;
-    if (over > 0) {
-      const [oldest] = await redisPipeline([["ZRANGEBYSCORE", indexKey(listId), "-inf", "+inf", "LIMIT", 0, over]]);
-      const gone = (Array.isArray(oldest) ? oldest.map(String) : []).filter((id) => id !== pollId && POLL_ID.test(id));
-      if (gone.length) {
-        await redisPipeline([
-          ["DEL", ...gone.flatMap((id) => [recordKey(listId, id), votesKey(listId, id)])],
-          ["ZREM", indexKey(listId), ...gone],
-        ]);
-      }
-    }
-    return true;
+    const [reply] = await redisPipeline([["EVAL", POLL_OPEN, 2, recordKey(listId, pollId), indexKey(listId), now, pollId, MAX_POLLS_KEPT, record, POLL_SECONDS, until, POLL_SECONDS]]);
+    if (!Array.isArray(reply)) return "failed";
+    if (Number(reply[0]) === 0 && reply.length === 1) return "full";
+    if (!(Number(reply[0]) === 1 || Number(reply[0]) === 2)) return "failed";
+    const found = parseRecord(reply[1]);
+    if (!found || found === "bad" || found.handle !== handle || found.question !== poll.question || found.answers.join("\n") !== poll.answers.join("\n")) return "failed";
+    return "ok";
   } catch {
-    return false;
+    return "failed";
+  }
+}
+
+/** How many polls the list keeps now, against MAX_POLLS_KEPT; null when it cannot be read. */
+export async function pollsKept(listId: string | null, now = Math.floor(Date.now() / 1000)): Promise<number | null> {
+  if (!listId) return 0;
+  if (!POLL_LIST.test(listId) || !isRedisConfigured()) return null;
+  try {
+    const [count] = await redisPipeline([["ZCOUNT", indexKey(listId), `(${now}`, "+inf"]]);
+    const n = Number(count);
+    return count !== null && Number.isSafeInteger(n) && n >= 0 ? n : null;
+  } catch {
+    return null;
   }
 }
 
@@ -182,7 +213,9 @@ export async function answerOf(ballot: Ballot): Promise<number | null | "failed"
   }
 }
 
-export type VoteOutcome = "recorded" | "already" | "withdrawn" | "none" | "closed" | "failed";
+export type VoteOutcome = "recorded" | "already" | "withdrawn" | "none" | "closed" | "failed" | "limited";
+/** Presses a connection may make in an hour (app/api/mail/poll); past them it is told so (lib/buyer-words/mail-poll.ts, limited). */
+export const POLL_PRESSES_AN_HOUR = 60;
 
 /** Keeps a reader's first answer. "recorded" only when this answer is now kept as theirs. */
 export async function castVote(ballot: Ballot, record: PollRecord, now = Math.floor(Date.now() / 1000)): Promise<VoteOutcome> {
@@ -214,8 +247,8 @@ export async function withdrawVote(ballot: Ballot, record: PollRecord, now = Mat
   }
 }
 
-/** One poll's totals, as the studio shows them: never who picked what. */
-export type PollResult = { id: string; question: string; answers: { text: string; count: number }[]; total: number; at: number; closes: number; closed: boolean };
+/** One poll's totals, as the studio shows them: never who picked what, and none below POLL_MIN_SHOWN answers (`shown` false, every count null). */
+export type PollResult = { id: string; question: string; answers: { text: string; count: number | null }[]; total: number | null; shown: boolean; at: number; closes: number; closed: boolean };
 
 /** The list's polls, newest first, with their totals; null when they could not be read whole. */
 export async function pollResults(listId: string | null): Promise<PollResult[] | null> {
@@ -235,7 +268,10 @@ export async function pollResults(listId: string | null): Promise<PollResult[] |
         const answer = Number(raw);
         if (Number.isSafeInteger(answer) && answer >= 0 && answer < counts.length) counts[answer] += 1;
       }
-      out.push({ id, question: record.question, answers: record.answers.map((text, k) => ({ text, count: counts[k] })), total: counts.reduce((a, b) => a + b, 0), at: record.at, closes: record.closes, closed: pollClosed(record) });
+      const total = counts.reduce((a, b) => a + b, 0);
+      // Below the fewest shown, nothing of the count leaves here: not the total, not a share.
+      const shown = total >= POLL_MIN_SHOWN;
+      out.push({ id, question: record.question, answers: record.answers.map((text, k) => ({ text, count: shown ? counts[k] : null })), total: shown ? total : null, shown, at: record.at, closes: record.closes, closed: pollClosed(record) });
     }
     return out;
   } catch {
@@ -256,7 +292,11 @@ export async function forgetPollPerson(listId: string | null, email: string): Pr
   return gone.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
 }
 
-/** One person's answers to the list's polls, for the copy of their data (lib/person-copy.ts). Only reads. */
+/**
+ * One person's answers to the list's polls, for the copy of their data
+ * (lib/person-copy.ts). Only reads. A poll or an answer it cannot read fails
+ * the copy, so a copy is never handed over with an answer silently missing.
+ */
 export async function pollAnswersOf(listId: string | null, email: string): Promise<{ question: string; answer: string }[]> {
   if (!listId || !isRedisConfigured()) return [];
   const voter = voterOf(listId, email);
@@ -269,9 +309,12 @@ export async function pollAnswersOf(listId: string | null, email: string): Promi
   list.forEach((_, i) => {
     const record = parseRecord(rows[i * 2]);
     const raw = rows[i * 2 + 1];
-    if (!record || record === "bad" || raw === null || raw === undefined) return;
-    const answer = record.answers[Number(raw)];
-    if (answer !== undefined) out.push({ question: record.question, answer });
+    if (record === "bad") throw new Error("A poll could not be read for the copy.");
+    if (raw === null || raw === undefined) return;
+    const answer = record ? record.answers[Number(raw)] : undefined;
+    // An answer kept for a poll that is gone, or past its answers, is one that cannot be read.
+    if (answer === undefined) throw new Error("An answer to a poll could not be read for the copy.");
+    out.push({ question: record!.question, answer });
   });
   return out;
 }

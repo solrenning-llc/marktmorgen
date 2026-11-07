@@ -32,6 +32,8 @@ export const MAX_POLL_QUESTION = 120;
 export const MAX_POLL_ANSWER = 60;
 export const MIN_POLL_ANSWERS = 2;
 export const MAX_POLL_ANSWERS = 5;
+/** The fewest answers a poll's totals are shown at (lib/mail-poll-votes.ts): below it, a total could say what one reader picked. */
+export const POLL_MIN_SHOWN = 5;
 
 export type MailPoll = { question: string; answers: string[] };
 

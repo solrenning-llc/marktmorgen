@@ -6,6 +6,7 @@
  * Browser-safe: plain data, nothing from the server.
  */
 import { type LanguageCode, parseLanguage } from "@/lib/store-language";
+import { POLL_MIN_SHOWN } from "@/lib/mail-poll";
 
 export type PollWords = {
   /** Under the answers in the email: how it works and who sees what. */
@@ -33,18 +34,21 @@ export type PollWords = {
   unknown: string;
   failedTitle: string;
   failed: string;
+  /** Past the presses a connection may make in an hour (app/api/mail/poll): says how many. */
+  limitedTitle: string;
+  limited: (presses: number) => string;
   previewTitle: string;
   preview: string;
 };
 
 const en: PollWords = {
-  emailNote: (name) => `Pick one answer. A page opens where you confirm it. ${name} sees only how many people picked each answer, never who picked what.`,
+  emailNote: (name) => `Pick one answer. A page opens where you confirm it. ${name} sees only how many people picked each answer, and only once at least ${POLL_MIN_SHOWN} people have answered, never who picked what.`,
   title: "Your answer",
   picked: (answer) => `Your answer: ${answer}`,
   send: "Send my answer",
   others: "Or pick another answer:",
   once: "Each person answers once. You can take your answer back later.",
-  privacy: (name) => `${name} sees only how many people picked each answer, never who picked what.`,
+  privacy: (name) => `${name} sees only how many people picked each answer, and only once at least ${POLL_MIN_SHOWN} people have answered, never who picked what.`,
   thanksTitle: "Thank you. Your answer is recorded.",
   thanks: (answer) => `You answered: ${answer}.`,
   alreadyTitle: "You already answered this poll",
@@ -58,18 +62,20 @@ const en: PollWords = {
   unknown: "It may have been copied only in part. Nothing was recorded. Use the link in the email itself.",
   failedTitle: "Your answer could not be recorded just now",
   failed: "Nothing was saved. Try the link in the email again later.",
+  limitedTitle: "Too many answers came from this connection",
+  limited: (n) => `At most ${n} answers an hour can come from one connection. Nothing was saved. Try the link in the email again in an hour.`,
   previewTitle: "This is a preview",
   preview: "Answers are recorded only from the email a reader gets. Nothing was recorded.",
 };
 
 const es: PollWords = {
-  emailNote: (name) => `Elige una respuesta. Se abre una página donde la confirmas. ${name} solo ve cuántas personas eligieron cada respuesta, nunca quién eligió qué.`,
+  emailNote: (name) => `Elige una respuesta. Se abre una página donde la confirmas. ${name} solo ve cuántas personas eligieron cada respuesta, y solo cuando al menos ${POLL_MIN_SHOWN} personas han respondido, nunca quién eligió qué.`,
   title: "Tu respuesta",
   picked: (answer) => `Tu respuesta: ${answer}`,
   send: "Enviar mi respuesta",
   others: "O elige otra respuesta:",
   once: "Cada persona responde una vez. Puedes retirar tu respuesta más tarde.",
-  privacy: (name) => `${name} solo ve cuántas personas eligieron cada respuesta, nunca quién eligió qué.`,
+  privacy: (name) => `${name} solo ve cuántas personas eligieron cada respuesta, y solo cuando al menos ${POLL_MIN_SHOWN} personas han respondido, nunca quién eligió qué.`,
   thanksTitle: "Gracias. Tu respuesta quedó registrada.",
   thanks: (answer) => `Respondiste: ${answer}.`,
   alreadyTitle: "Ya respondiste esta encuesta",
@@ -83,18 +89,20 @@ const es: PollWords = {
   unknown: "Puede que se haya copiado solo en parte. No se registró nada. Usa el enlace del propio correo.",
   failedTitle: "No se pudo registrar tu respuesta ahora",
   failed: "No se guardó nada. Vuelve a probar el enlace del correo más tarde.",
+  limitedTitle: "Llegaron demasiadas respuestas desde esta conexión",
+  limited: (n) => `Desde una conexión pueden llegar como mucho ${n} respuestas por hora. No se guardó nada. Vuelve a probar el enlace del correo dentro de una hora.`,
   previewTitle: "Esto es una vista previa",
   preview: "Las respuestas solo se registran desde el correo que recibe cada lector. No se registró nada.",
 };
 
 const fr: PollWords = {
-  emailNote: (name) => `Choisissez une réponse. Une page s'ouvre pour la confirmer. ${name} voit seulement combien de personnes ont choisi chaque réponse, jamais qui a choisi quoi.`,
+  emailNote: (name) => `Choisissez une réponse. Une page s'ouvre pour la confirmer. ${name} voit seulement combien de personnes ont choisi chaque réponse, et seulement quand au moins ${POLL_MIN_SHOWN} personnes ont répondu, jamais qui a choisi quoi.`,
   title: "Votre réponse",
   picked: (answer) => `Votre réponse : ${answer}`,
   send: "Envoyer ma réponse",
   others: "Ou choisissez une autre réponse :",
   once: "Chaque personne répond une fois. Vous pourrez retirer votre réponse plus tard.",
-  privacy: (name) => `${name} voit seulement combien de personnes ont choisi chaque réponse, jamais qui a choisi quoi.`,
+  privacy: (name) => `${name} voit seulement combien de personnes ont choisi chaque réponse, et seulement quand au moins ${POLL_MIN_SHOWN} personnes ont répondu, jamais qui a choisi quoi.`,
   thanksTitle: "Merci. Votre réponse est enregistrée.",
   thanks: (answer) => `Vous avez répondu : ${answer}.`,
   alreadyTitle: "Vous avez déjà répondu à ce sondage",
@@ -108,18 +116,20 @@ const fr: PollWords = {
   unknown: "Il a peut-être été copié en partie seulement. Rien n'a été enregistré. Utilisez le lien de l'e-mail lui-même.",
   failedTitle: "Votre réponse n'a pas pu être enregistrée pour l'instant",
   failed: "Rien n'a été gardé. Réessayez le lien de l'e-mail plus tard.",
+  limitedTitle: "Trop de réponses sont venues de cette connexion",
+  limited: (n) => `Une connexion peut envoyer au plus ${n} réponses par heure. Rien n'a été gardé. Réessayez le lien de l'e-mail dans une heure.`,
   previewTitle: "Ceci est un aperçu",
   preview: "Les réponses ne sont enregistrées que depuis l'e-mail reçu par chaque lecteur. Rien n'a été enregistré.",
 };
 
 const de: PollWords = {
-  emailNote: (name) => `Wähle eine Antwort. Es öffnet sich eine Seite, auf der du sie bestätigst. ${name} sieht nur, wie viele Personen welche Antwort gewählt haben, nie, wer was gewählt hat.`,
+  emailNote: (name) => `Wähle eine Antwort. Es öffnet sich eine Seite, auf der du sie bestätigst. ${name} sieht nur, wie viele Personen welche Antwort gewählt haben, und erst, wenn mindestens ${POLL_MIN_SHOWN} Personen geantwortet haben, nie, wer was gewählt hat.`,
   title: "Deine Antwort",
   picked: (answer) => `Deine Antwort: ${answer}`,
   send: "Meine Antwort senden",
   others: "Oder wähle eine andere Antwort:",
   once: "Jede Person antwortet einmal. Du kannst deine Antwort später zurücknehmen.",
-  privacy: (name) => `${name} sieht nur, wie viele Personen welche Antwort gewählt haben, nie, wer was gewählt hat.`,
+  privacy: (name) => `${name} sieht nur, wie viele Personen welche Antwort gewählt haben, und erst, wenn mindestens ${POLL_MIN_SHOWN} Personen geantwortet haben, nie, wer was gewählt hat.`,
   thanksTitle: "Danke. Deine Antwort ist gespeichert.",
   thanks: (answer) => `Du hast geantwortet: ${answer}.`,
   alreadyTitle: "Du hast diese Umfrage schon beantwortet",
@@ -133,18 +143,20 @@ const de: PollWords = {
   unknown: "Er wurde vielleicht nur zum Teil kopiert. Nichts wurde gespeichert. Nutze den Link in der E-Mail selbst.",
   failedTitle: "Deine Antwort konnte gerade nicht gespeichert werden",
   failed: "Nichts wurde gespeichert. Versuche den Link in der E-Mail später noch einmal.",
+  limitedTitle: "Zu viele Antworten von dieser Verbindung",
+  limited: (n) => `Von einer Verbindung können höchstens ${n} Antworten pro Stunde kommen. Nichts wurde gespeichert. Versuche den Link in der E-Mail in einer Stunde noch einmal.`,
   previewTitle: "Das ist eine Vorschau",
   preview: "Antworten werden nur über die E-Mail gespeichert, die eine Leserin oder ein Leser bekommt. Nichts wurde gespeichert.",
 };
 
 const it: PollWords = {
-  emailNote: (name) => `Scegli una risposta. Si apre una pagina dove la confermi. ${name} vede solo quante persone hanno scelto ogni risposta, mai chi ha scelto cosa.`,
+  emailNote: (name) => `Scegli una risposta. Si apre una pagina dove la confermi. ${name} vede solo quante persone hanno scelto ogni risposta, e solo quando almeno ${POLL_MIN_SHOWN} persone hanno risposto, mai chi ha scelto cosa.`,
   title: "La tua risposta",
   picked: (answer) => `La tua risposta: ${answer}`,
   send: "Invia la mia risposta",
   others: "Oppure scegli un'altra risposta:",
   once: "Ogni persona risponde una volta. Puoi ritirare la tua risposta più tardi.",
-  privacy: (name) => `${name} vede solo quante persone hanno scelto ogni risposta, mai chi ha scelto cosa.`,
+  privacy: (name) => `${name} vede solo quante persone hanno scelto ogni risposta, e solo quando almeno ${POLL_MIN_SHOWN} persone hanno risposto, mai chi ha scelto cosa.`,
   thanksTitle: "Grazie. La tua risposta è registrata.",
   thanks: (answer) => `Hai risposto: ${answer}.`,
   alreadyTitle: "Hai già risposto a questo sondaggio",
@@ -158,18 +170,20 @@ const it: PollWords = {
   unknown: "Forse è stato copiato solo in parte. Non è stato registrato nulla. Usa il link nell'email stessa.",
   failedTitle: "Non è stato possibile registrare la tua risposta ora",
   failed: "Non è stato salvato nulla. Riprova il link nell'email più tardi.",
+  limitedTitle: "Troppe risposte da questa connessione",
+  limited: (n) => `Da una connessione possono arrivare al massimo ${n} risposte all'ora. Non è stato salvato nulla. Riprova il link nell'email tra un'ora.`,
   previewTitle: "Questa è un'anteprima",
   preview: "Le risposte si registrano solo dall'email che riceve chi legge. Non è stato registrato nulla.",
 };
 
 const nl: PollWords = {
-  emailNote: (name) => `Kies één antwoord. Er opent een pagina waar je het bevestigt. ${name} ziet alleen hoeveel mensen elk antwoord kozen, nooit wie wat koos.`,
+  emailNote: (name) => `Kies één antwoord. Er opent een pagina waar je het bevestigt. ${name} ziet alleen hoeveel mensen elk antwoord kozen, en pas als minstens ${POLL_MIN_SHOWN} mensen hebben geantwoord, nooit wie wat koos.`,
   title: "Je antwoord",
   picked: (answer) => `Je antwoord: ${answer}`,
   send: "Mijn antwoord versturen",
   others: "Of kies een ander antwoord:",
   once: "Iedereen antwoordt één keer. Je kunt je antwoord later intrekken.",
-  privacy: (name) => `${name} ziet alleen hoeveel mensen elk antwoord kozen, nooit wie wat koos.`,
+  privacy: (name) => `${name} ziet alleen hoeveel mensen elk antwoord kozen, en pas als minstens ${POLL_MIN_SHOWN} mensen hebben geantwoord, nooit wie wat koos.`,
   thanksTitle: "Dank je. Je antwoord is vastgelegd.",
   thanks: (answer) => `Je antwoordde: ${answer}.`,
   alreadyTitle: "Je hebt deze peiling al beantwoord",
@@ -183,18 +197,20 @@ const nl: PollWords = {
   unknown: "Misschien is hij maar half gekopieerd. Er is niets vastgelegd. Gebruik de link in de e-mail zelf.",
   failedTitle: "Je antwoord kon nu niet worden vastgelegd",
   failed: "Er is niets bewaard. Probeer de link in de e-mail later opnieuw.",
+  limitedTitle: "Te veel antwoorden via deze verbinding",
+  limited: (n) => `Via één verbinding kunnen hoogstens ${n} antwoorden per uur komen. Er is niets bewaard. Probeer de link in de e-mail over een uur opnieuw.`,
   previewTitle: "Dit is een voorbeeld",
   preview: "Antwoorden worden alleen vastgelegd vanuit de e-mail die een lezer krijgt. Er is niets vastgelegd.",
 };
 
 const pt: PollWords = {
-  emailNote: (name) => `Escolha uma resposta. Abre-se uma página onde a confirma. ${name} só vê quantas pessoas escolheram cada resposta, nunca quem escolheu o quê.`,
+  emailNote: (name) => `Escolha uma resposta. Abre-se uma página onde a confirma. ${name} só vê quantas pessoas escolheram cada resposta, e só quando pelo menos ${POLL_MIN_SHOWN} pessoas tiverem respondido, nunca quem escolheu o quê.`,
   title: "A sua resposta",
   picked: (answer) => `A sua resposta: ${answer}`,
   send: "Enviar a minha resposta",
   others: "Ou escolha outra resposta:",
   once: "Cada pessoa responde uma vez. Pode retirar a sua resposta mais tarde.",
-  privacy: (name) => `${name} só vê quantas pessoas escolheram cada resposta, nunca quem escolheu o quê.`,
+  privacy: (name) => `${name} só vê quantas pessoas escolheram cada resposta, e só quando pelo menos ${POLL_MIN_SHOWN} pessoas tiverem respondido, nunca quem escolheu o quê.`,
   thanksTitle: "Obrigado. A sua resposta ficou registada.",
   thanks: (answer) => `Respondeu: ${answer}.`,
   alreadyTitle: "Já respondeu a este inquérito",
@@ -208,6 +224,8 @@ const pt: PollWords = {
   unknown: "Pode ter sido copiada só em parte. Nada foi registado. Use a ligação do próprio e-mail.",
   failedTitle: "Não foi possível registar a sua resposta agora",
   failed: "Nada foi guardado. Volte a tentar a ligação do e-mail mais tarde.",
+  limitedTitle: "Chegaram demasiadas respostas desta ligação",
+  limited: (n) => `De uma ligação podem chegar no máximo ${n} respostas por hora. Nada foi guardado. Volte a tentar a ligação do e-mail dentro de uma hora.`,
   previewTitle: "Isto é uma pré-visualização",
   preview: "As respostas só são registadas a partir do e-mail que cada leitor recebe. Nada foi registado.",
 };

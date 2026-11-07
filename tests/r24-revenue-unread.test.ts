@@ -185,6 +185,43 @@ for (const [label, over, invoice] of unreadRefs) {
   is(`July's line, ${label}: refused, never skipped as no membership`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, over), invoice)), "refused");
 }
 
+// The objects the newer shape nests the subscription in (`parent`, then
+// `subscription_details` or `subscription_item_details`) are read exactly too:
+// absent or null is "none there"; any other shape is refused, never read as
+// "no membership" and the line skipped (Claude 5's review of #3018).
+is(
+  "healthy: the line's parent with no item details (null), the invoice's parent reads",
+  beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { subscription: undefined, parent: { subscription_item_details: null } }), { parent: { subscription_details: { subscription: "sub_bea" } } })),
+  moved,
+);
+is(
+  "healthy: the invoice's parent with no subscription details (null), the line's own id reads",
+  beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000), { parent: { subscription_details: null } })),
+  moved,
+);
+is(
+  "healthy: the line's parent holding the item details with its id and no proration",
+  beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { subscription: undefined, parent: { subscription_item_details: { subscription: "sub_bea", proration: false } } }))),
+  moved,
+);
+const notObjects: [string, unknown][] = [["a number", 5], ["text", "sub_bea"], ["true", true], ["a list", [{ subscription: "sub_bea" }]]];
+for (const [shape, v] of notObjects) {
+  is(`July's line, the line's parent ${shape}: refused, never skipped as no membership`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { subscription: undefined, parent: v }))), "refused");
+  is(
+    `July's line, the line's subscription_item_details ${shape}: refused`,
+    beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { subscription: undefined, parent: { subscription_item_details: v } }))),
+    "refused",
+  );
+  is(`July's invoice, its parent ${shape}: refused`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { subscription: undefined }), { parent: v })), "refused");
+  is(
+    `July's invoice, its subscription_details ${shape}: refused`,
+    beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { subscription: undefined }), { parent: { subscription_details: v } })),
+    "refused",
+  );
+  // The line's own id is read, but its parent is still read for proration.
+  is(`July's line with its own id, its parent ${shape}: refused, not read as "no proration"`, beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { parent: v }))), "refused");
+}
+
 process.env.STRIPE_SECRET_KEY = "sk_test_r24_revenue_stand_in";
 const NOW = Date.parse("2026-10-13T12:00:00Z");
 const S = NOW / 1000;

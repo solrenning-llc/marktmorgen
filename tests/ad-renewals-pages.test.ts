@@ -12,13 +12,22 @@
  *     after that reads from the newest again;
  *   - a pass that stops before handling what it read (its deadline) keeps
  *     the place where it was, so nothing read and not sent is passed over;
- *   - a kept place that is not an invoice's id is unknown: nothing is read.
+ *   - a kept place that is not an invoice's id is unknown: nothing is read;
+ *   - the place lasts the day the pass reads (created[gte]), not an hour:
+ *     the sweep visits each store in turn and may come back after more than
+ *     an hour;
+ *   - the place names the Stripe account it was read in: once the creator
+ *     connects another account, it is let go and the new one read from the
+ *     newest;
+ *   - a pass that read renewals and returned before it handled them (the
+ *     store's tokens not read, a sent mark not known) keeps the place where
+ *     it was.
  */
 import * as ads from "@/lib/ad-events";
 import { sendRenewals, setServerToken, subKey } from "@/lib/ad-events";
 import { NO_PIXELS } from "@/lib/pixels";
 import { claimHandle, ensureStatsId, setAdsServer, setPixels, setStripeAccount, storeForEmail } from "@/lib/store";
-import { store as redis } from "./redis-stub";
+import { store as redis, advance } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
@@ -75,6 +84,9 @@ const renewal = (n: number) => ({
 });
 const renewals = (count: number) => Array.from({ length: count }, (_, i) => renewal(i + 1));
 const placeKey = (statsId: string) => `nl:adsrv:renew:${statsId}`;
+const ACCOUNT = "acct_1TestHarbor0002";
+/** A kept place: the account it was read in and the last invoice read. */
+const at = (invoice: string, account = ACCOUNT) => `${account}:${invoice}`;
 const fresh = () => {
   for (const key of redis.keys().filter((k) => k.startsWith("nl:adsrv:sent:"))) redis.run(["DEL", key]);
   asked.length = 0;
@@ -94,7 +106,7 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "harbor", "Harbor Kitchen", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestHarbor0002", true);
+  await setStripeAccount(OWNER, ACCOUNT, true);
   await setPixels(OWNER, { ...NO_PIXELS, meta: "123456789012345", tiktok: "C4ABCDEFGH1234567890", google: "G-AB12CD34EF", pinterest: "2612345678901" });
   let store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;
@@ -140,8 +152,8 @@ async function main(): Promise<void> {
   fresh();
   is("the first pass sends the newest three hundred", await sendRenewals(store, NOW), 300);
   is("it read three pages", asked.length, 3);
-  is("and kept where it stopped", redis.run(["GET", placeKey(statsId)]), "in_Page000300");
-  is("for an hour at the most", Number(redis.run(["TTL", placeKey(statsId)])) > 0 && Number(redis.run(["TTL", placeKey(statsId)])) <= 3600, true);
+  is("and kept where it stopped, in the account it read", redis.run(["GET", placeKey(statsId)]), at("in_Page000300"));
+  is("for the day the pass reads at the most", Number(redis.run(["TTL", placeKey(statsId)])) > 3600 && Number(redis.run(["TTL", placeKey(statsId)])) <= 86400, true);
   asked.length = 0;
   is("the next pass goes on from there and sends the other fifty", await sendRenewals(store, NOW), 50);
   is("starting after the place kept", asked.map((q) => q.get("starting_after")), ["in_Page000300"]);
@@ -150,16 +162,16 @@ async function main(): Promise<void> {
   asked.length = 0;
   is("the pass after reads from the newest again, and sends nothing twice", await sendRenewals(store, NOW), 0);
   is("from the newest", asked[0]?.get("starting_after"), null);
-  is("every one it read handled, it keeps its place after them, for the pass after", redis.run(["GET", placeKey(statsId)]), "in_Page000300");
+  is("every one it read handled, it keeps its place after them, for the pass after", redis.run(["GET", placeKey(statsId)]), at("in_Page000300"));
 
   part("A pass that stops before it handled what it read keeps the place where it was");
   fresh();
   redis.run(["DEL", placeKey(statsId)]);
   is("its time already over: nothing sent", await sendRenewals(store, NOW, 0), 0);
   is("and no place kept past what it did not send", redis.run(["GET", placeKey(statsId)]), null);
-  redis.run(["SET", placeKey(statsId), "in_Page000100", "EX", 3600]);
+  redis.run(["SET", placeKey(statsId), at("in_Page000100"), "EX", 3600]);
   is("nor moved from one kept before", await sendRenewals(store, NOW, 0), 0);
-  is("still there", redis.run(["GET", placeKey(statsId)]), "in_Page000100");
+  is("still there", redis.run(["GET", placeKey(statsId)]), at("in_Page000100"));
   redis.run(["DEL", placeKey(statsId)]);
 
   part("A kept place that is not an invoice's id is unknown");
@@ -167,6 +179,65 @@ async function main(): Promise<void> {
   redis.run(["SET", placeKey(statsId), "not-an-invoice", "EX", 3600]);
   await rejects("it throws", () => sendRenewals(store, NOW));
   is("before Stripe is asked", asked.length, 0);
+  redis.run(["SET", placeKey(statsId), "in_Page000100", "EX", 3600]);
+  await rejects("so does an invoice's id without the account it was read in", () => sendRenewals(store, NOW));
+  redis.run(["SET", placeKey(statsId), at("in_Page000100", "acct_bad shape"), "EX", 3600]);
+  await rejects("or with an account that is not an account's id", () => sendRenewals(store, NOW));
+  is("and Stripe is still not asked", asked.length, 0);
+  redis.run(["DEL", placeKey(statsId)]);
+
+  part("A place outlasts a sweep that comes back after more than an hour");
+  invoices = renewals(350);
+  fresh();
+  is("the first visit sends the newest three hundred", await sendRenewals(store, NOW), 300);
+  advance(3601 * 1000); // the sweep visits every store in turn: this one again only after an hour
+  is("the next visit, an hour and a second later, goes on from the place and sends the other fifty", await sendRenewals(store, NOW), 50);
+  is("all 350 sent, each once", sentToMeta, 350);
+  redis.run(["DEL", placeKey(statsId)]);
+
+  part("A place read in another Stripe account is let go");
+  invoices = renewals(350);
+  fresh();
+  is("three hundred sent in the first account", await sendRenewals(store, NOW), 300);
+  is("its place kept", redis.run(["GET", placeKey(statsId)]), at("in_Page000300"));
+  await setStripeAccount(OWNER, "acct_1TestHarbor0003", true);
+  store = (await storeForEmail(OWNER))!;
+  asked.length = 0;
+  await sendRenewals(store, NOW);
+  is("the creator connected another account: it is read from the newest, not after the old account's invoice", asked[0]?.get("starting_after"), null);
+  is("and the place kept is the new account's", redis.run(["GET", placeKey(statsId)]), at("in_Page000300", "acct_1TestHarbor0003"));
+  await setStripeAccount(OWNER, ACCOUNT, true);
+  store = (await storeForEmail(OWNER))!;
+  redis.run(["DEL", placeKey(statsId)]);
+
+  part("A pass that returns before it handled the renewals it read keeps the place where it was");
+  const configKey = `nl:adsrv:${statsId}`;
+  invoices = renewals(350);
+  fresh();
+  is("three hundred sent", await sendRenewals(store, NOW), 300);
+  const config = redis.run(["GET", configKey]);
+  redis.run(["DEL", configKey]);
+  is("the store's tokens not read: nothing sent", await sendRenewals(store, NOW), 0);
+  redis.run(["SET", configKey, config as string]);
+  is("and the place not moved past the fifty it did not send", redis.run(["GET", placeKey(statsId)]), at("in_Page000300"));
+  is("the next pass sends them", await sendRenewals(store, NOW), 50);
+
+  const original = redis.pipeline.bind(redis);
+  const unknownMarks = async (answer: (commands: (string | number)[][]) => unknown[]) => {
+    fresh();
+    redis.run(["DEL", placeKey(statsId)]);
+    is("three hundred sent", await sendRenewals(store, NOW), 300);
+    (redis as unknown as { pipeline: unknown }).pipeline = async (commands: (string | number)[][]) =>
+      commands.length && commands.every((c) => c[0] === "EXISTS") ? answer(commands) : original(commands);
+    const sent = await sendRenewals(store, NOW);
+    (redis as unknown as { pipeline: unknown }).pipeline = original;
+    return sent;
+  };
+  is("a sent mark answered as neither 1 nor 0 is not known: nothing is sent on it", await unknownMarks((commands) => commands.map(() => "QUEUED")), 0);
+  is("and the place stays where it was", redis.run(["GET", placeKey(statsId)]), at("in_Page000300"));
+  is("so are the marks answered one short", await unknownMarks((commands) => commands.slice(1).map(() => 0)), 0);
+  is("the place stays there too", redis.run(["GET", placeKey(statsId)]), at("in_Page000300"));
+  is("and once the marks read again, the fifty are sent", await sendRenewals(store, NOW), 50);
   redis.run(["DEL", placeKey(statsId)]);
 
   done();

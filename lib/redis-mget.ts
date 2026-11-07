@@ -1,7 +1,7 @@
 /**
  * Many string keys read with MGET, in chunks: Upstash bills every command of
  * a pipeline, and an MGET of many keys is one command, where a GET a key is
- * as many. Each chunk is its own trip, sent side by side, so one reply holds
+ * as many. Each chunk is its own trip, sent MGET_CONCURRENCY at a time, so one reply holds
  * at most its chunk's values (the caller picks a chunk that keeps that reply
  * within the size it was reviewed at).
  *
@@ -25,6 +25,13 @@ export const MGET_REPLY_BYTES = 1_048_576;
  * escape to six.
  */
 export const REPLY_ESCAPE_FACTOR = 2;
+/**
+ * The most MGET trips mgetWhole has in flight at once. With chunks sized from
+ * the written cap a reading may take a thousand trips (the booking calendar's
+ * making, 2 listings a trip); sent side by side they would open a thousand
+ * requests to the database together. They go in waves of this many instead.
+ */
+export const MGET_CONCURRENCY = 16;
 
 /** An MGET reply that was not one text-or-nothing for each key asked. */
 export class UnreadableMget extends Error {
@@ -46,7 +53,11 @@ export async function mgetWhole(keys: string[], perMget: number): Promise<(strin
   if (keys.length === 0) return [];
   const chunks: string[][] = [];
   for (let i = 0; i < keys.length; i += perMget) chunks.push(keys.slice(i, i + perMget));
-  const replies = await Promise.all(chunks.map((chunk) => redisPipeline([["MGET", ...chunk]])));
+  const replies: unknown[] = [];
+  for (let i = 0; i < chunks.length; i += MGET_CONCURRENCY) {
+    const wave = chunks.slice(i, i + MGET_CONCURRENCY);
+    replies.push(...(await Promise.all(wave.map((chunk) => redisPipeline([["MGET", ...chunk]])))));
+  }
   const out: (string | null)[] = [];
   chunks.forEach((chunk, c) => {
     const reply: unknown = replies[c];

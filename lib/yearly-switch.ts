@@ -40,6 +40,7 @@ import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { forgetPaid } from "@/lib/learn";
 import type { Listing, Store } from "@/lib/store";
+import { UnknownReplyError, repliesFor as linkSetReplies } from "@/lib/redis-reply";
 
 /** What the switch page and the form ask for, in place of another plan's id. */
 export const YEARLY_TARGET = "yearly";
@@ -66,7 +67,14 @@ export async function mintYearlyLink(store: Store, customer: string, subscriptio
   const token = Array.from(bytes)
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-  await redisPipeline([["SET", await linkKey(token), JSON.stringify({ a: store.stripeAccountId, c: customer, s: subscription }), "EX", YEARLY_LINK_SECONDS]]);
+  const key = await linkKey(token);
+  // Handed out only once Redis said it stored it (rule 24): any other answer deletes the link, in case it landed with
+  // its answer lost, and throws, so the offer's caller (lib/yearly-ask.ts) sends no email and lets its claim go.
+  const saved = linkSetReplies(await redisPipeline([["SET", key, JSON.stringify({ a: store.stripeAccountId, c: customer, s: subscription }), "EX", YEARLY_LINK_SECONDS]]), 1);
+  if (saved?.[0] !== "OK") {
+    await redisPipeline([["DEL", key]]).catch(() => {});
+    throw new UnknownReplyError("a yearly offer link's write");
+  }
   return token;
 }
 

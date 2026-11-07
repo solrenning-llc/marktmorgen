@@ -19,6 +19,7 @@
  *   nl:dir:page     the directory's rows, kept a few minutes; dropped on every save
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 
 const LISTED = "nl:dir:listed";
@@ -64,25 +65,34 @@ export async function forgetListing(sid: string): Promise<void> {
   await redisPipeline([["SREM", LISTED, sid], ["DEL", DIRECTORY_CACHE]]);
 }
 
-/** How many creators have said yes and would be listed today. */
+/**
+ * How many creators have said yes and would be listed today. A reply in any
+ * other shape throws UnknownReplyError: it is not "no program listed".
+ */
 export async function listedCount(): Promise<number> {
   if (!isRedisConfigured()) return 0;
-  const [count] = await redisPipeline([["SCARD", LISTED]]);
-  return Number(count) || 0;
+  const replies = repliesFor(await redisPipeline([["SCARD", LISTED]]), 1);
+  const count = replies ? countOf(replies[0]) : null;
+  if (count === null) throw new UnknownReplyError("the directory's SCARD");
+  return count;
 }
 
 /**
  * The sids of the listed stores, in pages.
  *
  * One command for a page of stores rather than a walk over the database
- * (lib/affiliate-directory.ts, readDirectory).
+ * (lib/affiliate-directory.ts, readDirectory). Only an exact [cursor, members]
+ * reply is a page; any other shape throws UnknownReplyError, never "no sid,
+ * walk finished", so the directory is not built from no stores. A member may
+ * come back more than once (SSCAN's own contract); the caller drops repeats.
  */
 export async function listedStores(cursor = "0", count = 100): Promise<{ sids: string[]; next: string }> {
   if (!isRedisConfigured()) return { sids: [], next: "0" };
-  const [reply] = await redisPipeline([["SSCAN", LISTED, cursor, "COUNT", String(count)]]);
-  const rows = Array.isArray(reply) ? reply : [];
-  return {
-    next: typeof rows[0] === "string" ? rows[0] : "0",
-    sids: Array.isArray(rows[1]) ? (rows[1] as unknown[]).map(String) : [],
-  };
+  const replies = repliesFor(await redisPipeline([["SSCAN", LISTED, cursor, "COUNT", String(count)]]), 1);
+  const page = replies ? repliesFor(replies[0], 2) : null;
+  // A cursor is a string of digits exactly (Codex T on #2921); "", "abc" or " 0" is not one, and would end or mislead the walk.
+  const next = page && typeof page[0] === "string" && /^[0-9]+$/.test(page[0]) ? page[0] : null;
+  const sids = page ? stringList(page[1]) : null;
+  if (next === null || sids === null) throw new UnknownReplyError("the directory's SSCAN");
+  return { next, sids };
 }

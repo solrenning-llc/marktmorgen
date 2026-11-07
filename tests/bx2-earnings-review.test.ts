@@ -137,7 +137,9 @@ part("MEDIUM 3: PayPal refunds are full refunds only, said on every PayPal month
   is("the design no longer says PayPal's readers are reused as they are", doc.includes("reused as they are"), false);
   is("it says partial refunds are not recorded", doc.includes("partial refunds"), true);
   is("it says each PayPal list is read newest first", doc.includes("newest first, so a cut loses only the oldest"), true);
-  is("it says an unreadable record or a missing amount, currency or time makes the list unread", doc.includes("never 0, `usd` or now"), true);
+  // Rule 23: the title said "makes the list unread"; Claude 5's decision of 7 Nov 2026 is that such a record stops its list there.
+  is("it says an unreadable record or a missing amount, currency or time never becomes 0, usd or now", doc.includes("never 0, `usd` or now"), true);
+  is("it says such a record stops its list there, its month and the ones before it unknown", doc.includes("stops its list there") && doc.includes("every month that begins after it in every time zone"), true);
 }
 
 part("MEDIUM 4: money given back is its own amount, in the month it came back");

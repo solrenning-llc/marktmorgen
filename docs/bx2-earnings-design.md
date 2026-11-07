@@ -109,10 +109,16 @@ every month of that source says "could not be read". The existing PayPal readers
 exact enough to take as they are (Claude 2's review of #2941), so the year reading reads the
 same keys with these rules: each list is read newest first, so a cut loses only the oldest
 records and `reachedBack` proves the months after it (`readPayPalRefundsWithCoverage` reads
-oldest first and would lose the newest refunds); a record that cannot be read, or a reply out
-of shape, makes the list unread, never a lower complete number (`readPayPalSales` drops it);
-and a record or a Stripe row whose amount, currency or time is missing makes its list unread,
-never 0, `usd` or now (as `readPaidSales` would give).
+oldest first and would lose the newest refunds); a page or a reply out of shape, an id twice
+or rows out of order make the list unread; and a record or a Stripe row that cannot be read, or
+whose amount, currency or time is missing, stops its list there: never 0, `usd` or now (as
+`readPaidSales` would give), and never dropped from a list said complete (as `readPayPalSales`
+drops it). The list is then not complete and its `reachedBack` is that record's time (with no
+time, the time of the last record read before it), so the record's month and every month
+before it say "could not be read", and every month that begins after it in every time zone
+(see `monthFloor` below) stays known: nothing newer is affected, and no month shows a lower
+number. A list dated otherwise than the order it is listed in (paid invoices, dated by
+payment) knows no month when it stops (`reachedBack` null).
 
 **Per month completeness.** A capped list (more records than its pages) still proves every
 record newer than the oldest one it read. The reading records, for each list, the oldest
@@ -193,10 +199,11 @@ source and currency only).
    `readRenewals`, which keeps only `subscription_cycle`); the refunds; and the disputes that took
    money, from their own balance transactions (never `DISPUTE_TAKES`), or, while that shape is not
    confirmed, disputes said not read with the money given back. PayPal: the same keys as
-   `readPayPalSales` and `readPayPalRefundsWithCoverage`, read newest first. In both: a Stripe
-   row or a PayPal record that cannot be read, a page or reply out of shape, or an amount,
-   currency or time missing makes its list unread, never a lower complete number and never 0,
-   `usd` or now. Each record carries its provider's id (`stripe:…`, `paypal:…`). It says
+   `readPayPalSales` and `readPayPalRefundsWithCoverage`, read newest first. In both: a page or
+   reply out of shape makes its list unread; a Stripe row or a PayPal record that cannot be
+   read, or whose amount, currency or time is missing, stops its list there, as "Exactness"
+   says (its month and the months before it unknown, every later month known; for the paid
+   invoices no month), never a lower complete number and never 0, `usd` or now. Each record carries its provider's id (`stripe:…`, `paypal:…`). It says
    `reinstated` not read (money given back has no reading of its own yet) and PayPal its disputes
    (the rule says PayPal's partial refunds are not recorded, `PARTLY_READ`); kept as a fourth
    reading kind through `keptReading`, heavy, counted first. Tests: the read never exceeds

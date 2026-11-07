@@ -39,6 +39,9 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: false, error: "not_selling" }, { status: 400 });
     }
     const account = store.stripeAccountId;
+    // What a cancel did, for the studio to say it in words: "done" (it never started and stays off) or
+    // "stopped" (it had no schedule left, so it may have started, and Stripe now has it off).
+    let cancelState: "done" | "stopped" | null = null;
 
     if (action === "add") {
       // Read the same way as the API's (lib/discount-input.ts).
@@ -83,6 +86,7 @@ export async function POST(request: NextRequest) {
         if (made.reason === "unknown") {
           return Response.json({ ok: false, error: "server_error" }, { status: 503 });
         }
+        // "live": Stripe made it live at once and did not confirm it off; it is kept for the studio to list.
         return Response.json({ ok: false, error: made.reason }, { status: made.reason === "taken" ? 409 : 502 });
       }
     } else if (action === "unschedule") {
@@ -94,9 +98,11 @@ export async function POST(request: NextRequest) {
       if (canceled === "busy") {
         return Response.json({ ok: false, error: "schedule", reason: "busy" }, { status: 409 });
       }
-      if (canceled !== "done" && canceled !== "none") {
+      // Either answer means Stripe confirmed the code off; anything else is never said to be off.
+      if (canceled !== "done" && canceled !== "stopped") {
         return Response.json({ ok: false, error: "stripe" }, { status: 502 });
       }
+      cancelState = canceled;
     } else if (action === "stop") {
       const id = text(body.id, 80);
       if (!id) {
@@ -129,7 +135,7 @@ export async function POST(request: NextRequest) {
     const anyLive = list.codes.some((entry) => entry.active);
     if (anyLive || !list.more) await setHasDiscounts(ref, anyLive);
 
-    return Response.json({ ok: true, codes: list.codes, more: list.more, schedules: kept.schedules });
+    return Response.json({ ok: true, codes: list.codes, more: list.more, schedules: kept.schedules, ...(cancelState ? { canceled: cancelState } : {}) });
   } catch (error) {
     console.error("changing a discount code failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

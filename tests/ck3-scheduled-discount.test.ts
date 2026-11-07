@@ -94,7 +94,7 @@ async function main() {
     part("Nothing happens before the start");
     calls = [];
     let found = 0;
-    const deps = { findStore: async (sid: string) => { found += 1; return sid === SID ? shop : null; }, markDiscounts: async () => { marked += 1; } };
+    const deps = { findStore: async (sid: string) => { found += 1; return sid === SID ? shop : null; }, markDiscounts: async () => { marked += 1; return { ...shop, hasDiscounts: true }; } };
     let marked = 0;
     let run = await sched.activateScheduledCodes(Date.now() + 10_000, start - 1, deps);
     is("no Stripe call before the start", calls.length, 0);
@@ -169,7 +169,9 @@ async function main() {
     calls = [];
     await sched.activateScheduledCodes(Date.now() + 10_000, start, deps);
     is("a canceled code is never switched on", calls.length, 0);
-    is("canceling what is not scheduled says so", await sched.cancelSchedule(shop, "promo_ck3synthetic"), "none");
+    calls = [];
+    is("canceling what has no schedule left stops it on Stripe and says so", await sched.cancelSchedule(shop, "promo_ck3synthetic"), "stopped");
+    is("one call to keep it off", calls.map((c) => c.body), ["active=false"]);
 
     part("The cap and the store's lock are checked before Stripe is asked");
     await redis.pipeline([["DEL", `nl:dsched:${STATS}`, "nl:dsched:due"]]);

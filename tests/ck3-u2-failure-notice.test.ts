@@ -200,6 +200,16 @@ async function main() {
     redis.pipeline = realPipeline;
     is("an unreadable list to tell sends nothing and says unknown", [told.length, run.notices.unknown], [0, 1]);
 
+    part("A store not read exactly keeps its notice; one confirmed gone drops it (the exact store read of #3006)");
+    await redis.pipeline([["DEL", `nl:dsched:${STATS}`, "nl:dsched:due", TELL]]);
+    told = [];
+    await redis.pipeline([["HSET", `nl:dsched:${STATS}`, "promo_GONE", JSON.stringify({ c: "GONE", s: start, e: end, t: ACTIVATION_TRIES, f: 1 })], ["ZADD", TELL, start, member("promo_GONE")]]);
+    run = await sched.activateScheduledCodes(Date.now() + 10_000, start + HOUR, { ...deps, findStore: async () => "unknown" as const });
+    is("a store read that is not exact sends nothing and says unknown", [told.length, run.notices.unknown, run.notices.dropped], [0, 1, 0]);
+    is("and the notice stays due for the next run", await redis.pipeline([["ZCARD", TELL]]), [1]);
+    run = await sched.activateScheduledCodes(Date.now() + 10_000, start + HOUR, { ...deps, findStore: async () => "none" as const });
+    is("a store confirmed gone sends nothing and drops the notice", [told.length, run.notices.dropped, (await redis.pipeline([["ZCARD", TELL]]))[0]], [0, 1, 0]);
+
     part("The real sender: the store's own email figure, before it goes");
     const lib = readFileSync("lib/discount-schedule-notice.ts", "utf8");
     is("sent through sendEmail, counted against the store's email figure", /meter: \{ by: "store", store(: store)?, kind: "email" \}/.test(lib), true);

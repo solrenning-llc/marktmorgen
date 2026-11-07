@@ -934,6 +934,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:catalog:move:cursor@lib/store.ts": company("Where the catalog move stopped", "One key, the company's job."),
   "nl:store:before-catalog:@lib/store.ts": { what: "A store record kept aside while it moved, thirty days", parts: [capped(MAX_STORE_BYTES + KB, "Once, at most the record.", src("lib/store.ts", "MAX_STORE_BYTES"))] },
   "nl:store:handle:@lib/store.ts": { what: "The store's addresses", parts: [capped(21 * KEY, "Its address and up to twenty before it.")] },
+  "nl:store:id:@lib/discount-schedule.ts": { what: "Where the store is kept, read exactly so a scheduled code is dropped only for a store confirmed gone", parts: [capped(0, "Read only: counted with lib/store.ts.")] },
   "nl:store:id:@lib/store.ts": { what: "Where the store is kept", parts: [capped(KEY, "One a store.")] },
   "nl:store:lock:@lib/store.ts": short("The store's lock while one change is written", "studio", 1, 128),
   "nl:store:owner:*@lib/store.ts": company("The pattern the daily job reads every store by", "Not a key: a pattern."),

@@ -45,9 +45,11 @@ const num = (v: unknown) => (typeof v === "number" ? v : NaN);
 const err = (a: Answer) => str((a.data.error as { message?: unknown } | undefined)?.message);
 /**
  * A subscription read back proves a switch only when the reply is that very subscription (rule 30): its own id, equal
- * to the one asked for. Another subscription's reply, or one with no id, fails the check; it never passes it.
+ * to the one asked for. Another subscription's reply, or one with no id, fails the check; it never passes it. A body
+ * that is not an object (JSON `null`) fails it the same way, without throwing.
  */
-const isOwnReply = (a: Answer, id: string): boolean => a.status === 200 && Object.hasOwn(a.data, "id") && a.data.id === id;
+const isOwnReply = (a: Answer, id: string): boolean =>
+  a.status === 200 && a.data !== null && typeof a.data === "object" && Object.hasOwn(a.data, "id") && a.data.id === id;
 const notOwn = (a: Answer, id: string) => (isOwnReply(a, id) ? "" : `Stripe's reply was not ${id}; `);
 /** The price on a subscription's first line, as Stripe answers it (an object, or its id). */
 const linePrice = (a: Answer) => {

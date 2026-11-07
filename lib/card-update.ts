@@ -95,9 +95,11 @@ const customerOf = (sub: SubRow) =>
 /**
  * A Stripe reply decides only when it is the object asked for (rule 30): it holds its own id, equal to the one
  * requested. Another membership of the same customer on the same store, or a reply with no id, says nothing about
- * this one: its status, its card and its unpaid invoice are not this membership's.
+ * this one: its status, its card and its unpaid invoice are not this membership's. A reply that is not an object at all (an HTTP 200 whose JSON body is `null`) is not this object either: it never
+ * throws here.
  */
-const isOwnReply = (reply: object, id: string): boolean => Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
+const isOwnReply = (reply: unknown, id: string): boolean =>
+  reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
 
 /** The membership a grant names, when Stripe's reply is that membership and it is this customer's and this store's. */
 async function subFor(store: Store, account: string, customer: string, subscription: string): Promise<SubRow | null> {

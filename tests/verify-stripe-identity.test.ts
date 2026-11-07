@@ -18,8 +18,8 @@ type Sub = { id: string; customer: string; status: string; metadata: Record<stri
 const prices = new Map<string, { id: string; metadata: Record<string, string> }>();
 const subs = new Map<string, Sub>();
 const failing = new Set<string>();
-/** What each GET /subscriptions/:id answers with: its own id, another subscription's, or none. */
-let readAs: "own" | "other" | "none" = "own";
+/** What each GET /subscriptions/:id answers with: its own id, another subscription's, none, or a JSON body `null`. */
+let readAs: "own" | "other" | "none" | "null" = "own";
 /** What each POST /subscriptions/:id (the switch) answers with: itself, another's id, none, or itself without the price just written. */
 let switchAs: "own" | "other" | "none" | "unwritten" | "null" = "own";
 /** What the void of a declined switch's invoice answers with. */
@@ -79,6 +79,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json(answerAs({ ...row, items, pending_update: null, latest_invoice: { id: "in_VerifySwitched1", status: "paid", total: 0, amount_paid: 0 } }, switchAs, "sub_SomebodyElse02"));
   }
   if (sub && method === "GET") {
+    if (readAs === "null") return json(null);
     const row: Record<string, unknown> = { ...subs.get(sub[1])! };
     if (readAs === "other") row.id = "sub_SomebodyElse01";
     if (readAs === "none") delete row.id;
@@ -110,6 +111,23 @@ async function main(): Promise<void> {
     readAs = mode;
     is(`no check passes on a reply with ${label}`, readBack(await verifyTiers()), [false, false, false, false]);
   }
+
+  // Claude 6 on #3098: an HTTP 200 whose JSON body is `null` itself. Whether the run fails whole (the cron then reports
+  // "the run itself" as failing) or check by check, no read-back check may pass on it.
+  part("Read back with a null body");
+  subs.clear();
+  failing.clear();
+  readAs = "null";
+  is("no check passes on a null body", await verifyTiers().then((checks) => readBack(checks).filter(Boolean).length, () => 0), 0);
+  subs.clear();
+  failing.clear();
+  const named = await verifyTiers();
+  is(
+    "…and the run completes, each read-back failing by name rather than the whole run failing",
+    [readBack(named), named.filter((c) => !c.ok).every((c) => c.detail.startsWith("Stripe's reply was not sub_"))],
+    [[false, false, false, false], true],
+  );
+  readAs = "own";
 
   /** The checks that rest on the switch's own reply: the amount it charged, and the declined card. */
   const amounts = (checks: { check: string; ok: boolean }[]) => checks.filter((c) => c.check.endsWith("the amount the member page shows is what Stripe charges")).map((c) => c.ok);

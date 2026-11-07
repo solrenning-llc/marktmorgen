@@ -29,9 +29,13 @@ async function main(): Promise<void> {
   let modelCalls = 0;
   /**
    * Rule 30: what each next GET of the add-on's subscription answers for. "own" is the subscription asked for; a string
-   * is another subscription's id; null is a reply with no id at all. Empty: always its own.
+   * is another subscription's id; null is a reply with no id at all; NULL_BODY is an HTTP 200 whose JSON body is `null`
+   * itself. Empty: always its own.
    */
+  const NULL_BODY = "null body";
   const replies: ("own" | string | null)[] = [];
+  /** The same for the next GET of the checkout page: "own" is the page asked for. */
+  let sessionReply: "own" | string | null = "own";
   let cancelSet = false;
   /** Rule 30 on the add-on's price made at Stripe (POST /prices): answered as written, or with one value not the one written. */
   let priceAs: "written" | "amount" | "currency" | "interval" | "null" = "written";
@@ -49,6 +53,7 @@ async function main(): Promise<void> {
     is("billing stays on the platform account", new Headers(init?.headers).has("Stripe-Account"), false);
     if (method === "GET" && url.pathname === "/v1/subscriptions/sub_SyncAssist01") {
       const next = replies.length ? replies.shift() : "own";
+      if (next === NULL_BODY) return Response.json(null);
       const reply: Record<string, unknown> = { id: next === "own" ? plan.subscriptionId : next, status, cancel_at_period_end: cancelSet, items: { data: [{ current_period_start: period.start, current_period_end: period.end }] } };
       if (next === null) delete reply.id;
       return Response.json(reply);
@@ -58,7 +63,10 @@ async function main(): Promise<void> {
       return Response.json({ id: plan.subscriptionId, status, cancel_at_period_end: cancelSet });
     }
     if (method === "GET" && url.pathname === "/v1/checkout/sessions/cs_test_SyncAssistReturn01") {
-      return Response.json({ id: "cs_test_SyncAssistReturn01", mode: "subscription", customer: "cus_SyncAssist01", subscription: plan.subscriptionId, metadata: { addon: "assistant", assistant_for: "syncassist" } });
+      if (sessionReply === NULL_BODY) return Response.json(null);
+      const page: Record<string, unknown> = { id: sessionReply === "own" ? "cs_test_SyncAssistReturn01" : sessionReply, mode: "subscription", customer: "cus_SyncAssist01", subscription: plan.subscriptionId, metadata: { addon: "assistant", assistant_for: "syncassist" } };
+      if (sessionReply === null) delete page.id;
+      return Response.json(page);
     }
     if (method === "GET" && url.pathname === "/v1/invoices") {
       is("dispute lookup belongs to this add-on", url.searchParams.get("subscription"), plan.subscriptionId);
@@ -105,7 +113,7 @@ async function main(): Promise<void> {
 
     // Rule 30 (from #2517): a Stripe reply decides only when it is the subscription asked for.
     const stored = async () => (await storeForEmail(owner))?.assistantPlan;
-    for (const [label, other] of [["another subscription's id", "sub_SomebodyElse01"], ["no id", null]] as const) {
+    for (const [label, other] of [["another subscription's id", "sub_SomebodyElse01"], ["no id", null], ["a null body", NULL_BODY]] as const) {
       part("Sync on a reply with " + label + ": nothing is decided, the store is left as it was");
       disputed = false;
       status = "past_due";
@@ -150,6 +158,19 @@ async function main(): Promise<void> {
       );
       is("no plan comes back on that reply", typeof returned === "string" ? "no plan" : "a plan for " + returned.subscriptionId, "no plan");
     }
+    for (const [label, other] of [["another page's id", `cs_test_${"S".repeat(20)}`], ["no id", null], ["a null body", NULL_BODY]] as const) {
+      part("Return from checkout, Stripe's page read with " + label + ": no add-on is granted on it");
+      status = "active";
+      replies.length = 0;
+      sessionReply = other;
+      await freshStore();
+      const returned = await readAssistantReturn((await storeForEmail(owner))!, "cs_test_SyncAssistReturn01").then(
+        (value) => (value === null ? "nothing" : value),
+        () => "unknown",
+      );
+      is("no plan comes back on that page", typeof returned === "string" ? "no plan" : "a plan for " + returned.subscriptionId, "no plan");
+    }
+    sessionReply = "own";
     replies.length = 0;
     await freshStore();
     part("Control: the same return with the subscription's own reply grants it");

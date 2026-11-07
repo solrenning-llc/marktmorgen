@@ -97,7 +97,8 @@ try {
   const errors = [];
   const page = await boardPage(context, errors);
   const mount = async (w) => {
-    await page.evaluate((w) => window.harness.mount(w), w);
+    const epoch = await page.evaluate((w) => window.harness.mount(w), w);
+    await page.waitForFunction((epoch) => window.harness.mountedEpoch === epoch, epoch);
     await page.locator("#deals-title").waitFor();
   };
   const active = () => page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName);
@@ -410,6 +411,7 @@ try {
 
   // 639 [GL7](7): a pipeline this person may only see says so once, at the top of the board.
   await mount(world({ viewOnly: ["sales0"] }));
+  await page.waitForFunction(() => document.body.innerText.includes("You can see this pipeline but not change it."));
   is("the view-only notice is shown once, at the top of the board, and no change control is drawn", [await page.evaluate(() => document.body.innerText.split("You can see this pipeline but not change it.").length - 1), await page.locator("#deal-board-view-only").count(), await page.locator('[id^="deal-remove-"], [id^="deal-edit-"], #deal-new').count()], [1, 1, 0]);
 
   is("no error in the page", errors, []);

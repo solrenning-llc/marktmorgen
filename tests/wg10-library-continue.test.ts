@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { LibraryContinue } from "@/components/library-continue";
-import { KEEP_DAYS, LAST_PREFIX, forgetLastIn, lastKey, lessonPath, readLast, writeLast } from "@/lib/lesson-position-rules";
+import { KEEP_DAYS, LAST_PREFIX, forgetLastIn, lastKey, lastShown, lessonPath, readLast, writeLast } from "@/lib/lesson-position-rules";
 import { deviceLastKey } from "@/lib/lesson-position";
 import { done, is, part } from "./check";
 
@@ -77,12 +77,23 @@ const coursePage = readFileSync("app/[handle]/course/[product]/page.tsx", "utf8"
 is("the course page forgets it whenever it opens without confirming access", /const forgetPerson = access\.state !== "open" && access\.learner && !access\.learner\.owner \? deviceLastKey\(access\.learner\.email\) : null;/.test(coursePage) && /\{forgetPerson \? <ForgetLastLesson courseId=\{course\.id\} person=\{forgetPerson\} \/> : null\}/.test(coursePage), true);
 
 part("The library: nothing drawn before the browser is read");
-is("server markup is empty, so nothing shows that is not there", renderToStaticMarkup(createElement(LibraryContinue, { person: ADA })), "");
+is("server markup is empty, so nothing shows that is not there", renderToStaticMarkup(createElement(LibraryContinue, { person: ADA, open: ["ada-studio"] })), "");
 const library = readFileSync("app/library/page.tsx", "utf8");
-is("the library hands over the key made from its own address", /const continuePerson = email \? deviceLastKey\(email\) : null;/.test(library) && /\{continuePerson \? <LibraryContinue person=\{continuePerson\} \/> : null\}/.test(library), true);
+is("the library hands over the key made from its own address", /const continuePerson = email \? deviceLastKey\(email\) : null;/.test(library) && /\{continuePerson \? <LibraryContinue person=\{continuePerson\} open=\{openHandles\} \/> : null\}/.test(library), true);
 const card = readFileSync("components/library-continue.tsx", "utf8");
 is("a named section with a heading, and a link whose words name the lesson (2.4.9)", [/aria-labelledby="library-continue-heading"/.test(card), /<h2 id="library-continue-heading"/.test(card), /Continue where you left off/.test(card), /`Continue “\$\{last\.lesson\}”`/.test(card)], [true, true, true, true]);
 is("the link is at least 44 px tall (2.5.5)", /className="btn btn-primary btn-sm btn-wrap[^"]*"/.test(card), true);
+
+part("The library shows the card only for a store it shows itself (Claude 6's MEDIUM on #3060)");
+const kept = readLast(raw, NOW + 1000);
+is("a store the library shows: the card", lastShown(kept, ["ada-studio", "ben-shop"]), kept);
+is("a store the library does not show (closed, or its record not read as open): no card", lastShown(kept, ["ben-shop"]), null);
+is("the stores could not all be read: no card, since a failed read is not proof either way (rule 24)", lastShown(kept, null), null);
+is("no stores at all: no card", lastShown(kept, []), null);
+is("a handle that only starts the same is not the store", lastShown(kept, ["ada"]), null);
+is("nothing kept: nothing shown", lastShown(null, ["ada-studio"]), null);
+is("the library hands the card the handles it shows, or null when a store could not be read", [/<LibraryContinue person=\{continuePerson\} open=\{openHandles\} \/>/.test(library), /const openHandles = [^;]*unread[^;]*\? null : shelves\.map\(\(\{ store \}\) => store\.handle\)/.test(library), /storeForId\(sid\)\.catch\(\(\) => UNREAD_STORE\)/.test(library) && /unread = read\.some\(\(s\) => s === UNREAD_STORE\);/.test(library)], [true, true, true]);
+is("the card draws only what lastShown lets through, and never removes a record for it", [/const last = lastShown\(read, open\);/.test(card), /if \(!key \|\| raw === null \|\| read\) return;/.test(card)], [true, true]);
 
 part("Said in the privacy policy, and in the person-data registry");
 const privacy = readFileSync("app/privacy/page.tsx", "utf8");

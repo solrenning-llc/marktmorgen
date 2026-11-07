@@ -10,6 +10,7 @@
  *   nl:ppsell:own:<stats>:<address hash>:<product>  the paid orders behind one address's product
  *   nl:ppsell:sales:<stats>     every paid order, scored by when it was paid (400 days): the store's numbers read it
  *   nl:ppsell:refunded:<stats>  paid orders PayPal says were refunded in full, scored by when that was seen
+ *   nl:ppsell:sum:<order>   a paid order's short line for the sales file (lib/paypal-sale-summary.ts), kept with its record
  *
  * How it fits together. Marktmorgen is a PayPal partner; a creator connects their
  * PayPal Business account through PayPal's own onboarding (Partner Referrals
@@ -50,6 +51,7 @@ import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { plainAmount, formatMoney } from "@/lib/money";
 import { saleOff, salePrice } from "@/lib/store-sale";
+import { SUMMARY_EARLIER_SECONDS, saleSummary, summaryKey } from "@/lib/paypal-sale-summary";
 import { sendEmail } from "@/lib/email";
 import { isPaidUp } from "@/lib/billing";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
@@ -63,7 +65,7 @@ const API = /^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.PAYPAL_API_BASE ?? ""
     ? "https://api-m.sandbox.paypal.com"
     : "https://api-m.paypal.com";
 const TIMEOUT_MS = 20_000;
-const ORDER_ID = /^[A-Z0-9]{10,36}$/;
+export const ORDER_ID = /^[A-Z0-9]{10,36}$/;
 /** The refunded mark's score as this file writes it (ZADD with String(now)): whole seconds, nothing else. */
 const REDIS_SCORE = /^[1-9]\d{0,11}$/;
 /**
@@ -92,10 +94,10 @@ const CAPTURE_ID = /^[A-Za-z0-9-]{1,64}$/;
 const MERCHANT_ID = /^[A-Z0-9]{8,20}$/;
 /** How long a refund on PayPal is watched for, after the sale. PayPal allows refunds for 180 days. */
 const WATCH_SECONDS = 180 * 86_400;
-const PAID_KEPT_SECONDS = 400 * 86_400;
+export const PAID_KEPT_SECONDS = 400 * 86_400;
 
 const orderKey = (order: string) => `nl:ppsell:o:${order}`;
-const paidKey = (order: string) => `nl:ppsell:paid:${order}`;
+export const paidKey = (order: string) => `nl:ppsell:paid:${order}`;
 const watchKey = (statsId: string) => `nl:ppsell:watch:${statsId}`;
 /** Orders whose payment PayPal holds as pending, scored by when they were taken. */
 const pendingKey = (statsId: string) => `nl:ppsell:pending:${statsId}`;
@@ -105,7 +107,7 @@ const DECLINED = new Set(["INSTRUMENT_DECLINED", "PAYER_ACTION_REQUIRED", "ORDER
 /** The paid orders behind one address's product (also read by lib/paypal-handed.ts). */
 export const ownKey = (statsId: string, email: string, productId: string) => `nl:ppsell:own:${statsId}:${addressHash(email)}:${productId}`;
 /** Every paid order, scored by when it was paid, and those refunded in full: what the store's numbers read. */
-const salesKey = (statsId: string) => `nl:ppsell:sales:${statsId}`;
+export const salesKey = (statsId: string) => `nl:ppsell:sales:${statsId}`;
 /** Exported for the affiliate book's count of what it will read (lib/affiliates.ts, bookSizes). */
 export const refundedKey = (statsId: string) => `nl:ppsell:refunded:${statsId}`;
 const SALES_KEPT_SECONDS = 400 * 86_400;
@@ -588,6 +590,8 @@ async function settle(order: string, opened: Opened, captureId: string, email: s
     ["ZADD", salesKey(opened.s), String(paid.at), order],
     ["ZREMRANGEBYSCORE", salesKey(opened.s), "-inf", String(paid.at - SALES_KEPT_SECONDS)],
     ["EXPIRE", salesKey(opened.s), SALES_KEPT_SECONDS],
+    // The sale's short line for the sales file, ending a little before the record (lib/paypal-sale-summary.ts).
+    ...lineWrite(order, paid, opened.s),
   ]);
   return { paid, fresh: true };
 }
@@ -994,7 +998,7 @@ export async function readPayPalSales(statsId: string | null, since: number, lim
 }
 
 /** The keys a PayPal order kept, by the order: for a closed store's deletion (lib/closed-store-data.ts). */
-export const paypalOrderKeys = (order: string): string[] => (ORDER_ID.test(order) ? [orderKey(order), paidKey(order)] : []);
+export const paypalOrderKeys = (order: string): string[] => (ORDER_ID.test(order) ? [orderKey(order), paidKey(order), summaryKey(order)] : []);
 
 /** The most refunded PayPal sales one reading of them takes. */
 export const PAYPAL_REFUNDS_READ = 500;
@@ -1054,3 +1058,9 @@ export async function readPayPalRefunds(statsId: string | null, since: number): 
 
 /** What a payment is called where a refund names it: the capture, so it never mixes with a Stripe payment's id. */
 export const paypalPaymentId = (capture: string) => `paypal:${capture}`;
+
+/** The write of a paid order's short line for the sales file, or none when its record is not in the known shape. */
+function lineWrite(order: string, paid: Paid, statsId: string): (string | number)[][] {
+  const line = saleSummary(paid, order, statsId);
+  return line ? [["SET", summaryKey(order), line, "EX", PAID_KEPT_SECONDS - SUMMARY_EARLIER_SECONDS]] : [];
+}

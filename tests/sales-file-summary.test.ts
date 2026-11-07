@@ -157,7 +157,6 @@ async function main(): Promise<void> {
   await setProductLink(OWNER, added.product.id, "https://example.com/guide");
   await setPayPalSeller(OWNER, SELLER);
   const base = (await storeForEmail(OWNER))!;
-  const statsId = base.statsId!;
   const catalogId = base.catalog.id!;
   const product = (await readListing(base, added.product.id))!;
 
@@ -179,7 +178,7 @@ async function main(): Promise<void> {
     const [line] = await redis.pipeline([["GET", `nl:ppsell:sum:${orders[0]}`]]);
     is("a line is written beside the record", typeof line, "string");
     const bytes = Buffer.byteLength(String(line), "utf8");
-    is(`at most 1,044 bytes, though the record weighs ${recordBytes}`, bytes <= 1_044 && recordBytes > 4_000 ? "short" : `${bytes} of ${recordBytes}`, "short");
+    is(`at most 1,038 bytes, though the record weighs ${recordBytes}`, bytes <= 1_038 && recordBytes > 4_000 ? "short" : `${bytes} of ${recordBytes}`, "short");
     const [lineTtl, recordTtl] = await redis.pipeline([["TTL", `nl:ppsell:sum:${orders[0]}`], ["TTL", `nl:ppsell:paid:${orders[0]}`]]);
     is("kept no longer than the record", [Number(lineTtl) > 0, Number(lineTtl) <= Number(recordTtl)], [true, true]);
   }
@@ -190,7 +189,7 @@ async function main(): Promise<void> {
     const { result, bytes } = await reading(/^nl:ppsell:(paid|sum):/, () => salesCsv(noHead, 0));
     is("byte for byte what it was", result.csv, before);
     is("every sale a row", [result.rows, result.csv.split("\r\n").length - 2], [30, 30]);
-    is(`at most 30 lines' bytes (${30 * 1_044}), not 30 records (${30 * recordBytes})`, bytes <= 30 * 1_044 + 200 ? "lines" : `${bytes} bytes`, "lines");
+    is(`at most 30 lines' bytes (${30 * 1_038}), not 30 records (${30 * recordBytes})`, bytes <= 30 * 1_038 + 200 ? "lines" : `${bytes} bytes`, "lines");
     is("no sale read whole", (result as { wholeRecords?: number }).wholeRecords, 0);
   }
 
@@ -256,6 +255,9 @@ async function main(): Promise<void> {
     is("no product record read", commands, 0);
     is("byte for byte what it was", result.csv, await filedBefore(store));
     is("its title from the names", result.csv.split("\r\n")[1].includes("Second Edition"), true);
+    const all = await reading(/^nl:/, () => salesCsv(store, 0));
+    // The three sales left without their line above are read whole: one MGET more; with every line there, three.
+    is("the whole file's Redis reads: the range, the lines' MGET, the three records' MGET and one HMGET of names, one trip each", [all.commands, all.trips], [4, 4]);
     await redis.pipeline([["HDEL", `nl:catalog:${catalogId}:n`, added.product.id]]);
     const missing = await reading(listingKeys, () => salesCsv(store, 0));
     is("a name missing: the record is read, the same bytes", [missing.commands > 0, missing.result.csv === result.csv], [true, true]);

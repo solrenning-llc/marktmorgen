@@ -1164,8 +1164,14 @@ export const COST_LINES: CostLine[] = [
     feature: "The studio's own reads and writes: every page of it drawn (STUDIO_PAGE_UNITS each), every save and read, its refreshing; and the never-paused plan, cancel, delete and data-download requests (17 October 2026)",
     // The essential requests are still priced here as one heavy request each. A sales file is dearer: measured at its
     // worst (7 November 2026), after its products are read in batches and each cell is bounded (lib/stats.ts salesCsv,
-    // tests/sales-file-cheaper.test.ts), it is about US$0.0159 a call (US$0.0292 before). Pricing it honestly here waits
-    // for the owner's decision on the first-year refund ceiling (Claude 4 to Claude 1, 7 November 2026); not certified.
+    // tests/sales-file-cheaper.test.ts), it is about US$0.0159 a call (US$0.0292 before). With each PayPal sale read from
+    // its short line (lib/paypal-sale-summary.ts, PAYPAL_SUMMARY_BYTES = 1,038 bytes, not MAX_PAID_BYTES) and product
+    // names from the catalog's names (lib/catalog.ts, MAX_STORE_NAMES_BYTES = 2,176,000 bytes read and kept at most),
+    // it is about US$0.0063 a call (tests/sales-file-summary.test.ts). That lower figure holds only once no sale and no
+    // product lacks its copy: a sale or a product without one is read whole, at the US$0.0159 figure. So the honest
+    // price may drop to it only after scripts/sales-file-fill.mjs, counting, reads every store and finds none left
+    // (lib/sales-file-fill.ts nothingLeft). Pricing it honestly here waits for the owner's decision on the first-year
+    // refund ceiling (Claude 4 to Claude 1, 7 November 2026); not certified.
     monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8),
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "studio"] },

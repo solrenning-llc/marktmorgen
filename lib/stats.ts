@@ -37,7 +37,8 @@ import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { onAccount } from "@/lib/stripe-account";
 import type { Listing, Store } from "@/lib/store";
-import { MAX_TITLE_LENGTH, listingsById, productIds, recordListings } from "@/lib/catalog";
+import { MAX_TITLE_LENGTH, listingNamesById, productIds, recordListings } from "@/lib/catalog";
+import { readPayPalSalesForFile } from "@/lib/paypal-sale-summary";
 import { plainAmount } from "@/lib/money";
 import { revenueBySource } from "@/lib/came-from";
 import { type AttributionTable, attributionTable } from "@/lib/attribution-rules";
@@ -1065,16 +1066,22 @@ function financialPage(list: { data?: unknown; has_more?: unknown }, seen: Set<s
   return rows;
 }
 
-export async function readPaidSales(store: Store, since: number, pages: number): Promise<{ sales: Sale[]; partial: boolean }> {
+/** How a reading of paid sales reads the store's PayPal sales: the records, unless a reader (the sales file's) is given. */
+type PayPalSalesReader = (statsId: string | null, since: number, limit: number) => Promise<{ sales: Paid[]; partial: boolean }>;
+
+export async function readPaidSales(store: Store, since: number, pages: number, readPayPal?: PayPalSalesReader): Promise<{ sales: Sale[]; partial: boolean }> {
   if (!readsSales(store)) return { sales: [], partial: false };
   const handles = saleHandles(store);
   const sales: Sale[] = [];
   let partial = false;
-  // Sales paid with PayPal, written down as each was paid (lib/paypal-sales.ts): counted beside Stripe's.
-  const paypal = await readPayPalSales(store.statsId, since, pages * 100).catch((error) => {
-    console.error("reading PayPal sales failed", error);
-    return { sales: [], partial: true };
-  });
+  // Sales paid with PayPal, written down as each was paid (lib/paypal-sales.ts): counted beside Stripe's. The sales
+  // file reads its own way (salesCsv), and a reading of it that does not answer is said there, never fewer sales.
+  const paypal = readPayPal
+    ? await readPayPal(store.statsId, since, pages * 100)
+    : await readPayPalSales(store.statsId, since, pages * 100).catch((error) => {
+        console.error("reading PayPal sales failed", error);
+        return { sales: [], partial: true };
+      });
   for (const paid of paypal.sales) sales.push(payPalSale(paid));
   if (paypal.partial) partial = true;
   if (!store.stripeAccountId) {
@@ -2388,17 +2395,28 @@ export function cutToBytes(text: string, max: number): string {
 /**
  * The store's sales as CSV, newest first: every paid checkout and one-click
  * extra since `sinceSeconds` (0 for all), up to EXPORT_PAGES pages of each.
- * Every product the sales name is read once, before the rows, in batches
- * (listingsById); each cell is bounded by SALES_FILE_COLUMNS.
+ * Every product the sales name is read once, before the rows, from the
+ * catalog's names (listingNamesById); each PayPal sale from its short line
+ * (lib/paypal-sale-summary.ts), read whole when its line is missing or does
+ * not read (`wholeRecords` counts those); each cell is bounded by
+ * SALES_FILE_COLUMNS. A reading that does not answer in its shape throws
+ * (CX-123 rule 24): the route says so, never a file with fewer rows.
  */
-export async function salesCsv(store: Store, sinceSeconds: number): Promise<{ csv: string; rows: number; partial: boolean }> {
-  const { sales, partial } = await readPaidSales(store, sinceSeconds, EXPORT_PAGES);
+export async function salesCsv(store: Store, sinceSeconds: number): Promise<{ csv: string; rows: number; partial: boolean; wholeRecords: number }> {
+  let wholeRecords = 0;
+  const { sales, partial } = await readPaidSales(store, sinceSeconds, EXPORT_PAGES, async (statsId, since, limit) => {
+    const read = await readPayPalSalesForFile(statsId, since, limit);
+    wholeRecords = read.whole;
+    // A line keeps no capture: the file never shows one.
+    return { sales: read.sales.map((line) => ({ ...line, capture: "" })), partial: read.partial };
+  });
+  if (wholeRecords) console.warn(`sales file: ${wholeRecords} PayPal sale(s) read whole, without their short line`);
   const named = new Set<string>();
   for (const sale of sales) {
     if (sale.product) named.add(sale.product);
     for (const added of bumpsFromMeta((sale.row.metadata ?? {}) as Record<string, string>)) named.add(added.id);
   }
-  const listings = await listingsById(store, named);
+  const listings = await listingNamesById(store, named);
   const find = (id: string) => (id ? listings.get(id) ?? null : null);
   const title = (id: string, fallback: unknown) => find(id)?.title ?? (typeof fallback === "string" ? fallback : "");
   const lines = [csvRow(SALES_FILE_COLUMNS.map(([name]) => name))];
@@ -2441,7 +2459,7 @@ export async function salesCsv(store: Store, sinceSeconds: number): Promise<{ cs
     ];
     lines.push(csvRow(cells.map((cell, i) => cutToBytes(cell, SALES_FILE_COLUMNS[i][1]))));
   }
-  return { csv: `${lines.join("\r\n")}\r\n`, rows: sales.length, partial };
+  return { csv: `${lines.join("\r\n")}\r\n`, rows: sales.length, partial, wholeRecords };
 }
 
 /** Every kept day of visits as CSV, newest first. */

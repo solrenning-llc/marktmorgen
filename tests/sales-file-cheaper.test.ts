@@ -215,6 +215,8 @@ async function main(): Promise<void> {
   {
     sessions = [checkout(1, { product: first.product.id, bump: second.product.id, title: "Should not be used" })];
     const noHead: Store = { ...base, catalog: { ...base.catalog, head: [] } };
+    // Without the catalog's names (lib/catalog.ts namesKey), as a store saved before them: the records are read.
+    await redis.pipeline([["DEL", `nl:catalog:${catalogId}:n`]]);
     for (const [label, reply] of [
       ["no reply for the read", () => []],
       ["a reply of another type", (cmds: (string | number)[][]) => cmds.map(() => 42)],

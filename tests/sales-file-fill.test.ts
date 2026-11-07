@@ -103,7 +103,7 @@ async function main(): Promise<void> {
 
   part("No line passes its bound");
   {
-    is("the bound is 1,044 bytes (tests/plan-cost-registry.ts, the studio line)", PAYPAL_SUMMARY_BYTES, 1_044);
+    is("the bound is 1,038 bytes (tests/plan-cost-registry.ts, the studio line)", PAYPAL_SUMMARY_BYTES, 1_038);
     is("a store's names are at most 2,176,000 bytes", MAX_STORE_NAMES_BYTES, 2_176_000);
     let seed = 7;
     const rand = () => ((seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648) / 2_147_483_648);

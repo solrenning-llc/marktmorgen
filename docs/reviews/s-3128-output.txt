@@ -1,0 +1,186 @@
+## SAME21 old route+form-store overlay
+
+the newest
+  ok    answered with the PDF
+  ok    byte for byte the PDF made from the answer as the list reads it
+  FAIL  no LRANGE of the answers sent by the app
+        expected 0
+        got      1
+  FAIL  of the list, only the one answer travels back
+        expected 2067
+        got      247930
+
+one in the middle
+  ok    answered with the PDF
+  ok    byte for byte the PDF made from the answer as the list reads it
+  FAIL  no LRANGE of the answers sent by the app
+        expected 0
+        got      1
+  FAIL  of the list, only the one answer travels back
+        expected 2066
+        got      247930
+
+the oldest
+  ok    answered with the PDF
+  ok    byte for byte the PDF made from the answer as the list reads it
+  FAIL  no LRANGE of the answers sent by the app
+        expected 0
+        got      1
+  FAIL  of the list, only the one answer travels back
+        expected 2065
+        got      247930
+
+An answer whose words hold another answer's id
+  FAIL  is not taken for it: the real one is found
+        expected [200,2065]
+        got      [200,248170]
+
+Confirmed absence, as before
+  ok    an answer no longer kept: 404
+  ok    a form with no answers: 404
+
+Unknown is never a PDF and never gone (rule 24)
+  FAIL  a number: 503 unavailable
+        expected [503,true]
+        got      [200,false]
+  FAIL  a list: 503 unavailable
+        expected [503,true]
+        got      [200,false]
+  FAIL  an object: 503 unavailable
+        expected [503,true]
+        got      [200,false]
+  FAIL  text that is not an answer: 503 unavailable
+        expected [503,true]
+        got      [200,false]
+  FAIL  an answer without its time: 503 unavailable
+        expected [503,true]
+        got      [200,false]
+  FAIL  another answer: 503 unavailable
+        expected [503,true]
+        got      [200,false]
+
+21 checks, 13 failing.
+S_VOLUME {"runs":259,"mocks":0}
+
+## SAME21 head
+
+the newest
+  ok    answered with the PDF
+  ok    byte for byte the PDF made from the answer as the list reads it
+  ok    no LRANGE of the answers sent by the app
+  ok    of the list, only the one answer travels back
+
+one in the middle
+  ok    answered with the PDF
+  ok    byte for byte the PDF made from the answer as the list reads it
+  ok    no LRANGE of the answers sent by the app
+  ok    of the list, only the one answer travels back
+
+the oldest
+  ok    answered with the PDF
+  ok    byte for byte the PDF made from the answer as the list reads it
+  ok    no LRANGE of the answers sent by the app
+  ok    of the list, only the one answer travels back
+
+An answer whose words hold another answer's id
+  ok    is not taken for it: the real one is found
+
+Confirmed absence, as before
+  ok    an answer no longer kept: 404
+  ok    a form with no answers: 404
+
+Unknown is never a PDF and never gone (rule 24)
+  ok    a number: 503 unavailable
+  ok    a list: 503 unavailable
+  ok    an object: 503 unavailable
+  ok    text that is not an answer: 503 unavailable
+  ok    an answer without its time: 503 unavailable
+  ok    another answer: 503 unavailable
+
+21 checks, all passing.
+S_VOLUME {"runs":241,"mocks":0}
+
+## Linked PDF17
+
+Lines
+  ok    words kept whole within the width
+  ok    a line break starts a new line
+  ok    a word wider than the line is cut where it must be
+
+What it says, in order
+  ok    the form, when, each question and its answer, the result, and the list
+  ok    an unanswered question says so
+
+The file, one page
+  ok    one page, tagged, a heading then the rest in order
+  ok    its title and language
+
+Over several pages
+  ok    as many pages as it takes
+  ok    each page has its own number in the structure, in order
+  ok    every element points at a page of the file
+  ok    a heading is never left alone at the foot of a page
+  ok    a paragraph is one element per page, not one per line
+
+Downloaded from the studio
+  ok    signed out: refused
+  ok    which form, which answer: asked
+  ok    an answer no longer kept: said so
+  ok    the file, made on request, kept nowhere
+  ok    each answer in the studio has its download, named by when it was sent
+
+17 checks, all passing.
+S_VOLUME {"runs":70,"mocks":0}
+
+## Linked unavailable6 node:test
+✔ one unknown form keeps both editable cards usable without a false count (30.731288ms)
+✔ CSV reports unavailable rather than an empty file or response gone (5.544623ms)
+✔ PDF reports unavailable rather than an empty file or response gone (1.220943ms)
+✔ opportunity reports unavailable rather than an empty file or response gone (1.038836ms)
+✔ confirmed known CSV and PDF keep their successful downloads (6.073748ms)
+✔ permission refusal stays before the response read (0.960248ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 53.422348
+S_VOLUME {"runs":0,"mocks":0}
+
+## Linked keep17
+
+Which forms offer it
+  ok    four questions or more
+  ok    one to write at length
+  ok    a short form does not
+
+What is kept
+  ok    only the answers to its questions, never a hidden field or the box to hear from the creator
+  ok    under the store and the form
+  ok    read back while fresh
+  ok    older than 30 days: forgotten, and gone from the browser
+  ok    unreadable: nothing
+  ok    forgotten on request
+
+Said in every language of the store
+  ok    each language says the three in its own words
+  ok    it says where they stay and to leave it off on a shared computer
+
+On the page
+  ok    the server draws no box: it shows only once the page runs scripts
+  ok    the box has no name, so it is never sent with the answers
+  ok    empty until checked: nothing kept unless asked
+  ok    sending forgets them
+  ok    nothing is fetched or sent for it
+  ok    offered on a store's live page only, never in the studio's preview
+
+17 checks, all passing.
+S_VOLUME {"runs":0,"mocks":0}
+
+Scoped strict types5roots: EXIT0
+Scoped lint6paths: EXIT0
+Product diff: EXIT0
+
+Final staged scanner:4326 tracked files /0 corrections /EXIT0

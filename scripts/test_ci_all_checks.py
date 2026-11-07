@@ -16,7 +16,7 @@ WORKFLOW_DIR = os.path.join(ROOT, ".github", "workflows")
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7"
 # The workflows that are not CI: the PV daily report (AGENTS.md) only reads pull requests, is never a
 # required check and has no final check (tests/stale-pr-report.test.ts).
-NOT_CI = {"stale-pr-report.yml"}
+NOT_CI = {"main-red-alarm.yml", "stale-pr-report.yml"}
 
 
 def scope(result="success", full="true"):
@@ -93,7 +93,7 @@ def jobs_of(text):
 class EveryWorkflowEndsWithTheFinalCheck(unittest.TestCase):
     def test_each_workflow_has_one_final_check_that_reads_every_other_job(self):
         files = sorted(f for f in os.listdir(WORKFLOW_DIR) if f.endswith(".yml"))
-        self.assertTrue(NOT_CI <= set(files))
+        # Each non-CI workflow may land on its own PR; whichever exists is left out.
         files = [f for f in files if f not in NOT_CI]
         self.assertTrue(files)
         self.assertEqual({f[:-4] for f in files}, set(WORKFLOWS))

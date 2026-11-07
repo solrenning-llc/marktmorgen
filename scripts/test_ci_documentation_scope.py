@@ -7,11 +7,10 @@ A = "a" * 40
 B = "b" * 40
 # The workflows that are not CI: the PV daily report (AGENTS.md) only reads pull requests and has no
 # documentation scope (tests/stale-pr-report.test.ts).
-NOT_CI = {"stale-pr-report.yml"}
+NOT_CI = {"main-red-alarm.yml", "stale-pr-report.yml"}
 
 def ci_workflows():
     paths = list(Path(".github/workflows").glob("*.yml"))
-    assert NOT_CI <= {p.name for p in paths}
     return [p for p in paths if p.name not in NOT_CI]
 
 def change(path, before="100644", after="100644", status="M"):

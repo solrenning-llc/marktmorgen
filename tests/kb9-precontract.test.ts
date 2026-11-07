@@ -54,10 +54,11 @@ function main(): void {
     LANGUAGES.map((lang) => [lang, DIGITAL_CONSENT_WORDS[lang].box.digital.includes(withdrawalWords(lang).withdrawLink)]),
     LANGUAGES.map((lang) => [lang, false]),
   );
-  // Claude 5's proof on #2953, kept: a digital "yes" that is not a pre-order leaves no function open, at payment or after.
+  // Claude 5's proof on #2953, kept: a digital "yes" that is not a pre-order, with its confirmation known sent (art.
+  // 16(m)(iii), #2827), leaves no function open, at payment or after.
   {
     const PAID = 1_800_000_000;
-    const facts = { kind: "sale", paidAt: PAID, member: false, givenByStore: false, consent: { version: EU_WITHDRAWAL_CONSENT_VERSION, at: PAID - 30, kind: "digital" } } as Parameters<typeof withdrawalWindow>[0];
+    const facts = { kind: "sale", paidAt: PAID, member: false, givenByStore: false, consent: { version: EU_WITHDRAWAL_CONSENT_VERSION, at: PAID - 30, kind: "digital" }, confirmed: true } as Parameters<typeof withdrawalWindow>[0];
     is("a digital yes, not a pre-order: the function is closed at payment and a minute later", [withdrawalWindow(facts, PAID).open, withdrawalWindow(facts, PAID + 60).open], [false, false]);
   }
   // Where it is: the buyer's list of purchases, in each language's word for it.

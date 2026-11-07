@@ -168,6 +168,11 @@ reading.
 2. **Pre-contract information.** The checkout's box sentence and the confirmation
    email say where the function is (Art. 6(1)(h), Annex I instruction 3), in every
    buyer language, with the version bumped as `lib/digital-consent.ts` does.
+   - Known gap (Claude 5 on #2827 and #2953): the box under the digital "yes" does
+     not name the function, because in the normal case the confirmation goes and
+     the right ends at supply. When that confirmation is not known to have gone,
+     the function stays open (art. 16(m)(iii)) without the box having said so.
+     The buyer's orders page still offers it whenever it is open.
 3. **Creator plans.** The same function in the studio's billing page for a plan
    bought within its 14 days.
 4. **Costs (MR).**

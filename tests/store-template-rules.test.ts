@@ -5,6 +5,7 @@
  * synthetic words only. No store is read or written here.
  */
 import { MAX_STORED_PAGE_BYTES } from "@/lib/sales-page";
+import { productSegment } from "@/lib/product-slug";
 import { TEMPLATE_FIELD_MAX_CHARS, TEMPLATE_MARKS, scrubTemplateText, scrubTemplateUrl, templateScrubSummary } from "@/lib/store-template-rules";
 import { done, is, part } from "./check";
 
@@ -90,5 +91,81 @@ is("counts that are not whole numbers: nothing is shared", [templateScrubSummary
 is("many public links in one field, each kept in its place", clean(Array.from({ length: 12 }, (_, i) => `https://example.com/p${i} 5551234567${i}`).join(" ")), Array.from({ length: 12 }, (_, i) => `https://example.com/p${i} ${P}`).join(" "));
 is("a field that already holds the marks used inside is refused", scrubTemplateText("a\uE000b"), { ok: false, why: "unchecked" });
 is("the notes say what was there", TEMPLATE_MARKS, { link: "[private link removed]", key: "[key removed]", email: "[email address removed]", phone: "[phone number removed]" });
+
+part("Common public links stay whole: a word slug is never random (review of 7 November 2026)");
+is("the store's own product link, its words and its id", ["ab12cd", "a1b2c3d4e5"].map((id) => {
+  const link = `https://marktmorgen.com/@ana/p/${productSegment({ id, title: "Sourdough masterclass for busy parents" })}`;
+  return clean(link) === link;
+}), [true, true]);
+const publicLinks = [
+  "https://example.com/blog/10-tips-for-better-bread",
+  "https://marktmorgen.com/ana/p/sourdough-masterclass-2026-edition",
+  "https://medium.com/@ana/how-i-built-a-store-8f3e2a1b9c0d",
+  "https://www.youtube.com/playlist?list=PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG",
+  "https://example.com/?utm_campaign=black-friday-2026-early-bird-offer",
+  "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s",
+];
+is("a blog post, a long slug, a Medium post, a playlist, a campaign tag and a video time", publicLinks.map(clean), publicLinks);
+is("the same in a button's link field", scrubTemplateUrl("https://example.com/blog/10-tips-for-better-bread"), { ok: true, url: "https://example.com/blog/10-tips-for-better-bread" });
+
+part("Words that only look like a key, an address or a phone number stay as written");
+const plainWords = [
+  "Our top-10-tips-for-sourdough-baking-at-home guide",
+  "ISBN 978-3-16-148410-0",
+  "Prices: 49 99 199 499",
+  "Server 192.168.100.200",
+  "Dates: 2026-11-07 2026-11-14",
+  '<img src="/img/logo@2x.png" alt="">',
+  "Run npm install react@18.3.1 first",
+  "Talk to your acct_manager today",
+  "#re_branding_masterclass_course",
+  "Reach 1 000 000 000 people",
+  "Years 2019 – 2023 – 2026",
+];
+is("a hyphenated phrase, an ISBN, a price list, an IP address, dates, a picture name, a package version, words with an underscore and a big number", plainWords.map(clean), plainWords);
+
+part("More private details are taken out (review of 7 November 2026)");
+/** Fictional secrets; a few are split so no scanner reads them as real ones. */
+const leaks: Record<string, string> = {
+  awsSecret: "AWS secret: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+  envOpenAI: "OPENAI_API_KEY=sk-proj-abc123def456ghi789",
+  envGeneric: "API_TOKEN=Zm9vYmFyMTIzNDU2Nzg5MA",
+  base64Secret: "secret Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdo+/==",
+  anthropic: "sk-ant-api03-abcDEF123456ghiJKL789",
+  githubPat: "github_pat_11ABCDEFG0123456789_abcdefghijklmnop",
+  gitlab: "glpat" + "-abcdefghij1234567890",
+  slackApp: "xoxe-1-abcdefghij123",
+  telegramBot: "https://api.telegram.org/bot123456789:" + "AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw/sendMessage",
+  zapierHook: "https://hooks.zapier.com/hooks/catch/1234567/abcdefg/",
+  vimeoPrivate: "https://vimeo.com/123456789/abcdef1234",
+  vimeoPlayerHash: "https://player.vimeo.com/video/123456789?h=abcdef1234",
+  googlePhotos: "https://photos.app.goo.gl/AbCdEf123GhIj",
+  googlePhotosShare: "https://photos.google.com/share/AF1QipMabc123",
+  hashRoute: "https://app.example.com/#/reset?token=abc123",
+  hostNoSlash: "example.com?token=abc123",
+  authToken: "https://example.com/x?auth_token=abc123",
+  privateToken: "https://gitlab.example.com/v4/x?private_token=abc123",
+  oauthToken: "https://example.com/cb?oauth_token=abc123",
+  shortT: "https://example.com/dl?t=abc123",
+  jsessionid: "https://example.com/f;jsessionid=ABC123DEF",
+  mmSignin: "https://marktmorgen.com/signin/confirm?c=abc123",
+  mmManage: "https://marktmorgen.com/ana/manage?s=abc123",
+  mmPay: "https://marktmorgen.com/ana/pay/req_abc123",
+  mmSign: "https://marktmorgen.com/ana/sign/agr123",
+  mmLibrary: "https://marktmorgen.com/library?s=abc123",
+  mmMessages: "https://marktmorgen.com/ana/community/messages/u1-u2",
+  mailtoPct: '<a href="mailto:ana%40example.com">mail</a>',
+  htmlEntityEmail: "ana&#64;example.com",
+  htmlEntityLink: '<a href="https&#58;//example.com/f?token=abc">x</a>',
+  phoneSpacedDash: "Call 555 - 123 - 4567",
+  phoneSlash: "Call 555/123/4567",
+  phoneEnDash: "Call 555 – 123 – 4567",
+  cyrillicScheme: "httpѕ://example.com/f?token=abc123",
+};
+is("none comes through as written", Object.entries(leaks).filter(([, text]) => clean(text) === text).map(([name]) => name), []);
+is("an env line keeps its name, a key its words around", [clean("OPENAI_API_KEY=sk-proj-abc123def456ghi789"), clean("API_TOKEN=Zm9vYmFyMTIzNDU2Nzg5MA"), clean("AWS secret: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")], [`OPENAI_API_KEY=${K}`, `API_TOKEN=${K}`, `AWS secret: ${K}`]);
+is("an encoded address: only it goes, the words around stay", [clean('<a href="mailto:ana%40example.com">mail</a>'), clean("Write ana&#64;example.com today"), clean('<a href="https&#58;//example.com/f?token=abc">x</a>')], [`<a href="${E}">mail</a>`, `Write ${E} today`, `<a href="${L}">x</a>`]);
+is("phone numbers with spaced dashes and slashes", [clean("Call 555 - 123 - 4567"), clean("Call 555/123/4567"), clean("Call 555 – 123 – 4567")], [`Call ${P}`, `Call ${P}`, `Call ${P}`]);
+is("a private video or hook in a button's link field is emptied", [scrubTemplateUrl("https://vimeo.com/123456789/abcdef1234"), scrubTemplateUrl("https://hooks.zapier.com/hooks/catch/1/a/")], [{ ok: true, url: null }, { ok: true, url: null }]);
 
 done();

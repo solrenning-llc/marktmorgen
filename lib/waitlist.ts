@@ -24,6 +24,7 @@ import { upsertContact } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
 import type { Listing, Store } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { givingWords } from "@/lib/buyer-words/giving";
 import {
   CONFIRM_SECONDS,
@@ -296,10 +297,29 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
       const emails = Array.isArray(slice) ? (slice as string[]) : [];
       if (!emails.length) break;
       const [rows] = await redisPipeline([["HMGET", listKey(sid, pid), ...emails]]);
-      // Whoever removed their address since the launch started is skipped.
-      const chunk = emails
-        .map((email, i) => [email, parseEntry(Array.isArray(rows) ? rows[i] : null)] as const)
-        .filter((pair): pair is readonly [string, WaitEntry] => pair[1] !== null);
+      // Whoever removed their address since the launch started (an exact
+      // null) is skipped. A reply of another shape, or a place that does not
+      // read as one, is unknown, never "left" (rule 24): the batch waits for
+      // the next run, as on a retry, rather than passing them over for good.
+      const places = repliesFor(rows, emails.length);
+      const chunk: (readonly [string, WaitEntry])[] = [];
+      let unknown = places === null;
+      if (places) {
+        for (const [i, email] of emails.entries()) {
+          const place = places[i];
+          if (place === null) continue;
+          const entry = typeof place === "string" ? parseEntry(place) : null;
+          if (!entry) {
+            unknown = true;
+            break;
+          }
+          chunk.push([email, entry]);
+        }
+      }
+      if (unknown) {
+        console.error("sending a waitlist launch: its places were read in an unknown shape, so the batch waits", new UnknownReplyError("a launch batch's waitlist places"));
+        break;
+      }
       if (!(await reserveDay(chunk.length))) break;
       const messages = chunk.map(([email, entry]) => {
         const page = `${SITE_URL}/@${store.handle}/waitlist?leave=${entry.t}`;
@@ -365,9 +385,16 @@ export async function forgetWaitlistPerson(sid: string | null, productIds: strin
 export async function waitlistPlacesOf(sid: string | null, productIds: string[], email: string): Promise<{ product: string; joined: number; confirmed: number; news: boolean }[]> {
   if (!sid || !productIds.length || !isRedisConfigured()) return [];
   const address = normaliseEmail(email);
-  const replies = await redisPipeline(productIds.map((p) => ["HGET", listKey(sid, p), address]));
+  // One reply per product, each the place or an exact null (none). Anything
+  // else is unknown, never "on no waitlist" (rule 24): the copy says it could
+  // not be made (lib/person-copy.ts).
+  const what = "a person's waitlist places";
+  const replies = repliesFor(await redisPipeline(productIds.map((p) => ["HGET", listKey(sid, p), address])), productIds.length);
+  if (!replies) throw new UnknownReplyError(what);
   return productIds.flatMap((product, i) => {
-    const entry = parseEntry(replies[i]);
-    return entry ? [{ product, joined: entry.at, confirmed: entry.ok, news: entry.c }] : [];
+    if (replies[i] === null) return [];
+    const entry = typeof replies[i] === "string" ? parseEntry(replies[i]) : null;
+    if (!entry) throw new UnknownReplyError(what);
+    return [{ product, joined: entry.at, confirmed: entry.ok, news: entry.c }];
   });
 }

@@ -23,7 +23,13 @@
  *   - the download reading Stripe, taking a reading, costing less than a
  *     studio page, or asking for more than the "stats" permission;
  *   - a file larger than the page that shows the same months;
- *   - the page without the download, or with it when there is nothing to download.
+ *   - the page without the download, or with it when there is nothing to download;
+ *   - the page offering the download when the reading was too large to keep a
+ *     copy of (READING_COPY_MAX_BYTES), so the file could never be made;
+ *   - a refusal answered as bare text on a whole-page navigation, instead of
+ *     back on the earnings page (or the studio's paused page) with the reason;
+ *   - a month cell a spreadsheet turns into a date ("2026-11"), and no word on
+ *     what to do when a spreadsheet puts the file in one column.
  */
 process.env.STRIPE_SECRET_KEY = "sk_test_earnings_file_stand_in";
 
@@ -33,7 +39,7 @@ import type { NextRequest } from "next/server";
 import { renderToStaticMarkup } from "react-dom/server";
 import EarningsPage from "../app/studio/earnings/page";
 import { GET } from "../app/api/store/earnings/route";
-import { EARNINGS_CSV_HEADER, earningsCsv, earningsFileName, earningsFromCopy } from "@/lib/earnings-csv";
+import { EARNINGS_CSV_HEADER, earningsCsv, earningsCsvMonth, earningsFileName, earningsFromCopy } from "@/lib/earnings-csv";
 import { type Earnings, type ListReading, type MoneyEvent, type MoneyKind, type ProviderReading, earningsByMonth, readingSince } from "@/lib/earnings-by-month";
 import { readEarningsYear } from "@/lib/earnings-read";
 import { parseCsv } from "@/lib/csv";
@@ -70,7 +76,9 @@ function rowsOf(csv: string): { header: string[]; rows: Row[] } {
   const parsed = parseCsv(csv);
   return { header: parsed.header, rows: parsed.rows.map((cells) => Object.fromEntries(parsed.header.map((name, i) => [name, cells[i] ?? ""]))) };
 }
-const pick = (rows: Row[], month: string, source: string) => rows.filter((r) => r.month === month && r.source === source);
+/** A month's cell as the file writes it, from the rule's "2031-06". */
+const M = (month: string) => earningsCsvMonth(month, "UTC");
+const pick = (rows: Row[], month: string, source: string) => rows.filter((r) => r.month === M(month) && r.source === source);
 const AMOUNTS = ["sales", "renewals", "refunds", "disputes", "left_after_refunds_and_disputes"];
 const NUMBER = /^-?\d+(\.\d+)?$/;
 
@@ -89,8 +97,9 @@ function pure(): void {
   is("the columns, in order, in plain names", header, COLUMNS);
   is("the header is EARNINGS_CSV_HEADER", EARNINGS_CSV_HEADER, COLUMNS);
   is("every line ends with CRLF, and the file with one", [csv.endsWith("\r\n"), csv.split("\r\n").every((line, i, all) => i === all.length - 1 || !line.includes("\n"))], [true, true]);
-  is("twelve months, newest first, the current one marked so far", [rows[0].month, rows[0].so_far, rows[rows.length - 1].month, [...new Set(rows.map((r) => r.month))].length], ["2031-06", "yes", "2030-07", 12]);
-  is("only the current month is so far", rows.filter((r) => r.so_far === "yes").every((r) => r.month === "2031-06") && rows.filter((r) => r.month !== "2031-06").every((r) => r.so_far === "no"), true);
+  is("twelve months, newest first, the current one marked so far", [rows[0].month, rows[0].so_far, rows[rows.length - 1].month, [...new Set(rows.map((r) => r.month))].length], ["June 2031 (UTC)", "yes", "July 2030 (UTC)", 12]);
+  is("no month cell a spreadsheet reads as a date: the month in words with its time zone, never 2031-06", rows.every((r) => /^[A-Z][a-z]+ \d{4} \(UTC\)$/.test(r.month)) && !/"\d{4}-\d{2}"/.test(csv), true);
+  is("only the current month is so far", rows.filter((r) => r.so_far === "yes").every((r) => r.month === M("2031-06")) && rows.filter((r) => r.month !== M("2031-06")).every((r) => r.so_far === "no"), true);
   const juneStripe = pick(rows, "2031-06", "Stripe");
   is("June, Stripe: euros and dollars on their own rows, alphabetical", juneStripe.map((r) => r.currency), ["EUR", "USD"]);
   is("June, Stripe dollars: sales 70.00, refunds 5.00, disputes 90.00, left -25.00", [juneStripe[1].sales, juneStripe[1].renewals, juneStripe[1].refunds, juneStripe[1].disputes, juneStripe[1].left_after_refunds_and_disputes], ["70.00", "0.00", "5.00", "90.00", "-25.00"]);
@@ -102,7 +111,7 @@ function pure(): void {
   is("each PayPal row says its disputes are not in it", pick(rows, "2031-06", "PayPal").map((r) => [r.state, r.currency, r.sales, r.not_included]), [["Read", "USD", "40.00", "PayPal disputes"]]);
   is("a month's all-sources rows say PayPal disputes are not in them", pick(rows, "2031-06", "All sources").every((r) => r.not_included === "PayPal disputes"), true);
   is("Stripe rows leave nothing out", juneStripe.every((r) => r.not_included === ""), true);
-  const may = rows.filter((r) => r.month === "2031-05");
+  const may = rows.filter((r) => r.month === M("2031-05"));
   is("a month read in full with nothing in it: Nothing recorded, with no currency and no amount", may.map((r) => [r.source, r.state, r.currency, ...AMOUNTS.map((a) => r[a])]), [
     ["Stripe", "Nothing recorded", "", "", "", "", "", ""],
     ["PayPal", "Nothing recorded", "", "", "", "", "", ""],
@@ -251,6 +260,7 @@ async function route(): Promise<void> {
     is("the page offers the download as a plain GET form for this store", [html.includes('action="/api/store/earnings"'), /method="get"/.test(html), html.includes(`name="store" value="${shop.sid}"`)], [true, true, true]);
     is("its button says what it gives, in plain words", /<button[^>]*type="submit"[^>]*>Download these 12 months \(CSV\)<\/button>/.test(html), true);
     is("and says the file has no buyer's name or email and reads nothing again", [/no buyer('|&#x27;)s name or email/i.test(html), /does not read Stripe or PayPal again/i.test(html)], [true, true]);
+    is("and what to do when a spreadsheet puts each row in one column: choose comma", /one column[^<]*comma/i.test(html), true);
     const kept = await keptCopy(shop, "earnings");
     const calls = stripeCalls;
     const before = await readingsLeft(shop, clock);
@@ -282,9 +292,13 @@ async function route(): Promise<void> {
   {
     const shop = makeStore(true);
     const res = await download(shop);
-    const text = await res.text();
-    is("409 and a sentence that says to open Earnings by month first", [res.status, /open Earnings by month first/i.test(text)], [409, true]);
-    is("no Stripe page read, no reading taken, no amount", [stripeCalls, (await readingsLeft(shop, NOW)).heavyLeft, noAmount(text)], [0, 2, true]);
+    is("back to the earnings page with its own notice, never a bare text page", [res.status, res.headers.get("location"), res.headers.get("cache-control")], [303, `/studio/earnings?store=${shop.sid}&file=none`, "no-store"]);
+    is("no Stripe page read, no reading taken", [stripeCalls, (await readingsLeft(shop, NOW)).heavyLeft], [0, 2]);
+    who.store = shop;
+    const told = renderToStaticMarkup(await EarningsPage({ searchParams: Promise.resolve({ store: shop.sid, file: "none" }) }));
+    is("the page says no file was made and why, as an alert", [/role="alert"[^>]*>[^<]*No file was made/.test(told), /none of your earnings were kept/i.test(told)], [true, true]);
+    const plain = await draw(shop);
+    is("without the notice's key, no notice", /No file was made/.test(plain), false);
   }
 
   part("A kept copy that is not what the rule makes: no file, never a guess");
@@ -299,15 +313,18 @@ async function route(): Promise<void> {
     (copy.value.months[0].sources[0] as { lines: { netCents: number }[] }).lines[0].netCents = 999_999;
     await redis.pipeline([["SET", key, JSON.stringify(copy)]]);
     const tampered = await download(shop);
-    const text = await tampered.text();
-    is("503, said as could not be read, with no amount", [tampered.status, /could not be read/i.test(text), noAmount(text)], [503, true, true]);
+    const unread = `/studio/earnings?store=${shop.sid}&file=unread`;
+    is("back to the earnings page, said as could not be read", [tampered.status, tampered.headers.get("location"), noAmount(await tampered.text())], [303, unread, true]);
     await redis.pipeline([["SET", key, "{not json"]]);
     const broken = await download(shop);
-    is("a copy that is not JSON: 503", [broken.status, noAmount(await broken.text())], [503, true]);
+    is("a copy that is not JSON: the same", [broken.status, broken.headers.get("location")], [303, unread]);
     await redis.pipeline([["SET", key, JSON.stringify({ at: NOW + 1, value: JSON.parse(raw).value })]]);
     const moved = await download(shop);
-    is("a copy whose time is not its months' time: 503", moved.status, 503);
-    is("none of it read Stripe again", stripeCalls, 5);
+    is("a copy whose time is not its months' time: the same", [moved.status, moved.headers.get("location")], [303, unread]);
+    who.store = shop;
+    const told = renderToStaticMarkup(await EarningsPage({ searchParams: Promise.resolve({ store: shop.sid, file: "unread" }) }));
+    is("the page says the file could not be made, as an alert", /role="alert"[^>]*>[^<]*No file was made: your earnings could not be read/.test(told), true);
+    is("none of the downloads read Stripe again", stripeCalls, 5);
   }
 
   part("The studio figure used: no file");
@@ -317,8 +334,7 @@ async function route(): Promise<void> {
     await draw(shop);
     who.used = true;
     const res = await download(shop);
-    const text = await res.text();
-    is("429 with the figure's own sentence, no amount", [res.status, text.includes("studio requests"), noAmount(text)], [429, true, true]);
+    is("to the studio's own page for a used figure, as every studio page goes", [res.status, res.headers.get("location")], [303, `/studio/paused?store=${shop.sid}&why=used`]);
   }
 
   part("A role that may not see the numbers: refused before anything is read");
@@ -351,9 +367,23 @@ async function route(): Promise<void> {
     const manyRows = rowsOf(body).rows.filter((r) => r.source === "Stripe");
     is("a file", res.status, 200);
     // The oldest month's renewals are not proved (lib/earnings-read.ts, RENEWAL_PAID_WITHIN_DAYS), so it is words, never an amount.
-    is("eleven months of twenty currencies each, one row each, and the oldest month Could not be read", [manyRows.filter((r) => r.state === "Read").length, manyRows.filter((r) => r.month === "2030-07").map((r) => r.state)], [11 * 20, ["Could not be read"]]);
+    is("eleven months of twenty currencies each, one row each, and the oldest month Could not be read", [manyRows.filter((r) => r.state === "Read").length, manyRows.filter((r) => r.month === M("2030-07")).map((r) => r.state)], [11 * 20, ["Could not be read"]]);
     is("no larger than the page", Buffer.byteLength(body, "utf8") <= Buffer.byteLength(html, "utf8"), true);
     is("no larger than twice the largest copy kept", Buffer.byteLength(body, "utf8") <= 2 * READING_COPY_MAX_BYTES, true);
+  }
+
+  part("A reading too large to keep a copy of: no download offered, and why");
+  reset();
+  {
+    const shop = makeStore(true);
+    const codes = ["usd", "eur", "gbp", "cad", "aud", "jpy", "chf", "sek", "nok", "dkk", "pln", "czk", "huf", "brl", "mxn", "sgd", "hkd", "nzd", "kwd", "bhd", "ron", "bgn", "isk", "try", "zar", "inr", "idr", "myr", "php", "thb", "krw", "twd", "ils", "aed", "sar", "qar", "omr", "jod", "egp", "mad", "ngn", "kes", "ghs", "cop", "clp", "pen", "ars", "uyu", "pyg", "bob", "vnd", "pkr", "bdt", "lkr", "npr", "uah", "kzt", "gel", "amd", "azn"];
+    stripe["/checkout/sessions"] = Array.from({ length: 12 }, (_, m) => codes.map((c, i) => checkout(`t${m}c${i}`, Date.UTC(2030, 6 + m, 2), 1000 + i, c))).flat();
+    const kept = await readEarningsYear(shop, "UTC", NOW);
+    is("the reading is larger than the copy's ceiling, so none is kept, and it says so", [Buffer.byteLength(JSON.stringify({ at: NOW, value: kept?.value }), "utf8") > READING_COPY_MAX_BYTES, await keptCopy(shop, "earnings"), kept?.unkept], [true, undefined, true]);
+    const html = await draw(shop);
+    is("the months are shown", html.includes("Kuwaiti dinars"), true);
+    is("no download form, never a button that can only fail", html.includes('action="/api/store/earnings"'), false);
+    is("a sentence says why: too large to keep a copy of, with many currencies", /too large to keep a copy of[^<]*many currencies/i.test(html), true);
   }
 
   part("The route's guard takes one studio request, as the world above says");

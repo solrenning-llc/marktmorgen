@@ -43,7 +43,7 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
     await real(commands);
     return ["QUEUED"];
   }
-  if (beforeLock && one?.[0] === "SET" && one.includes("NX") && /^nl:store:lock:|:partners:lock$/.test(String(one[1]))) {
+  if (beforeLock && one?.[0] === "SET" && one.includes("NX") && /^(?:nl:store:lock:.*|.*:partners:lock)$/.test(String(one[1]))) {
     const run = beforeLock;
     beforeLock = null;
     await run();

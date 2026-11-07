@@ -126,6 +126,12 @@ export type Preorder = {
   at: number;
   /** The payment, for a refund to find it. */
   pi: string;
+  /**
+   * Whether the creator ships it (the checkout's metadata ship=yes), kept so the buyer's list still says so once it is
+   * handed over (lib/buyer-orders.ts): its withdrawal period runs from a receipt not known here. Absent on an entry
+   * written before it was kept, which is read as not known.
+   */
+  ship?: boolean;
   /** Once handed over, in seconds. */
   given?: number;
   /** Once refunded before or after it was handed over, in seconds. */
@@ -141,6 +147,7 @@ export function parsePreorder(raw: unknown): Preorder | null {
       to: v.to,
       at: Number(v.at) || 0,
       pi: typeof v.pi === "string" ? v.pi : "",
+      ...(v.ship === true || v.ship === false ? { ship: v.ship } : {}),
       ...(Number(v.given) > 0 ? { given: Number(v.given) } : {}),
       ...(Number(v.revoked) > 0 ? { revoked: Number(v.revoked) } : {}),
     };

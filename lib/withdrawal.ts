@@ -45,6 +45,15 @@ const DAY_MS = 86_400_000;
 export const withdrawalKey = (sid: string, reference: string) => `nl:withdraw:${sid}:${reference}`;
 
 /**
+ * The reference a withdrawal is kept and named under: the order's own, or for a pre-order handed over, the checkout it
+ * was paid at (Purchase.checkout). Before its hand-over the list names it by that checkout; after, by its brought-over
+ * reference. Keeping the record under the checkout keeps a statement made before the hand-over standing after it (the
+ * function is not offered again, nothing goes twice), and the creator's note names an order their Stripe account knows
+ * (Claude 5's F on #2827).
+ */
+export const withdrawalReference = (purchase: Pick<Purchase, "reference" | "checkout">): string => purchase.checkout ?? purchase.reference;
+
+/**
  * Whether a purchase on the list as brought over is a pre-order this store handed over (lib/preorders.ts grants it under
  * the job "pre:<checkout>", and lib/buyer-orders.ts reads it back with preorder.given): a contract made here, paid at its
  * checkout's time (the entry's `at`, the checkout's created time as for every sale, or the time it was written down when
@@ -178,10 +187,11 @@ export type WithdrawOutcome = "done" | "unsent" | "unreached" | "untold" | "alre
  */
 export async function withdraw(store: Store, purchase: Purchase, statement: WithdrawalStatement, nowMs = Date.now()): Promise<WithdrawOutcome> {
   if (!store.sid || !isRedisConfigured() || statement.reference !== purchase.reference) return "error";
-  const key = withdrawalKey(store.sid, purchase.reference);
+  const reference = withdrawalReference(purchase);
+  const key = withdrawalKey(store.sid, reference);
   let record: WithdrawalRecord;
   try {
-    record = await readRecord(store.sid, purchase.reference);
+    record = await readRecord(store.sid, reference);
   } catch {
     return "error";
   }
@@ -198,7 +208,7 @@ export async function withdraw(store: Store, purchase: Purchase, statement: With
     created = made === 1;
     if (!created) {
       try {
-        record = await readRecord(store.sid, purchase.reference);
+        record = await readRecord(store.sid, reference);
       } catch {
         return "error";
       }
@@ -220,7 +230,7 @@ export async function withdraw(store: Store, purchase: Purchase, statement: With
     const tells = counted ? countOf(counted[0]) : null;
     if (tells === null || tells < 1) return "error";
     if (tells <= WITHDRAWAL_ACK_SENDS) {
-      told = await fileContact({ store, email: statement.email, name: statement.name, text: w.creatorNote(purchase.title, purchase.reference, when, purchase.paidWith === "paypal" ? "PayPal" : "Stripe"), now: nowMs }).catch((error) => {
+      told = await fileContact({ store, email: statement.email, name: statement.name, text: w.creatorNote(purchase.title, reference, when, purchase.paidWith === "paypal" ? "PayPal" : "Stripe"), now: nowMs }).catch((error) => {
         console.error("telling the creator about a withdrawal failed", error);
         return false;
       });

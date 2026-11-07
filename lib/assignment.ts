@@ -136,12 +136,14 @@ export async function readTaskDrop(courseId: string, lessonId: string): Promise<
  * back for that file, which only refuses sooner, never leaves the store holding more than its room, and it is said in
  * the log. Never throws: the deletion already happened and its files are still to be deleted.
  */
-function removedBytes(replies: unknown[] | null, sizes: number[]): number {
+function removedBytes(replies: unknown[] | null, sizes: unknown[]): number {
   let bytes = 0;
   let unknown = 0;
   sizes.forEach((size, i) => {
     const reply = replies ? replies[i] : undefined;
-    if (reply === 1) bytes += size;
+    // A size is given back only when it is a safe positive whole number (Codex N on #3078): text, a fraction, zero, a
+    // negative or one past the safe integers is unknown, never read as a size (CX-123 rule 24), so nothing comes back.
+    if (reply === 1 && typeof size === "number" && Number.isSafeInteger(size) && size > 0 && Number.isSafeInteger(bytes + size)) bytes += size;
     else if (reply !== 0) unknown++;
   });
   if (unknown) console.error(`not giving back the room of ${unknown} handed-in file(s)`, new UnknownReplyError("whether a handed-in file left the files' hash"));
@@ -500,7 +502,7 @@ export async function forgetTasksPerson(courseId: string, lessonIds: string[], w
   const raws = await redisPipeline(lessonIds.map((l) => ["GET", subKey(courseId, l, who)]));
   const handed = lessonIds.map((l, i) => ({ lessonId: l, sub: parse<Submission>(raws[i]) })).filter((h) => h.sub !== null);
   if (!handed.length) return { records: 0, files: [] };
-  const files = handed.flatMap((h) => (h.sub?.file?.path ? [{ lessonId: h.lessonId, path: h.sub.file.path, bytes: Number(h.sub.file.bytes) || 0 }] : []));
+  const files = handed.flatMap((h) => (h.sub?.file?.path ? [{ lessonId: h.lessonId, path: h.sub.file.path, bytes: h.sub.file.bytes as unknown }] : []));
   const members = handed.map((h) => `${h.lessonId}|${who}`);
   const commands = [
     ["DEL", ...handed.map((h) => subKey(courseId, h.lessonId, who))],

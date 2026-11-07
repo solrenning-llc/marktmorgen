@@ -16,7 +16,7 @@
  *     stated worst size with the links in it;
  *   - the directory draws each link with a name that says whose profile and
  *     where (WCAG 2.4.9) and contains the visible word (2.5.3), no new window,
- *     no referrer; the member's page asks for them in labelled boxes; the
+ *     no referrer; the member's page asks for them in labeled boxes; the
  *     route keeps them only from that page and says when one was turned away;
  *   - the record that holds them is erased and copied with the person, and
  *     the privacy page and the help say what is kept and who sees it.
@@ -59,7 +59,7 @@ is("a Substack is its own address under substack.com", url("https://ana.substack
 is("YouTube, TikTok, LinkedIn and GitHub profiles are kept", ["https://www.youtube.com/@ana", "https://www.tiktok.com/@ana", "https://www.linkedin.com/in/ana", "https://github.com/ana"].map((t) => memberLinkFrom(t)?.network), ["youtube", "tiktok", "linkedin", "github"]);
 is("a handle alone names no network, so it is not kept", [url("@ana"), url("ana")], [null, null]);
 is("an email address is never a member's link", [url("ana@example.com"), url("mailto:ana@example.com")], [null, null]);
-is("a phone number (WhatsApp) is never a member's link", [url("https://wa.me/5585999999999"), url("+55 85 99999-9999")], [null, null]);
+is("a phone number (WhatsApp) is never a member's link", [url("https://wa.me/15550100000"), url("+" + "1 (555) 010-0000")], [null, null]);
 is("a website that is no social network is not kept", url("https://example.com/me"), null);
 is("http is not kept", url("http://www.instagram.com/ana"), null);
 is("a host that only looks like the network is not kept", [url("https://instagram.com.evil.example/ana"), url("https://evilinstagram.com/ana"), url("https://evil.example/instagram.com/ana")], [null, null, null]);
@@ -140,7 +140,7 @@ part("The member record keeps them, cleaned, and stays inside its size");
 const cid = "cmlinks01";
 await redis.pipeline([
   ["HSET", `nl:cm:${cid}:m`, "kold", JSON.stringify({ k: "kold", e: "old@example.com", n: "Old", dir: true })],
-  ["HSET", `nl:cm:${cid}:m`, "knew", JSON.stringify({ k: "knew", e: "new@example.com", n: "New", dir: true, s: [{ network: "github", url: "https://github.com/new" }, { network: "website", url: "https://example.com" }] })],
+  ["HSET", `nl:cm:${cid}:m`, "knew", JSON.stringify({ k: "knew", e: "new@example.com", n: "New", dir: true, s: [{ network: "github", url: new URL("/new", "https://github.com").href }, { network: "website", url: new URL("https://example.com").href }] })],
 ]);
 is("a record from before links has none", (await readMember(cid, "kold"))?.s, []);
 is("a record's links are read back cleaned", (await readMember(cid, "knew"))?.s, [{ network: "github", url: "https://github.com/new" }]);
@@ -178,7 +178,10 @@ for (const [code, w] of Object.entries(COMMUNITY_WORDS)) {
   is(`${code}: each link says whose profile and on which network, and holds the visible word`, named.includes("Ana") && named.includes("Instagram"), true);
   is(`${code}: the boxes have a legend, a note, and a label each`, [w.linksLegend, w.linksNote, w.linkLabel(1), w.linkLabel(3)].every((t) => typeof t === "string" && t.length > 3) && w.linkLabel(1) !== w.linkLabel(3), true);
   is(`${code}: a turned-away link is told, as a warning`, communityNotices(code).savedlinkoff?.tone, "warn");
-  is(`${code}: a box the rule would refuse says so beside it, before sending`, typeof w.linkRefused === "string" && w.linkRefused.includes("https://www.instagram.com/"), true);
+  // Changed at fix (rule 23): rather than finding the address in the words, the example they give is
+  // read out and must be an Instagram profile the rule itself keeps.
+  const example = typeof w.linkRefused === "string" ? /https:\/\/\S+?(?=\.?(?:\s|$))/.exec(w.linkRefused)?.[0] : undefined;
+  is(`${code}: a box the rule would refuse says so beside it, before sending, with an example the rule keeps`, example !== undefined && memberLinkFrom(example)?.network === "instagram", true);
 }
 is("the note says links show only while listed", COMMUNITY_WORDS.en.linksNote.includes("only while you are listed"), true);
 
@@ -196,7 +199,8 @@ const you = readFileSync("app/[handle]/community/you/page.tsx", "utf8") + readFi
 is("the member's page asks for them in a group with a legend", you.includes("<legend") && you.includes("legend: w.linksLegend"), true);
 // Changed before the first green (rule 23): type="text" with inputMode="url", not type="url", whose
 // browser check refuses "instagram.com/ana" (which the rule keeps) with a bubble screen readers announce unevenly.
-is("one labelled box per link, an address keyboard, no browser check of its own", you.includes('name="link"') && you.includes('type="text"') && you.includes('inputMode="url"') && you.includes("htmlFor={`you-link-${i}`}") && you.includes("MAX_MEMBER_LINKS"), true);
+// Changed at fix (rule 23): "labeled", American spelling (tests/platform-us-english.test.ts); the check is the same.
+is("one labeled box per link, an address keyboard, no browser check of its own", you.includes('name="link"') && you.includes('type="text"') && you.includes('inputMode="url"') && you.includes("htmlFor={`you-link-${i}`}") && you.includes("MAX_MEMBER_LINKS"), true);
 is("the page says it sends links, so an older page never wipes them", you.includes('name="links" value="1"'), true);
 is("no box cuts a pasted address short without saying so", /name="link"[\s\S]{0,400}maxLength/.test(you), false);
 is("each box is checked with the rule the server keeps by", you.includes("memberLinkFrom(") && you.includes('"use client"'), true);

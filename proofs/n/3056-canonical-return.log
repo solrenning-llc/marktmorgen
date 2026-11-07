@@ -1,0 +1,15 @@
+
+Connected: one link to the page of tax registrations, whatever Stripe said
+  ok    active: linked, in the same tab, its words naming where it goes
+  ok    pending: linked, in the same tab, its words naming where it goes
+  ok    unknown: linked, in the same tab, its words naming where it goes
+
+Codex N's MEDIUM on #3056: drawn for one store, the link stays on that store
+  ok    active: the link carries the page's store, never the last one chosen in another tab
+  ok    pending: the link carries the page's store, never the last one chosen in another tab
+  ok    unknown: the link carries the page's store, never the last one chosen in another tab
+
+Not connected: no link (nothing to read yet)
+  ok    no link
+
+7 checks, all passing.

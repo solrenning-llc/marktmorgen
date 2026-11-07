@@ -19,3 +19,14 @@ Permanent regression suggestion: render the real TaxEditor inside the real Studi
 ## Coordination
 
 Reservation document is among the author's changed paths; N did not change it. Product/reservation consolidation policy remains with the coordinator/V. No author source/ref, main, CI, merge/enqueue, commercial setting, account, supplier credential or personal data was changed. C4-0226 requires literal FILA LIGADA before any eligible author enqueue; incorporation of #3047 alone does not authorize it.
+
+
+## Focal return — 7 November 2026 11:34 Fortaleza
+
+Exact new remote head 1a00e3adf852fc427739d933ce01c415229df7d1; nominal request6707673303 covered fix36ba5815, and current head additionally fixes the permanent test's TS2769 call-site form. Delta af0..1a00 has exactly two files: component uses existing useStudioHref; permanent adds three pinned-store assertions, retains all original four cases. Full delta and both files read. Claim CXN-1131/a8675595 BEFORE new diff/replay, after two channel409 rejections, each retried after >=120s/FULL new/prefix exact. No new source assertions changed in N's immutable five-case proof75b56b9f.
+
+MEDIUM5812485114 CLOSED IN THIS FOCAL DELTA, no new high/medium/low demonstrated. Same five N cases: prior3FAIL/two controls (preserved log, not rerun) -> final5/5; final permanent eed77baa7/7. Source e6248b9e, original5e57 preserved. Per-process120s/512MiB/256KiB/external fetch blocked, pure React, zero Redis/provider. Existing runtime input closure was exact to af0 and compare proves no other source changes; next/link, StudioStorePin and aliases therefore remain byte-identical. No browser/cookie switch/HTTP-route or tax-law/global-PR certification.
+
+ESLint component/permanent/Nproof exits0, partial-checkout pages notice retained. Scoped TypeScript attempt: three roots,394 total sources,0 diagnostics, but hash validation found16 older repository dependency modules among168 project type sources. This is NOT a qualified exact-head type certificate, NOT global project types and NOT a product failure. Initial metadata read preceded asynchronous compiler completion; retried only after process completion. No assertion/timeout loosened. The author separately reported exact focused TS2769 reproduction/fix; that is not an N execution. Keep both diagnostic and hash logs, do not relabel this run as exact-head strict GREEN.
+
+No CI reads/reruns, author source/ref/main changes, merge/enqueue or reservation edits for3056. Author owns final gates and stacked base2735. Evidence branch still carries the earlier base source: copy the unchanged proof/runner into exact1a00 before replay; do not run its historical component and call it the new head. This focal closes only the previously demonstrated pinning defect.

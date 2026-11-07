@@ -42,6 +42,7 @@ import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReply, exactReplies } from "@/lib/redis-exact";
 import { dataBytes } from "@/lib/store-data-rules";
 import { StoreFullError } from "@/lib/store-full";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
@@ -783,6 +784,42 @@ export function listingFinder(store: Store): (id: string | undefined) => Promise
 /** Listings of every product of one kind, in the creator's order. */
 export async function readKind(store: Store, kind: Kind): Promise<Listing[]> {
   return readListings(store, idsOfKind(store, kind));
+}
+
+/**
+ * readKind, read exactly (rule 24), for a person's deletion
+ * (lib/person-erasure.ts erasureScope): a product is left out only when
+ * Redis answers the exact null for its listing record. A pipeline reply that
+ * is not one answer a GET, a listing that is not text, does not parse or
+ * names another id, or a record that cannot be asked for at all, throws
+ * UnknownReply, so a course past the catalog's head never drops out of the
+ * deletion while the person's records in it are still kept. The same GETs in
+ * the same pipelines as readListings, so the deletion's cost does not move.
+ */
+export async function readKindExact(store: Store, kind: Kind): Promise<Listing[]> {
+  const what = "the listings a person's deletion goes through";
+  const asked = wanted(store, idsOfKind(store, kind));
+  const catalog = store.catalog;
+  if (catalog.inline) {
+    const byId = new Map(catalog.inline.map((p) => [p.id, p]));
+    return asked.map((id) => byId.get(id)).filter((p): p is Product => Boolean(p)).map(listingOf);
+  }
+  const found = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  const missing = asked.filter((id) => !found.has(id));
+  if (missing.length) {
+    if (!catalog.id || !isRedisConfigured()) throw new UnknownReply(what);
+    for (let i = 0; i < missing.length; i += 400) {
+      const some = missing.slice(i, i + 400);
+      const raws = exactReplies(await redisPipeline(some.map((id) => ["GET", listingKey(catalog.id!, id)])), some.length, what);
+      some.forEach((id, n) => {
+        if (raws[n] === null) return;
+        const listing = typeof raws[n] === "string" ? parseListing(parseJson(raws[n])) : null;
+        if (!listing || listing.id !== id) throw new UnknownReply(what);
+        found.set(id, listing);
+      });
+    }
+  }
+  return asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l));
 }
 
 /** The product a delivery id names, and the option when it is one. */

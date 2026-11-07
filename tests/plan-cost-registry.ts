@@ -616,6 +616,27 @@ export function request(shape: keyof typeof SHAPES, commands: number, bytes = 0)
 }
 
 /**
+ * One build of a course's audio feed, or one lesson's audio fetched (298 [H5-1], lib/course-audio.ts
+ * openCourseAudio), taken as COURSE_AUDIO_READ_UNITS public requests on the buyers' side before the course is
+ * read (held above it in tests/plan-cost-registry.test.ts). Commands: the token's limit (2) and the token (1),
+ * the store (2), its count (REQUEST_COMMANDS), the listing and the switch (2), the student's access as every
+ * lesson door reads it (lib/learn.ts courseLedger: the kept answer, the ledger, imported purchases and the answer
+ * kept again, 4; the community's levels, 4; one blocked check for each course the address holds, at most
+ * COURSE_AUDIO_HELD), the course and the passed quizzes (2). Bytes read: the store and the listing at their
+ * largest, the course record and the store's course listings at COURSE_AUDIO_COURSE_BYTES each, the ledger and
+ * the kept answer at 64 KB each; sent: the feed at MAX_LESSONS episodes of 1 KB; two Stripe list pages waited on
+ * when the kept answer has expired (one per spelling of the address). COURSE_AUDIO_HELD and
+ * COURSE_AUDIO_COURSE_BYTES are review ceilings, not measurements: the listings and the blocked checks are what
+ * every lesson page and lesson download already reads, and a store past them reads more there too.
+ */
+export const COURSE_AUDIO_HELD = 50;
+export const COURSE_AUDIO_COURSE_BYTES = 1_000_000;
+export const COURSE_AUDIO_READ =
+  request("wait", 2 + 1 + 2 + REQUEST_COMMANDS + 2 + 4 + 4 + COURSE_AUDIO_HELD + 2, MAX_STORE_BYTES + MAX_PRODUCT_BYTES + 2 * COURSE_AUDIO_COURSE_BYTES + 2 * 64_000)
+  + MAX_LESSONS * 1_024 * ORIGIN_PER_BYTE
+  + 2 * STRIPE_LIST_PAGE;
+
+/**
  * One of lib/read-ceilings.ts's worst reads, in dollars (C4-4, 4 November 2026):
  * its call, CPU, memory for its wall time and for each Stripe page waited on
  * (EXPORT_PAGE_SECONDS, as the export prices them), its commands, the bytes it
@@ -1077,6 +1098,9 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/page-read-rules.ts", names: ["COLLECTION_PRODUCTS_PER_UNIT", "collectionUnits", "BUNDLE_ITEMS_PER_UNIT", "bundleItemUnits"] },
       { file: "app/[handle]/shop/[collection]/page.tsx", names: ["collectionUnits(ids.length)", "bundleItemUnits(items.length)"] },
       { file: "app/api/store/licence/route.ts", names: ["takePublicRequest(store, \"buyer\")"] },
+      // A course's audio feed and each lesson's audio take their requests before the course is read (298 [H5-1]; COURSE_AUDIO_READ).
+      { file: "lib/course-audio.ts", names: ["takeBuyerRead(store, COURSE_AUDIO_READ_UNITS)"] },
+      { file: "lib/course-audio-rules.ts", names: ["COURSE_AUDIO_READ_UNITS = 6"] },
       // A community search and its access checks, and the one walk of its archive, paid before they read (4 November 2026).
       { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },
       { file: "app/[handle]/community/search/page.tsx", names: ["searchUnits({ room: config.chat.on, conversations })", "checkUnits(checks)", "{ shared: true }"] },

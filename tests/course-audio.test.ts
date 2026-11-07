@@ -148,7 +148,7 @@ async function main(): Promise<void> {
   const ask = (t: string) => feed(new Request(`https://marktmorgen.com/api/store/course/audio/feed/${t}.xml`) as never, { params: Promise.resolve({ token: `${t}.xml` }) });
   const listen = (t: string, id: string) => play(new Request(`https://marktmorgen.com/api/store/course/audio/play/${t}/${id}.mp3`) as never, { params: Promise.resolve({ token: t, lesson: `${id}.mp3` }) });
   await setCourseAudio(COURSE_ID, false, store);
-  is("switched off: not found, and nothing taken", (await ask(token)).status, 404);
+  is("switched off: not found", (await ask(token)).status, 404);
   await setCourseAudio(COURSE_ID, true, store);
   const folder = await storeFolder(OWNER);
   const before = await requestsIn(folder, windowId((await storeForEmail(OWNER))!)!);

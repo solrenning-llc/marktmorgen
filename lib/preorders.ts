@@ -23,7 +23,9 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { sendEmail } from "@/lib/email";
 import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { onAccount } from "@/lib/stripe-account";
-import { givenBack } from "@/lib/refunds";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { confirmLostRead, givenBack, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { canSell } from "@/lib/store-checkout";
 import { type Listing, type Store, saleHandles, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
@@ -40,6 +42,10 @@ export const piKey = (pi: string) => `nl:pre:pi:${pi}`;
 const anyKey = (sid: string) => `nl:pre:${sid}:any`;
 const anchorKey = (sid: string) => `nl:pre:${sid}:refunds`;
 const seenKey = (sid: string) => `nl:pre:${sid}:seen`;
+/** A write of one item (HDEL, HSET, EXPIRE or SADD of one field, member or key) answers 0 or 1; anything else is unknown (Codex Z). */
+const oneWrite = (reply: unknown): boolean => reply === 0 || reply === 1;
+/** Marks a row of the refunds job read; true only when Redis answered the SADD of one member with 0 or 1. */
+const markRead = async (sid: string, id: string): Promise<boolean> => oneWrite(repliesFor(await redisPipeline([["SADD", seenKey(sid), id]]), 1)?.[0]);
 const giveKey = (session: string) => `nl:pre:give:${session}`;
 const JOBS = "nl:pre:jobs";
 /** How long a pre-order is kept after it was last changed: past any refund window, as a gift is. */
@@ -147,6 +153,29 @@ export async function readPreorder(store: Store, productId: string, sessionId: s
   return parsePreorder(raw);
 }
 
+/**
+ * Whether a pre-order is given, read exactly, for a run that found another
+ * run's mark (Codex CX1 on #2726; CX-123 rule 24): one reply, the entry as
+ * text, JSON with its buyer's address, and `given` a positive whole number of
+ * seconds (true) or absent (false). Anything else is unknown and throws.
+ */
+async function givenExactly(sid: string, productId: string, sessionId: string): Promise<boolean> {
+  const raw = repliesFor(await redisPipeline([["HGET", entriesKey(sid, productId), sessionId]]), 1)?.[0];
+  let entry: unknown = null;
+  try {
+    entry = typeof raw === "string" ? JSON.parse(raw) : null;
+  } catch {
+    entry = null;
+  }
+  if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof (entry as { to?: unknown }).to !== "string" || !(entry as { to: string }).to) {
+    throw new UnknownReplyError("a pre-order's entry");
+  }
+  const given = (entry as { given?: unknown }).given;
+  if (given === undefined) return false;
+  if (typeof given === "number" && Number.isSafeInteger(given) && given > 0) return true;
+  throw new UnknownReplyError("a pre-order's entry");
+}
+
 /** A person's pre-orders of these products and what became of them, for the copy of their data (619 [SZ3]). Only reads. */
 export async function preordersOf(store: Store, productIds: string[], email: string): Promise<(Preorder & { product: string; checkout: string })[]> {
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
@@ -220,8 +249,17 @@ export type HandOverOutcome = "given" | "already" | "skip";
 export async function handOverPreorder(store: Store, product: Listing, sessionId: string, deps: HandOverDeps): Promise<HandOverOutcome> {
   if (!store.statsId || !isRedisConfigured()) return "skip";
   const sid = store.statsId;
-  const [claimed] = await redisPipeline([["SET", giveKey(sessionId), "1", "NX", "EX", 300]]);
-  if (claimed === null) return "already";
+  // The mark read exactly (lib/claim-mark.ts; CX-123 rules 24 and 25): somebody else's is "already"; an unknown one
+  // hands nothing over and says so, as when Redis does not answer, and the next run tries again.
+  const value = claimValue();
+  const claimed = await claimMark(giveKey(sessionId), 300, value);
+  if (claimed === "taken") {
+    // Another run holds the mark: "already" only once the pre-order is given, as for a gift (lib/gifts.ts):
+    // confirmPreorder answers "given" for it, so said while the other run may still fail, nothing would hand it over.
+    if (await givenExactly(sid, product.id, sessionId)) return "already";
+    throw new Error("another run is handing this pre-order over right now");
+  }
+  if (claimed === "unknown") throw new UnknownReplyError("a pre-order's giving mark");
   try {
     const entry = await readPreorder(store, product.id, sessionId);
     if (!entry || entry.revoked) return "skip";
@@ -234,7 +272,8 @@ export async function handOverPreorder(store: Store, product: Listing, sessionId
     await sendOut(store, product, entry.to, deps, `nimbus-preorder-out:${sessionId}`);
     return "given";
   } finally {
-    await redisPipeline([["DEL", giveKey(sessionId)]]).catch(() => {});
+    // Let go only while it still holds this run's value (releaseMark never throws).
+    await releaseMark(giveKey(sessionId), value);
   }
 }
 
@@ -419,40 +458,108 @@ export async function revokeRefundedPreorders(
   const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
   query.append("expand[]", "data.charge");
   const listed = await onAccount("GET", store.stripeAccountId, `/refunds?${query}`);
-  const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-  for (const refund of rows) {
+  // The refunds in their exact shape (Codex Q on #2724; CX-123 rule 24): a list of rows each as refundRowKnown()
+  // reads it, with every field that decides whether money went back. Anything else leaves the read unsure, so the
+  // anchor does not move past refunds that could not be read.
+  const refundsKnown = Array.isArray(listed.data) && (listed.data as unknown[]).every(refundRowKnown);
+  const refunds = refundsKnown ? (listed.data as Record<string, unknown>[]) : [];
+  // A dispute closed as lost takes a pre-order back as a full refund does, whatever its amount (lib/refunds.ts, the
+  // owner's rule of 4 November 2026; queue 388 [TB14]): read from Stripe's closing events, as lib/call-meetings.ts
+  // does. A read that fails or does not reach the end keeps the place, so it is read again next run.
+  const lost = await lostDisputesOrRetry(store.stripeAccountId, since, deadline, lostCursorKey("pre", sid));
+  let unsure = !lost.complete || !refundsKnown;
+  for (const refund of [...lost.rows, ...refunds]) {
     if (Date.now() >= deadline) return revoked;
     const id = typeof refund.id === "string" ? refund.id : "";
     const created = typeof refund.created === "number" ? refund.created : 0;
     const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
     const charge = refund.charge as { refunded?: unknown } | null;
+    const dispute = refund.object === "dispute";
     newest = Math.max(newest, created);
-    if (!id || !pi || refund.status !== "succeeded" || charge?.refunded !== true) continue;
-    const [fresh, found] = await redisPipeline([["SADD", seenKey(sid), id], ["GET", piKey(pi)]]);
-    if (Number(fresh) !== 1 || typeof found !== "string") continue;
-    const [foundSid, productId, session] = found.split("|");
-    if (foundSid !== sid || !productId || !session) continue;
-    const [raw] = await redisPipeline([["HGET", entriesKey(sid, productId), session]]);
-    const entry = parsePreorder(raw);
-    if (!entry || entry.revoked) continue;
-    if (entry.given) {
-      // Only what this pre-order gave: a purchase of the same product given another way stays.
-      const [rawGiven] = await redisPipeline([["HGET", importedKey(sid, entry.to), productId]]);
-      const job = (() => {
-        try {
-          return String((JSON.parse(String(rawGiven)) as { job?: unknown }).job ?? "");
-        } catch {
-          return "";
+    if (dispute && id && !pi) {
+      // No payment to look up: nothing of this store can be told from it, so it is read, and never holds the place back.
+      if (!(await markRead(sid, id))) unsure = true;
+      continue;
+    }
+    if (!id || !pi || !(dispute ? rowGivesBack(refund) : refund.status === "succeeded" && charge?.refunded === true)) continue;
+    // Read before anything is marked (Codex Z on #2724; CX-123 rule 24): whether this row was handled, the payment's
+    // pre-order and the pre-order itself, each in its exact shape. Unknown leaves the row unread and the read unsure,
+    // and the next run asks again; nothing is marked read until it was handled.
+    const looked = repliesFor(await redisPipeline([["SISMEMBER", seenKey(sid), id], ["GET", piKey(pi)]]), 2);
+    const handled = countOf(looked?.[0]);
+    const found = looked?.[1];
+    if (!looked || handled === null || handled > 1 || (found !== null && typeof found !== "string")) {
+      unsure = true;
+      continue;
+    }
+    if (handled === 1) continue;
+    const [foundSid, productId, session] = typeof found === "string" ? found.split("|") : [];
+    if (foundSid === sid && productId && session) {
+      const raw = repliesFor(await redisPipeline([["HGET", entriesKey(sid, productId), session]]), 1)?.[0];
+      if (raw !== null && typeof raw !== "string") {
+        unsure = true;
+        continue;
+      }
+      const entry = parsePreorder(raw);
+      if (entry && !entry.revoked) {
+        if (entry.given) {
+          // Only what this pre-order gave: a purchase of the same product given another way stays.
+          const given = repliesFor(await redisPipeline([["HGET", importedKey(sid, entry.to), productId]]), 1)?.[0];
+          if (given !== null && typeof given !== "string") {
+            unsure = true;
+            continue;
+          }
+          // No record: nothing of this pre-order is held as a purchase any more (null). A record that does not read,
+          // or whose job is not text, is unknown, never "given another way" (rule 30, Claude 4 on #2781).
+          let job = "";
+          if (typeof given === "string") {
+            let v: unknown;
+            try {
+              v = JSON.parse(given);
+            } catch {
+              v = undefined;
+            }
+            const named = v && typeof v === "object" && !Array.isArray(v) ? (v as { job?: unknown }).job : undefined;
+            if (typeof named !== "string") {
+              unsure = true;
+              continue;
+            }
+            job = named;
+          }
+          if (job === `pre:${session}`) {
+            // The course first, then the purchase (Codex G on #2781; rule 30): a course removal that fails keeps the
+            // purchase, so the next run takes both away again; taking a course away twice is harmless.
+            try {
+              await dropStart(entry.to, productId);
+            } catch (error) {
+              console.error("taking a refunded pre-order's course away failed; tried again next run", error);
+              unsure = true;
+              continue;
+            }
+            // Each write confirmed in its exact shape before the next (Codex Z, review 5794703899; CX-123 rule 24):
+            // a write left unknown marks nothing taken back or read and keeps the anchor, so the next run does it again.
+            const removed = repliesFor(await redisPipeline([["HDEL", importedKey(sid, entry.to), productId]]), 1);
+            if (!oneWrite(removed?.[0])) {
+              unsure = true;
+              continue;
+            }
+          }
         }
-      })();
-      if (job === `pre:${session}`) {
-        await redisPipeline([["HDEL", importedKey(sid, entry.to), productId]]);
-        await dropStart(entry.to, productId);
+        const saved = repliesFor(await redisPipeline([["HSET", entriesKey(sid, productId), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, productId)]), 2);
+        if (!oneWrite(saved?.[0]) || !oneWrite(saved?.[1])) {
+          unsure = true;
+          continue;
+        }
+        revoked += 1;
       }
     }
-    await redisPipeline([["HSET", entriesKey(sid, productId), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, productId)]);
-    revoked += 1;
+    // Marked read once handled: a run that stops halfway leaves it to the next, which does the same again.
+    if (!(await markRead(sid, id))) unsure = true;
   }
-  await redisPipeline([["SET", anchorKey(sid), String(newest)]]);
+  // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead), and the
+  // anchor with it: the closing events are read from the anchor, so it waits while they are not all read.
+  if (!(await confirmLostRead(lost, seenKey(sid)))) unsure = true;
+  else if (lost.complete && lost.resumed) newest = Math.min(newest, Math.max(lost.newest, since));
+  if (!unsure) await redisPipeline([["SET", anchorKey(sid), String(newest)]]);
   return revoked;
 }

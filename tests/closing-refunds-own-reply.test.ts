@@ -157,6 +157,22 @@ async function main() {
   is("nothing POSTed", posts, []);
   is("settled none", [nonePaid.settled, nonePaid.result?.none], ["none", 1]);
 
+  // Codex G's second money review of #3097 (inherited): what was given back is read exactly, or nothing is given. An
+  // amount_refunded that is not a whole number read as 0 would give back again what was already given back by hand.
+  for (const [label, value, key] of [["null", null, "rnull"], ["a string", "500", "rtext"], ["an object", { amount: 500 }, "robj"], ["negative", -1, "rneg"], ["a fraction", 1.5, "rfrac"]] as const) {
+    part(`This payment's own charge says what was given back as ${label}`);
+    await triedAgain(key, true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id, amount_refunded: value }) }) }, 1);
+  }
+  // Codex G's focal on #3097 (5815090132, proof g3097-refunded-overcharge): more given back than the charge took is
+  // not a reading of this charge; settling "none" on it would leave the member's unused time never given back.
+  part("This payment's own charge says more was given back than it took");
+  await triedAgain("rover", true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id, amount_refunded: 1001 }) }) }, 1);
+  part("This payment's own charge says what it took in no readable way");
+  await triedAgain("ramt", true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id, amount: "1000" }) }) }, 1);
+
+  part("This payment's charge is not expanded (only its id)");
+  await triedAgain("chargeid", true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: "ch_closeown1" }) }, 1);
+
   part("Control: this payment's own disputed charge still settles the member disputed, with nothing POSTed");
   const disputed = await run("owndisputed", true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id, disputed: true }) }) });
   is("nothing POSTed", posts, []);

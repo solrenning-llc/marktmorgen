@@ -82,6 +82,73 @@ async function main(): Promise<void> {
     is(`states ${JSON.stringify(states)}`, view, "rejected");
   }
 
+  // Claude 6 and Claude 5 on #2882 (MEDIUM): a record that reads as JSON but does not hold every device (no list,
+  // a list in another shape, one device that does not read) was taken as fewer devices and written back without them.
+  const teammateBroken = JSON.parse(String(saved)) as { devices: Record<string, unknown>[] };
+  teammateBroken.devices[1] = { ...teammateBroken.devices[1], auth: 7 };
+  const incomplete: [string, string][] = [
+    ["an empty object", "{}"],
+    ["an empty list", "[]"],
+    ["devices that are not a list", JSON.stringify({ handle: "phoneexact", devices: "x" })],
+    ["a teammate's device that does not read", JSON.stringify(teammateBroken)],
+  ];
+  for (const [label, text] of incomplete) {
+    part(`The device list reads as ${label}`);
+    await real([["SET", cfg, String(saved)]]);
+    const configRead = (c: Commands) => c.length === 1 && c[0][0] === "GET" && c[0][1] === cfg;
+    redis.pipeline = (async (c: Commands) => (configRead(c) ? [text] : real(c))) as typeof redis.pipeline;
+    let added: string;
+    try {
+      const result = await addDevice(store, owner, "owner", sub(3), ["sale"], "Phone three");
+      added = result.ok ? "added" : result.reason;
+    } catch {
+      added = "rejected";
+    } finally {
+      redis.pipeline = real;
+    }
+    is("adding a device is not done on a list that does not hold every device", added, "rejected");
+    is("the list is left exactly as it was, both phones in it", String((await real([["GET", cfg]]))[0]) === String(saved), true);
+  }
+
+  // Claude 5 on #2882 (LIGHT, security): a device written down is reported as added even when the studio's view
+  // cannot be read after it, so the route still tells the owner a new device hears of every sale.
+  part("The view cannot be read after a device is written down");
+  await real([["SET", cfg, String(saved)]]);
+  const viewAfter = (c: Commands) => c.length === 2 && c[0][0] === "GET" && c[0][1] === cfg;
+  redis.pipeline = (async (c: Commands) => (viewAfter(c) ? [(await real([c[0]]))[0], ["odd"]] : real(c))) as typeof redis.pipeline;
+  let reported: string;
+  try {
+    const result = await addDevice(store, owner, "owner", sub(5), ["sale"], "Phone five");
+    reported = result.ok ? `added:${result.created}:${result.view === null}` : result.reason;
+  } catch {
+    reported = "rejected";
+  } finally {
+    redis.pipeline = real;
+  }
+  is("added and created, with no view", reported, "added:true:true");
+  is("the device is kept", await devices(), 3);
+
+  // Claude 5 on #2882 (LIGHT): two devices added at once by two people: neither write lands over the other.
+  part("Two devices added at once");
+  await real([["SET", cfg, String(saved)]]);
+  const isWrite = (c: Commands) => c.length === 1 && ((c[0][0] === "SET" && c[0][1] === cfg) || (c[0][0] === "EVAL" && c[0][3] === cfg));
+  let raced = false;
+  redis.pipeline = (async (c: Commands) => {
+    if (!raced && isWrite(c)) {
+      raced = true;
+      await addDevice(store, "second@example.com", "admin", sub(7), ["sale"], "Phone seven");
+    }
+    return real(c);
+  }) as typeof redis.pipeline;
+  try {
+    await addDevice(store, "first@example.com", "admin", sub(6), ["sale"], "Phone six");
+  } catch {
+    /* counted below */
+  } finally {
+    redis.pipeline = real;
+  }
+  is("both new devices are kept beside the two there", await devices(), 4);
+
   part("Controls: a healthy list, and a confirmed empty one");
   is("the owner's own device in the view", (await phoneView(store, owner, "owner")).devices.length, 1);
   await real([["DEL", cfg]]);

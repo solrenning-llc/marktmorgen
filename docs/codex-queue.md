@@ -18413,6 +18413,7 @@ Testes automáticos: programação, acesso por passe, fim do acesso grátis na d
 
 530. [FT3] Tipo de funil "Bridge page" (página-ponte).
 Estado inicial: na fila.
+   - Andamento (Claude 5, 07/11/2026): **em andamento** (testado localmente; ramo claude5/ft3-bridge-funnel, PR a abrir no próximo lote; arquivos: lib/funnel-types.ts, lib/feature-pages.ts, tests/ft3-bridge-funnel.test.ts, tests/funnel-types.test.ts, tests/funnel-ai.test.ts e a contagem de tipos em docs/zero-cost-value-2026-10-18.md). Tipo "Bridge page" com uma página (título, vídeo nos players existentes, um botão, sem formulário, blocos vazios) e um produto do criador, nunca chamada; o botão leva ao produto escolhido dentro do funil e com a página aberta sozinha; montagem pela rota real testada. O modelo pronto do tipo "bridge" (regra 7 do FT) entra depois, no ramo claude5/ft-type-starters, sem dependência entre os ramos. Botão direto para o checkout do Stripe não construído (o botão leva à página do produto, onde está o checkout).
 O que fazer: um tipo de uma página só, entre um post ou anúncio e um produto do próprio criador: título, vídeo curto do criador (os players já existentes) e um único botão para a página do produto ou para o checkout; sem formulário. Os blocos começam vazios, como nos outros tipos.
 Testes automáticos: montagem da página e o botão levando ao produto certo.
 

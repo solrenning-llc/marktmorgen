@@ -193,7 +193,7 @@ async function main(): Promise<void> {
   const product = readFileSync("components/store-product.tsx", "utf8");
   is(
     "the gift, the group and the pre-order draw it where they draw no box (a shipped product), as the buy box does",
-    ["dc-gift-", "dc-group-", "dc-pre-", "dc-${place}"].map((id) => new RegExp(`<DigitalConsentBox id=\\{\`${id.replace(/[$]/g, "\\$")}[^\\n]*\\/> : <WithdrawalWhere lang=`).test(product)),
+    ["dc-gift-", "dc-group-", "dc-pre-", "dc-${place}"].map((id) => new RegExp(`<DigitalConsentBox id=\\{\`${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^\\n]*\\/> : <WithdrawalWhere lang=`).test(product)),
     [true, true, true, true],
   );
   is(

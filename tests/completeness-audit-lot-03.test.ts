@@ -16,18 +16,23 @@ is("the items list is under `items`", Array.isArray(lot.items) && (lot.items as 
 part("Every path:line reference resolves at the recorded main commit");
 const snapshot = String(lot.main ?? "");
 is("the recorded main commit is a short or full sha", /^[0-9a-f]{7,40}$/.test(snapshot), true);
-const git = (args: string[]) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
-// An unreachable commit is a failure, never a pass with nothing checked.
-let reachable = true;
-try { git(["cat-file", "-e", `${snapshot}^{commit}`]); } catch { reachable = false; }
-is(`commit ${snapshot} is reachable in this checkout`, reachable, true);
-if (reachable) {
-  const files = new Set(git(["ls-tree", "-r", "--name-only", snapshot]).split("\n"));
-  const lengths = new Map<string, number>();
-  const lengthOf = (path: string) => {
-    if (!lengths.has(path)) lengths.set(path, git(["show", `${snapshot}:${path}`]).split("\n").length - 1);
-    return lengths.get(path) as number;
-  };
+// CI checks out with depth 1, so the recorded commit is not in history there.
+// The line count of every cited file at that commit is kept in
+// tests/completeness-audit-lot-03-lines.json (taken with `git show <main>:<path>`),
+// so the check needs no other commit. When the commit is in this checkout, the
+// kept counts are verified against it as well.
+const kept = JSON.parse(readFileSync("tests/completeness-audit-lot-03-lines.json", "utf8")) as { main: string; lineCounts: Record<string, number> };
+is("the kept line counts are for the recorded commit", kept.main, snapshot);
+const git = (args: string[]) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
+let inHistory = true;
+try { git(["cat-file", "-e", `${snapshot}^{commit}`]); } catch { inHistory = false; }
+{
+  const files = new Set(Object.keys(kept.lineCounts));
+  const lengthOf = (path: string) => kept.lineCounts[path];
+  if (inHistory) {
+    const wrong = Object.entries(kept.lineCounts).filter(([path, n]) => git(["show", `${snapshot}:${path}`]).split("\n").length - 1 !== n).map(([path]) => path);
+    is(`kept line counts match ${snapshot}`, wrong, []);
+  }
   const reference = /([A-Za-z0-9_.\-/[\]@]+\.(?:tsx?|mjs|cjs|js|json|md|ya?ml|py|css)):(\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*)/g;
   const broken: string[] = [];
   let checked = 0;

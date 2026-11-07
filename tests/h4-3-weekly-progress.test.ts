@@ -122,15 +122,27 @@ test("with no baseline, or one too old, 'this week' is not known: never claimed 
     input({ courses: [week({ done: new Set(["a", "b"]), doneBefore: new Set(), lastSummarySeconds: NOW - BASELINE_FRESH_SECONDS - 1 })] }),
   );
   assert.equal(old.send, false);
-  // With an event coming, it goes out, but says nothing about lessons done this week.
+  // With an event coming, it goes out, but the course, with no news it can claim, is not in it.
   const withEvent = weeklyProgress(
     input({ courses: [week({ done: new Set(["a", "b"]), doneBefore: null, lastSummarySeconds: null })], events: [event("e1", 2)] }),
   );
   assert.equal(withEvent.send, true);
   if (!withEvent.send) return;
-  assert.equal(withEvent.courses[0].doneThisWeek, null);
-  assert.equal(withEvent.courses[0].doneCount, 2);
+  assert.deepEqual(withEvent.courses, []);
   assert.deepEqual(withEvent.events, [{ id: "e1", title: "Event e1", start: (NOW + 2 * DAY) * 1000 }]);
+  // With other news in the course (a module opened), it is there, saying nothing about lessons done this week.
+  const dripped = course("c1", [{ lessons: [lesson("a"), lesson("b")] }, { drip: 7, lessons: [lesson("c")] }]);
+  const opened = weeklyProgress(
+    input({
+      courses: [week({ course: dripped, joinedSeconds: NOW - 10 * DAY, done: new Set(["a", "b"]), doneBefore: null, lastSummarySeconds: null })],
+    }),
+  );
+  assert.equal(opened.send, true);
+  if (!opened.send) return;
+  assert.equal(opened.courses[0].doneThisWeek, null);
+  assert.equal(opened.courses[0].moreDone, 0);
+  assert.equal(opened.courses[0].doneCount, 2);
+  assert.equal(opened.courses[0].opened, 1);
 });
 
 test("a baseline from the future or not a number is not known either", () => {
@@ -140,7 +152,7 @@ test("a baseline from the future or not a number is not known either", () => {
   }
 });
 
-test("events: only coming ones, not cancelled, starting within the next seven days, soonest first, at most a few", () => {
+test("events: only coming ones, not canceled, starting within the next seven days, soonest first, at most a few", () => {
   const events = [
     event("late", 8),
     event("past", -1),

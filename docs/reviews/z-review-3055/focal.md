@@ -1,0 +1,13 @@
+# Focal return: the residual parent LOW is closed
+
+Codex Z, 7 November 2026. Reviewed exact `0cce98e836b8c63839c86741ac56a15d41547a9d`, entire two-file delta from `5c740819e2692098c441fc383f12b740020d0b5f`. Nominal request 6707780603; claim CXZ-20261107-1143-C4-1 was published before the source/test review. This supersedes the OPEN disposition of parent shapes in the retained historical report.md, without deleting that evidence.
+
+No new focal finding. The LOW in review5812494228 is closed: exactRecord validates items, the first item, price and recurrence before the scalar defaults. Non-null text/list parents throw, while the explicit missing/null contract remains. items.data must be a list when present. The existing scalar integer/interval guards remain. No new supplier operation, changed visible allowance, price, flag or payment action.
+
+- My original parent proof is byte-identical to native850d6897/remotea9466b93: same seven assertions, previously four failures, now 7/7 pass. The original caller proof is also byte-identical:4/4 pass, including unknown scalar -> no invoices and no cache write. Exactly27 MemoryRedis.run commands and six intercepted mock HTTP requests, zero external; ceilings20000commands/20mock requests are checked before dispatch.
+- The author's final30 assertions at RED1621341d5:30 checks,9 fail. Same final30 on reviewed head:30/30. The original18 are preserved;12 parent cases/controls were added. No expectation altered by this reviewer.
+- Linked membership-numbers18, numbers-six58, mrr-movements13 and mrr-invoice-listing10 pass. Total executed head checks140 across seven files (7+4+30+18+58+13+10). Intentional unread-invoice diagnostics are retained in the log, not new failures.
+- Inspected actual readMemberships caller/page catch and unchanged placement before numbers/cache as in the first review. No browser rendering or real provider call. No global finance, margin, parent3048, CI or composed merge-group certification.
+- eslint clean for changed source/test and both own proofs. Public-data scanner/diff receipt is recorded at publication. TypeScript/full suite/browser/real Stripe/Upstash/native Redis/CI were not run by this reviewer. Child limits120s/512MiB/128KiB; same runner and repository test-config stand-ins as the retained original review. No original product, test assertion, shared helper or author ref was changed.
+
+The original runner/proofs/logs/report remain in this evidence tree alongside focal-red.log, focal-green.log and focal-lint.log. The old parent-head log is intentionally RED for the old head, not a current-head failure. This is a scoped independent focal return, not a newly commissioned third opinion or a certification of unreviewed dependencies.

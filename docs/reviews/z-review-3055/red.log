@@ -1,0 +1,51 @@
+readsub-exact.test.ts
+
+Healthy and absent shapes read as before
+  ok    one at $15 a month
+  ok    two at $15 a year
+  ok    every 3 weeks
+  ok    no quantity (null): one
+  ok    no interval or count (null): a month, once
+  FAIL  a quantity of 0 is worth nothing, never one at the full price
+        expected {"amount":0,"interval":"month","count":1}
+        got      {"amount":1500,"interval":"month","count":1}
+
+Any other shape is unknown, never a month, one or nothing
+  FAIL  a negative quantity: unknown
+        expected "unknown"
+        got      {"amount":-1500,"interval":"month","count":1}
+  FAIL  a fractional quantity: unknown
+        expected "unknown"
+        got      {"amount":2250,"interval":"month","count":1}
+  FAIL  a quantity in text: unknown
+        expected "unknown"
+        got      {"amount":1500,"interval":"month","count":1}
+  FAIL  an interval of 12: unknown
+        expected "unknown"
+        got      {"amount":1500,"interval":"month","count":1}
+  FAIL  an interval that is no Stripe interval: unknown
+        expected "unknown"
+        got      {"amount":1500,"interval":"fortnight","count":1}
+  FAIL  an empty interval: unknown
+        expected "unknown"
+        got      {"amount":1500,"interval":"","count":1}
+  FAIL  a count of 0: unknown
+        expected "unknown"
+        got      {"amount":1500,"interval":"month","count":1}
+  FAIL  a negative count: unknown
+        expected "unknown"
+        got      {"amount":1500,"interval":"month","count":-2}
+  FAIL  a fractional count: unknown
+        expected "unknown"
+        got      {"amount":1500,"interval":"month","count":1.5}
+  FAIL  a count in text: unknown
+        expected "unknown"
+        got      {"amount":1500,"interval":"month","count":1}
+  FAIL  a price in text: unknown
+        expected "unknown"
+        got      {"amount":0,"interval":"month","count":1}
+  FAIL  a negative price: unknown
+        expected "unknown"
+        got      {"amount":-1500,"interval":"month","count":1}
+
+18 checks, 13 failing.

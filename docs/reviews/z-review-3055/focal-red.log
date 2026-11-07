@@ -1,0 +1,57 @@
+readsub-exact.test.ts
+
+Healthy and absent shapes read as before
+  ok    one at $15 a month
+  ok    two at $15 a year
+  ok    every 3 weeks
+  ok    no quantity (null): one
+  ok    no interval or count (null): a month, once
+  ok    a quantity of 0 is worth nothing, never one at the full price
+
+Any other shape is unknown, never a month, one or nothing
+  ok    a negative quantity: unknown
+  ok    a fractional quantity: unknown
+  ok    a quantity in text: unknown
+  ok    an interval of 12: unknown
+  ok    an interval that is no Stripe interval: unknown
+  ok    an empty interval: unknown
+  ok    a count of 0: unknown
+  ok    a negative count: unknown
+  ok    a fractional count: unknown
+  ok    a count in text: unknown
+  ok    a price in text: unknown
+  ok    a negative price: unknown
+
+A parent record in another shape is unknown, never free, one or a month (Codex Z on #3055)
+  FAIL  the price in text: unknown
+        expected "unknown"
+        got      {"amount":0,"interval":"month","count":1}
+  FAIL  the price as a list: unknown
+        expected "unknown"
+        got      {"amount":0,"interval":"month","count":1}
+  FAIL  the recurrence in text: unknown
+        expected "unknown"
+        got      {"amount":1500,"interval":"month","count":1}
+  FAIL  the recurrence as a list: unknown
+        expected "unknown"
+        got      {"amount":1500,"interval":"month","count":1}
+  FAIL  the item in text: unknown
+        expected "unknown"
+        got      {"amount":0,"interval":"month","count":1}
+  FAIL  the item as a list: unknown
+        expected "unknown"
+        got      {"amount":0,"interval":"month","count":1}
+  FAIL  the items in text: unknown
+        expected "unknown"
+        got      {"amount":0,"interval":"month","count":1}
+  FAIL  the items' list in text: unknown
+        expected "unknown"
+        got      {"amount":0,"interval":"month","count":1}
+  FAIL  the items' list as a record: unknown
+        expected "unknown"
+        got      {"amount":0,"interval":"month","count":1}
+  ok    no price at all (null) still reads as before: nothing
+  ok    no recurrence at all (null) still reads as before: a month, once
+  ok    no items at all still reads as before: nothing a month
+
+30 checks, 9 failing.

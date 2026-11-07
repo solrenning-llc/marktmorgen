@@ -37,8 +37,9 @@
  * first paint: at 1280 pixels the editor was drawn in one column and then,
  * once its script ran, in two, so the column of blocks went from 856 to 426
  * pixels and what was under it moved down (a layout shift of 0.0895 on a
- * slow network). What is drawn and where the focus lands in a browser is
- * checked by the scratch audit named in the pull request, not here.
+ * slow network). Where the focus lands, what the live region says and how
+ * the icon buttons are drawn in forced colors are checked in a real browser
+ * by tests/e2e/page-editor-actions.mjs, on the real component.
  *
  * Found in review (6 November 2026): an arrow that cannot move looked like
  * one that works (--ink-mute beside --ink-soft, 1.07:1, and ButtonText in
@@ -168,7 +169,19 @@ const notice = (error: string) => renderToStaticMarkup(createElement(ErrorNotice
 for (const [what, error] of [["a save", MESSAGES.signed_out], ["a Clear", clearing]] as const) {
   const html = notice(error);
   is(`after ${what}, the alert says it`, html.startsWith('<p class="notice notice-error mt-4" role="alert">') && html.includes(error), true);
-  is(`after ${what}, a link opens the log-in page in a new tab, so this tab keeps the page`, /<a href="\/signin" target="_blank" rel="noopener noreferrer"[^>]*>Log in again in a new tab<span class="new-tab-note sr-only">/.test(html), true);
+  is(`after ${what}, a link opens the log-in page in a new tab, so this tab keeps the page`, /<a href="\/signin" target="_blank" rel="noopener noreferrer"[^>]*>/.test(html), true);
+  // Its name as a screen reader reads it: its words, and an empty new-tab note's words written by app/globals.css.
+  const link = /<a href="\/signin"[^>]*>([\s\S]*?)<\/a>/.exec(html)?.[1] ?? "";
+  // Markup dropped one character at a time (no single-pass regex), as tests/orders-accessibility.test.ts does.
+  let words = "";
+  let inTag = false;
+  for (const ch of link.replaceAll('<span class="new-tab-note sr-only"></span>', " (opens in a new tab)")) {
+    if (ch === "<") inTag = true;
+    else if (ch === ">") inTag = false;
+    else if (!inTag) words += ch;
+  }
+  const name = words.replace(/\s+/g, " ").trim();
+  is(`after ${what}, the link says once, in words everyone sees, that it opens a new tab (WCAG 2.4.4, 2.5.3)`, name, "Log in again in a new tab");
 }
 is("another refusal has no log-in link", notice(MESSAGES.store_full).includes("/signin"), false);
 is("the editor draws its refusals with ErrorNotice", /\{error \? <ErrorNotice error=\{error\} \/> : null\}/.test(editor), true);

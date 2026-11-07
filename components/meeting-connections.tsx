@@ -79,13 +79,15 @@ export function MeetingConnections({
   review?: boolean;
   /** Settings-only retained connections; never offer new provider operations. */
   disabledProviders?: readonly MeetProvider[];
-  /** The test meeting each connected account has, where it has one (lib/meet-test.ts). */
-  tests?: Partial<Record<MeetProvider, TestMeeting>>;
+  /** The test meeting each connected account has, where it has one (lib/meet-test.ts); null when it could not be read. */
+  tests?: Partial<Record<MeetProvider, TestMeeting>> | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<MeetProvider | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tests, setTests] = useState(firstTests);
+  const [tests, setTests] = useState(firstTests ?? {});
+  /** The test meetings could not be read: nothing about them is offered, so none is made over one that is there. */
+  const unread = firstTests === null;
   const [testing, setTesting] = useState<MeetProvider | null>(null);
   /** Which of the test meeting's steps is running, so only its button says so. */
   const [doing, setDoing] = useState<"test" | "movetest" | "untest" | null>(null);
@@ -239,7 +241,11 @@ export function MeetingConnections({
               {connection && !connection.broken && !disabled ? (
                 <div className="mt-5 border-t border-line pt-5" data-meet-test={provider}>
                   <h3 className="text-sm font-semibold text-ink">Check that it works</h3>
-                  {tests[provider] ? (
+                  {unread ? (
+                    <p className="mt-1 text-sm text-ink-soft" role="status">
+                      We could not read your test meeting just now. Nothing was changed. Reload this page in a moment.
+                    </p>
+                  ) : tests[provider] ? (
                     <>
                       <p className="mt-1 text-sm text-ink-soft">
                         {`A test meeting is on your ${info.name} account, set for ${when(tests[provider].start)}, with nobody invited. Open it to see it. Move it an hour later to check what a buyer's move does, then delete it.`}

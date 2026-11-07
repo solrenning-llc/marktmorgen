@@ -18,6 +18,13 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
  * only, like the rest of the export (lib/team-roles.ts, "export"). Nothing is
  * written down by downloading it: a file on disk is not a payment, and the
  * book only says "paid" once the creator confirms they paid.
+ *
+ * The file is what the creator pays from, so it is made only from a book read
+ * in full (rule 24: an unknown answer fails closed). While Stripe's refunds,
+ * disputes or membership and plan invoices could not all be read, what is
+ * owed is not known, and no file is made: one made then could pay commission
+ * on a refunded sale or leave a payment out, and the money would leave the
+ * creator before anything here could refuse.
  */
 export async function GET(request: NextRequest) {
   const creator = await creatorFrom(request, "export");
@@ -26,6 +33,13 @@ export async function GET(request: NextRequest) {
   try {
     // The file names no product (batchFile), so nothing is read for the names.
     const book = await readBook(store, undefined, { titles: false });
+    const unread = book.refundsChecked ? (book.invoicesChecked ? null : "every membership and plan payment") : "refunds and chargebacks";
+    if (unread) {
+      return new Response(`We could not check ${unread} just now, so no file was made. Try again in a few minutes.`, {
+        status: 503,
+        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "300" },
+      });
+    }
     // Anyone with a PayPal payment on its way is left out, so nobody is paid twice.
     const lines = payableLines(book, await onTheirWay(store));
     if (!lines.length) {
@@ -73,6 +87,10 @@ export async function POST(request: NextRequest) {
     // Refunds are read from Stripe: when that failed, what is owed is not yet
     // known, and writing payouts against a guess is how a book starts lying.
     if (!book.refundsChecked) return fail("refunds", 409);
+    // The same for the invoices of memberships and plans (a Stripe error, or
+    // more than INVOICE_PAGES of them): a payment left unread is owed but not
+    // seen, and the batch written down would not match what was paid.
+    if (!book.invoicesChecked) return fail("invoices", 409);
 
     const away = await onTheirWay(store);
     const lines = payableLines(book, away);

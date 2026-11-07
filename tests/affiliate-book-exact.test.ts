@@ -198,6 +198,44 @@ async function main(): Promise<void> {
   await payWithPayPal(store);
   is("never a second PayPal batch", created.length, 1);
 
+  // Codex G and Codex M on #3051: a payout's cents were read as any number, so a negative or fractional amount in
+  // the book lowered what was paid and PayPal was asked for more (-3000 sent a second batch of $60.00). Every
+  // writer (the route, "Mark as paid", PayPal's settlement) writes a whole number of at least one: anything else
+  // is a record that does not read, never a reversal.
+  part("A payout whose amount is not a whole positive number of cents is never read as one");
+  const payoutAs = async (patch: Record<string, unknown>) => {
+    await settledOnce(store);
+    const field = await payoutField();
+    const [held] = await real([["HGET", PAYOUTS, field]]);
+    await real([["HSET", PAYOUTS, field, JSON.stringify({ ...(JSON.parse(String(held)) as object), ...patch })]]);
+  };
+  for (const [what, patch] of [
+    ["cents -3000", { cents: -3000 }],
+    ["cents -1", { cents: -1 }],
+    ["cents 0", { cents: 0 }],
+    ["cents 0.5", { cents: 0.5 }],
+    ["cents 2999.5", { cents: 2999.5 }],
+    ["cents past a safe integer", { cents: 2 ** 53 }],
+    ["cents as a string", { cents: "3000" }],
+    ["an empty affiliate id", { aff: "" }],
+    ["an empty payout id", { id: "" }],
+    ["a currency that is not a code", { currency: "US dollars" }],
+    ["a currency that is not text", { currency: 840 }],
+  ] as const) {
+    await payoutAs(patch);
+    is(`${what}: readBook throws UnknownReplyError`, await thrown(() => readBook(store)), "UnknownReplyError");
+    is(`${what}: payWithPayPal refuses with nothing sent`, await payWithPayPal(store), { ok: false, reason: "error" });
+    is(`${what}: never a second PayPal batch`, created.length, 1);
+  }
+  idle = await idleWorld();
+  await real([["HSET", `nl:aff:${idle.statsId}:payouts`, "0123456789ab", JSON.stringify({ id: "0123456789ab", aff: AFF, cents: -3000, currency: "usd", date: "2026-11-01", reference: "x", at: 1 })]]);
+  is("the same negative payout in idleSweep: throws", await thrown(() => idleSweep(idle, ms(400))), "UnknownReplyError");
+  await payoutAs({ cents: 3000 });
+  is("control: a whole positive payout still reads as paid", (await readBook(store)).rows.map((r) => [r.paid, r.payable]), [[3000, 0]]);
+  await payoutAs({ currency: undefined });
+  is("control: a payout from before the currency was written reads as US dollars", (await readBook(store)).payouts.map((p) => [p.cents, p.currency]), [[3000, "usd"]]);
+  is("and nothing more is sent", [await payWithPayPal(store), created.length], [{ ok: false, reason: "nothing" }, 1]);
+
   part("The payouts' HGETALL in an unknown shape is not an empty book");
   for (const [what, value] of [
     ["missing (undefined)", undefined],

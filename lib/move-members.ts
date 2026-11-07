@@ -246,15 +246,20 @@ export async function keptAlready(store: Store, email: string, productId: string
   if (!account || !EMAIL_PATTERN.test(email)) return false;
   // CX-123 rule 24 (rule 30 of Claude 4's sweep, C4-2890): a list without its data is unknown, never "not kept": it
   // throws, and sendMoveReminders puts the reminder back an hour instead of emailing someone who kept it.
+  // A page cut short (has_more not false) is not the whole list (Claude 5 on #2685): "not kept" is read only from whole
+  // lists, as liveMembership does; a live membership found on a page read is kept all the same.
   const customers = await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: "10" })}`);
   if (!Array.isArray(customers.data)) throw new Error("a member's customers did not read");
+  let whole = customers.has_more === false;
   for (const customer of customers.data as { id?: unknown }[]) {
     if (typeof customer.id !== "string") continue;
     const subs = await onAccount("GET", account, `/subscriptions?customer=${customer.id}&status=all&limit=100`);
     if (!Array.isArray(subs.data)) throw new Error("a member's subscriptions did not read");
     const list = subs.data as { status?: unknown; metadata?: Record<string, string> | null }[];
     if (list.some((s) => LIVE.has(String(s.status)) && s.metadata?.product === productId)) return true;
+    if (subs.has_more !== false) whole = false;
   }
+  if (!whole) throw new Error("a member's lists did not read whole");
   return false;
 }
 

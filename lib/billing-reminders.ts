@@ -10,6 +10,7 @@
  * charge, and says the date, the amount and the one click that stops it.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { isAddOn, keepCardThatPays, listSubscriptions, pastDueInGrace, periodEnd, planOf } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
@@ -229,6 +230,19 @@ export function failedPlanEmail(failed: FailedPlan): { subject: string; text: st
   };
 }
 
+/**
+ * Whether this run sends the email a mark stands for: true only when SET NX answers exactly "OK" (the mark taken
+ * here), false on nil (taken before: sent already, or being sent). Any other answer, or none, is unknown and throws
+ * (CX-123 rule 24): the caller sends nothing and leaves the mark alone, since it may be another run's, so an email is
+ * never sent twice. The mark is let go only after this run took it and its send failed.
+ */
+async function claimOnce(key: string, seconds: number): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["SET", key, "1", "NX", "EX", seconds]]), 1);
+  if (reply?.[0] === "OK") return true;
+  if (reply && reply[0] === null) return false;
+  throw new UnknownReplyError("a billing reminder's mark");
+}
+
 /** Every plan whose payment failed and that has not been written to about it yet. */
 export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: number; seen: number }> {
   const counts = { sent: 0, failed: 0, seen: 0 };
@@ -242,8 +256,17 @@ export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: n
       if (!due) continue;
       // Claimed before anything is done, so a second run never writes twice.
       const key = `nl:remind:failed:${due.invoice}`;
-      const [claimed] = await redisPipeline([["SET", key, "1", "NX", "EX", 90 * DAY]]);
-      if (claimed === null) continue;
+      let claimed: boolean;
+      try {
+        claimed = await claimOnce(key, 90 * DAY);
+      } catch (error) {
+        // Not known whether it was sent (CX-123 rule 24): nothing is sent, the mark is left as it is, and the
+        // invoice is said as failed; the run goes on to the next plan.
+        counts.failed += 1;
+        console.error("reading whether a failed payment was written about failed", due.invoice, error);
+        continue;
+      }
+      if (!claimed) continue;
       try {
         // A renewal's email says what has stopped, so it is written down
         // first (lib/billing-sync.ts); a failure waits for the next run.
@@ -289,8 +312,17 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
         const reminder = dueReminder(subscription, nowSeconds);
         if (!reminder) continue;
         const key = `nl:remind:${reminder.kind}:${reminder.subscription}:${reminder.at}`;
-        const [claimed] = await redisPipeline([["SET", key, "1", "NX", "EX", 60 * DAY]]);
-        if (claimed === null) continue;
+        let claimed: boolean;
+        try {
+          claimed = await claimOnce(key, 60 * DAY);
+        } catch (error) {
+          // Not known whether it was sent (CX-123 rule 24): nothing is sent, the mark is left as it is, and the
+          // charge is said as failed; the run goes on to the next subscription.
+          counts.failed += 1;
+          console.error("reading whether a billing reminder was sent failed", reminder.subscription, error);
+          continue;
+        }
+        if (!claimed) continue;
         const { subject, text } = reminderEmail(reminder);
         const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: reminder.email, subject, text, replyTo: SUPPORT_EMAIL });
         if (ok) counts.sent += 1;

@@ -684,7 +684,7 @@ const LIFE_DATES = new Set(["started", "since", "filled"]);
 function lifeCounts(flat: string[]): Map<string, number> {
   const out = new Map<string, number>();
   for (let i = 0; i < flat.length; i += 2) {
-    const count = LIFE_DATES.has(flat[i]) ? 0 : /^-?\d{1,15}$/.test(flat[i + 1]) ? Number(flat[i + 1]) : NaN;
+    const count = LIFE_DATES.has(flat[i]) ? 0 : /^\d{1,15}$/.test(flat[i + 1]) ? Number(flat[i + 1]) : NaN;
     if (!Number.isSafeInteger(count)) throw new UnknownReplyError("the all-time record's counts");
     out.set(flat[i], count);
   }

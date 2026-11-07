@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DigitalConsentBox } from "@/components/digital-consent-box";
+import { WithdrawalWhere } from "@/components/withdrawal-where";
 import { consentKind, deliversDigitally } from "@/lib/digital-consent";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -243,7 +244,7 @@ export default async function FreePage({ params, searchParams }: Params) {
                   <input type="hidden" name="handle" value={store.handle} />
                   <input type="hidden" name="token" value={token} />
                   {/* The box to start access at once (lib/digital-consent.ts), before the offer's checkout opens. */}
-                  {deliversDigitally(welcome.product) ? <DigitalConsentBox id="dc-welcome" kind={consentKind(welcome.product)} lang={store.language} refused={query.welcome === "consent"} className="mb-4" /> : null}
+                  {deliversDigitally(welcome.product) ? <DigitalConsentBox id="dc-welcome" kind={consentKind(welcome.product)} lang={store.language} refused={query.welcome === "consent"} className="mb-4" /> : <WithdrawalWhere lang={store.language} className="mb-4" />}
                   <button type="submit" className="btn st-btn btn-lg">
                     {ww.button(welcome.percent)}
                   </button>

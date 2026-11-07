@@ -126,12 +126,12 @@ async function main(): Promise<void> {
   // version or its fingerprint.
   const LINE: Record<(typeof LANGUAGES)[number], string> = {
     en: "You can withdraw online with ‘Withdraw from contract here’ on your purchases page, while you have that right.",
-    es: "Puedes desistir en línea con «Desistir del contrato aquí» en tus compras, mientras tengas ese derecho.",
+    es: "Puedes desistir en línea con “Desistir del contrato aquí” en tus compras, mientras tengas ese derecho.",
     fr: "Vous pouvez vous rétracter en ligne avec « Se rétracter du contrat ici » dans vos achats, tant que vous disposez de ce droit.",
-    de: "Sie können online mit „Vertrag hier widerrufen“ unter Ihren Käufen widerrufen, solange Ihnen dieses Recht zusteht.",
-    it: "Puoi recedere online con «Recedi dal contratto qui» nei tuoi acquisti, finché hai questo diritto.",
+    de: "Sie können online mit ‚Vertrag hier widerrufen‘ unter Ihren Käufen widerrufen, solange Ihnen dieses Recht zusteht.",
+    it: "Puoi recedere online con “Recedi dal contratto qui” nei tuoi acquisti, finché hai questo diritto.",
     nl: "Je kunt online herroepen met ‘Overeenkomst hier herroepen’ bij je aankopen, zolang je dat recht hebt.",
-    pt: "Pode desistir do contrato online com «Desistir do contrato aqui» nas suas compras, enquanto tiver esse direito.",
+    pt: "Pode desistir do contrato online com “Desistir do contrato aqui” nas suas compras, enquanto tiver esse direito.",
   };
   const whereOf = (lang: (typeof LANGUAGES)[number]) => (withdrawalWords(lang) as unknown as { checkoutWhere?: string }).checkoutWhere;
   is("the line, in every language, is the withdrawal words' own", LANGUAGES.map((lang) => [lang, whereOf(lang)]), LANGUAGES.map((lang) => [lang, LINE[lang]]));

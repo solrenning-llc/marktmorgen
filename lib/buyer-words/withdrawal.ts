@@ -62,7 +62,7 @@ export type WithdrawalWords = typeof en;
 
 const es: WithdrawalWords = {
   withdrawLink: "Desistir del contrato aquí",
-  checkoutWhere: "Puedes desistir en línea con «Desistir del contrato aquí» en tus compras, mientras tengas ese derecho.",
+  checkoutWhere: "Puedes desistir en línea con “Desistir del contrato aquí” en tus compras, mientras tengas ese derecho.",
   backToList: "Volver a tus compras",
   chooseLead: "Elige el pedido del que desistes.",
   noneOpen: "Ahora no puedes desistir en línea de ninguna de tus compras.",
@@ -146,7 +146,7 @@ const fr: WithdrawalWords = {
 
 const de: WithdrawalWords = {
   withdrawLink: "Vertrag hier widerrufen",
-  checkoutWhere: "Sie können online mit „Vertrag hier widerrufen“ unter Ihren Käufen widerrufen, solange Ihnen dieses Recht zusteht.",
+  checkoutWhere: "Sie können online mit ‚Vertrag hier widerrufen‘ unter Ihren Käufen widerrufen, solange Ihnen dieses Recht zusteht.",
   backToList: "Zurück zu Ihren Käufen",
   chooseLead: "Wählen Sie die Bestellung, die Sie widerrufen.",
   noneOpen: "Keiner Ihrer Käufe kann jetzt online widerrufen werden.",
@@ -188,7 +188,7 @@ const de: WithdrawalWords = {
 
 const it: WithdrawalWords = {
   withdrawLink: "Recedi dal contratto qui",
-  checkoutWhere: "Puoi recedere online con «Recedi dal contratto qui» nei tuoi acquisti, finché hai questo diritto.",
+  checkoutWhere: "Puoi recedere online con “Recedi dal contratto qui” nei tuoi acquisti, finché hai questo diritto.",
   backToList: "Torna ai tuoi acquisti",
   chooseLead: "Scegli l'ordine da cui recedi.",
   noneOpen: "Al momento non puoi recedere online da nessuno dei tuoi acquisti.",
@@ -272,7 +272,7 @@ const nl: WithdrawalWords = {
 
 const pt: WithdrawalWords = {
   withdrawLink: "Desistir do contrato aqui",
-  checkoutWhere: "Pode desistir do contrato online com «Desistir do contrato aqui» nas suas compras, enquanto tiver esse direito.",
+  checkoutWhere: "Pode desistir do contrato online com “Desistir do contrato aqui” nas suas compras, enquanto tiver esse direito.",
   backToList: "Voltar às suas compras",
   chooseLead: "Escolha a encomenda de que desiste.",
   noneOpen: "Neste momento não pode desistir online de nenhuma das suas compras.",

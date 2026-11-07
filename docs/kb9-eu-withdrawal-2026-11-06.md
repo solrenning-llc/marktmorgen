@@ -185,6 +185,15 @@ reading.
    - Not covered yet: a one-click button that goes straight to payment for a
      shipped product with nothing to choose (sales-page blocks, embedded cards),
      and the booking page of a call, which draw neither the box nor this line.
+   - The welcome offer's checkout draws the line in the box's place for a
+     shipped product, as the buy box does (Claude 1's focal return on #2953).
+   - Deferred, with its reason: `lib/course-confirmation-origin.ts` (no caller
+     with an effect today) accepts only the current consent version and
+     records today's words fingerprint. Its first funded caller must read an
+     order kept under an earlier version with that version's words
+     (`WORDS_BY_VERSION` in lib/digital-consent-email.ts) and fingerprint,
+     never refuse it or record another version's (Claude 5's second review of
+     #2953, Claude 1's focal return).
    - Confirmation email: unit 2b (`tests/kb9-precontract-email.pending.ts`).
 3. **Creator plans.** The same function in the studio's billing page for a plan
    bought within its 14 days.

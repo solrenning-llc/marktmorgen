@@ -1043,8 +1043,8 @@ export async function invitePartner(input: {
   const statsId = store.statsId as string;
   const [known] = await redisPipeline([["HGET", emailsKey(statsId), email]]);
   if (typeof known !== "string") {
-    const [count] = await redisPipeline([["HLEN", peopleKey(statsId)]]);
-    if (Number(count) >= MAX_AFFILIATES) return "full";
+    // Read exactly (rule 24): an unknown count throws before anything is written or sent, never "room left".
+    if ((await peopleCount(store)) >= MAX_AFFILIATES) return "full";
   }
 
   const named = share.products.map((id) => input.titles.get(id) ?? "a product").slice(0, 12);
@@ -1208,8 +1208,8 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
     affiliate = changed.next;
   }
   if (!affiliate) {
-    const [count] = await redisPipeline([["HLEN", peopleKey(statsId)]]);
-    if (Number(count) >= MAX_AFFILIATES) return { ok: false, reason: "full" };
+    // Read exactly (rule 24): an unknown count throws before anything is written, never "room left".
+    if ((await peopleCount(store)) >= MAX_AFFILIATES) return { ok: false, reason: "full" };
     const id = randomBytes(6).toString("hex");
     // One application per address, however many links are opened at once.
     const [won] = await redisPipeline([["HSETNX", emailsKey(statsId), grant.e, id]]);
@@ -1441,8 +1441,8 @@ export async function joinAsBuyer(store: Store, sessionId: string): Promise<Join
       affiliate = changed?.next ?? changed?.before ?? affiliate;
     }
   } else {
-    const [count] = await redisPipeline([["HLEN", peopleKey(statsId)]]);
-    if (Number(count) >= MAX_AFFILIATES) return { ok: false, reason: "full" };
+    // Read exactly (rule 24): an unknown count throws before anything is written, never "room left".
+    if ((await peopleCount(store)) >= MAX_AFFILIATES) return { ok: false, reason: "full" };
     const id = randomBytes(6).toString("hex");
     const [won] = await redisPipeline([["HSETNX", emailsKey(statsId), email, id]]);
     if (Number(won) !== 1) {

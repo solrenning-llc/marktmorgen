@@ -73,8 +73,15 @@ export async function GET(request: NextRequest) {
   const granted = await exchange(code, trip.redirect);
   if (!granted?.serverId) return back("discord=error");
   // Another server than the one connected: the old one is let go, with whoever it gave roles to.
+  // A failed forget (a thrown read, or an exact read that throws UnknownReplyError) switches nothing: the new server
+  // is not saved and the bot stays in the old one, and the creator is told so instead of a bare 500.
   if (before && before.id !== granted.serverId) {
-    await forgetServer(room, store.sid);
+    try {
+      await forgetServer(room, store.sid);
+    } catch (error) {
+      console.error("forgetting the old Discord server before a switch failed", error);
+      return back("discord=unchecked");
+    }
     await leaveServer(before.id).catch(() => false);
   }
   await saveServer(room, {

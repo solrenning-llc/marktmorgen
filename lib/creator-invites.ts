@@ -175,8 +175,13 @@ export async function recordInvite(store: Pick<Store, "sid" | "email" | "extra">
   const at = Math.floor(now / 1000);
   const set = await setOnce(byKey(store.sid), JSON.stringify({ r: inviter.sid, at, terms: INVITE_PROGRAM_OPEN ? currentInviteTerms() : readInviteTerms(undefined) }));
   if (set === "taken") return "already";
-  // Not known whether this invite was written down: listed under nobody, and said so (the claim route logs it).
-  if (set !== "ours") throw new UnknownReplyError("who invited a new store");
+  if (set !== "ours") {
+    // Not known whether this invite was written down: said so (the claim route logs it), and put on the settlement
+    // walk only, which credits from the store's own record alone (lib/creator-invite-credit.ts earnFrom pays by.r and
+    // nothing without a record). The inviter's own list is left alone: nothing confirmed the record is theirs.
+    await redisPipeline([["ZADD", ALL_KEY, "NX", at, store.sid]]).catch(() => null);
+    throw new UnknownReplyError("who invited a new store");
+  }
   await redisPipeline([
     ["ZADD", listKey(inviter.sid), at, store.sid],
     ["ZADD", ALL_KEY, at, store.sid],

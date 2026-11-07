@@ -136,11 +136,14 @@ async function main(): Promise<void> {
     const anaCode = (await inviteCode(ana.sid))!;
     const beaCode = (await inviteCode(bea.sid))!;
     await recordInvite(cal, beaCode);
+    const [allBefore] = await original([["ZSCORE", ALL_KEY, cal.sid]]);
+    // Ana's try a second later, so a score written over bea's would show.
     claimAnswers((key) => key === byKey(cal.sid), () => [undefined], { read: () => [undefined] });
     let first: unknown = "threw";
-    try { first = await recordInvite(cal, anaCode); } catch { /* checked below */ }
+    try { first = await recordInvite(cal, anaCode, Date.now() + 1_000); } catch { /* checked below */ }
     restore();
     const [mine, theirs, all] = await original([["ZSCORE", listKey(ana.sid), cal.sid], ["ZSCORE", listKey(bea.sid), cal.sid], ["ZSCORE", ALL_KEY, cal.sid]]);
+    is("and its place on the settlement walk keeps bea's time", all, allBefore);
     is("held by bea, unknown for ana: bea's record and lists kept, ana's list never gains it", [first, (await invitedBy(cal.sid))?.r === bea.sid, mine, theirs !== null, all !== null], ["threw", true, null, true, true]);
   }
   {

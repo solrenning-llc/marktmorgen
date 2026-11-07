@@ -88,7 +88,7 @@ import { readStreamPath } from "@/lib/stream-rules";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { BUYER_NOTICE_DAYS, BUYER_NOTICE_FROM, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, afterBuyersTold, buyerNoticeCap, buyersStartOn, paidBefore } from "@/lib/closing-buyers-rules";
 import { forgetCredit, startClosingCredit } from "@/lib/closing-credit";
-import { FINAL_INDEX, HELD_INDEX, forgetHeld, holdCharges, holdCounts, paidPeriods, retryHolds, savePaidPeriod, startCallBudget } from "@/lib/closing-holds";
+import { FINAL_INDEX, HELD_INDEX, forgetHeld, holdCharges, holdCounts, paidPeriods, retryHolds, savePaidPeriod, startCallBudget, workKey } from "@/lib/closing-holds";
 import { buyerPagesCap, forgetTold, tellBuyers, tellRefundShort } from "@/lib/closing-buyers";
 import { giveBackUnused, unusedRows, unusedSummary } from "@/lib/closing-refunds";
 import { stillToGive, unusedOf, type PaidPeriod } from "@/lib/closing-buyers-rules";
@@ -129,6 +129,8 @@ type State = {
   holdFrom?: number;
   /** The closing day, once it began (ms). */
   day?: number;
+  /** When Stripe was last asked to stop its renewals, once the days to ask every day were past (ms). */
+  renewalsAsked?: number;
   buyersFrom?: number;
   buyersDone?: number;
   buyersAfter?: string;
@@ -149,7 +151,7 @@ function parseState(raw: unknown): State {
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
     const out: State = {};
-    for (const name of ["of", "ended", "month", "week", "removed", "said", "fit", "renewals", "due", "erased", "hold", "holdFrom", "day", "buyersFrom", "buyersDone", "buyersPages", "buyersCapped", "untold", "refunds"] as const) {
+    for (const name of ["of", "ended", "month", "week", "removed", "said", "fit", "renewals", "due", "erased", "hold", "holdFrom", "day", "buyersFrom", "buyersDone", "buyersPages", "buyersCapped", "untold", "refunds", "renewalsAsked"] as const) {
       if (typeof value[name] === "number" && Number.isFinite(value[name] as number)) out[name] = value[name] as number;
     }
     if (typeof value.buyersAfter === "string" && /^(start|\d{1,3}\|[!-~]{0,800})$/.test(value.buyersAfter)) out.buyersAfter = value.buyersAfter;
@@ -919,6 +921,39 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
  * deleteSalesTraces); its files removed; and its line for the walk that
  * deletes its records.
  */
+/** The days of a closing day on which Stripe is asked every day to stop the renewals the store sold (SG2 review, C). */
+export const RENEWAL_TRY_DAYS = 7;
+/** After them, how often it is asked again, while a member could still be charged. */
+export const RENEWAL_LATE_GAP_DAYS = 7;
+
+/** Whether a closing day is past its days of asking Stripe every day. */
+export const renewalsLate = (now: number, day: number): boolean => now - day >= RENEWAL_TRY_DAYS * DAY_MS;
+/** Whether Stripe is asked today: every day for RENEWAL_TRY_DAYS, then once every RENEWAL_LATE_GAP_DAYS. */
+export const renewalsAskToday = (now: number, day: number, asked: number | undefined): boolean =>
+  !renewalsLate(now, day) || now - (asked ?? 0) >= RENEWAL_LATE_GAP_DAYS * DAY_MS;
+/**
+ * Whether a closing day whose renewals are not all stopped may go on: only past
+ * its days, and only when no member can be charged again, every one reached by
+ * the hold (collection paused with no day to resume, invoices voided) and none
+ * left to hold. Never a charge for a closed store; and its records are not kept
+ * for ever while each member is held.
+ *
+ * `asked` is what Stripe answered today (stopRenewals), null when it was not
+ * asked or could not be: the hold's own count never sees a paused member (a
+ * trial that ended without a card, which can come back) or one its search did
+ * not list (Claude 5 on #2560), so it closes only on a day Stripe was asked,
+ * every search read to its end, and every renewal found is stopped or held.
+ */
+export const renewalsMayClose = (late: boolean, held: boolean, leftToHold: number, asked: { read: boolean; unheld: number } | null): boolean =>
+  late && held && leftToHold === 0 && asked !== null && asked.read && asked.unheld === 0;
+
+/** The members the hold has not reached, or could not reach within its budget, read exactly: an unknown answer is never "none". */
+async function membersLeftToHold(folder: string): Promise<number> {
+  const [fields] = await redisPipeline([["HKEYS", workKey(folder)]]);
+  if (!Array.isArray(fields) || !fields.every((field) => typeof field === "string")) throw new Error("the members left to hold answered in an unknown shape");
+  return (fields as string[]).filter((field) => field.startsWith("f:") || field.startsWith("o:")).length;
+}
+
 async function closingDay(store: Store, key: string, state: State, endedAt: number, day: number, folder: string, now: number, hands: Hands, until: number, save: (next: State) => Promise<unknown>): Promise<Closing> {
   let next: State = state;
   if (!next.renewals) {
@@ -932,12 +967,31 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
     // expired, and its address is marked for after its records are gone.
     await markShut(store, next.day ?? day, endedAt);
     await expirePlanCheckouts(store, store.stripeCustomerId ? [store.stripeCustomerId] : []);
-    try {
-      const stopped = await stopRenewals(store, until);
-      if (!stopped.done) return { key, state: "held", note: "the renewals it sold are not all stopped yet" };
-    } catch (error) {
-      console.error("stopping a closing store's renewals failed", error);
-      return { key, state: "held", note: "Stripe could not be asked to stop its renewals" };
+    // SG2 review, C: tried every day for RENEWAL_TRY_DAYS, then once a week, so its searches have a ceiling.
+    const late = renewalsLate(now, next.day ?? day);
+    let note = "";
+    let asked: { read: boolean; unheld: number } | null = null;
+    if (renewalsAskToday(now, next.day ?? day, next.renewalsAsked)) {
+      try {
+        const stopped = await stopRenewals(store, until, endedAt);
+        asked = stopped;
+        if (!stopped.done) note = "the renewals it sold are not all stopped yet";
+      } catch (error) {
+        console.error("stopping a closing store's renewals failed", error);
+        note = "Stripe could not be asked to stop its renewals";
+      }
+      if (late) {
+        next = { ...next, renewalsAsked: now };
+        await save(next);
+      }
+    } else note = "the renewals it sold are not all stopped yet: asked again once a week";
+    if (note) {
+      if (!late) return { key, state: "held", note };
+      // Past the days: it closes only when no member can be charged again: every one of its members was
+      // reached by the hold (collection paused, with no day to resume, since its plan ended) and none is left
+      // to hold. Otherwise its records wait, and Stripe is asked again once a week.
+      if (!renewalsMayClose(late, Boolean(next.hold), next.hold ? await membersLeftToHold(folder) : 1, asked)) return { key, state: "held", note: `${note}; not every member's charges are held, so it waits` };
+      console.error("plan-closing: a closing store's renewals were not all stopped in its days to try; Stripe was read to the end and every renewal it found is held, with no day to resume, so it closes");
     }
     next = { ...next, renewals: now };
     await save(next);

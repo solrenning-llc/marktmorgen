@@ -125,6 +125,22 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/closed-store-data.ts DEL_WHILE_FREE: a closed store's key-named keys deleted only while no store holds its key again.
+        if (key.startsWith("-- marktmorgen:closed-del-if-free:v1\n")) {
+          const total = Number(args[0]);
+          const keys = args.slice(1, 1 + total);
+          const argv = args.slice(1 + total);
+          const n = Number(argv[0]);
+          const free = keys.slice(0, n).map((record) => this.run(["EXISTS", record]) === 0);
+          const doomed: string[] = [];
+          let kept = 0;
+          keys.slice(n).forEach((name, j) => {
+            if (free[Number(argv[j + 1]) - 1]) doomed.push(name);
+            else kept += 1;
+          });
+          this.scriptCalls += n + (doomed.length ? 1 : 0);
+          return [doomed.length ? this.run(["DEL", ...doomed]) : 0, kept];
+        }
         // lib/agent-book.ts AGENT_BOOK_WRITE: the agent book written only while the writer still holds the store's lock.
         if (key.startsWith("-- marktmorgen:agent-book-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, book, token, json] = args;
@@ -1365,16 +1381,17 @@ export class MemoryRedis {
 
       case "ZADD": {
         const z = this.zset(key);
-        // "NX": a member already there keeps the score it has.
+        // "NX": a member already there keeps the score it has. "XX": only a member already there is changed, none added.
         const onlyNew = args[0] === "NX";
-        const pairs = onlyNew ? args.slice(1) : args;
+        const onlyOld = args[0] === "XX";
+        const pairs = onlyNew || onlyOld ? args.slice(1) : args;
         for (let i = 0; i + 1 < pairs.length; i += 2) {
           const score = Number(pairs[i]);
           const member = pairs[i + 1];
           const at = z.findIndex((e) => e.member === member);
           if (at >= 0) {
             if (!onlyNew) z[at].score = score;
-          } else z.push({ score, member });
+          } else if (!onlyOld) z.push({ score, member });
         }
         z.sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
         return 1;

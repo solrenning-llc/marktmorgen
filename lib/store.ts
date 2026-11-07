@@ -858,6 +858,12 @@ async function sha256Hex(value: string): Promise<string> {
 const ownerKey = async (email: string) =>
   `nl:store:owner:${(await sha256Hex(`nimbus-store:${email.toLowerCase()}`)).slice(0, 40)}`;
 
+/**
+ * The key a store's record is kept under, for the closed stores' walk (lib/closed-store-data.ts): its deletes of
+ * what a closed store's key alone names check, in the same step, that no store was opened again under it.
+ */
+export const closedRecordKey = (ref: string): Promise<string> => ownerKey(ref);
+
 const handleKey = (handle: string) => `nl:store:handle:${handle}`;
 /**
  * Whether a handle's key, as read, still leads to a store: not free, not held
@@ -1096,6 +1102,23 @@ export async function storeForEmail(
   // still be addressed by their own persistent id.
   if (!store || typeof store.email !== "string" ||
       storeRef(store).toLowerCase() !== email.toLowerCase()) return null;
+  return store;
+}
+
+/**
+ * A closed store's record, read exactly, for the walk that deletes its records
+ * (lib/closed-store-data.ts, eraseClosed): the store, or "absent" only when
+ * Redis answered exactly that nothing is kept under its key. Any other answer
+ * (a reply of another shape, a record that cannot be read, a record of another
+ * store) throws, so an unknown answer is never taken for a store that is gone.
+ */
+export async function storeForClosing(ref: string): Promise<Store | "absent"> {
+  if (!ref || !isRedisConfigured()) throw new Error("a closed store's record cannot be read");
+  const reply = await redisPipeline([["GET", await ownerKey(ref)]]);
+  if (!Array.isArray(reply) || reply.length !== 1) throw new Error("a closed store's record answered in an unknown shape");
+  if (reply[0] === null) return "absent";
+  const store = parseStore(reply[0]);
+  if (!store || storeRef(store).toLowerCase() !== ref.toLowerCase()) throw new Error("a closed store's record could not be read as its own");
   return store;
 }
 

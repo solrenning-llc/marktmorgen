@@ -229,6 +229,30 @@ export async function readFlows(listId: string | null): Promise<Flow[]> {
   }
 }
 
+/**
+ * A list's sequences read exactly, for the walk that deletes a closed store's
+ * records (lib/closed-store-data.ts, marksOf): none only when Redis answers
+ * exactly that nothing is kept; any other answer that is not a list of
+ * sequences, each with its id, throws, so a sequence's records are never left
+ * behind for an answer that could not be read (CX-123, rule 24). Pages keep
+ * readFlows.
+ */
+export async function readFlowsExact(listId: string): Promise<Flow[]> {
+  if (!isRedisConfigured()) throw new Error("a closed store's sequences cannot be read");
+  const reply = await redisPipeline([["GET", flowsKey(listId)]]);
+  if (!Array.isArray(reply) || reply.length !== 1) throw new Error("a closed store's sequences answered in an unknown shape");
+  if (reply[0] === null) return [];
+  if (typeof reply[0] !== "string") throw new Error("a closed store's sequences answered in an unknown shape");
+  let list: unknown;
+  try {
+    list = JSON.parse(reply[0]);
+  } catch {
+    throw new Error("a closed store's sequences could not be read");
+  }
+  if (!Array.isArray(list) || !list.every((flow) => flow && typeof flow === "object" && typeof (flow as { id?: unknown }).id === "string")) throw new Error("a closed store's sequences could not be read");
+  return list as Flow[];
+}
+
 export class FlowWriteUnconfirmed extends Error {
   constructor() {
     super("Sequence write could not be confirmed");

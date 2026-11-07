@@ -564,6 +564,32 @@ export async function readCourses(ids: string[]): Promise<Map<string, Course>> {
 }
 
 /**
+ * Courses read exactly, for the walk that deletes a closed store's records
+ * (lib/closed-store-data.ts, marksOf): a course Redis says is gone is left
+ * out; an answer of any other shape, or a course that cannot be read as the
+ * one asked, throws, never "no course" (CX-123, rule 24). Pages keep
+ * readCourses.
+ */
+export async function readCoursesExact(ids: string[]): Promise<Map<string, Course>> {
+  const found = new Map<string, Course>();
+  const valid = ids.filter((id) => COURSE_ID_PATTERN.test(id));
+  if (valid.length === 0) return found;
+  if (!isRedisConfigured()) throw new Error("a closed store's courses cannot be read");
+  for (let i = 0; i < valid.length; i += 100) {
+    const some = valid.slice(i, i + 100);
+    const [rows] = await redisPipeline([["MGET", ...some.map(courseKey)]]);
+    if (!Array.isArray(rows) || rows.length !== some.length) throw new Error("a closed store's courses answered in an unknown shape");
+    some.forEach((id, n) => {
+      if (rows[n] === null) return;
+      const course = parseCourse(rows[n]);
+      if (!course || course.id !== id) throw new Error("a closed store's course could not be read");
+      found.set(id, course);
+    });
+  }
+  return found;
+}
+
+/**
  * Where a course is counted in the store's data room (lib/store-data.ts):
  * its outline in one slot, its lessons' text in another, each lesson's words
  * as the community's search may index them (lib/community-index.ts) included.

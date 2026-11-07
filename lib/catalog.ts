@@ -724,6 +724,36 @@ export async function listingSizes(store: Store, ids: string[]): Promise<number[
   return ids.map((id) => sizes.get(id) ?? 0);
 }
 
+/**
+ * Every listing of a store read exactly, for the walk that deletes a closed
+ * store's records (lib/closed-store-data.ts, marksOf): a listing Redis says is
+ * gone is left out; an answer of any other shape, or a listing that cannot be
+ * read as its own product's, throws, never "no such product" (CX-123, rule
+ * 24). Pages keep readListings, which leaves an unreadable product out.
+ */
+export async function readAllListingsExact(store: Store): Promise<Listing[]> {
+  const catalog = store.catalog;
+  if (catalog.inline) return readListings(store);
+  const asked = productIds(store);
+  const found = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  const missing = asked.filter((id) => !found.has(id));
+  if (missing.length) {
+    if (!catalog.id || !isRedisConfigured()) throw new Error("a closed store's products cannot be read");
+    for (let i = 0; i < missing.length; i += 400) {
+      const some = missing.slice(i, i + 400);
+      const raws = await redisPipeline(some.map((id) => ["GET", listingKey(catalog.id!, id)]));
+      if (!Array.isArray(raws) || raws.length !== some.length) throw new Error("a closed store's products answered in an unknown shape");
+      some.forEach((id, n) => {
+        if (raws[n] === null) return;
+        const listing = typeof raws[n] === "string" ? parseListing(parseJson(raws[n])) : null;
+        if (!listing || listing.id !== id) throw new Error("a closed store's product could not be read");
+        found.set(id, listing);
+      });
+    }
+  }
+  return asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l));
+}
+
 /** One listing, or null when the store has no such product (or no id was given). */
 export async function readListing(store: Store, id: string | null | undefined): Promise<Listing | null> {
   if (typeof id !== "string" || !id) return null;

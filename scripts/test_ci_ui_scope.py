@@ -151,6 +151,13 @@ class Graph(WithSyntheticSuite):
             "createRequire bound to another name": {"app/page.tsx": "import { createRequire } from 'node:module';\nconst load = createRequire(import.meta.url);\nexport default load('../lib/' + leaf + '.js');"},
             "createRequire imported under another name": {"app/page.tsx": "import { createRequire as make } from 'node:module';\nconst require = make(import.meta.url);\nexport default require(`../lib/${leaf}.js`).b;"},
             "require passed on as a value": {"app/page.tsx": "const load = require;\nexport default load('../lib/' + leaf);"},
+            # Codex G's sixth return on #3037: require reached through a method or an index
+            # (call, apply, bind, ["call"], ?.call) loads a computed name the graph cannot follow.
+            "require.call": {"app/page.tsx": "const rendered = require.call(null, '../lib/' + leaf + '.cjs').text;\nexport default rendered;"},
+            "require.apply": {"app/page.tsx": "const rendered = require.apply(null, ['../lib/' + leaf + '.cjs']).text;\nexport default rendered;"},
+            "require.bind": {"app/page.tsx": "const load = require.bind(null);\nexport default load('../lib/' + leaf);"},
+            "require by index": {"app/page.tsx": "export default require['call'](null, '../lib/' + leaf);"},
+            "require optional method": {"app/page.tsx": "export default require?.call(null, '../lib/' + leaf);"},
             "computed import in a component": {"components/c.tsx": "export const c = await import(`../lib/${leaf}.ts`);",
                                                "app/page.tsx": 'import { c } from "@/components/c";\nexport default c;'},
             "unresolved import": {"app/page.tsx": 'import "@/lib/missing";'},

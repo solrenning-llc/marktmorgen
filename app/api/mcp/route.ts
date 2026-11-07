@@ -1,7 +1,7 @@
 import { apiAgent, apiStore, holdMoreApi, takeMoreApi } from "@/lib/api-guard";
-import { proposeDescription } from "@/lib/agent-propose";
+import { proposeDescription, proposeSummary, proposeTitle } from "@/lib/agent-propose";
 import { BookReadRefused } from "@/lib/agent-book";
-import { PRODUCT_DESCRIPTION } from "@/lib/agent-kinds";
+import { PRODUCT_DESCRIPTION, PRODUCT_SUMMARY, PRODUCT_TITLE } from "@/lib/agent-kinds";
 import { addWork, apiReadUnits, listingsWork, proposeWork } from "@/lib/api-read-rules";
 import { listingsToRead } from "@/lib/catalog-read-count";
 import { limited } from "@/lib/request-guard";
@@ -92,7 +92,9 @@ export async function POST(request: Request) {
 
   // A tool that prepares a change needs a key that may (631 [AA1] (c)); checked instead of the plain read, so the call is counted once.
   const asked = (message.params ?? {}) as { name?: unknown; arguments?: Record<string, unknown> };
-  if (method === "tools/call" && asked.name === "propose_product_description") {
+  const prepares = { propose_product_description: proposeDescription, propose_product_title: proposeTitle, propose_product_summary: proposeSummary } as const;
+  const preparedKinds = { propose_product_description: PRODUCT_DESCRIPTION, propose_product_title: PRODUCT_TITLE, propose_product_summary: PRODUCT_SUMMARY } as const;
+  if (method === "tools/call" && typeof asked.name === "string" && Object.hasOwn(prepares, asked.name)) {
     const agent = await apiAgent(request, "draft");
     if (agent instanceof Response) {
       const refusal = (await agent.json().catch(() => null)) as { message?: unknown } | null;
@@ -101,7 +103,7 @@ export async function POST(request: Request) {
     // Paid for before it reads (lib/api-read-rules.ts, proposeWork): first all but the book; then the book, measured
     // under its lock where it cannot grow, at what it weighs, before it is read. Refused, the refusal's own sentence.
     const named = typeof asked.arguments?.product === "string" ? asked.arguments.product.slice(0, 40) : "";
-    const envelope = (book: number) => apiReadUnits(addWork(listingsWork(3 * listingsToRead(agent.store, named ? [named] : [])), proposeWork(book, PRODUCT_DESCRIPTION.maxBytes)));
+    const envelope = (book: number) => apiReadUnits(addWork(listingsWork(3 * listingsToRead(agent.store, named ? [named] : [])), proposeWork(book, preparedKinds[asked.name as keyof typeof prepares].maxBytes)));
     const refusedWords = async (refusal: Response) => {
       const words = (await refusal.json().catch(() => null)) as { message?: unknown } | null;
       return failure(id, -32001, typeof words?.message === "string" ? words.message : "That could not be prepared just now. Try again in a moment.");
@@ -115,7 +117,7 @@ export async function POST(request: Request) {
       return refusal === null;
     };
     try {
-      return result(id, await proposeDescription(agent.store, agent.keyId, asked.arguments ?? {}, admit));
+      return result(id, await prepares[asked.name as keyof typeof prepares](agent.store, agent.keyId, asked.arguments ?? {}, admit));
     } catch (error) {
       if (error instanceof BookReadRefused && refusal) return refusedWords(refusal);
       if (error instanceof BookReadRefused) return failure(id, -32001, "That could not be prepared just now. Try again in a moment.");

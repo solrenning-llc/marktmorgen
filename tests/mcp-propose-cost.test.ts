@@ -21,7 +21,7 @@
 import { POST as mcp } from "@/app/api/mcp/route";
 import { makeKey } from "@/lib/api-keys";
 import { addProposal } from "@/lib/agent-book";
-import { PRODUCT_DESCRIPTION } from "@/lib/agent-kinds";
+import { PRODUCT_DESCRIPTION, PRODUCT_SUMMARY, PRODUCT_TITLE } from "@/lib/agent-kinds";
 import { type ReadWork, addWork, apiReadUnits, listingsWork, proposeWork } from "@/lib/api-read-rules";
 import { listingsToRead } from "@/lib/catalog-read-count";
 import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
@@ -65,12 +65,12 @@ let id = 0;
 let key = "";
 const store = async () => (await storeForEmail(OWNER))!;
 
-async function call(args: Record<string, unknown>) {
+async function call(args: Record<string, unknown>, name = "propose_product_description") {
   reads = [];
   const response = await mcp(new Request("https://marktmorgen.com/api/mcp", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-    body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method: "tools/call", params: { name: "propose_product_description", arguments: args } }),
+    body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method: "tools/call", params: { name, arguments: args } }),
   }));
   const body = (await response.json()) as { result?: { content: { text: string }[]; isError: boolean }; error?: { code: number; message: string } };
   const text = body.result?.content[0].text ?? "";
@@ -105,6 +105,19 @@ async function main(): Promise<void> {
     const answered = await call({ product: p, description: words(400) });
     const after = await allowanceUsed(await store(), "api");
     is(`${label}: proposed, and took 1 + ${units}`, [answered.body.result?.isError ?? null, after - before], [false, 1 + units]);
+  }
+
+  part("A title and a short summary take the same way, by their own kind's size");
+  for (const [tool, args, kind] of [
+    ["propose_product_title", { product: p, title: "A plainer guide" }, PRODUCT_TITLE],
+    ["propose_product_summary", { product: p, summary: "Short and plain." }, PRODUCT_SUMMARY],
+  ] as const) {
+    const before = await allowanceUsed(await store(), "api");
+    const s = await store();
+    const units = apiReadUnits(addWork(listingsWork(3 * listingsToRead(s, [p])), proposeWork(await held(), kind.maxBytes)));
+    const answered = await call(args, tool);
+    const after = await allowanceUsed(await store(), "api");
+    is(`${tool}: proposed, and took 1 + ${units}`, [answered.body.result?.isError ?? null, after - before], [false, 1 + units]);
   }
 
   part("A book that grew before the lock was taken is paid at what it holds under the lock");

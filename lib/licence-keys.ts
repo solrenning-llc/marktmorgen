@@ -197,6 +197,33 @@ const BATCH = 1_000;
 
 type Info = { r: string; e: string; at: number; v?: number; w?: "refund" };
 
+/**
+ * A key's record read in its exact shape. Text that is not JSON, or JSON of another shape, is unknown and throws
+ * UnknownReplyError, never "no such key" (review of #2868, CX-123 rule 24).
+ */
+function readInfo(raw: string): Info {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new UnknownReplyError("a license key's record");
+  }
+  const info = value as Partial<Info> | null;
+  if (
+    !info ||
+    typeof info !== "object" ||
+    Array.isArray(info) ||
+    typeof info.r !== "string" ||
+    typeof info.e !== "string" ||
+    typeof info.at !== "number" ||
+    (info.v !== undefined && typeof info.v !== "number") ||
+    (info.w !== undefined && info.w !== "refund")
+  ) {
+    throw new UnknownReplyError("a license key's record");
+  }
+  return info as Info;
+}
+
 function parseInfo(key: string, raw: unknown): IssuedKey | null {
   if (typeof raw !== "string") return null;
   try {
@@ -454,12 +481,8 @@ export async function setRevoked(
   const raw = repliesFor(await redisPipeline([["HGET", infoKey(store, product), key]]), 1)?.[0];
   if (raw === null) return false;
   if (typeof raw !== "string") throw new UnknownReplyError("HGET of a license key's record");
-  let info: Info;
-  try {
-    info = JSON.parse(raw) as Info;
-  } catch {
-    return false;
-  }
+  // A record read back unreadable is unknown too: it is not "never given", and the healthy record is not overwritten.
+  const info = readInfo(raw);
   if (revoked && info.v) return true;
   const next: Info = {
     r: info.r,
@@ -772,6 +795,8 @@ export async function keysOf(store: Store, productIds: string[], email: string):
     if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("HGETALL of a product's license keys");
     const out: (IssuedKey & { product: string })[] = [];
     for (let k = 0; k + 1 < flat.length; k += 2) {
+      // An unreadable record is unknown, never a key left out of the copy.
+      readInfo(flat[k + 1]);
       const entry = parseInfo(String(flat[k]), flat[k + 1]);
       if (entry && entry.email.trim().toLowerCase() === address) out.push({ ...entry, product });
     }

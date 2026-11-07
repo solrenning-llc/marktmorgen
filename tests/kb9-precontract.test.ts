@@ -202,6 +202,24 @@ async function main(): Promise<void> {
     true,
   );
 
+  part("Claude 1's focal return on #2953: the welcome offer, and one quote style per language");
+  // A welcome offer can be any paid product (lib/welcome-offer.ts): a shipped one draws no box, so the line takes its place.
+  const welcomePage = readFileSync("app/[handle]/free/page.tsx", "utf8");
+  is("a shipped welcome product (no box) still gets the withdrawal line in the box's place", /<DigitalConsentBox id="dc-welcome"[^\n]*\/> : <WithdrawalWhere lang=/.test(welcomePage), true);
+  // The box and the line right under it quote the same label: with the same marks (typography only).
+  const marksAround = (text: string, label: string): string => {
+    const at = text.indexOf(label);
+    return at > 0 ? `${text.slice(at - 1, at)}${text.slice(at + label.length, at + label.length + 1)}` : "";
+  };
+  is(
+    "the box and the line quote the label with the same marks, in every language",
+    LANGUAGES.map((lang) => {
+      const label = withdrawalWords(lang).withdrawLink;
+      return [lang, marksAround(DIGITAL_CONSENT_WORDS[lang].box.membership, label) === marksAround(withdrawalWords(lang).checkoutWhere, label)];
+    }),
+    LANGUAGES.map((lang) => [lang, true]),
+  );
+
   done();
 }
 

@@ -50,6 +50,7 @@ import { DIRECTORY_CACHE, listedStores, wouldList } from "@/lib/directory-index"
 import type { LanguageCode } from "@/lib/store-language";
 import { programNumbers } from "@/lib/affiliates";
 import { MIN_CLICKS_FOR_RATES } from "@/lib/affiliate-directory-rules";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 export { MIN_CLICKS_FOR_RATES };
 
@@ -61,6 +62,23 @@ const KEEP_SECONDS = 600;
 
 /** The most programs read for the page: far past what one page lists. */
 const MAX_ROWS = 2_000;
+
+/** Sids asked of the listed set in one SSCAN page. */
+const SCAN_COUNT = 200;
+
+/**
+ * The most SSCAN pages one build of the directory reads, so its Redis commands
+ * have a ceiling before they are sent (MR: a ceiling before every spend). A
+ * healthy walk takes MAX_ROWS / SCAN_COUNT = 10 pages at the most; the rest is
+ * room for a set whose table is still sparse after many removals, where SCAN
+ * legally answers pages with few or no members (R2/C4 on #2921 measured about
+ * one more page per 15,000 members of past peak, so 64 covers a peak near a
+ * million). A cursor still not back at "0" after these pages, with fewer than
+ * MAX_ROWS stores read, is unknown: the read fails and nothing is kept, never a
+ * partial list kept as the whole one. Counted in tests/plan-cost-registry.ts
+ * (NOT_A_COST.DIRECTORY_SCAN_PAGES).
+ */
+export const DIRECTORY_SCAN_PAGES = 64;
 
 export type DirectoryProduct = {
   id: string;
@@ -231,8 +249,12 @@ export async function readDirectory(): Promise<DirectoryRow[]> {
   // SSCAN may return a member more than once, in a page or across pages: each store is one row (Codex T on #2921).
   const sids = new Set<string>();
   let cursor = "0";
+  let pages = 0;
   do {
-    const page = await listedStores(cursor, 200);
+    // Repeats and empty pages do not grow `sids`, so only a page count bounds a cursor that never ends (R2/C4 on #2921).
+    if (pages === DIRECTORY_SCAN_PAGES) throw new UnknownReplyError(`the directory's SSCAN, not at its end after ${DIRECTORY_SCAN_PAGES} pages,`);
+    const page = await listedStores(cursor, SCAN_COUNT);
+    pages += 1;
     for (const sid of page.sids) sids.add(sid);
     cursor = page.next;
   } while (cursor !== "0" && sids.size < MAX_ROWS);

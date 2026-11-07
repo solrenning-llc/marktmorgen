@@ -1794,6 +1794,44 @@ export type Book = {
   invoicesChecked: boolean;
 };
 
+/** A Stripe reply that cannot be read as Stripe documents it: what is owed on it is not known. */
+class StripeShapeError extends Error {
+  constructor(what: string) {
+    super(`Stripe gave ${what} in a shape that cannot be read`);
+    this.name = "StripeShapeError";
+  }
+}
+
+/**
+ * One page of a Stripe list as Stripe gave it (CX-123 rule 24, found reviewing #3048), the same reading as
+ * lib/checkout-sweep.ts and lib/winback-send.ts: `data` a list of objects, `has_more` a yes or no, and when there is
+ * more, the last row's id to go on from (`next`, null when the list is whole). Anything else throws, so a page that
+ * cannot be read is never "the whole list, and nothing on it", and the affiliate book says refundsChecked false.
+ */
+function stripePage(listed: { data?: unknown; has_more?: unknown }, what: string): { rows: Record<string, unknown>[]; next: string | null } {
+  if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") throw new StripeShapeError(what);
+  const rows = listed.data as unknown[];
+  if (!rows.every((row) => row !== null && typeof row === "object" && !Array.isArray(row))) throw new StripeShapeError(what);
+  if (!listed.has_more) return { rows: rows as Record<string, unknown>[], next: null };
+  const last = (rows.at(-1) as Record<string, unknown> | undefined)?.id;
+  if (typeof last !== "string" || !last) throw new StripeShapeError(`${what} with no last one to go on from`);
+  return { rows: rows as Record<string, unknown>[], next: last };
+}
+
+/** A payment a refund or dispute names: its id, "" when it names none (null), the id of an expanded one; else throws. */
+function paymentOf(raw: unknown, what: string): string {
+  if (raw === null) return "";
+  if (typeof raw === "string" && raw) return raw;
+  if (raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" && (raw as { id: string }).id) return (raw as { id: string }).id;
+  throw new StripeShapeError(what);
+}
+
+/** An amount in cents Stripe gave: a whole number, never below zero; anything else throws. */
+function centsOf(raw: unknown, what: string): number {
+  if (typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0) return raw;
+  throw new StripeShapeError(what);
+}
+
 /**
  * What has been refunded, by payment, on the creator's account, from the
  * oldest sale on the book on. Pending refunds count: the creator already
@@ -1815,16 +1853,16 @@ async function refundsSince(store: Store, since: number, deadline?: number): Pro
       undefined,
       wait,
     );
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    const { rows, next } = stripePage(listed, "a page of refunds");
     for (const refund of rows) {
+      if (typeof refund.status !== "string") throw new StripeShapeError("a refund's status");
       if (refund.status !== "succeeded" && refund.status !== "pending") continue;
-      const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-      const amount = typeof refund.amount === "number" ? refund.amount : 0;
+      const pi = paymentOf(refund.payment_intent, "a refund's payment");
+      const amount = centsOf(refund.amount, "a refund's amount");
       if (pi) byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
     }
-    const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") return { byIntent, complete: true };
-    after = last.id;
+    if (next === null) return { byIntent, complete: true };
+    after = next;
   }
   return { byIntent, complete: false };
 }
@@ -1851,17 +1889,16 @@ export async function disputesSince(store: Store, since: number, deadline?: numb
       undefined,
       wait,
     );
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    const { rows, next } = stripePage(listed, "a page of disputes");
     for (const dispute of rows) {
-      if (typeof dispute.status !== "string" || !DISPUTE_TAKES.has(dispute.status)) continue;
-      const raw = dispute.payment_intent;
-      const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
-      const amount = typeof dispute.amount === "number" && dispute.amount > 0 ? dispute.amount : 0;
+      if (typeof dispute.status !== "string") throw new StripeShapeError("a dispute's status");
+      if (!DISPUTE_TAKES.has(dispute.status)) continue;
+      const pi = paymentOf(dispute.payment_intent, "a dispute's payment");
+      const amount = centsOf(dispute.amount, "a dispute's amount");
       if (pi && amount) byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
     }
-    const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") return { byIntent, complete: true };
-    after = last.id;
+    if (next === null) return { byIntent, complete: true };
+    after = next;
   }
   return { byIntent, complete: false };
 }

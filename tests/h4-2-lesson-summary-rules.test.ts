@@ -80,7 +80,7 @@ async function main() {
   const long = vttOf(...Array.from({ length: Math.ceil(MAX_TRANSCRIPT_BYTES / 50) + 10 }, (_, i) => `Sentence number ${i} of a very long lesson goes here.`));
   is("a transcript longer than the cap is refused, never cut to its start", textOf(long), "refused: too_long");
   is("the cap is in bytes: letters of two bytes each count twice", MIN_TRANSCRIPT_CHARS < MAX_TRANSCRIPT_BYTES, true);
-  const wide = vttOf(...Array.from({ length: Math.ceil(MAX_TRANSCRIPT_BYTES / 60) + 2 }, () => "ééééééééééééééééééééééééééééééé ééééééééé"));
+  const wide = vttOf(...Array.from({ length: Math.ceil(MAX_TRANSCRIPT_BYTES / 60) + 2 }, (_, i) => `${"é".repeat(31)} ${i}`));
   is("so a file under the cap in letters but over it in bytes is refused", textOf(wide), "refused: too_long");
 
   part("A lesson version is the hash of its transcript");
@@ -110,8 +110,10 @@ async function main() {
   is("spaces inside a line are made one, paragraphs kept, nothing else changed", checkSummary("  This lesson prices   a first product.\n\n\n\nAsk five buyers.  ", TEXT), { ok: true, text: "This lesson prices a first product.\n\nAsk five buyers." });
   is("an unreadable transcript passes nothing", checkSummary(honest, ""), { ok: false, reason: "not_in_lesson" });
   for (const reason of ["empty", "too_long", "markup", "link", "pressure", "not_in_lesson", "long_sentence"] as const) {
-    is(`the studio has plain words for ${reason}`, typeof SUMMARY_REASONS[reason] === "string" && SUMMARY_REASONS[reason].length > 20 && !/\d{3,}/.test(SUMMARY_REASONS[reason]), true);
+    is(`the studio has plain words for ${reason}`, typeof SUMMARY_REASONS[reason] === "string" && SUMMARY_REASONS[reason].length > 20, true);
   }
+  is("the length words quote the real cap, never a typed figure", SUMMARY_REASONS.too_long.includes(MAX_SUMMARY_CHARS.toLocaleString("en-US")), true);
+  is("the sentence words quote the real cap", SUMMARY_REASONS.long_sentence.includes(String(MAX_SENTENCE_WORDS)), true);
 
   part("Nothing is shown before the creator approves it");
   const at = 1_800_000_000;

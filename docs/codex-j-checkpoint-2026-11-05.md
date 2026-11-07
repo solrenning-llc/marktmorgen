@@ -1,3 +1,39 @@
+# Codex J continuation — 7 November 2026, 18:07 Fortaleza
+
+## #3113 nominal focal DELIVERED — inherited MEDIUM closed on exact corrective head
+
+Formal **J5815022928 COMMENT**, FULLbody readback EXACT, subject **00248858bc0a6064b308a5e0e6987a91bd2ddd5f** OPEN/unmerged at preformal check. Closes ONLY inherited conditional privacy MEDIUM J5814674643; no new severity finding demonstrated in whole corrective2file delta3b6a..002. No global erasure/privacy/MR/retention/production certification.
+
+DEL records alone/exactcount BEFORE separate ZREM confirmed. Generic failedDEL model reaches BOTHold3b6a/final: old firstthrows/indexlosesAna/retry0/data+visitor retained; final firstthrows/indexkeepsAna/retry1/data/messages/token gone/tokenHandle+visitorThreadnull/Ben intact. AppliedDEL+lostACK/failedZREM/appliedZREM+lostACK/highZREMcount recover too, exactnullcleanup. N1637hunks preserved (N1730conversationCount leaseC4 separate); trim() oldbatchordering remains author's rule30 note outsidehunks, NOTclosed.
+
+**FrozenoriginalJ2 SHA2567e70dd4f01434df1b39abc493aadd7ed09568dc84d4c7a68e268cc8d1e6c49b6 BYTE-ID retained: BOTHold3b6a/current1PASS1FAIL, NOT2GREEN.** Hook demands combinedDEL/ZREM, absentfixed (injected0/data+visitorfalse), so finalfailure doesNOT demonstrate productdefect. J explicitly acknowledged own oracle additionally expects visitorStillReadable===partial as historicalobservation while laterexpectsretainedfalse, incompatiblewithhealthyrecovery. OldREDtracevalidretaineddata; originalnotaltered/afrouxado. Author6712772477 explanation accepted.
+**SEPARATErecovery6 SHA16849ae639e97bea62ac0b9ecb0707020d420ec75d80e405d32bd2b22be7edb5** same REALfileContactAna+Ben seeder, genericoperationhook, postretryunreadablevisitorcontract: SAME6 ONLYoldinbox3b6a inFINAL3FAIL→6PASS. Healthy/DELbefore/DELafterACKlost/ZREMbefore/ZREMafterACKlost/ZREMcountabove. Disposition+additionalcases NOT6newfindings/original2green. Authorpermanent7 BYTE-IDRED7dab5846af SHA6590750fce1db2c517bcac46be92d35f6dfe53c8ce3ca5c11912cf4e48d216ac SAME7/2FAIL→7PASS qualifiesequivalentcase. Permanent16SHA07b7985de9752d02a88b7dba2951f0452074dcf4c8cd1649c39ba7bf8d7e0fcc intact16PASS; inbox32+checked6+person-erasure32+person-copy20=**113ordinarycurrentPASS** counting7+16; derivative6overlap/frozen2separate.
+
+ActualES2017strictBundler5roots879sources0diag/exit0 at512/importtypesyes/notdependencybodiesglobalTSC. Lint7exit0/0errors/1unusedwithReplyForwarning ONLYfrozenown. Scannerfinal4333tracked0/stageddiff0/explicitstatusJSON. Everychild20kMemoryRedis.run inclnestedsetup+100ANYassignedfetchmock BEFOREdispatch/120s512MiBV8(notRSS)/256KiB/stdoutstderr/netTLShttpdenyBEFOREgraph+negativecontrols/Node24.22.1/0provider. Max3332run/10mockdifferentchildren. Frozenold127/current126;derivedold416/current428;author7old441/current440;16current813;inbox388/10;checked0/0;person-erasure3332/2;copy152/0. WholeerasePersonnormalfixturesran, NOTnewDELfaultthroughwholeerasePerson/HTTP. TwoBlobSDKmissingcredential/deferredcleanupstderrpreserved, noBlobdeletionproved/networkproviderrequest.
+
+## Durable focal evidence — SAME branch, historical base retained
+
+**codex/j-review-3113-inbox@1b674ffaa3ae944c5223fdfa88960d90e5a55466/tree69d3a9a60db3730fda218569e699a9a0b62197cd=native84869653ad948a04ab79639c5ea037b59bf5e749.** Five newFULLBYTE-ID:
+- scripts/j-3113-return.mjs 0c253356bed2c1903ac5b6a339011f6f851f5470
+- scripts/j-3113-return-types.mjs 37799f52a082a36c06799ecf79de45683bc10144
+- tests/j-3113-return.proof.ts 88ff78e0b8677df0def5547a425f86b0f691eb13
+- docs/reviews/j-3113-return.md b8ebca20d90d9d557231f86acf7736f055c0dd78
+- docs/reviews/j-3113-return.output.txt e6b372212e518e1b518e63ce02729f84332917ba
+
+BASEevidencehistorical3b6a NOTcurrent002: COPYnewrunner/types/derived+unchangedfrozenoriginalintoEXACT002beforeexec, old3b6aGitobjectrequired. Nativeprivate /workspace/scratch/72485b6ecfa0/j-review-3113-inbox ownHEAD84869653, priorc2dproofs/refsintact. NEW j-review-3113-return-002.bundle VERIFIEDrequires3b6a/oldbundlepreserved. Sourcecheckout /workspace/scratch/1f671dd904ba/j-review-3113-return-002 detached002/4ownuntrackedsourceartifacts+reportcopy; producttrackedintact. Rawlogs/status /tmp/j3113-return-002-* preserved, source/evidencechecks explicit. No unchanged passingtestreplaywithoutsourcechange.
+
+## Claim, coordination and cursor
+
+ClaimPR6712929405 BEFOREdiffsourcecode; channel1757CAS409 NOTPUBLISHED. Conservative20:58:00UTCclock; >=120s/FULLfreshdf7ada29/4403904/prefix+1500anchor+newdeltaREAD→**CXJ-20261107-1800-C4-1 CAS1cb2193a88f562ddb7e0e65cac2e466e7605ebc6/blobb161836f54812aac2a3129fe59aa38956539f801/FULL4405416EXACT** BEFOREcode/tests. No reappendclaim. FreshprefinalOPENexact002/timelineauthor+own/nootherreview.
+Channelprevious054a458c4234110→c12c74374399861 EXACTprefix/anchor+165751newchars relevantallread→a9134400696→df7a4403904→acceptedb1614405416→c10bf5424414798 prefixEXACT+deltaALLread throughC6-1804/CXG-1805. NextfreshreadbeforefinalCAS; finalreceipt recorded in taskprompt aftersuccess, never restore oldchannel.
+
+C1-1733TODOS14 and1746TODOS15 FULLread:3037PRIORITYMAX C4/Gnominals, no Jduplicate; UMpush/PR/round/mainONLYconflict-or-queueasks/rerunONLYproveninstabilityonce/stackONLYbasequeuedormerged; PAUSEnewunitPRuntilcoordinatorannouncesActions<100. FocalreviewnoCIallowed. C1-1737-C6-20 SIMEXPRESSO FULLread authorC6 corrections3077/78/80/83/90/3113/16/3120/24+3121ready; supersedeswaitsilencehistorical, NOTJproductivegrant. CurrentdirectrecipientsC4/C6ONLY/externalC1handoffprovenanceconflictpreserved/noC1message.
+C6-1743new002nominal deliveredJ now, no pending3113unchangedrerun. G3116focal5815013272closedALTOexact6d7(ORIGINAL6ABORT/DERIVED9GREEN+own8)/G3090d810claimed/G3097new31fdpendingafter3090/G3037a181residualsameclassMED stillopen, respectownership. U3124/P3077/M3083/N3078/T3090 newnominalheads belongtheirreviewers; no closureJbyreport. C2-C6first/second3110/3112/3111 delivered, notJthird;3117C2+S/3088TEAMC1queueleavealone/C2localfollowupafterpause. C2/C3/C4cost/identity/erasure/leasesreserved; noJcapsgrant. C1annual70onlyC2/month15/setup0.40 preserved. Old2844JMsnotclosedbyreports;2933automaticallyblockedNEVERretry/rephrase/bypass;3034-5offheadclosedEXACTcandidatesnotstalePR;2934alreadyqualified9ec/PRstale3e15 notrerun;2910a0dd/2896760closed;2941LOWseparate;3031-2C4residualsnotJclosed. OwnZERO2867mergeda698NOTqueried/reopened.
+
+Native main fetched45bddafa5f5c3a15793147a2f80c903882f022e7; AGENTS/CLAUDE/inbox/reservations/queue diffZEROvs09dd. Serialrootonly agentslistconfirmed/nootherrootchildrenactive; noownpriornode/gitrunners beforestart (systemsyncsleep isnotJrunner). Noauthorproductsource/ref/CI/retry/cancel/pushproduct/mainintegration/enqueue/merge/subagent. No futurewatchclaimed. Existingautomation6aebeda51a54819184a9461900992239 enabled/scheduleunchanged/promptONLY; reviewsongoingnotglobalcompletion. NextNEWnominal/deltacausal/requestedfreecutwithfreshFULL/headtimeline/ownershipRES, no unchangedrerun/thirdreview/artificialunit.403STOP/409>=120sFULLfreshREADdelta/prefixlenanchor1500/CAS/neverempty-partial-historyrestore/unknownNEVERzero/ALLproofsrefsREDshistorypreserved. Oldlocalf07MUSTNOToverwrite.
+
+--- COMPLETE PREVIOUS CHECKPOINT436007 CHARACTERS PRESERVED VERBATIM ---
+
 # Codex J continuation — 7 November 2026, 16:59 Fortaleza
 
 ## #3113 independent privacy review DELIVERED — residual inherited MEDIUM PROPOSED

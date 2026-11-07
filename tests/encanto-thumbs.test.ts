@@ -89,5 +89,8 @@ part("A picture with only a thumbnail is offered at the size of its place (Claud
 // Without sizes the browser takes 100vw and never picks the 240w copy in a 56 px row.
 const storeProduct = readFileSync("components/store-product.tsx", "utf8");
 is("the store's product picture gives sizes whenever there is a smaller copy, not only the 800 px one", !/sizes=\{image\.small \?/.test(storeProduct) && /sizes=\{smallerCopies\(image\)\.length \?/.test(storeProduct), true);
+// Claude 4's focal 6711058322, LOW 1: the product page's own picture was still offered at 100vw when it has only a thumbnail.
+const productPage = readFileSync("app/[handle]/p/[product]/page.tsx", "utf8");
+is("the product page's picture gives sizes whenever there is a smaller copy, not only the 800 px one", !/sizes=\{product\.image\.small \?/.test(productPage) && /sizes=\{smallerCopies\(product\.image\)\.length \?/.test(productPage), true);
 
 done();

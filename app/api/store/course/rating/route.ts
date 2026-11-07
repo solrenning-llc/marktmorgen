@@ -71,8 +71,9 @@ export async function POST(request: NextRequest) {
   if (action === "remove") {
     const learner = access.learner;
     if (!learner || !ITEM_ID_PATTERN.test(lessonId)) return new Response(null, { status: 303, headers: { Location: base } });
-    // A pass opened for some courses only (a sign-in link, or an address typed at checkout) reaches only those: never
-    // the rating its address gave in another course of the store. Access that ended is still the person's own course.
+    // The pass checkout opens with the address typed there (app/api/store/course/start) reaches that course only: never
+    // the rating the address gave in another course of the store. A sign-in link, or being signed in, reaches every
+    // course ("all"). Access that ended is still the person's own course, so it can still be taken back.
     if (learner.scope !== "all" && !learner.scope.includes(course)) return new Response(null, { status: 303, headers: { Location: base } });
     // The creator reads ratings; only students give or take them back.
     if (learner.owner) return back("");

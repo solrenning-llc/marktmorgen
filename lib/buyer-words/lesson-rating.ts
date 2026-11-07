@@ -137,7 +137,7 @@ const fr: LessonRatingWords = {
 
 const de: LessonRatingWords = {
   title: "Diese Lektion bewerten",
-  note: "Freiwillig. Nur die Person, die den Kurs anbietet, sieht Ihre Bewertung und Ihren Kommentar, ohne Ihren Namen und Ihre E-Mail-Adresse. Sie können sie hier ändern oder entfernen, solange diese Lektion für Sie offen ist. Sie werden gelöscht, wenn Sie den Shop bitten, Ihre Daten zu löschen, oder wenn diese Lektion oder der Kurs entfernt wird.",
+  note: "Freiwillig. Nur die Person, die den Kurs anbietet, sieht Ihre Bewertung und Ihren Kommentar, ohne Ihren Namen und Ihre E-Mail-Adresse. Sie können sie hier ändern oder entfernen, solange diese Lektion für Sie offen ist. Bewertung und Kommentar werden gelöscht, wenn Sie den Shop bitten, Ihre Daten zu löschen, oder wenn diese Lektion oder der Kurs entfernt wird.",
   legend: "Wie hilfreich war diese Lektion?",
   scores: ["1 – Nicht hilfreich", "2 – Etwas hilfreich", "3 – Hilfreich", "4 – Sehr hilfreich", "5 – Äußerst hilfreich"],
   noteLabel: "Kommentar (freiwillig)",

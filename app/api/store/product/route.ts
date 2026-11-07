@@ -307,6 +307,11 @@ export async function POST(request: NextRequest) {
             course = found;
             await dropComments(found.id, lessonsInOrder(found).map(({ lesson }) => lesson.id), store);
             // Its lessons' ratings go too (296 [SQ7]), a removed lesson's included: once the product is gone, nothing could reach them.
+            // Cost, measured in tests/sq7-lesson-rating-routes.test.ts with a rating on each of MAX_LESSONS lessons: at the
+            // worst (three passes, each re-dropping every lesson, and a fourth read of the index),
+            // at most 604 commands and about 192 KB. It comes out of the one studio request this removal takes (guardStoreWrite, priced in
+            // tests/plan-cost-registry.ts UNIT_COST.studio at 20 commands and 50 KB): no unit of its own, no coefficient
+            // changed, so a large course's removal sends more than that request is priced at, as its comments and files do.
             await dropCourseRatings(found.id, store);
           } else {
             if (preparedCourse) return false;

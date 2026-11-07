@@ -1600,8 +1600,10 @@ a.chip {
   flex: none;
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  /* A 44 px target (2.5.5) that still sits on the first line of text. */
+  width: 44px;
+  height: 44px;
+  margin: -6px -6px -6px 0;
   border-radius: 8px;
   background: transparent;
   color: #fff;
@@ -1616,12 +1618,38 @@ a.chip {
   outline-offset: 2px;
   border-radius: 8px;
 }
+/*
+ * Focus not obscured (2.4.11, 2.4.12): components/toast.tsx sets data-place to
+ * the first corner that leaves the focused control clear, or to "hidden" when
+ * none does. The move is instant, never animated.
+ */
+.nb-toast-region[data-place^="top"] {
+  top: max(16px, env(safe-area-inset-top));
+  bottom: auto;
+}
+.nb-toast-region[data-place="hidden"] .nb-toast {
+  visibility: hidden;
+}
+@media (forced-colors: active) {
+  .nb-toast {
+    border: 2px solid CanvasText;
+  }
+}
 @media (min-width: 640px) {
   .nb-toast-region {
     left: auto;
     right: 24px;
     bottom: 24px;
     justify-content: flex-end;
+  }
+  .nb-toast-region[data-place^="top"] {
+    top: 24px;
+    bottom: auto;
+  }
+  .nb-toast-region[data-place$="start"] {
+    left: 24px;
+    right: auto;
+    justify-content: flex-start;
   }
   .nb-toast {
     width: auto;

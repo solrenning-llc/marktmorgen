@@ -29,13 +29,15 @@
  * another page is.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { takePictureDoor } from "@/lib/picture-door";
 import { EMPTY_PAGE, MAX_STORED_PAGE_BYTES, type SalesPage, parsePage, picturePaths } from "@/lib/sales-page";
 import { sectionsOn } from "@/lib/saved-blocks";
 import { usesCommands } from "@/lib/saved-block-store";
 import { type DataChange, type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { ENTRY_BYTES, dataBytes } from "@/lib/store-data-rules";
+// For writePage's exact read of the page as it was.
+import { repliesFor as exactReplies } from "@/lib/redis-reply";
 
 const pageKey = (statsId: string, productId: string) => `nl:product:page:${statsId}:${productId}`;
 const picsKey = (statsId: string) => `nl:product:pics:${statsId}`;
@@ -195,7 +197,7 @@ export async function writePage(statsId: string, productId: string, page: SalesP
   const empty = page.blocks.length === 0 && !page.seoTitle && !page.seoDescription && !page.next;
   const json = JSON.stringify(page);
   const key = versionsKey(statsId, productId);
-  const read = repliesFor(await redisPipeline([["GET", pageKey(statsId, productId)], ["LLEN", key], ["LINDEX", key, -1]]), 3);
+  const read = exactReplies(await redisPipeline([["GET", pageKey(statsId, productId)], ["LLEN", key], ["LINDEX", key, -1]]), 3);
   if (!read) throw new UnknownReplyError("the page as it was");
   const [before, kept, oldest] = read;
   if (before !== null && typeof before !== "string") throw new UnknownReplyError("the page as it was");

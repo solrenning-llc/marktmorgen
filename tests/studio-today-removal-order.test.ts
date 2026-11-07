@@ -14,16 +14,24 @@
  *
  * And the banner over Today about two-step login (Claude 4's C4-2980 on #2900): when the person's two-step login could
  * not be read, the page says so plainly, rather than reading it as "no request to turn it off" and showing nothing.
+ * Nor does Two-step login below, or the invitation to add an app's code, take that unread login for "off": they offer
+ * no way to turn it on over it, and say it could not be read (CX-123 rule 24, lib/redis-reply.ts).
+ *
+ * And "Update now" (Claude 5's LEVE 1 on #2835): the day's reading of the store's numbers is taken only once the
+ * reads the page waits for have answered, never for a page that ends in its error.
  */
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
-import { isValidElement, type ReactNode } from "react";
+import { createElement, isValidElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { answering } from "./security/next-headers";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { REMOVAL_DAYS, listPasskeys } from "@/lib/passkeys";
 import { addProduct, claimHandle, ensureStatsId, setAdsServer, setAssistantPlan, setPixels, setSubscription, storeForEmail } from "@/lib/store";
 import { NO_PIXELS } from "@/lib/pixels";
 import StudioPage from "@/app/studio/page";
+import { AppCodeInvite } from "@/components/app-code-invite";
+import { TwoStepManager } from "@/components/two-step-manager";
 import { makePasskey } from "./passkey-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -68,6 +76,28 @@ async function passkeyLists(node: unknown, found: string[][] = [], seen = new Se
     await Promise.all(Object.values(props).map((value) => passkeyLists(value as ReactNode, found, seen)));
   }
   return found;
+}
+
+/** The props of every element of one component anywhere in the page's tree, its parts waited for as passkeyLists waits for them. */
+async function propsOf(node: unknown, type: unknown, found: Record<string, unknown>[] = [], seen = new Set<unknown>()): Promise<Record<string, unknown>[]> {
+  if (!node || typeof node !== "object" || seen.has(node)) return found;
+  seen.add(node);
+  if (typeof (node as PromiseLike<unknown>).then === "function") return propsOf(await node, type, found, seen);
+  if (Array.isArray(node)) {
+    await Promise.all(node.map((child) => propsOf(child, type, found, seen)));
+    return found;
+  }
+  if (isValidElement(node)) {
+    const props = node.props as Record<string, unknown>;
+    if (node.type === type) found.push(props);
+    await Promise.all(Object.values(props).map((value) => propsOf(value as ReactNode, type, found, seen)));
+  }
+  return found;
+}
+
+/** What each Two-step login on the page shows, drawn as the browser first gets it. */
+async function twoStepShown(tree: unknown): Promise<string[]> {
+  return (await propsOf(tree, TwoStepManager)).map((props) => renderToStaticMarkup(createElement(TwoStepManager, props as Parameters<typeof TwoStepManager>[0])));
 }
 
 /**
@@ -225,11 +255,14 @@ async function main(): Promise<void> {
   const THIRD = "today-two-step@example.com";
   await claimHandle(THIRD, "todaytwostep", "Today two-step", "");
   await ensureStatsId(THIRD);
+  // A passkey too, so the page would invite them to add an app's code if it took their two-step login for "off".
+  await makePasskey(THIRD, "cred-today-two-step").keep();
   const recordKey = `nl:2fa:${hex(`nimbus-2fa:${THIRD}`).slice(0, 40)}`;
   const reset = Date.now() + 3 * 86_400_000;
   await redis.pipeline([["SET", recordKey, JSON.stringify({ s: "synthetic-secret", since: Date.now() - 86_400_000, codes: [], last: -1, reset, backup: "" })]]);
   const thirdSession = await openSession(THIRD);
-  const render = async (fault: boolean): Promise<string> => {
+  // The page's parts are waited for inside the request, as React waits for them (#2900).
+  const render = async (fault: boolean): Promise<{ text: string; twoStep: string[]; invites: number }> => {
     const kept = redis.pipeline;
     if (fault)
       redis.pipeline = async (commands) => {
@@ -238,23 +271,82 @@ async function main(): Promise<void> {
       };
     answering(new NextRequest("https://marktmorgen.com/studio", { headers: { cookie: `${SESSION_COOKIE}=${thirdSession}` } }));
     try {
-      return (await words(await StudioPage({ searchParams: Promise.resolve({}) }))).join(" ");
+      const tree = await StudioPage({ searchParams: Promise.resolve({}) });
+      return { text: (await words(tree)).join(" "), twoStep: await twoStepShown(tree), invites: (await propsOf(tree, AppCodeInvite)).length };
     } finally {
       redis.pipeline = kept;
       answering(null);
     }
   };
   part("Today, with a request to turn two-step login off, read");
-  const read = await render(false);
+  const readPage = await render(false);
+  const read = readPage.text;
   is("the warning says two-step login is set to turn off", read.includes("Two-step login is set to turn off"), true);
   is("and does not say it could not be read", read.includes("Two-step login could not be read just now"), false);
 
   part("Today, when the person's two-step login cannot be read");
-  const unread = await render(true);
+  const unreadPage = await render(true);
+  const unread = unreadPage.text;
   is("the page says plainly it could not be read", unread.includes("Two-step login could not be read just now"), true);
   is("and that a request to turn it off may be waiting", unread.includes("cannot tell whether somebody asked to turn your two-step login off"), true);
   is("the warning is not shown as fact", unread.includes("Two-step login is set to turn off"), false);
+  is("and it names Cancel only for once the request shows", unread.includes("Once it shows, if a request is waiting and it was not you, press Cancel"), true);
   is("the request is still there", JSON.parse(String((await redis.pipeline([["GET", recordKey]]))[0])).reset, reset);
+
+  part("Two-step login below, read");
+  const readShown = readPage.twoStep;
+  is("the page shows Two-step login", readShown.length > 0, true);
+  is("it says two-step login is on", readShown.map((html) => html.includes("On. Logging in with the emailed link also asks")), readShown.map(() => true));
+  is("and offers to cancel the request", readShown.map((html) => html.includes("Cancel: keep two-step login on")), readShown.map(() => true));
+  is("no invitation to add an app's code: it is on", readPage.invites, 0);
+
+  part("Two-step login below, when it cannot be read");
+  const unreadShown = unreadPage.twoStep;
+  is("the page still shows Two-step login", unreadShown.length > 0, true);
+  is("where the banner's link goes", unreadShown.map((html) => html.includes('id="two-step"')), unreadShown.map(() => true));
+  is("it says it could not be read", unreadShown.map((html) => html.includes("Two-step login could not be read just now")), unreadShown.map(() => true));
+  is("it is not said to be off", unreadShown.map((html) => html.includes("After the emailed link, ask for a six-digit code")), unreadShown.map(() => false));
+  is("it offers no way to turn it on over it", unreadShown.map((html) => html.includes("Turn on two-step login")), unreadShown.map(() => false));
+  is("nor asks to log in again to turn it on", unreadShown.map((html) => html.includes("Turning this on needs a login")), unreadShown.map(() => false));
+  is("nor any other button or form, on a state it does not know", unreadShown.map((html) => /<button|<form/.test(html)), unreadShown.map(() => false));
+  is("no invitation to add an app's code", unreadPage.invites, 0);
+  is("and the record is untouched", JSON.parse(String((await redis.pipeline([["GET", recordKey]]))[0])).s, "synthetic-secret");
+
+  // Claude 5's LEVE 1 on #2835: "Update now" (numbers=fresh) reads the store's numbers again from the day's own
+  // budget (lib/store-readings.ts takeStoreReading). Sent together with the other reads, that reading was taken
+  // even when a read the page waits for failed and the page ended in its error; it waits for them now.
+  const freshPage = async (owner: string, fault: boolean): Promise<{ loaded: boolean; spent: number }> => {
+    await claimHandle(owner, owner.split("@")[0].replace(/[^a-z]/g, ""), "Today fresh", "");
+    await ensureStatsId(owner);
+    await addProduct(owner, "Guide", "", "19", null);
+    const ownerSession = await openSession(owner);
+    const kept = redis.pipeline;
+    let spent = 0;
+    redis.pipeline = async (commands) => {
+      if (commands.some((c) => c[0] === "INCRBY" && String(c[1]).startsWith("nl:reading:day:"))) spent += 1;
+      if (fault && commands.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:catalog:"))) throw new Error("SYNTHETIC_PRODUCTS_READ_FAULT");
+      return kept.call(redis, commands);
+    };
+    answering(new NextRequest("https://marktmorgen.com/studio?numbers=fresh", { headers: { cookie: `${SESSION_COOKIE}=${ownerSession}` } }));
+    let loaded = true;
+    try {
+      await words(await StudioPage({ searchParams: Promise.resolve({ numbers: "fresh" }) }));
+    } catch {
+      loaded = false;
+    } finally {
+      redis.pipeline = kept;
+      answering(null);
+    }
+    return { loaded, spent };
+  };
+  part("Update now, when a read the page waits for fails");
+  const failing = await freshPage("todayfreshfault@example.com", true);
+  is("the page ends in its error (precondition)", failing.loaded, false);
+  is("the day's reading is not taken for it", failing.spent, 0);
+  part("Update now, when every read answers");
+  const healthy = await freshPage("todayfreshok@example.com", false);
+  is("the page loads", healthy.loaded, true);
+  is("and the numbers are read again, from the day's budget", healthy.spent, 1);
 
   part("Today's store writes, when the billing month is read again during the visit");
   await writeOrder(false);

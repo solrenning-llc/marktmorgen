@@ -458,6 +458,19 @@ async function main(): Promise<void> {
   is("the click whose write found the gift already there is not counted for it; the one it gave is", [second.kind === "done" ? [second.done.changed, second.done.already] : second.kind, await dayCount()], [[["solo@example.org"], ["twin@example.org"]], 1]);
   await redisPipeline([["HDEL", twinKey, to], ["HDEL", importedKey(store.statsId!, "solo@example.org"), to]]);
   for (const key of await giftKeys()) await redisPipeline([["DEL", key]]);
+  // An HSETNX answered in no known shape (neither 0 nor 1) may have written: the day stays taken (unknown fails closed).
+  const oddKey = importedKey(store.statsId!, "odd@example.org");
+  const odd = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands: (string | number)[][]) => {
+    const answers = await odd(commands);
+    const at = commands.findIndex((c) => c[0] === "HSETNX" && c[1] === oddKey);
+    return at < 0 ? answers : answers.map((a: unknown, i: number) => (i === at ? null : a));
+  };
+  const oddGive = await applyGive(store, target, { change: "give", to, emails: ["odd@example.org"], expect: 1 }, async () => ({ ok: true }));
+  redis.pipeline = odd;
+  is("an HSETNX answer that is neither 0 nor 1 keeps the day's gift taken", [oddGive.kind, await dayCount()], ["done", 1]);
+  await redisPipeline([["HDEL", oddKey, to]]);
+  for (const key of await giftKeys()) await redisPipeline([["DEL", key]]);
 
   part("The day's gifts said as one count (second pre-review of unit 2, LEVE 3 and LEVE 4)");
   is("the studio's refusal names the day's figure from GIVES_PER_DAY, never a number typed in", readFileSync("lib/student-bulk-rules.ts", "utf8").includes("(1,000)"), false);

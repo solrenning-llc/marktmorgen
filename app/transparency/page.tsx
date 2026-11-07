@@ -28,6 +28,7 @@ export default async function TransparencyPage() {
   });
   const since = read?.since ?? null;
   const years: YearCounts[] = read?.years ?? [];
+  const oldest = years.at(-1)?.year;
   return (
     <LegalPage title="Notices about content" eyebrow="Transparency" effective={null} legalNav={false}>
       <p>
@@ -43,6 +44,11 @@ export default async function TransparencyPage() {
       ) : (
         <>
           <p>{`Counted from ${DAY.format(new Date(`${since}T00:00:00Z`))}. Orders from courts or authorities are not counted on this page.`}</p>
+          {oldest && Number(oldest) > Number(since.slice(0, 4)) ? (
+            <p className="notice notice-info" role="status">
+              {`Counts are kept for about six years, so the years before ${oldest} are no longer kept and are not shown.`}
+            </p>
+          ) : null}
           {years.map((y) => (
             <section key={y.year} aria-labelledby={`year-${y.year}`}>
               <h2 id={`year-${y.year}`}>{y.year}</h2>

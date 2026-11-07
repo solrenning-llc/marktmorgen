@@ -106,7 +106,7 @@ async function main(): Promise<void> {
     const sent: number[] = [];
     const got = await answering("GET", () => [day], async () => {
       const original: Pipeline = redis.pipeline;
-      redis.pipeline = (async (commands: Commands) => (sent.push(commands.length), original.call(redis, commands))) as Pipeline;
+      redis.pipeline = (async (commands: Commands) => (commands[0]?.[0] === "HGETALL" && sent.push(commands.length), original.call(redis, commands))) as Pipeline;
       try {
         return await throws(() => transparencyCounts(NOV));
       } finally {

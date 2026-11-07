@@ -25,10 +25,14 @@
  *     place wins for everybody on it;
  *   - another affiliate is shown by the name they chose for the board, only
  *     when they chose one, and never by their address; a name the board uses
- *     itself ("You", "An affiliate") cannot be chosen;
+ *     itself ("You", "An affiliate") cannot be chosen, nor a look-alike of one;
  *   - the title and the prize say no money and promise no earnings: a
- *     currency sign, an amount with a currency code, cash, transfers,
- *     payment services, gift cards, "guaranteed" and "earn" are refused.
+ *     currency sign or money emoji, an amount with a currency code or name,
+ *     cash, transfers, cheques, vouchers, store credit, payment services,
+ *     gift cards, "guaranteed" and "earn" are refused, checked after
+ *     full-width forms, accents, hidden characters, look-alike letters and
+ *     digits for letters are set aside. A title or a prize with a hidden
+ *     character (outside an emoji) or a word in mixed scripts is refused.
  *
  * Marktmorgen holds no money and pays no prize: the prize is the creator's,
  * given by them. Nothing here changes a commission, a rate or a payout.
@@ -122,50 +126,230 @@ const CURRENCY_CODES =
   "AED AFN ANG AOA ARS AUD AWG AZN BBD BDT BGN BHD BIF BMD BND BRL BSD BTN BWP BYN BZD CAD CDF CHF CLP CNY COP CRC CUC CVE CZK DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GHS GIP GMD GNF GTQ GYD HKD HNL HRK HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MDL MGA MKD MMK MNT MRU MUR MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PGK PKR PLN PYG QAR RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SLL SRD SSP STN SVC SYP SZL THB TJS TMT TND TTD TWD TZS UAH UGX USD UYU UZS VES VND VUV WST XAF XCD XCG XDR XOF XPF XSU YER ZAR ZMW ZWG ZWL".split(" ");
 /** The codes of the currencies most often written alone ("paid in USD"), which are never everyday words. */
 const MAJOR_CODES = "USD EUR GBP BRL JPY CHF AUD NZD MXN INR CNY HKD SGD ZAR SEK NOK DKK PLN KRW".split(" ");
-const AMOUNT = "\\d[\\d,.]*";
-const CODE_NEXT_TO_AMOUNT = new RegExp(`(?:^|[^\\p{L}])(?:${CURRENCY_CODES.join("|")})\\s?${AMOUNT}|${AMOUNT}\\s?(?:${CURRENCY_CODES.join("|")})(?![\\p{L}])`, "iu");
-/** Money, payment services and promises of earnings, as whole words in any case. */
+/** An amount in any decimal digits (NFKC has already turned full-width digits into ASCII ones). */
+const AMOUNT = "\\p{Nd}[\\p{Nd},.]*";
+/** "CAD" is also computer-aided design: "3 CAD templates" is a product, "100 CAD" is money. */
+const CAD_WORK = "templates?|files?|models?|drawings?|designs?|courses?|lessons?|tutorials?|projects?|exercises?|parts?";
+const CODE_NEXT_TO_AMOUNT = new RegExp(
+  `(?<![\\p{L}])(?:${CURRENCY_CODES.join("|")}) ?${AMOUNT}(?![\\p{Nd}])(?:[kmb](?![\\p{L}])|(?![\\p{L}]))` +
+    `|${AMOUNT}[kmb]? ?(?:${CURRENCY_CODES.map((c) => (c === "CAD" ? `CAD(?! (?:${CAD_WORK})(?![\\p{L}]))` : c)).join("|")})(?![\\p{L}])`,
+  "iu",
+);
+/**
+ * Currency names that are also everyday words or names (a pound of coffee, Penny Lane): money
+ * only right after an amount, and not after "lose 10" or before "of".
+ */
+const AMOUNT_NAMES = new RegExp(
+  `(?<![\\p{L}\\p{N}]|(?:lose|loses|lost|losing|drop|drops|dropped|shed|sheds|weigh|weighs|weighed|gain|gains|gained) )${AMOUNT}[kmb]? ?(?:pounds?|yen|rands?|franc|penny)(?![\\p{L}])(?! (?:of|lighter|heavier|down|off)(?![\\p{L}]))`,
+  "iu",
+);
+/** Words that pay through Wise or Stripe; the names alone are everyday words ("wise words", "a stripe"). */
+const PAID_THROUGH = "paid|pay|pays|paying|payment|payments|sent|send|sends|sending|via|by|through|using|with|on|over";
+/**
+ * Money, ways to pay or hand over money, and promises of earnings, as whole words in any case,
+ * each in its closed forms (no open endings, so "cashmere", "Earnest" and "Transferable" pass).
+ */
 const MONEY_WORDS = new RegExp(
-  `(?:^|[^\\p{L}\\p{N}])(?:${[
+  `(?<![\\p{L}])(?:${[
     ...MAJOR_CODES,
-    "cash\\w*",
+    // cash, money, transfers
+    "cash(?:es|ed|ing|back|backs|out|outs|ier|iers)?",
     "money",
-    "transfer\\w*",
+    "moneys",
+    "monies",
+    "transfer(?:s|red|ring)?",
     "wire",
+    "deposits?",
+    "cheques?",
+    `checks? (?:for|of|worth) ${AMOUNT}`,
+    "(?:bank|personal|paper|certified|traveller'?s|traveler'?s) checks?",
+    // vouchers and stored value
+    "gift[ -]?cards?",
+    "gift[ -]?certificates?",
+    "vouchers?",
+    "(?:store|shop|account|wallet|site) credits?",
+    "prepaid (?:cards?|debit|visa|mastercard|balance)",
+    // payment services
     "paypal",
     "venmo",
     "zelle",
     "payoneer",
     "revolut",
+    "skrill",
+    "neteller",
+    "remitly",
+    "western union",
+    "moneygram",
+    "alipay",
+    "picpay",
+    "interac",
+    "pix",
+    "mercado[ -]?pago",
+    "(?:apple|google|samsung|amazon|wechat)[ -]?pay",
+    `(?:${PAID_THROUGH}) (?:wise|stripe)`,
+    "(?:wise|stripe) (?:accounts?|balance|cards?|credits?|payouts?)",
+    // crypto
     "bitcoins?",
     "btc",
     "crypto(?:currenc(?:y|ies))?",
     "usdt",
     "usdc",
     "ethereum",
-    "gift ?cards?",
+    "dogecoin",
+    "litecoin",
+    // currency names that are no everyday word
+    "(?:us|usd|au|aud|ca|cad|nz|nzd|hk|hkd|sg|sgd)?dollars?",
+    "bucks",
+    "cents",
+    "pence",
+    "quid",
+    "euros?",
+    "eurocents?",
+    "reais",
+    "yuan",
+    "renminbi",
+    "rmb",
+    "rupees?",
+    "rupiahs?",
+    "pesos?",
+    "francs",
+    "rubles?",
+    "roubles?",
+    "lira",
+    "liras",
+    "lire",
+    "dinars?",
+    "dirhams?",
+    "riyals?",
+    "rials?",
+    "shekels?",
+    "zloty",
+    "zlotys",
+    "korunas?",
+    "kronor",
+    "kroner",
+    "kronur",
+    "forints?",
+    "baht",
+    "ringgits?",
+    "nairas?",
+    "cedis?",
+    "shillings?",
+    "hryvnias?",
+    "kwacha",
+    // earnings
     "payouts?",
     "income",
     "profits?",
     "salary",
+    "salaries",
     "commissions?",
-    "dollars?",
-    "bucks",
-    "euros?",
-    "reais",
-    "guarantee[ds]?",
-    "earn\\w*",
-  ].join("|")})(?![\\p{L}\\p{N}])`,
+    "guarantee(?:s|d|ing)?",
+    "earn(?:s|ed|ing|ings|er|ers)?",
+  ].join("|")})(?![\\p{L}])`,
   "iu",
 );
+/** Emoji that show money: money bag to money with wings, chart with yen, money-mouth face, coin, bank, ATM. */
+const MONEY_EMOJI = /[\u{1F4B0}-\u{1F4B9}\u{1F911}\u{1FA99}\u{1F3E6}\u{1F3E7}]/u;
 
-/** Whether free text says money or promises earnings: a currency sign, an amount with a code, or a money word. */
-function saysMoney(text: string): boolean {
-  return /\p{Sc}/u.test(text) || CODE_NEXT_TO_AMOUNT.test(text) || MONEY_WORDS.test(text);
+/**
+ * Characters that show nothing: controls, format characters (zero-width spaces and joiners,
+ * soft hyphens, direction marks, isolates and overrides) and the rest Unicode calls
+ * default-ignorable (variation selectors, Hangul fillers).
+ */
+const HIDDEN = /[\p{Cc}\p{Cf}\p{DI}]/u;
+const HIDDEN_ALL = /[\p{Cc}\p{Cf}\p{DI}]/gu;
+/** The only hidden characters a title or a prize may have: the variation selector and the joiner inside an emoji (a red heart with U+FE0F, a woman and a laptop joined by U+200D). */
+const EMOJI_JOINERS =
+  /(?<=[\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}])[\uFE0E\uFE0F]|(?<=[\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}][\uFE0E\uFE0F]?)\u200D(?=\p{Extended_Pictographic})/gu;
+
+/**
+ * Cyrillic, Greek and Armenian letters that look like Latin ones, mapped to the Latin letter
+ * they imitate, so "cash" written all in Cyrillic letters still reads as "cash". Only for checking:
+ * what the creator typed is kept as typed.
+ */
+const LOOK_ALIKE: Readonly<Record<string, string>> = {
+  // Cyrillic
+  "\u0430": "a", "\u0410": "A", "\u0412": "B", "\u044C": "b", "\u0441": "c", "\u0421": "C", "\u0501": "d",
+  "\u0435": "e", "\u0415": "E", "\u04BB": "h", "\u041D": "H", "\u0456": "i", "\u0406": "I", "\u04C0": "I",
+  "\u0458": "j", "\u0408": "J", "\u043A": "k", "\u041A": "K", "\u04CF": "l", "\u041C": "M", "\u043E": "o",
+  "\u041E": "O", "\u0440": "p", "\u0420": "P", "\u051B": "q", "\u051A": "Q", "\u0455": "s", "\u0405": "S",
+  "\u0422": "T", "\u051D": "w", "\u051C": "W", "\u0445": "x", "\u0425": "X", "\u0443": "y", "\u0423": "Y",
+  "\u04AF": "y", "\u04AE": "Y",
+  // Greek
+  "\u03B1": "a", "\u0391": "A", "\u0392": "B", "\u03F2": "c", "\u03F9": "C", "\u0395": "E", "\u0397": "H",
+  "\u03B9": "i", "\u0399": "I", "\u03F3": "j", "\u037F": "J", "\u03BA": "k", "\u039A": "K", "\u039C": "M",
+  "\u039D": "N", "\u03BD": "v", "\u03BF": "o", "\u039F": "O", "\u03C1": "p", "\u03A1": "P", "\u03C4": "t",
+  "\u03A4": "T", "\u03C5": "u", "\u03C7": "x", "\u03A7": "X", "\u03B3": "y", "\u03A5": "Y", "\u0396": "Z",
+  // Armenian
+  "\u0581": "g", "\u0570": "h", "\u0578": "n", "\u0585": "o", "\u0566": "q", "\u057D": "u",
+};
+
+/** What a text says once its look is set aside: compatibility forms folded (NFKC), hidden characters and accents dropped, look-alike letters read as Latin. */
+function fold(text: string): string {
+  const bare = text.normalize("NFKC").replace(HIDDEN_ALL, "").normalize("NFD").replace(/\p{M}/gu, "");
+  return Array.from(bare, (ch) => LOOK_ALIKE[ch] ?? ch).join("").normalize("NFKC");
 }
 
-/** Names the board uses itself, compared on letters and numbers only, in any case. */
-const RESERVED_NAMES = new Set(["you", "anaffiliate", "affiliate", "marktmorgen"]);
+/** Digits written for letters inside a word ("m0ney", "c4sh"), read as the letters; a "1" is tried as both "i" and "l". */
+function lettersForDigits(text: string, one: "i" | "l"): string {
+  const as: Record<string, string> = { "0": "o", "1": one, "3": "e", "4": "a", "5": "s", "7": "t" };
+  return text.replace(/[\p{L}\p{N}]+/gu, (w) => (/\p{L}/u.test(w) && /\p{N}/u.test(w) ? w.replace(/[013457]/g, (d) => as[d]) : w));
+}
+
+/** Whether free text says money or promises earnings: a currency sign or emoji, an amount with a code or a currency name, or a money word. */
+function saysMoney(text: string): boolean {
+  if (/\p{Sc}/u.test(text) || MONEY_EMOJI.test(text)) return true;
+  const plain = fold(text);
+  if (/\p{Sc}/u.test(plain) || CODE_NEXT_TO_AMOUNT.test(plain) || AMOUNT_NAMES.test(plain)) return true;
+  return [plain, lettersForDigits(plain, "i"), lettersForDigits(plain, "l")].some((w) => MONEY_WORDS.test(w));
+}
+
+/**
+ * Scripts a letter can belong to. A word may use one script, or Latin with Han and the
+ * Japanese kana, Latin with Han and Bopomofo, or Latin with Han and Hangul (Unicode
+ * UTS #39, "highly restrictive"); any other mix, such as Latin with a Cyrillic "o" (U+043E), is
+ * refused. A letter of a script not listed counts as "Other".
+ */
+const SCRIPTS: readonly (readonly [string, RegExp])[] = [
+  "Latin", "Greek", "Cyrillic", "Armenian", "Hebrew", "Arabic", "Syriac", "Thaana", "Nko", "Devanagari", "Bengali", "Gurmukhi",
+  "Gujarati", "Oriya", "Tamil", "Telugu", "Kannada", "Malayalam", "Sinhala", "Thai", "Lao", "Tibetan", "Myanmar", "Georgian",
+  "Hangul", "Ethiopic", "Cherokee", "Canadian_Aboriginal", "Khmer", "Mongolian", "Hiragana", "Katakana", "Bopomofo", "Han",
+  "Yi", "Lisu", "Vai", "Coptic", "Tifinagh", "Adlam", "Osage", "Deseret",
+].map((name) => [name, new RegExp(`\\p{Script=${name}}`, "u")] as const);
+const MIXES_ALLOWED: readonly ReadonlySet<string>[] = [
+  new Set(["Latin", "Han", "Hiragana", "Katakana"]),
+  new Set(["Latin", "Han", "Bopomofo"]),
+  new Set(["Latin", "Han", "Hangul"]),
+];
+function scriptOf(letter: string): string | null {
+  if (/[\p{Script=Common}\p{Script=Inherited}]/u.test(letter)) return null;
+  for (const [name, re] of SCRIPTS) if (re.test(letter)) return name;
+  return "Other";
+}
+function mixesScripts(text: string): boolean {
+  const bare = text.normalize("NFKC").replace(HIDDEN_ALL, "").normalize("NFD").replace(/\p{M}/gu, "");
+  for (const word of bare.match(/\p{L}+/gu) ?? []) {
+    const used = new Set<string>();
+    for (const letter of word) {
+      const s = scriptOf(letter);
+      if (s) used.add(s);
+    }
+    if (used.size > 1 && !MIXES_ALLOWED.some((ok) => [...used].every((s) => ok.has(s)))) return true;
+  }
+  return false;
+}
+
+/** Whether a title or a prize hides what it says: a hidden character outside an emoji, or a word in mixed scripts. */
+function hidesLetters(text: string): boolean {
+  return HIDDEN.test(text.normalize("NFKC").replace(EMOJI_JOINERS, "")) || mixesScripts(text);
+}
+
+/** How a board name is compared with the reserved ones: folded, letters and numbers only, lower case, with "rn" read as "m", "1" and "i" as "l", and "0" as "o". */
+const boardKey = (text: string): string =>
+  fold(text).toLowerCase().replace(/[^\p{L}\p{N}]/gu, "").replace(/rn/g, "m").replace(/[1i]/g, "l").replace(/0/g, "o");
+/** Names the board uses itself. */
+const RESERVED_NAMES = new Set(["You", "An affiliate", "Affiliate", "Marktmorgen"].map(boardKey));
 
 const tidy = (raw: unknown): string => (typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "");
 const whole = (raw: unknown, min: number, max: number): number | null =>
@@ -179,6 +363,7 @@ export function readChallenge(raw: unknown, nowMs: number): { ok: true; challeng
   const title = tidy(value.title);
   if (!title || title.length > CHALLENGE_MAX_TITLE) return { ok: false, problem: "title" };
   if (saysMoney(title)) return { ok: false, problem: "money" };
+  if (hidesLetters(title)) return { ok: false, problem: "title" };
 
   const now = Math.floor(nowMs / 1000);
   const start = whole(value.start, 1, SECONDS_CEILING);
@@ -208,11 +393,13 @@ export function readChallenge(raw: unknown, nowMs: number): { ok: true; challeng
     !label ||
     label.length > CHALLENGE_MAX_PRIZE ||
     LINK.test(label) ||
-    /[<>]/.test(label)
+    LINK.test(label.normalize("NFKC")) ||
+    /[<>]/.test(label.normalize("NFKC"))
   ) {
     return { ok: false, problem: "prize" };
   }
   if (saysMoney(label)) return { ok: false, problem: "money" };
+  if (hidesLetters(label)) return { ok: false, problem: "prize" };
 
   let products: string[] = [];
   if (value.products !== undefined && value.products !== null) {
@@ -319,8 +506,10 @@ export function readBoardName(raw: unknown): string | null {
   const name = tidy(raw);
   if (name.length < 2 || name.length > 30) return null;
   if (!/^[\p{L}\p{N}][\p{L}\p{N} .'_-]*$/u.test(name)) return null;
-  if (LINK.test(name) || /\.[a-z]{2,}/i.test(name)) return null;
-  if (RESERVED_NAMES.has(name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, ""))) return null;
+  const plain = name.normalize("NFKC");
+  if (LINK.test(name) || LINK.test(plain) || /\.[a-z]{2,}/i.test(plain)) return null;
+  // A hidden letter (a Hangul filler is a letter), a word in mixed scripts, or a look-alike of a reserved name.
+  if (HIDDEN.test(plain) || mixesScripts(name) || RESERVED_NAMES.has(boardKey(name))) return null;
   return name;
 }
 

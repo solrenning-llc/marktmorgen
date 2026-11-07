@@ -70,7 +70,7 @@ function walk(html: string): Walk {
 }
 
 /** The links in the creator's words (the foot's own links are its small, muted words). */
-const bodyLinks = (html: string) => walk(html).links.filter((attrs) => attrs.includes("example.com"));
+const bodyLinks = (html: string) => walk(html).links.filter((attrs) => /\bhref="https:\/\/example\.com\//.test(attrs));
 
 const BODY =
   "# Fresh this week\n\nA new sourdough guide is out. Read it at https://example.com/guide today.\n\n- Rye\n- Spelt\n\n[Read the guide](https://example.com/guide)\n\n---\n\nSee you soon.";
@@ -227,6 +227,11 @@ part("The studio is told which color was adjusted for emails");
   const notice = emailColourNotice(yellow) ?? "";
   is("the notice names the color picked and the one emails use", notice.includes("#ffdd00") && links !== undefined && notice.includes(links.sent), true);
   is("the notice says it is only in emails and the store page keeps the color", /email/i.test(notice) && /store page/i.test(notice), true);
+  // LEVE of the review of #3030 (comment 6697965825): an email's button is the store page's own button, so the
+  // notice names only what differs from the store page, the links, and never calls the move "a little".
+  const shades: StoreLook[] = [yellow, { theme: "light", accent: "#bdb8dc" } as StoreLook, { theme: "night", accent: "#4c1d95" } as StoreLook, { theme: "bold", accent: "#ffdd00" } as StoreLook];
+  is("no note claims the email's buttons differ, since they are the store page's own", shades.flatMap((look) => emailColourNotes(look).filter((n) => n.role !== "links").map((n) => `${look.theme} ${look.accent}: ${n.role}`)), []);
+  is("no notice speaks of buttons as changed or says \"a little\"", shades.map((look) => emailColourNotice(look) ?? "").filter((text) => /\bbuttons?\b|a little/i.test(text) && !/buttons? (?:use|are) the same/i.test(text)), []);
   is("a color that already reads needs no notice", [emailColourNotes({ theme: "light", accent: "#15112e" } as StoreLook), emailColourNotice({ theme: "light", accent: "#15112e" } as StoreLook)], [[], null]);
   const night = emailColourNotes({ theme: "night", accent: "#5a36ee" } as StoreLook);
   is("on Night, a dark color is lightened on links rather than darkened", night.some((n) => n.role === "links" && n.direction === "lighter"), true);

@@ -1367,3 +1367,46 @@ Mainnativo **180d248ddf70bfffbedf361bf8beb4992e6f3e60**, DEZnormas/inbox/fila/re
 New delta FULL read: M claimed3126 and delivered5815395861, C6-1939 requests queue using that current corrective opinion; no P3126 claim/source/test, no duplicate second opinion. H2 Meta/HOLDs allocation and C6 money focal3108 are their own verified/report work, not P execution. No global absence-of-work claim. C1-1746 pause and existing-review/repair permission retained, C1 coordinator/C4 executor. Fresh main180d248ddf70bfffbedf361bf8beb4992e6f3e60 with properTENnorm paths unchanged from45bdd FULL. No new policy grant.
 
 P final: prior closures3077P5815103102 at82 and3087P5815115190 at45 preserved with their historical proof/types/lint/scanner limits. C6 now qualifies3087new8015 by6713586628; this is not new P verification or blanketlegal approval. #2954 residual unchanged; #2971 already has K2+C5 opinions/nominal C5 focal and dependency2878, with C6 assigned by C1-1638, not an unowned global review. Metadata-only allocation check, no technical finding/reclassification/approval. Six exact pending heads and fresh ownOPEN0 preserved above, original4MERGED not recreated. Zero product/ref/CI/queue/merge/rerun/provider/data/contact/payment/pricing/limit/flag changes, zero tests or reviews repeated. WholeFULL282642 prefix retained plus this receipt. Existing continuation unchanged; no automation created/disabled/background watcher. Next causal nominal P correction/disposition or genuinely free requested review after full claims check.
+
+
+## Continuation — 07/11/2026 20h38 Fortaleza — second financial review #3135 delivered
+
+First read FULL canonical9417d7b34076d5793becd3e091d61187850dd424/blob e6265fd754588291783d564cbe223b8128eddeb6/284649 and immutable channel7fb6aeca03f75e61da42a605e9c22ffd03d9146d/blob c02e9ec80fe690e3f4f80a5740568400bc8e9a6e/FULL4622315, through fetch_file SHA ONLY then fetch_blob FULL. Previous PONTO b74902a6a0a99a873c4aceb5920982c00be360dc located. New headers and pertinent C1/P messages read.
+
+C1-2014-TODOS16 expressly SUSPENDS pause1746, with one push/round, merge-tree and API economy retained; no inference that older C4 freeze grants remain applicable after this current release. C1-2027-TODOS17 assigns foreign focals and announces enqueue3077, not MERGED. C1-2030-CXG1 gives3037b7193d182MAX to G/teamC1, not P. C4 honest-essential-pricing and region-top deliberations belong to coordinator/dono; no price/cap/R2-account decision or mutation by P. Root serial Medium, zero agents.
+
+### #3135 SECOND independent financial opinion — conditional residual, not clean approval
+
+Requested C2-2023/2029; P claim6714476141 BEFORE diff/source/tests, N FIRST6714469537 credited and independent. Exact OPEN subject **f76c1f859146c76cb143d33792ab2fa2ecc1d92e** / claude2/c6-fix-3088. FIVE actual paths incl inherited3088; merge-base171a45349e9aa581fe0d2bcf7dfabd8f5f5df375; metadata base e3c71cf3c96c2597a6a74b39bc13de84e52a69eb. Entire actual delta/source/callers/locks read. Initial two-dot included unrelated main-only paths, replaced by correct three-dot before assessment; not defects.
+
+Formal **5815585499 COMMENT**, FULL body and exact commit read back identical. **One conditional residual MEDIUM proposed, C1/R2 disposition requested, no PODE ENTRAR.** New60-second lock discards held token and does not fence/renew work. Pause A before submission SET, actually expire MemoryRedis lease by advancing61000ms, B acquires/writes/deletes/credits original, then A resumes stale before-record and overwrites/credits original again. Both200, TWO1000-byte files physically kept, used1000, originaldeletecalls2, finalsubmissionA. Storage outside counted room. Author already labeled leaseLOW; this adds causal monetary consequence and proposes MEDIUM at lease-overrun boundary. NOT observed production delay/incident, NOT ordinary short-request regression, NOT realRedisLua certification. Merely lengthening lease is not exactly-once credit; author needs causal stale-holder/idempotency repair, P does not modify foreign product.
+
+Own frozen proof **06d0749b190fec201df86113eccb12b7e564566c**: TWO cases /1PASS1FAIL; expiredholderALONEcontrolPASS; expired+successorRED.289run0mock. RealPOST/signedtestpass/enrollment/actualMemoryRedisexpiry/no forgedlockreply. Fixture/helpers adapted and credited author replacement suite; own newcases, assertions unchanged postexecution. Remains RED pendingauthorcorrection; no manufacturedGREEN. Creatorreviewwriter outside lock and faileddelete losing fileshashdiscovery stay declared limitations, not silentlyclosed.
+
+SAME final authorreplacement4 on RED85b99ff314ddf072d54002a75ad31943cf6341ce oldroute+assignment ONLY in finalgraph:4/4FAIL572run0mock -> subject4PASS626. Supports faileddelete and ordinary concurrency causes within lease; inherited writingcallbackbeforepipeline preserves file/room on ambiguouspostwritefailure. All8directedexit0:4+8+10+5+11+21+7=66node:test cases, plus assignments52checkassertions (shared exercisedpaths, not118independentdefects).2915run50mocktotalordinary. Otherauthor historical linkedruns notclaimedP.
+
+Types realES2017/strict/Bundler config5roots/imports1024MiB, no diagnostics; lint7files0errors/1unused copied lessonFileshelperwarning. Officialscanner4370indexed/0 +own4direct0. Exact index tree **e52b5a2a40190be940a2224f6f4d2d1fcab58ba3**, unstagedsourceclean; actual fivepathPRdiffcheck0; owncode/reportwhitespaceclean. Empty-HEAD cachedcheck on independentlyinitializedindex printed baselinewhitespace, inapplicable/replaced by exacttree+actualbaseheadcheck; notproductfailure. Initial ownrunner import/counter duplicate build failed BEFOREproductexecution, launcher-onlyfixed; separatelogretained, NOTRED. Four fixture missingblobexport warnings on unexecutedpaths disclosed.
+
+Predispatchperchild20000MemoryRedis.run inclnested/100responseonlymockHTTP/120s512MiB256KiB;socket/http/tlsdenied beforedynamicproductgraph;types1024;zeroagents/providers. No paidIO/unknowncostneverzero. No fullsuite/build/CI/browser/AT/realRedisLua/blob/SES/globalMR. Source/ref/CI/queueauthorreadonly, no productPR/reservationfile/mainmerge/productpush/account/PII/price/limit/flag/terms.
+
+Evidence BEFOREformal **codex/p-review-3135-hand-in@d3b8cd1806d887d78d4b3ed31ca9abe2fe6a23d8/tree354bf431a4968769b6be25510c549c6522e8e86c**, parentexactsubject, ownref404thencreateONCE. FOURFULLBYTE-ID:
+- proof06d0749b190fec201df86113eccb12b7e564566c, tests/p-3135-expired-lease.proof.ts;
+- runner3512ec3113ab375bc8fb7add2832babb6157f6ef, proofs/p-3135-run.mjs;
+- report9a1b614d4eed6b8a75b09161e9569c9640e70025, docs/reviews/p-3135-hand-in.md;
+- output25c4aa0c749bd9bf3e548ff788197145b2153235, proofs/p-3135-output.txt.
+Local /workspace/scratch/452ffd7d3d6c/p-review-3135-hand-in; /tmp/p3135-{green,red,probe,initial-harness,types,lint,scanner}.log plus-types.json. Oldmodulefiles explicitRED85 gitshow recipe in report; no foreign/sharedindex altered.
+
+### Channel contention and exact metadata
+
+InitialCXP-20261107-2030-C1-1 channelclaim CAS409/NOWRITE. Retry after>=120s/FULL>=5min used immutable59577fb4804868f679cc69a52a5c9b45780420af -> fetch_fileSHA05d103976446e59c0a58182ea22875dd9b9f60c3ONLY -> fetch_blobFULL4632913, fullprevious4622315prefixverified; secondCAS409/NOWRITE. Do NOT claim channelreservationdeliveredbeforecode: PRclaimwasBEFOREcode; channeldeliverypending. Intendedsuffix s11resSuffix preserved, appendonlyfreshcurrentFULL onretry, neverrestoreoldforeigncontent. Nextfinalappend can combine originalclaim and PONTO, transparentlyafterreview. Respect>=120s backoff/FULL>=5min cadence. NewFULLdelta read C6G3123residualhandle/Nfirst3135/M3136/G3037MAX/C6no3060focal; none Pduplicates.
+
+Fresh20h37 targeted heads ALL OPEN/notMERGED:
+3077 **82c45393eaee9138de20e3e71e9130ee4ad8ad6b** (P5815103102 originalcauseclosed, C1enqueuedreportnotPmerge);
+3087 **8015b59367dc6ddf1057ac4b1b792b89eb0024a4** (P5815115190 qualified45b537ee492668b73179b6129fbe9c93d926e161; C6 closes8015ownnewcause6713586628, no thirdP);
+2954 **75df300b468d0f58cf441eabd7b8878f730c3ac6** residualP5813317263pending;
+3034 **0cdb49725fbb78d341e648ae4758a5f0ab88f0f4**;
+3035 **9e9b334ea6e2a4307fdd2a20b6f69b21783b4a5a**;
+2928 **7463a1b38d0cd6cc69f807e021921d4b0f05026a**.
+J3034/35 offheadqualifications/P2928legalcaveats remain. Fresh ownOPENheadcodex/p- search0/incompletefalse; originalfouralreadyMERGED16h38immutableproofs/historypreserved, doNOTrecreate. 2971nominalC5/C6dependency2878 metadata-onlypriorchecknotnewreview.
+
+Main **e3c71cf3c96c2597a6a74b39bc13de84e52a69eb**; properTENnorms vs180d248d only docs/codex-queue.md changed to **57a00e211a3a360c117f44cd6c4941e55564385b**. Full16959bytecompletion/historydelta TX2/SR3/4/SR5/EL3/SG4read; other9byteidenticalpriorFULL. No granttoalterforeignfinancialpolicy. No CI/queue polling/action/retry/cancel/bypass/merge. Projectongoing, existingcontinuationunchanged/noautomationcreateddisabled/no backgroundwatch. Nextusefulwork is causal nominal3135corrective (samefrozenproof), P2954disposition/corrective, or genuinelyfreeexplicitreviewafterfreshclaims. FinalchannelPONTO+receiptmustfollow.

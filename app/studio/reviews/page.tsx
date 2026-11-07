@@ -92,8 +92,8 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
   // Each reviewed product's AI summary kept this week (636 [GL4](d)): read only, nothing made by opening the page,
   // every product's in one request.
   const summed = reviewed.slice(0, 30);
-  const keptSummaries = await readReviewSummaries(store.statsId, summed.map((p) => p.id)).catch(() => new Map<string, never>());
-  const aiSummaries = summed.map((p) => ({ id: p.id, title: p.title, reviews: numbers.get(p.id)?.visible ?? 0, summary: keptSummaries.get(p.id)?.summary ?? null, lastAt: keptSummaries.get(p.id)?.lastAt ?? 0 }));
+  const keptSummaries = await readReviewSummaries(store.statsId, summed.map((p) => p.id)).catch(() => null);
+  const aiSummaries = keptSummaries === null ? null : summed.map((p) => ({ id: p.id, title: p.title, reviews: numbers.get(p.id)?.visible ?? 0, summary: keptSummaries.get(p.id)?.summary ?? null, lastAt: keptSummaries.get(p.id)?.lastAt ?? 0 }));
   const tab = (view: "new" | "all", label: string) => (
     <Link
       href={studioPath(store, view === "new" ? "" : "view=all", "reviews")}
@@ -285,7 +285,12 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
 
             <ReviewThemes voice={await readVoice(store).catch(() => null)} studioHome={studioPath(store)} />
 
-            <ReviewAiSummaries products={aiSummaries} now={Math.floor(now / 1000)} />
+            {aiSummaries === null ? (
+              <section aria-labelledby="ai-summaries-title" className="card p-5 sm:p-6">
+                <h2 id="ai-summaries-title" className="font-semibold text-ink">AI review summaries</h2>
+                <p role="status" className="mt-2 text-sm text-ink-soft">Review summaries couldn&apos;t be loaded. Reload to try again.</p>
+              </section>
+            ) : <ReviewAiSummaries products={aiSummaries} now={Math.floor(now / 1000)} />}
 
             <div className="card p-5 sm:p-6">
               <h2 id="asking-for-reviews" tabIndex={-1} className="font-semibold text-ink">Asking for reviews</h2>

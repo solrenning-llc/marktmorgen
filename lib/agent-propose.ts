@@ -16,12 +16,14 @@ const answer = (value: unknown, isError = false): Answer => ({ content: [{ type:
 
 /** Keeps a proposal of `kind` for one product, after the words checks the studio runs; the answer the agent reads. */
 async function keep(store: Store, keyId: string, kind: AgentKind, product: string, after: string, what: string, admit?: AdmitBook): Promise<Answer> {
-  const listing = await readListing(store, product);
-  if (!listing || !store.statsId) return answer({ error: "There is no such product in this store. Use list_products for the ids." }, true);
-  // The words the studio would refuse on this product are refused here too, before the creator ever sees them.
-  const refused = await kind.refusal?.(store, product, after);
-  if (refused) return answer({ error: `${refused} Nothing was proposed.` }, true);
   try {
+    // Inside the try, so a failed read of the product answers as the tool's failure, never as an error thrown
+    // out of the route (Claude 5 on #1856, CX72, and on #1929).
+    const listing = await readListing(store, product);
+    if (!listing || !store.statsId) return answer({ error: "There is no such product in this store. Use list_products for the ids." }, true);
+    // The words the studio would refuse on this product are refused here too, before the creator ever sees them.
+    const refused = await kind.refusal?.(store, product, after);
+    if (refused) return answer({ error: `${refused} Nothing was proposed.` }, true);
     const before = await kind.current(store, product);
     const made = await addProposal({ ...store, statsId: store.statsId }, kind, { target: product, before, after, asked: { by: "mcp", who: keyId } }, Date.now(), admit);
     if (!made.ok) {
@@ -41,7 +43,7 @@ async function keep(store: Store, keyId: string, kind: AgentKind, product: strin
     if (error instanceof DataRoomError) return answer({ error: "The store has no room for this proposal right now." }, true);
     if (error instanceof BookBusy) return answer({ error: "Another change is being made to the proposals right now. Try again in a moment." }, true);
     console.error(`proposing a ${what} failed`, error);
-    return answer({ error: "The proposal could not be kept just now. Try again in a moment." }, true);
+    return answer({ error: "The proposal could not be prepared just now. Try again in a moment." }, true);
   }
 }
 

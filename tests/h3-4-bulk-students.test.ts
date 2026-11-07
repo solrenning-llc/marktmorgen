@@ -28,15 +28,13 @@ import {
   STUDENTS_PER_PAGE,
   accessSummary,
   filterStudents,
-  labelUnits,
-  listUnits,
   oppositeAccess,
   progressOf,
   readFilters,
   studentsCsv,
   type StudentLine,
 } from "@/lib/student-bulk-rules";
-import { accessChangeUnits, accessReadUnits, accessStates, applyAccess, readAccessAsk, studentList } from "@/lib/student-bulk";
+import { accessChangeUnits, accessReadUnits, accessStates, applyAccess, readAccessAsk, studentList, studentsPageUnits } from "@/lib/student-bulk";
 import { emailKey, markLesson, setBlocked, studentsOf, touchStudent } from "@/lib/learn";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { leadsKey, upsertContact } from "@/lib/contacts";
@@ -82,12 +80,20 @@ async function main(): Promise<void> {
   // Review of #3035 (Codex P, 5808427711): one figure a change (a request per ten people) became two, each at its
   // most in commands and bytes and taken before what it pays for: reading (accessReadUnits), then writing and reading
   // back (accessChangeUnits). A hundred people take 204 commands, which ten requests (200) did not cover.
+  // Changed assertions (rule 23, review of #3035, the students page's cost): listUnits(0), listUnits(100) and
+  // labelUnits(100) were 0, 5 and 4, taken after the page was scanned, while a page of a hundred read up to 105
+  // commands and 1.33 MB (27 requests; tests/h3-4-students-page-cost.test.ts). A page is now 25 students, paid whole
+  // before its first read (studentsPageUnits): 1 for a course with no lessons, 3 for one of MAX_LESSONS, 14 with labels.
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => `l${String(i).padStart(11, "0")}`);
   is(
     "studio requests taken before the work, by how much there is",
-    [accessReadUnits(1), accessReadUnits(100), accessReadUnits(MAX_STUDENT_ACTION), accessChangeUnits(1), accessChangeUnits(99), accessChangeUnits(100), accessChangeUnits(MAX_STUDENT_ACTION), listUnits(0), listUnits(100), labelUnits(100)],
-    [1, 3, 11, 1, 10, 11, 51, 0, 5, 4],
+    [
+      accessReadUnits(1), accessReadUnits(100), accessReadUnits(MAX_STUDENT_ACTION), accessChangeUnits(1), accessChangeUnits(99), accessChangeUnits(100), accessChangeUnits(MAX_STUDENT_ACTION),
+      studentsPageUnits({ lessonIds: [], labelled: false }), studentsPageUnits({ lessonIds: ids(200), labelled: false }), studentsPageUnits({ lessonIds: ids(200), labelled: true }),
+    ],
+    [1, 3, 11, 1, 10, 11, 51, 1, 3, 14],
   );
-  is("one page of students is a bounded read", STUDENTS_PER_PAGE, 100);
+  is("one page of students is a bounded read", STUDENTS_PER_PAGE, 25);
   is(
     "who is asked, read safely: each address once, in lower case; nothing else",
     readAccessAsk({ change: "revoke", emails: ["Ana@Example.com", "ana@example.com", "not-an-address", 7, "ben@example.com"], expect: 2 }),
@@ -169,13 +175,17 @@ async function main(): Promise<void> {
   const byEmail = new Map((read?.lines ?? []).map((l) => [l.email, l]));
   is("every student, with progress and access", [read?.total, [...byEmail.keys()].sort(), byEmail.get("ana@example.com")?.done, byEmail.get("dee@example.com")?.removed], [4, ["ana@example.com", "ben@example.com", "cy@example.com", "dee@example.com"], 1, true]);
   is("labels: a contact's own, none for one not on the list, unknown for one that cannot be read", [byEmail.get("ana@example.com")?.labels, byEmail.get("cy@example.com")?.labels, byEmail.get("ben@example.com")?.labels], [["VIP"], [], null]);
-  is("the reading is paid for first, by how many rows and labels it reads", charged, [listUnits(4) + labelUnits(4)]);
+  // Changed assertion (rule 23, review of #3035): [listUnits(4) + labelUnits(4)], taken once the four rows were scanned,
+  // is now the whole page at its most, taken before anything is read: two lessons, labels, 12 studio requests.
+  is("the reading is paid for first, at its most, before anything is read", charged, [12]);
   const pipeline = redis.pipeline.bind(redis);
   let commandsSeen = 0;
   redis.pipeline = async (commands: (string | number)[][]) => ((commandsSeen += commands.length), pipeline(commands));
   const refusedRead = await studentList(store, course, "0", async () => false, true);
   redis.pipeline = pipeline;
-  is("refused: nothing more is read than the page's size", [refusedRead, commandsSeen <= 3], [null, true]);
+  // Changed assertion (rule 23, review of #3035): a refused page read its scan and counts first (up to 3 commands); it
+  // now reads nothing.
+  is("refused: nothing is read", [refusedRead, commandsSeen], [null, 0]);
 
   part("Through the studio's route");
   const cookie = `${SESSION_COOKIE}=${await openSession(owner)}`;

@@ -10,7 +10,7 @@ import { readKind } from "@/lib/catalog";
 import { lessonCount, readCourse } from "@/lib/course";
 import { can } from "@/lib/team-roles";
 import { studentList } from "@/lib/student-bulk";
-import { MAX_STUDENT_ACTION, PROGRESS_WORDS, SEEN_WORDS, STUDENTS_PER_PAGE, filterStudents, givable, readFilters } from "@/lib/student-bulk-rules";
+import { MAX_STUDENT_ACTION, PROGRESS_WORDS, SEEN_WORDS, STUDENTS_PER_PAGE, filterStudents, givable, readFilters, readPageNumber, readStudentCursor } from "@/lib/student-bulk-rules";
 import { count } from "@/lib/bulk-label-rules";
 
 export const metadata: Metadata = {
@@ -28,8 +28,10 @@ type Params = { searchParams: Promise<{ [key: string]: string | string[] | undef
  * [H3-4], units 1 and 2). For whoever may change the store's courses
  * ("products"), as taking one student off a course; labels for whoever may
  * change the list ("send"); the file for whoever may download addresses
- * ("export"). The page's rows and labels are paid for in studio requests
- * before they are read (lib/student-bulk.ts).
+ * ("export"). What reading the page costs at its most, in commands and in
+ * bytes, is taken in studio requests before anything is read
+ * (lib/student-bulk.ts, studentsPageUnits); the students' labels, the
+ * costliest part, are read only when a label is asked for.
  */
 export default async function StudioStudentsPage({ searchParams }: Params) {
   const query = await searchParams;
@@ -49,7 +51,10 @@ export default async function StudioStudentsPage({ searchParams }: Params) {
   const course = product?.course ? await readCourse(product.course.id) : null;
   const typed = readFilters(query);
   const filters = canTag ? typed : { ...typed, label: "" };
-  const cursor = typeof query.after === "string" && /^\d{1,20}$/.test(query.after) ? query.after : "0";
+  const cursor = readStudentCursor(query.after);
+  const pageNumber = cursor === "0" ? 1 : readPageNumber(query.page);
+  // Labels cost the most to read (each contact's whole record): read only when a label is asked for.
+  const withLabels = canTag && Boolean(filters.label);
   // The studio's own sentence when it would not pay for the reading, kept to show in its place.
   const refusals: string[] = [];
   const read = course
@@ -63,12 +68,12 @@ export default async function StudioStudentsPage({ searchParams }: Params) {
           if (!counted?.ok && counted?.message) refusals.push(counted.message);
           return counted?.ok === true;
         },
-        canTag,
+        withLabels,
       )
     : null;
   const lessons = course ? lessonCount(course) : 0;
   const filtered = read ? filterStudents(read.lines, lessons, filters) : { shown: [], labelsUnknown: 0 };
-  const link = (after: string) =>
+  const link = (after: string, page: number) =>
     studioPath(
       store,
       [
@@ -78,6 +83,7 @@ export default async function StudioStudentsPage({ searchParams }: Params) {
         filters.label ? `label=${encodeURIComponent(filters.label)}` : "",
         filters.seen && filters.seen !== "any" ? `seen=${filters.seen}` : "",
         after !== "0" ? `after=${after}` : "",
+        after !== "0" ? `page=${page}` : "",
       ]
         .filter(Boolean)
         .join("&"),
@@ -154,7 +160,7 @@ export default async function StudioStudentsPage({ searchParams }: Params) {
                   <div className="text-sm">
                     <label htmlFor="students-label-filter" className="field-label block">Label on their contact</label>
                     <input id="students-label-filter" name="label" className="field mt-1 min-h-11" defaultValue={filters.label} aria-describedby="students-label-filter-hint" />
-                    <span id="students-label-filter-hint" className="mt-1 block text-xs text-ink-soft">Leave empty for any. Example: VIP</span>
+                    <span id="students-label-filter-hint" className="mt-1 block text-xs text-ink-soft">{"Leave empty for any. Each student's labels are shown when you choose one. Example: VIP"}</span>
                   </div>
                 ) : null}
                 <div className="sm:col-span-2">
@@ -177,17 +183,20 @@ export default async function StudioStudentsPage({ searchParams }: Params) {
                       <p className="mt-2 text-sm text-ink">{`${count(filtered.labelsUnknown, "student's labels", "students' labels")} couldn't be read, so ${filtered.labelsUnknown === 1 ? "that student is" : "those students are"} not shown for this label.`}</p>
                     ) : null}
                     {filtered.shown.length ? (
-                      <StudentsBulk key={`${product.id}:${cursor}:${filters.progress}:${filters.access}:${filters.label}:${filters.seen ?? "any"}`} productId={product.id} courseTitle={product.title} lessons={lessons} lines={filtered.shown} canTag={canTag} canExport={canExport} others={others} />
+                      <StudentsBulk key={`${product.id}:${cursor}:${filters.progress}:${filters.access}:${filters.label}:${filters.seen ?? "any"}`} productId={product.id} courseTitle={product.title} lessons={lessons} lines={filtered.shown} canTag={canTag} canExport={canExport} others={others} labelsShown={withLabels} />
                     ) : (
                       <p className="mt-4 rounded-[var(--r-md)] bg-sand p-5 text-sm text-ink-soft">No student on this page matches. Change your choices above, or go to the next page.</p>
                     )}
-                    <nav aria-label="Pages of students" className="mt-6 flex flex-wrap gap-4 text-sm">
+                    <nav aria-label="Pages of students" className="mt-6 flex flex-wrap items-center gap-4 text-sm">
+                      <p aria-current="page" className="inline-flex min-h-11 items-center font-semibold text-ink">{`Page ${pageNumber.toLocaleString("en-US")}`}</p>
                       {cursor !== "0" ? (
-                        <Link href={link("0")} className="inline-flex min-h-11 items-center underline">First page of students</Link>
+                        <Link href={link("0", 1)} className="inline-flex min-h-11 items-center underline">First page of students</Link>
                       ) : null}
                       {read.next !== "0" ? (
-                        <Link href={link(read.next)} className="inline-flex min-h-11 items-center underline">{`Next page of students (up to ${STUDENTS_PER_PAGE})`}</Link>
-                      ) : null}
+                        <Link href={link(read.next, pageNumber + 1)} className="inline-flex min-h-11 items-center underline">{`Next page of students (page ${(pageNumber + 1).toLocaleString("en-US")}, up to ${STUDENTS_PER_PAGE})`}</Link>
+                      ) : (
+                        <p className="inline-flex min-h-11 items-center text-ink-soft">This is the last page.</p>
+                      )}
                     </nav>
                   </>
                 )}

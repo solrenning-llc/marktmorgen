@@ -455,7 +455,7 @@ export async function studentDates(courseId: string, email: string): Promise<{ s
 }
 
 /** A kept student row's address (as kept) and times, only when the row is JSON with both times as whole seconds; otherwise null. */
-function studentTimes(raw: unknown): { e: unknown; s: number; l: number } | null {
+export function studentTimes(raw: unknown): { e: unknown; s: number; l: number } | null {
   if (typeof raw !== "string") return null;
   let row: unknown;
   try {

@@ -16,8 +16,13 @@
 import { count, labelKey } from "@/lib/bulk-label-rules";
 import { csvLine } from "@/lib/csv";
 
-/** Students read for one page of the list: one bounded read, paid for first (listUnits, labelUnits). */
-export const STUDENTS_PER_PAGE = 100;
+/**
+ * Students one page of the list shows, at most: what reading them costs is
+ * taken whole before the first read (lib/student-bulk.ts, studentsPageWork),
+ * so the page is kept small. Review of #3035: a hundred took up to 27 studio
+ * requests at their worst; twenty-five take 3, and 14 with their labels.
+ */
+export const STUDENTS_PER_PAGE = 25;
 /** The most people one change of access takes; past it the change is refused, never cut. */
 export const MAX_STUDENT_ACTION = 500;
 /** People whose access is read in one command. */
@@ -29,17 +34,21 @@ const MAX_ADDRESS = 254;
 /** The longest body a change sends: every address at its longest, quoted and separated, and the rest of the request. */
 export const MAX_STUDENT_BODY_BYTES = 1_000 + MAX_STUDENT_ACTION * (MAX_ADDRESS * 6 + 3);
 
-/** Studio requests taken before a page's rows are read: one command a row (what each marked done), twenty to a request. */
-export function listUnits(rows: number): number {
-  return Math.ceil(Math.max(0, Math.floor(rows)) / 20);
-}
 /**
- * Studio requests taken before the labels of a page's students are read: a
- * contact's record is up to two kilobytes, and a studio request is priced at
- * fifty kilobytes read, so twenty-five records to a request.
+ * Where a page of the list starts: the course's own scan cursor, and, when
+ * that scan answered more students than a page shows, a dot and the last
+ * student shown from it (their hashed address), so the next page goes on
+ * from there. Anything else is the first page.
  */
-export function labelUnits(rows: number): number {
-  return Math.ceil(Math.max(0, Math.floor(rows)) / 25);
+const STUDENT_CURSOR = /^\d{1,20}(?:\.[0-9a-f]{32})?$/;
+export function readStudentCursor(raw: unknown): string {
+  return typeof raw === "string" && STUDENT_CURSOR.test(raw) ? raw : "0";
+}
+
+/** Which page of the list this is, counted from 1, for saying where the creator is. Anything else is the first. */
+export function readPageNumber(raw: unknown): number {
+  const n = typeof raw === "string" && /^\d{1,5}$/.test(raw) ? Number(raw) : 1;
+  return n >= 1 ? n : 1;
 }
 
 export type Progress = "none" | "started" | "finished";
@@ -272,12 +281,25 @@ export function giveSummary(result: GiveDone, change: GiveChange, title: string)
 
 const day = (seconds: number) => (Number.isFinite(seconds) && seconds > 0 ? new Date(seconds * 1000).toISOString().slice(0, 10) : "");
 
-/** The selection as a spreadsheet file: one line a student, every cell quoted and never a formula (lib/csv.ts). */
-export function studentsCsv(lines: readonly StudentLine[], courseTitle: string, lessons: number): string {
+/**
+ * The selection as a spreadsheet file: one line a student, every cell quoted
+ * and never a formula (lib/csv.ts). The labels only when the page read them
+ * (`withLabels`): a column of labels never read is left out, not filled.
+ */
+export function studentsCsv(lines: readonly StudentLine[], courseTitle: string, lessons: number, withLabels = true): string {
   const rows = [
-    csvLine(["Email", "Course", "Joined", "Last here", "Lessons done", "Lessons", "Access", "Labels"]),
+    csvLine(["Email", "Course", "Joined", "Last here", "Lessons done", "Lessons", "Access", ...(withLabels ? ["Labels"] : [])]),
     ...lines.map((line) =>
-      csvLine([line.email, courseTitle, day(line.since), day(line.lastSeen), line.done, lessons, line.removed ? "Removed" : "Has access", line.labels === null ? "Not read" : line.labels.join(", ")]),
+      csvLine([
+        line.email,
+        courseTitle,
+        day(line.since),
+        day(line.lastSeen),
+        line.done,
+        lessons,
+        line.removed ? "Removed" : "Has access",
+        ...(withLabels ? [line.labels === null ? "Not read" : line.labels.join(", ")] : []),
+      ]),
     ),
   ];
   return rows.join("\r\n");

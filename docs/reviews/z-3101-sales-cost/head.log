@@ -1,0 +1,69 @@
+sales-file-cheaper.test.ts
+
+An ordinary file is byte for byte what it was
+  ok    the same bytes as before
+  ok    every sale a row, none partial
+  ok    a product confirmed gone keeps the title its sale carried
+
+Products are read in batches, not one after another
+  ok    at most ceil(N/500) + 2 = 5 trips for 1203 products
+  ok    and a command for each batch, never one for each product
+  ok    every sale is still a row
+  ok    each product's own title, and its extras' titles
+  ok    byte for byte what it was
+
+Each cell is bounded in the file, a cut marked, no row left out
+  ok    every sale is still a row, every column still there
+  ok    no row is more than 2,435 bytes
+  ok    a long buyer name is cut at 600 bytes, with a visible mark
+  ok    so are an email and an id no real one could be
+  ok    a buyer name of 400 characters in another alphabet is cut too, with the mark
+  ok    a catalog title and option label are never cut
+
+A product record that does not read is said, never a missing product (rule 24)
+  ok    no reply for the read: the file is not made
+  ok    a reply of another type: the file is not made
+  ok    a list cut short: the file is not made
+  ok    a record that is not a listing: the file is not made
+  ok    a healthy read still writes the product's title
+
+19 checks, all passing.
+COUNTED_MEMORY_COMMANDS 2490
+COUNTED_MOCK_HTTP 26
+s3101-batch-bytes.proof.ts
+S_BATCH_BYTES {"products":500,"sessionsPerProduct":50,"roomCharacters":500,"serializedListingBytes":29449,"largestResponseBytes":15127904,"syntheticLimitBytes":10485760,"productReads":1,"failure":"Error: synthetic transport: 15127904 response bytes exceed 10485760"}
+COUNTED_MEMORY_COMMANDS 1536
+COUNTED_MOCK_HTTP 6
+AssertionError [ERR_ASSERTION]: a catalog accepted by productWrites must still export
++ actual - expected
+
++ 'Error: synthetic transport: 15127904 response bytes exceed 10485760'
+- ''
+
+    at main (/tmp/z-points-9cxRqJ/s3101-batch-bytes.proof.ts.cjs:12296:25) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 'Error: synthetic transport: 15127904 response bytes exceed 10485760',
+  expected: '',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+z3101-csv-byte-boundaries.proof.ts
+✔ pure UTF-8 and CSV ceilings: ASCII (3.329628ms)
+✔ pure UTF-8 and CSV ceilings: CJK (1.010235ms)
+✔ pure UTF-8 and CSV ceilings: astral (0.576453ms)
+✔ pure UTF-8 and CSV ceilings: quotes (1.261866ms)
+✔ pure UTF-8 and CSV ceilings: backslashes (0.826889ms)
+✔ pure UTF-8 and CSV ceilings: formula (0.650866ms)
+✔ pure UTF-8 and CSV ceilings: unpaired surrogate (0.734829ms)
+✔ pure UTF-8 and CSV ceilings: combining (0.679613ms)
+COUNTED_MEMORY_COMMANDS 0
+COUNTED_MOCK_HTTP 0
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19.225677

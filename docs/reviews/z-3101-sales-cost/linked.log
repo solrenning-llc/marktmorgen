@@ -1,0 +1,160 @@
+catalog-read-count.test.ts
+
+A store with a head
+  ok    every product: counted as read
+  ok    some, in another order: counted as read
+  ok    ids the store does not have: counted as read
+  ok    ids asked twice: counted as read
+  ok    nothing: counted as read
+
+A store without a head
+  ok    every product: counted as read
+  ok    some, in another order: counted as read
+  ok    ids the store does not have: counted as read
+  ok    ids asked twice: counted as read
+  ok    nothing: counted as read
+
+A store inline
+  ok    every product: counted as read
+  ok    some, in another order: counted as read
+  ok    ids the store does not have: counted as read
+  ok    ids asked twice: counted as read
+  ok    nothing: counted as read
+
+A store with no catalog to read from
+  ok    every product: counted as read
+  ok    some, in another order: counted as read
+  ok    ids the store does not have: counted as read
+  ok    ids asked twice: counted as read
+  ok    nothing: counted as read
+  ok    the head is not read again
+  ok    an inline store reads none
+
+22 checks, all passing.
+COUNTED_MEMORY_COMMANDS 23
+COUNTED_MOCK_HTTP 0
+stats-report.test.ts
+
+What a browser and the host say
+  ok    devices
+  ok    countries
+
+Counted, and read back
+  ok    countries
+  ok    devices
+  ok    checkouts by channel, untagged as direct
+  ok    free addresses by channel
+  ok    the all-time record keeps no countries
+
+A channel from visit to sale
+  ok    one row a channel, money first
+
+The API's summary
+  ok    visits are there, money is null without Stripe
+  ok    its channels
+  ok    its countries and devices
+
+The weekly email
+  ok    it says the week
+  ok    with where it came from and how to stop it
+  ok    a week with nobody is not written about
+  ok    a week starts on its Monday
+  ok    claimed once a week
+  ok    the stop link is the store's own
+  ok    stopped, and started again
+
+18 checks, all passing.
+COUNTED_MEMORY_COMMANDS 319
+COUNTED_MOCK_HTTP 0
+store-export-unknown-size.test.ts
+✔ an unreadable data-room size refuses the export shape before any later read (2.403019ms)
+✔ an unknown data-room reply (boolean counts) refuses the export shape before later reads (0.475182ms)
+✔ an unknown data-room reply (blank counts) refuses the export shape before later reads (0.271171ms)
+✔ an unknown data-room reply (negative bytes) refuses the export shape before later reads (0.574813ms)
+✔ an unknown data-room reply (fractional bytes) refuses the export shape before later reads (0.327012ms)
+✔ an unknown data-room reply (an extra HMGET field) refuses the export shape before later reads (0.24501ms)
+✔ an unknown data-room reply (an extra pipeline result) refuses the export shape before later reads (0.241861ms)
+✔ a confirmed empty data room remains an exact zero-sized shape (9.06538ms)
+✔ the route answers unavailable before allowance or export work when the shape cannot be measured (0.789188ms)
+COUNTED_MEMORY_COMMANDS 3
+COUNTED_MOCK_HTTP 0
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 28.855261
+plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (155.242969ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (561.183622ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (114.993874ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (3.559869ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.273887ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.221387ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.774309ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (257.028649ms)
+✔ every store figure taken in the code is a kind a line prices (94.799986ms)
+✔ every email sent names a meter, and each file only the meters it may use (139.884132ms)
+✔ the units a figure is taken in cost at least what they stand for (14.234847ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (4.601645ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.678628ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.564836ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.126137ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.099464ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.790122ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (1.517734ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.181076ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (3.670481ms)
+✔ Path push fits its reserved studio requests (0.111806ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.098178ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.108982ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.249571ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (222.537646ms)
+COUNTED_MEMORY_COMMANDS 0
+COUNTED_MOCK_HTTP 0
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1614.661157
+store-data-registry.test.ts
+creator: room 18 MB; outside it 121.5 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 288.3 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 704.9 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (284.031614ms)
+✔ each family is bounded one way at least, and what it says can be checked (252.354575ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (11.383531ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.453211ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.566958ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (16.634937ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.244603ms)
+COUNTED_MEMORY_COMMANDS 0
+COUNTED_MOCK_HTTP 0
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 607.029346

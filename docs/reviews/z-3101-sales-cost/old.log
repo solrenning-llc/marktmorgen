@@ -1,0 +1,57 @@
+sales-file-cheaper.test.ts
+
+An ordinary file is byte for byte what it was
+  ok    the same bytes as before
+  ok    every sale a row, none partial
+  ok    a product confirmed gone keeps the title its sale carried
+
+Products are read in batches, not one after another
+  FAIL  at most ceil(N/500) + 2 = 5 trips for 1203 products
+        expected "within"
+        got      "1203 trips"
+  FAIL  and a command for each batch, never one for each product
+        expected "within"
+        got      "1203 commands"
+  ok    every sale is still a row
+  ok    each product's own title, and its extras' titles
+  ok    byte for byte what it was
+
+Each cell is bounded in the file, a cut marked, no row left out
+  ok    every sale is still a row, every column still there
+  FAIL  no row is more than 2,435 bytes
+        expected "within"
+        got      "13389 bytes"
+  FAIL  a long buyer name is cut at 600 bytes, with a visible mark
+        expected [true,true,true]
+        got      [false,false,true]
+  FAIL  so are an email and an id no real one could be
+        expected [true,true,true,true]
+        got      [false,false,false,false]
+  FAIL  a buyer name of 400 characters in another alphabet is cut too, with the mark
+        expected true
+        got      false
+  ok    a catalog title and option label are never cut
+
+A product record that does not read is said, never a missing product (rule 24)
+  FAIL  no reply for the read: the file is not made
+        expected "said"
+        got      "written: Should not be used"
+  FAIL  a reply of another type: the file is not made
+        expected "said"
+        got      "written: Should not be used"
+  FAIL  a list cut short: the file is not made
+        expected "said"
+        got      "written: Should not be used"
+  FAIL  a record that is not a listing: the file is not made
+        expected "said"
+        got      "written: Should not be used"
+  ok    a healthy read still writes the product's title
+
+19 checks, 10 failing.
+COUNTED_MEMORY_COMMANDS 3691
+COUNTED_MOCK_HTTP 26
+s3101-batch-bytes.proof.ts
+S_BATCH_BYTES {"products":500,"sessionsPerProduct":50,"roomCharacters":500,"serializedListingBytes":29449,"largestResponseBytes":30268,"syntheticLimitBytes":10485760,"productReads":500,"rows":500,"failure":""}
+4 checks, all passing.
+COUNTED_MEMORY_COMMANDS 2035
+COUNTED_MOCK_HTTP 6

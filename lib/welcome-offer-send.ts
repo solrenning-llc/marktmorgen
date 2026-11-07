@@ -14,6 +14,7 @@
  *   nl:wo:n:<statsId>              how many people have been offered it, for the studio
  */
 import { type DigitalConsent, DigitalConsentMissing } from "@/lib/digital-consent";
+import { claimMark } from "@/lib/claim-mark";
 import { OrdersPausedError } from "@/lib/order-admission";
 import { createHash } from "node:crypto";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
@@ -80,8 +81,8 @@ export async function scheduleReminder(store: Store, claim: Claim, token: string
   const when = remindAt(began, store.welcomeOffer.hours);
   if (when <= nowSeconds) return false;
   // One reminder per person and store, whatever else they ask for.
-  const [first] = await redisPipeline([["SET", remindedKey(store.statsId, claim.e), "1", "NX", "EX", Math.max(60, offer.until - nowSeconds + 86_400)]]);
-  if (first === null) return false;
+  // Ours only on OK or our own value read back (CX-123 rule 24, L9): anything else schedules nothing.
+  if ((await claimMark(remindedKey(store.statsId, claim.e), Math.max(60, offer.until - nowSeconds + 86_400))) !== "ours") return false;
   const member = JSON.stringify({ s: store.sid, i: store.statsId, h: hash(claim.e), e: claim.e, t: token });
   await redisPipeline([["ZADD", DUE_KEY, String(when), member]]);
   return true;

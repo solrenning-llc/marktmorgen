@@ -36,7 +36,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
-import { type LostRead, confirmLostRead, keptUnlessLost, lostCursorKey, lostDisputesOrRetry, refundedInFull, rowGivesBack } from "@/lib/refunds";
+import { type LostRead, confirmLostRead, keptUnlessLost, lostCursorKey, lostDisputesOrRetry, refundRowKnown, refundedInFull, rowGivesBack } from "@/lib/refunds";
 import { ordersGrant } from "@/lib/buyer-orders";
 import { DOWNLOAD_WINDOW_SECONDS } from "@/lib/store-checkout";
 import { REVIEW_STORES_KEY, markRefunded } from "@/lib/reviews";
@@ -46,6 +46,7 @@ import { readListings } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { takesReviews } from "@/lib/house-store";
 import { noteForErasure } from "@/lib/erasure-index";
+import { type StripePage, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 const SESSION_ID = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 const INTENT_ID = /^pi_[A-Za-z0-9]{10,200}$/;
@@ -90,15 +91,17 @@ async function invoicePayment(account: string, invoice: unknown): Promise<string
   const read = invoice && typeof invoice === "object" ? (invoice as Row) : await onAccount("GET", account, `/invoices/${encodeURIComponent(id)}`);
   const direct = idOf(read.payment_intent);
   if (INTENT_ID.test(direct)) return direct;
-  try {
-    const listed = await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ invoice: id, limit: "1" })}`);
-    const first = Array.isArray(listed.data) ? (listed.data as Row[])[0] : undefined;
-    const payment = first?.payment && typeof first.payment === "object" ? (first.payment as Row) : null;
-    const pi = idOf(payment?.payment_intent);
-    return INTENT_ID.test(pi) ? pi : "";
-  } catch {
-    return "";
-  }
+  // Read in its exact shape (lib/stripe-list.ts): a page in another shape, a row not readable, or a failure to read
+  // throws, and provePurchase says "error". "No payment" ("") only from a readable page: none listed, or the first
+  // one paid otherwise than by a PaymentIntent. Never a membership taken as not refunded on a guess.
+  const listed = readStripePage(
+    await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ invoice: id, limit: "1" })}`),
+    (row) => plainObject(ownField(row, "payment")),
+  );
+  if (listed.unreadable) throw new StripeListUnreadable("an invoice payment not readable");
+  const payment = listed.rows[0] ? (ownField(listed.rows[0], "payment") as Row) : null;
+  const pi = idOf(payment ? ownField(payment, "payment_intent") : undefined);
+  return INTENT_ID.test(pi) ? pi : "";
 }
 
 /**
@@ -301,8 +304,21 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
       query.append("expand[]", "data.charge");
       if (after) query.set("starting_after", after);
-      const listed = await onAccount("GET", store.stripeAccountId, `/refunds?${query}`);
-      const refunds = Array.isArray(listed.data) ? (listed.data as Row[]) : [];
+      // The page in its exact shape (lib/stripe-list.ts), each row by the refunds' own rule (refundRowKnown,
+      // lib/refunds.ts: its id, time, status, payment and charge.refunded as Stripe gives them). A page in another
+      // shape, or a row not readable, keeps the anchor (unsure), so no refund on it is passed over; the readable
+      // rows are still marked (Codex P on #2774).
+      let listed: StripePage;
+      try {
+        listed = readStripePage(await onAccount("GET", store.stripeAccountId, `/refunds?${query}`), refundRowKnown);
+      } catch (error) {
+        if (!(error instanceof StripeListUnreadable)) throw error;
+        console.error("reading refunds for reviews: a page in another shape", error);
+        unsure = true;
+        break;
+      }
+      if (listed.unreadable) unsure = true;
+      const refunds: Row[] = listed.rows;
       // A dispute closed as lost marks its reviews as a
       // full refund does (lib/refunds.ts, queue 388 [TB14]): read once, with
       // the first page, from Stripe's closing events (kept thirty days).
@@ -326,12 +342,13 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
         }
         newest = Math.max(newest, refund.created);
       }
-      const last = refunds[refunds.length - 1];
-      if (listed.has_more !== true || !last || typeof last.id !== "string") {
+      if (!listed.hasMore) {
         complete = true;
         break;
       }
-      after = last.id;
+      // More pages, and no readable last row to read them from: not complete.
+      if (!listed.lastId) break;
+      after = listed.lastId;
     }
   } finally {
     // A refunded review leaves "What buyers say" on the store page (lib/store-quotes.ts), also when a busy review

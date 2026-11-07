@@ -12,6 +12,9 @@ import { ASSISTANT_ON_SALE, PLANS_ON_SALE } from "@/lib/opening";
 import { ASSISTANT_MESSAGES_MONTHLY, ASSISTANT_NAME, ASSISTANT_PRICE_CENTS } from "@/lib/store-assistant-rules";
 import { isDomainsConfigured } from "@/lib/domains";
 import { feeWords } from "@/lib/fee-words";
+import { hostSyncOn } from "@/lib/meet-providers";
+import { calendarEventsMissionLine } from "@/lib/host-sync-words";
+import { paypalAtCheckout, paypalCheckoutLine } from "@/lib/public-explanations";
 
 export const metadata: Metadata = {
   title: "Our mission — Marktmorgen",
@@ -174,9 +177,12 @@ const ASSISTANT_CLOSED_LINE = `The ${ASSISTANT_NAME}: an AI chat on every page o
 const DOMAIN_LINE =
   "Your store on your own domain, on Studio: type it in the studio, add the one record we show you, and the certificate is handled for you";
 
+/*
+ * PayPal at checkout (paypalCheckoutLine, by the PayPal client) and writing
+ * every booking as an event (calendarEventsMissionLine, by hostSyncOn) are
+ * placed by the component, from the state this deployment is in.
+ */
 const NOT_BUILT = [
-  "PayPal at checkout: Stripe offers it only to accounts in the EU (except Hungary), the UK, Switzerland, Norway and Liechtenstein, and does not support it for the direct charges every sale here is made with",
-  "Writing every booking into your calendar as an event: only calls set to Google Meet are written there, other bookings come as a feed you subscribe to, and calendars are read for busy times",
   "Paying affiliates with no PayPal account of your own: they are paid from your PayPal, in one press or on your payday, never from money we hold",
   "A thank-you page of your own: after paying, the store's own page hands over what was bought, with your note and, in a funnel, a button to the next step",
   "Automatic replies on Instagram",
@@ -220,8 +226,11 @@ export default function MissionPage() {
   const billingReached = isBillingConfigured();
   const billing = billingReached && PLANS_ON_SALE;
   const domains = isDomainsConfigured();
+  const paypal = paypalAtCheckout();
+  const calendarSync = hostSyncOn();
   const built = [
     ...BUILT,
+    ...(paypal ? [paypalCheckoutLine(true)] : []),
     ...(domains ? [DOMAIN_LINE] : []),
     ...(ready ? [STRIPE_LINE, CHECKOUT_LINE, ORDERS_LINE] : []),
     ...(billing ? [BILLING_LINE] : []),
@@ -232,6 +241,8 @@ export default function MissionPage() {
     ...(ready ? [] : [STRIPE_LINE, CHECKOUT_LINE, ORDERS_LINE]),
     ...(billing ? [] : [billingReached ? BILLING_CLOSED_LINE : BILLING_LINE]),
     ...(billing && ASSISTANT_ON_SALE ? [] : [ASSISTANT_CLOSED_LINE]),
+    ...(paypal ? [] : [paypalCheckoutLine(false)]),
+    calendarEventsMissionLine(calendarSync),
     ...NOT_BUILT,
   ];
   return (

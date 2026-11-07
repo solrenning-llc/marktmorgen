@@ -443,7 +443,8 @@ function mayTurnOnAs(why: PauseWhy | null, key: KeyRecord, whose: Whose, mine: s
 /** The key list as the studio's panel shows it to this person, newest first. */
 export async function shownKeys(store: Store, email: string, role: Role): Promise<ShownKey[]> {
   if (!store.sid) return [];
-  const [keys, team] = await Promise.all([keyRecords(store.sid), teamNow(store)]);
+  // Strict: a list read in another shape throws, so the studio says it could not read the keys (audit SG2, finding 23).
+  const [keys, team] = await Promise.all([keyRecords(store.sid, true), teamNow(store)]);
   const mine = makerPrints(store.sid, email);
   return keys
     .map((k): ShownKey => {

@@ -49,7 +49,7 @@ export const en = {
   // ---- Sales and fair prices ----------------------------------------------
   fairHead: (country: string, percent: number) => `A fair price for ${country}: ${percent}% off`,
   fairNote: (store: string, plan: boolean) =>
-    `${store} lowers prices where money buys less. Taken off on the payment page, no code needed${plan ? "; the lower price is for paying in full" : ""}.`,
+    `${store} lowers prices where money buys less. This price was set automatically for you, from the country of your internet connection. Taken off on the payment page, no code needed${plan ? "; the lower price is for paying in full" : ""}.`,
   saleHead: (name: string, percent: number, ends: string) => `${name ? `${name}: ` : ""}${percent}% off · ${ends}`,
   saleNote: (until: string, plan: boolean) =>
     `Until ${until}. Taken off on the payment page, no code needed${plan ? "; the sale price is for paying in full" : ""}.`,
@@ -329,6 +329,7 @@ export const en = {
   newer: "Newer",
   older: "Older",
   askUnknown: (store: string) => `This page does not say. Ask ${store} before you buy.`,
+  askTermsCut: () => "I don't have the full terms here. Please ask the creator before you buy.",
 
   // ---- The card on the creator's own website ---------------------------------------------
   noLongerOnSale: "This product is no longer on sale.",

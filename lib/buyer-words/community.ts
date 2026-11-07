@@ -82,6 +82,7 @@ const en = {
     out: "Your session here ended. Ask for a new link below.",
     off: "This community is closed right now.",
     error: "Something went wrong on our side. Nothing was changed; try again in a moment.",
+    unconfirmed: "We could not confirm that this went through. Check the conversation before you try again.",
   } as Record<string, string>,
   /** After asking for a link to come in (?link=...). */
   linkNotices: {
@@ -327,7 +328,7 @@ const en = {
   forMembersWho: "This event is for members who have",
   productGone: (store: string) => `A product ${store} no longer offers here.`,
   otherAddress: "If you bought one with another address, sign out on your You page and come back in with that one.",
-  canceledByCreator: (store: string) => `${store} canceled this event, and everyone who had RSVP'd was emailed. There is nothing for you to do.`,
+  canceledByCreator: (store: string) => `${store} canceled this event. If you RSVP'd, we try to email you, but the email may not arrive. There is nothing for you to do.`,
   youHost: (count: number) => `You host · ${count} going`,
   cancelRsvp: "Cancel my RSVP",
   everyPlaceTaken: "Every place is taken",
@@ -651,6 +652,7 @@ const es: CommunityWords = {
     out: "Tu sesión aquí ha terminado. Pide un enlace nuevo abajo.",
     off: "Esta comunidad está cerrada ahora mismo.",
     error: "Algo falló por nuestra parte. No se cambió nada; vuelve a intentarlo en un momento.",
+    unconfirmed: "No pudimos confirmar si esto se completó. Revisa la conversación antes de volver a intentarlo.",
   },
   linkNotices: {
     sent: {
@@ -883,7 +885,7 @@ const es: CommunityWords = {
   forMembersWho: "Este evento es para los miembros que tienen",
   productGone: (store) => `Un producto que ${store} ya no ofrece aquí.`,
   otherAddress: "Si compraste uno con otra dirección, cierra sesión en tu página Tú y vuelve a entrar con esa.",
-  canceledByCreator: (store) => `${store} canceló este evento, y se avisó por email a todos los que habían confirmado asistencia. No tienes que hacer nada.`,
+  canceledByCreator: (store) => `${store} canceló este evento. Si habías confirmado tu asistencia, intentamos avisarte por email, pero el mensaje puede no llegar. No tienes que hacer nada.`,
   youHost: (count) => `Tú lo presentas · ${count} ${plural(count, "asistirá", "asistirán")}`,
   cancelRsvp: "Cancelar mi asistencia",
   everyPlaceTaken: "Todas las plazas están ocupadas",
@@ -1198,6 +1200,7 @@ const fr: CommunityWords = {
     out: "Votre session ici a pris fin. Demandez un nouveau lien ci-dessous.",
     off: "Cette communauté est fermée pour le moment.",
     error: `Un problème est survenu de notre côté. Rien n'a été modifié${S}; réessayez dans un instant.`,
+    unconfirmed: "Nous n’avons pas pu confirmer que cela a abouti. Consultez la conversation avant de réessayer.",
   },
   linkNotices: {
     sent: {
@@ -1430,7 +1433,7 @@ const fr: CommunityWords = {
   forMembersWho: "Cet événement est réservé aux membres qui possèdent",
   productGone: (store) => `Un produit que ${store} ne propose plus ici.`,
   otherAddress: "Si vous en avez acheté un avec une autre adresse, déconnectez-vous depuis votre page Vous et revenez avec celle-ci.",
-  canceledByCreator: (store) => `${store} a annulé cet événement, et toutes les personnes inscrites ont été prévenues par e-mail. Vous n'avez rien à faire.`,
+  canceledByCreator: (store) => `${store} a annulé cet événement. Si vous aviez confirmé votre présence, nous essayons de vous prévenir par e-mail, mais le message peut ne pas arriver. Vous n'avez rien à faire.`,
   youHost: (count) => `Vous animez · ${count}${S}${frPlural(count, "participant", "participants")}`,
   cancelRsvp: "Annuler mon inscription",
   everyPlaceTaken: "Toutes les places sont prises",
@@ -1745,6 +1748,7 @@ const de: CommunityWords = {
     out: "Ihre Sitzung hier ist beendet. Fordern Sie unten einen neuen Link an.",
     off: "Diese Community ist gerade geschlossen.",
     error: "Bei uns ist etwas schiefgelaufen. Es wurde nichts geändert; versuchen Sie es gleich noch einmal.",
+    unconfirmed: "Wir konnten nicht bestätigen, dass das geklappt hat. Prüfen Sie die Unterhaltung, bevor Sie es erneut versuchen.",
   },
   linkNotices: {
     sent: {
@@ -1977,7 +1981,7 @@ const de: CommunityWords = {
   forMembersWho: "Diese Veranstaltung ist für Mitglieder, die Folgendes besitzen",
   productGone: (store) => `Ein Produkt, das ${store} hier nicht mehr anbietet.`,
   otherAddress: "Wenn Sie eines mit einer anderen Adresse gekauft haben, melden Sie sich auf Ihrer Seite „Ich“ ab und kommen Sie mit dieser wieder herein.",
-  canceledByCreator: (store) => `${store} hat diese Veranstaltung abgesagt, und alle, die zugesagt hatten, wurden per E-Mail informiert. Sie müssen nichts tun.`,
+  canceledByCreator: (store) => `${store} hat dieses Event abgesagt. Wenn Sie zugesagt hatten, versuchen wir, Sie per E-Mail zu informieren, aber die E-Mail kommt vielleicht nicht an. Sie müssen nichts tun.`,
   youHost: (count) => `Sie leiten · ${count} ${plural(count, "Teilnehmer", "Teilnehmende")}`,
   cancelRsvp: "Meine Zusage zurückziehen",
   everyPlaceTaken: "Alle Plätze sind vergeben",
@@ -2292,6 +2296,7 @@ const it: CommunityWords = {
     out: "La tua sessione qui è terminata. Chiedi un nuovo link qui sotto.",
     off: "Questa community è chiusa in questo momento.",
     error: "Qualcosa è andato storto da parte nostra. Non è stato modificato nulla; riprova tra un momento.",
+    unconfirmed: "Non è stato possibile confermare che sia andato a buon fine. Controlla la conversazione prima di riprovare.",
   },
   linkNotices: {
     sent: {
@@ -2524,7 +2529,7 @@ const it: CommunityWords = {
   forMembersWho: "Questo evento è per i membri che hanno",
   productGone: (store) => `Un prodotto che ${store} non offre più qui.`,
   otherAddress: "Se ne hai acquistato uno con un altro indirizzo, esci dalla tua pagina Tu e rientra con quello.",
-  canceledByCreator: (store) => `${store} ha annullato questo evento, e chi aveva confermato la partecipazione è stato avvisato via email. Non devi fare nulla.`,
+  canceledByCreator: (store) => `${store} ha annullato questo evento. Se avevi confermato la partecipazione, proviamo ad avvisarti via email, ma il messaggio potrebbe non arrivare. Non devi fare nulla.`,
   youHost: (count) => `Conduci tu · ${count} ${plural(count, "partecipante", "partecipanti")}`,
   cancelRsvp: "Annulla la mia partecipazione",
   everyPlaceTaken: "Tutti i posti sono occupati",
@@ -2839,6 +2844,7 @@ const nl: CommunityWords = {
     out: "Je sessie hier is afgelopen. Vraag hieronder een nieuwe link aan.",
     off: "Deze community is op dit moment gesloten.",
     error: "Er ging aan onze kant iets mis. Er is niets gewijzigd; probeer het zo meteen opnieuw.",
+    unconfirmed: "We konden niet bevestigen dat dit is gelukt. Controleer het gesprek voordat je het opnieuw probeert.",
   },
   linkNotices: {
     sent: {
@@ -3071,7 +3077,7 @@ const nl: CommunityWords = {
   forMembersWho: "Dit evenement is voor leden die dit hebben",
   productGone: (store) => `Een product dat ${store} hier niet meer aanbiedt.`,
   otherAddress: "Heb je er een gekocht met een ander adres, log dan uit op je pagina Jij en kom terug met dat adres.",
-  canceledByCreator: (store) => `${store} heeft dit evenement geannuleerd, en iedereen die zich had aangemeld is gemaild. Je hoeft niets te doen.`,
+  canceledByCreator: (store) => `${store} heeft dit evenement geannuleerd. Als je had aangegeven dat je zou gaan, proberen we je per e-mail te informeren, maar die e-mail komt mogelijk niet aan. Je hoeft niets te doen.`,
   youHost: (count) => `Jij presenteert · ${count} ${plural(count, "deelnemer", "deelnemers")}`,
   cancelRsvp: "Mijn aanmelding annuleren",
   everyPlaceTaken: "Alle plaatsen zijn bezet",
@@ -3386,6 +3392,7 @@ const pt: CommunityWords = {
     out: "A sua sessão aqui terminou. Peça uma nova ligação abaixo.",
     off: "Esta comunidade está fechada neste momento.",
     error: "Algo correu mal do nosso lado. Nada foi alterado; tente novamente daqui a pouco.",
+    unconfirmed: "Não foi possível confirmar que isso foi concluído. Confira a conversa antes de tentar novamente.",
   },
   linkNotices: {
     sent: {
@@ -3618,7 +3625,7 @@ const pt: CommunityWords = {
   forMembersWho: "Este evento é para os membros que têm",
   productGone: (store) => `Um produto que ${store} já não oferece aqui.`,
   otherAddress: "Se comprou um com outro endereço, termine a sessão na sua página Eu e volte a entrar com esse.",
-  canceledByCreator: (store) => `${store} cancelou este evento, e todos os que tinham confirmado presença foram avisados por email. Não precisa de fazer nada.`,
+  canceledByCreator: (store) => `${store} cancelou este evento. Se tinha confirmado a presença, tentamos enviar-lhe um email, mas pode não chegar. Não precisa de fazer nada.`,
   youHost: (count) => `É o anfitrião · ${count} ${plural(count, "participante", "participantes")}`,
   cancelRsvp: "Cancelar a minha presença",
   everyPlaceTaken: "Todos os lugares estão ocupados",

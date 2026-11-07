@@ -130,6 +130,14 @@ async function main(): Promise<void> {
   is("says tax is added only while it is on in the checkout", page.includes("Tax is on in your checkout: Stripe adds it only where you have an active registration."), true);
   is("and says none is added while it is off, even where registered", page.includes("Tax is off in your checkout, so Stripe adds none now, even where you are registered."), true);
   is("the sentence follows the store's own setting", /store\.tax\.enabled \?/.test(page), true);
+  // Claude 5 on #2735: with prices that include the tax (lib/tax.ts, tax_behavior inclusive) Stripe adds nothing on top;
+  // the tax comes out of the price, so the page never says "adds it" in that state.
+  is(
+    "with prices that include tax, says the tax comes out of the price",
+    page.includes("Tax is on in your checkout and your prices include it: where you have an active registration, Stripe takes the tax out of your price."),
+    true,
+  );
+  is("the 'adds it' sentence is only for prices without tax", /store\.tax\.included \?/.test(page), true);
   is("never says tax is added whatever the setting", page.includes("Stripe adds tax at your\n            checkout only where you have one"), false);
   // Revisor 1 on #2735: a sale paid with PayPal (lib/paypal-sales.ts) adds no tax; the page says so whenever the store sells that way.
   is("says PayPal sales carry no tax, when the store sells through PayPal", page.includes("Sales paid with PayPal have no tax added.") && /sellsThroughPayPal\(store\) \?/.test(page), true);

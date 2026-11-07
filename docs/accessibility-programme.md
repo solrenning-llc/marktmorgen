@@ -153,6 +153,22 @@ Muted words on store pages (dates, notes, hints, "Unsaved" and similar) are smal
 - **The equivalent we offer:** this is not a keyboard trap (2.1.2). One Shift+Tab from the player's first control reaches Close, which is labeled "Close", is at least 44 × 44 px and is always visible at the top of the window. Close is also the first thing focused when the window opens.
 - **Not checked:** a real screen reader with each provider's real player.
 
+## Store front lines and the narrowest glyphs (7 November 2026)
+
+WCAG 2.2 1.4.8 (AAA) asks that a block of text be no wider than 80 characters or glyphs. On a buyer's store front (`app/[handle]/page.tsx`), `app/globals.css` caps paragraphs, definitions, quotes, captions and the FAQ's questions at `34ch`. `tests/store-front-accessibility.test.ts` holds the cap.
+
+- **Measured** in Chromium 153 by `tests/e2e/store-front-audit.mjs`, which counts the characters actually on each rendered line. The run uses Geist for every store font, because the machine cannot reach Google Fonts.
+  - **At 56ch (build of 06bca7d8d):** a real sentence reached 81 characters a line (the full store at 200%). Words made only of narrow letters (i, l, t, f, j, r, s) at each field's longest reached 126 a line at 1280 px; a question of 150 such characters reached 123.
+  - **At 34ch** (the new rule laid over that same build, not a new build): real sentences reach at most 51 a line, and narrow-letter words at most 75, in the 18 cases of the full and edge stores. The one count over 80 is a card's row at 200%: a title of 79 characters (titles keep at most 80) and its price badge "$7", which is a separate box. A title is not a block of text.
+- **The case:** glyphs narrower than the cap allows for, 34ch ÷ 80 = 0.425ch each. Measured in Geist: an apostrophe is 0.268ch, a comma or period 0.303ch, "!" 0.321ch and "i" 0.368ch. A text of single letters and spaces ("i i i") averages 0.37ch. The spaces from U+2000 to U+200A are narrower still, and a combining mark takes no room of its own.
+- **Why no width holds it:** a line holds the cap divided by the width of its glyphs. For any cap, a run of glyphs narrower than a 1/80 share of it goes past 80.
+  - Holding 80 apostrophes would need a cap of 21ch. A real sentence would then keep about 30 characters a line in Geist (81 × 21 ÷ 56).
+  - Glyphs that take almost no room need a cap near zero.
+  - So a CSS width that holds every glyph would cut ordinary sentences into short lines, and for the narrowest glyphs no width works. 34ch is the widest whole value that holds narrow-letter words with room (126 × 34 ÷ 56 ≈ 77). At 35ch the count would be about 79: no room left.
+  - A script that measures each paragraph and narrows it to its own glyphs is not demonstrated impossible. It is not built: the store front is drawn on the server and must work without script.
+- **The equivalent we offer:** the cap is in `ch`, so a line is the narrower of the cap and the window. Narrowing the window, or zooming in, narrows every line in the same proportion (WCAG technique C20). At 320 CSS px (400% zoom), the audit counted no line over 80 in any state. Reader views and the visitor's own style sheet also work, because the words are live text with no fixed width. The creator's words are never edited to fit.
+- **Not checked:** other store fonts (Nunito, Fraunces, Playfair Display, Bricolage Grotesque, Instrument Serif) as actually served, Firefox and WebKit, real devices, people.
+
 ## Resource-page interface captures (6 November 2026)
 
 Encanto 9 adds dated captures to `/platform/store-page` and

@@ -57,6 +57,13 @@
  * characters a line at 1280 and 95–107 at 200%. Those are findings for a
  * fix, not settled by this file.
  *
+ * After the fix (min-w-11 on the title link, the cap at 34ch, the FAQ's
+ * questions under it; laid over that same build as a style sheet, not
+ * rebuilt), full and edge: no target under 44 px, real sentences at most 51
+ * characters a line, narrow-letter words at most 75. One count stays over 80:
+ * a card's row at 200%, a 79-character title beside its price badge, two
+ * boxes, not a block of text (docs/accessibility-programme.md).
+ *
  * It exits 1 when any case is flagged and 0 when none is. Automation in one
  * engine: no screen reader, no Firefox or WebKit, no real zoom or device, no
  * people. Passing it is not conformance.

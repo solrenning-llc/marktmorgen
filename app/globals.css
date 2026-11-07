@@ -2491,10 +2491,12 @@ select.st-field:not([multiple]),
   align-items: center;
   min-height: 2.75rem;
 }
-/* A line of the store front's sentences stays under 80 letters at any width (WCAG 1.4.8): the cards (li) keep the
-   grid's columns, their words are capped. 56ch held at most 78 letters a line (tests/store-front-accessibility.test.ts). */
-[data-store-layout] :where(p, dd, blockquote, figcaption) {
-  max-width: 56ch;
+/* A line of the store front's sentences, and of its questions, stays at or under 80 characters at any width (WCAG
+   1.4.8): the cards (li) keep the grid's columns, their words are capped. Counted in Chromium, 56ch let a real sentence
+   reach 81 a line and words of narrow letters (i, l, t, f, j, r) 126; at 34ch they measured 51 and 75.
+   Narrower glyphs: docs/accessibility-programme.md (tests/store-front-accessibility.test.ts). */
+[data-store-layout] :where(p, dd, blockquote, figcaption, summary) {
+  max-width: 34ch;
 }
 [data-store-layout] :where(p.text-center, .text-center > p, p.st-note) {
   margin-inline: auto;

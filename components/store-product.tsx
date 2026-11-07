@@ -1109,10 +1109,10 @@ export function pageAction(
  * picture, lead to the product's own page, where the long description is.
  */
 /**
- * A product's title on its card: a 44 px target (WCAG 2.5.5 AAA). The padding keeps the hover line under the words,
- * drawn in the content box, not at the foot of the taller box.
+ * A product's title on its card: a 44 × 44 px target (WCAG 2.5.5 AAA), wide enough even for a title of one letter.
+ * The padding keeps the hover line under the words, drawn in the content box, not at the foot of the taller box.
  */
-const TITLE_LINK = "st-title-link inline-flex min-h-11 items-center py-2.5 [background-clip:content-box] [background-origin:content-box]";
+const TITLE_LINK = "st-title-link inline-flex min-h-11 min-w-11 items-center py-2.5 [background-clip:content-box] [background-origin:content-box]";
 
 export function ProductCard({
   store,

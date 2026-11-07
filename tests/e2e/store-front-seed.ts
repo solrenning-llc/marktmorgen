@@ -13,8 +13,9 @@
  *     whose title is one letter, with no summary and no details (so no
  *     "Read more"), and text made of narrow letters (i, l, t, f, j, r) at the
  *     longest each field allows: the bio, a product's title and summary with
- *     details, and a question's answer. Narrow letters fit more characters on
- *     a line than the average a width estimate assumes (WCAG 1.4.8).
+ *     details, a question (up to MAX_FAQ_Q) and a question's answer. Narrow
+ *     letters fit more characters on a line than the average a width
+ *     estimate assumes (WCAG 1.4.8).
  *
  * Prints one JSON line at the end: the full store's product ids and the
  * segment of its first collection.
@@ -31,6 +32,7 @@ import { redisPipeline } from "@/lib/redis";
 import { collectionSegment } from "@/lib/store-collections";
 import { MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH } from "@/lib/catalog-rules";
 import { MAX_BIO_LENGTH } from "@/lib/store-field-rules";
+import { MAX_FAQ_Q } from "@/lib/store-faq";
 
 const FULL = "front-owner@example.com", EMPTY = "empty-owner@example.com", LONG = "long-owner@example.com", EDGE = "edge-owner@example.com";
 
@@ -123,7 +125,7 @@ async function main(): Promise<void> {
   const narrow = await made(EDGE, narrowText(MAX_TITLE_LENGTH), narrowText(MAX_SUMMARY_LENGTH), "7");
   await setProductAbout(EDGE, narrow, true);
   await made(EDGE, "Plain neighbor", "A product of ordinary words, so the grid has more than the two cases.", "9");
-  const faq = await setFaq(EDGE, [{ q: "Is it little?", a: narrowText(400) }]);
+  const faq = await setFaq(EDGE, [{ q: "Is it little?", a: narrowText(400) }, { q: narrowText(MAX_FAQ_Q), a: "A question at the longest a question can be." }]);
   if (!faq?.faq?.length) throw new Error("edge faq");
 
   console.log(JSON.stringify({ ids, coll: collectionSegment(collections.store.collections![0]) }));

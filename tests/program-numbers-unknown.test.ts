@@ -14,6 +14,12 @@
  * An exact empty reply is still a true empty: a program with no records
  * reads as zeros.
  *
+ * A record inside an exact reply that cannot be read (not JSON, not the
+ * record it should be, a sale whose base or share is not a number, a
+ * currency of another shape) is of an unknown shape too, never dropped or
+ * read as 0. Older records still read as before: `byCode` for `how`, and no
+ * currency for US dollars.
+ *
  * Synthetic only: the in-memory Redis stand-in with one reply at a time made
  * malformed, and a fetch stub that answers Stripe with an empty list.
  */
@@ -127,6 +133,52 @@ async function main(): Promise<void> {
     is(`a click count of ${JSON.stringify(value)}: UnknownReplyError`, await outcome(() => programNumbers(bread)), "UnknownReplyError");
     restore();
   }
+
+  part("A record inside an exact reply that cannot be read is not zero either");
+  // Findings of Claude 6 (6697008326) and Codex T (review 5807888762) on #2950:
+  // an entry that does not parse, or a sale whose base or share is not a
+  // number, was dropped or read as 0, so the directory said "0 affiliates",
+  // "$0 paid" or "1 sale earning $0".
+  const bad: [string, string, string, string][] = [
+    ["an affiliate that is not JSON", "people", "bbbbbbbbbbbb", "{not json"],
+    ["an affiliate that is not an affiliate", "people", "bbbbbbbbbbbb", JSON.stringify({ id: "bbbbbbbbbbbb" })],
+    ["a sale that is not JSON", "sales", "cs_bad", "{not json"],
+    ["a sale with no base", "sales", "cs_bad", JSON.stringify({ ref: "cs_bad", aff: "aaaaaaaaaaaa", rate: 30, how: "click", currency: "usd" })],
+    ["a sale whose base is a word", "sales", "cs_bad", JSON.stringify({ ref: "cs_bad", aff: "aaaaaaaaaaaa", base: "unconfirmed", rate: 30, how: "click", currency: "usd" })],
+    ["a sale with no share", "sales", "cs_bad", JSON.stringify({ ref: "cs_bad", aff: "aaaaaaaaaaaa", base: 2000, how: "click", currency: "usd" })],
+    ["a sale whose share is text", "sales", "cs_bad", JSON.stringify({ ref: "cs_bad", aff: "aaaaaaaaaaaa", base: 2000, rate: "30", how: "click", currency: "usd" })],
+    ["a sale whose currency is of another shape", "sales", "cs_bad", JSON.stringify({ ref: "cs_bad", aff: "aaaaaaaaaaaa", base: 2000, rate: 30, how: "click", currency: "USD" })],
+    ["a payment that is not JSON", "payouts", "p_bad", "{not json"],
+    ["a payment whose amount is text", "payouts", "p_bad", JSON.stringify({ id: "p_bad", aff: "aaaaaaaaaaaa", cents: "300", currency: "usd" })],
+    ["a payment whose currency is of another shape", "payouts", "p_bad", JSON.stringify({ id: "p_bad", aff: "aaaaaaaaaaaa", cents: 300, currency: 840 })],
+  ];
+  for (const [name, which, field, value] of bad) {
+    await redisPipeline([["HSET", `nl:aff:${sid}:${which}`, field, value]]);
+    is(`${name}: UnknownReplyError, not zeros`, await outcome(() => programNumbers(bread)), "UnknownReplyError");
+    await redisPipeline([["HDEL", `nl:aff:${sid}:${which}`, field]]);
+  }
+  is("with the bad record gone, the numbers are the records' again", await outcome(() => programNumbers(bread)), exact);
+
+  // Older records still read as they always did: a sale written before `how`
+  // (with `byCode`), and a sale or a payment written before stores had a
+  // currency, which were in US dollars.
+  await redisPipeline([
+    ["HSET", `nl:aff:${sid}:sales`, "cs_old", JSON.stringify({ ref: "cs_old", aff: "aaaaaaaaaaaa", base: 1000, rate: 30, byCode: true })],
+    ["HSET", `nl:aff:${sid}:payouts`, "p_old", JSON.stringify({ id: "p_old", aff: "aaaaaaaaaaaa", cents: 100 })],
+  ]);
+  is(
+    "an older sale by code and older records with no currency still count, in US dollars",
+    await outcome(() => programNumbers(bread)),
+    { ...exact, sales: 2, earnedCents: 900, paidCents: 400 },
+  );
+  await redisPipeline([
+    ["HDEL", `nl:aff:${sid}:sales`, "cs_old"],
+    ["HDEL", `nl:aff:${sid}:payouts`, "p_old"],
+  ]);
+
+  await redisPipeline([["DEL", "nl:dir:page"], ["HSET", `nl:aff:${sid}:payouts`, "p_bad", "{not json"]]);
+  is("the directory shows the row with a bad record without numbers", (await readDirectory()).find((r) => r.handle === "breadhouse")?.numbers, null);
+  await redisPipeline([["DEL", "nl:dir:page"], ["HDEL", `nl:aff:${sid}:payouts`, "p_bad"]]);
 
   part("The public directory: the row without numbers, never zeros");
   await redisPipeline([["DEL", "nl:dir:page"]]);

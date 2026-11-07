@@ -176,6 +176,22 @@ function parseJob(raw: unknown): Job | null {
   }
 }
 
+/** A Redis list or pipeline envelope is evidence only when every position is
+ * an own data property. Sparse or inherited cells are an unknown read, not an
+ * empty connection or a shorter activity log. */
+function exactOwnArray(value: unknown, length?: number): unknown[] | null {
+  if (!Array.isArray(value)) return null;
+  const size = Object.getOwnPropertyDescriptor(value, "length");
+  if (!size || !Object.hasOwn(size, "value") || (length !== undefined && size.value !== length)) return null;
+  const out: unknown[] = [];
+  for (let index = 0; index < size.value; index += 1) {
+    const item = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!item || !Object.hasOwn(item, "value")) return null;
+    out.push(item.value);
+  }
+  return out;
+}
+
 async function readConfig(statsId: string): Promise<Config | null> {
   const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
   return parseConfig(raw);
@@ -489,21 +505,45 @@ export type SyncView = {
     /** The last problem with the key or the audience, until a send works again. */
     problem: { message: string; at: number } | null;
   } | null;
-  log: JobView[];
+  /** Null means the settings were read exactly but the recent-send history was not. */
+  log: JobView[] | null;
 };
 
 export async function syncView(store: Store): Promise<SyncView> {
   const available = canSeal() && isRedisConfigured();
   if (!store.statsId || !isRedisConfigured()) return { available, connected: null, log: [] };
   const statsId = store.statsId;
-  const [rawConfig, rawBad, rawLog] = await redisPipeline([
+  const view = exactOwnArray(await redisPipeline([
     ["GET", cfgKey(statsId)],
     ["GET", badKey(statsId)],
     ["LRANGE", logKey(statsId), 0, LOG_SIZE - 1],
-  ]);
+  ]), 3);
+  if (!view) throw new Error("The email platform view is unavailable");
+  const [rawConfig, rawBad, rawLog] = view;
   const config = parseConfig(rawConfig);
-  const ids = Array.isArray(rawLog) ? (rawLog as unknown[]).map(String).filter((id) => JOB_ID.test(id)) : [];
-  const jobs = ids.length ? await redisPipeline(ids.map((id) => ["GET", jobKey(id)])) : [];
+  const log = exactOwnArray(rawLog);
+  let parsedJobs: Job[] | null = null;
+  if (log && log.every((id) => typeof id === "string" && JOB_ID.test(id))) {
+    const ids = log as string[];
+    const jobs = ids.length ? exactOwnArray(await redisPipeline(ids.map((id) => ["GET", jobKey(id)])), ids.length) : [];
+    if (jobs) {
+      const parsed: Job[] = [];
+      let unread = false;
+      for (const raw of jobs) {
+        // Job records expire after seven days while their ids may remain in
+        // the bounded log. A missing GET is therefore known absence, not a
+        // broken batch; every present value must still be complete.
+        if (raw === null) continue;
+        const job = parseJob(raw);
+        if (!job) {
+          unread = true;
+          break;
+        }
+        parsed.push(job);
+      }
+      if (!unread) parsedJobs = parsed;
+    }
+  }
   let problem: { message: string; at: number } | null = null;
   try {
     const value = typeof rawBad === "string" ? (JSON.parse(rawBad) as { message?: unknown; at?: unknown }) : null;
@@ -531,10 +571,7 @@ export async function syncView(store: Store): Promise<SyncView> {
           problem,
         }
       : null,
-    log: jobs
-      .map(parseJob)
-      .filter((job): job is Job => job !== null)
-      .map((job) => ({
+    log: parsedJobs?.map((job) => ({
         id: job.id,
         email: job.email,
         title: job.title,
@@ -546,7 +583,7 @@ export async function syncView(store: Store): Promise<SyncView> {
         note: job.note,
         lastAt: job.lastAt,
         createdAt: job.createdAt,
-      })),
+      })) ?? null,
   };
 }
 
@@ -720,7 +757,13 @@ export async function forgetStoreSync(statsId: string | null): Promise<void> {
 /** Forgets the platform and its key. Anything still waiting to be sent fails at its next try. */
 export async function disconnect(store: Store): Promise<SyncView> {
   if (store.statsId) await writeConfig(store, null);
-  return syncView(store);
+  try {
+    return await syncView(store);
+  } catch {
+    // The key is already gone. A failed follow-up read must not turn a
+    // completed privacy action into a reported failure.
+    return { available: canSeal() && isRedisConfigured(), connected: null, log: null };
+  }
 }
 
 /**

@@ -70,7 +70,9 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, working: result.ok, message: result.message, view: result.view });
     }
     if (action === "disconnect") {
-      const before = (await syncView(store)).connected;
+      // Reading the label for the courtesy notice is not a precondition for
+      // forgetting the key and stopping future buyer-data sends.
+      const before = await syncView(store).then((view) => view.connected).catch(() => null);
       const view = await disconnect(store);
       if (before) after(() => noticeCreator(store, { kind: "email-platform-removed", name: PROVIDER_NAMES[before.provider] }));
       return Response.json({ ok: true, view });

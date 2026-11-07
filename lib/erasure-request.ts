@@ -34,7 +34,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
-import { type Store, storeForHandle, storeForId } from "@/lib/store";
+import { type Store, storeForHandleExact, storeForId } from "@/lib/store";
 import { leadsKey } from "@/lib/contacts";
 import { storesKnownFor } from "@/lib/buyer-library";
 import { erasePerson } from "@/lib/person-erasure";
@@ -108,7 +108,10 @@ export async function requestErasureLink(input: { email: string; ip: string; ori
  *
  * Asked from one store, that store's room is read before whether it knows the
  * address, so a full store answers "full" (with the day it opens again) for
- * every address; the request already names the store.
+ * every address; the request already names the store. A store that could not
+ * be read, or answered in an unknown shape, throws to the route, which answers
+ * "error": that says only that the store could not be read, nothing about the
+ * address, and never "sent" for a request that went nowhere (rule 24).
  *
  * Asked for every store, the email is taken from the share of the first of the
  * stores that know the address with room for a visitor's address (askedRoom),
@@ -116,7 +119,10 @@ export async function requestErasureLink(input: { email: string; ip: string; ori
  * is always "sent": "full" or "error" would only ever come to an address some
  * store knows, so after a stranger spent one store's share they would tell who
  * buys there (review C4-7). The page that answer opens always gives the
- * published privacy contact, for a link that does not arrive.
+ * published privacy contact, for a link that does not arrive. A store that
+ * could not be read is never dropped without a word: the link says how many
+ * stores it could not include, and when none could be read the failure goes
+ * to the server's log.
  */
 export async function askErasureLink(input: { email: string; ip: string; origin: string; handle?: string }): Promise<EraseAnswer> {
   const raw = input.email.trim();
@@ -126,7 +132,8 @@ export async function askErasureLink(input: { email: string; ip: string; origin:
   if (!(await withinLimit("erase-ip", input.ip, ERASE_ASKS_PER_IP_HOUR, 3_600))) return { status: "limited" };
   if (!(await withinLimit("erase-address", sha(email), ERASE_ASKS_PER_ADDRESS_HOUR, 3_600))) return { status: "limited" };
   if (input.handle) {
-    const store = await storeForHandle(input.handle).catch(() => null);
+    // Exact read: null only for a store that truly is not there; anything unknown throws to the route ("error").
+    const store = await storeForHandleExact(input.handle);
     if (store?.sid) {
       // The store's room is read before anything about the address: "full" comes to every address alike.
       const room = await askedRoom(store);
@@ -146,13 +153,22 @@ export async function askErasureLink(input: { email: string; ip: string; origin:
   // Every store: which stores know the address, and the email, only after the answer, for the same reason.
   afterAnswer(async () => {
     const stores: Store[] = [];
+    // A store whose read failed is left out of the link, and the link says so: never dropped without a word.
+    let unread = 0;
     for (const sid of (await storesKnownFor(email)).slice(0, MAX_ERASE_STORES)) {
-      const store = await storeForId(sid).catch(() => null);
+      const store = await storeForId(sid).catch((error: unknown) => {
+        console.error(`a store asked for in a deletion request could not be read (store ${sid})`, error);
+        unread += 1;
+        return null;
+      });
       if (store?.sid) stores.push(store);
     }
-    if (!stores.length) return;
-    const answer = await emailLink(stores, email, input.origin);
-    if (answer.status !== "sent") console.warn(`a deletion link asked for every store was not emailed: ${answer.status} (stores ${stores.map((s) => s.sid).join(",")})`);
+    if (!stores.length) {
+      if (unread) throw new Error(`${unread} ${unread === 1 ? "store" : "stores"} that know the address could not be read, so no deletion link was emailed`);
+      return;
+    }
+    const answer = await emailLink(stores, email, input.origin, unread);
+    if (answer.status !== "sent") console.warn(`a deletion link asked for every store was not emailed: ${answer.status} (stores ${stores.map((s) => s.sid).join(",")}; ${unread} not read)`);
   });
   return { status: "sent" };
 }
@@ -176,9 +192,11 @@ function afterAnswer(task: () => Promise<void>): void {
 /**
  * Emails the link from the first of these stores with room for a visitor's
  * address: "sent", "full" (none had room, with the soonest day one opens
- * again) or "error" (the sender failed).
+ * again) or "error" (the sender failed). `unread`: how many other stores that
+ * know the address could not be read now, said in the email so the person
+ * knows to ask again.
  */
-async function emailLink(stores: Store[], email: string, origin: string): Promise<EraseAnswer> {
+async function emailLink(stores: Store[], email: string, origin: string, unread = 0): Promise<EraseAnswer> {
   const token = randomBytes(32).toString("hex");
   const grant: Grant = { e: email, s: stores.map((s) => s.sid) };
   await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", ERASE_LINK_SECONDS]]);
@@ -194,6 +212,15 @@ async function emailLink(stores: Store[], email: string, origin: string): Promis
     `${origin}/privacy/delete?token=${token}`,
     "",
     "Nothing is deleted until you press the button on that page. If you did not ask for this, ignore this email: nobody can delete your data without it.",
+    ...(unread > 0
+      ? [
+          "",
+          unread === 1
+            ? "1 other store could not be checked just now, so this link does not delete your data from it. Ask again later to include it:"
+            : `${unread} other stores could not be checked just now, so this link does not delete your data from them. Ask again later to include them:`,
+          `${origin}/privacy/delete`,
+        ]
+      : []),
   ].join("\n");
   let full = false;
   let opens = 0;

@@ -145,6 +145,19 @@ async function main(): Promise<void> {
   pages.set("/invoices", Array.from({ length: 10 }, (_, i) => ({ object: "list", data: [{ ...invoice(`in_RenewCap${i}`, "sub_None"), billing_reason: "manual" }], has_more: true })));
   is("more pages than the cap fails, never 'no renewals'", await outcome(() => sendRenewals(store, NOW)), "threw");
   is("nothing sent to the platforms for a page that was not read", sentTo.filter((id) => id.startsWith("in_RenewCap")), []);
+  // A pass whose deadline has gone asks no page after the first (Claude 2, review 6707563715 on #3054):
+  // it fails as a page not read does, and the sweep tries again next pass.
+  pages.set("/invoices", [
+    { object: "list", data: [invoice("in_RenewLate1", "sub_Renew0001")], has_more: true },
+    { object: "list", data: [invoice("in_RenewLate2", "sub_Renew0002")], has_more: true },
+    { object: "list", data: [invoice("in_RenewLate3", "sub_Renew0002")], has_more: false },
+  ]);
+  asked.length = 0;
+  sentTo.length = 0;
+  is("past the pass's deadline, more pages than one fails, never 'no renewals'", await outcome(() => sendRenewals(store, NOW, Date.now() - 1)), "threw");
+  is("past the pass's deadline, no page after the first is asked", asked.filter((a) => a.startsWith("/invoices")).length, 1);
+  is("past the pass's deadline, nothing is sent", sentTo.filter((id) => id.startsWith("in_RenewLate")), []);
+  pages.delete("/invoices");
 
   done();
 }

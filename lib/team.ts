@@ -41,7 +41,7 @@ import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
-import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
+import { type Store, STORE_ID_PATTERN, storeForId, storeForIdExact } from "@/lib/store";
 import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, parseTeamRole } from "@/lib/team-roles";
 
 /** People on one store's team, invitations still waiting included. */
@@ -539,11 +539,8 @@ export async function removeMember(store: Store, email: string, options: { repea
 }
 
 /**
- * What an invitation is for, read without spending it, so the page the link
- * opens can say which store and which role before anything happens.
- */
-/**
- * The invitation behind a link, or null when it no longer works. The link's GET in any other shape is unknown and
+ * What an invitation is for, read without spending it, so the page the link opens can say which store and which
+ * role before anything happens: null when it no longer works. The link's GET in any other shape is unknown and
  * throws UnknownReplyError, and a read behind it that fails (the store, the team) throws too: never "no longer
  * works" for what could not be read (CX-123 rule 24).
  */
@@ -562,7 +559,8 @@ export async function peekInvite(token: string): Promise<{ store: Store; email: 
   }
   const role = parseTeamRole(claim?.role);
   if (typeof claim?.sid !== "string" || typeof claim.email !== "string" || !role) return null;
-  const store = await storeForId(claim.sid);
+  // The store read exactly (Claude 6 on #2969): only one confirmed not there is "no longer works".
+  const store = await storeForIdExact(claim.sid);
   if (!store) return null;
   const team = await readTeam(store.sid);
   if (!team.invites.some((i) => i.id === claim.id)) return null;

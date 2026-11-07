@@ -271,7 +271,8 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                   <p className="st-muted mt-4 leading-relaxed">{words.everythingSold(store.name)}</p>
                   {opensDiscord ? (
                     <div className="mt-7 rounded-2xl p-5" style={{ border: "1px solid var(--st-line)" }}>
-                      <p className="font-semibold">Discord</p>
+                      {/* A heading beside the purchases, so the list is walked heading by heading (WCAG 2.4.10). */}
+                      <h2 className="font-semibold">Discord</h2>
                       <p className="st-muted mt-1 text-sm">{dw.ordersNote}</p>
                       <form action="/api/store/discord/join" method="post">
                         <input type="hidden" name="handle" value={store.handle} />
@@ -456,6 +457,7 @@ async function BundleView({ store, token, asked }: { store: Store; token: string
             storeName={store.name}
             heading={words.insideTitle(answer.value.title)}
             showHeading={false}
+            titleAs="h2"
             missing={answer.value.missing ? 1 : 0}
             words={{ ...shared.words.bundle, missing: answer.value.missing }}
             lines={answer.value.lines.map((line) => ({

@@ -1057,6 +1057,9 @@ test("without JavaScript, each language describes only the purchases on the curr
     assert.ok(await setLanguage(OWNER, language));
     const batch = renderToStaticMarkup(await pageTree((await storeForEmail(OWNER))!, { token, older: checkouts[checked].id as string }));
     assert.equal(listed(batch).length, 3, language);
+    // WCAG 2.4.10: the batch's own page is its h1, then each purchase an h2 under it, with no level skipped.
+    const headings = [...batch.matchAll(/<h([1-6])[^>]*>([^<]*)<\/h\1>/g)].map((m) => `h${m[1]}:${m[2]}`);
+    assert.deepEqual(headings, [`h1:${ordersWords(language).olderTitle}`, ...listed(batch).map((title) => `h2:${title}`)], `${language}: ${headings.join(" | ")}`);
     assert.ok(batch.includes(expected[language]), `${language}: the page must describe this batch, not additions to a list on another page`);
     assert.ok(!batch.includes(ordersWords(language).olderShown(3)), `${language}: the accumulated-list status belongs only to the JavaScript view`);
   }

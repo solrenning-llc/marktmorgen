@@ -23,9 +23,9 @@ import { redisPipeline } from "@/lib/redis";
 import type { DataStore } from "@/lib/store-data";
 import { TRACE_ENTRY, traceKey } from "@/lib/community-trace";
 import { SET_TAKE_COUNT } from "@/lib/redis-take";
-import { exactReplies, replyCount } from "@/lib/redis-exact";
+import { UnknownReply, exactReplies, replyCount } from "@/lib/redis-exact";
 import { giveData } from "@/lib/store-data";
-import { forgetMemberRecord, readConfig } from "@/lib/community";
+import { forgetMemberRecord, readConfig, readMemberRecord } from "@/lib/community";
 import { forgetHandle } from "@/lib/community-mentions";
 import { forgetCommunityUnsub } from "@/lib/community-mail";
 import { forgetPointsPerson } from "@/lib/community-points";
@@ -46,10 +46,20 @@ import { unindexMember } from "@/lib/community-index";
  */
 export async function forgetCommunityPerson(id: string, who: string, email: string, productIds: string[], room?: DataStore): Promise<number> {
   const config = await readConfig(id).catch(() => null);
-  const member = await forgetMemberRecord(id, who, room);
-  let records = member ? 1 : 0;
-  if (member?.h) records += await forgetHandle(id, member.h, who);
-  if (member?.t) records += await forgetCommunityUnsub(member.t);
+  // The record is read first and taken last: what it names elsewhere (their handle, their unsubscribe token, whose
+  // record holds their address) goes while it can still be found by it, so a step that fails leaves the record for
+  // the next try (Claude 5 on #2576).
+  let records = 0;
+  let gone = false;
+  for (let tries = 0; tries < 3 && !gone; tries += 1) {
+    const read = await readMemberRecord(id, who);
+    const member = read?.member ?? null;
+    if (member?.h) records += await forgetHandle(id, member.h, who);
+    if (member?.t) records += await forgetCommunityUnsub(member.t);
+    gone = await forgetMemberRecord(id, who, read?.raw ?? null, room);
+    if (gone && read) records += 1;
+  }
+  if (!gone) throw new UnknownReply("a member's record that kept changing while it was deleted");
   await unindexMember(id, who);
   // Their trace (lib/community-trace.ts): what they wrote and did, by
   // reference; counted and deleted in one step, each entry's room given back once.

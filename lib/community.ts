@@ -47,7 +47,8 @@ import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataOwner, fieldReleaseBytes, orderWrite, releaseOrderData } from "@/lib/order-data";
-import { HASH_TAKE_FIELD } from "@/lib/redis-take";
+import { HASH_DEL_IF } from "@/lib/redis-take";
+import { UnknownReply, exactReplies, replyCount } from "@/lib/redis-exact";
 import { normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
 import {
@@ -1155,19 +1156,42 @@ export async function dropSpace(id: string, space: string): Promise<void> {
 }
 
 /**
+ * One member's own record as it is now, read exactly, for deleting them (lib/community-erasure.ts): its value, or null
+ * when there is none. Anything Redis did not answer whole is UnknownReply, never "no member", so the person is not
+ * reported deleted with the record kept (Claude 5 on #2576).
+ */
+export async function readMemberRecord(id: string, who: string): Promise<{ raw: string; member: Member | null } | null> {
+  if (!isRedisConfigured()) return null;
+  const [raw] = exactReplies(await redisPipeline([["HGET", membersKey(id), who]]), 1, "a member's record read");
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReply("a member's record read");
+  return { raw, member: parseMember(raw) };
+}
+
+/**
  * Deletes one member's own record (lib/community-erasure.ts): who they are,
  * their name and answers, their place in the directory, and the counts kept
- * for their limits. Answers the record as it was, for the keys it names
- * elsewhere (their handle, their unsubscribe token), or null.
+ * for their limits. Taken LAST, after what it names elsewhere (their handle,
+ * their unsubscribe token) is gone, and only while it still holds the value
+ * read (`raw`, from readMemberRecord): a step that fails before it leaves the
+ * record for the next try to find those keys by (Claude 5 on #2576). Answers
+ * true when this call deleted it, false when it changed in between (read it
+ * again); an answer that is not exact is UnknownReply, and gives no room back.
  */
-export async function forgetMemberRecord(id: string, who: string, room?: DataStore): Promise<Member | null> {
-  if (!isRedisConfigured()) return null;
-  // Read and deleted in one step: two deletions at once give its room back once.
-  const [raw] = await redisPipeline([
-    ["EVAL", HASH_TAKE_FIELD, 1, membersKey(id), who],
+export async function forgetMemberRecord(id: string, who: string, raw: string | null, room?: DataStore): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  const commands: (string | number)[][] = [
     ["ZREM", dirKey(id), who],
     ["DEL", ...(Object.keys(RATE_LIMITS) as RateKind[]).map((kind) => rateKey(id, who, kind))],
-  ]);
+  ];
+  if (raw !== null) commands.push(["EVAL", HASH_DEL_IF, 1, membersKey(id), who, raw]);
+  const replies = exactReplies(await redisPipeline(commands), commands.length, "a member's record deletion");
+  replyCount(replies[0], "a member's record deletion");
+  replyCount(replies[1], "a member's record deletion");
+  if (raw === null) return true;
+  const taken = replyCount(replies[2], "a member's record deletion");
+  if (taken === 0) return false;
+  if (taken !== 1) throw new UnknownReply("a member's record deletion");
   const member = parseMember(raw);
   // A record made by an order gives back its first write to the orders' part
   // and what it grew by, its name's words and handle with it, to the members'
@@ -1178,7 +1202,7 @@ export async function forgetMemberRecord(id: string, who: string, room?: DataSto
     await releaseOrderData(room, fieldReleaseBytes(who, JSON.stringify(first)));
     if (grown > 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: grown }]);
   }
-  return member;
+  return true;
 }
 
 /** Commands sent at once while reading a whole community for one member's copy. */

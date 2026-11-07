@@ -44,8 +44,12 @@ export function exactReplies(replies: unknown, count: number, what: string): unk
   return list;
 }
 
-/** A count Redis answered (DEL, HDEL, SREM and the like): a whole number from zero, or UnknownReply. */
+/**
+ * A count Redis answered (DEL, HDEL, SREM and the like): a safe whole number from zero, or UnknownReply. A number past
+ * the safe integers (2^53 and up) is not a count Redis could mean, and multiplied into room given back it would empty
+ * a slot (Codex G on #2576).
+ */
 export function replyCount(raw: unknown, what: string): number {
-  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 0) throw new UnknownReply(what);
+  if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 0) throw new UnknownReply(what);
   return raw;
 }

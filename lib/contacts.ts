@@ -41,7 +41,7 @@ import { joinedCommands } from "@/lib/joined-stores";
 import { DataRoomError, type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { fieldReleaseBytes, orderWrite, releaseOrderData } from "@/lib/order-data";
 import { DATA_STEP_BYTES, dataBytes, utf8Length } from "@/lib/store-data-rules";
-import { HASH_TAKE_FIELD } from "@/lib/redis-take";
+import { UnknownReply, exactReplies, replyCount } from "@/lib/redis-exact";
 
 /** How many product names one address keeps. */
 const MAX_TITLES = 20;
@@ -1048,19 +1048,47 @@ return 0`;
 export async function forgetContactPerson(listId: string | null, rawEmail: string, room?: DataStore): Promise<number> {
   if (!listId || !isRedisConfigured()) return 0;
   const email = normaliseEmail(rawEmail);
-  // Read and deleted in one step: two deletions at once give its room back once.
-  const [raw] = await redisPipeline([["EVAL", HASH_TAKE_FIELD, 1, leadsKey(listId), email]]);
-  if (typeof raw !== "string") return 0;
-  const contact = parseContact(raw);
-  if (!contact) return 1;
-  const commands: (string | number)[][] = [];
-  if (contact.t) commands.push(["DEL", tokenKey(contact.t)]);
-  if (contact.agreed) commands.push(["EVAL", DECR_TO_ZERO, 1, agreedKey(listId)]);
-  if (contact.agreed && contact.unsub) commands.push(["EVAL", DECR_TO_ZERO, 1, unsubKey(listId)]);
-  if (commands.length) await redisPipeline(commands);
-  // Its room goes back where it was taken (Contact.r); one written before that
-  // was recorded is not known to be in either place, and stays counted.
-  if (room && contact.r === "c") await giveData(room, [{ slot: CONTACTS_SLOT, bytes: contactBytes(contact) }]);
-  if (room && contact.r === "o") await releaseOrderData(room, fieldReleaseBytes(email, countedJson(contact)));
-  return contact.t ? 2 : 1;
+  for (let tries = 0; tries < 3; tries += 1) {
+    const [raw] = exactReplies(await redisPipeline([["HGET", leadsKey(listId), email]]), 1, "a contact's read");
+    if (raw === null) return 0;
+    if (typeof raw !== "string") throw new UnknownReply("a contact's read");
+    const contact = parseContact(raw);
+    // The row and its counts (CONTACT_FORGET, only while the row is still the one read) and its unsubscribe token,
+    // whose record holds the plain address, go in ONE request: a failed request leaves the row for the next try to
+    // find the token by, so the token is never left behind a deleted row (Claude 5 on #2576). The token goes even
+    // when the row changed in between: the person is being deleted, and the next try takes the row.
+    const commands: (string | number)[][] = [
+      ["EVAL", CONTACT_FORGET, 3, leadsKey(listId), agreedKey(listId), unsubKey(listId), email, raw, contact?.agreed ? "1" : "0", contact?.agreed && contact.unsub ? "1" : "0"],
+    ];
+    if (contact?.t) commands.push(["DEL", tokenKey(contact.t)]);
+    const replies = exactReplies(await redisPipeline(commands), commands.length, "a contact's deletion");
+    if (contact?.t) replyCount(replies[1], "a contact's token deletion");
+    const done = replies[0];
+    if (done === 0) continue;
+    if (done !== 1) throw new UnknownReply("a contact's deletion");
+    if (!contact) return 1;
+    // Its room goes back where it was taken (Contact.r); one written before that
+    // was recorded is not known to be in either place, and stays counted.
+    if (room && contact.r === "c") await giveData(room, [{ slot: CONTACTS_SLOT, bytes: contactBytes(contact) }]);
+    if (room && contact.r === "o") await releaseOrderData(room, fieldReleaseBytes(email, countedJson(contact)));
+    return contact.t ? 2 : 1;
+  }
+  throw new UnknownReply("a contact that kept changing while it was deleted");
 }
+
+/**
+ * Deletes a contact's row (KEYS[1] field ARGV[1]) only while it still holds the value read (ARGV[2]), and in the same
+ * step its place in the agreed and unsubscribed counts (KEYS[2], KEYS[3], when ARGV[3] and ARGV[4] are "1"), never
+ * below zero, so a row is never uncounted twice. 1 when deleted, 0 when the row changed. Modelled by
+ * lib/redis-memory.ts.
+ */
+export const CONTACT_FORGET = `-- marktmorgen:contact-forget:v1
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+redis.call("HDEL", KEYS[1], ARGV[1])
+local function down(key)
+  local n = tonumber(redis.call("GET", key) or "0") or 0
+  if n > 0 then redis.call("DECR", key) end
+end
+if ARGV[3] == "1" then down(KEYS[2]) end
+if ARGV[4] == "1" then down(KEYS[3]) end
+return 1`;

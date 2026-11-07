@@ -146,11 +146,18 @@ export async function joinWaitlist(input: {
       if (!(await takeData(store, [{ slot: waitSlot(product.id), bytes: taken }])).ok) return "full";
       await links(t);
       const [added] = await redisPipeline([["HSETNX", listKey(sid, product.id), email, value]]);
-      if (Number(added) === 1) {
+      if (added === 1) {
         leave = t;
         break;
       }
-      // Another request wrote it first: this one's room and its unused link to leave go, and it asks again.
+      if (added !== 0) {
+        // Not known whether it was written: its room stays taken, since the place may be there (Claude 5 on #2576),
+        // and it reads again. Written, the place is found as it is and kept; not written, its links go and it fails.
+        lastLink = t;
+        mustExist = true;
+        continue;
+      }
+      // Another request wrote it first (an exact 0): this one's room and its unused link to leave go, and it asks again.
       await giveData(store, [{ slot: waitSlot(product.id), bytes: taken }]);
       await redisPipeline([["DEL", tokenKey(t)]]);
       mustExist = true;
@@ -165,10 +172,16 @@ export async function joinWaitlist(input: {
     await links(t);
     lastLink = t;
     const [swapped] = await redisPipeline([["EVAL", HASH_SWAP_IF, 1, listKey(sid, product.id), email, existing, value]]);
-    if (Number(swapped) === 1) {
+    if (swapped === 1) {
       await settleEntry(store, sid, product.id, email, existing, value);
       leave = t;
       break;
+    }
+    if (swapped !== 0) {
+      // Not known whether it was written: what it would grow by is counted, never given back, and it reads again.
+      await noteGrowth(store, sid, product.id, email, existing, value);
+      mustExist = true;
+      continue;
     }
     if (!before) await redisPipeline([["DEL", tokenKey(t)]]);
     mustExist = true;
@@ -244,7 +257,11 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
     }
     const next = JSON.stringify({ ...read, ok: now() });
     const [swapped] = await redisPipeline([["EVAL", HASH_SWAP_IF, 1, listKey(grant.s, grant.p), grant.e, raw as string, next]]);
-    if (Number(swapped) !== 1) continue;
+    if (swapped !== 1) {
+      // Not known whether it was written (not an exact 0): what it would grow by is counted, never given back.
+      if (swapped !== 0) await noteGrowth(store, grant.s, grant.p, grant.e, raw as string, next);
+      continue;
+    }
     await settleEntry(store, grant.s, grant.p, grant.e, raw as string, next);
     entry = read;
   }
@@ -310,6 +327,12 @@ async function takeList(room: DataStore, sid: string, productId: string, at = Da
  * boxes checked), as it is and never refused, so the room always holds what
  * each place weighs and a deletion gives back exactly that.
  */
+/** A change of a place that may or may not have been written: its growth is counted, a shrink is never given back. */
+async function noteGrowth(store: DataStore, sid: string, productId: string, email: string, before: string, after: string): Promise<void> {
+  const grown = placeBytes(sid, productId, email, after) - placeBytes(sid, productId, email, before);
+  if (grown > 0) await noteData(store, [{ slot: waitSlot(productId), bytes: grown }]);
+}
+
 async function settleEntry(store: DataStore, sid: string, productId: string, email: string, before: string, after: string): Promise<void> {
   // Its link to leave too: a place that could not be read held none counted.
   const grown = placeBytes(sid, productId, email, after) - placeBytes(sid, productId, email, before);
@@ -391,6 +414,9 @@ export async function launch(store: Store, product: Listing, input: { note: unkn
   if (rawJob !== null && (typeof rawJob !== "string" || !parseJob(rawJob))) throw new UnknownReply("a launch's job");
   const pairs = plainList(rawList);
   if (!pairs || pairs.length % 2 !== 0 || pairs.some((value) => typeof value !== "string")) throw new UnknownReply("a launch's waitlist");
+  // Every place must read as one: a value that is not a place ("{cut", "{}") is not "not waiting", or the launch would
+  // delete a list it could not read whole (Codex G on #2576).
+  for (let i = 1; i < pairs.length; i += 2) if (!parseEntry(pairs[i])) throw new UnknownReply("a launch's waitlist");
   const running = parseJob(rawJob);
   if (running && !running.finished) return { ok: false, reason: "busy" };
   const confirmed = entriesOf(pairs).filter(([, e]) => e.ok > 0).map(([email]) => email).sort();

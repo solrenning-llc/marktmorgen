@@ -77,6 +77,16 @@ export function stringList(reply: unknown): string[] | null {
   return slots as string[];
 }
 
+/**
+ * A list of any members (an EVAL that answers a list of numbers), as a fresh
+ * plain list read from the reply's own data slots, or null: a Proxy, a hole,
+ * an inherited member or a getter is refused (ownSlots). The caller checks
+ * each member's shape.
+ */
+export function replyList(reply: unknown): unknown[] | null {
+  return ownSlots(reply);
+}
+
 /** A count (DEL, EXISTS, SCARD, HLEN, an EVAL that answers one): a whole number from zero up, or null. */
 export function countOf(reply: unknown): number | null {
   return typeof reply === "number" && Number.isSafeInteger(reply) && reply >= 0 ? reply : null;

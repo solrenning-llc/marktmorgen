@@ -258,7 +258,7 @@ export function CartButton({
   const retry = (
     <button
       type="button"
-      className="btn st-btn-ghost btn-sm min-h-11 min-w-11"
+      className="btn st-btn-ghost btn-sm inline-flex min-h-11 min-w-11 items-center justify-center"
       aria-disabled={busy}
       aria-busy={busy}
       onClick={() => {

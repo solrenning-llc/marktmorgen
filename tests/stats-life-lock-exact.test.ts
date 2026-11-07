@@ -23,6 +23,9 @@ let recordReply: unknown = "real";
 let recordTarget = "";
 let recordAt = 0;
 let recordSeen = 0;
+/** How the fill's read of the kept days (its HGETALLs of each day, then a PFCOUNT each) is answered: "real", or a function of the real replies. */
+let daysReply: "real" | ((real: unknown[]) => unknown) = "real";
+let daysTarget = "";
 const pipeline = redis.pipeline.bind(redis);
 const shaped = (real: unknown[], at: number, how: unknown): unknown[] => {
   if (how === "throw") throw new Error("synthetic: connection reset");
@@ -31,6 +34,14 @@ const shaped = (real: unknown[], at: number, how: unknown): unknown[] => {
 };
 redis.pipeline = (async (commands: (string | number)[][]) => {
   const real = await pipeline(commands);
+  // The fill's read only: every day's HGETALL, then every day's single-key PFCOUNT (readStats' own read adds
+  // multi-key PFCOUNTs for its windows, and is never answered oddly here).
+  const half = commands.length / 2;
+  const fillRead = commands.length > 2 && Number.isInteger(half) &&
+    commands.every((c, i) => c.length === 2 && c[0] === (i < half ? "HGETALL" : "PFCOUNT") && String(c[1]).startsWith(`nl:stats:${daysTarget}:`));
+  if (daysReply !== "real" && fillRead) {
+    return daysReply(real) as unknown[];
+  }
   if (commands.length === 1 && commands[0][0] === "HGETALL" && commands[0][1] === recordTarget && recordReply !== "real") {
     recordSeen += 1;
     if (recordSeen > recordAt) return shaped(real, 0, recordReply);
@@ -49,6 +60,8 @@ const reset = () => {
   recordTarget = "";
   recordAt = 0;
   recordSeen = 0;
+  daysReply = "real";
+  daysTarget = "";
 };
 
 const NOW = Date.UTC(2026, 10, 6, 12);
@@ -164,6 +177,32 @@ async function main(): Promise<void> {
     is(`${label}: filled once`, await life(id), { filled: true, direct: 5 });
     is(`${label}: not given from a guess`, got?.life ?? null, null);
     is(`${label}: the next read gives it, counted once`, (await readStats(storeOf(id), NOW))?.life?.views, 5);
+  }
+
+  // Review of #2905 (Claude 5, MEDIUM, rule 30): the fill read the kept days loosely, so an answer in another shape
+  // made every day empty and its visitors 0, and the record was still marked filled: those views were gone for good.
+  const DAYS_ODD: [string, (real: unknown[]) => unknown][] = [
+    ["a number", () => 7],
+    ["a string", () => "x"],
+    ["an object", () => ({ 0: [] })],
+    ["a short pipeline", (real) => real.slice(0, -1)],
+    ["a day answered as an odd-length list", (real) => real.map((r, i) => (i === real.length / 2 - 1 ? ["r:direct"] : r))],
+    ["a day holding a count that is not a whole number", (real) => real.map((r, i) => (i === real.length / 2 - 1 ? ["r:direct", "five"] : r))],
+    ["a visitor count answered as text", (real) => real.map((r, i) => (i === real.length - 1 ? "3" : r))],
+    ["the request failed", () => { throw new Error("synthetic: connection reset"); }],
+  ];
+  part("the kept days answered oddly: the record is never marked filled without them, and the next read fills it once");
+  for (const [label, odd] of DAYS_ODD) {
+    const id = `lifedays${DAYS_ODD.findIndex(([l]) => l === label)}`;
+    await seed(id);
+    daysTarget = id;
+    daysReply = odd;
+    const got = await readStats(storeOf(id), NOW);
+    reset();
+    is(`${label}: the record is not marked filled without the 5 kept views`, await life(id), { filled: false, direct: 0 });
+    is(`${label}: no all-time record from a guess this time`, got?.life ?? null, null);
+    is(`${label}: no lock left taken`, (await pipeline([["GET", lockKey(id)]]))[0], null);
+    is(`${label}: the next read fills it once`, [await (async () => (await readStats(storeOf(id), NOW))?.life?.views)(), await life(id)], [5, { filled: true, direct: 5 }]);
   }
 
   part("confirmed absence: a store with no record yet is filled once, and its lock let go by its own value");

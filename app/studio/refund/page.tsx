@@ -88,7 +88,8 @@ export default async function StudioRefundPage({ searchParams }: Params) {
   const refusal = reading && !owed && reading.refund.kind !== "guarantee" && reading.refund.kind !== "unstarted_months" ? refusalWords({ refund: reading.refund }) : null;
   const amount = owed ? moneyOf(owed.refund.cents, owed.currency) : "";
   const offer = owner && !finished && !underway && !withdrawn;
-  // Inside the 14 days from the plan payment, or while the payment cannot be read (never hidden on a guess).
+  // Inside the 14 days from the plan payment, or while Stripe could not be read at all (never hidden on a guess); an
+  // "unknown" from the account's own data is shown as the refusal above, which sends the creator to support.
   const withdrawWindow = offer && subscription ? planWithdrawWindow(shown ? reading : null) : null;
   const withdrawOpen = withdrawWindow?.open === true ? withdrawWindow : null;
   const resend = withdrawn !== null && !withdrawn.sent && withdrawn.tries < PLAN_WITHDRAW_ACK_SENDS;
@@ -113,7 +114,7 @@ export default async function StudioRefundPage({ searchParams }: Params) {
         <p id="withdraw-email-hint" className="field-hint mt-1">{W.emailHint}</p>
         <EmailField id="withdraw-email" name="email" className="field mt-2" wrapClassName="max-w-md" required autoComplete="email" defaultValue={ownerEmail} describedBy="withdraw-email-hint" store={false} />
       </div>
-      <button type="submit" className="btn btn-primary min-h-[44px]">{W.confirm}</button>
+      <button type="submit" className="btn btn-primary inline-flex min-h-[44px] items-center justify-center">{W.confirm}</button>
     </form>
   );
 
@@ -132,7 +133,7 @@ export default async function StudioRefundPage({ searchParams }: Params) {
           <div className="card max-w-2xl p-6 sm:p-8">
             <h1 className="text-2xl font-semibold tracking-[-0.02em] text-ink sm:text-3xl">{`Refund your payment for ${name}`}</h1>
             {withdrawOpen ? (
-              <p className="mt-4"><a href="#withdraw" className="btn btn-secondary min-h-[44px]" data-withdraw-link="">{W.link}</a></p>
+              <p className="mt-4"><a href="#withdraw" className="btn btn-secondary inline-flex min-h-[44px] items-center justify-center" data-withdraw-link="">{W.link}</a></p>
             ) : null}
             {notice ? (
               <div className={`mt-5 notice ${notice.tone === "success" ? "notice-success" : "notice-warn"}`} role="status" data-refund-done={done ? (owner ? query.done : "owner") : "busy"}>
@@ -197,7 +198,7 @@ export default async function StudioRefundPage({ searchParams }: Params) {
                   <>
                     <p className="mt-3 text-ink">{W.lead(planName)}</p>
                     <p className="mt-2 text-ink-soft">{withdrawOpen.until === null ? W.noEnd : W.until(momentOf(withdrawOpen.until * 1000))}</p>
-                    <p className="mt-2 text-ink-soft">{W.next}</p>
+                    <p className="mt-2 text-ink-soft">{reading?.refund.kind === "guarantee" ? W.next : W.nextChecked}</p>
                     {withdrawForm}
                   </>
                 ) : null}

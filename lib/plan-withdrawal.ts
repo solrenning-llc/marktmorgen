@@ -11,12 +11,21 @@
  * refundAndEndPlan); nothing here decides an amount. The function is offered:
  *   - under the money-back guarantee (kind "guarantee"), from the first payment
  *     it gives back, for 14 days (inside the guarantee's REFUND_DAYS, 30);
- *   - while the reading is unknown (Stripe not read), with no end: never hidden
- *     on a guess. A statement then is recorded and support is told.
- * Any other reading (refunded already, outside the window, a renewal, the
- * guarantee used before, months of a yearly plan, a trial with no payment) is
- * not offered: the existing flow gives no automatic full refund there, and a
- * refund it does not give is not invented here.
+ *   - while Stripe could not be read at all (no reading, or "unknown" for
+ *     stripe_unread), with no end: never hidden on a guess. A statement then
+ *     is recorded and support is told.
+ * Any other reading is not offered: refunded already, outside the window, a
+ * renewal, the guarantee used before, months of a yearly plan, a trial with no
+ * payment, and an "unknown" that comes from the account's own data (a credit
+ * on the customer's balance, too many payments, a payment that is not this
+ * store's, one that does not read). Those last answer the same on every read,
+ * at any age of the plan, so taking them as "no end" would keep the function
+ * open for ever (Claude 5's ALTO on #2849); the page shows the refusal, which
+ * sends the creator to support. The existing flow gives no automatic full
+ * refund there, and a refund it does not give is not invented here.
+ *
+ * Only the page under the guarantee says the payment is refunded in full; the
+ * receipt goes before the refund is decided, so it never promises one.
  *
  * On "Confirm withdrawal": the statement is recorded once per store and
  * subscription (PLAN_WITHDRAW_KEEP_DAYS), the receipt (art. 11a(4)) is
@@ -59,6 +68,8 @@ export const PLAN_WITHDRAW_ACK_SENDS = 3;
 export const PLAN_WITHDRAW_SUPPORT_TRIES = 3;
 /** The longest reason kept for support (the flow's own short words, never a person's data). */
 const WHY_MAX = 400;
+/** The reason left by the refund claim until the flow answers: what support reads if the request died in between. */
+const CLAIMED_UNANSWERED = "the refund was claimed but the refund flow's answer was not recorded; check whether the payment was refunded before refunding it";
 
 /** The record of a withdrawal from one store's plan subscription. */
 export const planWithdrawKey = (sid: string, subscriptionId: string) => `nl:plan-withdraw:${sid}:${subscriptionId}`;
@@ -66,7 +77,7 @@ export const planWithdrawKey = (sid: string, subscriptionId: string) => `nl:plan
 /** What the plan refund reading says about the withdrawal period now (see the file's comment). */
 export function planWithdrawWindow(reading: PlanRefundReading | null, nowSeconds = Math.floor(Date.now() / 1000)): WithdrawalWindow {
   const facts = (paidAt: number) => withdrawalWindow({ kind: "sale", paidAt, member: true, givenByStore: false, consent: null }, nowSeconds);
-  if (!reading || reading.refund.kind === "unknown") return facts(0);
+  if (!reading || (reading.refund.kind === "unknown" && reading.refund.reason === "stripe_unread")) return facts(0);
   if (reading.refund.kind !== "guarantee" || !("parts" in reading) || !reading.parts.length) return { open: false, why: "not-here" };
   return facts(Math.min(...reading.parts.map((part) => part.paidAtSeconds)));
 }
@@ -136,12 +147,16 @@ export async function withdrawFromPlan(store: Store, statement: WithdrawalStatem
   let reading: PlanRefundReading | null = null;
   const readOnce = async (): Promise<PlanRefundReading> => (reading ??= await readPlanRefund(store, nowSeconds).catch(() => unknownReading));
 
+  const existed = record.at !== null;
   if (record.at === null) {
     // A first statement: in time only if submitted inside the period (art. 11a(5)). One recorded before keeps its time.
     if (!submittedInTime(planWithdrawWindow(await readOnce(), nowSeconds), nowSeconds)) return "closed";
     const written = repliesFor(await redisPipeline([["HSETNX", key, "at", String(nowMs)], ["EXPIRE", key, PLAN_WITHDRAW_KEEP_DAYS * 86_400]]), 2);
     const made = written ? countOf(written[0]) : null;
-    if (made === null || made > 1 || countOf(written?.[1]) !== 1) return "error";
+    if (made === null || made > 1) return "error";
+    // The statement is recorded once HSETNX answered; an expiry that did not set does not undo it (Claude 5's LEVE 2
+    // on #2849). It is set again on the next statement, and the record is never read as "not withdrawn" for it.
+    if (countOf(written?.[1]) !== 1) console.error(`plan-withdraw: the record of store ${store.sid}'s withdrawal has no expiry set`);
     if (made === 1) record = { at: nowMs, tries: 0, sent: false, refund: false, support: null, supportTries: 0, told: false };
     else {
       try {
@@ -153,6 +168,11 @@ export async function withdrawFromPlan(store: Store, statement: WithdrawalStatem
     }
   }
   const at = record.at as number;
+  if (existed) {
+    // A record whose expiry was not set before gets it now; one that has an expiry keeps it ("NX").
+    const kept = repliesFor(await redisPipeline([["EXPIRE", key, PLAN_WITHDRAW_KEEP_DAYS * 86_400, "NX"]]).catch(() => null), 1);
+    if (!kept || countOf(kept[0]) === null) console.error(`plan-withdraw: the record of store ${store.sid}'s withdrawal could not be given an expiry`);
+  }
   const ack = acknowledgement(statement, `${PLAN_NAMES[store.tier] ?? "Marktmorgen"} for ${store.name || store.handle}`, "Marktmorgen", at, PLAN_ACK_WORDS);
 
   // The receipt: each try counted before it is made, so none is ever tried past the ceiling.
@@ -179,7 +199,8 @@ export async function withdrawFromPlan(store: Store, statement: WithdrawalStatem
   // PLAN_WITHDRAW_SUPPORT_TRIES times; the refund itself is never asked for again.
   const tell = async (why: string): Promise<PlanWithdrawOutcome> => {
     const kept = why.slice(0, WHY_MAX);
-    const counted = repliesFor(await redisPipeline([["HSETNX", key, "h", kept], ["HINCRBY", key, "ht", 1]]).catch(() => null), 2);
+    // HSET, not HSETNX: the claim below leaves a placeholder reason, which the flow's own answer replaces.
+    const counted = repliesFor(await redisPipeline([["HSET", key, "h", kept], ["HINCRBY", key, "ht", 1]]).catch(() => null), 2);
     const owed = counted ? countOf(counted[0]) : null;
     const tried = counted ? countOf(counted[1]) : null;
     if (owed === null || owed > 1 || tried === null || tried < 1) {
@@ -207,8 +228,10 @@ export async function withdrawFromPlan(store: Store, statement: WithdrawalStatem
     return tell(record.support);
   }
 
-  // The refund, taken in hand once per record: only the request that claims it asks for it.
-  const claimed = repliesFor(await redisPipeline([["HSETNX", key, "r", "1"]]).catch(() => null), 1);
+  // The refund, taken in hand once per record: only the request that claims it asks for it. The claim leaves a note
+  // owed to support in the same step, so a request that dies before the flow answers is never left with nobody told
+  // (Claude 5's LEVE 1 on #2849): the next statement sends that note, and the refund is still never asked for again.
+  const claimed = repliesFor(await redisPipeline([["HSETNX", key, "r", "1"], ["HSETNX", key, "h", CLAIMED_UNANSWERED]]).catch(() => null), 2);
   const claim = claimed ? countOf(claimed[0]) : null;
   if (claim === 0) return again;
   // Whether another request took it cannot be read: support is told (counted, at most PLAN_WITHDRAW_SUPPORT_TRIES in all), never a second refund.
@@ -217,7 +240,12 @@ export async function withdrawFromPlan(store: Store, statement: WithdrawalStatem
   if (now.refund.kind !== "guarantee" || !("parts" in now)) return tell(`the refund reading is ${now.refund.kind} (${"reason" in now.refund ? now.refund.reason : "no reason"})`);
   try {
     const flow = await refundAndEndPlan(store, nowSeconds, now.refund.cents);
-    if (flow.ok) return flow.ended ? "refunded" : "ending";
+    if (flow.ok) {
+      // Refunded: the note left by the claim is no longer owed.
+      const marked = repliesFor(await redisPipeline([["HSET", key, "hd", "1"]]).catch(() => null), 1);
+      if (!marked || countOf(marked[0]) === null) console.error(`plan-withdraw: store ${store.sid}'s refund went but its note could not be marked done; support may be told once`);
+      return flow.ended ? "refunded" : "ending";
+    }
     return tell(`the refund flow answered ${flow.reason}${flow.stopLeft ? " (its note and stop are left for the daily job)" : ""}`);
   } catch (error) {
     console.error("plan-withdraw: the refund flow failed part way", error);

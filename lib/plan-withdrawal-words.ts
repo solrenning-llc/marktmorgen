@@ -11,9 +11,18 @@ import { CONFIRM_WITHDRAWAL, WITHDRAW_FROM_CONTRACT } from "@/lib/withdrawal-rul
 
 const SUPPORT = "support@marktmorgen.com";
 
-/** What happens once a withdrawal is confirmed, said the same on the page and in the receipt. */
+/**
+ * What happens once a withdrawal is confirmed, said on the page only when the money-back guarantee gives the full
+ * refund (lib/plan-withdrawal.ts, planWithdrawWindow): anywhere else it would promise a refund nobody has worked out.
+ */
 const NEXT =
   "We refund your plan payment in full and end your plan at once, and email you when it is done. If we cannot do that at once, our support team handles it and writes to you.";
+/**
+ * What happens next when the refund is not known yet: on the page while the payment cannot be read, and in every
+ * receipt, which goes before the refund is decided. It promises no amount (Claude 5's ALTO on #2849).
+ */
+const NEXT_CHECKED =
+  "Our support team checks your payment and any refund owed to you, ends your plan, and writes to you.";
 
 export const PLAN_WITHDRAW_WORDS = {
   link: WITHDRAW_FROM_CONTRACT,
@@ -24,6 +33,7 @@ export const PLAN_WITHDRAW_WORDS = {
   until: (date: string) => `You can withdraw until ${date}.`,
   noEnd: "We could not check the date of your payment just now, so you can still send your withdrawal. We check it when it arrives.",
   next: NEXT,
+  nextChecked: NEXT_CHECKED,
   planLabel: "Your plan",
   subscriptionLabel: "Subscription",
   nameLabel: "Your name",
@@ -59,7 +69,7 @@ export const PLAN_ACK_WORDS: WithdrawalWords = {
   ackReceived: (when: string) => `We received your withdrawal from your Marktmorgen plan on ${when}.`,
   ackOrder: "Subscription",
   ackProduct: "Plan",
-  ackNext: () => `${NEXT} Keep this email: it shows that and when you withdrew.`,
+  ackNext: () => `We end your plan and refund what is owed to you, and email you when it is done. If we cannot do that at once, our support team checks your payment and writes to you. Keep this email: it shows that and when you withdrew.`,
 };
 
 /** The note to support when the refund was not made at once. */

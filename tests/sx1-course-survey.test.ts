@@ -161,7 +161,8 @@ async function main(): Promise<void> {
   }
   is("a kept answer that cannot be read is an error, never 'no answer'", threw, true);
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:course-survey-drop:v1"))) return [2];
+    // Regra 23: was the v1 header and the bare reply 2; the removal and its room's give-back are one script now (v2).
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:course-survey-drop:v2"))) return [[1, 0, 2]];
     return real(commands);
   }) as typeof redis.pipeline;
   let dropThrew = false;
@@ -214,6 +215,31 @@ async function main(): Promise<void> {
   is("deleting her again finds nothing", await forgetSurveyPerson(COURSE, ana, ROOM), 0);
   await forgetSurveyPerson(COURSE, ben, ROOM);
   is("all room back", await used(), empty);
+  // Taking one answer out gives back its room in the same step (regra 30, the sibling of a course's drop): a give-back
+  // sent on its own could fail silently after the answer went, and no later try would find it to give back.
+  const realOwn = redis.pipeline.bind(redis);
+  await answerSurvey({ room: ROOM, courseId: COURSE, who: ana, score: 9, note: "" });
+  await answerSurvey({ room: ROOM, courseId: COURSE, who: ben, score: 2, note: "" });
+  const sentOne: (string | number)[][][] = [];
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    sentOne.push(commands);
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-data:"))) throw new Error("down");
+    return realOwn(commands);
+  }) as typeof redis.pipeline;
+  const ownGone = await removeMyAnswer(COURSE, ana, ROOM).catch((error: unknown) => error);
+  const personGone = await forgetSurveyPerson(COURSE, ben, ROOM).catch((error: unknown) => error);
+  redis.pipeline = realOwn;
+  is("removing one's own and deleting a person are each one command, the room's give-back inside it", [ownGone, personGone, sentOne.length, sentOne.flat().length], [true, 1, 2, 2]);
+  is("and the room is level once they are gone", [await surveyAnswerCount(COURSE), await used()], [0, empty]);
+  const heldOne = redis.run(["HGET", dataKey(ROOM)!, "#"]);
+  await answerSurvey({ room: ROOM, courseId: COURSE, who: ana, score: 9, note: "" });
+  const heldTwo = redis.run(["HGET", dataKey(ROOM)!, "#"]);
+  redis.run(["HSET", dataKey(ROOM)!, "#", "not a count"]);
+  const unreadOwn = await removeMyAnswer(COURSE, ana, ROOM).catch(() => "unknown");
+  redis.run(["HSET", dataKey(ROOM)!, "#", String(heldTwo)]);
+  is("a room that cannot be read takes nothing out and says so", [unreadOwn, await hasAnswer(COURSE, ana)], ["unknown", true]);
+  await forgetSurveyPerson(COURSE, ana, ROOM);
+  is("and level again after", redis.run(["HGET", dataKey(ROOM)!, "#"]), heldOne);
 
   part("A change keeps no more bytes, so a full room never refuses it; a new answer is refused");
   redis.clear();

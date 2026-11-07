@@ -327,10 +327,12 @@ async function main(): Promise<void> {
 
   await section("Renewals: asked every day for RENEWAL_TRY_DAYS, then weekly; closed past them only when every member is held", async () => {
   const day = Date.UTC(2026, 10, 1);
-  is("within the days: asked every day, never closed without them", [renewalsLate(day + (RENEWAL_TRY_DAYS - 1) * DAY, day), renewalsAskToday(day + DAY, day, day), renewalsMayClose(false, true, 0)], [false, true, false]);
+  is("within the days: asked every day, never closed without them", [renewalsLate(day + (RENEWAL_TRY_DAYS - 1) * DAY, day), renewalsAskToday(day + DAY, day, day), renewalsMayClose(false, true, 0, { read: true, unheld: 0 })], [false, true, false]);
   const late = day + RENEWAL_TRY_DAYS * DAY;
   is("past them: asked once a week", [renewalsLate(late, day), renewalsAskToday(late, day, late - DAY), renewalsAskToday(late, day, late - RENEWAL_LATE_GAP_DAYS * DAY)], [true, false, true]);
-  is("and it closes only when every member is held and none is left to hold", [renewalsMayClose(true, true, 0), renewalsMayClose(true, false, 0), renewalsMayClose(true, true, 1)], [true, false, false]);
+  is("and it closes only when every member is held and none is left to hold", [renewalsMayClose(true, true, 0, { read: true, unheld: 0 }), renewalsMayClose(true, false, 0, { read: true, unheld: 0 }), renewalsMayClose(true, true, 1, { read: true, unheld: 0 })], [true, false, false]);
+  // Claude 5 on #2560: and only on a day Stripe was asked, read to the end, with no renewal found it could not stop that the hold does not hold.
+  is("never on a day Stripe was not asked, not read to the end, or that found one neither stopped nor held", [renewalsMayClose(true, true, 0, null), renewalsMayClose(true, true, 0, { read: false, unheld: 0 }), renewalsMayClose(true, true, 0, { read: true, unheld: 1 })], [false, false, false]);
   });
 
   await section("Second review, G: a store whose record cannot be deleted sits its walk out, on the air; what a visitor writes then is deleted by the walk that takes it", async () => {

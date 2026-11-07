@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { claimHandle, setStripeAccount, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
-import { type Hands, closeEnded, closeOne, closingOf, closingLetter } from "@/lib/plan-closing";
+import { type Hands, RENEWAL_TRY_DAYS, closeEnded, closeOne, closingOf, closingLetter } from "@/lib/plan-closing";
 import { CLOSING_DAYS, WARN_MONTH_DAYS, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import {
   BUYER_NOTICE_DAYS,
@@ -101,6 +101,11 @@ const world = {
   plans: [] as Record<string, unknown>[],
   failPlanSearch: false,
   planListReads: 0,
+  /** The creator's account: its subscription search refuses (a stand-in outage), or answers without its list. */
+  failSubSearch: false,
+  subSearchNoList: false,
+  /** The creator's account: every cancel of a membership refused. */
+  failCancels: false,
 };
 
 const lengthOf = (sub: Sub) => (sub.metadata.yearly ? 365 : 30) * 86_400;
@@ -178,6 +183,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json({ object: "list", data: [], has_more: false });
   }
   if (path === "/subscriptions/search") {
+    if (world.failSubSearch) return json({ error: { type: "api_error", message: "a stand-in outage" } }, 503);
+    if (world.subSearchNoList) return json({ object: "search_result" });
     const query = url.searchParams.get("query") ?? "";
     const all = [...world.subs.values()].filter((s) => query.includes(`'${s.metadata.store}'`));
     const from = Number(url.searchParams.get("page") ?? 0);
@@ -219,6 +226,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (!row) return json({ error: { message: "no such subscription" } }, 404);
     if (method === "GET") return json(subscriptionOf(row));
     if (method === "DELETE") {
+      if (world.failCancels) return json({ error: { type: "api_error", message: "a stand-in failure" } }, 500);
       row.status = "canceled";
       return json(subscriptionOf(row));
     }
@@ -796,6 +804,69 @@ async function main() {
   console.error = real;
   is("the buyers' notice waits, and so does the closing", [sent.some((m) => m.to === "gusbuyer@buyers.example.com"), gusDays.at(-1)], [false, `${CLOSING_DAYS + 3}:held:no company postal address for its buyers' notice`]);
   process.env.COMPANY_POSTAL_ADDRESS = POSTAL;
+
+  // Claude 5's review of #2560 (MEDIUM near HIGH): past its days of asking, a store closed on the hold's own count,
+  // which never saw a paused member (a trial that ended without a card, which can come back) or a hold whose search
+  // was answered without its list. It closes only on a day Stripe was asked, read to the end, and every renewal it
+  // found is stopped or held by this closing: never while one can still charge.
+  part("Past its days of asking Stripe, a store closes only when every renewal it found is stopped or held");
+  const lastDay = CLOSING_DAYS + RENEWAL_TRY_DAYS + 15;
+  const removedOn = (days: string[]) => days.filter((d) => d.split(":")[1] === "removed").map((d) => Number(d.split(":")[0]));
+  console.error = () => {};
+  {
+    const wes = await storeWith("wes");
+    member("wes", "wesmonth", 1_000, S(Date.UTC(2026, 11, 30)));
+    const paused = member("wes", "wespaused", 1_000, S(Date.UTC(2026, 11, 30)), { status: "paused" });
+    clockAt(Date.UTC(2026, 10, 16, 12));
+    const W = await ended(wes);
+    await daily(wes, W, 0, CLOSING_DAYS - 1);
+    world.failSubSearch = true;
+    const days = await daily(wes, W, CLOSING_DAYS, lastDay);
+    world.failSubSearch = false;
+    is("a paused member, Stripe unreachable from the closing day: never closed", [removedOn(days), paused.status], [[], "paused"]);
+    const back = await daily(wes, W, lastDay + 1, lastDay + 1 + 7);
+    is("Stripe reachable again: its paused member is ended, then it closes", [removedOn(back).length > 0, paused.status], [true, "canceled"]);
+  }
+  {
+    const xia = await storeWith("xia");
+    const unheld = member("xia", "xiamonth", 1_000, S(Date.UTC(2026, 11, 30)));
+    clockAt(Date.UTC(2026, 10, 16, 12));
+    const X = await ended(xia);
+    world.subSearchNoList = true;
+    const before = await daily(xia, X, 0, CLOSING_DAYS - 1);
+    world.subSearchNoList = false;
+    world.failSubSearch = true;
+    const days = await daily(xia, X, CLOSING_DAYS, lastDay);
+    world.failSubSearch = false;
+    is("the hold's search answered without its list is never 'every member held'", before.every((d) => d.includes("its members are not all reached yet")), true);
+    is("so it never closes on it, Stripe unreachable after", [removedOn(days), unheld.pause_collection === null && unheld.status === "active"], [[], true]);
+  }
+  {
+    const yul = await storeWith("yul");
+    const held = member("yul", "yulmonth", 1_000, S(Date.UTC(2026, 11, 30)));
+    clockAt(Date.UTC(2026, 10, 16, 12));
+    const Y = await ended(yul);
+    await daily(yul, Y, 0, CLOSING_DAYS - 1);
+    world.failCancels = true;
+    const days = await daily(yul, Y, CLOSING_DAYS, lastDay);
+    world.failCancels = false;
+    const first = removedOn(days)[0] ?? -1;
+    const start = days.findIndex((d) => d.includes("renewals"));
+    is("control: every cancel refused, every member held: it closes once its days of asking are past, not sooner", [first > 0, start >= 0 && first - (CLOSING_DAYS + start) >= RENEWAL_TRY_DAYS, held.status, held.pause_collection?.behavior, held.metadata.store_hold === String(Y)], [true, true, "active", "void", true]);
+  }
+  {
+    const zed = await storeWith("zed");
+    member("zed", "zedmonth", 1_000, S(Date.UTC(2026, 11, 30)));
+    const paused = member("zed", "zedpaused", 1_000, S(Date.UTC(2026, 11, 30)), { status: "paused" });
+    clockAt(Date.UTC(2026, 10, 16, 12));
+    const Z = await ended(zed);
+    await daily(zed, Z, 0, CLOSING_DAYS - 1);
+    world.failCancels = true;
+    const days = await daily(zed, Z, CLOSING_DAYS, lastDay);
+    world.failCancels = false;
+    is("every cancel refused and a paused member the hold never reaches: never closed", [removedOn(days), paused.status], [[], "paused"]);
+  }
+  console.error = real;
 
   part("What the creator's notices and studio say");
   const letter = closingLetter("ended", "Anna Shop", E, E + CLOSING_DAYS * DAY, E, { buyersBy: E + (CLOSING_DAYS - 7) * DAY, untold: 0, members: 1, unused: "$10", notHeld: 0, overLimit: 0 });

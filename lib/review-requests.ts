@@ -328,7 +328,7 @@ export async function sendReviewRequests(
     // Claimed before anything is sent, so two runs never send one email twice: the first by its mark,
     // the reminder by taking the order off the list (only one run takes it).
     // Ours only on OK or our own value read back (lib/claim-mark.ts); its value still reads as "being sent" to
-    // askStage. Taken by another run: dropped as before. Not known: left for the next run, nothing sent.
+    // askStage. Taken by another run: dropped as before. Not known: let go if ours, left for the next run, nothing sent.
     const claim = stage === "first" ? `sending:${claimValue()}` : undefined;
     if (claim) {
       const claimed = await claimMark(sentKey(entry.reference), SENT_MARK_SECONDS, claim);
@@ -336,7 +336,13 @@ export async function sendReviewRequests(
         await drop(member);
         continue;
       }
-      if (claimed === "unknown") continue;
+      if (claimed === "unknown") {
+        // It may have landed, and its "sending:" value would make the next run drop the order (askStage) though
+        // nothing was sent (Claude 5 on #2722). Nothing is sent on it, so it is let go if it still holds our own
+        // value (never another run's), and the order, still due, is asked again by the next run.
+        await releaseMark(sentKey(entry.reference), claim);
+        continue;
+      }
     } else {
       const taken = repliesFor(await redisPipeline([["ZREM", ASK_DUE_KEY, member]]), 1);
       if (!taken || countOf(taken[0]) !== 1) continue;

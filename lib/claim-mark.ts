@@ -49,8 +49,9 @@ export async function claimMark(key: string, seconds: number | null, value = cla
 /**
  * Lets go of a claim only while it still holds this claim's own value (Revisor 1 on #2719): a run whose mark ran out
  * and was taken by another run never deletes the other run's mark. The compare and delete is one script; when the
- * script cannot run, nothing is sent and the mark runs out at its own expiry (lib/redis-lock.ts, releaseLock; Codex G
- * on #2721). Never throws.
+ * script cannot run, nothing is sent and the mark stays (lib/redis-lock.ts, releaseLock; Codex G on #2721): one taken
+ * with an expiry runs out at it, but one kept for good (claimMark with seconds null) never does: it stays, and whatever
+ * it guards is not done again on it (Claude 5 on #2722). Never throws.
  */
 export async function releaseMark(key: string, value: string): Promise<void> {
   await releaseLock({ key, token: value, ttlSeconds: 1 });

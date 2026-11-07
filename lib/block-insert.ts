@@ -88,6 +88,26 @@ export function addedSaying(label: string, at: number): string {
   return `Added ${label} at position ${at + 1}.`;
 }
 
+/** What the status region says once a block is moved: its name, its new place counted from 1, and of how many. */
+export function movedSaying(label: string, to: number, count: number): string {
+  return `Moved ${label} to position ${to + 1} of ${count}.`;
+}
+
+/** What the status region says once a block is removed, and how to bring it back (WCAG 3.3.6). */
+export function removedSaying(label: string, at: number): string {
+  return `Removed ${label} from position ${at + 1}. Undo, at the top of the editor, brings it back.`;
+}
+
+/**
+ * Where the keyboard's focus goes once the block at `at` is removed and
+ * `left` blocks remain: the block now in its place, else the one before it;
+ * null when none is left, for the place to add one (WCAG 2.4.3).
+ */
+export function focusAfterRemoval(at: number, left: number): number | null {
+  if (left <= 0) return null;
+  return Math.min(at, left - 1);
+}
+
 /** What is said after a card is chosen in the side menu before its place. */
 export function chosenSaying(label: string): string {
   return `${label} chosen. Now press Add here where it should go, or Escape to cancel.`;

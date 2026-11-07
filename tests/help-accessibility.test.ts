@@ -54,6 +54,7 @@ is("names the store check by its own title, as the panel shows it", [studio.incl
 is("names the picture field by its own label", [studio.includes("What the picture shows, for people who cannot see it"), storeCheck.includes("What the picture shows, for people who cannot see it")], [true, true]);
 is("says it checks the first page of products and the links on the page", [/first page of your store/.test(studio), /links on (its|your store.s) page/.test(studio)], [true, true]);
 is("names the course check by its own title", [studio.includes("“Can everyone follow your lessons?”"), courseCheck.includes("Can everyone follow your lessons?")], [true, true]);
+is("says where the course check is: at the top of each course's own page, where app/studio/course/[product] draws it", [/at the top of each course.s page in your studio/.test(studio), /above each course/.test(studio), read("app/studio/course/[product]/page.tsx").includes("<CourseAccessCheck")], [true, false, true]);
 is("names the caption files the course editor takes", [/\.vtt/.test(studio) && /\.srt/.test(studio), /\.srt/.test(read("lib/captions.ts")) || /srt/.test(read("lib/captions.ts"))], [true, true]);
 const contrastLine = (accessLib.match(/"If a button color[^"]+"/) ?? [""])[0].slice(1, -1);
 is("the contrast every store gets, word for word as the studio says it", [contrastLine.length > 0, studio.includes(contrastLine)], [true, true]);

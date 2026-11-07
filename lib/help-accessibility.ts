@@ -51,7 +51,7 @@ export const ACCESS_HELP_SECTION: HelpSection = {
       a: [
         "A screen reader is a program that reads a page aloud, for people who cannot see the screen well. Your studio has two checks for things a screen reader cannot work out alone.",
         "“Can everyone use your store?” checks the products on the first page of your store and the links on its page. It lists each product picture with no description. To add one, open the product and fill in “What the picture shows, for people who cannot see it”. It also lists each link whose words do not say where it goes, such as “Click here”.",
-        "“Can everyone follow your lessons?” is above each course in your studio. It lists the lesson videos with no captions. Captions show what is said in a video as text, for people who cannot hear it. You can upload captions as a .vtt or .srt file, or have AI write them. “Can I sell a course?” says how both work.",
+        "“Can everyone follow your lessons?” is at the top of each course's page in your studio. It lists the lesson videos with no captions. Captions show what is said in a video as text, for people who cannot hear it. You can upload captions as a .vtt or .srt file, or have AI write them. “Can I sell a course?” says how both work.",
         `Done for you on every store: ${CONTRAST_DONE}`,
         "The checks never change your words, pictures or videos. You write each description and caption yourself. They are not a full review of your store.",
       ],

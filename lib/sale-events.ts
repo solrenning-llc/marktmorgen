@@ -30,8 +30,8 @@
  *     what was bought, when and the billing country (lib/recent-sales.ts).
  */
 import { saleHandles } from "@/lib/store";
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { claimMark } from "@/lib/claim-mark";
+import { isRedisConfigured } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { isSettled } from "@/lib/instant-pay";
 import { alertCreator } from "@/lib/phone-alerts";
 import { queuePerson } from "@/lib/email-sync";
@@ -75,7 +75,8 @@ export function listensToSales(store: Store): boolean {
  * a sale happened, without a figure.
  */
 function charged(amount: unknown, currency: unknown): string | null {
-  if (typeof currency !== "string" || !currency) return null;
+  // Stripe names a currency by three lowercase letters (ISO 4217); anything else is not one (Claude 6 on #3058).
+  if (typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) return null;
   return typeof amount === "number" && Number.isSafeInteger(amount) && amount >= 0 ? formatMoney(amount, currency) : null;
 }
 
@@ -164,13 +165,19 @@ export async function noteSales(store: Store, records: SaleRecord[]): Promise<nu
     (r): r is SaleRecord & { id: string } => typeof r.id === "string" && isSettled(r) && handles.has(r.metadata?.store ?? ""),
   );
   if (!paid.length) return 0;
-  // One round trip for which of them were told already.
-  const marks = await redisPipeline(paid.map((r) => ["EXISTS", toldKey(r.id)]));
+  // Each told once: its mark claimed exactly first (lib/claim-mark.ts), so the thanks page and the five-minute job
+  // never both tell it, and an answer in no known shape tells nothing this run (Claude 6 on #3058). A telling that
+  // throws lets its own mark go, so a later run tells it.
   let told = 0;
-  for (let i = 0; i < paid.length; i += 1) {
-    if (Number(marks[i]) === 1) continue;
-    await tell(store, paid[i], paid[i].id);
-    await redisPipeline([["SET", toldKey(paid[i].id), "1", "EX", TOLD_SECONDS]]);
+  for (const record of paid) {
+    const value = claimValue();
+    if ((await claimMark(toldKey(record.id), TOLD_SECONDS, value)) !== "ours") continue;
+    try {
+      await tell(store, record, record.id);
+    } catch (error) {
+      await releaseMark(toldKey(record.id), value);
+      throw error;
+    }
     told += 1;
   }
   return told;

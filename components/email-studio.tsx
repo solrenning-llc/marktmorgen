@@ -410,12 +410,25 @@ export function EmailStudio(props: {
     setRestore(restoring);
     setComposeRevision((value) => value + 1);
   };
+  // Opening an email remounts the composer above the button that opened it: once it is there, the focus goes to its subject
+  // (WCAG 2.4.3), without a scroll of its own, so the reduced-motion scroll to the composer stands (2.3.3).
+  const subjectAfterSwitch = useRef(false);
+  useEffect(() => {
+    if (!subjectAfterSwitch.current) return;
+    subjectAfterSwitch.current = false;
+    document.getElementById("mail-subject")?.focus({ preventScroll: true });
+  }, [composeRevision]);
   const openDraft = (draft: DraftRow | null) => {
-    if (draft && open?.id === draft.id && open.savedAt === draft.savedAt) return;
+    if (draft && open?.id === draft.id && open.savedAt === draft.savedAt) {
+      // Already open above: "Open above" still takes the creator to it.
+      document.getElementById("mail-subject")?.focus({ preventScroll: true });
+      return;
+    }
     if (composerState.current?.busy) {
       toast("Wait for the current email operation to finish before opening another email.");
       return;
     }
+    if (draft) subjectAfterSwitch.current = true;
     switchTo(draft);
   };
   const bringBack = () => {
@@ -2079,6 +2092,20 @@ function Flows({
     // The editor that opened takes the focus the box's button had, at its report's heading.
     if (imported) importedHeading.current?.focus();
   }, [imported]);
+  // New sequence or Edit: the editor that opens below takes the focus at its name, and closing it gives the focus back to the
+  // button that opened it, which the editor had removed or disabled (WCAG 2.4.3). A file brought in focuses its report instead.
+  const openerId = (flow: FlowRow | null) => (flow ? `flow-edit-${flow.id}` : "flow-new-sequence");
+  const opener = useRef<string | null>(null);
+  const editing = draft !== null;
+  useEffect(() => {
+    if (editing) {
+      if (opener.current) document.getElementById("flow-name")?.focus();
+      return;
+    }
+    const back = opener.current;
+    opener.current = null;
+    if (back) document.getElementById(back)?.focus();
+  }, [editing]);
   useLeaveGuard(aiBusy || (draft !== null && JSON.stringify(draft) !== draftBaseline));
   const [draftCount, setDraftCount] = useState<number>(DEFAULT_SEQUENCE_DRAFT);
   const requestedCount = availableCounts.some(count => count === draftCount) ? draftCount : (availableCounts[0] ?? DEFAULT_SEQUENCE_DRAFT);
@@ -2150,6 +2177,7 @@ function Flows({
     const opened = toDraft(flow, products);
     const others = flows.filter(other => other.id !== flow?.id);
     const next = { ...opened, steps: opened.steps.map(step => (step.kind === "start" || step.kind === "stop") && !others.some(other => other.id === step.actionFlow) ? { ...step, actionFlow: "" } : step) };
+    opener.current = openerId(flow);
     setDraftBaseline(JSON.stringify(next));
     setError(null);
     setDraft(next);
@@ -2394,6 +2422,7 @@ function Flows({
                   type="button"
                   className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 hover:text-violet-deep"
                   disabled={locked || draft !== null}
+                  id={`flow-edit-${f.id}`}
                   onClick={() => {
                     openDraft(f);
                   }}
@@ -2454,7 +2483,7 @@ function Flows({
           <legend className="sr-only">Sequence configuration</legend>
           <label className="block">
             <span className="field-label">Name, for you</span>
-            <input className="field mt-2" maxLength={80} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+            <input id="flow-name" className="field mt-2" maxLength={80} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
           </label>
           <label className="block">
             <span className="field-label">Starts when</span>
@@ -3031,7 +3060,7 @@ function Flows({
         </form>
       ) : flows.length < MAX_FLOWS ? (
         <>
-          <button type="button" className="btn btn-secondary mt-5" disabled={locked} onClick={() => openDraft(null)}>
+          <button type="button" id="flow-new-sequence" className="btn btn-secondary mt-5" disabled={locked} onClick={() => openDraft(null)}>
             New sequence
           </button>
           <SequenceImportBox disabled={locked} onRead={openImported} describe={(code) => MESSAGES[code] ?? null} />

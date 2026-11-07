@@ -169,3 +169,28 @@ for (const [label, edit] of [
     assert.equal(onList(path("listed")), true, "and leaves the door for a later run");
   });
 }
+
+test("one ZREM won and one in an unknown shape: only the won file is deleted, and the job still answers", async () => {
+  await noteTaskUpload(path("won"), stale());
+  await noteTaskUpload(path("unknown"), stale());
+  const outcome = await watching(
+    (commands, replies) => (isDoorTake(commands) ? commands.map((c, i) => (c[2] === path("unknown") ? "1" : replies[i])) : undefined),
+    run,
+  );
+  assert.equal(outcome.ok, true);
+  assert.deepEqual(deletes, [path("won")]);
+});
+
+test("cost: the healthy sweep is one list read and one pipeline of one ZREM per stale path, nothing more", async () => {
+  for (const name of ["a", "b", "c"]) await noteTaskUpload(path(name), stale());
+  const doorPipelines: Commands[] = [];
+  await watching((commands) => {
+    if (commands.some((c) => c[1] === DOORS)) doorPipelines.push(commands);
+    return undefined;
+  }, run);
+  assert.deepEqual(
+    doorPipelines.map((p) => p.map((c) => c[0])),
+    [["ZRANGEBYSCORE"], ["ZREM", "ZREM", "ZREM"]],
+  );
+  assert.equal(deletes.length, 3);
+});

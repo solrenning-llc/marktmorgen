@@ -400,17 +400,44 @@ export async function takeTaskUpload(path: string): Promise<boolean> {
 }
 
 /**
- * Files uploaded more than a day ago and never handed in, to delete: the
- * student closed the page, or chose another file. Taken off the list here;
- * the caller deletes them. A few hundred a run at most.
+ * Deletes, with `remove`, the files uploaded more than a day ago and never
+ * handed in: the student closed the page, or chose another file, or the file
+ * was a deleted person's that the file store did not answer for
+ * (lib/person-erasure.ts). A few hundred a run at most; answers the paths
+ * deleted.
+ *
+ * Each path is taken off the list by its own ZREM, and only one this run
+ * removed itself (exactly 1) is deleted: a hand-in that took the door
+ * (takeTaskUpload) after the list was read keeps its file (Claude 5 on
+ * #2836). A deletion that fails puts its paths back, so the next run tries
+ * again. The list, the pipeline and each ZREM are read in their exact shape
+ * (CX-123 rule 24): anything else deletes nothing it cannot prove was this
+ * run's own, and throws UnknownReplyError.
  */
-export async function staleTaskUploads(now = Date.now(), limit = 300): Promise<string[]> {
+export async function sweepTaskUploads(remove: (paths: string[]) => Promise<void>, now = Date.now(), limit = 300): Promise<string[]> {
   if (!isRedisConfigured()) return [];
   const before = Math.floor(now / 1000) - DOOR_SECONDS;
-  const [paths] = await redisPipeline([["ZRANGEBYSCORE", DOORS_KEY, 0, before, "LIMIT", 0, limit]]);
-  const out = (Array.isArray(paths) ? paths : []).filter((p): p is string => typeof p === "string");
-  if (out.length) await redisPipeline([["ZREM", DOORS_KEY, ...out]]);
-  return out;
+  const found = repliesFor(await redisPipeline([["ZRANGEBYSCORE", DOORS_KEY, 0, before, "LIMIT", 0, limit]]), 1)?.[0];
+  const listed = Array.isArray(found) ? repliesFor(found, found.length) : null;
+  if (!listed || !listed.every((p): p is string => typeof p === "string")) throw new UnknownReplyError("the uploads never handed in");
+  if (!listed.length) return [];
+  const takes = repliesFor(await redisPipeline(listed.map((p) => ["ZREM", DOORS_KEY, p])), listed.length);
+  if (!takes) throw new UnknownReplyError("which uploads never handed in were taken off their list");
+  const won = listed.filter((_, i) => takes[i] === 1);
+  const unknown = takes.some((reply) => reply !== 0 && reply !== 1);
+  let deleted = won;
+  if (won.length) {
+    try {
+      await remove(won);
+    } catch (error) {
+      console.error("could not delete unused assignment uploads; they are put back for the next run", error);
+      const back = repliesFor(await redisPipeline([["ZADD", DOORS_KEY, ...won.flatMap((p) => [before, p])]]), 1)?.[0];
+      if (countOf(back) === null) console.error(`putting back ${won.length} unused assignment uploads: unknown reply, they may be left`);
+      deleted = [];
+    }
+  }
+  if (unknown) throw new UnknownReplyError("whether an upload never handed in was taken off its list");
+  return deleted;
 }
 
 /** Whether to tell the creator about new work now: once an hour per course at most. */

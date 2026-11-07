@@ -221,8 +221,8 @@ async function main(): Promise<void> {
   is("nothing sent with none chosen", [emails.length - before, listed - readNow], [0, 0]);
 
   part("The studio's editor says what is true");
-  const draw = (setting: rules.Anniversary, choices: { id: string; title: string }[] | null = [], sentThisMonth = 3) =>
-    renderToStaticMarkup(createElement(AnniversaryEditor, { setting, storeName: "Harbor", suggestedAddress: "", sent: sentThisMonth, choices, connected: true, emailInPlan: true }));
+  const draw = (setting: rules.Anniversary, choices: { id: string; title: string }[] | null = [], sentThisMonth = 3, connected = true, emailInPlan = true) =>
+    renderToStaticMarkup(createElement(AnniversaryEditor, { setting, storeName: "Harbor", suggestedAddress: "", sent: sentThisMonth, choices, connected, emailInPlan }));
   const left = (await chosen()) as rules.Anniversary;
   is("the setting is left on, as the creator set it, with none chosen", [left.on, left.products], [true, []]);
   const emptyOn = draw(left);
@@ -234,6 +234,13 @@ async function main(): Promise<void> {
   is("with one chosen it says On and the month's count", [/>On<\/span>/.test(sending), sending.includes("Sent this month: 3")], [true, true]);
   is("and no warning", sending.includes("No product is chosen"), false);
   is("every product, on, says On without a warning", [/>On<\/span>/.test(draw({ ...left, products: "all" })), draw({ ...left, products: "all" }).includes("No product is chosen")], [true, false]);
+  // Switched on and fully set, but nothing can go out (lib/anniversary-send.ts stops without a connected
+  // Stripe account, and the store's email figure is zero on a plan without email): never "On".
+  const notConnected = draw({ ...left, products: "all" }, [], 3, false, true);
+  is("not connected to Stripe: not On, but on and not sending, with the reason and no month's count", [/>On<\/span>/.test(notConnected), notConnected.includes(">On, but not sending</span>"), notConnected.includes("Connect your Stripe account first."), notConnected.includes("Sent this month")], [false, true, true, false]);
+  const noEmail = draw({ ...left, products: "all" }, [], 3, true, false);
+  is("a plan without email: not On, but on and not sending, with the reason and no month's count", [/>On<\/span>/.test(noEmail), noEmail.includes(">On, but not sending</span>"), noEmail.includes("Your plan does not include email right now"), noEmail.includes("Sent this month")], [false, true, true, false]);
+  is("switched off, it says Off whatever else is missing", />Off<\/span>/.test(draw({ ...left, on: false, products: "all" }, [], 3, false, false)), true);
 
   part("The most that can be chosen, said beside the boxes it disables");
   const full = draw({ ...left, products: choiceList.slice(0, rules.MAX_ANNIVERSARY_PRODUCTS).map((p) => p.id) }, choiceList);

@@ -1651,6 +1651,7 @@ export function PageEditor({
               folder={folder}
               items={block.items}
               room={Math.min(MAX_PICTURES, MAX_PAGE_PICTURES - elsewhere - onlyInOther)}
+              away={`${base}-h`}
               onChange={(items) => change(index, { items })}
             />
           </div>
@@ -1704,6 +1705,7 @@ export function PageEditor({
               folder={folder}
               items={block.picture ? [block.picture] : []}
               room={Math.max(0, Math.min(1, MAX_PAGE_PICTURES - elsewhere - onlyInOther))}
+              away={`${base}-h`}
               onChange={(items) => change(index, { picture: items[0] ?? null })}
             />
             <fieldset>
@@ -3470,11 +3472,12 @@ function RowEditor({
 /**
  * An item taken out of a block's list: its Remove button goes with the focus in it, so the focus goes to the item
  * now in its place, or the one before it, or the list's Add button when none is left, once the list is drawn
- * again (WCAG 2.4.3; lib/block-insert.ts, itemFocusAfterRemoval).
+ * again (WCAG 2.4.3; lib/block-insert.ts, itemFocusAfterRemoval), or to `away` when no Add button is drawn.
  */
-function focusItemAfterRemoval(base: string, at: number, count: number) {
+function focusItemAfterRemoval(base: string, at: number, count: number, away?: string) {
   const { focus, gone } = itemFocusAfterRemoval(base, at, count);
-  focusWhenDrawn(() => (document.getElementById(gone) ? null : document.getElementById(focus)), browserFrames());
+  // `away`: where it goes when that Add button is not drawn either (a pictures list with no room left on the page).
+  focusWhenDrawn(() => (document.getElementById(gone) ? null : document.getElementById(focus) ?? (away ? document.getElementById(away) : null)), browserFrames());
 }
 
 /** A list of one-line points. */
@@ -3938,6 +3941,7 @@ function PicturesEditor({
   invalid = false,
   single = false,
   onSending,
+  away,
 }: {
   base: string;
   productId: string;
@@ -3959,6 +3963,11 @@ function PicturesEditor({
   single?: boolean;
   /** How many pictures it is sending now, told when sending starts and once more (0) when it ends, after onChange. */
   onSending?: (count: number) => void;
+  /**
+   * The id of the field the focus goes to when the last picture is removed and no Add button is drawn, the page
+   * having no room left for another (WCAG 2.4.3): the block's heading field.
+   */
+  away?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(0);
@@ -4091,7 +4100,7 @@ function PicturesEditor({
               id={itemRemoveId(base, i)}
               onClick={() => {
                 onChange(items.filter((_, j) => j !== i));
-                focusItemAfterRemoval(base, i, items.length);
+                focusItemAfterRemoval(base, i, items.length, away);
               }}
               className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
               aria-label={`Remove picture ${i + 1}`}

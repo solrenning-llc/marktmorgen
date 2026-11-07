@@ -62,7 +62,12 @@ const lists = ["function QuotesEditor(", "function CompareEditor(", "function Li
 is("the five lists are found", lists.map((l) => l.length > 0), [true, true, true, true, true]);
 is("each item's Remove button has its id", lists.map((l) => l.includes("id={itemRemoveId(base, i)}")), [true, true, true, true, true]);
 is("each list's Add button has its id", lists.map((l) => l.includes("id={itemAddId(base)}")), [true, true, true, true, true]);
-is("each Remove sends the focus on", lists.map((l) => /focusItemAfterRemoval\(base, i, (items|rows)\.length\)/.test(l)), [true, true, true, true, true]);
+is("each Remove sends the focus on", lists.map((l) => /focusItemAfterRemoval\(base, i, (items|rows)\.length(, away)?\)/.test(l)), [true, true, true, true, true]);
+// A pictures list draws its Add button only while the page has room for another picture: with none left, the last
+// picture removed sends the focus to the block's heading field, never to the body (Claude 5's LIGHT 1 on #2926).
+is("a pictures list passes on where the focus goes with no Add button drawn", /focusItemAfterRemoval\(base, i, items\.length, away\)/.test(lists[4]), true);
+const pictureBlocks = [between('case "pictures": {', "case \"countdown\""), between('case "feature": {', "</fieldset>")];
+is("the pictures block and the picture-and-text block send it to their heading field", pictureBlocks.map((b) => b.includes("<PicturesEditor") && b.includes("away={`${base}-h`}") && b.includes("id={`${base}-h`}")), [true, true]);
 const sendOn = between("function focusItemAfterRemoval(", "\n}\n");
 is("the focus waits for the list to be drawn again, then goes where itemFocusAfterRemoval says", /itemFocusAfterRemoval\(base, at, count\)/.test(sendOn) && /document\.getElementById\(gone\) \? null : document\.getElementById\(focus\)/.test(sendOn), true);
 

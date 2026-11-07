@@ -915,6 +915,9 @@ export const STORE_ID_PATTERN = /^[0-9a-f]{32}$/;
  */
 export const MAX_STORES_PER_ACCOUNT = 5;
 
+/** The shape of an owner's address (as lib/auth.ts's EMAIL_PATTERN), the reference of an account's first store. */
+const OWNER_ADDRESS = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 /** What an account's other stores are kept under: "#" and the store's id. */
 function extraRef(sid: string): string {
   return `#${sid}`;
@@ -1271,9 +1274,17 @@ export async function storeForId(sid: string): Promise<Store | null> {
   if (!reply) throw new UnknownReplyError("a store's id");
   const [ref] = reply;
   if (ref === null) return null;
-  if (typeof ref !== "string" || !ref) throw new UnknownReplyError("a store's id");
+  // Only this store's own reference: its owner's address (a first store) or "#<this id>" (any other). A value cut
+  // short or any other text would read some other owner key, find nil there and answer "no store", which callers act
+  // on (the PayPal settle set, plan disputes, a numbers link): it is unknown instead (Claude 5 on #2878).
+  if (typeof ref !== "string" || !(ref === extraRef(sid) || (!ref.startsWith("#") && OWNER_ADDRESS.test(ref)))) {
+    throw new UnknownReplyError("a store's id");
+  }
   const store = await storeForEmail(ref);
-  return store && store.sid === sid ? store : null;
+  if (!store) return null;
+  // Its reference names a store of another id: a half-finished move, never "no store".
+  if (store.sid !== sid) throw new UnknownReplyError("a store's id");
+  return store;
 }
 
 /**

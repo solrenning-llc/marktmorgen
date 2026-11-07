@@ -563,11 +563,15 @@ const SENTENCE_BREAK = /(?:[.!?:;][\t ]*(?:\r\n|[\n\r\v\f\u0085\u2028\u2029])|[\
  * general punctuation. Made from the table, never typed: before Claude 5's
  * review of #2579 it began at U+0250 with eight letters by hand, and 51 of the
  * table's own letters below it ("Ra\u0180att") were never read.
+ * Marked pure so a page that never folds text (the buyer's chat reads only two
+ * constants of these rules) leaves the table out of its bundle
+ * (tests/client-bundles.mjs, KEPT_OUT).
  */
-export const MAY_LOOK_ALIKE = new RegExp(
-  `[\\u00B5${LOOKALIKES_BEFORE_GATE_RANGE.map((code) => `\\u{${code.toString(16)}}`).join("")}\\u0180-\\u1FFF\\u2070-\\uFFFF\\u{10000}-\\u{10FFFF}]`,
-  "u",
-);
+export const MAY_LOOK_ALIKE = /* @__PURE__ */ gateOf(LOOKALIKES_BEFORE_GATE_RANGE);
+/** The gate from the table's look-alikes before U+0180 (MAY_LOOK_ALIKE). */
+function gateOf(before: readonly number[]): RegExp {
+  return new RegExp(`[\\u00B5${before.map((code) => `\\u{${code.toString(16)}}`).join("")}\\u0180-\\u1FFF\\u2070-\\uFFFF\\u{10000}-\\u{10FFFF}]`, "u");
+}
 /**
  * Text folded to the one form it is matched in, never shown: compatibility
  * forms as their plain letter and digit (fullwidth, mathematical bold, a

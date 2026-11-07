@@ -91,7 +91,8 @@ async function owner(): Promise<void> {
   is("one student's saves are held to an hourly limit", /withinLimit\("lesson-note", who, NOTE_SAVES_PER_HOUR, 3_600\)/.test(route), true);
   is("the answers are never cached", route.includes('NO_STORE = { "Cache-Control": "no-store" }') && (route.match(/NO_STORE/g) ?? []).length >= 4, true);
   const page = read("app/[handle]/course/[product]/[lesson]/page.tsx");
-  is("the lesson page reads a note only for a student, never the creator or a visitor", /student && open \? readNote\(/.test(page) || /student && open\s*\?\s*await readNote\(/.test(page), true);
+  // Since the reviews of #3031 (Claude 2, finding 5): and only on a lesson the route takes saves for, not one held back by a quiz.
+  is("the lesson page reads a note only for a student, never the creator or a visitor", /student && open && !blocker\s*\?\s*await readNote\(/.test(page), true);
   is("studio pages never read notes", read("app/studio/course/[product]/page.tsx").includes("lesson-notes"), false);
 }
 

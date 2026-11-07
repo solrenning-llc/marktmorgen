@@ -883,6 +883,30 @@ export class MemoryRedis {
           });
           return out;
         }
+        // lib/lesson-notes.ts SAVE_NOTE and FORGET_NOTES: a student's note, its count and its data-room slot in one step.
+        if (key.startsWith("-- marktmorgen:lesson-note-save:v1\n") && args[0] === "2" && args.length === 12) {
+          const [, room, notes, limit, month, field, slot, size, wasHeld, was, json, most] = args;
+          const held = this.run(["HGET", notes, field]);
+          if (wasHeld === "1" ? held !== was : held !== null) return [2, 0];
+          if (json === "") {
+            if (held !== null) this.run(["HDEL", notes, field]);
+            return this.storeData([room, limit, "1", month, "s", slot, "0"]);
+          }
+          if (held === null && Number(this.run(["HLEN", notes])) >= Number(most)) return [3, 0];
+          const taken = this.storeData([room, limit, "0", month, "s", slot, size]);
+          if (!Array.isArray(taken) || taken[0] !== 1) return taken;
+          this.run(["HSET", notes, field, json]);
+          return taken;
+        }
+        if (key.startsWith("-- marktmorgen:lesson-note-forget:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, room, notes, limit, month, prefix] = args;
+          const fields = this.run(["HKEYS", notes]) as string[];
+          if (fields.length === 0) return [0, 1, 0];
+          this.run(["DEL", notes]);
+          const changes = fields.filter((f) => /^[0-9a-f]{32}:[a-z0-9]{12}$/.test(f)).flatMap((f) => ["s", prefix + f, "0"]);
+          const taken = changes.length > 0 ? this.storeData([room, limit, "1", month, ...changes]) : [1, 0];
+          return Array.isArray(taken) ? [fields.length, taken[0], taken[1]] : taken;
+        }
         // lib/creator-card.ts SAVE_CARD and DROP_CARD: the card and its data-room slot in one step.
         if (key.startsWith("-- marktmorgen:card-save:v1\n") && args[0] === "2" && args.length === 7) {
           const [, room, target, limit, month, size, json] = args;

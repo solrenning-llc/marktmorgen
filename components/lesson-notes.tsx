@@ -16,7 +16,11 @@ export type NoteShown = { state: "kept"; text: string } | { state: "none" } | { 
  * A note that could not be read is said so, with no box to type over it:
  * an empty box would look like no note and overwrite the kept one on save.
  * A save names the note it started from, so a newer one saved in another
- * tab is never overwritten (the server answers "changed").
+ * tab is never overwritten (the server answers "changed"). Words typed while
+ * a save is on its way stay in the box, and leaving the page is guarded
+ * until what the box holds is what the server kept. A whole note deleted
+ * can be put back with one button. The count is said to a screen reader
+ * only once the student has typed.
  *
  * Said in the store's `language` (lib/buyer-words/lesson-notes.ts).
  */
@@ -36,15 +40,20 @@ export function LessonNotes({
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState("");
   const [heard, setHeard] = useState("");
+  // The note just deleted, while it can still be put back.
+  const [undo, setUndo] = useState<string | null>(null);
   const pause = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typed = useRef(false);
   const length = noteLength(text);
   const over = length > MAX_NOTE_CHARS;
   const count = w.count(length, MAX_NOTE_CHARS);
-  useLeaveGuard(initial.state !== "unknown" && text !== kept && !busy);
+  // Guarded while a save is on its way too: nothing is saved until the server says so.
+  useLeaveGuard(initial.state !== "unknown" && text !== kept);
 
-  // The count is said to a screen reader once typing pauses, not on every key.
+  // The count is said to a screen reader once typing pauses, not on every key, and never before the student types.
   useEffect(() => {
     if (pause.current) clearTimeout(pause.current);
+    if (!typed.current) return;
     pause.current = setTimeout(() => setHeard(over ? w.tooLong(MAX_NOTE_CHARS) : count), 1_000);
     return () => {
       if (pause.current) clearTimeout(pause.current);
@@ -62,26 +71,30 @@ export function LessonNotes({
     );
   }
 
-  async function save(event: React.FormEvent) {
-    event.preventDefault();
+  /** Sends `next`, starting from what the server kept; the box keeps whatever is typed meanwhile. */
+  async function send(next: string) {
     if (busy) return;
-    if (over) {
+    if (noteLength(next) > MAX_NOTE_CHARS) {
       setSaid(w.tooLong(MAX_NOTE_CHARS));
       return;
     }
+    const was = kept;
     setBusy(true);
     setSaid(w.saving);
     try {
       const response = await fetch("/api/store/course/note", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...where, text, was: kept }),
+        body: JSON.stringify({ ...where, text: next, was }),
       });
       const data = (await response.json().catch(() => ({}))) as { ok?: unknown; text?: unknown; error?: unknown };
       if (data.ok === true && typeof data.text === "string") {
-        setKept(data.text);
-        setText(data.text);
-        setSaid(data.text ? w.saved : w.cleared);
+        const saved = data.text;
+        setKept(saved);
+        // Only what was sent is replaced by what the server kept; words typed since stay.
+        setText((now) => (now === next ? saved : now));
+        setUndo(saved === "" && was !== "" ? was : null);
+        setSaid(saved ? w.saved : w.cleared);
         return;
       }
       const errors: Record<string, string> = {
@@ -90,6 +103,9 @@ export function LessonNotes({
         changed: w.changed,
         full: w.full,
         slow: w.slow,
+        // Trying again cannot help: the lesson is not open to them now (signed out, access ended, held by a quiz).
+        closed: w.closed,
+        owner: w.closed,
       };
       setSaid(errors[typeof data.error === "string" ? data.error : ""] ?? w.failed);
     } catch {
@@ -97,6 +113,18 @@ export function LessonNotes({
     } finally {
       setBusy(false);
     }
+  }
+
+  function save(event: React.FormEvent) {
+    event.preventDefault();
+    return send(text);
+  }
+
+  function putBack() {
+    if (undo === null) return;
+    const back = undo;
+    setText(back);
+    return send(back);
   }
 
   return (
@@ -109,7 +137,11 @@ export function LessonNotes({
           id="lesson-notes-text"
           name="text"
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => {
+            typed.current = true;
+            setUndo(null);
+            setText(event.target.value);
+          }}
           rows={6}
           aria-describedby="lesson-notes-private lesson-notes-count"
           aria-invalid={over ? true : undefined}
@@ -122,6 +154,9 @@ export function LessonNotes({
         <p className="sr-only" aria-live="polite">{heard}</p>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <button type="submit" className="btn st-btn min-h-[44px]" disabled={busy} aria-disabled={busy}>{w.save}</button>
+          {undo !== null ? (
+            <button type="button" className="btn st-btn-ghost min-h-[44px]" onClick={putBack} disabled={busy} aria-disabled={busy}>{w.undo}</button>
+          ) : null}
           <p role="status" className="text-sm">{said}</p>
         </div>
       </form>

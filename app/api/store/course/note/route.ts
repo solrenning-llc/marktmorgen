@@ -7,7 +7,7 @@ import { courseAccess, emailKey } from "@/lib/learn";
 import { heldBack, passedQuizzes } from "@/lib/quiz";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { takeBuyerAction, takeBuyerRead } from "@/lib/buyer-actions";
-import { MAX_NOTE_CHARS, notesAsText, notesOf, saveNote } from "@/lib/lesson-notes";
+import { MAX_NOTE_CHARS, courseNotesOf, noteReaderOf, notesAsText, saveNote } from "@/lib/lesson-notes";
 import { lessonNotesWords } from "@/lib/buyer-words/lesson-notes";
 import { speech } from "@/lib/buyer-words";
 
@@ -60,8 +60,12 @@ export async function POST(request: NextRequest) {
 
 /**
  * GET `?h=<handle>&p=<product>`: every note the signed-in student keeps on
- * the course, as a text file, in the course's order. One of the store's
- * buyer reads. A reply that cannot be read is said so, never an empty file.
+ * the course, as a text file, in the course's order, also after the course
+ * is no longer open to them (noteReaderOf: their own notes, by the session's
+ * address). One of the store's buyer reads, and before the notes are read,
+ * as many more as the course's notes weigh at their worst (courseNotesOf,
+ * noteReadUnits). A reply that cannot be read is said so, never an empty
+ * file.
  */
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
@@ -74,16 +78,17 @@ export async function GET(request: NextRequest) {
   const course = await readCourse(product.course.id);
   if (!course) return plain("Not found.", 404);
   const access = await courseAccess(store, product, await cookies());
-  if (access.state !== "open" || access.learner.owner) return plain("Not found.", 404);
+  const who = noteReaderOf(access, course.id);
+  if (!who) return plain("Not found.", 404);
   if (!store.statsId) return plain(w.readFailed, 503);
   if (!(await takeBuyerRead(store))) return plain(w.readFailed, 503);
-  const who = emailKey(access.learner.email);
   let notes;
   try {
-    notes = (await notesOf(store.statsId, who)).filter((note) => note.course === course.id);
+    notes = await courseNotesOf(store.statsId, who, course.id, (units) => takeBuyerRead(store, units));
   } catch {
     return plain(w.readFailed, 503);
   }
+  if (!notes) return plain(w.readFailed, 503);
   const said = speech(store);
   const text = notesAsText({
     words: w,

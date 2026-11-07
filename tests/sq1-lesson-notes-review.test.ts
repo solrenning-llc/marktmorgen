@@ -160,6 +160,24 @@ async function downloadCost(): Promise<void> {
   }
 }
 
+function everySize(): void {
+  part("J3: at every size a course's notes may reach, the requests admitted cost more than the worst download");
+  const units = lib.noteReadUnits as (n: number) => number;
+  const valueBytes = lib.MAX_NOTE_VALUE_BYTES as number;
+  const page = laterPageCost();
+  // One course can hold every note a student keeps (its lessons, and lessons since taken out of it).
+  let failing = -1;
+  for (let n = 0; n <= rules.MAX_NOTES_PER_STUDENT; n++) {
+    // The list of all the student's notes (a 45-byte field each), then the course's values, fifty to a command.
+    const dbBytes = 65_536 + rules.MAX_NOTES_PER_STUDENT * 64 + n * (valueBytes + 64);
+    // Each note sent with its lesson's and module's titles (120 characters, four bytes each) and its separator.
+    const outBytes = 4_096 + n * (4 * rules.MAX_NOTE_CHARS + 2 * 4 * 120 + 32);
+    const cost = readShapeCost({ seconds: SHAPES.heavy.seconds * (1 + dbBytes / 1e6), cpu: SHAPES.heavy.cpu * (1 + dbBytes / 1e6), commands: 12 + 1 + Math.ceil(n / 50), dbBytes, outBytes, stripePages: 0 });
+    if ((1 + units(n)) * page < cost && failing < 0) failing = n;
+  }
+  is("no size of a course's notes costs more than the requests its download takes", failing, -1);
+}
+
 async function erasureDuringSave(): Promise<void> {
   part("C2-3: an erasure that runs while a save is in flight");
   const who = emailKey("c2-erase@example.com");
@@ -370,6 +388,7 @@ void (async () => {
   await concurrentSaves();
   await lastPlace();
   await downloadCost();
+  everySize();
   await erasureDuringSave();
   closedCourse();
   heldLesson();

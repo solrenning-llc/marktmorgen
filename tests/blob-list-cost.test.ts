@@ -7,7 +7,7 @@
  * (reserveStoreUpload answers false for any backend but r2). Unknown is never zero.
  */
 import { readFileSync } from "node:fs";
-import { COST_LINES, BLOB_ADVANCED_OP, BLOB_PUT_TRIES } from "./plan-cost-registry";
+import { COST_LINES, BLOB_ADVANCED_OP, BLOB_SIMPLE_OP, BLOB_PUT_TRIES } from "./plan-cost-registry";
 import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { done, is, part } from "./check";
 
@@ -24,7 +24,7 @@ for (const tier of ["creator", "pro", "scale"] as const) {
   const expected = PAID_UPLOAD_OPENS[tier] * 1 * pages * BLOB_PUT_TRIES * BLOB_ADVANCED_OP;
   is(`${tier}: ${PAID_UPLOAD_OPENS[tier]} opens`, Math.abs((line?.monthlyUsd(tier) ?? Number.NaN) - expected) < 1e-12, true);
 }
-is("Creator is US$ 0.055", Math.abs((line?.monthlyUsd("creator") ?? 0) - 0.055) < 1e-12, true);
+is("Creator is US$ 0.077", Math.abs((line?.monthlyUsd("creator") ?? 0) - 0.077) < 1e-12, true);
 
 part("Sources and the callers left out are said");
 const sources = (line?.sources ?? []).map((source) => source.file);
@@ -32,4 +32,15 @@ for (const file of ["lib/file-store.ts", "lib/storage-quota.ts", "lib/vault-stor
 const basis = line?.basis ?? "";
 is("official page and date", /vercel\.com\/docs\/vercel-blob\/usage-and-pricing/.test(basis) && /6 November 2026/.test(basis), true);
 is("closed doors, ended stores and stamped copies named", /closed/.test(basis) && /ended/.test(basis) && /dropStamped/.test(basis), true);
+
+part("The dearest official regional rate, while the Blob store's region is unreviewed (Claude 1, comment 6708241908)");
+// Vercel prices Blob operations by region (vercel.com/docs/pricing/regional-pricing: Advanced US$ 4.50-7.00, Simple
+// US$ 0.35-0.56 a million; gru1 is the dearest, 7.00 and 0.56). docs/plan-capacity-provider-review.md says the store's
+// region is not reviewed, so the iad1 rate (US$ 5.00 / 0.40) is not a worst case: unknown is never the cheaper rate.
+is("an Advanced Operation at the dearest regional rate, US$ 7.00 a million", BLOB_ADVANCED_OP >= 7 / 1e6, true);
+is("a Simple Operation at the dearest regional rate, US$ 0.56 a million", BLOB_SIMPLE_OP >= 0.56 / 1e6, true);
+for (const tier of ["creator", "pro", "scale"] as const) {
+  is(`${tier}: the line at the dearest regional rate`, (line?.monthlyUsd(tier) ?? Number.NaN) >= PAID_UPLOAD_OPENS[tier] * 20 * BLOB_PUT_TRIES * 7 / 1e6 - 1e-12, true);
+}
+is("the basis names the regional page and the dearest region", /vercel\.com\/docs\/pricing\/regional-pricing/.test(basis) && /gru1/.test(basis) && /US\$ 7\.00/.test(basis), true);
 done();

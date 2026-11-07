@@ -1,0 +1,48 @@
+
+A person in every part of a store, deleted
+  ok    the person is in many parts of the store
+  ok    and their seeding changed many keys, so the comparison below means something
+  ok    the store finds them for every-store requests
+  ok    asking sends a link
+  ok    the email carries a link that works
+  ok    asking about an address no store knows sends nothing, and says the same
+  ok    the link names the address and the store
+  ok    the link deletes them
+  ok    it sent no more commands than it took units for (239 of 602)
+  ok    and moved no more bytes (50653 of 396850)
+  ok    the units it takes cover that work
+  ok    the link works once
+  ok    the store's owner is told, not asked
+  (left as allowed: nl:allow:email:…:2026-10-28, nl:allow:studio:…:2026-10-28, nl:allow:transactional:…:2026-10-28, nl:data:…, nl:data:room-test-store, nl:erased:…, nl:health:…, nl:mail:flowstats:80f27e7fd74b95e7, nl:rl:erase-address:…, nl:rl:erase-address:…, nl:rl:erase-ip:…, nl:rl:erase-ip:…, nl:rsum:ver:…:aefdbe2f4d, nl:sender:2026-11, nl:stats:…:ledger, nl:tasks:doors, nl:wf:day:…:2026-11-07, nl:wl:…:aefdbe2f4d:send)
+  ok    everything is as it was before them, but what is allowed to change
+  ok    no key or value names them, by address or by any key made from it
+  ok    only a fingerprint is kept, under the store's list
+  ok    which cannot be read back to the address
+  ok    the other person is untouched
+  ok    the store knows the address was deleted
+  ok    an import leaves them out
+  ok    a purchase without their own yes notes the purchase, not a yes
+  ok    their own yes, given again, puts them back and lifts the fingerprint
+  ok    the studio deletes them
+  ok    what the studio's door keeps: what an import gave them, by a one-way hash; nothing else names them
+  ok    their review stays, without their address (a store may not take reviews down)
+  ok    and everything else is as it was before them
+  ok    the activity log says a person was deleted, never who
+
+What it takes covers what it costs
+  ok    the base units cover the request itself and Discord
+  ok    units cover 550 commands and 310000 bytes
+  ok    units cover 1272 commands and 1709000 bytes
+  ok    units cover 39130 commands and 20115000 bytes
+  ok    the least a deletion takes is what the help says
+
+32 checks, all passing.
+N2700_MEMORY_RUN 3312
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth (/tmp/n2700grant-BRtGWf/case.cjs:43295:9)
+    at async requestApi (/tmp/n2700grant-BRtGWf/case.cjs:43464:16)
+    at async del (/tmp/n2700grant-BRtGWf/case.cjs:44643:3)
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth (/tmp/n2700grant-BRtGWf/case.cjs:43295:9)
+    at async requestApi (/tmp/n2700grant-BRtGWf/case.cjs:43464:16)
+    at async del (/tmp/n2700grant-BRtGWf/case.cjs:44643:3)

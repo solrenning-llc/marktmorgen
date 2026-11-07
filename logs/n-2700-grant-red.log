@@ -1,0 +1,51 @@
+✖ the list's row is erased after the module that reads its token, and waits for it (2.545437ms)
+✖ the erasure stays incomplete when the link use could not be erased, keeps the row, and a retry deletes the link key (56.245158ms)
+✔ control: with nothing failing, the row and the link key go in one erasure (13.232833ms)
+N2700_MEMORY_RUN 208
+ℹ tests 3
+ℹ suites 0
+ℹ pass 1
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 81.620058
+
+✖ failing tests:
+
+test at ../../../../tmp/n2700grant-GfI5Ue/case.cjs:91469:34
+✖ the list's row is erased after the module that reads its token, and waits for it (2.545437ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + undefined
+  - [
+  -   'lib/mail-clicks.ts'
+  - ]
+  
+      at TestContext.<anonymous> (/tmp/n2700grant-GfI5Ue/case.cjs:91473:29)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n2700grant-GfI5Ue/case.cjs:91475:34
+✖ the erasure stays incomplete when the link use could not be erased, keeps the row, and a retry deletes the link key (56.245158ms)
+  AssertionError [ERR_ASSERTION]: the list's row waits for the module that reads it
+      at TestContext.<anonymous> (/tmp/n2700grant-GfI5Ue/case.cjs:91503:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

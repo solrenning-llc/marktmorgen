@@ -1,0 +1,36 @@
+✔ control: a kept contact's link key and used set are deleted, and the count is Redis's (5.431549ms)
+✔ control: a confirmed absent row (null) has no link key, and the erasure goes on (0.440239ms)
+✔ the contact's HGET answers an error string: unknown, nothing taken for gone (2.340803ms)
+✔ the contact's HGET answers an empty string: unknown, nothing taken for gone (0.361193ms)
+✔ the contact's HGET answers a string that is not a contact: unknown, nothing taken for gone (0.644605ms)
+✔ the contact's HGET answers an object: unknown, nothing taken for gone (0.372438ms)
+✔ the contact's HGET answers a number: unknown, nothing taken for gone (0.450572ms)
+✔ the contact's HGET answers false: unknown, nothing taken for gone (0.206615ms)
+✔ the contact's HGET answers undefined: unknown, nothing taken for gone (0.755483ms)
+✔ the contact's HGET answers a list: unknown, nothing taken for gone (0.31184ms)
+✔ the contact's HGET pipeline answers no reply: unknown (0.551881ms)
+✔ the contact's HGET pipeline answers two replies: unknown (0.317872ms)
+✔ the contact's HGET pipeline answers a hole: unknown (0.301357ms)
+✔ the contact's HGET pipeline answers not a list: unknown (0.301221ms)
+✔ the DEL answers a string: unknown, never a count of zero (0.668627ms)
+✔ the DEL answers null: unknown, never a count of zero (1.418067ms)
+✔ the DEL answers a negative: unknown, never a count of zero (0.756228ms)
+✔ the DEL answers a fraction: unknown, never a count of zero (1.054799ms)
+✔ the DEL answers a list: unknown, never a count of zero (0.535805ms)
+✔ the whole erasure stays incomplete on an unknown contact read, keeps the row, and a retry deletes the link key (59.120946ms)
+✔ control: the copy reads the emails whose links they used, sorted, and a confirmed empty set as none (0.538212ms)
+✔ the copy's SMEMBERS answers an error string: unknown, never "used no link" (0.531831ms)
+✔ the copy's SMEMBERS answers null: unknown, never "used no link" (0.25657ms)
+✔ the copy's SMEMBERS answers an object: unknown, never "used no link" (0.266436ms)
+✔ the copy's SMEMBERS answers a number in the list: unknown, never "used no link" (0.325921ms)
+✔ the copy's SMEMBERS answers a hole: unknown, never "used no link" (0.1219ms)
+✔ the person's copy is refused as a whole when their link use cannot be read (5.218185ms)
+N2700_MEMORY_RUN 274
+ℹ tests 27
+ℹ suites 0
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 92.767703

@@ -1,0 +1,12 @@
+✔ the list's row is erased after the module that reads its token, and waits for it (2.042275ms)
+✔ the erasure stays incomplete when the link use could not be erased, keeps the row, and a retry deletes the link key (50.445318ms)
+✔ control: with nothing failing, the row and the link key go in one erasure (7.611629ms)
+N2700_MEMORY_RUN 289
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 67.384273

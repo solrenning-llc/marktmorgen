@@ -1,0 +1,1156 @@
+=== f2-sent-links.test.ts
+
+The links an email can have changed, read the way the email draws them
+  ok    distinct, in order, the full stop left with the sentence
+  ok    at most SENT_LINKS_MAX an email
+
+Sent from now on: one signed redirect a link, the same for every reader
+  ok    the email is marked as one whose links can be changed
+  ok    sent to both
+  ok    four links in the words
+  ok    every one goes through the redirect
+  ok    the same link twice is the same redirect
+  ok    the same for every reader: nothing of the reader in it
+  ok    nothing of the reader's address or token is on it
+  ok    the words are the address as typed
+  ok    the unsubscribe line is not wrapped
+
+The redirect goes where the link was sent to
+  ok    a 302 to the store's page, tagged with the email
+  ok    an outside address, untouched
+
+Never an open redirect
+  ok    another address with the same signature: refused, nowhere
+  ok    no signature: refused, nowhere
+  ok    a signature changed: refused, nowhere
+  ok    another link's number: refused, nowhere
+  ok    another email's id: refused, nowhere
+  ok    another store's name: refused, nowhere
+  ok    a subject line it was not sent with: refused, nowhere
+  ok    a number past the cap: refused, nowhere
+  ok    javascript: refused, nowhere
+
+A change goes only where it is safe
+  ok    not https: refused with words
+  ok    javascript: refused with words
+  ok    a name and password in it: refused with words
+  ok    another host: refused with words
+  ok    another store here: refused with words
+  ok    a store link sent out of the store: refused with words
+  ok    a page of ours that is not the store: refused with words
+  ok    not an address: refused with words
+  ok    too long: refused with words
+  ok    refused changes wrote nothing
+  ok    the rules say the same
+
+A change, kept with the original and every change before it
+  ok    same host: changed
+  ok    the redirect goes to the new address
+  ok    to a page of the store: changed
+  ok    and tagged with the email, as the store's pages are
+  ok    a store link to another of its pages
+  ok    every change in order, by link
+  ok    the original is still the email's own
+  ok    back to the original
+  ok    the redirect goes there again
+  ok    the same address twice is no change, nothing kept
+  ok    the key is the email's own
+  ok    kept for a bounded time, never for good
+
+Only the store's own sent emails, a bounded number of changes
+  ok    another store's email
+  ok    a link it does not have
+  ok    an email sent before this existed
+  ok    one not sent yet
+  ok    past SENT_LINK_CHANGES_MAX: refused, said
+
+What cannot be read goes to the original recorded at send time
+  ok    the button was changed before
+  ok    an error: the original
+  ok    a number: the original
+  ok    two replies: the original
+  ok    broken JSON: the original
+  ok    a record of another list: the original
+  ok    an address the rules refuse: the original
+
+One public request, counted before the one read; nothing about a click written
+  ok    followed to the change
+  ok    counted as one public request
+  ok    before the edit is read, which is read once
+  ok    nothing written but the store's request count
+  ok    bounded: a handful of commands
+  ok    a request costs more than what it reads
+
+A store not found, or its requests used up: the original, never the change
+  ok    the original, tagged as it was sent
+
+Erased with the store, registered with its bound
+  ok    one of the broadcast's keys
+  ok    its family is in the store data registry
+
+The studio says it, plainly
+  ok    the section's name
+  ok    an email sent before cannot be changed, and it says so
+  ok    the route needs the role that sends
+  ok    the email studio leads to it
+  ok    no open, no click counted, in the route
+  ok    no promise to send a link back always, past the most changes
+  ok    past the most changes, no form is offered for its links
+  ok    an unconfirmed save is never said as not changed
+  ok    a lost connection is never said as nothing changed
+  ok    busy is its own answer
+  ok    the privacy policy says what the redirect counts, not that it writes nothing
+
+77 checks, all passing.
+EXIT 0 
+=== f2-sent-links-race.test.ts
+  ok    the email has three links that can be changed
+
+Two changes to different links of an email never changed before, read at the same moment
+  ok    first record: every change answered "saved" is in the history kept
+  ok    first record: the history holds only changes answered "saved"
+  ok    first record: at least one of them is saved
+  ok    first record: a change not saved says so in words, never as a success
+  ok    first record: link 1 goes where its last kept change says
+  ok    first record: link 2 goes where its last kept change says
+  ok    first record: the data room counts at least what the history keeps
+  ok    first record: both are saved
+
+Two changes to one link of an email already changed, read at the same moment
+  ok    one change made before
+  ok    kept record: every change answered "saved" is in the history kept
+  ok    kept record: the history holds only changes answered "saved"
+  ok    kept record: at least one of them is saved
+  ok    kept record: a change not saved says so in words, never as a success
+  ok    kept record: link 1 goes where its last kept change says
+  ok    kept record: link 1 goes where its last kept change says
+  ok    kept record: the data room counts at least what the history keeps
+  ok    kept record: both are saved, in the order written
+
+Three changes at the same moment
+  ok    one change made before
+  ok    three at once: every change answered "saved" is in the history kept
+  ok    three at once: the history holds only changes answered "saved"
+  ok    three at once: at least one of them is saved
+  ok    three at once: a change not saved says so in words, never as a success
+  ok    three at once: link 0 goes where its last kept change says
+  ok    three at once: link 1 goes where its last kept change says
+  ok    three at once: the data room counts at least what the history keeps
+  ok    three at once: two saved, one busy
+  ok    busy says nothing was saved and to reload
+
+A write whose answer is lost
+  ok    landed, answer lost: saved, and kept
+  ok    not landed, answer lost: unconfirmed, never saved
+
+30 checks, all passing.
+EXIT 0 
+=== f2-sent-links-cost.test.ts
+  ok    the email has as many links as can be changed
+  ok    the email is at its longest
+
+1. The whole change request at its worst, against the studio requests taken
+  ok    the address is at its longest in characters
+  ok    and the rules let it go there
+  ok    saved: answered as it should (200 ok)
+  ok    saved: every command and byte inside the studio requests taken when sent ({"ok":true,"paid":15,"commands":21,"bytes":317278})
+  ok    saved: the change's own studio requests are taken before the email or its history is read
+  ok    busy: every write finds another change first: answered as it should (409 busy)
+  ok    busy: every write finds another change first: every command and byte inside the studio requests taken when sent ({"ok":true,"paid":15,"commands":23,"bytes":489578})
+  ok    busy: every write finds another change first: the change's own studio requests are taken before the email or its history is read
+  ok    the second write's answer lost, read back: answered as it should (503 unconfirmed)
+  ok    the second write's answer lost, read back: every command and byte inside the studio requests taken when sent ({"ok":true,"paid":15,"commands":23,"bytes":545965})
+  ok    the second write's answer lost, read back: the change's own studio requests are taken before the email or its history is read
+  ok    a full history: answered as it should (400 full)
+  ok    a full history: every command and byte inside the studio requests taken when sent ({"ok":true,"paid":15,"commands":11,"bytes":201253})
+  ok    a full history: the change's own studio requests are taken before the email or its history is read
+  ok    a first change that meets another's new history, kept a second longer: answered as it should (409 busy)
+  ok    a first change that meets another's new history, kept a second longer: every command and byte inside the studio requests taken when sent ({"ok":true,"paid":15,"commands":30,"bytes":323251})
+  ok    a first change that meets another's new history, kept a second longer: the change's own studio requests are taken before the email or its history is read
+
+1b. Without the studio requests a change needs, the email and its history are not read
+  ok    the store's studio count is where the route counts it
+  ok    refused for the studio requests, in words
+  ok    neither the email nor its history was read
+  ok    its history is as it was
+
+2. The history's ceiling in UTF-8 bytes, checked before writing
+  ok    the ceiling is a number of bytes
+  ok    three-byte characters: every change at its longest is saved
+  ok    three-byte characters: the history written is inside the ceiling (59249 bytes of 61536)
+  ok    four-byte pairs: every change at its longest is saved
+  ok    four-byte pairs: the history written is inside the ceiling (39959 bytes of 61536)
+  ok    an address with a lone surrogate (six bytes once written) is refused by the rules
+  ok    and by the server, with nothing written
+  ok    that history is past the ceiling
+  ok    a change more is refused in words, and nothing is written
+
+3. One opening of a link, with the history at its longest
+  ok    the history is at its longest in bytes
+  ok    an address with letters outside ASCII is answered with a redirect, its Location in ASCII
+  ok    it goes where the last change says
+  ok    what it reads: the store, its count and the history, once each ({"commands":5,"bytes":63753,"out":9208,"reads":["nl:store:handle:costshop","nl:store:owner:<x>","nl:mail:bc:<id>:go"]})
+  ok    and it costs less than the public request it is counted as (6.329e-5 against 2.428e-5)
+
+37 checks, all passing.
+EXIT 0 
+=== f2-sent-links-page-cost.test.ts
+  ok    a history at its longest in bytes, inside the ceiling
+  ok    read whole, ten histories are more than the page's own 4 studio requests (594492 bytes)
+  ok    the page's reader of the histories it shows exists
+
+1. Ten histories at their longest: paid before they are read, every call inside what was taken
+  ok    every history is read and shown
+  ok    the sizes are asked inside one studio request of the page's own ({"commands":10,"bytes":582})
+  ok    no history is read before the studio requests are taken
+  ok    every command and byte after it is inside what was taken when sent ({"paid":25,"commands":12,"bytes":594800})
+
+1b. Small histories cost what they are, and none costs nothing more
+  ok    three with one change, seven with none
+  ok    a small read takes one studio request more, not the ceiling (1)
+  ok    inside what was taken
+  ok    with no history at all, nothing more is taken and nothing more is read
+
+1c. A history that grows between its size and its read is read no further than paid
+  ok    inside what was taken ({"paid":4,"commands":12,"bytes":64008})
+  ok    the grown one is not shown as read (the page says it could not be read), the others are
+
+2. Without the studio requests the histories need, none is read
+  ok    the store's studio count is where the page counts it
+  ok    refused, in words
+  ok    no history read
+  ok    the page reads them through it, paying from the store's studio requests
+  ok    and says why when it is refused
+
+3. A history with no room in bytes for another change, under the most changes
+  ok    that history is past the ceiling, under the most changes
+  ok    said to have no room; one written by the server one change short of full still has room
+  ok    the page hands it to the editor
+  ok    the editor offers no form for its links then
+  ok    and says why, plainly
+  ok    a refusal for room from the server hides the form as well
+
+24 checks, all passing.
+EXIT 0 
+=== f2-sent-links-page-emails-cost.test.ts
+  ok    an email at its longest, as stored, past a hundred kilobytes
+  ok    listBroadcastsStrict reads all thirty
+  ok    read whole, thirty emails are more than the page's own 4 studio requests (4204622 bytes)
+  ok    the page's reader of the emails it shows exists
+
+1. Thirty emails at their longest: paid before they are read, every call inside what was taken
+  ok    every email is read whole, newest first
+  ok    the list and the sizes are asked with one LRANGE and one STRLEN each, small, inside the page's own studio requests ({"commands":31,"bytes":2559})
+  ok    no email is read before the studio requests are taken
+  ok    every command and byte after it is inside what was taken when sent ({"paid":145,"commands":32,"bytes":4205222})
+
+1b. Small emails cost what they are; no email costs nothing more
+  ok    three small emails
+  ok    a small read takes one studio request more (1)
+  ok    inside what was taken
+  ok    with no email, nothing is taken and only the list is asked
+  ok    a store with no list has no email, read from nowhere
+
+1c. An email that grows between its size and its read is read no further than paid
+  ok    inside what was taken ({"paid":150,"commands":35,"bytes":4345860})
+  ok    the grown one is read again, paid first, and shown as it is now
+  ok    it was taken twice: once for all, once for the grown one
+  ok    grown past it: could not be read
+  ok    and still inside what was taken
+
+2. Without the studio requests the emails need, none is read
+  ok    the store's studio count is where the page counts it
+  ok    refused, in words
+  ok    no email read
+  ok    the page reads them through it, paying from the store's studio requests, and no longer whole
+  ok    and says why when it is refused
+
+3. All or nothing, as listBroadcastsStrict
+  ok    a record missing from the list: could not be read
+  ok    a record of another list: could not be read
+  ok    a malformed record: could not be read
+  ok    an email whose links cannot be changed, not sent yet, is read as it is
+  ok    an index that is not one: could not be read
+
+28 checks, all passing.
+EXIT 0 
+=== broadcasts-read-cost-email-page.test.ts
+  ok    an email at its longest, as stored, past a hundred kilobytes
+  ok    listBroadcastsStrict reads all thirty, bodies and all
+  ok    read whole, thirty emails are more than the page's own 4 studio requests (4204712 bytes)
+  ok    the page reads its emails without their bodies, paying from the store's studio requests, and no longer whole
+  ok    and says, in words, when there are not enough studio requests left to read them
+  ok    the reader of the emails without their bodies exists
+
+1. Thirty emails at their longest: every field the page shows, without the body
+  ok    every email, newest first, each field as listBroadcastsStrict reads it, and no body
+  ok    the list and the sizes are asked inside the page's own studio requests, small ({"commands":32,"bytes":2967})
+  ok    no email is read before the studio requests are taken
+  ok    every command and byte after it is inside what was taken when sent ({"paid":2,"commands":33,"bytes":15496})
+  ok    no body crosses: all of it is a few kilobytes (18463)
+
+1b. What a body holds never moves where the body ends
+  ok    each read exactly as stored, but its body
+
+1c. Small emails cost what they are; none costs nothing more
+  ok    three small emails
+  ok    a small read takes one studio request more (1)
+  ok    inside what was taken
+  ok    with no email, nothing is taken and only the list is asked
+  ok    a store with no list has no email, read from nowhere
+  ok    an invalid limit is refused (0)
+  ok    an invalid limit is refused (-1)
+  ok    an invalid limit is refused (101)
+  ok    an invalid limit is refused (1.5)
+  ok    an invalid limit is refused (NaN)
+
+1d. An email that grows between its size and its read is read no further than paid
+  ok    inside what was taken ({"paid":3,"commands":37,"bytes":17275})
+  ok    the grown one is read again, paid first, and shown as it is now
+  ok    it was taken twice: once for all, once for the grown one
+  ok    grown past what a send writes on it: could not be read
+  ok    and still inside what was taken
+
+2. Without the studio requests they need, none is read
+  ok    refused, in words
+  ok    no email read
+
+3. All or nothing, as listBroadcastsStrict
+  ok    a record missing from the list: could not be read
+  ok    a record of another list: could not be read
+  ok    a malformed record: could not be read
+  ok    a record with an empty body: could not be read
+  ok    a record with no body: could not be read
+  ok    a record that is not JSON: could not be read
+  ok    a record whose first body is a nested one: could not be read
+  ok    an email not sent yet is read as it is
+  ok    an index that is not one: could not be read
+
+38 checks, all passing.
+EXIT 0 
+=== broadcasts-read-cost-marks.test.ts
+  ok    the marks read their emails without their bodies, and no longer whole
+
+1. Fifty emails at their longest: the reading is paid before any is read
+  ok    marks read
+  ok    only the list and the sizes are asked before a take, small ({"commands":52,"bytes":4347})
+  ok    no email is read before the studio requests are taken
+  ok    every command and byte after it is inside what was taken when sent ({"paid":3,"commands":53,"bytes":24956})
+  ok    no body crosses (29303 bytes)
+
+2. The same marks as from the emails read whole
+  ok    same marks
+
+3. Without the studio requests they need, no email is read
+  ok    no email read
+  ok    no email mark, the sale's marks stay
+
+9 checks, all passing.
+EXIT 0 
+=== broadcasts-read-cost-mcp.test.ts
+
+1. Twenty-nine emails at their longest, and one more listed between the measure and the read
+  ok    told
+  ok    the late one was listed after the measure
+  ok    what the reading did comes to no more API requests than were taken ({"took":6,"units":5,"bytes":18196,"commands":68})
+  ok    the email listed after the measure is not read
+  ok    each measured email is read once
+  ok    no body crosses (18196 bytes)
+  ok    the late one is told on the next call
+
+2. An email grown between the measure and the read is read once more, paid first
+  ok    told as it is now
+  ok    inside what was taken ({"took":5,"units":2})
+  ok    the store's API count is where it is counted
+  ok    refused with its own words
+  ok    the grown one read once, as far as it was paid
+
+12 checks, all passing.
+EXIT 0 
+=== broadcasts-read-cost-path-growth.test.ts
+
+1. The newest emails at their longest: everything after the first take is inside what was taken
+  ok    read
+  ok    a sent email is found
+  ok    nothing read before the first take
+  ok    every command and byte after it is inside what was taken when sent ({"paid":9,"commands":15,"bytes":3891})
+  ok    no body crosses (3891 bytes)
+
+2. Whether an email was sent is told exactly
+  ok    fewer than it reads, none sent: no email sent
+  ok    as many as it reads, none sent: unknown
+  ok    sent under another store's address: unknown, never read as this store's
+  ok    a record that is not one: unknown
+
+3. Without the studio requests the emails need, none is read
+  ok    the fact stays unknown, never 'no email sent'
+  ok    no email read
+
+11 checks, all passing.
+EXIT 0 
+=== plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (68.884965ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (140.40491ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (43.763387ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.509825ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.206048ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.182358ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.47855ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (104.245322ms)
+✔ every store figure taken in the code is a kind a line prices (53.347266ms)
+✔ every email sent names a meter, and each file only the meters it may use (89.85298ms)
+✔ the units a figure is taken in cost at least what they stand for (8.86972ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (3.902307ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.210269ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.334449ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.158817ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.095825ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (1.341228ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (2.109834ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.138383ms)
+✔ Path push fits its reserved studio requests (0.129486ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.058955ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.064671ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.253059ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (103.351719ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 648.141688
+EXIT 0 
+=== store-data-registry.test.ts
+creator: room 18 MB; outside it 121.4 MB on average, 294.6 MB at once
+pro: room 135 MB; outside it 288.2 MB on average, 804.3 MB at once
+scale: room 250 MB; outside it 704.6 MB on average, 2473.6 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (162.320936ms)
+✔ each family is bounded one way at least, and what it says can be checked (151.077226ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (5.421901ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (2.487495ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.776706ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (9.787123ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.376753ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 362.163004
+EXIT 0 
+=== api-events-measured.test.ts
+  ok    an endpoint hears sales
+
+The largest sale the code makes: a bundle of twenty, three checked at checkout, each a bundle of twenty, every title 80 characters of a three-byte script
+  ok    the newest LOG_SIZE deliveries are in the log
+  a delivery of this sale is kept at 29,995 bytes; the 50 at 1,499,740
+  ok    the message names the bundle and every product checked, each with its own bundle
+  ok    far past the 4 KB a delivery was priced at
+  ok    inside the bound a delivery is made under, with the room its tries write later
+  ok    the store's data registry prices a delivery at the bound, at or above the largest the code makes
+
+GET /api/v1/events: measured, set aside, settled at what was read and sent
+  limit=10: 1,501,140 bytes read, 286,931 sent, 12 requests taken (priced at 4 KB a delivery it was 5)
+  ok    answered, ten messages
+  ok    every delivery in the log read once
+  ok    the requests taken are what the bytes read and sent cost, with the door's
+  ok    more than the flat 5 the 4 KB price took for this
+  ok    each delivery measured before any was read
+  ok    limit=1: one message, settled at the one sent
+  ok    and no more than limit=10
+  ok    a type none of them is: the deliveries read, nothing sent
+
+Too few requests left for what was measured: refused, no delivery read, only the door's request and the measuring kept
+  ok    the month is taken down to 11
+  ok    refused with the whole count it may take
+  ok    no delivery read
+  ok    only the door's request and the measuring done kept
+  ok    the month is taken down to 12
+  ok    with exactly what it may take left, answered
+  ok    and what it did not need given back
+  ok    the month is taken down to 1000
+
+A log or sizes answered broken: unavailable before any delivery is read; the measuring set aside is kept (C3-124, Codex G2)
+  ok    partial-sizes: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken
+  ok    empty-sizes: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken
+  ok    text-sizes: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken
+  ok    null-log: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken
+  ok    not-ids: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken
+  ok    one-not-id: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken
+
+Every text cleaned where the message is made: the worst a text can escape is a quotation mark, four bytes kept
+  ok    control characters become a space, a text is cut at its most, a lone surrogate half becomes U+FFFD
+  the largest sale with every text at its longest in quotation marks is kept at 45,456 bytes, under 63,488
+  ok    kept with its message, at three quarters of the bound or less
+  ok    in control characters: kept with its message, none of them escaped (was past 48 KB, every sale not sent)
+
+A message past the bound is never kept or sent: its line says so, nothing queued, nothing counted
+  ok    nothing queued
+  ok    its line: no message, failed, with the reason and the true figure
+  ok    kept small
+  ok    the studio's log shows it, without a way to send it again
+  ok    no webhook delivery of the month taken
+  ok    a message just inside the bound is queued as always
+  ok    the studio's webhooks and the developers page say the bounds, from the code's figures
+  ok    a day's lines are bounded: SKIPPED_LINES_PER_DAY of their own, then one line that counts the rest
+
+A failed delivery kept before the bound, larger than it, is not sent again by hand
+  ok    refused with the reason, nothing sent or counted
+
+The order's own title stands in only for its own product when a listing is gone
+  ok    its own product: the order's title; a bundle's product or one checked: none
+
+get_emails with a kept copy of what they sold of 172 KB: measured, set aside and settled at it
+  get_emails: a kept copy of 172,020 bytes takes 5; priced at 64,000 it took 5
+  ok    answered
+  ok    the copy is the size asked
+  ok    the requests taken are what the copy read costs, with the door's
+  ok    the copy's own bytes are priced, not its old 64 KB
+  ok    the month is taken down to 4
+  ok    one short of it: refused, nothing read
+
+The month's webhook deliveries used: no message kept or sent, a line that says so, bounded by the day
+  ok    messages made while deliveries are left are kept: one tried and counted, one not tried yet
+  ok    not tried before the month was used: not sent, and its message not kept past it
+  ok    counted at its first try: not sent again, but its message kept, to be sent again by hand
+  ok    made with the month used 0: nothing queued
+  ok    made with the month used 1: nothing queued
+  ok    made with the month used 2: nothing queued
+  ok    made with the month used 3: nothing queued
+  ok    made with the month used 4: nothing queued
+  ok    made with the month used 5: nothing queued
+  ok    SKIPPED_LINES_PER_DAY lines of their own, then one line that counts the rest
+  ok    no message kept behind any of them
+
+58 checks, all passing.
+api: reading recent events failed Error: the recent deliveries could not be measured
+    at recentEvents (/dev/shm/j3034-return-2YAn3e/api-events-measured.test.ts.cjs:62305:21)
+    at async GET (/dev/shm/j3034-return-2YAn3e/api-events-measured.test.ts.cjs:62346:19)
+    at async main (/dev/shm/j3034-return-2YAn3e/api-events-measured.test.ts.cjs:67032:20)
+api: reading recent events failed Error: the recent deliveries could not be measured
+    at recentEvents (/dev/shm/j3034-return-2YAn3e/api-events-measured.test.ts.cjs:62305:21)
+    at async GET (/dev/shm/j3034-return-2YAn3e/api-events-measured.test.ts.cjs:62346:19)
+    at async main (/dev/shm/j3034-return-2YAn3e/api-events-measured.test.ts.cjs:67032:20)
+api: reading recent events failed Error: the recent deliveries could not be measured
+    at recentEvents (/dev/shm/j3034-return-2YAn3e/api-events-measured.test.ts.cjs:62305:21)
+    at async GET (/dev/shm/j3034-return-2YAn3e/api-events-measured.test.ts.cjs:62346:19)
+    at async main (/dev/shm/j3034-return-2YAn3e/api-events-measured.test.ts.cjs:67032:20)
+api: reading recent events failed Error: the recent deliveries could not be measured
+    at recentEvents (/dev/shm/j3034-return-2YAn3e/api-events-measured.test.ts.cjs:62305:21)
+    at async GET (/dev/shm/j3034-return-2YAn3e/api-events-measured.test.ts.cjs:62346:19)
+    at async main (/dev/shm/j3034-return-2YAn3e/api-events-measured.test.ts.cjs:67032:20)
+api: reading recent events failed Error: the recent deliveries could not be measured
+    at recentEvents (/dev/shm/j3034-return-2YAn3e/api-events-measured.test.ts.cjs:62305:21)
+    at async GET (/dev/shm/j3034-return-2YAn3e/api-events-measured.test.ts.cjs:62346:19)
+    at async main (/dev/shm/j3034-return-2YAn3e/api-events-measured.test.ts.cjs:67032:20)
+api: reading recent events failed Error: the recent deliveries could not be measured
+    at recentEvents (/dev/shm/j3034-return-2YAn3e/api-events-measured.test.ts.cjs:62305:21)
+    at async GET (/dev/shm/j3034-return-2YAn3e/api-events-measured.test.ts.cjs:62346:19)
+    at async main (/dev/shm/j3034-return-2YAn3e/api-events-measured.test.ts.cjs:67032:20)
+EXIT 0 
+FAILED FILES 0
+applied-write receipt {"status":503,"apiError":"unconfirmed","live":"We could not confirm whether link 1 was changed. Reload the page to see where it goes now.","visible":"We could not confirm the change was saved. Reload the page to see where the link goes now.","writes":1,"requests":1,"destination":"https://example.com/changed","commands":6,"forms":1,"text":"We could not confirm whether link 1 was changed. Reload the page to see where it goes now.Synthetic reviewSent November 6, 2026. 1 link you can change. 0 of 20 changes used.Link 1Written in the email: https://example.com/originalGoes to now: https://example.com/originalNew address for link 1Starts with https://. It can go to another page on example.com, or to a page of your store. For example: https://example.com/new-pageWe could not confirm the change was saved. Reload the page to see where the link goes now.Save the new address for link 1 We could not confirm whether link 1 was changed. Reload the page to see where it goes now. Synthetic reviewSent November 6, 2026. 1 link you can change. 0 of 20 changes used.Link 1Written in the email: https://example.com/originalGoes to now: https://example.com/originalNew address for link 1Starts with https://. It can go to another page on example.com, or to a page of your store. For example: https://example.com/new-pageWe could not confirm the change was saved. Reload the page to see where the link goes now.Save the new address for link 1 Synthetic reviewSent November 6, 2026. 1 link you can change. 0 of 20 changes used.Link 1Written in the email: https://example.com/originalGoes to now: https://example.com/originalNew address for link 1Starts with https://. It can go to another page on example.com, or to a page of your store. For example: https://example.com/new-pageWe could not confirm the change was saved. Reload the page to see where the link goes now.Save the new address for link 1 Synthetic reviewSent November 6, 2026. 1 link you can change. 0 of 20 changes used.Link 1Written in the email: https://example.com/originalGoes to now: https://example.com/originalNew address for link 1Starts with https://. It can go to another page on example.com, or to a page of your store. For example: https://example.com/new-pageWe could not confirm the change was saved. Reload the page to see where the link goes now.Save the new address for link 1 Synthetic review Sent November 6, 2026. 1 link you can change. 0 of 20 changes used. Link 1Written in the email: https://example.com/originalGoes to now: https://example.com/originalNew address for link 1Starts with https://. It can go to another page on example.com, or to a page of your store. For example: https://example.com/new-pageWe could not confirm the change was saved. Reload the page to see where the link goes now.Save the new address for link 1 Link 1Written in the email: https://example.com/originalGoes to now: https://example.com/originalNew address for link 1Starts with https://. It can go to another page on example.com, or to a page of your store. For example: https://example.com/new-pageWe could not confirm the change was saved. Reload the page to see where the link goes now.Save the new address for link 1 Link 1 Written in the email: https://example.com/originalGoes to now: https://example.com/original Written in the email: https://example.com/original Written in the email:  https://example.com/original Goes to now: https://example.com/original Goes to now:  https://example.com/original New address for link 1Starts with https://. It can go to another page on example.com, or to a page of your store. For example: https://example.com/new-pageWe could not confirm the change was saved. Reload the page to see where the link goes now.Save the new address for link 1 New address for link 1 Starts with https://. It can go to another page on example.com, or to a page of your store. For example: https://example.com/new-page  We could not confirm the change was saved. Reload the page to see where the link goes now. Save the new address for link 1 Save the new address for link 1"}
+✔ the review transport blocks both fetch and sockets before product graph use (2.334291ms)
+✔ healthy control: restoring the original before the cap is a confirmed twentieth change (12.114224ms)
+✔ bounded undo contract: exhausted history offers no form and says undo is unavailable (37.413867ms)
+✔ healthy control: a confirmed save announces the destination actually kept (20.172ms)
+✔ an applied write with a lost acknowledgment never announces definitely unchanged (14.466197ms)
+✔ lost EVAL acknowledgment with healthy exact readback confirms the stored destination (4.06954ms)
+J_COUNTED_MEMORY_COMMANDS 33
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 457.043963
+=== f2-sent-links.test.ts
+
+The links an email can have changed, read the way the email draws them
+  ok    distinct, in order, the full stop left with the sentence
+  ok    at most SENT_LINKS_MAX an email
+
+Sent from now on: one signed redirect a link, the same for every reader
+  ok    the email is marked as one whose links can be changed
+  ok    sent to both
+  ok    four links in the words
+  ok    every one goes through the redirect
+  ok    the same link twice is the same redirect
+  ok    the same for every reader: nothing of the reader in it
+  ok    nothing of the reader's address or token is on it
+  ok    the words are the address as typed
+  ok    the unsubscribe line is not wrapped
+
+The redirect goes where the link was sent to
+  ok    a 302 to the store's page, tagged with the email
+  ok    an outside address, untouched
+
+Never an open redirect
+  ok    another address with the same signature: refused, nowhere
+  ok    no signature: refused, nowhere
+  ok    a signature changed: refused, nowhere
+  ok    another link's number: refused, nowhere
+  ok    another email's id: refused, nowhere
+  ok    another store's name: refused, nowhere
+  ok    a subject line it was not sent with: refused, nowhere
+  ok    a number past the cap: refused, nowhere
+  ok    javascript: refused, nowhere
+
+A change goes only where it is safe
+  ok    not https: refused with words
+  ok    javascript: refused with words
+  ok    a name and password in it: refused with words
+  ok    another host: refused with words
+  ok    another store here: refused with words
+  ok    a store link sent out of the store: refused with words
+  ok    a page of ours that is not the store: refused with words
+  ok    not an address: refused with words
+  ok    too long: refused with words
+  ok    refused changes wrote nothing
+  ok    the rules say the same
+
+A change, kept with the original and every change before it
+  ok    same host: changed
+  ok    the redirect goes to the new address
+  ok    to a page of the store: changed
+  ok    and tagged with the email, as the store's pages are
+  ok    a store link to another of its pages
+  ok    every change in order, by link
+  ok    the original is still the email's own
+  ok    back to the original
+  ok    the redirect goes there again
+  ok    the same address twice is no change, nothing kept
+  ok    the key is the email's own
+  ok    kept for a bounded time, never for good
+
+Only the store's own sent emails, a bounded number of changes
+  ok    another store's email
+  ok    a link it does not have
+  ok    an email sent before this existed
+  ok    one not sent yet
+  ok    past SENT_LINK_CHANGES_MAX: refused, said
+
+What cannot be read goes to the original recorded at send time
+  ok    the button was changed before
+  ok    an error: the original
+  ok    a number: the original
+  ok    two replies: the original
+  ok    broken JSON: the original
+  ok    a record of another list: the original
+  ok    an address the rules refuse: the original
+
+One public request, counted before the one read; nothing about a click written
+  ok    followed to the change
+  ok    counted as one public request
+  ok    before the edit is read, which is read once
+  ok    nothing written but the store's request count
+  ok    bounded: a handful of commands
+  ok    a request costs more than what it reads
+
+A store not found, or its requests used up: the original, never the change
+  ok    the original, tagged as it was sent
+
+Erased with the store, registered with its bound
+  ok    one of the broadcast's keys
+  ok    its family is in the store data registry
+
+The studio says it, plainly
+  ok    the section's name
+  ok    an email sent before cannot be changed, and it says so
+  ok    the route needs the role that sends
+  ok    the email studio leads to it
+  ok    no open, no click counted, in the route
+  ok    no promise to send a link back always, past the most changes
+  ok    past the most changes, no form is offered for its links
+  ok    an unconfirmed save is never said as not changed
+  ok    a lost connection is never said as nothing changed
+  ok    busy is its own answer
+  ok    the privacy policy says what the redirect counts, not that it writes nothing
+
+77 checks, all passing.
+EXIT 0
+=== f2-sent-links-race.test.ts
+  ok    the email has three links that can be changed
+
+Two changes to different links of an email never changed before, read at the same moment
+  ok    first record: every change answered "saved" is in the history kept
+  ok    first record: the history holds only changes answered "saved"
+  ok    first record: at least one of them is saved
+  ok    first record: a change not saved says so in words, never as a success
+  ok    first record: link 1 goes where its last kept change says
+  ok    first record: link 2 goes where its last kept change says
+  ok    first record: the data room counts at least what the history keeps
+  ok    first record: both are saved
+
+Two changes to one link of an email already changed, read at the same moment
+  ok    one change made before
+  ok    kept record: every change answered "saved" is in the history kept
+  ok    kept record: the history holds only changes answered "saved"
+  ok    kept record: at least one of them is saved
+  ok    kept record: a change not saved says so in words, never as a success
+  ok    kept record: link 1 goes where its last kept change says
+  ok    kept record: link 1 goes where its last kept change says
+  ok    kept record: the data room counts at least what the history keeps
+  ok    kept record: both are saved, in the order written
+
+Three changes at the same moment
+  ok    one change made before
+  ok    three at once: every change answered "saved" is in the history kept
+  ok    three at once: the history holds only changes answered "saved"
+  ok    three at once: at least one of them is saved
+  ok    three at once: a change not saved says so in words, never as a success
+  ok    three at once: link 0 goes where its last kept change says
+  ok    three at once: link 1 goes where its last kept change says
+  ok    three at once: the data room counts at least what the history keeps
+  ok    three at once: two saved, one busy
+  ok    busy says nothing was saved and to reload
+
+A write whose answer is lost
+  ok    landed, answer lost: saved, and kept
+  ok    not landed, answer lost: unconfirmed, never saved
+
+30 checks, all passing.
+EXIT 0
+=== f2-sent-links-cost.test.ts
+  ok    the email has as many links as can be changed
+  ok    the email is at its longest
+
+1. The whole change request at its worst, against the studio requests taken
+  ok    the address is at its longest in characters
+  ok    and the rules let it go there
+  ok    saved: answered as it should (200 ok)
+  ok    saved: every command and byte inside the studio requests taken when sent ({"ok":true,"paid":15,"commands":21,"bytes":317278})
+  ok    saved: the change's own studio requests are taken before the email or its history is read
+  ok    busy: every write finds another change first: answered as it should (409 busy)
+  ok    busy: every write finds another change first: every command and byte inside the studio requests taken when sent ({"ok":true,"paid":15,"commands":23,"bytes":489578})
+  ok    busy: every write finds another change first: the change's own studio requests are taken before the email or its history is read
+  ok    the second write's answer lost, read back: answered as it should (503 unconfirmed)
+  ok    the second write's answer lost, read back: every command and byte inside the studio requests taken when sent ({"ok":true,"paid":15,"commands":23,"bytes":545965})
+  ok    the second write's answer lost, read back: the change's own studio requests are taken before the email or its history is read
+  ok    a full history: answered as it should (400 full)
+  ok    a full history: every command and byte inside the studio requests taken when sent ({"ok":true,"paid":15,"commands":11,"bytes":201253})
+  ok    a full history: the change's own studio requests are taken before the email or its history is read
+  ok    a first change that meets another's new history, kept a second longer: answered as it should (409 busy)
+  ok    a first change that meets another's new history, kept a second longer: every command and byte inside the studio requests taken when sent ({"ok":true,"paid":15,"commands":30,"bytes":323251})
+  ok    a first change that meets another's new history, kept a second longer: the change's own studio requests are taken before the email or its history is read
+
+1b. Without the studio requests a change needs, the email and its history are not read
+  ok    the store's studio count is where the route counts it
+  ok    refused for the studio requests, in words
+  ok    neither the email nor its history was read
+  ok    its history is as it was
+
+2. The history's ceiling in UTF-8 bytes, checked before writing
+  ok    the ceiling is a number of bytes
+  ok    three-byte characters: every change at its longest is saved
+  ok    three-byte characters: the history written is inside the ceiling (59249 bytes of 61536)
+  ok    four-byte pairs: every change at its longest is saved
+  ok    four-byte pairs: the history written is inside the ceiling (39959 bytes of 61536)
+  ok    an address with a lone surrogate (six bytes once written) is refused by the rules
+  ok    and by the server, with nothing written
+  ok    that history is past the ceiling
+  ok    a change more is refused in words, and nothing is written
+
+3. One opening of a link, with the history at its longest
+  ok    the history is at its longest in bytes
+  ok    an address with letters outside ASCII is answered with a redirect, its Location in ASCII
+  ok    it goes where the last change says
+  ok    what it reads: the store, its count and the history, once each ({"commands":5,"bytes":63753,"out":9208,"reads":["nl:store:handle:costshop","nl:store:owner:<x>","nl:mail:bc:<id>:go"]})
+  ok    and it costs less than the public request it is counted as (6.329e-5 against 2.428e-5)
+
+37 checks, all passing.
+EXIT 0
+=== f2-sent-links-page-cost.test.ts
+  ok    a history at its longest in bytes, inside the ceiling
+  ok    read whole, ten histories are more than the page's own 4 studio requests (594492 bytes)
+  ok    the page's reader of the histories it shows exists
+
+1. Ten histories at their longest: paid before they are read, every call inside what was taken
+  ok    every history is read and shown
+  ok    the sizes are asked inside one studio request of the page's own ({"commands":10,"bytes":582})
+  ok    no history is read before the studio requests are taken
+  ok    every command and byte after it is inside what was taken when sent ({"paid":25,"commands":12,"bytes":594800})
+
+1b. Small histories cost what they are, and none costs nothing more
+  ok    three with one change, seven with none
+  ok    a small read takes one studio request more, not the ceiling (1)
+  ok    inside what was taken
+  ok    with no history at all, nothing more is taken and nothing more is read
+
+1c. A history that grows between its size and its read is read no further than paid
+  ok    inside what was taken ({"paid":4,"commands":12,"bytes":64008})
+  ok    the grown one is not shown as read (the page says it could not be read), the others are
+
+2. Without the studio requests the histories need, none is read
+  ok    the store's studio count is where the page counts it
+  ok    refused, in words
+  ok    no history read
+  ok    the page reads them through it, paying from the store's studio requests
+  ok    and says why when it is refused
+
+3. A history with no room in bytes for another change, under the most changes
+  ok    that history is past the ceiling, under the most changes
+  ok    said to have no room; one written by the server one change short of full still has room
+  ok    the page hands it to the editor
+  ok    the editor offers no form for its links then
+  ok    and says why, plainly
+  ok    a refusal for room from the server hides the form as well
+
+24 checks, all passing.
+EXIT 0
+=== f2-sent-links-page-emails-cost.test.ts
+  ok    an email at its longest, as stored, past a hundred kilobytes
+  ok    listBroadcastsStrict reads all thirty
+  ok    read whole, thirty emails are more than the page's own 4 studio requests (4204622 bytes)
+  ok    the page's reader of the emails it shows exists
+
+1. Thirty emails at their longest: paid before they are read, every call inside what was taken
+  ok    every email is read whole, newest first
+  ok    the list and the sizes are asked with one LRANGE and one STRLEN each, small, inside the page's own studio requests ({"commands":31,"bytes":2559})
+  ok    no email is read before the studio requests are taken
+  ok    every command and byte after it is inside what was taken when sent ({"paid":145,"commands":32,"bytes":4205222})
+
+1b. Small emails cost what they are; no email costs nothing more
+  ok    three small emails
+  ok    a small read takes one studio request more (1)
+  ok    inside what was taken
+  ok    with no email, nothing is taken and only the list is asked
+  ok    a store with no list has no email, read from nowhere
+
+1c. An email that grows between its size and its read is read no further than paid
+  ok    inside what was taken ({"paid":150,"commands":35,"bytes":4345860})
+  ok    the grown one is read again, paid first, and shown as it is now
+  ok    it was taken twice: once for all, once for the grown one
+  ok    grown past it: could not be read
+  ok    and still inside what was taken
+
+2. Without the studio requests the emails need, none is read
+  ok    the store's studio count is where the page counts it
+  ok    refused, in words
+  ok    no email read
+  ok    the page reads them through it, paying from the store's studio requests, and no longer whole
+  ok    and says why when it is refused
+
+3. All or nothing, as listBroadcastsStrict
+  ok    a record missing from the list: could not be read
+  ok    a record of another list: could not be read
+  ok    a malformed record: could not be read
+  ok    an email whose links cannot be changed, not sent yet, is read as it is
+  ok    an index that is not one: could not be read
+
+28 checks, all passing.
+EXIT 0
+=== broadcasts-read-cost-email-page.test.ts
+  ok    an email at its longest, as stored, past a hundred kilobytes
+  ok    listBroadcastsStrict reads all thirty, bodies and all
+  ok    read whole, thirty emails are more than the page's own 4 studio requests (4204712 bytes)
+  ok    the page reads its emails without their bodies, paying from the store's studio requests, and no longer whole
+  ok    and says, in words, when there are not enough studio requests left to read them
+  ok    the reader of the emails without their bodies exists
+
+1. Thirty emails at their longest: every field the page shows, without the body
+  ok    every email, newest first, each field as listBroadcastsStrict reads it, and no body
+  ok    the list and the sizes are asked inside the page's own studio requests, small ({"commands":32,"bytes":2967})
+  ok    no email is read before the studio requests are taken
+  ok    every command and byte after it is inside what was taken when sent ({"paid":2,"commands":33,"bytes":15496})
+  ok    no body crosses: all of it is a few kilobytes (18463)
+
+1b. What a body holds never moves where the body ends
+  ok    each read exactly as stored, but its body
+
+1c. Small emails cost what they are; none costs nothing more
+  ok    three small emails
+  ok    a small read takes one studio request more (1)
+  ok    inside what was taken
+  ok    with no email, nothing is taken and only the list is asked
+  ok    a store with no list has no email, read from nowhere
+  ok    an invalid limit is refused (0)
+  ok    an invalid limit is refused (-1)
+  ok    an invalid limit is refused (101)
+  ok    an invalid limit is refused (1.5)
+  ok    an invalid limit is refused (NaN)
+
+1d. An email that grows between its size and its read is read no further than paid
+  ok    inside what was taken ({"paid":3,"commands":37,"bytes":17275})
+  ok    the grown one is read again, paid first, and shown as it is now
+  ok    it was taken twice: once for all, once for the grown one
+  ok    grown past what a send writes on it: could not be read
+  ok    and still inside what was taken
+
+2. Without the studio requests they need, none is read
+  ok    refused, in words
+  ok    no email read
+
+3. All or nothing, as listBroadcastsStrict
+  ok    a record missing from the list: could not be read
+  ok    a record of another list: could not be read
+  ok    a malformed record: could not be read
+  ok    a record with an empty body: could not be read
+  ok    a record with no body: could not be read
+  ok    a record that is not JSON: could not be read
+  ok    a record whose first body is a nested one: could not be read
+  ok    an email not sent yet is read as it is
+  ok    an index that is not one: could not be read
+
+38 checks, all passing.
+EXIT 0
+=== broadcasts-read-cost-marks.test.ts
+  ok    the marks read their emails without their bodies, and no longer whole
+
+1. Fifty emails at their longest: the reading is paid before any is read
+  ok    marks read
+  ok    only the list and the sizes are asked before a take, small ({"commands":52,"bytes":4347})
+  ok    no email is read before the studio requests are taken
+  ok    every command and byte after it is inside what was taken when sent ({"paid":3,"commands":53,"bytes":24956})
+  ok    no body crosses (29303 bytes)
+
+2. The same marks as from the emails read whole
+  ok    same marks
+
+3. Without the studio requests they need, no email is read
+  ok    no email read
+  ok    no email mark, the sale's marks stay
+
+9 checks, all passing.
+EXIT 0
+=== broadcasts-read-cost-mcp.test.ts
+
+1. Twenty-nine emails at their longest, and one more listed between the measure and the read
+  ok    told
+  ok    the late one was listed after the measure
+  ok    what the reading did comes to no more API requests than were taken ({"took":6,"units":5,"bytes":18196,"commands":68})
+  ok    the email listed after the measure is not read
+  ok    each measured email is read once
+  ok    no body crosses (18196 bytes)
+  ok    the late one is told on the next call
+
+2. An email grown between the measure and the read is read once more, paid first
+  ok    told as it is now
+  ok    inside what was taken ({"took":5,"units":2})
+  ok    the store's API count is where it is counted
+  ok    refused with its own words
+  ok    the grown one read once, as far as it was paid
+
+12 checks, all passing.
+EXIT 0
+=== broadcasts-read-cost-path-growth.test.ts
+
+1. The newest emails at their longest: everything after the first take is inside what was taken
+  ok    read
+  ok    a sent email is found
+  ok    nothing read before the first take
+  ok    every command and byte after it is inside what was taken when sent ({"paid":9,"commands":15,"bytes":3891})
+  ok    no body crosses (3891 bytes)
+
+2. Whether an email was sent is told exactly
+  ok    fewer than it reads, none sent: no email sent
+  ok    as many as it reads, none sent: unknown
+  ok    sent under another store's address: unknown, never read as this store's
+  ok    a record that is not one: unknown
+
+3. Without the studio requests the emails need, none is read
+  ok    the fact stays unknown, never 'no email sent'
+  ok    no email read
+
+11 checks, all passing.
+EXIT 0
+=== plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (72.373384ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (159.724648ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (42.333195ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.440801ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.201888ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.15375ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (1.009245ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (114.086912ms)
+✔ every store figure taken in the code is a kind a line prices (138.450949ms)
+✔ every email sent names a meter, and each file only the meters it may use (99.211234ms)
+✔ the units a figure is taken in cost at least what they stand for (12.526499ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (4.079904ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.342423ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.482152ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.176018ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.103593ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.300626ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (1.131753ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.111264ms)
+✔ Path push fits its reserved studio requests (0.120694ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.098834ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.484954ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.126571ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (45.432118ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 720.884263
+EXIT 0
+=== store-data-registry.test.ts
+creator: room 18 MB; outside it 121.4 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 288.2 MB on average, 805.6 MB at once
+scale: room 250 MB; outside it 704.8 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (84.730902ms)
+✔ each family is bounded one way at least, and what it says can be checked (112.570529ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (6.100363ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.634586ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.383888ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (6.416937ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.196185ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 236.430873
+EXIT 0
+=== api-events-measured.test.ts
+  ok    an endpoint hears sales
+
+The largest sale the code makes: a bundle of twenty, three checked at checkout, each a bundle of twenty, every title 80 characters of a three-byte script
+  ok    the newest LOG_SIZE deliveries are in the log
+  a delivery of this sale is kept at 29,995 bytes; the 50 at 1,499,740
+  ok    the message names the bundle and every product checked, each with its own bundle
+  ok    far past the 4 KB a delivery was priced at
+  ok    inside the bound a delivery is made under, with the room its tries write later
+  ok    the store's data registry prices a delivery at the bound, at or above the largest the code makes
+
+GET /api/v1/events: measured, set aside, settled at what was read and sent
+  limit=10: 1,501,140 bytes read, 286,931 sent, 12 requests taken (priced at 4 KB a delivery it was 5)
+  ok    answered, ten messages
+  ok    every delivery in the log read once
+  ok    the requests taken are what the bytes read and sent cost, with the door's
+  ok    more than the flat 5 the 4 KB price took for this
+  ok    each delivery measured before any was read
+  ok    limit=1: one message, settled at the one sent
+  ok    and no more than limit=10
+  ok    a type none of them is: the deliveries read, nothing sent
+
+Too few requests left for what was measured: refused, no delivery read, only the door's request and the measuring kept
+  ok    the month is taken down to 11
+  ok    refused with the whole count it may take
+  ok    no delivery read
+  ok    only the door's request and the measuring done kept
+  ok    the month is taken down to 12
+  ok    with exactly what it may take left, answered
+  ok    and what it did not need given back
+  ok    the month is taken down to 1000
+
+A log or sizes answered broken: unavailable before any delivery is read; the measuring set aside is kept (C3-124, Codex G2)
+  ok    partial-sizes: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken
+  ok    empty-sizes: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken
+  ok    text-sizes: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken
+  ok    null-log: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken
+  ok    not-ids: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken
+  ok    one-not-id: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken
+
+Every text cleaned where the message is made: the worst a text can escape is a quotation mark, four bytes kept
+  ok    control characters become a space, a text is cut at its most, a lone surrogate half becomes U+FFFD
+  the largest sale with every text at its longest in quotation marks is kept at 45,456 bytes, under 63,488
+  ok    kept with its message, at three quarters of the bound or less
+  ok    in control characters: kept with its message, none of them escaped (was past 48 KB, every sale not sent)
+
+A message past the bound is never kept or sent: its line says so, nothing queued, nothing counted
+  ok    nothing queued
+  ok    its line: no message, failed, with the reason and the true figure
+  ok    kept small
+  ok    the studio's log shows it, without a way to send it again
+  ok    no webhook delivery of the month taken
+  ok    a message just inside the bound is queued as always
+  ok    the studio's webhooks and the developers page say the bounds, from the code's figures
+  ok    a day's lines are bounded: SKIPPED_LINES_PER_DAY of their own, then one line that counts the rest
+
+A failed delivery kept before the bound, larger than it, is not sent again by hand
+  ok    refused with the reason, nothing sent or counted
+
+The order's own title stands in only for its own product when a listing is gone
+  ok    its own product: the order's title; a bundle's product or one checked: none
+
+get_emails with a kept copy of what they sold of 172 KB: measured, set aside and settled at it
+  get_emails: a kept copy of 172,020 bytes takes 5; priced at 64,000 it took 5
+  ok    answered
+  ok    the copy is the size asked
+  ok    the requests taken are what the copy read costs, with the door's
+  ok    the copy's own bytes are priced, not its old 64 KB
+  ok    the month is taken down to 4
+  ok    one short of it: refused, nothing read
+
+The month's webhook deliveries used: no message kept or sent, a line that says so, bounded by the day
+  ok    messages made while deliveries are left are kept: one tried and counted, one not tried yet
+  ok    not tried before the month was used: not sent, and its message not kept past it
+  ok    counted at its first try: not sent again, but its message kept, to be sent again by hand
+  ok    made with the month used 0: nothing queued
+  ok    made with the month used 1: nothing queued
+  ok    made with the month used 2: nothing queued
+  ok    made with the month used 3: nothing queued
+  ok    made with the month used 4: nothing queued
+  ok    made with the month used 5: nothing queued
+  ok    SKIPPED_LINES_PER_DAY lines of their own, then one line that counts the rest
+  ok    no message kept behind any of them
+
+58 checks, all passing.
+api: reading recent events failed Error: the recent deliveries could not be measured
+    at recentEvents (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:62443:21)
+    at async GET (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:62484:19)
+    at async main (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:67811:20)
+api: reading recent events failed Error: the recent deliveries could not be measured
+    at recentEvents (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:62443:21)
+    at async GET (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:62484:19)
+    at async main (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:67811:20)
+api: reading recent events failed Error: the recent deliveries could not be measured
+    at recentEvents (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:62443:21)
+    at async GET (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:62484:19)
+    at async main (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:67811:20)
+api: reading recent events failed Error: the recent deliveries could not be measured
+    at recentEvents (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:62443:21)
+    at async GET (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:62484:19)
+    at async main (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:67811:20)
+api: reading recent events failed Error: the recent deliveries could not be measured
+    at recentEvents (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:62443:21)
+    at async GET (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:62484:19)
+    at async main (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:67811:20)
+api: reading recent events failed Error: the recent deliveries could not be measured
+    at recentEvents (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:62443:21)
+    at async GET (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:62484:19)
+    at async main (/dev/shm/j3034-return-eTPOSE/api-events-measured.test.ts.cjs:67811:20)
+EXIT 0
+FAILED FILES 0

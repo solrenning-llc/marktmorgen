@@ -77,14 +77,49 @@ for (const bad of [
   // Written in two parts so the public-data check never reads a phone number in this file.
   "Text me at +" + "1 (415) 555-0134",
   "Go to example.com today",
+  "Shop at shop.de",
+  "Watch evil.tv tonight",
+  "Find her at sam-writes.studio",
+  "Find her at SAM.Writes.COM",
+  // A full-width dot and full-width letters read as a link once normalized (NFKC).
+  "Go to evil\uff0etv",
+  "Go to \uff45\uff56\uff49\uff4c\uff0e\uff54\uff56",
+  // An ideographic full stop, which a browser's address bar reads as a dot.
+  "Go to evil\u3002tv",
+  "Mail sam\uff20example\uff0ecom",
 ]) {
   is(`a line with a link, an email address or a phone number: ${JSON.stringify(bad)}`, problem([{ handle: "sam.writes", why: bad }]), ["why-contact", 0]);
 }
-for (const bad of ["<script>alert(1)</script>", "Nice <img src=x onerror=alert(1)>", "javascript:alert(1)", "bell\u0007"]) {
+for (const bad of [
+  "<script>alert(1)</script>",
+  "Nice <img src=x onerror=alert(1)>",
+  "javascript:alert(1)",
+  "bell\u0007",
+  // Invisible format characters (\p{Cf}): word joiner, soft hyphen, Mongolian vowel separator, a tag letter, a byte-order mark.
+  "Good\u2060notes",
+  "Good\u00adnotes",
+  "Good\u180enotes",
+  "Good notes\u{e0041}",
+  "\ufeffGood notes",
+  "Good\u2066notes\u2069",
+  // Full-width angle brackets read as markup once normalized (NFKC).
+  "Nice \uff1cb\uff1ebold\uff1c/b\uff1e",
+]) {
   is(`a line with markup or a control character: ${JSON.stringify(bad)}`, problem([{ handle: "sam.writes", why: bad }]), ["why-unsafe", 0]);
 }
 is("a span of years is not a phone number", ok([{ handle: "sam.writes", why: "Weekly notes since 2015-2020, then monthly." }])?.length, 1);
 is("a version number is not a link", ok([{ handle: "sam.writes", why: "Clear guides to Node.js and React 19." }])?.length, 1);
+for (const fine of [
+  "Short, sharp essays. Every week.",
+  "Recipes loved by 3.5 million readers.",
+  "Live at 9 a.m. on Mondays, e.g. small talks.",
+  "Wait...what a read.",
+  "Dr. Ana writes about sleep, i.e. rest.",
+  "Version 2.0 of her course is out.",
+  "U.S. history, told simply.",
+]) {
+  is(`common words and punctuation are not a link: ${JSON.stringify(fine)}`, ok([{ handle: "sam.writes", why: fine }])?.length, 1);
+}
 is("the first problem is the one named", problem([{ handle: "sam.writes", why: "ok" }, { handle: OWN, why: "x" }, { handle: "x", why: "" }]), ["own", 1]);
 is("the creator's own store address must be a real one", problem([], ""), ["own", null]);
 is("an own address of the wrong shape is refused", problem([{ handle: "sam.writes", why: "x" }], "Not A Handle"), ["own", null]);

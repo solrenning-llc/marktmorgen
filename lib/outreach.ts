@@ -422,9 +422,10 @@ export async function startPitch(
   ];
   // Said written only on the exact receipt (Claude 1 on #2870): a draft shown with a stop link that may not open, or
   // with no wait held before the same business, is never answered done. The room taken stays taken (fails safe).
-  wroteSet(await redisPipeline(commands), commands, "a new pitch");
-  // The pitches let go give their room back; their stop links stay counted (OUTREACH_TRACE_BYTES).
-  const gone = replaced.length + (pushedOut ? 1 : 0);
+  const receipt = wroteSet(await redisPipeline(commands), commands, "a new pitch");
+  // The pitches let go give their room back; their stop links stay counted (OUTREACH_TRACE_BYTES). Only those this
+  // write removed, on their own HDEL's 1: a 0 is a drop that got there first and gave the room back already.
+  const gone = commands.filter((command, i) => command[0] === "HDEL" && receipt[i] === 1).length;
   if (gone > 0) await giveData(store, [{ slot: PITCHES_SLOT, bytes: gone * PITCH_BYTES }]);
   return { ok: true, pitch, left: written.left, replaced: replaced.map((p) => p.id) };
 }
@@ -461,10 +462,12 @@ function wrote(replies: unknown, length: number, what: string): number[] {
   return counts as number[];
 }
 
-/** A write's receipt where a SET answers "OK" and every other command a count; anything else throws. */
-function wroteSet(replies: unknown, commands: (string | number)[][], what: string): void {
+/** A write's receipt where a SET answers "OK" and every other command a count, read in order; anything else throws. */
+function wroteSet(replies: unknown, commands: (string | number)[][], what: string): (number | "OK")[] {
   const receipt = repliesFor(replies, commands.length);
-  if (!receipt || receipt.some((reply, i) => (commands[i][0] === "SET" ? reply !== "OK" : countOf(reply) === null))) throw new UnknownReplyError(what);
+  const read = receipt?.map((reply, i) => (commands[i][0] === "SET" ? (reply === "OK" ? "OK" : null) : countOf(reply)));
+  if (!read || read.some((reply) => reply === null)) throw new UnknownReplyError(what);
+  return read as (number | "OK")[];
 }
 
 /**

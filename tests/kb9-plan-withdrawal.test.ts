@@ -54,10 +54,18 @@ const receipts = () => world.emails.filter((e) => e.subject.includes("withdrawal
 /** Refuses the next `n` emails at the stand-in Resend, counting every try of a receipt (subject naming the withdrawal). */
 let refuse = 0;
 let receiptTries = 0;
+/** The host a request goes to, read whole (never a substring of the URL). */
+const hostOf = (u: string): string => {
+  try {
+    return new URL(u).hostname;
+  } catch {
+    return "";
+  }
+};
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = String(input instanceof Request ? input.url : input);
-  if (url.includes("api.resend.com")) {
+  if (hostOf(url) === "api.resend.com") {
     const subject = String((JSON.parse(String(init?.body ?? "{}")) as { subject?: string }).subject ?? "");
     if (subject.includes("withdrawal")) receiptTries += 1;
     if (refuse > 0) {
@@ -92,7 +100,7 @@ async function main() {
   world.emails = [];
   const first = await post({ name: NAME, email: ADDRESS });
   is("told on the refund page", [first.status, first.page, first.state], [303, "/studio/refund", "refunded"]);
-  is("the name and the email never go in the address", [first.location.includes("Ana"), first.location.includes("example.com")], [false, false]);
+  is("the name and the email never go in the address", [first.location.includes("Ana"), first.location.includes("@") || first.location.includes("%40")], [false, false]);
   const kept = await recordOf(who.store.sid, a.subId);
   is("the withdrawal is recorded with its time, its receipt marked sent", [typeof kept[0] === "string" && /^\d+$/.test(kept[0]), kept[1], kept[2]], [true, "1", "1"]);
   is("one receipt, to the address given", receipts().map((e) => e.to), [ADDRESS]);
@@ -214,7 +222,7 @@ async function main() {
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input instanceof Request ? input.url : input);
     if (!stripeUp && url.includes("api.stripe.com/v1/charges")) return new Response(JSON.stringify({ error: { message: "down" } }), { status: 500 });
-    if (url.includes("api.resend.com") && [(JSON.parse(String(init?.body ?? "{}")) as { to?: string | string[] }).to].flat().includes(SUPPORT)) {
+    if (hostOf(url) === "api.resend.com" && [(JSON.parse(String(init?.body ?? "{}")) as { to?: string | string[] }).to].flat().includes(SUPPORT)) {
       supportTries += 1;
       if (!supportUp) return new Response(JSON.stringify({ message: "unavailable" }), { status: 503 });
     }

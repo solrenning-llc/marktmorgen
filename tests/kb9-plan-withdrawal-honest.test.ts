@@ -44,10 +44,18 @@ const receipts = () => world.emails.filter((e) => e.to === ADDRESS && e.subject.
 let balance = 0;
 let onRefund: (() => Promise<void>) | null = null;
 let stripeDown = false;
+/** The host a request goes to, read whole (never a substring of the URL). */
+const hostOf = (u: string): string => {
+  try {
+    return new URL(u).hostname;
+  } catch {
+    return "";
+  }
+};
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = String(input instanceof Request ? input.url : input);
-  if (url.includes("api.stripe.com")) {
+  if (hostOf(url) === "api.stripe.com") {
     if (stripeDown) return new Response(JSON.stringify({ error: { message: "down" } }), { status: 500 });
     if (url.includes("/v1/refunds") && init?.method === "POST" && onRefund) await onRefund();
     const answer = await realFetch(input, init);

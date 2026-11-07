@@ -57,7 +57,7 @@ import {
 import { storeBase } from "@/lib/purchase-email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { textCountOf } from "@/lib/redis-count";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { SafeFetchError, checkUrl, safeFetch } from "@/lib/safe-fetch";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";

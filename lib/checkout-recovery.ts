@@ -494,9 +494,16 @@ async function deliver(
   const [claimed, claimedOnce] = claims;
   // Sent only when both were taken here, each answered exactly "OK"; nothing
   // back means another pass holds it. Any other reply is unknown and nothing
-  // is sent. A lost reply may still have set its mark, which can only hold
-  // back this one optional reminder for its week: the safe side.
+  // is sent. The claim that did answer "OK" was taken here and is given back
+  // at once (Claude 5's LOW on #2929), so the next pass sends this reminder
+  // and the buyer's other checkouts are not held back a week; the one whose
+  // reply was lost may still have set its mark, which can only hold back
+  // this one optional reminder for its week: the safe side.
   if ((claimed !== "OK" && claimed !== null) || (claimedOnce !== "OK" && claimedOnce !== null)) {
+    const back: (string | number)[][] = [];
+    if (claimed === "OK") back.push(["DEL", sentKey(id)]);
+    if (claimedOnce === "OK") back.push(["DEL", onceKey(statsId, email, onceFor)]);
+    if (back.length > 0) await redisPipeline(back).catch(() => null);
     throw new UnknownReplyError("the checkout reminder's claim");
   }
   if (claimed === null || claimedOnce === null) return "skip";

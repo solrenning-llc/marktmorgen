@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { lastKey, readLast } from "@/lib/lesson-position-rules";
+import { lastKey, lastShown, readLast } from "@/lib/lesson-position-rules";
 
 /** The device's value never changes under this page on its own: read once, on the client. */
 const noSubscription = () => () => {};
@@ -23,20 +23,24 @@ function kept(key: string | null): string | null {
  * the library's own address. Nothing is drawn on the server or before the
  * device is read, and nothing when no lesson is kept, so the card never shows
  * something that is not there. One kept but unreadable or too old is removed.
+ * A lesson from a store the library does not show (`open`, the handles it
+ * shows, or null when it could not read every store) is not drawn, and is
+ * kept: it lapses after KEEP_DAYS like any other.
  */
-export function LibraryContinue({ person }: { person: string }) {
+export function LibraryContinue({ person, open }: { person: string; open: readonly string[] | null }) {
   const key = lastKey(person);
   const raw = useSyncExternalStore(noSubscription, () => kept(key), () => null);
   const [now] = useState(() => Date.now());
-  const last = raw === null ? null : readLast(raw, now);
+  const read = raw === null ? null : readLast(raw, now);
   useEffect(() => {
-    if (!key || raw === null || last) return;
+    if (!key || raw === null || read) return;
     try {
       window.localStorage.removeItem(key);
     } catch {
       // Storage blocked: nothing to remove.
     }
-  }, [key, raw, last]);
+  }, [key, raw, read]);
+  const last = lastShown(read, open);
   if (!last) return null;
   return (
     <section aria-labelledby="library-continue-heading" className="card mt-6 min-w-0 p-5" data-library-continue>

@@ -39,6 +39,9 @@ const STATUS: Record<string, { tone: "ok" | "error"; text: string }> = {
  * from, each opening its own list of purchases. Signed in by a link emailed
  * to the address, as each store's own list is.
  */
+/** A store this address bought from whose record could not be read: not "closed", and not "open" either. */
+const UNREAD_STORE = Symbol("unread store");
+
 export default async function LibraryPage({ searchParams }: Params) {
   const query = await searchParams;
   const token = typeof query.token === "string" ? query.token.slice(0, 80) : "";
@@ -49,8 +52,13 @@ export default async function LibraryPage({ searchParams }: Params) {
 
   // Each store's own list, opened by a link made for this address now (lib/buyer-orders.ts).
   const shelves: { store: Store; open: string | null; waiting: string }[] = [];
+  // Whether a store this address bought from could not be read: then the library cannot tell which stores are open, and
+  // the "Continue" card shows nothing rather than a lesson from a store it may not show (rule 24; Claude 6 on #3060).
+  let unread = false;
   if (email) {
-    const stores = (await Promise.all((await storesBoughtFrom(email)).map((sid) => storeForId(sid).catch(() => null)))).filter((s): s is Store => s !== null);
+    const read = await Promise.all((await storesBoughtFrom(email)).map((sid) => storeForId(sid).catch(() => UNREAD_STORE)));
+    unread = read.some((s) => s === UNREAD_STORE);
+    const stores = read.filter((s): s is Store => s !== null && s !== UNREAD_STORE);
     // What waits on them at one store (lib/buyer-waiting.ts), shown only where its orders page opens to act on it, and read
     // only once that store's buyer requests paid for the read (LIBRARY_WAITING_UNITS; Codex J on #1969). Without them nothing
     // is read, and the card says it could not check, never that something waits. Payment requests are read only where they
@@ -73,6 +81,8 @@ export default async function LibraryPage({ searchParams }: Params) {
     }
     shelves.sort((a, b) => a.store.name.localeCompare(b.store.name, "en"));
   }
+  // The handles of the stores the library shows, the only ones whose last lesson the card may offer.
+  const openHandles = unread ? null : shelves.map(({ store }) => store.handle);
 
   return (
     <div className="flex min-h-screen flex-col bg-paper text-ink">
@@ -96,7 +106,7 @@ export default async function LibraryPage({ searchParams }: Params) {
               <p className="mt-2 text-sm text-ink-soft">
                 What you bought from a store is here while that store is open on Marktmorgen. A store whose creator closes it takes what was bought from it along, so download the files you want to keep. <Link href="/terms#closing" className="underline underline-offset-4">How a store closes</Link>.
               </p>
-              {continuePerson ? <LibraryContinue person={continuePerson} /> : null}
+              {continuePerson ? <LibraryContinue person={continuePerson} open={openHandles} /> : null}
               {shelves.length ? (
                 <ul className="mt-6 grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {shelves.map(({ store, open, waiting }) => (

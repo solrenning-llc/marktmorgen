@@ -198,6 +198,18 @@ export function writeLast(last: Omit<LastLesson, "at">, nowMs: number): string |
 }
 
 /**
+ * The last lesson as the library may show it: only when its store is among the stores the library itself shows
+ * (`open`, their handles), since a closed store "is gone, and is never shown" (lib/buyer-library.ts) and its lesson link
+ * would lead nowhere (Claude 6 on #3060). When the library could not read every store (`open` null), nothing is shown,
+ * since a failed read is not proof the store closed nor that it is open (rule 24); the record is kept either way.
+ */
+export function lastShown(last: LastLesson | null, open: readonly string[] | null): LastLesson | null {
+  if (!last || !open) return null;
+  const handle = last.path.slice(2, last.path.indexOf("/course/"));
+  return open.includes(handle) ? last : null;
+}
+
+/**
  * The last lesson read back whole, or null: an address that is not a lesson page of this site (so a value changed on
  * the device can never send anyone elsewhere), a name longer than any written, a time in the future or older than
  * KEEP_DAYS, or anything else.

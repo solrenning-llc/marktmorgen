@@ -29,6 +29,7 @@ import { leadsKey } from "@/lib/contacts";
 import { mintPass, passCookieName } from "@/lib/learn";
 import { productSegment } from "@/lib/product-slug";
 import { MAX_UNLOCK_PRODUCTS, lockedOf, unlockCandidates, unlocksOf } from "@/lib/community-locked";
+import { collectionUnits } from "@/lib/page-read-rules";
 import { store as redis } from "./redis-stub";
 import { cookieValues } from "./meeting-withdrawal-page-world";
 import { paidPeriod } from "./billing-period-fixture";
@@ -210,8 +211,55 @@ async function main(): Promise<void> {
   };
   const ways = (await unlocksOf(store, many, yes))!;
   const last = many.spaces[many.spaces.length - 1].id;
-  is("a space none of whose products was read is unknown, not none", ways[last], "unknown");
+  is("a space none of whose products was read is capped (ask the creator), not none", ways[last], "capped");
   is("no space says none while its product is on sale", Object.values(ways).filter((way) => way === "none").length, 0);
+
+  part("The read cap runs out before a product on sale: the space says so truthfully, never 'reload'");
+  // Review of #3007 (7 November 2026): 24 hidden products before the one on sale left the space "unknown" for good,
+  // and the page said "Reload the page to try again", which never helps (a space takes up to 50 products).
+  const shelved: string[] = [];
+  for (let n = 0; n < MAX_UNLOCK_PRODUCTS; n++) {
+    const product = await made(`Shelved ${n}`, "5");
+    await setProductHidden(OWNER, product, true);
+    shelved.push(product);
+  }
+  const deep = newItemId();
+  const deepConfig: CommunityConfig = {
+    ...freshConfig(store.name),
+    access: [starter, guide, ...shelved],
+    spaces: [
+      { id: general, name: "General", about: "", creatorOnly: false, only: [], level: 0 },
+      { id: deep, name: "Deep room", about: "", creatorOnly: false, only: [...shelved, guide], level: 0, shown: true },
+    ] as CommunityConfig["spaces"],
+  };
+  store = (await storeForEmail(OWNER))!;
+  let units = 0;
+  const counted = async (n: number) => {
+    units += n;
+    return true;
+  };
+  is("24 hidden products, then Guide on sale: the space is capped, not unknown", (await unlocksOf(store, deepConfig, counted))?.[deep], "capped");
+  is("and no more than the cap was paid for", units <= collectionUnits(MAX_UNLOCK_PRODUCTS), true);
+  await saveConfig(id, deepConfig);
+  html = await draw(OUTSIDER);
+  is("the member's page asks them to ask the creator, and never says reload", [lockedPart(html).includes("Ask the creator how to get in."), lockedPart(html).includes("Reload the page")], [true, false]);
+
+  part("A space settled by its first product leaves the rest of the cap to the next one");
+  const quick = newItemId(), slow = newItemId();
+  const twoConfig: CommunityConfig = {
+    ...freshConfig(store.name),
+    access: [guide, ...fillers, ...shelved],
+    spaces: [
+      { id: general, name: "General", about: "", creatorOnly: false, only: [], level: 0 },
+      { id: quick, name: "Quick room", about: "", creatorOnly: false, only: fillers, level: 0, shown: true },
+      { id: slow, name: "Slow room", about: "", creatorOnly: false, only: [...shelved.slice(0, 13), guide], level: 0, shown: true },
+    ] as CommunityConfig["spaces"],
+  };
+  units = 0;
+  const two = (await unlocksOf(store, twoConfig, counted))!;
+  is("the quick space names its first product", two[quick], { title: "Item 0", href: `/@lockedclub/p/${productSegment({ id: fillers[0], title: "Item 0" })}` });
+  is("the slow space, behind 13 hidden products, still names Guide", two[slow], guideLink);
+  is("and the reads stay inside the cap", units <= collectionUnits(MAX_UNLOCK_PRODUCTS), true);
   done();
 }
 

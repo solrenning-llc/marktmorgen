@@ -1,0 +1,59 @@
+SUBJECT 5f01d43388c3a2e88afe9ae01331987d8692c56a
+ORIGINAL TEST IN FINAL GRAPH
+
+The words of a figure used up
+  ok    the window: the month, or the trial
+  ok    a larger plan only to a store that pays, has one above it, while plans are on sale
+  ok    a figure not included: where, and a plan offered only while plans are on sale
+  ok    in a trial, a kind that ends at zero says the trial's end and after; another says it opens again
+  ok    a store at the full trial length counts it as one window
+
+A place this month, said as it is
+  ok    a database that does not answer: unknown, not let in, and never called full
+  FAIL  and a webhook refused for it waits to be tried again on the schedule, where before it failed for good as 'full'
+        expected true
+        got      false
+  ok    so the studio's count says unknown too
+  ok    places all taken: full, and the pool's own words
+  ok    a paying store is always in
+
+What the owner needs to leave or pay, past its own daily figure
+  ok    is refused as daily, never as the month's figure
+
+11 checks, 1 failing.
+S_VOLUME {"runs":84,"mocks":0}
+S_STATUS 1 null undefined LOG /tmp/s3096-guard-ODRRVq
+
+FINAL TEST
+
+The words of a figure used up
+  ok    the window: the month, or the trial
+  ok    a larger plan only to a store that pays, has one above it, while plans are on sale
+  ok    a figure not included: where, and a plan offered only while plans are on sale
+  ok    in a trial, a kind that ends at zero says the trial's end and after; another says it opens again
+  ok    a store at the full trial length counts it as one window
+
+A place this month, said as it is
+  ok    a database that does not answer: unknown, not let in, and never called full
+  ok    and a webhook refused for it waits to be tried again on the schedule, where before it failed for good as 'full'
+  ok    so the studio's count says unknown too
+  ok    places all taken: full, and the pool's own words
+  ok    a paying store is always in
+
+What the owner needs to leave or pay, past its own daily figure
+  ok    is refused as daily, never as the month's figure
+
+11 checks, all passing.
+S_VOLUME {"runs":84,"mocks":0}
+S_STATUS 0 null undefined LOG /tmp/s3096-guard-8slHyO
+
+TYPES: strict ES2017/Bundler changed test root and imports; no diagnostics
+
+LINT
+LINT_EXIT 0
+PRODUCT IDENTITY: git diff bbfd HEAD --exit-code -- lib app components EXIT0; full diff only tests/paused-reasons.test.ts (one replacement).
+
+SCANNER
+Public data check: 4312 tracked files; 0 file(s) require correction.
+SCANNER_EXIT 0
+DIFF: git diff --check and git diff --cached --check EXIT0

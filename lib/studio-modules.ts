@@ -108,6 +108,7 @@ export const NOT_MODULES: Readonly<Record<string, string>> = {
   team: "Who helps run the store and with which role, the store's administration opened from the studio home.",
   path: "Your Path, a guide of next steps for the owner, opened from the reminder on the studio home.",
   labels: "A tool for labels on many contacts at once, opened from Moving from another platform.",
+  card: "The business card, one address with a Save contact button, opened from Your pages.",
 };
 
 /** What the page knows about the person, the store and the deployment. */

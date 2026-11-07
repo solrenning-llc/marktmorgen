@@ -712,8 +712,9 @@ export async function readListingsMeasured(store: Store, ids?: Iterable<string>)
  * reader whose answer would be wrong with one left out (a store's policy
  * page, lib/store-policy-input.ts). An id the store does not have, a record
  * missing from Redis, a reply that is not one exact answer per GET
- * (repliesFor), or a record that is not that product's listing makes the
- * whole read unknown, never a shorter list (Codex G's review of #1824).
+ * (repliesFor), a record that is not that product's listing, or one whose
+ * `recurring` is there but not a schedule makes the whole read unknown, never
+ * a shorter list or a membership read as none (Codex G's review of #1824).
  */
 export async function readListingsExact(store: Store, ids: readonly string[]): Promise<Listing[]> {
   const asked = wanted(store, ids);
@@ -738,8 +739,13 @@ export async function readListingsExact(store: Store, ids: readonly string[]): P
       const replies = repliesFor(answers[c], chunk.length);
       if (!replies) throw new UnknownReplyError("a listing read");
       chunk.forEach((id, i) => {
-        const listing = parseListing(parseJson(replies[i]));
+        const raw = parseJson(replies[i]);
+        const listing = parseListing(raw);
         if (!listing || listing.id !== id) throw new UnknownReplyError("a listing read with a record missing or unreadable");
+        // parseProduct reads a schedule it cannot read as none; here that would say "not a membership".
+        // Only an absent or null `recurring` is none (Codex G's review of #1824).
+        const recurring = (raw as { recurring?: unknown }).recurring;
+        if (recurring !== undefined && recurring !== null && !listing.recurring) throw new UnknownReplyError("a listing read with a membership schedule unreadable");
         found.set(id, listing);
       });
     });

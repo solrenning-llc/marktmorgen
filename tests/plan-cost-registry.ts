@@ -281,6 +281,18 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
  * cleanup/failures/retention must precede first activation; lifecycle is not
  * financial evidence. Never restore never_activated after any use while
  * payloads or uncertain reserves remain. Future tails are unknown/rejected.
+ * CX-121 physical-refusal construction adds two individually expiring
+ * HASH fields (state/date/checkout only;400days) in the existing company
+ * pools. Before enqueue, HLEN+pending reserves finite summary cardinality
+ * (technical10000), separately from pending globalItems/storeItems. No new
+ * key family or public limit. Strict Lua snapshots precede value transfer;
+ * personal copy/erasure and full-pool fulfillment add bounded operations.
+ * Redis7.4.12 isolated EVAL+internal observed maxima: enqueue27, claim16,
+ * dispatch16, refusal32, explicit no-POST16; these are component measurements,
+ * not full lifetime
+ * costs, supplier invoices, reviewed funding or an amendment to ORDER.
+ * Refusal-field copies, failure tails and erasure/trigger costs remain
+ * UNKNOWN/rejected until a complete independent admission precedes IO.
  * The new account-wide Resend budget is also NOT funded by this order
  * coefficient or by a paid provider quota alone. Its permanent schema1
  * ledger, schema2 claims, pending/unknown holds without TTL, exact35-day

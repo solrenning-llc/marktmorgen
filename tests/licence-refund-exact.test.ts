@@ -7,6 +7,10 @@
  * replying something that is not a key nor "none", Stripe answering a list without its `data` array) is not "this
  * sale has no key" nor "no checkout": the refund stays unread and the next run revokes the key. The same file's
  * low-pool warning, pool cap and data copy treat an unknown count or list as unknown, never as zero or empty.
+ *
+ * Review MEDIUM on #2868: a product the store still lists whose listing read comes back empty (a product outside the
+ * catalog head, its GET answered in an unknown shape) is not "the product is gone": the refund stays unread and the
+ * next run revokes the key.
  */
 import { type Store, claimHandle, ensureStatsId, addProduct, setProductKeys, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { MAX_POOL_KEYS, addKeys, checkKey, keyForSale, keysOf, revokeRefunded } from "@/lib/licence-keys";
@@ -17,7 +21,7 @@ import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_licence_refund_exact";
 const OWNER = "licencerefund@example.com";
-const ACCOUNT = "acct_1TestLicenceRef1";
+const ACCOUNT = "acct_1TestLicRef01";
 const NOW = Math.floor(Date.now() / 1000);
 
 const sessionsByPayment: Record<string, Record<string, unknown>[]> = {};
@@ -153,6 +157,30 @@ async function main(): Promise<void> {
     is("nothing revoked, and the refund is left unread", [once === "threw" ? 0 : once, await seenOf(id)], [0, 0]);
     is("the next run (Stripe healthy again) revokes the refunded key", [await run(), await checkKey(store, app, key)], [1, "revoked"]);
   }
+
+  part("2d. A listed product's listing read answers in an unknown shape (review of #2868)");
+  const outside = await sale("cs_test_licref000010", "pi_LicenceRef0010");
+  refunds = [refund("re_LicenceRef0010", "pi_LicenceRef0010")];
+  // The product sits outside the catalog head (a store with more than a page of products, or a head over its bytes),
+  // so its listing is read with a GET of its own; that GET answers with no reply at all.
+  is("control: the store still lists the product", store.catalog.items.some((item) => item.id === app.id), true);
+  const headless: Store = { ...store, catalog: { ...store.catalog, head: [] } };
+  const listingGet = (commands: Command[]) => commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).endsWith(`:l:${app.id}`);
+  redis.pipeline = (async (commands: Command[]) => (listingGet(commands) ? [] : real(commands))) as typeof redis.pipeline;
+  let outsideRun: number | "threw";
+  try {
+    outsideRun = await revokeRefunded(headless, Date.now() + 10_000);
+  } catch {
+    outsideRun = "threw";
+  }
+  redis.pipeline = real;
+  is("nothing revoked, and the refund is left unread", [outsideRun === "threw" ? 0 : outsideRun, await seenOf("re_LicenceRef0010"), await checkKey(store, app, outside)], [0, 0, "valid"]);
+  is("the next healthy run revokes the refunded key", [await run(), await checkKey(store, app, outside), await seenOf("re_LicenceRef0010")], [1, "revoked", 1]);
+
+  part("2e. Healthy control: a refunded product the store no longer lists is read, with nothing to revoke");
+  refunds = [refund("re_LicenceRef0011", "pi_LicenceRef0011")];
+  sessionsByPayment.pi_LicenceRef0011 = [{ id: "cs_test_licref000011", object: "checkout.session", metadata: { store: "licencerefund", product: "prodgone000001" } }];
+  is("the refund is marked read and nothing is revoked", [await run(), await seenOf("re_LicenceRef0011")], [0, 1]);
 
   part("3. MEDIUM: an unknown pool count never emails \"No license keys left\" while keys are in stock");
   const pooled = await addProduct(OWNER, "Glaze Pack", "", "19", null);

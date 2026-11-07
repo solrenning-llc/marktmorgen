@@ -12,7 +12,7 @@ import { admission, type Refusal } from "./file-upload-admission-world";
 import { resetWorld, state, FOLDER } from "./upload-route-world";
 import { reset, calls } from "./upload-budget-redis";
 
-const scenarios: readonly [Refusal, number][] = [["signed_out", 401], ["forbidden", 403], ["gone", 403], ["used", 429], ["two_step", 403]];
+const scenarios: readonly [Refusal, number][] = [["locked", 403], ["signed_out", 401], ["forbidden", 403], ["gone", 403], ["used", 429], ["two_step", 403]];
 
 for (const [reason, expectedStatus] of scenarios) {
   test(`legacy file upload answers ${reason} with HTTP ${expectedStatus}`, async () => {

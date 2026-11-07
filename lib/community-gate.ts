@@ -50,9 +50,12 @@ export function previewSpaces<S extends GatedSpace>(spaces: readonly S[], access
  * How a locked space can be opened: by buying a product, not now, not known
  * (its products could not be read: reloading may help), or not found within
  * the read cap (its products past the cap were never read: reloading would
- * not help, so the member is sent to the creator) (542 [CM1]).
+ * not help, so the member is sent to the creator) (542 [CM1]). "unchecked"
+ * is a space whose answer for this member could not be read just now: they
+ * may hold its product, so it is neither called locked nor offered for sale
+ * (review of #3007, M1).
  */
-export type Unlock = { title: string; href: string } | "none" | "unknown" | "capped";
+export type Unlock = { title: string; href: string } | "none" | "unknown" | "capped" | "unchecked";
 
 /** All a page draws of one locked space: never its id, address or anything from inside it. */
 export type LockedSpace = { name: string; about: string; unlock: Unlock };

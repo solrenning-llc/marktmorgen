@@ -102,10 +102,10 @@ function unlockOf(needs: readonly string[], read: ReadonlySet<string>, byId: Rea
  * reads, for its products and for the items it reads for the first time, so
  * the rounds together pay at least what reading them at once would (an id
  * read as an item and later judged as a product is paid at both rates).
- * A failed read of the listings, the items
- * or the pre-orders makes the answer empty ("unknown"), never "none" (a
- * product whose stock or keys cannot be read is left out by
- * productsBuyableNow, as on its page). A space still unread when the cap is
+ * A failed read of the listings, the items,
+ * the pre-orders, or a product's stock or keys (productsBuyableNow throws
+ * for them when given what was read; review of #3007, L1) makes the answer
+ * empty ("unknown"), never "none". A space still unread when the cap is
  * spent is "capped": reloading would read the same products again, so the
  * page says to ask the creator instead.
  */
@@ -169,16 +169,24 @@ export async function unlocksOf(
 /**
  * The locked spaces one member sees, or null when the store's requests did
  * not cover reading their products (the caller shows the resting page).
- * `opened` is the ids of the spaces maySeeSpace let them into.
+ * `opened` is the ids of the spaces the member was let into, and `unchecked`
+ * those whose answer could not be read just now (answeredSpaces,
+ * lib/community-access.ts): each of those shown locked is listed as
+ * "unchecked", with no way in offered and nothing read for it, since the
+ * member may already hold its product (review of #3007, M1).
  */
 export async function lockedSpaces(
   store: Store,
   config: CommunityConfig,
   opened: ReadonlySet<string>,
   take: (units: number) => Promise<boolean>,
+  unchecked: ReadonlySet<string> = new Set(),
 ): Promise<LockedSpace[] | null> {
-  const locked = lockedOf(config, opened);
-  if (locked.length === 0) return [];
+  const notChecked: LockedSpace[] = lockedOf(config, opened)
+    .filter(({ space }) => unchecked.has(space.id))
+    .map(({ space }) => ({ name: space.name, about: space.about, unlock: "unchecked" }));
+  const locked = lockedOf(config, new Set([...opened, ...unchecked]));
+  if (locked.length === 0) return notChecked;
   const unlocks = await unlocksOf(store, config, take);
-  return unlocks === null ? null : lockedList(locked, unlocks);
+  return unlocks === null ? null : [...lockedList(locked, unlocks), ...notChecked];
 }

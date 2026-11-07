@@ -334,7 +334,9 @@ export async function readConfig(id: string): Promise<CommunityConfig | null> {
 }
 
 export async function saveConfig(id: string, config: CommunityConfig): Promise<void> {
-  await redisPipeline([["SET", cfgKey(id), JSON.stringify(config)]]);
+  // Its own answer read (review of #3007, L2): a save not confirmed throws, so no route says it saved.
+  const replies = repliesFor(await redisPipeline([["SET", cfgKey(id), JSON.stringify(config)]]), 1);
+  if (!replies || replies[0] !== "OK") throw new UnknownReplyError("a community's setup save");
 }
 
 // ------------------------------------------------------------------ members

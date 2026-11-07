@@ -18,6 +18,9 @@ export type LockedWords = {
   unknown: string;
   /** A space whose products past the read cap were never read: reloading would read the same ones, so the member asks the creator. */
   capped: string;
+  /** Kept spaces whose answer for this member could not be read just now: no lock and no way in, since they may hold the product. */
+  uncheckedHeading: string;
+  unchecked: string;
 };
 
 const en: LockedWords = {
@@ -29,6 +32,8 @@ const en: LockedWords = {
   notYet: "Access isn't available yet.",
   unknown: "We couldn't load how to get in. Reload the page to try again.",
   capped: "Ask the creator how to get in.",
+  uncheckedHeading: "Spaces we couldn't check",
+  unchecked: "We couldn't check your access to these spaces just now. Reload the page to try again.",
 };
 
 const es: LockedWords = {
@@ -40,6 +45,8 @@ const es: LockedWords = {
   notYet: "El acceso aún no está disponible.",
   unknown: "No hemos podido cargar cómo entrar. Vuelve a cargar la página para intentarlo de nuevo.",
   capped: "Pregunta al creador cómo entrar.",
+  uncheckedHeading: "Espacios que no pudimos comprobar",
+  unchecked: "No hemos podido comprobar tu acceso a estos espacios en este momento. Vuelve a cargar la página para intentarlo de nuevo.",
 };
 
 const fr: LockedWords = {
@@ -51,6 +58,8 @@ const fr: LockedWords = {
   notYet: "L’accès n’est pas encore disponible.",
   unknown: "Nous n’avons pas pu charger comment entrer. Rechargez la page pour réessayer.",
   capped: "Demandez au créateur comment entrer.",
+  uncheckedHeading: "Espaces que nous n’avons pas pu vérifier",
+  unchecked: "Nous n’avons pas pu vérifier votre accès à ces espaces pour le moment. Rechargez la page pour réessayer.",
 };
 
 const de: LockedWords = {
@@ -62,6 +71,8 @@ const de: LockedWords = {
   notYet: "Der Zugang ist noch nicht verfügbar.",
   unknown: "Wir konnten nicht laden, wie man hineinkommt. Lade die Seite neu, um es noch einmal zu versuchen.",
   capped: "Frag den Ersteller, wie du hineinkommst.",
+  uncheckedHeading: "Bereiche, die wir nicht prüfen konnten",
+  unchecked: "Wir konnten deinen Zugang zu diesen Bereichen gerade nicht prüfen. Lade die Seite neu, um es noch einmal zu versuchen.",
 };
 
 const it: LockedWords = {
@@ -73,6 +84,8 @@ const it: LockedWords = {
   notYet: "L’accesso non è ancora disponibile.",
   unknown: "Non siamo riusciti a caricare come entrare. Ricarica la pagina per riprovare.",
   capped: "Chiedi al creatore come entrare.",
+  uncheckedHeading: "Spazi che non siamo riusciti a controllare",
+  unchecked: "Non siamo riusciti a controllare il tuo accesso a questi spazi in questo momento. Ricarica la pagina per riprovare.",
 };
 
 const nl: LockedWords = {
@@ -84,6 +97,8 @@ const nl: LockedWords = {
   notYet: "Toegang is nog niet beschikbaar.",
   unknown: "We konden niet laden hoe je binnenkomt. Laad de pagina opnieuw om het nog eens te proberen.",
   capped: "Vraag de maker hoe je binnenkomt.",
+  uncheckedHeading: "Ruimtes die we niet konden controleren",
+  unchecked: "We konden je toegang tot deze ruimtes nu niet controleren. Laad de pagina opnieuw om het nog eens te proberen.",
 };
 
 const pt: LockedWords = {
@@ -95,6 +110,8 @@ const pt: LockedWords = {
   notYet: "O acesso ainda não está disponível.",
   unknown: "Não conseguimos carregar como entrar. Recarregue a página para tentar de novo.",
   capped: "Pergunte ao criador como entrar.",
+  uncheckedHeading: "Espaços que não conseguimos verificar",
+  unchecked: "Não conseguimos verificar o seu acesso a estes espaços agora. Recarregue a página para tentar de novo.",
 };
 
 const WORDS: Record<LanguageCode, LockedWords> = { en, es, fr, de, it, nl, pt };

@@ -5,7 +5,7 @@ import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { feed, postNumbers, readMembers, readPosts } from "@/lib/community";
-import { accessProducts, visibleSpaces } from "@/lib/community-access";
+import { accessProducts, answeredSpaces } from "@/lib/community-access";
 import { lockedSpaces } from "@/lib/community-locked";
 import { takePublicRequest } from "@/lib/traffic";
 import { LockedSpaces } from "@/components/community-locked";
@@ -82,9 +82,12 @@ export default async function CommunityPage({ params, searchParams }: Params) {
   // Spaces kept for the buyers of some products are not in this list for
   // anybody else, and neither are their posts: the gate is asked here, once,
   // and everything below reads only what came back.
-  const spaces = await visibleSpaces(store, config, { owner, email: viewer.email });
+  // A kept space whose answer could not be read just now is shut, as a no is, but never said to be kept for other
+  // buyers (review of #3007, M1): the member may hold its product.
+  const { spaces, unchecked } = await answeredSpaces(store, config, { owner, email: viewer.email });
   const mineIds = new Set(spaces.map((s) => s.id));
   const askedSpace = typeof query.space === "string" && ITEM_ID.test(query.space) ? query.space : "";
+  if (askedSpace && unchecked.has(askedSpace)) throw new Error("a community space's access could not be checked just now");
   // A space they may not see answers the same as one that is not there.
   if (askedSpace && !mineIds.has(askedSpace)) redirect(`${`/@${store.handle}/community`}?n=spacelocked`);
   const space = askedSpace ? spaces.find((s) => s.id === askedSpace) ?? null : null;
@@ -122,7 +125,7 @@ export default async function CommunityPage({ params, searchParams }: Params) {
   const openTo = await accessProducts(store, config);
   // The kept spaces shown locked that this member was not let into (542 [CM1]): their names, lines and the way in,
   // on the first page of every space only, with what they read paid for first; nothing from inside them is read.
-  const lockedList = !owner && !space && !before ? await lockedSpaces(store, config, mineIds, (units) => takePublicRequest(store, "buyer", undefined, units)) : [];
+  const lockedList = !owner && !space && !before ? await lockedSpaces(store, config, mineIds, (units) => takePublicRequest(store, "buyer", undefined, units), unchecked) : [];
   if (lockedList === null) redirect(`/@${store.handle}/resting`);
 
   return (

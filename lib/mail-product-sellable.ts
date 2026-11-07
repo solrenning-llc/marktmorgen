@@ -67,7 +67,9 @@ export type AlreadyRead = { soon: ReadonlySet<string>; listings: ReadonlyMap<str
 /**
  * The ids of `products` a buyer can get from `store` now. `now` is in
  * milliseconds. With `known`, neither the pre-orders nor the bundles' items
- * are read: they are taken from it.
+ * are read: they are taken from it, and a stock or keys read that fails
+ * throws, so that caller says it could not tell (review of #3007, L1) where
+ * an email's block, with no `known`, leaves the product out.
  */
 export async function productsBuyableNow(store: Store, products: readonly Listing[], now = Date.now(), known?: AlreadyRead): Promise<Set<string>> {
   // A suspended store's pages rest (lib/takedown.ts): nothing of it is shown.
@@ -99,7 +101,8 @@ export async function productsBuyableNow(store: Store, products: readonly Listin
       try {
         const [left, noKeys] = await Promise.all([stockLeft(store, p, now), outOfKeys(store, p)]);
         if (left === 0 || noKeys) return null;
-      } catch {
+      } catch (error) {
+        if (known) throw error;
         return null;
       }
       return p.id;

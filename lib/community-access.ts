@@ -326,11 +326,57 @@ export async function maySeeSpace(
   const ids = gate.needs;
   const id = store.community?.id;
   if (!id) return false;
-  // An answer that could not be read is a no: the space stays shut (locked or hidden), never opened on a guess.
-  return holdsAnyOf(store, ids, viewer.email, `nl:cm:${id}:sp:ok:${space.id}:${emailKey(viewer.email)}`, String(config.v)).catch((error) => {
+  return holdsAnyOf(store, ids, viewer.email, spaceOkKey(id, space.id, viewer.email), String(config.v));
+}
+
+const spaceOkKey = (community: string, space: string, email: string) => `nl:cm:${community}:sp:ok:${space}:${emailKey(email)}`;
+
+/**
+ * One space's answer for one viewer, said as it is: let in, not let in, or
+ * not known just now (Stripe or the kept answer could not be read). The same
+ * rule and the same kept answer as maySeeSpace, asked strictly, so a failed
+ * request is never a no. The member's own community page uses it (review of
+ * #3007, M1): a member whose access could not be checked is never let in on a
+ * guess, and never shown the space locked with an offer to buy what they may
+ * already own; the page says it could not check.
+ */
+export type SpaceAnswer = "in" | "out" | "unknown";
+
+export async function spaceAnswer(
+  store: Store,
+  config: CommunityConfig,
+  space: { id: string; only: string[] },
+  viewer: { owner: boolean; email: string },
+): Promise<SpaceAnswer> {
+  if (viewer.owner) return "in";
+  const gate = spaceGate(space, config.access);
+  if (gate.open) return "in";
+  const id = store.community?.id;
+  if (!id || !isRedisConfigured()) return "out";
+  try {
+    return (await holdsProductsOrThrow(store, gate.needs, viewer.email, spaceOkKey(id, space.id, viewer.email), String(config.v))) ? "in" : "out";
+  } catch (error) {
     console.error("checking a community space's access failed", error);
-    return false;
-  });
+    return "unknown";
+  }
+}
+
+/**
+ * The spaces one viewer may see, in the creator's order, as visibleSpaces,
+ * and the kept spaces whose answer could not be read just now (`unchecked`):
+ * shut, as a no is, but never said to be kept for other buyers.
+ */
+export async function answeredSpaces(
+  store: Store,
+  config: CommunityConfig,
+  viewer: { owner: boolean; email: string },
+): Promise<{ spaces: Space[]; unchecked: Set<string> }> {
+  if (viewer.owner) return { spaces: config.spaces, unchecked: new Set() };
+  const gated = config.spaces.filter((s) => s.only.length);
+  const answers = await Promise.all(gated.map((s) => spaceAnswer(store, config, s, viewer)));
+  const mine = new Set(gated.filter((_, i) => answers[i] === "in").map((s) => s.id));
+  const unchecked = new Set(gated.filter((_, i) => answers[i] === "unknown").map((s) => s.id));
+  return { spaces: config.spaces.filter((s) => !s.only.length || mine.has(s.id)), unchecked };
 }
 
 /**

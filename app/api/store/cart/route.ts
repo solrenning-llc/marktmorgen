@@ -7,6 +7,7 @@ import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readListings, readProduct } from "@/lib/catalog";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { cartPrice, createCartCheckout } from "@/lib/cart-checkout";
+import { codeCookieName, readLinkCode } from "@/lib/code-link";
 import { MAX_CART, cartable, dealOff, readCartIds } from "@/lib/cart-rules";
 import { bestBundleSwap } from "@/lib/cart-bundle";
 import { cartPicks } from "@/lib/store-collections";
@@ -37,6 +38,11 @@ import { cartItemOf, cartShipping, shipsWithOnline } from "@/lib/cart-shipping";
 import { SHIP_REGIONS, activeShipping, shipsToWords } from "@/lib/shipping";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { deliversDigitally } from "@/lib/digital-consent";
+import { releaseCartStockHolds, stockLeft, withCartStockHolds } from "@/lib/stock";
+import { HOLD_SECONDS } from "@/lib/stripe-account";
+
+/** The cart's checkout last opened in this browser, whose held units are handed back when it pays for a cart again (lib/stock.ts). */
+const CART_HOLD_COOKIE = "nl_cart_hold";
 
 /**
  * What a cart holds, as the store has it now (`GET ?handle=&ids=a,b`): each
@@ -56,6 +62,9 @@ export async function GET(request: NextRequest) {
   const country = readCountry(request.headers.get("x-vercel-ip-country"));
   const locale = LANGUAGES[store.language].locale;
   const [listings, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => ({ soon: new Set<string>() }))]);
+  // A limited product with none left cannot be paid for: said on its line (lib/stock.ts). A count that cannot be read is
+  // not a unit either, but is not said to be sold out: it is not available in a cart right now (undefined).
+  const left = new Map(await Promise.all(listings.filter((p) => p.stock !== null).map(async (p) => [p.id, await stockLeft(store, p).catch(() => undefined)] as const)));
   const selling = canSell(store);
   const sw = shippingWords(store.language);
   const items = ids.flatMap((id) => {
@@ -65,7 +74,9 @@ export async function GET(request: NextRequest) {
     // A product the creator ships: its own line about when it ships, as its page says it (lib/shipping.ts).
     const shipped = activeShipping(product);
     const ships = shipped ? [shipped.cents > 0 ? sw.cost(formatMoney(shipped.cents, store.currency, locale)) : sw.free, shipped.note].filter(Boolean).join(" · ") : null;
-    return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && !coming.soon.has(id), ships }];
+    const soldOut = left.get(id) === 0;
+    const unknown = left.has(id) && left.get(id) === undefined;
+    return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && !coming.soon.has(id) && !soldOut && !unknown, ships, soldOut }];
   });
   // What ships, as the checkout will ask Stripe for it (lib/cart-shipping.ts), from what can be paid for.
   const shippable = items.filter((item) => item.ok).flatMap((item) => listings.filter((p) => p.id === item.id));
@@ -241,9 +252,10 @@ async function suggestions(
  * Pays for a cart: a plain form with the store's handle and each product's
  * id (`id`, up to four). Nothing it sends sets a price. Every product is read
  * again and must still go in a cart: published, at one price, sold once,
- * nothing to choose, book, hold or answer first, not coming soon, with keys
- * left if it hands one out. Anything else sends the visitor back to the store
- * with the cart as it was, to look it over.
+ * nothing to choose, book or answer first, not coming soon, with keys left if
+ * it hands one out, and a unit of each limited one held for this checkout.
+ * Anything else sends the visitor back to the store with the cart as it was,
+ * to look it over.
  */
 export async function POST(request: NextRequest) {
   const origin = originFrom(request);
@@ -300,8 +312,16 @@ export async function POST(request: NextRequest) {
     // the checkout, as for one product (app/api/store/checkout/route.ts).
     const offerFrom = await cartOfferOwner(store, products).catch(() => null);
     const upsell = offerFrom ? newUpsellKey() : null;
-    const opened = await createCartCheckout(store, products, linkOrigin(request, store), {
+    // A buyer who went back from Stripe's page hands back the units that checkout held before holding them again (lib/stock.ts).
+    const previous = request.cookies.get(CART_HOLD_COOKIE)?.value ?? "";
+    if (previous) await releaseCartStockHolds(store, products, previous).catch(() => {});
+    // One unit of each limited product held for this checkout, or nothing opened (lib/stock.ts, withCartStockHolds).
+    const holding = await withCartStockHolds(store, products, async (held) => createCartCheckout(store, products, linkOrigin(request, store), {
+      held,
       remind: reminding,
+      // A code that came in a link to this store (lib/code-link.ts), applied
+      // by Stripe only if it is one of the creator's live codes.
+      code: readLinkCode(request.cookies.get(codeCookieName(store.handle))?.value) || undefined,
       country: readCountry(request.headers.get("x-vercel-ip-country")),
       cameFrom: cameFrom(request.headers.get("referer"), new URL(origin).hostname),
         // The channel this sale is credited to: the page's own tags, else the
@@ -310,12 +330,18 @@ export async function POST(request: NextRequest) {
       via,
       digitalConsent,
       offers: upsell && offerFrom ? { upsellKey: upsell.fingerprint, from: offerFrom.id } : null,
-    });
+    }), (error) => error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof CartShippingRefused);
+    // Sold out since the cart was opened: back to it, which says which; busy or unreadable: nothing was charged, try again.
+    if (!holding.ok) return away(`/@${store.handle}?cart=${holding.reason === "soldout" ? "changed" : "error"}#cart`);
+    const opened = holding.value;
     if (reminding) await keepAssistReminder({ store, session: opened.id, email: remindEmail, version: remindVersion });
     for (const product of products) after(() => countHit(request, store, { kind: "checkout", id: product.id }));
     const headers = new Headers({ Location: opened.url, "Cache-Control": "no-store" });
     // The secret only the browser that pays holds: without it no offer can be answered.
     if (upsell) headers.append("Set-Cookie", `${UPSELL_COOKIE}=${upsell.secret}; Path=/; Max-Age=7200; HttpOnly; SameSite=Lax${origin.startsWith("https://") ? "; Secure" : ""}`);
+    if (products.some((product) => product.stock !== null)) {
+      headers.append("Set-Cookie", `${CART_HOLD_COOKIE}=${opened.id}; Path=/api/store/cart; Max-Age=${HOLD_SECONDS}; HttpOnly; SameSite=Lax${origin.startsWith("https://") ? "; Secure" : ""}`);
+    }
     return new Response(null, { status: 303, headers });
   } catch (error) {
     if (error instanceof OrdersPausedError) return away(`/@${store.handle}?status=${error.reason === "paused" ? "paused" : "error"}`);

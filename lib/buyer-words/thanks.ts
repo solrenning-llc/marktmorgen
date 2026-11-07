@@ -225,6 +225,12 @@ const en = {
     "Some PayPal payments, such as ones from a bank account, take a few days to clear. As soon as PayPal confirms it, what you bought is emailed to the address of your PayPal account. There is nothing more to do here.",
   tooManyTries: "That was a lot of tries in a few minutes",
   ppWrite: (store: string) => `If PayPal shows a payment to ${store}, write to them by replying to PayPal's receipt.`,
+  ppCouldNotCheck: "We could not check this payment just now",
+  ppCouldNotCheckBody: "If you paid, it will be handed over and your receipt emailed; refresh in a minute.",
+  ppHandingOver: "Payment received, we're handing it over",
+  ppHandingOverBody: (email: string) => `Your receipt will be emailed to ${email} once it is handed over. Refresh in a minute.`,
+  ppRefunded: "Payment refunded",
+  ppRefundedBody: "This payment was refunded in full through PayPal, so this purchase is no longer yours to open. Your PayPal account shows the refund.",
   waitFew: "Wait a few minutes, then open this page again.",
 };
 
@@ -424,6 +430,12 @@ const es: ThanksWords = {
     "Algunos pagos de PayPal, como los hechos desde una cuenta bancaria, tardan unos días en confirmarse. En cuanto PayPal lo confirme, lo que compraste se envía por email a la dirección de tu cuenta de PayPal. No tienes que hacer nada más aquí.",
   tooManyTries: "Fueron muchos intentos en pocos minutos",
   ppWrite: (store) => `Si PayPal muestra un pago a ${store}, escríbele respondiendo al recibo de PayPal.`,
+  ppCouldNotCheck: "No pudimos comprobar este pago ahora mismo",
+  ppCouldNotCheckBody: "Si pagaste, lo que compraste se te entregará y tu recibo se enviará por email; actualiza la página en un minuto.",
+  ppHandingOver: "Pago recibido, lo estamos entregando",
+  ppHandingOverBody: (email) => `Tu recibo se enviará por email a ${email} en cuanto se entregue. Actualiza la página en un minuto.`,
+  ppRefunded: "Pago reembolsado",
+  ppRefundedBody: "Este pago se reembolsó por completo a través de PayPal, así que ya no puedes abrir esta compra. Tu cuenta de PayPal muestra el reembolso.",
   waitFew: "Espera unos minutos y vuelve a abrir esta página.",
 };
 
@@ -622,6 +634,12 @@ const fr: ThanksWords = {
     "Certains paiements PayPal, comme ceux depuis un compte bancaire, prennent quelques jours. Dès que PayPal le confirme, votre achat est envoyé par e-mail à l'adresse de votre compte PayPal. Vous n'avez rien d'autre à faire ici.",
   tooManyTries: "Beaucoup d'essais en quelques minutes",
   ppWrite: (store) => `Si PayPal affiche un paiement à ${store}, écrivez-lui en répondant au reçu de PayPal.`,
+  ppCouldNotCheck: "Nous n'avons pas pu vérifier ce paiement pour le moment",
+  ppCouldNotCheckBody: "Si vous avez payé, votre achat vous sera remis et votre reçu envoyé par e-mail ; actualisez la page dans une minute.",
+  ppHandingOver: "Paiement reçu, nous vous remettons votre achat",
+  ppHandingOverBody: (email) => `Votre reçu sera envoyé par e-mail à ${email} dès que l'achat vous sera remis. Actualisez la page dans une minute.`,
+  ppRefunded: "Paiement remboursé",
+  ppRefundedBody: "Ce paiement a été remboursé en totalité via PayPal, vous ne pouvez donc plus ouvrir cet achat. Votre compte PayPal indique le remboursement.",
   waitFew: "Patientez quelques minutes, puis rouvrez cette page.",
 };
 
@@ -820,6 +838,12 @@ const de: ThanksWords = {
     "Manche PayPal-Zahlungen, etwa vom Bankkonto, brauchen ein paar Tage. Sobald PayPal sie bestätigt, wird Ihr Kauf an die Adresse Ihres PayPal-Kontos gemailt. Hier ist nichts weiter zu tun.",
   tooManyTries: "Das waren viele Versuche in wenigen Minuten",
   ppWrite: (store) => `Wenn PayPal eine Zahlung an ${store} zeigt, schreiben Sie, indem Sie auf die Quittung von PayPal antworten.`,
+  ppCouldNotCheck: "Wir konnten diese Zahlung gerade nicht prüfen",
+  ppCouldNotCheckBody: "Wenn Sie bezahlt haben, wird Ihr Kauf übergeben und Ihre Quittung gemailt; laden Sie die Seite in einer Minute neu.",
+  ppHandingOver: "Zahlung erhalten, wir übergeben Ihren Kauf",
+  ppHandingOverBody: (email) => `Ihre Quittung wird an ${email} gemailt, sobald der Kauf übergeben ist. Laden Sie die Seite in einer Minute neu.`,
+  ppRefunded: "Zahlung erstattet",
+  ppRefundedBody: "Diese Zahlung wurde über PayPal vollständig erstattet, daher können Sie diesen Kauf nicht mehr öffnen. Ihr PayPal-Konto zeigt die Erstattung.",
   waitFew: "Warten Sie ein paar Minuten und öffnen Sie diese Seite dann erneut.",
 };
 
@@ -1018,6 +1042,12 @@ const it: ThanksWords = {
     "Alcuni pagamenti PayPal, come quelli da conto bancario, richiedono alcuni giorni. Appena PayPal lo conferma, ciò che hai comprato viene inviato via email all'indirizzo del tuo account PayPal. Qui non c'è altro da fare.",
   tooManyTries: "Sono stati tanti tentativi in pochi minuti",
   ppWrite: (store) => `Se PayPal mostra un pagamento a ${store}, scrivigli rispondendo alla ricevuta di PayPal.`,
+  ppCouldNotCheck: "Non siamo riusciti a verificare questo pagamento in questo momento",
+  ppCouldNotCheckBody: "Se hai pagato, l'acquisto ti verrà consegnato e la ricevuta inviata via email; aggiorna la pagina tra un minuto.",
+  ppHandingOver: "Pagamento ricevuto, stiamo consegnando l'acquisto",
+  ppHandingOverBody: (email) => `La ricevuta verrà inviata via email a ${email} appena l'acquisto sarà consegnato. Aggiorna la pagina tra un minuto.`,
+  ppRefunded: "Pagamento rimborsato",
+  ppRefundedBody: "Questo pagamento è stato rimborsato per intero tramite PayPal, quindi non puoi più aprire questo acquisto. Il tuo account PayPal mostra il rimborso.",
   waitFew: "Aspetta qualche minuto, poi riapri questa pagina.",
 };
 
@@ -1216,6 +1246,12 @@ const nl: ThanksWords = {
     "Sommige PayPal-betalingen, zoals die vanaf een bankrekening, duren een paar dagen. Zodra PayPal hem bevestigt, wordt wat je kocht gemaild naar het adres van je PayPal-rekening. Je hoeft hier verder niets te doen.",
   tooManyTries: "Dat waren veel pogingen in een paar minuten",
   ppWrite: (store) => `Toont PayPal een betaling aan ${store}, schrijf hen dan door op de bon van PayPal te antwoorden.`,
+  ppCouldNotCheck: "We konden deze betaling nu niet controleren",
+  ppCouldNotCheckBody: "Heb je betaald, dan wordt je aankoop overgedragen en je bon gemaild; vernieuw de pagina over een minuut.",
+  ppHandingOver: "Betaling ontvangen, we dragen je aankoop over",
+  ppHandingOverBody: (email) => `Je bon wordt naar ${email} gemaild zodra de aankoop is overgedragen. Vernieuw de pagina over een minuut.`,
+  ppRefunded: "Betaling terugbetaald",
+  ppRefundedBody: "Deze betaling is volledig terugbetaald via PayPal, dus je kunt deze aankoop niet meer openen. Je PayPal-rekening toont de terugbetaling.",
   waitFew: "Wacht een paar minuten en open deze pagina dan opnieuw.",
 };
 
@@ -1414,6 +1450,12 @@ const pt: ThanksWords = {
     "Alguns pagamentos PayPal, como os feitos a partir de uma conta bancária, demoram alguns dias. Assim que o PayPal o confirmar, o que comprou é enviado por email para o endereço da sua conta PayPal. Não há mais nada a fazer aqui.",
   tooManyTries: "Foram muitas tentativas em poucos minutos",
   ppWrite: (store) => `Se o PayPal mostrar um pagamento a ${store}, escreva-lhe respondendo ao recibo do PayPal.`,
+  ppCouldNotCheck: "Não foi possível verificar este pagamento agora",
+  ppCouldNotCheckBody: "Se pagou, a compra será entregue e o recibo enviado por email; atualize a página dentro de um minuto.",
+  ppHandingOver: "Pagamento recebido, estamos a entregar a sua compra",
+  ppHandingOverBody: (email) => `O recibo será enviado por email para ${email} assim que a compra for entregue. Atualize a página dentro de um minuto.`,
+  ppRefunded: "Pagamento reembolsado",
+  ppRefundedBody: "Este pagamento foi reembolsado na totalidade através do PayPal, por isso já não pode abrir esta compra. A sua conta PayPal mostra o reembolso.",
   waitFew: "Aguarde alguns minutos e depois abra esta página novamente.",
 };
 

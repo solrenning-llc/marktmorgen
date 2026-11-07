@@ -451,6 +451,9 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
   if (!email || !record) return null;
   const through = (to: "sign-in" | "recovery") =>
     held?.viaRecovery ? "a login link sent to your recovery address" : to === "sign-in" ? "a login link sent to this address" : "a login link sent to the sign-in address";
+  // Everything the notice needs is read before anything is written (Claude 6 on #2948): a read that fails here spends
+  // nothing, sets no day and opens nothing, so two-step login never turns off on a login the owner was not told of.
+  const backup = await backupOf(email, record);
   // Spent, as a right code spends it: one waiting login, one session.
   const [removed] = await redisPipeline([["DEL", holdKey(token)]]);
   if (Number(removed) !== 1) return null;
@@ -487,7 +490,7 @@ If it was not you, somebody can read your email: log in with your app's code or 
     email,
     first ? "Your Marktmorgen account was opened without two-step login" : "Your Marktmorgen account was opened again without two-step login",
     opened("sign-in"),
-    await backupOf(email, record),
+    backup,
     opened("recovery"),
   );
   return { session, email, until };

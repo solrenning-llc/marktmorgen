@@ -179,25 +179,45 @@ async function readLedger(sid: string, fields: string[]): Promise<(string | null
   return slots as (string | null)[];
 }
 
-/** A run that stopped after making its funnel of pages: that funnel's id, to use again rather than make a second. */
-function parsePartial(raw: string | null): string {
-  if (!raw) return "";
-  try {
-    const value = JSON.parse(raw) as { state?: string; funnel?: string };
-    return value && value.state === "funnel" && typeof value.funnel === "string" ? value.funnel : "";
-  } catch {
-    return "";
-  }
-}
+const isText = (value: unknown): value is string => typeof value === "string";
+const isCount = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
-function parseSaved(raw: string | null): SavedImport | null {
-  if (!raw) return null;
+/**
+ * A run entry, read only in one of the three shapes saveFunnelImport writes: "started" (nothing made yet), "funnel"
+ * (its funnel of pages made: that id, to use again rather than make a second) and "done" (what the import made). A
+ * missing entry (nil) is a run never made. Any other value (empty, not JSON, an unknown state, or a known state
+ * without what this file writes with it) is unknown, never "never made", which would make the funnel again on every
+ * press (review of #2974): it throws UnknownReplyError, so the plan and the save stop before anything is made.
+ */
+function parseRun(raw: string | null): { done: SavedImport | null; partial: string } {
+  if (raw === null) return { done: null, partial: "" };
+  let value: unknown;
   try {
-    const value = JSON.parse(raw) as SavedImport & { state?: string };
-    return value && value.state === "done" && value.funnel && typeof value.funnel.id === "string" ? value : null;
+    value = JSON.parse(raw);
   } catch {
-    return null;
+    throw new UnknownReplyError("a ClickFunnels import run entry");
   }
+  if (isRecord(value) && isCount(value.at)) {
+    if (value.state === "started") return { done: null, partial: "" };
+    if (value.state === "funnel" && isText(value.funnel) && value.funnel) return { done: null, partial: value.funnel };
+    const funnel = value.funnel;
+    if (
+      value.state === "done" &&
+      isRecord(funnel) &&
+      isText(funnel.id) &&
+      funnel.id &&
+      isText(funnel.name) &&
+      isText(funnel.slug) &&
+      Array.isArray(value.pages) &&
+      value.pages.every(isText) &&
+      isCount(value.bumps) &&
+      isCount(value.offers)
+    ) {
+      return { done: { funnel: { id: funnel.id, name: funnel.name, slug: funnel.slug }, pages: [...value.pages], bumps: value.bumps, offers: value.offers, at: value.at }, partial: "" };
+    }
+  }
+  throw new UnknownReplyError("a ClickFunnels import run entry");
 }
 
 const money = (cents: number, store: Store) => formatMoney(cents, store.currency);
@@ -239,8 +259,9 @@ async function build(store: Store, raw: unknown): Promise<Built> {
   const sid = store.sid ?? "";
   const pageKeys = input.pages.map((c) => `page:${pageKeyOf(c.page)}`);
   const [runRaw, ...madeIds] = await readLedger(sid, [`run:${key}`, ...pageKeys]);
-  const done = parseSaved(runRaw);
-  const partial = parsePartial(runRaw);
+  const { done, partial } = parseRun(runRaw);
+  // A page entry is the id of the page made (never empty); an id no longer in the store is a page since deleted.
+  if (madeIds.some((id) => id === "")) throw new UnknownReplyError("a ClickFunnels import page entry");
 
   // Only the products the pages name are read, not the whole catalog.
   const named = new Set(input.pages.flatMap((c) => [c.page.product, ...c.page.bumps]).filter(Boolean));

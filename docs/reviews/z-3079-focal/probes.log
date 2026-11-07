@@ -1,0 +1,63 @@
+z-3079-invalid-listing.proof.ts
+
+Known call controls before unknown listings
+  ok    healthy: one event and the original room
+OBSERVED malformed JSON {"status":503,"missingLabel":false,"room":false,"kept":false,"commands":23}
+  ok    malformed JSON: unknown must not become gone/cached without room
+OBSERVED valid JSON not a listing {"status":503,"missingLabel":false,"room":false,"kept":false,"commands":23}
+  ok    valid JSON not a listing: unknown must not become gone/cached without room
+OBSERVED another listing under this id {"status":503,"missingLabel":false,"room":false,"kept":false,"commands":23}
+  ok    another listing under this id: unknown must not become gone/cached without room
+
+4 checks, all passing.
+COUNTED_MEMORY_COMMANDS 159
+COUNTED_MOCK_HTTP 4
+making a booking calendar failed UnreadableMget: an MGET answered a value that is not the listing asked for
+    at /tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:11062:50
+    at Array.forEach (<anonymous>)
+    at readListingsBatched (/tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:11058:13)
+    at async /tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:50568:24
+    at async bookedCalendarFeed (/tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:50380:12)
+    at async GET (/tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:50557:20)
+    at async counted (/tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:50651:21)
+    at async main (/tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:50706:22)
+making a booking calendar failed UnreadableMget: an MGET answered a value that is not the listing asked for
+    at /tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:11062:50
+    at Array.forEach (<anonymous>)
+    at readListingsBatched (/tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:11058:13)
+    at async /tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:50568:24
+    at async bookedCalendarFeed (/tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:50380:12)
+    at async GET (/tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:50557:20)
+    at async counted (/tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:50651:21)
+    at async main (/tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:50706:22)
+making a booking calendar failed UnreadableMget: an MGET answered a value that is not the listing asked for
+    at /tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:11062:50
+    at Array.forEach (<anonymous>)
+    at readListingsBatched (/tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:11058:13)
+    at async /tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:50568:24
+    at async bookedCalendarFeed (/tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:50380:12)
+    at async GET (/tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:50557:20)
+    at async counted (/tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:50651:21)
+    at async main (/tmp/z-points-g89ZUg/z-3079-invalid-listing.proof.ts.cjs:50706:22)
+z-3079-listing-bytes.proof.ts
+  FAIL  healthy writer accepted all valid 50-session call products, and batched reader returns all50
+        expected [50,true,1]
+        got      [2,true,1]
+OBSERVED_BYTES {"perListing":29538,"rawBatch":59076,"restJSONBytes":60700,"pricedBatch":32768,"claimedReplyCeiling":1048576}
+  FAIL  actual valid stored listing bytes fit the priced 16KiB per listing
+        expected true
+        got      false
+  ok    real returned50-key MGET JSON fits the PR one-MiB claim before any check
+
+3 checks, 2 failing.
+COUNTED_MEMORY_COMMANDS 7
+COUNTED_MOCK_HTTP 0
+z-3079-listing-bytes-derived.proof.ts
+  ok    healthy writer accepted all valid 50-session call products, and batched reader returns all50
+OBSERVED_BYTES {"perListing":29538,"rawBatch":1476900,"restJSONBytes":60700,"pricedBatch":32768,"claimedReplyCeiling":1048576}
+  ok    valid stored listing bytes fit the writer cap for50 products
+  ok    real returned50-key MGET JSON fits the PR one-MiB claim before any check
+
+3 checks, all passing.
+COUNTED_MEMORY_COMMANDS 175
+COUNTED_MOCK_HTTP 0

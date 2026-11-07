@@ -1,0 +1,178 @@
+calendar-batch-reads.test.ts
+  ok    the stand-in store has every call listing and its calls id
+
+A store at MAX_PRODUCTS call listings and CALENDAR_CALLS bookings makes its file in a few MGETs
+  ok    the file is made, every booking in it with its room
+  ok    no listing or room is read with a GET of its own, besides the rooms' making (SET NX and GET)
+  ok    the listings in 1,000 MGETs of at most 2, the rooms in 3 of at most 400 keys
+  ok    each booking's two meeting records read with a GET each (no byte cap where they are written)
+  ok    measured (3028) within the answer and the making as priced (9 + 3039)
+  ok    the making's shape at its worst: 3,039 commands (5,531 when every listing and every room read was a GET)
+  ok    and the measured making is within that figure (3028 <= 9 + 3,039)
+
+The listing MGETs are sent a few at a time, never all at once (MGET_CONCURRENCY)
+  ok    the file is still made
+  FAIL  at most MGET_CONCURRENCY (16) trips to the database at once (seen: 1000), not the 1,000 listing MGETs together
+        expected true
+        got      false
+
+An MGET reply that is not whole, or holds anything but text or nothing, fails the making as an unknown
+  ok    listings: a reply one short fails the making (503), nothing kept
+  ok    listings: a number among the replies fails the making, nothing kept
+  ok    rooms: a reply one short fails the making, nothing kept
+  ok    rooms: a number among the replies fails the making, nothing kept
+
+One MGET's reply fits 1 MiB at the most a record can be written, not at the bytes it is priced at (review: Codex Z, reply size)
+  ok    LISTINGS_PER_MGET × 2 × MAX_PRODUCT_BYTES within 1 MiB
+  ok    each planted record is a valid listing over LISTING_READ_BYTES, under MAX_PRODUCT_BYTES
+  ok    the file is still made, every booking in it
+  ok    every listing MGET's reply, as the REST answer's JSON, within 1 MiB (largest 200814 bytes)
+  ok    no MGET carries a meeting record's key
+  ok    every room MGET carries only room keys, whose worst reply (keys × 2 × a room's address) is within 1 MiB
+
+A batched value that is there but is not the record asked for fails the making as an unknown (review: Codex Z, fail closed)
+  ok    listings: text that is not JSON fails the making (503), nothing kept
+  ok    listings: {} fails the making, nothing kept
+  ok    listings: empty text fails the making, nothing kept
+  ok    listings: another product's record under this key fails the making, nothing kept
+  ok    rooms: a booking's room key holding an address no room here has fails the making, nothing kept
+  ok    meeting records: text that is not JSON fails the making, nothing kept
+  ok    meeting records: {} fails the making, nothing kept
+  ok    meeting records: another booking's record under this key fails the making, nothing kept
+  ok    meeting records: a booking's own record is read and its link given
+
+Each reply stays within 1 MiB at the bytes it is priced at; the other readers keep their GETs
+  ok    2 listings at LISTING_READ_BYTES, 400 room keys at 1,024 bytes: each MGET's reply within 1 MiB
+  ok    readListings and roomsFor, for every other reader, still send one GET a key
+
+31 checks, 1 failing.
+COUNTED_MEMORY_COMMANDS 29688
+COUNTED_MOCK_HTTP 16
+making a booking calendar failed UnreadableMget: an MGET of 2 keys was not answered whole
+    at /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:10242:13
+    at Array.forEach (<anonymous>)
+    at mgetWhole (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:10238:10)
+    at async readListingsBatched (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:11081:18)
+    at async /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50602:24
+    at async bookedCalendarFeed (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50414:12)
+    at async GET (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50591:20)
+    at async counted (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50796:21)
+    at async broken (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50891:20)
+    at async main (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50905:75)
+making a booking calendar failed UnreadableMget: an MGET answered something other than text or nothing
+    at /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:10245:62
+    at Array.forEach (<anonymous>)
+    at mgetWhole (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:10238:10)
+    at async readListingsBatched (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:11081:18)
+    at async /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50602:24
+    at async bookedCalendarFeed (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50414:12)
+    at async GET (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50591:20)
+    at async counted (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50796:21)
+    at async broken (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50891:20)
+    at async main (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50906:78)
+making a booking calendar failed UnreadableMget: an MGET of 400 keys was not answered whole
+    at /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:10242:13
+    at Array.forEach (<anonymous>)
+    at mgetWhole (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:10238:10)
+    at async Promise.all (index 0)
+    at async readByMgets (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:49895:28)
+    at async roomsReadWith (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:49922:16)
+    at async slotRoomsWith (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50278:17)
+    at async /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50603:71
+    at async bookedCalendarFeed (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50414:12)
+    at async GET (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50591:20)
+making a booking calendar failed UnreadableMget: an MGET answered something other than text or nothing
+    at /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:10245:62
+    at Array.forEach (<anonymous>)
+    at mgetWhole (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:10238:10)
+    at async Promise.all (index 0)
+    at async readByMgets (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:49895:28)
+    at async roomsReadWith (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:49922:16)
+    at async slotRoomsWith (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50278:17)
+    at async /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50603:71
+    at async bookedCalendarFeed (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50414:12)
+    at async GET (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50591:20)
+making a booking calendar failed UnreadableMget: an MGET answered a value that is not the listing asked for
+    at /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:11086:50
+    at Array.forEach (<anonymous>)
+    at readListingsBatched (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:11082:13)
+    at async /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50602:24
+    at async bookedCalendarFeed (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50414:12)
+    at async GET (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50591:20)
+    at async counted (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50796:21)
+    at async planted (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50937:20)
+    at async main (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50959:79)
+making a booking calendar failed UnreadableMget: an MGET answered a value that is not the listing asked for
+    at /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:11086:50
+    at Array.forEach (<anonymous>)
+    at readListingsBatched (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:11082:13)
+    at async /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50602:24
+    at async bookedCalendarFeed (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50414:12)
+    at async GET (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50591:20)
+    at async counted (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50796:21)
+    at async planted (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50937:20)
+    at async main (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50960:54)
+making a booking calendar failed UnreadableMget: an MGET answered a value that is not the listing asked for
+    at /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:11086:50
+    at Array.forEach (<anonymous>)
+    at readListingsBatched (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:11082:13)
+    at async /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50602:24
+    at async bookedCalendarFeed (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50414:12)
+    at async GET (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50591:20)
+    at async counted (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50796:21)
+    at async planted (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50937:20)
+    at async main (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50961:62)
+making a booking calendar failed UnreadableMget: an MGET answered a value that is not the listing asked for
+    at /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:11086:50
+    at Array.forEach (<anonymous>)
+    at readListingsBatched (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:11082:13)
+    at async /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50602:24
+    at async bookedCalendarFeed (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50414:12)
+    at async GET (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50591:20)
+    at async counted (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50796:21)
+    at async planted (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50937:20)
+    at async main (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50962:91)
+making a booking calendar failed UnreadableMget: a room key held something other than a room made here
+    at /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:49907:54
+    at Array.map (<anonymous>)
+    at readByMgets (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:49898:15)
+    at async roomsReadWith (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:49922:16)
+    at async slotRoomsWith (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50278:17)
+    at async /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50603:71
+    at async bookedCalendarFeed (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50414:12)
+    at async GET (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50591:20)
+    at async counted (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50796:21)
+    at async planted (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50937:20)
+making a booking calendar failed UnreadableMget: a meeting record's key held something other than its own record
+    at /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:49902:15
+    at Array.map (<anonymous>)
+    at readByMgets (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:49898:15)
+    at async roomsReadWith (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:49922:16)
+    at async slotRoomsWith (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50278:17)
+    at async /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50603:71
+    at async bookedCalendarFeed (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50414:12)
+    at async GET (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50591:20)
+    at async counted (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50796:21)
+    at async planted (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50937:20)
+making a booking calendar failed UnreadableMget: a meeting record's key held something other than its own record
+    at /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:49902:15
+    at Array.map (<anonymous>)
+    at readByMgets (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:49898:15)
+    at async roomsReadWith (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:49922:16)
+    at async slotRoomsWith (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50278:17)
+    at async /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50603:71
+    at async bookedCalendarFeed (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50414:12)
+    at async GET (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50591:20)
+    at async counted (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50796:21)
+    at async planted (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50937:20)
+making a booking calendar failed UnreadableMget: a meeting record's key held something other than its own record
+    at /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:49902:15
+    at Array.map (<anonymous>)
+    at readByMgets (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:49898:15)
+    at async roomsReadWith (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:49922:16)
+    at async slotRoomsWith (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50278:17)
+    at async /tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50603:71
+    at async bookedCalendarFeed (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50414:12)
+    at async GET (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50591:20)
+    at async counted (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50796:21)
+    at async planted (/tmp/z-points-dc2hht/calendar-batch-reads.test.ts.cjs:50937:20)

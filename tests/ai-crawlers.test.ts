@@ -19,7 +19,14 @@
  *     a second same choice writes nothing;
  *   - the studio says what it really does: it asks, it cannot promise,
  *     search engines are not asked, the marktmorgen.com address is not
- *     covered, and a change can take a day to reach crawlers.
+ *     covered, the AI companies' own search is asked too, visits a person
+ *     asks for may not follow the rules, and a change is in our copy within
+ *     the hour the route is kept (no day-long stale copy) while each AI
+ *     company re-reads it on its own schedule;
+ *   - closed, the lines still say buyers' pages, courses and the community
+ *     are not open to AI;
+ *   - a member with the settings permission and not products still gets the
+ *     switch, in a card of its own.
  */
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
@@ -29,7 +36,7 @@ import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setAiCrawlers, s
 import { AI_CRAWLERS, AI_CRAWLERS_LISTED, parseAiCrawlers } from "@/lib/ai-crawlers";
 import { storeRobots } from "@/lib/store-sitemap";
 import { searchCheck, agentsGet, AGENTS_GET } from "@/lib/store-search-check";
-import { StoreSearchCheck } from "@/components/store-search-check";
+import { StoreSearchCheck, AiCrawlersOnly } from "@/components/store-search-check";
 import { AiCrawlersSwitch, AI_CRAWLERS_WORDS } from "@/components/ai-crawlers-switch";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { POST as aiCrawlersRoute } from "@/app/api/store/ai-crawlers/route";
@@ -123,6 +130,8 @@ async function main(): Promise<void> {
   part("What a creator's domain serves as /robots.txt");
   const served = await (await storeRobotsRoute(new Request("https://shop.example.com/robots.txt"), { params: Promise.resolve({ handle: "@aicrawl" }) })).text();
   is("the closed rules, read from the store", AI_CRAWLERS.every((c) => served.includes(`User-agent: ${c.agent}\nDisallow: /\n`)), true);
+  const cache = (await storeRobotsRoute(new Request("https://shop.example.com/robots.txt"), { params: Promise.resolve({ handle: "@aicrawl" }) })).headers.get("Cache-Control") ?? "";
+  is("our copy is kept an hour at most: no day-long stale copy", [cache, /stale-while-revalidate/.test(cache)], ["public, max-age=0, s-maxage=3600", false]);
   is("the proxy still sends a domain's /robots.txt there", readFileSync("proxy.ts", "utf8").includes('"/robots.txt": "/store-robots"'), true);
   await post({ open: true });
   const reopened = await (await storeRobotsRoute(new Request("https://shop.example.com/robots.txt"), { params: Promise.resolve({ handle: "@aicrawl" }) })).text();
@@ -135,12 +144,16 @@ async function main(): Promise<void> {
   const shut = agentsGet({ ...base, aiCrawlers: "closed", ownDomain: true });
   is("closed: never says the store is open to AI", shut.some((l) => /open to AI/i.test(l)), false);
   is("closed: says the marktmorgen.com address still lets them in", shut[0].includes("marktmorgen.com"), true);
+  const noDomainLines = agentsGet({ ...base, aiCrawlers: "closed", ownDomain: false });
+  is("closed: still says buyers' pages, courses and the community are not open", [shut[0], noDomainLines[0]].map((l) => l.includes("Buyers' own pages, courses and your community are not")), [true, true]);
   const w = AI_CRAWLERS_WORDS;
   const all = Object.values(w).join(" ");
   is("asks, cannot promise", [/\bask/i.test(w.what), /not every crawler/i.test(w.what), /cannot promise/i.test(w.what)], [true, true, true]);
   is("search engines are not asked", /Google Search, Bing and other search engines are not asked/.test(w.search), true);
   is("the marktmorgen.com address is not covered", /marktmorgen\.com/.test(w.address), true);
-  is("a change can take up to a day", /up to a day/.test(w.delay), true);
+  is("the AI companies' own search is asked too, so the store may stop showing up there", [/ChatGPT search/.test(w.search), /Perplexity/.test(w.search), /stop showing up/.test(w.search), /not only/.test(w.search)], [true, true, true, true]);
+  is("visits a person asks for may not follow the rules", [/ChatGPT-User/.test(w.userAsked), /Perplexity-User/.test(w.userAsked), /may not follow/.test(w.userAsked)], [true, true, true]);
+  is("the delay as it is: our copy within an hour, each AI company on its own schedule", [/within an hour/.test(w.delay), /own schedule/.test(w.delay), /up to a day/.test(w.delay)], [true, true, false]);
   is("no promise words", /guarantee|fully|100%|block all|every AI/i.test(all), false);
   const openSwitch = renderToStaticMarkup(createElement(AiCrawlersSwitch, { open: true, ownDomain: true }));
   const closedSwitch = renderToStaticMarkup(createElement(AiCrawlersSwitch, { open: false, ownDomain: true }));
@@ -154,7 +167,13 @@ async function main(): Promise<void> {
   is("shown in the check with a live domain and the settings permission", panel("open", true, true).includes("Ask AI crawlers to stay out"), true);
   is("not shown where it would do nothing: no domain and open", panel("open", false, true).includes("data-ai-crawlers"), false);
   is("not shown without the settings permission", panel("closed", true, false).includes("data-ai-crawlers="), false);
-  is("the studio page passes the permission", readFileSync("app/studio/page.tsx", "utf8").includes('<StoreSearchCheck check={searchCheck(store)} canChangeAi={may("settings")} />'), true);
+  const studioPage = readFileSync("app/studio/page.tsx", "utf8");
+  is("the studio page passes the permission", studioPage.includes('<StoreSearchCheck check={searchCheck(store)} canChangeAi={may("settings")} />'), true);
+  is("settings without products: the switch alone", studioPage.includes(': may("settings") ? <AiCrawlersOnly check={searchCheck(store)} /> : null}'), true);
+  const only = (aiCrawlers: "open" | "closed", ownDomain: boolean) =>
+    renderToStaticMarkup(AiCrawlersOnly({ check: { description: true, indexed: true, suspended: false, agents: { noPicture: [] }, summaries: { missing: [], unchecked: 0 }, ownDomain, aiCrawlers } }));
+  is("alone: a card with its own h2 and the switch where it does something", [only("open", true).includes("<h2"), only("open", true).includes('data-ai-crawlers="open"'), only("closed", false).includes('data-ai-crawlers="closed"')], [true, true, true]);
+  is("alone: nothing where it would do nothing", only("open", false), "");
   done();
 }
 

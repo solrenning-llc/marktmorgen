@@ -9,6 +9,8 @@ import { UrlField } from "@/components/url-field";
 import { roomOnLeave } from "@/lib/url-check";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
+import { browserFrames, focusWhenDrawn } from "@/lib/focus-when-drawn";
+import { focusAfterRemoval } from "@/lib/block-insert";
 import type { Product } from "@/lib/store";
 import {
   BUFFERS,
@@ -313,6 +315,16 @@ function RoomChoice({
   );
 }
 
+/**
+ * Focus follows a change (2.4.3): to the field with this id once it is drawn,
+ * trying again for a few frames if it is drawn late (lib/focus-when-drawn.ts).
+ * Used wherever adding or removing a row takes away the button that had the
+ * focus, so it never falls to the page's body.
+ */
+const focusSoon = (target: string) => {
+  focusWhenDrawn(() => document.getElementById(target), browserFrames());
+};
+
 function isoDate(y: number, m: number, d: number): string {
   return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
@@ -411,7 +423,6 @@ export function OtherLengths({ draft, setDraft, currency, id, wrong, clearWrong,
     setDraft({ ...draft, extra: draft.extra.map((row, i) => (i === index ? { ...row, ...change } : row)) });
   };
   // Focus follows the change (2.4.3): to a new row's length, or back to the group's explanation once a row is gone.
-  const focusSoon = (target: string) => requestAnimationFrame(() => document.getElementById(target)?.focus());
   return (
     <fieldset aria-describedby={`lengths-hint-${id}`}>
       <legend className="field-label">Other lengths (optional)</legend>
@@ -782,8 +793,14 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
                     <button
                       type="button"
                       aria-label={`Remove session ${index + 1}`}
-                      onClick={() => setDraft({ ...draft, sessions: draft.sessions.filter((_, i) => i !== index) })}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full text-lg leading-none text-ink-mute transition hover:bg-white hover:text-danger"
+                      onClick={() => {
+                        const sessions = draft.sessions.filter((_, i) => i !== index);
+                        setDraft({ ...draft, sessions });
+                        // The button goes with its session: the focus goes to the session now in its place, else the one before it.
+                        const at = focusAfterRemoval(index, sessions.length);
+                        if (at !== null) focusSoon(`call-${product.id}-session-${sessions[at].id}-date`);
+                      }}
+                      className="inline-flex h-11 w-11 items-center justify-center rounded-full text-lg leading-none text-ink-mute transition hover:bg-white hover:text-danger"
                     >
                       &times;
                     </button>
@@ -793,11 +810,12 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
                   <label className="col-span-2 block sm:col-span-1">
                     <span className="text-xs font-semibold text-ink-soft">Date</span>
                     <input
+                      id={`call-${product.id}-session-${s.id}-date`}
                       type="date"
                       required
                       value={s.date}
                       onChange={(e) => setSession(index, { date: e.target.value })}
-                      className="field mt-1 !min-h-0 !py-1.5"
+                      className="field mt-1 !min-h-11 !py-1.5"
                     />
                   </label>
                   <label className="col-span-2 block sm:col-span-1">
@@ -808,7 +826,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
                       required
                       value={s.time}
                       onChange={(e) => setSession(index, { time: e.target.value })}
-                      className="field mt-1 !min-h-0 !py-1.5"
+                      className="field mt-1 !min-h-11 !py-1.5"
                     />
                   </label>
                   <label className="block">
@@ -816,7 +834,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
                     <select
                       value={s.minutes}
                       onChange={(e) => setSession(index, { minutes: Number(e.target.value) })}
-                      className="field mt-1 !min-h-0 !py-1.5 !pl-3"
+                      className="field mt-1 !min-h-11 !py-1.5 !pl-3"
                     >
                       {SESSION_LENGTHS.map((m) => (
                         <option key={m} value={m}>{`${m} min`}</option>
@@ -834,7 +852,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
                       required
                       value={s.seats}
                       onChange={(e) => setSession(index, { seats: e.target.value })}
-                      className="field mt-1 !min-h-0 !py-1.5"
+                      className="field mt-1 !min-h-11 !py-1.5"
                     />
                   </label>
                   {draft.video || draft.inPerson ? null : (
@@ -846,7 +864,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
                         value={s.room}
                         onChange={(room) => setSession(index, { room })}
                         check={SESSION_ROOM_CHECK}
-                        className="field mt-1 !min-h-0 !py-1.5"
+                        className="field mt-1 !min-h-11 !py-1.5"
                       />
                     </div>
                   )}
@@ -857,7 +875,12 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
           {draft.sessions.length < MAX_SESSIONS ? (
             <button
               type="button"
-              onClick={() => setDraft({ ...draft, sessions: [...draft.sessions, newSession(draft.tz, draft.sessions[draft.sessions.length - 1])] })}
+              onClick={() => {
+                const added = newSession(draft.tz, draft.sessions[draft.sessions.length - 1]);
+                setDraft({ ...draft, sessions: [...draft.sessions, added] });
+                // This button is gone once the last session allowed is added: the focus goes to the new session's date.
+                focusSoon(`call-${product.id}-session-${added.id}-date`);
+              }}
               className="mt-3 inline-flex min-h-11 -my-2.5 items-center text-sm font-semibold text-violet-deep underline underline-offset-4"
             >
               Add a session
@@ -979,7 +1002,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
             const on = ranges.length > 0;
             return (
               <div key={name} className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[10px] bg-paper px-3 py-2">
-                <label className="flex w-32 items-center gap-2 text-sm font-semibold text-ink">
+                <label className="flex min-h-11 w-32 items-center gap-2 text-sm font-semibold text-ink">
                   <input
                     type="checkbox"
                     checked={on}
@@ -1003,12 +1026,13 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
                     {ranges.map((range, index) => (
                       <span key={index} className="flex flex-wrap items-center gap-1.5 text-sm text-ink-soft">
                         <input
+                          id={`call-${product.id}-day-${day}-${index}-from`}
                           type="time"
                           step={300}
                           aria-label={`${name}, stretch ${index + 1}, from`}
                           value={clock(range[0])}
                           onChange={(e) => setRange(day, index, 0, e.target.value)}
-                          className="field !min-h-0 w-[7.5rem] !py-1.5"
+                          className="field !min-h-11 w-[7.5rem] !py-1.5"
                         />
                         to
                         <input
@@ -1017,7 +1041,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
                           aria-label={`${name}, stretch ${index + 1}, to`}
                           value={clock(range[1] === 1440 ? 1439 : range[1])}
                           onChange={(e) => setRange(day, index, 1, e.target.value)}
-                          className="field !min-h-0 w-[7.5rem] !py-1.5"
+                          className="field !min-h-11 w-[7.5rem] !py-1.5"
                         />
                         {index > 0 ? (
                           <button
@@ -1027,8 +1051,10 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
                               const weekly = draft.weekly.map((r) => r.map((x) => [x[0], x[1]] as Range));
                               weekly[day] = weekly[day].slice(0, 1);
                               setDraft({ ...draft, weekly });
+                              // The button goes with its stretch: the focus goes to the day's first clock.
+                              focusSoon(`call-${product.id}-day-${day}-0-from`);
                             }}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-lg leading-none text-ink-mute transition hover:bg-white hover:text-danger"
+                            className="inline-flex h-11 w-11 items-center justify-center rounded-full text-lg leading-none text-ink-mute transition hover:bg-white hover:text-danger"
                           >
                             &times;
                           </button>
@@ -1043,8 +1069,10 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
                           const end = weekly[day][0][1];
                           weekly[day].push([Math.min(end + 60, 1380), Math.min(end + 180, 1440)]);
                           setDraft({ ...draft, weekly });
+                          // A day holds at most two stretches, so this button is gone: the focus goes to the new stretch's first clock.
+                          focusSoon(`call-${product.id}-day-${day}-${weekly[day].length - 1}-from`);
                         }}
-                        className="text-sm font-semibold text-violet-deep underline underline-offset-4"
+                        className="inline-flex min-h-11 items-center text-sm font-semibold text-violet-deep underline underline-offset-4"
                       >
                         Add a second stretch
                       </button>

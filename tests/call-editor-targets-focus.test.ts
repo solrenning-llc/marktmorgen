@@ -41,7 +41,9 @@ const ids = new Set([...source.matchAll(/\bid=\{`([^`]+)`\}/g)].map((m) => shape
 /** Every focusSoon(`…`) in a handler names an id that the editor really draws. */
 function focusTargets(block: string): { called: boolean; drawn: boolean } {
   const targets = [...block.matchAll(/focusSoon\(`([^`]+)`\)/g)].map((m) => shape(m[1]));
-  return { called: targets.length > 0, drawn: targets.length > 0 && targets.every((t) => ids.has(t)) };
+  // A drawn id's `${…}` stands for any one value, so a fixed `0` (the day's first clock) matches `${index}` too.
+  const drawnAs = (target: string) => [...ids].some((id) => new RegExp(`^${id.split("${}").map((p) => p.replace(/[.*+?^$()|[\]\\{}]/g, "\\$&")).join("(?:\\$\\{\\}|[^-]+)")}$`).test(target));
+  return { called: targets.length > 0, drawn: targets.length > 0 && targets.every(drawnAs) };
 }
 
 const classOf = (block: string) => block.match(/className="([^"]+)"/)?.[1]?.split(/\s+/) ?? [];

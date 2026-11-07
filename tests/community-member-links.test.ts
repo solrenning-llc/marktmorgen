@@ -63,6 +63,31 @@ is("a phone number (WhatsApp) is never a member's link", [url("https://wa.me/558
 is("a website that is no social network is not kept", url("https://example.com/me"), null);
 is("http is not kept", url("http://www.instagram.com/ana"), null);
 is("a host that only looks like the network is not kept", [url("https://instagram.com.evil.example/ana"), url("https://evilinstagram.com/ana"), url("https://evil.example/instagram.com/ana")], [null, null, null]);
+// Added at review (LEVE, independent review of 6 November 2026, comment 6698301155): a network's own
+// link redirector is on the network's host but sends the reader to another site, under a label
+// that says the network (WCAG 2.4.9), so it is no profile.
+const away = encodeURIComponent("https://evil.example/");
+is("a network's own redirector to another site is not kept", [
+  url(`https://l.facebook.com/l.php?u=${away}`),
+  url(`https://lm.facebook.com/l.php?u=${away}`),
+  url(`https://www.youtube.com/redirect?q=${away}`),
+  url(`https://www.linkedin.com/redir/redirect?url=${away}`),
+  url(`https://www.instagram.com/linkshim/?u=${away}`),
+], [null, null, null, null, null]);
+is("a query that carries another address is not kept, however it is written", [
+  url(`https://www.pinterest.com/offsite/?url=${away}`),
+  url("https://t.me/iv?url=//evil.example/"),
+  url(`https://www.facebook.com/ana?next=${encodeURIComponent(away)}`),
+  url("https://x.com/ana?u=https://evil.example/"),
+], [null, null, null, null]);
+is("an address inside the path is not kept", [url("https://x.com/https://evil.example/"), url(`https://x.com/go/${away}`)], [null, null]);
+is("a redirector path or host is not kept even without a destination", [
+  url("https://www.facebook.com/l.php?u=evil.example"),
+  url("https://l.instagram.com/ana"),
+  url("https://www.youtube.com/redirect?q=evil.example"),
+], [null, null, null]);
+is("a stored redirector is left out when read back", parseMemberLinks([{ network: "facebook", url: `https://l.facebook.com/l.php?u=${away}` }, { network: "youtube", url: `https://www.youtube.com/redirect?q=${away}` }]), []);
+is("a profile's own query and path still pass", [url("https://www.facebook.com/profile.php?id=100012345"), url("https://www.youtube.com/@ana/videos"), url("https://www.linkedin.com/in/ana")], ["https://www.facebook.com/profile.php?id=100012345", "https://www.youtube.com/@ana/videos", "https://www.linkedin.com/in/ana"]);
 is("an address with a user and password is not kept", url("https://user:pw@www.instagram.com/ana"), null);
 is("a script address is not kept", url("javascript:alert(1)//instagram.com/"), null);
 is("an address longer than the limit is not kept", url(`https://www.instagram.com/${"a".repeat(MAX_MEMBER_LINK_URL)}`), null);

@@ -16,6 +16,10 @@
  *      listed after the measure is not read (it is told on the next call);
  *      one grown since is read once more, paid first.
  *   3. No body crosses.
+ *   4. Each email's size without its body (one script, a GET inside it for
+ *      each) is asked only after the API requests asking it comes to were
+ *      taken (Codex J 5811457165 on #3034: thirty sizes inside the door's one
+ *      request); with none left, none is asked, and the refusal says why.
  */
 import { emailsTool } from "@/lib/mcp-tools";
 import { holdMoreApi, takeMoreApi } from "@/lib/api-guard";
@@ -43,6 +47,8 @@ const recordsRead = (batch: Command[]) => batch.flatMap((c) => {
   }
   return [];
 });
+/** Records whose size without the body a batch asks (a heads script in "size" mode). */
+const sizesAsked = (batch: Command[]) => batch.reduce((n, c) => n + (c[0] === "EVAL" && String(c[1]).startsWith(HEADS) && c[3 + Number(c[2])] === "size" ? Number(c[2]) : 0), 0);
 /** A batch that takes or gives back the store's requests: priced by apiReadUnits itself (withTaking). */
 const taking = (batch: Command[]) => batch.some((c) => c.some((v) => String(v).includes("nl:allow:")));
 
@@ -72,7 +78,14 @@ async function run(store: Store, then: ((batch: Command[]) => Promise<void>) | n
     stripePages: 0,
     roundTrips: work.length,
   };
-  return { told: told as Told | Response | "threw", took, did, units: apiReadUnits(did), read: log.flatMap((b) => recordsRead(b.batch)) };
+  const firstTake = log.findIndex((b) => taking(b.batch));
+  const firstSizes = log.findIndex((b) => sizesAsked(b.batch) > 0);
+  return {
+    told: told as Told | Response | "threw", took, did, units: apiReadUnits(did), read: log.flatMap((b) => recordsRead(b.batch)),
+    sized: log.reduce((n, b) => n + sizesAsked(b.batch), 0),
+    // The sizes are asked only after a take: the API requests asking them comes to (or, before the fix, the door's one alone).
+    sizedBeforeTake: firstSizes >= 0 && (firstTake < 0 || firstSizes < firstTake),
+  };
 }
 
 async function main(): Promise<void> {
@@ -128,6 +141,25 @@ async function main(): Promise<void> {
     });
     is("refused with its own words", refused.told instanceof Response ? [refused.told.status, /API requests/.test(await refused.told.text())] : refused.told, [429, true]);
     is("the grown one read once, as far as it was paid", refused.read.filter((k) => k === emailKey(ids[0])).length, 1);
+    await pipeline([["SET", api[0], "0"]]);
+  }
+
+  part("4. The sizes are paid before they are asked; with nothing left, none is asked");
+  {
+    const ids = idsFor(30, "c3");
+    await writeEmails(store, ids, () => LONGEST);
+    const paid = await run(store, null);
+    is("told", paid.told !== "threw" && !(paid.told instanceof Response) ? paid.told.emails?.length : paid.told, 30);
+    is("all thirty sizes asked", paid.sized, 30);
+    is("no size is asked before the API requests asking it comes to are taken", paid.sizedBeforeTake, false);
+    is(`what the reading did comes to no more API requests than were taken (${JSON.stringify({ took: paid.took, units: paid.units })})`, paid.units <= paid.took, true);
+
+    const api = redis.keys().filter((k) => k.startsWith("nl:allow:api:"));
+    await pipeline([["SET", api[0], "2000"]]);
+    const none = await run(store, null);
+    is("refused with its own words", none.told instanceof Response ? [none.told.status, /API requests/.test(await none.told.text())] : none.told, [429, true]);
+    is("no size asked, no email read", [none.sized, none.read.length], [0, 0]);
+    is("nothing taken", none.took, 0);
     await pipeline([["SET", api[0], "0"]]);
   }
 

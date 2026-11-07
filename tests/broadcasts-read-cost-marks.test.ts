@@ -8,13 +8,15 @@
  * the route's own studio requests, for a subject, a date and a count each.
  * Held here, with synthetic stores only:
  *
- *   1. Before any email is read, only the list and each one's size without
- *      its body are asked, small; the studio requests reading them comes to
- *      are taken first; every command and byte after that is inside what was
- *      taken when it is sent, and no body crosses.
+ *   1. Before any take, only the list is asked: each one's size without its
+ *      body (one script, a GET inside it for each) is paid before it is
+ *      asked (Codex P 5811379332 on #3034: fifty sizes inside the range
+ *      route's one studio request), and what reading them comes to is taken
+ *      before any is read; every command and byte after the first take is
+ *      inside what was taken when it is sent, and no body crosses.
  *   2. The marks are the same as from the emails read whole.
- *   3. Without the studio requests they need, no email is read and the chart
- *      has no email marks; its other marks stay.
+ *   3. Without the studio requests they need, no email is read or measured
+ *      and the chart has no email marks; its other marks stay.
  */
 import { readFileSync } from "node:fs";
 import { readMarks, marksFrom } from "@/lib/auto-marks";
@@ -45,7 +47,8 @@ async function main(): Promise<void> {
   {
     const { result, sum } = await run();
     is("marks read", Array.isArray(result) && result.filter((m) => m.kind === "email").length, READ);
-    is(`only the list and the sizes are asked before a take, small (${JSON.stringify(sum.own)})`, sum.own.commands <= 1 + 1 + READ && sum.own.bytes <= 8_000, true);
+    is(`only the list is asked before a take, small (${JSON.stringify(sum.own)})`, sum.own.commands <= 1 && sum.own.bytes <= 8_000, true);
+    is("no email's size is asked before the studio requests asking it comes to are taken", sum.sizedBefore, false);
     is("no email is read before the studio requests are taken", sum.readBefore, false);
     is(`every command and byte after it is inside what was taken when sent (${JSON.stringify({ paid: sum.paid, commands: sum.commands, bytes: sum.bytes })})`, sum.ok, true);
     is(`no body crosses (${sum.own.bytes + sum.bytes} bytes)`, sum.own.bytes + sum.bytes < 60_000, true);
@@ -63,6 +66,7 @@ async function main(): Promise<void> {
     await leaveStudio(0, 5_000);
     const { result, log } = await run();
     is("no email read", log.some((e) => e.kind === "db" && e.reads.length > 0), false);
+    is("no email's size asked either", log.some((e) => e.kind === "db" && e.sizes > 0), false);
     is("no email mark, the sale's marks stay", Array.isArray(result) ? [result.filter((m) => m.kind === "email").length, result.filter((m) => m.kind === "sale").length] : result, [0, 2]);
     await leaveStudio(5_000, 5_000);
   }

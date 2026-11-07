@@ -21,7 +21,7 @@ export const UNIT_COMMANDS = 20;
 export const UNIT_BYTES = 50_000;
 
 export type Command = (string | number)[];
-export type Event = { kind: "pay"; units: number } | { kind: "db"; commands: number; bytes: number; reads: string[] };
+export type Event = { kind: "pay"; units: number } | { kind: "db"; commands: number; bytes: number; reads: string[]; sizes: number };
 
 export const wire = (value: unknown): number => Buffer.byteLength(JSON.stringify(value ?? null), "utf8");
 export const utf8 = (text: string): number => Buffer.byteLength(text, "utf8");
@@ -85,17 +85,22 @@ function readsOf(batch: Command[]): string[] {
   return out;
 }
 
+/** Records whose size without the body a batch asks (a heads script in "size" mode): work that must be paid before it is sent too (Codex P 5811379332, Codex J 5811457165 on #3034). */
+export function sizesOf(batch: Command[]): number {
+  return batch.reduce((n, c) => n + (c[0] === "EVAL" && String(c[1]).startsWith(HEADS) && c[3 + Number(c[2])] === "size" ? Number(c[2]) : 0), 0);
+}
+
 /** The studio requests a reader takes, from the store's own count (lib/studio-route.ts, countStudio). */
 export const payFrom = (store: Store) => async (units: number) => {
   const counted = await countStudio(store, null, units);
   return counted.ok ? ({ ok: true } as const) : ({ ok: false, message: counted.message } as const);
 };
 
-export type Sum = { ok: boolean; paid: number; commands: number; bytes: number; own: { commands: number; bytes: number }; readBefore: boolean; read: number };
+export type Sum = { ok: boolean; paid: number; commands: number; bytes: number; own: { commands: number; bytes: number }; readBefore: boolean; sizedBefore: boolean; read: number; sized: number };
 
 /**
  * What a run read before its first take (`own`, inside its caller's own
- * studio requests), whether a record was read before it, and whether every
+ * studio requests), whether a record was read or measured before it, and whether every
  * command and byte after it is inside what was taken when it was sent.
  */
 export function covered(log: Event[]): Sum {
@@ -117,7 +122,8 @@ export function covered(log: Event[]): Sum {
     if (commands > paid * UNIT_COMMANDS || bytes > paid * UNIT_BYTES) ok = false;
   }
   const read = log.reduce((n, e) => n + (e.kind === "db" ? e.reads.length : 0), 0);
-  return { ok, paid, commands, bytes, own, readBefore: before.some((e) => e.reads.length > 0), read };
+  const sized = log.reduce((n, e) => n + (e.kind === "db" ? e.sizes : 0), 0);
+  return { ok, paid, commands, bytes, own, readBefore: before.some((e) => e.reads.length > 0), sizedBefore: before.some((e) => e.sizes > 0), read, sized };
 }
 
 /** Runs `what` with every database call watched; `then` runs after a batch (to change a record between two calls). */
@@ -128,7 +134,7 @@ export async function watched<T>(what: () => Promise<T>, then: ((batch: Command[
     // A take is credited when it is sent: its own commands are in what it takes.
     if (studio) log.push({ kind: "pay", units: Number(studio[2]) });
     const replies = await pipeline(batch);
-    log.push({ kind: "db", commands: billed(batch), bytes: wire(batch) + wire(replies), reads: readsOf(batch) });
+    log.push({ kind: "db", commands: billed(batch), bytes: wire(batch) + wire(replies), reads: readsOf(batch), sizes: sizesOf(batch) });
     if (then) await then(batch);
     return replies;
   }) as typeof redis.pipeline;

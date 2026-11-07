@@ -11,12 +11,15 @@
  *   1. The page reads each email without its body (readBroadcastHeads,
  *      lib/broadcasts.ts: the body's string emptied inside the database,
  *      BROADCAST_HEADS), every field it shows exactly as stored.
- *   2. Before any is read, the list and each one's size without its body
- *      are asked inside the page's own studio requests; the studio requests
- *      reading them comes to are taken first; every command and byte after
- *      that is inside what was taken when it is sent. One that grows between
+ *   2. Before any take, only the list is asked, inside the page's own
+ *      studio requests; each one's size without its body is paid before it
+ *      is asked (Codex P 5811379332, Codex J 5811457165 on #3034), and the
+ *      studio requests reading them comes to are taken before any is read;
+ *      every command and byte after the first take is inside what was taken
+ *      when it is sent. One that grows between
  *      its size and its read is read once more, paid first, then not at all.
- *   3. Without those studio requests none is read, and the page says why.
+ *   3. Without those studio requests none is read or measured, and the page
+ *      says why.
  *   4. All or nothing, as listBroadcastsStrict: a record missing, of another
  *      list, malformed or without a body makes the page say the emails could
  *      not be read, never a shorter list.
@@ -77,7 +80,8 @@ async function main(): Promise<void> {
     const strict = await listBroadcastsStrict(listId);
     const expected = strict.map(withoutBody);
     is("every email, newest first, each field as listBroadcastsStrict reads it, and no body", result !== "threw" && result.ok ? result.heads : result, expected);
-    is(`the list and the sizes are asked inside the page's own studio requests, small (${JSON.stringify(sum.own)})`, sum.own.commands <= 1 + 1 + READ && sum.own.bytes <= 8_000, true);
+    is(`only the list is asked inside the page's own studio requests, small (${JSON.stringify(sum.own)})`, sum.own.commands <= 1 && sum.own.bytes <= 8_000, true);
+    is("no email's size is asked before the studio requests asking it comes to are taken", sum.sizedBefore, false);
     is("no email is read before the studio requests are taken", sum.readBefore, false);
     is(`every command and byte after it is inside what was taken when sent (${JSON.stringify({ paid: sum.paid, commands: sum.commands, bytes: sum.bytes })})`, sum.ok, true);
     is(`no body crosses: all of it is a few kilobytes (${sum.own.bytes + sum.bytes})`, sum.own.bytes + sum.bytes < 40_000, true);
@@ -140,6 +144,7 @@ async function main(): Promise<void> {
     const { result, log } = await run();
     is("refused, in words", result !== "threw" && !result.ok && result.refused.length > 10, true);
     is("no email read", log.some((e) => e.kind === "db" && e.reads.length > 0), false);
+    is("no email's size asked either", log.some((e) => e.kind === "db" && e.sizes > 0), false);
     await leaveStudio(5_000, 5_000);
   }
 

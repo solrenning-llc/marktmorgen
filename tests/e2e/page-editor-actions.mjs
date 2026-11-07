@@ -4,8 +4,8 @@
 // where it went (2.4.3, 4.1.3); the same sentence said twice is said again;
 // in forced colors no icon button animates its colors (inbox C4-35); Undo and
 // Redo of moves made in one step name the block that moved, and a picture
-// block whose send is still pending, or with no room left on the page, never
-// drops the focus (#2926).
+// block whose send is still pending, or with no room left on the page, or in a
+// column, never drops the focus (#2926).
 // The real component with a synthetic page and every request held in the
 // page (tests/e2e/page-editor-harness.tsx), the site's own style sheet built
 // by Tailwind from the editor's classes: no server, no build, nothing sent.
@@ -203,6 +203,21 @@ try {
   await settled();
   await settled();
   is("removing that last picture puts the focus on the block's heading field", await page.evaluate(() => ({ tag: document.activeElement?.tagName, label: document.activeElement?.labels?.[0]?.textContent ?? null })), { tag: "INPUT", label: "Heading (optional)" });
+
+  // A picture in a column is one part of the row: the row's own Remove takes it away and sends the focus on, and the
+  // picture's own list sends it nowhere, so nothing takes it after (Claude 5's LIGHT 2 on #2926). Synthetic row.
+  await page.evaluate(() => {
+    const picture = { path: "images/0123456789abcdef01234567/0123456789abcdef0123456789abcdee.jpg", width: 4, height: 4, alt: "A synthetic picture in a column", caption: "" };
+    window.harness.mount([{ ...window.harness.block("row"), columns: [[{ kind: "image", picture, decorative: false }], []] }]);
+  });
+  await page.locator("button[aria-expanded]", { hasText: "Columns" }).first().click();
+  const removePart = page.getByRole("button", { name: /^Remove: part 1 of column 1/ });
+  await removePart.waitFor();
+  is("a column's picture draws no Remove button of its own", await page.getByRole("button", { name: /^Remove picture/ }).count(), 0);
+  await removePart.focus();
+  await page.keyboard.press("Enter");
+  for (let i = 0; i < 4; i++) await settled();
+  is("the row's Remove sends the focus to the column's Add, and it stays there", await page.evaluate(() => document.activeElement?.id?.endsWith("-c0-add") ?? false), true);
 
   is("no error on the page", errors, []);
 } finally {

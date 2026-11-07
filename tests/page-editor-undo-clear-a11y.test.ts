@@ -68,6 +68,14 @@ is("each Remove sends the focus on", lists.map((l) => /focusItemAfterRemoval\(ba
 is("a pictures list passes on where the focus goes with no Add button drawn", /focusItemAfterRemoval\(base, i, items\.length, away\)/.test(lists[4]), true);
 const pictureBlocks = [between('case "pictures": {', "case \"countdown\""), between('case "feature": {', "</fieldset>")];
 is("the pictures block and the picture-and-text block send it to their heading field", pictureBlocks.map((b) => b.includes("<PicturesEditor") && b.includes("away={`${base}-h`}") && b.includes("id={`${base}-h`}")), [true, true]);
+// A picture in a column is one part of the row (single): it draws no Remove button of its own, so the row's own
+// Remove moves the focus, and the pictures list never sends it too (Claude 5's LIGHT 2 on #2926).
+const picturesOwn = lists[4];
+const removeAt = picturesOwn.indexOf("id={itemRemoveId(base, i)}");
+is("in a pictures list, the Remove button is drawn only when it is not a part of something else", removeAt > 0 && picturesOwn.lastIndexOf("{single ? null : (", removeAt) > 0, true);
+const columnPicture = between('case "image":', 'case "video":');
+is("a column's picture is single, without a place to send the focus of its own", columnPicture.includes("<PicturesEditor") && /\n\s+single\n/.test(columnPicture) && !columnPicture.includes("away="), true);
+is("the row's own Remove takes a column's part away and says where the focus goes", /aria-label=\{`Remove: \$\{what\}`\} onClick=\{\(\) => remove\(place\)\}/.test(editor) && between("function remove(place: RowPlace) {", "\n  }\n").includes("`${base}-c${place.column}-add`"), true);
 const sendOn = between("function focusItemAfterRemoval(", "\n}\n");
 is("the focus waits for the list to be drawn again, then goes where itemFocusAfterRemoval says", /itemFocusAfterRemoval\(base, at, count\)/.test(sendOn) && /document\.getElementById\(gone\) \? null : document\.getElementById\(focus\)/.test(sendOn), true);
 

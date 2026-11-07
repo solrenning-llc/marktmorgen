@@ -46,6 +46,7 @@ import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccoun
 import { windowOf, withConfirmations, withdraw, withdrawalKey, withdrawalStanding } from "@/lib/withdrawal";
 import { submittedInTime, withdrawalWindow, type WithdrawalFacts } from "@/lib/withdrawal-rules";
 import { WITHDRAWAL_WORDS } from "@/lib/buyer-words/withdrawal";
+import { importedKey } from "@/lib/imported-purchases";
 import { openConversation, readInbox } from "@/lib/inbox";
 import { withinLimit } from "@/lib/request-guard";
 import { NEW_PER_DAY } from "@/lib/inbox-rules";
@@ -436,6 +437,8 @@ test("G: a handed-over pre-order whose shipping was never written down is taken 
     const entry = JSON.parse(String(raw)) as Record<string, unknown>;
     delete entry.ship;
     await redis.pipeline([["HSET", key, session.id, JSON.stringify(entry)]]);
+    // And its grant made before the job said whether it ships (Claude 1's H on #2827): the job as it was, "pre:<checkout>".
+    await asOldGrant(store, product, session.id);
     store = (await storeForEmail(OWNER)) as Store;
     const pre = (await purchasesFor(store, BUYER, new OrdersMeter(store))).find((p) => p.preorder?.given);
     assert.ok(pre, "precondition: on the list as handed over");
@@ -457,6 +460,82 @@ test("G: a digital pre-order handed over keeps its 14 days, not an open end", as
     const pre = (await purchasesFor(store, BUYER, new OrdersMeter(store))).find((p) => p.preorder?.given);
     assert.ok(pre && pre.shipped !== true, "not shipped");
     assert.deepEqual(windowOf(pre!), { open: true, until: at(2026, 11, 24, 11, 59, 59) });
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+/** Rewrites a handed-over pre-order's grant to the job it had before it said whether it ships: "pre:<checkout>". */
+async function asOldGrant(store: Store, product: string, checkout: string): Promise<void> {
+  const grantKey = importedKey(store.statsId!, BUYER);
+  const [raw] = await redis.pipeline([["HGET", grantKey, product]]);
+  const grant = JSON.parse(String(raw)) as Record<string, unknown>;
+  grant.job = `pre:${checkout}`;
+  await redis.pipeline([["HSET", grantKey, product, JSON.stringify(grant)]]);
+}
+
+// Claude 1's focal re-review of #2827 (H, MEDIUM): the pre-order's entry expires 400 days after its product's last
+// change, while the grant that keeps the purchase on the buyer's list never does. Whether it ships is kept where the
+// purchase is kept, so an entry gone never turns a known digital purchase into an unknown one.
+test("H: a digital pre-order handed over stays digital once its entry is gone: its 14 days ended, never open again", async () => {
+  // Read 401 days after paying: the store's plan is set up on the day of the read, so only the pre-order is old.
+  Date.now = () => at(2027, 12, 15, 8) * 1000;
+  try {
+    const { product } = await shop();
+    let store = (await storeForEmail(OWNER)) as Store;
+    const session = preorderSession("predigone", product, at(2026, 11, 9, 8));
+    sessions = [session];
+    assert.equal(await confirmPreorder(store, session, (await readListing(store, product))!, deps), "given");
+    // The entry expires (400 days after the product's last pre-order change).
+    await redis.pipeline([["DEL", `nl:pre:${store.statsId}:${product}`]]);
+    store = (await storeForEmail(OWNER)) as Store;
+    const pre = (await purchasesFor(store, BUYER, new OrdersMeter(store))).find((p) => p.preorder?.given);
+    assert.ok(pre, "precondition: still on the list (its grant does not expire)");
+    assert.equal(pre!.shipped === true, false, "still digital");
+    assert.deepEqual(windowOf(pre!), { open: false, why: "ended" }, "its 14 days ended long ago: not offered again");
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test("H: a shipped pre-order handed over stays shipped once its entry is gone: open, with no end", async () => {
+  Date.now = () => at(2026, 11, 29, 8) * 1000;
+  try {
+    const { product } = await shop();
+    let store = (await storeForEmail(OWNER)) as Store;
+    await redis.pipeline([["SADD", `nl:wl:${store.statsId}:soon`, product]]);
+    const session = preorderSession("preshipgone", product, at(2026, 11, 9, 8), { ship: "yes" });
+    sessions = [session];
+    assert.equal(await confirmPreorder(store, session, (await readListing(store, product))!, deps), "sent");
+    await redis.pipeline([["SREM", `nl:wl:${store.statsId}:soon`, product]]);
+    store = (await storeForEmail(OWNER)) as Store;
+    assert.equal(await handOverPreorder(store, (await readListing(store, product))!, session.id, deps), "given");
+    await redis.pipeline([["DEL", `nl:pre:${store.statsId}:${product}`]]);
+    store = (await storeForEmail(OWNER)) as Store;
+    const pre = (await purchasesFor(store, BUYER, new OrdersMeter(store))).find((p) => p.preorder?.given);
+    assert.ok(pre, "precondition: on the list");
+    assert.equal(pre!.shipped, true, "still shipped");
+    assert.deepEqual(windowOf(pre!), { open: true, until: null });
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test("H: an old grant (no shipping in its job) whose entry is gone is not known: kept open, never closed on a guess", async () => {
+  Date.now = () => at(2026, 11, 10, 8) * 1000;
+  try {
+    const { product } = await shop();
+    let store = (await storeForEmail(OWNER)) as Store;
+    const session = preorderSession("preoldgone", product, at(2026, 11, 9, 8));
+    sessions = [session];
+    assert.equal(await confirmPreorder(store, session, (await readListing(store, product))!, deps), "given");
+    await asOldGrant(store, product, session.id);
+    await redis.pipeline([["DEL", `nl:pre:${store.statsId}:${product}`]]);
+    store = (await storeForEmail(OWNER)) as Store;
+    const pre = (await purchasesFor(store, BUYER, new OrdersMeter(store))).find((p) => p.preorder?.given);
+    assert.ok(pre, "precondition: on the list");
+    assert.equal(pre!.checkout, session.id, "the old job still names its checkout");
+    assert.deepEqual(windowOf(pre!), { open: true, until: null }, "not known: kept open");
   } finally {
     Date.now = realNow;
   }

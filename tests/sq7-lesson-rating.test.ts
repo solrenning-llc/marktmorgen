@@ -26,6 +26,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  dropCourseRatings,
   dropLessonRatings,
   forgetLessonRatingsPerson,
   lessonRatingCount,
@@ -225,6 +226,34 @@ async function main(): Promise<void> {
   await forgetLessonRatingsPerson(COURSE, ben, ROOM);
   is("the room counts ratings, and a store's closing erases them", [countedInRoom(`nl:lr:${COURSE}:l:${L1}`), countedInRoom(`nl:lr:${COURSE}:ls`), closingOf(`nl:lr:${COURSE}:ls`)], [true, true, { how: "erase" }]);
 
+  part("A course the creator removes or turns off takes every rating with it, a removed lesson's too");
+  redis.clear();
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L1, who: ana, score: 4, note: "Good." });
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L2, who: ben, score: 2, note: "" });
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: "lessongone03", who: ana, score: 1, note: "" });
+  const other = "o".repeat(32);
+  await rateLesson({ room: ROOM, courseId: other, lessonId: L1, who: ana, score: 5, note: "" });
+  const withAll = await used();
+  is("every rating of the course goes, a lesson no longer in it too", await dropCourseRatings(COURSE, ROOM), 3);
+  is("nothing of the course is left", redis.run(["KEYS", `nl:lr:${COURSE}:*`]), []);
+  is("their room comes back", withAll - (await used()), RATING_ROOM_BYTES * 3);
+  is("another course's rating stays", (await readMyRating(other, L1, ana))?.score, 5);
+  is("a course with no ratings: nothing", await dropCourseRatings(COURSE, ROOM), 0);
+  redis.run(["SADD", `nl:lr:${COURSE}:ls`, "../../nl:x"]);
+  let oddIndex = false;
+  try {
+    await dropCourseRatings(COURSE, ROOM);
+  } catch {
+    oddIndex = true;
+  }
+  is("an index entry that is not a lesson id is unknown: nothing is taken, the removal can be asked again", [oddIndex, redis.run(["SCARD", `nl:lr:${COURSE}:ls`])], [true, 1]);
+  redis.clear();
+  const productRoute = source("app/api/store/product/route.ts");
+  const courseRoute = source("app/api/store/course/route.ts");
+  is("removing a product with a course drops its ratings before the product goes, with its comments", (productRoute.match(/await dropCourseRatings\((?:found\.id|going\.course\.id), store\);/g) ?? []).length, 2);
+  is("turning a course off drops its ratings, or says it could not", /try \{\s*await dropComments\(course\.id, \[\], store\);\s*await dropCourseRatings\(course\.id, store\);\s*\} catch/.test(courseRoute), true);
+  is("removing a lesson or a module drops their ratings beside their comments", /dropLessonComments\(course\.id, gone, store\)[^\n]*\n\s*await dropLessonRatings\(course\.id, gone, store\)/.test(courseRoute), true);
+
   part("Deleting a person is priced at every lesson its ratings are kept under, a removed one too");
   redis.clear();
   await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L1, who: ana, score: 4, note: "" });
@@ -233,6 +262,9 @@ async function main(): Promise<void> {
   is("no course, nothing counted", await ratedLessonCount([]), 0);
   const scope = { store: ROOM, sid: "s", statsId: "f".repeat(32), listId: null, email: "ana@example.com", person: "p", learner: ana, courses: [{ productId: "p1", courseId: COURSE, lessonIds: [L1], moduleIds: ["m1"] }], productIds: ["p1"], communityId: null } as unknown as ErasureScope;
   is("the erasure is sized at the course's lessons and every lesson holding a rating", (await erasureSize(scope)).lessons, 1 + 2);
+  // Changed check (rule 23, pre-review of 90c20877f): this used to SET the index to a string, but MemoryRedis's SET
+  // silently replaces a key of another type, so the count read back a plain 0 and never failed; the stub below gives
+  // the odd reply a real Redis's WRONGTYPE stands for.
   const realCount = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
     if (commands.some((c) => c[0] === "SCARD" && String(c[1]) === `nl:lr:${COURSE}:ls`)) return ["?"];
@@ -266,10 +298,13 @@ async function main(): Promise<void> {
   const limit = route.indexOf("withinLimit(\"lesson-rating\"");
   is("a buyer action is taken before rating", take > 0 && take < rate, true);
   is("the per-person limit comes before any rating read or write", limit > 0 && limit < rate && limit < route.indexOf("await removeMyRating("), true);
+  // Changed assertion (rule 23, pre-review of 51916e1f1): the remove branch now checks who is signed in before it
+  // removes, so the old 40-character window no longer reached removeMyRating; still no buyer action inside it.
   is("removing is not charged a buyer action", /if \(action === "remove"\) \{(?:(?!takeBuyerAction)[\s\S]){0,900}removeMyRating/.test(route) && route.indexOf("await removeMyRating(") < take, true);
   const removing = route.indexOf('if (action === "remove")');
   is("a student removes their own rating without the lesson being open to them: only who they are is asked", removing > 0 && removing < route.indexOf('access.state !== "open"') && removing < route.indexOf("findLesson(") && removing < route.indexOf("heldBack("), true);
   is("the store's owner never removes a student's rating", /if \(action === "remove"\) \{[\s\S]{0,400}learner\.owner\) return back\(""\)/.test(route), true);
+  is("removing keeps to the courses the sign-in opens: a pass for one course never removes a rating in another", /if \(action === "remove"\) \{[\s\S]{0,600}learner\.scope !== "all" && !learner\.scope\.includes\(course\)\)/.test(route), true);
   const scored = route.indexOf("parseScore(form.get(\"score\"))");
   is("a score that is not one is refused before a buyer action is taken", scored > 0 && scored < take, true);
   is("a full data room says so", route.includes("error instanceof DataRoomError") && route.includes('back("noroom")'), true);
@@ -297,6 +332,8 @@ async function main(): Promise<void> {
   }
   is("the promise is what the page does: no 'at any time' while a closed lesson has no form", /at any time/.test(LESSON_RATING_WORDS.en.note), false);
   is("and it says deleting one's data removes it", /delete your data/.test(LESSON_RATING_WORDS.en.note), true);
+  is("and that removing the lesson or the course removes it", /removes this lesson or course/.test(LESSON_RATING_WORDS.en.note), true);
+  is("German says the rating and comment (plural) are deleted", /Sie werden gelöscht/.test(LESSON_RATING_WORDS.de.note), true);
   is("an unknown language speaks English", lessonRatingWords("xx").title, LESSON_RATING_WORDS.en.title);
 
   done();

@@ -182,6 +182,53 @@ async function main(): Promise<void> {
     is("the next healthy sweep hands it over once", [await owned(buyer), swept], [1, 1]);
   }
 
+  // Claude 6's MEDIUM on #2909 (head 4ba53ee9, O6): the refund watch wrote the refund mark (ZADD + EXPIRE) without
+  // reading the replies, then, with nothing granted yet, took the order off its watch. A mark that was never written
+  // left nothing to stop the retry, so a refunded order was handed over for good. Now the two replies are read
+  // exactly (each 0 or 1); anything else keeps the order on the watch, looked at again in an hour.
+  const markWrite = (c: Commands) =>
+    c.length === 2 && c[0][0] === "ZADD" && c[0][1] === `nl:ppsell:refunded:${statsId}` && c[1][0] === "EXPIRE";
+  for (const [label, applied, reply] of [
+    ["no reply at all, not written", false, []],
+    ["one reply of two, not written", false, [1]],
+    ["the text \"1\" and 1, not written", false, ["1", 1]],
+    ["an impossible count 2 and 1, not written", false, [2, 1]],
+    ["1 and the text \"x\", not written", false, [1, "x"]],
+    ["no reply at all, written", true, []],
+  ] as [string, boolean, unknown[]][]) {
+    part(`The refund mark's write answered ${label}: the refunded order is never kept handed over`);
+    swept = 0;
+    const buyer = `write-${label.replace(/\W+/g, "-")}@example.com`;
+    const order = await buy(store, id, buyer, slowReturn);
+    // The watch's first look comes an hour after paying, as in the realistic case: the refund lands before it.
+    refunded.add(captureOf(order));
+    const pipeline = redis.pipeline.bind(redis);
+    let faulted = 0;
+    redis.pipeline = (async (c: Commands) => {
+      if (faulted === 0 && markWrite(c)) {
+        faulted += 1;
+        if (applied) await pipeline(c);
+        return [...reply];
+      }
+      return pipeline(c);
+    }) as typeof redis.pipeline;
+    try {
+      await sweepLater();
+    } finally {
+      redis.pipeline = pipeline;
+    }
+    is("the faulty write was met", faulted, 1);
+    for (let i = 0; i < 3; i += 1) await sweepLater();
+    is("after three healthy sweeps: marked refunded and nothing held", [await refundMark(order) !== null, await owned(buyer)], [true, 0]);
+  }
+
+  part("Control: the refund mark written and confirmed, nothing granted: nothing handed over, off the list");
+  swept = 0;
+  const healthy = await buy(store, id, "write-healthy@example.com", slowReturn);
+  refunded.add(captureOf(healthy));
+  await sweepLater();
+  is("marked, nothing handed over, out of the list", [await refundMark(healthy) !== null, await owned("write-healthy@example.com"), swept, (await queued()).includes(healthy)], [true, 0, 0, false]);
+
   done();
 }
 

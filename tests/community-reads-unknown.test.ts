@@ -10,6 +10,8 @@ import { conversationsOf, searchMessages } from "@/lib/community-dm";
 import { COPIERS } from "@/lib/person-copy";
 import type { ErasureScope } from "@/lib/erasure-rules";
 import { queryWords } from "@/lib/community-search";
+import { COMMUNITY_WORDS } from "@/lib/buyer-words/community";
+import { readFileSync } from "node:fs";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -227,6 +229,24 @@ async function main(): Promise<void> {
   is("healthy lists: the copy carries both conversations", copied.map((r) => r.privateMessages.map((c) => [c.request, c.messages.length])), [[[false, 2], [true, 1]]]);
   redis.run(["DEL", CHAT(PAIR2)]);
   is("a request with an exact empty list is kept, with no messages", ((await outcome(() => conversationsOf(COMMUNITY, MEMBER))) as { messages: unknown[] }[]).map((c) => c.messages.length), [2, 0]);
+
+  part("The search page: a search that could not be read is said, never no match");
+  const page = readFileSync("app/[handle]/community/search/page.tsx", "utf8");
+  is("no failed room or message search is turned into an empty list", /search(Room|Messages)\([^)]*\)\.catch\(\(\) => \[\]\)/.test(page), false);
+  is("a failed room or message search is kept as unknown", page.includes("unread(searchRoom(id, used))") && page.includes("unread(searchMessages(id, key, used))"), true);
+  is("an unknown tab carries no number", page.includes('{n === null ? null : <span className="cm-tab-n">{n}</span>}'), true);
+  is("an unknown tab says so in a live region", page.includes('role="status">{w.searchUnread(unsearched)}</p>'), true);
+  is("an unknown tab never says No match", page.includes("{shown === 0 && !unsearched ? ("), true);
+  is("an unknown tab never says what was searched", page.includes('tab === "room" && roomHits ?') && page.includes('tab === "dm" && dmHits ?'), true);
+  const english = COMMUNITY_WORDS.en.searchUnread;
+  is("the English words, plain", [english("room"), english("dm")], [
+    "The room could not be searched just now, so we cannot say whether it holds a match. Try again in a moment.",
+    "Your messages could not be searched just now, so we cannot say whether they hold a match. Try again in a moment.",
+  ]);
+  for (const [code, words] of Object.entries(COMMUNITY_WORDS)) {
+    if (code === "en") continue;
+    is(`${code}: its own words for both tabs, not the English`, [words.searchUnread("room") !== english("room"), words.searchUnread("dm") !== english("dm"), words.searchUnread("room") !== words.searchUnread("dm")], [true, true, true]);
+  }
 
   done();
 }

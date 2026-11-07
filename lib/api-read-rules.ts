@@ -407,6 +407,8 @@ export function emailsWork(s: { broadcasts: number; broadcastBytes: number; flow
     roundTrips: 2 + 4,
   };
 }
+/** get_emails' two calls of lib/broadcasts.ts BROADCAST_HEADS (its emails' sizes without their bodies, then its read), beside the GETs inside them that emailsWork counts. */
+export const EMAILS_HEADS_WORK: ReadWork = { commands: 2, bytes: 0, sent: 0, stripePages: 0, roundTrips: 0 };
 /** What get_emails looks up before it sets aside: whether what they sold is kept and how big (STRLEN), and the PayPal sales and refunds it would read (two ZCARD), side by side. */
 export const EMAILS_PROBE_WORK: ReadWork = { commands: 3, bytes: 0, sent: 0, stripePages: 0, roundTrips: 1 };
 /**

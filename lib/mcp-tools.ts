@@ -36,14 +36,15 @@ import { type Counts, testState } from "@/lib/headline-test-rules";
 import { reachShares, readDepth } from "@/lib/page-depth";
 import { isFree } from "@/lib/store-field-rules";
 import { keptMembershipBytes, membershipNumbersPaid } from "@/lib/membership-numbers";
-import { broadcastSizes, listBroadcasts } from "@/lib/broadcasts";
+import { type Regrow, broadcastHeadsBytes, measureBroadcastHeads, readMeasuredHeads } from "@/lib/broadcasts";
+import { EMAIL_GROWTH_BYTES } from "@/lib/sent-links";
 import { broadcastMoney, flowMoney, keptMailRevenueBytes, readMailRevenuePaid } from "@/lib/mail-revenue";
 import { flowStats, flowsBytes, readFlows } from "@/lib/flows";
 import { listCounts } from "@/lib/contacts";
 import { affiliatesOn, readBook } from "@/lib/affiliates";
 import { type Charge, type Hold, chargeBook } from "@/lib/api-read";
 import {
-  EMAILS_BROADCASTS, EMAILS_PROBE_WORK, MEMBERSHIPS_COLD_WORK, addWork, apiReadUnits, boughtNextWork, courseOutlineWork, emailsWork, lessonWork, listingsWork, mailRevenueColdWork,
+  EMAILS_BROADCASTS, EMAILS_HEADS_WORK, EMAILS_PROBE_WORK, MEMBERSHIPS_COLD_WORK, addWork, apiReadUnits, boughtNextWork, courseOutlineWork, emailsWork, lessonWork, listingsWork, mailRevenueColdWork,
   membershipsWork, pageReadingWork, pageTestWork, pageVersionsWork, productTextWork, salesPageWork, savedBlocksWork, settledUnits,
   COUNT_REPLY_BYTES, SAVED_SECTIONS_MAX, type ReadWork,
 } from "@/lib/api-read-rules";
@@ -363,23 +364,45 @@ export async function membershipsTool(store: Store, charge: Charge) {
  * (lib/api-guard.ts, holdMoreApi). Only a copy that was kept when measured
  * and is gone a moment later takes its sales as a second step, before
  * Stripe is asked (refused with its own words, nothing shown).
+ *
+ * The emails are measured and read without their bodies, which it never
+ * tells (lib/broadcasts.ts, measureBroadcastHeads and readMeasuredHeads):
+ * only those measured, each no further than its size, priced as they cross.
+ * One grown since is read once more up to EMAIL_GROWTH_BYTES after what
+ * that comes to was taken (refused with its own words, nothing shown).
  */
 export async function emailsTool(store: Store, meter: { charge: Charge; hold: Hold }) {
   if (!store.listId) return { list: null, note: "This store keeps no list yet." };
   const [sizes, flowBytes, revenueBytes, paypal] = await Promise.all([
-    broadcastSizes(store.listId, EMAILS_BROADCASTS),
+    measureBroadcastHeads(store.listId, EMAILS_BROADCASTS).catch(() => null),
     flowsBytes(store.listId),
     keptMailRevenueBytes(store),
     paypalCounts(store.statsId),
   ]);
   if (!sizes || flowBytes === null || revenueBytes === null || !paypal) throw new Error("the emails could not be measured");
   // What they sold is read when there is an email or a sequence to credit, and from Stripe when it is not kept.
-  const salesRead = Boolean(store.stripeAccountId && store.statsId) && revenueBytes === 0 && (sizes.count > 0 || flowBytes > 0);
-  const emailsAt = (revenue: number) => addWork(EMAILS_PROBE_WORK, emailsWork({ broadcasts: sizes.count, broadcastBytes: sizes.bytes, flowBytes, revenueBytes: revenue }));
+  const salesRead = Boolean(store.stripeAccountId && store.statsId) && revenueBytes === 0 && (sizes.ids.length > 0 || flowBytes > 0);
+  // The emails as they cross without their bodies, and the two script calls themselves beside each GET inside them.
+  const emailsAt = (revenue: number) => addWork(EMAILS_PROBE_WORK, addWork(emailsWork({ broadcasts: sizes.ids.length, broadcastBytes: broadcastHeadsBytes(sizes.sizes), flowBytes, revenueBytes: revenue }), EMAILS_HEADS_WORK));
   const held = apiReadUnits(salesRead ? addWork(emailsAt(0), mailRevenueColdWork(paypal.sales)) : emailsAt(revenueBytes));
   const settle = await meter.hold(held);
   if (settle instanceof Response) return settle;
-  const [counts, broadcasts, flows] = await Promise.all([listCounts(store.listId), listBroadcasts(store.listId, EMAILS_BROADCASTS), readFlows(store.listId)]);
+  // An email grown since it was measured is read again only after what that comes to is taken, as it crosses.
+  const grew: { units: number; refused: Response | null } = { units: 0, refused: null };
+  const regrow: Regrow = async (_units, grown) => {
+    const more = apiReadUnits({ commands: 1 + grown.length, bytes: broadcastHeadsBytes(grown, EMAIL_GROWTH_BYTES), roundTrips: 1 });
+    const refused = await meter.charge(more, held + grew.units);
+    if (refused) {
+      grew.refused = refused;
+      return { ok: false, message: "refused" };
+    }
+    grew.units += more;
+    return { ok: true };
+  };
+  const [counts, heads, flows] = await Promise.all([listCounts(store.listId), readMeasuredHeads(sizes, regrow), readFlows(store.listId)]);
+  if (grew.refused) return grew.refused;
+  if (!heads.ok) throw new Error("the emails could not be read");
+  const broadcasts = heads.heads;
   const said: { refused: Response | null; second: number; read: number; kept: number | null } = { refused: null, second: 0, read: 0, kept: null };
   const [revenueRead, flowCounts] = await Promise.all([
     broadcasts.length || flows.length

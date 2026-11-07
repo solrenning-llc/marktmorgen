@@ -236,22 +236,6 @@ async function save(b: Broadcast): Promise<void> {
   if (!Array.isArray(response) || response.length !== 1 || response[0] !== "OK") throw new Error("Campaign progress write could not be confirmed");
 }
 
-/**
- * How many of the newest `limit` broadcasts there are and how many bytes
- * their records hold, before they are read: for a reading that pays for its
- * size first (lib/mcp-tools.ts, emailsTool). Null when a size did not come back.
- */
-export async function broadcastSizes(listId: string | null, limit = 30): Promise<{ count: number; bytes: number } | null> {
-  if (!listId || !isRedisConfigured()) return { count: 0, bytes: 0 };
-  const [ids] = await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]);
-  const list = Array.isArray(ids) ? (ids as string[]) : [];
-  if (!list.length) return { count: 0, bytes: 0 };
-  const lengths = (await redisPipeline(list.map((id) => ["STRLEN", bcKey(id)]))).map(Number);
-  if (lengths.some((n) => !Number.isSafeInteger(n) || n < 0)) return null;
-  // A broadcast added between this and the reading is a few bytes more, bounded by how fast a store writes them.
-  return { count: list.length, bytes: lengths.reduce((a, b) => a + b, 0) };
-}
-
 /** The store's broadcasts, newest first. */
 export async function listBroadcasts(listId: string | null, limit = 30): Promise<Broadcast[]> {
   if (!listId || !isRedisConfigured()) return [];
@@ -321,6 +305,8 @@ export type BroadcastHead = Omit<Broadcast, "body">;
 export type BroadcastHeads = { ok: true; heads: BroadcastHead[] } | { ok: false; refused: string };
 /** Takes `units` studio requests (or other requests counted as they are) before what they pay for is read. */
 export type PayFirst = (units: number) => Promise<{ ok: true } | { ok: false; message: string }>;
+/** Takes what reading again the emails of `sizes` (without their bodies) up to EMAIL_GROWTH_BYTES more comes to: `units` in studio requests. */
+export type Regrow = (units: number, sizes: readonly number[]) => Promise<{ ok: true } | { ok: false; message: string }>;
 
 /**
  * KEYS the emails' records. ARGV[1] "size" or "read", and after "read" the
@@ -379,8 +365,23 @@ const HEAD_ARG_BYTES = 128;
 export function broadcastHeadsUnits(sizes: readonly number[], growth = 0): number {
   const read = sizes.filter((size) => Number.isSafeInteger(size) && size > 0);
   if (!read.length) return 0;
-  return studioReadUnits(HEADS_SCRIPT_WIRE + read.reduce((sum, size) => sum + HEAD_ARG_BYTES + wireOf(size + growth), 0), 1 + read.length);
+  return studioReadUnits(broadcastHeadsBytes(read, growth), 1 + read.length);
 }
+
+/**
+ * The bytes reading the emails whose sizes without their bodies are `sizes`
+ * moves, both ways as JSON: the script's call, each one's key and bound, and
+ * each one up to its size and `growth` bytes more as it crosses (wireOf). 0
+ * when there is nothing to read. Its commands are 1 + sizes.length (the
+ * script and each GET inside it).
+ */
+export function broadcastHeadsBytes(sizes: readonly number[], growth = 0): number {
+  const read = sizes.filter((size) => Number.isSafeInteger(size) && size > 0);
+  return read.length ? HEADS_SCRIPT_WIRE + read.reduce((sum, size) => sum + HEAD_ARG_BYTES + wireOf(size + growth), 0) : 0;
+}
+
+/** The emails a reading will read, newest first, and each one's size without its body, as measured (measureBroadcastHeads). */
+export type MeasuredHeads = { listId: string | null; ids: string[]; sizes: number[] };
 
 /** The script's answer for `keys`: one slot a key, or it throws. */
 async function headsOf(keys: string[], bounds: number[] | null): Promise<unknown[]> {
@@ -416,27 +417,55 @@ function headOf(raw: unknown, id: string, listId: string): BroadcastHead | null 
  * says why.
  */
 export async function readBroadcastHeads(listId: string | null, pay: PayFirst, limit = 30): Promise<BroadcastHeads> {
-  if (!listId) return { ok: true, heads: [] };
+  const measured = await measureBroadcastHeads(listId, limit);
+  if (!measured.ids.length) return { ok: true, heads: [] };
+  const paid = await pay(broadcastHeadsUnits(measured.sizes));
+  if (!paid.ok) return { ok: false, refused: paid.message };
+  return readMeasuredHeads(measured, pay);
+}
+
+/**
+ * The store's newest `limit` emails and each one's size without its body,
+ * before any is read (one LRANGE, then BROADCAST_HEADS "size"): for a
+ * reading that pays for them first (readBroadcastHeads, and get_emails in
+ * lib/mcp-tools.ts, which sets them aside with the rest of what it reads).
+ * An index or a record that is not one throws.
+ */
+export async function measureBroadcastHeads(listId: string | null, limit = 30): Promise<MeasuredHeads> {
+  if (!listId) return { listId, ids: [], sizes: [] };
   if (!isRedisConfigured()) throw new Error("Campaign storage is unavailable");
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Invalid campaign history limit");
   const index = repliesFor(await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]), 1);
   if (!index || !Array.isArray(index[0])) throw new Error("Campaign index is unavailable");
   const ids: unknown[] = index[0];
   if (ids.length > limit || ids.some((id) => typeof id !== "string" || !BROADCAST_ID.test(id)) || new Set(ids).size !== ids.length) throw new Error("Campaign index is incomplete");
-  if (!ids.length) return { ok: true, heads: [] };
-  const wanted = ids as string[];
-  const keys = wanted.map(bcKey);
-  const sized = await headsOf(keys, null);
+  if (!ids.length) return { listId, ids: [], sizes: [] };
+  const sized = await headsOf((ids as string[]).map(bcKey), null);
   if (sized.some((size) => typeof size !== "number" || !Number.isSafeInteger(size) || size <= 0)) throw new Error("Campaign records are incomplete");
-  const sizes = sized as number[];
-  const paid = await pay(broadcastHeadsUnits(sizes));
-  if (!paid.ok) return { ok: false, refused: paid.message };
-  const first = await headsOf(keys, sizes);
+  return { listId, ids: ids as string[], sizes: sized as number[] };
+}
+
+/**
+ * The emails measured, each read no further than its size, once what that
+ * comes to was paid for by the caller; only those, whatever was listed
+ * since. One that grew since (its send moving on: its count, its note) is
+ * read once more up to EMAIL_GROWTH_BYTES further, after `regrow` took what
+ * that comes to (broadcastHeadsUnits with EMAIL_GROWTH_BYTES, in studio
+ * requests; a caller that counts in other requests prices it from the sizes
+ * it is handed, with broadcastHeadsBytes). All or nothing: a record that is
+ * still not one throws.
+ */
+export async function readMeasuredHeads(measured: MeasuredHeads, regrow: Regrow): Promise<BroadcastHeads> {
+  const { listId, ids: wanted, sizes } = measured;
+  if (!listId || !wanted.length) return { ok: true, heads: [] };
+  if (wanted.length !== sizes.length) throw new Error("Campaign records are incomplete");
+  const first = await headsOf(wanted.map(bcKey), sizes);
   const heads = wanted.map((id, i) => headOf(first[i], id, listId));
   const again = wanted.flatMap((id, i) => (heads[i] ? [] : [{ i, id, size: sizes[i] }]));
   if (again.length) {
     // Grown since its size was asked, or not one: read once more, paid first, no further than a send can write on it.
-    const more = await pay(broadcastHeadsUnits(again.map(({ size }) => size), EMAIL_GROWTH_BYTES));
+    const grown = again.map(({ size }) => size);
+    const more = await regrow(broadcastHeadsUnits(grown, EMAIL_GROWTH_BYTES), grown);
     if (!more.ok) return { ok: false, refused: more.message };
     const second = await headsOf(again.map(({ id }) => bcKey(id)), again.map(({ size }) => size + EMAIL_GROWTH_BYTES));
     again.forEach(({ i, id }, j) => (heads[i] = headOf(second[j], id, listId)));

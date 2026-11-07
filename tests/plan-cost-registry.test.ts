@@ -540,7 +540,8 @@ test("an API reading that reads more than a page takes further requests that cov
   before("lib/mcp-tools.ts", "membershipNumbersPaid(store", "await titlesFor(store, n.byProduct");
   before("lib/mcp-tools.ts", "if (charge && (await charge(apiReadUnits(listingsWork(listingsToRead(store, missing))), taken)))", "await readListings(store, missing)");
   before("lib/membership-numbers.ts", 'if (beforeStripe && !(await beforeStripe())) return "refused";', "/subscriptions?");
-  before("lib/mcp-tools.ts", "const settle = await meter.hold(held);", "listBroadcasts(store.listId, EMAILS_BROADCASTS)");
+  // Regra 23 (#3034's siblings): get_emails reads its emails without their bodies, only those measured (was "listBroadcasts(store.listId, EMAILS_BROADCASTS)").
+  before("lib/mcp-tools.ts", "const settle = await meter.hold(held);", "readMeasuredHeads(sizes, regrow)");
   before("lib/mcp-tools.ts", "said.refused = await meter.charge(said.second, held);", "const refused = await settle(due);");
   before("lib/mcp-tools.ts", "const refused = await settle(due);", "currency: store.currency,");
   before("lib/mcp-tools.ts", "const held = await meter.hold(most);", "await readPaths(store.statsId)");

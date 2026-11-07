@@ -113,6 +113,22 @@ async function main(): Promise<void> {
     });
     is("told as it is now", r.told !== "threw" && !(r.told instanceof Response) ? r.told.emails?.[0].sent : r.told, 123_456);
     is(`inside what was taken (${JSON.stringify({ took: r.took, units: r.units })})`, r.units <= r.took, true);
+
+    // Exactly what the first read sets aside left, then grown: the read again is refused, in words, and not made.
+    await writeEmails(store, ids, () => LONGEST);
+    const plain = await run(store, null);
+    const api = redis.keys().filter((k) => k.startsWith("nl:allow:api:"));
+    is("the store's API count is where it is counted", api.length, 1);
+    await pipeline([["SET", api[0], String(2_000 - plain.took)]]);
+    let again = false;
+    const refused = await run(store, async (batch) => {
+      if (again || !measuring(batch)) return;
+      again = true;
+      await pipeline([["SET", emailKey(ids[0]), record(store, ids[0], LONGEST, { note: "n".repeat(300) })]]);
+    });
+    is("refused with its own words", refused.told instanceof Response ? [refused.told.status, /API requests/.test(await refused.told.text())] : refused.told, [429, true]);
+    is("the grown one read once, as far as it was paid", refused.read.filter((k) => k === emailKey(ids[0])).length, 1);
+    await pipeline([["SET", api[0], "0"]]);
   }
 
   done();

@@ -20,6 +20,7 @@
  */
 import sitemap from "@/app/sitemap";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { SITE_URL } from "@/lib/site-url";
 
 export const INDEXNOW_KEY = "7cf3353593a7c20e70bd0efdaf6db5b7";
@@ -56,14 +57,18 @@ export function sitemapUrls(): string[] {
 /**
  * Announces the sitemap's addresses not announced before. An address is
  * remembered only after the protocol accepted it (200 or 202), so a refused
- * or unanswered request is tried again the next day.
+ * or unanswered request is tried again the next day; so is a run whose
+ * "already announced?" replies cannot be read, which sends nothing.
  */
 export async function announceNewPages(send: typeof fetch = fetch): Promise<IndexNowResult> {
   if (!isRedisConfigured()) return { ok: false, reason: "unavailable" };
   const urls = sitemapUrls();
   if (!urls.length) return { ok: true, announced: 0 };
-  const known = await redisPipeline(urls.map((url) => ["SISMEMBER", SENT_KEY, url]));
-  const fresh = urls.filter((_, i) => Number(known[i]) !== 1);
+  // Read exactly (CX-123 rule 24): one reply an address, each 0 (not announced) or 1 (announced). Anything else is
+  // not "never announced": the run sends nothing and is tried again the next day.
+  const known = repliesFor(await redisPipeline(urls.map((url) => ["SISMEMBER", SENT_KEY, url])), urls.length);
+  if (!known || known.some((member) => member !== 0 && member !== 1)) return { ok: false, reason: "unavailable" };
+  const fresh = urls.filter((_, i) => known[i] === 0);
   let announced = 0;
   for (let start = 0; start < fresh.length; start += INDEXNOW_BATCH) {
     const batch = fresh.slice(start, start + INDEXNOW_BATCH);

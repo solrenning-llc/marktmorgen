@@ -167,7 +167,7 @@ is("one unreadable step makes the whole history unreadable, not a complete 1000"
 is("a history that is not a list is unreadable", caught(() => priorLowestPrice("x" as unknown as PriceStep[], tS)), "unreadable");
 is("a step that is not a record is unreadable", caught(() => priorLowestPrice([{ at: t0, cents: 1000 }, null] as unknown as PriceStep[], tS)), "unreadable");
 is("recording onto an unreadable history keeps it as it came, never filtered", caught(() => recordPrice(corrupt, 900, tS)), corrupt);
-is("so it still reads as unreadable afterwards", caught(() => priorLowestPrice(recordPrice(corrupt, 900, tS), tS + DAY)), "unreadable");
+is("so it still reads as unreadable afterward", caught(() => priorLowestPrice(recordPrice(corrupt, 900, tS), tS + DAY)), "unreadable");
 
 part("Proposition 65: the site is named on its own (review J5809017387, LOW)");
 is("a longer hostname that only starts with the site does not name it", checkProp65("WARNING: Lead. See www.P65Warnings.ca.gov.example.invalid"), "site");

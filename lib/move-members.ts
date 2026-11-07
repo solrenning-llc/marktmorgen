@@ -31,7 +31,7 @@ import { moveWords } from "@/lib/buyer-words/move";
 import { activeIntro } from "@/lib/intro-price";
 import { firstChargeAt, linkSeconds, reminderAt } from "@/lib/move-rules";
 import { giveData, needData } from "@/lib/store-data";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { takePublicRequest } from "@/lib/traffic";
 import { AFFILIATE_STRIPE_PAGES_PER_UNIT } from "@/lib/public-read-rules";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -491,12 +491,19 @@ export async function forgetInvitesPerson(store: Pick<Store, "sid" | "statsId">,
   const held = fields.flatMap((field, i) => (rows[i] === null ? [] : [{ field, invite: parseInvite(rows[i]) }]));
   if (!held.length) return 0;
   const links = held.flatMap((h) => (h.invite ? [linkKey(h.invite.t)] : []));
-  await redisPipeline([
+  const deletes: (string | number)[][] = [
     ["HDEL", invitesKey(statsId), ...held.map((h) => h.field)],
     ...(links.length ? [["DEL", ...links]] : []),
     ["ZREM", DUE_KEY, ...held.map((h) => `${store.sid}|${h.field}`)],
     // The checkout their link last opened, kept a day so it is not opened twice.
     ["DEL", ...held.map((h) => openKey(statsId, h.field))],
-  ]);
+  ];
+  // Each delete answered with its count (Claude 5 on #2685): a reply out of shape is not "deleted", so the erasure lists
+  // this part as not finished.
+  const done = repliesFor(await redisPipeline(deletes), deletes.length);
+  if (!done || done.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("deleting a person's invitations");
+  // A record that did not read held its link's token, so that link could not be deleted: the rest is gone, but the erasure
+  // is not finished, never "ok" with the link kept (it runs out at its own expiry, linkSeconds).
+  if (held.some((h) => !h.invite)) throw new UnknownReplyError("a person's invitation link: its record did not read");
   return held.length;
 }

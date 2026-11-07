@@ -71,8 +71,8 @@ import { forgetFinishPerson } from "@/lib/course-finish";
 import { forgetQuizPerson } from "@/lib/quiz";
 import { forgetTasksPerson } from "@/lib/assignment";
 import { forgetCertificatesPerson } from "@/lib/certificate";
-import { forgetLessonCommentsPerson } from "@/lib/lesson-comments";
 import { forgetSurveyPerson } from "@/lib/course-survey";
+import { forgetLessonCommentsPerson } from "@/lib/lesson-comments";
 import { forgetCommunityPerson } from "@/lib/community-erasure";
 import { forgetWaitlistPerson } from "@/lib/waitlist";
 import { forgetBondPerson } from "@/lib/affiliate-bond";
@@ -149,18 +149,18 @@ export const ERASERS: Eraser[] = [
   },
   { module: "lib/certificate.ts", run: (s) => forgetCertificatesPerson(s.courses.map((c) => c.courseId), s.email, s.store) },
   {
-    module: "lib/lesson-comments.ts",
-    run: async (s) => {
-      let records = 0;
-      for (const c of s.courses) records += await forgetLessonCommentsPerson(c.courseId, c.lessonIds, s.learner, s.store);
-      return records;
-    },
-  },
-  {
     module: "lib/course-survey.ts",
     run: async (s) => {
       let records = 0;
       for (const c of s.courses) records += await forgetSurveyPerson(c.courseId, s.learner, s.store);
+      return records;
+    },
+  },
+  {
+    module: "lib/lesson-comments.ts",
+    run: async (s) => {
+      let records = 0;
+      for (const c of s.courses) records += await forgetLessonCommentsPerson(c.courseId, c.lessonIds, s.learner, s.store);
       return records;
     },
   },

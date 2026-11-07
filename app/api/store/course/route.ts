@@ -235,7 +235,9 @@ export async function POST(request: NextRequest) {
 
       if (action === "disable") {
         if (lessonCount(course) > 0) return Response.json({ ok: false, error: "not_empty" }, { status: 400 });
+        // Its survey answers go in the same try as its comments (285 [SX1]): 503 on failure, the course kept for another try.
         try {
+          await dropCourseSurvey(course.id, store);
           await dropComments(course.id, [], store);
         } catch {
           return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
@@ -243,7 +245,6 @@ export async function POST(request: NextRequest) {
         const result = await setProductCourse(ref, id, null);
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
         await dropCourse(course, store);
-        await dropCourseSurvey(course.id, store).catch((error: unknown) => console.error("could not drop a course's survey answers", error));
         if (community) await unindexCourse(community, product.id, course).catch(() => {});
         await registerDrip(store, product, { ...course, modules: [] });
         return Response.json({ ok: true });

@@ -69,6 +69,7 @@ import { MAX_TRIMMED_PAGE_CHARS } from "@/lib/clickfunnels-page";
 import { IMPORTS_PER_SHARE_MONTH, MAX_APPLY_PAGES, PREVIEWS_PER_SHARE_MONTH, SHARE_LIMITS } from "@/lib/funnel-share-rules";
 import { MAX_SECTION_BYTES } from "@/lib/saved-blocks";
 import { MAX_PAGE_BYTES } from "@/lib/sales-page";
+import { SURVEY_PAGE_BYTES, SURVEY_PAGE_COMMANDS } from "@/lib/course-survey-rules";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { TEAM_LIMITS } from "@/lib/team-scheduling-rules";
 import { SYNC_SECONDS } from "@/lib/host-calendar";
@@ -610,6 +611,11 @@ export function figureCost(allowances: Record<AllowanceKind, number>, kind: Allo
 export const REQUEST_COMMANDS = 1 + SHARE_COMMANDS_PER_REQUEST;
 
 /** What one request costs: its call, CPU, memory, database commands and the bytes it moves through the database. */
+/** What a course page view adds for the survey when finishing (285 [SX1]): one command and at most one answer's bytes. */
+export function surveyPageCost(): number {
+  return SURVEY_PAGE_COMMANDS * COMMAND + SURVEY_PAGE_BYTES * DB_BYTE;
+}
+
 export function request(shape: keyof typeof SHAPES, commands: number, bytes = 0): number {
   const { seconds, cpu } = SHAPES[shape];
   return CALL + cpu * CPU_SECOND + seconds * MEMORY_SECOND + commands * COMMAND + bytes * DB_BYTE;
@@ -1069,10 +1075,13 @@ export const COST_LINES: CostLine[] = [
     feature: "Requests beyond the counted visit: pages drawn again, the cart, searches, downloads, the page after paying, reviews, members' pages to manage, forms (17 October 2026)",
     monthlyUsd: (tier) => {
       const limit = REQUESTS_PER_VISIT * VISITS_INCLUDED[tier] + EXTRA_REQUESTS[tier];
-      return EXTRA_REQUESTS[tier] * laterPageCost() + limit * REQUEST_COMMANDS * COMMAND;
+      return EXTRA_REQUESTS[tier] * laterPageCost() + limit * REQUEST_COMMANDS * COMMAND + limit * surveyPageCost();
     },
     sources: [
       { file: "lib/traffic-rules.ts", names: ["REQUESTS_PER_VISIT", "EXTRA_REQUESTS", "requestLimitFor"] },
+      // A course page drawn for a student with the course in their pass reads one more thing (285 [SX1]): whether a survey answer is kept, or their own once finished. Every request of the window is priced at it.
+      { file: "lib/course-survey-rules.ts", names: ["SURVEY_PAGE_COMMANDS", "SURVEY_PAGE_BYTES"] },
+      { file: "app/[handle]/course/[product]/page.tsx", names: ["hasAnswer(course.id, surveyWho)", "readMyAnswer(course.id, surveyWho)"] },
       // A collection's products paid before they are read, and a license check before it reads the product (4 November 2026).
       { file: "lib/page-read-rules.ts", names: ["COLLECTION_PRODUCTS_PER_UNIT", "collectionUnits", "BUNDLE_ITEMS_PER_UNIT", "bundleItemUnits"] },
       { file: "app/[handle]/shop/[collection]/page.tsx", names: ["collectionUnits(ids.length)", "bundleItemUnits(items.length)"] },
@@ -1287,10 +1296,10 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)"] },
       { file: "app/api/store/course/progress/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/course/certificate/route.ts", names: ["takeBuyerAction(store)"] },
-      { file: "lib/lesson-comments-rules.ts", names: ["COMMENTS_PER_DAY", "COMMENTS_PER_MINUTE"] },
       // The survey when finishing a course (285 [SX1]): one buyer action before the student's progress is read and the answer written, its room from the data room; removing one's own is not charged, as deleting one's own comment is not.
       { file: "app/api/store/course/survey/route.ts", names: ["takeBuyerAction(store)", "withinLimit(\"course-survey\""] },
       { file: "lib/course-survey-rules.ts", names: ["SURVEYS_PER_DAY", "SURVEYS_PER_MINUTE"] },
+      { file: "lib/lesson-comments-rules.ts", names: ["COMMENTS_PER_DAY", "COMMENTS_PER_MINUTE"] },
       { file: "lib/community-text.ts", names: ["RATE_LIMITS", "EVENT_WRITES_PER_HOUR"] },
     ],
     basis: "Every action of the window at the heaviest one's cost; the creator's own acts there are studio requests (line studio), a deletion follows an action already counted, and the per-person limits only spread them. The reads beside them (pictures, calendar files, lesson downloads, sign-in links, podcast episodes) are public requests on the buyers' side (line public-requests), a picture as PICTURE_REQUEST_UNITS of them.",
@@ -1658,9 +1667,10 @@ export const SCOPES: Record<string, ScopeClass> = {
   // The Store assistant (an add-on, ADD_ON_LINES): its asks are burst limits under its month's pool, the rest public requests.
   assist: guard("A burst limit per connection under the Store assistant's monthly pool (add-on line store-assistant)."),
   "assist-day": guard("A daily limit per connection under the Store assistant's monthly pool (add-on line store-assistant)."),
+  "course-survey": BURST("buyer-actions"), "course-survey-day": BURST("buyer-actions"),
   "assist-store": guard("A per-minute limit per store under the Store assistant's monthly pool (add-on line store-assistant)."),
   "assist-read": PUBLIC, "assist-handoff": PUBLIC, "assist-next-dismiss": PUBLIC,
-  "lesson-comment": BURST("buyer-actions"), "lesson-comment-day": BURST("buyer-actions"), "course-survey": BURST("buyer-actions"), "course-survey-day": BURST("buyer-actions"), "task-hand-in": BURST("buyer-actions"), "task-upload": BURST("buyer-actions"),
+  "lesson-comment": BURST("buyer-actions"), "lesson-comment-day": BURST("buyer-actions"), "task-hand-in": BURST("buyer-actions"), "task-upload": BURST("buyer-actions"),
   // Per store, under a figure of the window.
   "api-add": BURST("rest-api"), "api-give": BURST("rest-api"),
   "inbox-new": BURST("inbox"), "chat-send": BURST("inbox"), "chat-start": BURST("inbox"),

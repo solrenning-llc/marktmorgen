@@ -26,8 +26,8 @@ import { emailKey, markLesson, mintPass, recordEnrollment, touchStudent } from "
 import { markPassed } from "@/lib/quiz";
 import { handIn, takeRoom } from "@/lib/assignment";
 import { issueCertificate } from "@/lib/certificate";
-import { addComment } from "@/lib/lesson-comments";
 import { answerSurvey } from "@/lib/course-survey";
+import { addComment } from "@/lib/lesson-comments";
 import { CREATOR_AUTHOR } from "@/lib/lesson-comments-rules";
 import { freshConfig, saveConfig, touchMember } from "@/lib/community";
 import { indexMember } from "@/lib/community-index";
@@ -184,12 +184,12 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
   const course = { id: w.courseId, modules: [{ id: w.modules[0], title: "Module 1", dripDays: 0, lessons: w.lessons.map((id) => ({ id, title: id })) }], certificate: true, startsAt: null } as never;
   const issued = await issueCertificate({ room: ROOM, store: store.handle, productId: w.courseProduct, course, title: "The Course", creator: store.name, email, who: learner, name: "Tess Taylor" });
   if (!issued.ok) throw new Error("no certificate");
-  const asked = await addComment({ room: ROOM, courseId: w.courseId, lessonId: w.lessons[0], by: learner, text: "How long does this take?", name: "Tess" });
-  if (!asked.ok) throw new Error("no comment");
-  await addComment({ room: ROOM, courseId: w.courseId, lessonId: w.lessons[0], by: CREATOR_AUTHOR, text: "About an hour.", parent: asked.comment.id });
   // Their answer to the survey when finishing the course, with its comment (lib/course-survey.ts, 285 [SX1]).
   const answered = await answerSurvey({ room: ROOM, courseId: w.courseId, who: learner, score: 9, note: "Clear and practical." });
   if (!answered.ok) throw new Error("no survey answer");
+  const asked = await addComment({ room: ROOM, courseId: w.courseId, lessonId: w.lessons[0], by: learner, text: "How long does this take?", name: "Tess" });
+  if (!asked.ok) throw new Error("no comment");
+  await addComment({ room: ROOM, courseId: w.courseId, lessonId: w.lessons[0], by: CREATOR_AUTHOR, text: "About an hour.", parent: asked.comment.id });
 
   // The community (lib/community*.ts, lib/chat-grant.ts).
   const id = w.communityId;

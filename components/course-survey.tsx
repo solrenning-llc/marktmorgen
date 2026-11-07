@@ -20,7 +20,7 @@ function isNotice(value: string): value is SurveyNotice {
  * `mode` "answer" is for a student who finished the course with access open:
  * the form, and the way to remove a kept answer. "remove" is for one who
  * cannot answer now (a lesson added since, an access that ended) but has an
- * answer kept: only that answer and the way to remove it. A removal is asked
+ * answer kept: only that it is kept and the way to remove it. A removal is asked
  * first, on its own screen (`?sv=confirm`). `mine` is "unread" when the kept
  * answer could not be read: then nothing can be sent over it, only the notice
  * is shown.
@@ -34,16 +34,18 @@ export function CourseSurveyBox({
 }: {
   where: { handle: string; product: string };
   mode: "answer" | "remove";
-  mine: SurveyAnswer | null | "unread";
+  /** "kept": an answer is kept, not read (the page of a student who has not finished reads only that). */
+  mine: SurveyAnswer | "kept" | null | "unread";
   notice: string;
   language?: unknown;
 }) {
   const w = courseSurveyWords(language);
-  const kept = mine === "unread" ? null : mine;
+  const kept = mine === "unread" || mine === "kept" ? null : mine;
+  const has = mine !== null && mine !== "unread";
   if (mode === "remove" && mine === null) return null;
   const flash = isNotice(notice) ? w.notices[notice] : "";
   const warn = WARNINGS.has(notice);
-  const confirming = notice === "confirm" && kept !== null;
+  const confirming = notice === "confirm" && has;
   const hidden = (
     <>
       <input type="hidden" name="handle" value={where.handle} />
@@ -62,7 +64,7 @@ export function CourseSurveyBox({
       ) : confirming ? (
         <>
           <ArrivalNotice className="mt-4 text-sm font-semibold">
-            <p style={{ color: "var(--st-text)" }}>{w.yours(kept.score)}</p>
+            {kept ? <p style={{ color: "var(--st-text)" }}>{w.yours(kept.score)}</p> : null}
             <p className="mt-1" style={{ color: "var(--st-text)" }}>{w.confirm}</p>
           </ArrivalNotice>
           <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -109,7 +111,7 @@ export function CourseSurveyBox({
               <button type="submit" className="btn st-btn">{w.save}</button>
             </form>
           )}
-          {kept ? (
+          {has ? (
             // Sent without `sure`: the page comes back asking first (`?sv=confirm`).
             <form action="/api/store/course/survey" method="post" className="mt-2">
               {hidden}

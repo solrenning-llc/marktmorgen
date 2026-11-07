@@ -94,6 +94,14 @@ export async function readMyAnswer(courseId: string, who: string): Promise<Surve
   return answer;
 }
 
+/** Whether a student keeps an answer: one command, no comment read (for the page of a student who has not finished). */
+export async function hasAnswer(courseId: string, who: string): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  const [found] = exactReplies(await redisPipeline([["HEXISTS", surveyKey(courseId), who]]), 1, "whether a course survey answer is kept");
+  if (found !== 0 && found !== 1) throw unreadable();
+  return found === 1;
+}
+
 /** How many students answered a course's survey. */
 export async function surveyAnswerCount(courseId: string): Promise<number> {
   if (!isRedisConfigured()) return 0;

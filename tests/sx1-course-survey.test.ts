@@ -318,11 +318,11 @@ async function main(): Promise<void> {
   const looked = sent.flat();
   sent.length = 0;
   await readMyAnswer(COURSE, ana);
-  const read = sent.flat();
+  const ownRead = sent.flat();
   redis.pipeline = realSee;
   is("whether one is kept is one command that returns no comment", looked.map((c) => c[0]), ["HEXISTS"]);
-  is("reading one's own is one command", read.map((c) => c[0]), ["HGET"]);
-  is("a page view adds at most the commands the cost line prices", Math.max(looked.length, read.length) <= SURVEY_PAGE_COMMANDS, true);
+  is("reading one's own is one command", ownRead.map((c) => c[0]), ["HGET"]);
+  is("a page view adds at most the commands the cost line prices", Math.max(looked.length, ownRead.length) <= SURVEY_PAGE_COMMANDS, true);
   is("and at most the bytes it prices: one answer at its largest", SURVEY_PAGE_BYTES >= SURVEY_ENTRY_MAX_BYTES, true);
   const costLine = source("tests/plan-cost-registry.ts");
   is("the public requests line prices it for every request of the window", /limit \* surveyPageCost\(\)/.test(costLine) && costLine.includes(`{ file: "lib/course-survey-rules.ts", names: ["SURVEY_PAGE_COMMANDS", "SURVEY_PAGE_BYTES"] }`), true);
@@ -360,8 +360,8 @@ async function main(): Promise<void> {
   is("the count is paid for before it is read", page.indexOf("countStudio(store, null, 1)") > 0 && page.indexOf("countStudio(store, null, 1)") < page.indexOf("await surveyAnswerCount("), true);
   is("the answers are paid for before they are read", paid > 0 && paid < page.indexOf("await readCourseAnswers("), true);
   is("only the owner, and only when asked", /const surveyAsks = open && access\.learner\.owner && query\.survey === "1";/.test(page), true);
-  is("a student's whole answer is read only once they finished, for the form", /surveyWho && finished \? readMyAnswer\(course\.id, surveyWho\)/.test(page), true);
-  is("otherwise only whether one is kept, one command and no comment", /surveyWho \? hasAnswer\(course\.id, surveyWho\)/.test(page), true);
+  is("a student's whole answer is read only once they finished, for the form", /surveyWho && finished\s*\?\s*readMyAnswer\(course\.id, surveyWho\)/.test(page), true);
+  is("otherwise only whether one is kept, one command and no comment", /surveyWho\s*\?\s*hasAnswer\(course\.id, surveyWho\)/.test(page), true);
   is("the form only once finished; otherwise only the way to remove a kept answer", /mode=\{finished \? "answer" : "remove"\}/.test(page), true);
   const box = source("components/course-survey.tsx");
   is("the notice takes the focus when the page comes back", box.includes("<ArrivalNotice"), true);

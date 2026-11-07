@@ -32,7 +32,7 @@ import { exampleTitlesLeft } from "@/lib/course-templates";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
 import { CourseSurveyBox, CourseSurveySummary, type OwnerSurveyView } from "@/components/course-survey";
-import { readCourseAnswers, readMyAnswer, surveyAnswerCount } from "@/lib/course-survey";
+import { hasAnswer, readCourseAnswers, readMyAnswer, surveyAnswerCount } from "@/lib/course-survey";
 import { MAX_COURSE_ANSWERS, SURVEY_READ_SLACK, type SurveyAnswer, summarizeSurvey, surveyReadUnits } from "@/lib/course-survey-rules";
 import { countStudio } from "@/lib/studio-route";
 import type { Store } from "@/lib/store";
@@ -129,12 +129,16 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const finished = studying && hasFinished(course, done, passed);
   const mustPass = requiredQuizLessons(course).length;
   const certNotice = w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME)[typeof query.cert === "string" ? query.cert : ""] ?? null;
-  // The survey when finishing (285 [SX1]): a student's own answer, read only for them, whenever this browser was let
-  // into the course, so a kept answer can always be removed (an access that ended, a lesson added since); the form
-  // itself only once finished. Unreadable is said, never taken for none.
+  // The survey when finishing (285 [SX1]), for a browser let into this course, so a kept answer can always be
+  // removed (an access that ended, a lesson added since). One command a view, priced in the public-requests line
+  // (SURVEY_PAGE_COMMANDS, SURVEY_PAGE_BYTES): the student's own answer once they finished, for the form; before
+  // that, only whether one is kept, no comment read. Unreadable is said, never taken for none.
   const surveyLearner = access.learner && !access.learner.owner && (access.learner.scope === "all" || access.learner.scope.includes(course.id)) ? access.learner : null;
   const surveyWho = surveyLearner ? emailKey(surveyLearner.email) : "";
-  const myAnswer: SurveyAnswer | null | "unread" = await (surveyWho ? readMyAnswer(course.id, surveyWho) : Promise.resolve(null)).catch(() => "unread" as const);
+  const myAnswer: SurveyAnswer | "kept" | null | "unread" = await (surveyWho && finished
+    ? readMyAnswer(course.id, surveyWho)
+    : surveyWho ? hasAnswer(course.id, surveyWho).then((kept) => (kept ? ("kept" as const) : null)) : Promise.resolve(null)
+  ).catch(() => "unread" as const);
   // The store's owner sees the answers, read only when asked, each time paid from the studio's requests.
   const surveyAsks = open && access.learner.owner && query.survey === "1";
   const surveyView: OwnerSurveyView | null = surveyAsks

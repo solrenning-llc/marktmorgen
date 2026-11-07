@@ -38,8 +38,8 @@ import { doneLessons, studentDates } from "@/lib/learn";
 import { attemptOf, passedQuizzes } from "@/lib/quiz";
 import { submissionsOf } from "@/lib/assignment";
 import { certificatesOf } from "@/lib/certificate";
-import { lessonComments } from "@/lib/lesson-comments";
 import { answerOfPerson } from "@/lib/course-survey";
+import { lessonComments } from "@/lib/lesson-comments";
 import { bondRecordOf } from "@/lib/affiliate-bond";
 import { readLeads } from "@/lib/affiliate-leads";
 import { importedFrom, importedKey } from "@/lib/imported-purchases";
@@ -100,8 +100,8 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/quiz.ts": { how: "copied", what: "Your quiz tries, answers, results and passes" },
   "lib/assignment.ts": { how: "copied", what: "Work you handed in, and the store's feedback on it" },
   "lib/certificate.ts": { how: "copied", what: "Your certificates" },
-  "lib/lesson-comments.ts": { how: "copied", what: "Your comments under lessons" },
   "lib/course-survey.ts": { how: "copied", what: "Your answers to the survey when you finished a course, with your comments" },
+  "lib/lesson-comments.ts": { how: "copied", what: "Your comments under lessons" },
   "lib/community-erasure.ts": { how: "copied", what: "Your community profile, points, notifications, private messages, what you said in its room, the events you said you are coming to, and your posts, comments, likes, votes and reports" },
   "lib/waitlist.ts": { how: "copied", what: "Your places on the store's waitlists" },
   "lib/affiliate-bond.ts": { how: "copied", what: "Which affiliate brought you to the store" },
@@ -265,6 +265,14 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   },
   // Withdrawn ones too: the erasure deletes them, so they are kept about the person.
   "lib/certificate.ts": async (s) => certificatesOf(s.courses.map((c) => c.courseId), s.email),
+  "lib/course-survey.ts": async (s) => {
+    const out: unknown[] = [];
+    for (const c of s.courses) {
+      const answer = await answerOfPerson(c.courseId, s.learner);
+      if (answer) out.push({ course: c.productId, score: answer.score, comment: answer.note, at: iso(answer.at) });
+    }
+    return out;
+  },
   "lib/lesson-comments.ts": async (s) => {
     const out: unknown[] = [];
     for (const c of s.courses) {
@@ -272,14 +280,6 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
         // Only their own: the replies under them are other people's words.
         for (const comment of await lessonComments(c.courseId, lessonId)) if (comment.by === s.learner) out.push({ course: c.productId, lesson: lessonId, name: comment.name, text: comment.text, at: iso(comment.at) });
       }
-    }
-    return out;
-  },
-  "lib/course-survey.ts": async (s) => {
-    const out: unknown[] = [];
-    for (const c of s.courses) {
-      const answer = await answerOfPerson(c.courseId, s.learner);
-      if (answer) out.push({ course: c.productId, score: answer.score, comment: answer.note, at: iso(answer.at) });
     }
     return out;
   },

@@ -305,9 +305,12 @@ export async function POST(request: NextRequest) {
           if (found) {
             if (!preparedCourse || JSON.stringify(found) !== JSON.stringify(preparedCourse)) return false;
             course = found;
+            // Its survey answers go too (285 [SX1]), here, before the product goes: a failure keeps the product for another try.
+            await dropCourseSurvey(found.id, store);
             await dropComments(found.id, lessonsInOrder(found).map(({ lesson }) => lesson.id), store);
           } else {
             if (preparedCourse) return false;
+            await dropCourseSurvey(going.course.id, store);
             await dropCommentsAfterCourseGone(going.course.id, store);
           }
           return true;
@@ -349,7 +352,6 @@ export async function POST(request: NextRequest) {
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));
         if (removedCourse) {
           await dropCourse(removedCourse, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
-          await dropCourseSurvey(removedCourse.id, removed.store).catch((error: unknown) => console.error("could not drop a removed course's survey answers", error));
         }
         for (const file of had) {
           // A lesson video the video service keeps is taken away there (lib/stream.ts).

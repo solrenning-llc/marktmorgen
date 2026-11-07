@@ -41,6 +41,16 @@ const RECORD_FRAME_BYTES = 32;
  */
 export const SURVEY_ENTRY_MAX_BYTES = WHO_BYTES + RECORD_FRAME_BYTES + 3 * MAX_SURVEY_NOTE;
 /**
+ * What the course page adds to each view by a student with the course in
+ * their pass (app/[handle]/course/[product]/page.tsx): one command, either
+ * whether an answer is kept (HEXISTS, no comment returned) or, once they
+ * finished, their own answer for the form (HGET, at most one answer's bytes).
+ * Priced for every request of a store's window in the public-requests line
+ * (tests/plan-cost-registry.ts, surveyPageCost).
+ */
+export const SURVEY_PAGE_COMMANDS = 1;
+export const SURVEY_PAGE_BYTES = SURVEY_ENTRY_MAX_BYTES;
+/**
  * What the store's data room (lib/store-data.ts) is charged for one answer,
  * whatever its size: its field in the course's hash. Charged before it is
  * written, once per student and course; a change is not charged again.

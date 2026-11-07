@@ -427,6 +427,8 @@ export default async function StorePage({ params, searchParams }: Params) {
                           </a>
                         </p>
                       ) : null}
+                      {/* How the results are ordered (EU 2011/83/EU Art. 6a(1)(a)): searchStore keeps the creator's own product order, nothing is paid for. */}
+                      {results && results.total ? <p className="mt-1 text-sm">{bw.searchOrder(store.name)}</p> : null}
                     </form>
                   ) : null}
                   {/* The creator's collections, each a page of its own (lib/store-collections.ts). */}

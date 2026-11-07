@@ -23,14 +23,18 @@ import {
 } from "@/lib/store-look";
 import { MAX_PHOTO_BYTES, PHOTO_SIDE, photoUrl } from "@/lib/photo-limits";
 import {
+  PALETTE_HEAD_BYTES,
   PALETTE_MAX_BYTES,
+  PALETTE_MAX_PIXELS,
   PALETTE_TYPES,
   type PicturePalette,
   type PictureProblem,
   fitInside,
   paletteFromPixels,
   pictureProblem,
+  pictureSize,
   themeForPicture,
+  tooManyPixels,
 } from "@/lib/image-palette";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
@@ -105,10 +109,11 @@ function toBase64(blob: Blob): Promise<string> {
 }
 
 /** What the creator reads when a picture gives no colours. */
-const PICTURE_MESSAGES: Record<PictureProblem | "unreadable", string> = {
+const PICTURE_MESSAGES: Record<PictureProblem | "too_many_pixels" | "unreadable", string> = {
   type: "That picture could not be opened. Try a JPEG, PNG or WebP.",
   empty: "That picture could not be opened. Try a JPEG, PNG or WebP.",
   too_big: `That picture is larger than ${Math.round(PALETTE_MAX_BYTES / (1024 * 1024))} MB. Try a smaller copy of it.`,
+  too_many_pixels: `That picture has more than ${PALETTE_MAX_PIXELS / 1_000_000} million pixels. Try a smaller copy of it.`,
   unreadable: "We could not find any colors in that picture. Try another one.",
 };
 
@@ -117,15 +122,27 @@ const PICTURE_MESSAGES: Record<PictureProblem | "unreadable", string> = {
  * it is drawn small on a canvas that never leaves the page and only the
  * colours found are kept. Nothing is uploaded, saved or sent.
  */
-async function readPicture(file: File): Promise<PicturePalette | PictureProblem | "unreadable"> {
+async function readPicture(file: File): Promise<PicturePalette | PictureProblem | "too_many_pixels" | "unreadable"> {
   const problem = pictureProblem(file);
   if (problem) return problem;
+  // The size comes from the file's own header, before anything is decoded:
+  // a small file can unpack into a picture too large for the device.
+  let head: Uint8Array;
+  try {
+    head = new Uint8Array(await file.slice(0, PALETTE_HEAD_BYTES).arrayBuffer());
+  } catch {
+    return "unreadable";
+  }
+  const declared = pictureSize(head);
+  if (!declared) return "unreadable";
+  if (tooManyPixels(declared)) return "too_many_pixels";
   const url = URL.createObjectURL(file);
   try {
     const image = new Image();
     image.decoding = "async";
     image.src = url;
     await image.decode();
+    if (tooManyPixels({ width: image.naturalWidth, height: image.naturalHeight })) return "too_many_pixels";
     const size = fitInside(image.naturalWidth, image.naturalHeight);
     if (!size) return "unreadable";
     const canvas = document.createElement("canvas");
@@ -291,6 +308,12 @@ export function LookEditor({
   }
 
   const working = status.kind === "working";
+  // The theme a picture's lightness suggests, said in the same live region as
+  // the colours found, and only while it differs from the theme picked.
+  const suggestedTheme = picture ? THEMES.find((option) => option.id === themeForPicture(picture)) ?? null : null;
+  const pictureSuggestion = picture && suggestedTheme && suggestedTheme.id !== theme
+    ? `Your picture is mostly ${picture.dark ? "dark" : "light"}, so the ${suggestedTheme.label} theme may suit it.`
+    : "";
 
   return (
     <section data-look-editor aria-busy={working} className="card mt-8 p-6 sm:p-8" aria-labelledby="look-title">
@@ -325,7 +348,7 @@ export function LookEditor({
                 </span>
               )}
               <div className="flex flex-wrap items-center gap-2">
-                <label className={`btn btn-secondary btn-sm cursor-pointer ${working ? "pointer-events-none opacity-60" : ""}`}>
+                <label className={`btn btn-secondary btn-sm cursor-pointer has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-violet-brand ${working ? "pointer-events-none opacity-60" : ""}`}>
                   <Icon name="camera" size={16} />
                   {photoId ? "Choose another photo" : "Choose a photo"}
                   <input
@@ -448,7 +471,7 @@ export function LookEditor({
               Pick a picture from your device, such as your logo. Its main colors are found right here in your browser: the picture is not uploaded or saved.
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2.5">
-              <label className={`btn btn-secondary btn-sm cursor-pointer ${working || readingPicture ? "pointer-events-none opacity-60" : ""}`}>
+              <label className={`btn btn-secondary btn-sm cursor-pointer has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-violet-brand ${working || readingPicture ? "pointer-events-none opacity-60" : ""}`}>
                 <Icon name="palette" size={16} />
                 {picture ? "Choose another picture" : "Choose a picture"}
                 <input
@@ -475,14 +498,11 @@ export function LookEditor({
                 </button>
               ))}
             </div>
-            <p role="status" aria-live="polite" className="field-hint mt-2">{pictureNote}</p>
-            {picture && themeForPicture(picture) !== theme ? (
-              <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-soft">
-                {`Your picture is mostly ${picture.dark ? "dark" : "light"}, so the ${THEMES.find((option) => option.id === themeForPicture(picture))?.label} theme may suit it.`}
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTheme(themeForPicture(picture))}>
-                  {`Use the ${THEMES.find((option) => option.id === themeForPicture(picture))?.label} theme`}
-                </button>
-              </p>
+            <p role="status" aria-live="polite" className="field-hint mt-2">{pictureNote}{pictureSuggestion ? ` ${pictureSuggestion}` : ""}</p>
+            {picture && suggestedTheme && suggestedTheme.id !== theme ? (
+              <button type="button" className="btn btn-ghost btn-sm mt-2" onClick={() => setTheme(suggestedTheme.id)}>
+                {`Use the ${suggestedTheme.label} theme`}
+              </button>
             ) : null}
           </fieldset>
 

@@ -25,6 +25,13 @@ export const PALETTE_MAX = 5;
 export const PALETTE_MIN_SHARE = 0.01;
 /** Pictures larger than this are not opened at all. */
 export const PALETTE_MAX_BYTES = 15 * 1024 * 1024;
+/**
+ * Pictures with more pixels than this are not decoded: a small file can unpack
+ * into a huge picture, so the size is read from the file's own header first.
+ */
+export const PALETTE_MAX_PIXELS = 40_000_000;
+/** How much of the start of a file is read to find its size. */
+export const PALETTE_HEAD_BYTES = 256 * 1024;
 /** The only kinds of picture opened: ordinary photos and images, never SVG. */
 export const PALETTE_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
 
@@ -61,6 +68,83 @@ export function pictureProblem(file: { type: string; size: number }): PicturePro
   return null;
 }
 
+export type PictureSize = { width: number; height: number };
+
+function ascii(bytes: Uint8Array, at: number, text: string): boolean {
+  if (at + text.length > bytes.length) return false;
+  for (let i = 0; i < text.length; i += 1) if (bytes[at + i] !== text.charCodeAt(i)) return false;
+  return true;
+}
+
+function sized(width: number, height: number): PictureSize | null {
+  return Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0 ? { width, height } : null;
+}
+
+/** JPEG markers that start a frame and carry its size (SOF0–SOF15 but DHT, JPG and DAC). */
+const JPEG_FRAMES = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+
+function jpegSize(bytes: Uint8Array): PictureSize | null {
+  let at = 2;
+  while (at < bytes.length) {
+    if (bytes[at] !== 0xff) return null;
+    while (at < bytes.length && bytes[at] === 0xff) at += 1;
+    if (at >= bytes.length) return null;
+    const marker = bytes[at];
+    at += 1;
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8)) continue;
+    // Image data or the end before any size: the size is unknown.
+    if (marker === 0xda || marker === 0xd9) return null;
+    if (at + 2 > bytes.length) return null;
+    const length = (bytes[at] << 8) | bytes[at + 1];
+    if (length < 2) return null;
+    if (JPEG_FRAMES.has(marker)) {
+      if (at + 7 > bytes.length) return null;
+      return sized((bytes[at + 5] << 8) | bytes[at + 6], (bytes[at + 3] << 8) | bytes[at + 4]);
+    }
+    at += length;
+  }
+  return null;
+}
+
+function webpSize(bytes: Uint8Array): PictureSize | null {
+  if (ascii(bytes, 12, "VP8 ")) {
+    if (bytes.length < 30 || bytes[23] !== 0x9d || bytes[24] !== 0x01 || bytes[25] !== 0x2a) return null;
+    return sized((bytes[26] | (bytes[27] << 8)) & 0x3fff, (bytes[28] | (bytes[29] << 8)) & 0x3fff);
+  }
+  if (ascii(bytes, 12, "VP8L")) {
+    if (bytes.length < 25 || bytes[20] !== 0x2f) return null;
+    const [b0, b1, b2, b3] = [bytes[21], bytes[22], bytes[23], bytes[24]];
+    return sized(1 + (b0 | ((b1 & 0x3f) << 8)), 1 + ((b1 >> 6) | (b2 << 2) | ((b3 & 0x0f) << 10)));
+  }
+  if (ascii(bytes, 12, "VP8X")) {
+    if (bytes.length < 30) return null;
+    return sized(1 + (bytes[24] | (bytes[25] << 8) | (bytes[26] << 16)), 1 + (bytes[27] | (bytes[28] << 8) | (bytes[29] << 16)));
+  }
+  return null;
+}
+
+/**
+ * A picture's width and height from the first bytes of the file itself (its
+ * PNG, JPEG or WebP header), whatever type the file claims, so nothing has to
+ * be decoded to know it. Null when the bytes are none of the three or the
+ * size cannot be found in them: then the picture is not opened.
+ */
+export function pictureSize(head: Uint8Array): PictureSize | null {
+  if (!(head instanceof Uint8Array)) return null;
+  if (head.length >= 24 && head[0] === 0x89 && ascii(head, 1, "PNG") && head[4] === 0x0d && head[5] === 0x0a && head[6] === 0x1a && head[7] === 0x0a && ascii(head, 12, "IHDR")) {
+    const read = (at: number) => ((head[at] << 24) >>> 0) + (head[at + 1] << 16) + (head[at + 2] << 8) + head[at + 3];
+    return sized(read(16), read(20));
+  }
+  if (head.length >= 4 && head[0] === 0xff && head[1] === 0xd8) return jpegSize(head);
+  if (ascii(head, 0, "RIFF") && ascii(head, 8, "WEBP")) return webpSize(head);
+  return null;
+}
+
+/** Whether a picture has more pixels than PALETTE_MAX_PIXELS. */
+export function tooManyPixels(size: PictureSize): boolean {
+  return size.width * size.height > PALETTE_MAX_PIXELS;
+}
+
 /** The size to draw a picture at so it fits inside PALETTE_SIDE, keeping its shape and never enlarging it. */
 export function fitInside(width: number, height: number): { width: number; height: number } | null {
   if (!(Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0)) return null;
@@ -94,7 +178,7 @@ function average(group: Group): [number, number, number] {
 /**
  * The main colours of a picture from its RGBA pixels (as a canvas gives them),
  * width × height, at most PALETTE_SIDE a side. Null when the input is not
- * exactly that, or when no pixel is visible.
+ * exactly that, when no pixel is visible, or when every colour is a speck.
  */
 export function paletteFromPixels(data: ArrayLike<number>, width: number, height: number): PicturePalette | null {
   if (!data || typeof data.length !== "number") return null;
@@ -160,6 +244,9 @@ export function paletteFromPixels(data: ArrayLike<number>, width: number, height
     })
     // A logo on white is mostly white, but its colour is what suits a button.
     .sort((a, b) => Number(b.vivid) - Number(a.vivid) || b.count - a.count);
+
+  // Only specks: there is no colour to offer, which is "none found", not an empty choice.
+  if (found.length === 0) return null;
 
   return {
     colors: found.slice(0, PALETTE_MAX).map(({ hex, share }) => ({ hex, share })),

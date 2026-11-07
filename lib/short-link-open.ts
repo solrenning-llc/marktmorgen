@@ -25,7 +25,9 @@
  * fails leaves the open counted, never the other way. Every refusal says so
  * in plain words, sends nobody anywhere and is never kept by the CDN: it is
  * never shown as "this link ended". The company's month is priced in
- * tests/short-link-open-cap.test.ts and listed in lib/llc-fixed-costs.ts.
+ * tests/short-link-open-cap.test.ts and held there as a company cost that is
+ * unknown, never zero (SHORT_LINK_UNPAID_COMPANY_COST, tests/plan-cost-registry.ts);
+ * it is not a line of lib/llc-fixed-costs.ts, which feeds CURRENT_COMMERCIAL_TERMS.
  *
  *   nl:slink:open:<hour>   string   the hour's opens not paid by a store, kept two hours
  */

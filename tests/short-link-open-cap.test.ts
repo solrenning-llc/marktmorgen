@@ -32,7 +32,9 @@ import {
   SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_OPENS_PER_ADDRESS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS, SHORT_LINK_UNKNOWN_PAUSE_MS,
   SHORT_LINK_UNPAID_PER_HOUR,
 } from "@/lib/short-link-open-rules";
-import { FIXED_COST_SOURCE_OBSERVATIONS, LLC_FIXED_COST_IDS } from "@/lib/llc-fixed-costs";
+import { CURRENT_LLC_FIXED_COST_CEILINGS, LLC_FIXED_COST_IDS } from "@/lib/llc-fixed-costs";
+import { CURRENT_COMMERCIAL_TERMS } from "@/lib/commercial-margin";
+import { SHORT_LINK_UNPAID_COMPANY_COST } from "./plan-cost-registry";
 import {
   UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
@@ -178,7 +180,7 @@ async function main(): Promise<void> {
   is("opens per address", SHORT_LINK_OPENS_PER_ADDRESS, PER_ADDRESS);
   is("unpaid opens an hour", SHORT_LINK_UNPAID_PER_HOUR, UNPAID_PER_HOUR);
 
-  part("What the opens no store pays for cost the company at most, a month (MR item 2; lib/llc-fixed-costs.ts)");
+  part("What the opens no store pays for cost the company at most, a month (MR item 2; tests/plan-cost-registry.ts)");
   const micro = (n: number) => n / 1_000_000;
   const COMMAND = micro(UPSTASH_MICRO_USD_PER_MILLION_COMMANDS) / 1e6;
   const CALL = micro(VERCEL_CALL_MICRO_USD_PER_MILLION) / 1e6;
@@ -204,11 +206,22 @@ async function main(): Promise<void> {
   is("the site's unpaid opens stay under $15 a month", readMonth < 15, true);
   is("one instance's counts beyond them stay under $3 a month", instanceMonth < 3, true);
   is("a paid open's own commands, held in the store's unit (tests/plan-cost-registry.test.ts)", SHORT_LINK_COUNT_COMMANDS + SHORT_LINK_READ_COMMANDS + SHORT_LINK_REFUND_COMMANDS, 6);
-  is("the company's fixed costs carry the line, unreviewed and never zero", [
+  // The company's cost is held in the test registry, unreviewed: priced above zero, its ceiling unknown, never zero.
+  is("the company's cost is held, priced above zero, its reviewed ceiling unknown and not approved", [
+    SHORT_LINK_UNPAID_COMPANY_COST.perHour,
+    readMonth > 0 && instanceMonth > 0,
+    SHORT_LINK_UNPAID_COMPANY_COST.reviewedMonthlyUsdCents,
+    SHORT_LINK_UNPAID_COMPANY_COST.approvedCeiling,
+  ], [SHORT_LINK_UNPAID_PER_HOUR, true, null, false]);
+  // It is not a line of lib/llc-fixed-costs.ts: those lines enter CURRENT_COMMERCIAL_TERMS, which only the owner changes.
+  const ids = (list: readonly { id: string }[] | readonly string[]) => list.map((x) => (typeof x === "string" ? x : x.id));
+  is("nothing that feeds the commercial terms names it", [
     (LLC_FIXED_COST_IDS as readonly string[]).includes("short-link-unpaid-opens"),
-    FIXED_COST_SOURCE_OBSERVATIONS.shortLinkUnpaidOpens.perHour,
-    FIXED_COST_SOURCE_OBSERVATIONS.shortLinkUnpaidOpens.approvedCeiling,
-  ], [true, SHORT_LINK_UNPAID_PER_HOUR, false]);
+    ids(CURRENT_LLC_FIXED_COST_CEILINGS).includes("short-link-unpaid-opens"),
+    ids(CURRENT_COMMERCIAL_TERMS.llcFixedCosts.required).includes("short-link-unpaid-opens"),
+    ids(CURRENT_COMMERCIAL_TERMS.llcFixedCosts.ceilings).includes("short-link-unpaid-opens"),
+    JSON.stringify(CURRENT_COMMERCIAL_TERMS).includes("short-link") || JSON.stringify(CURRENT_COMMERCIAL_TERMS).includes("shortLink"),
+  ], [false, false, false, false, false]);
 
   done();
 }

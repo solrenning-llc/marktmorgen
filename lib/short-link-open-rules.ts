@@ -1,8 +1,7 @@
 /**
  * The figures that bound what opening a short link can cost
  * (app/l/[code]/route.ts, lib/short-link-open.ts). Plain values, so the
- * company's fixed costs (lib/llc-fixed-costs.ts) and the tests read them
- * without the database.
+ * tests read them without the database.
  *
  * A link that opens is paid by its store, as one of its public requests
  * (SHORT_LINK_OPEN_UNITS, lib/traffic.ts). What no store pays for — a code

@@ -138,6 +138,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `app/studio/bundles/page.tsx` | SETTING | 128–167: bundle price labels and editor | no |
 | `app/studio/community/page.tsx` | SETTING | 211–216: product price labels | no |
 | `app/studio/deals/page.tsx` | SETTING | 63: deal values the creator types (not sale money) | no |
+| `components/deal-channels-table.tsx` | SETTING | 17, 72: deals' values by their person's first channel, the values the creator typed (not sale money), shown in the store's currency (639 [GL7](9)) | no |
 | `app/studio/forms/page.tsx` | SETTING | 81: a deal value from a form | no |
 | `app/studio/funnels/page.tsx` | SETTING | 203/342–343: offer planning and funnel editor prices | no |
 | `app/studio/import/page.tsx` | SETTING | 125: an imported product's price label | no |
@@ -162,3 +163,4 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/store.ts` | SETTING | 2497–3911: the smallest charge for box, plan, offer and shipping; field reading and validation; setCurrency | no |
 | `lib/api-numbers.ts` | OTHER | 64: the store's currency is part of the kept numbers' key, so a copy read under another currency is never reused; no amount is formatted or summed here | n/a |
 | `lib/digital-consent-email.ts` | OTHER | 37: speechFor only formats a date; no money | n/a |
+| `lib/sales-goal.ts` | OTHER | 37–38: the text scan matches `s.currency` inside `fields.currency`; this is the saved goal record's own currency, not a new read of the store currency | yes: malformed or mismatched evidence stays unavailable, never converted |

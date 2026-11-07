@@ -49,7 +49,9 @@ import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
 import { noteForErasure } from "@/lib/erasure-index";
 import { orderWrite } from "@/lib/order-data";
-import { suppressedCommand, wasSuppressed } from "@/lib/suppression";
+// Kept apart from the reply helpers imported above by other work, so the two never collide by name.
+import * as exactReply from "@/lib/redis-reply";
+import { suppressedCommand } from "@/lib/suppression";
 
 /** Orders looked at in one run of the job. */
 export const MAX_ASKS_PER_RUN = 50;
@@ -90,38 +92,62 @@ async function stopLink(store: Store, email: string): Promise<string> {
   return token;
 }
 
-/** Who a stop link belongs to, without acting on it. */
-export async function readReviewStop(token: string): Promise<{ email: string; storeName: string; stopped: boolean; handle: string } | null> {
-  if (!REVIEW_STOP.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", stopKey(token)]]);
-  if (typeof raw !== "string" || !raw) return null;
+type StopGrant = { s: string; e: string; n?: unknown; h?: unknown };
+
+/**
+ * A stop link's grant, read from its GET reply only in its exact shape
+ * (CX-123 rule 24, as lib/checkout-recovery.ts reads a reminder's): one
+ * reply, text or nothing. Nothing, or text that is not a grant, is a link we
+ * do not know (null); any other reply is unknown and throws, never "no such
+ * link".
+ */
+function stopGrantOf(replies: unknown): StopGrant | null {
+  const reply = exactReply.repliesFor(replies, 1);
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new exactReply.UnknownReplyError("a review stop link");
+  const raw = reply[0];
+  if (!raw) return null;
   try {
-    const grant = JSON.parse(raw) as { s?: unknown; e?: unknown; n?: unknown; h?: unknown };
-    if (typeof grant.s !== "string" || typeof grant.e !== "string" || !grant.s || !grant.e) return null;
-    const [off] = await redisPipeline([["EXISTS", offKey(grant.s, grant.e)]]);
-    // The store's handle, so the page can speak the store's language.
-    const handle = typeof grant.h === "string" ? grant.h : "";
-    return { email: grant.e, storeName: typeof grant.n === "string" ? grant.n : "", stopped: Number(off) === 1, handle };
+    const grant = JSON.parse(raw) as unknown;
+    if (!grant || typeof grant !== "object") return null;
+    const { s, e, n, h } = grant as { s?: unknown; e?: unknown; n?: unknown; h?: unknown };
+    return typeof s === "string" && typeof e === "string" && s && e ? { s, e, n, h } : null;
   } catch {
     return null;
   }
 }
 
-/** Stops every review request from that store to that address, for good. Safe to press twice. */
+/** Who a stop link belongs to, without acting on it. Throws when Redis answers in an unknown shape. */
+export async function readReviewStop(token: string): Promise<{ email: string; storeName: string; stopped: boolean; handle: string } | null> {
+  if (!REVIEW_STOP.test(token) || !isRedisConfigured()) return null;
+  const grant = stopGrantOf(await redisPipeline([["GET", stopKey(token)]]));
+  if (!grant) return null;
+  // The stop mark is there (1) or not (0); anything else is unknown, never "not stopped".
+  const off = exactReply.repliesFor(await redisPipeline([["EXISTS", offKey(grant.s, grant.e)]]), 1);
+  const count = off ? exactReply.countOf(off[0]) : null;
+  if (count !== 0 && count !== 1) throw new exactReply.UnknownReplyError("a review stop mark");
+  // The store's handle, so the page can speak the store's language.
+  const handle = typeof grant.h === "string" ? grant.h : "";
+  return { email: grant.e, storeName: typeof grant.n === "string" ? grant.n : "", stopped: count === 1, handle };
+}
+
+/**
+ * Stops every review request from that store to that address, for good.
+ * Safe to press twice. True only when the stop mark's write answered "OK";
+ * a reply of any other shape, or a write that failed, throws, never
+ * "stopped" and never "no such link" (CX-123 rule 24).
+ */
 export async function stopReviewRequests(token: string): Promise<boolean> {
   if (!REVIEW_STOP.test(token) || !isRedisConfigured()) return false;
-  const [raw] = await redisPipeline([["GET", stopKey(token)]]);
-  if (typeof raw !== "string" || !raw) return false;
-  try {
-    const grant = JSON.parse(raw) as { s?: unknown; e?: unknown; h?: unknown };
-    if (typeof grant.s !== "string" || typeof grant.e !== "string" || !grant.s || !grant.e) return false;
-    // Kept for good, so counted in the store's room at what it adds (lib/order-data.ts).
-    const store = typeof grant.h === "string" && grant.h ? await storeForHandle(grant.h).catch(() => null) : null;
-    await orderWrite(store && store.statsId === grant.s ? store : { statsId: grant.s }, [["SET", offKey(grant.s, grant.e), new Date().toISOString()]]);
-    return true;
-  } catch {
-    return false;
-  }
+  const grant = stopGrantOf(await redisPipeline([["GET", stopKey(token)]]));
+  if (!grant) return false;
+  // Kept for good, so counted in the store's room at what it adds (lib/order-data.ts).
+  const store = typeof grant.h === "string" && grant.h ? await storeForHandle(grant.h).catch(() => null) : null;
+  const written = exactReply.repliesFor(
+    await orderWrite(store && store.statsId === grant.s ? store : { statsId: grant.s }, [["SET", offKey(grant.s, grant.e), new Date().toISOString()]]),
+    1,
+  );
+  if (!written || written[0] !== "OK") throw new exactReply.UnknownReplyError("a review stop mark");
+  return true;
 }
 
 /** The words of the email, for one order and the products in it not reviewed yet, in the store's language. `stage` "again" is the one reminder. */
@@ -271,13 +297,18 @@ export async function sendReviewRequests(
       continue;
     }
     const email = proof.proof.email;
-    const [off, contact, deleted] = await redisPipeline([
+    const checks = await redisPipeline([
       ["EXISTS", offKey(entry.statsId, email)],
       store.listId ? ["HGET", leadsKey(store.listId), normaliseEmail(email)] : ["EXISTS", "nl:none"],
       suppressedCommand(store.listId, email),
-    ]);
+    ]).catch(() => null);
+    const recipient = reviewRecipientState(checks, Boolean(store.listId));
+    if (recipient === "unknown") {
+      await later(member, nowSeconds + RETRY_SECONDS.stripe);
+      continue;
+    }
     // Nobody who pressed stop, left the list, or was deleted from the store (lib/suppression.ts).
-    if (Number(off) === 1 || (store.listId && parseContact(contact)?.unsub) || wasSuppressed(deleted)) {
+    if (recipient === "stopped") {
       await drop(member);
       continue;
     }
@@ -363,5 +394,29 @@ export async function sendReviewRequests(
     counts.sent += ready.length;
   }
   return counts;
+}
+
+/** A missing/malformed opt-out or erasure response never grants permission to send. */
+function reviewRecipientState(checks: unknown, hasList: boolean): "unknown" | "stopped" | "open" {
+  if (!Array.isArray(checks) || checks.length !== 3) return "unknown";
+  for (let i = 0; i < 3; i++) if (!Object.hasOwn(checks, i)) return "unknown";
+  const [off, raw, erased] = checks;
+  if ((off !== 0 && off !== 1) || (erased !== 0 && erased !== 1)) return "unknown";
+  let unsubscribed = false;
+  if (hasList) {
+    if (raw !== null) {
+      if (typeof raw !== "string") return "unknown";
+      try {
+        const value: unknown = JSON.parse(raw);
+        // Legacy contacts can omit unsub; a present value must be boolean.
+        if (!value || typeof value !== "object" || Array.isArray(value) ||
+            ("unsub" in value && typeof value.unsub !== "boolean")) return "unknown";
+      } catch { return "unknown"; }
+      const contact = parseContact(raw);
+      if (!contact) return "unknown";
+      unsubscribed = contact.unsub;
+    }
+  } else if (raw !== 0 && raw !== 1) return "unknown";
+  return off === 1 || unsubscribed || erased === 1 ? "stopped" : "open";
 }
 

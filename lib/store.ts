@@ -859,6 +859,13 @@ const ownerKey = async (email: string) =>
   `nl:store:owner:${(await sha256Hex(`nimbus-store:${email.toLowerCase()}`)).slice(0, 40)}`;
 
 const handleKey = (handle: string) => `nl:store:handle:${handle}`;
+/**
+ * Whether a handle's key, as read, still leads to a store: not free, not held
+ * back after a store was deleted or closed. For a reader that asks along with
+ * other keys, such as the private calendar feed (lib/calendar-sync.ts).
+ */
+export const storeHandleKey = handleKey;
+export const handleLeadsToStore = (raw: unknown): boolean => typeof raw === "string" && raw !== "" && !raw.startsWith(RELEASED_PREFIX);
 
 /** The ids of an account's other stores. Deliberately not under nl:store:owner:. */
 const accountKey = async (email: string) =>
@@ -3201,10 +3208,14 @@ export async function editProduct(
 export async function removeProduct(
   email: string,
   id: string,
-): Promise<{ ok: true; store: Store; product: Product } | { ok: false; reason: "none" | "unknown" }> {
+  before?: (product: Product, store: Store) => Promise<boolean>,
+): Promise<{ ok: true; store: Store; product: Product } | { ok: false; reason: "none" | "unknown" | "unavailable" }> {
   const result = await withStore(email, async (store, save) => {
     const product = await readProduct(store, id);
     if (!product) return { ok: false as const, reason: "unknown" as const };
+    if (before && !(await before(product, store))) {
+      return { ok: false as const, reason: "unavailable" as const };
+    }
     // A bundle that held it holds it no more, in the same write, so no bundle
     // goes on promising a product the store no longer has. Whoever bought the
     // bundle before kept its list on their order (lib/bundle-rules.ts).

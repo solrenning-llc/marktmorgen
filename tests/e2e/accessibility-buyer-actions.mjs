@@ -1,3 +1,4 @@
+import "./orders-list-actions.mjs";
 import {createRequire} from "node:module";
 import {spawn} from "node:child_process";
 import {readFileSync,mkdtempSync,rmSync} from "node:fs";
@@ -6,6 +7,7 @@ import {build} from "esbuild";
 import {startServices} from "./services.mjs";
 import {prepareReviewedMailApp} from "./reviewed-mail-app.mjs";
 import {resolve,join} from "node:path";
+import {createServer} from "node:http";
 const root=resolve(".");
 const require=createRequire(join(root,"package.json"));
 const engine=process.env.E2E_BROWSER??"chromium";
@@ -47,6 +49,19 @@ try{
 let app,reviewedApp,output="";
 let browser,cases=0,audits=0,failed=0,libraryLink=null;const gaps=[];
 const redact=value=>String(value).replace(/token=[^&\s"']+/g,"token=redacted");
+// 2.5.5 Target Size (Enhanced, AAA): every control a buyer presses on the checkout's own pages is at least 44 by 44 CSS px.
+// A link inside a sentence is the criterion's inline exception; a box counts with its label, which presses it too.
+const targetsUnder44=(page,scope="body")=>page.evaluate(scope=>{
+ const out=[],shown=n=>{const r=n.getBoundingClientRect(),s=getComputedStyle(n);return r.width>0&&r.height>0&&s.visibility!=="hidden"&&!n.closest("[hidden],[inert],.sr-only");};
+ for(const n of document.querySelector(scope)?.querySelectorAll("a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button]")??[]){
+  const label=n.matches("input")?(n.labels?.[0]??n.closest("label")):null;
+  if(!shown(n)&&!(label&&shown(label)))continue;
+  if(n.tagName==="A"&&getComputedStyle(n).display==="inline"){const p=n.parentElement;if(p&&(p.textContent||"").trim().length>(n.textContent||"").trim().length+3)continue;}
+  const r=n.getBoundingClientRect(),l=label?label.getBoundingClientRect():r,width=Math.max(r.width,l.width),height=Math.max(r.height,l.height);
+  if(width<43.5||height<43.5)out.push({tag:n.tagName,name:(n.getAttribute("aria-label")||n.textContent||"").trim().slice(0,60),width:Math.round(width),height:Math.round(height)});
+ }
+ return out;
+},scope);
 const localLink=value=>String(value).replace("https://marktmorgen.com",origin);
 try{
  reviewedApp=await prepareReviewedMailApp(root,env);
@@ -102,6 +117,7 @@ try{
     });
     audits++;console.log("BUYER_MATRIX_AUDIT:"+JSON.stringify({engine,width,mode,state,...result}));
     if(result.scroll>result.client||result.violations.length)throw Error("Accessibility/overflow failure at "+state);
+    if(["product-checkout-form","simulated-paid-receipt"].includes(state)){const small=await targetsUnder44(page);if(small.length)throw Error("Target under 44 by 44 px at "+state+" "+JSON.stringify(small));}
     if(result.incomplete.length)gaps.push({width,mode,state,manualReview:result.incomplete});
    }
    // Sent back without the box (app/api/store/checkout, consent=needed): the reason is written beside it and tied to it, the box is
@@ -168,6 +184,143 @@ try{
   }catch(error){failed++;console.error("BUYER_MATRIX_FAILURE:"+JSON.stringify({engine,width,mode,phase,error:redact(error)}));}
   finally{cases++;await context.close();}
  }
+ // 656 [WG16]: a store with nothing on it (tests/e2e/seed.ts, freshshop) shows the empty state: a heading and one
+ // sentence, no dead button, nothing blank, axe AAA. Its blog, with no posts, has no page at all (404), never a blank one.
+ // Baseline at 320 and 1280 px only; its time is printed so the cost it adds to this job is measured, never taken as zero.
+ const emptyStarted=Date.now();let emptyCases=0;
+ for(const width of [320,1280]){
+  const blog=await fetch(origin+"/@freshshop/blog",{headers:{"x-forwarded-for":"198.51.100."+(40+width%7)},signal:AbortSignal.timeout(30_000)});
+  if(blog.status!==404){failed++;console.error("EMPTY_STATE_FAILURE:"+JSON.stringify({engine,width,path:"/@freshshop/blog",error:"A store with no posts has a blog page: HTTP "+blog.status}));}
+ }
+ for(const width of [320,1280])for(const path of ["/@freshshop"]){
+  const context=await browser.newContext({viewport:{width,height:900},serviceWorkers:"block",extraHTTPHeaders:{"x-forwarded-for":"198.51.100."+(10+emptyCases)}});
+  try{
+   const page=await context.newPage();const errors=[];page.on("pageerror",error=>errors.push(redact(error)));
+   await context.route("**/*",route=>{const url=new URL(route.request().url());if(url.origin!==origin&&url.origin!==FAKE)return route.abort();if(url.pathname==="/api/store/hit")return route.fulfill({status:204,body:""});if(!["GET","HEAD"].includes(route.request().method()))return route.abort();return route.continue();});
+   const response=await page.goto(origin+path,{waitUntil:"networkidle",timeout:60000});
+   if(response?.status()!==200)throw Error("HTTP "+response?.status());
+   const empty=await page.evaluate(()=>[...document.querySelectorAll("[data-empty-state]")].map(node=>({heading:node.querySelector("h2")?.textContent?.trim()??"",sentence:node.querySelector("p")?.textContent?.trim()??"",actions:[...node.querySelectorAll("a,button")].map(a=>({tag:a.tagName,href:a.getAttribute("href")})),visible:node.getBoundingClientRect().height>0})));
+   if(empty.length!==1||!empty[0].heading||!empty[0].sentence||!empty[0].visible)throw Error("Empty state missing or blank "+JSON.stringify(empty));
+   if(empty[0].actions.some(a=>a.tag!=="A"||!/^\/(?!\/)/.test(a.href??"")))throw Error("Dead or foreign action in the empty state "+JSON.stringify(empty[0].actions));
+   await page.addScriptTag({content:axe});
+   const result=await page.evaluate(async()=>{const root=document.documentElement,run=await window.axe.run(document,{rules:{"color-contrast-enhanced":{enabled:true}}});return {scroll:root.scrollWidth,client:root.clientWidth,violations:run.violations.map(v=>({id:v.id,nodes:v.nodes.length})),incomplete:run.incomplete.map(v=>v.id)};});
+   audits++;console.log("EMPTY_STATE_AUDIT:"+JSON.stringify({engine,width,path,empty:empty[0],...result}));
+   if(result.scroll>result.client||result.violations.length||errors.length)throw Error("Empty state accessibility/overflow/page failure "+JSON.stringify({violations:result.violations,errors}));
+   if(result.incomplete.length)gaps.push({width,mode:"baseline",state:"empty "+path,manualReview:result.incomplete});
+  }catch(error){failed++;console.error("EMPTY_STATE_FAILURE:"+JSON.stringify({engine,width,path,error:redact(error)}));}
+  finally{emptyCases++;cases++;await context.close();}
+ }
+ console.log("EMPTY_STATE_COST:"+JSON.stringify({engine,cases:emptyCases,milliseconds:Date.now()-emptyStarted}));
+ // The cart (components/store-cart.tsx), the checkout for several products at once, by keyboard only: every control in it
+ // 44 by 44 px (2.5.5); removing a product keeps the focus in the cart (2.4.3); Escape and Close shut it and give the focus
+ // back to its button (2.4.3, 2.1.1); and moving the focus out of it shuts it, so the open panel never covers the control
+ // that has the focus (2.4.11, 2.4.12). Nothing is written: the cart lives in this browser and its reads are GET requests.
+ // Baseline at 320 and 1280 px only; its time is printed so the cost it adds to this job is measured, never taken as zero.
+ const cartStarted=Date.now();let cartCases=0;
+ for(const width of [320,1280]){
+  const context=await browser.newContext({viewport:{width,height:900},serviceWorkers:"block",extraHTTPHeaders:{"x-forwarded-for":"198.51.100."+(60+cartCases)}});
+  try{
+   const page=await context.newPage();const errors=[];page.on("pageerror",error=>errors.push(redact(error)));
+   await context.route("**/*",route=>{const url=new URL(route.request().url());if(url.origin!==origin&&url.origin!==FAKE)return route.abort();if(url.pathname==="/api/store/hit")return route.fulfill({status:204,body:""});if(!["GET","HEAD"].includes(route.request().method()))return route.abort();return route.continue();});
+   const response=await page.goto(origin+"/@localshop",{waitUntil:"networkidle",timeout:60000});
+   if(response?.status()!==200)throw Error("HTTP "+response?.status());
+   const adds=page.locator("main button[aria-pressed]");
+   for(const n of [0,1]){await adds.nth(n).focus();await page.keyboard.press("Enter");}
+   const opener=page.locator("#cart .st-cart-open"),panel=page.locator("#cart .st-cart-panel"),lines=panel.locator("li");
+   const openByKeyboard=async()=>{await opener.focus();await page.keyboard.press("Enter");await panel.waitFor();};
+   const focus=()=>page.evaluate(()=>{const a=document.activeElement;return {inCart:Boolean(a?.closest("#cart")),inPanel:Boolean(a?.closest(".st-cart-panel")),opener:Boolean(a?.matches(".st-cart-open")),tag:a?.tagName??"",name:(a?.getAttribute("aria-label")||a?.textContent||"").trim().slice(0,60)};});
+   await openByKeyboard();await lines.nth(1).waitFor({timeout:15_000});await panel.locator("form[data-checkout]").waitFor({timeout:15_000});
+   const small=await targetsUnder44(page,"#cart .st-cart-panel");
+   if(small.length)throw Error("Cart target under 44 by 44 px "+JSON.stringify(small));
+   await page.addScriptTag({content:axe});
+   const result=await page.evaluate(async()=>{const run=await window.axe.run(document.querySelector("#cart"),{rules:{"color-contrast-enhanced":{enabled:true}}});return run.violations.map(v=>({id:v.id,nodes:v.nodes.length}));});
+   if(result.length)throw Error("Cart axe violations "+JSON.stringify(result));
+   // Removing the first product by keyboard: the focus stays in the cart, on the next product's button.
+   await lines.first().locator("button").focus();await page.keyboard.press("Enter");
+   await page.waitForFunction(()=>document.querySelectorAll("#cart .st-cart-panel li").length===1);
+   const afterRemove=await focus();
+   if(!afterRemove.inPanel)throw Error("Removing a product lost the focus "+JSON.stringify(afterRemove));
+   // Escape shuts it, and the focus is on its button again.
+   await page.keyboard.press("Escape");
+   if(await panel.count()!==0)throw Error("Escape did not shut the cart");
+   const afterEscape=await focus();if(!afterEscape.opener)throw Error("Escape did not give the focus back to the cart's button "+JSON.stringify(afterEscape));
+   // Close, pressed by keyboard, does the same.
+   await openByKeyboard();await panel.getByRole("button",{name:"Close",exact:true}).focus();await page.keyboard.press("Enter");
+   if(await panel.count()!==0)throw Error("Close did not shut the cart");
+   const afterClose=await focus();if(!afterClose.opener)throw Error("Close did not give the focus back to the cart's button "+JSON.stringify(afterClose));
+   // Shift+Tab from its button moves the focus to the page: the panel shuts, so nothing covers what has the focus.
+   await openByKeyboard();await opener.focus();await page.keyboard.press("Shift+Tab");
+   const behind=await focus();
+   if(behind.inCart||await panel.count()!==0)throw Error("The open cart stayed over the page while the focus left it "+JSON.stringify(behind));
+   // Opened, a click on an empty part of the page (the focus leaves for the page itself), then Tab or a screen reader's own
+   // move puts it on a link under the panel: the panel shuts as well.
+   await openByKeyboard();await page.evaluate(()=>document.activeElement?.blur?.());await page.locator("main a[href]").first().focus();
+   if(await panel.count()!==0)throw Error("The open cart stayed over the page while the focus was put under it");
+   // The last product removed: the cart says it is empty and keeps the focus; Close gives it back to the cart's button.
+   await openByKeyboard();await lines.first().waitFor({timeout:15_000});await lines.first().locator("button").focus();await page.keyboard.press("Enter");
+   await page.waitForFunction(()=>document.querySelectorAll("#cart .st-cart-panel li").length===0);
+   const emptied=await focus();if(!emptied.inPanel)throw Error("Emptying the cart lost the focus "+JSON.stringify(emptied));
+   await page.keyboard.press("Escape");const afterEmpty=await focus();
+   if(!afterEmpty.opener)throw Error("An emptied cart lost the focus on closing "+JSON.stringify(afterEmpty));
+   if(errors.length)throw Error("Page errors "+JSON.stringify(errors));
+   audits++;console.log("CART_KEYBOARD_PROOF:"+JSON.stringify({engine,width,afterRemove,afterEscape,afterClose,behind,emptied,afterEmpty}));
+  }catch(error){failed++;console.error("CART_KEYBOARD_FAILURE:"+JSON.stringify({engine,width,error:redact(error)}));}
+  finally{cartCases++;cases++;await context.close();}
+ }
+ console.log("CART_KEYBOARD_COST:"+JSON.stringify({engine,cases:cartCases,milliseconds:Date.now()-cartStarted}));
+ // The card a creator puts on their own site (app/embed/[handle]/[product]), framed as it is pasted and as the checkout
+ // script's overlay opens it: one main landmark around it (1.3.1, AX274), axe AAA. Then the overlay itself, opened by the
+ // script (lib/embed-sdk.ts) from a page on another local origin: the focus goes into the card, Tab never reaches the page
+ // under the dialog (2.4.3, 2.4.11), its close button shows a ring of its own (2.4.13), and closing gives the focus back to
+ // the link. The overlay's focus moves are checked in Chromium only: what Tab does around a cross-origin frame differs by
+ // engine, and Firefox and WebKit were not run where this was written; that gap is printed, never counted as a pass.
+ const embedStarted=Date.now();let embedCases=0;
+ const sdkFolder=mkdtempSync(join(tmpdir(),"mm-buyer-sdk-")),sdkFile=join(sdkFolder,"sdk.cjs");
+ await build({entryPoints:[join(root,"lib/embed-sdk.ts")],bundle:true,platform:"node",format:"cjs",outfile:sdkFile,logLevel:"error",alias:{"@":root}});
+ const sdk=require(sdkFile);rmSync(sdkFolder,{recursive:true,force:true});
+ const hostPort=4598,host="http://127.0.0.1:"+hostPort,card=origin+"/embed/localshop/"+ids["Weeknight Dinners"];
+ const hostPage=`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A creator's own site</title></head><body><main><h1>Dinners at home</h1><p><a id="buy" data-mm="overlay" href="${card}">Buy Weeknight Dinners</a></p><p><a id="under" href="#more">More recipes</a></p></main>${sdk.loaderTag(origin)}</body></html>`;
+ const hostServer=createServer((req,res)=>{res.writeHead(200,{"content-type":"text/html; charset=utf-8"});res.end(hostPage);});
+ await new Promise(resolve=>hostServer.listen(hostPort,"127.0.0.1",resolve));
+ try{
+  for(const width of [390,1280]){
+   const context=await browser.newContext({viewport:{width,height:900},serviceWorkers:"block",extraHTTPHeaders:{"x-forwarded-for":"198.51.100."+(80+embedCases)}});
+   try{
+    const page=await context.newPage();const errors=[];page.on("pageerror",error=>errors.push(redact(error)));
+    await context.route("**/*",route=>{const url=new URL(route.request().url());if(url.origin!==origin&&url.origin!==FAKE&&url.origin!==host)return route.abort();if(url.pathname==="/api/store/hit")return route.fulfill({status:204,body:""});if(!["GET","HEAD"].includes(route.request().method()))return route.abort();return route.continue();});
+    for(const query of ["","?mm=overlay"]){
+     const response=await page.goto(card+query,{waitUntil:"networkidle",timeout:60000});
+     if(response?.status()!==200)throw Error("Card HTTP "+response?.status());
+     await page.addScriptTag({content:axe});
+     const result=await page.evaluate(async()=>{const run=await window.axe.run(document,{rules:{"color-contrast-enhanced":{enabled:true}}});return {mains:[...document.querySelectorAll("main")].map(m=>m.id),violations:run.violations.map(v=>({id:v.id,nodes:v.nodes.length}))};});
+     if(result.mains.length!==1||result.mains[0]!=="content"||result.violations.length)throw Error("Card "+(query||"pasted")+" landmark/axe failure "+JSON.stringify(result));
+    }
+    if(engine==="chromium"){
+     await page.goto(host+"/",{waitUntil:"networkidle",timeout:60000});
+     await page.locator("#buy").focus();await page.keyboard.press("Enter");
+     const frameNode=await page.waitForSelector("[role=dialog] iframe");const frame=await frameNode.contentFrame();
+     await frame.waitForLoadState("networkidle");
+     await frame.waitForFunction(()=>document.hasFocus(),null,{timeout:10_000}).catch(()=>{});
+     const inCard=await frame.evaluate(()=>document.hasFocus());
+     if(!inCard)throw Error("The overlay did not put the focus in the card");
+     const trail=[];
+     for(let n=0;n<10;n++){await page.keyboard.press("Tab");trail.push(await page.evaluate(()=>{const a=document.activeElement;return a===document.body?"page edge":a?.closest("[role=dialog]")?"dialog "+a.tagName:"UNDER "+(a?.id||a?.tagName);}));}
+     if(trail.some(step=>step.startsWith("UNDER")))throw Error("Tab reached the page under the dialog "+JSON.stringify(trail));
+     const close=page.locator("[role=dialog] > button");await close.focus();
+     const ring=await close.evaluate(n=>getComputedStyle(n).boxShadow);
+     if(!/3px.*6px/.test(ring))throw Error("The close button shows no ring of its own "+ring);
+     await page.keyboard.press("Enter");
+     if(await page.locator("[role=dialog]").count()!==0)throw Error("Close did not shut the overlay");
+     if(await page.evaluate(()=>document.activeElement?.id)!=="buy")throw Error("Closing did not give the focus back to the link");
+     console.log("OVERLAY_KEYBOARD_PROOF:"+JSON.stringify({engine,width,inCard,trail,ring}));
+    }else gaps.push({width,mode:"baseline",state:"embed overlay",reason:"Overlay focus moves around a cross-origin frame checked in Chromium only."});
+    if(errors.length)throw Error("Page errors "+JSON.stringify(errors));
+    audits++;
+   }catch(error){failed++;console.error("EMBED_FAILURE:"+JSON.stringify({engine,width,error:redact(error)}));}
+   finally{embedCases++;cases++;await context.close();}
+  }
+ }finally{await new Promise(resolve=>hostServer.close(resolve));}
+ console.log("EMBED_COST:"+JSON.stringify({engine,cases:embedCases,milliseconds:Date.now()-embedStarted}));
  console.log("BUYER_MATRIX_OPEN_GAPS:"+JSON.stringify(gaps));
  console.log("BUYER_MATRIX_SUMMARY:"+JSON.stringify({engine,cases,audits,failed,scope:"Real local app checkout against fake Stripe paid return; local captured inbox/library/orders. No real checkout/payment/provider/message/account or external download."}));
 }finally{await browser?.close();if(app&&app.exitCode===null){const closed=new Promise(resolve=>app.once("exit",resolve));const forced=setTimeout(()=>app.kill("SIGKILL"),5_000);app.kill("SIGTERM");await closed;clearTimeout(forced);}await services.close();if(reviewedApp)await reviewedApp.cleanup();}

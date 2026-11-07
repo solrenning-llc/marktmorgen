@@ -168,6 +168,24 @@ async function inTurns<T, R>(items: T[], width: number, each: (item: T) => Promi
   return out;
 }
 
+/** Only a complete positional recipient batch can advance this send. */
+async function recipientBatch(id: string, start: number, count: number): Promise<string[] | null> {
+  try {
+    const reply: unknown = await redisPipeline([["LRANGE", toKey(id), start, start + count - 1]]);
+    if (!Array.isArray(reply) || Object.getPrototypeOf(reply) !== Array.prototype || reply.length !== 1 || Reflect.ownKeys(reply).length !== 2) return null;
+    const outer = Object.getOwnPropertyDescriptor(reply, "0");
+    const rows: unknown = outer && Object.hasOwn(outer, "value") ? outer.value : null;
+    if (!Array.isArray(rows) || Object.getPrototypeOf(rows) !== Array.prototype || rows.length !== count || Reflect.ownKeys(rows).length !== count + 1) return null;
+    const keys: string[] = [];
+    for (let index = 0; index < count; index++) {
+      const slot = Object.getOwnPropertyDescriptor(rows, String(index));
+      if (!slot || !Object.hasOwn(slot, "value") || typeof slot.value !== "string" || !/^[0-9a-f]{32}$/.test(slot.value)) return null;
+      keys.push(slot.value);
+    }
+    return new Set(keys).size === count ? keys : null;
+  } catch { return null; }
+}
+
 /**
  * Moves one send on for as long as `deadline` allows. Safe to call from two
  * places at once: only one holds the send at a time.
@@ -202,10 +220,9 @@ export async function advanceAnnouncement(
 
     while (job.done < job.total && Date.now() < deadline) {
       // Checked batches (lib/mail.ts): each member is asked of Stripe before sending.
-      const [chunk] = await redisPipeline([["LRANGE", toKey(id), job.done, job.done + CHECKED_BATCH_SIZE - 1]]);
-      const keys = Array.isArray(chunk) ? (chunk as string[]) : [];
-      if (!keys.length) {
-        job = { ...job, done: job.total };
+      const keys = await recipientBatch(id, job.done, Math.min(CHECKED_BATCH_SIZE, job.total - job.done));
+      if (!keys) {
+        job = { ...job, status: "waiting", note: "We couldn't read the remaining recipients. The send is still pending." };
         break;
       }
       const found = await readMembers(job.community, keys);

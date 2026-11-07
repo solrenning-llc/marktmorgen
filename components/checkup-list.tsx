@@ -28,12 +28,12 @@ export function CheckupList({ checks, checkedAt, hrefOf }: { checks: Check[]; ch
           const state = STATE[check.state];
           return (
             <li key={check.id}>
-              <section className="card p-5 sm:p-6" aria-labelledby={`check-${check.id}`} data-check={check.id} data-state={check.state}>
+              <section className="card p-5 sm:p-6" aria-labelledby={`check-${check.id} check-${check.id}-state`} data-check={check.id} data-state={check.state}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 id={`check-${check.id}`} className="text-lg font-semibold tracking-[-0.02em] text-ink">
                     {check.title}
                   </h2>
-                  <span className={`${state.className} inline-flex items-center gap-1`}>
+                  <span id={`check-${check.id}-state`} className={`${state.className} inline-flex items-center gap-1`}>
                     <Icon name={state.icon} size={14} />
                     {state.words}
                   </span>

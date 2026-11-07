@@ -33,6 +33,8 @@ import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendBatch, type BatchMessage } from "@/lib/email";
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { textCountOf } from "@/lib/redis-count";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type Store, saleHandles, storeFolder, storeRef } from "@/lib/store";
 import { readPayPalSales } from "@/lib/paypal-sales";
 import { importedBuyers } from "@/lib/imported-purchases";
@@ -63,6 +65,31 @@ export const toldKey = (folder: string) => `nl:closing:told:${folder}`;
 const contactOf = (store: Store) => (store.contact?.on ? `use the contact form on its page, ${storeBase(store)}#contact, or reply to this email` : "reply to this email: your reply goes to the store");
 /** The told list's mark for an address the cap did not cover: written once, so each is counted once. */
 const UNTOLD = "x";
+
+/**
+ * One entry of the told list, only in its exact shape (audit SG2, CX-123
+ * rule 24): "absent" when the address is not on it (HGET and HMGET answer
+ * null), "untold" for the cap's mark, when it was told (the ending's time,
+ * as written), or null: unknown, and then nothing is sent on it this round.
+ */
+function markOf(raw: unknown): "absent" | "untold" | number | null {
+  return raw === UNTOLD ? "untold" : textCountOf(raw);
+}
+
+/**
+ * takeCredit, and when its reply is unknown (it throws), gives back the
+ * `certain` credit taken before it in the same round, whose emails will not
+ * go now, and throws again (review 1 of SG2 L8). The unknown take itself is
+ * never given back: it is not known whether it ran.
+ */
+async function takeCreditOrGiveBack(folder: string, n: number, certain: number): Promise<boolean> {
+  try {
+    return await takeCredit(folder, n);
+  } catch (error) {
+    await returnCredit(folder, certain).catch((failed) => console.error("giving back a closing's email credit failed; not tried again", failed));
+    throw error;
+  }
+}
 
 function message(store: Store, to: string, letter: BuyerLetter, postal: string): BatchMessage {
   const text = `${letter.text}\n\nMarktmorgen, ${postal}`;
@@ -126,13 +153,15 @@ export async function tellBuyers(store: Store, endedAt: number, day: number, aft
   const tell = async (raw: string[]): Promise<boolean> => {
     const fresh = [...new Set(raw.map((e) => normaliseEmail(e)).filter((e) => EMAIL_PATTERN.test(e)))];
     if (!fresh.length) return true;
-    const known = await redisPipeline([["HMGET", toldKey(folder), ...fresh]]);
-    const marks = Array.isArray(known[0]) ? (known[0] as unknown[]) : [];
-    const todo = fresh.filter((_, i) => marks[i] === null || marks[i] === undefined);
+    const known = repliesFor(await redisPipeline([["HMGET", toldKey(folder), ...fresh]]), 1)?.[0];
+    // A told list that cannot be read is never "nobody told yet": nobody is written to this round.
+    const marks = Array.isArray(known) && known.length === fresh.length ? known.map(markOf) : null;
+    if (marks === null || marks.includes(null)) return false;
+    const todo = fresh.filter((_, i) => marks[i] === "absent");
     for (let i = 0; i < todo.length; i += 100) {
       const going: string[] = [];
       for (const email of todo.slice(i, i + 100)) {
-        if (await takeCredit(folder, EMAILS_PER_BUYER_PER_ENDING)) going.push(email);
+        if (await takeCreditOrGiveBack(folder, EMAILS_PER_BUYER_PER_ENDING, going.length * EMAILS_PER_BUYER_PER_ENDING)) going.push(email);
         else {
           // Counted once however many times the address turns up (HSETNX).
           const [fresh] = await redisPipeline([["HSETNX", toldKey(folder), email, UNTOLD]]);
@@ -223,9 +252,11 @@ export async function tellStaysOpen(store: Store, until: number): Promise<boolea
 export async function toldOf(store: Store, email: string): Promise<{ toldAt: number } | null> {
   if (!isRedisConfigured()) return null;
   const folder = await storeFolder(storeRef(store));
-  const [raw] = await redisPipeline([["HGET", toldKey(folder), normaliseEmail(email)]]);
-  if (raw === null || raw === undefined) return null;
-  return { toldAt: raw === UNTOLD ? 0 : Number(raw) || 0 };
+  const mark = markOf(repliesFor(await redisPipeline([["HGET", toldKey(folder), normaliseEmail(email)]]), 1)?.[0]);
+  // Unknown is never "not yet": it fails the whole copy (lib/person-copy.ts, copyPerson), as any read that fails does.
+  if (mark === null) throw new UnknownReplyError("an entry of a closing's told list");
+  if (mark === "absent") return null;
+  return { toldAt: mark === "untold" ? 0 : mark };
 }
 
 /**
@@ -240,18 +271,30 @@ export async function tellRefundShort(store: Store, short: { email: string; amou
   if (!short.length) return out;
   if (!postal) return { ...out, ok: false };
   const folder = await storeFolder(storeRef(store));
-  const going: BatchMessage[] = [];
-  const addresses: string[] = [];
+  // Every member's mark is read before any credit is taken: one that cannot
+  // be read (audit SG2, CX-123 rule 24) is not known to be paid for or not,
+  // so nothing is taken or sent this round, and it is tried again.
+  const rows: { row: (typeof short)[number]; email: string; told: boolean }[] = [];
   for (const row of short) {
     const email = normaliseEmail(row.email);
     if (!EMAIL_PATTERN.test(email)) {
       out.untold += 1;
       continue;
     }
-    const [told] = await redisPipeline([["HGET", toldKey(folder), email]]);
-    if ((told === null || told === UNTOLD) && !(await takeCredit(folder, 1))) {
-      out.untold += 1;
-      continue;
+    const mark = markOf(repliesFor(await redisPipeline([["HGET", toldKey(folder), email]]), 1)?.[0]);
+    if (mark === null) return { ...out, ok: false };
+    rows.push({ row, email, told: typeof mark === "number" });
+  }
+  const going: BatchMessage[] = [];
+  const addresses: string[] = [];
+  let taken = 0;
+  for (const { row, email, told } of rows) {
+    if (!told) {
+      if (!(await takeCreditOrGiveBack(folder, 1, taken))) {
+        out.untold += 1;
+        continue;
+      }
+      taken += 1;
     }
     addresses.push(email);
     const letter = why === "limit" ? refundUnmadeLetter : refundShortLetter;

@@ -678,24 +678,31 @@ type InvoiceRow = {
   lines?: { data?: { price?: { product?: unknown } | null; metadata?: Record<string, string> | null }[] } | null;
 };
 
-/** The most pages of the day's paid invoices one pass reads (100 each), as the member scores read memberships. */
-const RENEWAL_PAGES = 10;
+/**
+ * The most pages of the day's paid invoices one renewals pass reads (100 each), as the member scores read
+ * memberships. A cap of its own, not lib/api-read-rules.ts's RENEWAL_PAGES (the numbers' renewals read).
+ */
+const AD_RENEWAL_PAGES = 10;
 
 /**
  * Each membership renewal paid in the last day, as a purchase of its own, for
  * a membership whose first checkout carried the buyer's yes: the creator's
- * invoices of the day, every page of them up to RENEWAL_PAGES, read once per
+ * invoices of the day, every page of them up to AD_RENEWAL_PAGES, read once per
  * pass, only on a store that sends from the server.
  */
 export async function sendRenewals(store: Store, now = Date.now(), deadline = Infinity): Promise<number> {
   if (!store.statsId || !store.stripeAccountId || !sendsFromServer(store) || !isRedisConfigured()) return 0;
   const since = Math.floor(now / 1000) - 86400;
-  // A page in an unknown shape, or more pages than the cap, is a reading not made (CX-123 rule 24): it fails
-  // as Stripe not answering does (the sweep logs it and tries again next pass), never as "no renewals".
+  // A page in an unknown shape, more pages than the cap, or a pass out of time, is a reading not made
+  // (CX-123 rule 24): it fails as Stripe not answering does (the sweep logs it and tries again next pass),
+  // never as "no renewals".
   const listedRows: InvoiceRow[] = [];
   let whole = false;
   let after = "";
-  for (let page = 0; page < RENEWAL_PAGES; page += 1) {
+  for (let page = 0; page < AD_RENEWAL_PAGES; page += 1) {
+    // A pass past its deadline asks no page after the first: it fails as a page not read does, and the
+    // sweep tries again next pass, never "no renewals" (Claude 2, review 6707563715 on #3054).
+    if (page > 0 && Date.now() >= deadline) throw new Error("Stripe's paid invoices of the day not read: the pass ran out of time");
     const listed = await onAccount("GET", store.stripeAccountId, `/invoices?limit=100&status=paid&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
     if (!Array.isArray(listed.data)) throw new Error("Stripe gave a page of invoices that is not a list");
     if (typeof listed.has_more !== "boolean") throw new Error("Stripe gave whether there are more invoices in a shape that cannot be read");
@@ -709,7 +716,7 @@ export async function sendRenewals(store: Store, now = Date.now(), deadline = In
     if (!last || typeof last.id !== "string") throw new Error("Stripe gave a page of invoices with no last one to go on from");
     after = last.id;
   }
-  if (!whole) throw new Error(`Stripe has more paid invoices of the day than ${RENEWAL_PAGES} pages`);
+  if (!whole) throw new Error(`Stripe has more paid invoices of the day than ${AD_RENEWAL_PAGES} pages`);
   const handles = saleHandles(store);
   const rows = listedRows.filter((row) => {
     if (typeof row.id !== "string" || row.billing_reason !== "subscription_cycle" || row.status !== "paid") return false;

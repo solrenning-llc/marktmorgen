@@ -254,6 +254,11 @@ export async function cancelScheduled(
  * record is gone is taken off; a waiting one that is not on the due list
  * (which the scripts never leave behind, but a hand or a restore could) is put
  * back on it, and says it is late.
+ *
+ * Known limit, not built yet (review of 293 [SQ4]): this is the only clear of
+ * done ones past their week, run when the studio's community page is opened
+ * or one is scheduled; a community whose studio is not opened keeps them, and
+ * their room, until then (bounded by MAX_SCHEDULED_POSTS records).
  */
 export async function listScheduled(store: Store, now = Date.now()): Promise<ScheduledPost[]> {
   const community = store.community?.id;
@@ -296,6 +301,12 @@ export type RunCounts = { posted: number; failed: number; unknown: number; later
  * It takes one only with PUBLISH_MIN_MS left before `deadline`
  * (milliseconds), and each post's own work is cut off at `deadline`. `now`
  * is the job's clock.
+ *
+ * Known limit, not built yet (review of 293 [SQ4]): PUBLISH_MIN_MS is checked
+ * before a post is taken, not before its announcement email is asked for. A
+ * post put up close to `deadline` can have queueAnnouncement given up by the
+ * cutoff: the post stands, its record says mail "error", and the email is not
+ * asked for again (no new read is spent to retry it).
  */
 export async function runScheduledPosts(deadline: number, now = Date.now()): Promise<RunCounts> {
   const counts: RunCounts = { posted: 0, failed: 0, unknown: 0, later: 0 };

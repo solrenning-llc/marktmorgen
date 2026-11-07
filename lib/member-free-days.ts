@@ -20,6 +20,10 @@
  * moved since the creator saw it is refused, so a second press after the
  * first went through never adds the days again.
  *
+ * Stripe reads the membership "trialing" from then on; the same request marks
+ * whether it was paid for before (lib/member-free-days-rules.ts, freeDaysMarks),
+ * so no reader takes a paid membership for one in a free trial.
+ *
  * Cost (MR): one studio request (the route's guard), the Stripe reads the
  * discount's own find makes and one write, all on the creator's account; two
  * Redis commands for the claim and the activity log's own two; and one email
@@ -39,7 +43,7 @@ import { freeDaysWords } from "@/lib/buyer-words/free-days";
 import { readListings } from "@/lib/catalog";
 import { forgetStatus } from "@/lib/membership-access";
 import type { Store } from "@/lib/store";
-import { type FreeDaysBlock, type FreeDaysSub, freeDaysState, movedCharge, parseFreeDays } from "@/lib/member-free-days-rules";
+import { type FreeDaysBlock, type FreeDaysSub, freeDaysMarks, freeDaysState, movedCharge, parseFreeDays } from "@/lib/member-free-days-rules";
 
 /** The Stripe version lib/member-discount.ts reads memberships with, so a subscription reads the same here. */
 const API_VERSION = "2025-09-30.clover";
@@ -107,11 +111,13 @@ export async function giveFreeDays(
   const release = () => redisPipeline([["DEL", key]]).catch(() => null);
 
   // The body depends only on the membership, the date seen and the days, so a repeat under the same key is Stripe's replay.
+  // The marks say whether its "trialing" from now is a free trial or days on a paid membership (lib/member-free-days-rules.ts).
   const body = new URLSearchParams({
     trial_end: String(nextCharge),
     proration_behavior: "none",
     "metadata[free_days]": String(days),
     "metadata[free_days_from]": String(expected),
+    ...freeDaysMarks(found.raw),
   });
   let answer: Record<string, unknown>;
   try {

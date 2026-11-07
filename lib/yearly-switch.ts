@@ -39,6 +39,7 @@ import { DEFAULT_LANGUAGE, LANGUAGES, parseLanguage } from "@/lib/store-language
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { forgetPaid } from "@/lib/learn";
+import { inFreeTrial } from "@/lib/member-free-days-rules";
 import type { Listing, Store } from "@/lib/store";
 
 /** What the switch page and the form ask for, in place of another plan's id. */
@@ -158,7 +159,8 @@ async function find(store: Store, token: string, subscription: string): Promise<
   if (!product || !canSellProduct(store, product)) return { reason: "yearly", emailed };
   const choice = yearlyChoice(sub, product, store.tiers, store.currency, Math.floor(Date.now() / 1000));
   if (!choice) return { reason: "yearly", emailed };
-  return { grant, emailed, itemId, product, choice, trialing: sub.status === "trialing" };
+  // yearlyChoice already refused free days given on a paid membership; only a real free trial is one here.
+  return { grant, emailed, itemId, product, choice, trialing: inFreeTrial(sub) };
 }
 
 /** What moving to yearly would cost right now, in Stripe's own figures. Changes nothing. */

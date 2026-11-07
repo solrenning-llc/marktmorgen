@@ -27,7 +27,7 @@ import { addProduct, claimHandle, ensureStatsId, setProductLink, setStoreTiers, 
 import { choicesFor, liveTiers, previewSwitch, switchTier } from "@/lib/tier-switch";
 import { membershipsFor, requestManageLink } from "@/lib/membership-manage";
 import { giveFreeDays } from "@/lib/member-free-days";
-import { yearlyChoice } from "@/lib/yearly-switch-rules";
+import { askFits, yearlyChoice } from "@/lib/yearly-switch-rules";
 import { numbersFrom, readSub } from "@/lib/membership-numbers";
 import * as profile from "@/lib/buyer-profile";
 import { store as redis } from "./redis-stub";
@@ -173,6 +173,15 @@ async function main(): Promise<void> {
   );
   is("days given on a real trial: still a trial, offered", yearlyChoice(yearlySub({ status: "trialing", metadata: { store: "harbor", product: "club", free_days: "3", free_days_paid: "0" } }), club, [], "usd", NOW)?.cents, 20000);
 
+  is(
+    "the email offering yearly counts the payments from the real start, not from the days' end",
+    [
+      askFits(yearlySub({ start_date: NOW - 90 * DAY, trial_end: NOW - 10 * DAY, metadata: { store: "harbor", product: "club", free_days: "5", free_days_paid: "1", free_days_trial_was: "0" } }), NOW),
+      askFits(yearlySub({ start_date: NOW - 90 * DAY, trial_end: NOW - 10 * DAY }), NOW),
+    ],
+    [true, false],
+  );
+
   part("Unknown fails closed: free days with no mark");
   member = fresh({ status: "trialing", trial_end: PERIOD_END + 5 * DAY, metadata: { store: "harbor", product: tierA, free_days: "5" } });
   const unmarked = await previewSwitch(store, token, "sub_Member0001", b.product.id);
@@ -196,8 +205,11 @@ async function main(): Promise<void> {
   is("given 2 more", again.ok, true);
   const againBody = calls.filter((c) => c.path === "/subscriptions/sub_Member0001" && c.body.get("trial_end")).at(-1)!.body;
   is("still paid before, with the real trial's end kept, not the days' own", [againBody.get("metadata[free_days_paid]"), againBody.get("metadata[free_days_trial_was]")], ["1", String(NOW - 60 * DAY)]);
+  // A later period (the claim on PERIOD_END is still held from the first press above, as it should be).
+  const LATER = PERIOD_END + 30 * DAY;
   member = fresh({ status: "active", trial_end: NOW - 40 * DAY });
-  await giveFreeDays(store, MEMBER, "sub_Member0001", 2, PERIOD_END, by);
+  (member.items as { data: Record<string, unknown>[] }).data[0].current_period_end = LATER;
+  is("given 2 days on a paid membership that had a trial once", (await giveFreeDays(store, MEMBER, "sub_Member0001", 2, LATER, by)).ok, true);
   const firstBody = calls.filter((c) => c.path === "/subscriptions/sub_Member0001" && c.body.get("trial_end")).at(-1)!.body;
   is("a paid membership that had a trial once: that trial's end is kept", [firstBody.get("metadata[free_days_paid]"), firstBody.get("metadata[free_days_trial_was]")], ["1", String(NOW - 40 * DAY)]);
 

@@ -25,6 +25,7 @@
  */
 import { RECURRING_ALWAYS } from "@/lib/affiliate-setting";
 import { type YearlyCandidate, type Yearly, activeYearly } from "@/lib/yearly-price";
+import { onPaidFreeDays, realTrialEnd } from "@/lib/member-free-days-rules";
 
 /** The parts of a Stripe subscription these rules read. */
 export type YearlySub = {
@@ -88,6 +89,9 @@ export function yearlyChoice(
   if (!product) return null;
   const status = String(sub.status ?? "");
   if (status !== "active" && status !== "trialing") return null;
+  // Free days given on a paid membership read "trialing" in Stripe, but are no free trial (lib/member-free-days-rules.ts):
+  // a move made then would be charged nothing for the rest of a period paid. Offered again once it is charged.
+  if (onPaidFreeDays(sub)) return null;
   if (num(sub.cancel_at) > 0 || sub.cancel_at_period_end === true) return null;
   if (sub.pause_collection && typeof sub.pause_collection === "object") return null;
   const meta = sub.metadata ?? {};
@@ -118,7 +122,8 @@ export const ASK_AFTER_DAYS = 58;
  */
 export function askFits(sub: YearlySub, nowSeconds: number): boolean {
   if (sub.status !== "active") return false;
-  const paidSince = Math.max(num(sub.start_date), num(sub.trial_end));
+  // The real trial's end: free days given on a paid membership move Stripe's trial_end, not when it began to pay.
+  const paidSince = Math.max(num(sub.start_date), realTrialEnd(sub));
   return paidSince > 0 && nowSeconds - paidSince >= ASK_AFTER_DAYS * 86_400;
 }
 

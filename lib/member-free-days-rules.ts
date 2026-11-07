@@ -23,7 +23,24 @@
  * So the new trial_end is the next charge the creator saw plus the days,
  * exactly: the period already paid for, or the trial already running, is
  * kept whole, and the days come after it.
+ *
+ * "Trialing" is then not a free trial (Claude 6 on #2912). On a membership
+ * already paid for, Stripe reads it "trialing" from the moment the days are
+ * given, for the rest of the period paid and the days after it, and keeps
+ * that trial_end once it runs again. Every reader that takes "trialing" for a
+ * free trial would say the wrong thing: a switch of tier shown as nothing due,
+ * a receipt without what was charged, a paying member counted as one in a
+ * trial. So the same request that moves the date marks the membership
+ * (FREE_DAYS_PAID: "1" paid before, "0" a free trial given more days; and,
+ * when paid before, FREE_DAYS_TRIAL_WAS: the end of the real trial it had, or
+ * "0"), and the readers ask inFreeTrial and paidFreeDays below, never the
+ * status alone. Free days with no mark cannot be told apart: not a free trial.
  */
+
+/** Metadata the free days write: whether the membership was paid for before them ("1") or in a free trial ("0"). */
+export const FREE_DAYS_PAID = "free_days_paid";
+/** Metadata, when paid before: the end of the membership's real trial, in seconds, or "0" when it had none. */
+export const FREE_DAYS_TRIAL_WAS = "free_days_trial_was";
 
 /**
  * The most days one press gives: one quarter. It covers a courtesy week, a
@@ -74,6 +91,53 @@ export function freeDaysState(sub: Raw, nowSeconds: number): { nextCharge: numbe
   if (sub.schedule) return { nextCharge, blocked: "scheduled" };
   if (nextCharge <= nowSeconds) return { nextCharge, blocked: "unknown" };
   return { nextCharge, blocked: null };
+}
+
+const metaOf = (sub: { metadata?: unknown }): Record<string, unknown> =>
+  sub.metadata && typeof sub.metadata === "object" && !Array.isArray(sub.metadata) ? (sub.metadata as Record<string, unknown>) : {};
+const isSet = (value: unknown) => value !== undefined && value !== null && value !== "";
+
+/**
+ * Whether free days given here make the membership's "trialing" something
+ * other than a free trial: given on a membership paid for before ("1"), or
+ * given with no mark that says which (unknown, so not a free trial). False
+ * only when no free days were given, or they were given in a free trial ("0").
+ */
+export function paidFreeDays(sub: { metadata?: unknown }): boolean {
+  const meta = metaOf(sub);
+  if (meta[FREE_DAYS_PAID] === "0") return false;
+  return isSet(meta[FREE_DAYS_PAID]) || isSet(meta.free_days);
+}
+
+/** Whether a membership is in a real free trial: Stripe says "trialing" and no free days given on a paid one say otherwise. */
+export function inFreeTrial(sub: { status?: unknown; metadata?: unknown }): boolean {
+  return sub.status === "trialing" && !paidFreeDays(sub);
+}
+
+/** Whether a membership is "trialing" only because free days were given on it while paid (or it cannot be told). */
+export function onPaidFreeDays(sub: { status?: unknown; metadata?: unknown }): boolean {
+  return sub.status === "trialing" && paidFreeDays(sub);
+}
+
+/**
+ * The end of a membership's real free trial, in seconds, or 0: Stripe's
+ * trial_end, except after free days given on a paid membership, whose
+ * trial_end is the days' own; then the end kept when they were given.
+ */
+export function realTrialEnd(sub: { trial_end?: unknown; metadata?: unknown }): number {
+  if (!paidFreeDays(sub)) return num(sub.trial_end);
+  return num(Number(metaOf(sub)[FREE_DAYS_TRIAL_WAS]));
+}
+
+/**
+ * The marks the free days carry on the request that moves the date, read from
+ * the membership as Stripe answered before it: a free trial stays one ("0"); a
+ * paid membership, or one already on free days given while paid, is "1" with
+ * its real trial's end.
+ */
+export function freeDaysMarks(sub: Raw): Record<string, string> {
+  if (inFreeTrial(sub)) return { [`metadata[${FREE_DAYS_PAID}]`]: "0" };
+  return { [`metadata[${FREE_DAYS_PAID}]`]: "1", [`metadata[${FREE_DAYS_TRIAL_WAS}]`]: String(realTrialEnd(sub)) };
 }
 
 /** One of the member's running memberships here, as the studio's form shows it. */

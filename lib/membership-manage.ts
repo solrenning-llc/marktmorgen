@@ -38,6 +38,7 @@ import { isOwnReasonId, offers } from "@/lib/leave-rules";
 import { countLeave } from "@/lib/leave-flow";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
+import { onPaidFreeDays } from "@/lib/member-free-days-rules";
 
 /** How long the emailed link keeps working. */
 export const MANAGE_LINK_SECONDS = 60 * 60;
@@ -357,6 +358,12 @@ export type Membership = {
   /** Stripe's state for it, and whether it was sold to end after a set number of payments. */
   status: string;
   fixedEnd: boolean;
+  /**
+   * Whether it is "trialing" only because the creator gave free days on it while
+   * it was paid for (lib/member-free-days-rules.ts): not a free trial, so no
+   * switch of tier or of schedule is offered until it is charged again.
+   */
+  onFreeDays: boolean;
   /** What it is, by the product's name in the store today. */
   title: string;
   /** Each payment, in the currency's smallest unit. */
@@ -485,6 +492,7 @@ export async function membershipsFor(store: Store, token: string): Promise<Membe
       product,
       status: typeof sub.status === "string" ? sub.status : "",
       fixedEnd: Boolean(sub.metadata?.ends_after),
+      onFreeDays: onPaidFreeDays(sub),
       title: titles.get(product) || membershipWords(store.language).yourMembership,
       amount: typeof price?.unit_amount === "number" ? price.unit_amount : 0,
       currency: subscriptionCurrency(sub, store.currency),

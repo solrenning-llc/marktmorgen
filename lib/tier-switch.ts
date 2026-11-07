@@ -21,6 +21,16 @@
  * and what they get change together. In a free trial nothing is charged now
  * and the new price starts when the trial ends. A member keeps whatever
  * discount their membership already had.
+ *
+ * A membership on free days the creator gave while it was paid for
+ * (lib/member-free-days-rules.ts) reads "trialing" in Stripe for the rest of
+ * the period paid, but it is no free trial (Claude 6 on #2912): it is never
+ * switched until it is charged again. Stripe charges nothing for a change made
+ * while it reads "trialing", so the member would move up for free for the
+ * rest of a period paid at the lower price, or be shown $0 and charged; and a
+ * figure from Stripe that cannot be told apart from that is not one to show.
+ * The member's page offers no switch then (choicesFor); a link to one is
+ * answered as one that cannot switch, and nothing is sent to Stripe.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -30,6 +40,7 @@ import { readListings } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type Membership, endsAtOf, grantOf, subscriptionCurrency, subsOf } from "@/lib/membership-manage";
 import { canTier, direction, dueNow, productOfSub } from "@/lib/tier-rules";
+import { inFreeTrial, onPaidFreeDays } from "@/lib/member-free-days-rules";
 import { formatMoney } from "@/lib/money";
 import { membershipLine } from "@/lib/buyer-words";
 import { membershipWords } from "@/lib/buyer-words/membership";
@@ -80,7 +91,7 @@ export function tierWords(store: Store, product: Listing, language: unknown = DE
 
 /** The tiers one membership can switch to; none when it cannot switch at all. */
 export function choicesFor(store: Store, membership: Membership, tiers: Listing[]): TierChoice[] {
-  if (membership.endsAt !== null || membership.fixedEnd || !SWITCHABLE.has(membership.status)) return [];
+  if (membership.endsAt !== null || membership.fixedEnd || membership.onFreeDays || !SWITCHABLE.has(membership.status)) return [];
   // Paid in another currency than the store's now (it changed its currency since): every tier is
   // priced in the store's, so a switch would change the subscription's currency. None is offered.
   if (membership.currency.toLowerCase() !== store.currency) return [];
@@ -263,6 +274,8 @@ async function find(store: Store, token: string, subscription: string, target: s
   const sub = (await subsOf(store, grant)).find((s) => s.id === subscription);
   // Not this member's, not this store's, or no longer running: one answer for all.
   if (!sub || endsAtOf(sub) !== null || sub.metadata?.ends_after || !SWITCHABLE.has(String(sub.status))) return { reason: "gone" };
+  // Free days given on a paid membership: "trialing" in Stripe, not a free trial. Not switched until charged again.
+  if (onPaidFreeDays(sub)) return { reason: "gone" };
   const itemId = typeof sub.items?.data?.[0]?.id === "string" ? (sub.items.data[0].id as string) : "";
   if (!itemId || (sub.items?.data?.length ?? 0) !== 1) return { reason: "gone" };
   // The new tier's Price is made in the store's currency (tierPrice); a subscription
@@ -272,7 +285,7 @@ async function find(store: Store, token: string, subscription: string, target: s
   const from = tiers.find((t) => t.id === productOfSub(sub));
   const to = tiers.find((t) => t.id === target);
   if (!from || !to || from.id === to.id) return { reason: "tier" };
-  return { grant, itemId, from, to, trialing: sub.status === "trialing" };
+  return { grant, itemId, from, to, trialing: inFreeTrial(sub) };
 }
 
 /** What a switch would cost right now, in Stripe's own figures. Changes nothing. */

@@ -54,6 +54,7 @@ import { doneLessons, studentDates } from "@/lib/learn";
 import { importedFor } from "@/lib/imported-purchases";
 import { isGroupJob } from "@/lib/group-buy";
 import { callsFor, type BookedCall } from "@/lib/buyer-orders";
+import { onPaidFreeDays } from "@/lib/member-free-days-rules";
 
 /** The most customers whose payments one page reads; more is said, not hidden. */
 export const MAX_CUSTOMERS = 15;
@@ -311,8 +312,11 @@ function chargeOf(raw: unknown): Charge | null {
   return { id, cents: num(charge.amount), refunded: Math.min(num(charge.amount_refunded), num(charge.amount)), currency: currencyOf(charge), at: num(charge.created) };
 }
 
-function membershipStatus(sub: Row): ProfileMembership["status"] {
-  const status = str(sub.status);
+/** How the person's page names a membership's state. Exported for its test. */
+export function membershipStatus(sub: Row): ProfileMembership["status"] {
+  // Free days given on a paid membership read "trialing" in Stripe, but it is paying, not in a free trial
+  // (lib/member-free-days-rules.ts): it reads as active (or set to end) below.
+  const status = onPaidFreeDays(sub) ? "active" : str(sub.status);
   if (status === "trialing") return "trialing";
   if (status === "past_due" || status === "unpaid") return "past_due";
   if (sub.pause_collection && typeof sub.pause_collection === "object") return "paused";

@@ -1108,6 +1108,12 @@ export function pageAction(
  * Every style carries the same facts and the same buy box. The title, and the
  * picture, lead to the product's own page, where the long description is.
  */
+/**
+ * A product's title on its card: a 44 × 44 px target (WCAG 2.5.5 AAA), wide enough even for a title of one letter.
+ * The padding keeps the hover line under the words, drawn in the content box, not at the foot of the taller box.
+ */
+const TITLE_LINK = "st-title-link inline-flex min-h-11 min-w-11 items-center py-2.5 [background-clip:content-box] [background-origin:content-box]";
+
 export function ProductCard({
   store,
   product,
@@ -1186,10 +1192,19 @@ export function ProductCard({
     />
   ) : null;
 
+  // "Read more" says, to a screen reader, which product it is for (WCAG 2.4.9), its visible words first (2.5.3); a
+  // 44 px target like the title (2.5.5). The title's own words, not new ones, so every buyer language reads it.
+  const readMore = (
+    <Link prefetch={false} href={href} className="inline-flex min-h-11 items-center underline underline-offset-4" style={{ color: "var(--st-text)" }}>
+      {w.readMore}
+      <span className="sr-only">{`: ${product.title}`}</span>
+    </Link>
+  );
+
   const heading = (
     <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
       <h2 className="font-display min-w-0 text-lg font-semibold leading-snug">
-        <Link prefetch={false} href={href} className="st-title-link">
+        <Link prefetch={false} href={href} className={TITLE_LINK}>
           {product.title}
         </Link>
       </h2>
@@ -1205,13 +1220,7 @@ export function ProductCard({
       {sold ? <p className="st-sold mt-1 text-sm font-semibold">{sold}</p> : null}
       <ProductFacts store={store} product={product} bundleItems={bundleItems} />
       {summary}
-      {product.about || product.page ? (
-        <p className="mt-2 text-sm font-semibold">
-          <Link prefetch={false} href={href} className="underline underline-offset-4" style={{ color: "var(--st-text)" }}>
-            {w.readMore}
-          </Link>
-        </p>
-      ) : null}
+      {product.about || product.page ? <p className="mt-2 text-sm font-semibold">{readMore}</p> : null}
     </>
   );
 
@@ -1272,7 +1281,7 @@ export function ProductCard({
           </Link>
           <div className="min-w-0 flex-1">
             <h2 className="font-display text-lg font-semibold leading-snug">
-              <Link prefetch={false} href={href} className="st-title-link">
+              <Link prefetch={false} href={href} className={TITLE_LINK}>
                 {product.title}
               </Link>
             </h2>
@@ -1284,13 +1293,7 @@ export function ProductCard({
           </div>
         </div>
         <div className="sm:hidden">{summary}</div>
-        {product.about || product.page ? (
-          <p className="mt-2 text-sm font-semibold">
-            <Link prefetch={false} href={href} className="underline underline-offset-4" style={{ color: "var(--st-text)" }}>
-              {w.readMore}
-            </Link>
-          </p>
-        ) : null}
+        {product.about || product.page ? <p className="mt-2 text-sm font-semibold">{readMore}</p> : null}
         {rest}
       </li>
     );

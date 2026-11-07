@@ -12,6 +12,8 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
+import { isProgram } from "../scripts/reservation-check.mjs";
 
 const root = process.cwd();
 const odd = "pasta com espaço ção";
@@ -117,4 +119,17 @@ test("browser bundle check runs through a symbolic link", () => {
   } finally {
     rmSync(box, { recursive: true, force: true });
   }
+});
+
+test("isProgram: undecided paths run; imports, bundles and other files never do", () => {
+  const here = join(root, "scripts/reservation-check.mjs");
+  assert.equal(isProgram(pathToFileURL(here).href, here), true);
+  assert.equal(isProgram(pathToFileURL(here).href, join(root, "scripts/../scripts/reservation-check.mjs")), true);
+  assert.equal(isProgram(pathToFileURL(here).href, join(root, "tests/run.mjs")), false);
+  assert.equal(isProgram(pathToFileURL(here).href, undefined), false);
+  assert.equal(isProgram(undefined, here), false);
+  assert.equal(isProgram("data:text/javascript,1", here), false);
+  // Neither path can be resolved: the same file name runs rather than passing in silence.
+  assert.equal(isProgram("file:///no/such/dir/reservation-check.mjs", "/elsewhere/reservation-check.mjs"), true);
+  assert.equal(isProgram("file:///no/such/dir/reservation-check.mjs", "/elsewhere/other.mjs"), false);
 });

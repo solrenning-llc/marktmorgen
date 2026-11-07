@@ -8,6 +8,9 @@
 // In CI it runs inside `npm test` (tests/reservation-check.test.ts) on every
 // pull request; locally: node scripts/reservation-check.mjs <branch> <base>.
 import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { basename, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * Files every agent edits: the queue and the lanes through their own small
@@ -159,7 +162,26 @@ export function report({ me, found }, branch, changedCount) {
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+/**
+ * Whether this file is the program Node was asked to run. A plain URL
+ * comparison fails in a folder with a space or a non-ASCII letter (the URL is
+ * percent-encoded) and through a symbolic link (Node runs the real path), and
+ * the check then exited 0 saying nothing: a silent "no conflict". Both sides are
+ * compared as real paths; when a path cannot be resolved, the file name decides,
+ * so an undecided case runs and speaks instead of passing in silence. Bundled
+ * into a test (no file URL) or imported by another file, it never runs.
+ */
+export function isProgram(metaUrl, entry) {
+  if (!entry || typeof metaUrl !== "string" || !metaUrl.startsWith("file:")) return false;
+  const self = fileURLToPath(metaUrl);
+  try {
+    return realpathSync(self) === realpathSync(entry);
+  } catch {
+    return resolve(self) === resolve(entry) || basename(self) === basename(entry);
+  }
+}
+
+if (isProgram(import.meta.url, process.argv[1])) {
   const [branch, base] = process.argv.slice(2);
   const git = (args) => execFileSync("git", args, { encoding: "utf8" });
   // The reservations as they are on the base branch: a PR cannot clear another agent's row for itself.

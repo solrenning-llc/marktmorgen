@@ -1,0 +1,363 @@
+
+=== current ===
+{"file":"takedown-unknown.test.ts","old":false,"exit":0}
+
+A product whose record cannot be read is not already down
+  ok    the read timed out: an error to try again, not 409 "nothing"
+  ok    and the product is still published, with nothing on the record and no email
+  ok    its record answered nothing although the store lists it: an error too, not "nothing"
+  ok    still published, nothing written, nothing sent
+  ok    once the read works, the same press takes it down
+  ok    a product the store does not list is still nothing to do
+
+The notice to the creator is part of the takedown
+  ok    the email could not be sent: not "Done", and the operator is told the notice did not go out
+  ok    the link stays down, written on the record once
+  ok    the button has words for that answer
+  ok    pressed again: the notice goes out, and it says Done
+  ok    one email, to the creator, about the link
+  ok    under the same idempotency key every try used, this takedown's own
+  ok    nothing written or counted twice
+  ok    pressed a third time, after the notice went out: nothing to do, nothing sent
+
+A takedown whose notice went out the first time
+  ok    taken down and told, at once
+  ok    a second press: already down, nothing sent again
+
+A store switched off, its notice unsent
+  ok    not Done, and the store stays off
+  ok    pressed again: the notice goes out once, under the same key
+  ok    and then nothing more
+
+A notice the provider may have taken is never called sent, nor sent twice
+  ok    the provider answered 500: not Done, the kit stays down
+  ok    pressed again: still not Done and not "already down", and the email is not posted a second time
+
+Published again and taken down again under the same notice: a new notice, under a new key
+  ok    taken down again, and Done
+  ok    one new email, under a key that is not the first takedown's
+  ok    and a press after it: nothing more
+
+Two presses at once take the content down once, write it once and tell the creator once
+  ok    one press takes it down, the other finds nothing left to do
+  ok    down, written on the record once, one email
+
+26 checks, all passing.
+MemoryRedis dispatches: 1876 mock HTTP: 10
+taking content down failed Error: Redis request timed out (test)
+    at store.pipeline ([stdin]:50943:41)
+    at redisPipeline ([stdin]:9218:41)
+    at [stdin]:17404:59
+    at Array.map (<anonymous>)
+    at getMany ([stdin]:17404:44)
+    at readListingsMeasured ([stdin]:17439:24)
+    at readListings ([stdin]:17425:17)
+    at readListing ([stdin]:17450:17)
+    at stillUp ([stdin]:50526:27)
+    at finish ([stdin]:50596:20)
+taking content down failed Error: the store lists this product, but its record could not be read
+    at stillUp ([stdin]:50527:25)
+    at async finish ([stdin]:50596:14)
+    at async withLock ([stdin]:14512:12)
+    at async POST ([stdin]:50710:19)
+    at async answer ([stdin]:50816:22)
+    at async main ([stdin]:50831:16)
+email rejected 422
+the takedown notice to the creator was not sent
+email rejected 422
+the takedown notice to the creator was not sent
+the takedown notice to the creator was not sent
+the takedown notice to the creator was not sent
+
+
+=== base ===
+{"file":"takedown-unknown.test.ts","old":true,"exit":1}
+
+A product whose record cannot be read is not already down
+  FAIL  the read timed out: an error to try again, not 409 "nothing"
+        expected [500,"error"]
+        got      [409,"nothing"]
+  ok    and the product is still published, with nothing on the record and no email
+  FAIL  its record answered nothing although the store lists it: an error too, not "nothing"
+        expected [500,"error","threw"]
+        got      [409,"nothing",{"value":null}]
+  ok    still published, nothing written, nothing sent
+  ok    once the read works, the same press takes it down
+  ok    a product the store does not list is still nothing to do
+
+The notice to the creator is part of the takedown
+  FAIL  the email could not be sent: not "Done", and the operator is told the notice did not go out
+        expected [500,"notice_unsent",null]
+        got      [200,null,"The link \"My mixtape\" (https://soundcloud.com/someone/a-track)"]
+  ok    the link stays down, written on the record once
+  ok    the button has words for that answer
+  FAIL  pressed again: the notice goes out, and it says Done
+        expected [200,"The link \"My mixtape\" (https://soundcloud.com/someone/a-track)"]
+        got      [409,null]
+  FAIL  one email, to the creator, about the link
+        expected [1,["unknown@example.com"],true,true]
+        got      [0,[null],null,null]
+  FAIL  under the same idempotency key every try used, this takedown's own
+        expected [1,true]
+        got      [2,false]
+  ok    nothing written or counted twice
+  FAIL  pressed a third time, after the notice went out: nothing to do, nothing sent
+        expected [409,"nothing",1]
+        got      [409,"nothing",0]
+
+A takedown whose notice went out the first time
+  ok    taken down and told, at once
+  ok    a second press: already down, nothing sent again
+
+A store switched off, its notice unsent
+  FAIL  not Done, and the store stays off
+        expected [500,"notice_unsent",true]
+        got      [200,null,true]
+  FAIL  pressed again: the notice goes out once, under the same key
+        expected [200,1,1,true]
+        got      [409,0,1,false]
+  FAIL  and then nothing more
+        expected [409,1]
+        got      [409,0]
+
+A notice the provider may have taken is never called sent, nor sent twice
+  FAIL  the provider answered 500: not Done, the kit stays down
+        expected [500,"notice_unsent",false]
+        got      [200,null,false]
+  FAIL  pressed again: still not Done and not "already down", and the email is not posted a second time
+        expected [500,"notice_unsent",1,0]
+        got      [409,"nothing",1,0]
+
+Published again and taken down again under the same notice: a new notice, under a new key
+  ok    taken down again, and Done
+  FAIL  one new email, under a key that is not the first takedown's
+        expected [1,true,true]
+        got      [0,true,null]
+  FAIL  and a press after it: nothing more
+        expected [409,"nothing",1]
+        got      [409,"nothing",0]
+
+Two presses at once take the content down once, write it once and tell the creator once
+  FAIL  one press takes it down, the other finds nothing left to do
+        expected ["200 null","409 nothing"]
+        got      ["200 null","200 null"]
+  FAIL  down, written on the record once, one email
+        expected ["unpublished",1,1]
+        got      ["unpublished",2,1]
+
+26 checks, 16 failing.
+MemoryRedis dispatches: 1792 mock HTTP: 7
+email rejected 422
+email rejected 422
+
+
+=== proof ===
+{"file":"p-review-3087-stage-evidence.proof.ts","old":false,"exit":1}
+
+Unknown stage reads must not erase a pending creator notice
+  ok    control: confirmed provider refusal leaves a durable unsent notice
+  FAIL  empty: unknown stage read remains an error to retry, never nothing
+        expected [500,"error",0]
+        got      [409,"nothing",0]
+  FAIL  undefined: unknown stage read remains an error to retry, never nothing
+        expected [500,"error",0]
+        got      [409,"nothing",0]
+  ok    control: the same persisted pending notice delivers when readable
+
+Unapplied stage writes must stop before destructive content removal
+unapplied stage writes observation {"status":500,"error":"notice_unsent","surviving":false,"stored":null,"attempts":1}
+  FAIL  unknown initial stage ACK stops with a storage error
+        expected [500,"error"]
+        got      [500,"notice_unsent"]
+  FAIL  content is preserved until its recovery record is confirmed
+        expected true
+        got      false
+  FAIL  healthy retry can still remove content and deliver its notice
+        expected [200,1]
+        got      [409,0]
+
+7 checks, 5 failing.
+MemoryRedis dispatches: 1223 mock HTTP: 4
+email rejected 422
+the takedown notice to the creator was not sent
+email rejected 422
+the takedown notice to the creator was not sent
+
+
+=== linked ===
+{"file":"takedown.test.ts","old":false,"exit":0}
+
+What a notice must say
+  ok    a whole copyright notice is read
+  ok    each missing part is named
+  ok    another kind of notice needs no address or telephone
+
+Kept, and sent to the support inbox only
+  ok    sent
+  ok    to the support inbox, with Reply to the sender, and nothing to the sender
+  ok    saying everything the notice said
+  ok    its link opens it, with the store it names
+  ok    a token that is not one opens nothing
+  ok    five an hour from one connection
+  ok    each notice that reached the inbox is counted once
+  ok    two tries that could not be sent: an error each, and nothing more counted
+  ok    a notice about a product's page points at that product
+
+Taken down, written down, and told
+  ok    a link removed
+  ok    gone from the page, and on the record
+  ok    the creator is told what, why, and how to answer
+  ok    a product unpublished
+  ok    nothing twice
+
+A store switched off
+  ok    before: it sells
+  ok    its pages and sales off, and on the record
+  ok    and back on, with the record kept
+
+20 checks, all passing.
+MemoryRedis dispatches: 325 mock HTTP: 11
+{"file":"takedown-response.test.ts","old":false,"exit":0}
+Takedown confirmation: actual handler refuses malformed bodies without external calls; display requires HTTP and strict complete receipt.
+MemoryRedis dispatches: 0 mock HTTP: 0
+{"file":"eu-dsa-statement.test.ts","old":false,"exit":0}
+
+The Terms sections the email cites exist
+  ok    each section title is in app/terms/page.tsx
+  ok    the takedown is decided by a person pressing a button
+  ok    copyright: the email has no HTML part to check apart from its text
+
+Art. 17(3), a copyright notice
+  ok    (a) what was restricted
+  ok    (a) territorial scope: every country
+  ok    (a) duration of a product: until it is published again, and what that risks
+  ok    (a) no promise that only we can change it
+  ok    (b) facts: the notice and the address it named
+  ok    (b) that it came from a notice, under which rule
+  ok    (b) the sender of a notice of illegal content is not named
+  ok    (c) no automated means
+  ok    (d) the legal ground, with why
+  ok    (e) the contractual ground: Terms sections 3 and 4, linked
+  ok    (f) how to answer us
+  ok    (f) judicial redress
+  ok    (f) no internal complaint system or out-of-court body promised
+  ok    other: the email has no HTML part to check apart from its text
+
+Art. 17(3), a other notice
+  ok    (a) what was restricted
+  ok    (a) territorial scope: every country
+  ok    (a) duration of a product: until it is published again, and what that risks
+  ok    (a) no promise that only we can change it
+  ok    (b) facts: the notice and the address it named
+  ok    (b) that it came from a notice, under which rule
+  ok    (b) the sender of a notice of illegal content is not named
+  ok    (c) no automated means
+  ok    (d) the legal ground, with why
+  ok    (e) the contractual ground: Terms sections 3 and 4, linked
+  ok    (f) how to answer us
+  ok    (f) judicial redress
+  ok    (f) no internal complaint system or out-of-court body promised
+
+Art. 17(3)(a), the duration said for each kind of action (Claude 5 on #2928)
+  ok    other: the email has no HTML part to check apart from its text
+  ok    link: the duration says what the code does
+  ok    link: no other kind's duration
+  ok    other: the email has no HTML part to check apart from its text
+  ok    kit: the duration says what the code does
+  ok    kit: no other kind's duration
+  ok    other: the email has no HTML part to check apart from its text
+  ok    store: the duration says what the code does
+  ok    store: no other kind's duration
+
+The anchors the email links to are the ones the Terms page draws (Claude 5's LOW 3 on #2928)
+  ok    "3. Selling through a Marktmorgen store" has no id of its own, so its anchor is the one computed from its title
+  ok    "3. Selling through a Marktmorgen store": the test's anchor is the page's own sectionId
+  ok    "4. Acceptable use" has no id of its own, so its anchor is the one computed from its title
+  ok    "4. Acceptable use": the test's anchor is the page's own sectionId
+  ok    "16. Governing law" has no id of its own, so its anchor is the one computed from its title
+  ok    "16. Governing law": the test's anchor is the page's own sectionId
+
+45 checks, all passing.
+MemoryRedis dispatches: 607 mock HTTP: 10
+{"file":"report-response.test.ts","old":false,"exit":0}
+
+A false receipt never hides the notice
+  ok    explicit successful receipt is accepted
+  ok    HTTP failure cannot confirm receipt
+  ok    malformed or contradictory receipt refused
+  ok    refusal has readable recovery text
+  ok    malformed or contradictory receipt refused
+  ok    refusal has readable recovery text
+  ok    malformed or contradictory receipt refused
+  ok    refusal has readable recovery text
+  ok    malformed or contradictory receipt refused
+  ok    refusal has readable recovery text
+  ok    malformed or contradictory receipt refused
+  ok    refusal has readable recovery text
+  ok    malformed or contradictory receipt refused
+  ok    refusal has readable recovery text
+  ok    malformed or contradictory receipt refused
+  ok    refusal has readable recovery text
+  ok    malformed or contradictory receipt refused
+  ok    refusal has readable recovery text
+  ok    malformed or contradictory receipt refused
+  ok    refusal has readable recovery text
+  ok    malformed or contradictory receipt refused
+  ok    refusal has readable recovery text
+  ok    malformed or contradictory receipt refused
+  ok    refusal has readable recovery text
+
+Only recognized validation problems become messages
+  ok    server field problem remains understandable
+  ok    server field problem remains understandable
+  ok    server field problem remains understandable
+  ok    server field problem remains understandable
+  ok    server field problem remains understandable
+  ok    server field problem remains understandable
+  ok    server field problem remains understandable
+  ok    server field problem remains understandable
+  ok    unrecognized problem uses readable fallback
+  ok    unrecognized problem uses readable fallback
+  ok    unrecognized problem uses readable fallback
+  ok    unrecognized problem uses readable fallback
+  ok    unrecognized problem uses readable fallback
+  ok    unrecognized problem uses readable fallback
+  ok    rate limit preserves its next step
+  ok    success metadata is allowed
+
+40 checks, all passing.
+MemoryRedis dispatches: 0 mock HTTP: 0
+{"file":"transparency.test.ts","old":false,"exit":0}
+
+Nothing counted yet
+  ok    no day, no years: the page says counting begins with the first notice
+
+Counted as they happen
+  ok    from the first day counted
+  ok    received, by kind
+  ok    acted on once per notice, however many steps
+  ok    each step counted
+  ok    a made-up notice id is not counted
+  ok    and a later year starts at nothing
+  ok    nothing about who or which store is kept
+
+Where they are counted, and the page
+  ok    a notice when filed, a step when taken
+  ok    orders from authorities are said not to be counted, never shown as zero
+  ok    reached from the report form
+
+11 checks, all passing.
+MemoryRedis dispatches: 34 mock HTTP: 0
+
+
+=== types ===
+
+
+=== lint ===
+
+
+=== scanner ===
+Public data check: 4292 tracked files; 0 file(s) require correction.
+
+
+=== diff ===

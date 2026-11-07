@@ -34,13 +34,16 @@ export async function POST(request: NextRequest) {
     store = sid ? await storeForId(sid) : null;
   } catch (error) {
     console.error("a numbers link could not be read for its password", error);
-    return new Response("The link could not be checked just now. Try again in a moment.", { status: 503, headers: { "Cache-Control": "no-store" } });
+    // Back to the page's own notice, in its language and layout, never a bare text page (Claude 5 on #2971).
+    return back("?unread=1");
   }
   const link = store?.numbersLinks.find((l) => l.id === id);
   const now = Date.now();
   if (!link || link.expires <= Math.floor(now / 1000)) return back();
   // A password tried is one of the store's public requests for its window (lib/traffic.ts).
-  if (!store || !(await takePublicRequest(store, "public", now))) return back("?tries=1");
+  if (!store) return back();
+  // The store's window refused, or not known to be taken: not "too many tries", which is this connection's own count.
+  if (!(await takePublicRequest(store, "public", now))) return back("?busy=1");
   if (!passwordFits(link, password)) return back("?wrong=1");
   const cookie = passCookie(link, now);
   if (!cookie) return back("?wrong=1");

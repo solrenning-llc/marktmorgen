@@ -1,6 +1,7 @@
 import {ownedRepositoryEnv} from "./owned-repository.mjs";
 import {spawnSync} from "node:child_process";
 import {fileURLToPath} from "node:url";
+import {realpathSync} from "node:fs";
 const CLI=fileURLToPath(new URL("./node_modules/@guidepup/setup/bin/guidepup",import.meta.url));
 /** Only preparation is repeatable; the real reader and speech assertions run once. */
 export async function setupOwnedReader(options={}){
@@ -37,7 +38,14 @@ export async function setupOwnedReader(options={}){
  if(!succeeded(attempt()))throw Error("Reader preparation remained unavailable");
  return {attempts:2};
 }
-if(process.argv[1]===fileURLToPath(import.meta.url)){
+// Real paths on both sides: through a symbolic link Node runs the real path, and a
+// plain comparison ended the CI step with exit 0 without preparing anything.
+function isProgram(entry){
+ if(!entry)return false;
+ const self=fileURLToPath(import.meta.url);
+ try{return realpathSync(self)===realpathSync(entry);}catch{return self===entry;}
+}
+if(isProgram(process.argv[1])){
  setupOwnedReader().then(result=>console.log("Owned reader preparation completed; attempts="+result.attempts))
   .catch(()=>{console.error("Owned reader preparation failed; actual reader approval is unavailable.");process.exitCode=1;});
 }

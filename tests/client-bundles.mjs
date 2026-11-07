@@ -1,4 +1,5 @@
 import { readdir, readFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
@@ -39,7 +40,14 @@ export async function checkKeptOut(root) {
  }
  return failures;
 }
-if(typeof process !== 'undefined' && process.argv[1]&&pathToFileURL(resolve(process.argv[1])).href===import.meta.url){
+// Real paths on both sides: through a symbolic link Node runs the real path, and the
+// URL comparison ended with exit 0 without bundling anything.
+function isProgram(entry){
+ if(!entry||typeof import.meta.url!=='string'||!import.meta.url.startsWith('file:'))return false;
+ const self=fileURLToPath(import.meta.url);
+ try{return realpathSync(self)===realpathSync(entry);}catch{return pathToFileURL(resolve(entry)).href===import.meta.url;}
+}
+if(typeof process !== 'undefined' && isProgram(process.argv[1])){
  const result=await checkClientBundles(resolve(dirname(fileURLToPath(import.meta.url)),'..'));
  console.log(JSON.stringify(result,null,2));
  if(result.failed)process.exitCode=1;

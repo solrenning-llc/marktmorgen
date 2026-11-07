@@ -15,6 +15,7 @@ export const metadata: Metadata = {
 
 const NOTICES: Record<string, string> = {
   unknown: "Your code could not be checked just now, and nothing was opened. Wait a moment, then type the code your app shows now.",
+  "reset-unknown": "We could not let you in just now, and nothing was changed. Wait a moment, then try again.",
   wrong: "That code is not right. Type the six digits your app shows now, or one of your recovery codes.",
   limited: "That is a lot of codes in an hour. Wait a while, then try again, or log in with a passkey.",
   unreadable:
@@ -36,7 +37,7 @@ export default async function CodePage({ searchParams }: { searchParams: Promise
   const status = typeof params.status === "string" ? params.status : "";
   // An unknown reply can come after the wait was spent (lib/two-step.ts finishSignIn): said as a login not finished,
   // never as a link that expired.
-  if (!email) redirect(status === "unknown" ? "/signin?status=login-unknown" : "/signin?status=expired");
+  if (!email) redirect(["unknown", "reset-unknown"].includes(status) ? "/signin?status=login-unknown" : "/signin?status=expired");
   const notice = Object.hasOwn(NOTICES, status) ? NOTICES[status] : null;
   // A request to turn it off without a code, waiting its days (lib/two-step.ts askReset).
   // Unreadable just now (CX-123 rule 24): said so, and no day or address is made up for it.

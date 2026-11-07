@@ -199,9 +199,19 @@ const TAKE_COMMANDS = 4;
 const DATA_INSIDE_FIRST = 6 + 2 * 24;
 const DATA_INSIDE_AGAIN = 6;
 /** How much an email's record may grow while it is read, after its size was asked: its count sent, its note and failures. */
-const EMAIL_GROWTH_BYTES = 4_096;
+export const EMAIL_GROWTH_BYTES = 4_096;
 /** A stored value as it crosses to the database and back as JSON: each byte escaped once more at the most, and its quotes. */
-const wireOf = (bytes: number) => 2 * bytes + 64;
+export const wireOf = (bytes: number) => 2 * bytes + 64;
+/**
+ * The studio requests a read comes to, beyond the request's own: `bytes`
+ * sent and answered (as JSON) and `commands` billed, with the take itself
+ * (its commands, and 512 bytes): the larger of what its bytes and its
+ * commands come to, in studio requests of twenty commands and fifty
+ * kilobytes (tests/plan-cost-registry.ts, UNIT_COST.studio).
+ */
+export function studioReadUnits(bytes: number, commands: number): number {
+  return Math.max(Math.ceil((512 + bytes) / STUDIO_UNIT_BYTES), Math.ceil((TAKE_COMMANDS + commands) / STUDIO_UNIT_COMMANDS));
+}
 /**
  * The history as it crosses: no address has a quote, a backslash, a control
  * character or half a character in it (lib/sent-link-rules.ts) and the list
@@ -253,9 +263,7 @@ const SHOWN_READ_COMMAND_BYTES = 128;
 export function sentLinksShownUnits(sizes: readonly number[]): number {
   const read = sizes.filter((size) => Number.isSafeInteger(size) && size > 0);
   if (!read.length) return 0;
-  const bytes = 512 + read.reduce((sum, size) => sum + SHOWN_READ_COMMAND_BYTES + wireOf(size + SHOWN_GROWTH_BYTES), 0);
-  const commands = TAKE_COMMANDS + read.length;
-  return Math.max(Math.ceil(bytes / STUDIO_UNIT_BYTES), Math.ceil(commands / STUDIO_UNIT_COMMANDS));
+  return studioReadUnits(read.reduce((sum, size) => sum + SHOWN_READ_COMMAND_BYTES + wireOf(size + SHOWN_GROWTH_BYTES), 0), read.length);
 }
 
 /** The shortest address a change can send a link to: no change is shorter in bytes. */
@@ -354,9 +362,7 @@ export type ShownEmails = { ok: true; emails: ShownEmail[] } | { ok: false; refu
 export function sentEmailsShownUnits(sizes: readonly number[], growth = 0): number {
   const read = sizes.filter((size) => Number.isSafeInteger(size) && size > 0);
   if (!read.length) return 0;
-  const bytes = 512 + read.reduce((sum, size) => sum + SHOWN_READ_COMMAND_BYTES + wireOf(size + growth), 0);
-  const commands = TAKE_COMMANDS + read.length;
-  return Math.max(Math.ceil(bytes / STUDIO_UNIT_BYTES), Math.ceil(commands / STUDIO_UNIT_COMMANDS));
+  return studioReadUnits(read.reduce((sum, size) => sum + SHOWN_READ_COMMAND_BYTES + wireOf(size + growth), 0), read.length);
 }
 
 /** One email's record, checked as listBroadcastsStrict checks what the page uses of it: null when it is not one (or was read short). */

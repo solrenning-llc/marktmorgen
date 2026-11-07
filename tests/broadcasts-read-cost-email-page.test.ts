@@ -32,6 +32,12 @@ import { done, is, part } from "./check";
 const READ = 30;
 const OWNER = "emailpageread@example.com";
 const read = (path: string) => readFileSync(path, "utf8");
+/** A record as listBroadcastsStrict reads it, but its body. */
+const withoutBody = <T extends { body: string }>(b: T): Omit<T, "body"> => {
+  const copy: Partial<T> = { ...b };
+  delete copy.body;
+  return copy as Omit<T, "body">;
+};
 
 type Head = Record<string, unknown> & { id: string };
 type Heads = { ok: true; heads: Head[] } | { ok: false; refused: string };
@@ -69,7 +75,7 @@ async function main(): Promise<void> {
   {
     const { result, sum } = await run();
     const strict = await listBroadcastsStrict(listId);
-    const expected = strict.map(({ body: _body, ...rest }) => rest);
+    const expected = strict.map(withoutBody);
     is("every email, newest first, each field as listBroadcastsStrict reads it, and no body", result !== "threw" && result.ok ? result.heads : result, expected);
     is(`the list and the sizes are asked inside the page's own studio requests, small (${JSON.stringify(sum.own)})`, sum.own.commands <= 1 + 1 + READ && sum.own.bytes <= 8_000, true);
     is("no email is read before the studio requests are taken", sum.readBefore, false);
@@ -90,7 +96,7 @@ async function main(): Promise<void> {
     await writeEmails(store, few, (i) => tricky[i], (i) => ({ subject: `A "quoted" \\ subject ${i} "body":"`, note: i === 1 ? 'Waiting: "body":"' : "" }));
     const { result } = await run();
     const strict = await listBroadcastsStrict(listId);
-    is("each read exactly as stored, but its body", result !== "threw" && result.ok ? result.heads : result, strict.map(({ body: _body, ...rest }) => rest));
+    is("each read exactly as stored, but its body", result !== "threw" && result.ok ? result.heads : result, strict.map(withoutBody));
   }
 
   part("1c. Small emails cost what they are; none costs nothing more");
@@ -148,6 +154,8 @@ async function main(): Promise<void> {
       ["a record with an empty body", () => pipeline([["SET", emailKey(ids[4]), record(store, ids[4], "")]]).then(() => undefined)],
       ["a record with no body", () => pipeline([["SET", emailKey(ids[4]), JSON.stringify({ ...JSON.parse(record(store, ids[4], "x")), body: undefined })]]).then(() => undefined)],
       ["a record that is not JSON", () => pipeline([["SET", emailKey(ids[4]), '{"id":"x","body":"unterminated']]).then(() => undefined)],
+      // No record has one (createBroadcast writes the body fifth, and no nested field is called "body"): the body read is then its own, and refused.
+      ["a record whose first body is a nested one", () => pipeline([["SET", emailKey(ids[4]), JSON.stringify({ extra: { body: "x" }, ...JSON.parse(record(store, ids[4], small(4))) })]]).then(() => undefined)],
     ];
     for (const [what, spoil] of cases) {
       await writeEmails(store, ids.slice(0, 8), small);

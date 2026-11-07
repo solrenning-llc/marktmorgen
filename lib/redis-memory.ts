@@ -188,6 +188,37 @@ export class MemoryRedis {
           this.run(["HINCRBY", ledger, "reserved", rawCharge]); return 1;
         }
         // CX-67: atomic held membership and aggregate observations.
+        // lib/broadcasts.ts BROADCAST_HEADS: each email's record without its body ("size": its length in bytes; "read": up to its bound), -1 missing, -2 no body.
+        if (key.startsWith("-- marktmorgen:broadcast-heads:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const mode = args[1 + count];
+          const bounds = args.slice(2 + count);
+          return keys.map((one, i) => {
+            const raw = this.run(["GET", one]);
+            if (raw === null || raw === undefined) return -1;
+            if (typeof raw !== "string") throw new Error("WRONGTYPE");
+            const at = raw.indexOf('"body":"');
+            if (at < 0) return -2;
+            const start = at + 8;
+            let from = start;
+            let head: string | null = null;
+            for (;;) {
+              const quote = raw.indexOf('"', from);
+              if (quote < 0) break;
+              let slashes = 0;
+              while (raw[quote - 1 - slashes] === "\\") slashes += 1;
+              if (slashes % 2 === 0) {
+                if (quote > start) head = raw.slice(0, start) + raw.slice(quote);
+                break;
+              }
+              from = quote + 1;
+            }
+            if (head === null) return -2;
+            const bytes = new TextEncoder().encode(head);
+            return mode === "size" ? bytes.length : new TextDecoder().decode(bytes.slice(0, Number(bounds[i])));
+          });
+        }
         // lib/webhooks.ts READ_DELIVERIES: each delivery read only while it is no larger than its bound, {0} at the first larger one.
         if (key.startsWith("-- marktmorgen:webhook-deliveries-read:v1\n")) {
           const count = Number(args[0]);

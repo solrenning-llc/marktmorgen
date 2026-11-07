@@ -14,11 +14,11 @@ import { idsOfKind, readTitles } from "@/lib/catalog";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { PLANS_ON_SALE } from "@/lib/opening";
-import { studioPath, studioView } from "@/lib/studio-route";
+import { countStudio, studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { listCounts } from "@/lib/contacts";
-import { listBroadcastsStrict } from "@/lib/broadcasts";
+import { type BroadcastHeads, readBroadcastHeads } from "@/lib/broadcasts";
 import { letterIdFor, publishedLetters } from "@/lib/letters";
 import { broadcastMoney, flowMoney, readMailRevenue, readMailVisits } from "@/lib/mail-revenue";
 import { sellsSomething } from "@/lib/mail-starters";
@@ -62,10 +62,17 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const { store } = view;
 
   const allowance = monthlyAllowance(store);
-  const [counts, used, loadedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
+  // The emails are read without their bodies, which this page never shows: the list and each one's size first,
+  // inside this page's own studio requests, then what reading them comes to is taken before any is read
+  // (lib/broadcasts.ts, readBroadcastHeads).
+  const payStudio = async (units: number) => {
+    const counted = await countStudio(store, null, units);
+    return counted.ok ? ({ ok: true } as const) : ({ ok: false, message: counted.message } as const);
+  };
+  const [counts, used, listedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
     listCounts(store.listId),
     usedThisMonth(store.listId, windowId(store)),
-    listBroadcastsStrict(store.listId).catch(() => null),
+    readBroadcastHeads(store.listId, payStudio).catch((): BroadcastHeads | null => null),
     readFlowListStrict(store.listId).catch(() => null),
     // The names of the products a flow or a broadcast can be about: one
     // command, where reading every card was one per product (lib/catalog.ts).
@@ -82,6 +89,9 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   ]);
   const levels = health ? healthLevels(health) : null;
   const advice = levels ? healthAdvice(levels.worst, levels.measure) : null;
+  const loadedBroadcasts = listedBroadcasts?.ok ? listedBroadcasts.heads : null;
+  // Not read because the studio requests reading them comes to are not left: said in words, with why.
+  const emailsRefused = listedBroadcasts && !listedBroadcasts.ok ? listedBroadcasts.refused : null;
   const broadcasts = loadedBroadcasts ?? [];
   const flows = loadedFlows ?? [];
   const drafts = loadedDrafts ?? [];
@@ -229,6 +239,11 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               <p className="mt-2 text-sm">{advice.text}</p>
               <p className="mt-2 text-sm text-ink-soft">{HEALTH_NOTE}</p>
             </section>
+          ) : null}
+          {emailsRefused !== null ? (
+            <p role="status" className="mt-6 max-w-2xl">
+              Your sent and scheduled emails could not be shown: reading them counts as studio requests, and there are not enough left. {emailsRefused}
+            </p>
           ) : null}
           {can(role, "send") && broadcasts.some((b) => b.sent > 0) ? (
             <p className="mt-6">

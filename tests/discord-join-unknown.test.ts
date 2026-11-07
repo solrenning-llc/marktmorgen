@@ -160,6 +160,14 @@ test("thanks page, an order past its three-day window: the orders page's form, n
   assert.equal(await joined({ session_id: SESSION }), `https://marktmorgen.test/@${HANDLE}/orders`);
 });
 
+test("the orders page shows its own expired-link notice for status=expired, with no link to read", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { ordersWords } = await import("@/lib/buyer-words/orders");
+  const page = readFileSync("app/[handle]/orders/page.tsx", "utf8");
+  assert.match(page, /: NOTICES\[status\] \?\? null;/);
+  assert.equal(ordersWords("en").notices.expired.title, "This link has expired");
+});
+
 test.after(() => {
   redis.pipeline = original;
 });

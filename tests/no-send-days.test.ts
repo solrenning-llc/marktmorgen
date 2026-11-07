@@ -66,6 +66,29 @@ is("never earlier than due, always on an open day, never more than the longest w
 is("no setting: now; a setting that could not be read: unknown, so nothing goes out and nothing is dropped", [whenToSend("none", "marketing", SAT_10AM), whenToSend("unknown", "marketing", SAT_10AM), whenToSend("unknown", "service", SAT_10AM)], [{ send: "now" }, { send: "unknown" }, { send: "now" }]);
 is("a kept setting that breaks the rules is unknown, never a guess", [whenToSend({ timeZone: NY, weekdays: [0, 1, 2, 3, 4, 5, 6], dates: [] }, "marketing", SAT_10AM), whenToSend({ timeZone: "Not/AZone", weekdays: [6], dates: [] }, "marketing", SAT_10AM), whenToSend({ timeZone: NY, weekdays: [], dates: run("2026-11-07", MAX_WAIT_DAYS + 1) }, "marketing", SAT_10AM)], [{ send: "unknown" }, { send: "unknown" }, { send: "unknown" }]);
 
+part("The day it goes out is the day it says, even when the clocks skip");
+const NUUK = "America/Nuuk";
+const nuuk: NoSendDays = { timeZone: NUUK, weekdays: [0, 5], dates: [] };
+// Nuuk moves its clocks at 01:00 UTC, which there is 11:00 PM on Saturday 28 March 2026: Saturday has no 11 PM hour.
+is("proof: in Nuuk, Saturday 28 March 2026 goes from 10:59 PM straight to Sunday", [clock(Date.UTC(2026, 2, 29, 0, 59), NUUK), clock(Date.UTC(2026, 2, 29, 1, 0), NUUK)], ["Saturday, March 28, 2026 at 10:59 PM", "Sunday, March 29, 2026 at 12:00 AM"]);
+// Friday 27 March, 11:30 PM in Nuuk: Friday is held; Saturday's 11:30 PM does not exist and an hour later is Sunday, which is held too.
+const friday = whenToSend(nuuk, "marketing", Date.UTC(2026, 2, 28, 1, 30));
+is("Friday 11:30 PM, Saturday's 11:30 PM skipped, Sunday held: it waits for Monday 11:30 PM", [friday, friday.send === "later" ? clock(friday.at, NUUK) : ""], [{ send: "later", at: Date.UTC(2026, 2, 31, 0, 30), day: "2026-03-30" }, "Monday, March 30, 2026 at 11:30 PM"]);
+const nuukDues = Array.from({ length: 2 * 24 * 7 }, (_, h) => Date.UTC(2026, 2, 25, 0, 0) + h * 1_800_000);
+const localKey = (ms: number, tz: string) => new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(ms);
+is("every half hour across that week: the day given is the day its clock shows, and never a held one", nuukDues.every((due) => {
+  const w = whenToSend(nuuk, "marketing", due);
+  if (w.send === "now") return ![0, 5].includes(new Date(Date.parse(localKey(due, NUUK))).getUTCDay());
+  return w.send === "later" && w.at > due && localKey(w.at, NUUK) === w.day && !nuuk.weekdays.includes(new Date(Date.parse(w.day)).getUTCDay());
+}), true);
+
+part("A clock that is not a time is unknown, never an error");
+is("an email due at no time: unknown, so nothing goes out and nothing is dropped", [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 9e15].map((due) => whenToSend(weekend, "marketing", due)), Array(4).fill({ send: "unknown" }));
+is("an email about an order still goes now: its day is never looked at", whenToSend(weekend, "service", Number.NaN), { send: "now" });
+is("no setting still sends now: its day is never looked at", whenToSend("none", "marketing", Number.NaN), { send: "now" });
+is("a setting read at no time: unknown, never an error", [Number.NaN, Number.POSITIVE_INFINITY, 9e15].map((now) => readNoSendDays({ timeZone: NY, weekdays: [6], dates: ["2026-12-25"] }, now)), Array(3).fill({ ok: false, why: "unknown" }));
+is("what the studio says then", (NO_SEND_PROBLEMS as Record<string, unknown>).unknown, "These settings could not be checked just now. Try again in a moment.");
+
 part("What the studio says");
 is("weekdays from Monday, then dates, then what happens and what is never held", noSendDaysWords({ timeZone: NY, weekdays: [0, 6, 1], dates: ["2026-12-24", "2026-12-25"] }), "Automated marketing emails wait on Mondays, Saturdays and Sundays and on 2 dates you picked. They go out on the next day you allow, at the same time of day, in your time zone (America/New_York). Emails about an order, like receipts and access links, are never held.");
 is("one date, no weekdays", noSendDaysWords({ timeZone: SP, weekdays: [], dates: ["2026-12-25"] }), "Automated marketing emails wait on 1 date you picked. They go out on the next day you allow, at the same time of day, in your time zone (America/Sao_Paulo). Emails about an order, like receipts and access links, are never held.");

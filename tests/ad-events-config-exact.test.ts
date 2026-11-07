@@ -85,7 +85,7 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "adconfig", "Ad Config", "");
   const statsId = (await ensureStatsId(OWNER))!.statsId!;
-  await setStripeAccount(OWNER, "acct_1TestAdConfig001", true);
+  await setStripeAccount(OWNER, "acct_1TestAdConf0001", true);
   await setSubscription(OWNER, { customerId: "cus_adc", subscriptionId: "sub_adc", active: true, tier: "creator", period: paidPeriod() });
   configKey = `nl:adsrv:${statsId}`;
   for (const p of ["meta", "tiktok", "google", "pinterest"] as const) await setServerToken(statsId, p, TOKENS[p], { account: "549755885175" });

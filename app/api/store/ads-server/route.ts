@@ -13,7 +13,8 @@ import { UnknownReplyError } from "@/lib/redis-reply";
  * checkout knows whether to keep anything without asking. A setup that
  * cannot be read exactly before the change answers 503 "unavailable" and
  * writes nothing, neither the setup nor the store's list. When the change
- * was written and only reading it back fails, it answers 503 "saved_unread":
+ * was written and reading it back or writing the store's list then fails
+ * (an unknown reply or a transport error), it answers 503 "saved_unread":
  * the change is kept, the store's list is left as it was (the studio writes
  * it at its next reading), and the editor says it was saved.
  */
@@ -34,13 +35,16 @@ export async function POST(request: NextRequest) {
     } else {
       return Response.json({ ok: false, error: "invalid" }, { status: 400 });
     }
-    const setup = await serverSetup(store.statsId).catch((error: unknown) => {
-      if (error instanceof UnknownReplyError) return "saved_unread" as const;
-      throw error;
-    });
-    if (setup === "saved_unread") return Response.json({ ok: false, error: "saved_unread" }, { status: 503 });
-    await setAdsServer(guarded.ref, platformsOn(setup));
-    return Response.json({ ok: true, setup }, { headers: { "Cache-Control": "no-store" } });
+    // The change is written: any failure from here on, an unknown reply or a
+    // transport error on the read back or on the store's list, says so.
+    try {
+      const setup = await serverSetup(store.statsId);
+      await setAdsServer(guarded.ref, platformsOn(setup));
+      return Response.json({ ok: true, setup }, { headers: { "Cache-Control": "no-store" } });
+    } catch (error) {
+      if (!(error instanceof UnknownReplyError)) console.error("reading server-sent conversions back after a change failed", error);
+      return Response.json({ ok: false, error: "saved_unread" }, { status: 503 });
+    }
   } catch (error) {
     if (error instanceof UnknownReplyError) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     console.error("changing server-sent conversions failed", error);

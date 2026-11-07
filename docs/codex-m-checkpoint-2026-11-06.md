@@ -4077,3 +4077,7 @@ M_BUDGET {"pipelineCommands":306,"memoryRun":346,"httpMockDispatch":10,"exceeded
 
 ```
 
+
+
+### Entrega em andamento — 07/11/2026,19h40 Fortaleza
+Parecer M5815395861 publicado e FULLbody confirmado no head5557ec81b2024faa049b622c26df7ff3cbbc084e. CAS do canal paraCXM-20261107-1939-C1-2 recebeu409: NÃO publicada. Mensagem completa pendente preservada localmente/em memória, não repetir sem leitura integral fresca e espera>=120s. Prefixo alheio nunca restaurado. Checkpoint de prova9ff1ac08 permanece válido, nenhuma revisão/teste deve ser repetida por esse conflito documental.

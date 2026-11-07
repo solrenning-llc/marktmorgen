@@ -34,7 +34,7 @@ const en = {
   linkNotices: {
     sent: {
       title: "Check your inbox",
-      body: "If that address bought this course, a link to open it is on its way. It works for one hour.",
+      body: "If that address bought this course, we tried to email it a link to open it. The link works for one hour. If nothing arrives in a few minutes, check your spam folder, then ask again.",
     },
     email: { title: "That address does not look right", body: "Check it and try again." },
     limited: { title: "Too many requests", body: "Wait a little, then ask again." },
@@ -352,7 +352,7 @@ const es: CoursesWords = {
   linkNotices: {
     sent: {
       title: "Revisa tu bandeja de entrada",
-      body: "Si esa dirección compró este curso, va en camino un enlace para abrirlo. Funciona durante una hora.",
+      body: "Si esa dirección compró este curso, intentamos enviarle por email un enlace para abrirlo. El enlace funciona durante una hora. Si no llega nada en unos minutos, revisa la carpeta de spam y luego vuelve a pedirlo.",
     },
     email: { title: "Esa dirección no parece correcta", body: "Revísala e inténtalo de nuevo." },
     limited: { title: "Demasiadas solicitudes", body: "Espera un poco y vuelve a pedirlo." },
@@ -647,7 +647,7 @@ const fr: CoursesWords = {
   linkNotices: {
     sent: {
       title: "Consultez votre boîte de réception",
-      body: "Si cette adresse a acheté cette formation, un lien pour l'ouvrir est en route. Il fonctionne pendant une heure.",
+      body: "Si cette adresse a acheté cette formation, nous avons essayé de lui envoyer par e-mail un lien pour l'ouvrir. Le lien fonctionne pendant une heure. Si rien n'arrive d'ici quelques minutes, regardez dans vos spams, puis redemandez-le.",
     },
     email: { title: "Cette adresse ne semble pas correcte", body: "Vérifiez-la et réessayez." },
     limited: { title: "Trop de demandes", body: "Patientez un peu, puis redemandez." },
@@ -936,7 +936,7 @@ const de: CoursesWords = {
   linkNotices: {
     sent: {
       title: "Sehen Sie in Ihrem Posteingang nach",
-      body: "Wenn mit dieser Adresse dieser Kurs gekauft wurde, ist ein Link zum Öffnen unterwegs. Er funktioniert eine Stunde lang.",
+      body: "Wenn mit dieser Adresse dieser Kurs gekauft wurde, haben wir versucht, ihr einen Link zum Öffnen per E-Mail zu senden. Der Link funktioniert eine Stunde lang. Wenn in ein paar Minuten nichts ankommt, sehen Sie im Spam-Ordner nach und fragen Sie dann erneut.",
     },
     email: { title: "Diese Adresse sieht nicht richtig aus", body: "Prüfen Sie sie und versuchen Sie es erneut." },
     limited: { title: "Zu viele Anfragen", body: "Warten Sie kurz und fragen Sie dann erneut." },
@@ -1230,7 +1230,7 @@ const it: CoursesWords = {
   linkNotices: {
     sent: {
       title: "Controlla la tua casella di posta",
-      body: "Se con quell'indirizzo è stato acquistato questo corso, un link per aprirlo è in arrivo. Funziona per un'ora.",
+      body: "Se con quell'indirizzo è stato acquistato questo corso, abbiamo provato a inviargli via email un link per aprirlo. Il link funziona per un'ora. Se tra qualche minuto non arriva nulla, controlla la cartella spam, poi richiedilo.",
     },
     email: { title: "Quell'indirizzo non sembra corretto", body: "Controllalo e riprova." },
     limited: { title: "Troppe richieste", body: "Aspetta un po', poi richiedilo." },
@@ -1522,7 +1522,7 @@ const nl: CoursesWords = {
   linkNotices: {
     sent: {
       title: "Kijk in je inbox",
-      body: "Als met dat adres deze cursus is gekocht, is er een link onderweg om hem te openen. Die werkt een uur lang.",
+      body: "Als met dat adres deze cursus is gekocht, hebben we geprobeerd er een link naartoe te mailen om hem te openen. De link werkt een uur lang. Komt er binnen een paar minuten niets aan, kijk dan in je spammap en vraag het daarna opnieuw.",
     },
     email: { title: "Dat adres lijkt niet te kloppen", body: "Controleer het en probeer het opnieuw." },
     limited: { title: "Te veel verzoeken", body: "Wacht even en vraag het dan opnieuw." },
@@ -1815,7 +1815,7 @@ const pt: CoursesWords = {
   linkNotices: {
     sent: {
       title: "Consulte a sua caixa de entrada",
-      body: "Se esse endereço comprou este curso, uma ligação para o abrir está a caminho. Funciona durante uma hora.",
+      body: "Se esse endereço comprou este curso, tentámos enviar-lhe por email uma ligação para o abrir. A ligação funciona durante uma hora. Se nada chegar dentro de alguns minutos, veja a pasta de spam e depois volte a pedir.",
     },
     email: { title: "Esse endereço não parece correto", body: "Verifique-o e tente novamente." },
     limited: { title: "Demasiados pedidos", body: "Aguarde um pouco e volte a pedir." },

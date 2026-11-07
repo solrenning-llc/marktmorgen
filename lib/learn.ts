@@ -789,7 +789,8 @@ export type LinkRequest = "sent" | "email" | "limited" | "error";
 
 /**
  * Emails a way into the course, when the address bought it. "sent" either
- * way: only whoever reads the inbox learns whether it had.
+ * way, and also when that email could not go out: only whoever reads the
+ * inbox learns whether the address had bought it.
  */
 export async function requestCourseLink(input: {
   store: Store;
@@ -809,8 +810,16 @@ export async function requestCourseLink(input: {
   if (serviceMailKnownUnavailable()) return "error";
 
   const paid = await paidCourses(store, raw);
-  if (!paid.has(product.id)) return "sent";
-  return (await sendCourseLink(store, product, raw, origin)) ? "sent" : "error";
+  // The same reply whether the address bought the course or not, and whether
+  // its email went out or not: a failed send must not tell anyone it had.
+  if (paid.has(product.id)) {
+    try {
+      await sendCourseLink(store, product, raw, origin);
+    } catch (error) {
+      console.error("sending a course link failed", error);
+    }
+  }
+  return "sent";
 }
 
 /** Sends the link itself. Also used when a buyer pays in another browser. */
@@ -822,12 +831,24 @@ export async function sendCourseLink(store: Store, product: Listing, email: stri
   const link = `${origin}/api/store/course/open?token=${token}`;
   // In the store's language (lib/buyer-words/courses.ts).
   const w = coursesWords(store.language);
-  return sendEmail({ meter: { by: "store", store: store, kind: "transactional" },
-    from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
-    to: email,
-    subject: w.courseSubject(product.title).slice(0, 200),
-    text: [w.courseLead(product.title), "", link, "", w.courseDevice, "", w.courseHour, "", w.sentBy(store.name)].join("\n"),
-  });
+  let sent = false;
+  try {
+    sent = await sendEmail({ meter: { by: "store", store: store, kind: "transactional" },
+      from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
+      to: email,
+      subject: w.courseSubject(product.title).slice(0, 200),
+      text: [w.courseLead(product.title), "", link, "", w.courseDevice, "", w.courseHour, "", w.sentBy(store.name)].join("\n"),
+    });
+  } finally {
+    // A link whose email did not go out opens nothing: it is removed at once,
+    // not left for the hour. When the send's outcome was unknown, an email that
+    // did arrive then holds a link that no longer opens, and asking again sends
+    // a new one. Removal is best effort: the hour's expiry still ends it.
+    if (!sent) {
+      await redisPipeline([["DEL", linkKey(token)]]).catch((error) => console.error("removing an unsent course link failed", error));
+    }
+  }
+  return sent;
 }
 
 /** Spends one open of an emailed link, and says who and what it was for. */

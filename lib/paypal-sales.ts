@@ -1058,9 +1058,5 @@ export async function readPayPalRefundsWithCoverage(statsId: string | null, sinc
   return { rows: out, partial: flat.length > 2 * PAYPAL_REFUNDS_READ || missing };
 }
 
-export async function readPayPalRefunds(statsId: string | null, since: number): Promise<{ order: string; capture: string; cents: number; currency: string; at: number }[]> {
-  return (await readPayPalRefundsWithCoverage(statsId, since)).rows;
-}
-
 /** What a payment is called where a refund names it: the capture, so it never mixes with a Stripe payment's id. */
 export const paypalPaymentId = (capture: string) => `paypal:${capture}`;

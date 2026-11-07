@@ -29,6 +29,8 @@ import { membershipsFor, requestManageLink } from "@/lib/membership-manage";
 import { giveFreeDays } from "@/lib/member-free-days";
 import { askFits, yearlyChoice } from "@/lib/yearly-switch-rules";
 import { numbersFrom, readSub } from "@/lib/membership-numbers";
+import { membershipWords } from "@/lib/buyer-words/membership";
+import { LANGUAGES } from "@/lib/store-language";
 import * as profile from "@/lib/buyer-profile";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -152,7 +154,7 @@ async function main(): Promise<void> {
   const listed = (await membershipsFor(store, token))!;
   is("its page offers no switch of tier while the given days run", choicesFor(store, listed[0], tiers), []);
   const after = await previewSwitch(store, token, "sub_Member0001", b.product.id);
-  is("a switch's preview is refused, never $0 as a free trial", after.ok ? [after.preview.due, after.preview.trialing] : after.reason, "gone");
+  is("a switch's preview is refused, never $0 as a free trial, and says when it opens", after.ok ? [after.preview.due, after.preview.trialing] : [after.reason, waitsUntil(after)], ["waiting", PERIOD_END + DAY]);
   const sent = calls.length;
   emails.length = 0;
   const made = await switchTier(store, token, "sub_Member0001", b.product.id, Math.floor(Date.now() / 1000), TEST_CONSENT);
@@ -185,7 +187,7 @@ async function main(): Promise<void> {
   part("Unknown fails closed: free days with no mark");
   member = fresh({ status: "trialing", trial_end: PERIOD_END + 5 * DAY, metadata: { store: "harbor", product: tierA, free_days: "5" } });
   const unmarked = await previewSwitch(store, token, "sub_Member0001", b.product.id);
-  is("not taken for a free trial: no $0, no switch", unmarked.ok ? [unmarked.preview.due, unmarked.preview.trialing] : unmarked.reason, "gone");
+  is("not taken for a free trial: no $0, no switch", unmarked.ok ? [unmarked.preview.due, unmarked.preview.trialing] : [unmarked.reason, waitsUntil(unmarked)], ["waiting", PERIOD_END + 5 * DAY]);
 
   part("A real free trial is still one");
   member = fresh({ status: "trialing", trial_end: NOW + 5 * DAY });
@@ -229,7 +231,46 @@ async function main(): Promise<void> {
     typeof status === "function" ? [status(paidDays), status(realTrial), status(fresh({ status: "trialing", metadata: { store: "harbor", free_days: "2" } }))] : "missing",
     ["active", "trialing", "active"],
   );
+
+  part("A member moved from another platform (Claude 5 on #2912): paid there until its first charge, not a free trial");
+  // lib/store-checkout.ts: subscription_data[trial_end] is the first charge and metadata[moved] is "yes",
+  // so Stripe reads it "trialing" until then, for a period the member already paid on the other platform.
+  const FIRST = NOW + 12 * DAY;
+  const moved = (over: Record<string, unknown> = {}) => fresh({ status: "trialing", start_date: NOW - DAY, trial_end: FIRST, metadata: { store: "harbor", product: tierA, moved: "yes" }, ...over });
+  member = moved();
+  is("its page offers no switch of tier before its first charge", choicesFor(store, (await membershipsFor(store, token))![0], tiers), []);
+  const movedPreview = await previewSwitch(store, token, "sub_Member0001", b.product.id);
+  is("a switch's preview is refused, never $0 as a free trial, and says when it opens", movedPreview.ok ? [movedPreview.preview.due, movedPreview.preview.trialing] : [movedPreview.reason, waitsUntil(movedPreview)], ["waiting", FIRST]);
+  const movedSent = calls.length;
+  emails.length = 0;
+  const movedMade = await switchTier(store, token, "sub_Member0001", b.product.id, Math.floor(Date.now() / 1000), TEST_CONSENT);
+  is("and the switch itself is refused: nothing is charged", movedMade.ok ? movedMade.title : movedMade.reason, "gone");
+  is("no price change sent to Stripe, no receipt", [calls.slice(movedSent).filter((c) => c.body.get("items[0][price]")).length, emails.length], [0, 0]);
+  is("no move to yearly offered before its first charge", yearlyChoice(yearlySub({ status: "trialing", trial_end: FIRST, metadata: { store: "harbor", product: "club", moved: "yes" } }), club, [], "usd", NOW), null);
+  const movedRead = readSub(moved() as never, handles)!;
+  is("the numbers read it as paying, with no free trial", [movedRead.status, movedRead.trialEnd], ["active", 0]);
+  const movedNumbers = numbersFrom([movedRead], "usd", NOW);
+  is("one paying ($10 a month), none in a free trial", [movedNumbers.paying, movedNumbers.trialing, movedNumbers.mrr], [1, 0, 1000]);
+  is("after its first charge it never had a free trial", readSub(moved({ status: "active", trial_end: FIRST - 30 * DAY }) as never, handles)!.trialEnd, 0);
+  is("the person's page: paying, not 'In a free trial'", typeof status === "function" ? status(moved()) : "missing", "active");
+  member = moved();
+  is("free days given to it", (await giveFreeDays(store, MEMBER, "sub_Member0001", 2, FIRST, by)).ok, true);
+  const movedDays = calls.filter((c) => c.path === "/subscriptions/sub_Member0001" && c.body.get("trial_end")).at(-1)!.body;
+  is("are marked as given on a paid membership, with no earlier trial", [movedDays.get("metadata[free_days_paid]"), movedDays.get("metadata[free_days_trial_was]")], ["1", "0"]);
+
+  part("What the switch page says when changing plans waits for the next payment");
+  for (const code of Object.keys(LANGUAGES)) {
+    const m = membershipWords(code) as unknown as { switchProblems: Record<string, { title: string; body: string }>; switchWaitsOn?: (date: string) => string };
+    const waiting = m.switchProblems.waiting;
+    is(`${code}: its own words, not "cannot switch"`, Boolean(waiting?.title && waiting.body && waiting.title !== m.switchProblems.gone.title && !/trial|prueba|essai|Testzeit|prova|proef|teste/i.test(waiting.body)), true);
+    is(`${code}: with the date when it is known`, typeof m.switchWaitsOn === "function" && m.switchWaitsOn("@@DATE@@").includes("@@DATE@@"), true);
+  }
   done();
+}
+
+/** The next payment a refused switch waits for, when it says one. */
+function waitsUntil(result: object): unknown {
+  return "nextCharge" in result ? (result as { nextCharge: unknown }).nextCharge : null;
 }
 
 main().catch((error) => {

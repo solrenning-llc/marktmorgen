@@ -63,7 +63,7 @@ async function main(): Promise<void> {
   for (const [name, reply] of shapes) {
     inviteAnswers(reply);
     is(`${name}: peekInvite is unknown`, await outcome(TOKEN), "unknown");
-    is(`${name}: the page says joining did not finish`, await landing(TOKEN), "/signin?status=invite-error");
+    is(`${name}: the page says the invitation could not be read (#2969), never that it expired`, await landing(TOKEN), "page");
     restore();
   }
 
@@ -73,11 +73,11 @@ async function main(): Promise<void> {
     throw new Error("Redis request failed with status 503");
   }) as typeof redis.pipeline;
   is("the store or team read failing: peekInvite throws", (await outcome(TOKEN)) === "none", false);
-  is("the store or team read failing: the page says joining did not finish", await landing(TOKEN), "/signin?status=invite-error");
+  is("the store or team read failing: the page says it could not be read, never expired", await landing(TOKEN), "page");
   redis.pipeline = (async () => {
     throw new Error("Redis request failed with status 503");
   }) as typeof redis.pipeline;
-  is("Redis down: the page says joining did not finish", await landing(TOKEN), "/signin?status=invite-error");
+  is("Redis down: the page says it could not be read, never expired", await landing(TOKEN), "page");
   restore();
   done();
 }

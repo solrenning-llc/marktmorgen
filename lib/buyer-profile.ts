@@ -54,6 +54,7 @@ import { doneLessons, studentDates } from "@/lib/learn";
 import { importedFor } from "@/lib/imported-purchases";
 import { isGroupJob } from "@/lib/group-buy";
 import { callsFor, type BookedCall } from "@/lib/buyer-orders";
+import { repliesFor as findSetReplies } from "@/lib/redis-reply";
 
 /** The most customers whose payments one page reads; more is said, not hidden. */
 export const MAX_CUSTOMERS = 15;
@@ -93,7 +94,13 @@ export function readAddress(raw: unknown): string {
 export async function findToken(store: Pick<Store, "sid">, email: string): Promise<string | null> {
   if (!isRedisConfigured() || !store.sid) return null;
   const token = randomBytes(24).toString("hex");
-  await redisPipeline([["SET", findKey(token), JSON.stringify({ s: store.sid, e: normaliseEmail(email) }), "EX", FIND_SECONDS]]);
+  // Handed out only once Redis said it stored it (rule 24): any other answer gives none (the route says the search is
+  // unavailable), and the token, in case it landed with its answer lost, is deleted, so no address is left under it.
+  const saved = findSetReplies(await redisPipeline([["SET", findKey(token), JSON.stringify({ s: store.sid, e: normaliseEmail(email) }), "EX", FIND_SECONDS]]), 1);
+  if (saved?.[0] !== "OK") {
+    await redisPipeline([["DEL", findKey(token)]]).catch(() => {});
+    return null;
+  }
   return token;
 }
 

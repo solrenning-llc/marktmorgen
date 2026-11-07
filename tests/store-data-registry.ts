@@ -244,6 +244,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:adsrv:@lib/ad-events.ts": { what: "The store's server-side ad settings, its sealed tokens", parts: [capped(8 * KB, "Four platforms' sealed tokens and a test code: one record a store.")] },
   "nl:adsrv:ctx:@lib/ad-events.ts": room("What a checkout opened with ad consent carries to its sale (four days), kept only while it fits", "lib/ad-events.ts"),
   "nl:adsrv:last:@lib/ad-events.ts": { what: "The last answers of the ad platforms, for the studio", parts: [capped(4 * KB, "One record a store, ninety days.")] },
+  "nl:adsrv:renew:@lib/ad-events.ts": { what: "Where a pass of a store's renewals left off in the day's paid invoices, when there were more than one pass reads", parts: [capped(KEY, "One key a store, an invoice's id, an hour at the most (RENEW_PLACE_SECONDS).")] },
   "nl:adsrv:sent:@lib/ad-events.ts": { what: "A sale, renewal or lead already sent to the ad platforms", room: ["lib/ad-events.ts"], parts: [per("order", 3, MARK, "A sale's mark, three days."), per("request", 3, MARK, "A lead's mark, three days.", REQ("sign-up"))] },
   "nl:adsrv:sub:@lib/ad-events.ts": { what: "What a membership's renewals are sent with", parts: [per("order", 400, KB, "Its cookies and clicks, once per membership sold, 400 days.", KIND("membership"))] },
   "nl:stats:@lib/ad-spend.ts": { what: "What the creator spent on ads", parts: [capped(MAX_SPEND_ENTRIES * 512, "MAX_SPEND_ENTRIES entries, the oldest let go.", src("lib/ad-spend-rules.ts", "MAX_SPEND_ENTRIES"))] },

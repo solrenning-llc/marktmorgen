@@ -150,9 +150,11 @@ async function main(): Promise<void> {
   asked.length = 0;
   is("the pass after reads from the newest again, and sends nothing twice", await sendRenewals(store, NOW), 0);
   is("from the newest", asked[0]?.get("starting_after"), null);
+  is("every one it read handled, it keeps its place after them, for the pass after", redis.run(["GET", placeKey(statsId)]), "in_Page000300");
 
   part("A pass that stops before it handled what it read keeps the place where it was");
   fresh();
+  redis.run(["DEL", placeKey(statsId)]);
   is("its time already over: nothing sent", await sendRenewals(store, NOW, 0), 0);
   is("and no place kept past what it did not send", redis.run(["GET", placeKey(statsId)]), null);
   redis.run(["SET", placeKey(statsId), "in_Page000100", "EX", 3600]);

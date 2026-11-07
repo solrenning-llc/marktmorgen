@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
   if (target === YEARLY_TARGET) {
     const yearly = await switchYearly(store, token, subscription, at, consent);
     if (!yearly.ok && yearly.reason === "consent") return askAgain();
-    const status = yearly.ok ? "yearly" : yearly.reason === "gone" || yearly.reason === "yearly" ? "cannot-switch" : yearly.reason;
+    const status = yearly.ok ? "yearly" : yearly.reason === "gone" || yearly.reason === "yearly" ? "cannot-switch" : yearly.reason === "freeDays" ? "free-days" : yearly.reason;
     if (await linkIsLive(token)) return back(status);
     return new Response(null, {
       status: 303,
@@ -93,5 +93,6 @@ export async function POST(request: NextRequest) {
   if (!result.ok && result.reason === "consent") return askAgain();
   // Switched instead of leaving, from the page that asked why (lib/leave-flow.ts).
   if (result.ok && fromLeave && store.leaving.on) await countLeave(store.statsId, "switched");
-  return back(result.ok ? "switched" : result.reason === "gone" || result.reason === "tier" ? "cannot-switch" : result.reason);
+  // Paid free days running: said as such on the membership page (lib/tier-switch.ts).
+  return back(result.ok ? "switched" : result.reason === "gone" || result.reason === "tier" ? "cannot-switch" : result.reason === "freeDays" ? "free-days" : result.reason);
 }

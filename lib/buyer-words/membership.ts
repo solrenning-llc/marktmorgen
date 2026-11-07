@@ -80,6 +80,7 @@ const en = {
       title: "That switch cannot be made",
       body: "The plan may no longer be offered, or the membership may be canceled or waiting on a payment. Nothing was changed.",
     },
+    "free-days": { title: "Your free days are running", body: "The store gave you free days, so your next payment comes later than usual. You can switch plans once that payment is made. Nothing was changed." },
   } as Record<string, Notice>,
   manageHead: "Manage or cancel your membership",
   manageIntro: (store: string) =>
@@ -204,6 +205,8 @@ const en = {
     error: { title: "Stripe could not work out the price just now", body: "Nothing was changed. Try again in a moment." },
     yearly: { title: "Paying yearly is not offered on this membership", body: "It may already be paid yearly, carry a discount, be canceled or waiting on a payment, or the yearly price may have changed. Nothing was changed." },
     yearlyExpired: { title: "This link has expired", body: "The link in the email works for 14 days. Ask for a link to your membership on its page; from there you can pay yearly." },
+    // A paid membership in free days the store gave: no switch until the next payment (lib/tier-switch.ts, review of #2912).
+    freeDays: { title: "Your free days are running", body: "The store gave you free days, so your next payment comes later than usual. You can switch plans once that payment is made. Nothing was changed." },
   } as Record<string, Notice>,
   switchTo: (title: string) => `Switch to ${title}`,
   nowLabel: "Now",
@@ -441,6 +444,7 @@ const es: MembershipWords = {
       title: "Ese cambio no se puede hacer",
       body: "Puede que el plan ya no se ofrezca, o que la membresía esté cancelada o pendiente de un pago. No se cambió nada.",
     },
+    "free-days": { title: "Tus días gratis están en curso", body: "La tienda te dio días gratis, así que tu próximo pago llega más tarde de lo habitual. Puedes cambiar de plan cuando se haga ese pago. No se cambió nada." },
   },
   manageHead: "Gestiona o cancela tu membresía",
   manageIntro: (store) =>
@@ -565,6 +569,7 @@ const es: MembershipWords = {
     error: { title: "Stripe no pudo calcular el precio en este momento", body: "No se cambió nada. Vuelve a intentarlo en un momento." },
     yearly: { title: "Esta membresía no ofrece el pago anual", body: "Puede que ya se pague al año, tenga un descuento, esté cancelada o pendiente de un pago, o que el precio anual haya cambiado. No se cambió nada." },
     yearlyExpired: { title: "Este enlace ha caducado", body: "El enlace del correo funciona 14 días. Pide un enlace a tu membresía en su página; desde allí puedes pagar al año." },
+    freeDays: { title: "Tus días gratis están en curso", body: "La tienda te dio días gratis, así que tu próximo pago llega más tarde de lo habitual. Puedes cambiar de plan cuando se haga ese pago. No se cambió nada." },
   },
   switchTo: (title) => `Cambiar a ${title}`,
   nowLabel: "Ahora",
@@ -787,6 +792,7 @@ const fr: MembershipWords = {
       title: "Ce changement est impossible",
       body: "La formule n'est peut-être plus proposée, ou l'abonnement est peut-être annulé ou en attente d'un paiement. Rien n'a été modifié.",
     },
+    "free-days": { title: "Vos jours offerts sont en cours", body: "La boutique vous a offert des jours gratuits, donc votre prochain paiement arrive plus tard que d'habitude. Vous pourrez changer de formule une fois ce paiement effectué. Rien n'a été modifié." },
   },
   manageHead: "Gérer ou annuler votre abonnement",
   manageIntro: (store) =>
@@ -919,6 +925,7 @@ const fr: MembershipWords = {
     error: { title: "Stripe n'a pas pu calculer le prix pour le moment", body: "Rien n'a été modifié. Réessayez dans un instant." },
     yearly: { title: "Le paiement annuel n'est pas proposé pour cet abonnement", body: "Il est peut-être déjà payé à l'année, bénéficie d'une réduction, est résilié ou en attente d'un paiement, ou le prix annuel a changé. Rien n'a été modifié." },
     yearlyExpired: { title: "Ce lien a expiré", body: "Le lien de l'e-mail fonctionne 14 jours. Demandez un lien vers votre abonnement sur sa page ; de là, vous pouvez payer à l'année." },
+    freeDays: { title: "Vos jours offerts sont en cours", body: "La boutique vous a offert des jours gratuits, donc votre prochain paiement arrive plus tard que d'habitude. Vous pourrez changer de formule une fois ce paiement effectué. Rien n'a été modifié." },
   },
   switchTo: (title) => `Passer à ${title}`,
   nowLabel: "Actuellement",
@@ -1143,6 +1150,7 @@ const de: MembershipWords = {
       title: "Dieser Wechsel ist nicht möglich",
       body: "Der Tarif wird möglicherweise nicht mehr angeboten, oder die Mitgliedschaft ist gekündigt oder wartet auf eine Zahlung. Es wurde nichts geändert.",
     },
+    "free-days": { title: "Ihre geschenkten Tage laufen", body: "Der Shop hat Ihnen kostenlose Tage geschenkt, daher kommt Ihre nächste Zahlung später als sonst. Sie können den Tarif wechseln, sobald diese Zahlung erfolgt ist. Es wurde nichts geändert." },
   },
   manageHead: "Mitgliedschaft verwalten oder kündigen",
   manageIntro: (store) =>
@@ -1275,6 +1283,7 @@ const de: MembershipWords = {
     error: { title: "Stripe konnte den Preis gerade nicht berechnen", body: "Es wurde nichts geändert. Versuchen Sie es gleich noch einmal." },
     yearly: { title: "Für diese Mitgliedschaft gibt es keine jährliche Zahlung", body: "Sie wird vielleicht schon jährlich bezahlt, hat einen Rabatt, ist gekündigt oder wartet auf eine Zahlung, oder der Jahrespreis hat sich geändert. Es wurde nichts geändert." },
     yearlyExpired: { title: "Dieser Link ist abgelaufen", body: "Der Link in der E-Mail gilt 14 Tage. Fordern Sie auf der Seite Ihrer Mitgliedschaft einen Link an; von dort können Sie jährlich zahlen." },
+    freeDays: { title: "Ihre geschenkten Tage laufen", body: "Der Shop hat Ihnen kostenlose Tage geschenkt, daher kommt Ihre nächste Zahlung später als sonst. Sie können den Tarif wechseln, sobald diese Zahlung erfolgt ist. Es wurde nichts geändert." },
   },
   switchTo: (title) => `Zu ${title} wechseln`,
   nowLabel: "Jetzt",
@@ -1510,6 +1519,7 @@ const it: MembershipWords = {
       title: "Quel cambio non si può fare",
       body: "Il piano potrebbe non essere più offerto, oppure l'abbonamento potrebbe essere annullato o in attesa di un pagamento. Non è stato modificato nulla.",
     },
+    "free-days": { title: "I tuoi giorni gratuiti sono in corso", body: "Il negozio ti ha regalato giorni gratuiti, quindi il tuo prossimo pagamento arriva più tardi del solito. Potrai cambiare piano una volta effettuato quel pagamento. Non è stato modificato nulla." },
   },
   manageHead: "Gestisci o annulla il tuo abbonamento",
   manageIntro: (store) =>
@@ -1638,6 +1648,7 @@ const it: MembershipWords = {
     error: { title: "Stripe non è riuscito a calcolare il prezzo in questo momento", body: "Non è stato modificato nulla. Riprova tra un momento." },
     yearly: { title: "Il pagamento annuale non è offerto per questo abbonamento", body: "Potrebbe essere già pagato annualmente, avere uno sconto, essere annullato o in attesa di un pagamento, oppure il prezzo annuale potrebbe essere cambiato. Non è stato cambiato nulla." },
     yearlyExpired: { title: "Questo link è scaduto", body: "Il link nell'email funziona per 14 giorni. Chiedi un link al tuo abbonamento sulla sua pagina; da lì puoi pagare annualmente." },
+    freeDays: { title: "I tuoi giorni gratuiti sono in corso", body: "Il negozio ti ha regalato giorni gratuiti, quindi il tuo prossimo pagamento arriva più tardi del solito. Potrai cambiare piano una volta effettuato quel pagamento. Non è stato modificato nulla." },
   },
   switchTo: (title) => `Passa a ${title}`,
   nowLabel: "Ora",
@@ -1862,6 +1873,7 @@ const nl: MembershipWords = {
       title: "Die overstap kan niet",
       body: "Het abonnement wordt misschien niet meer aangeboden, of het lidmaatschap is misschien opgezegd of wacht op een betaling. Er is niets gewijzigd.",
     },
+    "free-days": { title: "Je gratis dagen lopen", body: "De winkel heeft je gratis dagen gegeven, dus je volgende betaling komt later dan normaal. Je kunt van abonnement wisselen zodra die betaling is gedaan. Er is niets gewijzigd." },
   },
   manageHead: "Je lidmaatschap beheren of opzeggen",
   manageIntro: (store) =>
@@ -1989,6 +2001,7 @@ const nl: MembershipWords = {
     error: { title: "Stripe kon de prijs nu niet berekenen", body: "Er is niets gewijzigd. Probeer het zo opnieuw." },
     yearly: { title: "Per jaar betalen kan niet voor dit lidmaatschap", body: "Misschien wordt het al per jaar betaald, heeft het een korting, is het opgezegd of wacht het op een betaling, of is de jaarprijs veranderd. Er is niets gewijzigd." },
     yearlyExpired: { title: "Deze link is verlopen", body: "De link in de e-mail werkt 14 dagen. Vraag op de pagina van je lidmaatschap een link aan; van daaruit kun je per jaar betalen." },
+    freeDays: { title: "Je gratis dagen lopen", body: "De winkel heeft je gratis dagen gegeven, dus je volgende betaling komt later dan normaal. Je kunt van abonnement wisselen zodra die betaling is gedaan. Er is niets gewijzigd." },
   },
   switchTo: (title) => `Overstappen naar ${title}`,
   nowLabel: "Nu",
@@ -2211,6 +2224,7 @@ const pt: MembershipWords = {
       title: "Essa mudança não pode ser feita",
       body: "O plano pode já não estar disponível, ou a subscrição pode estar cancelada ou à espera de um pagamento. Nada foi alterado.",
     },
+    "free-days": { title: "Os seus dias grátis estão a decorrer", body: "A loja ofereceu-lhe dias grátis, por isso o seu próximo pagamento chega mais tarde do que o habitual. Pode mudar de plano depois de esse pagamento ser feito. Nada foi alterado." },
   },
   manageHead: "Gerir ou cancelar a sua subscrição",
   manageIntro: (store) =>
@@ -2338,6 +2352,7 @@ const pt: MembershipWords = {
     error: { title: "A Stripe não conseguiu calcular o preço neste momento", body: "Nada foi alterado. Tente novamente daqui a pouco." },
     yearly: { title: "O pagamento anual não está disponível para esta subscrição", body: "Pode já ser paga anualmente, ter um desconto, estar cancelada ou à espera de um pagamento, ou o preço anual pode ter mudado. Nada foi alterado." },
     yearlyExpired: { title: "Esta ligação expirou", body: "A ligação do email funciona durante 14 dias. Peça uma ligação para a sua subscrição na respetiva página; a partir daí pode pagar anualmente." },
+    freeDays: { title: "Os seus dias grátis estão a decorrer", body: "A loja ofereceu-lhe dias grátis, por isso o seu próximo pagamento chega mais tarde do que o habitual. Pode mudar de plano depois de esse pagamento ser feito. Nada foi alterado." },
   },
   switchTo: (title) => `Mudar para ${title}`,
   nowLabel: "Agora",

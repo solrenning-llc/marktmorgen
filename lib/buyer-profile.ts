@@ -54,6 +54,7 @@ import { doneLessons, studentDates } from "@/lib/learn";
 import { importedFor } from "@/lib/imported-purchases";
 import { isGroupJob } from "@/lib/group-buy";
 import { callsFor, type BookedCall } from "@/lib/buyer-orders";
+import { memberStatus } from "@/lib/member-free-days-rules";
 
 /** The most customers whose payments one page reads; more is said, not hidden. */
 export const MAX_CUSTOMERS = 15;
@@ -312,7 +313,8 @@ function chargeOf(raw: unknown): Charge | null {
 }
 
 function membershipStatus(sub: Row): ProfileMembership["status"] {
-  const status = str(sub.status);
+  // A paid membership in free days the creator gave reads "trialing" on Stripe: it is paying (lib/member-free-days-rules.ts).
+  const status = memberStatus(sub);
   if (status === "trialing") return "trialing";
   if (status === "past_due" || status === "unpaid") return "past_due";
   if (sub.pause_collection && typeof sub.pause_collection === "object") return "paused";

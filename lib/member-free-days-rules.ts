@@ -16,13 +16,26 @@
  *     Stripe documents for moving a subscription's billing date with a trial
  *     (docs.stripe.com/billing/subscriptions/billing-cycle, "Using a trial to
  *     change the billing cycle"; and the trial_end parameter of "Update a
- *     subscription" in the API reference). Not read again on 6 November 2026:
- *     docs.stripe.com could not be reached from where this was built, so the
- *     source is cited as known, unverified that day.
+ *     subscription" in the API reference). Read again on 7 November 2026
+ *     (Claude 4, for Claude 5): the same page still documents it; setting
+ *     billing_cycle_anchor to a chosen time is a private preview for flexible
+ *     billing mode only, so it is not a way here.
  *
  * So the new trial_end is the next charge the creator saw plus the days,
  * exactly: the period already paid for, or the trial already running, is
  * kept whole, and the days come after it.
+ *
+ * A paid membership in its free days is not a free trial (Claude 4 team review
+ * of #2912, A1 and M1). Stripe answers it "trialing", and keeps that trial_end
+ * on it after the days end, so giving free days to one that was paid writes on
+ * it, in the same request, which trial_end is free days (FREE_DAYS_UNTIL) and
+ * the real trial it had before, 0 for none (TRIAL_END_BEFORE). Every reader
+ * that takes "trialing" or trial_end for a free trial reads through
+ * memberStatus and realTrialEnd: the member stays paying, in the numbers, the
+ * MRR and the studio. Free days given inside a real trial leave it a trial.
+ * Stripe prorates nothing inside a trial, so while paid free days run a tier
+ * switch or a move to yearly would hand the new price over for nothing: both
+ * are refused until the next charge (inPaidFreeDays).
  */
 
 /**
@@ -50,6 +63,55 @@ export function movedCharge(nextCharge: number, days: number): number {
 
 type Raw = Record<string, unknown>;
 const num = (value: unknown) => (typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0);
+
+/** On a membership given free days while it was paid for: the trial_end that is free days, in seconds. */
+export const FREE_DAYS_UNTIL = "mm_free_days_until";
+/** And the end of the real free trial it had before, in seconds; "0" for none. */
+export const TRIAL_END_BEFORE = "mm_trial_end_before";
+const SECONDS = /^(0|[1-9]\d{0,11})$/;
+
+function metaOf(sub: Raw): Record<string, unknown> {
+  return sub.metadata && typeof sub.metadata === "object" ? (sub.metadata as Record<string, unknown>) : {};
+}
+
+/**
+ * Whether the subscription's trial_end is free days given to a membership
+ * already paid for, not a free trial: both marks written, and the first the
+ * very trial_end Stripe holds. A trial set since in Stripe's dashboard has
+ * another trial_end, so it reads as the trial it is.
+ */
+export function paidFreeDays(sub: Raw): boolean {
+  const end = num(sub.trial_end);
+  const meta = metaOf(sub);
+  return end > 0 && meta[FREE_DAYS_UNTIL] === String(end) && typeof meta[TRIAL_END_BEFORE] === "string" && SECONDS.test(meta[TRIAL_END_BEFORE] as string);
+}
+
+/** The end of the membership's real free trial, in seconds, 0 for none: never paid free days. */
+export function realTrialEnd(sub: Raw): number {
+  return paidFreeDays(sub) ? Number(metaOf(sub)[TRIAL_END_BEFORE]) : num(sub.trial_end);
+}
+
+/** Stripe's status read as what the member is: a paid membership in its free days is "active", not in a trial. */
+export function memberStatus(sub: Raw): string {
+  const status = typeof sub.status === "string" ? sub.status : "";
+  return status === "trialing" && paidFreeDays(sub) ? "active" : status;
+}
+
+/** Whether a paid membership's free days are running now: no switch of its price until they end (Stripe prorates nothing in a trial). */
+export function inPaidFreeDays(sub: Raw): boolean {
+  return sub.status === "trialing" && paidFreeDays(sub);
+}
+
+/**
+ * The marks giving free days writes, from the membership as read before:
+ * paid (running, or already in paid free days) keeps saying so, with its real
+ * trial carried over; a real trial made longer stays a trial, both marks
+ * removed (an empty value removes a key on Stripe).
+ */
+export function freeDaysMarks(sub: Raw, nextCharge: number): Record<string, string> {
+  if (sub.status === "active" || inPaidFreeDays(sub)) return { [FREE_DAYS_UNTIL]: String(nextCharge), [TRIAL_END_BEFORE]: String(realTrialEnd(sub)) };
+  return { [FREE_DAYS_UNTIL]: "", [TRIAL_END_BEFORE]: "" };
+}
 
 /** When the period already paid for ends: on the item since 2025, on the subscription before. */
 function periodEnd(sub: Raw): number {

@@ -42,6 +42,21 @@ export type MemberSub = {
 export type Raw = Record<string, unknown>;
 const list = (value: unknown): Raw[] => (value && typeof value === "object" && Array.isArray((value as Raw).data) ? ((value as Raw).data as Raw[]) : []);
 
+/**
+ * One page of a Stripe list read exactly (rule 24; Claude 4 team review of
+ * #2912, M2): its rows when the answer is a whole list on one page. An answer
+ * out of shape, without has_more, or saying more pages follow throws, so the
+ * caller says Stripe could not be read, never that there is no membership.
+ */
+function onePage(value: unknown, what: string): Raw[] {
+  const page = value && typeof value === "object" ? (value as Raw) : null;
+  if (!page || !Array.isArray(page.data) || typeof page.has_more !== "boolean" || !page.data.every((row) => row && typeof row === "object")) {
+    throw new Error(`Stripe answered ${what} in an unknown shape`);
+  }
+  if (page.has_more) throw new Error(`Stripe has more ${what} than one page holds`);
+  return page.data as Raw[];
+}
+
 /** Whether Stripe says a subscription already has a discount on it (old `discount` or new `discounts`). */
 export function hasDiscount(sub: Raw): boolean {
   if (sub.discount && typeof sub.discount === "object") return true;
@@ -85,11 +100,11 @@ export async function memberSubRows(store: Store, email: string): Promise<{ row:
   if (!account) return null;
   const handles = saleHandles(store);
   try {
-    const customers = list(await onAccount("GET", account, `/customers?email=${encodeURIComponent(email)}&limit=${MAX_CUSTOMERS}`, undefined, API_VERSION));
+    const customers = onePage(await onAccount("GET", account, `/customers?email=${encodeURIComponent(email)}&limit=${MAX_CUSTOMERS}`, undefined, API_VERSION), "customers");
     const out: { row: MemberSub; raw: Raw }[] = [];
     for (const customer of customers) {
       if (typeof customer.id !== "string" || !CUSTOMER_PATTERN.test(customer.id)) continue;
-      const subs = list(await onAccount("GET", account, `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all&limit=20`, undefined, API_VERSION));
+      const subs = onePage(await onAccount("GET", account, `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all&limit=20`, undefined, API_VERSION), "subscriptions");
       for (const sub of subs) {
         const row = readMemberSub(sub, handles);
         if (row) out.push({ row, raw: sub });

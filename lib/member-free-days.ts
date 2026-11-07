@@ -5,7 +5,9 @@
  * on the creator's own Stripe account (lib/stripe-account.ts, onAccount):
  * the membership's trial_end is set to its next charge plus the days, with no
  * proration (lib/member-free-days-rules.ts says why this and not a pause).
- * Marktmorgen takes nothing and charges nothing here.
+ * Marktmorgen takes nothing and charges nothing here. On a paid membership
+ * the same request marks the new trial_end as free days, so nothing reads the
+ * member as in a free trial (lib/member-free-days-rules.ts, freeDaysMarks).
  *
  * Read again on the server at the moment of giving, never taken from the
  * page: the member by their address, the membership among this store's
@@ -39,7 +41,7 @@ import { freeDaysWords } from "@/lib/buyer-words/free-days";
 import { readListings } from "@/lib/catalog";
 import { forgetStatus } from "@/lib/membership-access";
 import type { Store } from "@/lib/store";
-import { type FreeDaysBlock, type FreeDaysSub, freeDaysState, movedCharge, parseFreeDays } from "@/lib/member-free-days-rules";
+import { type FreeDaysBlock, type FreeDaysSub, freeDaysMarks, freeDaysState, movedCharge, parseFreeDays } from "@/lib/member-free-days-rules";
 
 /** The Stripe version lib/member-discount.ts reads memberships with, so a subscription reads the same here. */
 const API_VERSION = "2025-09-30.clover";
@@ -107,12 +109,15 @@ export async function giveFreeDays(
   const release = () => redisPipeline([["DEL", key]]).catch(() => null);
 
   // The body depends only on the membership, the date seen and the days, so a repeat under the same key is Stripe's replay.
+  // On a paid membership it also says the new trial_end is free days, not a trial (lib/member-free-days-rules.ts, freeDaysMarks).
+  const marks = freeDaysMarks(found.raw, nextCharge);
   const body = new URLSearchParams({
     trial_end: String(nextCharge),
     proration_behavior: "none",
     "metadata[free_days]": String(days),
     "metadata[free_days_from]": String(expected),
   });
+  for (const [key, value] of Object.entries(marks)) body.set(`metadata[${key}]`, value);
   let answer: Record<string, unknown>;
   try {
     answer = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body, API_VERSION, `member-free-days:${subscription}:${expected}:${days}`);
@@ -127,7 +132,9 @@ export async function giveFreeDays(
     return { ok: false, reason: "unknown" };
   }
   // Only Stripe's own word that the next charge is now the new date counts as done.
-  if (answer.id !== subscription || answer.trial_end !== nextCharge || answer.status !== "trialing") {
+  const kept = answer.metadata && typeof answer.metadata === "object" ? (answer.metadata as Record<string, unknown>) : null;
+  const marked = kept !== null && Object.entries(marks).every(([key, value]) => (value === "" ? !(key in kept) : kept[key] === value));
+  if (answer.id !== subscription || answer.trial_end !== nextCharge || answer.status !== "trialing" || !marked) {
     console.error("Stripe's answer to free days did not carry the new date", subscription);
     await release();
     return { ok: false, reason: "unknown" };

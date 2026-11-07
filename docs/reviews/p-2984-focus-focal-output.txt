@@ -1,0 +1,250 @@
+Observed /tmp/p2984-source-red.log
+not ok - opening a saved email moves focus to its subject
+not ok - opening a sequence moves focus to its name
+not ok - closing a sequence returns focus to its opener
+EMAIL_STUDIO_ACCESSIBILITY_SOURCE_RED:{"checks":3,"failed":3}
+
+Observed /tmp/p2984-qualified-red.log
+{"file":"email-studio-accessibility.test.ts","exit":1}
+
+2.5.5: controls the audit measured under 44 × 44 px
+  ok    Import addresses (the list's import opener) is at least 44px tall
+  ok    the import's file picker is at least 44px tall
+  ok    the import's agreement box is at least 44px tall
+  ok    Try a second subject line is at least 44px tall
+  ok    the Now choice is at least 44px tall
+  ok    the At a time I choose choice is at least 44px tall
+  ok    Not yet, under the review is at least 44px tall
+  ok    Start a new one instead is at least 44px tall
+  ok    Close, under a sequence being edited is at least 44px tall
+  ok    Pause, on a sequence is at least 44px tall
+  ok    Preview and switch on, on a sequence is at least 44px tall
+  ok    Runs, on a sequence is at least 44px tall
+  ok    Remove this email or step is at least 44px tall
+  ok    the sequence's On box is at least 44px tall
+  ok    More ways to choose (the audience's opener) is at least 44px tall
+  ok    Map of its steps is at least 44px tall
+  ok    Open, on a draft, is at least 44px wide
+  ok    Edit, on a sequence, is at least 44px wide
+  ok    Runs, on a sequence, is at least 44px wide
+  ok    Close, under a sequence being edited, is at least 44px wide (39px measured)
+  ok    the site has no .input class
+  ok    the history's search and status use the site's 48px field
+
+1.4.10 / 2.5.5: the sequence's file picker and the path preview's address fit 320 px
+  ok    the sequence's file picker is as wide as its box at most, and 44px tall
+  ok    the path preview's address keeps a 14rem basis, so its button wraps below it instead of squeezing it to 31px
+  ok    the When choices' fieldset can shrink to a 320px screen
+
+2.4.13: a date and time field keeps its focus bands while the focus is inside it
+  ok    date and time fields show the bands on :focus-within, which still matches while the calendar button has the focus
+
+1.3.1 / 2.4.10: each card's title is a heading
+  ok    "First, how your emails are signed" is an h2
+  ok    "Not set up yet" is an h2
+  ok    "This month" is an h2
+  ok    "How your emails are signed" is an h2
+  ok    "Your list" is an h2
+  ok    "Part of Pro" is an h2
+
+2.3.3: opening a draft or writing an email again scrolls without motion when motion is reduced
+  ok    no smooth scroll that ignores prefers-reduced-motion
+  ok    the scroll reads prefers-reduced-motion
+
+3.3.6: removing a sequence asks first, as deleting a draft does
+  ok    the removal asks before it calls the server
+
+2.4.3 / 3.2.1: focus follows what the creator opened and comes back when it closes
+  FAIL  opening a saved email moves focus to its subject
+        expected true
+        got      false
+  FAIL  opening a sequence moves focus to its name
+        expected true
+        got      false
+  FAIL  closing a sequence returns focus to its opener
+        expected true
+        got      false
+  ok    the subject field is the one with that id
+  FAIL  the sequence's name field carries the id that is focused
+        expected true
+        got      false
+  FAIL  New sequence and Edit carry the ids focus goes back to
+        expected [true,true]
+        got      [false,false]
+  FAIL  2.3.3: the subject's focus keeps the reduced-motion scroll to the composer instead of jumping
+        expected true
+        got      false
+
+2.2.5: a session that ends while writing loses nothing after logging in again
+  ok    the message says the email stays on the page and to log in again in a new tab
+  ok    beside it, a link to log in that opens a new tab and says so
+
+The list email's HTML: a title and a character set
+  ok    the title is the subject, escaped
+  ok    the character set is said
+  ok    the language is still on the html element
+  ok    and a text version still goes with it
+
+48 checks, 6 failing.
+MemoryRedis dispatches: 5
+
+Observed /tmp/p2984-qualified-permanent.log
+{"file":"email-studio-accessibility.test.ts","exit":0}
+
+2.5.5: controls the audit measured under 44 × 44 px
+  ok    Import addresses (the list's import opener) is at least 44px tall
+  ok    the import's file picker is at least 44px tall
+  ok    the import's agreement box is at least 44px tall
+  ok    Try a second subject line is at least 44px tall
+  ok    the Now choice is at least 44px tall
+  ok    the At a time I choose choice is at least 44px tall
+  ok    Not yet, under the review is at least 44px tall
+  ok    Start a new one instead is at least 44px tall
+  ok    Close, under a sequence being edited is at least 44px tall
+  ok    Pause, on a sequence is at least 44px tall
+  ok    Preview and switch on, on a sequence is at least 44px tall
+  ok    Runs, on a sequence is at least 44px tall
+  ok    Remove this email or step is at least 44px tall
+  ok    the sequence's On box is at least 44px tall
+  ok    More ways to choose (the audience's opener) is at least 44px tall
+  ok    Map of its steps is at least 44px tall
+  ok    Open, on a draft, is at least 44px wide
+  ok    Edit, on a sequence, is at least 44px wide
+  ok    Runs, on a sequence, is at least 44px wide
+  ok    Close, under a sequence being edited, is at least 44px wide (39px measured)
+  ok    the site has no .input class
+  ok    the history's search and status use the site's 48px field
+
+1.4.10 / 2.5.5: the sequence's file picker and the path preview's address fit 320 px
+  ok    the sequence's file picker is as wide as its box at most, and 44px tall
+  ok    the path preview's address keeps a 14rem basis, so its button wraps below it instead of squeezing it to 31px
+  ok    the When choices' fieldset can shrink to a 320px screen
+
+2.4.13: a date and time field keeps its focus bands while the focus is inside it
+  ok    date and time fields show the bands on :focus-within, which still matches while the calendar button has the focus
+
+1.3.1 / 2.4.10: each card's title is a heading
+  ok    "First, how your emails are signed" is an h2
+  ok    "Not set up yet" is an h2
+  ok    "This month" is an h2
+  ok    "How your emails are signed" is an h2
+  ok    "Your list" is an h2
+  ok    "Part of Pro" is an h2
+
+2.3.3: opening a draft or writing an email again scrolls without motion when motion is reduced
+  ok    no smooth scroll that ignores prefers-reduced-motion
+  ok    the scroll reads prefers-reduced-motion
+
+3.3.6: removing a sequence asks first, as deleting a draft does
+  ok    the removal asks before it calls the server
+
+2.4.3 / 3.2.1: focus follows what the creator opened and comes back when it closes
+  ok    opening a saved email moves focus to its subject
+  ok    opening a sequence moves focus to its name
+  ok    closing a sequence returns focus to its opener
+  ok    the subject field is the one with that id
+  ok    the sequence's name field carries the id that is focused
+  ok    New sequence and Edit carry the ids focus goes back to
+  ok    2.3.3: the subject's focus keeps the reduced-motion scroll to the composer instead of jumping
+
+2.2.5: a session that ends while writing loses nothing after logging in again
+  ok    the message says the email stays on the page and to log in again in a new tab
+  ok    beside it, a link to log in that opens a new tab and says so
+
+The list email's HTML: a title and a character set
+  ok    the title is the subject, escaped
+  ok    the character set is said
+  ok    the language is still on the html element
+  ok    and a text version still goes with it
+
+48 checks, all passing.
+MemoryRedis dispatches: 5
+
+Observed /tmp/p2984-qualified-linked.log
+{"file":"composer-set-aside.test.ts","exit":0}
+
+Walked as a creator walks it
+  ok    editing A then opening B: A's changes are set aside, with A
+  ok    opening C from an untouched B: A is still set aside
+  ok    opening D over changes to a new email: both are kept, newest last
+  ok    bringing back takes the newest
+  ok    and sets aside what was unsaved then
+  ok    a draft still there comes back as itself
+  ok    a draft deleted since comes back as a new email, still unsaved
+  ok    nothing set aside: nothing to bring back
+
+A sentence for each step
+  ok    set aside
+  ok    brought back, with another set aside in turn
+  ok    brought back alone
+  ok    an email with no subject is named for what it is
+  ok    a clean switch says nothing new
+  ok    the count, singular and plural
+
+The composer, wired to them
+  ok    no browser question when opening another email
+  ok    a switch adds to the list, never replaces it
+  ok    bringing back takes the newest, and an email being sent or saved is not switched away from
+  ok    after sending, the email brought back is not shown again
+  ok    everything that makes the composer unsaved is kept
+  ok    an uncertain draft save stays blocked when brought back
+  ok    each step's sentence in a polite live region always on the page, with a real button naming the email
+  ok    brought back, the focus goes to the email's subject
+  ok    leaving the page with something set aside asks first
+  ok    the rules store and send nothing
+
+24 checks, all passing.
+MemoryRedis dispatches: 0
+{"file":"sequence-import-studio.test.ts","exit":0}
+
+The template reads back
+  ok    its two example emails and their waits, with nothing reported: its preview column is left empty, since preview text is not kept yet
+  ok    its header is the template's columns
+
+The box
+  ok    a labeled file field for CSV files, its help tied to it
+  ok    the template offered for download as a CSV file
+  ok    it says nothing is sent, and what is taken out
+  ok    the button waits for a file
+  ok    its report's place is always there, so what is put in it is announced
+  ok    a report line reads as words
+  ok    a refusal is said in the studio's words, never "try again" for signing in or a plan; the same file can be picked again
+
+The route only reads
+  ok    it needs what saving a sequence needs
+  ok    it reads the file and answers; nothing saved, sent or switched on
+
+The editor
+  ok    what is read opens as a new sequence, waits in days when whole, unsaved so leaving asks first
+  ok    a new sequence is saved paused, whatever is sent
+  ok    the report stays in the editor until it is saved or closed, and its heading takes the focus
+  ok    the studio's words are passed for a refusal
+
+15 checks, all passing.
+MemoryRedis dispatches: 0
+{"file":"email-faq.test.ts","exit":0}
+
+The studio's own words and rules
+  ok    the tool, labeled Pro
+  ok    email offered, only on a paid-up Studio or Scale plan
+  ok    a paid-up-no-more Studio store is told why, not offered Pro
+  ok    the sender's fields and their save, first, as the studio says them
+  ok    the compose words, the draft, when, the check and the confirms, as the studio says them
+  ok    sending for the owner or an Admin, writing drafts for an Editor too
+  ok    no button starts or changes a plan while none is on sale, as the checkout and the switch refuse
+  ok    the trial's emails only said while a trial can start
+
+The answers, in both states
+  ok    two questions
+  ok    sending: both plans, paid up, the studio's label, who presses what, the studio's words in order
+  ok    try before paying: not yet today; the shared answer on Studio or Scale later, not on a Store trial
+  ok    one space between sentences, never two
+  ok    no figure but the trial's days, no percent, no result promised
+
+On the email page
+  ok    first in the page's own Questions block
+  ok    no question asked twice
+  ok    no sentence of the answers said elsewhere on the page, or twice among them
+
+16 checks, all passing.
+MemoryRedis dispatches: 0

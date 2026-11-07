@@ -27,11 +27,13 @@ export const CALENDAR_CREDITS_PER_DAY = 5;
  */
 export const CALENDAR_RETRIES_PER_DAY = 1;
 /**
- * Answers one store's feed gets in an hour: four, two calendar apps (a phone
- * and a computer) each asking every thirty minutes, the file's own
- * REFRESH-INTERVAL. A third app asks more than this and is told to come back.
+ * Answers one store's feed gets in an hour: two, two calendar apps (a phone
+ * and a computer) each asking once an hour, the file's own REFRESH-INTERVAL
+ * (four and every thirty minutes until 7 November 2026: the answers, up to
+ * 2.3 MB each, were the largest cost of the first month refunded, TODOS-11).
+ * A third app asks more than this and is told to come back.
  */
-export const CALENDAR_POLLS_PER_HOUR = 4;
+export const CALENDAR_POLLS_PER_HOUR = 2;
 /**
  * Answers refused past the pace in an hour before the address stops (inbox
  * C4-33, light a): the most the first-payment refund the owner funds allows

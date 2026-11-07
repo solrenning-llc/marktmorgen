@@ -524,8 +524,8 @@ export function bookedCalendar(
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
     `X-WR-CALNAME:${icsText(`${store.name} bookings`)}`,
-    "REFRESH-INTERVAL;VALUE=DURATION:PT30M",
-    "X-PUBLISHED-TTL:PT30M",
+    "REFRESH-INTERVAL;VALUE=DURATION:PT60M",
+    "X-PUBLISHED-TTL:PT60M",
   ];
   for (const slot of keptSlots([...slots.values()], now)) {
     const product = listings.find((p) => p.id === slot.product);

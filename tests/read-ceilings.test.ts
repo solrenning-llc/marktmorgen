@@ -147,7 +147,9 @@ async function main(): Promise<void> {
   const ownMade = makings;
   const answers: string[] = [];
   for (let n = 0; n < CALENDAR_CREDITS_PER_DAY + 2; n += 1) {
-    const now = day + (CALENDAR_REFRESH_SECONDS + 120) * 1000 + n * 20 * 60_000;
+    // Spaced past the pace (an hour after the refreshes above, then one answer every 60 / CALENDAR_POLLS_PER_HOUR
+    // minutes and a minute), so each is answered and the pace never decides what this checks.
+    const now = day + (CALENDAR_REFRESH_SECONDS + 120) * 1000 + 3_600_000 + n * ((60 / CALENDAR_POLLS_PER_HOUR) * 60_000 + 60_000);
     await planReminders(CALLS, store.handle, `cs_test_feed00000${n}`, now + 3 * 86_400_000, now);
     answers.push((await bookedCalendarFeed(owner, make, now + 1_000)).state);
   }
@@ -180,6 +182,8 @@ async function main(): Promise<void> {
     const second = await bookedCalendarFeed(owner, make, retryDay + 60_000).then((a) => a.state, () => "error");
     const afterSecond = Number(redis.run(["GET", builds]));
     stripeDown = false;
+    // The pace let go, so the answer below is about the day's makings, not the hour's answers.
+    redis.run(["DEL", `nl:cal:pace:${owner.statsId}`]);
     const third = await bookedCalendarFeed(owner, make, retryDay + 120_000);
     is(`the first failure gives its making back (${CALENDAR_RETRIES_PER_DAY} a day): the day still has one`, [first, afterFirst], ["error", CALENDAR_BUILDS_PER_DAY - 1]);
     is("the second failure that day is counted: the day's makings are used", [second, afterSecond], ["error", CALENDAR_BUILDS_PER_DAY]);
@@ -451,6 +455,8 @@ async function main(): Promise<void> {
     const withCalls = { ...thirdOwner, callsId: "d".repeat(32) };
     is("the copy, young and unchanged", (await bookedCalendarFeed(withCalls, thirdMake, t0 + 60_000)).state, "copy");
     await planReminders(withCalls.callsId, "renamedto", "cs_test_renamed0001", t0 + 5 * 86_400_000, t0 + 120_000);
+    // The hour's answers let go, so the answer below is about the booking's mark, not the pace.
+    redis.run(["DEL", `nl:cal:pace:${withCalls.statsId}`]);
     is("a booking marked under the new handle is read by the calls id: made again at once", (await bookedCalendarFeed(withCalls, thirdMake, t0 + 180_000)).state, "made");
 
     part("A copy is kept only by the store that made it (light 3)");

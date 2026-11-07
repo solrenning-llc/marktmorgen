@@ -54,6 +54,7 @@ export default async function PathPage({searchParams}:{searchParams:Promise<Reco
  const returnMission=record?returnMissionFor(store,record,now):null;
  const returning=returnMission?.state==="open";
  const streak=record?streakOf(record.checkins,localDay(record.answers.timeZone,now)):null;
+ const weeklySummary=progress&&record&&!failed?pathWeeklySummary({timeZone:record.answers.timeZone,checkins:record.checkins},now):null;
  const boardRows=record?.board?await readPathBoardRows(record.board.token).catch(()=>null):[];
  const growth=record&&progress?.complete&&!returning?await readPathGrowth(store,record.money,chargeStudio(store)).catch(()=>null):null;
  const growthMissions=growth?pathGrowthMissions(growth.facts):[];
@@ -80,8 +81,9 @@ export default async function PathPage({searchParams}:{searchParams:Promise<Reco
      <p className="mt-2 text-sm text-ink-soft">{goalWords(record.answers,store.currency)}</p>
      <p className="mt-2 text-sm text-ink-soft">Progress comes from your store&apos;s records. Readings refresh at most once every ten minutes when your studio allowance has room.</p>
      <p className="mt-2 text-sm text-ink-soft">{record.counts?"Visits and leads last read: "+new Date(record.counts.at).toISOString()+".":"Visits and leads have not been read yet."} {record.money?"Orders last read: "+new Date(record.money.at).toISOString()+".":"Orders have not been read yet."}</p>
+     {!failed&&!returning&&weeklySummary?.state==="unavailable"&&streak?<p className="mt-2">Current streak: {streak.days} check-in {streak.days===1?"day":"days"}. {streak.restLeft} rest {streak.restLeft===1?"day":"days"} left this week.</p>:null}
     </section>
-    {!failed?<PathWeeklySummary summary={pathWeeklySummary({timeZone:record.answers.timeZone,checkins:record.checkins},now)} streak={returning?null:streak}/>:null}
+    {!failed&&weeklySummary?<PathWeeklySummary summary={weeklySummary} streak={returning?null:streak}/>:null}
     <section className="mt-8" aria-labelledby="path-next"><h2 id="path-next" className="t-h3">{returning?RETURN_HEADING:progress.complete?"Your first real sale is recorded":"Your next mission"}</h2>
      {mission?<div className="mt-4 rounded-2xl border border-line bg-white p-6"><h3 className="text-xl font-semibold">{mission.title}</h3><p className="mt-3">{mission.why}</p><ol className="mt-4 list-decimal space-y-2 pl-6">{mission.steps.map(step=><li key={step}>{step}</li>)}</ol><p className="mt-4 text-sm text-ink-soft">Recorded when: {mission.closesOn}</p><a className="btn btn-primary mt-5" href={hrefFor(mission.place)}>{mission.place.label}</a></div>:<p className="mt-3">Keep listening to your customers and improving what you offer. Your reached level stays with you.</p>}
      {wording?<PathAiWording key={store.sid+"|"+wording.mission+"|"+wording.step} source={wording} endpoint={"/api/store/path?store="+encodeURIComponent(store.sid)}/>:null}

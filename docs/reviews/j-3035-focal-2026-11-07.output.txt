@@ -1,0 +1,448 @@
+PINNED SOURCE BLOBS
+{
+  "lib/student-bulk.ts": "37218a534844c86c6bcd76307bbd2ca51ba4d661",
+  "lib/student-bulk-rules.ts": "2a11bca6b1dc0d14a42c1807f779ea4effd0feec",
+  "app/api/store/students/route.ts": "a8428ff3b829a9944a169131e731cfaee8623bb4",
+  "tests/h3-4-bulk-students.test.ts": "4ce2c24ac9b310d8abdae94472625470b95e8a4e",
+  "lib/redis-memory.ts": "b1e69636ef2b0d3da5ca722ad7d7ad856330a1cc",
+  "tests/test-config.mjs": "3d25065d9fc211649a1aad676a0f64e057badb5b"
+}
+SIX_ALIASES_AND_ENV_BYTE_EQUIVALENT
+EXPLICITSTATUS
+{"originalJ": 0, "originalP": 0, "permanent-old": 1, "permanent": 0, "revocation": 0, "profile": 0, "english": 0, "types": 0, "lint": 0, "scanner": 0, "diff": 0}
+
+--- originalJ ---
+J_3035_FOCAL head j-review-3035-bulk-students.proof.ts TARGET a1eb4c1eb654ccd4ef9acb20d364591ae625313a
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+An applied write with unreadable read-back remains uncertain in every summary
+  ok    the actual course blocked set was changed
+  ok    the caller correctly keeps this result unknown
+  ok    the visible/full summary does not claim that nothing changed
+  ok    the short live-region summary also preserves uncertainty
+  ok    the detailed reason still says that the applied write is unconfirmed
+  ok    healthy confirmed grant remains a confirmed success
+  ok    the command ceiling stayed bounded
+
+7 checks, all passing.
+MEMORY_REDIS_RUN 14
+J_CHILD_EXIT 0
+
+--- originalP ---
+J_3035_FOCAL head p-review-3035-access-admission.test.ts TARGET a1eb4c1eb654ccd4ef9acb20d364591ae625313a
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+Every bounded access read and write is admitted before it is spent
+  ok    admission happens before the first HMGET/SMISMEMBER access read
+  ok    the admitted studio units cover every Redis command in the operation
+
+2 checks, all passing.
+MEMORY_REDIS_RUN 224
+J_CHILD_EXIT 0
+
+--- permanent-old ---
+J_3035_FOCAL old-modules h3-4-bulk-students.test.ts TARGET a1eb4c1eb654ccd4ef9acb20d364591ae625313a
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+The rules
+  ok    progress: not started, started, finished
+  ok    filters read from the address, the label as it will be kept
+  ok    anything else is no filter
+  ok    by progress
+  ok    by access
+  ok    by label, in any case; a student whose labels could not be read is left out and counted, never guessed
+  ok    no label filter: nobody is left out for labels
+  ok    the undo is the opposite change
+  FAIL  studio requests taken before the work, by how much there is: a change's writes (two commands a person) and its read-back, twenty commands to a request
+        expected [1,2,2,11,51,0,5,4]
+        got      [1,1,2,10,50,0,5,4]
+  ok    one page of students is a bounded read
+  ok    who is asked, read safely: each address once, in lower case; nothing else
+  ok    refused: no change named, nobody, too many
+  ok    every refusal says what to do
+  ok    the answer says how many changed and, for the rest, why
+  ok    all done, said short
+  ok    a change that did not land says so
+  FAIL  a change that could not be confirmed is never said as nothing changed, in full or in the short live line
+        expected [false,false,true]
+        got      [true,true,true]
+  FAIL  nor when some of it did not land either
+        expected false
+        got      true
+  ok    the file: a header, one line a student, every cell quoted and never a formula
+
+A store with a course and four students
+  ok    dee was taken off the course, one at a time, as before
+  ok    each person's access, read exactly from the same records the course reads
+
+The list, read exactly and paid for before it is read
+  ok    every student, with progress and access
+  ok    labels: a contact's own, none for one not on the list, unknown for one that cannot be read
+  ok    the reading is paid for first, by how many rows and labels it reads
+  ok    refused: nothing more is read than the page's size
+
+Through the studio's route
+  ok    the review says exactly what it would do
+  ok    and writes nothing
+  ok    a count that is not the one reviewed is refused, with what it would do now, nothing written
+  ok    a confirmation always carries the count it confirms
+  ok    applied: each person's own result
+  ok    the course's own list reads them as taken off
+  ok    no email, sequence or refund is started: nothing is written but the access and the counts
+  ok    undone, exactly: those it changed have access again
+  ok    giving access to one who has it changes nothing
+  ok    not a course: refused
+  ok    more people than one change takes: refused, saying what to do
+  ok    an action that is not one
+  ok    no session: refused, and nothing changed
+
+Unknown is never read as done, nor changed by guess
+  ok    access that cannot be read is counted as unread, never as a change
+  ok    and is not changed by guess
+  ok    a change whose result cannot be read back is said as unconfirmed, never as done
+  ok    one write that failed: that person is said as not changed, the other as done
+  ok    studio requests refused: nothing is written
+  ok    taken before writing, by how many it changes
+
+Every access read and write is paid for before it happens (Codex P, review 5808427711 on #3035)
+  FAIL  a change: paid for before its first read, and every command it sends is covered
+        expected ["done",true,[]]
+        got      ["done",false,["HMGET+SMISMEMBER at 2 commands with 0 requests taken"]]
+  FAIL  a hundred people: the reads, the writes and the read-back are all inside the requests taken first
+        expected ["done",100,[],true]
+        got      ["done",100,["HMGET+SMISMEMBER at 2 commands with 0 requests taken","SADD+DEL at 202 commands with 10 requests taken","HMGET+SMISMEMBER at 204 commands with 10 requests taken"],false]
+  FAIL  studio requests refused before the read: nothing is read and nothing written
+        expected ["refused",[],["dee@example.com"]]
+        got      ["refused",["HMGET+SMISMEMBER"],["dee@example.com"]]
+  FAIL  refused after the read: nothing is written
+        expected ["refused",[],["dee@example.com"]]
+        got      ["done",["HMGET+SMISMEMBER at 2 commands with 0 requests taken"],["ana@example.com","ben@example.com","dee@example.com"]]
+  FAIL  a review: paid for before it reads, every command covered, and it says what it would do
+        expected [true,[],{"kind":"review","review":{"changes":2,"already":0,"notStudent":1,"unread":0}}]
+        got      [false,["HMGET+SMISMEMBER at 2 commands with 0 requests taken"],{"changes":2,"already":0,"notStudent":1,"unread":0}]
+  FAIL  a review refused its studio requests reads nothing
+        expected ["refused",[]]
+        got      [null,["HMGET+SMISMEMBER"]]
+  FAIL  the route's review takes its studio requests before it reads
+        expected [200,2]
+        got      [200,1]
+  FAIL  the route's change takes its studio requests before it reads
+        expected [200,2]
+        got      [200,1]
+
+The screen
+  ok    a box for every student, named by who it selects
+  ok    one to select every student on this page, saying how many
+  ok    how many are selected, said where a screen reader hears it
+  ok    every action named; refunds are not one of them
+  ok    refunds are said to stay one at a time
+  ok    targets of at least 44 pixels
+  ok    labels and the file only for a role that may use them
+  ok    the page is the products role's, and reads one bounded page
+  ok    the course's own page leads to it
+
+61 checks, 11 failing.
+MEMORY_REDIS_RUN 1292
+changing a student's access failed Error: injected: the write failed
+    at store.pipeline (/dev/shm/j3035-focal-4WTLEd/proof.cjs:79783:154)
+    at redisPipeline (/dev/shm/j3035-focal-4WTLEd/proof.cjs:35536:41)
+    at setBlocked (/dev/shm/j3035-focal-4WTLEd/proof.cjs:78845:9)
+    at /dev/shm/j3035-focal-4WTLEd/proof.cjs:79174:20
+    at Array.map (<anonymous>)
+    at applyAccess (/dev/shm/j3035-focal-4WTLEd/proof.cjs:79173:64)
+    at async POST (/dev/shm/j3035-focal-4WTLEd/proof.cjs:79204:21)
+    at async post (/dev/shm/j3035-focal-4WTLEd/proof.cjs:79746:22)
+    at async main (/dev/shm/j3035-focal-4WTLEd/proof.cjs:79803:18)
+J_CHILD_EXIT 1
+
+--- permanent ---
+J_3035_FOCAL head h3-4-bulk-students.test.ts TARGET a1eb4c1eb654ccd4ef9acb20d364591ae625313a
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+The rules
+  ok    progress: not started, started, finished
+  ok    filters read from the address, the label as it will be kept
+  ok    anything else is no filter
+  ok    by progress
+  ok    by access
+  ok    by label, in any case; a student whose labels could not be read is left out and counted, never guessed
+  ok    no label filter: nobody is left out for labels
+  ok    the undo is the opposite change
+  ok    studio requests taken before the work, by how much there is: a change's writes (two commands a person) and its read-back, twenty commands to a request
+  ok    one page of students is a bounded read
+  ok    who is asked, read safely: each address once, in lower case; nothing else
+  ok    refused: no change named, nobody, too many
+  ok    every refusal says what to do
+  ok    the answer says how many changed and, for the rest, why
+  ok    all done, said short
+  ok    a change that did not land says so
+  ok    a change that could not be confirmed is never said as nothing changed, in full or in the short live line
+  ok    nor when some of it did not land either
+  ok    the file: a header, one line a student, every cell quoted and never a formula
+
+A store with a course and four students
+  ok    dee was taken off the course, one at a time, as before
+  ok    each person's access, read exactly from the same records the course reads
+
+The list, read exactly and paid for before it is read
+  ok    every student, with progress and access
+  ok    labels: a contact's own, none for one not on the list, unknown for one that cannot be read
+  ok    the reading is paid for first, by how many rows and labels it reads
+  ok    refused: nothing more is read than the page's size
+
+Through the studio's route
+  ok    the review says exactly what it would do
+  ok    and writes nothing
+  ok    a count that is not the one reviewed is refused, with what it would do now, nothing written
+  ok    a confirmation always carries the count it confirms
+  ok    applied: each person's own result
+  ok    the course's own list reads them as taken off
+  ok    no email, sequence or refund is started: nothing is written but the access and the counts
+  ok    undone, exactly: those it changed have access again
+  ok    giving access to one who has it changes nothing
+  ok    not a course: refused
+  ok    more people than one change takes: refused, saying what to do
+  ok    an action that is not one
+  ok    no session: refused, and nothing changed
+
+Unknown is never read as done, nor changed by guess
+  ok    access that cannot be read is counted as unread, never as a change
+  ok    and is not changed by guess
+  ok    a change whose result cannot be read back is said as unconfirmed, never as done
+  ok    one write that failed: that person is said as not changed, the other as done
+  ok    studio requests refused: nothing is written
+  ok    taken before writing, by how many it changes
+
+Every access read and write is paid for before it happens (Codex P, review 5808427711 on #3035)
+  ok    a change: paid for before its first read, and every command it sends is covered
+  ok    a hundred people: the reads, the writes and the read-back are all inside the requests taken first
+  ok    studio requests refused before the read: nothing is read and nothing written
+  ok    refused after the read: nothing is written
+  ok    a review: paid for before it reads, every command covered, and it says what it would do
+  ok    a review refused its studio requests reads nothing
+  ok    the route's review takes its studio requests before it reads
+  ok    the route's change takes its studio requests before it reads
+
+The screen
+  ok    a box for every student, named by who it selects
+  ok    one to select every student on this page, saying how many
+  ok    how many are selected, said where a screen reader hears it
+  ok    every action named; refunds are not one of them
+  ok    refunds are said to stay one at a time
+  ok    targets of at least 44 pixels
+  ok    labels and the file only for a role that may use them
+  ok    the page is the products role's, and reads one bounded page
+  ok    the course's own page leads to it
+
+61 checks, all passing.
+MEMORY_REDIS_RUN 1302
+changing a student's access failed Error: injected: the write failed
+    at store.pipeline (/dev/shm/j3035-focal-9wmEte/proof.cjs:79799:154)
+    at redisPipeline (/dev/shm/j3035-focal-9wmEte/proof.cjs:35536:41)
+    at setBlocked (/dev/shm/j3035-focal-9wmEte/proof.cjs:78845:9)
+    at /dev/shm/j3035-focal-9wmEte/proof.cjs:79185:20
+    at Array.map (<anonymous>)
+    at applyAccess (/dev/shm/j3035-focal-9wmEte/proof.cjs:79184:64)
+    at async POST (/dev/shm/j3035-focal-9wmEte/proof.cjs:79226:21)
+    at async post (/dev/shm/j3035-focal-9wmEte/proof.cjs:79762:22)
+    at async main (/dev/shm/j3035-focal-9wmEte/proof.cjs:79819:18)
+J_CHILD_EXIT 0
+
+--- revocation ---
+J_3035_FOCAL head access-revocation.test.ts TARGET a1eb4c1eb654ccd4ef9acb20d364591ae625313a
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+The one rule: refunded in full, as Stripe says on the charge
+  ok    the charge's own flag
+  ok    every cent given back, flag or not
+  ok    a partial refund keeps access
+  ok    a payment read with its latest charge
+  ok    a charge Stripe did not expand is not refunded
+  ok    nothing at all is not refunded
+
+A payment plan, by its first invoice's payment
+  ok    older API versions: the invoice names its payment
+  ok    newer ones: the invoice's payments are listed
+  ok    partly refunded: kept
+  ok    a membership is not judged by this rule
+  ok    no account to ask: not refunded
+
+A course bought once
+  ok    opens
+  ok    refunded in full: shut, though the thanks page wrote it down
+  ok    refunded in part: still open
+  ok    bought again after the refund: open again
+  ok    taken off the course by the creator: shut
+
+A course sold as a membership
+  ok    active: open
+  ok    trialing: open
+  ok    past_due: open
+  ok    canceled: shut
+  ok    unpaid: shut
+  ok    incomplete_expired: shut
+
+A community
+  ok    a paid purchase lets in
+  ok    refunded in full: not let in
+  ok    a membership canceled: not let in
+  ok    a membership running: let in
+  ok    bought in one click after paying for something else: let in
+  ok    and not once that payment is refunded
+  ok    a purchase from another store opens nothing here
+  ok    Stripe cannot be asked: nobody is let in on a guess
+  ok    and that answer was not kept: the next request asks again
+
+31 checks, all passing.
+MEMORY_REDIS_RUN 138
+checking community access failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount (/dev/shm/j3035-focal-4p6Hk0/proof.cjs:5702:11)
+    at async paidForAny (/dev/shm/j3035-focal-4p6Hk0/proof.cjs:48162:27)
+    at async ticketFor (/dev/shm/j3035-focal-4p6Hk0/proof.cjs:48231:120)
+    at async main (/dev/shm/j3035-focal-4p6Hk0/proof.cjs:48392:62) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+J_CHILD_EXIT 0
+
+--- profile ---
+J_3035_FOCAL head buyer-profile.test.ts TARGET a1eb4c1eb654ccd4ef9acb20d364591ae625313a
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+What they paid
+  ok    the address, as one
+  ok    the name Stripe has
+  ok    this store's sales and payments only, newest first
+  ok    paid in dollars, each payment once
+  ok    and given back
+  ok    euros kept apart
+  ok    purchases and later payments
+
+Where they came from
+  ok    first and latest purchase
+  ok    a channel is known for some of their sales
+  ok    the course sale's channel and campaign
+  ok    where they found the store, from the earliest sale that says, not the older one that does not
+  ok    the latest purchase that says: direct, which is not the same as not recorded
+
+Membership, course, list
+  ok    the membership, paying
+  ok    the course, two of four lessons
+  ok    on the list, agreed, with its labels
+  ok    Stripe was read in full
+
+Notes
+  ok    the key is the same whatever the capitals, and is not the address
+  ok    empty words are not a note
+  ok    a note, with who wrote it and its line breaks kept
+  ok    at most MAX_PERSON_NOTES, the newest kept
+  ok    one taken away
+  ok    no key holds the address
+  ok    a deleted store's notes all go
+
+Opening a buyer's page
+  ok    an address is read as one; anything else is not
+  ok    a search's token opens it on its own store
+  ok    and on no other
+  ok    a made-up token opens nothing
+  ok    a sale of this store opens its buyer
+  ok    another store's sale opens nobody
+  ok    something that is not a sale's reference is not looked up
+
+When Stripe cannot be read
+  ok    the page says so, and the rest is still there
+
+31 checks, all passing.
+MEMORY_REDIS_RUN 243
+reading a buyer's payments failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount (/dev/shm/j3035-focal-i0iyO9/proof.cjs:9295:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async buyerProfile (/dev/shm/j3035-focal-i0iyO9/proof.cjs:56787:24)
+    at async main (/dev/shm/j3035-focal-i0iyO9/proof.cjs:57355:16) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+J_CHILD_EXIT 0
+
+--- english ---
+J_3035_FOCAL head platform-us-english.test.ts TARGET a1eb4c1eb654ccd4ef9acb20d364591ae625313a
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+American English guard distinguishes prose from compatibility identifiers
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    existing non-English buyer copy is outside this policy
+  ok    mixed buyer dictionaries retain other languages
+  ok    separate foreign buyer declarations remain unchanged
+  ok    American prose passes
+  ok    single-word test title is also checked
+  ok    test output titles are also platform-maintained text
+  ok    test data can exercise a forbidden sample
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+
+All current app, component, library and test-diagnostic sources
+  ok    real source inventory is scanned
+  ok    platform prose and diagnostic titles use American spelling
+
+42 checks, all passing.
+MEMORY_REDIS_RUN 0
+J_CHILD_EXIT 0
+
+--- types ---
+{
+  "scope": "direct roots plus imported types; imported dependency bodies not separately checked",
+  "roots": [
+    "lib/student-bulk.ts",
+    "lib/student-bulk-rules.ts",
+    "app/api/store/students/route.ts",
+    "tests/h3-4-bulk-students.test.ts",
+    "tests/j-review-3035-bulk-students.proof.ts",
+    "tests/p-review-3035-access-admission.test.ts"
+  ],
+  "sources": 846,
+  "options": {
+    "target": "ES2017",
+    "strict": true,
+    "moduleResolution": "Bundler"
+  },
+  "diagnostics": []
+}
+
+--- lint ---
+
+--- scanner ---
+Public data check: 4285 tracked files; 0 file(s) require correction.
+
+--- diff ---

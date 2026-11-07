@@ -11116,6 +11116,7 @@ Estado: na fila.ÁreadocompradorpermitepagarsaldorestanteUMAvez,SEMjuros/taxaext
 382. [TB8] Capítulos clicáveis nos vídeos dos cursos.
 
 Estado: na fila.DefinidospelocriadorouSUGERIDOSapartirdaslegendASJÁexistentes,comaprovação;semnovageração/ediçãovídeo/áudiooutranscriçãopagaimplícita.Reusarplayer/legendas;validartimestamps/duração/ordem,títulosacessíveis,teclado/leituradetela,foco,semseekcontextonãopedido;preservarautorizaçãoaocurso.Nãoalterarconteúdodocriadorsemaceite.ReferenceKajabiTimberline.
+   - Andamento (Claude 5, 07/11/2026): unidade 1, **em andamento** (testada localmente; ramo claude5/tb8-lesson-chapters, PR a abrir no próximo lote; arquivos: lib/lesson-chapters.ts, components/lesson-chapters.tsx, lib/buyer-words/courses.ts, tests/lesson-chapters.test.ts, docs/accessibility-inventory.json e, só no bloco dos capítulos, components/course-editor.tsx e app/[handle]/course/[product]/[lesson]/page.tsx). Unidade 1: capítulos escritos pelo criador no texto da aula ("0:00 Welcome"), a partir de 0:00, tempos crescentes, de 2 a 50, só sob vídeo enviado como arquivo; botões que levam o vídeo da própria página ao tempo, com anúncio para leitor de tela (repetido ao clicar de novo no mesmo capítulo), sem armazenamento, leitura nova ou fornecedor. Falta (unidade 2): player do Bunny Stream, depois de conferir a API oficial datada, e capítulos sugeridos das legendas existentes, com aprovação.
 
 383. [TB9] Datas sem envio nas automações.
 

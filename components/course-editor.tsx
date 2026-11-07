@@ -1057,7 +1057,7 @@ function LessonEditor({
                     so the studio says nothing about them for that one. */}
                 {lesson.video && !isStreamPath(lesson.video.pathname) ? (
                   <p className="mt-1 text-sm text-ink-mute">
-                    {`Chapters: write lines like "0:00 Welcome" and "2:15 Setup", one under the other and starting at 0:00. Students see them under the video and can jump to each one.`}
+                    {`Chapters: put each chapter on its own line, its time and then its name, like "0:00 Welcome" and then "2:15 Setup". Start the first line at 0:00, give each next line a later time, and write at least two lines. Students see them under the video and can jump to each one.`}
                   </p>
                 ) : null}
               </div>

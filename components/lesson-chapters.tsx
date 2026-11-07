@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { type Chapter, MIN_CHAPTERS, chaptersWithin, currentChapter, jumpTo } from "@/lib/lesson-chapters";
+
+// The quiet line is emptied on each click and written this long after, so a
+// screen reader says it again when the same chapter is chosen twice.
+const SAY_AFTER_MS = 100;
 
 /**
  * The chapters of a lesson video, under it (382 [TB8], unit 1): one button
@@ -20,6 +24,14 @@ export function LessonChapters({ chapters, videoId, heading, announce }: { chapt
   const [shown, setShown] = useState(chapters);
   const [current, setCurrent] = useState(-1);
   const [said, setSaid] = useState("");
+  const wait = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (wait.current) clearTimeout(wait.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     const video = document.getElementById(videoId);
@@ -57,7 +69,10 @@ export function LessonChapters({ chapters, videoId, heading, announce }: { chapt
                   if (!(video instanceof HTMLVideoElement)) return;
                   jumpTo(video, chapter.at);
                   setCurrent(i);
-                  setSaid(announce[i] ?? "");
+                  const line = announce[i] ?? "";
+                  setSaid("");
+                  if (wait.current) clearTimeout(wait.current);
+                  wait.current = setTimeout(() => setSaid(line), SAY_AFTER_MS);
                 }}
                 className={`flex min-h-11 w-full items-baseline gap-3 rounded-xl px-3 py-2 text-left text-sm ${here ? "font-semibold" : ""}`}
                 style={{ color: "var(--st-text)", border: `1px solid ${here ? "var(--st-text)" : "var(--st-line)"}` }}

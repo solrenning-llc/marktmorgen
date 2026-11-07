@@ -13,6 +13,13 @@ const WORKFLOWS = [
   "accessibility-real-readers", "accessibility-signup-actions", "accessibility-studio-matrix",
   "codeql", "dependency-security", "product-checks",
 ];
+/** What the concurrency group guarantees, word for word above cancel-in-progress. */
+const CONCURRENCY_COMMENT = [
+  "  # A merge group's ref is its own (gh-readonly-queue/main/pr-N-…), so with the event in",
+  "  # the group a merge group never shares one with a pull request run or another merge group.",
+  "  # The active merge-group run is never canceled by this group; a newer delivery of the same",
+  "  # merge group may replace one still pending, and that replacement is the same check.",
+].join("\n") + "\n";
 const read = (name: string) => readFileSync(`.github/workflows/${name}.yml`, "utf8");
 
 /** Top-level jobs of a workflow: {job id: its text}. */
@@ -72,6 +79,9 @@ for (const name of WORKFLOWS) {
   is(`${name}: the group holds the ref and the event`, [group.includes("${{ github.ref }}"), group.endsWith("-${{ github.event_name }}")], [true, true]);
   is(`${name}: in-progress runs are canceled only outside merge_group`,
     /\n {2}cancel-in-progress: (.*)\n/.exec(on)?.[1], "${{ github.event_name != 'merge_group' }}");
+  is(`${name}: the comment states only what concurrency guarantees`,
+    /\n((?: {2}#.*\n)+) {2}cancel-in-progress:/.exec(on)?.[1], CONCURRENCY_COMMENT);
+  is(`${name}: no claim that a queued change is never canceled`, /never has its checks cancel/.test(on), false);
 }
 
 part("under merge_group the scope always asks for every suite (no skip, no reuse)");

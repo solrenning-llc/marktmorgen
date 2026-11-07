@@ -8,7 +8,12 @@
  * they come back, instead of answering every question a second time.
  *
  * Where they are kept: in the student's own browser only, under
- * `mm-quiz:<store>:<course>:<lesson>`. Nothing is sent to the server for it
+ * `mm-quiz:<student>:<store>:<course>:<lesson>`, where `<student>` is a short
+ * mark of the signed-in student (quizStudentMark), never their address. Two
+ * students sharing a browser so never get each other's picks back, and a
+ * quiz opened by one removes whatever was kept for anyone else (othersKept):
+ * a student's sign-out is a server redirect with no page script to clear
+ * anything, so the next student's first quiz does it. Nothing is sent to the server for it
  * and no supplier is called, so it costs nothing per student and holds no
  * personal data on our side. What is kept is only the position of each
  * checked choice (`q_<question id>` = `0`…), never a hidden field, a name or
@@ -19,7 +24,8 @@
  * When they go: once the server says the try was marked, when the questions
  * are not the ones kept for (the creator changed them, or a bank drew
  * another try), when the quiz is shut (passed, out of tries, waiting), after
- * QUIZ_KEEP_DAYS, and when the student presses "Clear these answers".
+ * QUIZ_KEEP_DAYS, when the student presses "Clear these answers", and when
+ * another student opens a quiz in the same browser.
  */
 
 /** How long picks kept in a browser are kept, at most. */
@@ -31,9 +37,34 @@ const CLOCK_SLACK_MS = 60_000;
 /** The most picks kept: every choice of every question of the largest quiz (20 × 6), with room. */
 export const MAX_KEPT_PICKS = 200;
 
+/** FNV-1a, 32 bits, as eight hex digits: a check or a short mark, never a secret. */
+function fnv(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+/**
+ * A short mark for the signed-in student, from the opaque key the lesson's
+ * page already has for them (lib/learn.ts emailKey, itself a hash of the
+ * address): eight hex digits, so the browser's storage holds nothing that
+ * says who they are, only enough to keep two students' picks apart.
+ */
+export const quizStudentMark = (studentKey: string): string => fnv(`mm-quiz-student:${studentKey}`);
+
 /** Where a lesson's quiz picks are kept in this browser, and only there. */
 export const QUIZ_KEEP_PREFIX = "mm-quiz:";
-export const quizKeepKey = (handle: string, product: string, lesson: string) => `${QUIZ_KEEP_PREFIX}${handle}:${product}:${lesson}`;
+export const quizKeepKey = (student: string, handle: string, product: string, lesson: string) =>
+  `${QUIZ_KEEP_PREFIX}${student}:${handle}:${product}:${lesson}`;
+
+/** Of the browser's keys, the quiz picks kept for anyone but this student: removed as their quiz opens. */
+export function othersKept(keys: Iterable<string>, student: string): string[] {
+  const mine = `${QUIZ_KEEP_PREFIX}${student}:`;
+  return [...keys].filter((key) => key.startsWith(QUIZ_KEEP_PREFIX) && !key.startsWith(mine));
+}
 
 /** What one browser keeps for one lesson's quiz. */
 export type QuizKept = {
@@ -69,12 +100,7 @@ export function keptQuizAnswers(entries: Iterable<[string, unknown]>): [string, 
  */
 export function quizFit(questions: readonly { id: string; kind: string; choices: readonly string[] }[]): string {
   const text = questions.map((x) => [x.id, x.kind, ...x.choices].join("\u0001")).join("\u0002");
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < text.length; i += 1) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return `${questions.length}-${hash.toString(16).padStart(8, "0")}`;
+  return `${questions.length}-${fnv(text)}`;
 }
 
 const FIT = /^\d{1,3}-[0-9a-f]{8}$/;
@@ -120,7 +146,8 @@ export function onQuizLoad(
   // Sent, and the server said the try was marked: those picks are the try's now.
   if (kept.sent !== undefined && page.marked) return { kind: "forget" };
   // Sent, but the page never came back marked (the connection dropped, or the
-  // student went back): nothing was counted, so the picks come back.
+  // student went back): the try may or may not have been counted, so the
+  // picks come back under a line that claims neither (quizKeepBack).
   const resave = kept.sent !== undefined ? { at: kept.at, fit: kept.fit, answers: kept.answers } : null;
   return { kind: "restore", answers: kept.answers, resave };
 }
@@ -134,4 +161,16 @@ export function sentKept(raw: string | null | undefined, now: number): QuizKept 
 /** Whether a choice is checked in the kept picks: each kept pick checked, every other choice not. */
 export function pickedIn(answers: readonly [string, string][], name: string, value: string): boolean {
   return answers.some(([n, v]) => n === name && v === value);
+}
+
+/** The keeper's three states: saving picks, picks just put back, picks just cleared. */
+export type QuizKeeperState = "saving" | "back" | "cleared";
+
+/**
+ * What the keeper shows in each state. The note that picks are saved stays in
+ * every state, since every new pick is saved, Clear included; the live line
+ * says what just happened; the button to clear shows only after putting back.
+ */
+export function quizKeeperShows(state: QuizKeeperState): { note: true; line: "quizKeepBack" | "quizKeepCleared" | null; clear: boolean } {
+  return { note: true, line: state === "back" ? "quizKeepBack" : state === "cleared" ? "quizKeepCleared" : null, clear: state === "back" };
 }

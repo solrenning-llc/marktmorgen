@@ -325,6 +325,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 storeName={store.name}
                 justMarked={query.quiz === "marked"}
                 language={store.language}
+                student={student ? who : undefined}
               />
             ) : null}
 

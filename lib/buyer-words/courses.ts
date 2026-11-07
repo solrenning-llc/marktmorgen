@@ -207,7 +207,7 @@ const en = {
   waitAgain: (span: string) => `You can try again in ${span}. Come back to this page then.`,
   staleTry: "Your questions changed since you opened this page, so nothing was checked and no try was used. Here are your questions now.",
   quizKeepNote: "Your answers are saved in this browser as you pick them, so you can leave and finish later.",
-  quizKeepBack: "We put back the answers you picked here before. Nothing has been checked yet.",
+  quizKeepBack: "We put back the answers you picked here before. If you already checked them, your result is shown in this quiz.",
   quizKeepClear: "Clear these answers",
   quizKeepCleared: "Your saved answers are cleared.",
 
@@ -515,7 +515,7 @@ const es: CoursesWords = {
   waitAgain: (span) => `Puedes volver a intentarlo dentro de ${span}. Vuelve a esta página entonces.`,
   staleTry: "Tus preguntas cambiaron desde que abriste esta página, así que no se comprobó nada y no se usó ningún intento. Estas son tus preguntas ahora.",
   quizKeepNote: "Tus respuestas se guardan en este navegador mientras las eliges, así que puedes salir y terminar más tarde.",
-  quizKeepBack: "Hemos recuperado las respuestas que elegiste aquí antes. Todavía no se ha comprobado nada.",
+  quizKeepBack: "Hemos recuperado las respuestas que elegiste aquí antes. Si ya las comprobaste, tu resultado aparece en este cuestionario.",
   quizKeepClear: "Borrar estas respuestas",
   quizKeepCleared: "Tus respuestas guardadas se han borrado.",
 
@@ -815,7 +815,7 @@ const fr: CoursesWords = {
   waitAgain: (span) => `Vous pourrez réessayer dans ${span}. Revenez sur cette page à ce moment-là.`,
   staleTry: `Vos questions ont changé depuis l'ouverture de cette page${S}: rien n'a été vérifié et aucune tentative n'a été utilisée. Voici vos questions maintenant.`,
   quizKeepNote: "Vos réponses sont enregistrées dans ce navigateur au fur et à mesure, pour que vous puissiez partir et terminer plus tard.",
-  quizKeepBack: "Nous avons remis les réponses que vous aviez choisies ici. Rien n'a encore été vérifié.",
+  quizKeepBack: "Nous avons remis les réponses que vous aviez choisies ici. Si vous les avez déjà vérifiées, votre résultat est affiché dans ce quiz.",
   quizKeepClear: "Effacer ces réponses",
   quizKeepCleared: "Vos réponses enregistrées sont effacées.",
 
@@ -1109,7 +1109,7 @@ const de: CoursesWords = {
   waitAgain: (span) => `Sie können es in ${span} erneut versuchen. Kommen Sie dann auf diese Seite zurück.`,
   staleTry: "Ihre Fragen haben sich geändert, seit Sie diese Seite geöffnet haben. Deshalb wurde nichts geprüft und kein Versuch verbraucht. Hier sind Ihre Fragen jetzt.",
   quizKeepNote: "Ihre Antworten werden in diesem Browser gespeichert, während Sie sie auswählen. So können Sie gehen und später weitermachen.",
-  quizKeepBack: "Wir haben die Antworten wiederhergestellt, die Sie hier vorher gewählt hatten. Es wurde noch nichts geprüft.",
+  quizKeepBack: "Wir haben die Antworten wiederhergestellt, die Sie hier vorher gewählt hatten. Wenn Sie sie schon geprüft haben, steht Ihr Ergebnis in diesem Quiz.",
   quizKeepClear: "Diese Antworten löschen",
   quizKeepCleared: "Ihre gespeicherten Antworten sind gelöscht.",
 
@@ -1405,7 +1405,7 @@ const it: CoursesWords = {
   waitAgain: (span) => `Puoi riprovare tra ${span}. Torna su questa pagina allora.`,
   staleTry: "Le tue domande sono cambiate da quando hai aperto questa pagina, quindi non è stato controllato nulla e non hai usato nessun tentativo. Ecco le tue domande adesso.",
   quizKeepNote: "Le tue risposte vengono salvate in questo browser mentre le scegli, così puoi uscire e finire più tardi.",
-  quizKeepBack: "Abbiamo rimesso le risposte che avevi scelto qui prima. Non è stato ancora controllato nulla.",
+  quizKeepBack: "Abbiamo rimesso le risposte che avevi scelto qui prima. Se le hai già controllate, il tuo risultato è mostrato in questo quiz.",
   quizKeepClear: "Cancella queste risposte",
   quizKeepCleared: "Le tue risposte salvate sono state cancellate.",
 
@@ -1702,7 +1702,7 @@ const nl: CoursesWords = {
   waitAgain: (span) => `Je kunt het over ${span} opnieuw proberen. Kom dan terug naar deze pagina.`,
   staleTry: "Je vragen zijn veranderd sinds je deze pagina opende, dus er is niets gecontroleerd en geen poging gebruikt. Dit zijn nu je vragen.",
   quizKeepNote: "Je antwoorden worden in deze browser bewaard terwijl je ze kiest, zodat je kunt weggaan en later verdergaan.",
-  quizKeepBack: "We hebben de antwoorden teruggezet die je hier eerder koos. Er is nog niets gecontroleerd.",
+  quizKeepBack: "We hebben de antwoorden teruggezet die je hier eerder koos. Als je ze al hebt gecontroleerd, staat je resultaat in deze quiz.",
   quizKeepClear: "Deze antwoorden wissen",
   quizKeepCleared: "Je bewaarde antwoorden zijn gewist.",
 
@@ -1999,7 +1999,7 @@ const pt: CoursesWords = {
   waitAgain: (span) => `Pode tentar novamente dentro de ${span}. Volte a esta página nessa altura.`,
   staleTry: "As suas perguntas mudaram desde que abriu esta página, por isso nada foi verificado e nenhuma tentativa foi usada. Estas são agora as suas perguntas.",
   quizKeepNote: "As suas respostas são guardadas neste navegador à medida que as escolhe, para que possa sair e terminar mais tarde.",
-  quizKeepBack: "Repusemos as respostas que escolheu aqui antes. Ainda nada foi verificado.",
+  quizKeepBack: "Repusemos as respostas que escolheu aqui antes. Se já as verificou, o seu resultado aparece neste questionário.",
   quizKeepClear: "Apagar estas respostas",
   quizKeepCleared: "As suas respostas guardadas foram apagadas.",
 

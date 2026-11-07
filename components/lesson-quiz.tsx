@@ -3,7 +3,7 @@ import { questionsPerTry, triesLeft } from "@/lib/quiz";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import type { LanguageCode } from "@/lib/store-language";
 import { QuizAutosave } from "@/components/quiz-autosave";
-import { quizFit, quizKeepKey } from "@/lib/quiz-autosave";
+import { quizFit, quizKeepKey, quizStudentMark } from "@/lib/quiz-autosave";
 
 /**
  * A lesson's quiz, as a student meets it: the questions to answer, and after
@@ -20,7 +20,8 @@ import { quizFit, quizKeepKey } from "@/lib/quiz-autosave";
  *
  * A student's picks are kept in their own browser while they answer and put
  * back when they return (297 [SQ8], components/quiz-autosave.tsx), keyed by
- * the store, course and lesson in `hidden`; without those nothing is kept.
+ * a short mark of `student` and the store, course and lesson in `hidden`;
+ * without those nothing is kept. Only the mark reaches the browser.
  *
  * Said in the store's `language` (lib/buyer-words/courses.ts), English
  * unless given.
@@ -36,6 +37,7 @@ export function LessonQuiz({
   waitSeconds = 0,
   stale = false,
   language = "en",
+  student,
 }: {
   quiz: Quiz;
   attempt: Attempt | null;
@@ -51,6 +53,8 @@ export function LessonQuiz({
   /** Came back because the questions sent were no longer this try's: nothing was counted. */
   stale?: boolean;
   language?: LanguageCode;
+  /** The signed-in student's opaque key (lib/learn.ts emailKey), never the address; without it nothing is kept in the browser. */
+  student?: string;
 }) {
   const w = coursesWords(language);
   const total = questionsPerTry(quiz);
@@ -89,8 +93,9 @@ export function LessonQuiz({
         quiz.waitMinutes ? w.bankWait(w.span(quiz.waitMinutes)) : null,
       ].filter((line): line is string => Boolean(line))
     : [];
+  const keeper = mode === "student" && student ? quizStudentMark(student) : null;
   const keepKey =
-    mode === "student" && hidden.handle && hidden.product && hidden.lesson ? quizKeepKey(hidden.handle, hidden.product, hidden.lesson) : null;
+    keeper && hidden.handle && hidden.product && hidden.lesson ? quizKeepKey(keeper, hidden.handle, hidden.product, hidden.lesson) : null;
 
   return (
     <section id="quiz" className="mt-8 scroll-mt-6 rounded-2xl px-5 py-5 sm:px-6" style={{ border: "1px solid var(--st-line-strong)" }} aria-labelledby="quiz-title">
@@ -198,6 +203,7 @@ export function LessonQuiz({
         {keepKey ? (
           <QuizAutosave
             keepKey={keepKey}
+            student={keeper ?? ""}
             fit={quizFit(quiz.questions)}
             open={canAnswer}
             marked={justMarked}

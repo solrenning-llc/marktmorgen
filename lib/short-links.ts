@@ -22,12 +22,17 @@
  *
  *   nl:slink:<code>             the link: its store and where it goes
  *   nl:slink:store:<statsId>    hash: <code> → the same, the store's links
+ *
+ * A link may change where it goes on a date (510 [CK2] unit 1, `then`): read
+ * from the same record, so opening it costs what it did. Every change to a
+ * kept link is a compare-and-swap of both copies (SWAP_LINK), so a change made
+ * meanwhile, a date or a page, is never written over.
  */
 import { randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { CODE, CODE_LETTERS, MAX_LINKS, type ShortLink, linkName, linkPlace, readTarget } from "@/lib/short-link-rules";
+import { CODE, CODE_LETTERS, MAX_LINKS, MIN_THEN_MS, type ShortLink, keptThen, linkName, linkPlace, readTarget, readThen } from "@/lib/short-link-rules";
 
-export { type LinkTarget, type ShortLink, shortUrl, landingUrl } from "@/lib/short-link-rules";
+export { type LinkTarget, type LinkThen, type ShortLink, shortUrl, landingUrl } from "@/lib/short-link-rules";
 
 const ALPHABET = CODE_LETTERS;
 
@@ -44,13 +49,17 @@ function parse(raw: unknown): Kept | null {
     const name = linkName(v.name);
     const target = readTarget(v.target, () => true);
     if (!name || !target) return null;
-    return { code: v.code, name, place: linkPlace(v.place), target, made: Number(v.made) || 0, sid: v.sid, statsId: v.statsId };
+    const kept: Kept = { code: v.code, name, place: linkPlace(v.place), target, made: Number(v.made) || 0, sid: v.sid, statsId: v.statsId };
+    if (v.then === undefined) return kept;
+    // A date that cannot be read is not "no date": the link would go on opening a page it was meant to leave.
+    const then = keptThen(v.then);
+    return then ? { ...kept, then } : null;
   } catch {
     return null;
   }
 }
 
-const shown = ({ code, name, place, target, made }: Kept): ShortLink => ({ code, name, place, target, made });
+const shown = ({ code, name, place, target, made, then }: Kept): ShortLink => (then ? { code, name, place, target, made, then } : { code, name, place, target, made });
 
 /** How many short links a store has made, in one command: what the path's post-link missions count (lib/path-facts.ts). */
 export async function countLinks(statsId: string | null): Promise<number> {
@@ -105,16 +114,69 @@ export async function addLink(
   return { ok: false, reason: "unavailable" };
 }
 
-/** Changes where a link goes; the post it is in keeps working. */
-export async function retarget(statsId: string, code: unknown, target: unknown, isProduct: (id: string) => boolean): Promise<ShortLink[] | null> {
-  if (typeof code !== "string" || !CODE.test(code)) return null;
-  const next = readTarget(target, isProduct);
+/**
+ * Both copies of a kept link, written only while the store's copy is still
+ * exactly `before`: 1 written, 0 changed or gone since it was read.
+ * KEYS[1] the link, KEYS[2] the store's links; ARGV[1] the code, ARGV[2] the
+ * record as read, ARGV[3] the record to write.
+ */
+const SWAP_LINK = `-- marktmorgen:short-link-swap:v1
+if redis.call('HGET', KEYS[2], ARGV[1]) ~= ARGV[2] then return 0 end
+redis.call('SET', KEYS[1], ARGV[3])
+redis.call('HSET', KEYS[2], ARGV[1], ARGV[3])
+return 1`;
+
+/** Writes `after` over a link whose record is still `before`: "done", "changed" when it was not, "unknown" when the reply says neither. */
+export async function swapLink(statsId: string, code: string, before: string, after: string): Promise<"done" | "changed" | "unknown"> {
+  const [reply] = await redisPipeline([["EVAL", SWAP_LINK, 2, linkKey(code), storeKey(statsId), code, before, after]]);
+  return reply === 1 ? "done" : reply === 0 ? "changed" : "unknown";
+}
+
+export type ChangeResult = { ok: true; links: ShortLink[] } | { ok: false; reason: "gone" | "when" | "target" | "same" | "changed" | "unavailable" };
+
+/** The store's own record of a link, as kept and as read, or null when it is not this store's. */
+async function keptOf(statsId: string, code: unknown): Promise<{ raw: string; kept: Kept } | null> {
+  if (typeof code !== "string" || !CODE.test(code) || !isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["HGET", storeKey(statsId), code]]);
   const kept = parse(raw);
-  if (!next || !kept || kept.statsId !== statsId) return null;
-  const changed = JSON.stringify({ ...kept, target: next });
-  await redisPipeline([["SET", linkKey(code), changed], ["HSET", storeKey(statsId), code, changed]]);
-  return readLinks(statsId);
+  return typeof raw === "string" && kept && kept.statsId === statsId ? { raw, kept } : null;
+}
+
+/** Swaps a link for `next` and answers the list as it is after. */
+async function change(statsId: string, raw: string, next: Kept): Promise<ChangeResult> {
+  const swapped = await swapLink(statsId, next.code, raw, JSON.stringify(next));
+  if (swapped === "changed") return { ok: false, reason: "changed" };
+  if (swapped === "unknown") return { ok: false, reason: "unavailable" };
+  return { ok: true, links: await readLinks(statsId) };
+}
+
+/** Changes where a link goes; the post it is in keeps working, and a date it changes on stays. */
+export async function retarget(statsId: string, code: unknown, target: unknown, isProduct: (id: string) => boolean): Promise<ChangeResult> {
+  const found = await keptOf(statsId, code);
+  if (!found) return { ok: false, reason: "gone" };
+  const next = readTarget(target, isProduct);
+  if (!next) return { ok: false, reason: "target" };
+  return change(statsId, found.raw, { ...found.kept, target: next });
+}
+
+/**
+ * 510 [CK2] unit 1: from a date on, the link opens another page of the store
+ * (`then`, read by readThen against `now`), or, with null, no longer changes.
+ * Never the page it already opens: that would change nothing.
+ */
+export async function setThen(statsId: string, code: unknown, then: unknown, isProduct: (id: string) => boolean, now = Date.now()): Promise<ChangeResult> {
+  const found = await keptOf(statsId, code);
+  if (!found) return { ok: false, reason: "gone" };
+  if (then === null) {
+    const rest: Kept = { ...found.kept };
+    delete rest.then;
+    return change(statsId, found.raw, rest);
+  }
+  const next = readThen(then, isProduct, now);
+  // Which part is wrong, so the studio says the right thing: the date, or where it goes.
+  if (!next) return { ok: false, reason: then && typeof then === "object" && readThen({ ...then, at: now + MIN_THEN_MS }, isProduct, now) ? "when" : "target" };
+  if (JSON.stringify(next.target) === JSON.stringify(found.kept.target)) return { ok: false, reason: "same" };
+  return change(statsId, found.raw, { ...found.kept, then: next });
 }
 
 /** Ends a link: from now on it opens the page that says so. */

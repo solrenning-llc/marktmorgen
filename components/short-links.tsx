@@ -1,16 +1,22 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
 import { POST_PLACES, qrFileName, qrSvg } from "@/lib/share-links";
-import { type LinkTarget, MAX_LINKS, MAX_NAME, type ShortLink, linkName, shortUrl } from "@/lib/short-link-rules";
+import { type LinkTarget, type LinkThen, MAX_LINKS, MAX_NAME, type ShortLink, linkName, shortUrl } from "@/lib/short-link-rules";
+import { useOwnZone } from "@/components/local-clock";
 import { formatMoney } from "@/lib/money";
 
 type Result = { visits: number; sales: number; cents: number };
 
 const REASONS: Record<string, string> = {
+  same: "The link already goes there. Choose another page for after the date.",
+  when: "Choose a date and time at least a minute from now and at most two years away.",
+  changed: "This link was changed somewhere else a moment ago. Reload the page to see it, then try again.",
+  gone: "That link is no longer in your store. Reload the page to see your links.",
+
   name: "Give the post a name, like october-reel.",
   taken: "Another link already has that name. Each post's link needs its own, so its results are its own.",
   target: "Choose where the link goes.",
@@ -91,6 +97,102 @@ function LinkQr({ url, name }: { url: string; name: string }) {
   );
 }
 
+/** "June 1, 2027 at 9:00 AM": on the creator's own clock once the page runs, in UTC (and said so) before. */
+function WhenWords({ ms }: { ms: number }) {
+  const zone = useOwnZone();
+  const words = new Date(ms).toLocaleString("en-US", { dateStyle: "long", timeStyle: "short", timeZone: zone || "UTC" });
+  return <time dateTime={new Date(ms).toISOString()}>{zone ? words : `${words} UTC`}</time>;
+}
+
+/**
+ * 510 [CK2] unit 1: the date a link changes where it goes, and the page it
+ * opens from then. The date is typed on the creator's own clock and sent as a
+ * moment; the server checks it is a minute to two years away.
+ */
+function ChangeOnDate({
+  link,
+  options,
+  busy,
+  onSave,
+  onCancel,
+}: {
+  link: ShortLink;
+  /** The pages it may change to: never the one it opens now. */
+  options: { value: string; label: string }[];
+  busy: boolean;
+  onSave: (then: LinkThen) => Promise<boolean>;
+  onCancel: () => void;
+}) {
+  const id = useId();
+  const zone = useOwnZone();
+  const [when, setWhen] = useState("");
+  const [to, setTo] = useState(options[0]?.value ?? "");
+  const [problem, setProblem] = useState("");
+  if (!options.length) {
+    return (
+      <p className="mt-2 text-xs text-ink-soft">
+        This link opens your store, so it can only change to a product. Add a product to your store first.
+      </p>
+    );
+  }
+  return (
+    <form
+      className="mt-2 grid gap-2 rounded-[10px] p-3 ring-1 ring-line sm:grid-cols-2"
+      aria-labelledby={`${id}-title`}
+      onSubmit={async (event) => {
+        event.preventDefault();
+        const at = when ? new Date(when).getTime() : NaN;
+        if (!Number.isFinite(at)) {
+          setProblem("Choose a date and a time.");
+          return;
+        }
+        setProblem("");
+        const target = targetFrom(to);
+        if (target.kind === "cart") return;
+        if (await onSave({ at, target })) onCancel();
+      }}
+    >
+      <p id={`${id}-title`} className="text-sm font-semibold text-ink sm:col-span-2">{`Change where “${link.name}” goes on a date`}</p>
+      <label className="min-w-0">
+        <span className="field-label">Date and time</span>
+        <input
+          type="datetime-local"
+          className="field mt-1 w-full py-2"
+          required
+          value={when}
+          aria-describedby={`${id}-help${problem ? ` ${id}-problem` : ""}`}
+          aria-invalid={problem ? true : undefined}
+          onChange={(e) => setWhen(e.target.value)}
+        />
+      </label>
+      <label className="min-w-0">
+        <span className="field-label">Then it goes to</span>
+        <select className="field mt-1 w-full py-2" value={to} onChange={(e) => setTo(e.target.value)}>
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      </label>
+      <p id={`${id}-help`} className="text-xs text-ink-soft sm:col-span-2">
+        {`On your own clock${zone ? ` (${zone})` : ""}. At least a minute from now and at most two years away. Until then the link opens the page it opens now. The visits and sales stay on this link's line. You can cancel the change at any time before it happens.`}
+      </p>
+      {problem ? (
+        <p id={`${id}-problem`} role="alert" className="text-xs font-semibold text-ink sm:col-span-2">
+          {problem}
+        </p>
+      ) : null}
+      <div className="flex flex-wrap gap-2 sm:col-span-2">
+        <button type="submit" className="btn btn-secondary btn-sm" disabled={busy}>
+          Save the change
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>
+          Close
+        </button>
+      </div>
+    </form>
+  );
+}
+
 /**
  * Short links for posts (lib/short-links.ts): one for each post, video, talk
  * or flyer, with its own QR code and its own line of results, and where it
@@ -114,6 +216,7 @@ export function ShortLinks({
   const [target, setTarget] = useState("store");
   const [busy, setBusy] = useState(false);
   const [qr, setQr] = useState("");
+  const [dating, setDating] = useState("");
   const named = linkName(name);
 
   async function send(body: Record<string, unknown>, done: string): Promise<boolean> {
@@ -245,6 +348,43 @@ export function ShortLinks({
                     End link
                   </button>
                 </div>
+                {link.then ? (
+                  <div className="mt-2 flex flex-wrap items-baseline gap-2">
+                    <p className="min-w-0 text-xs text-ink">
+                      {"From "}
+                      <WhenWords ms={link.then.at} />
+                      {`, it goes to ${where(link.then.target)}.`}
+                    </p>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      disabled={busy}
+                      aria-label={`Cancel the change for ${link.name}`}
+                      onClick={() => void send({ action: "then", code: link.code, then: null }, `Canceled. The link goes to ${where(link.target)}.`)}
+                    >
+                      Cancel the change
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm mt-2 ring-1 ring-line"
+                    aria-expanded={dating === link.code}
+                    aria-label={`Change on a date where the link for ${link.name} goes`}
+                    onClick={() => setDating(dating === link.code ? "" : link.code)}
+                  >
+                    Change on a date
+                  </button>
+                )}
+                {dating === link.code && !link.then ? (
+                  <ChangeOnDate
+                    link={link}
+                    busy={busy}
+                    options={[{ value: "store", label: "Your store" }, ...products.map((p) => ({ value: `product:${p.id}`, label: p.title }))].filter((o) => o.value !== targetValue(link.target))}
+                    onSave={(then) => send({ action: "then", code: link.code, then }, `Saved. On that date the link starts going to ${where(then.target)}.`)}
+                    onCancel={() => setDating("")}
+                  />
+                ) : null}
               </li>
             );
           })}

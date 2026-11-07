@@ -62,7 +62,7 @@ async function main(): Promise<void> {
   if (!flyer.ok) throw new Error("no flyer");
   await retarget(mine.statsId, made.link.code, { kind: "product", id: "guide" }, isProduct);
   is("the same link now opens the product", (await open(made.link.code)).to, "https://marktmorgen.com/@harbor/p/guide?utm_source=instagram&utm_medium=post&utm_campaign=october-reel");
-  is("another store cannot change it", await retarget("someoneelse0000", made.link.code, { kind: "store" }, () => true), null);
+  is("another store cannot change it", (await retarget("someoneelse0000", made.link.code, { kind: "store" }, () => true)).ok, false);
   await removeLink("someoneelse0000", flyer.link.code);
   is("nor end it", Boolean(await findLink(flyer.link.code)), true);
   await removeLink(mine.statsId, flyer.link.code);

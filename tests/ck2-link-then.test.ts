@@ -100,6 +100,7 @@ async function main(): Promise<void> {
   const made = await addLink(mine, { name: "Spring sale", place: "instagram", target: { kind: "product", id: "guide" } }, guide, 1000);
   if (!made.ok) throw new Error("no link");
   const code = made.link.code;
+  const plain = await open(code);
   const now = Date.now();
   const set = await setThen(mine.statsId, code, { at: now + 3_600_000, target: { kind: "store" } }, guide, now);
   is("set: the list shows when and where to", set.ok ? set.links.find((l) => l.code === code)?.then : set.reason, { at: now + 3_600_000, target: { kind: "store" } });
@@ -108,7 +109,7 @@ async function main(): Promise<void> {
     "https://marktmorgen.com/@harbor/p/guide?utm_source=instagram&utm_medium=post&utm_campaign=spring-sale",
     STANDARD,
   ]);
-  is("opening it reads the link's one record, as before (the store's own reads aside)", before.sent.filter((c) => c === "GET").length >= 1 && !before.sent.some((c) => ["EVAL", "SET", "HSET", "HGET", "HVALS"].includes(c)), true);
+  is("opening a link with a date sends exactly what it sent without one: the same reads, nothing written", before.sent, plain.sent);
   is("refused: the page it already opens", (await setThen(mine.statsId, code, { at: now + 3_600_000, target: { kind: "product", id: "guide" } }, guide, now)).ok ? "" : "same", "same");
   is("refused: a date that is not one", (await setThen(mine.statsId, code, { at: now - 5, target: { kind: "store" } }, guide, now)).ok ? "" : "target", "target");
   is("refused: another store's link", (await setThen("someoneelse0000", code, { at: now + 3_600_000, target: { kind: "store" } }, guide, now)).ok ? "" : "gone", "gone");

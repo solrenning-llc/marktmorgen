@@ -2,12 +2,15 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
 import { ensureStatsId } from "@/lib/store";
 import { readTitles } from "@/lib/catalog";
-import { addLink, removeLink, retarget } from "@/lib/short-links";
+import { type ChangeResult, addLink, removeLink, retarget, setThen } from "@/lib/short-links";
 
 /**
  * The store's short links for posts (lib/short-links.ts), for whoever may
  * work on its pages: `{ action: "add", name, place, target }` makes one,
  * `{ action: "target", code, target }` changes where it goes, and
+ * `{ action: "then", code, then: { at, target } | null }` sets the date it
+ * changes on and where it goes from then (510 [CK2] unit 1; `at` in
+ * milliseconds, the target the store or a product) or takes it back, and
  * `{ action: "remove", code }` ends it. A target is `{ kind: "store" }` or
  * `{ kind: "product", id }` or a ready cart, `{ kind: "cart", ids, code? }`
  * (624 [SZ8](23)). Answers the list as it is after.
@@ -27,10 +30,12 @@ export async function POST(request: NextRequest) {
       if (!added.ok) return Response.json({ ok: false, error: added.reason }, { status: added.reason === "unavailable" ? 503 : 400 });
       return answer(added.links);
     }
-    if (body.action === "target") {
-      const links = await retarget(store.statsId, body.code, body.target, isProduct);
-      return links ? answer(links) : Response.json({ ok: false, error: "target" }, { status: 400 });
-    }
+    const changed = (result: ChangeResult) =>
+      result.ok
+        ? answer(result.links)
+        : Response.json({ ok: false, error: result.reason }, { status: result.reason === "unavailable" ? 503 : result.reason === "changed" ? 409 : 400 });
+    if (body.action === "target") return changed(await retarget(store.statsId, body.code, body.target, isProduct));
+    if (body.action === "then") return changed(await setThen(store.statsId, body.code, body.then, isProduct));
     if (body.action === "remove") return answer(await removeLink(store.statsId, body.code));
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {

@@ -543,6 +543,14 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[4]);
           return 1;
         }
+        // lib/short-links.ts SWAP_LINK: both copies of a link written only while the store's copy is still the one read.
+        if (key.startsWith("-- marktmorgen:short-link-swap:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, link, links, code, before, after] = args;
+          if (this.run(["HGET", links, code]) !== before) return 0;
+          this.run(["SET", link, after]);
+          this.run(["HSET", links, code, after]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:flow-queue-if-leased:v1\n") && args[0] === "2" && args.length === 6) {
           const [, lease, queue, member, score, next] = args;
           if (this.run(["ZSCORE", lease, member]) === null) return 0;

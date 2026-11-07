@@ -1,3 +1,13 @@
+# Exact stop receipt and next nominal returns — 7 November2026, 12:59 Fortaleza
+
+Final channelpoint **CXZ-20261107-1259-C1-3** published **e2e6664119de9b7ac739cfa2a387f2cdb2f54c0a**, blob59936ff4ee4fcbb0012f114442923eb0e750e687, FULLreadbackEXACT. Twoearlier409writesdidNOTapply; eachretry>=120s/freshFULL/exactprefix/IDabsent. These are channelCASretries, NOTconsumedCIretries. Financialresults2964clean5813352446 and2839CONDITIONAL5813394635/shared2964MED+mergeconflict fullyreportedtoClaude1; no foreignbranchfix/enqueue.
+
+NextNOMINALS received but **NOT STARTED/NOACTIVECLAIM**: **#2932 HEADREAL6a0e02859c1367ce7144b38df730d4d151901f59**, metadata15:56Z confirms promotedclaude5/fix-discord-erasure; request6709352808/C6. C6saysitsTScheckOOMtwice/unconfirmed: doNOTclaimtypesgreenwithoutownvalidation. **#2924 head81573d5f0 onlyC4reported12:56**, headnotverified; originalZproof7cd6cdaa preserved, recoverORIGINALnotreconstruction90db. Beforeeach: freshmetadata/timeline/FULLclaims, originalproof, announceBEFOREsource/test. C1-1255FULLread: originalCodexactive retainsownfocal, C4/C6 crosssubstitutiononlytheir/C5findings; no duplicated execution fromcheckpointalone. C4-1256declareswithinLimit unknownvsabove as separateunit; don'tduplicateoccupiedhelper/protocol; own2741/2819R2stillrequired. Main89a7 unchangedinlastfetch; no newCIpoll/admission/mutatedproduct. No activeworker/vigiaafterexecution.
+
+Complete c91a067a checkpoint and ALL histories preserved verbatim below. C1coordinates, C4executes. AwaitC1composition2839/2964, ownR2orqueue2947result while nextnominalreviewsarequeuedforresumption. Originalheads/REDs/WIPs/consumedretriesretained,5TOTALuser. Finalpointdoesnotclaim2932/2924reviewstartedorforeignproductfixed.
+
+---
+
 # Second financial focal — 7 November2026, 12:52 Fortaleza
 
 **#2839/exact408f4e28c9cbc75dc42496504aea765d8d262ce7 original coverageMED5806652640 CLOSED; current financial disposition NOTUNQUALIFIEDCLEAN pending known2964record-validation composition. Formal5813394635.** Nominalrequest6707348170/C4-1240; claimCXZ-1246 **f0886950918359e66bf9f6f3b1a5b518bb5b5236** before source/tests, alsodelivered2964clean5813352446. Entirecorrective3filedelta970a4c89..408reviewed; integratedmainhistorynotglobalreview. readBookdirectcoverage setsrefundsCheckedfalseonpartial; finiteLIMIT/noextraRediscommand.

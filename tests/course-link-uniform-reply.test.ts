@@ -218,3 +218,26 @@ test("the reply is honest when nothing was sent: no promise of a link, and what 
   }
   assert.match(coursesWords("en").linkNotices.sent.body, /ask again/i, "tells the buyer what to do if nothing arrives");
 });
+
+// Each language's words for "contact the store", as the rest of lib/buyer-words/courses.ts names the store.
+const CONTACT = {
+  en: "contact the store",
+  es: "contacta con la tienda",
+  fr: "contactez la boutique",
+  de: "wenden Sie sich an den Shop",
+  it: "contatta il negozio",
+  nl: "neem dan contact op met de winkel",
+  pt: "contacte a loja",
+} as const;
+
+test("the reply says plainly where the link went, and whom to ask when none ever arrives, in every language", () => {
+  const sent = coursesWords("en").linkNotices.sent.body;
+  assert.ok(!sent.includes("email it a link"), "no \"it\" that could be the address or the course");
+  assert.ok(sent.includes("a link to that address"), sent);
+  for (const code of LANGUAGE_CODES) {
+    const body = coursesWords(code).linkNotices.sent.body;
+    const words = CONTACT[code as keyof typeof CONTACT];
+    assert.ok(words, `${code}: a language this test does not know yet`);
+    assert.ok(body.includes(words), `${code}: says to contact the store when asking again brings nothing: ${body}`);
+  }
+});

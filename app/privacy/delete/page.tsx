@@ -3,7 +3,7 @@ import { EmailField } from "@/components/email-field";
 import Link from "next/link";
 import { SiteNav } from "@/components/site-nav";
 import { SiteFooter } from "@/components/site-footer";
-import { storeForHandle } from "@/lib/store";
+import { storeForHandleExact } from "@/lib/store";
 import { readErasureLink } from "@/lib/erasure-request";
 import { readErasureReceipt } from "@/lib/erasure-receipt";
 import { ERASE_TOKEN } from "@/lib/erasure-rules";
@@ -60,10 +60,11 @@ export default async function DeletePage({ searchParams }: Params) {
   const opensAt = typeof query.opens === "string" && /^\d{4}-\d{2}-\d{2}$/.test(query.opens) ? new Date(`${query.opens}T00:00:00Z`) : null;
   const opensOn = opensAt && !Number.isNaN(opensAt.getTime()) ? opensAt.toLocaleDateString("en-US", { timeZone: "UTC", month: "long", day: "numeric", year: "numeric" }) : "";
   const handle = typeof query.store === "string" ? query.store.slice(0, 60).toLowerCase() : "";
-  // A store that could not be read just now is said so: the choice of that store alone is never dropped without a word.
+  // A store that could not be read just now, or answered in an unknown shape, is said so: the choice of that store
+  // alone is never dropped without a word (rule 24).
   let storeUnread = false;
   const store = handle
-    ? await storeForHandle(handle).catch((error: unknown) => {
+    ? await storeForHandleExact(handle).catch((error: unknown) => {
         console.error("the store for a deletion request could not be read", error);
         storeUnread = true;
         return null;

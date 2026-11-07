@@ -48,6 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -1200,6 +1201,30 @@ export async function storeForHandle(handle: string): Promise<Store | null> {
   if (email.startsWith(RELEASED_PREFIX)) return null;
   const [raw] = await redisPipeline([["GET", await ownerKey(email)]]);
   return parseStore(raw);
+}
+
+/**
+ * storeForHandle on Redis's exact answer only (rule 24): null only where the
+ * handle is free or was let go, or the record it leads to is truly not there;
+ * a reply missing or in any other shape, and a record that is there but
+ * cannot be read, throw UnknownReplyError, so a page says the store could
+ * not be read rather than that there is no such store.
+ */
+export async function storeForHandleExact(handle: string): Promise<Store | null> {
+  if (!isRedisConfigured()) return null;
+  if (handleProblem(handle)) return null;
+  const [email] = repliesFor(await redisPipeline([["GET", handleKey(handle)]]), 1) ?? unknownHandleReply();
+  if (email === null) return null;
+  if (typeof email !== "string" || !email) unknownHandleReply();
+  // A name that was let go is held, not owned: it leads nowhere on purpose.
+  if (email.startsWith(RELEASED_PREFIX)) return null;
+  const [raw] = repliesFor(await redisPipeline([["GET", await ownerKey(email)]]), 1) ?? unknownHandleReply();
+  if (raw === null) return null;
+  return (typeof raw === "string" ? parseStore(raw) : null) ?? unknownHandleReply();
+}
+
+function unknownHandleReply(): never {
+  throw new UnknownReplyError("the store behind an address");
 }
 
 /**

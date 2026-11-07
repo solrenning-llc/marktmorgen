@@ -214,14 +214,17 @@ async function main(): Promise<void> {
   // every read inside the call is 1.5 s later than the test's own read before it, so the turn happens on every run.
   const realNow = Date.now;
   const now = Math.floor(realNow() / 1000);
+  // The clock as it is once the call is done: the latest second the checkout's time can have been counted from.
+  let after = now;
   Date.now = () => realNow() + 1500;
   try {
     await createCartCheckout(shop, [limited("print6", 3) as Product, plain("guide1") as Product], "https://marktmorgen.com", { digitalConsent: TEST_CONSENT, held: true, remind: true });
+    after = Math.floor(Date.now() / 1000);
   } finally {
     Date.now = realNow;
   }
   const closes = Number(sent.at(-1)!.get("expires_at"));
-  is("a held unit's time, shorter than a reminder's hour", closes > now && closes <= now + 31 * 60, true);
+  is("a held unit's time, shorter than a reminder's hour", closes > now && closes <= after + 31 * 60, true);
 
   part("The open cart, and paying for it");
   const OWNER = "prints@example.com";

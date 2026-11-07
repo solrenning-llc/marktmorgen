@@ -110,7 +110,7 @@ import { assistantLeft, assistantMissed } from "@/lib/store-assistant";
 import { assistantRefusal, syncAssistant } from "@/lib/assistant-billing";
 import { assistantWindow } from "@/lib/store-assistant-rules";
 import { STORE_PAGE, answersAllowance, answersUsed, missedQuestions } from "@/lib/answers";
-import { readCards, readTitles } from "@/lib/catalog";
+import { readCards } from "@/lib/catalog";
 import { TaxEditor } from "@/components/tax-editor";
 import { StoreLanguageEditor } from "@/components/store-language-editor";
 import { RecoveryEditor } from "@/components/recovery-editor";
@@ -760,8 +760,8 @@ async function saleCandidates(store: Store): Promise<{ id: string; title: string
  * "Goes well with" can pick (lib/store-collections.ts). One read of the
  * cards, whatever the store's size (lib/catalog.ts, readCards).
  */
-async function publishedChoices(store: Store): Promise<{ id: string; title: string }[]> {
-  const cards = await readCards(store).catch(() => new Map<string, { title: string }>());
+async function publishedChoices(store: Store, cardsRead: Promise<Map<string, { title: string }>>): Promise<{ id: string; title: string }[]> {
+  const cards = await cardsRead;
   return store.catalog.items
     .filter((item) => (item.kind & KIND.hidden) === 0)
     .map((item) => ({ id: item.id, title: cards.get(item.id)?.title ?? "" }))
@@ -1177,9 +1177,12 @@ export default async function StudioPage({
         left: readsSales(current) ? left.heavyLeft : left.anyLeft,
       }
     : null;
-  const statListings = current && visits && salesRead ? await readListings(current, [...new Set([...productsInStats(current, visits, salesRead.value), ...reachProducts(visits)])]) : [];
+  // Read after the day's reading, from what it read, so it cannot be waited for before it: when the products it names
+  // could not be read (one outside the catalog's head is read from its own record), the numbers wait, as when they
+  // could not be read, rather than end the page or name a product "no longer in your store" (Claude 5 on #2835).
+  const statListings = current && visits && salesRead ? await readListings(current, [...new Set([...productsInStats(current, visits, salesRead.value), ...reachProducts(visits)])]).catch(() => null) : [];
   const counted =
-    current && visits && salesRead
+    current && visits && salesRead && statListings
       ? studioStats(current, visits, salesRead.value, salesRead.state, statListings)
       : null;
   // Its rates beside those of stores its size (lib/benchmarks.ts): this page's numbers are kept as the
@@ -1264,6 +1267,21 @@ export default async function StudioPage({
   const billingReady = isBillingConfigured();
   const NEXT = connectReady ? NEXT_WHEN_SELLING : NEXT_WHEN_NOT;
 
+  // 651 [WG11] unit 2, step 2: each section below that waits for its own reads is an async function called in place,
+  // a promise React renders beside the other sections, so they wait together and not one after another. Each sits
+  // where it did, under the same condition, and reads and writes what it did; a refusal still fails the page.
+  // tests/studio-today-trips.test.ts renders the tree whole.
+  // The store writes in the parts below keep the order they had: the ready cart link's count, which writes the billing
+  // month when the store's snapshot has none (lib/billing-sync.ts refreshPeriod), then a token's platforms
+  // (ServerEvents), then the add-on's month read again from Stripe (the assistant), so they never wait on each other's
+  // store lock in one visit. Each part takes the one before from here and puts its own, while the page's JSX is built,
+  // before it awaits anything (tests/studio-today-removal-order.test.ts).
+  const serverWrite: { done: Promise<unknown> } = { done: Promise.resolve() };
+  // The store's cards, read once for the parts that show them (the short links' titles, the product editor's pairs,
+  // the cards and the welcome offer), when the first of them asks: read side by side, each would repair a cold cache again (Codex M on
+  // #2900). Read in order as before, the later two found it repaired.
+  const cardsOnce: { read: Promise<Awaited<ReturnType<typeof readCards>>> | null } = { read: null };
+  const storeCards = (shop: Store) => (cardsOnce.read ??= early(readCards(shop).catch(() => new Map())));
   return (
     <div className="min-h-screen bg-paper text-ink">
       {store && view ? (
@@ -1547,22 +1565,25 @@ export default async function StudioPage({
                 <summary className="cursor-pointer text-sm font-semibold text-ink">Share the store: link, QR code, posts</summary>
                 <div className="mt-4">
                   <SharePanel url={storeBase(store)} title={store.name} what="store" />
-                  {may("page") && store.statsId ? (
-                    <ShortLinks
-                      links={await readLinks(store.statsId).catch(() => [])}
-                      products={[...(await readTitles(store).catch(() => new Map<string, string>()))].map(([id, title]) => ({ id, title }))}
-                      results={
-                        numbers
-                          ? (numbers.posts?.d90 ?? []).reduce<Record<string, { visits: number; sales: number; cents: number }>>((all, row) => {
-                              const sum = all[row.campaign] ?? { visits: 0, sales: 0, cents: 0 };
-                              all[row.campaign] = { visits: sum.visits + row.visits, sales: sum.sales + row.sales, cents: sum.cents + row.cents };
-                              return all;
-                            }, {})
-                          : undefined
-                      }
-                      currency={store.currency}
-                    />
-                  ) : null}
+                  {may("page") && store.statsId ? (async () => {
+                    const titles = storeCards(store).then((cards) => new Map([...cards].map(([id, card]) => [id, card.title] as const)));
+                    return (
+                      <ShortLinks
+                        links={await readLinks(store.statsId).catch(() => [])}
+                        products={[...(await titles)].map(([id, title]) => ({ id, title }))}
+                        results={
+                          numbers
+                            ? (numbers.posts?.d90 ?? []).reduce<Record<string, { visits: number; sales: number; cents: number }>>((all, row) => {
+                                const sum = all[row.campaign] ?? { visits: 0, sales: 0, cents: 0 };
+                                all[row.campaign] = { visits: sum.visits + row.visits, sales: sum.sales + row.sales, cents: sum.cents + row.cents };
+                                return all;
+                              }, {})
+                            : undefined
+                        }
+                        currency={store.currency}
+                      />
+                    );
+                  })() : null}
                   {may("page") ? (
                     <AiOn value={ai}>
                       <AiPosts url={storeBase(store)} what="store" />
@@ -1587,61 +1608,73 @@ export default async function StudioPage({
                     </p>
                   </div>
                 ) : null}
-                <StatsPanel
-                  data={numbers}
-                  reading={numbersReading}
-                  canExport={may("export")}
-                  notes={statsNotes}
-                  marks={autoMarks}
-                  spends={adSpends}
-                  beside={beside}
-                  meta={await metaView(store.statsId, store.currency).then((view) => (view ? { ...view, readPaused: costsPaused(store) } : view)).catch(() => null)}
-                  canConnectMeta={may("settings")}
-                  pin={pin}
-                  askHeard={!heardIsOff}
-                  canSetHeard={may("settings")}
-                  canSetAttribution={may("settings")}
-                  canAsk={aiAvailableFor(store)}
-                  voice={store ? await readVoice(store).catch(() => null) : undefined}
-                  insightContext={{
-                    storeUrl: current ? storeBase(current) : undefined,
-                    reminders: current ? current.recovery.enabled : undefined,
-                    may: { settings: may("settings"), page: may("page"), draft: may("draft") },
-                    pages: statListings.filter((l) => l.page).map((l) => l.id),
-                    promotionProducts: current && (may("page") || may("draft"))
-                      ? statListings.filter((product) => !product.hidden).map((product) => ({ id: product.id, title: product.title, url: `${storeBase(current)}/p/${productSegment(product)}` }))
-                      : [],
-                  }}
-                  weeklyAi={may("settings") && aiAvailableFor(store) && store ? store.weeklyAi : undefined}
-                  weeklyTeam={
-                    team && store
-                      ? {
-                          members: team.members.filter((m) => can(m.role, "stats")).map((m) => m.email.toLowerCase()),
-                          chosen: await weeklyTeam(store.handle).catch(() => []),
-                        }
-                      : null
-                  }
-                  goal={(await readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: 0 }))).cents}
-                  chat={may("settings") ? await chatSetup(store.statsId).catch(() => null) : undefined}
-                  chatSales={store.chatSales}
-                  deviceMarked={isMarkedDevice((await cookies()).get(NO_COUNT_COOKIE)?.value, store.sid)}
-                />
-                {await (async () => {
+                {(async () => {
+                  const meta = metaView(store.statsId, store.currency).then((view) => (view ? { ...view, readPaused: costsPaused(store) } : view)).catch(() => null);
+                  const voice = store ? readVoice(store).catch(() => null) : undefined;
+                  const chosen = team && store ? weeklyTeam(store.handle).catch(() => []) : null;
+                  const goal = readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: 0 }));
+                  const chat = may("settings") ? chatSetup(store.statsId).catch(() => null) : undefined;
+                  return (
+                    <StatsPanel
+                      data={numbers}
+                      reading={numbersReading}
+                      canExport={may("export")}
+                      notes={statsNotes}
+                      marks={autoMarks}
+                      spends={adSpends}
+                      beside={beside}
+                      meta={await meta}
+                      canConnectMeta={may("settings")}
+                      pin={pin}
+                      askHeard={!heardIsOff}
+                      canSetHeard={may("settings")}
+                      canSetAttribution={may("settings")}
+                      canAsk={aiAvailableFor(store)}
+                      voice={await voice}
+                      insightContext={{
+                        storeUrl: current ? storeBase(current) : undefined,
+                        reminders: current ? current.recovery.enabled : undefined,
+                        may: { settings: may("settings"), page: may("page"), draft: may("draft") },
+                        pages: (statListings ?? []).filter((l) => l.page).map((l) => l.id),
+                        promotionProducts: current && (may("page") || may("draft"))
+                          ? (statListings ?? []).filter((product) => !product.hidden).map((product) => ({ id: product.id, title: product.title, url: `${storeBase(current)}/p/${productSegment(product)}` }))
+                          : [],
+                      }}
+                      weeklyAi={may("settings") && aiAvailableFor(store) && store ? store.weeklyAi : undefined}
+                      weeklyTeam={
+                        team && store
+                          ? {
+                              members: team.members.filter((m) => can(m.role, "stats")).map((m) => m.email.toLowerCase()),
+                              chosen: (await chosen) ?? [],
+                            }
+                          : null
+                      }
+                      goal={(await goal).cents}
+                      chat={await chat}
+                      chatSales={store.chatSales}
+                      deviceMarked={isMarkedDevice((await cookies()).get(NO_COUNT_COOKIE)?.value, store.sid)}
+                    />
+                  );
+                })()}
+                {(async () => {
                   // What buyers get next (lib/next-bought.ts): read from the week's
                   // record, and read again in the background after six hours.
                   if (!store.stripeAccountId) return null;
                   const paths = await readPaths(store.statsId).catch(() => null);
-                  if (pathsStale(paths) && (await claimPathsRead(store.statsId).catch(() => false))) {
-                    after(() => readAllTimeSales(store).then(() => undefined).catch(() => undefined));
-                  }
-                  if (!paths) return null;
-                  const pairs = Object.entries(paths.next)
+                  // The claim and the titles below go together; the read again starts only when this page won the claim.
+                  const claimed = pathsStale(paths) ? claimPathsRead(store.statsId).catch(() => false) : false;
+                  const pairs = Object.entries(paths?.next ?? {})
                     .flatMap(([from, steps]) => steps.map((step) => ({ from, ...step })))
                     .sort((a, b) => b.buyers - a.buyers || a.days - b.days)
                     .slice(0, 12);
-                  const firstOnes = Object.entries(paths.starts).sort((a, b) => b[1] - a[1]).slice(0, 3);
+                  const firstOnes = Object.entries(paths?.starts ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 3);
                   const ids = [...new Set([...pairs.flatMap((p) => [p.from, p.id]), ...firstOnes.map(([id]) => id)])];
-                  const listed = new Map((ids.length ? await readListings(store, ids).catch(() => []) : []).map((p) => [p.id, p]));
+                  const titled = paths && ids.length ? readListings(store, ids).catch(() => []) : null;
+                  if (await claimed) {
+                    after(() => readAllTimeSales(store).then(() => undefined).catch(() => undefined));
+                  }
+                  if (!paths) return null;
+                  const listed = new Map(((await titled) ?? []).map((p) => [p.id, p]));
                   const withOffers = new Set(idsOfKind(store, "funnel"));
                   const rows = pairs
                     .map((p) => ({ p, a: listed.get(p.from), b: listed.get(p.id) }))
@@ -1657,11 +1690,16 @@ export default async function StudioPage({
                   const starts = firstOnes.flatMap(([id, buyers]) => (listed.get(id) && buyers >= 3 ? [{ title: listed.get(id)!.title, buyers }] : []));
                   return <BuyerPaths rows={rows} starts={starts} canEdit={may("products")} />;
                 })()}
-                <GoogleSearches
-                  searches={await storeSearches(store).catch(() => null)}
-                  operator={isOperator(email) ? await searchConsoleStatus().catch(() => ({ connected: false, account: "" })) : null}
-                  result={typeof params.gsc === "string" ? params.gsc : ""}
-                />
+                {(async () => {
+                  const operator = isOperator(email) ? searchConsoleStatus().catch(() => ({ connected: false, account: "" })) : null;
+                  return (
+                    <GoogleSearches
+                      searches={await storeSearches(store).catch(() => null)}
+                      operator={await operator}
+                      result={typeof params.gsc === "string" ? params.gsc : ""}
+                    />
+                  );
+                })()}
               </div>
             ) : null}
 
@@ -1705,34 +1743,42 @@ export default async function StudioPage({
 
             {may("products") ? (
               <div id="products" className="scroll-mt-32">
-                <ProductEditor
-                  products={shelf?.products ?? []}
-                  total={productCount(store)}
-                  positions={shelf?.positions}
-                  paging={shelf?.paging ?? null}
-                  choices={shelf?.choices}
-                  named={shelf?.named}
-                  notes={shelf?.notes}
-                  folder={folder}
-                  imageFolder={pictures}
-                  handle={store.handle}
-                  selling={current ? canSell(current) : false}
-                  testMode={isConnectInTestMode()}
-                  email={store.email}
-                  currency={store.currency}
-                  meetings={meetAccounts}
-                  ai={ai}
-                  newComments={await newCommentsFor(shelf?.products ?? [])}
-                  waitlists={await waitlistViews(store, (shelf?.products ?? []).map((p) => p.id)).catch(() => ({}))}
-                  preorders={await preorderViews(store, (shelf?.products ?? []).map((p) => p.id)).catch(() => ({}))}
-                  mailAddress={store.mail?.address ?? store.winback?.address ?? ""}
-                  cover={{ accent: store.look.accent, font: store.look.font, name: store.name, language: store.language }}
-                  look={store.look}
-                  ownHosts={store.domain?.name ? [store.domain.name] : []}
-                  pairChoices={await publishedChoices(store)}
-                  tiers={store.tiers}
-                  taxOnTop={store.tax.enabled && !store.tax.included}
-                />
+                {(async () => {
+                  const newComments = early(newCommentsFor(shelf?.products ?? []));
+                  const waitlists = waitlistViews(store, (shelf?.products ?? []).map((p) => p.id)).catch(() => ({}));
+                  const preorders = preorderViews(store, (shelf?.products ?? []).map((p) => p.id)).catch(() => ({}));
+                  const pairChoices = early(publishedChoices(store, storeCards(store)));
+                  return (
+                    <ProductEditor
+                      products={shelf?.products ?? []}
+                      total={productCount(store)}
+                      positions={shelf?.positions}
+                      paging={shelf?.paging ?? null}
+                      choices={shelf?.choices}
+                      named={shelf?.named}
+                      notes={shelf?.notes}
+                      folder={folder}
+                      imageFolder={pictures}
+                      handle={store.handle}
+                      selling={current ? canSell(current) : false}
+                      testMode={isConnectInTestMode()}
+                      email={store.email}
+                      currency={store.currency}
+                      meetings={meetAccounts}
+                      ai={ai}
+                      newComments={await newComments}
+                      waitlists={await waitlists}
+                      preorders={await preorders}
+                      mailAddress={store.mail?.address ?? store.winback?.address ?? ""}
+                      cover={{ accent: store.look.accent, font: store.look.font, name: store.name, language: store.language }}
+                      look={store.look}
+                      ownHosts={store.domain?.name ? [store.domain.name] : []}
+                      pairChoices={await pairChoices}
+                      tiers={store.tiers}
+                      taxOnTop={store.tax.enabled && !store.tax.included}
+                    />
+                  );
+                })()}
               </div>
             ) : (
               <section className="card mt-8 p-6 sm:p-8" aria-labelledby="catalogue-title">
@@ -1960,40 +2006,54 @@ export default async function StudioPage({
               <>
                 <DiscountEditor selling={current ? canSell(current) : false} currency={store.currency} address={`${SITE_URL}/@${store.handle}`} />
 
-                <SaleEditor
-                  initial={store.sale}
-                  products={await saleCandidates(store)}
-                  connected={Boolean(current?.stripeAccountId)}
-                  now={saleClock()}
-                />
+                {(async () => (
+                  <SaleEditor
+                    initial={store.sale}
+                    products={await saleCandidates(store)}
+                    connected={Boolean(current?.stripeAccountId)}
+                    now={saleClock()}
+                  />
+                ))()}
 
-                <FairPriceEditor
-                  initial={store.fair}
-                  currency={store.currency}
-                  examplePrice={2700}
-                  products={await saleCandidates(store)}
-                  names={Object.fromEntries(allCountries().map((code) => [code, countryName(code)]))}
-                />
+                {(async () => (
+                  <FairPriceEditor
+                    initial={store.fair}
+                    currency={store.currency}
+                    examplePrice={2700}
+                    products={await saleCandidates(store)}
+                    names={Object.fromEntries(allCountries().map((code) => [code, countryName(code)]))}
+                  />
+                ))()}
 
                 <CartDealEditor initial={store.cartDeal} currency={store.currency} offered={offersCart(store)} />
 
-                {offersCart(store) ? <CartLinkBuilder address={`${SITE_URL}/@${store.handle}`} products={await cartLinkProducts(store)} more={cartLinkCandidates(store).length > CART_LINK_CHOICES ? CART_LINK_CHOICES : 0} /> : null}
+                {offersCart(store) ? (async () => {
+                  const products = cartLinkProducts(store);
+                  serverWrite.done = products;
+                  return <CartLinkBuilder address={`${SITE_URL}/@${store.handle}`} products={await products} more={cartLinkCandidates(store).length > CART_LINK_CHOICES ? CART_LINK_CHOICES : 0} />;
+                })() : null}
 
-                {await (async () => {
+                {(async () => {
                   const tiers = await tierCandidates(store);
                   return tiers.length ? <TierEditor initial={store.tiers} memberships={tiers} /> : null;
                 })()}
 
                 <PixelEditor pixels={store.pixels} canViewAttribution={may("stats")} />
-                {hasPixels(store.pixels) ? (
+                {hasPixels(store.pixels) ? (async () => {
+                  const before = serverWrite.done;
+                  const setupRead = (async () => {
+                    const setup = await serverSetup(store.statsId).catch(() => NO_SETUP);
+                    // A token saved before the store kept its own list of platforms is written there now, once, after
+                    // the cart link's write.
+                    const on = SERVER_PLATFORMS.filter((p) => setup.on[p]);
+                    if (on.join() !== store.adsServer.join()) await before.catch(() => null).then(() => setAdsServer(storeRef(store), on)).catch(() => null);
+                    return setup;
+                  })();
+                  // The writes after this one wait for the cart link's too, even when this part writes nothing.
+                  serverWrite.done = Promise.all([before.catch(() => null), setupRead]);
+                  return (
                   <ServerEventsEditor
-                    setup={await (async () => {
-                      const setup = await serverSetup(store.statsId).catch(() => NO_SETUP);
-                      // A token saved before the store kept its own list of platforms is written there now, once.
-                      const on = SERVER_PLATFORMS.filter((p) => setup.on[p]);
-                      if (on.join() !== store.adsServer.join()) await setAdsServer(storeRef(store), on).catch(() => null);
-                      return setup;
-                    })()}
+                    setup={await setupRead}
                     pixels={{
                       meta: Boolean(store.pixels.meta),
                       tiktok: Boolean(store.pixels.tiktok),
@@ -2002,11 +2062,39 @@ export default async function StudioPage({
                     }}
                     googleId={store.pixels.google ?? ""}
                   />
-                ) : null}
+                  );
+                })() : null}
 
-                {await (async () => {
+                {(async () => {
+                  const cardsRead = storeCards(store);
+                  // The answers' month and the assistant's need only the store: they are sent with the cards, and each
+                  // is still shown where it was, under the same condition.
+                  const answers = may("page") && aiAvailableFor(store) ? { used: answersUsed(store).catch(() => 0), missed: missedQuestions(store).catch(() => []) } : null;
+                  const assistant = may("page")
+                    ? early((async () => {
+                        // The add-on's month as Stripe has it, read again when the snapshot has run out (lib/assistant-billing.ts).
+                        const own = store.assistantPlan && !assistantWindow(store.assistantPlan) && isBillingConfigured() ? await serverWrite.done.then(() => syncAssistant(store)).catch(() => store) : store;
+                        const missed = assistantMissed(own).catch(() => []);
+                        return (
+                          <StoreAssistantEditor
+                            setting={own.assistant}
+                            next={own.nextOffer}
+                            remind={own.assistReminder}
+                            postal={own.recovery.address !== ""}
+                            plan={own.assistantPlan}
+                            onSale={ASSISTANT_ON_SALE}
+                            canBill={may("billing")}
+                            refusal={assistantRefusal(own)}
+                            usage={await assistantLeft(own).catch(() => null)}
+                            missed={await missed}
+                            notice={typeof params.assistant === "string" ? params.assistant : ""}
+                            pin={pin}
+                          />
+                        );
+                      })())
+                    : null;
                   // The free, published products, by name: what can be offered to a leaving visitor.
-                  const cards = await readCards(store).catch(() => new Map());
+                  const cards = await cardsRead;
                   const free = store.catalog.items
                     .filter((item) => (item.kind & KIND.free) !== 0 && (item.kind & KIND.hidden) === 0)
                     .map((item) => ({ id: item.id, title: cards.get(item.id)?.title ?? "" }))
@@ -2040,12 +2128,12 @@ export default async function StudioPage({
                           signup={joinOpen(store)}
                         />
                       ) : null}
-                      {may("page") && aiAvailableFor(store) ? (
+                      {answers ? (
                         <AnswersEditor
                           setting={store.answers}
-                          used={await answersUsed(store).catch(() => 0)}
+                          used={await answers.used}
                           allowance={answersAllowance(store)}
-                          missed={(await missedQuestions(store).catch(() => [])).map((row) => ({
+                          missed={(await answers.missed).map((row) => ({
                             title:
                               row.productId === STORE_PAGE
                                 ? "Looked for on your store page, and nothing fit"
@@ -2055,28 +2143,7 @@ export default async function StudioPage({
                           }))}
                         />
                       ) : null}
-                      {may("page")
-                        ? await (async () => {
-                            // The add-on's month as Stripe has it, read again when the snapshot has run out (lib/assistant-billing.ts).
-                            const own = store.assistantPlan && !assistantWindow(store.assistantPlan) && isBillingConfigured() ? await syncAssistant(store).catch(() => store) : store;
-                            return (
-                              <StoreAssistantEditor
-                                setting={own.assistant}
-                                next={own.nextOffer}
-                                remind={own.assistReminder}
-                                postal={own.recovery.address !== ""}
-                                plan={own.assistantPlan}
-                                onSale={ASSISTANT_ON_SALE}
-                                canBill={may("billing")}
-                                refusal={assistantRefusal(own)}
-                                usage={await assistantLeft(own).catch(() => null)}
-                                missed={await assistantMissed(own).catch(() => [])}
-                                notice={typeof params.assistant === "string" ? params.assistant : ""}
-                                pin={pin}
-                              />
-                            );
-                          })()
-                        : null}
+                      {assistant}
                     </>
                   );
                 })()}
@@ -2085,15 +2152,18 @@ export default async function StudioPage({
 
                 {may("settings") ? <StoreLanguageEditor language={store.language} handle={store.handle} /> : null}
 
-                {givesAway && may("settings") ? (
-                  <WelcomeOfferEditor
-                    offer={store.welcomeOffer}
-                    products={[...(await readCards(store).catch(() => new Map()))].map(([, c]) => c).filter((c) => c.priceCents > 0).map((c) => ({ id: c.id, title: c.title }))}
-                    connected={Boolean(current?.stripeAccountId)}
-                    suggestedAddress={store.winback.address || store.recovery.address || store.mail?.address || ""}
-                    offered={await welcomesOffered(store).catch(() => 0)}
-                  />
-                ) : null}
+                {givesAway && may("settings") ? (async () => {
+                  const offered = welcomesOffered(store).catch(() => 0);
+                  return (
+                    <WelcomeOfferEditor
+                      offer={store.welcomeOffer}
+                      products={[...(await storeCards(store))].map(([, c]) => c).filter((c) => c.priceCents > 0).map((c) => ({ id: c.id, title: c.title }))}
+                      connected={Boolean(current?.stripeAccountId)}
+                      suggestedAddress={store.winback.address || store.recovery.address || store.mail?.address || ""}
+                      offered={await offered}
+                    />
+                  );
+                })() : null}
 
                 <RecoveryEditor
                   recovery={store.recovery}
@@ -2108,25 +2178,34 @@ export default async function StudioPage({
                   <>
                     <DunningEditor dunning={store.dunning} connected={Boolean(current?.stripeAccountId)} />
                     <LeaveEditor leaving={store.leaving} pause={store.pause} tiers={store.tiers.length} />
-                    <NudgeEditor
-                      nudge={store.nudge}
-                      suggestedAddress={store.mail?.address || store.winback.address || store.recovery.address || ""}
-                      sent={await nudgesThisMonth(store).catch(() => 0)}
-                    />
-                    <YearlyAskEditor
-                      ask={store.yearlyAsk}
-                      suggestedAddress={store.nudge.address || store.mail?.address || store.winback.address || store.recovery.address || ""}
-                      sent={await yearlyAsksThisMonth(store).catch(() => 0)}
-                      offersYearly={(await readKind(store, "recurring").catch(() => [])).some((p) => activeYearly(p, store.tiers) !== null)}
-                    />
+                    {(async () => (
+                      <NudgeEditor
+                        nudge={store.nudge}
+                        suggestedAddress={store.mail?.address || store.winback.address || store.recovery.address || ""}
+                        sent={await nudgesThisMonth(store).catch(() => 0)}
+                      />
+                    ))()}
+                    {(async () => {
+                      const recurring = readKind(store, "recurring").catch(() => []);
+                      return (
+                        <YearlyAskEditor
+                          ask={store.yearlyAsk}
+                          suggestedAddress={store.nudge.address || store.mail?.address || store.winback.address || store.recovery.address || ""}
+                          sent={await yearlyAsksThisMonth(store).catch(() => 0)}
+                          offersYearly={(await recurring).some((p) => activeYearly(p, store.tiers) !== null)}
+                        />
+                      );
+                    })()}
                     <SaveOfferEditor save={store.save} connected={Boolean(current?.stripeAccountId)} />
                     <PauseEditor months={store.pause} />
-                    <WinBackEditor
-                      winback={store.winback}
-                      connected={Boolean(current?.stripeAccountId)}
-                      suggestedAddress={store.recovery.address || store.mail?.address || ""}
-                      sent={await winbacksSent(store).catch(() => 0)}
-                    />
+                    {(async () => (
+                      <WinBackEditor
+                        winback={store.winback}
+                        connected={Boolean(current?.stripeAccountId)}
+                        suggestedAddress={store.recovery.address || store.mail?.address || ""}
+                        sent={await winbacksSent(store).catch(() => 0)}
+                      />
+                    ))()}
                   </>
                 ) : null}
               </>

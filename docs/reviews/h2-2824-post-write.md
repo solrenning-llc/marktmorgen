@@ -33,8 +33,9 @@ Execution ceiling: 150 assertions, 20,000 synthetic commands, 120 seconds,
 512 MiB heap, no real provider or customer data. Actual RED ended in under one
 second. An unavailable view is never retried by the proposed correction.
 
-The product branch remains unchanged at the above head while this RED is
-preserved on the existing `codex/h-email-sync-disconnect-red` branch.
+At initial RED preservation, the product branch was unchanged at the above
+head. The evidence is on the existing `codex/h-email-sync-disconnect-red`
+branch: initial `c932f6d1`, completed route evidence `9405d95d`.
 
 ## Local correction
 
@@ -68,10 +69,47 @@ Validation on the local correction:
   annotation resolved it without changing the assertion.
 - ESLint on six changed code/test/launcher paths, max-warnings 0: clean.
   One unused launcher counter was removed before the final lint pass.
-- Public-data scanner: 4,153 tracked paths, 0 corrections; diff-check clean.
+- Public-data scanner: 4,155 tracked paths after adding the two evidence files,
+  0 corrections; diff-check clean.
 
 Dependencies were restored from the existing npm cache using offline install,
 without lifecycle scripts or a lockfile change. Test processes use 512 MiB;
 the directed compiler uses 1 GiB, bounded to the five roots. No global build,
 browser, native Redis, real provider, customer data or deployed action was run.
 Independent focal review and nine NEW final checks remain mandatory.
+
+## Incoming #2451 composition: prepared, not pushed to the product PR
+
+After the single product advance to `66a52a0555dbeca8cf354d2c03acf400883169fe`,
+N published `33577e2d3f61f616718fd35247db1dfbee5be5cd`. Its strict Kit list
+reader requires both pagination booleans to prove a terminal page. H2's
+synthetic response omitted them. A read-only esbuild composition replacing
+ONLY `lib/email-platforms.ts` with that exact incoming blob produced
+36 checks / 12 failures in H2's permanent test. This is an H2 fixture
+compatibility problem, not a finding or independent review of N's PR.
+
+The local fixture now explicitly supplies `has_previous_page: false` and
+`has_next_page: false` for its complete two-item list. No expected action,
+assertion, timeout, production reader or target-completeness condition changes.
+The same official 36 checks then all passed with the incoming reader. The
+native backend/route proof also passed 43/43, 43 pipeline commands; its
+single-item route fixture has the same explicit terminal metadata. ESLint
+on the two changed test/launcher paths is clean with max-warnings 0.
+
+The prepared delta is only the permanent test, its launcher and this report.
+All three production blobs remain byte-identical to the candidate `66a52a05`.
+No second product push or main integration was performed during its new CI.
+Coordinate incorporation with N/C5; a necessary future integration must include
+these fixtures, an applicable focal return and nine NEW final checks.
+
+Portable combined reproduction from the completed evidence branch, after
+fetching both existing branches:
+
+```sh
+H2_PRODUCT_REF=66a52a0555dbeca8cf354d2c03acf400883169fe H2_PLATFORM_REF=33577e2d3f61f616718fd35247db1dfbee5be5cd node --max-old-space-size=512 tests/h2-2824-post-write-native.mjs
+```
+
+The executed local product sources were byte-identical to `66a52a05`; the
+incoming platform source was pinned to `33577e2d3`. All synthetic boundaries
+and limitations above continue to apply. Neither source was edited by this
+composition check.

@@ -54,7 +54,7 @@ const original = redis.pipeline.bind(redis) as Pipeline;
 const server = http.createServer((request, response) => {
   response.setHeader("Content-Type", "application/json");
   if (request.url === "/v4/account") response.end("{}");
-  else if (request.url?.startsWith("/v4/forms?")) response.end(JSON.stringify({ forms: [{ id: "audience", name: "First" }, { id: "second", name: "Second" }] }));
+  else if (request.url?.startsWith("/v4/forms?")) response.end(JSON.stringify({ forms: [{ id: "audience", name: "First" }, { id: "second", name: "Second" }], pagination: { has_previous_page: false, has_next_page: false } }));
   else {
     response.statusCode = 404;
     response.end("{}");

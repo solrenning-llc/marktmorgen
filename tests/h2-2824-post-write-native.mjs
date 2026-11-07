@@ -10,7 +10,7 @@ import { registerHooks, stripTypeScriptTypes } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { posix, resolve } from 'node:path';
-const root=process.cwd(), ref=process.env.H2_PRODUCT_REF;
+const root=process.cwd(), ref=process.env.H2_PRODUCT_REF, platformRef=process.env.H2_PLATFORM_REF;
 const sources=new Map();
 const boundaries={
  'lib/auth.ts': `export const normaliseEmail=s=>s.trim().toLowerCase();`,
@@ -25,8 +25,9 @@ const boundaries={
 };
 const productPaths=new Set(['lib/email-sync.ts','app/api/store/email-sync/route.ts','components/email-sync-editor.tsx']);
 function source(path){
- if(!sources.has(path))sources.set(path,ref&&productPaths.has(path)
-  ?execFileSync('git',['show',`${ref}:${path}`],{cwd:root,encoding:'utf8',timeout:20000,maxBuffer:1048576})
+ const sourceRef=path==='lib/email-platforms.ts'&&platformRef?platformRef:ref&&productPaths.has(path)?ref:null;
+ if(!sources.has(path))sources.set(path,sourceRef
+  ?execFileSync('git',['show',`${sourceRef}:${path}`],{cwd:root,encoding:'utf8',timeout:20000,maxBuffer:1048576})
   :readFileSync(resolve(root,path),'utf8'));
  return sources.get(path);
 }
@@ -58,7 +59,7 @@ const {store:redis}=await import('h2:///tests/redis-stub.ts');
 const {POST}=await import('h2:///app/api/store/email-sync/route.ts');
 const {setPlatformHooksForTests}=await import('h2:///lib/email-platforms.ts');
 const http=await import('node:http'),https=await import('node:https'),net=await import('node:net');
-const server=http.createServer((request,response)=>{response.setHeader('Content-Type','application/json');response.end(request.url.startsWith('/v4/forms')?JSON.stringify({forms:[{id:'audience',name:'Audience'}]}):'{}');});
+const server=http.createServer((request,response)=>{response.setHeader('Content-Type','application/json');response.end(request.url.startsWith('/v4/forms')?JSON.stringify({forms:[{id:'audience',name:'Audience'}],pagination:{has_previous_page:false,has_next_page:false}}):'{}');});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
 class LocalAgent extends https.Agent{createConnection(){return net.connect(server.address().port,'127.0.0.1');}}
 setPlatformHooksForTests({resolve:async()=>[{address:'93.184.216.34',family:4}],agent:new LocalAgent()});
@@ -92,5 +93,5 @@ try{
 }finally{
  redis.pipeline=pipeline;setPlatformHooksForTests(undefined);await new Promise(r=>server.close(r));
 }
-console.log(JSON.stringify({ref:ref??'local',commands,routeChecks,routeFailures,files:sources.size,boundaries:Object.keys(boundaries),semanticTypes:'not run'}));
+console.log(JSON.stringify({ref:ref??'local',platformRef:platformRef??'local',commands,routeChecks,routeFailures,files:sources.size,boundaries:Object.keys(boundaries),semanticTypes:'not run'}));
 if(routeFailures)process.exitCode=1;

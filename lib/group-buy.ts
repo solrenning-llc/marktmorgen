@@ -45,7 +45,8 @@ import { addressHash, grantImported, importedKey } from "@/lib/imported-purchase
 import { bundleFromMeta } from "@/lib/bundle-rules";
 import { onAccount } from "@/lib/stripe-account";
 import { refundRowKnown } from "@/lib/refunds";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, readStripePage, type StripePage } from "@/lib/stripe-list";
 import { formatMoney } from "@/lib/money";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
@@ -140,8 +141,27 @@ export async function readGroup(id: string): Promise<Group | null> {
   }
 }
 
-async function saveGroup(group: Group, seconds: number): Promise<void> {
-  await redisPipeline([["SET", groupKey(group.id), JSON.stringify(group), "EX", seconds]]);
+/**
+ * A purchase's record for settling it, read exactly (sweep A3; CX-123 rules 24 and 30): no record is null, and an
+ * answer that is not one reply of text or nothing is unknown and throws, never "no purchase", so a paid checkout is
+ * never said as having nothing to settle because Redis answered in another shape.
+ */
+async function readGroupExactly(id: string): Promise<Group | null> {
+  if (!GROUP_ID.test(id) || !isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline([["GET", groupKey(id)]]), 1);
+  if (!replies || (replies[0] !== null && typeof replies[0] !== "string")) throw new UnknownReplyError("a purchase for several's record");
+  if (typeof replies[0] !== "string") return null;
+  try {
+    const g = JSON.parse(replies[0]) as Group;
+    return g && g.id === id && Number.isInteger(g.people) ? g : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Writes a purchase down; true only when Redis answered the write in its exact shape ("OK"). */
+async function saveGroup(group: Group, seconds: number): Promise<boolean> {
+  return repliesFor(await redisPipeline([["SET", groupKey(group.id), JSON.stringify(group), "EX", seconds]]), 1)?.[0] === "OK";
 }
 
 /** A paid purchase of this store's that still hands out places; null for anything else. */
@@ -174,7 +194,10 @@ export async function startGroup(store: Store, product: Listing, people: unknown
   if (count === null) return { ok: false, reason: "people" };
   if (!payable(chosen.option ? chosen.option.priceCents : product.priceCents, count)) return { ok: false, reason: "amount" };
   const group: Group = { id: newGroupId(), s: store.statsId, p: product.id, ...(chosen.option ? { o: chosen.option.id } : {}), people: count, at: now() };
-  await saveGroup(group, GROUP_PENDING_SECONDS);
+  // Written down exactly before any checkout opens (sweep A3; CX-123 rules 24 and 30): a write answered in another
+  // shape may not have landed, and a purchase paid for with no record never hands out a place. Refused instead, as
+  // "unavailable" (the page says nothing was charged), and no checkout is made.
+  if (!(await saveGroup(group, GROUP_PENDING_SECONDS))) return { ok: false, reason: "unavailable" };
   return { ok: true, group };
 }
 
@@ -216,11 +239,22 @@ export async function settleGroup(input: {
 }): Promise<SettleOutcome> {
   const { store, session, product } = input;
   const id = session.metadata?.group ?? "";
-  const group = await readGroup(id);
+  const group = await readGroupExactly(id);
   if (!group || group.s !== store.statsId || group.p !== product.id) return "skip";
   if (group.paid) return "already";
-  const [claimed] = await redisPipeline([["SET", `${groupKey(id)}:settling`, "1", "NX", "EX", 300]]);
-  if (claimed === null) return "already";
+  const settling = `${groupKey(id)}:settling`;
+  // Claimed with this run's own value and read exactly (C4-3000): an answer in another shape is read back, never taken
+  // as ours, and the mark is let go only while it still holds this run's value (lib/claim-mark.ts).
+  const mark = claimValue();
+  const claimed = await claimMark(settling, 300, mark);
+  if (claimed === "unknown") throw new UnknownReplyError("a purchase for several's settling mark");
+  if (claimed === "taken") {
+    // Another run is settling it. "already" only once it is paid: confirmGroup (lib/purchase-email.ts) keeps its
+    // "sent" mark on "already", so said while the other run may still fail, the paid purchase would never be settled
+    // (as deliverGift does since Claude 4 on #2726). Thrown, no "sent" mark is kept and the next run tries again.
+    if ((await readGroupExactly(id))?.paid) return "already";
+    throw new Error("another run is settling this purchase for several right now");
+  }
 
   const sessionId = typeof session.id === "string" ? session.id : "";
   // Stripe gives the payment as its id, or whole when the caller asked for it.
@@ -231,12 +265,21 @@ export async function settleGroup(input: {
   // The hour its checkout was admitted in, which held room for every place for a day (takePlace).
   const admittedHour = Number(session.metadata?.[ADMITTED_FIELD] ?? "");
   const paid: Group = { ...group, session: sessionId, pi, paid: now(), items: items.length ? items : null, ...(Number.isSafeInteger(admittedHour) && admittedHour > 0 ? { h: admittedHour } : {}) };
-  await saveGroup(paid, GROUP_KEPT_SECONDS);
-  await redisPipeline([
-    ...(pi ? [["SET", piKey(pi), group.id, "EX", GROUP_KEPT_SECONDS] as (string | number)[]] : []),
-    ["SET", anyKey(group.s), "1"],
-    ["DEL", `${groupKey(id)}:settling`],
-  ]);
+  // What a refund looks up (the payment's purchase, and that this store sold one) is written first and the purchase
+  // marked paid last, each answered exactly "OK" (sweep A3; CX-123 rules 24 and 30): a write left unknown lets go of
+  // the settling mark and throws, so confirmGroup keeps no "sent" mark and the next run does it again, never
+  // "already" on a purchase whose payment a refund could not find.
+  const kept: (string | number)[][] = [...(pi ? [["SET", piKey(pi), group.id, "EX", GROUP_KEPT_SECONDS]] : []), ["SET", anyKey(group.s), "1"]];
+  const keptReplies = repliesFor(await redisPipeline(kept), kept.length);
+  if (!keptReplies || !keptReplies.every((reply) => reply === "OK")) {
+    await releaseMark(settling, mark);
+    throw new UnknownReplyError("a paid purchase for several's payment record");
+  }
+  if (!(await saveGroup(paid, GROUP_KEPT_SECONDS))) {
+    await releaseMark(settling, mark);
+    throw new UnknownReplyError("a paid purchase for several's record");
+  }
+  await releaseMark(settling, mark);
 
   await sendReceipt({ ...input, group: paid, lead: givingWords(store.language).thanksReceipt(store.name), idempotencyKey: `nimbus-group-receipt:${group.id}` }).catch((error) =>
     console.error("a receipt for several people failed", error),
@@ -301,7 +344,19 @@ export async function resendGroupReceipt(input: { store: Store; session: Session
   return sendReceipt({ ...input, group, lead: givingWords(input.store.language).resentReceipt(input.store.name), again: true });
 }
 
-type Member = { e: string; at: number };
+/**
+ * A place taken: the address, when, and the value only the run that took it wrote (`k`, lib/claim-mark.ts claimValue;
+ * Claude 6 on #2872), so a run lets go of a place's record only while it is its own. Records written before `k` have
+ * none, and no run lets them go.
+ */
+type Member = { e: string; at: number; k?: string };
+
+/**
+ * Deletes a place's record only while it still holds exactly what this run wrote (Claude 6 on #2872; CX-123 rules 25
+ * and 30), in one script, as releaseMark does for a mark: a run whose own write is unknown never deletes the place
+ * another run of the same link holds. The first line names it for the local stand-in (lib/redis-memory.ts).
+ */
+const HDEL_OWN = '-- marktmorgen:hdel-own:v1\nif redis.call("HGET", KEYS[1], ARGV[1]) == ARGV[2] then return redis.call("HDEL", KEYS[1], ARGV[1]) else return 0 end';
 
 function parseMember(raw: unknown): Member | null {
   if (typeof raw !== "string") return null;
@@ -358,19 +413,27 @@ export async function askPlace(input: {
   const title = groupTitle(product, group);
   const g = givingWords(store.language);
 
-  const [held, takenRaw] = await redisPipeline([
+  // Whether this address holds a place, and how many are taken, read exactly (sweep A3; CX-123 rule 24): an answer
+  // in another shape sends nothing and says so ("unavailable": nothing was taken or lost), never "nobody, none".
+  const looked = repliesFor(await redisPipeline([
     ["HEXISTS", membersKey(group.id), addressHash(email)],
     ["GET", takenKey(group.id)],
-  ]);
-  const has = Number(held) === 1;
-  if (!has && (Number(takenRaw) || 0) >= group.people) return "full";
+  ]), 2);
+  const held = looked?.[0];
+  const takenRaw = looked?.[1];
+  const taken = takenRaw === null ? 0 : typeof takenRaw === "string" && /^\d{1,15}$/.test(takenRaw) ? Number(takenRaw) : null;
+  if (!looked || (held !== 0 && held !== 1) || taken === null) return "unavailable";
+  const has = held === 1;
+  if (!has && taken >= group.people) return "full";
 
   // The link can be passed to anybody, and each address typed on it is sent
   // one email: counted per purchase and per day, generously for a real team
-  // and far short of a way to fill inboxes.
-  const [sentRaw] = await redisPipeline([["INCR", mailKey(group.id)]]);
-  if (Number(sentRaw) === 1) await redisPipeline([["EXPIRE", mailKey(group.id), 86_400]]);
-  if (Number(sentRaw) > group.people * 3 + 10) return "slow";
+  // and far short of a way to fill inboxes. The count read exactly (sweep A3;
+  // CX-123 rule 24): unknown sends nothing, never an email past the cap.
+  const sentCount = countOf(repliesFor(await redisPipeline([["INCR", mailKey(group.id)]]), 1)?.[0]);
+  if (sentCount === null) return "unavailable";
+  if (sentCount === 1) await redisPipeline([["EXPIRE", mailKey(group.id), 86_400]]);
+  if (sentCount > group.people * 3 + 10) return "slow";
   // The email is one of the store's access emails, taken as it is sent
   // (lib/email.ts); when the month's are used, the person is told so here.
   if ((await allowanceUsed(store, "transactional")) >= allowanceFor(store, "transactional")) return "resting";
@@ -420,6 +483,8 @@ export async function askPlace(input: {
 export type Taken =
   | { outcome: "taken" | "already" | "has"; email: string; group: Group }
   | { outcome: "full" | "resting"; email: string; group: Group }
+  /** The address holds a record of a place but the product is not on it: nothing can be confirmed yet. */
+  | { outcome: "pending"; email: string; group: Group }
   | { outcome: "gone" };
 
 /** Whether the room its checkout held for its places is still held now (lib/order-admission.ts). */
@@ -430,7 +495,10 @@ export function placesHeld(group: Pick<Group, "h">, nowMs = Date.now()): boolean
 /**
  * Opens the link from a place's email: takes a place for its address, once.
  * "already" is the same address opening its link again; "has" is an address
- * that owns the product some other way, which takes no place.
+ * that owns the product some other way, which takes no place; "pending" is an
+ * address holding a record of a place whose product is not on it (another run
+ * still handing it over, or a record a give-back could not remove), which is
+ * never said to be a place taken.
  */
 export async function takePlace(input: {
   store: Store;
@@ -450,20 +518,57 @@ export async function takePlace(input: {
   const email = asked.e;
   const who = addressHash(email);
 
-  const [mine, owned] = await redisPipeline([
+  // Every answer that decides a place read exactly (sweep A3; CX-123 rule 24): unknown hands nothing out and throws
+  // (the page says the place was not taken), never a place past the number paid for, never "already" on nothing.
+  const looked = repliesFor(await redisPipeline([
     ["HEXISTS", membersKey(group.id), who],
     ["HEXISTS", importedKey(group.s, email), group.p],
-  ]);
-  if (Number(mine) === 1) return { outcome: "already", email, group };
+  ]), 2);
+  const mine = looked?.[0];
+  const owned = looked?.[1];
+  if (!looked || (mine !== 0 && mine !== 1) || (owned !== 0 && owned !== 1)) throw new UnknownReplyError("a place's holder");
+  // "already" only when the product is on the address: a record without it is never said to be a place taken.
+  if (mine === 1) return { outcome: owned === 1 ? "already" : "pending", email, group };
   // Given it some other way already: no place is used for it.
-  if (Number(owned) === 1) return { outcome: "has", email, group };
+  if (owned === 1) return { outcome: "has", email, group };
 
   const at = now();
-  const [fresh] = await redisPipeline([["HSETNX", membersKey(group.id), who, JSON.stringify({ e: email, at } satisfies Member)]]);
-  if (Number(fresh) !== 1) return { outcome: "already", email, group };
-  const giveBack = () => redisPipeline([["HDEL", membersKey(group.id), who], ["DECR", takenKey(group.id)]]);
-  const [count] = await redisPipeline([["INCR", takenKey(group.id)]]);
-  if (Number(count) > group.people) {
+  // The hold carries a value only this run writes, so only this run's own hold is ever let go (Claude 6 on #2872).
+  const hold = JSON.stringify({ e: email, at, k: claimValue() } satisfies Member);
+  const dropOwn: (string | number)[] = ["EVAL", HDEL_OWN, 1, membersKey(group.id), who, hold];
+  // Let go of this address's hold on a place it was not given, so its link works again on a later try, and only while
+  // the record is still this run's own: a hold whose write came back unknown may be another run's of the same link (a
+  // double click), whose place is the one a refund takes back. The count is left alone, since whether it moved is
+  // unknown: at worst a place stays counted, never one handed out too many. When the script cannot run, the hold
+  // stays and the link says "pending" with nothing more handed out; never another run's record deleted.
+  const letGo = () => redisPipeline([dropOwn]).catch(() => null);
+  const fresh = repliesFor(await redisPipeline([["HSETNX", membersKey(group.id), who, hold]]), 1)?.[0];
+  if (fresh === 0) {
+    // Another run of the same link holds the place (a double click) and may still end "full", "resting" or "has":
+    // "already" only once the product is on the address, read exactly; before that, "pending" (#2872 review).
+    const onIt = repliesFor(await redisPipeline([["HEXISTS", importedKey(group.s, email), group.p]]), 1)?.[0];
+    if (onIt !== 0 && onIt !== 1) throw new UnknownReplyError("a place's holder");
+    return { outcome: onIt === 1 ? "already" : "pending", email, group };
+  }
+  if (fresh !== 1) {
+    await letGo();
+    throw new UnknownReplyError("a place's hold");
+  }
+  // The place given back: this run's own record (the same script) and the count its own INCR moved. Upstash runs each
+  // command of a pipeline on its own, so the script can fail while the DECR lands and the call throws: the run keeps
+  // its answer ("full", "resting", "has") and tries the script once more alone, never the DECR again (whether it
+  // moved is unknown; at worst a place stays counted). A record the retry cannot remove reads "pending", never
+  // "already" (#2872 review).
+  const giveBack = async () => {
+    const replies = repliesFor(await redisPipeline([dropOwn, ["DECR", takenKey(group.id)]]).catch(() => null), 2);
+    if (!replies || (replies[0] !== 0 && replies[0] !== 1)) await letGo();
+  };
+  const count = repliesFor(await redisPipeline([["INCR", takenKey(group.id)]]), 1)?.[0];
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) {
+    await letGo();
+    throw new UnknownReplyError("the count of places taken");
+  }
+  if (count > group.people) {
     await giveBack();
     return { outcome: "full", email, group };
   }

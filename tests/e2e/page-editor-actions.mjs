@@ -2,7 +2,8 @@
 // an arrow that cannot move keeps the focus and says it is off (2.4.3, 4.1.2);
 // a move keeps the focus on the arrow that moved with its block and says
 // where it went (2.4.3, 4.1.3); the same sentence said twice is said again;
-// and in forced colors no icon button animates its colors (inbox C4-35).
+// in forced colors no icon button animates its colors (inbox C4-35); and a
+// picture block whose send is still pending never drops the focus (#2926).
 // The real component with a synthetic page and every request held in the
 // page (tests/e2e/page-editor-harness.tsx), the site's own style sheet built
 // by Tailwind from the editor's classes: no server, no build, nothing sent.
@@ -10,6 +11,7 @@
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { deflateSync } from "node:zlib";
 import { build } from "esbuild";
 
 const root = resolve(".");
@@ -26,6 +28,16 @@ function is(name, got, want) {
   const ok = JSON.stringify(got) === JSON.stringify(want);
   if (!ok) failed++;
   console.log(`${ok ? "ok  " : "FAIL"}  ${name}${ok ? "" : `\n      expected ${JSON.stringify(want)}\n      got      ${JSON.stringify(got)}`}`);
+}
+
+/** A valid PNG of w × h opaque gray pixels, made here (CRC and zlib), so the editor's shrink reads a real picture. */
+function pngOf(w, h) {
+  const table = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (buf) => { let c = 0xffffffff; for (const b of buf) c = table[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const body = Buffer.concat([Buffer.from(type, "ascii"), data]); const sum = Buffer.alloc(4); sum.writeUInt32BE(crc(body)); return Buffer.concat([len, body, sum]); };
+  const header = Buffer.alloc(13); header.writeUInt32BE(w, 0); header.writeUInt32BE(h, 4); header[8] = 8; header[9] = 2;
+  const rows = Buffer.concat(Array.from({ length: h }, () => Buffer.concat([Buffer.from([0]), Buffer.alloc(w * 3, 128)])));
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", deflateSync(rows)), chunk("IEND", Buffer.alloc(0))]);
 }
 
 const bundle = await build({
@@ -54,18 +66,23 @@ const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>
 
 const browser = await driver.launch(engine === "chromium" && process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
 const errors = [];
+const uploads = [];
 try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, serviceWorkers: "block" });
   const page = await context.newPage();
   page.on("pageerror", (error) => errors.push(String(error)));
   await page.route("**/*", (route) => {
     const url = new URL(route.request().url());
-    if (url.origin !== "http://editor.test") return route.abort();
+    if (url.origin !== "http://localhost:41904") return route.abort();
+    // A picture's send is held here, never answered, so it stays "being sent"; nothing is uploaded.
+    if (url.pathname === "/api/store/image/upload") return void uploads.push(route);
     if (url.pathname === "/editor.js") return route.fulfill({ contentType: "text/javascript", body: script });
     if (url.pathname === "/globals.css") return route.fulfill({ contentType: "text/css", body: css });
     return url.pathname === "/" ? route.fulfill({ contentType: "text/html", body: html }) : route.fulfill({ status: 404, body: "" });
   });
-  await page.goto("http://editor.test/");
+  // localhost is a secure context, as the studio's https is (crypto.randomUUID names a picture); every request to it is
+  // answered by the route above, so nothing needs to listen there.
+  await page.goto("http://localhost:41904/");
   const settled = () => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
   const focused = () => page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.tagName);
   const status = () => page.evaluate(() => [...document.querySelectorAll('p[role="status"].sr-only')].map((node) => node.textContent).find((text) => text) ?? "");
@@ -113,6 +130,43 @@ try {
   is("forced colors are on for the next check", await page.evaluate(() => matchMedia("(forced-colors: active)").matches), true);
   is("in forced colors no icon button animates its colors", await timing(), 0);
   await page.emulateMedia({ forcedColors: "none" });
+
+  // A picture block's last picture removed while another is still being sent (#2926, candidate of the Codex M review):
+  // the focus goes to the block's Add button, which says it is sending; it must stay on the page, never on the body.
+  // The send is held by the page's route below, so it stays pending; nothing is uploaded.
+  const png = pngOf(4, 4);
+  const pictures = async () => {
+    await page.evaluate(() => {
+      const block = window.harness.block("pictures");
+      window.harness.mount([{ ...block, items: [{ path: "images/0123456789abcdef01234567/0123456789abcdef0123456789abcdef.jpg", width: 4, height: 4, alt: "A synthetic picture", caption: "" }] }]);
+    });
+    const open = page.locator("button[aria-expanded]", { hasText: "1 picture" }).first();
+    await open.click();
+    await page.getByRole("button", { name: "Remove picture 1" }).waitFor();
+  };
+  const sending = () => page.getByRole("button", { name: /^Sending 1 picture/ });
+  const where = () => page.evaluate(() => ({ tag: document.activeElement?.tagName, words: document.activeElement?.textContent?.trim() ?? "", busy: document.activeElement?.getAttribute("aria-busy") ?? null }));
+
+  await pictures();
+  await page.locator('input[type="file"]').setInputFiles({ name: "synthetic.png", mimeType: "image/png", buffer: png });
+  await sending().waitFor();
+  await page.getByRole("button", { name: "Remove picture 1" }).focus();
+  await page.keyboard.press("Enter");
+  await settled();
+  await settled();
+  is("removing the last picture while another is sent puts the focus on its Add button, which says it is sending", await where(), { tag: "BUTTON", words: "Sending 1 picture…", busy: "true" });
+  await page.keyboard.press("Enter");
+  await settled();
+  is("pressing it while it sends starts nothing more: one send held", uploads.length, 1);
+
+  // The Add button pressed, a picture chosen, and the send starting under the focus: the focus stays on it.
+  await pictures();
+  const add = page.getByRole("button", { name: /^Add pictures/ });
+  await add.focus();
+  await page.locator('input[type="file"]').setInputFiles({ name: "synthetic.png", mimeType: "image/png", buffer: png });
+  await sending().waitFor();
+  await settled();
+  is("a send starting under the focus keeps it on the Add button, which says it is sending", await where(), { tag: "BUTTON", words: "Sending 1 picture…", busy: "true" });
 
   is("no error on the page", errors, []);
 } finally {

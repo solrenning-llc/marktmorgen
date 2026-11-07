@@ -250,7 +250,7 @@ export function AffiliateStudio({
       }
       setPicked([]);
       // Those left waiting are named below the count, each with why (lib/affiliate-bulk-words.ts).
-      setLastBulk({ decision, before: data.before, held: readHeld(data.held) });
+      setLastBulk({ decision, before: data.before, held: readHeld(data.held, pending.map((r) => ({ id: r.affiliate.id, email: r.affiliate.email }))) });
       router.refresh();
     } catch {
       setError({ where: "bulk", text: MESSAGES.server_error });
@@ -451,10 +451,15 @@ export function AffiliateStudio({
             </h2>
             {lastBulk ? (
               <div className="notice mt-3 flex flex-wrap items-center justify-between gap-3 text-sm" role="status">
-                <span>
-                  {`${lastBulk.before.length} ${lastBulk.before.length === 1 ? "application" : "applications"} ${lastBulk.decision === "approve" ? "approved" : "declined"}.`}
-                  {lastBulk.decision === "approve" ? " Each was emailed their link; undoing puts them back as applications but cannot take that email back." : ""}
-                  {lastBulk.before.length ? " You can undo this for 10 minutes." : ""}
+                <div>
+                  <p>
+                    {`${lastBulk.before.length} ${lastBulk.before.length === 1 ? "application" : "applications"} ${lastBulk.decision === "approve" ? "approved" : "declined"}.`}
+                    {/* Only those approved were emailed: with nobody approved, nobody was. */}
+                    {lastBulk.decision === "approve" && lastBulk.before.length
+                      ? ` ${lastBulk.before.length === 1 ? "They were" : "Each was"} emailed their link; undoing puts them back as applications but cannot take that email back.`
+                      : ""}
+                    {lastBulk.before.length ? " You can undo this for 10 minutes." : ""}
+                  </p>
                   {lastBulk.held.length ? (
                     <ul className="mt-2 list-disc space-y-1 pl-5">
                       {heldLines(lastBulk.held, "approve").map((line) => (
@@ -462,7 +467,7 @@ export function AffiliateStudio({
                       ))}
                     </ul>
                   ) : null}
-                </span>
+                </div>
                 <span className="flex gap-2">
                   {lastBulk.before.length ? (
                     <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} aria-busy={busy === "bulk"} onClick={undoBulk}>
@@ -1296,7 +1301,7 @@ function ShareMany({
         return;
       }
       // Those whose new share would pass the cap, or could not be checked just now, keep theirs and are named.
-      setLast({ rate: asked, before: data.before, refused: readHeld(data.refused) });
+      setLast({ rate: asked, before: data.before, refused: readHeld(data.refused, members) });
       setPicked([]);
       if (data.before.length) toast("Shares saved. They apply to sales from now on.");
       router.refresh();
@@ -1310,8 +1315,8 @@ function ShareMany({
       <summary className="cursor-pointer font-semibold text-ink">Change the share of several affiliates</summary>
       {last ? (
         <div className="notice mt-3 flex flex-wrap items-center justify-between gap-3 text-sm" role="status">
-          <span>
-            {`${last.before.length} ${last.before.length === 1 ? "share" : "shares"} changed to ${last.rate === null ? `the program's ${percent}%` : `${last.rate}%`}.${last.before.length ? " It applies to sales from now on." : ""}`}
+          <div>
+            <p>{`${last.before.length} ${last.before.length === 1 ? "share" : "shares"} changed to ${last.rate === null ? `the program's ${percent}%` : `${last.rate}%`}.${last.before.length ? " It applies to sales from now on." : ""}`}</p>
             {last.refused.length ? (
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 {heldLines(last.refused, "rate").map((line) => (
@@ -1319,7 +1324,7 @@ function ShareMany({
                 ))}
               </ul>
             ) : null}
-          </span>
+          </div>
           <span className="flex gap-2">
             {last.before.length ? (
               <button

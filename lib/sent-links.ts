@@ -51,6 +51,7 @@ import {
   type SentVariant,
   SENT_LINKS_MAX,
   SENT_LINK_CHANGES_MAX,
+  SENT_LINK_ENTRY_MAX_BYTES,
   SENT_LINK_KEEP_DAYS,
   SENT_LINK_MAX_LENGTH,
   SENT_LINK_RECORD_MAX_BYTES,
@@ -182,24 +183,6 @@ export async function readSentLinks(id: string): Promise<SentLinks | null> {
   return (await readKept(id)).kept;
 }
 
-/** The changes of several emails at once, for the studio: one command each, in one request. Unread ones are missing. */
-export async function readSentLinksMany(ids: string[]): Promise<Map<string, SentLinks | null>> {
-  const out = new Map<string, SentLinks | null>();
-  const wanted = ids.filter((id) => ID.test(id));
-  if (!wanted.length || !isRedisConfigured()) return out;
-  // Exactly one reply a read, each in its own slot (lib/redis-reply.ts), or none of them is taken as read.
-  const replies = repliesFor(await redisPipeline(wanted.map((id) => ["GET", sentLinkKey(id)])), wanted.length);
-  if (!replies) return out;
-  wanted.forEach((id, i) => {
-    try {
-      out.set(id, replies[i] === null ? null : parseKept(replies[i]));
-    } catch {
-      // Not shown as "never changed": left out, and the studio says it could not be read.
-    }
-  });
-  return out;
-}
-
 /** What one studio request pays for in the database (tests/plan-cost-registry.ts, UNIT_COST.studio). */
 const STUDIO_UNIT_COMMANDS = 20;
 const STUDIO_UNIT_BYTES = 50_000;
@@ -246,6 +229,94 @@ export function sentLinkChangeUnits(emailBytes: number): number {
   const bytes = 512 + wireOf(email + EMAIL_GROWTH_BYTES) + SENT_LINK_WRITE_TRIES * tryBytes + HISTORY_WIRE_BYTES + 64;
   const commands = TAKE_COMMANDS + 1 + (1 + 1 + DATA_INSIDE_FIRST + 3) + (SENT_LINK_WRITE_TRIES - 1) * (1 + 1 + DATA_INSIDE_AGAIN + 3) + 1;
   return Math.max(Math.ceil(bytes / STUDIO_UNIT_BYTES), Math.ceil(commands / STUDIO_UNIT_COMMANDS));
+}
+
+/**
+ * A change that may land on a history between the studio page asking its
+ * size and reading it: one entry at its longest. A history grown further is
+ * read no further than that (GETRANGE), so it does not parse and the page
+ * says it could not be read.
+ */
+const SHOWN_GROWTH_BYTES = SENT_LINK_ENTRY_MAX_BYTES;
+/** One read of a history as it is sent: its command, with the key and the range. */
+const SHOWN_READ_COMMAND_BYTES = 128;
+
+/**
+ * The studio requests the page "Change where a link goes" takes, beyond its
+ * own, to read the histories of the emails it shows, from each one's size as
+ * stored (0 when it has none, and then it is not read): one GETRANGE each, up
+ * to its size and SHOWN_GROWTH_BYTES more, both ways as JSON (each byte
+ * escaped once more at the most, wireOf: what is stored is JSON written by
+ * changeLink), and the take itself. 0 when there is nothing to read. Held
+ * over what is measured in tests/f2-sent-links-page-cost.test.ts.
+ */
+export function sentLinksShownUnits(sizes: readonly number[]): number {
+  const read = sizes.filter((size) => Number.isSafeInteger(size) && size > 0);
+  if (!read.length) return 0;
+  const bytes = 512 + read.reduce((sum, size) => sum + SHOWN_READ_COMMAND_BYTES + wireOf(size + SHOWN_GROWTH_BYTES), 0);
+  const commands = TAKE_COMMANDS + read.length;
+  return Math.max(Math.ceil(bytes / STUDIO_UNIT_BYTES), Math.ceil(commands / STUDIO_UNIT_COMMANDS));
+}
+
+/** The shortest address a change can send a link to: no change is shorter in bytes. */
+const SHORTEST_ADDRESS = "https://a";
+
+/**
+ * Whether a history has no room in bytes for even the shortest change, though
+ * under SENT_LINK_CHANGES_MAX changes: written as changeLink writes it, and
+ * past SENT_LINK_RECORD_MAX_BYTES, so every change would be refused. Only a
+ * history kept before the ceiling was checked can be like that.
+ */
+export function sentLinksNoRoom(kept: SentLinks, nowSeconds: number): boolean {
+  if (kept.changes.length >= SENT_LINK_CHANGES_MAX) return false;
+  const next: SentLinks = { l: kept.l, exp: kept.exp, changes: [...kept.changes, { n: 0, to: SHORTEST_ADDRESS, at: nowSeconds }] };
+  return utf8Length(JSON.stringify(next)) > SENT_LINK_RECORD_MAX_BYTES;
+}
+
+/** What the studio page shows of the histories: each read one (null: never changed), and those with no room left; or why none was read. */
+export type ShownSentLinks = { ok: true; kept: Map<string, SentLinks | null>; noRoom: Set<string> } | { ok: false; refused: string };
+
+/**
+ * The histories of the emails the studio page shows (#3034, Claude 5): their
+ * sizes first (one STRLEN each, inside the page's own studio requests), then
+ * the studio requests reading them comes to at the most (sentLinksShownUnits)
+ * are taken through `pay`, and only then is each one that exists read, no
+ * further than paid. Without them nothing is read and the refusal says why.
+ * One unread or unreadable is left out of `kept`, and the page says it could
+ * not be read.
+ */
+export async function readShownSentLinks(ids: string[], pay: (units: number) => Promise<{ ok: true } | { ok: false; message: string }>, now = Date.now()): Promise<ShownSentLinks> {
+  const kept = new Map<string, SentLinks | null>();
+  const noRoom = new Set<string>();
+  const wanted = ids.filter((id) => ID.test(id));
+  if (!wanted.length || !isRedisConfigured()) return { ok: true, kept, noRoom };
+  // Exactly one reply a size (lib/redis-reply.ts), or none is known.
+  const sized = repliesFor(await redisPipeline(wanted.map((id) => ["STRLEN", sentLinkKey(id)])), wanted.length);
+  if (!sized || sized.some((size) => !Number.isSafeInteger(size) || (size as number) < 0)) return { ok: true, kept, noRoom };
+  const sizes = sized as number[];
+  const units = sentLinksShownUnits(sizes);
+  if (units > 0) {
+    const paid = await pay(units);
+    if (!paid.ok) return { ok: false, refused: paid.message };
+  }
+  const read: { id: string; size: number }[] = [];
+  wanted.forEach((id, i) => (sizes[i] > 0 ? read.push({ id, size: sizes[i] }) : kept.set(id, null)));
+  if (!read.length) return { ok: true, kept, noRoom };
+  const replies = repliesFor(await redisPipeline(read.map(({ id, size }) => ["GETRANGE", sentLinkKey(id), 0, size + SHOWN_GROWTH_BYTES - 1])), read.length);
+  if (!replies) return { ok: true, kept, noRoom };
+  const at = Math.floor(now / 1000);
+  read.forEach(({ id }, i) => {
+    // Gone since its size was asked: its links go where the email sent them.
+    if (replies[i] === "") return kept.set(id, null);
+    try {
+      const one = parseKept(replies[i]);
+      kept.set(id, one);
+      if (sentLinksNoRoom(one, at)) noRoom.add(id);
+    } catch {
+      // Not shown as "never changed": left out, and the studio says it could not be read.
+    }
+  });
+  return { ok: true, kept, noRoom };
 }
 
 /**

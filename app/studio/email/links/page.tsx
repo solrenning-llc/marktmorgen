@@ -2,14 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { studioPath, studioView } from "@/lib/studio-route";
+import { countStudio, studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { listBroadcastsStrict } from "@/lib/broadcasts";
 import { isOwnLink } from "@/lib/mail-links";
 import { storeBase } from "@/lib/purchase-email";
 import { SENT_LINKS_MAX, SENT_LINK_CHANGES_MAX, SENT_LINK_KEEP_DAYS, linksOf } from "@/lib/sent-link-rules";
-import { readSentLinksMany } from "@/lib/sent-links";
+import { type ShownSentLinks, readShownSentLinks } from "@/lib/sent-links";
 import { type SentEmailLinks, SentLinksEditor } from "@/components/sent-links-editor";
 
 export const metadata: Metadata = {
@@ -43,7 +43,15 @@ export default async function StudioSentLinksPage({ searchParams }: Params) {
   const sent = (all ?? []).filter((b) => b.sent > 0);
   const changeable = sent.filter((b) => b.links === true && linksOf(b.body).length > 0).slice(0, SHOWN);
   const before = sent.filter((b) => b.links !== true).length;
-  const kept = changeable.length ? await readSentLinksMany(changeable.map((b) => b.id)).catch(() => new Map()) : new Map();
+  // Each history's size first, inside this page's own studio requests; what reading them comes to is taken
+  // from the store's studio requests before any is read (lib/sent-links.ts, readShownSentLinks).
+  const pay = async (units: number) => {
+    const counted = await countStudio(store, "send", units);
+    return counted.ok ? ({ ok: true } as const) : ({ ok: false, message: counted.message } as const);
+  };
+  const unread: ShownSentLinks = { ok: true, kept: new Map(), noRoom: new Set() };
+  const shown: ShownSentLinks = changeable.length ? await readShownSentLinks(changeable.map((b) => b.id), pay).catch(() => unread) : unread;
+  const kept = shown.ok ? shown.kept : unread.kept;
   const emails: SentEmailLinks[] = changeable.map((b) => {
     const links = linksOf(b.body);
     return {
@@ -53,6 +61,7 @@ export default async function StudioSentLinksPage({ searchParams }: Params) {
       links,
       own: links.map((href) => { try { return isOwnLink(new URL(href), store); } catch { return false; } }),
       changes: kept.has(b.id) ? (kept.get(b.id)?.changes ?? []) : null,
+      noRoom: shown.ok ? shown.noRoom.has(b.id) : false,
     };
   });
   const emailPage = studioPath(store, "", "email");
@@ -88,7 +97,10 @@ export default async function StudioSentLinksPage({ searchParams }: Params) {
           ) : null}
           {all === null ? (
             <p className="mt-8">Your sent emails could not be read just now. Reload the page to try again.</p>
-          ) : emails.length === 0 ? (
+          ) : shown.ok ? null : (
+            <p className="mt-8">Where these links go now could not be shown: reading it counts as studio requests, and there are not enough left. {shown.refused}</p>
+          )}
+          {all === null || !shown.ok ? null : emails.length === 0 ? (
             <p className="mt-8">No sent email with links you can change yet. Links in the next one-off email you send can be changed here once it goes out.</p>
           ) : (
             <div className="mt-8">

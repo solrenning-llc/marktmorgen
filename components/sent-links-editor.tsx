@@ -5,7 +5,8 @@ import { type LinkChange, SENT_LINK_CHANGES_MAX, SENT_LINK_KEEP_DAYS, SENT_LINK_
 
 /** One sent email whose links can be changed, as the page reads it. `changes` null: they could not be read just now. */
 /** `own`: whether each link went to the store, which then can only go to another page of it. */
-export type SentEmailLinks = { id: string; subject: string; sentOn: string; links: string[]; own: boolean[]; changes: LinkChange[] | null };
+/** `noRoom`: its changes have no room left in bytes for another one, though fewer than the most (lib/sent-links.ts, sentLinksNoRoom). */
+export type SentEmailLinks = { id: string; subject: string; sentOn: string; links: string[]; own: boolean[]; changes: LinkChange[] | null; noRoom: boolean };
 
 /** Said when the change may or may not have been saved. */
 const UNKNOWN = "We could not confirm whether the change was saved. Reload the page to see where the link goes now.";
@@ -29,8 +30,9 @@ const day = (seconds: number) => new Date(seconds * 1000).toLocaleDateString("en
  * words. When the answer is unknown (the server could not confirm its
  * write, a reply that is not its own, or no reply), the change may have
  * been saved, so it says it could not confirm and to reload (Codex J on
- * #3034). Once an email's changes are all used, no form is shown for its
- * links: a button that cannot work is not offered.
+ * #3034). Once an email's changes are all used, or have no room left for
+ * another (Claude 5 on #3034: then the server refuses every change), no form
+ * is shown for its links: a button that cannot work is not offered.
  */
 /** `home`: the store's own address, for the example a store link is given. */
 export function SentLinksEditor({ emails: initial, home }: { emails: SentEmailLinks[]; home: string }) {
@@ -67,6 +69,13 @@ export function SentLinksEditor({ emails: initial, home }: { emails: SentEmailLi
         return;
       }
       const said = typeof answer.message === "string" && answer.message ? answer.message : "";
+      // No room left for another change (the most changes, or their size): no form for its links any more, and the email says why.
+      if (answer.ok === false && answer.error === "full") {
+        setEmails((all) => all.map((e) => (e.id === email.id ? { ...e, noRoom: true } : e)));
+        setLive(`Link ${n + 1} was not changed. ${said || "This email's links have no room left for another change."}`);
+        focusAfter.current = `${email.id}-title`;
+        return;
+      }
       if (answer.ok === false && typeof answer.error === "string" && answer.error !== "unconfirmed") {
         setErrors((all) => ({ ...all, [field]: said || "That did not work. Nothing was changed. Try again in a moment." }));
         setLive(`Link ${n + 1} was not changed.`);
@@ -91,13 +100,18 @@ export function SentLinksEditor({ emails: initial, home }: { emails: SentEmailLi
           return (
             <li key={email.id}>
               <section aria-labelledby={`${email.id}-title`} className="card p-5 sm:p-6">
-                <h2 id={`${email.id}-title`} className="text-xl font-semibold break-words">{email.subject}</h2>
+                <h2 id={`${email.id}-title`} tabIndex={-1} className="text-xl font-semibold break-words">{email.subject}</h2>
                 <p className="mt-1 text-ink-soft">
                   Sent {email.sentOn}. {email.links.length === 1 ? "1 link" : `${email.links.length} links`} you can change.
                   {email.changes ? ` ${used} of ${SENT_LINK_CHANGES_MAX} changes used.` : ""}
                 </p>
                 {email.changes === null ? (
                   <p className="mt-3 text-ink">Where these links go now could not be read just now. Reload the page to try again. Each one still goes where it went.</p>
+                ) : null}
+                {email.changes !== null && used < SENT_LINK_CHANGES_MAX && email.noRoom ? (
+                  <p className="mt-3 text-ink">
+                    This email&apos;s links have no room left for another change, so they cannot be changed or sent back again. Each one keeps going where it goes now until {SENT_LINK_KEEP_DAYS} days after the first change, then where the email first sent it.
+                  </p>
                 ) : null}
                 {email.changes !== null && used >= SENT_LINK_CHANGES_MAX ? (
                   <p className="mt-3 text-ink">
@@ -127,7 +141,7 @@ export function SentLinksEditor({ emails: initial, home }: { emails: SentEmailLi
                               <dd id={`${field}-now`} tabIndex={-1} className="inline break-all font-semibold">{now}</dd>
                             </div>
                           </dl>
-                          {used >= SENT_LINK_CHANGES_MAX ? null : <form
+                          {email.noRoom || used >= SENT_LINK_CHANGES_MAX ? null : <form
                             className="mt-3"
                             onSubmit={(event) => {
                               event.preventDefault();

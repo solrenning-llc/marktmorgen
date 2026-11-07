@@ -1,0 +1,50 @@
+applied-write receipt {"status":503,"apiError":"unconfirmed","live":"Link 1 was not changed.","visible":"We could not confirm the change was saved. Reload the page to see where the link goes now.","writes":1,"requests":1,"destination":"https://example.com/changed","commands":4}
+✔ the review transport blocks both fetch and sockets before product graph use (2.852024ms)
+✔ healthy control: restoring the original before the cap is a confirmed twentieth change (8.566198ms)
+✖ the original remains an available undo after the history cap (1.826488ms)
+✔ healthy control: a confirmed save announces the destination actually kept (40.629411ms)
+✖ an applied write with a lost acknowledgment never announces definitely unchanged (4.087543ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 3
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 312.669302
+
+✖ failing tests:
+
+test at ../../../../tmp/j-review-3034-n74BVl/sent-links.cjs:7365:27
+✖ the original remains an available undo after the history cap (1.826488ms)
+  AssertionError [ERR_ASSERTION]: the page promises always and keeps offering its undo button
+
+  false !== true
+
+      at TestContext.<anonymous> (/tmp/j-review-3034-n74BVl/sent-links.cjs:7368:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/j-review-3034-n74BVl/sent-links.cjs:7459:27
+✖ an applied write with a lost acknowledgment never announces definitely unchanged (4.087543ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /was not changed|nothing was changed/i. Input:
+
+  'Link 1 was not changed.'
+
+      at TestContext.<anonymous> (/tmp/j-review-3034-n74BVl/sent-links.cjs:7467:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'Link 1 was not changed.',
+    expected: /was not changed|nothing was changed/i,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }

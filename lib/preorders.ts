@@ -193,6 +193,21 @@ export async function readPreorder(store: Store, productId: string, sessionId: s
 }
 
 /**
+ * One pre-order's entry, read exactly for the hand-over (Codex C2 on #2963; CX-123 rule 24): one reply; null is a
+ * confirmed absence; an entry that parses is the entry. Anything else (no reply, a hole, one too many, another type,
+ * text that does not parse) throws, so the release job keeps it and the next run asks again, never "skip".
+ */
+async function readPreorderExact(sid: string, productId: string, sessionId: string): Promise<Preorder | null> {
+  const replies = repliesFor(await redisPipeline([["HGET", entriesKey(sid, productId), sessionId]]), 1);
+  if (!replies) throw new UnknownReplyError("a pre-order's entry");
+  const [raw] = replies;
+  if (raw === null) return null;
+  const entry = parsePreorder(raw);
+  if (!entry) throw new UnknownReplyError("a pre-order's entry");
+  return entry;
+}
+
+/**
  * Whether a pre-order is given, read exactly, for a run that found another
  * run's mark (Codex CX1 on #2726; CX-123 rule 24): one reply, the entry as
  * text, JSON with its buyer's address, and `given` a positive whole number of
@@ -300,7 +315,8 @@ export async function handOverPreorder(store: Store, product: Listing, sessionId
   }
   if (claimed === "unknown") throw new UnknownReplyError("a pre-order's giving mark");
   try {
-    const entry = await readPreorder(store, product.id, sessionId);
+    if (!SESSION_ID.test(sessionId)) return "skip";
+    const entry = await readPreorderExact(sid, product.id, sessionId);
     if (!entry || entry.revoked) return "skip";
     if (entry.given) return "already";
     await grantImported(sid, `pre:${sessionId}`, [{ email: entry.to, productId: product.id, items: null }], entry.at, store.sid);

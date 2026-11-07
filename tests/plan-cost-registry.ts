@@ -576,7 +576,11 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   inbox: request("light", 12 + TAKE_COMMANDS, 4_000),
   // An email sent from inside a request or a job already counted, and its count.
   email: PER_EMAIL + TAKE_COMMANDS * COMMAND,
-  transactional: PER_EMAIL + (6 + TAKE_COMMANDS) * COMMAND,
+  // An access email and its link: the link written, the sender's state read and written, the hour counted (five on a
+  // send that goes out). One that did not go out has its link deleted (lib/community-access.ts, lib/buyer-library.ts,
+  // lib/learn.ts); on the send that finds Amazon's account paused that is seven with the day's notice check
+  // (measured 7 November 2026, tests/access-link-uniform-reply.test.ts worlds), so seven are priced.
+  transactional: PER_EMAIL + (7 + TAKE_COMMANDS) * COMMAND,
   // A call out, waited on at 2 GB for ten seconds.
   integration: request("wait", 10 + TAKE_COMMANDS, 20_000),
   // What a buyer does inside what they bought (lib/buyer-actions.ts): the

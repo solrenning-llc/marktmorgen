@@ -975,3 +975,290 @@ Public data check: 3974 tracked files; 0 file(s) require correction.
 ```
 {"verified": 3974, "unmatched": [], "scanner_exit": 0}
 ```
+
+
+## Retomada 07/11/2026 15h53 Fortaleza — #3083 MÉDIO herdado proposto com prova
+
+#3081 formalM5814399028 COMMENT/readbackEXATO/canalCXM1548entregue **051961d905c91fc5c29996ada731e46ff8cd37a8/blobc92d9021231aa64a74c4fc9e8b0bf1a0da5d3bc6 FULL4000788charsEXATO**. MesmareciboRES#3083ANTESdiff/fonte/testes. ÚltimosG1542segunda3076/C6-1544N3078C1disposição/C2-1545Z3079/C6-1545pedido3083/C6-1547pedido3084/C4-1547fechou5reservas/#3066Nlease lidos/créditosdonos intactos. Nãopegarsegunda3076G, não assumir3084semreserva. #3077P5814311731 e#3078N5814378860 pendentesC1classificarinclusão/followup, não autoencerrados peloM.
+
+### #3083 exato1babf986bb0c76c5dcbd1b88d609c4f5e75d0a3f
+C6pedido1545, metadata/body/timelinevazia antesclaim1548 efontessódepoisreadback. Delta2files: flowsd0a52a708728368653a69d8ed69ff195816fc931/test37 44ebe9a24522480128b2933f0b51652057ea5368. Base1d7cbe8dda5d35d049c699def9919b89a6376ef5/flows2f631889a0573579daffc55d95f45d7b47ff2324. Cópia m-review-3083/view3973headGitblobmatch+1ownproof. Trechosmutação/readstrict/writeFlows/purgeFlow/erase/forgetPerson/forgetStore/enroll/act/cachedsendDueSteps+route502/503source lidos. NÃOHTTPendpoint, nãoerasePersoninteiro/produção. Corridaenrolljáemvoo declaradanoPR NÃOfechada/não novoachadoM; cacheflowdosendernão é garantia quiescênciaglobal. Sófiltrodeactiveemleiturasnovas foi sourceconfirmado.
+
+SAMEpermanenteFINAL37comSÓflowsoldaliasemgrafofinal:37/24FAIL→head37PASS. Ligadosflow-mutation-reads97PASS+flow-list74PASS+flow-people13PASS=>221ordináriosatuaisPASS. Preadmission20kpipe+20krun/500mockHTTP/120s512MiB256KiBporfilho: old37=147/147/0;head37=203/203/0;97=145/145/0;74=0/0/0(fixtureintercepta,nãoafirmarzeroleituras);13=503/551/9. BuildfaltantegivingANTESqualquerexecução, recuperadossóGitblobhead; propriequívocowritetoolargv>128KiBrecusouANTESwrite, trocadoporchunks<=50k, nãotestproduto/nãoRED. Nenhumtetoexcedido.
+
+**UM MÉDIO PROPOSTO HERDADO/CONDICIONAL, não regressão**, lib/flows.ts398–403(erase) viaremoveFlow376/378:confirmaapenasarray+length, não slotsDEL/ZREM. PrópriaMESMAprova7/3FAIL(4PASS) BOTHbase+head. InjeçãosomenteerasepipelinequecontémDELdoregistroREALsemeadoopenRuns: retorno commands.map(()=>null),EXATOcomprimento,zerocomandosdoapagamentodespachados; oprogramaaceita/unlistaworkflow,registroemailpermanece,eafutureforgetWorkflowPersonnãooalcança. Controles3healthyremoval/write/runerasePASS;interceptcount1PASS;trêsfalhassãoummesmocaso(nãotrêsachados). Prova **Gitblobb6e65affc48995e3222560e0a30e33cd5ee3f4ba**, completaabaixo. Before41run/41pipe/0HTTP;head45/45/0;grafos406inputsheadverificadossalvoflowsoldexato. R2/C1executarMESMAprova,classificar e decidirinclusão/followupANTESreparo/veredito incondicional. Nãoeditarfontealheia/nãoduplicarbaixaZREVRANGEfilterjádeclarada/nãoatrelaranovaregressãoou400diasobservadosreais. Persistênciacódigo400diasconfigurados eórfãoreproduzidonomock; nãoretençãorealmedida.
+
+TiposES2017strictBundler3raízes982sources0diagnósticos; lint3files0/scanneroficial3974tracked0;3973Gitblobshead+1ownproofexact;diffwhitespaceproductsemoutput(code1conteúdodiff). NãofullCI/novegreens/LuaRedisreal/provedor/browser/MRglobal. PróximoformalCOMMENTdepoispreflighthead/timeline ecanalnotifC1/C6/R2. Nenhum produto/código/refautor/CI/queue/mainmutation. C1coordena/C4executor,serialMédio0subagentes/API1330>=5min/semOPENvarredura. Continuidadeexistenteinalterada;seguirretornonominal/reviewlivrecompreflight,reservaANTEScódigo.
+
+### view/tests/m-3083-erasure-reply.proof.ts
+```
+import { FlowWriteUnconfirmed, forgetWorkflowPerson, readFlows, removeFlow } from "@/lib/flows";
+import { FlowRunUnavailable, openRuns, personOf } from "@/lib/flow-runs";
+import type { Store } from "@/lib/store";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+const listId = "m-remove-proof-list";
+const listKey = "nl:mail:flows:" + listId;
+const store = { listId, statsId: null, mail: { fromName: "Sample", address: "Sample address" }, subscriptionActive: true, tier: "pro", trialEnds: 0, name: "Sample", handle: "sample", catalog: { items: [] } } as unknown as Store;
+const flow = { id: "5555555555555555", name: "Welcome", trigger: "joined", productId: null, active: true, createdAt: 1, steps: [{ id: "cccccccccccccccc", delayHours: 0, subject: "Hello", body: "Sample" }] };
+const email = "person@example.com";
+const runKey = `nl:wf:run:${flow.id}:${personOf(email)}`;
+const original = redis.pipeline;
+async function seed() { redis.clear(); await original.call(redis, [["SET", listKey, JSON.stringify([flow])]]); await openRuns(flow.id, [email]); }
+async function main() {
+  part("M independent: right-length invalid erase slots must not orphan a run");
+  await seed();
+  let intercepted = 0;
+  redis.pipeline = async commands => {
+    if (commands.some(c => c[0] === "DEL" && c[1] === runKey)) {
+      intercepted += 1;
+      // No erase is dispatched: the transport supplies one invalid null reply per command.
+      return commands.map(() => null);
+    }
+    return original.call(redis, commands);
+  };
+  let error: unknown = null;
+  try { await removeFlow(store, flow.id); } catch (caught) { error = caught; }
+  finally { redis.pipeline = original; }
+  is("the targeted real-run erase was intercepted exactly once", intercepted, 1);
+  is("invalid erase replies cannot acknowledge a removal", error instanceof FlowWriteUnconfirmed || error instanceof FlowRunUnavailable, true);
+  is("the workflow remains listed so erasure can find the run", (await readFlows(listId)).some(f => f.id === flow.id), true);
+  await forgetWorkflowPerson(store, email);
+  is("a later person erasure still removes the actual run's address", (await original.call(redis, [["HGET", runKey, "email"]]))[0], null);
+  part("Healthy real-write control");
+  await seed();
+  is("normal removal still succeeds", (await removeFlow(store, flow.id)).ok, true);
+  is("normal removal removes the workflow", (await readFlows(listId)).length, 0);
+  is("normal removal erases its actual run", (await original.call(redis, [["EXISTS", runKey]]))[0], 0);
+  done();
+}
+void main();
+
+```
+
+### run.mjs
+```
+import{readFileSync,writeFileSync,mkdirSync,existsSync,symlinkSync}from'node:fs';import{resolve,join}from'node:path';import{createRequire}from'node:module';import{createHash}from'node:crypto';import{spawnSync}from'node:child_process';import{testAliases,testEnvironment}from'./view/tests/test-config.mjs';
+const root=resolve('.'),view=join(root,'view'),deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules';const{build}=createRequire(join(deps,'package.json'))('esbuild');if(!existsSync(join(view,'node_modules')))symlinkSync(deps,join(view,'node_modules'),'dir');mkdirSync('logs',{recursive:true});
+const jobs=process.argv.slice(2);for(const job of jobs){const [mode,test]=job.split(':');
+ const bootstrap=`import{MemoryRedis}from'./lib/redis-memory';import{store as redis}from'./tests/redis-stub';let pc=0,rc=0,hc=0,exceeded=false;const stop=()=>{exceeded=true;throw Error('M_ADMISSION_CEILING')};const pipeline=redis.pipeline,run=MemoryRedis.prototype.run;redis.pipeline=function(c){if(pc+c.length>20000)return stop();pc+=c.length;return pipeline.call(this,c)};MemoryRedis.prototype.run=function(c){if(rc+1>20000)return stop();rc++;return run.call(this,c)};let current=()=>{throw Error('NO_EXTERNAL_NETWORK')};Object.defineProperty(globalThis,'fetch',{configurable:true,get:()=>current,set:f=>{current=(...a)=>{if(hc+1>500)return stop();hc++;return f(...a)}}});process.on('beforeExit',()=>{console.log('M_BUDGET',JSON.stringify({pipelineCommands:pc,memoryRun:rc,httpMockDispatch:hc,exceeded}));if(exceeded)process.exitCode=1});import('./tests/${test}');`;
+ const alias=testAliases(test,view,join(view,'tests'));if(mode==='before')alias['@/lib/flows']=join(root,'before-flows.ts');const b=await build({stdin:{contents:bootstrap,resolveDir:view,sourcefile:'m-bootstrap.ts',loader:'ts'},absWorkingDir:view,bundle:true,write:false,platform:'node',format:'cjs',alias,metafile:true,logLevel:'error'});const f=resolve('logs/'+mode+'-'+test+'.cjs');const pin=JSON.parse(readFileSync('head-pins.json','utf8'));let checked=0;for(const input of Object.keys(b.metafile.inputs)){if(input.includes('node_modules')||input==='m-bootstrap.ts')continue;const file=resolve(view,input);const bytes=readFileSync(file);const hash=createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');if(file===join(root,'before-flows.ts')){if(hash!=='2f631889a0573579daffc55d95f45d7b47ff2324')throw Error('Old rule mismatch');}else if(input==='tests/m-3083-erasure-reply.proof.ts'){if(hash!=='b6e65affc48995e3222560e0a30e33cd5ee3f4ba')throw Error('Own proof mismatch');}else if(hash!==pin[input])throw Error('Head pin mismatch '+input);checked++;}console.log(JSON.stringify({mode,test,checked}));writeFileSync(f,b.outputFiles[0].text);writeFileSync(f+'.meta.json',JSON.stringify(b.metafile));
+ const p=spawnSync(process.execPath,['--max-old-space-size=512',f],{cwd:view,env:testEnvironment({PATH:'/usr/bin:/bin',TZ:'UTC'}),encoding:'utf8',timeout:120000,maxBuffer:256*1024});const out=(p.stdout||'')+(p.stderr||'');writeFileSync(f+'.log',out);console.log(JSON.stringify({mode,test,exit:p.status,error:p.error?.message,signal:p.signal,tail:out.slice(-1700)}));if(p.error||p.signal)throw Error('Incomplete child');
+}
+
+```
+
+### verify.cjs
+```
+const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');const deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules',root=path.resolve('view'),ts=require(deps+'/typescript');
+const names=['lib/flows.ts','tests/flow-remove-erasure.test.ts','tests/m-3083-erasure-reply.proof.ts'];const opts={strict:true,noEmit:true,allowJs:true,target:ts.ScriptTarget.ES2017,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler,skipLibCheck:true,esModuleInterop:true,resolveJsonModule:true,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'@/lib/content-jsx',baseUrl:root,paths:{'@/*':['*']},types:['node','react'],typeRoots:[deps+'/@types'],lib:['lib.esnext.d.ts','lib.dom.d.ts','lib.dom.iterable.d.ts']};
+const p=ts.createProgram(names.map(f=>path.join(root,f)),opts),ds=ts.getPreEmitDiagnostics(p);fs.writeFileSync('types.log',ts.formatDiagnosticsWithColorAndContext(ds,{getCurrentDirectory:()=>root,getCanonicalFileName:f=>f,getNewLine:()=>"\n"})+JSON.stringify({roots:names.length,sources:p.getSourceFiles().length,diagnostics:ds.length}));console.log('types',ds.length);
+const paths=names;const r=cp.spawnSync(process.execPath,['--max-old-space-size=512',deps+'/eslint/bin/eslint.js',...paths],{cwd:root,encoding:'utf8',timeout:120000,maxBuffer:256*1024});fs.writeFileSync('lint.log',(r.stdout||'')+(r.stderr||''));console.log('lint',r.status,r.signal,r.error?.message);
+
+```
+
+### run.log
+```
+{"mode":"before","test":"flow-remove-erasure.test.ts","checked":406}
+{"mode":"before","test":"flow-remove-erasure.test.ts","exit":1,"signal":null,"tail":"lowRunUnavailable: Workflow run history is unavailable\n    at runPeople (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:11997:61)\n    at async purgeFlow (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47206:18)\n    at async removeFlow (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47175:3)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47322:7)\nerasing a removed workflow's runs failed FlowRunUnavailable: Workflow run history is unavailable\n    at runPeople (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:11997:61)\n    at async purgeFlow (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47206:18)\n    at async removeFlow (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47175:3)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47322:7)\nerasing a removed workflow's runs failed FlowWriteUnconfirmed: Sequence write could not be confirmed\n    at erase (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47191:71)\n    at async purgeFlow (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47213:3)\n    at async removeFlow (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47175:3)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47322:7)\n"}
+{"mode":"head","test":"flow-remove-erasure.test.ts","checked":406}
+{"mode":"head","test":"flow-remove-erasure.test.ts","exit":0,"signal":null,"tail":"gain succeeds\n  ok    throws: the workflow is gone\n  ok    throws: its run is erased\n  ok    throws: its index is erased\n  ok    garbled index: the run holds the address before\n  ok    garbled index: the removal says it could not be confirmed\n  ok    garbled index: the workflow stays listed, so its runs can still be reached\n  ok    garbled index: and it is paused, so nobody new starts it and nothing more is sent\n  ok    garbled index: the other workflow is left as it was\n  ok    garbled index: a later erasure request erases the run's address\n  ok    garbled index: and its queued step\n  ok    garbled index: removing it again succeeds\n  ok    garbled index: the workflow is gone\n  ok    garbled index: its run is erased\n  ok    garbled index: its index is erased\n  ok    garbled erase: the run holds the address before\n  ok    garbled erase: the removal says it could not be confirmed\n  ok    garbled erase: the workflow stays listed, so its runs can still be reached\n  ok    garbled erase: and it is paused, so nobody new starts it and nothing more is sent\n  ok    garbled erase: the other workflow is left as it was\n  ok    garbled erase: a later erasure request erases the run's address\n  ok    garbled erase: and its queued step\n  ok    garbled erase: removing it again succeeds\n  ok    garbled erase: the workflow is gone\n  ok    garbled erase: its run is erased\n  ok    garbled erase: its index is erased\n\nRemoving a workflow when everything answers\n  ok    removal succeeds\n  ok    only the other workflow is left\n  ok    the run is erased\n  ok    the queued step is erased\n\n37 checks, all passing.\nM_BUDGET {\"pipelineCommands\":203,\"memoryRun\":203,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"flow-mutation-reads.test.ts","checked":420}
+{"mode":"head","test":"flow-mutation-reads.test.ts","exit":0,"signal":null,"tail":"nown list\n  ok    save makes no sequence write\n  ok    save preserves stored bytes\n  ok    remove refuses an unknown list\n  ok    remove makes no sequence write\n  ok    remove preserves stored bytes\n  ok    starters refuses an unknown list\n  ok    starters makes no sequence write\n  ok    starters preserves stored bytes\n  ok    keep refuses an unknown list\n  ok    keep makes no sequence write\n  ok    keep preserves stored bytes\n  ok    save needs explicit write confirmation\n  ok    remove needs explicit write confirmation\n  ok    save needs explicit write confirmation\n  ok    remove needs explicit write confirmation\n  ok    save needs explicit write confirmation\n  ok    remove needs explicit write confirmation\n  ok    save needs explicit write confirmation\n  ok    remove needs explicit write confirmation\n  ok    save needs explicit write confirmation\n  ok    remove needs explicit write confirmation\n  ok    save needs explicit write confirmation\n  ok    remove needs explicit write confirmation\n  ok    save needs explicit write confirmation\n  ok    remove needs explicit write confirmation\n  ok    save needs explicit write confirmation\n  ok    remove needs explicit write confirmation\n  ok    lost acknowledgement does not claim success\n  ok    unconfirmed response does not imply rollback\n  ok    valid creation succeeds\n  ok    creation preserves both existing sequences\n  ok    valid editing succeeds\n  ok    editing preserves the other sequence\n  ok    valid removal succeeds\n  ok    removal preserves remaining sequences\n  ok    confirmed absent list permits creation\n\n97 checks, all passing.\nM_BUDGET {\"pipelineCommands\":145,\"memoryRun\":145,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"flow-list.test.ts","checked":13}
+{"mode":"head","test":"flow-list.test.ts","exit":0,"signal":null,"tail":"low1\",\"name\":\"Welcome\",\"trigger\":\"joined\",\"productId\":null,\"active\":false,\"createdAt\":1,\"steps\":[{\"id\":\"step1\",\"delayHours\":0,\"subject\":\"Hello\",\"body\":\"Sample\"}],\"goal\":\"purchase\"}]\n  ok    valid product goal is preserved\n  ok    valid purchase goal is preserved\n  ok    store without a list is confirmed empty\n  ok    no storage read without a list\n  ok    only selected list is read\n  ok    valid list read\n  ok    only selected list is read\n  ok    confirmed missing key is empty\n  ok    only selected list is read\n  ok    confirmed stored empty list\n  ok    only selected list is read\n  ok    failed read is not an empty list []\n  ok    only selected list is read\n  ok    failed read is not an empty list [null,null]\n  ok    only selected list is read\n  ok    failed read is not an empty list null\n  ok    only selected list is read\n  ok    failed read is not an empty list {}\n  ok    only selected list is read\n  ok    failed read is not an empty list [null]\n  ok    only selected list is read\n  ok    failed read is not an empty list [\"\"]\n  ok    only selected list is read\n  ok    failed read is not an empty list [\"bad json\"]\n  ok    only selected list is read\n  ok    failed read is not an empty list [\"{}\"]\n  ok    only selected list is read\n  ok    failed read is not an empty list [\"[null]\"]\n  ok    only selected list is read\n  ok    failed read is not an empty list [\"[{\\\"id\\\":\\\"flow1\\\",\\\"name\\\":\\\"Welcome\\\",\\\"trigger\\\":\\\"joined\\\",\\\"productId\\\":null,\\\"active\\\":false,\\\"createdAt\\\":1,\\\"steps\\\":null}]\"]\n  ok    only selected list is read\n  ok    storage failure remains unknown\n\n74 checks, all passing.\nM_BUDGET {\"pipelineCommands\":0,\"memoryRun\":0,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"flow-people.test.ts","checked":412}
+{"mode":"head","test":"flow-people.test.ts","exit":0,"signal":null,"tail":"\nRead and saved strictly\n  ok    a field and a value it keeps; a stage the board has; a note with words\n  ok    a form that asks for no address cannot start a sequence\n  ok    a sequence that starts with the form, its steps kept\n\nStarted by the form, for people on the list\n  ok    the field is set for those on the list, not for somebody who is not\n  ok    Ana gets a new deal in the stage; Ben's open deal moves there\n  ok    a note on her page, saying where it came from\n  ok    the owner told once, with both of them\n  ok    and the email goes to each, once\n\nA sign-up asked from a form remembers it\n  ok    the confirmation link uses the service route and knows the form\n\nA workflow for one quiz result (added 17 October 2026)\n  ok    a result the quiz does not have is refused\n  ok    one of its results is kept on the workflow\n  ok    only the person who got that result starts it\n  ok    a sign-up asked from a quiz keeps the service route, form and result\n\n13 checks, all passing.\nM_BUDGET {\"pipelineCommands\":503,\"memoryRun\":551,\"httpMockDispatch\":9,\"exceeded\":false}\n"}
+
+```
+
+### proof.log
+```
+{"mode":"before","test":"m-3083-erasure-reply.proof.ts","checked":406}
+{"mode":"before","test":"m-3083-erasure-reply.proof.ts","exit":1,"signal":null,"tail":"\nM independent: right-length invalid erase slots must not orphan a run\n  ok    the targeted real-run erase was intercepted exactly once\n  FAIL  invalid erase replies cannot acknowledge a removal\n        expected true\n        got      false\n  FAIL  the workflow remains listed so erasure can find the run\n        expected true\n        got      false\n  FAIL  a later person erasure still removes the actual run's address\n        expected null\n        got      \"person@example.com\"\n\nHealthy real-write control\n  ok    normal removal still succeeds\n  ok    normal removal removes the workflow\n  ok    normal removal erases its actual run\n\n7 checks, 3 failing.\nM_BUDGET {\"pipelineCommands\":41,\"memoryRun\":41,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"m-3083-erasure-reply.proof.ts","checked":406}
+{"mode":"head","test":"m-3083-erasure-reply.proof.ts","exit":1,"signal":null,"tail":"\nM independent: right-length invalid erase slots must not orphan a run\n  ok    the targeted real-run erase was intercepted exactly once\n  FAIL  invalid erase replies cannot acknowledge a removal\n        expected true\n        got      false\n  FAIL  the workflow remains listed so erasure can find the run\n        expected true\n        got      false\n  FAIL  a later person erasure still removes the actual run's address\n        expected null\n        got      \"person@example.com\"\n\nHealthy real-write control\n  ok    normal removal still succeeds\n  ok    normal removal removes the workflow\n  ok    normal removal erases its actual run\n\n7 checks, 3 failing.\nM_BUDGET {\"pipelineCommands\":45,\"memoryRun\":45,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+
+```
+
+### logs/before-flow-remove-erasure.test.ts.cjs.log
+```
+
+Removing a workflow whose runs cannot be erased
+  ok    throws: the run holds the address before
+  FAIL  throws: the removal says it could not be confirmed
+        expected true
+        got      false
+  FAIL  throws: the workflow stays listed, so its runs can still be reached
+        expected true
+        got      false
+  FAIL  throws: and it is paused, so nobody new starts it and nothing more is sent
+        expected false
+        got      undefined
+  ok    throws: the other workflow is left as it was
+  FAIL  throws: a later erasure request erases the run's address
+        expected null
+        got      "person@example.com"
+  FAIL  throws: and its queued step
+        expected null
+        got      "1"
+  FAIL  throws: removing it again succeeds
+        expected true
+        got      false
+  ok    throws: the workflow is gone
+  FAIL  throws: its run is erased
+        expected 0
+        got      1
+  FAIL  throws: its index is erased
+        expected 0
+        got      1
+  ok    garbled index: the run holds the address before
+  FAIL  garbled index: the removal says it could not be confirmed
+        expected true
+        got      false
+  FAIL  garbled index: the workflow stays listed, so its runs can still be reached
+        expected true
+        got      false
+  FAIL  garbled index: and it is paused, so nobody new starts it and nothing more is sent
+        expected false
+        got      undefined
+  ok    garbled index: the other workflow is left as it was
+  FAIL  garbled index: a later erasure request erases the run's address
+        expected null
+        got      "person@example.com"
+  FAIL  garbled index: and its queued step
+        expected null
+        got      "1"
+  FAIL  garbled index: removing it again succeeds
+        expected true
+        got      false
+  ok    garbled index: the workflow is gone
+  FAIL  garbled index: its run is erased
+        expected 0
+        got      1
+  FAIL  garbled index: its index is erased
+        expected 0
+        got      1
+  ok    garbled erase: the run holds the address before
+  FAIL  garbled erase: the removal says it could not be confirmed
+        expected true
+        got      false
+  FAIL  garbled erase: the workflow stays listed, so its runs can still be reached
+        expected true
+        got      false
+  FAIL  garbled erase: and it is paused, so nobody new starts it and nothing more is sent
+        expected false
+        got      undefined
+  ok    garbled erase: the other workflow is left as it was
+  FAIL  garbled erase: a later erasure request erases the run's address
+        expected null
+        got      "person@example.com"
+  FAIL  garbled erase: and its queued step
+        expected null
+        got      "1"
+  FAIL  garbled erase: removing it again succeeds
+        expected true
+        got      false
+  ok    garbled erase: the workflow is gone
+  FAIL  garbled erase: its run is erased
+        expected 0
+        got      1
+  FAIL  garbled erase: its index is erased
+        expected 0
+        got      1
+
+Removing a workflow when everything answers
+  ok    removal succeeds
+  ok    only the other workflow is left
+  ok    the run is erased
+  ok    the queued step is erased
+
+37 checks, 24 failing.
+M_BUDGET {"pipelineCommands":147,"memoryRun":147,"httpMockDispatch":0,"exceeded":false}
+erasing a removed workflow's runs failed FlowRunUnavailable: Workflow run history is unavailable
+    at runPeople (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:11997:61)
+    at async purgeFlow (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47206:18)
+    at async removeFlow (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47175:3)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47322:7)
+erasing a removed workflow's runs failed FlowRunUnavailable: Workflow run history is unavailable
+    at runPeople (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:11997:61)
+    at async purgeFlow (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47206:18)
+    at async removeFlow (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47175:3)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47322:7)
+erasing a removed workflow's runs failed FlowWriteUnconfirmed: Sequence write could not be confirmed
+    at erase (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47191:71)
+    at async purgeFlow (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47213:3)
+    at async removeFlow (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47175:3)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3083/logs/before-flow-remove-erasure.test.ts.cjs:47322:7)
+
+```
+
+### logs/head-flow-remove-erasure.test.ts.cjs.log
+```
+
+Removing a workflow whose runs cannot be erased
+  ok    throws: the run holds the address before
+  ok    throws: the removal says it could not be confirmed
+  ok    throws: the workflow stays listed, so its runs can still be reached
+  ok    throws: and it is paused, so nobody new starts it and nothing more is sent
+  ok    throws: the other workflow is left as it was
+  ok    throws: a later erasure request erases the run's address
+  ok    throws: and its queued step
+  ok    throws: removing it again succeeds
+  ok    throws: the workflow is gone
+  ok    throws: its run is erased
+  ok    throws: its index is erased
+  ok    garbled index: the run holds the address before
+  ok    garbled index: the removal says it could not be confirmed
+  ok    garbled index: the workflow stays listed, so its runs can still be reached
+  ok    garbled index: and it is paused, so nobody new starts it and nothing more is sent
+  ok    garbled index: the other workflow is left as it was
+  ok    garbled index: a later erasure request erases the run's address
+  ok    garbled index: and its queued step
+  ok    garbled index: removing it again succeeds
+  ok    garbled index: the workflow is gone
+  ok    garbled index: its run is erased
+  ok    garbled index: its index is erased
+  ok    garbled erase: the run holds the address before
+  ok    garbled erase: the removal says it could not be confirmed
+  ok    garbled erase: the workflow stays listed, so its runs can still be reached
+  ok    garbled erase: and it is paused, so nobody new starts it and nothing more is sent
+  ok    garbled erase: the other workflow is left as it was
+  ok    garbled erase: a later erasure request erases the run's address
+  ok    garbled erase: and its queued step
+  ok    garbled erase: removing it again succeeds
+  ok    garbled erase: the workflow is gone
+  ok    garbled erase: its run is erased
+  ok    garbled erase: its index is erased
+
+Removing a workflow when everything answers
+  ok    removal succeeds
+  ok    only the other workflow is left
+  ok    the run is erased
+  ok    the queued step is erased
+
+37 checks, all passing.
+M_BUDGET {"pipelineCommands":203,"memoryRun":203,"httpMockDispatch":0,"exceeded":false}
+
+```
+
+### types.log
+```
+{"roots":3,"sources":982,"diagnostics":0}
+```
+
+### lint.log
+```
+
+```
+
+### scanner.log
+```
+Public data check: 3974 tracked files; 0 file(s) require correction.
+
+```
+
+### verified.json
+```
+{"verified_head": 3973, "own_proof_gitblob": "b6e65affc48995e3222560e0a30e33cd5ee3f4ba", "unmatched": [], "scanner_exit": 0}
+```

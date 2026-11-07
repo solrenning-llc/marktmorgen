@@ -16,7 +16,8 @@ import { FREE_POOL_BASE_STORES, PAYING_INDEX, freePoolSize } from "@/lib/free-po
 import { type PlanFields, standingOf } from "@/lib/plan-standing";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark } from "@/lib/claim-mark";
-import { repliesFor } from "@/lib/redis-reply";
+import { countOf, repliesFor } from "@/lib/redis-reply";
+import { textCountOf } from "@/lib/redis-count";
 
 const KEEP_SECONDS = 40 * 86_400;
 const REFUSED_SECONDS = 3_600;
@@ -80,9 +81,15 @@ export async function admitNonPaying(store: PoolStore, now = Date.now()): Promis
   return (await poolPlace(store, now)) === "in";
 }
 
-/** Places handed out this month, and how many there are, for the owner's own checks. */
-export async function poolThisMonth(now = Date.now()): Promise<{ taken: number; size: number }> {
+/**
+ * Places handed out this month, and how many there are, for the owner's own checks.
+ * Each read exactly (rule 24): a counter that is not there is none handed out; a reply
+ * in any other shape is unknown (null), shown as unknown, never as 0 taken nor the smallest pool.
+ */
+export async function poolThisMonth(now = Date.now()): Promise<{ taken: number | null; size: number | null }> {
   if (!isRedisConfigured()) return { taken: 0, size: FREE_POOL_BASE_STORES };
-  const [taken, paying] = await redisPipeline([["GET", countKey(calendarWindow(now).id)], ["SCARD", PAYING_INDEX]]);
-  return { taken: Number(taken) || 0, size: freePoolSize(Number(paying) || 0) };
+  const replies = repliesFor(await redisPipeline([["GET", countKey(calendarWindow(now).id)], ["SCARD", PAYING_INDEX]]), 2);
+  const taken = textCountOf(replies?.[0]);
+  const paying = countOf(replies?.[1]);
+  return { taken: taken === "absent" ? 0 : taken, size: paying === null ? null : freePoolSize(paying) };
 }

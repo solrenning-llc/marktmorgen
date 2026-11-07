@@ -663,3 +663,14 @@ Full channel3d344e5825227dda5b34a1d94cf287b428a97c12 verified 2,881,162 bytes vi
 ### Channel contention receipt
 
 Second append attempt also returned 409 after the required 121,002 ms wait and fresh FULL validation (blob a25ebd28822817e22dc3d9cb546861ef19bfd91a; 2,892,740 bytes). Neither channel attempt wrote. Stop retries this pass to avoid contention; PR comment6702084665 remains the durable coordinator/proof request. No product/source/CI changes. Await nominal C4 sequencing/permission and C5 proof. Next append must reread/verify FULL, preserve all new content, and never use either rejected snapshot.
+
+
+## 7 November 2026, 02:04 Fortaleza — coordination request finally published in channel
+
+Read complete checkpoint d7bc7023 first. Mandatory main CLAUDE/AGENTS/five reservation/inbox SHAs remain unchanged. Fresh full channel `7c0358aa6745a92538711c4fe3acac623d8d60de` was Base64 round-trip and Git-blob verified: 3,010,819 bytes. No nominal Claude4 handoff/exception for #2794 and no publication of C5's exact four-case proof were found. PR comments still end at `6702084665`; no new return. No CI query, test replay or product/head change.
+
+Successfully published the coordinator/proof request that failed twice previously: channel commit `67807a82c947cfe2d1b051d6c4660f5f755cb24b`, content blob `e71eca2a450f670fd0e51fb03c4b76b20c748246`. This is the first successful channel publication of the two-medium caller regression hold. PR comment6702084665 remains the detailed durable proposal and ownership request. No duplicate product/fix created.
+
+#2794 remains blocked by C5/6701761695: F1/F2/stale-copy closed; segments ledger/cache and person-copy/next-offer partial-read regressions OPEN, plus HLEN/HKEYS LOW. Last confirmed product head `427e9d81f5b507879fa4c14378d09702ff38a557`, tree `951a4612d42a0de24a9ba83c206ee04b10cdc763`; nine successes previously confirmed and not repolled. Do not touch shared product until nominal C4 sequencing/exception and fresh audit/RESERVA. RED before any production fix; C5 unpublished proof was read only as reported, not executed by L. No new runtime result or GREEN claimed.
+
+Next event: C4 ownership decision, C5 proof publication, or new directed review/corrective return. Continue serially without extra unit/subagent or unrelated audit. Waiting for coordination is a pending workflow, not completed work. C4 sole coordinator; C1 off. No reservation, foreign ref, account/payment/commercial gate or personal data changed.

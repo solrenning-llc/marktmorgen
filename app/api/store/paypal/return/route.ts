@@ -22,8 +22,9 @@ export async function GET(request: NextRequest) {
   if (!(await withinLimit("paypal-return", `${clientAddress(request)}|${store.handle}`, 30, 600))) return away(`/@${store.handle}?status=slow`);
   // Handed over inside the capture, before the order leaves pending: a hand-over that fails answers "error" and
   // leaves the order pending, so the sweep hands it over (lib/paypal-sales.ts settle), never only logged.
+  // A product the creator removed hands nothing over (false): that is a failed hand-over, so the order stays pending.
   const result = await captureOrder(store, order, async (paid) => {
-    await handOverPayPal(store, paid);
+    if (!(await handOverPayPal(store, paid))) throw new Error("a PayPal payment's product is gone: nothing was handed over");
   });
   if (result.ok) return away(`/@${store.handle}/thanks?paypal=${encodeURIComponent(order)}`);
   // Not settled yet, the answer was lost on the way, or the hand-over failed:

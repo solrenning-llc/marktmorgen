@@ -9,7 +9,9 @@
  *     that lands on "expired";
  *   - requestHubLink (lib/affiliate-hub.ts) and invitePartner
  *     (lib/affiliates.ts) send a paid email carrying the link: with the SET
- *     unconfirmed they send nothing and answer "error";
+ *     unconfirmed they send nothing and leave no link behind; invitePartner
+ *     answers "error", requestHubLink "sent" as for every address (its work
+ *     runs after the answer: tests/hub-link-uniform-reply.test.ts);
  *   - with Redis answering "OK", all three work as before.
  */
 import { createHash } from "node:crypto";
@@ -21,6 +23,12 @@ import { requestHubLink } from "@/lib/affiliate-hub";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { afterTasks } from "./next-server-after-world";
+
+/** Runs what the answers left for after them, as Next does once each answer is sent. */
+async function runAfterTasks(): Promise<void> {
+  while (afterTasks.length) await (afterTasks.shift() as () => unknown)();
+}
 
 type Pipeline = typeof redis.pipeline;
 type Commands = Parameters<Pipeline>[0];
@@ -39,11 +47,17 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return new Response(JSON.stringify(found ?? { error: { message: "No such checkout.session" } }), { status: found ? 200 : 404 });
 }) as typeof fetch;
 
-/** Runs `work` with the one-command SET of a key starting with `prefix` answered by `reply` and not applied. */
-async function setAnswered<T>(prefix: string, reply: unknown[], work: () => Promise<T>): Promise<T> {
+/** Runs `work` with the one-command SET of a key starting with `prefix` answered by `reply`, not applied unless `apply`. */
+async function setAnswered<T>(prefix: string, reply: unknown[], work: () => Promise<T>, apply = false): Promise<T> {
   const original: Pipeline = redis.pipeline;
-  redis.pipeline = (async (commands: Commands) =>
-    commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).startsWith(prefix) ? reply : original.call(redis, commands)) as Pipeline;
+  redis.pipeline = (async (commands: Commands) => {
+    if (commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).startsWith(prefix)) {
+      // With `apply`, the SET is still made and only its answer is lost.
+      if (apply) await original.call(redis, commands);
+      return reply;
+    }
+    return original.call(redis, commands);
+  }) as Pipeline;
   try {
     return await work();
   } finally {
@@ -111,6 +125,8 @@ async function main(): Promise<void> {
     for (const key of [...data.keys()]) if (key.startsWith("nl:rl:affhub-")) data.delete(key);
     const before = sent.length;
     const answer = await requestHubLink({ email: "dana@example.com", ip: "203.0.113.9", origin: "https://marktmorgen.com" });
+    // The stores, the link and its email run after the answer (lib/after-answer.ts).
+    await runAfterTasks();
     return { answer, emails: sent.length - before };
   };
   is("control: the hub link is emailed", await ask(), { answer: "sent", emails: 1 });
@@ -126,7 +142,9 @@ async function main(): Promise<void> {
 
   part("requestHubLink: no paid email with a link that was not stored");
   for (const [what, reply] of ODD) {
-    is(`${what}: "error" and no email`, await setAnswered("nl:affhub:link:", reply, ask), { answer: "error", emails: 0 });
+    // Rule 23: was { answer: "error", emails: 0 }. "error" only for an affiliate told a stranger apart (pre-review MÉDIO,
+    // lib/affiliate-hub.ts:93); the answer is "sent" for every address now, and still no email goes out.
+    is(`${what}: "sent" as for anybody, and no email`, await setAnswered("nl:affhub:link:", reply, ask), { answer: "sent", emails: 0 });
   }
   is("and the stored link the email carries opens the page", await stored(hubLinkKey(hubToken)), true);
 
@@ -145,6 +163,12 @@ async function main(): Promise<void> {
   for (const [what, reply] of ODD) {
     const got = await setAnswered("nl:aff:link:", reply, () => invite("pat@example.com"));
     is(`${what}: "error" and no email`, { answer: got.answer, emails: got.emails }, { answer: "error", emails: 0 });
+  }
+  const storeLinks = () => [...(redis as unknown as { data: Map<string, unknown> }).data.keys()].filter((k) => k.startsWith("nl:aff:link:")).length;
+  for (const [what, reply] of ODD) {
+    const before = storeLinks();
+    const got = await setAnswered("nl:aff:link:", reply, () => invite("pat@example.com"), true);
+    is(`a SET made with ${what}: "error", no email, and the link removed`, { answer: got.answer, emails: got.emails, kept: storeLinks() - before }, { answer: "error", emails: 0, kept: 0 });
   }
   const invited = await invite("pat@example.com");
   is("control: the invitation is emailed with a stored link", [invited.answer, invited.emails, await stored(storeLinkKey(invited.token))], ["sent", 1, true]);

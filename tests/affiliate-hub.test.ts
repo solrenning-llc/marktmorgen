@@ -16,6 +16,12 @@ import { hubOwner, requestHubLink, storesPromoted } from "@/lib/affiliate-hub";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { afterTasks } from "./next-server-after-world";
+
+/** Runs what the answers left for after them, as Next does once each answer is sent. */
+async function runAfterTasks(): Promise<void> {
+  while (afterTasks.length) await (afterTasks.shift() as () => unknown)();
+}
 
 const sent: { to: string; text: string }[] = [];
 const sessions = new Map<string, Record<string, unknown>>();
@@ -72,9 +78,15 @@ async function main(): Promise<void> {
   is("and the address itself is nowhere in the key", keys.some((k) => k.includes("dana")), false);
 
   part("Signing in by email");
-  is("an address that is nobody's affiliate: the same answer, and no email", [await requestHubLink({ email: "nobody@example.com", ip: "203.0.113.1", origin: "https://marktmorgen.com" }), sent.length], ["sent", 0]);
+  // The stores, the link and its email run after the answer (lib/after-answer.ts): each ask runs them before reading what was sent.
+  const ask = async (email: string) => {
+    const answer = await requestHubLink({ email, ip: "203.0.113.1", origin: "https://marktmorgen.com" });
+    await runAfterTasks();
+    return answer;
+  };
+  is("an address that is nobody's affiliate: the same answer, and no email", [await ask("nobody@example.com"), sent.length], ["sent", 0]);
   is("not an address", await requestHubLink({ email: "nope", ip: "203.0.113.1", origin: "https://marktmorgen.com" }), "email");
-  is("an affiliate: a link to their page", [await requestHubLink({ email: "dana@example.com", ip: "203.0.113.1", origin: "https://marktmorgen.com" }), sent.at(-1)?.to, sent.at(-1)?.text.includes("2 stores")], ["sent", "dana@example.com", true]);
+  is("an affiliate: a link to their page", [await ask("dana@example.com"), sent.at(-1)?.to, sent.at(-1)?.text.includes("2 stores")], ["sent", "dana@example.com", true]);
   const token = sent.at(-1)?.text.match(/token=([0-9a-f]{64})/)?.[1] ?? "";
   is("it opens the page for that address, and a made-up one for nobody", [await hubOwner(token), await hubOwner("0".repeat(64))], ["dana@example.com", null]);
 

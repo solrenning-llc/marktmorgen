@@ -14,6 +14,10 @@
  *   - an unknown read of the kept server (another shape, or a thrown read): nothing switches, the code is not
  *     exchanged, the old server stays connected with its roles and members, the bot is not removed from it, and the
  *     creator is sent back with `discord=unchecked`, never `discord=connected`;
+ *   - forgetting the old server fails (a thrown read of its members, as #3017's exact forgetServer throws on an
+ *     unknown reply): the creator is sent back with `discord=unchecked`, never a bare 500; the new server is not
+ *     saved, the old one stays connected with its roles and members, and the bot is not removed from it (LOW of the
+ *     independent review on #2976);
  *   - the studio page has an honest, plain words notice for `unchecked`, shown as an error (role="alert").
  */
 import { readFileSync } from "node:fs";
@@ -48,7 +52,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 }) as typeof fetch;
 
 type Commands = (string | number)[][];
-type Read = "healthy" | "none" | "shape" | "thrown";
+type Read = "healthy" | "none" | "shape" | "thrown" | "forget";
 
 async function scenario(read: Read) {
   redis.clear();
@@ -80,6 +84,16 @@ async function scenario(read: Read) {
         used = true;
         if (read === "thrown") throw new Error("synthetic Redis failure");
         return [];
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+  }
+  if (read === "forget") {
+    // The switch's first read of the old server's members fails (forgetServer), after the kept server read exactly.
+    redis.pipeline = (async (commands: Commands) => {
+      if (!used && commands.length === 1 && commands[0][0] === "HKEYS" && String(commands[0][1]).startsWith("nl:dc:mem:")) {
+        used = true;
+        throw new Error("synthetic Redis failure");
       }
       return real(commands);
     }) as typeof redis.pipeline;
@@ -126,7 +140,14 @@ async function main() {
     is(`${read}: the old server's roles and member kept, on the old server`, [unknown.roles, unknown.members], [[["prod1", [ROLE]]], [ANA]]);
   }
 
-  part("4. The studio says so plainly, as an error");
+  part("4. Forgetting the old server fails: nothing switches, and the creator is told so, never a bare 500");
+  const forget = await scenario("forget");
+  is("forget: the creator is told the server could not be checked, never a bare 500 or \"connected\"", forget.status, "unchecked");
+  is("forget: the new server was not saved; the old one is still connected", forget.server, OLD);
+  is("forget: the bot was not removed from the old server", forget.left, false);
+  is("forget: the old server's roles and member kept", [forget.roles, forget.members], [[["prod1", [ROLE]]], [ANA]]);
+
+  part("5. The studio says so plainly, as an error");
   const page = readFileSync(join(process.cwd(), "app/studio/discord/page.tsx"), "utf8");
   const line = page.split("\n").find((l) => /^\s*unchecked:/.test(l)) ?? "";
   is("the notice for unchecked is an error", /tone: "error"/.test(line), true);

@@ -4,7 +4,6 @@
  *
  *   nl:pp:<statsId>          the creator's PayPal app: its Client ID, its Secret sealed, auto-pay on or off
  *   nl:pp:open:<statsId>     batches sent and not yet settled: what each affiliate was sent
- *   nl:pp:item:<item>        a PayPal payout item already written into the book (once)
  *   nl:pp:stores             the stores with a batch still open, for the daily job
  *
  * How it works, and why this way. PayPal's Payouts API only ever sends money
@@ -57,7 +56,6 @@ const TIMEOUT_MS = 20_000;
 
 const linkKey = (statsId: string) => `nl:pp:${statsId}`;
 const openKey = (statsId: string) => `nl:pp:open:${statsId}`;
-const itemKey = (item: string) => `nl:pp:item:${item}`;
 const STORES = "nl:pp:stores";
 const context = (statsId: string) => `paypal-payouts|${statsId}`;
 
@@ -303,7 +301,8 @@ function refusedBeforeMade(error: unknown): boolean {
  * answers with this same batch. If only the second fails, both stay; the
  * settling then finds the "?" one, gets the same batch back and writes it
  * again, and an item already written into the book is never written twice
- * (nl:pp:item). True when the batch is held under its id.
+ * (its payout id is derived from the item, lib/affiliates.ts bookPayPalPayout).
+ * True when the batch is held under its id.
  */
 async function promoteBatch(statsId: string, field: string, batch: string, entry: OpenBatch): Promise<boolean> {
   const held: unknown = await redisPipeline([["HSET", openKey(statsId), batch, JSON.stringify({ at: entry.at, currency: entry.currency, lines: entry.lines })]]).catch(() => null);
@@ -495,13 +494,12 @@ export async function settlePayPal(store: Store): Promise<Settled> {
       const got = statusOf.get(line.a);
       const status = batchStatus === "DENIED" || batchStatus === "CANCELED" ? "FAILED" : got?.status ?? "PENDING";
       if (status === PAID && got?.item) {
-        // Booked first, exactly once per PayPal item (lib/affiliates.ts bookPayPalPayout), then marked. Anything not
+        // Booked exactly once per PayPal item (lib/affiliates.ts bookPayPalPayout: HSETNX under an id derived from the
+        // item), and the book alone says it was: no separate mark is kept (Claude 5's LEVE 3 on #2844). Anything not
         // known on the way throws before the open batch is rewritten: the line stays on its way, never owed again,
         // and the next run finds it in the book (Revisor 1's GRAVE on 7bd48a58).
         booked ??= await bookedPayouts(store);
         const done = await bookPayPalPayout(store, { aff: line.a, cents: line.c, currency: sent.currency, date: day, item: got.item }, booked);
-        const reply = repliesFor(await redisPipeline([["SET", itemKey(got.item), batch, "NX", "EX", 400 * 86_400]]), 1);
-        if (!reply || (reply[0] !== "OK" && reply[0] !== null)) throw new UnknownReplyError("the mark of a paid PayPal item");
         if (done === "booked") out.paid += 1;
       } else if (NOT_PAID.has(status)) {
         out.released += 1;

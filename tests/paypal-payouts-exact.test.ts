@@ -2,9 +2,10 @@
  * Redis answers the PayPal payouts read in an unknown shape (rule 24): never
  * read as "this call wrote it", "not connected" or "store gone".
  *
- *   - settling: a SET NX on a paid item that answers anything but "OK" or
- *     null books nothing, so the affiliate book is never counted twice, and
- *     the item stays on its way for the next run;
+ *   - settling: the HSETNX that books a paid item answering anything but 0
+ *     or 1 is not "booked", so the affiliate book is never counted twice,
+ *     and the item stays on its way for the next run (no separate item mark
+ *     is kept since Claude 5's LEVE 3 on #2844);
  *   - the daily job: a store whose record could not be read stays in the
  *     settle set (only a confirmed absent store leaves it);
  *   - the creator's PayPal link: an unknown answer is not "not connected"
@@ -94,7 +95,7 @@ async function rejects(body: () => Promise<unknown>): Promise<boolean> {
   }
 }
 const paidTo = async (store: Store) => (await readBook(store)).rows.find((r) => r.affiliate.id === "aaaaaaaaaaaa")?.paid ?? -1;
-const itemSet = (commands: Commands) => commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith("nl:pp:item:");
+const booking = (commands: Commands) => commands.length === 1 && commands[0][0] === "HSETNX" && commands[0][1] === `nl:aff:${STATS}:payouts`;
 
 async function main(): Promise<void> {
   process.env.STRIPE_SECRET_KEY = "sk_test_paypal_exact_only";
@@ -118,12 +119,12 @@ async function main(): Promise<void> {
     itemStatus = { aaaaaaaaaaaa: "SUCCESS" };
   };
 
-  part("Revisor 1, repro 1: the item's mark is written and its answer is lost");
+  part("Revisor 1, repro 1 (the mark is gone since Claude 5's LEVE 3): the booking is written and its answer is lost");
   await sentAndPaid();
-  is("that settle is not said as done", await intercepted(itemSet, async (c) => { await real(c); return [undefined]; }, () => rejects(() => settlePayPal(store))), true);
+  is("that settle is not said as done", await intercepted(booking, async (c) => { await real(c); return [undefined]; }, () => rejects(() => settlePayPal(store))), true);
   await sentOnce();
 
-  part("Revisor 1, repro 2: the mark would be written, and writing the payout into the book fails (a full data room)");
+  part("Revisor 1, repro 2: writing the payout into the book fails (a full data room)");
   await sentAndPaid();
   is("that settle is not said as done", await intercepted(payoutsWrite, async () => { throw new Error("Synthetic DataRoomError: the store's data room is full"); }, () => rejects(() => settlePayPal(store))), true);
   is("nothing is in the book yet", await paidTo(store), 0);
@@ -133,35 +134,39 @@ async function main(): Promise<void> {
   const malformedNx: [string, () => unknown[]][] = [
     ["no reply at all", () => []],
     ["undefined", () => [undefined]],
-    ["a number", () => [1]],
+    ["OK", () => ["OK"]],
+    ["the string 1", () => ["1"]],
+    ["the number 2", () => [2]],
+    ["null", () => [null]],
     ["an empty string", () => [""]],
     ["a list", () => [[]]],
     ["QUEUED", () => ["QUEUED"]],
-    ["two replies", () => ["OK", "OK"]],
+    ["two replies", () => [1, 1]],
   ];
   for (const [label, reply] of malformedNx) {
-    part(`Booked before (by its reference, as before ids were derived), and the mark answers ${label}: never booked twice`);
+    part(`The booking is written and its answer is ${label}: booked once, never twice`);
     await sentAndPaid();
-    await addPayout(store, { aff: "aaaaaaaaaaaa", cents: 3000, currency: "usd", date: "2026-11-01", reference: "PayPal ITEMBATCH1ABC0" });
-    is("settling does not say it settled", await intercepted(itemSet, async (c) => { await real(c); return reply(); }, () => rejects(() => settlePayPal(store))), true);
-    is("the book is not written again", await paidTo(store), 3000);
+    is("settling does not say it settled", await intercepted(booking, async (c) => { await real(c); return reply(); }, () => rejects(() => settlePayPal(store))), true);
+    is("in the book once", await paidTo(store), 3000);
+    is("and still on its way, never owed", [...(await onTheirWay(store))], ["aaaaaaaaaaaa"]);
     await sentOnce();
 
-    part(`The item is new, and the mark answers ${label}: booked once, never twice`);
+    part(`The booking is not written and its answer is ${label}: booked once, by the next settle`);
     await sentAndPaid();
-    is("settling does not say it settled", await intercepted(itemSet, async () => reply(), () => rejects(() => settlePayPal(store))), true);
-    is("booked once, before the mark", await paidTo(store), 3000);
+    is("settling does not say it settled", await intercepted(booking, async () => reply(), () => rejects(() => settlePayPal(store))), true);
+    is("nothing is in the book yet", await paidTo(store), 0);
+    is("and still on its way, never owed", [...(await onTheirWay(store))], ["aaaaaaaaaaaa"]);
     await sentOnce();
   }
 
-  part("Control: the mark already there and the payout in the book: nothing booked again");
+  part("Control: booked before by its reference (as before ids were derived), with an old mark left: nothing booked again");
   await sentAndPaid();
   await addPayout(store, { aff: "aaaaaaaaaaaa", cents: 3000, currency: "usd", date: "2026-11-01", reference: "PayPal ITEMBATCH1ABC0" });
   await real([["SET", "nl:pp:item:ITEMBATCH1ABC0", "BATCH1ABC"]]);
   is("not booked here, nothing left on its way", await settlePayPal(store), { paid: 0, released: 0, waiting: 0 });
   is("in the book once", await paidTo(store), 3000);
 
-  part("A mark with no payout in the book (left by a failure before this change) is booked, once");
+  part("An old mark with no payout in the book (left by a failure before the booking came first) is booked, once");
   await sentAndPaid();
   await real([["SET", "nl:pp:item:ITEMBATCH1ABC0", "BATCH1ABC"]]);
   is("booked by this settle", await settlePayPal(store), { paid: 1, released: 0, waiting: 0 });

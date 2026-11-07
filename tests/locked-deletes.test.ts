@@ -431,6 +431,7 @@ async function main(): Promise<void> {
     "community/chat": ["lockedFor"],
     "community/events": ["act:events:cancel", "act:events:delete", "lockedFor"],
     "community/manage": ["act:community:report-delete", "need:settings"],
+    "community/schedule": ["act:community:delete", "need:send"],
     "community/push": ["not:a member's own device, signed up for notifications again at will"],
     "community/rsvp": ["not:a member taking back their own place at an event"],
     "course": ["act:products:lesson-remove", "act:products:module-remove", "act:products:media-remove", "act:products:task-remove", "act:products:quiz-remove", "act:products:withdraw", "act:products:cm-delete", "lockedFor"],
@@ -541,6 +542,7 @@ async function main(): Promise<void> {
     },
     "community/chat": { clear: "lockedFor", say: "open:adds", unsay: "lockedFor" },
     "community/events": { cancel: "act:events", create: "open:adds", delete: "act:events", edit: "lockedFor" },
+    "community/schedule": { add: "open:adds", cancel: "act:community:delete" },
     "community/manage": {
       access: "need:settings", dismiss: "open:a report set aside; the post or comment stays as it was", enable: "need:settings", member: "open:reversible",
       messages: "need:settings", onboarding: "need:settings", "report-delete": "act:community", rewards: "need:settings", room: "need:settings",

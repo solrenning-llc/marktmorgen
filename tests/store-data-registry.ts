@@ -440,6 +440,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cm:evmailq@lib/community-event-mail.ts": company("Event sends under way", "One set, members gone when sent."),
   "nl:cm:@lib/community-events.ts": { what: "Events, their places and who is coming", room: ["lib/community-events.ts"] },
   "nl:cm:evq@lib/community-events.ts": company("Event reminders due", "One sorted set for every store, counted with each event's room."),
+  // 293 [SQ4]: posts and announcements written ahead, each counted in the store's data room until it is cleared.
+  "nl:cm:@lib/community-schedule.ts": { what: "Posts and announcements written ahead, until they go up or are cleared", room: ["lib/community-schedule.ts"] },
+  "nl:cm:schq@lib/community-schedule.ts": company("Scheduled community posts due", "One sorted set for every store, at most MAX_SCHEDULED_POSTS members a community, each counted with its post's room and taken out when the job holds it."),
   "nl:rl:cm:ev:@lib/community-events.ts": short("Event changes an hour", "studio", 1),
   "nl:cimg:@lib/community-files.ts": { what: "Community pictures, their owners and counts", line: "community-pictures" },
   "nl:cimg:doors@lib/community-files.ts": company("Picture doors not yet used, swept a day on", "One sorted set for every store, each door a buyer action's."),

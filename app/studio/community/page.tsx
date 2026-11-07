@@ -22,12 +22,16 @@ import { announcementReach, canAnnounceByEmail } from "@/lib/community-mail";
 import { can } from "@/lib/team-roles";
 import { CommunityStudio, type QueueRow, type StudioMember } from "@/components/community-studio";
 import { CommunityEventsStudio, type StudioEvent } from "@/components/community-events-studio";
+import { CommunitySchedule, type StudioScheduled } from "@/components/community-schedule";
+import { listScheduled } from "@/lib/community-schedule";
+import { settled, stateWords } from "@/lib/community-schedule-rules";
 import { VIDEO_ROOM_NOTE } from "@/lib/call-rooms";
 import { configuredProviders } from "@/lib/meet-providers";
 import { meetView } from "@/lib/meet-connect";
 import { eventMeetings } from "@/lib/event-meetings";
 import type { MeetAccount } from "@/components/call-editor";
 import { videoAddress } from "@/lib/sales-page";
+import { zoneName } from "@/lib/call-setup";
 import {
   type CommunityEvent,
   eventClock,
@@ -78,6 +82,8 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
   let totals = { members: 0, listed: 0, posts: 0, reach: 0 };
   let rewards: Reward[] = [];
   let coming: StudioEvent[] = [];
+  // 293 [SQ4]: posts written ahead, for the owner only (they are posted as the creator); null when they could not be read.
+  let scheduled: StudioScheduled[] | null = [];
   let over: StudioEvent[] = [];
   // Google Calendar and Zoom (lib/meet-connect.ts): which accounts an event
   // can have a meeting made on, for the form. Nothing is read when the
@@ -132,6 +138,34 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
       }),
       post: e.post,
     });
+    if (view.role === "owner") {
+      const at = now;
+      const names = new Map(config.spaces.map((s) => [s.id, s.name]));
+      scheduled = await listScheduled(store, at)
+        .then((list) =>
+          list.map((p): StudioScheduled => ({
+            id: p.id,
+            space: p.sp,
+            spaceName: names.get(p.sp) ?? "a space since removed",
+            title: p.title,
+            text: p.text,
+            kind: p.kind,
+            email: p.email,
+            date: p.date,
+            time: p.time,
+            tz: p.tz,
+            when: `${p.state === "posted" ? "Set for" : "Goes up"} ${new Intl.DateTimeFormat("en-US", { timeZone: p.tz, dateStyle: "full", timeStyle: "short" }).format(new Date(p.due * 1000))} ${zoneName(p.due * 1000, p.tz)}`,
+            waiting: p.state === "waiting" && !settled(p, Math.floor(at / 1000)),
+            clearable: settled(p, Math.floor(at / 1000)),
+            state: stateWords(p, Math.floor(at / 1000)),
+            href: p.state === "posted" && p.post ? `/@${store.handle}/community/post/${p.post}` : "",
+          })),
+        )
+        .catch((error) => {
+          console.error("reading scheduled community posts failed", error);
+          return null;
+        });
+    }
     coming = soon.map((e, i) => shape(e, i));
     over = past.events.map((e, i) => shape(e, soon.length + i));
 
@@ -273,6 +307,13 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
             ) : null
           }
         />
+        {config && view.role === "owner" ? <CommunitySchedule
+          posts={scheduled}
+          spaces={config.spaces.map((s) => ({ id: s.id, name: s.name }))}
+          canEmail={canAnnounceByEmail(store)}
+          reach={totals.reach}
+          handle={store.handle}
+        /> : null}
       </main>
       </StudioStorePin>
     </div>

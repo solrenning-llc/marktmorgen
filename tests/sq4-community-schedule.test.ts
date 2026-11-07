@@ -1,7 +1,7 @@
 /**
  * 293 [SQ4], unit 1: a post or an announcement written ahead in the studio and
  * put up in the community at the date and time the creator chose, on the
- * clock of the time zone chosen. Editable and cancellable until the five-minute
+ * clock of the time zone chosen. It can be edited or canceled until the five-minute
  * job takes it; the job then posts it under the community's rules as they are
  * at that moment (the space still there, the post cap, the store's data room),
  * and asks for the announcement's email only then. A try whose outcome is not
@@ -18,7 +18,7 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
 const OWNER = "sq4owner@example.com";
-const root = join(__dirname, "..");
+const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), "utf8");
 
 async function main(): Promise<void> {
@@ -57,7 +57,7 @@ async function main(): Promise<void> {
     ok: true,
     input: { sp: "bbbbbbbbbbbb", title: "Office hours", text: "Bring your questions.", kind: "announcement", email: true, due: Date.UTC(2030, 0, 15, 14, 30) / 1000, tz: "America/New_York", date: "2030-01-15", time: "09:30" },
   });
-  const summer = readScheduleInput({ ...good, date: "2030-07-15" }, spaces, now);
+  const summer = readScheduleInput({ ...good, date: "2030-07-15" }, spaces, Date.UTC(2030, 6, 1, 12, 0));
   is("in summer the same clock is an hour earlier in UTC (EDT)", summer.ok ? summer.input.due : null, Date.UTC(2030, 6, 15, 13, 30) / 1000);
   is("a plain post is never emailed, whatever was sent", (() => { const r = readScheduleInput({ ...good, kind: "post" }, spaces, now); return r.ok ? [r.input.kind, r.input.email] : null; })(), ["post", false]);
   is("a space that is not there is refused", readScheduleInput({ ...good, space: "cccccccccccc" }, spaces, now), { ok: false, problem: "space" });
@@ -123,19 +123,19 @@ async function main(): Promise<void> {
   const after = sched.parseRecord(redis.run(["GET", keys.record(one.id)]));
   is("its record says posted, with the post", [after?.state, after?.post], ["posted", posted[0].id]);
   is("off the job's due list", redis.run(["ZSCORE", sched.DUE_KEY, sched.dueMember(shop.sid, id, one.id)]), null);
-  const ran2 = await sched.runScheduledPosts(Date.now() + 10_000, (one.due + 400) * 1000);
+  const ran2 = await sched.runScheduledPosts(Date.now() + 10_000, (one.due + 1) * 1000);
   is("a second run posts nothing again", [ran2.posted, (await feed(id, {})).posts.length], [0, 1]);
 
-  part("Cancelling: the record, both lists and the room go");
+  part("Canceling: the record, both lists and the room go");
   const list0 = await sched.listScheduled(shop, (one.due + 1) * 1000);
   const second = list0.find((p) => p.state === "waiting")!;
-  const cancelled = await sched.cancelScheduled(shop, second.id, (one.due + 1) * 1000);
-  is("cancelled", cancelled, { ok: true });
+  const canceled = await sched.cancelScheduled(shop, second.id, (one.due + 1) * 1000);
+  is("canceled", canceled, { ok: true });
   is("record gone", redis.run(["GET", keys.record(second.id)]), null);
   is("out of the list", redis.run(["ZSCORE", keys.list, second.id]), null);
   is("out of the due list", redis.run(["ZSCORE", sched.DUE_KEY, sched.dueMember(shop.sid, id, second.id)]), null);
   is("its room given back", slot(second.id), 0);
-  is("cancelling again finds nothing", await sched.cancelScheduled(shop, second.id, (one.due + 1) * 1000), { ok: false, reason: "gone" });
+  is("canceling again finds nothing", await sched.cancelScheduled(shop, second.id, (one.due + 1) * 1000), { ok: false, reason: "gone" });
   is("a posted one is cleared from the list the same way, and its room given back", [await sched.cancelScheduled(shop, one.id, (one.due + 1) * 1000), slot(one.id)], [{ ok: true }, 0]);
 
   part("Editing moves it and changes its words; the old time posts nothing");
@@ -234,8 +234,11 @@ async function main(): Promise<void> {
   is("nothing queued at scheduling", redis.run(["SCARD", "nl:cm:mailq"]), 0);
   await sched.runScheduledPosts(Date.now() + 10_000, (annPost.due + 1) * 1000);
   const annAfter = sched.parseRecord(redis.run(["GET", keys.record(annPost.id)]));
-  is("posted as an announcement; with nobody asking for email, said so", [annAfter?.state, annAfter?.mail], ["posted", "empty"]);
-  is("the creator is told nobody was emailed", rules.stateWords(annAfter!, annPost.due + 60).includes("nobody"), true);
+  // This synthetic store has no email set up (lib/mail.ts canWrite), which the posting asks about then, not before.
+  is("posted as an announcement; its email refused by the plan as it is now, and said so", [annAfter?.state, annAfter?.kind, annAfter?.mail], ["posted", "announcement", "plan"]);
+  is("the creator is told it was not emailed, and why", rules.stateWords(annAfter!, annPost.due + 60), "Posted. It was not emailed: your plan does not send community emails right now.");
+  is("nobody asking is said too", rules.stateWords({ ...annAfter!, mail: "empty" }, annPost.due + 60).includes("nobody has asked"), true);
+  is("an email started is said as going out, never as delivered", rules.stateWords({ ...annAfter!, mail: "queued" }, annPost.due + 60).includes("is going out"), true);
 
   part("The list: soonest first; posted ones go after a week, with their room");
   shop = (await storeForEmail(OWNER))!;
@@ -248,7 +251,8 @@ async function main(): Promise<void> {
   part("The route: the owner only, paid before anything is read, emailing as sending");
   const route = read("app/api/store/community/schedule/route.ts");
   const order = (a: string, b: string) => route.indexOf(a) >= 0 && route.indexOf(b) > route.indexOf(a);
-  is("an email to members asks for the sending permission", route.includes('body.email === true ? "send" : "community"'), true);
+  is("taking one off is named \"delete\" to the guard, which a locked session may not do", route.includes('text(body.action, 20) === "cancel" ? "delete"'), true);
+  is("an email to members asks for the sending permission", route.includes('body.email === true && text(body.action, 20) !== "cancel" ? "send" : "community"'), true);
   is("only the store's owner posts as the creator", route.includes('role !== "owner"'), true);
   is("the owner check comes before the charge", order('role !== "owner"', "takeAllowance("), true);
   is("scheduling takes every unit at once", route.includes('takeAllowance(store, "studio", SCHEDULE_UNITS)'), true);

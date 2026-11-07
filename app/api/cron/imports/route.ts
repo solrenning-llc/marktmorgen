@@ -5,6 +5,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { advanceImports, sendMoveReminders } from "@/lib/imports";
 import { readMetaDue } from "@/lib/meta-ads";
 import { sendWelcomeReminders } from "@/lib/welcome-offer-send";
+import { runScheduledPosts } from "@/lib/community-schedule";
 import { storeForId } from "@/lib/store";
 import { noticeCreator } from "@/lib/account-notice";
 
@@ -15,7 +16,9 @@ export const maxDuration = 60;
  * two do not start together (vercel.json lists the minutes, 2, 7, … 57,
  * rather than a stepped range, the plainest form a scheduler reads): works through the imports a creator started
  * and then left (lib/imports.ts), a chunk at a time, for fifty of its sixty
- * seconds. The studio's page does the same while it is open, and each
+ * seconds, after the community posts set for now (lib/community-schedule.ts),
+ * which go first, for eight seconds at most, so they keep their time. The
+ * studio's page does the same while it is open, and each
  * import's own lock keeps the two from working on one import at once.
  * Then, for five seconds at most, what the stores' Meta ad accounts spent,
  * read once a day each (lib/meta-ads.ts). What time is left goes to the one
@@ -41,6 +44,11 @@ async function run(request: NextRequest): Promise<Response> {
   if (got === null) return Response.json({ ok: true, busy: true });
   const started = Date.now();
   try {
+    // Community posts the creator set for now (293 [SQ4], lib/community-schedule.ts), first: they have a time to keep.
+    const scheduled = await runScheduledPosts(started + 8_000).catch((error: unknown) => {
+      console.error("putting up scheduled community posts failed", error);
+      return null;
+    });
     const counts = await advanceImports(started + 40_000);
     // What the stores' Meta ad accounts spent, each read once a day, for five seconds at most (lib/meta-ads.ts).
     const metaAds = await readMetaDue(Math.min(started + 45_000, Date.now() + 5_000), storeForId, (owner) => noticeCreator(owner, { kind: "metaads-broken" }).then(() => {})).catch((error: unknown) => {
@@ -54,7 +62,7 @@ async function run(request: NextRequest): Promise<Response> {
     });
     // Then the one reminder to members moved from another platform who have not kept theirs yet.
     const reminded = await sendMoveReminders(started + 50_000);
-    return Response.json({ ok: true, ...counts, metaAds, welcome, reminded }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json({ ok: true, ...counts, scheduled, metaAds, welcome, reminded }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("the import job failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

@@ -1167,6 +1167,11 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/path-reminder.ts", names: ["sendPathReminder", "PATH_REMINDER_UNITS"] },
       { file: "lib/path-facts.ts", names: ["PATH_SALE_PAGES", "PATH_REFUND_PAGES", "PATH_MONEY_SECONDS"] },
       { file: "app/studio/paused/page.tsx", names: [`SHOWN_PER_DAY = ${PAUSED_PER_DAY};`, "studio-paused"] },
+      // A community post scheduled ahead (293 [SQ4]) takes SCHEDULE_UNITS studio requests when it is scheduled: the act, and each try the
+      // five-minute job may make to post it, which reads the store and writes the post as posting it now does (one request then); an edit takes one.
+      { file: "app/api/store/community/schedule/route.ts", names: ['takeAllowance(store, "studio", SCHEDULE_UNITS)', 'takeAllowance(store, "studio", 1)'] },
+      { file: "lib/community-schedule-rules.ts", names: ["SCHEDULE_UNITS = 1 + PUBLISH_TRIES", "MAX_SCHEDULED_POSTS", "RUN_BATCH"] },
+      { file: "app/api/cron/imports/route.ts", names: ["runScheduledPosts("] },
       // The totals of every store take a page of each other store's studio, as the Terms say (C4-4, owner's decision of 4 November 2026, C4-18).
       { file: "app/studio/totals/page.tsx", names: ["countStudio(store, null, STUDIO_PAGE_UNITS)"] },
     ],

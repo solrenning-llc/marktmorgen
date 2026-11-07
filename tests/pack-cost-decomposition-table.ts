@@ -36,7 +36,7 @@ import {
 } from "./historical-margin-model";
 import { CLOSING_DAYS, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { PACKS, atScale, linePriceCents, packPriceCents, packUnit, type Pack } from "./pricing-usage-proposal-table";
-import { PER_EMAIL, STORAGE_PER_GB } from "./plan-cost-registry";
+import { PER_EMAIL, POLL_SEND_USD, STORAGE_PER_GB } from "./plan-cost-registry";
 
 /** The day the supplier pages below were read and this analysis made. */
 export const READ_ON = "18 October 2026";
@@ -216,7 +216,7 @@ export function creditOption(amountCents: number, listEmailVia: "resend" | "ses-
   const roomCents = unitUnder(amountCents, 0, SIZING_READING, true).usageRoomCents - ADD_ON_ROOM_CENTS;
   const multiplier = amountCents / roomCents;
   const rates = PACKS.map((pack) => {
-    const costPerUnitUsd = pack.id === "list-email" && listEmailVia === "ses-only" ? SES_DEAREST_PER_EMAIL : pack.costUsd / pack.units;
+    const costPerUnitUsd = pack.id === "list-email" && listEmailVia === "ses-only" ? SES_DEAREST_PER_EMAIL + POLL_SEND_USD : pack.costUsd / pack.units;
     const centsPerDisplay = Math.ceil(Math.round(costPerUnitUsd * pack.per * 100 * multiplier * 1e6) / 1e6);
     const unitsBought = Math.floor((amountCents * pack.per) / centsPerDisplay);
     return { pack, centsPerDisplay, unitsBought, costCents: centsUp(unitsBought * costPerUnitUsd) };
@@ -231,8 +231,8 @@ export function creditOption(amountCents: number, listEmailVia: "resend" | "ses-
 export function supplierVariant(id: "list-email" | "storage", times = 1): { pack: Pack; priceCents: number; unit: UnitResult } {
   const base = PACKS.find((p) => p.id === id)!;
   const scaled = times === 1 ? base : atScale(base, times);
-  const costUsd = id === "list-email" ? scaled.units * SES_DEAREST_PER_EMAIL : scaled.units * R2_PER_GB * (1 + (CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
-  const pack = { ...scaled, costUsd, basis: id === "list-email" ? "Amazon SES at $0.23 a thousand" : "R2 at $0.015 a GB-month" };
+  const costUsd = id === "list-email" ? scaled.units * (SES_DEAREST_PER_EMAIL + POLL_SEND_USD) : scaled.units * R2_PER_GB * (1 + (CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
+  const pack = { ...scaled, costUsd, basis: id === "list-email" ? "Amazon SES at $0.23 a thousand, and the most an email's poll adds (POLL_SEND_USD)" : "R2 at $0.015 a GB-month" };
   return { pack, priceCents: packPriceCents(pack), unit: packUnit(pack) };
 }
 

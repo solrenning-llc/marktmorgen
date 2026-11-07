@@ -761,8 +761,8 @@ export async function advanceBroadcast(
       if (result.stopped === "poll_failed") {
         const failures = b.failures + 1;
         b = failures >= 5
-          ? { ...b, status: "failed", failures, note: "Its poll could not be written down, so nothing more was sent. Send it again to try once more.", finishedAt: now }
-          : { ...b, status: "sending", failures, note: "Paused for a moment: its poll could not be written down. It is tried again by itself." };
+          ? { ...b, status: "failed", failures, note: "Whether its poll was saved could not be confirmed, so nothing more was sent. Send it again to try once more.", finishedAt: now }
+          : { ...b, status: "sending", failures, note: "Paused for a moment: whether its poll was saved could not be confirmed. It is tried again by itself." };
         break;
       }
       if (result.stopped) {

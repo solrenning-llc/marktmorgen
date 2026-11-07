@@ -487,7 +487,7 @@ export type SendOutcome = {
   /** Addresses not tried, because the send stopped before them. */
   rest: string[];
   // "poll_full": the list keeps the most polls at once, so an email with a new one does not go (lib/mail-poll-votes.ts);
-  // "poll_failed": its poll could not be written down just now, so nothing went.
+  // "poll_failed": whether its poll was saved could not be confirmed just now, so nothing went.
   stopped: "allowance" | "day" | "sender" | "paused" | "portion" | "retry" | "refused" | "poll_full" | "poll_failed" | null;
   /** Why and until when, for a send stopped as "paused" (lib/mail-health.ts). */
   pause?: Pause;
@@ -558,7 +558,7 @@ export async function sendTo(
     const links = new Map<string, string[]>();
     if (poll) {
       for (const email of chunk) {
-        const own = voteLinks(store.listId as string, store.handle, pollId as string, email, poll.answers.length);
+        const own = voteLinks(store.listId as string, store.sid, pollId as string, email, poll.answers.length);
         if (!own) {
           await release(store, chunk.length);
           await rampBack(watched, chunk.length);

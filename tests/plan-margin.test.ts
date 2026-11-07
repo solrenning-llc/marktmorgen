@@ -115,9 +115,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
-  GB, STORAGE_PER_GB, FILE_DELIVERY_PER_GB, STREAM_STORAGE_PER_GB, PER_EMAIL, ORDER_COST,
+  GB, STORAGE_PER_GB, FILE_DELIVERY_PER_GB, STREAM_STORAGE_PER_GB, ORDER_COST,
   aiCeilingUsd, hourCost, lineKeptShare, netOf, providerFeeUsd, ordersCost, perPaymentCost, videoCost, visitsCost, worstCost, type Prices,
 } from "./plan-cost-model";
+import { LIST_EMAIL_USD } from "./plan-cost-registry";
 
 /**
  * The two sets of prices: the one on sale, and the one decided on October 12,
@@ -176,7 +177,7 @@ for (const [schedule, prices] of SCHEDULES) for (const tier of TIERS) {
       ["video", videoCost(tier)],
       ["visits", visitsCost(tier)],
       ["orders", ordersCost(tier)],
-      ["email", monthlyEmails(tier) * PER_EMAIL],
+      ["email", monthlyEmails(tier) * LIST_EMAIL_USD],
       ["AI drafts", aiCeilingUsd(tier)],
     ];
     for (const [name, cost] of lines) {

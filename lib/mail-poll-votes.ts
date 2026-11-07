@@ -6,7 +6,8 @@
  *   - Each reader's copy carries their own links: a key for the reader made
  *     from the list and their address with a secret (it cannot be turned
  *     back into the address, or made from one without the secret), the
- *     store's handle, and a signature over the poll, the store and that key.
+ *     store's id (which a new address never changes), and a signature over
+ *     the poll, the store and that key.
  *     A link with another key, another poll, another store or a wrong
  *     signature records nothing. Nothing in it can be guessed.
  *   - A link opens a page (app/poll); only the button on it records, so a
@@ -21,9 +22,11 @@
  *     in one step (POLL_OPEN): a poll is never deleted while it is kept, so a
  *     reader never finds an open poll gone; a new one past the cap is
  *     refused, and a poll leaves the count when its time is over.
- *   - The creator sees the totals only (pollResults), never who picked what,
- *     and only from POLL_MIN_SHOWN answers: below it, a total would say what
- *     one of a few readers picked.
+ *   - The creator sees totals only (pollResults), never with names, and only
+ *     once the poll has closed (no answer moves them after, so two looks
+ *     cannot be set side by side) and from POLL_MIN_SHOWN answers. The store's
+ *     owner and team are not readers: their presses record nothing
+ *     ("team"), so they cannot make up the fewest answers themselves.
  *   - Each page and each answer is one of the store's public requests
  *     (lib/traffic.ts, takePublicRequest), taken after the store is found
  *     from the signed link and before anything of the poll is read or
@@ -88,6 +91,8 @@ export const POLL_SEND_BYTES = 2 * POLL_RECORD_BYTES + POLL_OPEN.length + 256;
 export const POLL_ID = /^[0-9a-f]{24}$/;
 export const POLL_LIST = /^[0-9a-f]{32}$/;
 const HEX32 = /^[0-9a-f]{32}$/;
+/** A store's id, as lib/store.ts STORE_ID_PATTERN (not imported, so this file stays clear of the store module). */
+const STORE_ID = /^[0-9a-f]{32}$/;
 
 const recordKey = (listId: string, pollId: string) => `nl:mpoll:${listId}:${pollId}`;
 const votesKey = (listId: string, pollId: string) => `nl:mpoll:v:${listId}:${pollId}`;
@@ -103,22 +108,23 @@ export function voterOf(listId: string, email: string): string | null {
   return mac(`voter:${listId}:${normaliseEmail(email)}`);
 }
 
-const signatureOf = (listId: string, handle: string, pollId: string, voter: string) => mac(`vote:${listId}:${handle}:${pollId}:${voter}`);
+const signatureOf = (listId: string, sid: string, pollId: string, voter: string) => mac(`vote:${listId}:${sid}:${pollId}:${voter}`);
 
 /** One reader's link to one answer of a poll. */
-export type Ballot = { listId: string; handle: string; pollId: string; voter: string; signature: string; answer: number };
+/** One reader's link to one answer of a poll; `sid` is the store's id, which a new address never changes. */
+export type Ballot = { listId: string; sid: string; pollId: string; voter: string; signature: string; answer: number };
 
 /** The address of a ballot's page. */
 export function ballotUrl(ballot: Ballot, extra = ""): string {
-  return `${SITE_URL}/poll?l=${ballot.listId}&h=${ballot.handle}&p=${ballot.pollId}&v=${ballot.voter}&s=${ballot.signature}&a=${ballot.answer}${extra}`;
+  return `${SITE_URL}/poll?l=${ballot.listId}&i=${ballot.sid}&p=${ballot.pollId}&v=${ballot.voter}&s=${ballot.signature}&a=${ballot.answer}${extra}`;
 }
 
 /** This reader's links, one an answer, or null when they cannot be signed (no secret): then the email does not go. */
-export function voteLinks(listId: string, handle: string, pollId: string, email: string, answers: number): string[] | null {
+export function voteLinks(listId: string, sid: string, pollId: string, email: string, answers: number): string[] | null {
   const voter = voterOf(listId, email);
-  const signature = voter && HANDLE_PATTERN.test(handle) ? signatureOf(listId, handle, pollId, voter) : null;
+  const signature = voter && STORE_ID.test(sid) ? signatureOf(listId, sid, pollId, voter) : null;
   if (!voter || !signature) return null;
-  return Array.from({ length: answers }, (_, answer) => ballotUrl({ listId, handle, pollId, voter, signature, answer }));
+  return Array.from({ length: answers }, (_, answer) => ballotUrl({ listId, sid, pollId, voter, signature, answer }));
 }
 
 /** A ballot from a page's address, or null when it is not one this site signed. */
@@ -127,13 +133,13 @@ export function readBallot(query: { [key: string]: string | string[] | undefined
     const value = query instanceof URLSearchParams ? query.get(name) : query[name];
     return typeof value === "string" ? value.slice(0, 80) : "";
   };
-  const listId = get("l"), handle = get("h"), pollId = get("p"), voter = get("v"), signature = get("s"), raw = get("a");
-  if (!POLL_LIST.test(listId) || !HANDLE_PATTERN.test(handle) || !POLL_ID.test(pollId) || !HEX32.test(voter) || !HEX32.test(signature) || !/^[0-9]$/.test(raw)) return null;
+  const listId = get("l"), sid = get("i"), pollId = get("p"), voter = get("v"), signature = get("s"), raw = get("a");
+  if (!POLL_LIST.test(listId) || !STORE_ID.test(sid) || !POLL_ID.test(pollId) || !HEX32.test(voter) || !HEX32.test(signature) || !/^[0-9]$/.test(raw)) return null;
   const answer = Number(raw);
   if (answer >= MAX_POLL_ANSWERS) return null;
-  const expected = signatureOf(listId, handle, pollId, voter);
+  const expected = signatureOf(listId, sid, pollId, voter);
   if (!expected || !timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) return null;
-  return { listId, handle, pollId, voter, signature, answer };
+  return { listId, sid, pollId, voter, signature, answer };
 }
 
 /** A poll as it is kept. */
@@ -168,7 +174,8 @@ export async function openPoll(listId: string, handle: string, pollId: string, p
     if (Number(reply[0]) === 0 && reply.length === 1) return "full";
     if (!(Number(reply[0]) === 1 || Number(reply[0]) === 2)) return "failed";
     const found = parseRecord(reply[1]);
-    if (!found || found === "bad" || found.handle !== handle || found.question !== poll.question || found.answers.join("\n") !== poll.answers.join("\n")) return "failed";
+    // The handle kept is the one it was first written under; a store renamed since is still this store (the list is its own).
+    if (!found || found === "bad" || found.question !== poll.question || found.answers.join("\n") !== poll.answers.join("\n")) return "failed";
     return "ok";
   } catch {
     return "failed";
@@ -213,7 +220,8 @@ export async function answerOf(ballot: Ballot): Promise<number | null | "failed"
   }
 }
 
-export type VoteOutcome = "recorded" | "already" | "withdrawn" | "none" | "closed" | "failed" | "limited";
+export type VoteOutcome = "recorded" | "already" | "withdrawn" | "none" | "closed" | "failed" | "limited" | "team";
+
 /** Presses a connection may make in an hour (app/api/mail/poll); past them it is told so (lib/buyer-words/mail-poll.ts, limited). */
 export const POLL_PRESSES_AN_HOUR = 60;
 
@@ -247,7 +255,7 @@ export async function withdrawVote(ballot: Ballot, record: PollRecord, now = Mat
   }
 }
 
-/** One poll's totals, as the studio shows them: never who picked what, and none below POLL_MIN_SHOWN answers (`shown` false, every count null). */
+/** One poll's totals, as the studio shows them: never with names, and none before it closed or below POLL_MIN_SHOWN answers (`shown` false, every count null). */
 export type PollResult = { id: string; question: string; answers: { text: string; count: number | null }[]; total: number | null; shown: boolean; at: number; closes: number; closed: boolean };
 
 /** The list's polls, newest first, with their totals; null when they could not be read whole. */
@@ -269,8 +277,8 @@ export async function pollResults(listId: string | null): Promise<PollResult[] |
         if (Number.isSafeInteger(answer) && answer >= 0 && answer < counts.length) counts[answer] += 1;
       }
       const total = counts.reduce((a, b) => a + b, 0);
-      // Below the fewest shown, nothing of the count leaves here: not the total, not a share.
-      const shown = total >= POLL_MIN_SHOWN;
+      // Before it closes, or below the fewest shown, nothing of the count leaves here: not the total, not a share.
+      const shown = pollClosed(record) && total >= POLL_MIN_SHOWN;
       out.push({ id, question: record.question, answers: record.answers.map((text, k) => ({ text, count: shown ? counts[k] : null })), total: shown ? total : null, shown, at: record.at, closes: record.closes, closed: pollClosed(record) });
     }
     return out;

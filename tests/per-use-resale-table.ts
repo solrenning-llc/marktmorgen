@@ -23,7 +23,7 @@ import { join } from "node:path";
 import { CENTS_PER_MINUTE, MIN_CENTS } from "@/lib/auto-captions-rules";
 import { ADD_ON_ROOM_CENTS } from "@/lib/store-assistant-rules";
 import { MOST_TAX_READING, SIZING_READING, unitUnder, type UnitResult } from "./historical-margin-model";
-import { PER_EMAIL, hourCost } from "./plan-cost-registry";
+import { LIST_EMAIL_USD, hourCost } from "./plan-cost-registry";
 import { PACKS } from "./pricing-usage-proposal-table";
 import { centsUp, creditOption } from "./pack-cost-decomposition-table";
 
@@ -77,8 +77,8 @@ export function candidates(): Candidate[] {
   const comp = (key: string) => data().competitors[key]?.find((r) => r.unitUsd !== undefined)?.unitUsd ?? null;
   return [
     {
-      id: "list-email", name: "Extra list emails (as today: Resend's rate)", unitUsd: PER_EMAIL, per: 1_000, perName: "1,000 emails",
-      supplier: `PER_EMAIL (tests/plan-cost-registry.ts), Resend's ${resend.what}; Postmark charges more`, supplierSources: ["resend", "postmark"],
+      id: "list-email", name: "Extra list emails (as today: Resend's rate)", unitUsd: LIST_EMAIL_USD, per: 1_000, perName: "1,000 emails",
+      supplier: `LIST_EMAIL_USD (tests/plan-cost-registry.ts: PER_EMAIL and the most an email's poll adds), Resend's ${resend.what}; Postmark charges more`, supplierSources: ["resend", "postmark"],
       monthlyUsd: 0, onceUsd: 0, competitorUnitUsd: comp("email"), competitorKey: "email", unbounded: null,
       compliance: "CAN-SPAM, GDPR and ePrivacy consent: already carried by lib/email.ts, the list's consent and unsubscribe, lib/mail-health.ts",
       effort: "Small: the meters exist (lib/email.ts EmailMeter); a balance drawn on after the plan's figure, the purchase and its page",

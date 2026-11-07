@@ -10,7 +10,7 @@
 
 | Order | Service | Verdict | Cost a unit (dearest supplier read) | Price a unit from a $250 credit / $1,000 credit | Fixed a month, and once, from a $1,000 credit | Against a competitor's own unit price | Why |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Extra list emails (as today: Resend's rate) | **sell** | $0.90 per 1,000 emails | $19.01 / $17.99 per 1,000 emails | none | 26.7× HighLevel's $0.68 per 1,000 emails | Prepaid, bounded, compliance already built; the heavy sender pays for what he sends. The rate cannot match HighLevel's: sell the plan on its included allowance, not on this rate. |
+| 1 | Extra list emails (as today: Resend's rate) | **sell** | $0.92 per 1,000 emails | $19.39 / $18.35 per 1,000 emails | none | 27.2× HighLevel's $0.68 per 1,000 emails | Prepaid, bounded, compliance already built; the heavy sender pays for what he sends. The rate cannot match HighLevel's: sell the plan on its included allowance, not on this rate. |
 | 2 | Extra list emails, sent by Amazon SES only (if built) | **sell** | $0.23 per 1,000 emails | $4.86 / $4.60 per 1,000 emails | none | 6.8× HighLevel's $0.68 per 1,000 emails | Same as above at about a quarter of the rate, once the routing is built. |
 | 3 | Video hours watched | **sell** | $0.0144 per hour | $0.31 / $0.29 per hour | none | no unit price stated | Cents an hour to the buyer, a course seller's first need; competitors include video and sell no hour, so the plan's included hours carry the comparison and credits only the overflow. |
 | 4 | AI writing jobs (with five answers each) | **sell** | $0.0796 per writing job with 5 answers | $1.69 / $1.60 per writing job with 5 answers | none | no unit price stated | Bounded by the hold on every call; competitors sell AI credits too (units do not convert). |
@@ -28,7 +28,7 @@ The whole credit spent on that one service alone, in the dearest way it can be (
 
 | Service | $100 credit: rate, net | $250 credit: rate, net | $1,000 credit: rate, net | Net under the most-tax reading ($1,000) |
 | --- | --- | --- | --- | --- |
-| Extra list emails (as today: Resend's rate) | $21.33 per 1,000 emails, 60.18% | $19.01 per 1,000 emails, 60.07% | $17.99 per 1,000 emails, 60.01% | 12.00% |
+| Extra list emails (as today: Resend's rate) | $21.76 per 1,000 emails, 60.18% | $19.39 per 1,000 emails, 60.07% | $18.35 per 1,000 emails, 60.01% | 12.00% |
 | Extra list emails, sent by Amazon SES only (if built) | $5.46 per 1,000 emails, 60.18% | $4.86 per 1,000 emails, 60.07% | $4.60 per 1,000 emails, 60.02% | 12.00% |
 | Video hours watched | $0.35 per hour, 60.26% | $0.31 per hour, 60.13% | $0.29 per hour, 60.04% | 12.01% |
 | AI writing jobs (with five answers each) | $1.89 per writing job with 5 answers, 60.24% | $1.69 per writing job with 5 answers, 60.10% | $1.60 per writing job with 5 answers, 60.03% | 12.00% |

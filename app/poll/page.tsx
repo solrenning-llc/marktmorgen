@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
-import { type Store, storeForPage } from "@/lib/store";
+import { type Store, storeForId } from "@/lib/store";
 import { takePublicRequest } from "@/lib/traffic";
 import { type Ballot, POLL_PRESSES_AN_HOUR, answerOf, ballotUrl, pollClosed, readBallot, readPollRecord } from "@/lib/mail-poll-votes";
 import { type PollWords, pollWords } from "@/lib/buyer-words/mail-poll";
@@ -55,7 +55,7 @@ export default async function PollPage({ searchParams }: { searchParams: Promise
     );
   }
   // The store from the signed link; its public request is taken before anything of the poll is read.
-  const found = await storeForPage(ballot.handle).catch(() => null);
+  const found = await storeForId(ballot.sid).catch(() => null);
   const store = found && found.listId === ballot.listId ? found : null;
   const words = pollWords(store?.language);
   const failed = (
@@ -72,6 +72,13 @@ export default async function PollPage({ searchParams }: { searchParams: Promise
   }
   if (!(await takePublicRequest(store).catch(() => false))) return failed;
   const done = typeof query.done === "string" ? query.done : "";
+  if (done === "team") {
+    return (
+      <Card store={store} title={words.teamTitle} words={words}>
+        <p className="mt-3 text-ink-soft">{words.team}</p>
+      </Card>
+    );
+  }
   if (done === "limited") {
     return (
       <Card store={store} title={words.limitedTitle} words={words}>
@@ -81,7 +88,7 @@ export default async function PollPage({ searchParams }: { searchParams: Promise
   }
   const record = await readPollRecord(ballot.listId, ballot.pollId);
   if (record === "failed") return failed;
-  if (!record || record.handle !== ballot.handle) {
+  if (!record) {
     return (
       <Card store={store} title={words.closedTitle} words={words}>
         <p className="mt-3 text-ink-soft">{words.closed}</p>

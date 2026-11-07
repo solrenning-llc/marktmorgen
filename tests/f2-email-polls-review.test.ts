@@ -10,7 +10,7 @@
  *     deleted while it is kept: a new one past the cap is refused, with its
  *     reason in the studio, and a poll whose time is over leaves the count
  *     by itself.
- *   - A poll that could not be written down says so, not that the email
+ *   - A poll whose saving could not be confirmed says so, not that the email
  *     service asked to slow down.
  *   - The store's public request is taken before the poll is read: a store
  *     whose requests are refused reads nothing of the poll.
@@ -141,7 +141,7 @@ async function main(): Promise<void> {
   }) as typeof redis.pipeline;
   const paused = (await advanceBroadcast(shaky.broadcast.id, storeForHandle, Date.now() + 60_000))!;
   redis.pipeline = pipe;
-  is("it says its poll could not be written down, not that the service asked to slow down", [paused.note.includes("poll could not be written down"), paused.note.includes("slow down")], [true, false]);
+  is("it says whether its poll was saved could not be confirmed, not that the service asked to slow down", [paused.note.includes("poll was saved could not be confirmed"), paused.note.includes("slow down")], [true, false]);
 
   part("The store's public request comes before anything of the poll is read");
   const [open] = (await redis.pipeline([["ZREVRANGE", `nl:mpoll:ix:${list2}`, 0, 0]])) as [string[]];

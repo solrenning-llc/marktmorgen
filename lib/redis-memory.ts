@@ -883,6 +883,65 @@ export class MemoryRedis {
           });
           return out;
         }
+        // lib/lesson-notes.ts NOTE_SAVE and NOTE_FORGET: a student's note, their tally and the notes' slot in one step.
+        if (key.startsWith("-- marktmorgen:lesson-note-save:v1\n")) {
+          if (args[0] !== "3" || args.length !== 17) return [-1, 0];
+          const [, room, notes, prints, limit, month, field, seen, json, rawOld, rawNew, rawMost, rawMine, rawShare, rawTally, print, rawStart] = args;
+          const [oldB, newB, most, mine, share, tally, start] = [rawOld, rawNew, rawMost, rawMine, rawShare, rawTally, rawStart].map(Number);
+          if (![oldB, newB, most, mine, share, tally, start].every(Number.isFinite) || field === "#" || field === "") return [-1, 0];
+          if (print !== "") {
+            const erased = this.run(["HGET", prints, print]);
+            if (typeof erased === "string" && !(Number(erased) < start - 1)) return [2, 0];
+          }
+          const held = this.run(["HGET", notes, field]);
+          if ((typeof held === "string" ? held : "") !== seen) return [2, 0];
+          if (typeof held !== "string" && json === "") return [1, 0];
+          const sum = this.run(["HGET", notes, "#"]);
+          let had = 0;
+          if (typeof sum === "string") {
+            had = Number(sum);
+            if (!Number.isInteger(had) || had < 0) return [-1, 0];
+          } else if (typeof held === "string") return [-1, 0];
+          if (typeof held !== "string") {
+            const count = Number(this.run(["HLEN", notes])) - (typeof sum === "string" ? 1 : 0);
+            if (count >= most) return [3, 0];
+          }
+          const now = had - oldB + newB;
+          if (now < 0) return [-1, 0];
+          let delta = newB - oldB;
+          if (had === 0 && now > 0) delta += tally;
+          else if (had > 0 && now === 0) delta -= tally;
+          if (delta > 0) {
+            if (now > mine) return [4, 0];
+            const all = Number(this.run(["HGET", room, "lnote"]) ?? "0");
+            if (!Number.isFinite(all)) return [-1, 0];
+            if (all + delta > share) return [5, 0];
+          }
+          const taken = this.storeData([room, limit, "0", month, "a", "lnote", String(delta)]);
+          if (!Array.isArray(taken) || taken[0] !== 1) return taken;
+          if (json === "") this.run(["HDEL", notes, field]);
+          else this.run(["HSET", notes, field, json]);
+          if (now > 0) this.run(["HSET", notes, "#", String(now)]);
+          else this.run(["HDEL", notes, "#"]);
+          return taken;
+        }
+        if (key.startsWith("-- marktmorgen:lesson-note-forget:v1\n")) {
+          if (args[0] !== "2" || args.length !== 6) return [-1, 0];
+          const [, room, notes, limit, month, rawTally] = args;
+          const tally = Number(rawTally);
+          if (!Number.isFinite(tally)) return [-1, 0];
+          const sum = this.run(["HGET", notes, "#"]);
+          let had = 0;
+          if (typeof sum === "string") {
+            had = Number(sum);
+            if (!Number.isInteger(had) || had < 0) return [-1, 0];
+          }
+          const n = Number(this.run(["HLEN", notes])) - (typeof sum === "string" ? 1 : 0);
+          this.run(["DEL", notes]);
+          if (had === 0) return [n, 1];
+          const taken = this.storeData([room, limit, "1", month, "a", "lnote", String(-(had + tally))]);
+          return [n, Array.isArray(taken) ? taken[0] : -1];
+        }
         // lib/creator-card.ts SAVE_CARD and DROP_CARD: the card and its data-room slot in one step.
         if (key.startsWith("-- marktmorgen:card-save:v1\n") && args[0] === "2" && args.length === 7) {
           const [, room, target, limit, month, size, json] = args;

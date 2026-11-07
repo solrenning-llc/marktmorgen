@@ -8,6 +8,7 @@ import { heldBack, passedQuizzes } from "@/lib/quiz";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { takeBuyerAction, takeBuyerRead } from "@/lib/buyer-actions";
 import { MAX_NOTE_CHARS, notesAsText, notesOf, saveNote } from "@/lib/lesson-notes";
+import { NOTE_DOWNLOAD_UNITS } from "@/lib/lesson-notes-rules";
 import { lessonNotesWords } from "@/lib/buyer-words/lesson-notes";
 import { speech } from "@/lib/buyer-words";
 
@@ -52,7 +53,17 @@ export async function POST(request: NextRequest) {
   // A save is one of the store's buyer actions (lib/buyer-actions.ts).
   if (!(await takeBuyerAction(store))) return no("resting", 503);
 
-  const saved = await saveNote({ statsId: store.statsId, learner: who, courseId: course.id, lessonId: found.lesson.id, text: body.text, was: body.was, room: store });
+  const saved = await saveNote({
+    statsId: store.statsId,
+    learner: who,
+    courseId: course.id,
+    lessonId: found.lesson.id,
+    text: body.text,
+    was: body.was,
+    room: store,
+    // A save on its way while the person is deleted writes nothing (Claude 2's review of #3031, M3).
+    erasure: { listId: store.listId, email: access.learner.email },
+  });
   if (saved.ok) return Response.json({ ok: true, text: saved.text }, { headers: NO_STORE });
   const status = saved.reason === "invalid" || saved.reason === "too_long" ? 400 : saved.reason === "unknown" ? 503 : 409;
   return no(saved.reason, status);
@@ -60,8 +71,12 @@ export async function POST(request: NextRequest) {
 
 /**
  * GET `?h=<handle>&p=<product>`: every note the signed-in student keeps on
- * the course, as a text file, in the course's order. One of the store's
- * buyer reads. A reply that cannot be read is said so, never an empty file.
+ * the course, as a text file, in the course's order, also once their access
+ * to the course has ended (a refund, a membership over): the notes are still
+ * theirs and still kept (Claude 2's review of #3031, M4). It takes
+ * NOTE_DOWNLOAD_UNITS of the store's buyer reads before it reads anything,
+ * what the most one student keeps costs to read (Codex J's review, M3). A
+ * reply that cannot be read is said so, never an empty file.
  */
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
@@ -74,9 +89,9 @@ export async function GET(request: NextRequest) {
   const course = await readCourse(product.course.id);
   if (!course) return plain("Not found.", 404);
   const access = await courseAccess(store, product, await cookies());
-  if (access.state !== "open" || access.learner.owner) return plain("Not found.", 404);
+  if (!access.learner || access.learner.owner) return plain("Not found.", 404);
   if (!store.statsId) return plain(w.readFailed, 503);
-  if (!(await takeBuyerRead(store))) return plain(w.readFailed, 503);
+  if (!(await takeBuyerRead(store, NOTE_DOWNLOAD_UNITS))) return plain(w.readFailed, 503);
   const who = emailKey(access.learner.email);
   let notes;
   try {

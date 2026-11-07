@@ -18,6 +18,11 @@ export type NoteShown = { state: "kept"; text: string } | { state: "none" } | { 
  * A save names the note it started from, so a newer one saved in another
  * tab is never overwritten (the server answers "changed").
  *
+ * What is typed while a save is on its way stays in the box, and leaving
+ * the page stays guarded until it is saved too; deleting a whole note offers
+ * to undo it; the count is said to a screen reader only once the student has
+ * typed (Claude 2's review of #3031, M2, L6, L7).
+ *
  * Said in the store's `language` (lib/buyer-words/lesson-notes.ts).
  */
 export function LessonNotes({
@@ -36,14 +41,22 @@ export function LessonNotes({
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState("");
   const [heard, setHeard] = useState("");
+  // The words of a note just deleted, while the box is still empty: what Undo puts back.
+  const [lost, setLost] = useState<string | null>(null);
   const pause = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The box as it is now, for a save that answers after the student typed more.
+  const latest = useRef(start);
+  // Whether the student has typed: nothing is said to a screen reader before that.
+  const typed = useRef(false);
   const length = noteLength(text);
   const over = length > MAX_NOTE_CHARS;
   const count = w.count(length, MAX_NOTE_CHARS);
-  useLeaveGuard(initial.state !== "unknown" && text !== kept && !busy);
+  // Guarded while anything in the box is not saved, also while a save is on its way.
+  useLeaveGuard(initial.state !== "unknown" && text !== kept);
 
-  // The count is said to a screen reader once typing pauses, not on every key.
+  // The count is said to a screen reader once typing pauses, not on every key, and never before the student types.
   useEffect(() => {
+    if (!typed.current) return;
     if (pause.current) clearTimeout(pause.current);
     pause.current = setTimeout(() => setHeard(over ? w.tooLong(MAX_NOTE_CHARS) : count), 1_000);
     return () => {
@@ -62,34 +75,37 @@ export function LessonNotes({
     );
   }
 
-  async function save(event: React.FormEvent) {
-    event.preventDefault();
-    if (busy) return;
-    if (over) {
-      setSaid(w.tooLong(MAX_NOTE_CHARS));
-      return;
-    }
+  /** Sends `next` over `was`; the box keeps whatever was typed meanwhile, and only what was sent is said saved. */
+  async function send(next: string, was: string): Promise<void> {
     setBusy(true);
     setSaid(w.saving);
     try {
       const response = await fetch("/api/store/course/note", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...where, text, was: kept }),
+        body: JSON.stringify({ ...where, text: next, was }),
       });
       const data = (await response.json().catch(() => ({}))) as { ok?: unknown; text?: unknown; error?: unknown };
       if (data.ok === true && typeof data.text === "string") {
-        setKept(data.text);
-        setText(data.text);
-        setSaid(data.text ? w.saved : w.cleared);
+        const saved = data.text;
+        setKept(saved);
+        setLost(saved === "" && was !== "" ? was : null);
+        if (latest.current === next) {
+          // Nothing typed since: the box shows the note as kept (the server trims what trails it).
+          latest.current = saved;
+          setText(saved);
+          setSaid(saved ? w.saved : w.cleared);
+        } else setSaid(w.savedEarlier);
         return;
       }
       const errors: Record<string, string> = {
         too_long: w.tooLong(MAX_NOTE_CHARS),
         too_many: w.tooMany(MAX_NOTES_PER_STUDENT),
+        mine: w.mine,
         changed: w.changed,
         full: w.full,
         slow: w.slow,
+        closed: w.closed,
       };
       setSaid(errors[typeof data.error === "string" ? data.error : ""] ?? w.failed);
     } catch {
@@ -97,6 +113,24 @@ export function LessonNotes({
     } finally {
       setBusy(false);
     }
+  }
+
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    if (busy) return;
+    if (over) {
+      setSaid(w.tooLong(MAX_NOTE_CHARS));
+      return;
+    }
+    await send(text, kept);
+  }
+
+  /** Puts a note just deleted back, as a new note. */
+  async function undo() {
+    if (busy || lost === null) return;
+    latest.current = lost;
+    setText(lost);
+    await send(lost, "");
   }
 
   return (
@@ -109,7 +143,11 @@ export function LessonNotes({
           id="lesson-notes-text"
           name="text"
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => {
+            typed.current = true;
+            latest.current = event.target.value;
+            setText(event.target.value);
+          }}
           rows={6}
           aria-describedby="lesson-notes-private lesson-notes-count"
           aria-invalid={over ? true : undefined}
@@ -121,7 +159,10 @@ export function LessonNotes({
         </p>
         <p className="sr-only" aria-live="polite">{heard}</p>
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          <button type="submit" className="btn st-btn min-h-[44px]" disabled={busy} aria-disabled={busy}>{w.save}</button>
+          <button type="submit" className="btn st-btn inline-flex min-h-[44px] items-center" disabled={busy} aria-disabled={busy}>{w.save}</button>
+          {lost !== null && text === "" ? (
+            <button type="button" className="btn st-btn-ghost inline-flex min-h-[44px] items-center" onClick={undo} disabled={busy} aria-disabled={busy}>{w.undo}</button>
+          ) : null}
           <p role="status" className="text-sm">{said}</p>
         </div>
       </form>

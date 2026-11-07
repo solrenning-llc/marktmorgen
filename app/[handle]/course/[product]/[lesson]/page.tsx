@@ -143,8 +143,9 @@ export default async function LessonPage({ params, searchParams }: Params) {
       ])
     : [false, [], ""];
   const threads = reader && talking ? threadsFor(comments, reader).slice(0, SHOWN_THREADS) : [];
-  // The student's own private note (290 [SQ1]): read only for them, never for the creator or a visitor.
-  const note = student && open ? await readNote(store.statsId ?? "", who, course.id, lesson.id) : null;
+  // The student's own private note (290 [SQ1]): read only for them, never for the creator or a visitor, and never on
+  // a lesson held behind a quiz or work to hand in, whose saves the route refuses (Claude 2's review of #3031, L5).
+  const note = student && open && !blocker ? await readNote(store.statsId ?? "", who, course.id, lesson.id) : null;
   const mustPass = Boolean(student && quiz && lesson.quiz?.required && !passed.has(lesson.id));
   // Work to hand in, still holding the lessons after it shut.
   const mustHandIn = Boolean(student && task && lesson.task?.gate && !passed.has(lesson.id));

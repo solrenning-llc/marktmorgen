@@ -32,6 +32,7 @@ import { AFFILIATE_LOAD_BYTES_PER_UNIT } from "@/lib/public-read-rules";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 import { laterPageCost } from "./traffic-cost";
+import { suppressCommand } from "@/lib/suppression";
 import { done, is, part } from "./check";
 
 type Command = (string | number)[];
@@ -106,9 +107,11 @@ async function creatorRoom(): Promise<void> {
 async function erasureDuringSave(): Promise<void> {
   part("Claude 2 M3: an erasure that runs while a save is on its way leaves nothing behind");
   const STATS = "c5statserase3031";
+  const LIST = "c5listerase3031";
   const COURSE = "e".repeat(32);
   for (const [name, first] of [["over a kept note", "Draft one."], ["a first note", ""]] as const) {
-    const ana = emailKey(`ana-${first ? "kept" : "new"}@example.com`);
+    const email = `ana-${first ? "kept" : "new"}@example.com`;
+    const ana = emailKey(email);
     const key = `nl:lnote:${STATS}:${ana}`;
     const baseline = await used(ROOM);
     if (first) is(`(${name}) setup: a first note is kept`, (await saveNote({ statsId: STATS, learner: ana, courseId: COURSE, lessonId: "lessonone001", text: first, was: "", room: ROOM })).ok, true);
@@ -116,13 +119,17 @@ async function erasureDuringSave(): Promise<void> {
     redis.pipeline = (async (commands: Command[]) => {
       if (erased === -1 && commands.some((c) => writesTo(c, key))) {
         redis.pipeline = real;
-        // The person is deleted from the store (lib/person-erasure.ts runs this) at this instant.
+        // The person is deleted from the store at this instant, as lib/person-erasure.ts does it: their print first,
+        // on its own, then each part (rule 23: the order of the real erasure, added with the fix; what is held is not
+        // changed).
+        await real([suppressCommand(LIST, email)]);
         erased = await forgetLessonNotesPerson(STATS, ana, ROOM);
       }
       return real(commands);
     }) as Pipeline;
     try {
-      await saveNote({ statsId: STATS, learner: ana, courseId: COURSE, lessonId: "lessonone001", text: "Draft two, longer than the first one.", was: first, room: ROOM });
+      // As the route saves: with the store's list and the student's address (app/api/store/course/note).
+      await saveNote({ statsId: STATS, learner: ana, courseId: COURSE, lessonId: "lessonone001", text: "Draft two, longer than the first one.", was: first, room: ROOM, erasure: { listId: LIST, email } });
     } finally {
       redis.pipeline = real;
     }
@@ -207,6 +214,7 @@ function promises(): void {
   const privacy = read("app/privacy/page.tsx");
   is("the policy no longer promises the download 'at any time'", /notes as a text file at any time/.test(privacy), false);
   is("the policy says the notes stay after access ends until the student empties them or is deleted", /after their access to the course ends/.test(privacy), true);
+  is("the route saves with the store's list and the student's address, so a save on its way during an erasure writes nothing", /erasure: \{ listId: store\.listId, email: access\.learner\.email \}/.test(route), true);
   const page = read("app/[handle]/course/[product]/[lesson]/page.tsx");
   is("the page shows the box only on a lesson the route lets them save (not one held behind a quiz)", /const note = student && open && !blocker \? await readNote\(/.test(page), true);
 }

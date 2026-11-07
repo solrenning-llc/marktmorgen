@@ -7,6 +7,8 @@
  *   - A session whose place in the account's set was not confirmed was opened all the same, out of reach of
  *     "Log out of all devices".
  *   - The deletes that log sessions out were never read: an answer missing was counted as closed.
+ *   - A locked session (lib/two-step.ts openLockedSession, the "no app, no codes, no passkey" way in) whose lock
+ *     was not confirmed was handed out all the same: a full session, unlocked (review of #2948 at 929dec4d).
  *
  * Each unknown is said as such, never as done; the healthy paths and confirmed absence answer as before.
  */
@@ -17,6 +19,7 @@ import { SESSION_COOKIE, SessionsUnknownError, dropSecondStep, emailForSession, 
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { POST as signOutAll } from "@/app/api/auth/signout-all/route";
 import { POST as signOut } from "@/app/api/auth/signout/route";
+import { lockedUntil, openLockedSession } from "@/lib/two-step";
 import { store as redis } from "./redis-stub";
 
 type Command = (string | number)[];
@@ -188,4 +191,40 @@ test("the deletes read in their shape: the count is the sessions closed, as befo
   assert.deepEqual([await emailForSession(byKey), await emailForSession(other), await emailForSession(plain)], ["owner@example.com", null, "owner@example.com"]);
   assert.equal(await endAllSessions("owner@example.com"), 2);
   assert.equal(await endAllSessions("nobody@example.com"), 0);
+});
+
+// ---- A locked session: its lock read exactly ---------------------------------------------------------------------
+
+const LOCKED = "lost@example.com";
+const isLockWrite = (c: Command) => String(c[1]).startsWith("nl:2fa:locked:") || String(c[1]).startsWith("nl:2fa:lockedset:");
+
+for (const [label, hook] of [
+  ["its lock's SET not applied (no answer)", (c: Command): Answer => (c[0] === "SET" && String(c[1]).startsWith("nl:2fa:locked:") ? { reply: undefined } : null)],
+  ["its lock's SET answered a number", (c: Command): Answer => (c[0] === "SET" && String(c[1]).startsWith("nl:2fa:locked:") ? { reply: 1 } : null)],
+  ["the account's locked set answered as text", (c: Command): Answer => (c[0] === "SADD" && String(c[1]).startsWith("nl:2fa:lockedset:") ? { reply: "OK" } : null)],
+  ["the locked set's expiry answered nothing", (c: Command): Answer => (c[0] === "EXPIRE" && String(c[1]).startsWith("nl:2fa:lockedset:") ? { reply: null } : null)],
+  ["Redis failing on the lock", (c: Command): Answer => (isLockWrite(c) ? "throw" : null)],
+] as const) {
+  test(`a locked session, ${label}: refused and taken back, never handed out unlocked`, async () => {
+    redis.clear();
+    await assert.rejects(() => tampered(hook, () => openLockedSession(LOCKED, Date.now() + 7 * 86_400_000)));
+    // Nothing of it is left open: the account holds no session.
+    assert.equal(await endAllSessions(LOCKED), 0);
+  });
+}
+
+test("a locked session whose lock pipeline answered short: refused and taken back", async () => {
+  redis.clear();
+  await assert.rejects(() => wholePipeline((c) => c[0] === "SET" && String(c[1]).startsWith("nl:2fa:locked:"), () => [], () => openLockedSession(LOCKED, Date.now() + 7 * 86_400_000)), UnknownReplyError);
+  assert.equal(await endAllSessions(LOCKED), 0);
+});
+
+test("a locked session answered in its shape opens as before, locked until its day", async () => {
+  redis.clear();
+  const until = Date.now() + 7 * 86_400_000;
+  const id = await openLockedSession(LOCKED, until);
+  assert.match(id, /^[0-9a-f]{64}$/);
+  assert.equal(await emailForSession(id), LOCKED);
+  assert.equal(await lockedUntil(id), until);
+  assert.equal(await endAllSessions(LOCKED), 1);
 });

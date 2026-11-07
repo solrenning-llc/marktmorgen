@@ -13,6 +13,8 @@
  */
 import { onAccount, StripeError } from "@/lib/stripe-account";
 import { withLock } from "@/lib/redis-lock";
+import { redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { grantOf, subsOf, type SubRow } from "@/lib/membership-manage";
 import { forgetStatus } from "@/lib/membership-access";
 import { productOfSub } from "@/lib/tier-rules";
@@ -28,10 +30,16 @@ const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
 
 /**
  * One change to a membership at a time: the lock a switch between plans or to yearly takes (lib/tier-switch.ts,
- * lib/yearly-fallback.ts), held from reading the membership to Stripe's answer. Resuming inside a pause starts a new
+ * lib/yearly-fallback.ts), from reading the membership to Stripe's answer. Resuming inside a pause starts a new
  * period with a payment (`billing_cycle_anchor=now`), and Stripe charges for every such request it carries out, so
- * two presses that both read the membership as paused must never both send it: the second waits, then reads it as it
+ * two presses that both read the membership as paused must not both send it: the second waits, then reads it as it
  * is. A lock that cannot be taken, or Redis that cannot be asked, changes nothing and answers "error".
+ *
+ * The lock is a lease (MEMBERSHIP_LOCK_SECONDS), let go when the first press returns, so on its own it cannot stop
+ * a request whose answer never came, or a press held past the lease, from being sent a second time while Stripe
+ * still reads the membership as paused (Codex G and Codex T on #3090). What does is the resume's idempotency key
+ * (resumeKeyOf): every try of the same resume of the same pause carries the same key, and Stripe answers a repeat
+ * with the first result, or 409 while it is still working on it, instead of charging again.
  */
 const membershipLockKey = (subscription: string) => `nl:tier:${subscription}:lock`;
 /** Longer than the reads and the change at their ceiling (STRIPE_TIMEOUT_MS, 20 s, lib/fetch-timeout.ts), with room. */
@@ -47,6 +55,71 @@ async function underLock<T>(subscription: string, what: string, work: () => Prom
     return { ok: false, reason: "error" };
   }
 }
+
+/**
+ * Which pause a resume ends: the membership, when the pause starts and ends, and when it was asked for, so a pause
+ * taken off and asked for again (same start) is a resume of its own, never answered with the earlier one's result.
+ * A pause with no readable time of asking (one older than that field) is "0": the same pause still names one key.
+ */
+function pauseIdOf(subscription: string, pause: { from: number; until: number }, sub: PauseSub): string {
+  const asked: unknown = sub.metadata?.paused_at;
+  return `${subscription}:${pause.from}:${pause.until}:${typeof asked === "string" && /^\d{9,11}$/.test(asked) ? asked : "0"}`;
+}
+
+/**
+ * The try of one resume of one pause, which its idempotency key carries. It moves on only after Stripe said for
+ * certain that nothing was done (refusedForCertain): Stripe keeps a declined card's 402 under its key for a day and
+ * answers every repeat with it, so a member who fixes their card needs a new key. After no answer, a 409 or Stripe's
+ * own failure it stays, so the next press repeats the same request and Stripe never carries out a second one (CX-123
+ * rule 24: an unknown outcome is never read as declined). The key is the same whether the resume charges or only
+ * takes off a pause not yet started: a try that crosses the pause's start sends other parameters under the same key,
+ * which Stripe refuses (an idempotency error) rather than carrying out both.
+ */
+const resumeTryKey = (pauseId: string) => `nl:tier:resume:${pauseId}`;
+/**
+ * Renewed at every try, and longer than the day Stripe keeps a key's result: a counter that ran out (back to try 0)
+ * only ever names keys last used more than two days before, never the key of a try whose answer is still unknown.
+ */
+const RESUME_TRY_SECONDS = 2 * 86_400;
+const resumeKeyOf = (pauseId: string, attempt: number) => `nimbus-resume:${pauseId}:${attempt}`;
+
+/** The current try, read exactly (with its lifetime renewed): null when Redis cannot be asked or answers in another shape. */
+async function resumeTry(pauseId: string): Promise<number | null> {
+  const key = resumeTryKey(pauseId);
+  try {
+    const replies = repliesFor(await redisPipeline([["GET", key], ["EXPIRE", key, RESUME_TRY_SECONDS]]), 2);
+    if (!replies) return null;
+    const [count, renewed] = replies;
+    if (renewed !== 0 && renewed !== 1) return null;
+    if (count === null) return 0;
+    return typeof count === "string" && /^(?:0|[1-9]\d{0,8})$/.test(count) ? Number(count) : null;
+  } catch (error) {
+    console.error("reading a resume's try failed", error);
+    return null;
+  }
+}
+
+/**
+ * The next try, after Stripe refused this one for certain. A write that fails leaves the key as it was: the next
+ * press repeats it and gets Stripe's saved refusal once more (never a second charge), and moves it on then.
+ */
+async function nextResumeTry(pauseId: string): Promise<void> {
+  const key = resumeTryKey(pauseId);
+  try {
+    await redisPipeline([["INCR", key], ["EXPIRE", key, RESUME_TRY_SECONDS]]);
+  } catch (error) {
+    console.error("moving a resume to its next try failed; the next press repeats this one", error);
+  }
+}
+
+/**
+ * Stripe's answer that it refused the resume and did nothing: a 4xx, but never a 409, which Stripe also answers while
+ * a request under the same key is still being worked on, nor an idempotency error (the key met other parameters),
+ * which says nothing of what the first request under it did. lib/yearly-fallback.ts reads refused the same way,
+ * there without the idempotency error.
+ */
+const refusedForCertain = (error: unknown) =>
+  error instanceof StripeError && error.status >= 400 && error.status < 500 && error.status !== 409 && error.code !== "idempotency_error";
 
 export type PauseResult = { ok: true; from: number; until: number } | { ok: false; reason: "expired" | "cannot" | "error" };
 export type ResumeResult = { ok: true } | { ok: false; reason: "expired" | "cannot" | "declined" | "error" };
@@ -131,9 +204,14 @@ export async function resumeMembership(store: Store, token: string, subscription
       body.set("proration_behavior", "none");
       body.set("payment_behavior", "error_if_incomplete");
     }
+    // A try that cannot be read is never guessed: guessing a new one could charge again for a resume still pending.
+    const pauseId = pauseIdOf(subscription, pause, found.sub);
+    const attempt = await resumeTry(pauseId);
+    if (attempt === null) return { ok: false, reason: "error" };
     try {
-      await onAccount("POST", found.account, `/subscriptions/${encodeURIComponent(subscription)}`, body);
+      await onAccount("POST", found.account, `/subscriptions/${encodeURIComponent(subscription)}`, body, undefined, resumeKeyOf(pauseId, attempt));
     } catch (error) {
+      if (refusedForCertain(error)) await nextResumeTry(pauseId);
       if (error instanceof StripeError && error.status === 402) return { ok: false, reason: "declined" };
       console.error("resuming a membership failed", error);
       return { ok: false, reason: "error" };

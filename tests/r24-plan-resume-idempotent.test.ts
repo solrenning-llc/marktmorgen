@@ -233,6 +233,16 @@ async function main(): Promise<void> {
   is("neither moves the key on: all three tries carry the same one", [keys().length, sameKey()], [3, true]);
   is("and the try after them resumes, charged once", [then, charged], [{ ok: true }, 1]);
 
+  part("A pause taken off before it started, asked for again, and taken off again");
+  reset();
+  const early = PERIOD_END - DAY;
+  const offFirst = await resumeMembership(store, token, SUB, early);
+  is("the first is taken off", [offFirst, sub.pause_collection], [{ ok: true }, null]);
+  const again = pausedSub();
+  sub = { ...again, metadata: { ...(again.metadata as Record<string, string>), paused_at: String(NOW + 3600) } };
+  const offAgain = await resumeMembership(store, token, SUB, early);
+  is("the new pause is a resume of its own: a new key, carried out, never the first one's saved answer", [offAgain, keys()[0] !== keys()[1], sub.pause_collection], [{ ok: true }, true, null]);
+
   done();
 }
 

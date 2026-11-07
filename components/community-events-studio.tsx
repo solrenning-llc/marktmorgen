@@ -100,7 +100,14 @@ const MESSAGES: Record<string, string> = {
 const ROOM_CHECK = roomOnLeave(MESSAGES.link);
 const LINK_CHECK: LinkCheck = (raw) => (raw.trim() ? ROOM_CHECK(raw) : { problem: MESSAGES.link, fix: null });
 
-type Answer = { ok?: boolean; error?: string; moved?: boolean };
+/**
+ * `notice`, after a move or a cancellation that was made: "waiting" when who is coming could not be read just then
+ * (the email goes out once it can), "failed" when the email could not be started at all.
+ */
+type Answer = { ok?: boolean; error?: string; moved?: boolean; notice?: "waiting" | "failed" };
+
+/** What the studio says when the email about a change could not be started. */
+const UNSENT = "but the email to anyone coming could not be started. Tell them in the community.";
 
 async function send(payload: Record<string, unknown>): Promise<Answer> {
   try {
@@ -253,7 +260,13 @@ export function CommunityEventsStudio({
                   onCancel={() => setEditing(null)}
                   onSave={async (payload) => {
                     const ok = await run(`e-${event.id}`, { action: "edit", event: event.id, ...payload }, (a) =>
-                      a.moved ? (event.going === null ? "Moved. Anyone coming is being emailed." : event.going ? `Moved. ${event.going === 1 ? "The person" : `The ${event.going} people`} coming ${event.going === 1 ? "is" : "are"} being emailed.` : "Moved.") : "Saved.",
+                      a.moved
+                        ? a.notice === "failed"
+                          ? `Moved, ${UNSENT}`
+                          : a.notice === "waiting" || event.going === null
+                            ? "Moved. Anyone coming is being emailed."
+                            : event.going ? `Moved. ${event.going === 1 ? "The person" : `The ${event.going} people`} coming ${event.going === 1 ? "is" : "are"} being emailed.` : "Moved."
+                        : "Saved.",
                     );
                     if (ok) setEditing(null);
                   }}
@@ -274,7 +287,13 @@ export function CommunityEventsStudio({
                   onCancelEvent={() => {
                     const who = event.going === null ? " Anyone coming will be emailed once." : event.going ? ` The ${event.going === 1 ? "person" : `${event.going} people`} coming will be emailed once.` : "";
                     if (window.confirm(`Cancel "${event.title}"?${who} This cannot be undone.`)) {
-                      run(`e-${event.id}`, { action: "cancel", event: event.id }, event.going === null ? "Canceled. Anyone coming is being emailed." : event.going ? "Canceled. Everyone coming is being emailed." : "Canceled.");
+                      run(`e-${event.id}`, { action: "cancel", event: event.id }, (a) =>
+                        a.notice === "failed"
+                          ? `Canceled, ${UNSENT}`
+                          : a.notice === "waiting" || event.going === null
+                            ? "Canceled. Anyone coming is being emailed."
+                            : event.going ? "Canceled. Everyone coming is being emailed." : "Canceled.",
+                      );
                     }
                   }}
                   onDelete={() => {

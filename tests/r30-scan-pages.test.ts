@@ -14,8 +14,9 @@
  *   were whole. Now it throws: the download answers 502 "We could not read your list right now" and the export says
  *   that part could not be read.
  * - lib/community-events.ts, rsvpList: an event's reminder, move or cancellation was emailed to a short list (or to
- *   nobody) as if it were everyone coming, and its send was claimed for good. Now it throws; the send's claim is given
- *   back (lib/community-event-mail.ts, startJob) and a due reminder stays queued for the next run.
+ *   nobody) as if it were everyone coming, and its send was claimed for good. Now it throws; a reminder's claim is
+ *   given back (lib/community-event-mail.ts, startJob) and the reminder stays queued for the next run, and a move's
+ *   or a cancellation's notice is written down waiting for its list (tests/r30-event-notice-unread.test.ts).
  *
  * An exact page (["0", [...]]) is still read as it is, and a walk that reaches "0" is whole.
  */
@@ -154,7 +155,7 @@ async function going(): Promise<string> {
 
 async function notice(): Promise<string> {
   const job = await queueEventNotice(communityStore, event(soon()), "moved", { start: soon() - 86_400_000, minutes: 30 });
-  return job ? `job for ${job.total}` : "no job";
+  return job ? (job.waiting ? "waiting" : `job for ${job.total}`) : "no job";
 }
 
 async function main(): Promise<void> {
@@ -207,12 +208,13 @@ async function main(): Promise<void> {
     answering("HSCAN", answer);
     is(`${label}: ${want}`, await outcome(going), want);
   }
-  part("lib/community-event-mail.ts: a send whose list did not read is not sent short, and is not claimed for good");
-  for (const [label, answer, want] of shapes(["e".repeat(32), "100"], true).filter(([label]) => label.startsWith("not a pair: Q") || label.startsWith("a second page"))) {
+  part("lib/community-event-mail.ts: a move's notice whose list did not read is not sent short, and waits for its list");
+  // The waiting notice is then sent once to everyone coming (tests/r30-event-notice-unread.test.ts).
+  for (const [label, answer] of shapes(["e".repeat(32), "100"], true).filter(([label]) => label.startsWith("not a pair: Q") || label.startsWith("a second page"))) {
     await rsvpWorld();
     answering("HSCAN", answer);
-    is(`${label}: the move's notice is ${want}`, await outcome(notice), want);
-    is(`${label}: asked again with pages that read, it goes to everyone coming`, await outcome(notice), "job for 2");
+    is(`${label}: the move's notice is written down waiting, with nobody listed yet`, await outcome(notice), "waiting");
+    is(`${label}: asked again with pages that read, it is the same notice, not a second one`, await outcome(notice), "no job");
   }
   {
     const start = soon();

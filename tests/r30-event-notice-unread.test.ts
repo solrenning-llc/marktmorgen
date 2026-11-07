@@ -24,6 +24,7 @@ import { runEventQueue } from "@/lib/community-event-mail";
 import { claimHandle, ensureStatsId, setCommunity, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { POST as events } from "@/app/api/store/community/events/route";
 import { store as redis } from "./redis-stub";
+import { allowanceUsed } from "@/lib/store-allowance";
 import { installSesMailFixture } from "./ses-mail-fixture";
 import { done, is, part } from "./check";
 
@@ -65,7 +66,7 @@ async function runAfter(): Promise<void> {
 
 /** One run of the five-minute job's event part. */
 async function job(): Promise<void> {
-  await runEventQueue(storeForHandle, realNow() + 20_000, { mail: true });
+  await runEventQueue(storeForHandle, Date.now() + 20_000, { mail: true });
 }
 
 async function main(): Promise<void> {
@@ -153,6 +154,20 @@ async function main(): Promise<void> {
   await job();
   is("the waiting move is not sent for an event called off", to("New time: Off night"), []);
   is("the cancellation is, once to each", to("Canceled: Off night"), GOING);
+
+  part("A notice that cannot even be written down: the change is still answered as made, never 500, and says so");
+  const unwritten = await event("Unwritten night", hour(realNow() + 3 * DAY));
+  redis.pipeline = (async (commands: Commands) => {
+    if (commands.length === 1 && commands[0][0] === "HSCAN" && String(commands[0][1]).endsWith(":r")) return ["QUEUED"];
+    if (commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith("nl:cm:evmail:") && commands[1]?.[0] === "SADD") throw new Error("synthetic pipeline failure");
+    return original(commands);
+  }) as typeof redis.pipeline;
+  is("the route says it is canceled, and that its email could not be started", await answer(await post({ action: "cancel", event: unwritten.id })), [200, true, "failed"]);
+  unread(false);
+  is("and it is canceled", ((await original([["GET", `nl:cm:${id}:ev:${unwritten.id}`]]))[0] as string).includes('"cancelled":true'), true);
+
+  part("Inside the store's own email figure: every email sent was counted against it, and none went without it");
+  is("twelve emails, each counted", [mail.sent.length, await allowanceUsed((await storeForEmail(OWNER))!, "email")], [12, 12]);
 
   part("Only while it is of use: a notice whose list never read before the start is not sent late");
   const late = await event("Late night", hour(realNow() + 3 * DAY));

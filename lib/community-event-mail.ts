@@ -31,6 +31,14 @@
  * twice; the key a send is made under says which reminder, move or
  * cancellation it is, so the same one is never started twice.
  *
+ * A move's or a cancellation's notice whose list of who is coming does not
+ * read when it is made (rule 30) is written down all the same, `waiting`,
+ * with no readers yet: the change is made and must not go untold. Each run
+ * reads the list again, until it reads, while the notice is still of use
+ * (as the hour-before reminder: not once the event has begun), and then
+ * sends it like any other. A move's notice still waiting when the event is
+ * then called off is dropped: the cancellation's email says all.
+ *
  * These are the community's own notices about something a member signed up
  * for, sent from the store's name through Marktmorgen's address like the reminders
  * before a booked call, on every plan, and not counted against Pro's monthly
@@ -89,6 +97,12 @@ export type EventMailJob = {
   status: "sending" | "sent" | "failed";
   note: string;
   failures: number;
+  /**
+   * A notice whose list of who is coming did not read when it was made: no
+   * readers written yet, and `total` 0 until they are. False once they are,
+   * and absent on every send made with its list.
+   */
+  waiting?: boolean;
 };
 
 const JOBS = "nl:cm:evmailq";
@@ -135,17 +149,31 @@ export async function readEventJob(id: string): Promise<EventMailJob | null> {
   return parseJob(raw);
 }
 
-/** Whether a reminder is still worth sending: the day-before one gives way to the hour-before one. */
+/**
+ * Whether a reminder is still worth sending: the day-before one gives way to the hour-before one. A notice still
+ * waiting for its list is asked as the hour-before one is (advanceEventJob).
+ */
 function stillUseful(kind: EventMailKind, start: number, now: number): boolean {
   if (kind === "24") return now < start - HOUR;
   if (kind === "1") return now < start;
   return true;
 }
 
+/** Writes a send's readers down, in order, and the send with them. */
+async function listReaders(job: EventMailJob, readers: string[]): Promise<void> {
+  const commands: (string | number)[][] = [["DEL", toKey(job.id)]];
+  for (let i = 0; i < readers.length; i += 500) commands.push(["RPUSH", toKey(job.id), ...readers.slice(i, i + 500)]);
+  commands.push(["EXPIRE", toKey(job.id), KEEP_SECONDS]);
+  await redisPipeline(commands);
+  await save(job);
+}
+
 /**
  * Writes a send down, once: the same reminder, move or cancellation asked
  * for again finds it made and starts nothing. Null when there is nobody to
- * send it to, or it was made already.
+ * send it to, or it was made already. A move's or a cancellation's notice
+ * whose list does not read is written down `waiting` (advanceEventJob reads
+ * it again); a reminder's throws, and stays queued (runEventQueue).
  */
 async function startJob(
   store: Store,
@@ -159,16 +187,19 @@ async function startJob(
   const id = createHash("sha256").update(`${community}|${event.id}|${kind}|${seq}`).digest("hex").slice(0, 24);
   const [claimed] = await redisPipeline([["SET", madeKey(id), "1", "NX", "EX", KEEP_SECONDS]]);
   if (claimed === null) return null;
-  // Who is coming could not be read (rule 30): the claim is given back, so the send is not made short now nor
-  // refused as made later; the caller says it failed, and a due reminder stays queued (runEventQueue).
+  // Who is coming could not be read (rule 30). A reminder's claim is given back, so the send is not made short now
+  // nor refused as made later; the caller says it failed, and a due reminder stays queued (runEventQueue). A
+  // move's or a cancellation's notice keeps its claim and is written down waiting for its list: the change it
+  // tells of is already made.
+  const notice = kind !== "24" && kind !== "1";
   const readers = await rsvpList(community, event.id).then(
     (list) => list.map((r) => r.key),
     async (error: unknown) => {
+      if (notice) return null;
       await redisPipeline([["DEL", madeKey(id)]]).catch(() => {});
       throw error;
     },
   );
-  if (!readers.length) return null;
   const job: EventMailJob = {
     id,
     community,
@@ -178,21 +209,33 @@ async function startJob(
     start: event.start,
     was: was?.start ?? 0,
     wasMinutes: was?.minutes ?? 0,
-    total: readers.length,
+    total: readers?.length ?? 0,
     done: 0,
     sent: 0,
     status: "sending",
     note: "",
     failures: 0,
   };
-  const commands: (string | number)[][] = [["DEL", toKey(id)]];
-  for (let i = 0; i < readers.length; i += 500) commands.push(["RPUSH", toKey(id), ...readers.slice(i, i + 500)]);
-  commands.push(["EXPIRE", toKey(id), KEEP_SECONDS]);
-  await redisPipeline(commands);
-  await save(job);
+  if (readers === null) return await startWaiting({ ...job, note: WAITING_NOTE, waiting: true });
+  if (!readers.length) return null;
+  await listReaders(job, readers);
   await redisPipeline([["SADD", JOBS, id]]);
   return job;
 }
+
+/** A notice with its list still to be read, written down with no readers; the claim given back when it is not. */
+async function startWaiting(job: EventMailJob): Promise<EventMailJob> {
+  try {
+    await redisPipeline([["SET", jobKey(job.id), JSON.stringify(job), "EX", KEEP_SECONDS], ["SADD", JOBS, job.id]]);
+  } catch (error) {
+    // Not written down: nothing stands in for a notice that does not exist.
+    await redisPipeline([["DEL", madeKey(job.id)]]).catch(() => {});
+    throw error;
+  }
+  return job;
+}
+
+const WAITING_NOTE = "We couldn't read who is coming yet. The email waits and goes out once we can.";
 
 /** The creator moved or cancelled an event: the one email to everyone coming. */
 export async function queueEventNotice(
@@ -318,6 +361,21 @@ export async function advanceEventJob(
     // A reminder for a time the event has left, or for an event called off, is no use.
     if (reminder && (event.cancelled || event.start !== job.start || !stillUseful(job.kind, event.start, Date.now()))) {
       return await finish("sent", "No longer due.");
+    }
+    if (job.waiting) {
+      // A move's notice gives way to the cancellation's, which says all.
+      if (job.kind === "moved" && event.cancelled) return await finish("sent", "No longer due: the event was canceled, and that email says so.");
+      // Read again only while it is of use: as the hour-before reminder, not once the event has begun.
+      if (!stillUseful("1", event.start, Date.now())) return await finish("failed", "We couldn't read who was coming before the event's time. Nobody was emailed.");
+      const readers = await rsvpList(job.community, job.event).then((list) => list.map((r) => r.key), () => null);
+      if (readers === null) {
+        job = { ...job, note: WAITING_NOTE };
+        await save(job);
+        return job;
+      }
+      if (!readers.length) return await finish("sent", "");
+      job = { ...job, waiting: false, total: readers.length, note: "" };
+      await listReaders(job, readers);
     }
     if (!isSenderConfigured()) return job;
     const words = eventMailWords(store, config, event, job);

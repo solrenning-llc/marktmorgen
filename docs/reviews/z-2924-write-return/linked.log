@@ -1,0 +1,516 @@
+meta-lines-exact.test.ts
+✔ metaLines: a missing envelope is unknown, never "no lines" (24.220681ms)
+✔ metaLines: a connection count that is not a count is unknown, never "no lines" (0.361896ms)
+✔ metaLines: a null connection count is unknown, never "no lines" (0.458919ms)
+✔ metaLines: lines that are not text is unknown, never "no lines" (0.37927ms)
+✔ metaLines: lines that are not JSON is unknown, never "no lines" (0.285285ms)
+✔ metaLines: lines that are not a list is unknown, never "no lines" (0.159351ms)
+✔ the spend route answers the typed lines with spendsUnread when Meta's lines cannot be read (16.490649ms)
+✔ the Meta account route answers spendsUnread when Meta's lines cannot be read (8.012242ms)
+✔ the model is told ad spend is unknown, not given the typed lines as all of it, when Meta's lines cannot be read (7.62346ms)
+✔ healthy controls: typed and Meta lines both counted everywhere (8.955313ms)
+✔ confirmed absence: not connected, or connected with nothing read yet, is no Meta line (0.299712ms)
+✔ metaLines: a kept list holding a line with no id beside a whole line is unknown, never that line alone (0.435918ms)
+✔ metaLines: a kept list holding a line whose id is not Meta's beside a whole line is unknown, never that line alone (0.225897ms)
+✔ metaLines: a kept list holding a line of no amount beside a whole line is unknown, never that line alone (0.152993ms)
+✔ metaLines: a kept list holding text beside a whole line is unknown, never that line alone (0.719062ms)
+✔ metaLines: a kept list holding null beside a whole line is unknown, never that line alone (0.112443ms)
+✔ the model is told ad spend is unknown when a Meta line is in another shape, never handed the rest as all of it (3.58851ms)
+✔ typed spend holding a field that is not an id beside a whole entry is unknown, never that entry alone (0.523507ms)
+✔ typed spend holding a value that is not JSON beside a whole entry is unknown, never that entry alone (0.270665ms)
+✔ typed spend holding a value that is not a record beside a whole entry is unknown, never that entry alone (0.136016ms)
+✔ typed spend holding a record of no channel beside a whole entry is unknown, never that entry alone (0.225827ms)
+✔ the model is told ad spend is unknown when a typed entry is in another shape (0.961028ms)
+✔ the spend route answers 503 when a typed entry is in another shape, never the rest as all of it (2.720563ms)
+COUNTED_MEMORY_COMMANDS 110
+COUNTED_MOCK_HTTP 4
+ℹ tests 23
+ℹ suites 0
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 90.029856
+reading Meta's ad spend lines failed UnknownReplyError: Redis answered Meta's ad spend lines in an unknown shape
+    at metaLines (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:50064:62)
+    at async Promise.all (index 1)
+    at async readSpendLines (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:50256:25)
+reading Meta's ad spend lines failed UnknownReplyError: Redis answered Meta's ad spend lines in an unknown shape
+    at metaLines (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:50064:62)
+    at async Promise.all (index 1)
+    at async readSpendLines (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:50256:25)
+    at async Promise.all (index 1)
+    at async POST2 (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:52031:27)
+    at async withMetaRead (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:52084:12)
+    at async TestContext.<anonymous> (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:52116:20)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+reading Meta's ad spend lines failed UnknownReplyError: Redis answered Meta's ad spend lines in an unknown shape
+    at metaLines (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:50064:62)
+    at async Promise.all (index 1)
+    at async readSpendLines (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:50256:25)
+    at async knownSpends (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:51310:17)
+    at async askNumbers (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:51316:18)
+    at async withMetaRead (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:52084:12)
+    at async TestContext.<anonymous> (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:52145:3)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+reading Meta's ad spend lines failed UnknownReplyError: Redis answered Meta's ad spend lines in an unknown shape
+    at metaLines (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:50068:21)
+    at async Promise.all (index 1)
+    at async readSpendLines (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:50256:25)
+    at async knownSpends (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:51310:17)
+    at async askNumbers (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:51316:18)
+    at async withMetaRead (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:52084:12)
+    at async TestContext.<anonymous> (/tmp/z-points-LJiB8u/meta-lines-exact.test.ts.cjs:52179:3)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+meta-spend-review-2924.test.ts
+✔ 1. a kept entry in another shape refuses the add: three tries write nothing (21.87616ms)
+✔ 1. a read after the write that fails answers the lines known, never 'not saved' with the line saved (7.211739ms)
+✔ 1. control: a healthy add writes once and answers both kinds of line (6.223295ms)
+✔ 2. the weekly email's spend: whole, or none at all (4.309645ms)
+✔ 3. disconnecting Meta: a connection read answering no reply is never 'not connected' (2.798438ms)
+✔ 3. disconnecting Meta: a connection read answering cut text is never 'not connected' (2.008946ms)
+✔ 3. disconnecting Meta: a connection read answering a number is never 'not connected' (2.001565ms)
+✔ 3. disconnecting Meta: a deletion answered in no known shape is not 'disconnected' (3.770042ms)
+✔ 3. control: a healthy disconnect forgets the connection and its lines (2.700461ms)
+COUNTED_MEMORY_COMMANDS 120
+COUNTED_MOCK_HTTP 0
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 68.79174
+reading the ad spend back after adding failed UnknownReplyError: Redis answered the ad spend typed in an unknown shape
+    at keptSpends (/tmp/z-points-LJiB8u/meta-spend-review-2924.test.ts.cjs:11112:22)
+    at async typedSpends (/tmp/z-points-LJiB8u/meta-spend-review-2924.test.ts.cjs:11108:11)
+    at async Promise.all (index 0)
+    at async readSpendLines (/tmp/z-points-LJiB8u/meta-spend-review-2924.test.ts.cjs:11118:25)
+    at async addSpend (/tmp/z-points-LJiB8u/meta-spend-review-2924.test.ts.cjs:11172:27)
+    at async settle (/tmp/z-points-LJiB8u/meta-spend-review-2924.test.ts.cjs:11210:21)
+    at async TestContext.<anonymous> (/tmp/z-points-LJiB8u/meta-spend-review-2924.test.ts.cjs:11232:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+reading Meta's ad spend lines failed UnknownReplyError: Redis answered Meta's ad spend lines in an unknown shape
+    at metaLines (/tmp/z-points-LJiB8u/meta-spend-review-2924.test.ts.cjs:11038:62)
+    at async Promise.all (index 1)
+    at async readSpendLines (/tmp/z-points-LJiB8u/meta-spend-review-2924.test.ts.cjs:11118:25)
+    at async spendsForReport (/tmp/z-points-LJiB8u/meta-spend-review-2924.test.ts.cjs:11131:16)
+    at async settle (/tmp/z-points-LJiB8u/meta-spend-review-2924.test.ts.cjs:11210:21)
+    at async TestContext.<anonymous> (/tmp/z-points-LJiB8u/meta-spend-review-2924.test.ts.cjs:11252:22)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+reading ad spend for the weekly email failed UnknownReplyError: Redis answered the ad spend typed in an unknown shape
+    at keptSpends (/tmp/z-points-LJiB8u/meta-spend-review-2924.test.ts.cjs:11112:22)
+    at async typedSpends (/tmp/z-points-LJiB8u/meta-spend-review-2924.test.ts.cjs:11108:11)
+    at async Promise.all (index 0)
+    at async readSpendLines (/tmp/z-points-LJiB8u/meta-spend-review-2924.test.ts.cjs:11118:25)
+    at async spendsForReport (/tmp/z-points-LJiB8u/meta-spend-review-2924.test.ts.cjs:11131:16)
+    at async settle (/tmp/z-points-LJiB8u/meta-spend-review-2924.test.ts.cjs:11210:21)
+    at async TestContext.<anonymous> (/tmp/z-points-LJiB8u/meta-spend-review-2924.test.ts.cjs:11256:23)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+meta-ads.test.ts
+
+Marketing API version
+  ok    without a setting, use the supported Marketing API default
+  ok    an invalid version setting uses the supported default: ""
+  ok    an invalid version setting uses the supported default: " "
+  ok    an invalid version setting uses the supported default: "26.0"
+  ok    an invalid version setting uses the supported default: "v25"
+  ok    an invalid version setting uses the supported default: "v25.0/path"
+  ok    an invalid version setting uses the supported default: "https://example.com"
+  ok    a version explicitly configured for a deployment is still honored
+
+Meta's rows as lines
+  ok    each platform on the channel the numbers count it under
+  ok    in the smallest unit of the account's currency
+  ok    Meta's own utm_source words counted as the channels
+  ok    added up by day, channel and campaign, nothing spent left out
+
+A read replaces its days and keeps the days before, a week to a line
+  ok    the week before is one line over the days it had, the day read again is Meta's new figure
+  ok    and the week's money is all there over its days
+  ok    nothing older than 400 days is kept
+  ok    merging again changes nothing
+  ok    a typed line on a channel and day Meta read is pointed out; another channel is not
+
+Which account is read without asking
+  ok    the only one, or the only active one in the store's currency
+
+Connecting
+  ok    before, the studio offers it and nothing is read
+  ok    Meta's page, asked for ads_read and nothing else
+  ok    another session cannot take it
+  ok    the right session takes it once
+  ok    provider requests use the supported Marketing API version
+  ok    a code Meta refuses keeps nothing
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    without ads_read granted, it is given back and nothing kept
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    one account: read without asking
+  ok    the token is kept sealed, never in the clear
+  ok    it ends when Meta's token ends, about 60 days on
+
+Read into the numbers
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    read
+  ok    every call to Meta carries appsecret_proof
+  ok    Meta's next page is followed
+  ok    Meta's lines come with the typed ones, marked as Meta's
+  ok    the studio says when and how much
+
+A read whose kept lines cannot be read replaces nothing (Claude 6 on #2924)
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    control: a read keeps the line before its 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    kept lines read as not JSON: not read, and the older line is still kept
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    kept lines read as no reply: not read, and the older line is still kept
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    kept lines read as a number: not read, and the older line is still kept
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    kept lines read as a list that is not text: not read, and the older line is still kept
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    kept lines holding a line with no id: not read, and nothing kept is replaced
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    kept lines holding a line of no amount: not read, and nothing kept is replaced
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    kept lines holding text: not read, and nothing kept is replaced
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    kept lines holding null: not read, and nothing kept is replaced
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    back as it was: read again
+
+Another currency is not read
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    the account in the store's currency is still the one read
+  ok    choosing one that is not listed does nothing
+  ok    in EUR for a store in USD: not read, and the lines of the other account are gone
+
+A token Meta refuses
+  ok    provider requests use the supported Marketing API version
+  ok    marks it broken
+  ok    the owner is told once, and the studio says why
+
+The daily pass
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    connecting again works again
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    each store read once a day
+
+Funded new Meta connection phases refuse before provider work
+  ok    a new start stays at the studio
+  ok    valid new callback state cannot exchange credentials without funding
+  ok    canceling remains available
+  ok    no provider request or extra integration allowance
+
+Marked paid Meta spend reads require the current store cohort before new work
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    fresh paid read refuses without a cohort creator month
+  ok    no provider request or spend/read record creator month
+  ok    fresh paid read refuses without a cohort creator year
+  ok    no provider request or spend/read record creator year
+  ok    fresh paid read refuses without a cohort pro month
+  ok    no provider request or spend/read record pro month
+  ok    fresh paid read refuses without a cohort pro year
+  ok    no provider request or spend/read record pro year
+  ok    fresh paid read refuses without a cohort scale month
+  ok    no provider request or spend/read record scale month
+  ok    fresh paid read refuses without a cohort scale year
+  ok    no provider request or spend/read record scale year
+  ok    the actual daily pass skips the unfunded new read
+  ok    connection and cached view remain readable
+  ok    provider requests use the supported Marketing API version
+  ok    retained disconnect still works without a cohort
+
+Meta's notice, and disconnecting
+  ok    a notice signed with the app's secret names the user; another does not
+  ok    every store that user connected forgets it, and what was read
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    disconnecting gives it back to Meta and deletes what was read; the typed line stays
+  ok    disconnecting what is not connected says so
+
+145 checks, all passing.
+COUNTED_MEMORY_COMMANDS 486
+COUNTED_MOCK_HTTP 60
+reading Meta ad spend failed Redis answered the Meta ad spend lines kept in an unknown shape
+reading Meta ad spend failed Redis answered the Meta ad spend lines kept in an unknown shape
+reading Meta ad spend failed Redis answered the Meta ad spend lines kept in an unknown shape
+reading Meta ad spend failed Redis answered the Meta ad spend lines kept in an unknown shape
+reading Meta ad spend failed Redis answered the Meta ad spend lines kept in an unknown shape
+reading Meta ad spend failed Redis answered the Meta ad spend lines kept in an unknown shape
+reading Meta ad spend failed Redis answered the Meta ad spend lines kept in an unknown shape
+reading Meta ad spend failed Redis answered the Meta ad spend lines kept in an unknown shape
+numbers-ask.test.ts
+
+What the model is handed
+  ok    money as the creator reads it, channels by name
+  ok    nothing about any buyer
+  ok    a figure is found only as given
+  ok    complete variant amount reaches assistant
+  ok    partial variant amount withheld
+
+A question
+  ok    answered, with only the figures that are in the numbers
+  ok    one of the month's jobs
+  ok    the question and the numbers reached the model
+  ok    a window or part the panel does not have becomes 30 days and none
+  ok    no answer: the started attempt stays counted
+
+The weekly summary
+  ok    a few sentences from the same numbers
+  ok    none left: the email goes without it
+
+12 checks, all passing.
+COUNTED_MEMORY_COMMANDS 48
+COUNTED_MOCK_HTTP 4
+the writing model refused 500 {}
+daily-cashflow.test.ts
+
+Exact smallest-unit allocation over recorded intervals
+  ok    100 units over three days conserves every unit
+  ok    whole and partitioned intervals agree
+  ok    entries outside selected days cost nothing
+  ok    one day takes its whole amount
+  ok    one smallest unit is not lost across three days
+  ok    multiple overlapping entries conserve their totals
+  ok    all daily allocations conserve 1 units
+  ok    all daily allocations conserve 2 units
+  ok    all daily allocations conserve 5 units
+  ok    all daily allocations conserve 100 units
+  ok    all daily allocations conserve 1001 units
+  ok    all daily allocations conserve 100000000 units
+
+Daily ledger and period ledger use the same arithmetic
+  ok    payments, refund date and rounded spend are explicit
+  ok    renewal and other-channel payments are included
+  ok    daily results sum exactly to channel results
+  ok    days outside selected range are not counted
+  ok    incomplete reading does not invent zero refunds
+  ok    missing daily ledger stays unknown even with old coverage flag
+  ok    recorded zero refunds are zero with complete daily ledger
+  ok    unavailable ad entries are not invented as zero
+  ok    empty recorded entries are genuine zero recorded spend
+  ok    failed or missing sales produce no daily reading
+
+CSV and panel preserve money, negatives and unknowns
+  ok    negative daily results remain negative
+  ok    spreadsheet amounts and loss are numeric
+  ok    yen stays in whole yen
+  ok    unknown refunds and result export blank
+  ok    panel has totals, UTC dates, limits and download
+  ok    newest day is first in table
+  ok    unknown daily ledger has a visible explanation
+  ok    zero-payment refund day is an actual negative result
+
+Assistant and tools reuse the daily reading
+  ok    assistant gets the exact daily result
+  ok    assistant can open daily panel
+  ok    no recorded spend is invented when not loaded
+  ok    tool uses minor units and omits unprovided ads
+  ok    no buyer identities in daily outputs
+  ok    unread sales do not produce daily assistant data
+
+36 checks, all passing.
+COUNTED_MEMORY_COMMANDS 0
+COUNTED_MOCK_HTTP 0
+campaign-results.test.ts
+
+Campaign tags combine channels honestly and keep spend-only activity
+  ok    one tag retains every payment and ad channel
+  ok    one combined traffic count, without duplicating by channel
+  ok    spend-only campaign remains an actual negative gross comparison
+  ok    ads without campaign are disclosed, never assigned to launch
+  ok    tagged and untagged spend conserve the period total
+  ok    old campaigns outside the selected days are omitted
+  ok    highest recorded spend is first
+  ok    organic campaign has zero recorded ads
+  ok    unloaded ads and ad channels remain unknown
+  ok    legacy single-source label does not invent a channel list
+  ok    campaign merge retains all channels without duplicating visits
+  ok    mixed legacy and current inputs do not claim a complete channel list
+
+Incomplete or unavailable paid records are not treated as zero
+  ok    partial readings withhold paid totals and comparisons
+  ok    partial reads still show visits and recorded ads
+  ok    spend-only with failed sales is unknown, not a false loss
+  ok    no date range produces no report
+  ok    legacy inputs without daily dates are handled safely
+
+Rendered table and export explain what the records mean
+  ok    table displays all channels and spend-only campaigns
+  ok    table does not equate paid records with unique buyers or profit
+  ok    report is downloadable and has semantic headers
+  ok    partial reading has a visible explanation
+  ok    untagged-only spend is not hidden
+  ok    CSV keeps dates, channels, counts and amounts
+  ok    negative gross comparison stays numeric
+  ok    incomplete paid figures export as blank
+  ok    yen values follow store currency
+  ok    spreadsheet formula-like tag is escaped
+
+Assistant and tools preserve channels, costs and uncertainty
+  ok    assistant sees the exact channel list and comparison
+  ok    tool gives combined amounts with all payment channels
+  ok    tool does not invent unloaded ad costs
+  ok    no buyer identities are included
+  ok    assistant keeps unprovided campaign costs unknown
+
+32 checks, all passing.
+COUNTED_MEMORY_COMMANDS 0
+COUNTED_MOCK_HTTP 0
+z-2924-meta-spend-partial-derived.proof.ts
+✔ control: wholly valid typed and Meta members produce the known $17 cost (15.550028ms)
+✔ Meta read rejects the whole list when any member is malformed (0.683451ms)
+✔ typed spend read rejects the whole hash when any field value is malformed (0.625567ms)
+✔ partial provider values leave daily ad cost and after-ads result unknown (1.366719ms)
+✔ askNumbers does not hand the partial $17 to the model as all ad spend (22.105687ms)
+✔ weeklySummary does not hand the partial $17 to the model as all ad spend (2.300676ms)
+COUNTED_MEMORY_COMMANDS 63
+COUNTED_MOCK_HTTP 2
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 50.213184
+reading Meta's ad spend lines failed UnknownReplyError: Redis answered Meta's ad spend lines in an unknown shape
+    at metaLines (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial-derived.proof.ts.cjs:11351:21)
+    at async Promise.all (index 1)
+    at async readSpendLines (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial-derived.proof.ts.cjs:11390:27)
+    at async TestContext.<anonymous> (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial-derived.proof.ts.cjs:12443:16)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+reading Meta's ad spend lines failed UnknownReplyError: Redis answered Meta's ad spend lines in an unknown shape
+    at metaLines (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial-derived.proof.ts.cjs:11351:21)
+    at async Promise.all (index 1)
+    at async readSpendLines (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial-derived.proof.ts.cjs:11390:27)
+    at async knownSpends (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial-derived.proof.ts.cjs:12300:16)
+    at async askNumbers (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial-derived.proof.ts.cjs:12306:18)
+    at async TestContext.<anonymous> (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial-derived.proof.ts.cjs:12453:3)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+reading Meta's ad spend lines failed UnknownReplyError: Redis answered Meta's ad spend lines in an unknown shape
+    at metaLines (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial-derived.proof.ts.cjs:11351:21)
+    at async Promise.all (index 1)
+    at async readSpendLines (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial-derived.proof.ts.cjs:11390:27)
+    at async knownSpends (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial-derived.proof.ts.cjs:12300:16)
+    at async weeklySummary (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial-derived.proof.ts.cjs:12334:18)
+    at async TestContext.<anonymous> (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial-derived.proof.ts.cjs:12459:3)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+z-2924-meta-spend-partial.proof.ts
+✔ control: wholly valid typed and Meta members produce the known $17 cost (16.607611ms)
+✔ Meta read rejects the whole list when any member is malformed (0.708829ms)
+✔ typed spend read rejects the whole hash when any field value is malformed (0.503376ms)
+✖ partial provider values leave daily ad cost and after-ads result unknown (1.010835ms)
+✔ askNumbers does not hand the partial $17 to the model as all ad spend (22.742537ms)
+✔ weeklySummary does not hand the partial $17 to the model as all ad spend (2.151562ms)
+COUNTED_MEMORY_COMMANDS 63
+COUNTED_MOCK_HTTP 2
+ℹ tests 6
+ℹ suites 0
+ℹ pass 5
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 51.411762
+
+✖ failing tests:
+
+test at ../../../tmp/z-points-LJiB8u/z-2924-meta-spend-partial.proof.ts.cjs:12440:27
+✖ partial provider values leave daily ad cost and after-ads result unknown (1.010835ms)
+  UnknownReplyError: Redis answered the ad spend typed in an unknown shape
+      at keptSpends (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial.proof.ts.cjs:11385:22)
+      at async typedSpends (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial.proof.ts.cjs:11381:11)
+      at async Promise.all (index 0)
+      at async readSpendLines (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial.proof.ts.cjs:11390:27)
+      at async TestContext.<anonymous> (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial.proof.ts.cjs:12443:16)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+reading Meta's ad spend lines failed UnknownReplyError: Redis answered Meta's ad spend lines in an unknown shape
+    at metaLines (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial.proof.ts.cjs:11351:21)
+    at async Promise.all (index 1)
+    at async readSpendLines (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial.proof.ts.cjs:11390:27)
+    at async TestContext.<anonymous> (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial.proof.ts.cjs:12443:16)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+reading Meta's ad spend lines failed UnknownReplyError: Redis answered Meta's ad spend lines in an unknown shape
+    at metaLines (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial.proof.ts.cjs:11351:21)
+    at async Promise.all (index 1)
+    at async readSpendLines (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial.proof.ts.cjs:11390:27)
+    at async knownSpends (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial.proof.ts.cjs:12300:16)
+    at async askNumbers (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial.proof.ts.cjs:12306:18)
+    at async TestContext.<anonymous> (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial.proof.ts.cjs:12450:3)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+reading Meta's ad spend lines failed UnknownReplyError: Redis answered Meta's ad spend lines in an unknown shape
+    at metaLines (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial.proof.ts.cjs:11351:21)
+    at async Promise.all (index 1)
+    at async readSpendLines (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial.proof.ts.cjs:11390:27)
+    at async knownSpends (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial.proof.ts.cjs:12300:16)
+    at async weeklySummary (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial.proof.ts.cjs:12334:18)
+    at async TestContext.<anonymous> (/tmp/z-points-LJiB8u/z-2924-meta-spend-partial.proof.ts.cjs:12456:3)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)

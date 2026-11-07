@@ -1,0 +1,136 @@
+z-2924-write-ack.proof.ts
+{"firstFailed":false,"beforeRetry":[],"afterRetry":[1200],"total":1200}
+{"ok":false,"kept":[]}
+✔ control: a healthy add records one real line (12.03794ms)
+✔ a lost receipt after applying a write must not make the same retry record the expense twice (3.827509ms)
+✔ a write not applied with an unknown empty receipt must not be reported saved (0.714583ms)
+COUNTED_MEMORY_COMMANDS 22
+COUNTED_MOCK_HTTP 0
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 28.567474
+writing an ad spend line answered no receipt Error: Synthetic applied write receipt lost
+    at store.pipeline (/tmp/z-points-rxGPNo/z-2924-write-ack.proof.ts.cjs:10335:54)
+    at async written (/tmp/z-points-rxGPNo/z-2924-write-ack.proof.ts.cjs:10272:19)
+    at async addSpend (/tmp/z-points-rxGPNo/z-2924-write-ack.proof.ts.cjs:10300:8)
+    at async TestContext.<anonymous> (/tmp/z-points-rxGPNo/z-2924-write-ack.proof.ts.cjs:10339:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+ad-spend-write-receipt.test.ts
+✔ control: a healthy add records one line, confirmed (11.993437ms)
+✔ a receipt lost after the write was applied refuses the add with nothing saved, so the retry records the expense once (4.108577ms)
+✔ a write not applied, with an empty receipt, is never reported saved (1.524055ms)
+✔ an applied write answered with one reply for two commands is undone by its own id and refused, keeping the lines kept before (15.951726ms)
+✔ an applied write answered with an extra reply is undone by its own id and refused, keeping the lines kept before (2.185042ms)
+✔ an applied write answered with the HSET count as text is undone by its own id and refused, keeping the lines kept before (1.562722ms)
+✔ an applied write answered with the HSET count as 0 is undone by its own id and refused, keeping the lines kept before (2.689567ms)
+✔ an applied write answered with the EXPIRE answer as 0 is undone by its own id and refused, keeping the lines kept before (1.272225ms)
+✔ an applied write answered with no list at all is undone by its own id and refused, keeping the lines kept before (1.476161ms)
+✔ when the undoing deletion is unconfirmed too, the outcome is unknown: never saved success, never 'nothing saved' (3.191067ms)
+COUNTED_MEMORY_COMMANDS 141
+COUNTED_MOCK_HTTP 0
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 65.198307
+writing an ad spend line answered no receipt Error: synthetic: the write was applied and its receipt lost
+    at /tmp/z-points-rxGPNo/ad-spend-write-receipt.test.ts.cjs:10343:11
+writing an ad spend line answered no receipt Error: synthetic: receipt lost
+    at store.pipeline (/tmp/z-points-rxGPNo/ad-spend-write-receipt.test.ts.cjs:10380:54)
+    at async written (/tmp/z-points-rxGPNo/ad-spend-write-receipt.test.ts.cjs:10272:19)
+    at async addSpend (/tmp/z-points-rxGPNo/ad-spend-write-receipt.test.ts.cjs:10300:8)
+    at async waitForActual (node:assert:646:5)
+    at async strict.rejects (node:assert:769:25)
+    at async TestContext.<anonymous> (/tmp/z-points-rxGPNo/ad-spend-write-receipt.test.ts.cjs:10385:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+z-2924-deferred-write.proof.ts
+{"phase":"before delayed completion","result":{"ok":false,"reason":"unavailable"},"threw":false}
+{"phase":"after retry and delayed completion","kept":[1200,1200]}
+✔ control: a healthy write records one expense (8.784202ms)
+✔ control: failure before dispatch leaves nothing and a healthy retry records one (2.656443ms)
+✖ cleanup count zero cannot prove a still-pending write will never apply (1.559964ms)
+✖ a pending first write completing after cleanup and retry must not duplicate the expense (2.725743ms)
+COUNTED_MEMORY_COMMANDS 32
+COUNTED_MOCK_HTTP 0
+ℹ tests 4
+ℹ suites 0
+ℹ pass 2
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 28.127211
+
+✖ failing tests:
+
+test at ../../../tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10357:27
+✖ cleanup count zero cannot prove a still-pending write will never apply (1.559964ms)
+  AssertionError [ERR_ASSERTION]: an unresolved write must remain an unknown outcome, not confirmed not-saved
+      at TestContext.<anonymous> (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10363:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10365:27
+✖ a pending first write completing after cleanup and retry must not duplicate the expense (2.725743ms)
+  AssertionError [ERR_ASSERTION]: one expense remains one even when the first transport completes late
+  + actual - expected
+
+    [
+      1200,
+  +   1200
+    ]
+
+      at TestContext.<anonymous> (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10374:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+writing an ad spend line answered no receipt Error: synthetic client transport failed; command completion is unresolved
+    at store.pipeline (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10331:13)
+    at redisPipeline (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:3454:41)
+    at written (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10272:25)
+    at addSpend (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10300:14)
+    at async interrupted (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10336:14)
+    at async TestContext.<anonymous> (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10351:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+writing an ad spend line answered no receipt Error: synthetic client transport failed; command completion is unresolved
+    at store.pipeline (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10331:13)
+    at redisPipeline (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:3454:41)
+    at written (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10272:25)
+    at addSpend (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10300:14)
+    at async interrupted (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10336:14)
+    at async TestContext.<anonymous> (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10359:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+writing an ad spend line answered no receipt Error: synthetic client transport failed; command completion is unresolved
+    at store.pipeline (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10331:13)
+    at redisPipeline (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:3454:41)
+    at written (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10272:25)
+    at addSpend (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10300:14)
+    at async interrupted (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10336:14)
+    at async TestContext.<anonymous> (/tmp/z-points-rxGPNo/z-2924-deferred-write.proof.ts.cjs:10367:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)

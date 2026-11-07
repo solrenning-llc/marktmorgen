@@ -1,0 +1,419 @@
+z-2924-write-ack.proof.ts
+{"firstFailed":true,"beforeRetry":[1200],"afterRetry":[1200,1200],"total":2400}
+{"ok":true,"kept":[]}
+✔ control: a healthy add records one real line (11.140106ms)
+✖ a lost receipt after applying a write must not make the same retry record the expense twice (19.3804ms)
+✖ a write not applied with an unknown empty receipt must not be reported saved (0.889583ms)
+COUNTED_MEMORY_COMMANDS 23
+COUNTED_MOCK_HTTP 0
+ℹ tests 3
+ℹ suites 0
+ℹ pass 1
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 44.952032
+
+✖ failing tests:
+
+test at ../../../tmp/z-points-g36e5l/z-2924-write-ack.proof.ts.cjs:10310:27
+✖ a lost receipt after applying a write must not make the same retry record the expense twice (19.3804ms)
+  AssertionError [ERR_ASSERTION]: one real expense remains one after retry of the refused operation
+  + actual - expected
+
+    [
+      1200,
+  +   1200
+    ]
+
+      at TestContext.<anonymous> (/tmp/z-points-g36e5l/z-2924-write-ack.proof.ts.cjs:10329:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-g36e5l/z-2924-write-ack.proof.ts.cjs:10331:27
+✖ a write not applied with an unknown empty receipt must not be reported saved (0.889583ms)
+  AssertionError [ERR_ASSERTION]: unknown write is never saved success with no saved row
+
+  true !== false
+
+      at TestContext.<anonymous> (/tmp/z-points-g36e5l/z-2924-write-ack.proof.ts.cjs:10343:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+ad-spend-write-receipt.test.ts
+✔ control: a healthy add records one line, confirmed (18.065322ms)
+✖ a receipt lost after the write was applied refuses the add with nothing saved, so the retry records the expense once (1.134429ms)
+✖ a write not applied, with an empty receipt, is never reported saved (3.211025ms)
+✖ an applied write answered with one reply for two commands is undone by its own id and refused, keeping the lines kept before (18.727785ms)
+✖ an applied write answered with an extra reply is undone by its own id and refused, keeping the lines kept before (3.580567ms)
+✖ an applied write answered with the HSET count as text is undone by its own id and refused, keeping the lines kept before (2.45841ms)
+✖ an applied write answered with the HSET count as 0 is undone by its own id and refused, keeping the lines kept before (8.43933ms)
+✖ an applied write answered with the EXPIRE answer as 0 is undone by its own id and refused, keeping the lines kept before (4.48101ms)
+✖ an applied write answered with no list at all is undone by its own id and refused, keeping the lines kept before (5.590462ms)
+✖ when the undoing deletion is unconfirmed too, the outcome is unknown: never saved success, never 'nothing saved' (3.521163ms)
+COUNTED_MEMORY_COMMANDS 95
+COUNTED_MOCK_HTTP 0
+ℹ tests 10
+ℹ suites 0
+ℹ pass 1
+ℹ fail 9
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 183.338671
+
+✖ failing tests:
+
+test at ../../../tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10319:27
+✖ a receipt lost after the write was applied refuses the add with nothing saved, so the retry records the expense once (1.134429ms)
+  Error: synthetic: the write was applied and its receipt lost
+      at /tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10323:11
+
+test at ../../../tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10331:27
+✖ a write not applied, with an empty receipt, is never reported saved (3.211025ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    {
+  +   metaUnread: false,
+  +   ok: true,
+  +   spends: []
+  -   ok: false,
+  -   reason: 'unavailable'
+    }
+
+      at TestContext.<anonymous> (/tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10334:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: [Object],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10345:29
+✖ an applied write answered with one reply for two commands is undone by its own id and refused, keeping the lines kept before (18.727785ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    {
+  +   metaUnread: false,
+  +   ok: true,
+  +   spends: [
+  +     {
+  +       campaign: '',
+  +       cents: 1200,
+  +       channel: 'instagram',
+  +       from: '2026-11-07',
+  +       id: '62e1d94a',
+  +       to: '2026-11-07'
+  +     },
+  +     {
+  +       campaign: '',
+  +       cents: 700,
+  +       channel: 'facebook',
+  +       from: '2026-11-07',
+  +       id: 'c053ecb0',
+  +       to: '2026-11-07'
+  +     }
+  +   ]
+  -   ok: false,
+  -   reason: 'unavailable'
+    }
+
+      at TestContext.<anonymous> (/tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10349:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: [Object],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10345:29
+✖ an applied write answered with an extra reply is undone by its own id and refused, keeping the lines kept before (3.580567ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    {
+  +   metaUnread: false,
+  +   ok: true,
+  +   spends: [
+  +     {
+  +       campaign: '',
+  +       cents: 1200,
+  +       channel: 'instagram',
+  +       from: '2026-11-07',
+  +       id: '416d6948',
+  +       to: '2026-11-07'
+  +     },
+  +     {
+  +       campaign: '',
+  +       cents: 700,
+  +       channel: 'facebook',
+  +       from: '2026-11-07',
+  +       id: 'a5567bcd',
+  +       to: '2026-11-07'
+  +     }
+  +   ]
+  -   ok: false,
+  -   reason: 'unavailable'
+    }
+
+      at TestContext.<anonymous> (/tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10349:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: [Object],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10345:29
+✖ an applied write answered with the HSET count as text is undone by its own id and refused, keeping the lines kept before (2.45841ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    {
+  +   metaUnread: false,
+  +   ok: true,
+  +   spends: [
+  +     {
+  +       campaign: '',
+  +       cents: 1200,
+  +       channel: 'instagram',
+  +       from: '2026-11-07',
+  +       id: '0467996d',
+  +       to: '2026-11-07'
+  +     },
+  +     {
+  +       campaign: '',
+  +       cents: 700,
+  +       channel: 'facebook',
+  +       from: '2026-11-07',
+  +       id: '7eb80f7d',
+  +       to: '2026-11-07'
+  +     }
+  +   ]
+  -   ok: false,
+  -   reason: 'unavailable'
+    }
+
+      at TestContext.<anonymous> (/tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10349:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: [Object],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10345:29
+✖ an applied write answered with the HSET count as 0 is undone by its own id and refused, keeping the lines kept before (8.43933ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    {
+  +   metaUnread: false,
+  +   ok: true,
+  +   spends: [
+  +     {
+  +       campaign: '',
+  +       cents: 700,
+  +       channel: 'facebook',
+  +       from: '2026-11-07',
+  +       id: 'db166afb',
+  +       to: '2026-11-07'
+  +     },
+  +     {
+  +       campaign: '',
+  +       cents: 1200,
+  +       channel: 'instagram',
+  +       from: '2026-11-07',
+  +       id: 'fd9949d6',
+  +       to: '2026-11-07'
+  +     }
+  +   ]
+  -   ok: false,
+  -   reason: 'unavailable'
+    }
+
+      at TestContext.<anonymous> (/tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10349:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: [Object],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10345:29
+✖ an applied write answered with the EXPIRE answer as 0 is undone by its own id and refused, keeping the lines kept before (4.48101ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    {
+  +   metaUnread: false,
+  +   ok: true,
+  +   spends: [
+  +     {
+  +       campaign: '',
+  +       cents: 700,
+  +       channel: 'facebook',
+  +       from: '2026-11-07',
+  +       id: '703fa6cc',
+  +       to: '2026-11-07'
+  +     },
+  +     {
+  +       campaign: '',
+  +       cents: 1200,
+  +       channel: 'instagram',
+  +       from: '2026-11-07',
+  +       id: 'b3a2b14b',
+  +       to: '2026-11-07'
+  +     }
+  +   ]
+  -   ok: false,
+  -   reason: 'unavailable'
+    }
+
+      at TestContext.<anonymous> (/tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10349:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: [Object],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10345:29
+✖ an applied write answered with no list at all is undone by its own id and refused, keeping the lines kept before (5.590462ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    {
+  +   metaUnread: false,
+  +   ok: true,
+  +   spends: [
+  +     {
+  +       campaign: '',
+  +       cents: 700,
+  +       channel: 'facebook',
+  +       from: '2026-11-07',
+  +       id: 'a509b081',
+  +       to: '2026-11-07'
+  +     },
+  +     {
+  +       campaign: '',
+  +       cents: 1200,
+  +       channel: 'instagram',
+  +       from: '2026-11-07',
+  +       id: 'bc75b6fa',
+  +       to: '2026-11-07'
+  +     }
+  +   ]
+  -   ok: false,
+  -   reason: 'unavailable'
+    }
+
+      at TestContext.<anonymous> (/tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10349:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: [Object],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10355:27
+✖ when the undoing deletion is unconfirmed too, the outcome is unknown: never saved success, never 'nothing saved' (3.521163ms)
+  AssertionError [ERR_ASSERTION]: The validation function is expected to return "true". Received false
+
+  Caught error:
+
+  Error: synthetic: receipt lost
+      at async TestContext.<anonymous> (/tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10365:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: Error: synthetic: receipt lost
+        at store.pipeline (/tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10360:54)
+        at async addSpend (/tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10277:3)
+        at async waitForActual (node:assert:646:5)
+        at async strict.rejects (node:assert:769:25)
+        at async TestContext.<anonymous> (/tmp/z-points-g36e5l/ad-spend-write-receipt.test.ts.cjs:10365:5)
+        at async Test.run (node:internal/test_runner/test:1409:7)
+        at async Test.processPendingSubtests (node:internal/test_runner/test:974:7),
+    expected: [Function (anonymous)],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+z-2924-deferred-write.proof.ts
+{"phase":"before delayed completion","threw":true}
+{"phase":"after retry and delayed completion","kept":[1200,1200]}
+✔ control: a healthy write records one expense (13.701495ms)
+✔ control: failure before dispatch leaves nothing and a healthy retry records one (2.383418ms)
+✔ cleanup count zero cannot prove a still-pending write will never apply (2.234075ms)
+✖ a pending first write completing after cleanup and retry must not duplicate the expense (3.967153ms)
+COUNTED_MEMORY_COMMANDS 29
+COUNTED_MOCK_HTTP 0
+ℹ tests 4
+ℹ suites 0
+ℹ pass 3
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 34.444705
+
+✖ failing tests:
+
+test at ../../../tmp/z-points-g36e5l/z-2924-deferred-write.proof.ts.cjs:10345:27
+✖ a pending first write completing after cleanup and retry must not duplicate the expense (3.967153ms)
+  AssertionError [ERR_ASSERTION]: one expense remains one even when the first transport completes late
+  + actual - expected
+
+    [
+      1200,
+  +   1200
+    ]
+
+      at TestContext.<anonymous> (/tmp/z-points-g36e5l/z-2924-deferred-write.proof.ts.cjs:10354:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

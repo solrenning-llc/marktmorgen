@@ -5,7 +5,7 @@ import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, RUN_KEEP_SECONDS, activeFlowL
 import { type WaitReason, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { END, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
-import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, forgetHeldCommand, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts } from "@/lib/flow-runs";
+import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, forgetHeldCommand, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runCount, runPeople, settleAttempts } from "@/lib/flow-runs";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 /**
@@ -262,6 +262,63 @@ export const flowListUnits = (db: number, sent: number): number => ledgerUnits(d
 
 const utf8Bytes = (text: string) => Buffer.byteLength(text, "utf8");
 
+/** The commands one studio request is priced at (tests/plan-cost-registry.ts, UNIT_COST.studio): one more for each of them an erasure sends. */
+export const FLOW_UNIT_COMMANDS = 20;
+/** The longest address a run holds (lib/auth.ts, normaliseEmail). */
+const LONGEST_ADDRESS_BYTES = 254;
+/**
+ * Bytes erasing one person's run takes besides their queued steps, at the
+ * most: their key in the index read, their address asked for and answered,
+ * and the deletions of their run, its history, their start and their places
+ * in the two indexes, with the replies. About 970 measured with a 42-byte
+ * address (tests/flow-page-units.test.ts); with the longest address and room.
+ */
+export const PURGE_PERSON_BYTES = 1_500;
+/** What erasing a workflow's runs sends whatever their number: its index read, then deleted, and its tallies. */
+export const PURGE_FLOW = { commands: 3, bytes: 1_000 };
+
+/**
+ * What erasing every run of one workflow takes at the most (purgeFlow), for
+ * `people` people: for each, their address read (one command), their run and
+ * history, their places in the two indexes and their start deleted (four),
+ * and their steps in the queue and its lease removed under every address the
+ * store has had (`handles`) and at every step, a thousand members a command.
+ * Pure.
+ */
+export function purgeCost(people: number, listId: string, handles: string[], flowId: string): { commands: number; bytes: number } {
+  const queued = Math.max(1, handles.length) * MAX_STEPS;
+  // listId|handle|flowId|step|email, quoted, with its comma.
+  const member = utf8Bytes(listId) + Math.max(0, ...handles.map(utf8Bytes)) + utf8Bytes(flowId) + String(MAX_STEPS - 1).length + LONGEST_ADDRESS_BYTES + 4 + 3;
+  const each = { commands: 1 + 4 + 2 * Math.ceil(queued / 1000), bytes: PURGE_PERSON_BYTES + 2 * queued * member };
+  const n = Math.max(0, Math.ceil(people));
+  return { commands: PURGE_FLOW.commands + n * each.commands, bytes: PURGE_FLOW.bytes + n * each.bytes };
+}
+
+/**
+ * What the studio's email page sends on for each byte of the list of
+ * workflows: the list in the page's flight data, escaped once more inside the
+ * HTML (at most twice its bytes: a quote kept as two bytes crosses as four),
+ * and what the page draws of it, its names and conditions (at most the list
+ * once more).
+ */
+export const PAGE_SENT_TIMES = 3;
+
+/**
+ * The store's workflows for the studio's email page, through the same meter
+ * as the studio's actions on them (FlowMeter): measured before they are read,
+ * and what reading them and sending them on comes to taken first. Refused
+ * with why (an empty message when the studio requests could not be counted),
+ * and nothing of them read. Throws when they cannot be read.
+ */
+export async function readFlowsForPage(listId: string | null, charge: FlowCharge): Promise<{ ok: true; flows: Flow[] } | { ok: false; refused: string }> {
+  try {
+    return { ok: true, flows: await new FlowMeter(charge, PAGE_SENT_TIMES).list(listId) };
+  } catch (error) {
+    if (error instanceof FlowNotCounted) return { ok: false, refused: error.said };
+    throw error;
+  }
+}
+
 /**
  * One studio action's meter for the store's workflows (review of #1927,
  * 7 November 2026): every studio action on them reads the whole list, and
@@ -275,9 +332,11 @@ const utf8Bytes = (text: string) => Buffer.byteLength(text, "utf8");
 export class FlowMeter {
   private db = 0;
   private sent = 0;
+  private commands = 0;
   private taken = 0;
 
-  constructor(private readonly charge: FlowCharge) {}
+  /** `sentTimes`: what is sent on for each byte of the list sent back (PAGE_SENT_TIMES for the email page). */
+  constructor(private readonly charge: FlowCharge, private readonly sentTimes = 1) {}
 
   /** The list, read strictly once it is counted; `sends` when the action sends it back. */
   async list(listId: string | null, sends = true): Promise<Flow[]> {
@@ -302,10 +361,26 @@ export class FlowMeter {
     await this.take(bytes, bytes);
   }
 
-  private async take(db: number, sent: number): Promise<void> {
+  /**
+   * Before a workflow is removed: what erasing every run of it takes
+   * (purgeFlow), from the number of people in its index, counted before
+   * any of them is read, and the runs that may start before the list is
+   * written (two UTC days' room, dailyRunLimit). Not counted, or not left:
+   * FlowNotCounted, and nothing is written or erased.
+   */
+  async purge(store: Store, flowId: string): Promise<void> {
+    if (!store.listId) return;
+    const counted = await runCount(flowId).catch(() => null);
+    if (counted === null) throw new FlowNotCounted("");
+    const cost = purgeCost(counted + 2 * dailyRunLimit(store), store.listId, [store.handle, ...(store.previousHandles ?? [])], flowId);
+    await this.take(cost.bytes, 0, cost.commands);
+  }
+
+  private async take(db: number, sent: number, commands = 0): Promise<void> {
     this.db += db;
-    this.sent = Math.max(this.sent, sent);
-    const due = flowListUnits(this.db, this.sent) - this.taken;
+    this.sent = Math.max(this.sent, sent * this.sentTimes);
+    this.commands += commands;
+    const due = flowListUnits(this.db, this.sent) + Math.ceil(this.commands / FLOW_UNIT_COMMANDS) - this.taken;
     if (due <= 0) return;
     const counted = await this.charge(due).catch(() => ({ ok: false as const, message: "" }));
     if (!counted.ok) throw new FlowNotCounted(counted.message);
@@ -454,6 +529,8 @@ export async function removeFlow(store: Store, id: string, meter?: FlowMeter): P
   if (!store.listId) return { ok: false, reason: "unknown" };
   const flows = meter ? await meter.list(store.listId) : await readFlowListStrict(store.listId);
   if (!flows.some((f) => f.id === id)) return { ok: false, reason: "unknown" };
+  // Erasing its runs below is taken for first: without it, the workflow stays with every run of it.
+  await meter?.purge(store, id);
   const next = flows.filter((f) => f.id !== id);
   await writeFlows(store, store.listId, next, meter);
   // Its runs, their history, starts and queued steps: nothing of the people in it is kept.

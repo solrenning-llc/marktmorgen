@@ -451,6 +451,18 @@ export async function runPeople(flowId: string, page = 500): Promise<{ person: s
   return out;
 }
 
+/**
+ * How many people have a run of this workflow in its index, before any of
+ * them is read: for counting what erasing them takes (lib/flows.ts,
+ * FlowMeter.purge). null when it did not come back.
+ */
+export async function runCount(flowId: string): Promise<number | null> {
+  const reply = await redisPipeline([["ZCARD", indexKey(flowId)]]).catch(() => null);
+  if (!replied(reply, 1)) return null;
+  const count = Number(reply[0]);
+  return Number.isSafeInteger(count) && count >= 0 ? count : null;
+}
+
 /** The index of a workflow's runs, once every run in it has been erased. */
 export const forgetIndexCommand = (flowId: string): (string | number)[] => ["DEL", indexKey(flowId)];
 /** A store's held runs, all of them: for a store being deleted. */

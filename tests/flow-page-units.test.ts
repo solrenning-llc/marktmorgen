@@ -206,7 +206,10 @@ async function main(): Promise<void> {
     } finally {
       redis.pipeline = base;
     }
-    is("refused, in words", unknown.result !== "threw" && !unknown.result.ok && unknown.result.refused.length > 10, true);
+    // Regra 23 (changed after the RED commit): the reader refuses with an empty reason when nothing could be counted,
+    // as FlowNotCounted("") does for the route, and the page says it with NOT_COUNTED (lib/person-agenda-read.ts).
+    is("refused, with no count to say", unknown.result !== "threw" && !unknown.result.ok ? unknown.result.refused : unknown.result, "");
+    is("which the page says in words", /refused \|\| NOT_COUNTED/.test(page), true);
     is("nothing read", unknown.tally.flowsRead, 0);
   }
 

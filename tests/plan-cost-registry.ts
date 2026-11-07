@@ -1176,7 +1176,13 @@ export const COST_LINES: CostLine[] = [
       // request's own fifty kilobytes, flowListUnits more studio requests are taken before each move (review of #1927,
       // 7 November 2026; tests/flow-save-units.test.ts measures it through the route, the worst list included).
       { file: "lib/flows.ts", names: ["class FlowMeter", "flowListUnits", "ledgerUnits(db) + sentUnits(sent)", "await meter?.write(json);", "opts.meter ? await opts.meter.list(store.listId)"] },
-      { file: "app/api/store/mail/route.ts", names: ["new FlowMeter((units) => countUnits(counted, units))", "saveFlow(store, raw, { meter: flowMeter() })", "setFlowActive(store, text(body.id, 40), body.active === true, flowMeter())", "removeFlow(store, text(body.id, 40), flowMeter())", "setUpStarters(store, flowMeter())", "flowMeter().list(store.listId, false)", "error instanceof FlowNotCounted"] },
+      { file: "app/api/store/mail/route.ts", names: ["new FlowMeter((units) => countUnits(counted, units))", "saveFlow(store, raw, { meter: flowMeter() })", "setFlowActive(store, text(body.id, 40), body.active === true, flowMeter())", "removeFlow(store, text(body.id, 40), flowMeter())", "setUpStarters(store, flowMeter())", "flowMeter().list(store.listId, false)", "error instanceof FlowNotCounted", "resolveHeldRun(store, id, run, choice, flows)"] },
+      // The studio's email page reads the workflows through the same meter, what it sends on counted at PAGE_SENT_TIMES; a
+      // workflow removed has the erasure of every run of it taken for first (purgeCost: its people counted before any is read,
+      // and two days' runs that may start meanwhile), or it stays with them (tests/flow-page-units.test.ts, 7 November 2026).
+      { file: "lib/flows.ts", names: ["readFlowsForPage", "PAGE_SENT_TIMES", "sent * this.sentTimes", "FLOW_UNIT_COMMANDS", "purgeCost", "await meter?.purge(store, id);", "counted + 2 * dailyRunLimit(store)", "read ?? (await readFlowListStrict(store.listId))"] },
+      { file: "lib/flow-runs.ts", names: ["export async function runCount"] },
+      { file: "app/studio/email/page.tsx", names: ["readFlowsForPage(store.listId, payStudio)", "countUnits(store, units)", "flowsRefused"] },
       // A store that kept tasks about people before their count has every task read once to make it, after tasksRecountUnits studio requests are taken (review of #1959, 4 November 2026).
       { file: "lib/crm.ts", names: ["TASKS_RECOUNT_UNITS", "tasksRecountUnits", "TASK_COUNT_FIELD"] },
       // The agenda of everyone's tasks reads every task: tasksRecountUnits(people) studio requests first, refused without reading (review of f6bd3d1f4, M1).

@@ -36,19 +36,12 @@ export async function POST(request: NextRequest) {
   if (!isDiscordConfigured() || !store.sid || !(await readServer(storeKey(store)))) return page("off");
   if (!(await withinStore("discord-join", clientAddress(request), 20, 600, store, "buyer"))) return page("failed");
 
-  // An order or a link that could not be checked just now is said as such ("unchecked"), never as no purchase.
   let email: string | null = null;
   if (sessionId) {
     const order = await readOrder(store, sessionId);
-    if (order.state === "error") return page("unchecked");
     email = order.state === "paid" && !order.gift && !order.group ? order.email : null;
   } else if (token) {
-    try {
-      email = await ordersGrant(store, token);
-    } catch (error) {
-      console.error("reading a purchases link for Discord failed", error);
-      return page("unchecked");
-    }
+    email = await ordersGrant(store, token);
   }
   if (!email) return page("none");
   const redirect = redirectUri(origin);

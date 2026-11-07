@@ -114,7 +114,7 @@ export async function pauseMembership(store: Store, token: string, subscription:
  */
 export async function resumeMembership(store: Store, token: string, subscription: string, now = Math.floor(Date.now() / 1000)): Promise<ResumeResult> {
   // Read and changed under the membership's lock: a second press reads it after the first's change, no longer paused.
-  const done = await underLock(subscription, "resuming a membership", async (): Promise<ResumeResult | { ok: true; account: string }> => {
+  const done = await underLock(subscription, "resuming a membership", async (): Promise<Extract<ResumeResult, { ok: false }> | { ok: true; account: string }> => {
     let found: Awaited<ReturnType<typeof memberSub>>;
     try {
       found = await memberSub(store, token, subscription);

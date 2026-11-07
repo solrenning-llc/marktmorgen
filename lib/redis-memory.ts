@@ -125,6 +125,22 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
+        if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, listKey, id, kept] = args;
+          this.live(listKey);
+          if (!this.data.has(listKey)) return null;
+          for (const raw of this.list(listKey).slice(0, Number(kept))) {
+            if (!raw.includes(`"id":"${id}"`)) continue;
+            try {
+              const value = JSON.parse(raw) as unknown;
+              if (!value || typeof value !== "object" || Array.isArray(value) || (value as { id?: unknown }).id === id) return raw;
+            } catch {
+              return raw;
+            }
+          }
+          return null;
+        }
         // lib/agent-book.ts AGENT_BOOK_WRITE: the agent book written only while the writer still holds the store's lock.
         if (key.startsWith("-- marktmorgen:agent-book-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, book, token, json] = args;

@@ -29,7 +29,10 @@ export const readMembers = async (_community: string, keys: string[]) => new Map
 export const mailableMembers = async () => members;
 export const readMember = async () => null;
 export const setMail = async () => {};
-export const setMemberToken = async () => {};
+/** Whether a member's stop-link token write is refused, as patchMember refuses an unknown read (lib/community.ts). */
+export let tokenWriteFails = false;
+export const setTokenWriteFails = (fails: boolean) => { tokenWriteFails = fails; };
+export const setMemberToken = async () => { if (tokenWriteFails) throw new Error("synthetic unknown member read"); };
 export const holdsTicket = async () => true;
 export const mayAttend = async () => true;
 export const readEvent = async () => event;
@@ -50,12 +53,13 @@ export const fromLine = () => "Synthetic <sender@example.com>";
 export const storeSender = fromLine;
 export const monthlyAllowance = () => 100;
 export const reserve = async () => "ok";
-export const release = async () => {};
+export const released: number[] = [];
+export const release = async (_store: unknown, n: number) => { released.push(n); };
 export const render = (_store: unknown, subject: string, text: string) => ({ subject, text, html: text, headers: {} });
 export const bodyHtml = (text: string) => text;
 export const orderWrite = async () => {};
 export const alertCreator = async () => false;
 
 export function reset(): void {
-  db.clear(); commandsSeen.length = 0; sent.length = 0; readReply = null;
+  db.clear(); commandsSeen.length = 0; sent.length = 0; readReply = null; released.length = 0; tokenWriteFails = false;
 }

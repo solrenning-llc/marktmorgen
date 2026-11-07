@@ -1,6 +1,6 @@
 import { advanceAnnouncement, type AnnouncementJob } from "@/lib/community-mail";
 import { advanceEventJob, type EventMailJob } from "@/lib/community-event-mail";
-import { commandsSeen, db, event, members, reset, sent, setReadReply, store } from "./community-mail-read-world";
+import { commandsSeen, db, event, members, released, reset, sent, setReadReply, setTokenWriteFails, store } from "./community-mail-read-world";
 import { done, is, part } from "./check";
 
 const id = "e".repeat(24);
@@ -73,6 +73,29 @@ async function main(): Promise<void> {
     setReadReply(() => [Object.freeze([...keys])]);
     const tail = await advance(id, async () => store, Date.now() + 10_000);
     is("confirmed final short batch preserves earlier progress", [tail?.status, tail?.done, tail?.sent, sent.length], ["sent", 3, 3, 1]);
+  }
+  part("announcement: a stop link that could not be kept is never sent, and the send stays pending");
+  {
+    reset();
+    const job = { id, community: store.community!.id, handle: store.handle, post: "f".repeat(12),
+      subject: "Synthetic announcement", body: "Synthetic body", total: 2, done: 0, sent: 0, status: "sending", note: "", failures: 0,
+    } as AnnouncementJob;
+    db.run(["SET", "nl:cm:mail:" + id, JSON.stringify(job)]);
+    db.run(["RPUSH", "nl:cm:mail:" + id + ":to", ...keys]);
+    db.run(["SADD", "nl:cm:mailq", id]);
+    const kept = members[0].t;
+    members[0].t = "";
+    setTokenWriteFails(true);
+    let result: Awaited<ReturnType<typeof advanceAnnouncement>> | "thrown" = null;
+    try { result = await advanceAnnouncement(id, async () => store, Date.now() + 10_000); } catch { result = "thrown"; }
+    const saved = JSON.parse(String(db.run(["GET", "nl:cm:mail:" + id])));
+    is("nothing sent, no progress, the reservation given back", [sent.length, saved.done, saved.sent, released], [0, 0, 0, [2]]);
+    is("said as still pending, never thrown out of the mail job", result !== "thrown" && [result?.status, /couldn.t save/i.test(result?.note ?? "")], ["waiting", true]);
+    is("the list and the pending queue survive", [db.run(["LRANGE", "nl:cm:mail:" + id + ":to", 0, -1]), db.run(["SMEMBERS", "nl:cm:mailq"])], [keys, [id]]);
+    setTokenWriteFails(false);
+    const resumed = await advanceAnnouncement(id, async () => store, Date.now() + 10_000);
+    is("once the token is kept, the same batch goes out", [resumed?.status, resumed?.sent, sent.length], ["sent", 2, 1]);
+    members[0].t = kept;
   }
   done();
 }

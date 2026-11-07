@@ -69,7 +69,7 @@ export async function paidStoreSitemap(store: Store, now = Date.now()): Promise<
   const size = await sitemapSize(store);
   if (!size) return null;
   if (!(await takePublicRequest(store, "public", now, sitemapUnits(size)))) return null;
-  return storeSitemap(store, Math.floor(now / 1000), size.postPages);
+  return storeSitemap(store, Math.floor(now / 1000), size.postPages).catch(() => null);
 }
 
 export type SitemapEntry = { url: string; lastModified?: string };

@@ -131,6 +131,32 @@ async function main() {
   part("The payment read is this payment, but its expanded charge belongs to another payment and is disputed");
   await triedAgain("othercharge", true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: OTHER_INTENT, disputed: true }) }) }, 1);
 
+  // Claude 6 on #3097 (the same MEDIUM as Codex G's on #3120): a paid payment whose intent does not read, or a list that
+  // is not whole, is not "this invoice was paid by nothing"; settling "none" there would close the member for good.
+  const noIntentInvoice = { id: INVOICE, object: "invoice", payment_intent: null };
+  part("The invoice names no payment, and its own paid payment is listed with no readable intent");
+  await triedAgain(
+    "paidnointent",
+    false,
+    {
+      invoice: noIntentInvoice,
+      listed: { object: "list", has_more: false, data: [{ id: "inpay_closeown2", object: "invoice_payment", invoice: INVOICE, status: "paid", payment: { type: "payment_intent", payment_intent: 7 } }] },
+      intent: ownIntent,
+    },
+    2,
+  );
+
+  part("The invoice names no payment, and the list of its payments is not whole (has_more)");
+  await triedAgain("notwhole", false, { invoice: noIntentInvoice, listed: { object: "list", has_more: true, data: [{ id: "inpay_closeown3", object: "invoice_payment", invoice: INVOICE, status: "failed" }] }, intent: ownIntent }, 2);
+
+  part("The invoice names no payment, and the list says whether it is whole in no readable way");
+  await triedAgain("nohasmore", false, { invoice: noIntentInvoice, listed: { object: "list", data: [] }, intent: ownIntent }, 2);
+
+  part("Control: a whole list with no paid payment still settles the member none");
+  const nonePaid = await run("nonepaid", false, { invoice: noIntentInvoice, listed: { object: "list", has_more: false, data: [{ id: "inpay_closeown4", object: "invoice_payment", invoice: INVOICE, status: "failed" }] }, intent: ownIntent });
+  is("nothing POSTed", posts, []);
+  is("settled none", [nonePaid.settled, nonePaid.result?.none], ["none", 1]);
+
   part("Control: this payment's own disputed charge still settles the member disputed, with nothing POSTed");
   const disputed = await run("owndisputed", true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id, disputed: true }) }) });
   is("nothing POSTed", posts, []);

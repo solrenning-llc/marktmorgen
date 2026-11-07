@@ -12,6 +12,11 @@
  *       strike. Its statement of reasons is still owed (EU DSA Art. 17(1): owed once the restriction was imposed, even
  *       if lifted since), so it stays listed, with a note that it is back up, and the press sends it once, in the kept
  *       words, under the takedown's own idempotency key (coordinator's legal correction, 7 Nov 2026).
+ *   G   (Claude 6, focal 6713440905): the steps are written before the content is touched, so they say a takedown
+ *       started, not that it is down. When the store write fails before it lands, the owed button sends no email and
+ *       writes no strike, and the page does not list it as taken down; when the write landed without being confirmed,
+ *       the content is down and the owed button finishes it (one strike, one email); old steps with no `applied`
+ *       field are read the same way.
  *   LOW1 the owed list says what is known: "Taken down, but we could not confirm the creator was told".
  *   LOW2 the page keeps working when the owed list cannot be read, and says so.
  *   LOW3 the owed set's SADD/EXPIRE replies are checked: unknown stops before the content is touched.
@@ -89,7 +94,7 @@ async function main(): Promise<void> {
   await setStripeAccount(owner, "acct_1TestReview001", true);
   await setSubscription(owner, { customerId: "cus_Review001", subscriptionId: "sub_Review001", active: true, period: paidPeriod() });
   const links: string[] = [];
-  for (const title of ["First track", "Second track", "Third track", "Fourth track", "Fifth track", "Sixth track"]) {
+  for (const title of ["First track", "Second track", "Third track", "Fourth track", "Fifth track", "Sixth track", "Seventh track", "Eighth track", "Ninth track"]) {
     const made = await addStoreLink(owner, title, `https://example.com/${title.toLowerCase().replace(" ", "-")}`);
     if (!made.ok) throw new Error(`setup: ${title}`);
     links.push(made.store.links.find((l) => l.title === title)!.id);
@@ -296,6 +301,88 @@ async function main(): Promise<void> {
     is("the retry finishes: one strike, one email, the store still off", [second.status, (await strikes()) - before, sent.length, Boolean((await store()).suspended)], [200, 1, 1, true]);
   }
 
+  // The next pipeline after the owed set is written fails: the store write times out before it lands.
+  const failAfterOwed = () => {
+    let armed = false;
+    fault = (commands) => {
+      if (armed) {
+        fault = null;
+        return "throw";
+      }
+      if (on("SADD", owedKey)(commands)) armed = true;
+      return undefined;
+    };
+  };
+  /** Whether the page lists that takedown as owed ("threw" when the list cannot be read). */
+  const lists = async (part: string) => {
+    const listed = await owedNow();
+    return listed === "threw" ? "threw" : listed.value.some((o) => `${o.action.type}-${"id" in o.action ? o.action.id : ""}` === part);
+  };
+
+  part("G, link: the owed button never tells of a takedown that did not land (Claude 6, focal 6713440905)");
+  {
+    const id = links[6];
+    sent.length = 0;
+    const before = await strikes();
+    failAfterOwed();
+    const first = await answer({ type: "link", id });
+    fault = null;
+    is("the store write timed out: an error, and the link is still up", [first.status, first.error, await linkUp(id)], [500, "error", true]);
+    is("the page does not list it as taken down", await lists(`link-${id}`), false);
+    const press = await answer({ type: "link", id }, true);
+    is("the owed press does not answer Done", press.status === 200, false);
+    is("no email, no strike, the link still up", [sent.length, (await strikes()) - before, await linkUp(id)], [0, 0, true]);
+    const real = await answer({ type: "link", id });
+    is("the normal button still takes it down and tells the creator once", [real.status, await linkUp(id), sent.length, (await strikes()) - before], [200, false, 1, 1]);
+  }
+
+  part("G, product: the owed button never tells of an unpublish that did not land (Claude 6, focal 6713440905)");
+  {
+    const id = ids[1];
+    sent.length = 0;
+    const before = await strikes();
+    failAfterOwed();
+    const first = await answer({ type: "product", id });
+    fault = null;
+    is("the store write timed out: an error, and the product is still published", [first.status, first.error, await published(id)], [500, "error", "published"]);
+    is("the page does not list it as taken down", await lists(`product-${id}`), false);
+    const press = await answer({ type: "product", id }, true);
+    is("the owed press does not answer Done", press.status === 200, false);
+    is("no email, no strike, still published", [sent.length, (await strikes()) - before, await published(id)], [0, 0, "published"]);
+  }
+
+  part("G: a takedown that landed without being confirmed is finished by the owed button");
+  {
+    const id = links[7];
+    const key = stepsKey(`link-${id}`);
+    sent.length = 0;
+    const before = await strikes();
+    fault = (commands) => (on("SET", key, (c) => String(c[2]).includes('"applied":true'))(commands) ? "throw" : undefined);
+    const first = await answer({ type: "link", id });
+    fault = null;
+    is("the link went, but its mark was not confirmed: an error, nothing sent", [first.status, first.error, await linkUp(id), sent.length], [500, "error", false, 0]);
+    is("the page lists it as taken down, owed", await lists(`link-${id}`), true);
+    const press = await answer({ type: "link", id }, true);
+    is("the owed press finishes it: Done, one strike, one email", [press.status, (await strikes()) - before, sent.length], [200, 1, 1]);
+  }
+
+  part("G: steps kept before the `applied` field, content down, are finished");
+  {
+    const id = links[8];
+    const key = stepsKey(`link-${id}`);
+    sent.length = 0;
+    const before = await strikes();
+    const at = String(Date.now() - 60_000);
+    await realPipeline([["SET", key, JSON.stringify({ what: 'The link "Ninth track" (https://example.com/ninth-track)', howLong: "How long: for good.", at, noted: false, counted: false, sent: false }), "EX", 3600]]);
+    await realPipeline([["SADD", owedKey, `link-${id}`]]);
+    const { removeStoreLink } = await import("@/lib/store");
+    const gone = await removeStoreLink(owner, id);
+    if (!gone.ok || (await linkUp(id))) throw new Error("setup: the link did not go");
+    is("listed as owed", await lists(`link-${id}`), true);
+    const press = await answer({ type: "link", id }, true);
+    is("the owed press finishes it: Done, one strike, one email", [press.status, (await strikes()) - before, sent.length], [200, 1, 1]);
+  }
+
   part("LOW1, LOW2: the page says only what is known");
   {
     const page = readFileSync("app/takedown/[token]/page.tsx", "utf8");
@@ -303,6 +390,7 @@ async function main(): Promise<void> {
     is("the old heading is gone", page.includes("the creator was not told yet"), false);
     is("an owed list that cannot be read is said, and the page goes on", page.includes("We could not check whether an email to the creator is still owed."), true);
     is("the owed button presses the owed path", /label="Send the email to the creator"[^>]*owed|owed[^>]*label="Send the email to the creator"/.test(page), true);
+    is("the owed button says honestly when no email was sent because the takedown was not confirmed", readFileSync("components/takedown-actions.tsx", "utf8").includes("we could not confirm it was taken down"), true);
     is("content up again is noted, still owed", page.includes("It is back up now; the email still explains why it was taken down."), true);
     is("no answer refuses the owed email for content up again", [readFileSync("components/takedown-actions.tsx", "utf8").includes("up_again"), readFileSync("app/api/takedown/route.ts", "utf8").includes("up_again")], [false, false]);
   }

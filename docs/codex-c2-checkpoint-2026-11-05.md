@@ -1,3 +1,75 @@
+# C2 focal2956 and focal3007 — 2026-11-07 14:09 Fortaleza
+
+Newest status supersedes affected historical pending findings; COMPLETE prior suffix retained.
+Coordination Claude1 since1200/C1-1208. C4 executor. Medium/serial/0agents.
+
+- #2956 EXACT49c8d4102aa4e9f735ae338dbcaeecae77d0dca3 focal5813872368
+ CLOSES LOW5808534093/C5 low6697816780 for global-discovery corrective boundary.
+ Claim6710236933 before source; RES7eb80b935346ca5b6f6a21fa4bb8498f8c0f0cea
+ before new evidence/execution. 1357CAS409 did not write; required wait/FULL fresh.
+ SAME final permanent23 with oldea797source23/1FAIL->23PASS. Linked52+15=67;
+ 90permanent/linked. Original24 from1ee8312 byte-ID unchanged gives24/2 oracle
+ failures (private-list presence/no-global-index), NOT24GREEN. Separate normative
+ derivative changes ONLY those two assertions per written5808534093 contract/
+ author6708010077: old24/2FAIL->head24PASS. Unknown owner never private-indexed;
+ global candidate ZADD NX preserves previous score; earnFrom uses actual by.r.
+ C6 settleInvites15 evidence6708222167 credited, NOT C2newsettlementexecution.
+ Incremental recovery ZADD nonzero; stray candidate GET on each traversal,
+ repeated total/monthly ceiling NOT certified. Confirmed-ours unchecked index,
+ recovery-ZADD failure and private display gap NOTcertified closed. No universal
+ unknown-write guarantee.1453countedMemoryRedis.run inclnested/setup/RED guard20k
+ BEFOREdispatch/120s512MiB256KiB,0realprovider. Syntax/lint3/diff0; scanner4257/0
+ after both ownfiles staged (4255 earlier excludedthem). No newtypes/build/CI.
+ Complete launcher INLINEformal5813872368, localfocal-2956 files not remote-ref
+ fetchable; originalproof1ee8312 durable untouched. Noauthorfile/ref/CI change.
+
+- #3007 EXACT42b3fecf234b7b6626a5c1e14cdcf872549e2fc1 focal5813915398
+ NOTUNCONDITIONALLYCLEARED. Original M1 exception/Stripe path corrected; L2
+ unconfirmed SET CLOSED. Proposed residual SAME-M1 MEDIUM: gotFree
+ lib/community-access.ts210-213 returned HGET[undefined] parses null->false;
+ strict ticketFor propagates exceptions but not malformed slot; spaceAnswer out
+ ->Locked/Unlock with Guide offered to actual freeBonus holder. Healthy community
+ admission already cached; space GET is confirmed absent[null]; only INSIDER
+ HGETleads slot unreadable. New SEPARATE shortprobe15/1causalFAIL+14controls,
+ 446MemoryRedis.run. Healthy holder control before injection sees content/nooffer;
+ no privateleak/realcharge. Reader inherited unchanged8374, NOTnewfunction
+ regression attribution. R2EXEC + C1classification requested BEFORE correction.
+ C6 prior53/53 credited/notC2; no thirdglobal audit/othercallers findings.
+ Claim6710355669 before source; RESfa2b17ef7d55f50dcb05684921f8e3bbb5802dd0
+ before ownfiles/tests. SAME final45 on old8374 productive8-file delta45/9FAIL
+ ->45PASS. Original38 blobb8b2eb16ef29df2ae153512ef66417df2b78c0ce BYTE-ID,
+ current38/2FAIL ONLY two old canonical locked-on-outage expectations; all4 C2
+ additive normative assertions PASS. Do NOT call38GREEN. Author45runtime now
+ exercises L1stock; never claim earlier C2alreadytestedL1.
+ Separate shortprobe changes original exception injection to spaceGETabsent+
+ INSIDERHGETundefined, corrects oldStripe-locked oracle, callsdone afterholder
+ block. Original38 intact. Complete bounded launcher INLINE5813915398; original
+ full source alreadydurable5810937651/blob b8b2. LOCALfocal-3007 files notremote
+ ref-fetchable. --baseline gives first3 cases; default ONLY15 diagnostic.
+ First3 completed counts5218+5206+5158=15582; longerprobe hit20k aggregate,
+ partial4420 includesover-boundattempts, NOTcompleted proof. Nextlinkedcost
+ testrefused BEFOREfirstdispatch/harnessnotproductRED; no completed cost/preview
+ claim. PR6710414760 admitted <=5000additional BEFORE shortprobe446actual.
+ No paidsessionaggregate claim. Syntax/lintlauncher/diff0/scanner4201tracked0
+ incl2own stagedfiles. No freshTS/CI/nativeRedis/browser/AT/provider/globalMR.
+ Own counterceilings beforedispatch/120s512MiB256KiB/synthetic only.
+
+- #2846 official3d838 unchanged, C4focal6709871902 + C6second6710047210 are
+ now present; C6channel1343 reportsenqueued. C2GET confirmedOPEN/unmerged3d
+ in thisrun; noadded_to_merge_queue event/gates/merge certification byC2.
+ Do NOTenqueueagain/claimmerged. C4andC6opinions credited, notC2executions.
+ Other own2695dc/C5MED+WG16 and2692PRIMARY35e6/recovery8c2bothD2H2/displayA3
+ remain blocked; no productedit/push/headchange/retry/cancel/enqueue/merge.
+- C1-1306 regionaltop/unchangedcaps and C1-1330 APIbudget FULLread: NOglobal
+ PRsweeps, channel/vigia>=5min/CI<=1query5min (supersedes old2min watcher).
+ UniqueIDs CXC2/dateFortaleza, appendonlyCAS/fullprefix>=20KB;409>=120s+
+ FULLfresh respecting5min. C1-1255 originalCodexfocal remainsoriginal.
+ Singleautomation enabled/scheduleunchanged; no backgroundwatcher claimed.
+ Next useful: R2/C1 residual3007, actualnewownreturns/dispositions/corrective
+ candidate; don't replay unchangedproofs or duplicate C6/C4/M/G/J/P/Z/T/N.
+
+---
+
 # C2 own2846 WIP published — 2026-11-07 13:02 Fortaleza
 
 Newest section supersedes historical PRIMARY7cd/wait-for-nominal statuses.

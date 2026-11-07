@@ -81,6 +81,8 @@ export type PlanRefundReading =
 type Row = Record<string, unknown>;
 const obj = (v: unknown): Row | null => (v && typeof v === "object" && !Array.isArray(v) ? (v as Row) : null);
 const idOf = (v: unknown): string => (typeof v === "string" ? v : typeof obj(v)?.id === "string" ? String(obj(v)!.id) : "");
+/** Whether Stripe's reply is the object asked for, by its own id (rule 30): another's, or one with none, decides nothing. */
+const isOwnReply = (reply: Row, id: string): boolean => Object.hasOwn(reply, "id") && reply.id === id;
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : Number.NaN);
 
 class Spent extends Error {}
@@ -313,6 +315,8 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
           // own earlier plans (started again since) is this store's: not decided here, never a silent no.
           if (!INVOICE_ID.test(invoiceId)) return { refund: { kind: "unknown", reason: "unreadable" } };
           const earlier = await get(`/invoices/${encodeURIComponent(invoiceId)}?expand[]=subscription`);
+          // Another invoice's reply, or one with no id: whose the first payment was is not known, so not decided here.
+          if (!isOwnReply(earlier, invoiceId)) return { refund: { kind: "unknown", reason: "unreadable" } };
           const named = obj(obj(earlier.subscription)?.metadata)?.store;
           const handles = new Set([store.handle, ...store.previousHandles]);
           if (typeof named === "string" && handles.has(named)) return { refund: { kind: "unknown", reason: "not_this_store" } };

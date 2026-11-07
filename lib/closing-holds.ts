@@ -74,6 +74,8 @@ const INVOICE_ID = /^in_[A-Za-z0-9]{6,64}$/;
 const INTENT_ID = /^pi_[A-Za-z0-9]{6,64}$/;
 
 type Row = HeldSub & Record<string, unknown>;
+/** Whether Stripe's reply is the object asked for, by its own id (rule 30): another's, or one with none, decides nothing. */
+const isOwnReply = (reply: Record<string, unknown>, id: string): boolean => Object.hasOwn(reply, "id") && reply.id === id;
 type Cursor = { h: number; p: string };
 
 const parseCursor = (raw: unknown): Cursor => {
@@ -323,6 +325,9 @@ export async function retryHolds(store: Store, endedAt: number, until: number): 
         return;
       }
       const sub = (await onAccount("GET", account, `/subscriptions/${encodeURIComponent(id)}?expand[]=customer`)) as Row;
+      // Another subscription's reply, or one with no id: nothing is known of this member. It stays to be tried again
+      // tomorrow (its call spent, as for any failed read), never dropped and never another subscription held in its place.
+      if (!isOwnReply(sub, id)) throw new Error("Stripe answered for another subscription");
       if (!chargeable(sub) || (sub.metadata?.store_hold === String(endedAt) && sub.pause_collection)) {
         await redisPipeline([["HDEL", workKey(folder), `f:${id}`]]);
         return;

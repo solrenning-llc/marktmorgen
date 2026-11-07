@@ -622,7 +622,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           "A payment plan cannot be canceled from your page; a buyer who needs to change something replies to their order confirmation email, which reaches you.",
           `A payment request is one payment: no installments on requests yet. Up to ${REQUEST_LIMITS.creator.open} open at once on ${PLAN_TITLES.creator}, ${REQUEST_LIMITS.pro.open} on ${PLAN_TITLES.pro} and ${REQUEST_LIMITS.scale.open} on ${PLAN_TITLES.scale}; each link takes payment for ${OPEN_DAYS} days.`,
           "Pay what you want is for a product with one price, sold once: not with memberships, price options, payment plans, the box at checkout, calls or discount codes.",
-          "Questions are short answers, numbers, lists or a phone number: no checkbox question, and none on free products.",
+          "Questions are short answers, numbers, lists, a yes or no choice or a phone number: no checkbox question, and none on free products.",
           "Stripe shows its own consent box only on checkouts of US businesses, so outside the United States the reminder after an unpaid checkout reaches only a buyer who goes back from the checkout and asks for it. A call's reminder needs that box, so outside the United States none is sent for calls or live sessions.",
         ],
       },

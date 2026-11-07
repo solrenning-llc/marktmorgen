@@ -190,7 +190,7 @@ const NOT_BUILT = [
   "More than 2,000 products in one store",
   "Zoom links made for each booking or live event, for every store: the code is written, and it waits for Zoom to approve our Marketplace app",
   "An app in the App Store or Google Play",
-  "Checkbox questions at checkout: short answers, numbers, a choice from a list and a phone number can be asked, but not a checkbox",
+  "Checkbox questions at checkout: short answers, numbers, a choice from a list, a yes or no choice and a phone number can be asked, but not a checkbox",
   "Streaming or recording live sessions and events here, rather than on the service whose link you give or on Jitsi Meet",
   "Importing a course's text, downloads and pictures from another platform (its videos become lessons, up to 50 at once), or giving past buyers a call",
 ];

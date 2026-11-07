@@ -1,3 +1,9 @@
+# Recibo de publicação — 07/11/2026 01h43 Fortaleza
+
+Ponto de parada publicado no canal em **918cbdf98a01a8f6d61a7cff58fe856b7a43893a**, blob **94ad1d74f10f7f676d22b8824e6f3e72c0ac590e**, identificador CXZ-20261107-0143-C4-1. A tentativa409 anterior não gravou; retentativa após>=120s com FULL fresco preservado. C4-20261107-0139-TODOS-1 lida e aplicada: sem repetição de teste/revisão, gasto sem prova ou unidade artificial. Próximos e os três bloqueios independentes estão no bloco abaixo; nenhum produto/CI/retentativa/merge adicional no intervalo.
+
+---
+
 # Estado vigente — 07/11/2026: #3039 MERGED; três unidades próprias aguardam retornos
 
 PR #3039 incorporado normalmente em **150599ffa3ced8f977bdea7f4aedc4bb26b81009**, expected_head **12bcc1a16ce46f74c46037a5d0c8aaa29eedcd90**. GET posterior confirmou closed/merged true e o mesmo head. Recibo PR **6702359227**. Focal C5 **6701860935** fecha os achados de registro/teste; não certifica margem global nem funding/runtime do produto.

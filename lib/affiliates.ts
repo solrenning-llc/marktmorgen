@@ -564,7 +564,9 @@ export async function signInLinkFor(store: Store, email: string, origin: string)
   if (!affiliate) return null;
   const token = randomBytes(32).toString("hex");
   const grant: LinkGrant = { s: store.statsId as string, e: affiliate.email, n: "" };
-  await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", AFFILIATE_LINK_SECONDS]]);
+  // Offered only once Redis said it stored it: an unanswered or odd reply is no link (rule 24), never one that lands on "expired".
+  const saved = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", AFFILIATE_LINK_SECONDS]]), 1);
+  if (saved?.[0] !== "OK") return null;
   return `${origin}/@${store.handle}/affiliates?token=${token}`;
 }
 
@@ -786,7 +788,9 @@ export async function invitePartner(input: {
 
   const token = randomBytes(32).toString("hex");
   const grant: LinkGrant = { s: statsId, e: email, n: "Invited as a partner", k: 1, p: share };
-  await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", AFFILIATE_LINK_SECONDS]]);
+  // A paid email only with a link Redis said it stored (rule 24).
+  const saved = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", AFFILIATE_LINK_SECONDS]]), 1);
+  if (saved?.[0] !== "OK") return "error";
   const sent = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
     to: email,

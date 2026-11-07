@@ -42,6 +42,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { personKeys, personWrite } from "@/lib/joined-stores";
+import { repliesFor as exactReplies } from "@/lib/redis-reply";
 
 export const HUB_LINK_SECONDS = 24 * 60 * 60;
 export const HUB_TOKEN = /^[0-9a-f]{64}$/;
@@ -87,7 +88,9 @@ export async function requestHubLink(input: { email: string; ip: string; origin:
   const stores = await storesPromoted(email);
   if (!stores.length) return "sent";
   const token = randomBytes(32).toString("hex");
-  await redisPipeline([["SET", linkKey(token), email, "EX", HUB_LINK_SECONDS]]);
+  // A paid email only with a link Redis said it stored (rule 24): otherwise nothing is sent, and the page says to try again.
+  const saved = exactReplies(await redisPipeline([["SET", linkKey(token), email, "EX", HUB_LINK_SECONDS]]), 1);
+  if (saved?.[0] !== "OK") return "error";
   const link = `${input.origin}/affiliate?token=${token}`;
   // One of the access emails of the first store in the list (lib/store-allowance-rules.ts).
   const charged = await storeForId(stores[0]).catch(() => null);

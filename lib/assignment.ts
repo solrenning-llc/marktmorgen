@@ -4,6 +4,7 @@
  *
  *   nl:course:<course>:task:<lesson>              the prompt and its switches
  *   nl:course:<course>:task:<lesson>:sub:<who>    one student's work, and what came back
+ *   nl:course:<course>:task:<lesson>:sub:<who>:lock  one hand-in of that work at a time, a minute at most
  *   nl:course:<course>:task:<lesson>:files        every file handed in for it, and its size, to delete with it
  *   nl:course:<course>:tasks:waiting              work waiting for the creator, oldest first
  *   nl:course:<course>:tasks:all                  all the work handed in, by when it last was
@@ -20,6 +21,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { ENTRY_BYTES, dataBytes } from "@/lib/store-data-rules";
@@ -265,6 +267,21 @@ export async function releaseBytes(room: string, bytes: number): Promise<void> {
   if (!isRedisConfigured() || !(bytes > 0)) return;
   const [left] = await redisPipeline([["DECRBY", bytesKey(room), Math.ceil(bytes)]]);
   if (typeof left === "number" && Number.isSafeInteger(left) && left < 0) await redisPipeline([["SET", bytesKey(room), 0]]);
+}
+
+/** How long one hand-in holds its work's lock at most, and how long the next one waits for it. */
+const HAND_IN_LOCK_SECONDS = 60;
+const HAND_IN_WAIT_MS = 5_000;
+
+/**
+ * One hand-in of one student's work on one lesson at a time (CX-123 rule 24): two at once would each read the same
+ * earlier work, each answer its file as the one replaced and give its room back twice, and the file one of them
+ * handed in would stay stored with no work keeping it. The route runs everything from reading the earlier work to
+ * deleting the file it replaced inside this. A lock still taken after the wait throws LockBusyError before anything
+ * is read or taken, so the student can simply hand in again.
+ */
+export function oneHandInAtATime<T>(courseId: string, lessonId: string, who: string, work: () => Promise<T>): Promise<T> {
+  return withLock(`${subKey(courseId, lessonId, who)}:lock`, HAND_IN_LOCK_SECONDS, HAND_IN_WAIT_MS, () => work());
 }
 
 /** What handing in did: where the work stands, and the earlier file it replaced, with its size, to delete. */

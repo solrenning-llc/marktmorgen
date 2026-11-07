@@ -13,14 +13,17 @@
  *   - taking a photo off needs no put and no slot;
  *   - a counter that cannot be read is taken as the ceiling, never as zero;
  *   - deleting the review and writing it again does not reset the count (review M1 on #2863): the count is also kept
- *     on its own hash beside the product's reviews, which a buyer's delete and a person's erasure leave in place; it
- *     goes only with the product's reviews (dropReviews) or the store.
+ *     on its own hash beside the product's reviews, which a buyer's delete leaves in place; it goes with a person's
+ *     erasure (second review of #2863: the id is computed again from their address), with the product's reviews
+ *     (dropReviews) or with the store;
+ *   - no helper puts a review photo without a slot.
  */
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/review/route";
 import { addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { dropReviews, forgetReviewsPerson, parseReview, readReview, reviewId } from "@/lib/reviews";
 import * as summaryRules from "@/lib/review-summary";
+import * as reviewPhoto from "@/lib/review-photo";
 import { REVIEW_NOTICES } from "@/components/review-form";
 import { GIVING_WORDS } from "@/lib/buyer-words/giving";
 import { PERSON_DATA } from "@/lib/person-data";
@@ -147,9 +150,16 @@ async function main() {
     is(`round ${round}: no new put`, blobControl.puts.length, 3);
     is(`round ${round}: the new record carries the kept count`, (await kept(idOne) as unknown as { photoPuts?: number })?.photoPuts, 3);
   }
-  is("a person's erasure of their reviews leaves the count too", (await forgetReviewsPerson(statsId, [productId], SESSIONS[ONE].email, store)).records, 1);
-  is("after the erasure, a review with a photo is saved without it", statusOf(await send(ONE, { photo: jpeg(800, 600), text: "After erasure." })), "photoLimit");
-  is("still no new put", blobControl.puts.length, 3);
+  const countKey = `nl:rev:${statsId}:${productId}:photos`;
+  is("control: the buyer's own delete keeps the count", [statusOf(await send(ONE, { action: "delete" })), redis.run(["HGET", countKey, idOne])], ["deleted", "3"]);
+
+  part("A person's erasure takes the count too (second review of #2863): nothing is left under an id their address gives again");
+  is("erased with their review already deleted: no review to delete", (await forgetReviewsPerson(statsId, [productId], SESSIONS[ONE].email, store)).records, 0);
+  is("the count under their id is gone", redis.run(["HGET", countKey, idOne]), null);
+  is("written again after the erasure, a photo is a new review's first", statusOf(await send(ONE, { photo: jpeg(800, 600), text: "After erasure." })), "saved");
+  is("one new put, inside a new slot", blobControl.puts.length, 4);
+  is("erased with the review there", (await forgetReviewsPerson(statsId, [productId], SESSIONS[ONE].email, store)).records, 1);
+  is("its count goes with it", redis.run(["HGET", countKey, idOne]), null);
 
   part("A put that fails after its slot was granted");
   blobControl.fail = true;
@@ -158,7 +168,7 @@ async function main() {
   is("the words were saved", (await kept(idTwo))?.text, "Words from two.");
   is("with no photo", (await kept(idTwo))?.photo ?? null, null);
   is("the slot stays used: the cost side fails closed", (await kept(idTwo) as unknown as { photoPuts?: number })?.photoPuts, 1);
-  is("one put was tried", blobControl.puts.length, 4);
+  is("one put was tried", blobControl.puts.length, 5);
 
   part("The kept count read in an unknown shape is the ceiling, never zero");
   const SESSION_THREE = "cs_test_reviewphotolimit00003";
@@ -172,18 +182,21 @@ async function main() {
   const unknownStatus = statusOf(await send(SESSION_THREE, { photo: jpeg(1200, 900), text: "Words from three." }));
   redis.pipeline = original;
   is("a new review whose kept count reads garbled: the words are saved, the photo refused", unknownStatus, "photoLimit");
-  is("no put for it", blobControl.puts.length, 4);
+  is("no put for it", blobControl.puts.length, 5);
 
   part("The kept count goes with the product's reviews");
-  const countKey = `nl:rev:${statsId}:${productId}:photos`;
   is("control: the count is kept on its own hash", redis.keys().includes(countKey), true);
   await dropReviews(statsId, productId);
   is("dropReviews deletes it with the reviews", redis.keys().includes(countKey), false);
   is(
-    "what a person's erasure keeps says so, for the person's own page",
-    PERSON_DATA.some((line) => line.file === "lib/reviews.ts" && line.how === "kept" && "only" in line && line.only === "person" && /new photos/.test(line.what)),
+    "the person's own page says the count is erased with their reviews",
+    PERSON_DATA.some((line) => line.file === "lib/reviews.ts" && line.how === "erased" && /new photos/.test(line.what)),
     true,
   );
+  is("and never that it is kept", PERSON_DATA.some((line) => line.file === "lib/reviews.ts" && line.how === "kept" && /new photos|one-way id/.test(line.what)), false);
+
+  part("No put outside a granted slot (second review of #2863, LEVE)");
+  is("the photo module has no helper that puts without a slot", "keepReviewPhoto" in reviewPhoto, false);
 
   part("The counter as kept");
   const raw = (extra: Record<string, unknown>) =>

@@ -168,6 +168,19 @@ async function carryOut(meter: Meter, folder: string, month: string, adding: Add
 }
 
 /**
+ * Writes the month's billed figure once a line is on the invoice, then lets its record go. The record is what stops a
+ * second charge, so it is deleted only after an exact "OK" for the figure (Claude 6 on #2944): sent in one request, a
+ * refused write (Redis out of memory) with the delete still run lost the record while the figure stayed where it was,
+ * and the next run charged the line again. Any other answer throws with the record kept: the next run finds the line
+ * on the invoice and writes the figure then.
+ */
+async function closeLine(meter: Meter, folder: string, month: string, billed: number): Promise<void> {
+  const wrote = repliesFor(await redisPipeline([["SET", billedKey(meter, folder, month), billed, "EX", KEEP_SECONDS]]), 1);
+  if (!wrote || wrote[0] !== "OK") throw new UnknownReplyError("a usage month's billed figure written after its line");
+  await redisPipeline([["DEL", addingKey(meter, folder, month)]]);
+}
+
+/**
  * A once-only mark (CX-123 rule 24), the same rule as lib/claim-mark.ts
  * (#2714), kept here until that file is on this branch: SET NX with a value
  * no other attempt writes. "OK", one reply for the one command, is ours and
@@ -263,13 +276,29 @@ export async function settleUsage(meter: Meter, folder: string, month: string, f
     await redisPipeline([["DEL", addingKey(meter, folder, month)]]);
     unfinished = null;
   }
+  // A line already on the invoice, found below, that is closed without being asked for again.
+  let onInvoice = false;
   if (unfinished && unfinished.to > owed) {
-    // Written down for more than the meter owes now: never finished, so
-    // nothing past what is owed reaches an invoice. Since 31 October 2026
+    // Written down for more than the meter owes now. Since 31 October 2026
     // every meter owes nothing (232 [CA1] unit 3), so a line begun before
-    // then is dropped here instead of being charged after use.
-    await redisPipeline([["DEL", addingKey(meter, folder, month)]]);
-    unfinished = null;
+    // then is dropped here instead of being charged after use, but only once
+    // Stripe says it never got it (Claude 6 on #2944): its charge may have
+    // landed with the answer lost, and dropped, the month was charged again
+    // from what was billed. Found there, it counts as billed; Stripe not
+    // asked or not answering, the record is kept for the next run.
+    let there: boolean | null = null;
+    if (isBillingConfigured()) {
+      there = await findInvoiceLine(unfinished.customerId, mark(meter, folder, month, unfinished.from), Math.floor(unfinished.at / 1000) - 60).catch((error) => {
+        console.error(`looking up a ${meter.name} line past what is owed failed`, error);
+        return null;
+      });
+    }
+    if (there === null) return { ...out, state: "failed" };
+    if (there) onInvoice = true;
+    else {
+      await redisPipeline([["DEL", addingKey(meter, folder, month)]]);
+      unfinished = null;
+    }
   }
   if (!unfinished) {
     if (owed - billed <= 0) return out;
@@ -282,14 +311,11 @@ export async function settleUsage(meter: Meter, folder: string, month: string, f
   // A line that was being added when the last run ended: finished first,
   // for the customer it was begun for.
   if (unfinished) {
-    if (!isBillingConfigured() || !(await carryOut(meter, folder, month, unfinished))) return { ...out, state: "failed" };
+    if (!onInvoice && (!isBillingConfigured() || !(await carryOut(meter, folder, month, unfinished)))) return { ...out, state: "failed" };
     billed = unfinished.to;
     out.added += unfinished.to - unfinished.from;
     out.state = "billed";
-    await redisPipeline([
-      ["SET", billedKey(meter, folder, month), billed, "EX", KEEP_SECONDS],
-      ["DEL", addingKey(meter, folder, month)],
-    ]);
+    await closeLine(meter, folder, month, billed);
     await monthlyFor(store, unfinished.subscriptionId);
   }
 
@@ -314,10 +340,7 @@ export async function settleUsage(meter: Meter, folder: string, month: string, f
   const wrote = repliesFor(await redisPipeline([["SET", addingKey(meter, folder, month), JSON.stringify(adding), "EX", KEEP_SECONDS]]), 1);
   if (!wrote || wrote[0] !== "OK") throw new UnknownReplyError("a usage line written down before its charge");
   if (!(await carryOut(meter, folder, month, adding))) return { ...out, state: "failed" };
-  await redisPipeline([
-    ["SET", billedKey(meter, folder, month), owed, "EX", KEEP_SECONDS],
-    ["DEL", addingKey(meter, folder, month)],
-  ]);
+  await closeLine(meter, folder, month, owed);
   out.added += due;
   await monthlyFor(store, store.subscriptionId);
   return { ...out, state: "billed" };

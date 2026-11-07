@@ -272,7 +272,8 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", `nl:watch:adding:${ana.folder}:${month}`, JSON.stringify({ from: 0, to: 150, at: now, amount: VIDEO_SECONDS_INCLUDED + 50 * HOUR, line: "old line", customerId: "cus_Ana0001", subscriptionId: "sub_Ana0001" })]]);
   const stale = await settleAt(ana.folder, month, true, now);
   is("an unfinished line from before is dropped, not finished", [stale.state, stale.added, lines.length, (await redis.pipeline([["GET", `nl:watch:adding:${ana.folder}:${month}`]]))[0]], ["nothing", 0, 0, null]);
-  is("Stripe is never asked to add a line", [stripeAsked.filter((p) => p.includes("invoiceitems")).length, lines.length], [0, 0]);
+  // Asked only whether that old line is there before it is dropped (Claude 6 on #2944), never to add one.
+  is("Stripe is never asked to add a line", [stripeAsked.filter((p) => p.startsWith("POST") && p.includes("invoiceitems")).length, lines.length], [0, 0]);
   is("the legacy price is kept only as history: the meter does not use it", videoOwedCents(VIDEO_SECONDS_INCLUDED + HOUR) > 0, true);
 
   part("A store with no plan that can be charged");

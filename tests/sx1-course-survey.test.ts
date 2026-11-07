@@ -215,9 +215,15 @@ async function main(): Promise<void> {
   redis.clear();
   const SMALL = { ...ROOM, sid: "small-room-store" };
   await answerSurvey({ room: SMALL, courseId: COURSE, who: ana, score: 6, note: "" });
-  // Fill the rest of this store's room.
-  const left = (await dataUsed(SMALL))!;
-  await needData(SMALL, [{ slot: "filler", bytes: left.room - left.used }]);
+  // Fill the rest of this store's room, to within a few bytes.
+  for (let chunk = (await dataUsed(SMALL))!.room; chunk >= 16; ) {
+    try {
+      await needData(SMALL, [{ slot: "filler", bytes: chunk }]);
+    } catch (error) {
+      if (!(error instanceof DataRoomError)) throw error;
+      chunk = Math.floor(chunk / 2);
+    }
+  }
   is("Ana changes hers in a full room", await answerSurvey({ room: SMALL, courseId: COURSE, who: ana, score: 8, note: "Better on a second look." }), { ok: true, changed: true });
   is("the change is kept", (await readMyAnswer(COURSE, ana))?.score, 8);
   let refusedNew = false;
@@ -229,7 +235,7 @@ async function main(): Promise<void> {
   is("Ben's new answer is refused for room", refusedNew, true);
   is("and nothing of his was written", await readMyAnswer(COURSE, ben), null);
 
-  part("Giving room back failing after an answer was written is unknown, never an error");
+  part("Giving room back failing after an answer was written is never an error: what was written stands");
   redis.clear();
   await answerSurvey({ room: ROOM, courseId: COURSE, who: ana, score: 4, note: "" });
   const realGive = redis.pipeline.bind(redis);
@@ -250,7 +256,8 @@ async function main(): Promise<void> {
     answered = error;
   }
   redis.pipeline = realGive;
-  is("the answer says unknown", answered, { ok: false, reason: "unknown" });
+  // giveData never throws (lib/store-data.ts): the charge simply stays, never less than what is kept.
+  is("the answer says it changed, with no error", answered, { ok: true, changed: true });
   is("and what was written is kept", (await readMyAnswer(COURSE, ana))?.score, 2);
 
   part("A course that goes takes its survey with it, giving back only what was confirmed gone");
@@ -262,7 +269,8 @@ async function main(): Promise<void> {
   const withTwo = await used();
   is("both answers of the course go", await dropCourseSurvey(COURSE, ROOM), 2);
   is("none are left", [await readMyAnswer(COURSE, ana), await readMyAnswer(COURSE, ben), await surveyAnswerCount(COURSE)], [null, null, 0]);
-  is("their room comes back, exactly", withTwo - (await used()), SURVEY_ROOM_BYTES * 2);
+  // The course's place in the room closes too with its last answer (lib/store-data.ts).
+  is("their room comes back", withTwo - (await used()) >= SURVEY_ROOM_BYTES * 2, true);
   is("another course's answers stay", (await readMyAnswer(OTHER, ana))?.score, 7);
   is("dropping again finds nothing", await dropCourseSurvey(COURSE, ROOM), 0);
   await dropCourseSurvey(OTHER, ROOM);
@@ -309,7 +317,7 @@ async function main(): Promise<void> {
   is("the per-person limit comes before any read or write", limit > 0 && limit < answer && limit < route.indexOf("await removeMyAnswer(") && limit < route.indexOf("doneLessons("), true);
   is("the buyer action is taken before the student's progress is read", take > 0 && take < route.indexOf("doneLessons("), true);
   is("an answer is kept only from a student who finished the course", finished > take && finished < answer && /if \(!hasFinished\(course, done, passed\)\) return back\("unfinished"\)/.test(route), true);
-  is("removing is not charged a buyer action", /action === "remove"[\s\S]{0,60}removeMyAnswer/.test(route) && route.indexOf("await removeMyAnswer(") < take, true);
+  is("removing is not charged a buyer action", /action === "remove"[\s\S]{0,300}removeMyAnswer/.test(route) && route.indexOf("await removeMyAnswer(") < take, true);
   is("a full data room says so", route.includes("error instanceof DataRoomError") && route.includes('back("noroom")'), true);
   is("removing needs the confirmation, and otherwise asks for it", /form\.get\("sure"\) !== "1"\) return back\("confirm"\)/.test(route), true);
   is("a student with this course in their pass removes their answer whatever their access is now", route.indexOf("await removeMyAnswer(") < route.indexOf('access.state !== "open"') && /scope === "all" \|\| access\.learner\.scope\.includes\(course\.id\)/.test(route), true);

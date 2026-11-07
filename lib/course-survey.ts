@@ -50,6 +50,26 @@ if count >= most then return 4 end
 redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
 return 1`;
 
+/**
+ * Changes one student's answer only when they already have one, without any
+ * room taken: a kept answer is charged at its largest, so a change never
+ * keeps more. KEYS: the course's answers; ARGV: the student's key, the
+ * record. Answers 2 when it changed, 0 when there was none to change.
+ */
+export const CHANGE_SURVEY_ANSWER = `-- marktmorgen:course-survey-change:v1
+if redis.call("HEXISTS", KEYS[1], ARGV[1]) == 0 then return 0 end
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
+return 2`;
+
+/**
+ * Takes a whole course's answers away, when the course goes. KEYS: the
+ * course's answers. Answers how many there were, all gone.
+ */
+export const DROP_ALL_SURVEY_ANSWERS = `-- marktmorgen:course-survey-drop-all:v1
+local count = redis.call("HLEN", KEYS[1])
+redis.call("DEL", KEYS[1])
+return count`;
+
 /** Takes one student's answer out. KEYS: the course's answers; ARGV: the student's key. Answers 1 when one went, 0 when there was none. */
 export const DROP_SURVEY_ANSWER = `-- marktmorgen:course-survey-drop:v1
 return redis.call("HDEL", KEYS[1], ARGV[1])`;
@@ -103,12 +123,22 @@ export async function answerSurvey(input: {
   if (score === null) return { ok: false, reason: "score" };
   if (!isRedisConfigured()) return { ok: false, reason: "unknown" };
   const answer: SurveyAnswer = { score, note: cleanSurveyNote(input.note), at: input.now ?? Math.floor(Date.now() / 1000) };
+  const record = serializeAnswer(answer);
+  // A change first, with no room taken: a full room never refuses one.
+  let changed: unknown;
+  try {
+    [changed] = exactReplies(await redisPipeline([["EVAL", CHANGE_SURVEY_ANSWER, 1, surveyKey(input.courseId), input.who, record]]), 1, "a course survey answer's change");
+  } catch {
+    return { ok: false, reason: "unknown" };
+  }
+  if (changed === 2) return { ok: true, changed: true };
+  if (changed !== 0) return { ok: false, reason: "unknown" };
   const charge = [{ slot: SURVEY_SLOT(input.courseId), bytes: SURVEY_ROOM_BYTES }];
   await needData(input.room, charge);
   let written: unknown;
   try {
     [written] = exactReplies(
-      await redisPipeline([["EVAL", SET_SURVEY_ANSWER, 1, surveyKey(input.courseId), input.who, serializeAnswer(answer), MAX_COURSE_ANSWERS]]),
+      await redisPipeline([["EVAL", SET_SURVEY_ANSWER, 1, surveyKey(input.courseId), input.who, record, MAX_COURSE_ANSWERS]]),
       1,
       "a course survey answer's write",
     );
@@ -117,15 +147,17 @@ export async function answerSurvey(input: {
     return { ok: false, reason: "unknown" };
   }
   if (written === 1) return { ok: true, changed: false };
-  if (written === 2) {
+  if (written !== 2 && written !== 4 && written !== 0) return { ok: false, reason: "unknown" };
+  // Nothing new kept: an answer that came in between was changed, or nothing was written. The charge goes
+  // back; if that fails, the answer stands (or not) as written and the outcome is said as unknown, with the
+  // charge kept (never less than what may be kept).
+  try {
     await giveData(input.room, charge);
-    return { ok: true, changed: true };
+  } catch {
+    return { ok: false, reason: "unknown" };
   }
-  if (written === 4 || written === 0) {
-    await giveData(input.room, charge);
-    return { ok: false, reason: written === 4 ? "full" : "unknown" };
-  }
-  return { ok: false, reason: "unknown" };
+  if (written === 2) return { ok: true, changed: true };
+  return { ok: false, reason: written === 4 ? "full" : "unknown" };
 }
 
 /**
@@ -183,5 +215,29 @@ export async function forgetSurveyPerson(courseId: string, who: string, room?: D
   const [gone] = exactReplies(await redisPipeline([["EVAL", DROP_SURVEY_ANSWER, 1, surveyKey(courseId), who]]), 1, what);
   if (gone !== 0 && gone !== 1) throw new UnknownReply(what);
   if (room && gone === 1) await giveData(room, [{ slot: SURVEY_SLOT(courseId), bytes: SURVEY_ROOM_BYTES }]);
+  return gone;
+}
+
+/**
+ * Deletes every answer of a course, when the course goes (a product removed:
+ * app/api/store/product; a course turned off: app/api/store/course), and gives
+ * back the room of each answer confirmed gone. Tried again up to `tries` times
+ * when Redis fails; a reply that is not exactly a count throws UnknownReply,
+ * with nothing given back. Answers how many went.
+ */
+export async function dropCourseSurvey(courseId: string, room: DataStore, tries = 3): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const what = "the deletion of a course's survey answers";
+  let gone: unknown;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      [gone] = exactReplies(await redisPipeline([["EVAL", DROP_ALL_SURVEY_ANSWERS, 1, surveyKey(courseId)]]), 1, what);
+      break;
+    } catch (error) {
+      if (error instanceof UnknownReply || attempt >= tries) throw error;
+    }
+  }
+  if (typeof gone !== "number" || !Number.isSafeInteger(gone) || gone < 0) throw new UnknownReply(what);
+  if (gone > 0) await giveData(room, [{ slot: SURVEY_SLOT(courseId), bytes: SURVEY_ROOM_BYTES * gone }]);
   return gone;
 }

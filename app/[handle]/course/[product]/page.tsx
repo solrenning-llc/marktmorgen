@@ -129,8 +129,12 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const finished = studying && hasFinished(course, done, passed);
   const mustPass = requiredQuizLessons(course).length;
   const certNotice = w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME)[typeof query.cert === "string" ? query.cert : ""] ?? null;
-  // The survey when finishing (285 [SX1]): a student's own answer, read only for them once they finished; unreadable is said, never taken for none.
-  const myAnswer: SurveyAnswer | null | "unread" = await (finished ? readMyAnswer(course.id, who) : Promise.resolve(null)).catch(() => "unread" as const);
+  // The survey when finishing (285 [SX1]): a student's own answer, read only for them, whenever this browser was let
+  // into the course, so a kept answer can always be removed (an access that ended, a lesson added since); the form
+  // itself only once finished. Unreadable is said, never taken for none.
+  const surveyLearner = access.learner && !access.learner.owner && (access.learner.scope === "all" || access.learner.scope.includes(course.id)) ? access.learner : null;
+  const surveyWho = surveyLearner ? emailKey(surveyLearner.email) : "";
+  const myAnswer: SurveyAnswer | null | "unread" = await (surveyWho ? readMyAnswer(course.id, surveyWho) : Promise.resolve(null)).catch(() => "unread" as const);
   // The store's owner sees the answers, read only when asked, each time paid from the studio's requests.
   const surveyAsks = open && access.learner.owner && query.survey === "1";
   const surveyView: OwnerSurveyView | null = surveyAsks
@@ -292,14 +296,6 @@ export default async function CoursePage({ params, searchParams }: Params) {
                 </div>
               ) : null}
 
-              {finished ? (
-                <CourseSurveyBox
-                  where={{ handle: store.handle, product: product.id }}
-                  mine={myAnswer}
-                  notice={typeof query.sv === "string" ? query.sv : ""}
-                  language={store.language}
-                />
-              ) : null}
               {surveyView ? <CourseSurveySummary view={surveyView} language={store.language} /> : null}
             </div>
           ) : (
@@ -340,6 +336,16 @@ export default async function CoursePage({ params, searchParams }: Params) {
               )}
             </div>
           )}
+
+          {surveyWho ? (
+            <CourseSurveyBox
+              where={{ handle: store.handle, product: product.id }}
+              mode={finished ? "answer" : "remove"}
+              mine={myAnswer}
+              notice={typeof query.sv === "string" ? query.sv : ""}
+              language={store.language}
+            />
+          ) : null}
         </div>
 
         <div className="st-card mt-6 p-6 sm:p-8">

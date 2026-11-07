@@ -23,6 +23,12 @@ export type CourseSurveyWords = {
   noteHint: (max: number) => string;
   save: string;
   remove: string;
+  /** Beside a kept answer the form is not shown for: why, and that removing it is still open. */
+  removeOnly: string;
+  /** The question before a removal, and its two answers. */
+  confirm: string;
+  confirmYes: string;
+  keep: string;
   yours: (score: number) => string;
   notices: Record<SurveyNotice, string>;
   ownerTitle: string;
@@ -42,13 +48,17 @@ export type CourseSurveyWords = {
 const en: CourseSurveyWords = {
   title: "You finished the course",
   question: "How likely are you to recommend this course to a friend?",
-  note: "Optional, one question. Only the creator sees your answer and comment, without your name or email address. It is never shown to other students or on the store. You can change or remove it at any time.",
+  note: "Optional, one question. Only the creator sees your answer and comment, without your name or email address. It is never shown to other students or on the store. You can remove it at any time, and change it while you have access to the course and have finished it.",
   low: "0 means not at all likely.",
   high: "10 means extremely likely.",
   noteLabel: "Comment (optional)",
   noteHint: (max) => `Up to ${max} characters.`,
   save: "Send my answer",
   remove: "Remove my answer",
+  removeOnly: "You can change this answer only while you have access to the course and have finished every lesson. You can always remove it.",
+  confirm: "Remove your answer? This cannot be undone.",
+  confirmYes: "Yes, remove my answer",
+  keep: "Keep my answer",
   yours: (score) => `Your answer: ${score} out of 10.`,
   notices: {
     saved: "Your answer is saved. Thank you.",
@@ -77,13 +87,17 @@ const en: CourseSurveyWords = {
 const es: CourseSurveyWords = {
   title: "Has terminado el curso",
   question: "¿Qué probabilidad hay de que recomiendes este curso a un amigo?",
-  note: "Es opcional, una sola pregunta. Solo el creador ve tu respuesta y tu comentario, sin tu nombre ni tu email. Nunca se muestra a otros alumnos ni en la tienda. Puedes cambiarla o quitarla cuando quieras.",
+  note: "Es opcional, una sola pregunta. Solo el creador ve tu respuesta y tu comentario, sin tu nombre ni tu email. Nunca se muestra a otros alumnos ni en la tienda. Puedes quitarla cuando quieras y cambiarla mientras tengas acceso al curso y lo hayas terminado.",
   low: "0 significa nada probable.",
   high: "10 significa muy probable.",
   noteLabel: "Comentario (opcional)",
   noteHint: (max) => `Hasta ${max} caracteres.`,
   save: "Enviar mi respuesta",
   remove: "Quitar mi respuesta",
+  removeOnly: "Solo puedes cambiar esta respuesta mientras tengas acceso al curso y hayas terminado todas las lecciones. Siempre puedes quitarla.",
+  confirm: "¿Quitar tu respuesta? No se puede deshacer.",
+  confirmYes: "Sí, quitar mi respuesta",
+  keep: "Mantener mi respuesta",
   yours: (score) => `Tu respuesta: ${score} de 10.`,
   notices: {
     saved: "Tu respuesta está guardada. Gracias.",
@@ -112,13 +126,17 @@ const es: CourseSurveyWords = {
 const fr: CourseSurveyWords = {
   title: "Vous avez terminé le cours",
   question: "Quelle est la probabilité que vous recommandiez ce cours à un ami ?",
-  note: "Facultatif, une seule question. Seul le créateur voit votre réponse et votre commentaire, sans votre nom ni votre adresse e-mail. Elle n’est jamais montrée aux autres élèves ni sur la boutique. Vous pouvez la modifier ou la retirer à tout moment.",
+  note: "Facultatif, une seule question. Seul le créateur voit votre réponse et votre commentaire, sans votre nom ni votre adresse e-mail. Elle n’est jamais montrée aux autres élèves ni sur la boutique. Vous pouvez la retirer à tout moment, et la modifier tant que vous avez accès au cours et l’avez terminé.",
   low: "0 signifie pas du tout probable.",
   high: "10 signifie extrêmement probable.",
   noteLabel: "Commentaire (facultatif)",
   noteHint: (max) => `Jusqu’à ${max} caractères.`,
   save: "Envoyer ma réponse",
   remove: "Retirer ma réponse",
+  removeOnly: "Vous ne pouvez modifier cette réponse que tant que vous avez accès au cours et avez terminé toutes les leçons. Vous pouvez toujours la retirer.",
+  confirm: "Retirer votre réponse ? Cette action est définitive.",
+  confirmYes: "Oui, retirer ma réponse",
+  keep: "Garder ma réponse",
   yours: (score) => `Votre réponse : ${score} sur 10.`,
   notices: {
     saved: "Votre réponse est enregistrée. Merci.",
@@ -147,13 +165,17 @@ const fr: CourseSurveyWords = {
 const de: CourseSurveyWords = {
   title: "Sie haben den Kurs abgeschlossen",
   question: "Wie wahrscheinlich ist es, dass Sie diesen Kurs einem Freund empfehlen?",
-  note: "Freiwillig, eine einzige Frage. Nur die Person, die den Kurs anbietet, sieht Ihre Antwort und Ihren Kommentar, ohne Ihren Namen und Ihre E-Mail-Adresse. Sie wird nie anderen Teilnehmenden oder im Shop gezeigt. Sie können sie jederzeit ändern oder entfernen.",
+  note: "Freiwillig, eine einzige Frage. Nur die Person, die den Kurs anbietet, sieht Ihre Antwort und Ihren Kommentar, ohne Ihren Namen und Ihre E-Mail-Adresse. Sie wird nie anderen Teilnehmenden oder im Shop gezeigt. Sie können sie jederzeit entfernen und ändern, solange Sie Zugang zum Kurs haben und ihn abgeschlossen haben.",
   low: "0 bedeutet überhaupt nicht wahrscheinlich.",
   high: "10 bedeutet äußerst wahrscheinlich.",
   noteLabel: "Kommentar (freiwillig)",
   noteHint: (max) => `Bis zu ${max} Zeichen.`,
   save: "Meine Antwort senden",
   remove: "Meine Antwort entfernen",
+  removeOnly: "Sie können diese Antwort nur ändern, solange Sie Zugang zum Kurs haben und alle Lektionen abgeschlossen haben. Entfernen können Sie sie immer.",
+  confirm: "Ihre Antwort entfernen? Das lässt sich nicht rückgängig machen.",
+  confirmYes: "Ja, meine Antwort entfernen",
+  keep: "Meine Antwort behalten",
   yours: (score) => `Ihre Antwort: ${score} von 10.`,
   notices: {
     saved: "Ihre Antwort ist gespeichert. Danke.",
@@ -182,13 +204,17 @@ const de: CourseSurveyWords = {
 const it: CourseSurveyWords = {
   title: "Hai finito il corso",
   question: "Quanto è probabile che consiglieresti questo corso a un amico?",
-  note: "Facoltativo, una sola domanda. Solo il creatore vede la tua risposta e il tuo commento, senza il tuo nome né il tuo indirizzo email. Non viene mai mostrata ad altri studenti né nel negozio. Puoi cambiarla o rimuoverla quando vuoi.",
+  note: "Facoltativo, una sola domanda. Solo il creatore vede la tua risposta e il tuo commento, senza il tuo nome né il tuo indirizzo email. Non viene mai mostrata ad altri studenti né nel negozio. Puoi rimuoverla quando vuoi e cambiarla finché hai accesso al corso e l’hai finito.",
   low: "0 significa per niente probabile.",
   high: "10 significa estremamente probabile.",
   noteLabel: "Commento (facoltativo)",
   noteHint: (max) => `Fino a ${max} caratteri.`,
   save: "Invia la mia risposta",
   remove: "Rimuovi la mia risposta",
+  removeOnly: "Puoi cambiare questa risposta solo finché hai accesso al corso e hai finito tutte le lezioni. Puoi sempre rimuoverla.",
+  confirm: "Rimuovere la tua risposta? Non si può annullare.",
+  confirmYes: "Sì, rimuovi la mia risposta",
+  keep: "Tieni la mia risposta",
   yours: (score) => `La tua risposta: ${score} su 10.`,
   notices: {
     saved: "La tua risposta è salvata. Grazie.",
@@ -217,13 +243,17 @@ const it: CourseSurveyWords = {
 const nl: CourseSurveyWords = {
   title: "Je hebt de cursus afgerond",
   question: "Hoe waarschijnlijk is het dat je deze cursus aan een vriend aanraadt?",
-  note: "Vrijblijvend, één vraag. Alleen de maker ziet je antwoord en opmerking, zonder je naam of e-mailadres. Het wordt nooit aan andere deelnemers of in de winkel getoond. Je kunt het altijd wijzigen of verwijderen.",
+  note: "Vrijblijvend, één vraag. Alleen de maker ziet je antwoord en opmerking, zonder je naam of e-mailadres. Het wordt nooit aan andere deelnemers of in de winkel getoond. Je kunt het altijd verwijderen, en wijzigen zolang je toegang tot de cursus hebt en hem hebt afgerond.",
   low: "0 betekent helemaal niet waarschijnlijk.",
   high: "10 betekent heel erg waarschijnlijk.",
   noteLabel: "Opmerking (vrijblijvend)",
   noteHint: (max) => `Maximaal ${max} tekens.`,
   save: "Mijn antwoord versturen",
   remove: "Mijn antwoord verwijderen",
+  removeOnly: "Je kunt dit antwoord alleen wijzigen zolang je toegang tot de cursus hebt en alle lessen hebt afgerond. Verwijderen kan altijd.",
+  confirm: "Je antwoord verwijderen? Dit kan niet ongedaan worden gemaakt.",
+  confirmYes: "Ja, mijn antwoord verwijderen",
+  keep: "Mijn antwoord houden",
   yours: (score) => `Jouw antwoord: ${score} van de 10.`,
   notices: {
     saved: "Je antwoord is opgeslagen. Dank je.",
@@ -252,13 +282,17 @@ const nl: CourseSurveyWords = {
 const pt: CourseSurveyWords = {
   title: "Concluiu o curso",
   question: "Qual é a probabilidade de recomendar este curso a um amigo?",
-  note: "Opcional, uma só pergunta. Só o criador vê a sua resposta e o seu comentário, sem o seu nome nem o seu e-mail. Nunca é mostrada a outros alunos nem na loja. Pode alterá-la ou retirá-la a qualquer momento.",
+  note: "Opcional, uma só pergunta. Só o criador vê a sua resposta e o seu comentário, sem o seu nome nem o seu e-mail. Nunca é mostrada a outros alunos nem na loja. Pode retirá-la a qualquer momento e alterá-la enquanto tiver acesso ao curso e o tiver concluído.",
   low: "0 significa nada provável.",
   high: "10 significa extremamente provável.",
   noteLabel: "Comentário (opcional)",
   noteHint: (max) => `Até ${max} caracteres.`,
   save: "Enviar a minha resposta",
   remove: "Retirar a minha resposta",
+  removeOnly: "Só pode alterar esta resposta enquanto tiver acesso ao curso e tiver concluído todas as aulas. Pode sempre retirá-la.",
+  confirm: "Retirar a sua resposta? Não é possível desfazer.",
+  confirmYes: "Sim, retirar a minha resposta",
+  keep: "Manter a minha resposta",
   yours: (score) => `A sua resposta: ${score} de 10.`,
   notices: {
     saved: "A sua resposta está guardada. Obrigado.",

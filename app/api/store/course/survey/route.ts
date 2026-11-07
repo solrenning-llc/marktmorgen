@@ -16,10 +16,12 @@ import { restingAway, takeBuyerAction } from "@/lib/buyer-actions";
 /**
  * A student's answer to the survey when they finish a course (285 [SX1]),
  * from the course's own page: a plain form, no script needed. `action` is
- * "answer" (with `score` 0 to 10 and an optional `note`) or "remove". Only a
- * student of the course, and an answer only once they finished it (every
- * lesson done, every quiz that has to be passed passed: lib/certificate.ts
- * hasFinished); the store's owner reads the answers and never gives one.
+ * "answer" (with `score` 0 to 10 and an optional `note`) or "remove" (with
+ * `sure=1`, sent from the confirmation; without it the page asks first). Only
+ * a browser let into the course; an answer only while the access is open and
+ * once they finished it (every lesson done, every quiz that has to be passed
+ * passed: lib/certificate.ts hasFinished), while removing a kept answer is
+ * always open to them. The store's owner reads the answers and never gives one.
  * Every answer goes back to the course page, with `?sv=` saying what
  * happened.
  *
@@ -54,11 +56,15 @@ export async function POST(request: NextRequest) {
       headers: { Location: `${base}${notice ? `?sv=${notice}` : ""}#survey`, "Cache-Control": "no-store" },
     });
 
+  const away = () => new Response(null, { status: 303, headers: { Location: base } });
   const course = await readCourse(product.course.id);
   const access = await courseAccess(store, product, request.cookies);
-  if (!course || access.state !== "open") return new Response(null, { status: 303, headers: { Location: base } });
+  if (!course || !access.learner) return away();
   // The creator reads the answers; only students give them.
   if (access.learner.owner) return back("");
+  // Only a browser let into this course. Removing one's own answer needs nothing more: a student whose
+  // access ended, or a course that grew a lesson since, never keeps them from taking their answer back.
+  if (!(access.learner.scope === "all" || access.learner.scope.includes(course.id))) return away();
   const who = emailKey(access.learner.email);
 
   const person = `${storeKey(store)}:${who}`;
@@ -69,10 +75,14 @@ export async function POST(request: NextRequest) {
   if (!minute || !day) return back("slow");
 
   if (action === "remove") {
+    // Asked first, on its own screen (components/course-survey.tsx): a removal cannot be undone.
+    if (form.get("sure") !== "1") return back("confirm");
     const gone = await removeMyAnswer(course.id, who, store).catch(() => null);
     return back(gone === null ? "unknown" : "removed");
   }
   if (action !== "answer") return back("");
+  // An answer, though, only from a student whose access is open now and who finished the course.
+  if (access.state !== "open") return away();
 
   if (!(await takeBuyerAction(store))) return restingAway(origin, store);
   const [done, passed] = await Promise.all([doneLessons(course.id, access.learner.email), passedQuizzes(course.id, who)]);

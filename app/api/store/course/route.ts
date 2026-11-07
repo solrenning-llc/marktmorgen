@@ -3,6 +3,7 @@ import { addComment, deleteComment, dropComments, dropLessonComments, readCommen
 import { COMMENT_ID_PATTERN, CREATOR_AUTHOR } from "@/lib/lesson-comments-rules";
 import { tellStudent } from "@/lib/lesson-comment-notify";
 import type { NextRequest } from "next/server";
+import { dropCourseSurvey } from "@/lib/course-survey";
 import { DataRoomError } from "@/lib/store-data";
 import { MAX_AI_LESSONS, MAX_AI_MODULES } from "@/lib/ai-rules";
 import { deleteFile as del, headFile as head } from "@/lib/file-store";
@@ -242,6 +243,7 @@ export async function POST(request: NextRequest) {
         const result = await setProductCourse(ref, id, null);
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
         await dropCourse(course, store);
+        await dropCourseSurvey(course.id, store).catch((error: unknown) => console.error("could not drop a course's survey answers", error));
         if (community) await unindexCourse(community, product.id, course).catch(() => {});
         await registerDrip(store, product, { ...course, modules: [] });
         return Response.json({ ok: true });

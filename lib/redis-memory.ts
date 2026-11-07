@@ -370,6 +370,18 @@ export class MemoryRedis {
           this.run(["HSET", answers, who, value]);
           return 1;
         }
+        if (key.startsWith("-- marktmorgen:course-survey-change:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, answers, who, value] = args;
+          if (this.run(["HEXISTS", answers, who]) !== 1) return 0;
+          this.run(["HSET", answers, who, value]);
+          return 2;
+        }
+        if (key.startsWith("-- marktmorgen:course-survey-drop-all:v1\n") && args[0] === "1" && args.length === 2) {
+          const [, answers] = args;
+          const count = Number(this.run(["HLEN", answers]));
+          this.run(["DEL", answers]);
+          return count;
+        }
         if (key.startsWith("-- marktmorgen:course-survey-drop:v1\n") && args[0] === "1" && args.length === 3) {
           const [, answers, who] = args;
           return this.run(["HDEL", answers, who]);

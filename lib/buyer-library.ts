@@ -42,7 +42,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { orderWrite } from "@/lib/order-data";
-import { withinLimit } from "@/lib/request-guard";
+import { essentialLimitState } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { afterAnswer } from "@/lib/after-answer";
 import { joinedKeys, personKeys, personWrite } from "@/lib/joined-stores";
@@ -112,8 +112,14 @@ export async function requestLibraryLink(input: { email: string; ip: string; ori
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
   if (!isRedisConfigured() || !isSenderConfigured()) return "error";
   const email = normaliseEmail(raw);
-  if (!(await withinLimit("library-ip", input.ip, 10, 3_600))) return "limited";
-  if (!(await withinLimit("library-address", sha(email), 5, 3_600))) return "limited";
+  // A paid email follows: a count that is not known sends nothing, for every address alike, before anything about the
+  // address is asked, so saying so tells nobody who bought; it is said as our error, never as too many requests.
+  const byConnection = await essentialLimitState("library-ip", input.ip, 10, 3_600);
+  if (byConnection === "unknown") return "error";
+  if (byConnection === "exceeded") return "limited";
+  const byAddress = await essentialLimitState("library-address", sha(email), 5, 3_600);
+  if (byAddress === "unknown") return "error";
+  if (byAddress === "exceeded") return "limited";
   // From here the answer is "sent" whatever happens, and at once: the stores, the link and its email are all after it.
   afterAnswer("sending a library link", () => sendLibraryLink(email, input.origin));
   return "sent";

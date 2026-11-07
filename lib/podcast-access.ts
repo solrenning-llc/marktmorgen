@@ -38,7 +38,7 @@ import { orderWrite } from "@/lib/order-data";
 import { holdsProducts } from "@/lib/community-access";
 import { sendEmail } from "@/lib/email";
 import { afterAnswer } from "@/lib/after-answer";
-import { withinLimit } from "@/lib/request-guard";
+import { essentialLimitState, withinLimit } from "@/lib/request-guard";
 import { FEED_TOKEN } from "@/lib/podcast-rules";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import type { Listing, Store } from "@/lib/store";
@@ -141,7 +141,11 @@ export async function sendFeedLink(input: { store: Store; product: Listing; emai
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
   const { store, product } = input;
   if (!(await withinStore("podcast-link-ip", `${store.handle}:${input.ip}`, 10, 3_600, store, "buyer"))) return "limited";
-  if (!(await withinLimit("podcast-link-address", sha(normaliseEmail(raw)), 5, 3_600))) return "limited";
+  // A paid email follows: a count that is not known sends nothing, for every address alike, before anything about the
+  // address is asked, so saying so tells nobody who bought; it is said as our error, never as too many requests.
+  const byAddress = await essentialLimitState("podcast-link-address", sha(normaliseEmail(raw)), 5, 3_600);
+  if (byAddress === "unknown") return "error";
+  if (byAddress === "exceeded") return "limited";
   // From here the answer is "sent" whatever happens, and at once: the right to listen, the feed and its email are all after it.
   afterAnswer("sending a podcast feed link", () => sendFeedEmail(store, product, raw, input.base, input.from));
   return "sent";

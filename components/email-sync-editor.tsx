@@ -179,10 +179,11 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
 
   async function connect(event: React.FormEvent) {
     event.preventDefault();
-    const mine = ++readNo.current;
     const data = await post({ action: "connect", provider, key: key.trim() }, "connect");
     if (!data?.view?.connected) return;
-    if (mine !== readNo.current) return;
+    // Only a connect that took is a read of the lists: it overtakes the opening read from here. A refused one
+    // leaves that read to land, so the box never keeps saying it is reading with no read left to end it.
+    readNo.current += 1;
     setKey("");
     setReplacing(false);
     if (Array.isArray(data.targets)) {

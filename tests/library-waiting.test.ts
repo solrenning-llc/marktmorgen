@@ -93,11 +93,26 @@ async function main(): Promise<void> {
   is("only after the store's requests were taken", firstTraffic >= 0 && firstTraffic < firstWaiting, true);
   is("and the card says what waits", opened.html.includes(`more than ${WAITING_SHOWN} proposals or agreements to sign`), true);
 
+  part("Stores are read a few at a time, not one after another (Claude 5 on #1969)");
+  const OTHER = "jlib-two@example.com";
+  await claimHandle(OTHER, "jlibtwo", "Second library store", "");
+  await ensureStoreId(OTHER);
+  await ensureStatsId(OTHER);
+  await setPastBuyers(OTHER);
+  await setSubscription(OTHER, { customerId: "cus_JLibraryTwo", subscriptionId: "sub_JLibraryTwo", active: true, tier: "creator", period: paidPeriod() });
+  await rememberBuyers((await storeForEmail(OTHER))!.sid, [BUYER]);
+  const both = await watch(() => LibraryPage({ searchParams: Promise.resolve({ token }) }));
+  const firstRead = both.commands.findIndex(isWaiting);
+  // Read one after another, the second store's orders link would come only after the first store's waiting records.
+  const links = both.commands.slice(0, firstRead).filter((c) => c[0] === "SET" && String(c[1]).startsWith("nl:orders:link:")).length;
+  is("both stores' cards start before the first one's waiting records are read", links, 2);
+
   part("With the store's requests used up: nothing read, and the card says it could not check");
   await takePublicRequest(store, "buyer", Date.now(), requestLimitFor(store));
   is("(the window used up)", await takePublicRequest(store, "buyer", Date.now(), 1), false);
   const spent = await watch(() => LibraryPage({ searchParams: Promise.resolve({ token }) }));
-  is("no waiting record read", spent.commands.some(isWaiting), false);
+  // The first store's records only: the second store still has its requests and reads its own.
+  is("no waiting record read", spent.commands.some((c) => isWaiting(c) && c.some((x) => String(x).includes(store.sid))), false);
   is("the card says it could not check", spent.html.includes(WAITING_LATER), true);
   is("and promises no time", /soon|again/.test(WAITING_LATER), false);
   is("nor that something waits", WAITING_LATER.includes("whether this store is waiting on anything"), true);

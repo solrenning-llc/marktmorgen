@@ -469,6 +469,10 @@ export const AGREEMENT_VERSION_MOST =
  * leaves above these commands and bytes (about US$0.000019 a card) pays some
  * 3 s at 2 GB, well over it (Claude 5 on #1969); the units must keep that room.
  */
+/** How long a library card waits on Redis at the most (its take and about four round trips), paid by LIBRARY_WAITING_UNITS' room. */
+export const LIBRARY_CARD_WAIT_SECONDS = 3;
+/** What that wait costs: the page's memory for those seconds (Claude 5 on #1969). */
+export const libraryCardWait = (): number => LIBRARY_CARD_WAIT_SECONDS * MEMORY_SECOND;
 export const libraryWaitingRead = (): number => {
   const bytes = 2 * (AGREEMENTS_PER_PERSON + REQUESTS_PER_PERSON) * 16_384 + WAITING_SHOWN * AGREEMENT_VERSION_MOST;
   return (TAKE_COMMANDS + 4 + WAITING_SHOWN) * COMMAND + bytes * DB_BYTE + perMegabyte(bytes);

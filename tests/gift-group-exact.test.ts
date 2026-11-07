@@ -281,6 +281,75 @@ async function main(): Promise<void> {
   restore();
   is("not settled a second time beside the other run: it throws, no receipt", [p5First, emails.length - p5Emails], ["threw", 0]);
   is("the other run's mark is left alone", await get(p5Mark), "another-run");
+
+  // Claude 4's review of #2872 (comment 6699159625, M1, MÉDIO, money): the write marking a gift given, or a purchase
+  // paid, lands while its reply comes back in another shape. The run throws, rightly; the next run must still tell the
+  // friend and send the payer's receipt (with the link that hands out the places), once, never "already" with nobody told.
+  const toCount = (address: string, since: number) => emails.slice(since).filter((e) => e.to.includes(address)).length;
+  part("6. deliverGift: the record marked given lands, its reply in another shape (M1)");
+  const g6 = await startGift(store, product, { to: "friend7@example.com", from: "Ana", message: "" });
+  if (!g6.ok) throw new Error("no gift");
+  const g6Session = paidSession({ gift: g6.gift.id });
+  const g6Since = emails.length;
+  unknownFor(isSet(`nl:gift:${g6.gift.id}`, (c) => c[1] === `nl:gift:${g6.gift.id}`), true);
+  const g6First = await outcome(deliverGift({ ...giftDeps, session: g6Session }));
+  restore();
+  const g6Second = await outcome(deliverGift({ ...giftDeps, session: g6Session }));
+  const g6Third = await outcome(deliverGift({ ...giftDeps, session: g6Session }));
+  is("the first run throws; the next tells (given), the one after is already", [g6First, g6Second, g6Third], ["threw", "given", "already"]);
+  is("the friend is emailed about the gift once", toCount("friend7@example.com", g6Since), 1);
+  is("the payer gets the gift receipt once", toCount("payer@example.com", g6Since), 1);
+
+  part("6. settleGroup: the record marked paid lands, its reply in another shape (M1)");
+  const p6 = await startGroup(store, product, "2");
+  if (!p6.ok) throw new Error("no group");
+  const p6Session = paidSession({ group: p6.group.id, people: "2" });
+  const p6Since = emails.length;
+  unknownFor(isSet(`nl:grp:${p6.group.id}`, (c) => c[1] === `nl:grp:${p6.group.id}`), true);
+  const p6First = await outcome(settleGroup({ ...deps, session: p6Session }));
+  restore();
+  const p6Second = await outcome(settleGroup({ ...deps, session: p6Session }));
+  const p6Third = await outcome(settleGroup({ ...deps, session: p6Session }));
+  is("the first run throws; the next sends the receipt (settled), the one after is already", [p6First, p6Second, p6Third], ["threw", "settled", "already"]);
+  is("the payer gets the receipt with the places link once", toCount("payer@example.com", p6Since), 1);
+
+  // Same review (L1, money): in a purchase for two, the first place's count lands while its reply comes back in another
+  // shape. Whether it moved must be found out, never left counted with the place let go: two places were paid for and
+  // two people get in.
+  part("7. takePlace: the first place's count lands, its reply in another shape, once (L1)");
+  const p7 = await startGroup(store, product, "2");
+  if (!p7.ok) throw new Error("no group");
+  if ((await settleGroup({ ...deps, session: paidSession({ group: p7.group.id, people: "2" }) })) !== "settled") throw new Error("not settled");
+  store = (await storeForEmail(OWNER))!;
+  const counter7 = `nl:grp:${p7.group.id}:n`;
+  const link7 = async (email: string) => {
+    const t = Buffer.from(("q" + email).padEnd(32, "x").slice(0, 32)).toString("hex");
+    await real([["SET", `nl:grp:take:${t}`, JSON.stringify({ g: p7.group.id, e: email }), "EX", 3600]]);
+    return t;
+  };
+  const take7 = async (email: string) => {
+    const taken = await outcome(takePlace({ store, token: await link7(email), recordStart: async () => {} }));
+    return taken === "threw" ? taken : taken.outcome;
+  };
+  // Only the first command that moves this purchase's count (the INCR, or a script on the count) is answered in
+  // another shape; it lands. Everything after it answers as usual.
+  let once7 = false;
+  redis.pipeline = (async (commands: Command[]) => {
+    const replies = await real(commands);
+    return commands.map((c, i) => {
+      const moves = (c[0] === "INCR" && c[1] === counter7) || (c[0] === "EVAL" && c[3] === counter7);
+      if (!moves || once7) return replies[i];
+      once7 = true;
+      return UNKNOWN;
+    });
+  }) as typeof redis.pipeline;
+  const ivy1 = await take7("ivy@example.com");
+  restore();
+  const ivy2 = await take7("ivy@example.com");
+  const jo = await take7("jo@example.com");
+  is("ivy takes her place (on the first run or on the next), jo takes the second", [ivy1 === "taken" || ivy2 === "taken", jo], [true, "taken"]);
+  is("two places paid for: ivy and jo both hold the product", [await owns("ivy@example.com"), await owns("jo@example.com")], [[product.id], [product.id]]);
+  is("two places counted", await placesTaken(p7.group.id), 2);
   done();
 }
 

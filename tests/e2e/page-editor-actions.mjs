@@ -4,7 +4,8 @@
 // where it went (2.4.3, 4.1.3); the same sentence said twice is said again;
 // in forced colors no icon button animates its colors (inbox C4-35); Undo and
 // Redo of moves made in one step name the block that moved, and a picture
-// block whose send is still pending never drops the focus (#2926).
+// block whose send is still pending, or with no room left on the page, never
+// drops the focus (#2926).
 // The real component with a synthetic page and every request held in the
 // page (tests/e2e/page-editor-harness.tsx), the site's own style sheet built
 // by Tailwind from the editor's classes: no server, no build, nothing sent.
@@ -185,6 +186,23 @@ try {
   await sending().waitFor();
   await settled();
   is("a send starting under the focus keeps it on the Add button, which says it is sending", await where(), { tag: "BUTTON", words: "Sending 1 picture…", busy: "true" });
+
+  // A block's last picture removed where the page has no room left for another (the other blocks, or the other version
+  // of the page, hold the page's 24): no Add button is drawn then, so the focus goes to the block's heading field, never
+  // to the body (Claude 5's LIGHT 1 on #2926; WCAG 2.4.3). Four full blocks and one holding a picture: synthetic.
+  await page.evaluate(() => {
+    const picture = (n) => ({ path: `images/0123456789abcdef01234567/${n.toString(16).padStart(32, "0")}.jpg`, width: 4, height: 4, alt: `Synthetic picture ${n}`, caption: "" });
+    const full = (k) => ({ ...window.harness.block("pictures"), items: Array.from({ length: 6 }, (_, j) => picture(k * 6 + j + 1)) });
+    window.harness.mount([full(0), full(1), full(2), full(3), { ...window.harness.block("pictures"), items: [picture(99)] }]);
+  });
+  await page.locator("button[aria-expanded]", { hasText: "1 picture" }).first().click();
+  await page.getByRole("button", { name: "Remove picture 1" }).waitFor();
+  is("with no room on the page, the block holding one picture draws no Add button", await page.getByRole("button", { name: /^Add pictures/ }).count(), 0);
+  await page.getByRole("button", { name: "Remove picture 1" }).focus();
+  await page.keyboard.press("Enter");
+  await settled();
+  await settled();
+  is("removing that last picture puts the focus on the block's heading field", await page.evaluate(() => ({ tag: document.activeElement?.tagName, label: document.activeElement?.labels?.[0]?.textContent ?? null })), { tag: "INPUT", label: "Heading (optional)" });
 
   is("no error on the page", errors, []);
 } finally {

@@ -11,6 +11,7 @@ import { ClicksBox } from "@/components/store-product";
 import { scriptMode, withTags } from "@/lib/embed-sites";
 import { readScriptOpen } from "@/lib/embed-open";
 import { EmbedMessenger } from "@/components/embed-messenger";
+import { NewTab } from "@/components/new-tab";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -89,6 +90,8 @@ export default async function EmbedJoin({ params, searchParams }: Params) {
   const said = speech(store);
   const look = lookStyle(store.look) as React.CSSProperties;
   const aside = framed ? { target: "_blank", rel: "noopener" } : { target: "_top" };
+  // In a frame the link opens a new tab, and says so in the store's language (3.2.5, G201); as a page it stays in the tab and says nothing.
+  const away = framed ? <NewTab language={store.language} /> : null;
   const storeLink = withTags(`/@${store.handle}`, open.tags);
   const talking = framed && open.live && open.site ? open.site : null;
   const backHost = open.back ? new URL(open.back).hostname : "";
@@ -123,6 +126,7 @@ export default async function EmbedJoin({ params, searchParams }: Params) {
         {joinOpen(store) ? (framed ? <p className="st-muted mt-2">{said.w.cardOpens(store.name)}</p> : null) : <p className="st-muted mt-2">{w.notices.closed.title}</p>}
         <a href={storeLink} {...aside} className="btn st-btn mt-5">
           {said.w.seeStore(store.name)}
+          {away}
         </a>
       </>,
       said.lang.locale,

@@ -147,6 +147,8 @@ function PitchCard({ pitch, onChange, onGone }: { pitch: Pitch; onChange: (next:
               <>
                 <button type="button" disabled={busy} className="btn btn-primary btn-sm" onClick={() => saveThen(() => window.open(links.gmail, "_blank", "noopener"))}>
                   Open it in Gmail
+                  {/* Gmail opens in a new tab, and the button says so (3.2.5, G201). */}
+                  <NewTab />
                 </button>
                 <button type="button" disabled={busy} className="btn btn-secondary btn-sm" onClick={() => saveThen(() => (window.location.href = links.mailto))}>
                   Open it in my mail app

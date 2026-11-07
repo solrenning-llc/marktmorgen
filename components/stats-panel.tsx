@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { AllTimeSales, Ranked, RangeKey, StatsData, Today } from "@/lib/stats";
 import { StoreField } from "@/components/studio-store-pin";
+import { NewTab } from "@/components/new-tab";
 import { dashboardPaidComplete, dashboardProducts } from "@/lib/dashboard-coverage";
 import { ledgerPaymentsComplete } from "@/lib/payment-ledger-coverage";
 import { paidFiguresComplete } from "@/lib/paid-coverage";
@@ -798,6 +799,8 @@ export function StatsPanel({
                         data-insight-action
                       >
                         {item.action.label}
+                        {/* An outside page opens in a new tab, and says so (3.2.5, G201). */}
+                        {item.action.href.startsWith("/") ? null : <NewTab />}
                       </a>
                     ) : (
                       <button

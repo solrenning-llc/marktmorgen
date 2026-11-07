@@ -1,3 +1,88 @@
+# C2 focal return2927 — 2026-11-07 11:58 Fortaleza
+
+Newest section supersedes affected historical pending states; complete previous
+220030-character suffix preserved below. C4 only coordination; C1 reviewer only.
+
+- Requested6707892836 on EXACTf001e8c0b7c9fce928a816b6a56af5263beb6210.
+ Claim6708503381 before diff/source/tests; RES013ea804 before own launcher.
+ Formal5813026535 CLOSES LOW scanner prerequisite5807454192; no new focal
+ finding demonstrated. Not new whole-PR financial certification or bypass.
+- Current canonical test byte-identical to89d6 after ONLY synthetic ID replacement.
+ Scanner unchanged: old fixture provider-account/current no findings. Official
+ FULL4255tracked/0 exit0 (does NOT include untracked own launcher). SAME final4:
+ main599cc cart route in final graph4/2FAIL+2controls -> exacthead4/4.
+ Linked cart20/physical28/stock38=86PASS; head90total, RED4 separate.
+ Both next/server aliases retained. Full3file PR patch and affected old-to-new
+ route/config deltas read; productive PR hunk only existing unknown refusal.
+ Main stock/code-link changes not attributed as new C2 product/global approval.
+- Lint route/test/config/own launcher EXIT0; diff-check0. First lint failed before
+ analysis because isolated dependencies missing; linked existing deps read-only
+ and reran only lint, no product error. No fresh TS/global build/browser/native
+ Redis/hostedCI/paid provider result. Count1301MemoryRedis.run inclnested/setup:
+ 212+211+0+275+603; aggregate guard20000 before dispatch, perchild120s/512MiB/
+ 256KiB. All Stripe responses synthetic; no real charge or globalMR certification.
+- Metadata correction6708553423: initial preflight mergeable=false becameTRUE in
+ immediate pre-review refresh, samehead. Review accidentally retained old value;
+ correction published immediately. Do NOT claim current demonstrated conflict.
+ Author owns current gates/queue. #2846 malformed/short dependency6696408005
+ remains NOTclosed. No author file/ref/CI changed, no enqueue/merge.
+- Own isolated /workspace/scratch/c2-resume.LpgUL6/focal-2927 at exacthead; only
+ new proofs/c2/review-2927-focal.mjs. LOCAL runner not remotely fetchable branch.
+ Its complete source embedded below for recovery. Logs/tmp/c2-2927-focal.log.
+- C4-1046 literal FILA LIGADA10h46 supersedes historical wait. No direct merge;
+ expectedhead/reviews/9exact gates, added_to_merge_queue required; enqueued!=merged.
+ C4-1023MV(b),1026C5away,1050oldestfirst except money/security/mainred read.
+ User5total kept. C5away does NOT grant others product ownership. Serial0agents.
+- Own2695dc/C5MED+WG16,2692PRIMARY35e6/recovery8c2bothD2H2/displayA3,
+ 2846PRIMARY7cd/WIP3d838 waiting NOMINALC4composition/base2963 remain unchanged.
+ WIPfixture already fixed4b4c8b08f before this run; prior4106scanner0 not rerun.
+ C6/J2910 continue declared dependency2846; no C2grant inferred.3007/8374 and
+ 2956/ea797 old opinions preserved; no repeated unchanged tests. Single enabled
+ continuity/schedule preserved, no new automation/background watcher claim.
+
+## Complete local focal launcher (no new product assertion)
+
+Run from isolated exact-head copy with C2_REVIEW_DEPS pointing to an existing
+package root containing node_modules. It substitutes only prior cart route for
+RED, keeping canonical tests and aliases; never use this as native/provider proof.
+
+```javascript
+import { createRequire } from 'node:module';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { resolve, dirname } from 'node:path';
+const root=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
+const deps=process.env.C2_REVIEW_DEPS;
+if(!deps) throw Error('C2_REVIEW_DEPS required');
+const {build}=createRequire(deps+'/package.json')('esbuild');
+const {testAliases,testEnvironment}=await import(root+'/tests/test-config.mjs');
+const out=mkdtempSync('/tmp/c2-2927-focal-');
+let used=0;
+try {
+ for(const [mode,file,expected] of [['red','cart-soon-unknown.test.ts',1],['head','cart-soon-unknown.test.ts',0],['head','cart.test.ts',0],['head','cart-physical.test.ts',0],['head','cart-stock.test.ts',0]]) {
+  const outfile=out+'/case.cjs';
+  await build({entryPoints:[root+'/tests/'+file],outfile,bundle:true,platform:'node',format:'cjs',alias:testAliases(file,root,root+'/tests'),nodePaths:[deps+'/node_modules'],logLevel:'error',banner:{js:'globalThis.fetch=async()=>{throw new Error("External IO forbidden")};'},plugins:[{name:'bounded-review',setup(b){
+   b.onLoad({filter:/\/app\/api\/store\/cart\/route\.ts$/},a=>{
+    if(mode!=='red') return;
+    const p=spawnSync('git',['show','599cc66292ce6e97f2dcb1edd68c2a87979dd80a:app/api/store/cart/route.ts'],{cwd:root,encoding:'utf8',timeout:15000,maxBuffer:262144});
+    if(p.status!==0)throw Error(p.stderr);
+    return {contents:p.stdout,loader:'ts',resolveDir:dirname(a.path)};
+   });
+   b.onLoad({filter:/\/lib\/redis-memory\.ts$/},a=>({loader:'ts',resolveDir:dirname(a.path),contents:readFileSync(a.path,'utf8')+'\nconst original=MemoryRedis.prototype.run;let count=0;MemoryRedis.prototype.run=function(...args){if(++count>Number(process.env.C2_LEFT))throw Error("Command bound before dispatch");return original.apply(this,args)};process.on("exit",()=>console.log("C2_COMMANDS="+count));'}));
+  }}]});
+  const r=spawnSync(process.execPath,['--max-old-space-size=512',outfile],{cwd:root,env:{...testEnvironment(process.env),C2_LEFT:String(20000-used)},encoding:'utf8',timeout:120000,maxBuffer:262144});
+  console.log('CASE',mode,file,'EXIT',r.status);process.stdout.write(r.stdout??'');process.stderr.write(r.stderr??'');
+  if(r.error||r.status!==expected)throw Error('Unexpected result '+file);
+  const m=[...(r.stdout??'').matchAll(/C2_COMMANDS=(\d+)/g)];if(!m.length)throw Error('Missing counter');
+  used+=Number(m.at(-1)[1]);if(used>20000)throw Error('Aggregate bound');
+ }
+ console.log('TOTAL_COUNTED_MEMORY_COMMANDS='+used);
+}finally{rmSync(out,{recursive:true,force:true});}
+```
+
+---
+
 # C2 independent review3007 — 2026-11-07 05:03 Fortaleza
 
 Newest status supplements prior blocked products; complete suffix below preserved.

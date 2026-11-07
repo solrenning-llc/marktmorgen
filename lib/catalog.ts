@@ -42,6 +42,7 @@ import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import { StoreFullError } from "@/lib/store-full";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
@@ -704,6 +705,38 @@ export async function readListingsMeasured(store: Store, ids?: Iterable<string>)
     });
   }
   return { listings: asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l)), bytes };
+}
+
+/**
+ * readListings for the products asked, on Redis's exact answer only (rule 24):
+ * a product whose record is truly not there is left out, as readListings does;
+ * a reply missing or in any other shape, and a record that is there but is not
+ * that product's listing, throw UnknownReplyError, so a page says a name could
+ * not be read rather than leave out what it was about.
+ */
+export async function readListingsExact(store: Store, ids: Iterable<string>): Promise<Listing[]> {
+  const asked = wanted(store, ids);
+  const catalog = store.catalog;
+  if (catalog.inline) {
+    const byId = new Map(catalog.inline.map((p) => [p.id, p]));
+    return asked.map((id) => byId.get(id)).filter((p): p is Product => Boolean(p)).map(listingOf);
+  }
+  const found = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  const missing = asked.filter((id) => !found.has(id));
+  if (missing.length && catalog.id && isRedisConfigured()) {
+    for (let i = 0; i < missing.length; i += 400) {
+      const chunk = missing.slice(i, i + 400);
+      const raws = repliesFor(await redisPipeline(chunk.map((id) => ["GET", listingKey(catalog.id!, id)])), chunk.length);
+      if (!raws) throw new UnknownReplyError("a product's listing");
+      chunk.forEach((id, k) => {
+        if (raws[k] === null) return;
+        const listing = typeof raws[k] === "string" ? parseListing(parseJson(raws[k])) : null;
+        if (!listing || listing.id !== id) throw new UnknownReplyError("a product's listing");
+        found.set(id, listing);
+      });
+    }
+  }
+  return asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l));
 }
 
 /**

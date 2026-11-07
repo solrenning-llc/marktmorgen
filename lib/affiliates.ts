@@ -552,6 +552,27 @@ export async function affiliateByEmail(store: Store, email: string): Promise<Aff
 }
 
 /**
+ * affiliateByEmail on Redis's exact answer only (rule 24): null only where the
+ * address, or the record its id leads to, is truly not there; a reply missing
+ * or in any other shape, and a record that is there but cannot be read, throw
+ * UnknownReplyError, so a page says it could not be read rather than that the
+ * address is nobody's affiliate.
+ */
+export async function affiliateByEmailExact(store: Store, email: string): Promise<Affiliate | null> {
+  if (!store.statsId || !isRedisConfigured()) return null;
+  const [id] = repliesFor(await redisPipeline([["HGET", emailsKey(store.statsId), normaliseEmail(email)]]), 1) ?? unknownAffiliate();
+  if (id === null) return null;
+  if (typeof id !== "string" || !AFFILIATE_ID_PATTERN.test(id)) unknownAffiliate();
+  const [raw] = repliesFor(await redisPipeline([["HGET", peopleKey(store.statsId), id]]), 1) ?? unknownAffiliate();
+  if (raw === null) return null;
+  return parseAffiliate(raw) ?? unknownAffiliate();
+}
+
+function unknownAffiliate(): never {
+  throw new UnknownReplyError("an affiliate's record");
+}
+
+/**
  * A link that signs an affiliate this store already has in to its page, made
  * for an address whose owner has just proved it (lib/affiliate-hub.ts): the
  * same one-off link the store's own form emails, handed over instead of sent.

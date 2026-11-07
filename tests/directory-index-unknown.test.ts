@@ -14,11 +14,13 @@
  * An exact empty set (SCARD 0, SSCAN ["0", []]) is still a true empty.
  */
 import { DIRECTORY_CACHE, listedCount, listedStores } from "@/lib/directory-index";
+import * as directory from "@/lib/affiliate-directory";
 import { readDirectory } from "@/lib/affiliate-directory";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { addProduct, claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, setSubscription } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { NOT_A_COST } from "./plan-cost-registry";
 import { done, is, part } from "./check";
 
 globalThis.fetch = (async () => new Response(JSON.stringify({ object: "list", data: [] }), { status: 200 })) as typeof fetch;
@@ -183,6 +185,42 @@ async function main(): Promise<void> {
     redis.pipeline = original;
   }
   is("a cursor of digits is still a page", (await listedStores("0")).next, "0");
+
+  // R2/C4 on #2921 (MEDIO): the walk stopped only at cursor "0" or at MAX_ROWS distinct stores. A cursor that never
+  // comes back to "0" with pages that bring nothing new (a member repeated, or empty pages, which SCAN allows on a
+  // sparse table) sent one SSCAN per page with no end before the function timed out. It now reads at most
+  // DIRECTORY_SCAN_PAGES pages; past them the read is unknown and nothing is kept.
+  part("The walk reads at most DIRECTORY_SCAN_PAGES pages (RED)");
+  const ceiling = (directory as unknown as Record<string, unknown>).DIRECTORY_SCAN_PAGES;
+  is("the ceiling is exported, 64 pages", ceiling, 64);
+  is("and its count is in the cost registry, by name", typeof (NOT_A_COST as Record<string, string | undefined>).DIRECTORY_SCAN_PAGES, "string");
+  const HARNESS_STOP = 200;
+  /** SSCAN answers `page(n)` for its n-th call; past HARNESS_STOP the harness stops a walk that would not end. */
+  async function walking(page: (n: number) => unknown): Promise<{ outcome: string; scans: number; kept: unknown }> {
+    await original([["DEL", DIRECTORY_CACHE]]);
+    let n = 0;
+    redis.pipeline = (async (commands: Commands) => {
+      if (commands[0]?.[0] === "SSCAN") {
+        if (++n > HARNESS_STOP) throw new Error("harness stop");
+        return [page(n)];
+      }
+      return original(commands);
+    }) as typeof redis.pipeline;
+    const outcome = await failure(() => readDirectory());
+    redis.pipeline = original;
+    return { outcome, scans: n, kept: await kept() };
+  }
+  redis.clear();
+  await selling("baker@example.com", "breadhouse", "Bread House");
+  const [one] = (await original([["SMEMBERS", "nl:dir:listed"]])) as [string[]];
+  is("one listed store repeated on a cursor that never ends: unknown at exactly 64 pages, nothing kept", await walking(() => ["5", [one[0]]]), { outcome: "UnknownReplyError", scans: 64, kept: null });
+  is("empty pages on a cursor that never ends: unknown at exactly 64 pages, nothing kept", await walking(() => ["5", []]), { outcome: "UnknownReplyError", scans: 64, kept: null });
+  const sixtyFour = await walking((n) => [n === 64 ? "0" : "5", n === 64 ? [one[0]] : []]);
+  is("healthy control: a walk that ends on its 64th page is read and kept", [sixtyFour.outcome, sixtyFour.scans, (JSON.parse(String(sixtyFour.kept)) as { handle: string }[]).map((row) => row.handle)], ["answered", 64, ["breadhouse"]]);
+  is("one page more than the ceiling is unknown, nothing kept", await walking((n) => [n === 65 ? "0" : "5", []]), { outcome: "UnknownReplyError", scans: 64, kept: null });
+  // MAX_ROWS (2,000) distinct stores still end the walk on their own, before the page ceiling.
+  is("healthy control: pages of 200 new sids stop at 2,000 stores after 10 pages", (await walking((n) => ["5", Array.from({ length: 200 }, (_, i) => `sid_${n}_${i}`)])).scans, 10);
+  is("healthy control: the real stub's walk of one listed store is one page", await walking((n) => ["0", n === 1 ? [one[0]] : []]).then((r) => [r.outcome, r.scans]), ["answered", 1]);
 
   done();
 }

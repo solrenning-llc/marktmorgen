@@ -61,7 +61,9 @@ async function main(): Promise<void> {
   part("What the studio is shown");
   is("a discount, old or new shape, is seen", [hasDiscount({ discount: { id: "di" } }), hasDiscount({ discounts: ["di"] }), hasDiscount({ discounts: [] })], [true, true, false]);
   is("another store's or a payment plan is not a membership here", [readMemberSub(subs[2], new Set(["memberstore"])), readMemberSub(subs[3], new Set(["memberstore"]))], [null, null]);
-  const found = await memberSubs(store, "member@example.com");
+  // "unreadable" is never a list of memberships: read as none found, so the checks below fail on it.
+  const read = await memberSubs(store, "member@example.com");
+  const found = Array.isArray(read) ? read : null;
   is("only this store's running memberships of that address", found?.map((s) => [s.id, s.discounted]), [["sub_live000001", false], ["sub_disc000001", true]]);
   is("with what each renewal costs", found?.[0] ? [found[0].amount, found[0].currency, found[0].interval, found[0].product] : null, [2900, "usd", "month", "prod000001"]);
   is("nobody under that address: none", (await memberSubs(store, "nobody@example.com"))?.length, 0);

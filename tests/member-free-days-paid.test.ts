@@ -164,7 +164,7 @@ async function main(): Promise<void> {
   part("An answer from Stripe that cannot be read is not 'no membership' (rule 24)");
   subs = [subscription("sub_live000001")];
   mode = "healthy";
-  is("control: the member's running membership is found", (await freeDaysSubs(store, "member@example.com", NOW))?.map((s) => s.id), ["sub_live000001"]);
+  is("control: the member's running membership is found", await freeDaysSubs(store, "member@example.com", NOW).then((read) => (Array.isArray(read) ? read.map((s) => s.id) : read)), ["sub_live000001"]);
   for (const m of ["customers out of shape", "subscriptions out of shape", "no has_more", "more pages"] as const) {
     mode = m;
     // Stripe answered, but not in a shape that can be read: "unreadable" and "unavailable" (lib/member-discount.ts,

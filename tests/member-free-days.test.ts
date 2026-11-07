@@ -133,7 +133,9 @@ async function main(): Promise<void> {
   is("a membership on a schedule of changes is left alone", freeDaysState(subscription("sub_sched00001", { schedule: "sub_sched_1" }), NOW).blocked, "scheduled");
 
   part("What the studio is shown");
-  const found = await freeDaysSubs(store, "member@example.com");
+  // "unreadable" is never a list of memberships: read as none found, so the checks below fail on it.
+  const read = await freeDaysSubs(store, "member@example.com");
+  const found = Array.isArray(read) ? read : null;
   is(
     "only this store's running memberships of that address, each with its next charge",
     found?.map((s) => [s.id, s.nextCharge, s.blocked]),
@@ -145,7 +147,7 @@ async function main(): Promise<void> {
       ["sub_behind0001", 0, "behind"],
     ],
   );
-  is("the discount's own reading still reads the same memberships (healthy control)", (await memberSubs(store, "member@example.com"))?.map((s) => s.id), ["sub_live000001", "sub_trial00001", "sub_ending0001", "sub_paused0001", "sub_behind0001"]);
+  is("the discount's own reading still reads the same memberships (healthy control)", await memberSubs(store, "member@example.com").then((read) => (Array.isArray(read) ? read.map((s) => s.id) : read)), ["sub_live000001", "sub_trial00001", "sub_ending0001", "sub_paused0001", "sub_behind0001"]);
 
   part("Refused before Stripe is asked");
   is("another store's membership", await giveFreeDays(store, "member@example.com", "sub_else000001", 7, PERIOD_END, by), { ok: false, reason: "not_member" });

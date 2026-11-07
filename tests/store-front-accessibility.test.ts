@@ -152,6 +152,12 @@ async function main(): Promise<void> {
   const boxes = css.match(/\[data-store-layout\] :where\(p\.flex, p\.grid, p\.st-card, p:has\(> \.st-card\)\)\s*\{([^}]*)\}/);
   is("a p that is a box (flex, grid, a card or holding one) is not capped", /max-width:\s*none/.test(boxes?.[1] ?? ""), true);
   is("and that rule comes after the cap, so it wins at the same weight", css.indexOf(boxes?.[0] ?? "\u0000") > css.indexOf(measure?.[0] ?? "\u0000"), true);
+  // Rule 30 from Claude 5's review of #2907: Tailwind v4 puts its utilities in a layer, and a rule in no layer beats any
+  // layer, so a block's own max-w-* or mx-* would lose to the cap. In @layer components, the utility wins again.
+  const capAt = css.indexOf(measure?.[0] ?? "\u0000");
+  const layerOpen = css.lastIndexOf("@layer components {", capAt);
+  const layerClose = layerOpen < 0 ? -1 : css.indexOf("\n}\n", layerOpen);
+  is("the store front's cap, its boxes and its centering sit in @layer components", layerOpen >= 0 && layerClose > css.indexOf(boxes?.[0] ?? "\u0000") && layerClose > css.search(/\[data-store-layout\] :where\(p\.text-center/), true);
   // 1ch is the width of "0". Characters counted line by line in Chromium by tests/e2e/store-front-audit.mjs at 56ch
   // (build of 06bca7d8d, Geist): a real sentence reached 81 a line (the full store at 200%), words of narrow letters
   // only (i, l, t, f, j, r, s) 126 (the edge store at 1280 px). A line scales with the cap.

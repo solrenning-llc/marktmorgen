@@ -118,6 +118,14 @@ class Graph(WithSyntheticSuite):
             # Codex G on #3037: a page or a component it re-exports may import a library
             # file whose name is computed; the graph cannot see it, so it must not skip.
             "computed import in a page": {"app/page.tsx": "const leaf = 'b';\nexport default (await import(`../lib/${leaf}.ts`)).b;"},
+            # Codex G's residual on #3037: a string prefix joined to a variable reads as a
+            # literal "../lib/" and resolves to lib/index.*, hiding the real target.
+            "concatenated import in a page": {"app/page.tsx": "export default (await import('../lib/' + leaf + '.ts')).b;",
+                                              "lib/index.ts": "export const unused = true;"},
+            "concatenated require in a component": {"components/c.tsx": "export const c = require('../lib/' + leaf);",
+                                                    "lib/index.ts": "export const unused = true;",
+                                                    "app/page.tsx": 'import { c } from "@/components/c";\nexport default c;'},
+            "method on the specifier": {"app/page.tsx": "export default await import('../lib/b'.concat(x));"},
             "computed import in a component": {"components/c.tsx": "export const c = await import(`../lib/${leaf}.ts`);",
                                                "app/page.tsx": 'import { c } from "@/components/c";\nexport default c;'},
             "unresolved import": {"app/page.tsx": 'import "@/lib/missing";'},
@@ -151,6 +159,12 @@ class Graph(WithSyntheticSuite):
                     if ui.COMPUTED.search(code):
                         found.add(path)
         self.assertEqual(found, set(REAL_REVIEWED))
+
+    def test_a_whole_literal_dynamic_import_is_still_followed(self):
+        for code in ("await import('../lib/b')", "await import( '../lib/b' )", "require('../lib/b')",
+                     "await import('../lib/b', { with: {} })"):
+            with self.subTest(code=code):
+                self.assertFalse(ui.COMPUTED.search(code))
 
     def test_unreadable_file_raises(self):
         files = list(BASE) + ["lib/ghost.ts"]

@@ -1,0 +1,80 @@
+/**
+ * Reviewer's synthetic proof for #2667 delta 378732ac..70e37cc9 (stockLeftKnown in the recount).
+ * Redis stubbed, Stripe mocked; no real provider.
+ */
+import { parseProduct } from "@/lib/catalog";
+import { withCartStockHolds, withStockHold } from "@/lib/stock";
+import type { Listing, Store } from "@/lib/store";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+
+/** session id -> Stripe reply (status + body) */
+const replies = new Map<string, { code: number; body: unknown }>();
+let gets = 0;
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input));
+  const method = init?.method ?? "GET";
+  const one = /^\/v1\/checkout\/sessions\/([^/]+)$/.exec(url.pathname);
+  if (url.hostname === "api.stripe.com" && one && method === "GET") {
+    gets += 1;
+    const r = replies.get(one[1]) ?? { code: 200, body: { id: one[1], status: "expired" } };
+    return new Response(JSON.stringify(r.body), { status: r.code });
+  }
+  return new Response("{}", { status: 404 });
+}) as typeof fetch;
+
+const creator = { statsId: "v".repeat(32), stripeAccountId: "acct_1TestReview2667" } as Store;
+const limited = (id: string, stock: number) => parseProduct({ id, title: `Print ${id}`, summary: "", priceCents: 2000, stock, link: `https://example.com/${id}` }) as Listing;
+const key = (id: string) => `nl:stock:${creator.statsId}:${id}`;
+const sess = (id: string, i: number) => `cs_test_rv${id}${String(i).padStart(6, "0")}`;
+const lapse = async (id: string, i: number) => redis.pipeline([["HSET", key(id), sess(id, i), JSON.stringify({ until: Date.now() - 1000 })]]);
+
+async function main(): Promise<void> {
+  redis.clear();
+  process.env.STRIPE_SECRET_KEY = "sk_test_only";
+  const original: typeof redis.pipeline = redis.pipeline.bind(redis);
+  let opened = 0;
+  const open = async () => { opened += 1; return { id: `cs_test_rvopen${String(opened).padStart(6, "0")}` }; };
+
+  part("A. Stripe answers 200 with a status that is neither open, complete nor expired");
+  await lapse("a", 0);
+  replies.set(sess("a", 0), { code: 200, body: { id: sess("a", 0), status: "weird" } });
+  is("A: press again, never Sold out", await withStockHold(creator, limited("a", 1), open), { ok: false, reason: "busy" });
+
+  part("B. Control: a lapsed hold whose checkout is complete but unpaid is a known holder");
+  await lapse("b", 0);
+  replies.set(sess("b", 0), { code: 200, body: { id: sess("b", 0), status: "complete", payment_status: "unpaid" } });
+  is("B: Sold out (known)", await withStockHold(creator, limited("b", 1), open), { ok: false, reason: "soldout" });
+
+  part("C. Redis read fails only on the recount (after the locks are let go)");
+  await lapse("c", 0);
+  let reads = 0;
+  redis.pipeline = async (batch) => {
+    if (batch.some((c) => c[0] === "HGETALL" && c[1] === key("c"))) { reads += 1; if (reads === 2) throw new Error("read down"); }
+    return original(batch);
+  };
+  try {
+    is("C: press again, never Sold out", await withStockHold(creator, limited("c", 1), open), { ok: false, reason: "busy" });
+  } finally { redis.pipeline = original; }
+
+  part("D. Cart: X certainly sold (paid), Y only lapsed holds and Stripe down");
+  await redis.pipeline([["HSET", key("dx"), "cs_test_rvpaid000001", JSON.stringify({ until: 0, paid: true })]]);
+  await lapse("dy", 0);
+  replies.set(sess("dy", 0), { code: 500, body: {} });
+  const d = await withCartStockHolds(creator, [limited("dx", 1), limited("dy", 1)], open);
+  is("D: X is certainly sold out, so the cart is refused as Sold out (naming X)", d.ok === false ? [d.reason, (d as { ids?: string[] }).ids?.includes("dx")] : d, ["soldout", true]);
+
+  part("E. Sibling: more lapsed holds than MAX_CHECKS, the asked ones complete-unpaid, the sixth never asked");
+  for (let i = 0; i < 6; i += 1) await lapse("e", i);
+  for (let i = 0; i < 5; i += 1) replies.set(sess("e", i), { code: 200, body: { id: sess("e", i), status: "complete", payment_status: "unpaid" } });
+  // sess("e", 5) would be "expired" (default) if asked: one unit is free.
+  gets = 0;
+  const e = await withStockHold(creator, limited("e", 6), open);
+  is("E: the never-asked hold is a guess: press again, never Sold out", e, { ok: false, reason: "busy" });
+  is("E: Stripe asked at most MAX_CHECKS", gets <= 5, true);
+
+  is("nothing opened anywhere", opened, 0);
+  done();
+}
+
+void main();

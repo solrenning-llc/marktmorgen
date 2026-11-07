@@ -11,6 +11,17 @@ from ci_ui_scope import (GitTree, Uncertain, changed_paths, reachable,  # noqa: 
 from ci_documentation_scope import requires_suite  # noqa: E402
 import ci_ui_scope as ui  # noqa: E402
 
+# The repository's own reviewed bundlers, kept before the synthetic tree below adds its
+# stand-in suite (tests/e2e/suite.mjs), which bundles a named file the same way.
+REAL_REVIEWED = ui.REVIEWED_COMPUTED
+SYNTHETIC_REVIEWED = REAL_REVIEWED | {"tests/e2e/suite.mjs"}
+
+
+class WithSyntheticSuite(unittest.TestCase):
+    def setUp(self):
+        ui.REVIEWED_COMPUTED = SYNTHETIC_REVIEWED
+        self.addCleanup(setattr, ui, "REVIEWED_COMPUTED", REAL_REVIEWED)
+
 A, B = "a" * 40, "b" * 40
 
 BASE = {
@@ -55,7 +66,7 @@ def change(path, status="M", before="100644", after="100644"):
     return (":" + before + " " + after + " " + A + " " + B + " " + status + "\0" + path + "\0").encode()
 
 
-class Graph(unittest.TestCase):
+class Graph(WithSyntheticSuite):
     def test_follows_aliases_reexports_js_to_ts_css_and_the_jsx_runtime(self):
         graph = reachable(*tree(BASE))
         for path in ("lib/a.ts", "lib/a-parts.ts", "lib/theme.css", "lib/mark.css",
@@ -139,7 +150,7 @@ class Graph(unittest.TestCase):
                         code = "\n".join(ui.code_lines(handle.read()))
                     if ui.COMPUTED.search(code):
                         found.add(path)
-        self.assertEqual(found, set(ui.REVIEWED_COMPUTED))
+        self.assertEqual(found, set(REAL_REVIEWED))
 
     def test_unreadable_file_raises(self):
         files = list(BASE) + ["lib/ghost.ts"]
@@ -199,7 +210,7 @@ class Events(unittest.TestCase):
         self.assertTrue(requires_suite("ui", "merge_group", A, B, diff, lambda _: True))
 
 
-class FromGit(unittest.TestCase):
+class FromGit(WithSyntheticSuite):
     def test_reads_each_revision_through_git(self):
         with tempfile.TemporaryDirectory() as folder:
             def git(*args):

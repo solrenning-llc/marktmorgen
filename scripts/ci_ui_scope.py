@@ -63,6 +63,17 @@ CSS_URL = re.compile(r"""url\(\s*(["']?)(\.{1,2}/[^"')\s]+)\1\s*\)""")
 NAMED = re.compile(r"""[A-Za-z0-9_@.\[\]/-]*[A-Za-z0-9_\]-]\.(?:tsx?|mts|cts|m?js|cjs|jsx|json|css)\b""")
 
 
+# Reviewed one by one: each imports a bundle esbuild built from files it names in strings.
+# tests/ci-merge-group's twin in scripts/test_ci_ui_scope.py fails when this set and the
+# repository disagree, so a new computed import is reviewed and named, never let through.
+REVIEWED_COMPUTED = frozenset({
+    "tests/e2e/agreements.mjs",
+    "tests/e2e/mobile-render.mjs",
+    "tests/e2e/services.mjs",
+    "tests/e2e/store-copy.mjs",
+})
+
+
 class Uncertain(Exception):
     """The graph cannot prove what reaches the suites; the caller runs them in full."""
 
@@ -202,9 +213,10 @@ def reachable(files, read):
         except (OSError, UnicodeError, KeyError) as error:
             raise Uncertain("unreadable " + current) from error
         code = "\n".join(code_lines(text))
-        if COMPUTED.search(code) and not always(current):
-            # In ALWAYS a computed import loads a bundle built from a file named in a
-            # string, which named_files() follows; elsewhere nothing reviewed it.
+        if COMPUTED.search(code) and current not in REVIEWED_COMPUTED:
+            # Only the named end-to-end runners below load a bundle built from a file
+            # they name in a string, which named_files() follows. Any other computed
+            # import, a page or component included (Codex G on #3037), is unknown.
             raise Uncertain("computed import in " + current)
         if LISTING.search(code) and current not in LISTERS:
             raise Uncertain("unreviewed directory listing in " + current)

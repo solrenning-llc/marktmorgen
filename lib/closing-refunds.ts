@@ -40,6 +40,7 @@ import { redisPipeline } from "@/lib/redis";
 import { signedOf } from "@/lib/redis-count";
 import { repliesFor } from "@/lib/redis-reply";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
+import { StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { type PaidPeriod, REFUNDS_PER_REQUEST, stillToGive, totalsOf, unusedOf } from "@/lib/closing-buyers-rules";
 import { paidPeriods, savePaidPeriod, takeCalls, workKey } from "@/lib/closing-holds";
 
@@ -147,14 +148,51 @@ async function intentOf(account: string, invoice: string, count: () => void): Pr
   const direct = typeof read.payment_intent === "string" ? read.payment_intent : (read.payment_intent as { id?: unknown } | null)?.id;
   if (typeof direct === "string" && INTENT_ID.test(direct)) return direct;
   count();
-  const listed = await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ invoice, limit: "10" })}`);
-  for (const row of Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : []) {
-    if (row.status !== "paid") continue;
-    const pi = (row.payment as { payment_intent?: unknown } | null)?.payment_intent;
-    const id = typeof pi === "string" ? pi : (pi as { id?: unknown } | null)?.id;
-    if (typeof id === "string" && INTENT_ID.test(id)) return id;
+  // Read in its exact shape (lib/stripe-list.ts; CX-123 rules 24 and 30): a page in another shape, a row that does not
+  // read, or a list not read to its end throws, and the member stays to be read again. "No payment" ("") only from a
+  // whole, readable list: none paid, or paid otherwise than by a PaymentIntent. Never a refund owed dropped on a guess.
+  const page = readStripePage(await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ invoice, limit: "10" })}`), (row) => {
+    const status = ownField(row, "status");
+    if (typeof status !== "string") return false;
+    if (status !== "paid") return true;
+    const payment = ownField(row, "payment");
+    if (!plainObject(payment)) return false;
+    const pi = ownField(payment, "payment_intent");
+    // Absent (or null) only on a payment of another kind; present, it must name a PaymentIntent.
+    return pi === undefined || pi === null || INTENT_ID.test(idOf(pi));
+  });
+  if (page.unreadable) throw new StripeListUnreadable("an invoice's payments, a row not readable");
+  for (const row of page.rows) {
+    if (ownField(row, "status") !== "paid") continue;
+    const id = idOf(ownField(ownField(row, "payment") as Record<string, unknown>, "payment_intent"));
+    if (INTENT_ID.test(id)) return id;
   }
+  if (page.hasMore) throw new StripeListUnreadable("an invoice's payments, not read to the end");
   return "";
+}
+
+/** An id Stripe sends as text, or inside the object it expanded. */
+const idOf = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  const id = plainObject(value) ? ownField(value, "id") : undefined;
+  return typeof id === "string" ? id : "";
+};
+
+/**
+ * The payment's charge, read in its exact shape before a refund is weighed (CX-123 rules 24 and 30): expanded, in
+ * this payment's currency, with what was refunded already as a whole number of cents and whether it is disputed as
+ * true or false. Anything else is unknown, never a charge with nothing refunded: what the creator already gave back
+ * is never given again, and a member is never settled as short on a charge that could not be read.
+ */
+function chargeOf(intent: Record<string, unknown>, currency: string): Record<string, unknown> {
+  const charge = ownField(intent, "latest_charge");
+  if (!plainObject(charge)) throw new Error("the payment's charge was not sent expanded");
+  const refunded = ownField(charge, "amount_refunded");
+  const cur = ownField(charge, "currency");
+  if (!Number.isSafeInteger(refunded) || (refunded as number) < 0) throw new Error("the charge's refunded amount could not be read");
+  if (typeof cur !== "string" || cur.toLowerCase() !== currency.toLowerCase()) throw new Error("the charge's currency is not the payment's");
+  if (typeof ownField(charge, "disputed") !== "boolean") throw new Error("whether the charge is disputed could not be read");
+  return charge;
 }
 
 /** The account's available balance, by currency, in the smallest unit. */
@@ -290,7 +328,7 @@ export async function giveBackUnused(
         }
         count();
         const pi = await onAccount("GET", account, `/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge.balance_transaction`);
-        const charge = pi.latest_charge && typeof pi.latest_charge === "object" ? (pi.latest_charge as Record<string, unknown>) : {};
+        const charge = chargeOf(pi, row.paid.cur);
         if (charge.disputed === true) {
           await settle("disputed");
           out.disputed += 1;
@@ -310,7 +348,7 @@ export async function giveBackUnused(
           else out.done.push({ sub: row.sub, amount: prior.amount, cur: row.paid.cur });
           continue;
         }
-        const refunded = typeof charge.amount_refunded === "number" ? charge.amount_refunded : 0;
+        const refunded = charge.amount_refunded as number;
         const give = Math.min(stillToGive(row.unused, refunded), Math.max(0, (row.paid.tot ?? row.paid.amt) - refunded));
         if (give <= 0) {
           await settle("none");

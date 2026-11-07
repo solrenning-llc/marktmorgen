@@ -8,6 +8,7 @@
  *   nl:course:<course>:tasks:waiting              work waiting for the creator, oldest first
  *   nl:course:<course>:tasks:all                  all the work handed in, by when it last was
  *   nl:tasks:bytes:<store key>                    what the store's students keep handed in, in bytes
+ *   nl:tasks:taken:<hash of a file's path>        the bytes one file took of that room, for an hour (undoTakeRoom)
  *   nl:tasks:doors                                files a student was let upload, by when: handed in, or deleted after a day
  *   nl:course:<course>:tasks:told                 the creator was told of new work this hour
  *
@@ -17,7 +18,9 @@
  * on an assignment the creator does not review, it is done at once; on one
  * they review, when they approve it.
  */
+import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { ENTRY_BYTES, dataBytes } from "@/lib/store-data-rules";
 import { markLesson } from "@/lib/learn";
@@ -40,6 +43,9 @@ const filesKey = (courseId: string, lessonId: string) => `nl:course:${courseId}:
 const waitingKey = (courseId: string) => `nl:course:${courseId}:tasks:waiting`;
 const allKey = (courseId: string) => `nl:course:${courseId}:tasks:all`;
 const bytesKey = (room: string) => `nl:tasks:bytes:${room}`;
+const takenKey = (path: string) => `nl:tasks:taken:${createHash("sha256").update(path).digest("hex").slice(0, 40)}`;
+/** How long a file's mark of the room it took is kept: long enough for the route to give it back at once. */
+const TAKEN_SECONDS = 60 * 60;
 const DOORS_KEY = "nl:tasks:doors";
 /** A file uploaded and not handed in within this long is deleted. */
 export const DOOR_SECONDS = 24 * 60 * 60;
@@ -80,31 +86,69 @@ export async function saveTask(courseId: string, lessonId: string, task: Task, d
   if (grown < 0) await giveData(data, [{ slot: TASKS_SLOT(courseId), bytes: -grown }]);
 }
 
-/** Forgets an assignment and all the work handed in for it. Returns the files to delete. */
-export async function dropTask(courseId: string, lessonId: string, room: string | null, data: DataStore): Promise<string[]> {
-  if (!isRedisConfigured()) return [];
-  const [flat] = await redisPipeline([["HGETALL", filesKey(courseId, lessonId)]]);
-  const pairs = Array.isArray(flat) ? flat : [];
+/** A handed-in file's size as handIn writes it in the files' hash: a whole number of bytes, as text. */
+const FILE_BYTES_TEXT = /^(0|[1-9]\d{0,15})$/;
+
+/** What removing an assignment will forget, read in full before anything is deleted (readTaskDrop). */
+export type TaskDrop = { courseId: string; lessonId: string; files: string[]; bytes: number; gone: string[]; freed: number };
+
+/**
+ * Reads what removing an assignment will forget: its handed-in files and their sizes, the work handed in, and what
+ * the records weigh. Every reply in its exact shape (CX-123 rules 24 and 30; Claude 4 after Codex P on #2655): a
+ * files' hash, a list of work or a record that does not read throws UnknownReplyError. A caller reads this before it
+ * takes the assignment out of the course (Revisor 1 on #2810), so a read that fails leaves everything findable.
+ */
+export async function readTaskDrop(courseId: string, lessonId: string): Promise<TaskDrop> {
+  const flat = repliesFor(await redisPipeline([["HGETALL", filesKey(courseId, lessonId)]]), 1)?.[0];
+  const pairs: unknown[] | null = Array.isArray(flat)
+    ? flat
+    : flat && typeof flat === "object"
+      ? Object.entries(flat as Record<string, unknown>).flat()
+      : null;
+  if (!pairs || pairs.length % 2 !== 0) throw new UnknownReplyError("the files handed in for an assignment");
   const files: string[] = [];
   let bytes = 0;
-  for (let i = 0; i + 1 < pairs.length; i += 2) {
-    files.push(String(pairs[i]));
-    bytes += Number(pairs[i + 1]) || 0;
+  for (let i = 0; i < pairs.length; i += 2) {
+    const [name, size] = [pairs[i], pairs[i + 1]];
+    if (typeof name !== "string" || !name || typeof size !== "string" || !FILE_BYTES_TEXT.test(size)) throw new UnknownReplyError("the files handed in for an assignment");
+    files.push(name);
+    bytes += Number(size);
   }
   // Each student's own record, found by the list of all the work handed in.
-  const [waiting] = await redisPipeline([["ZRANGEBYSCORE", allKey(courseId), "-inf", "+inf"]]);
-  const gone = (Array.isArray(waiting) ? waiting : []).filter((m): m is string => typeof m === "string" && m.startsWith(`${lessonId}|`));
+  const waiting = repliesFor(await redisPipeline([["ZRANGEBYSCORE", allKey(courseId), "-inf", "+inf"]]), 1)?.[0];
+  if (!Array.isArray(waiting) || !waiting.every((m) => typeof m === "string")) throw new UnknownReplyError("the work handed in for a course");
+  const gone = (waiting as string[]).filter((m) => m.startsWith(`${lessonId}|`));
   // What the prompt and the work weighed comes back to the store's data room.
-  const held = await redisPipeline([["GET", taskKey(courseId, lessonId)], ...gone.map((member) => ["GET", subKey(courseId, lessonId, member.slice(lessonId.length + 1))])]);
+  const held = repliesFor(
+    await redisPipeline([["GET", taskKey(courseId, lessonId)], ...gone.map((member) => ["GET", subKey(courseId, lessonId, member.slice(lessonId.length + 1))])]),
+    1 + gone.length,
+  );
+  if (!held || !held.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReplyError("an assignment's records");
   const freed = held.reduce((sum: number, raw, i) => sum + recordBytes(raw, i === 0 ? 1 : 3), 0) + files.length * ENTRY_BYTES;
+  return { courseId, lessonId, files, bytes, gone, freed };
+}
+
+/**
+ * Forgets what readTaskDrop read, and only that: the files read leave the files' hash one by one (HDEL), so a file
+ * handed in after the reading stays listed, never lost; the work read leaves the lists. Returns the files to delete.
+ */
+export async function applyTaskDrop(drop: TaskDrop, room: string | null, data: DataStore): Promise<string[]> {
+  const { courseId, lessonId, files, bytes, gone, freed } = drop;
   await redisPipeline([
-    ["DEL", taskKey(courseId, lessonId), filesKey(courseId, lessonId)],
+    ["DEL", taskKey(courseId, lessonId)],
+    ...(files.length ? [["HDEL", filesKey(courseId, lessonId), ...files]] : []),
     ...gone.map((member) => ["DEL", subKey(courseId, lessonId, member.slice(lessonId.length + 1))]),
     ...(gone.length ? [["ZREM", waitingKey(courseId), ...gone], ["ZREM", allKey(courseId), ...gone]] : []),
   ]);
   if (room && bytes) await releaseBytes(room, bytes);
   if (freed) await giveData(data, [{ slot: TASKS_SLOT(courseId), bytes: freed }]);
   return files;
+}
+
+/** Forgets an assignment and all the work handed in for it, read first (readTaskDrop). Returns the files to delete. */
+export async function dropTask(courseId: string, lessonId: string, room: string | null, data: DataStore): Promise<string[]> {
+  if (!isRedisConfigured()) return [];
+  return applyTaskDrop(await readTaskDrop(courseId, lessonId), room, data);
 }
 
 /** One student's work on one assignment, or null when they have handed nothing in. */
@@ -127,29 +171,100 @@ export async function submissionsOf(courseId: string, rows: { lessonId: string; 
  * Room for a file of this size in what this store's students keep: taken
  * now, given back when the file is no longer kept (releaseBytes). `limit`
  * is the store's own (lib/assignment-rules.ts, taskRoomFor).
+ *
+ * With the file's `path`, the same round marks that file as having taken
+ * its bytes, for an hour (TAKEN_SECONDS), after the INCRBY: a round cut
+ * short leaves at worst the bytes without the mark, which only refuses
+ * sooner, never a mark without the bytes.
+ *
+ * The total is read only in its exact shape (CX-123 rule 24): one reply for
+ * each command, a whole number at least the bytes just added, and the mark
+ * written. Anything else throws UnknownReplyError, so the work is not
+ * handed in and the student is told something went wrong (the route's
+ * "server_error"), never that the room is full. Whether the INCRBY was
+ * applied is not known then, so nothing is given back here: the caller
+ * gives the bytes back with undoTakeRoom, which does it only when the
+ * file's mark says they entered (a DECRBY of bytes that never entered
+ * would leave room for more than the store's limit).
  */
-export async function takeRoom(room: string, bytes: number, limit: number = MAX_STORE_TASK_BYTES): Promise<boolean> {
+export async function takeRoom(room: string, bytes: number, limit: number = MAX_STORE_TASK_BYTES, path?: string): Promise<boolean> {
   if (!isRedisConfigured() || !Number.isFinite(bytes) || bytes <= 0 || !Number.isSafeInteger(limit) || limit <= 0) return false;
-  const [used] = await redisPipeline([["INCRBY", bytesKey(room), Math.ceil(bytes)]]);
-  if (Number(used) > limit) {
-    await redisPipeline([["DECRBY", bytesKey(room), Math.ceil(bytes)]]);
+  const added = Math.ceil(bytes);
+  const marked = typeof path === "string" && path !== "";
+  const replies = repliesFor(
+    await redisPipeline([["INCRBY", bytesKey(room), added], ...(marked ? [["SET", takenKey(path), added, "EX", TAKEN_SECONDS]] : [])]),
+    marked ? 2 : 1,
+  );
+  // INCRBY answers the new total as a number. A total under `added` (a counter left below zero) is unknown here and
+  // throws; the increment stays, so the counter is back at or above zero for the next try (Revisor 1 on #2655).
+  const used = replies ? countOf(replies[0]) : null;
+  if (used === null || used < added || (marked && replies?.[1] !== "OK")) throw new UnknownReplyError("the room taken by handed-in files");
+  if (used > limit) {
+    const [left] = await redisPipeline([["DECRBY", bytesKey(room), added], ...(marked ? [["DEL", takenKey(path)]] : [])]);
+    if (typeof left === "number" && left < 0) await redisPipeline([["SET", bytesKey(room), 0]]);
     return false;
   }
   return true;
 }
 
-/** Whether a file of this size would still fit, read without taking anything. */
+/**
+ * Gives back the room takeRoom took for this file when its answer was not
+ * known, only if the file's mark says the bytes entered: the mark is
+ * deleted first, and only a DEL that answered exactly 1 (this call removed
+ * it, so no other one will) is followed by the DECRBY, never below zero
+ * (releaseBytes). No mark: the bytes never entered, or were given back
+ * already. An answer of another shape throws UnknownReplyError and gives
+ * nothing back, which only refuses sooner.
+ *
+ * The mark of a file whose room was taken with a known answer is left to
+ * expire: this is called only from the hand-in route's failure on that same
+ * call, and a file's path passes the door once (takeTaskUpload), so a later
+ * releaseBytes of the same bytes never meets this.
+ */
+export async function undoTakeRoom(room: string, bytes: number, path: string): Promise<boolean> {
+  if (!isRedisConfigured() || !Number.isFinite(bytes) || bytes <= 0 || !path) return false;
+  const replies = repliesFor(await redisPipeline([["DEL", takenKey(path)]]), 1);
+  if (!replies || (replies[0] !== 0 && replies[0] !== 1)) throw new UnknownReplyError("whether a handed-in file took its room");
+  if (replies[0] !== 1) return false;
+  await releaseBytes(room, bytes);
+  return true;
+}
+
+/**
+ * What GET answers for the counter INCRBY/DECRBY keep: a whole number of bytes, as text. It can be below zero for a
+ * moment (a DECRBY racing releaseBytes' SET 0), and a counter below zero is nothing used, as releaseBytes reads it
+ * (Revisor 1 on #2655): never a store whose students can no longer hand in.
+ */
+const BYTES_TEXT = /^(0|-?[1-9]\d{0,15})$/;
+
+/** A GET of the counter as text, a whole number, below zero read as zero; null for anything else, a number included (GET answers text or nil only; Codex P on #2655). */
+function bytesUsed(reply: unknown): number | null {
+  if (typeof reply !== "string" || !BYTES_TEXT.test(reply)) return null;
+  const n = Number(reply);
+  return Number.isSafeInteger(n) ? Math.max(0, n) : null;
+}
+
+/**
+ * Whether a file of this size would still fit, read without taking anything.
+ * Only an explicit nil is "nothing used"; a whole number from 0 is what is
+ * used; any other reply is unknown and throws UnknownReplyError (Codex P on
+ * #2655; CX-123 rule 24), so no upload is signed on a guess and nobody is
+ * told the room is full when it was not read.
+ */
 export async function hasRoom(room: string, bytes: number, limit: number = MAX_STORE_TASK_BYTES): Promise<boolean> {
   if (!isRedisConfigured()) return false;
-  const [used] = await redisPipeline([["GET", bytesKey(room)]]);
-  return (Number(used) || 0) + bytes <= limit;
+  const replies = repliesFor(await redisPipeline([["GET", bytesKey(room)]]), 1);
+  const reply = replies?.[0];
+  const used = reply === null ? 0 : bytesUsed(reply);
+  if (!replies || used === null) throw new UnknownReplyError("how much room a store's handed-in files take");
+  return used + bytes <= limit;
 }
 
 /** Gives back room taken for files that are no longer kept. */
 export async function releaseBytes(room: string, bytes: number): Promise<void> {
   if (!isRedisConfigured() || !(bytes > 0)) return;
   const [left] = await redisPipeline([["DECRBY", bytesKey(room), Math.ceil(bytes)]]);
-  if (Number(left) < 0) await redisPipeline([["SET", bytesKey(room), 0]]);
+  if (typeof left === "number" && Number.isSafeInteger(left) && left < 0) await redisPipeline([["SET", bytesKey(room), 0]]);
 }
 
 /** What handing in did: where the work stands, and the earlier file it replaced, with its size, to delete. */
@@ -305,17 +420,29 @@ export async function tellCreatorNow(courseId: string): Promise<boolean> {
 }
 
 /** Forgets every assignment of a course that is going, and returns their files to delete. */
-export async function dropCourseTasks(course: { id: string; modules: { lessons: { id: string; task?: unknown }[] }[] }, room: string | null, data: DataStore): Promise<string[]> {
+type CourseTasks = { id: string; modules: { lessons: { id: string; task?: unknown }[] }[] };
+
+/** Every assignment of a course read for removal (readTaskDrop), before the course goes; throws on any unread. */
+export async function readCourseTaskDrops(course: CourseTasks): Promise<TaskDrop[]> {
+  const drops: TaskDrop[] = [];
+  if (!isRedisConfigured()) return drops;
+  for (const unit of course.modules) for (const lesson of unit.lessons) if (lesson.task) drops.push(await readTaskDrop(course.id, lesson.id));
+  return drops;
+}
+
+/** Forgets what readCourseTaskDrops read, then the course's lists of work. Returns the files to delete. */
+export async function applyCourseTaskDrops(course: CourseTasks, drops: TaskDrop[], room: string | null, data: DataStore): Promise<string[]> {
   const files: string[] = [];
-  for (const unit of course.modules) {
-    for (const lesson of unit.lessons) {
-      if (lesson.task) files.push(...(await dropTask(course.id, lesson.id, room, data)));
-    }
-  }
+  for (const drop of drops) files.push(...(await applyTaskDrop(drop, room, data)));
   if (files.length || course.modules.some((m) => m.lessons.some((l) => l.task))) {
     await redisPipeline([["DEL", waitingKey(course.id), allKey(course.id)]]);
   }
   return files;
+}
+
+/** A course's assignments all forgotten, each read first. Returns the files to delete. */
+export async function dropCourseTasks(course: CourseTasks, room: string | null, data: DataStore): Promise<string[]> {
+  return applyCourseTaskDrops(course, await readCourseTaskDrops(course), room, data);
 }
 
 /**

@@ -199,6 +199,17 @@ async function main(): Promise<void> {
   const studioStop = await studio({ action: "stop", id: idOf("STUDIOLAST") });
   disarm();
   is("stop of the last live code while the box cannot be written: said as done, the list as Stripe has it", [studioStop.status, studioStop.body.ok, Array.isArray(studioStop.body.codes)], [200, true, true]);
+  // Pre-review of money (L): the studio's stop said only that the codes are on, never that the one asked for is off.
+  for (const failure of ["throw", "lost"] as const) {
+    await fresh();
+    is("two live codes made", [(await make("STUDIOKEEP")).status, (await make("STUDIOGOOFF")).status], [200, 200]);
+    await setHasDiscounts(OWNER, false); // a box left off by an earlier failure
+    arm(failure, "stop");
+    const studioOff = await studio({ action: "stop", id: idOf("STUDIOGOOFF") });
+    disarm();
+    is(`stop, ${failure}, other codes live: not ok, said as the box, and said that the code asked for is off`, [studioOff.status, studioOff.body.ok, studioOff.body.error, studioOff.body.stopped], [503, false, "checkout_box", true]);
+    is(`stop, ${failure}: Stripe has it off, the other still live`, liveCodes(), ["STUDIOKEEP"]);
+  }
   await fresh();
   const studioFine = await studio({ action: "add", code: "STUDIOFINE", percent: "10" });
   is("control: added as before, box on", [studioFine.status, studioFine.body.ok, await box()], [200, true, true]);
@@ -223,6 +234,7 @@ async function main(): Promise<void> {
   const root = process.cwd();
   const editor = readFileSync(join(root, "components/discount-editor.tsx"), "utf8");
   is("the studio has its own words for the box", /checkout_box:\s*\n?\s*"[^"]*buyers cannot enter/.test(editor), true);
+  is("and, after a stop, says the code was switched off first", /checkout_box_stopped:\s*\n?\s*"The code was switched off\.[^"]*buyers cannot enter/.test(editor), true);
   const reference = readFileSync(join(root, "app/developers/page.tsx"), "utf8");
   is("the API reference names the answer", reference.includes("checkout_box"), true);
 

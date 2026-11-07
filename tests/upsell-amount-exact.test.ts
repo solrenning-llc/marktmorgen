@@ -28,7 +28,7 @@ const NOW = Math.floor(Date.now() / 1000);
 let shape: { amount?: unknown; currency?: unknown } = {};
 let charged = 0;
 const letters: string[] = [];
-let sessions: Record<string, Record<string, unknown>> = {};
+const sessions: Record<string, Record<string, unknown>> = {};
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));

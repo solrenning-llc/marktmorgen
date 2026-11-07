@@ -1,4 +1,4 @@
-import { addNote, MAX_NOTES, parseNotes, readNotes } from "@/lib/stats-notes";
+import { addNote, MAX_NOTES, noteText, parseNotes, readNotes } from "@/lib/stats-notes";
 import { changeKeyReading, changeReading, commands, reset, store } from "./stats-notes-read-world";
 import { done, is, part } from "./check";
 
@@ -15,6 +15,28 @@ async function refusesRead(): Promise<boolean> {
 }
 
 async function main() {
+  part("A note written at the text boundary never poisons its history");
+  reset();
+  await store.pipeline([["HSET", key, "00000001", value, "00000002", value, "00000003", value]]);
+  const boundary = "a".repeat(79) + " launch";
+  let added = null;
+  let addFailed = false;
+  try { added = await addNote(stats, "2026-11-04", boundary, now); } catch { addFailed = true; }
+  is("the real writer accepts a cut immediately after a space", [addFailed, added?.length], [false, 4]);
+  let history = null;
+  try { history = await readNotes(stats); } catch { /* Recorded by the assertion below. */ }
+  is("the original three notes and the boundary note stay readable", history?.length, 4);
+  is("new boundary notes are canonical on every normalization", [noteText(boundary), noteText(noteText(boundary))], ["a".repeat(79), "a".repeat(79)]);
+  reset();
+  const legacy = "a".repeat(79) + " ";
+  await store.pipeline([["HSET", key, "00000001", value, "00000002", JSON.stringify({ day: "2026-11-04", text: legacy })]]);
+  let legacyHistory = null;
+  try { legacyHistory = await readNotes(stats); } catch { /* Recorded by the assertion below. */ }
+  is("the previous writer's exact boundary form remains readable without rewriting it", legacyHistory, [{ id: "00000001", day: "2026-11-04", text: "Published the course" }, { id: "00000002", day: "2026-11-04", text: legacy }]);
+  for (const text of ["Short ", "a".repeat(79) + "\t"]) {
+    is("unwritten whitespace forms remain unknown: " + JSON.stringify(text), refuses(() => parseNotes(["00000001", JSON.stringify({ day: "2026-11-04", text })])), true);
+  }
+
   part("Only complete inert chart-note records describe the stored history");
   is("confirmed empty hash stays empty", parseNotes([]), []);
   is("confirmed record stays unchanged", parseNotes(pair), [{ id: "00000001", day: "2026-11-04", text: "Published the course" }]);

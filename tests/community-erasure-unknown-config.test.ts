@@ -8,9 +8,19 @@
  * failed or odd reply became "no settings", so "no spaces", so none of those
  * records was deleted, and the erasure still said the person was gone.
  *
+ * A setup stored damaged (a value that is not settings at all) is not a lost
+ * reply, and pressing again never mends it (review of #3091 by Claude 2,
+ * MEDIUM: the erasure stayed "incomplete" for good). While the setup cannot
+ * be read, the community is off for everyone (communityViewer), so no space's
+ * answer is read or written; those written before expire on their own within
+ * five minutes (lib/community-access.ts, OPEN_SECONDS). So the erasure deletes
+ * everything else and finishes.
+ *
  * Synthetic data and the in-memory store only.
  */
 import { forgetCommunityPerson } from "@/lib/community-erasure";
+import { communityViewer } from "@/lib/community-access";
+import type { Store } from "@/lib/store";
 import { emailKey } from "@/lib/learn";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -34,6 +44,8 @@ const healthy = () => {
   redis.pipeline = real;
 };
 const isCfg = (c: (string | number)[]) => c[0] === "GET" && c[1] === cfgKey;
+const okKey = `nl:cm:${CM}:ok:${emailKey(EMAIL)}`;
+const productOk = `nl:cm:${CM}:sg:prod1:${emailKey(EMAIL)}`;
 const exists = async (key: string) => Number((await real([["EXISTS", key]]))[0]) === 1;
 
 async function rejects(run: () => Promise<unknown>): Promise<boolean> {
@@ -77,6 +89,32 @@ async function main(): Promise<void> {
     await forgetCommunityPerson(CM, "mem1", EMAIL, ["prod1"]);
     is("and the erasure run again deletes it", await exists(spaceOk), false);
   }
+
+  for (const [what, stored] of [
+    ["text that is not settings", "{bad"],
+    ["an empty value", ""],
+  ] as [string, string][]) {
+    part(`The setup is stored damaged: ${what}`);
+    healthy();
+    redis.clear();
+    await real([["SET", cfgKey, stored], ["SET", okKey, "1"], ["SET", productOk, "1"], ["HSET", `nl:cm:${CM}:wel`, emailKey(EMAIL), "1"]]);
+    const viewer = await communityViewer({ community: { id: CM, on: true } } as unknown as Store, { get: () => undefined });
+    is("the community is off for everyone, so no space's answer is read or written", viewer.state, "off");
+    is("the erasure finishes instead of staying incomplete for good", await rejects(() => forgetCommunityPerson(CM, "mem1", EMAIL, ["prod1"])), false);
+    is("the community's own answer about them is gone", await exists(okKey), false);
+    is("the answer for the product they bought is gone", await exists(productOk), false);
+    is("the welcome kept for them is gone", Number((await real([["HEXISTS", `nl:cm:${CM}:wel`, emailKey(EMAIL)]]))[0]), 0);
+    is("the damaged setup is left as it is, for the creator", (await real([["GET", cfgKey]]))[0], stored);
+    is("pressing again finishes too", await rejects(() => forgetCommunityPerson(CM, "mem1", EMAIL, ["prod1"])), false);
+  }
+
+  part("A lost reply is still not damage: it refuses, and nothing is deleted");
+  await setup();
+  await real([["SET", okKey, "1"]]);
+  answer(isCfg, "throw");
+  is("refused", await rejects(() => forgetCommunityPerson(CM, "mem1", EMAIL, ["prod1"])), true);
+  healthy();
+  is("the community's answer about them is still there to be deleted", await exists(okKey), true);
   done();
 }
 

@@ -8,7 +8,9 @@
  *   - a login proven by the emailed link opens no session while the record
  *     cannot be read, and says so honestly;
  *   - lockedUntil answers locked when its MGET, or the lock it reads, is in
- *     another shape; a session with no lock is still open;
+ *     another shape; a session with no lock is still open; past the lock's day,
+ *     a kept mark or a lock's opening time in another shape keeps it locked
+ *     (Codex J and Claude 5 on #2896), never sets it free;
  *   - a code is spent only on SET NX's own "OK": an unknown answer rejects;
  *   - mayAddSecondStep refuses and hasSecondStep answers yes on an unknown record.
  *
@@ -31,6 +33,7 @@ globalThis.fetch = (async () => new Response("{}", { status: 404 })) as typeof f
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const recordKey = (email: string) => `nl:2fa:${sha(`nimbus-2fa:${email}`).slice(0, 40)}`;
 const lockedKey = (session: string) => `nl:2fa:locked:${sha(`nimbus-2fa-locked:${session}`).slice(0, 40)}`;
+const keptKey = (email: string) => `nl:2fa:lockedset:${sha(`nimbus-2fa-lockedset:${email}`).slice(0, 40)}:kept`;
 const codeHash = (code: string) => sha(`nimbus-2fa-code:${code.toLowerCase().replace(/[^a-z0-9]/g, "")}`);
 
 const ON = "r24-on@example.com";
@@ -124,6 +127,57 @@ test("lockedUntil answers locked when the lock itself is in another shape", asyn
   const locked = await openLockedSession(ON, Date.now() + 7 * 86_400_000);
   await original([["SET", lockedKey(locked), "garbage|1", "EX", 3600]]);
   assert.ok((await lockedUntil(locked)) > Date.now());
+});
+
+// Past its day, a lock stays only while its account's locked sessions are kept (endLocked could not log them out
+// after it opened): the kept mark's time and the lock's own opening time are read exactly, or it stays locked.
+const LATE = "r24-late@example.com";
+const DAY = 86_400_000;
+/** A session whose lock ran out yesterday, opened ten days ago, with its account kept locked a second after. */
+async function pastItsDay(): Promise<{ session: string; opened: number; until: number }> {
+  const opened = Date.now() - 10 * DAY;
+  const until = Date.now() - DAY;
+  const session = await openLockedSession(LATE, until, opened);
+  await original([["SET", keptKey(LATE), String(opened + 1000)]]);
+  return { session, opened, until };
+}
+const isKeptGet = (cmd: Cmd) => cmd[0] === "GET" && cmd[1] === keptKey(LATE);
+
+test("past its day: kept locked by a kept mark after it opened, set free without one (controls)", async () => {
+  await ready;
+  const { session } = await pastItsDay();
+  assert.ok((await lockedUntil(session)) > Date.now(), "kept after it opened: still locked");
+  await original([["DEL", keptKey(LATE)]]);
+  assert.equal(await lockedUntil(session), 0, "no kept mark: its day is over");
+  const { session: later, opened } = await pastItsDay();
+  await original([["SET", keptKey(LATE), String(opened - 1000)]]);
+  assert.equal(await lockedUntil(later), 0, "opened after the mark: not kept");
+});
+
+for (const [label, reply] of [["empty text", ""], ["a space", " "], ["scientific", "1e2"], ["hexadecimal", "0x10"], ["a number", 7], ["an object", {}], ["short pipeline", "short"]] as [string, unknown][]) {
+  test(`past its day, a kept mark read as ${label}: still locked, never set free`, async () => {
+    await ready;
+    const { session } = await pastItsDay();
+    await withReply(isKeptGet, reply, async () => {
+      assert.ok((await lockedUntil(session)) > Date.now(), "an unknown mark counts as kept");
+    });
+  });
+}
+
+for (const [label, opening] of [["scientific", "1e20"], ["padded", " 99999999999999 "], ["hexadecimal", "0x7fffffffffff"], ["empty", ""]] as [string, string][]) {
+  test(`past its day, its lock's opening time read as ${label}: still locked, never set free`, async () => {
+    await ready;
+    const { session, until } = await pastItsDay();
+    await original([["SET", lockedKey(session), `${until}|${opening}`, "EX", 3600]]);
+    assert.ok((await lockedUntil(session)) > Date.now(), "an unknown opening time is never later than the mark");
+  });
+}
+
+test("past its day, a lock with more parts than this code writes: still locked", async () => {
+  await ready;
+  const { session, until, opened } = await pastItsDay();
+  await original([["SET", lockedKey(session), `${until}|${opened + 5000}|x`, "EX", 3600]]);
+  assert.ok((await lockedUntil(session)) > Date.now());
 });
 
 const isOnce = (cmd: Cmd) => cmd[0] === "SET" && String(cmd[1]).startsWith("nl:2fa:once:");

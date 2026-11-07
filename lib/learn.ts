@@ -521,19 +521,33 @@ const DONE_SLOT = (courseId: string) => `cd:${courseId}`;
  * Marks a lesson done or not done. Done takes room in the store's data room
  * first (DataRoomError when it does not fit), unless `always`: what follows a
  * quiz passed or work handed in, which was taken already.
+ *
+ * Each answer is read in its exact shape (CX-123 rule 24): "done already?" 1 takes nothing, 0 takes the room once,
+ * anything else takes nothing, writes nothing and throws UnknownReplyError, so the next try reads it again instead of
+ * taking the room a second time. The write's 0 (another try wrote it first and took its own room) gives this one's
+ * back; an unknown write keeps the room (it may be written; room is never given back on a guess) and throws, and the
+ * next try reads it as done. Unmarking gives the room back only on an exact 1, and throws on an unknown answer.
  */
 export async function markLesson(courseId: string, email: string, lessonId: string, done: boolean, room: DataStore, always = false): Promise<void> {
   const bytes = dataBytes([lessonId], 1);
+  const one = async (command: (string | number)[]): Promise<number | null> => {
+    const n = countOf(repliesFor(await redisPipeline([command]), 1)?.[0]);
+    return n === null || n > 1 ? null : n;
+  };
   if (done) {
-    const [held] = await redisPipeline([["SISMEMBER", doneKey(courseId, email), lessonId]]);
-    if (Number(held) === 1) return;
+    const held = await one(["SISMEMBER", doneKey(courseId, email), lessonId]);
+    if (held === null) throw new UnknownReplyError("whether a lesson is marked done");
+    if (held === 1) return;
     if (always) await noteData(room, [{ slot: DONE_SLOT(courseId), bytes }]);
     else await needData(room, [{ slot: DONE_SLOT(courseId), bytes }]);
-    await redisPipeline([["SADD", doneKey(courseId, email), lessonId]]);
+    const added = await one(["SADD", doneKey(courseId, email), lessonId]);
+    if (added === null) throw new UnknownReplyError("a lesson marked done");
+    if (added === 0) await giveData(room, [{ slot: DONE_SLOT(courseId), bytes }]);
     return;
   }
-  const [removed] = await redisPipeline([["SREM", doneKey(courseId, email), lessonId]]);
-  if (Number(removed) === 1) await giveData(room, [{ slot: DONE_SLOT(courseId), bytes }]);
+  const removed = await one(["SREM", doneKey(courseId, email), lessonId]);
+  if (removed === null) throw new UnknownReplyError("a lesson marked not done");
+  if (removed === 1) await giveData(room, [{ slot: DONE_SLOT(courseId), bytes }]);
 }
 
 /**

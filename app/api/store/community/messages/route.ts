@@ -17,6 +17,10 @@ import {
 } from "@/lib/community-dm";
 import { restingAway, takeBuyerAction } from "@/lib/buyer-actions";
 import { DataRoomError } from "@/lib/store-data";
+import { communityWords } from "@/lib/buyer-words/community";
+
+/** How far a request got before something failed: the store's language once read, and whether a write had begun. */
+type Progress = { language?: unknown; writing: boolean };
 
 /** A member key, or the creator. */
 const WHO = /^(creator|[0-9a-f]{12,64})$/;
@@ -34,6 +38,24 @@ const PAIR = /^(creator|[0-9a-f]{12,64})\.(creator|[0-9a-f]{12,64})$/;
  * that draws no box is a courtesy; this is the door.
  */
 export async function POST(request: NextRequest) {
+  const progress: Progress = { writing: false };
+  try {
+    return await act(request, progress);
+  } catch (error) {
+    // Redis did not answer, or answered a count in a shape nobody knows
+    // (CX-123 rule 24). Before any write, nothing changed and it is said so;
+    // once a message, an answer or an unblock was being written, whether it
+    // went through is not known, and the person is asked to look first.
+    console.error("a community message action failed", error);
+    const notices = communityWords(progress.language).notices;
+    return new Response(progress.writing ? notices.unconfirmed : notices.error, {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+    });
+  }
+}
+
+async function act(request: NextRequest, progress: Progress): Promise<Response> {
   const origin = originFrom(request);
   // Read only as far as 32 KB (a message's 2,000 characters, written out as a form), whether or not a length was declared (MM-SA-10).
   const form = await limited(request, 32_000).then((r) => r.formData()).catch(() => null);
@@ -42,6 +64,7 @@ export async function POST(request: NextRequest) {
   const handle = normaliseHandle(field("handle", 60));
   const store = handle ? await storeForHandle(handle) : null;
   if (!store || fromAnotherSite(request)) return new Response("Not Found", { status: 404 });
+  progress.language = store.language;
 
   const home = `${origin}/@${store.handle}/community`;
   const box = `${home}/messages`;
@@ -76,6 +99,7 @@ export async function POST(request: NextRequest) {
     // somebody chose to have.
     const started = await within(id, key, "dmNew");
     let sent: Awaited<ReturnType<typeof send>>;
+    progress.writing = true;
     try {
       sent = await send(id, config.dm, key, to, text, store);
     } catch (error) {
@@ -106,6 +130,7 @@ export async function POST(request: NextRequest) {
   const pair = field("pair", 140);
   if (!PAIR.test(pair) || !otherIn(pair, key)) return back(box, "gone");
 
+  progress.writing = true;
   if (action === "accept") {
     return (await accept(id, key, pair)) ? back(`${box}/${pair}`, "dmaccepted") : back(box, "gone");
   }

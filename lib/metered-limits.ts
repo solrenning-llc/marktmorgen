@@ -14,7 +14,7 @@
  * The registry finds every scope used with either, so a public path or a
  * call out cannot be added without a figure.
  */
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit, withinLimit } from "@/lib/request-guard";
 import type { Store } from "@/lib/store";
 import { takeAllowance } from "@/lib/store-allowance";
 import { takePublicRequest } from "@/lib/traffic";
@@ -31,7 +31,9 @@ export async function withinStore(scope: string, who: string, limit: number, win
 export type ServiceRefusal = { reason: "tries" } | { reason: "used" | "pool" | "unknown"; message: string };
 
 export async function withinServiceWhy(scope: string, who: string, limit: number, windowSeconds: number, store: Store): Promise<ServiceRefusal | null> {
-  if (!(await withinLimit(scope, who, limit, windowSeconds))) return { reason: "tries" };
+  // A confirmed monthly allowance cannot repair an unknown short-window
+  // counter. Refuse before taking that allowance or calling the provider.
+  if (!(await withinEssentialLimit(scope, who, limit, windowSeconds))) return { reason: "tries" };
   const taken = await takeAllowance(store, "integration");
   return taken.ok ? null : { reason: taken.reason, message: taken.message };
 }

@@ -53,6 +53,7 @@ import { studioReviews } from "@/lib/reviews";
 import { readStats, studioStats } from "@/lib/stats";
 import { readTitles } from "@/lib/catalog";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
+import { timeLeft } from "@/lib/fetch-timeout";
 import type { Store } from "@/lib/store";
 
 export type VoiceSource = "cancel" | "question" | "review" | "search";
@@ -101,6 +102,18 @@ export type VoiceSummary = {
 export const DAYS = 90;
 /** Fewer texts than this, and there is nothing worth sorting. */
 export const MIN_TEXTS = 8;
+/**
+ * Time kept, after the model answers, to save the summary (one Redis
+ * script, given up after REDIS_TIMEOUT_MS), within the request's cutoff.
+ */
+export const VOICE_DEADLINE_MARGIN_MS = 5_000;
+/**
+ * The least time the model is given. With less than this left after the
+ * reading, beyond the margin, makeVoice answers "late" before the month's
+ * job is taken: the platform's cut would otherwise fall after counting,
+ * and the creator would lose a job for nothing (Revisor 1's note on #2621).
+ */
+export const VOICE_MODEL_MIN_MS = 15_000;
 /** The most texts sent: the newest of each list, so one month's job stays small. */
 export const MAX_TEXTS = 160;
 const MAX_TEXT = 300;
@@ -303,7 +316,7 @@ export async function readVoice(store: Store, now = Date.now()): Promise<VoiceSu
 
 export type VoiceResult =
   | { ok: true; summary: VoiceSummary; fresh: boolean; left: number | null }
-  | { ok: false; reason: "few" | "busy" | "off" | "used" | "failed" | "changed"; texts?: number };
+  | { ok: false; reason: "few" | "busy" | "off" | "used" | "failed" | "changed" | "late"; texts?: number };
 
 /**
  * This month's summary: the one already made, or, when there is none and
@@ -323,6 +336,12 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
   try {
     const items = await gatherVoice(store, now);
     if (items.length < MIN_TEXTS) return { ok: false, reason: "few", texts: items.length };
+    // Inside the request's cutoff (the route's withCutoff), the model gets the time left less the
+    // margin to save the summary; with too little left, nothing is counted (VOICE_MODEL_MIN_MS).
+    const room = timeLeft() - VOICE_DEADLINE_MARGIN_MS;
+    if (room < VOICE_MODEL_MIN_MS) return { ok: false, reason: "late" };
+    // Never longer than askModel's own limit (45 s), which applies when the room is larger.
+    const modelMs = room < 45_000 ? room : undefined;
     const done = await counted(store, now, async () => {
       const system = [
         "You sort what an online store's customers wrote into the few themes they repeat.",
@@ -331,7 +350,7 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
         "Name each theme in plain American English, at most 8 words, saying what customers said or wanted (for example: \"Wants a printable version\", \"Price feels high for what is inside\"). No numbers in a name, no judgment of the customers, nothing that is not in the texts.",
         "Return only a JSON object: {\"themes\": [{\"title\": string, \"ids\": [numbers of its texts]}]}, the most repeated theme first.",
       ].join("\n\n");
-      const reply = await askModel(store, system, voicePrompt(items), 900, answerModel());
+      const reply = await askModel(store, system, voicePrompt(items), 900, answerModel(), modelMs);
       const json = reply ? jsonIn(reply) : null;
       if (!json) return null;
       const sorted = themesFrom(json, items);

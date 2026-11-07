@@ -53,6 +53,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Held, LockBusyError, setIfHeld, withLock } from "@/lib/redis-lock";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import { type MeetProvider, MEET_NAMES, isMeetProvider } from "@/lib/call-setup";
@@ -391,28 +392,45 @@ export async function disconnect(statsId: string, provider: MeetProvider, host =
   });
 }
 
+/** Every DEL of one pipeline confirmed by its own count, or UnknownReplyError: a deletion is never taken as done unseen. */
+function confirmDeleted(replies: unknown, commands: number, what: string): void {
+  const answered = repliesFor(replies, commands);
+  if (!answered || answered.some((reply) => countOf(reply) === null)) throw new UnknownReplyError(what);
+}
+
 /**
  * Zoom's notice that a user removed the app: every store that user connected
  * forgets the connection. Returns, for each store that did, who to tell.
+ *
+ * Read exactly (CX-123 rule 24): the user's stores, each connection and each
+ * deletion. An unknown reply throws before the user's index is deleted, so
+ * nothing they connected is left without a way to find it, and the notice is
+ * not answered with a success (app/api/integrations/zoom/deauthorize), so
+ * Zoom sends it again. Only a confirmed absence (no member, no connection)
+ * counts as nothing to forget.
  */
 export async function forgetUser(
   provider: MeetProvider,
   accountId: string,
 ): Promise<{ statsId: string; owner: { email: string; handle: string }; account: string }[]> {
   if (!isRedisConfigured() || !accountId) return [];
-  const [members] = await redisPipeline([["SMEMBERS", userKey(provider, accountId)]]);
-  const stores = Array.isArray(members) ? (members as unknown[]).filter((m): m is string => typeof m === "string") : [];
+  const stores = stringList(repliesFor(await redisPipeline([["SMEMBERS", userKey(provider, accountId)]]), 1)?.[0]);
+  if (!stores) throw new UnknownReplyError("the stores a meeting account connected");
   const forgot: { statsId: string; owner: { email: string; handle: string }; account: string }[] = [];
   for (const statsId of stores.slice(0, 50)) {
     const c = await withLock(refreshLockKey(statsId, provider), 20, 9_000, async () => {
-      const found = await readConnection(statsId, provider);
-      if (!found || found.account.id !== accountId) return null;
-      await redisPipeline([["DEL", connKey(statsId, provider)], ["DEL", testKey(statsId, provider)]]);
+      const read = repliesFor(await redisPipeline([["GET", connKey(statsId, provider)]]), 1);
+      if (!read) throw new UnknownReplyError("a meeting connection");
+      if (read[0] === null) return null;
+      const found = parseConnection(read[0], provider);
+      if (!found) throw new UnknownReplyError("a meeting connection");
+      if (found.account.id !== accountId) return null;
+      confirmDeleted(await redisPipeline([["DEL", connKey(statsId, provider)], ["DEL", testKey(statsId, provider)]]), 2, "a meeting connection's deletion");
       return found;
     });
     if (c) forgot.push({ statsId, owner: c.owner, account: viewOf(c).account });
   }
-  await redisPipeline([["DEL", userKey(provider, accountId)]]);
+  confirmDeleted(await redisPipeline([["DEL", userKey(provider, accountId)]]), 1, "a meeting account's index deletion");
   return forgot;
 }
 

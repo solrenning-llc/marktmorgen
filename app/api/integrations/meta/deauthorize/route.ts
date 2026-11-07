@@ -26,7 +26,15 @@ export async function POST(request: NextRequest) {
   }
   const user = signedUser(raw);
   if (!user) return Response.json({ error: "invalid" }, { status: 400 });
-  const forgot = await forgetMetaUser(user);
+  // Nothing is confirmed to Meta unless every store was read and forgotten exactly (CX-123 rule 24): an unknown reply
+  // answers 503 with no confirmation code, the user's index kept, so Meta asks again.
+  let forgot: Awaited<ReturnType<typeof forgetMetaUser>>;
+  try {
+    forgot = await forgetMetaUser(user);
+  } catch (error) {
+    console.error("forgetting a Meta user failed", error);
+    return Response.json({ error: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
   if (forgot.length) after(async () => {
     for (const store of forgot) await noticeCreator(store.owner, { kind: "metaads-disconnected", byMeta: true });
   });

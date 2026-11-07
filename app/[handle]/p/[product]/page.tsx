@@ -169,11 +169,20 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle, product: id } = await params;
   const found = await load(handle, id);
   if (!found) {
-    // A draft's preview is never indexed or followed, has no canonical
-    // address and no card for a shared link, and reads nothing more to say so.
+    // A draft's preview is never indexed or followed, and reads nothing more to say so. Next
+    // merges a page's metadata over its layouts' (app/layout.tsx), so the canonical address and
+    // the site's card are switched off here by name (null), not left out, or they would be
+    // inherited. The picture of opengraph-image.tsx beside this page is still added by Next's
+    // file convention; for a draft it draws no picture, price or name of the product.
     const draft = await draftFor(handle, id);
     if (!draft) return { title: "Not found — Marktmorgen" };
-    return { title: `Preview: ${draft.product.title} — ${draft.store.name}`, robots: { index: false, follow: false, nocache: true } };
+    return {
+      title: `Preview: ${draft.product.title} — ${draft.store.name}`,
+      robots: { index: false, follow: false, nocache: true },
+      alternates: { canonical: null },
+      openGraph: null,
+      twitter: null,
+    };
   }
   const { store, product } = found;
   const [about, page] = await Promise.all([product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""), pageOf(store, product)]);

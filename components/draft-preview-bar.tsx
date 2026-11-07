@@ -12,20 +12,34 @@ import type { PageAction } from "@/components/sales-blocks";
 
 const STUDIO_PRODUCTS = "/studio#products";
 
+/**
+ * Hides the store's chat or Store assistant, which the store's layout draws in
+ * a corner of every page (app/[handle]/layout.tsx, data-store-corner): nobody
+ * on the team spends the assistant's replies or writes to the inbox from a
+ * draft. Hidden with display: none, so it is out of the page for a screen
+ * reader and the keyboard too. React puts the rule in the document's head.
+ */
+const HIDE_CORNER = "[data-store-corner]{display:none!important}";
+
 /** The notice at the top of the preview, in a landmark of its own named "Preview". */
 export function DraftPreviewBar() {
   return (
-    <section lang="en-US" aria-label="Preview" className="st-note relative mx-auto mt-4 w-[calc(100%-2rem)] max-w-2xl text-base leading-relaxed">
-      <p>
-        <strong>Preview.</strong> This product is a draft. Only you and your team can see this page. Buyers cannot find it. Buying is
-        off here, and nothing on this page is counted or emailed.
-      </p>
-      <p className="mt-2">
-        <a href={STUDIO_PRODUCTS} className="st-footer-link inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
-          Back to your products in the studio
-        </a>
-      </p>
-    </section>
+    <>
+      <style href="draft-preview-corner" precedence="default">
+        {HIDE_CORNER}
+      </style>
+      <section lang="en-US" aria-label="Preview" className="st-note relative mx-auto mt-4 w-[calc(100%-2rem)] max-w-2xl text-base leading-relaxed">
+        <p>
+          <strong>Preview.</strong> This product is a draft. Only you and your team can see this page. Buyers cannot find it. Buying is
+          off here, and nothing on this page is counted or emailed.
+        </p>
+        <p className="mt-2">
+          <a href={STUDIO_PRODUCTS} className="st-footer-link inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
+            Back to your products in the studio
+          </a>
+        </p>
+      </section>
+    </>
   );
 }
 

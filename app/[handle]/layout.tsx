@@ -90,12 +90,13 @@ export default async function StoreLayout({ children, params }: LayoutProps<"/[h
       {/* A link from a sequence's email, used by somebody who allowed it to be seen (lib/mail-clicks.ts). */}
       {store ? <MailClick /> : null}
       {/* The Store assistant, where it is on and paid for (lib/store-assistant.ts), or else the chat, where the creator turned it on (lib/inbox.ts): drawn from the store already read, nothing more asked of the server. */}
+      {/* data-store-corner: a draft's preview hides this corner (components/draft-preview-bar.tsx), as this layout cannot tell a preview from a page. */}
       {store && assistantShown(store) ? (
-        <div className={`st-theme-${store.look.theme}`} style={lookStyle(store.look) as React.CSSProperties}>
+        <div data-store-corner="" className={`st-theme-${store.look.theme}`} style={lookStyle(store.look) as React.CSSProperties}>
           <StoreAssistant handle={store.handle} storeName={store.name} language={store.language} />
         </div>
       ) : store && chatOpen(store) ? (
-        <div className={`st-theme-${store.look.theme}`} style={lookStyle(store.look) as React.CSSProperties}>
+        <div data-store-corner="" className={`st-theme-${store.look.theme}`} style={lookStyle(store.look) as React.CSSProperties}>
           <StoreChat handle={store.handle} storeName={store.name} language={store.language} />
         </div>
       ) : null}

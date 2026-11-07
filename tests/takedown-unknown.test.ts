@@ -13,13 +13,16 @@
  *      second press sends the notice under the same idempotency key, once,
  *      and writes nothing on the record twice. A press after the notice
  *      went out sends nothing.
+ *   3. Content published again and taken down again under the same notice is a
+ *      new takedown: its notice goes out under a new key, never answered by
+ *      the provider with the first one's receipt (Claude 6, #3087, LEVE 2).
  *
  * Synthetic store, in-memory Redis, the email provider stood in by fetch.
  */
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/takedown/route";
-import { addProduct, addStoreLink, claimHandle, ensureStatsId, setKit, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, addStoreLink, claimHandle, ensureStatsId, setKit, setProductHidden, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readReport } from "@/lib/takedown-rules";
 import { fileReport, openReport, takeDown } from "@/lib/takedown";
 import { transparencyCounts } from "@/lib/transparency";
@@ -191,6 +194,19 @@ async function main(): Promise<void> {
   is("the provider answered 500: not Done, the kit stays down", [maybe.status, maybe.error, (await store()).kit.on], [500, "notice_unsent", false]);
   const maybeAgain = await answer({ type: "kit" });
   is("pressed again: still not Done and not \"already down\", and the email is not posted a second time", [maybeAgain.status, maybeAgain.error, tried.length, sent.length], [500, "notice_unsent", 1, 0]);
+
+  part("Published again and taken down again under the same notice: a new notice, under a new key");
+  // Claude 6's focal review of #3087, LEVE 2: the second takedown reused the first one's idempotency key,
+  // so the provider answered with the first receipt and the creator was never told the second time.
+  if (!(await setProductHidden(owner, near, false)).ok || (await published(near)) !== "published") throw new Error("setup: the product did not publish again");
+  sent.length = 0;
+  tried.length = 0;
+  const firstKey = `takedown-${report.id}-product-${near}`;
+  const twice = await answer({ type: "product", id: near });
+  is("taken down again, and Done", [twice.status, await published(near)], [200, "unpublished"]);
+  is("one new email, under a key that is not the first takedown's", [sent.length, sent[0]?.key !== firstKey, sent[0]?.key.startsWith(`${firstKey}-`)], [1, true, true]);
+  const twiceAgain = await answer({ type: "product", id: near });
+  is("and a press after it: nothing more", [twiceAgain.status, twiceAgain.error, sent.length], [409, "nothing", 1]);
   done();
 }
 

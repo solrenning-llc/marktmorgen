@@ -11,11 +11,14 @@ import {
   MAX_STORE_DATES,
   MONTH_DAYS,
   MONTH_NAMES,
+  STORE_DATE_WINDOW_DAYS,
   type StoreDates,
   dateKey,
+  dayIn,
   dayWords,
   nextDay,
 } from "@/lib/store-dates-rules";
+import { hasPlaceholder } from "@/lib/mail-body";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
 /** What happened to a date's email the last time it was due (lib/store-dates-send.ts, DateResult). */
@@ -26,6 +29,7 @@ const MESSAGES: Record<string, string> = {
   many: `A store can keep at most ${MAX_STORE_DATES} dates.`,
   date: "Choose a day that exists in that month.",
   twice: "Two dates are on the same day. Keep one email for each day.",
+  leap: "February 29 comes on March 1 in most years, so it cannot be kept together with March 1. Keep one of them.",
   name: "Give this date a name, like \"Store birthday\". Only you see it.",
   subject: "Write the subject line of this date's email.",
   message: "Write the email for this date.",
@@ -47,9 +51,21 @@ const WHY: Record<string, string> = {
   empty: "nobody on your list could be written to.",
   room: "your store's data room was full.",
   error: "it could not be made.",
+  waiting: "too many stores' emails were due at once, and it could not be made within a week.",
 };
 
 type Row = { id: number; name: string; month: number; day: number; subject: string; message: string };
+type Field = "name" | "day" | "subject" | "message";
+/** Which field a refusal of the server is about, for a refusal that names a date. */
+function fieldOf(reason: string, row: Row | undefined): Field | null {
+  if (reason === "name") return "name";
+  if (reason === "subject") return "subject";
+  if (reason === "message") return "message";
+  if (reason === "placeholder") return row && hasPlaceholder(row.subject) ? "subject" : "message";
+  if (reason === "date" || reason === "twice" || reason === "leap") return "day";
+  return null;
+}
+const DAY_MS = 86_400_000;
 
 /** The store's own dates, each with its email, once a year (lib/store-dates-rules.ts, lib/store-dates-send.ts; 283 [HG2] unit 2). */
 export function StoreDatesEditor({
@@ -75,6 +91,10 @@ export function StoreDatesEditor({
   const [nextId, setNextId] = useState(setting.dates.length);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The field a refusal is about: marked invalid, with the reason under it. */
+  const [fieldError, setFieldError] = useState<{ id: number; field: Field; text: string } | null>(null);
+  /** The last date removed before saving, with where it was, so it can be put back. */
+  const [removed, setRemoved] = useState<{ row: Row; index: number } | null>(null);
 
   const change = (id: number, patch: Partial<Row>) =>
     setRows((list) =>
@@ -92,10 +112,23 @@ export function StoreDatesEditor({
     setNextId((id) => id + 1);
   }
 
+  function remove(row: Row, index: number) {
+    setRows((list) => list.filter((r) => r.id !== row.id));
+    setRemoved({ row, index });
+    if (fieldError?.id === row.id) setFieldError(null);
+  }
+
+  function undoRemove() {
+    if (!removed) return;
+    setRows((list) => [...list.slice(0, removed.index), removed.row, ...list.slice(removed.index)]);
+    setRemoved(null);
+  }
+
   async function save() {
     if (busy) return;
     setBusy(true);
     setError(null);
+    setFieldError(null);
     try {
       const dates = rows.map(({ name, month, day, subject, message }) => ({ name, month, day, subject, message }));
       const response = await fetch("/api/store/store-dates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on, dates }) });
@@ -106,12 +139,16 @@ export function StoreDatesEditor({
       const askedDays = rows.map((r) => `${r.month}-${r.day}`).sort();
       if (response.ok && data.ok === true && data.error === undefined && saved.on === on && savedDays !== null && savedDays.join() === askedDays.join()) {
         toast("Store dates saved.");
+        setRemoved(null);
         router.refresh();
         return;
       }
       const reason = typeof data.error === "string" ? data.error : "";
       const known = !response.ok && data.ok === false && Object.prototype.hasOwnProperty.call(MESSAGES, reason);
-      const which = typeof data.index === "number" && Number.isInteger(data.index) && data.index >= 0 && data.index < rows.length ? `Date ${data.index + 1}: ` : "";
+      const index = typeof data.index === "number" && Number.isInteger(data.index) && data.index >= 0 && data.index < rows.length ? data.index : null;
+      const which = index !== null ? `Date ${index + 1}: ` : "";
+      const field = known && index !== null ? fieldOf(reason, rows[index]) : null;
+      if (field && index !== null) setFieldError({ id: rows[index].id, field, text: MESSAGES[reason] });
       setError(known ? `${which}${MESSAGES[reason]}` : MESSAGES.server_error);
     } catch {
       setError(MESSAGES.server_error);
@@ -124,6 +161,8 @@ export function StoreDatesEditor({
     "Pick a few days of the year that matter to your store, like the day it opened. On each one, every year, your list gets the email you write here.",
     "It goes to everyone on your list who agreed to hear from you and is still on it. Never to somebody who left your list, whose email bounced or who marked your email as spam.",
     "Each person gets it once for each date, each year. It is made around 9:00 in the morning, UTC, on that day, and you can follow it under Sent and scheduled in Email.",
+    `On a day many stores' dates fall on, like January 1, it can be made on one of the following mornings instead, up to ${STORE_DATE_WINDOW_DAYS} days after the day. This page says when it is waiting its turn, and why if it was not sent.`,
+    "A date you add on its own day goes out at the next run: if that morning's run is over, the next morning.",
     "Making it uses one studio request, and each email counts toward your store's emails for the month. If too few are left for your whole list, it is not made, and this page says so.",
     "It carries your list email's footer: why they get it, a one-click way off your list and your postal address. We never ask anyone for a birth date.",
   ];
@@ -172,22 +211,44 @@ export function StoreDatesEditor({
         {rows.map((row, index) => {
           const savedDate = setting.dates.find((d) => d.month === row.month && d.day === row.day);
           const result = savedDate ? results[dateKey(savedDate)] : undefined;
+          const stillDue = savedDate && result ? now < dayIn(savedDate, result.year) + STORE_DATE_WINDOW_DAYS * DAY_MS : false;
           const resultWords = savedDate && result
             ? result.outcome === "made"
               ? `On ${dayWords(savedDate)}, ${result.year}, it was made for ${result.total} ${result.total === 1 ? "person" : "people"} on your list.`
               : result.outcome === "unconfirmed"
                 ? `On ${dayWords(savedDate)}, ${result.year}, making it could not be confirmed. Check Sent and scheduled in Email. It is never made twice in a year.`
-                : `Not sent on ${dayWords(savedDate)}, ${result.year}: ${WHY[result.outcome] ?? WHY.error}`
+                : result.outcome === "waiting" && stillDue
+                  ? `Waiting its turn: many stores' emails were due on ${dayWords(savedDate)}, ${result.year}. It is made on one of the next mornings, at the latest ${STORE_DATE_WINDOW_DAYS} days after the day.`
+                  : `Not sent on ${dayWords(savedDate)}, ${result.year}: ${WHY[result.outcome] ?? WHY.error}`
             : null;
           const next = savedDate && setting.on ? new Date(nextDay(savedDate, now)) : null;
           const base = `store-date-${row.id}`;
+          const invalid = (field: Field) => fieldError?.id === row.id && fieldError.field === field;
+          const errorId = `${base}-error`;
+          const errorLine = (field: Field) =>
+            invalid(field) ? (
+              <span id={errorId} className="mt-1 block text-sm font-semibold text-ink">
+                {fieldError!.text}
+              </span>
+            ) : null;
           return (
             <fieldset key={row.id} className="rounded-xl border border-line p-4">
               <legend className="px-1 text-sm font-semibold text-ink">{`Date ${index + 1}${row.name ? `: ${row.name}` : ""}`}</legend>
               <div className="space-y-4">
                 <label className="block" htmlFor={`${base}-name`}>
                   <span className="field-label">Name, only you see it</span>
-                  <input id={`${base}-name`} disabled={busy} className="field mt-2" maxLength={MAX_DATE_NAME} value={row.name} placeholder="Store birthday" onChange={(event) => change(row.id, { name: event.target.value })} />
+                  <input
+                    id={`${base}-name`}
+                    aria-invalid={invalid("name") || undefined}
+                    aria-describedby={invalid("name") ? errorId : undefined}
+                    disabled={busy}
+                    className="field mt-2"
+                    maxLength={MAX_DATE_NAME}
+                    value={row.name}
+                    placeholder="Store birthday"
+                    onChange={(event) => change(row.id, { name: event.target.value })}
+                  />
+                  {errorLine("name")}
                 </label>
                 <div className="flex flex-wrap gap-4">
                   <label className="block" htmlFor={`${base}-month`}>
@@ -202,7 +263,15 @@ export function StoreDatesEditor({
                   </label>
                   <label className="block" htmlFor={`${base}-day`}>
                     <span className="field-label">Day</span>
-                    <select id={`${base}-day`} disabled={busy} className="field mt-2" value={row.day} onChange={(event) => change(row.id, { day: Number(event.target.value) })}>
+                    <select
+                      id={`${base}-day`}
+                      aria-invalid={invalid("day") || undefined}
+                      aria-describedby={invalid("day") ? errorId : undefined}
+                      disabled={busy}
+                      className="field mt-2"
+                      value={row.day}
+                      onChange={(event) => change(row.id, { day: Number(event.target.value) })}
+                    >
                       {Array.from({ length: MONTH_DAYS[row.month - 1] }, (_, i) => i + 1).map((day) => (
                         <option key={day} value={day}>
                           {row.month === 2 && day === 29 ? "29 (March 1 in other years)" : day}
@@ -211,9 +280,20 @@ export function StoreDatesEditor({
                     </select>
                   </label>
                 </div>
+                {errorLine("day")}
                 <label className="block" htmlFor={`${base}-subject`}>
                   <span className="field-label">Subject line</span>
-                  <input id={`${base}-subject`} disabled={busy} className="field mt-2" maxLength={MAX_DATE_SUBJECT} value={row.subject} onChange={(event) => change(row.id, { subject: event.target.value })} />
+                  <input
+                    id={`${base}-subject`}
+                    aria-invalid={invalid("subject") || undefined}
+                    aria-describedby={invalid("subject") ? errorId : undefined}
+                    disabled={busy}
+                    className="field mt-2"
+                    maxLength={MAX_DATE_SUBJECT}
+                    value={row.subject}
+                    onChange={(event) => change(row.id, { subject: event.target.value })}
+                  />
+                  {errorLine("subject")}
                 </label>
                 <label className="block" htmlFor={`${base}-message`}>
                   <span className="field-label">The email</span>
@@ -222,7 +302,8 @@ export function StoreDatesEditor({
                   </span>
                   <textarea
                     id={`${base}-message`}
-                    aria-describedby={`${base}-message-help`}
+                    aria-describedby={invalid("message") ? `${base}-message-help ${errorId}` : `${base}-message-help`}
+                    aria-invalid={invalid("message") || undefined}
                     disabled={busy}
                     className="field mt-2"
                     rows={5}
@@ -230,6 +311,7 @@ export function StoreDatesEditor({
                     value={row.message}
                     onChange={(event) => change(row.id, { message: event.target.value })}
                   />
+                  {errorLine("message")}
                 </label>
                 {next ? (
                   <p className="text-sm text-ink">
@@ -242,13 +324,23 @@ export function StoreDatesEditor({
                     {resultWords}
                   </p>
                 ) : null}
-                <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => setRows((list) => list.filter((r) => r.id !== row.id))}>
+                <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => remove(row, index)}>
                   {`Remove date ${index + 1}`}
                 </button>
               </div>
             </fieldset>
           );
         })}
+        {removed ? (
+          <p className="flex flex-wrap items-center gap-3 text-sm text-ink" role="status">
+            <span>{`Removed ${removed.row.name ? `"${removed.row.name}"` : "a date"}. It is gone only once you save.`}</span>
+            {rows.length < MAX_STORE_DATES ? (
+              <button type="button" className="btn btn-ghost" disabled={busy} onClick={undoRemove}>
+                Undo remove
+              </button>
+            ) : null}
+          </p>
+        ) : null}
         {rows.length < MAX_STORE_DATES ? (
           <button type="button" className="btn btn-ghost" disabled={busy} onClick={add}>
             Add a date
@@ -256,7 +348,7 @@ export function StoreDatesEditor({
         ) : (
           <p className="text-sm text-ink-soft">{`You have the most dates a store can keep: ${MAX_STORE_DATES}.`}</p>
         )}
-        <p className="text-sm text-ink-soft">Nothing changes until you save. To undo a change before saving, reload this page.</p>
+        <p className="text-sm text-ink-soft">Nothing changes until you save. To undo any other change before saving, reload this page.</p>
         <button type="submit" className="btn btn-primary" disabled={busy} aria-busy={busy}>
           {busy ? "Saving…" : "Save"}
         </button>

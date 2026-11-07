@@ -3,8 +3,8 @@
  * (lib/store-dates-rules.ts, 283 [HG2] unit 2).
  *
  * Once a day, inside the daily job (app/api/cron/plans), for every store that
- * turned it on: each date whose day it is (UTC), or was yesterday when a run
- * was missed (dueYear), becomes one of the store's own emails to its whole
+ * turned it on: each date whose day it is (UTC), or was in the last
+ * STORE_DATE_WINDOW_DAYS when it was not made yet (dueYear), becomes one of the store's own emails to its whole
  * list, made exactly as the creator's "Send now" in Email makes one
  * (lib/broadcasts.ts, createBroadcast) and sent by the scheduled job that
  * sends every such email (app/api/cron/mail, advanceAll). So it goes, like
@@ -25,11 +25,19 @@
  *   - one studio request is taken from the store's month (lib/store-allowance.ts),
  *     the same the creator's own "Send now" takes: none left, none made.
  *
- * The mark is let go whenever nothing was made, so a later run that day or
- * the next can try again; it is kept when the email was made, or when its
- * writing could not be confirmed (it may exist: never a second). At most
- * `limit` emails are tried in one run (DATE_EMAILS_PER_RUN); the rest the
- * next run, inside the date's window.
+ * The mark is let go whenever nothing was made, so a later run inside the
+ * date's week can try again; it is kept when the email was made, or when its
+ * writing could not be confirmed (it may exist: never a second).
+ *
+ * Fair across stores. At most `limit` emails are tried in one run, for the
+ * whole platform (DATE_EMAILS_PER_RUN), so on a day many stores' dates fall
+ * on (January 1, December 25) one run cannot make them all. The run then
+ * walks on without making anything, noting "waiting" on each date due and
+ * not made yet this year, and the next run starts from the first store it
+ * did not get to (the cursor), so every store's turn comes, in order. A date
+ * stays due for STORE_DATE_WINDOW_DAYS; one still not made by then is not
+ * made that year, and its last note says why (the studio: "waiting" past the
+ * week reads as not sent because too many were due at once).
  *
  *   nl:hgd:made:<statsId>:<MMDD>:<year>   that date's email for that year, MADE_DAYS
  *   nl:hgd:last:<statsId>                 hash: <MMDD> → what happened that year, for the studio, LAST_DAYS
@@ -63,9 +71,9 @@ const lastKey = (statsId: string) => `nl:hgd:last:${statsId}`;
  * What happened to a date's email in a year, as the studio says it:
  * made (to `total` people), or not made and why.
  */
-export type DateOutcome = "made" | "setup" | "plan" | "studio" | "allowance" | "empty" | "room" | "unconfirmed" | "error";
+export type DateOutcome = "made" | "setup" | "plan" | "studio" | "allowance" | "empty" | "room" | "unconfirmed" | "error" | "waiting";
 export type DateResult = { year: number; at: number; outcome: DateOutcome; total: number };
-const OUTCOMES: readonly DateOutcome[] = ["made", "setup", "plan", "studio", "allowance", "empty", "room", "unconfirmed", "error"];
+const OUTCOMES: readonly DateOutcome[] = ["made", "setup", "plan", "studio", "allowance", "empty", "room", "unconfirmed", "error", "waiting"];
 
 async function note(statsId: string, key: string, result: DateResult): Promise<void> {
   await redisPipeline([
@@ -176,7 +184,29 @@ async function storeDatesStore(store: Store, deadline: number, now: number, budg
   return { made, stopped: false };
 }
 
-/** The daily run: every store with its dates on, from where the last run stopped. */
+/**
+ * A store this run has no emails left for: each date due and not made yet this year is noted "waiting"
+ * for the studio, unless this year's result is already there (made, or why not). Nothing is claimed or taken.
+ */
+async function noteWaiting(store: Store, now: number): Promise<void> {
+  if (!storeDatesOn(store) || !store.statsId) return;
+  const statsId = store.statsId;
+  for (const date of store.storeDates.dates) {
+    const year = dueYear(date, now);
+    if (year === null) continue;
+    const key = dateKey(date);
+    const [raw] = await redisPipeline([["HGET", lastKey(statsId), key]]);
+    const prior = parseResult(raw);
+    if (prior && prior.year === year) continue;
+    await note(statsId, key, { year, at: Date.now(), outcome: "waiting", total: 0 });
+  }
+}
+
+/**
+ * The daily run: every store with its dates on, from where the last run stopped. Once this run's emails
+ * are spent, it walks on only to note the dates left waiting, and the next run starts from the first store
+ * it did not make for.
+ */
 export async function sendStoreDates(deadline: number, now = Date.now(), limit = DATE_EMAILS_PER_RUN): Promise<{ stores: number; made: number }> {
   const counts = { stores: 0, made: 0 };
   if (!isRedisConfigured() || !isSenderConfigured()) return counts;
@@ -185,6 +215,8 @@ export async function sendStoreDates(deadline: number, now = Date.now(), limit =
   const [savedCursor, savedDone] = typeof saved === "string" ? saved.split("|") : ["0", "0"];
   let cursor = /^\d+$/.test(savedCursor ?? "") ? savedCursor : "0";
   let skip = Number(savedDone) || 0;
+  // Where the next run starts: the first store this one ran out of emails for, once it did.
+  let resume: string | null = null;
   while (Date.now() < deadline) {
     const { stores, next } = await storesAfter(cursor);
     let done = 0;
@@ -193,14 +225,22 @@ export async function sendStoreDates(deadline: number, now = Date.now(), limit =
         done += 1;
         continue;
       }
-      if (Date.now() >= deadline || budget.left <= 0) break;
+      if (Date.now() >= deadline) break;
       if (storeDatesOn(store) && store.statsId) {
         counts.stores += 1;
         try {
-          const result = await storeDatesStore(store, deadline, now, budget);
-          counts.made += result.made;
-          // Out of time or of this run's emails inside this store: the next run starts with it again.
-          if (result.stopped) break;
+          if (resume === null && budget.left > 0) {
+            const result = await storeDatesStore(store, deadline, now, budget);
+            counts.made += result.made;
+            // Out of time or of this run's emails inside this store: the next run starts with it again.
+            if (result.stopped) {
+              resume = `${cursor}|${done}`;
+              if (Date.now() < deadline) await noteWaiting(store, now);
+            }
+          } else {
+            resume ??= `${cursor}|${done}`;
+            await noteWaiting(store, now);
+          }
         } catch (error) {
           console.error("making a store's date emails failed", store.handle, error);
         }
@@ -208,13 +248,13 @@ export async function sendStoreDates(deadline: number, now = Date.now(), limit =
       done += 1;
     }
     if (done < stores.length) {
-      await redisPipeline([["SET", CURSOR_KEY, `${cursor}|${done}`]]);
+      await redisPipeline([["SET", CURSOR_KEY, resume ?? `${cursor}|${done}`]]);
       return counts;
     }
     skip = 0;
     cursor = next;
     if (next === "0") break;
   }
-  await redisPipeline([["SET", CURSOR_KEY, `${cursor}|0`]]);
+  await redisPipeline([["SET", CURSOR_KEY, resume ?? `${cursor}|0`]]);
   return counts;
 }

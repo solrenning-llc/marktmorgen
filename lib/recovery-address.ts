@@ -34,6 +34,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinLimit } from "@/lib/request-guard";
 import { LOCKED_LIST } from "@/lib/locked-words";
+import { repliesFor as linkSetReplies } from "@/lib/redis-reply";
 
 /** How long logins through the recovery address alone are locked. */
 export const LOCK_DAYS = 7;
@@ -158,7 +159,15 @@ export async function sendLostEmailLink(signIn: string, ip: string, origin: stri
   const address = await recoveryAddress(email);
   if (!address) return;
   const token = randomBytes(32).toString("hex");
-  await redisPipeline([["SET", linkKey(token), email, "EX", LINK_SECONDS]]);
+  // A way in is emailed only once Redis said it stored it (rule 24): any other answer sends nothing, to the recovery
+  // address or the sign-in one (no link went), and the link, in case it landed with its answer lost, is deleted. The
+  // route answers the same either way.
+  const saved = linkSetReplies(await redisPipeline([["SET", linkKey(token), email, "EX", LINK_SECONDS]]), 1);
+  if (saved?.[0] !== "OK") {
+    await redisPipeline([["DEL", linkKey(token)]]).catch(() => {});
+    console.error("a recovery-address link was not stored, so no email was sent");
+    return;
+  }
   const sent = await mail(address, "Get back into your Marktmorgen account", [
     `This is the recovery address of the Marktmorgen account ${email}. Somebody said they can no longer open that inbox and asked for a way in.`,
     "",

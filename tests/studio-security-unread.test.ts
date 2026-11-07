@@ -5,8 +5,8 @@
  * (null), not off or none. Each is judged on its own (review of #2913):
  * - an unread recovery address puts a notice in the recovery section, which
  *   keeps its heading and its #account-recovery anchor, and offers no "Add";
- * - an unread two-step login puts a notice in the two-step section, which
- *   keeps its heading and its #two-step anchor, and offers no "Turn on";
+ * - an unread two-step login is main's TwoStepManager `unread` (#2900): the
+ *   section keeps its heading and its #two-step anchor, and offers no "Turn on";
  * - a two-step login that was read is drawn whole, so the reset notice's
  *   "press Cancel under Two-step login" always has its Cancel button, and it
  *   never says "There is no recovery address" when the address was unread.
@@ -36,7 +36,6 @@ function render(element: ReturnType<typeof createElement> | null): string {
 }
 const parts = twoStepModule as unknown as Record<string, unknown>;
 const recoveryParts = recoveryModule as unknown as Record<string, unknown>;
-const TwoStepUnread = typeof parts.TwoStepUnread === "function" ? (parts.TwoStepUnread as () => null) : null;
 const RecoveryAddressUnread = typeof recoveryParts.RecoveryAddressUnread === "function" ? (recoveryParts.RecoveryAddressUnread as () => null) : null;
 
 part("a failed read is unknown, never off or none");
@@ -51,15 +50,16 @@ is("the notice never says both were unread", page.includes("Your two-step login 
 is("two places show the managers", [...page.matchAll(/<RecoveryAddressManager /g)].length, 2);
 is("each recovery manager gives way only to its own unread read", page.split("{recoveryRead === null ? <RecoveryAddressUnread /> : <RecoveryAddressManager shown={recoveryShown} />}").length - 1, 2);
 is(
-  "each two-step manager gives way only to its own unread read, and is told when the address was unread",
-  page.split("{twoStepRead === null ? <TwoStepUnread /> : <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} recoveryUnknown={recoveryRead === null} fresh={freshLogin} locked={lockedTill > 0} />}").length - 1,
+  "each two-step manager is unread only on its own read, and is told when the address was unread",
+  page.split("<TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} recoveryUnknown={recoveryRead === null} fresh={freshLogin} locked={lockedTill > 0} unread={twoStepRead === null} />").length - 1,
   2,
 );
+is("one way only to say two-step login is unread (main's `unread`, no second component)", [page.includes("TwoStepUnread"), "TwoStepUnread" in parts, "TWO_STEP_UNREAD" in parts], [false, false, false]);
 
 part("an unread section keeps its heading and the anchor the links point to");
-const twoStepUnread = render(TwoStepUnread ? createElement(TwoStepUnread) : null);
+const twoStepUnread = render(createElement(twoStepModule.TwoStepManager as unknown as (props: Record<string, unknown>) => null, { on: false, codesLeft: 0, reset: 0, backup: "", fresh: true, locked: false, unread: true, recoveryUnknown: true }));
 const recoveryUnread = render(RecoveryAddressUnread ? createElement(RecoveryAddressUnread) : null);
-is("two-step: anchor, heading, notice", [twoStepUnread.includes('id="two-step"'), twoStepUnread.includes(">Two-step login</h3>"), twoStepUnread.includes(`Your two-step login could not be read just now. ${AGAIN}`)], [true, true, true]);
+is("two-step: anchor, heading, notice", [twoStepUnread.includes('id="two-step"'), twoStepUnread.includes(">Two-step login</h3>"), twoStepUnread.includes("Two-step login could not be read just now")], [true, true, true]);
 is("two-step: nothing offered on a guess", /Turn on|Cancel/.test(twoStepUnread), false);
 is("recovery: anchor, heading, notice", [recoveryUnread.includes('id="account-recovery"'), recoveryUnread.includes(">Recovery address</h3>"), recoveryUnread.includes(`Your recovery address could not be read just now. ${AGAIN}`)], [true, true, true]);
 is("recovery: nothing offered on a guess", /Add|Send|<input/.test(recoveryUnread), false);

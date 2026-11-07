@@ -66,8 +66,11 @@ function standIn(hash = "") {
         el.children = (el.children as unknown[]).filter((c) => c !== child);
         child.parentNode = null;
       },
-      focus() {},
-      contentWindow: tag === "iframe" ? { name: "frame-window", focus() { (el.contentWindow as Record<string, unknown>).focused = true; } } : undefined,
+      // What has the focus is recorded on the page, as a browser's document.activeElement.
+      focus() {
+        document.activeElement = el;
+      },
+      contentWindow: tag === "iframe" ? { name: "frame-window", focus() { (el.contentWindow as Record<string, unknown>).focused = true; document.activeElement = el; } } : undefined,
     };
     // The browser's own modal dialog: what showModal does is recorded, nothing more.
     if (tag === "dialog") el.showModal = () => { el.modal = true; };
@@ -84,6 +87,7 @@ function standIn(hash = "") {
     child.parentNode = null;
   };
   const document = {
+    activeElement: null as unknown,
     readyState: "complete",
     body,
     documentElement: { style: { overflow: "" } },
@@ -253,9 +257,23 @@ async function main(): Promise<void> {
   // The keyboard stays in the dialog (2.4.3, 2.4.11): the browser's own modal dialog makes the rest of the page unreachable
   // until it closes, without the script reading or changing any element of the page.
   is("the dialog is the browser's own modal one", [(box as unknown as { tag: string }).tag, (box as unknown as { modal?: boolean }).modal], ["dialog", true]);
-  (frame as unknown as { onload?: () => void }).onload?.();
-  is("once the card has loaded, the focus is in it, on the card's own first control", (frame.contentWindow as { focused?: boolean }).focused, true);
-  const shut = box.children[1] as { tag: string; style: Record<string, string>; onfocus?: () => void; onblur?: () => void };
+  is("the card's frame takes the focus as the dialog opens", page.document.activeElement === frame, true);
+  (frame as unknown as { onload?: (() => void) | null }).onload?.();
+  // contentWindow.focus() focuses the card's window, not one of its controls: the next Tab reaches the first of them.
+  is("once the card has loaded, the focus is in its window, so the next Tab reaches the card's first control", (frame.contentWindow as { focused?: boolean }).focused, true);
+  const shut = box.children[1] as { tag: string; style: Record<string, string>; onfocus?: () => void; onblur?: () => void; focus: () => void };
+  // The card loads again when it moves within its frame (a call's times, a form sent): the person may be on Close by then.
+  (frame.contentWindow as { focused?: boolean }).focused = false;
+  shut.focus();
+  (frame as unknown as { onload?: (() => void) | null }).onload?.();
+  is("a later load of the card never takes the focus back from where the person is (3.2.1, 3.2.5)", [(frame.contentWindow as { focused?: boolean }).focused ?? false, page.document.activeElement === shut], [false, true]);
+  const late = standIn();
+  late.click(late.link("https://marktmorgen.com/embed/harbor/k3j9x2p1ab?mm=page", "overlay", "Buy The Reset"));
+  const lateParts = (late.appended[0] as { children: Record<string, unknown>[] }).children;
+  const lateFrame = lateParts[0] as { contentWindow: { focused?: boolean }; onload?: (() => void) | null };
+  (lateParts[1] as { focus: () => void }).focus();
+  lateFrame.onload?.();
+  is("nor does a card that loads after the person has already moved on to Close", [lateFrame.contentWindow.focused ?? false, late.document.activeElement === lateParts[1]], [false, true]);
   shut.onfocus?.();
   is("its close button shows its focus in two colors, 3 px each, seen on any page under it (2.4.13)", [shut.tag, shut.style.boxShadow], ["button", "0 0 0 3px #15112e,0 0 0 6px #fff"]);
   // Forced colors (high contrast) drop box-shadow: an outline, transparent elsewhere, is what shows the focus there (2.4.7, 2.4.13).

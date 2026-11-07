@@ -4,6 +4,8 @@
  *   (high contrast) too, where the browser drops box-shadow (WCAG 2.2 SC 2.4.7 and 2.4.13, read November 7, 2026:
  *   https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html, https://www.w3.org/WAI/WCAG22/Understanding/focus-appearance.html),
  *   and only while it has the focus, so the focus can be told from the rest.
+ * - The same overlay's card, when it loads, takes the focus only on its first load and only if the person has not moved
+ *   on (3.2.1, 3.2.5): a slow card, or the card moving within its frame, never pulls the focus back from Close.
  * - The cart (components/store-cart.tsx): removing a product puts the focus on the next one (2.4.3), but a Remove that took
  *   nothing out never moves the focus later, on a change the person did not make (3.2.1, 3.2.5).
  */
@@ -55,6 +57,38 @@ try {
   out.overlay[forced]={rest,focus};
   await page.close();
  }
+ // A synthetic card, held back until the test lets it load, so the person can move first (a slow network).
+ out.load={};out.cardOutside=0;
+ for(const moved of [false,true]){
+  const page=await browser.newPage();
+  page.on('pageerror',error=>out.errors.push(error.message));
+  let release;const gate=new Promise(r=>{release=r;});
+  await page.route('**/*',async route=>{
+   const url=new URL(route.request().url());
+   if(url.origin!=='https://marktmorgen.com'||!url.pathname.startsWith('/embed/')){out.cardOutside++;return route.abort();}
+   await gate;
+   return route.fulfill({contentType:'text/html',body:'<!doctype html><html lang="en"><body><button>Pay</button></body></html>'});
+  });
+  await page.setContent('<a href="https://marktmorgen.com/embed/synthetic-store/abc123" data-mm="overlay">Buy the course</a>');
+  await page.addScriptTag({content:source});
+  await page.focus('a');await page.keyboard.press('Enter');
+  await page.waitForSelector('dialog iframe');
+  await page.evaluate(()=>{window.__loads=0;document.querySelector('dialog iframe').addEventListener('load',()=>{window.__loads++;});});
+  if(moved)await page.evaluate(()=>document.querySelector('dialog button').focus());
+  release();
+  await page.waitForFunction(()=>window.__loads===1);
+  await page.waitForTimeout(50);
+  const on=()=>page.evaluate(()=>document.activeElement.tagName);
+  const first=await on();
+  // The card moves within its frame (a call's times, a form sent) while the person is on Close.
+  await page.evaluate(()=>document.querySelector('dialog button').focus());
+  const card=page.frames().find(f=>f!==page.mainFrame());
+  await card.evaluate(()=>{location.href=location.href+'?view=times';});
+  await page.waitForFunction(()=>window.__loads===2);
+  await page.waitForTimeout(50);
+  out.load[moved?'moved':'stayed']={first,later:await on()};
+  await page.close();
+ }
  const page=await browser.newPage();
  page.on('pageerror',error=>out.errors.push(error.message));
  await page.route('**/*',async route=>{
@@ -100,6 +134,8 @@ try {
 
 const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", browserScript], { encoding: "utf8", timeout: 90_000, maxBuffer: 2_000_000 })) as {
   overlay: Record<"none" | "active", Record<"rest" | "focus", { focused: boolean; outline: string; outlineColor: string; shadow: string }>>;
+  load: Record<"stayed" | "moved", { first: string; later: string }>;
+  cardOutside: number;
   removed: { remove: boolean; name: string };
   failedRows: number;
   later: { remove: boolean; name: string };
@@ -113,6 +149,10 @@ is("in normal colors nothing else is drawn: its outline, if any, is transparent"
 is("in forced colors the browser drops the ring", overlay.active.focus.shadow, "none");
 is("so in forced colors Close shows its focus with an outline in the system's color (2.4.7, 2.4.13)", overlay.active.focus.outline !== "none", true);
 is("and only while it has the focus, so the focus can be told apart", overlay.active.rest.outline, "none");
+is("a card that loads while the person waits takes the focus into its frame", result.load.stayed.first, "IFRAME");
+is("a card that loads after the person moved on to Close leaves the focus on Close", result.load.moved.first, "BUTTON");
+is("and the card moving within its frame never pulls the focus back from Close", [result.load.stayed.later, result.load.moved.later], ["BUTTON", "BUTTON"]);
+is("the synthetic card asked nothing outside itself", result.cardOutside, 0);
 is("removing a product puts the focus on the next one's Remove (2.4.3)", result.removed, { remove: true, name: "Remove Synthetic b2" });
 is("a Remove whose writing failed takes nothing out", result.failedRows, 2);
 is("and never moves the focus later, when another tab changes the cart", result.later, { remove: false, name: "Close" });

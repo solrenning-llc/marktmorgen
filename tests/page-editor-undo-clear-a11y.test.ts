@@ -90,6 +90,17 @@ is("several back", stepSaying("back", [A], [A, B, C, X], false, 1), "Undone: 3 b
 is("several off", stepSaying("forward", [A, B, C, X], [A], false, 1), "Redone: 3 blocks are off the page.");
 is("some back and some off", stepSaying("back", [A, B], [A, C], false, 1), "Undone: a change to the blocks on the page.");
 is("a move", stepSaying("back", [A, B, C], [A, C, B], false, 1), "Undone: Questions moved to position 2 of 3.");
+// A move of more than one place, by dragging or by Move pressed again within the history's 500 ms pause (one step):
+// the block that went back, or forward, is named, never one only pushed aside by it (Claude 5's MEDIUM on #2926).
+const P = { id: "p", label: "Guarantee", draft: 5 };
+is("a drag from 5 to 2, undone: the block that went back is named", stepSaying("back", [A, P, B, C, X], [A, B, C, X, P], false, 1), "Undone: Guarantee moved to position 5 of 5.");
+is("three quick Moves down, from 2 to 5, one step, redone: the block that went is named", stepSaying("forward", [A, B, C, X, P], [A, C, X, P, B], false, 0), "Redone: Text moved to position 5 of 5. Nothing more to redo.");
+is("the same three Moves undone", stepSaying("back", [A, C, X, P, B], [A, B, C, X, P], false, 1), "Undone: Text moved to position 2 of 5.");
+is("two quick Moves up of the Video, undone", stepSaying("back", [A, X, B, C, P], [A, B, C, X, P], false, 1), "Undone: Video moved to position 4 of 5.");
+is("a drag from 3 to 5, undone", stepSaying("back", [A, B, X, P, C], [A, B, C, X, P], false, 2), "Undone: Questions moved to position 3 of 5.");
+is("a drag from 3 to 5, redone", stepSaying("forward", [A, B, C, X, P], [A, B, X, P, C], false, 1), "Redone: Questions moved to position 5 of 5.");
+is("a one-place move is said as before, the first block moved", [stepSaying("back", [A, B, C, X], [A, B, X, C], false, 1), stepSaying("forward", [A, B, C, X], [A, C, B, X], false, 1)], ["Undone: Video moved to position 3 of 4.", "Redone: Questions moved to position 2 of 4."]);
+is("two blocks moved as far in one step: the first of them on the page", stepSaying("back", [A, B, C, X, P], [A, C, B, P, X], false, 1), "Undone: Questions moved to position 2 of 5.");
 is("a change inside a block", stepSaying("back", [A, B, C], [A, { ...B, draft: 5 }, C], false, 1), "Undone: a change in Text, block 2.");
 is("the page style", stepSaying("forward", [A, B], [A, B], true, 1), "Redone: the page style.");
 is("anything else", stepSaying("back", [A, B], [A, B], false, 1), "Undone: the last change.");

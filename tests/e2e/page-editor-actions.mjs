@@ -2,8 +2,9 @@
 // an arrow that cannot move keeps the focus and says it is off (2.4.3, 4.1.2);
 // a move keeps the focus on the arrow that moved with its block and says
 // where it went (2.4.3, 4.1.3); the same sentence said twice is said again;
-// in forced colors no icon button animates its colors (inbox C4-35); and a
-// picture block whose send is still pending never drops the focus (#2926).
+// in forced colors no icon button animates its colors (inbox C4-35); Undo and
+// Redo of moves made in one step name the block that moved, and a picture
+// block whose send is still pending never drops the focus (#2926).
 // The real component with a synthetic page and every request held in the
 // page (tests/e2e/page-editor-harness.tsx), the site's own style sheet built
 // by Tailwind from the editor's classes: no server, no build, nothing sent.
@@ -131,6 +132,22 @@ try {
   is("forced colors are on for the next check", await page.evaluate(() => matchMedia("(forced-colors: active)").matches), true);
   is("in forced colors no icon button animates its colors", await timing(), 0);
   await page.emulateMedia({ forcedColors: "none" });
+
+  // Move pressed three times within the history's 500 ms pause is one step: Undo and Redo name the block that went
+  // back and forward, never one only pushed aside by it (Claude 5's MEDIUM on #2926; WCAG 4.1.3).
+  await page.evaluate(() => window.harness.mount(["hero", "text", "faq", "video", "guarantee"].map((kind) => window.harness.block(kind))));
+  await page.getByRole("button", { name: "Move block 5 up" }).focus();
+  for (let i = 0; i < 3; i++) {
+    await page.keyboard.press("Enter");
+    await settled();
+  }
+  is("three quick Moves up take the Guarantee to position 2", (await status()).trim(), "Moved Guarantee to position 2 of 5.");
+  await page.locator("#undo-step").click();
+  await settled();
+  is("Undo of the three Moves names the block that went back", (await status()).trim(), "Undone: Guarantee moved to position 5 of 5. Nothing more to undo.");
+  await page.locator("#redo-step").click();
+  await settled();
+  is("Redo of the three Moves names the block that went forward", (await status()).trim(), "Redone: Guarantee moved to position 2 of 5. Nothing more to redo.");
 
   // A picture block's last picture removed while another is still being sent (#2926, candidate of the Codex M review):
   // the focus goes to the block's Add button, which says it is sending; it must stay on the page, never on the body.

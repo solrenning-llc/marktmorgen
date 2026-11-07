@@ -49,6 +49,7 @@ export async function StoreTracking({
           askFirst={askFirst}
           place={place}
           event={event}
+          viewed={product || undefined}
         />
       ) : null}
     </>

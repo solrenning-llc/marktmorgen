@@ -6,6 +6,7 @@ import { pixelChoiceState, type Pixels } from "@/lib/pixels";
 import { X_SCRIPT, xConfigCall, xEventCall } from "@/lib/x-pixel";
 import { type Place, redditInitCall, redditScript, redditTrackCall } from "@/lib/reddit-pixel";
 import { ADS_COOKIE_SECONDS, adsCookieName, nextAdsCookie } from "@/lib/ad-consent";
+import { CART_CHANGED_EVENT, CART_KEY_PREFIX, type Step, addedToCart, cartIdsOf, stepCalls, stepsAllowed, STEPS_MARK_VALUE, stepsMarkKey } from "@/lib/pixel-steps";
 
 /**
  * The creator's own ad pixels, on their store's pages.
@@ -63,6 +64,35 @@ function writeChoice(handle: string, value: "yes" | "no" | null) {
     else localStorage.removeItem(consentKey(handle));
   } catch {
     // A browser that keeps nothing asks again next time; nothing breaks.
+  }
+}
+
+/**
+ * Whether the yes was given to the words that name a product view and an add
+ * to cart (lib/pixel-steps.ts): kept on Allow, removed on every other choice.
+ */
+function readMark(handle: string): string | null {
+  try {
+    return localStorage.getItem(stepsMarkKey(handle));
+  } catch {
+    return null;
+  }
+}
+
+function writeMark(handle: string, on: boolean) {
+  try {
+    if (on) localStorage.setItem(stepsMarkKey(handle), STEPS_MARK_VALUE);
+    else localStorage.removeItem(stepsMarkKey(handle));
+  } catch {
+    // Without storage there is no mark, so these two steps are never told.
+  }
+}
+
+function readCart(handle: string): string[] {
+  try {
+    return cartIdsOf(localStorage.getItem(`${CART_KEY_PREFIX}${handle}`));
+  } catch {
+    return [];
   }
 }
 
@@ -225,6 +255,15 @@ function startReddit(w: PixelWindow, id: string, limited: boolean, place: Place)
   w.rdt("track", "PageVisit");
 }
 
+/** One step, to each of the creator's pixels that is loaded on this page. */
+function sendStep(w: PixelWindow, pixels: Pixels, step: Step) {
+  for (const [kind, args] of stepCalls(pixels, step)) {
+    if (kind === "meta" && w.fbq) w.fbq(...args);
+    else if (kind === "google" && w.gtag) w.gtag(...args);
+    else if (kind === "reddit" && w.rdt) w.rdt(...args);
+  }
+}
+
 function track(w: PixelWindow, pixels: Pixels, event: Exclude<PixelEvent, null> | { type: "checkout" }, restricted = true) {
   const toReddit = w.rdt ? redditTrackCall(pixels, event) : null;
   if (toReddit && w.rdt) w.rdt(...toReddit);
@@ -260,6 +299,7 @@ export function StorePixels({
   askFirst,
   place = { country: null, region: null },
   event = null,
+  viewed,
 }: {
   handle: string;
   storeName: string;
@@ -271,6 +311,8 @@ export function StorePixels({
   /** Where the visitor is, for Reddit's Limited Data Use (lib/reddit-pixel.ts placeOf). */
   place?: Place;
   event?: PixelEvent;
+  /** A product's own page: which product, told as a product view (lib/pixel-steps.ts). */
+  viewed?: string;
 }) {
   // "unknown" until the browser has been asked, so the server's page and the
   // browser's first paint agree.
@@ -343,8 +385,40 @@ export function StorePixels({
       }, 300);
     };
     document.addEventListener("submit", onSubmit, true);
-    return () => document.removeEventListener("submit", onSubmit, true);
-  }, [state, pixels, event, handle, place]);
+
+    // A product view and an add to cart (601 [KB22] U9), only for a visitor
+    // who pressed Allow on the words that name them.
+    let stopSteps = () => {};
+    if (stepsAllowed(state, readChoice(handle), readMark(handle))) {
+      if (viewed && !started.has(`view:${viewed}`)) {
+        started.add(`view:${viewed}`);
+        sendStep(w, pixels, { type: "view", productId: viewed });
+      }
+      // The cart says when this page changed it (components/store-cart.tsx).
+      // What was in it when this started, put back from a link included, is
+      // not told; taking a product out is not told either.
+      let before = readCart(handle);
+      const onCart = () => {
+        const now = readCart(handle);
+        for (const productId of addedToCart(before, now)) sendStep(w, pixels, { type: "cart", productId });
+        before = now;
+      };
+      // Another tab's change is never told here; it only moves what was there.
+      const onOtherTab = () => {
+        before = readCart(handle);
+      };
+      window.addEventListener(CART_CHANGED_EVENT, onCart);
+      window.addEventListener("storage", onOtherTab);
+      stopSteps = () => {
+        window.removeEventListener(CART_CHANGED_EVENT, onCart);
+        window.removeEventListener("storage", onOtherTab);
+      };
+    }
+    return () => {
+      document.removeEventListener("submit", onSubmit, true);
+      stopSteps();
+    };
+  }, [state, pixels, event, handle, place, viewed]);
 
   if (state === "unknown") return null;
 
@@ -360,7 +434,7 @@ export function StorePixels({
       >
         <p className="font-bold">{`${storeName} measures its ads`}</p>
         <p className="st-muted mt-1 text-sm leading-relaxed">
-          {`With your permission, this page loads ad measurement from ${names}, which sets cookies, and ${storeName} tells them about your sign-ups and purchases, so it can tell which of its ads bring people here. If you say no, nothing loads, nothing is sent, and the page works just the same.`}{" "}
+          {`With your permission, this page loads ad measurement from ${names}, which sets cookies, and ${storeName} tells them which products you open and put in your cart, and about your sign-ups and purchases, so it can tell which of its ads bring people here. If you say no, nothing loads, nothing is sent, and the page works just the same.`}{" "}
           <Link href="/privacy#ads" className="st-footer-link font-semibold">
             More about this
           </Link>
@@ -372,6 +446,8 @@ export function StorePixels({
             onClick={() => {
               const gpc = (navigator as Navigator & {globalPrivacyControl?:boolean}).globalPrivacyControl === true;
               writeChoice(handle,gpc ? "no" : "yes");
+              if (gpc) writeMark(handle, false);
+              else writeMark(handle, true);
               setState(pixelChoiceState("yes",askFirst,gpc));
             }}
           >
@@ -382,6 +458,7 @@ export function StorePixels({
             className="btn st-option !w-auto !py-2.5 font-semibold"
             onClick={() => {
               writeChoice(handle, "no");
+              writeMark(handle, false);
               setState("off");
             }}
           >
@@ -400,11 +477,13 @@ export function StorePixels({
         onClick={() => {
           if (state === "on") {
             writeChoice(handle, "no");
+            writeMark(handle, false);
             // Scripts already loaded cannot be unloaded from a page; the next
             // page this store opens loads none.
             window.location.reload();
           } else {
             writeChoice(handle, null);
+            writeMark(handle, false);
             setState("ask");
           }
         }}

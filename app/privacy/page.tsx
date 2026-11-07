@@ -28,7 +28,7 @@ export default function PrivacyPage() {
   // Named only while the files creators sell are kept there (lib/vault.ts).
   const cloudflare = isVaultConfigured();
   return (
-    <LegalPage title="Privacy Policy" lastUpdated="November 4, 2026">
+    <LegalPage title="Privacy Policy" lastUpdated="November 7, 2026">
       <p>
         Marktmorgen (“Marktmorgen,” “we,” “us,” or “our”) is operated by
         Solrenning, an independent software studio. This Privacy Policy
@@ -288,7 +288,12 @@ export default function PrivacyPage() {
           where a visitor has not said yes, it is marked Limited Data Use with
           the visitor&apos;s country and, when known, region, and the creator
           has to switch off Reddit&apos;s automatic matching of email addresses
-          before the pixel can be added.
+          before the pixel can be added. Meta, Google and Reddit are also told
+          which products a visitor opens and puts in the cart, by the
+          product&apos;s id alone, with no amount and nothing about the visitor,
+          and only after the visitor pressed Allow on the words that say so. A
+          visitor who was never asked, or who said yes before those words, is
+          not counted this way.
         </p>
         <p id="ads-server">
           <strong className="text-black">

@@ -30,6 +30,7 @@ const en = {
   notices: {
     done: { title: "Your withdrawal was sent", body: "A confirmation with what you sent and when is on its way to your email." },
     unsent: { title: "Your withdrawal was sent", body: "We could not email the confirmation just now. Your withdrawal is recorded with its date and time; you can ask the store for a copy." },
+    unreached: { title: "Your withdrawal is recorded, but not delivered yet", body: "We recorded your withdrawal with its date and time. The store has not received it yet, and no confirmation reached your email. Send this form again to try again." },
     untold: { title: "Your withdrawal is recorded", body: "We could not pass it to the store just now. Send this form again later and we will try again, or write to the store yourself." },
     already: { title: "You already withdrew from this order", body: "Nothing more is needed. Your first withdrawal and its date stand." },
     closed: { title: "This order cannot be withdrawn from here", body: "The time to withdraw from it online has passed, or it does not have one. You can still write to the store." },
@@ -47,8 +48,8 @@ const en = {
   ackEmail: "Email for this confirmation",
   ackSentOn: "Sent on",
   ackNext: (store: string) => `${store} handles what happens next, including any refund owed to you. Keep this email: it shows that and when you withdrew.`,
-  creatorNote: (product: string, order: string, when: string) =>
-    `Withdrawal from contract (EU consumer law): the buyer withdrew from “${product}”, order ${order}, on ${when}. Cancel and refund from your Stripe account as your terms and the law require.`,
+  creatorNote: (product: string, order: string, when: string, account: "Stripe" | "PayPal") =>
+    `Withdrawal from contract (EU consumer law): the buyer withdrew from “${product}”, order ${order}, on ${when}. Cancel and refund from your ${account} account as your terms and the law require.`,
 };
 
 export type WithdrawalWords = typeof en;
@@ -72,6 +73,7 @@ const es: WithdrawalWords = {
   notices: {
     done: { title: "Tu desistimiento fue enviado", body: "Una confirmación con lo que enviaste y cuándo va camino de tu email." },
     unsent: { title: "Tu desistimiento fue enviado", body: "No pudimos enviar la confirmación por email ahora. Tu desistimiento queda registrado con su fecha y hora; puedes pedir una copia a la tienda." },
+    unreached: { title: "Tu desistimiento queda registrado, pero aún no se entregó", body: "Registramos tu desistimiento con su fecha y hora. La tienda aún no lo recibió y no llegó ninguna confirmación a tu email. Envía este formulario de nuevo para volver a intentarlo." },
     untold: { title: "Tu desistimiento queda registrado", body: "No pudimos pasárselo a la tienda ahora. Envía este formulario de nuevo más tarde y lo volveremos a intentar, o escribe tú a la tienda." },
     already: { title: "Ya desististe de este pedido", body: "No hace falta nada más. Tu primer desistimiento y su fecha siguen valiendo." },
     closed: { title: "No se puede desistir de este pedido desde aquí", body: "El plazo para desistir en línea ya pasó, o no tiene uno. Aún puedes escribir a la tienda." },
@@ -89,8 +91,8 @@ const es: WithdrawalWords = {
   ackEmail: "Email para esta confirmación",
   ackSentOn: "Enviado el",
   ackNext: (store) => `${store} se encarga de lo que sigue, incluido cualquier reembolso que te corresponda. Guarda este email: muestra que desististe y cuándo.`,
-  creatorNote: (product, order, when) =>
-    `Desistimiento del contrato (ley de consumo de la UE): quien compró desistió de «${product}», pedido ${order}, el ${when}. Cancela y reembolsa desde tu cuenta de Stripe como exigen tus condiciones y la ley.`,
+  creatorNote: (product, order, when, account) =>
+    `Desistimiento del contrato (ley de consumo de la UE): quien compró desistió de «${product}», pedido ${order}, el ${when}. Cancela y reembolsa desde tu cuenta de ${account} como exigen tus condiciones y la ley.`,
 };
 
 const fr: WithdrawalWords = {
@@ -112,6 +114,7 @@ const fr: WithdrawalWords = {
   notices: {
     done: { title: "Votre rétractation a été envoyée", body: "Une confirmation avec ce que vous avez envoyé et quand est en route vers votre e-mail." },
     unsent: { title: "Votre rétractation a été envoyée", body: "Nous n'avons pas pu envoyer la confirmation par e-mail pour l'instant. Votre rétractation est enregistrée avec sa date et son heure ; vous pouvez en demander une copie à la boutique." },
+    unreached: { title: "Votre rétractation est enregistrée, mais pas encore transmise", body: "Nous avons enregistré votre rétractation avec sa date et son heure. La boutique ne l'a pas encore reçue, et aucune confirmation n'est arrivée dans votre e-mail. Renvoyez ce formulaire pour réessayer." },
     untold: { title: "Votre rétractation est enregistrée", body: "Nous n'avons pas pu la transmettre à la boutique pour l'instant. Renvoyez ce formulaire plus tard et nous réessaierons, ou écrivez vous-même à la boutique." },
     already: { title: "Vous vous êtes déjà rétracté de cette commande", body: "Rien d'autre n'est nécessaire. Votre première rétractation et sa date restent valables." },
     closed: { title: "Impossible de se rétracter de cette commande ici", body: "Le délai pour se rétracter en ligne est passé, ou elle n'en a pas. Vous pouvez toujours écrire à la boutique." },
@@ -129,8 +132,8 @@ const fr: WithdrawalWords = {
   ackEmail: "E-mail pour cette confirmation",
   ackSentOn: "Envoyé le",
   ackNext: (store) => `${store} s'occupe de la suite, y compris de tout remboursement qui vous est dû. Gardez cet e-mail : il montre que vous vous êtes rétracté et quand.`,
-  creatorNote: (product, order, when) =>
-    `Rétractation du contrat (droit de la consommation de l'UE) : l'acheteur s'est rétracté de « ${product} », commande ${order}, le ${when}. Annulez et remboursez depuis votre compte Stripe comme vos conditions et la loi l'exigent.`,
+  creatorNote: (product, order, when, account) =>
+    `Rétractation du contrat (droit de la consommation de l'UE) : l'acheteur s'est rétracté de « ${product} », commande ${order}, le ${when}. Annulez et remboursez depuis votre compte ${account} comme vos conditions et la loi l'exigent.`,
 };
 
 const de: WithdrawalWords = {
@@ -152,6 +155,7 @@ const de: WithdrawalWords = {
   notices: {
     done: { title: "Ihr Widerruf wurde gesendet", body: "Eine Bestätigung mit Ihren Angaben und dem Zeitpunkt ist auf dem Weg zu Ihrer E-Mail." },
     unsent: { title: "Ihr Widerruf wurde gesendet", body: "Die Bestätigung konnte gerade nicht per E-Mail gesendet werden. Ihr Widerruf ist mit Datum und Uhrzeit gespeichert; Sie können den Shop um eine Kopie bitten." },
+    unreached: { title: "Ihr Widerruf ist gespeichert, aber noch nicht zugestellt", body: "Wir haben Ihren Widerruf mit Datum und Uhrzeit gespeichert. Der Shop hat ihn noch nicht erhalten, und keine Bestätigung hat Ihre E-Mail erreicht. Senden Sie dieses Formular noch einmal, um es erneut zu versuchen." },
     untold: { title: "Ihr Widerruf ist gespeichert", body: "Wir konnten ihn gerade nicht an den Shop weitergeben. Senden Sie dieses Formular später noch einmal, dann versuchen wir es erneut, oder schreiben Sie dem Shop selbst." },
     already: { title: "Sie haben diese Bestellung bereits widerrufen", body: "Mehr ist nicht nötig. Ihr erster Widerruf und sein Datum gelten weiter." },
     closed: { title: "Diese Bestellung kann hier nicht widerrufen werden", body: "Die Frist für den Online-Widerruf ist abgelaufen, oder es gibt keine. Sie können dem Shop weiterhin schreiben." },
@@ -169,8 +173,8 @@ const de: WithdrawalWords = {
   ackEmail: "E-Mail für diese Bestätigung",
   ackSentOn: "Gesendet am",
   ackNext: (store) => `${store} kümmert sich um alles Weitere, auch um eine Ihnen zustehende Erstattung. Bewahren Sie diese E-Mail auf: Sie zeigt, dass und wann Sie widerrufen haben.`,
-  creatorNote: (product, order, when) =>
-    `Widerruf des Vertrags (EU-Verbraucherrecht): Die Käuferin oder der Käufer hat „${product}“, Bestellung ${order}, am ${when} widerrufen. Kündigen und erstatten Sie in Ihrem Stripe-Konto, wie Ihre Bedingungen und das Gesetz es verlangen.`,
+  creatorNote: (product, order, when, account) =>
+    `Widerruf des Vertrags (EU-Verbraucherrecht): Die Käuferin oder der Käufer hat „${product}“, Bestellung ${order}, am ${when} widerrufen. Kündigen und erstatten Sie in Ihrem ${account}-Konto, wie Ihre Bedingungen und das Gesetz es verlangen.`,
 };
 
 const it: WithdrawalWords = {
@@ -192,6 +196,7 @@ const it: WithdrawalWords = {
   notices: {
     done: { title: "Il tuo recesso è stato inviato", body: "Una conferma con quello che hai inviato e quando sta arrivando alla tua email." },
     unsent: { title: "Il tuo recesso è stato inviato", body: "Non siamo riusciti a inviare la conferma per email in questo momento. Il tuo recesso è registrato con data e ora; puoi chiederne una copia al negozio." },
+    unreached: { title: "Il tuo recesso è registrato, ma non ancora consegnato", body: "Abbiamo registrato il tuo recesso con data e ora. Il negozio non l'ha ancora ricevuto e nessuna conferma è arrivata alla tua email. Invia di nuovo questo modulo per riprovare." },
     untold: { title: "Il tuo recesso è registrato", body: "Non siamo riusciti a passarlo al negozio in questo momento. Invia di nuovo questo modulo più tardi e riproveremo, oppure scrivi tu al negozio." },
     already: { title: "Hai già receduto da questo ordine", body: "Non serve altro. Il tuo primo recesso e la sua data restano validi." },
     closed: { title: "Non puoi recedere da questo ordine da qui", body: "Il termine per recedere online è passato, oppure non c'è. Puoi comunque scrivere al negozio." },
@@ -209,8 +214,8 @@ const it: WithdrawalWords = {
   ackEmail: "Email per questa conferma",
   ackSentOn: "Inviato il",
   ackNext: (store) => `${store} si occupa di quello che segue, compreso qualsiasi rimborso che ti spetta. Conserva questa email: mostra che hai receduto e quando.`,
-  creatorNote: (product, order, when) =>
-    `Recesso dal contratto (diritto dei consumatori UE): chi ha comprato è receduto da «${product}», ordine ${order}, il ${when}. Annulla e rimborsa dal tuo account Stripe come richiedono le tue condizioni e la legge.`,
+  creatorNote: (product, order, when, account) =>
+    `Recesso dal contratto (diritto dei consumatori UE): chi ha comprato è receduto da «${product}», ordine ${order}, il ${when}. Annulla e rimborsa dal tuo account ${account} come richiedono le tue condizioni e la legge.`,
 };
 
 const nl: WithdrawalWords = {
@@ -232,6 +237,7 @@ const nl: WithdrawalWords = {
   notices: {
     done: { title: "Je herroeping is verstuurd", body: "Een bevestiging met wat je stuurde en wanneer is onderweg naar je e-mail." },
     unsent: { title: "Je herroeping is verstuurd", body: "We konden de bevestiging nu niet mailen. Je herroeping is vastgelegd met datum en tijd; je kunt de winkel om een kopie vragen." },
+    unreached: { title: "Je herroeping is vastgelegd, maar nog niet bezorgd", body: "We hebben je herroeping vastgelegd met datum en tijd. De winkel heeft hem nog niet ontvangen, en er is geen bevestiging in je e-mail aangekomen. Stuur dit formulier opnieuw om het nog eens te proberen." },
     untold: { title: "Je herroeping is vastgelegd", body: "We konden hem nu niet aan de winkel doorgeven. Stuur dit formulier later opnieuw en we proberen het nog eens, of schrijf de winkel zelf." },
     already: { title: "Je hebt deze bestelling al herroepen", body: "Er is niets meer nodig. Je eerste herroeping en de datum ervan blijven gelden." },
     closed: { title: "Deze bestelling kun je hier niet herroepen", body: "De termijn om online te herroepen is voorbij, of er is er geen. Je kunt de winkel nog steeds schrijven." },
@@ -249,8 +255,8 @@ const nl: WithdrawalWords = {
   ackEmail: "E-mail voor deze bevestiging",
   ackSentOn: "Verstuurd op",
   ackNext: (store) => `${store} regelt de rest, ook een terugbetaling waar je recht op hebt. Bewaar deze e-mail: hij laat zien dat en wanneer je herriep.`,
-  creatorNote: (product, order, when) =>
-    `Herroeping van de overeenkomst (EU-consumentenrecht): de koper herriep ‘${product}’, bestelling ${order}, op ${when}. Zeg op en betaal terug vanuit je Stripe-account zoals je voorwaarden en de wet vereisen.`,
+  creatorNote: (product, order, when, account) =>
+    `Herroeping van de overeenkomst (EU-consumentenrecht): de koper herriep ‘${product}’, bestelling ${order}, op ${when}. Zeg op en betaal terug vanuit je ${account}-account zoals je voorwaarden en de wet vereisen.`,
 };
 
 const pt: WithdrawalWords = {
@@ -272,6 +278,7 @@ const pt: WithdrawalWords = {
   notices: {
     done: { title: "A sua desistência foi enviada", body: "Uma confirmação com o que enviou e quando está a caminho do seu email." },
     unsent: { title: "A sua desistência foi enviada", body: "Não foi possível enviar a confirmação por email agora. A sua desistência fica registada com data e hora; pode pedir uma cópia à loja." },
+    unreached: { title: "A sua desistência fica registada, mas ainda não foi entregue", body: "Registámos a sua desistência com data e hora. A loja ainda não a recebeu e nenhuma confirmação chegou ao seu email. Envie este formulário de novo para tentar outra vez." },
     untold: { title: "A sua desistência fica registada", body: "Não foi possível passá-la à loja agora. Envie este formulário de novo mais tarde e tentaremos outra vez, ou escreva diretamente à loja." },
     already: { title: "Já desistiu desta encomenda", body: "Não é preciso mais nada. A sua primeira desistência e a data dela continuam válidas." },
     closed: { title: "Não é possível desistir desta encomenda aqui", body: "O prazo para desistir online já passou, ou ela não tem um. Ainda pode escrever à loja." },
@@ -289,8 +296,8 @@ const pt: WithdrawalWords = {
   ackEmail: "Email para esta confirmação",
   ackSentOn: "Enviado em",
   ackNext: (store) => `${store} trata do que se segue, incluindo qualquer reembolso que lhe seja devido. Guarde este email: mostra que desistiu e quando.`,
-  creatorNote: (product, order, when) =>
-    `Desistência do contrato (direito do consumidor da UE): quem comprou desistiu de «${product}», encomenda ${order}, em ${when}. Cancele e reembolse a partir da sua conta Stripe, como exigem os seus termos e a lei.`,
+  creatorNote: (product, order, when, account) =>
+    `Desistência do contrato (direito do consumidor da UE): quem comprou desistiu de «${product}», encomenda ${order}, em ${when}. Cancele e reembolse a partir da sua conta ${account}, como exigem os seus termos e a lei.`,
 };
 
 export const WITHDRAWAL_WORDS: Record<LanguageCode, WithdrawalWords> = { en, es, fr, de, it, nl, pt };

@@ -22,14 +22,30 @@
  *
  * When the period runs (Directive 2011/83/EU arts. 9, 16(a), 16(m), as read
  * for item 91 in lib/digital-consent.ts): 14 days from the contract; digital
- * content whose buyer gave the art. 16(m) yes loses the right once supply
- * begins: at once, or when a pre-order is actually handed over (its planned
- * release day proves nothing, so until then it keeps the 14 days); a
+ * content whose buyer gave the art. 16(m) yes, and whose confirmation on a
+ * durable medium is known to have gone (art. 16(m)(iii), art. 8(7)(b): the
+ * order's confirmation email, read as `confirmed`), loses the right once
+ * supply begins: at once, or when a pre-order is actually handed over (its
+ * planned release day proves nothing, so until then it keeps the 14 days);
+ * the yes without that confirmation known sent keeps the 14 days; a
  * membership is at least partly a service, so it keeps the 14 days; a shipped
  * item's 14 days run from its receipt (art. 9(2)(b)), which is not known here,
  * so it stays offered with no end. When a time cannot be read the function
  * stays offered: it is never hidden on a guess. Nothing here decides a refund
  * or its amount.
+ *
+ * How the 14 days are counted (withdrawalEnd; Claude 5's review of #2827),
+ * on the protective reading of Regulation (EEC, Euratom) No 1182/71, which
+ * recital 41 of Directive 2011/83/EU applies to its periods, art. 3(1), 3(2)(b)
+ * and 3(4) as the reviewer recalls them: NOT verified against the official
+ * text, because EUR-Lex could not be reached from here
+ * (docs/kb9-eu-withdrawal-2026-11-06.md). The day of payment is not counted;
+ * the period ends at the end of the 14th calendar day after the UTC day of
+ * payment; a last day on a Saturday or a Sunday moves to the following
+ * Monday; and "the end of the day" is the end of that calendar day anywhere
+ * on Earth (23:59:59 at UTC-12, 11:59:59 UTC the next calendar day), so no
+ * buyer's own day is cut short. Public holidays differ by country and are not
+ * known here, so they are not applied.
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import type { KeptConsent } from "@/lib/digital-consent";
@@ -63,6 +79,11 @@ export type WithdrawalFacts = {
   preorder?: { day: string | null; given: boolean };
   /** Shipped by the creator. */
   shipped?: boolean;
+  /**
+   * The order's confirmation email (art. 8(7), the durable medium of art. 16(m)(iii)) is known to have gone: true only
+   * when its mark read exactly "sent" (lib/withdrawal.ts, withConfirmations). Absent or false keeps the 14 days.
+   */
+  confirmed?: boolean;
 };
 
 /**
@@ -72,16 +93,44 @@ export type WithdrawalFacts = {
  */
 export type WithdrawalWindow = { open: true; until: number | null } | { open: false; why: "not-here" | "supplied" | "ended" };
 
+/** The end of the day anywhere on Earth: the last place a calendar day ends is UTC-12, 12 hours after UTC's. */
+const EARTH_DAY_END = 12 * 3600 - 1;
+
+/**
+ * The last moment of the withdrawal period for a contract made at `paidAt` (seconds), as the file's comment counts it:
+ * the end, anywhere on Earth, of the 14th calendar day after the UTC day of payment, a Saturday or a Sunday moved to
+ * the Monday.
+ */
+export function withdrawalEnd(paidAt: number): number {
+  const paid = new Date(paidAt * 1000);
+  const last = new Date(Date.UTC(paid.getUTCFullYear(), paid.getUTCMonth(), paid.getUTCDate() + WITHDRAWAL_DAYS));
+  const weekday = last.getUTCDay();
+  const moved = weekday === 6 ? 2 : weekday === 0 ? 1 : 0;
+  return Date.UTC(last.getUTCFullYear(), last.getUTCMonth(), last.getUTCDate() + moved + 1) / 1000 + EARTH_DAY_END;
+}
+
+/** The last day of the period whose end is `until` (withdrawalEnd), as the midnight UTC that starts it, in seconds: the day a page promises. */
+export function lastWithdrawalDay(until: number): number {
+  return until - EARTH_DAY_END - DAY;
+}
+
+/** Whether the art. 16(m) yes would end the right once supplied: digital content sold once, handed over (a pre-order only once it is). */
+export function yesEndsOnSupply(facts: WithdrawalFacts): boolean {
+  if (facts.kind === "imported" || facts.givenByStore || facts.shipped) return false;
+  const membership = facts.member || facts.consent?.kind === "membership";
+  return !membership && facts.consent?.kind === "digital" && (!facts.preorder || facts.preorder.given);
+}
+
 /** When the withdrawal function is offered for one purchase (see the file's comment). */
 export function withdrawalWindow(facts: WithdrawalFacts, nowSeconds: number): WithdrawalWindow {
   if (facts.kind === "imported" || facts.givenByStore) return { open: false, why: "not-here" };
   const paid = Number.isSafeInteger(facts.paidAt) && facts.paidAt > 0 ? facts.paidAt : null;
-  const membership = facts.member || facts.consent?.kind === "membership";
   // A shipped item's 14 days run from its receipt, not known here: no end is invented.
   if (facts.shipped) return { open: true, until: null };
-  const until: number | null = paid === null ? null : paid + WITHDRAWAL_DAYS * DAY;
-  // The yes ends the right once supply actually begins: at once, or when a pre-order is handed over, never on its planned day.
-  if (!membership && facts.consent?.kind === "digital" && (!facts.preorder || facts.preorder.given)) return { open: false, why: "supplied" };
+  const until: number | null = paid === null ? null : withdrawalEnd(paid);
+  // The yes ends the right once supply actually begins (at once, or when a pre-order is handed over, never on its planned
+  // day), and only with the confirmation on a durable medium known sent (art. 16(m)(iii)): never hidden on a guess.
+  if (yesEndsOnSupply(facts) && facts.confirmed === true) return { open: false, why: "supplied" };
   if (until !== null && nowSeconds > until) return { open: false, why: "ended" };
   return { open: true, until };
 }

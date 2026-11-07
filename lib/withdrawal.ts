@@ -29,10 +29,11 @@ import { fileContact } from "@/lib/inbox";
 import type { Store } from "@/lib/store";
 import { takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
-import { type Purchase, displayName, senderAddress } from "@/lib/buyer-orders";
+import { type OrdersMeter, type Purchase, displayName, senderAddress } from "@/lib/buyer-orders";
+import { confirmationKey } from "@/lib/purchase-email";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { withdrawalWords } from "@/lib/buyer-words/withdrawal";
-import { type WithdrawalFacts, type WithdrawalStatement, type WithdrawalWindow, acknowledgement, submittedInTime, withdrawalWindow } from "@/lib/withdrawal-rules";
+import { type WithdrawalFacts, type WithdrawalStatement, type WithdrawalWindow, acknowledgement, submittedInTime, withdrawalWindow, yesEndsOnSupply } from "@/lib/withdrawal-rules";
 
 /** How long the record of a withdrawal is kept, in days. */
 export const WITHDRAWAL_KEEP_DAYS = 400;
@@ -53,7 +54,40 @@ export function factsOf(purchase: Purchase): WithdrawalFacts {
     consent: purchase.consent ?? null,
     ...(purchase.preorder ? { preorder: purchase.preorder } : {}),
     ...(purchase.shipped === true ? { shipped: true } : {}),
+    ...(purchase.confirmed === true ? { confirmed: true } : {}),
   };
+}
+
+/** An order's own confirmation is kept under its checkout (cs_) or its payment taken in one click (pi_), lib/purchase-email.ts. */
+const CONFIRMED_REFERENCE = /^(cs_(test|live)_|pi_)[A-Za-z0-9]{10,200}$/;
+
+/**
+ * The purchases with whether each one's confirmation email is known to have gone (Purchase.confirmed), read only where
+ * the art. 16(m) yes would otherwise end the right (art. 16(m)(iii) needs that confirmation on a durable medium too) and
+ * the 14 days still run: one GET of its nl:confirm: mark (lib/purchase-email.ts) each, all taken through the opening's
+ * meter before they are read, as its other reads that grow with what the buyer has. Only a reply that is exactly "sent"
+ * counts: no mark, "sending", any other value, a reply in another shape or a read that fails all leave it not known,
+ * so the function stays offered (CX-123: unknown is never "sent"; never hidden on a guess). The mark is kept 40 days
+ * from when the confirmation went (SENT_MARK_SECONDS, set at or after payment), and the period ends before payment + 18
+ * days (withdrawalEnd: 14 days, a weekend moved, the end of the day anywhere on Earth), so a mark gone by expiry belongs
+ * to an order whose 14 days are over anyway. A confirmation sent by another path that writes no such mark (an order's
+ * reserved origin, lib/order-confirmation-outbox.ts; a PayPal order) is not known here and keeps the function offered.
+ */
+export async function withConfirmations(purchases: Purchase[], meter: Pick<OrdersMeter, "take">, nowSeconds = Math.floor(Date.now() / 1000)): Promise<Purchase[]> {
+  const asked = purchases.filter((purchase) => {
+    const facts = factsOf(purchase);
+    return CONFIRMED_REFERENCE.test(purchase.reference) && yesEndsOnSupply(facts) && withdrawalWindow(facts, nowSeconds).open;
+  });
+  if (asked.length === 0) return purchases;
+  await meter.take(asked.length);
+  let replies: unknown[] | null = null;
+  try {
+    replies = repliesFor(await redisPipeline(asked.map((purchase) => ["GET", confirmationKey(purchase.reference)])), asked.length);
+  } catch (error) {
+    console.error("an order's confirmation mark could not be read", error);
+  }
+  const sent = new Set(asked.filter((_, i) => replies?.[i] === "sent").map((purchase) => purchase.reference));
+  return purchases.map((purchase) => (sent.has(purchase.reference) ? { ...purchase, confirmed: true } : purchase));
 }
 
 /** When the function is offered for this purchase, now. */
@@ -93,28 +127,35 @@ export async function withdrawnAt(store: Pick<Store, "sid">, reference: string):
   return (await readRecord(store.sid, reference)).at;
 }
 
+/** What a recorded withdrawal still owes: the acknowledgement with the store told ("unsent"), the acknowledgement with the store not told ("unreached"), or only the creator's notice ("untold"). */
+export type WithdrawalOwed = "unsent" | "unreached" | "untold";
+
 /**
- * Where one order's withdrawal stands, for its page: when it was recorded (or null), and what is still owed to it, the
- * acknowledgement ("unsent") or the creator's notice ("untold"), while a try of it is left. Throws when the record does
- * not read.
+ * Where one order's withdrawal stands, for its page: when it was recorded (or null), and what is still owed to it while a
+ * try of it is left: the acknowledgement, said "unreached" when the creator was not told either (whether or not a try of
+ * the notice is left: it never says the store got it) and "unsent" when they were; or the creator's notice ("untold").
+ * Throws when the record does not read.
  */
-export async function withdrawalStanding(store: Pick<Store, "sid">, reference: string): Promise<{ at: number | null; owed: "unsent" | "untold" | null }> {
+export async function withdrawalStanding(store: Pick<Store, "sid">, reference: string): Promise<{ at: number | null; owed: WithdrawalOwed | null }> {
   if (!store.sid || !isRedisConfigured()) throw new Error("withdrawals cannot be read");
   const record = await readRecord(store.sid, reference);
   if (record.at === null) return { at: null, owed: null };
-  const owed = !record.sent && record.tries < WITHDRAWAL_ACK_SENDS ? "unsent" : !record.told && record.tells < WITHDRAWAL_ACK_SENDS ? "untold" : null;
+  const owed = !record.sent && record.tries < WITHDRAWAL_ACK_SENDS ? (record.told ? "unsent" : "unreached") : !record.told && record.tells < WITHDRAWAL_ACK_SENDS ? "untold" : null;
   return { at: record.at, owed };
 }
 
-export type WithdrawOutcome = "done" | "unsent" | "untold" | "already" | "closed" | "full" | "error";
+export type WithdrawOutcome = "done" | "unsent" | "unreached" | "untold" | "already" | "closed" | "full" | "error";
 
 /**
  * Records one withdrawal and sends its acknowledgement and the creator's notice.
  * "closed" when the period is over (art. 11a(5) reads the submission time);
  * "already" when this order's acknowledgement went before, or was tried
  * WITHDRAWAL_ACK_SENDS times and the creator was told (or was tried as
- * often), nothing sent again; "unsent" when the record is written but the
- * acknowledgement email could not be sent (the next statement tries again);
+ * often), nothing sent again; "unsent" when the record is written and the
+ * creator told but the acknowledgement email could not be sent (the next
+ * statement tries again); "unreached" when the record is written but neither
+ * the creator's notice nor the acknowledgement went (Claude 5 on #2827: never
+ * said as sent; the next statement tries both again);
  * "untold" when the acknowledgement went but the creator's notice was refused
  * (an inbox quota, say): it is never reported as passed on, the
  * acknowledgement says so, and the next statement tries the notice again, at
@@ -165,7 +206,7 @@ export async function withdraw(store: Store, purchase: Purchase, statement: With
     const tells = counted ? countOf(counted[0]) : null;
     if (tells === null || tells < 1) return "error";
     if (tells <= WITHDRAWAL_ACK_SENDS) {
-      told = await fileContact({ store, email: statement.email, name: statement.name, text: w.creatorNote(purchase.title, purchase.reference, when), now: nowMs }).catch((error) => {
+      told = await fileContact({ store, email: statement.email, name: statement.name, text: w.creatorNote(purchase.title, purchase.reference, when, purchase.paidWith === "paypal" ? "PayPal" : "Stripe"), now: nowMs }).catch((error) => {
         console.error("telling the creator about a withdrawal failed", error);
         return false;
       });
@@ -196,6 +237,6 @@ export async function withdraw(store: Store, purchase: Purchase, statement: With
       }
     }
   }
-  if (!sent) return "unsent";
+  if (!sent) return told ? "unsent" : "unreached";
   return told ? "done" : "untold";
 }

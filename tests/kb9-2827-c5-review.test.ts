@@ -189,12 +189,17 @@ test("MEDIUM 2: the page shows the last day the function is still open on", asyn
   // Every clock of this test at a fixed time: paid Sunday November 1, 2026 at 00:30 UTC, the page opened on November 14.
   Date.now = () => at(2026, 11, 14, 12) * 1000;
   try {
-    const { product, token } = await shop();
+    const { store, product, token } = await shop();
     sessions = [paid("deadline", product, at(2026, 11, 1, 0, 30))];
     const html = await render({ token, ref: sessions[0].id as string });
     assert.ok(html.includes("You can withdraw until November 16, 2026."), `the Monday after the Sunday: ${html.match(/You can withdraw until[^<]*/)?.[0]}`);
+    // A link lasts ORDERS_LINK_SECONDS (a day): the buyer asks for a new one on the day shown.
     Date.now = () => at(2026, 11, 16, 23) * 1000;
-    assert.ok((await render({ token, ref: sessions[0].id as string })).includes("Confirm withdrawal"), "still offered late on the day shown");
+    const later = new URL((await ordersLinkFor(store, BUYER, `${ORIGIN}/@mara`))!).searchParams.get("token")!;
+    assert.ok((await render({ token: later, ref: sessions[0].id as string })).includes("Confirm withdrawal"), "still offered late on the day shown");
+    Date.now = () => (at(2026, 11, 17, 11, 59, 59) + 1) * 1000;
+    const after = new URL((await ordersLinkFor(store, BUYER, `${ORIGIN}/@mara`))!).searchParams.get("token")!;
+    assert.ok(!(await render({ token: after, ref: sessions[0].id as string })).includes("Confirm withdrawal"), "and no longer once its end has passed");
   } finally {
     Date.now = realNow;
   }

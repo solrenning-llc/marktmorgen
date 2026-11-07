@@ -4,7 +4,7 @@ import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { OrdersBusy, OrdersLate, findPurchase } from "@/lib/buyer-orders";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { readStatement } from "@/lib/withdrawal-rules";
-import { withdraw } from "@/lib/withdrawal";
+import { withConfirmations, withdraw } from "@/lib/withdrawal";
 
 const MAX_BODY_BYTES = 2_000;
 
@@ -63,6 +63,8 @@ export async function POST(request: NextRequest) {
   let found: Awaited<ReturnType<typeof findPurchase>>;
   try {
     found = await findPurchase(store, token, reference);
+    // Whether its confirmation is known sent, where the yes would end the right (art. 16(m)(iii)), read through the lookup's meter.
+    if (found) found = { ...found, purchase: (await withConfirmations([found.purchase], found.meter))[0] };
   } catch (error) {
     if (error instanceof OrdersBusy || error instanceof OrdersLate) return back("busy");
     console.error("reading an order to withdraw from failed", error);

@@ -36,6 +36,7 @@
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import type { AttributionRule } from "@/lib/affiliate-setting";
 import { orderWrite } from "@/lib/order-data";
 import type { Store } from "@/lib/store";
@@ -114,11 +115,14 @@ export async function rememberBuyer(store: Store, email: string, affiliateId: st
   await orderWrite(store, [["HSET", key, field, affiliateId]]);
 }
 
-/** How many buyers this store has bonded, for the creator's own screen. */
-export async function bondCount(store: Store): Promise<number> {
+/**
+ * How many buyers this store has bonded, for the creator's own screen. HLEN's own
+ * count, read exactly (rule 24): a reply in any other shape is unknown (null),
+ * shown as unknown, never as 0 bonds.
+ */
+export async function bondCount(store: Store): Promise<number | null> {
   if (!store.statsId || !isRedisConfigured()) return 0;
-  const [count] = await redisPipeline([["HLEN", bondKey(store.statsId)]]);
-  return Number(count) || 0;
+  return countOf(repliesFor(await redisPipeline([["HLEN", bondKey(store.statsId)]]), 1)?.[0]);
 }
 
 /**

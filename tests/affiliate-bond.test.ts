@@ -142,7 +142,7 @@ test("a store at the cap keeps every bond it has and refuses only new ones", asy
 
   await rememberBuyer(store, "known@example.com", BRUNO, "last");
   assert.equal(await bondFor(store, "known@example.com"), BRUNO, "a buyer it already knows still moves");
-  assert.ok((await bondCount(store)) >= MAX_BONDS);
+  assert.ok(((await bondCount(store)) ?? -1) >= MAX_BONDS);
 });
 
 // ---- The record itself -------------------------------------------------

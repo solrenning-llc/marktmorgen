@@ -74,6 +74,7 @@ type Line = {
 export type Invoice = {
   created?: unknown;
   subscription?: unknown;
+  customer?: unknown;
   parent?: { subscription_details?: { subscription?: unknown } | null } | null;
   lines?: { data?: Line[]; has_more?: unknown } | null;
 };
@@ -134,8 +135,20 @@ export function pricesFrom(invoices: Invoice[], subs: Map<string, Sub>): Map<str
     const fromInvoice = ref(invoice.subscription, "an invoice's subscription") || ref(obj(obj(invoice.parent, "an invoice's parent")?.subscription_details, "an invoice's subscription details")?.subscription, "an invoice's subscription");
     const lines = invoice.lines === undefined || invoice.lines === null ? [] : invoice.lines.data;
     if (!Array.isArray(lines)) throw new UnreadInvoiceError("an invoice's lines");
-    // Stripe embeds at most 10 lines: one that says there are more is a list cut short, not the whole invoice.
-    if (bool(invoice.lines?.has_more, "whether an invoice has more lines")) throw new UnreadInvoiceError("an invoice with more lines than it gave");
+    // Stripe embeds at most 10 lines: one that says there are more is a list cut short, not the whole invoice, when it
+    // may hold a member's line. Another business's invoice on the same Stripe account is passed over.
+    if (bool(invoice.lines?.has_more, "whether an invoice has more lines")) {
+      const lineIds = (lines as unknown[]).map((l) => {
+        if (!l || typeof l !== "object") throw new UnreadInvoiceError("an invoice line");
+        return ref((l as Line).subscription, "an invoice line's subscription") || ref(details(l as Line)?.subscription, "an invoice line's subscription");
+      });
+      const members = new Set([...subs.values()].map((s) => s.customer).filter((c): c is string => typeof c === "string" && c !== ""));
+      const customer = ref(invoice.customer, "an invoice's customer");
+      if (subs.has(fromInvoice) || lineIds.some((id) => subs.has(id)) || (customer !== "" && members.has(customer))) {
+        throw new UnreadInvoiceError("an invoice with more lines than it gave");
+      }
+      continue;
+    }
     for (const line of lines as unknown[] as Line[]) {
       if (!line || typeof line !== "object") throw new UnreadInvoiceError("an invoice line");
       const id = ref(line.subscription, "an invoice line's subscription") || ref(details(line)?.subscription, "an invoice line's subscription") || fromInvoice;
@@ -158,7 +171,10 @@ export function pricesFrom(invoices: Invoice[], subs: Map<string, Sub>): Map<str
       const every = recurring?.interval;
       if (every !== undefined && every !== null && (typeof every !== "string" || !INTERVALS.has(every))) throw new UnreadInvoiceError("an invoice line's interval");
       const interval = typeof every === "string" ? every : sub.interval;
-      const count = num(recurring?.interval_count, "an invoice line's interval count") || (typeof every === "string" ? 1 : sub.count);
+      // A whole number from 1; none given is one with the line's interval, or the membership's own.
+      const counted = num(recurring?.interval_count, "an invoice line's interval count");
+      if (counted !== null && (counted < 1 || !Number.isInteger(counted))) throw new UnreadInvoiceError("an invoice line's interval count");
+      const count = counted ?? (typeof every === "string" ? 1 : sub.count);
       const value = unit ? perMonth(unit * quantity, interval, count) : perMonth(amount, sub.interval, sub.count);
       const at = num(obj(line.period, "an invoice line's period")?.start, "an invoice line's period") || num(invoice.created, "an invoice's date");
       if (!at) throw new UnreadInvoiceError("an invoice line with no time");

@@ -622,16 +622,21 @@ async function readMemberships(
     query.append("expand[]", "data.customer");
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", store.stripeAccountId, `/subscriptions?${query}`);
-    const rows = (Array.isArray(listed.data) ? listed.data : []) as Raw[];
+    // A page in an unknown shape is a reading not made (CX-123 rule 24), said as Stripe not answering, never as a
+    // whole list with no members and nothing recurring.
+    if (!Array.isArray(listed.data)) throw new Error("Stripe gave a page of memberships that is not a list");
+    if (typeof listed.has_more !== "boolean") throw new Error("Stripe gave whether there are more memberships in a shape that cannot be read");
+    const rows = listed.data as Raw[];
     for (const raw of rows) {
       const sub = readSub(raw, handles);
       if (sub) subs.push(sub);
     }
-    const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") {
+    if (!listed.has_more) {
       complete = true;
       break;
     }
+    const last = rows[rows.length - 1];
+    if (!last || typeof last.id !== "string") throw new Error("Stripe gave a page of memberships with no last one to go on from");
     after = last.id;
   }
   const named = await withoutErasedWords(store, subs, Math.floor(now / 1000));

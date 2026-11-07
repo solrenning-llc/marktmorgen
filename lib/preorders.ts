@@ -272,16 +272,24 @@ export async function handOverPreorder(store: Store, product: Listing, sessionId
   try {
     const entry = await readPreorder(store, product.id, sessionId);
     if (!entry || entry.revoked) return "skip";
-    if (entry.given) return "already";
+    if (entry.given) {
+      // Given by an earlier run: the way in is asked for again under the SAME idempotency key, which the senders
+      // keep (Amazon's once-only mark, Resend's key and receipt), so an email already sent is not sent or billed
+      // again, and one that run never reached (it stopped between the mark and the email) still goes out.
+      await sendOut(store, product, entry.to, deps, `nimbus-preorder-out:${sessionId}`);
+      return "already";
+    }
     await grantImported(sid, `pre:${sessionId}`, [{ email: entry.to, productId: product.id, items: null }], entry.at, store.sid);
     if (!store.pastBuyers) await setPastBuyers(storeRef(store));
     if (product.course) await deps.recordStart(entry.to, product.id, now());
-    // The "given" mark read exactly (rule 30 of Claude 5's finding on #2963): HSET and EXPIRE of one field answer 0 or
-    // 1. On anything else the grant above stands, so the way in is still emailed (its idempotency key makes a retry's
-    // email the same one), then it throws, never "given": the caller retries, and the retry finds it given or marks it.
-    const marked = repliesFor(await redisPipeline([["HSET", entriesKey(sid, product.id), sessionId, JSON.stringify({ ...entry, given: now() } satisfies Preorder)], keep(sid, product.id)]), 2);
-
+    // The way in is emailed once the grant stands and BEFORE the "given" mark is written (Codex P on #3077): a mark
+    // that Redis applied but whose answer was lost (the transport threw) would otherwise leave the pre-order given and
+    // never emailed, since a retry stops at "given". Its idempotency key makes a retry's email the same one.
     await sendOut(store, product, entry.to, deps, `nimbus-preorder-out:${sessionId}`);
+    // The "given" mark read exactly (rule 30 of Claude 5's finding on #2963): HSET and EXPIRE of one field answer 0 or
+    // 1. On anything else the grant and the email above stand; it throws, never "given": the caller retries, and the
+    // retry finds it given or marks it.
+    const marked = repliesFor(await redisPipeline([["HSET", entriesKey(sid, product.id), sessionId, JSON.stringify({ ...entry, given: now() } satisfies Preorder)], keep(sid, product.id)]), 2);
     if (!marked || !oneWrite(marked[0]) || !oneWrite(marked[1])) throw new UnknownReplyError("a pre-order's given mark");
     return "given";
   } finally {

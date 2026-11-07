@@ -401,6 +401,8 @@ export type SubRow = {
   cancel_at_period_end?: unknown;
   cancel_at?: unknown;
   current_period_end?: unknown;
+  /** While "trialing": when it is charged next. */
+  trial_end?: unknown;
   items?: {
     data?: {
       current_period_end?: unknown;

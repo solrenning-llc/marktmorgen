@@ -98,12 +98,25 @@ const metaOf = (sub: { metadata?: unknown }): Record<string, unknown> =>
 const isSet = (value: unknown) => value !== undefined && value !== null && value !== "";
 
 /**
- * Whether free days given here make the membership's "trialing" something
- * other than a free trial: given on a membership paid for before ("1"), or
- * given with no mark that says which (unknown, so not a free trial). False
- * only when no free days were given, or they were given in a free trial ("0").
+ * A member moved from another platform (lib/move-members.ts, lib/store-checkout.ts):
+ * its checkout sets trial_end to the first charge here and marks it
+ * metadata[moved] "yes", so Stripe reads it "trialing" until then, for a
+ * period the member already paid on the other platform (Claude 5 on #2912).
+ * It is paid for, never in a free trial, and never had one here.
+ */
+export function movedHere(sub: { metadata?: unknown }): boolean {
+  return metaOf(sub).moved === "yes";
+}
+
+/**
+ * Whether the membership's "trialing" is something other than a free trial:
+ * a member moved from another platform (movedHere), or free days given here on
+ * a membership paid for before ("1"), or given with no mark that says which
+ * (unknown, so not a free trial). False only when it was not moved and no free
+ * days were given, or they were given in a free trial ("0").
  */
 export function paidFreeDays(sub: { metadata?: unknown }): boolean {
+  if (movedHere(sub)) return true;
   const meta = metaOf(sub);
   if (meta[FREE_DAYS_PAID] === "0") return false;
   return isSet(meta[FREE_DAYS_PAID]) || isSet(meta.free_days);
@@ -114,7 +127,7 @@ export function inFreeTrial(sub: { status?: unknown; metadata?: unknown }): bool
   return sub.status === "trialing" && !paidFreeDays(sub);
 }
 
-/** Whether a membership is "trialing" only because free days were given on it while paid (or it cannot be told). */
+/** Whether a membership is "trialing" only because it was moved here paid, or free days were given on it while paid (or it cannot be told). */
 export function onPaidFreeDays(sub: { status?: unknown; metadata?: unknown }): boolean {
   return sub.status === "trialing" && paidFreeDays(sub);
 }
@@ -122,7 +135,9 @@ export function onPaidFreeDays(sub: { status?: unknown; metadata?: unknown }): b
 /**
  * The end of a membership's real free trial, in seconds, or 0: Stripe's
  * trial_end, except after free days given on a paid membership, whose
- * trial_end is the days' own; then the end kept when they were given.
+ * trial_end is the days' own (then the end kept when they were given), and
+ * on a moved member, whose trial_end is its first charge here (then 0, or the
+ * end kept by free days given since, which is 0 too).
  */
 export function realTrialEnd(sub: { trial_end?: unknown; metadata?: unknown }): number {
   if (!paidFreeDays(sub)) return num(sub.trial_end);

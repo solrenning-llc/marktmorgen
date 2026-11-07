@@ -262,20 +262,33 @@ export type Preview = {
   digital: boolean;
 };
 
-export type PreviewResult = { ok: true; preview: Preview } | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "error" };
+/**
+ * "waiting": a membership already paid up to its next charge that is not a
+ * free trial (moved here, or free days given while paid): no switch until
+ * then. `nextCharge` is when, in seconds, from what Stripe already answered;
+ * 0 when it did not say.
+ */
+export type PreviewResult =
+  | { ok: true; preview: Preview }
+  | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "error" }
+  | { ok: false; reason: "waiting"; nextCharge: number };
 
 type Found = { grant: NonNullable<Awaited<ReturnType<typeof grantOf>>>; itemId: string; from: Listing; to: Listing; trialing: boolean };
 
 /** Checks one switch against the link, the membership and the tiers, asking Stripe only what it must. */
-async function find(store: Store, token: string, subscription: string, target: string): Promise<Found | { reason: "expired" | "gone" | "tier" | "currency" }> {
+async function find(store: Store, token: string, subscription: string, target: string): Promise<Found | { reason: "expired" | "gone" | "tier" | "currency" } | { reason: "waiting"; nextCharge: number }> {
   if (!SUB_PATTERN.test(subscription)) return { reason: "gone" };
   const grant = await grantOf(store, token);
   if (!grant) return { reason: "expired" };
   const sub = (await subsOf(store, grant)).find((s) => s.id === subscription);
   // Not this member's, not this store's, or no longer running: one answer for all.
   if (!sub || endsAtOf(sub) !== null || sub.metadata?.ends_after || !SWITCHABLE.has(String(sub.status))) return { reason: "gone" };
-  // Free days given on a paid membership: "trialing" in Stripe, not a free trial. Not switched until charged again.
-  if (onPaidFreeDays(sub)) return { reason: "gone" };
+  // Moved here paid, or free days given on a paid membership: "trialing" in Stripe, not a free trial.
+  // Not switched until charged again, on its trial_end, which is said from what Stripe already answered.
+  if (onPaidFreeDays(sub)) {
+    const when = Number(sub.trial_end);
+    return { reason: "waiting", nextCharge: Number.isSafeInteger(when) && when > 0 ? when : 0 };
+  }
   const itemId = typeof sub.items?.data?.[0]?.id === "string" ? (sub.items.data[0].id as string) : "";
   if (!itemId || (sub.items?.data?.length ?? 0) !== 1) return { reason: "gone" };
   // The new tier's Price is made in the store's currency (tierPrice); a subscription
@@ -293,7 +306,7 @@ export async function previewSwitch(store: Store, token: string, subscription: s
   if (!isRedisConfigured() || !store.stripeAccountId) return { ok: false, reason: "error" };
   try {
     const found = await find(store, token, subscription, target);
-    if ("reason" in found) return { ok: false, reason: found.reason };
+    if ("reason" in found) return found.reason === "waiting" ? { ok: false, reason: "waiting", nextCharge: found.nextCharge } : { ok: false, reason: found.reason };
     const price = await tierPrice(store, found.to);
     const at = Math.floor(Date.now() / 1000);
     const invoice = await onAccount("POST", found.grant.a, "/invoices/create_preview", previewBody(found.grant.c, subscription, found.itemId, price, at));
@@ -346,7 +359,8 @@ export async function switchTier(store: Store, token: string, subscription: stri
   try {
     return await withLock(`nl:tier:${subscription}:lock`, 60, 5_000, async (): Promise<SwitchResult> => {
       const found = await find(store, token, subscription, target);
-      if ("reason" in found) return { ok: false, reason: found.reason };
+      // Only a preview's page has a form; a post for a membership waiting on its next charge is one that cannot switch.
+      if ("reason" in found) return { ok: false, reason: found.reason === "waiting" ? "gone" : found.reason };
       const digital = deliversDigitally(found.to);
       if (digital && !validConsent(consent)) return { ok: false, reason: "consent" };
       const account = found.grant.a;

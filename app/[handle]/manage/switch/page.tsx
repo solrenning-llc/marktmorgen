@@ -6,6 +6,7 @@ import { lookStyle } from "@/lib/store-look";
 import { formatMoney } from "@/lib/money";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { membershipWords } from "@/lib/buyer-words/membership";
+import { speech } from "@/lib/buyer-words";
 import { previewSwitch } from "@/lib/tier-switch";
 import { YEARLY_TARGET, previewYearly } from "@/lib/yearly-switch";
 import { DigitalConsentBox } from "@/components/digital-consent-box";
@@ -117,7 +118,8 @@ export default async function SwitchPage({ params, searchParams }: Params) {
           ) : (
             <div className="st-note">
               <p className="font-bold" style={{ color: "var(--st-text)" }}>{m.switchProblems[result.reason].title}</p>
-              <p className="mt-1 text-sm">{m.switchProblems[result.reason].body}</p>
+              {/* Already paid up to its next charge (moved here, or free days given while paid): says when changing opens. */}
+              <p className="mt-1 text-sm">{result.reason === "waiting" && result.nextCharge ? m.switchWaitsOn(speech(store).date(result.nextCharge * 1000)) : m.switchProblems[result.reason].body}</p>
             </div>
           )}
         </div>

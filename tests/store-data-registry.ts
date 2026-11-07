@@ -72,7 +72,7 @@ import { MAX_SEGMENTS } from "@/lib/segments-rules";
 import { MAX_CHAT_KEPT, MAX_CHAT_TEXT } from "@/lib/community-chat-rules";
 import { MAX_REPORT_QUEUE, MAX_SPACES, MAX_QUESTIONS, MAX_WELCOME } from "@/lib/community-text";
 import { MAX_PHOTO_BYTES } from "@/lib/photo-limits";
-import { MAX_TEAM, LOG_LINES } from "@/lib/team";
+import { MAX_TEAM, LOG_LINES, LOG_LINE_BYTES } from "@/lib/team";
 import { DELIVERY_MAX_BYTES, GIVEN_UP_LINES_PER_DAY, MAX_ENDPOINTS, SKIPPED_LINES_PER_DAY, LOG_SIZE as HOOK_LOG } from "@/lib/webhooks";
 import { LOG_SIZE as SYNC_LOG } from "@/lib/email-sync";
 import { MAX_DEVICES } from "@/lib/phone-alerts";
@@ -510,6 +510,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:crm:stages:@lib/crm.ts": { what: "The first pipeline's stages, as the board kept them before pipelines", parts: [capped(MAX_STAGES * 256, "MAX_STAGES stages.", src("lib/crm-rules.ts", "MAX_STAGES"))] },
   "nl:crm:pipes:@lib/crm.ts": { what: "The deals' pipelines and their stages (17 October 2026): one slot, at what the record weighs", room: ["lib/crm.ts"] },
   "nl:crm:pacc:@lib/pipeline-access.ts": { what: "What each teammate may do with each pipeline, only where restricted", room: ["lib/pipeline-access.ts"] },
+  "nl:crm:pacc:lock:@lib/pipeline-access.ts": short("One change to a teammate's pipeline access at a time, ten seconds at the most", "studio", 1, 128),
   "nl:crm:v:@lib/crm.ts": { what: "People's values of the store's fields", room: ["lib/crm.ts"] },
   "nl:vcard:@lib/creator-card.ts": { what: "The creator's business card, as they typed it", room: ["lib/creator-card.ts"] },
   "nl:voice:@lib/customer-voice.ts": { what: "What buyers said, summed up a month", parts: [capped(14 * 16 * KB, "One summary a month, 400 days.")] },
@@ -951,7 +952,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:team:@lib/team.ts": { what: "The team and its invites", parts: [capped((MAX_TEAM + 10) * KB, "MAX_TEAM members and their invites.", src("lib/team.ts", "MAX_TEAM"))] },
   "nl:team:invite:@lib/team.ts": short("An invite's link, seven days", "studio", 7, 512),
   "nl:team:lock:@lib/team.ts": short("The team's lock", "studio", 1, 128),
-  "nl:team:log:@lib/team.ts": { what: "What the team did", parts: [capped(LOG_LINES * 512, "The newest LOG_LINES.", src("lib/team.ts", "LOG_LINES"))] },
+  // Each line at most LOG_LINE_BYTES (logTeam drops a pipeline-access line's details, then shortens it, past that), and 64 for its list entry.
+  "nl:team:log:@lib/team.ts": { what: "What the team did", parts: [capped(LOG_LINES * (LOG_LINE_BYTES + 64), "The newest LOG_LINES, each at most LOG_LINE_BYTES.", src("lib/team.ts", "LOG_LINES", "LOG_LINE_BYTES"))] },
   "nl:team:of:@lib/team.ts": company("The stores a person is on", "A person's, not a store's: at most the stores they are on."),
   "nl:product:note:@lib/thanks-note-store.ts": { what: "Notes after paying", room: ["lib/thanks-note-store.ts"] },
   "nl:tier:@lib/tier-switch.ts": short("A membership's lock while it changes tier", "request", 1, 128, REQ("tier switch")),

@@ -49,9 +49,9 @@ const deals = readFileSync("app/studio/deals/page.tsx", "utf8");
 is("the deals page reads this person's access, the owner and Admins never restricted", deals.includes('const restricted = view.role !== "owner" && view.role !== "admin";') && deals.includes("readPipelineAccess(store.statsId, view.email).catch(() => null)"), true);
 is("shows only what they may see, and marks what they may only see", deals.includes("visiblePipelines(inventory.pipelines, view.role, access)") && deals.includes("deals: inventory.deals.filter((deal) => seenStages.has(deal.stage))") && deals.includes("viewOnly={viewOnly}"), true);
 is("never offers a pipeline beyond the store's limit", deals.includes("pipelineMax={Math.max(0, pipelineLimit(store) - hidden)}"), true);
-is("says so when there is nothing they may see", deals.includes("You have no pipelines to see in this store."), true);
+is("says so when there is nothing they may see (the board itself, which still offers a pipeline of their own and the fields)", readFileSync("components/deals-board.tsx", "utf8").includes("You have no pipelines to see in this store."), true);
 is("an access record that cannot be read is said as such, and nobody is sent to an Admin who cannot change access", [deals.includes("Your access to this store&apos;s pipelines could not be read just now"), deals.includes("owner or an Admin"), deals.includes("someHidden={restricted}")], [true, false, true]);
-is("but never when their access could not be read: then the deals are unavailable, not missing", deals.includes("inventory.available && access !== null && shown.pipelines.length === 0") && deals.includes("&& shown.pipelines.length > 0;"), true);
+is("but never when their access could not be read: then the deals are unavailable, not missing", deals.includes("restricted && access === null ?") && deals.includes("&& (shown.pipelines.length > 0 || restricted);"), true);
 const forms = readFileSync("app/studio/forms/page.tsx", "utf8");
 is("the forms page offers only stages they may change, and shows only deals they may see", forms.includes('seen.filter((p) => p.access === "edit")') && forms.includes("reviewData.deals.filter((deal) => !restricted || seenStages.has(deal.stage))"), true);
 

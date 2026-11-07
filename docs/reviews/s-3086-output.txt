@@ -1,0 +1,754 @@
+
+=== permanent-red ===
+
+Three monthly payments end with the third period
+  ok    given its end
+  ok    the end is the close of the third period, the way Stripe counts months
+  ok    and it is the same moment addPeriods names
+  ok    nothing is prorated
+  ok    a second pass changes nothing: the plan already has its end
+
+Weekly plans count weeks
+  ok    four weeks after the first payment
+
+A membership that ends after twelve payments counts from its trial's end
+  ok    twelve months after the first payment, not after the trial began
+
+What is left alone
+  ok    a plan already canceled
+  ok    a checkout still open waits
+  ok    one never paid is let go
+  ok    a membership with no end is not given one
+  ok    a 'plan' of one payment is not one
+  ok    a checkout Stripe does not know
+  ok    an address that is not an account
+  ok    none of these changed any subscription
+
+The job settles each pending plan once
+  ok    the paid one given its end; the open one kept for its two days
+  ok    run again: only the open one is looked at, and nothing is changed twice
+
+A reply for another checkout or subscription decides nothing
+  FAIL  a subscription reply with another id and an end is not taken as this plan's end
+        expected true
+        got      false
+  FAIL  a subscription reply with no id, canceled, is not taken as this plan's end
+        expected true
+        got      false
+  FAIL  a checkout reply for another checkout does not let the plan go
+        expected true
+        got      false
+  ok    none of them changed any subscription
+  FAIL  an update answered for another subscription is not settled
+        expected true
+        got      false
+  FAIL  the job keeps such a plan and asks again on its next pass
+        expected [1,0,1,0]
+        got      [0,1,0,0]
+
+23 checks, 5 failing.
+S_VOLUME {"runs":9,"mocks":36}
+S_STATUS 1 null undefined LOG /tmp/s3086-1AARkG
+
+=== original-red ===
+  ok    control: own reply gives the plan its end
+  FAIL  different id with cancel_at: not settled as done without capping the plan
+        expected false
+        got      true
+  FAIL  no id, status canceled: not settled as done without capping the plan
+        expected false
+        got      true
+
+3 checks, 2 failing.
+S_VOLUME {"runs":0,"mocks":7}
+S_STATUS 1 null undefined LOG /tmp/s3086-7LZENp
+
+=== probe-head ===
+  ok    healthy real writer caps and clears
+  ok    wrong-id: no confirmed cap is not a completed plan
+  ok    wrong-id: original pending member remains reachable
+  ok    wrong-id: next healthy pass caps the plan
+  FAIL  missing: no confirmed cap is not a completed plan
+        expected 0
+        got      1
+  FAIL  missing: original pending member remains reachable
+        expected true
+        got      false
+  FAIL  missing: next healthy pass caps the plan
+        expected [1,1807776000]
+        got      [0,0]
+  FAIL  zero: no confirmed cap is not a completed plan
+        expected 0
+        got      1
+  FAIL  zero: original pending member remains reachable
+        expected true
+        got      false
+  FAIL  zero: next healthy pass caps the plan
+        expected [1,1807776000]
+        got      [0,0]
+  FAIL  string: no confirmed cap is not a completed plan
+        expected 0
+        got      1
+  FAIL  string: original pending member remains reachable
+        expected true
+        got      false
+  FAIL  string: next healthy pass caps the plan
+        expected [1,1807776000]
+        got      [0,0]
+
+13 checks, 9 failing.
+S_VOLUME {"runs":24,"mocks":18}
+S_STATUS 1 null undefined LOG /tmp/s3086-CtJ7k4
+
+=== probe-base ===
+  ok    healthy real writer caps and clears
+  FAIL  wrong-id: no confirmed cap is not a completed plan
+        expected 0
+        got      1
+  FAIL  wrong-id: original pending member remains reachable
+        expected true
+        got      false
+  FAIL  wrong-id: next healthy pass caps the plan
+        expected [1,1807776000]
+        got      [0,0]
+  FAIL  missing: no confirmed cap is not a completed plan
+        expected 0
+        got      1
+  FAIL  missing: original pending member remains reachable
+        expected true
+        got      false
+  FAIL  missing: next healthy pass caps the plan
+        expected [1,1807776000]
+        got      [0,0]
+  FAIL  zero: no confirmed cap is not a completed plan
+        expected 0
+        got      1
+  FAIL  zero: original pending member remains reachable
+        expected true
+        got      false
+  FAIL  zero: next healthy pass caps the plan
+        expected [1,1807776000]
+        got      [0,0]
+  FAIL  string: no confirmed cap is not a completed plan
+        expected 0
+        got      1
+  FAIL  string: original pending member remains reachable
+        expected true
+        got      false
+  FAIL  string: next healthy pass caps the plan
+        expected [1,1807776000]
+        got      [0,0]
+
+13 checks, 12 failing.
+S_VOLUME {"runs":24,"mocks":15}
+S_STATUS 1 null undefined LOG /tmp/s3086-kQXJ3J
+
+=== payment-plan-end-green ===
+
+Three monthly payments end with the third period
+  ok    given its end
+  ok    the end is the close of the third period, the way Stripe counts months
+  ok    and it is the same moment addPeriods names
+  ok    nothing is prorated
+  ok    a second pass changes nothing: the plan already has its end
+
+Weekly plans count weeks
+  ok    four weeks after the first payment
+
+A membership that ends after twelve payments counts from its trial's end
+  ok    twelve months after the first payment, not after the trial began
+
+What is left alone
+  ok    a plan already canceled
+  ok    a checkout still open waits
+  ok    one never paid is let go
+  ok    a membership with no end is not given one
+  ok    a 'plan' of one payment is not one
+  ok    a checkout Stripe does not know
+  ok    an address that is not an account
+  ok    none of these changed any subscription
+
+The job settles each pending plan once
+  ok    the paid one given its end; the open one kept for its two days
+  ok    run again: only the open one is looked at, and nothing is changed twice
+
+A reply for another checkout or subscription decides nothing
+  ok    a subscription reply with another id and an end is not taken as this plan's end
+  ok    a subscription reply with no id, canceled, is not taken as this plan's end
+  ok    a checkout reply for another checkout does not let the plan go
+  ok    none of them changed any subscription
+  ok    an update answered for another subscription is not settled
+  ok    the job keeps such a plan and asks again on its next pass
+
+23 checks, all passing.
+S_VOLUME {"runs":8,"mocks":38}
+S_STATUS 0 null undefined LOG /tmp/s3086-yzVqIF
+
+=== r2517-finishplan-identity-green ===
+  ok    control: own reply gives the plan its end
+  ok    different id with cancel_at: not settled as done without capping the plan
+  ok    no id, status canceled: not settled as done without capping the plan
+
+3 checks, all passing.
+S_VOLUME {"runs":0,"mocks":7}
+S_STATUS 0 null undefined LOG /tmp/s3086-jEx9M2
+
+=== plan-closing-green ===
+[stdin]:4778
+var STORE_RECORD_BYTES, ASSISTANT_PRICE_CENTS, ASSISTANT_NAME, ASSISTANT_MODEL, ASSISTANT_MESSAGES_MONTHLY, ASSISTANT_INPUT_BYTES, ASSISTANT_HISTORY_BYTES, ASSISTANT_OUTPUT_TOKENS, ASSISTANT_PRODUCTS, ASSISTANT_PAGES, MAX_ASSISTANT_REPLY, MAX_ASSISTANT_NOTES, ASSISTANT_TURNS_KEPT, ASSISTANT_KEEP_SECONDS, ASSISTANT_MISSED_SECONDS, NO_ASSISTANT, SUBSCRIPTION, ACCESS_COMPLEMENT, CLAUSE_END, GUARANTEE_WORDS, GUARANTEE_WORDS_NL, HANDED_OVER, remiseAsDiscount, REMISE_AS_DISCOUNT, REMISE_AS_DISCOUNT_JOINED, DEAL_TERMS, BETWEEN, termSource, DEAL_SIGNS, WORD_EDGE_BEFORE, WORD_EDGE_AFTER, COMPOUND_STEMS, termFind, DEAL_TERM_RULES, DEAL_WORDS, TERMS_TERMS, TERMS_WORDS, NUMBER_PIECES, NUMBER_ARTICLES, NUMBER_JOINS, PIECE, ANY_PIECE, JOIN, NUMBER_WORD, PERIOD_WORDS, TIME_UNITS, DURATION, TLDS, SENTENCE_WORDS, WORD_TLDS, ceilDiv2, ASSISTANT_REQUEST_SHAPE, ASSISTANT_MESSAGE_COMMANDS, ASSISTANT_MESSAGE_DB_BYTES, ASSISTANT_CONVERSATION_BYTES, ADD_ON_FEES, ADD_ON_ROOM_CENTS, count, assistantPriceWords;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            ^
+
+SyntaxError: Identifier 'count' has already been declared
+    at makeContextifyScript (node:internal/vm:194:14)
+    at compileScript (node:internal/process/execution:388:10)
+    at evalTypeScript (node:internal/process/execution:270:24)
+    at node:internal/main/eval_stdin:51:5
+    at Socket.<anonymous> (node:internal/process/execution:205:5)
+    at Socket.emit (node:events:526:24)
+    at endReadableNT (node:internal/streams/readable:1783:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+
+Node.js v24.22.1
+S_STATUS 1 null undefined LOG /tmp/s3086-ibJZ2l
+
+=== plan-closing-final ===
+
+The days
+  ok    what a store keeps past its room is removed thirty days after its plan ended
+  ok    with a notice when the plan ends, one fourteen days before and one seven days before
+
+A store whose plan runs is not in line
+  ok    a course
+  ok    a podcast
+  ok    she keeps eleven gigabytes, more than twice what a store with no plan may
+  ok    nobody is in line while their plan runs, or before they ever had one
+  ok    and a run looks at nobody
+
+The plan ends
+  ok    each is in line under the day its plan ended
+  ok    seen again as ended, a store keeps its place
+  ok    a notice that cannot be sent is not written down as sent
+  ok    the store that keeps more than its room is written to; the one that fits is left alone
+  ok    one email, to the store's owner, with replies going to the people who answer
+  ok    it says the plan ended and that nothing has been removed
+  ok    it gives the room, what the store keeps, and the day
+  ok    the two ways out
+  ok    what goes and what stays
+  ok    and that two more notices come first, the last at least a week before
+  ok    the same day again, nobody is written to twice
+
+A store that fits is measured once a week, not once a day
+  ok    not again inside the week
+  ok    and again after it
+  ok    a store that keeps more is measured every day it is looked at
+
+The notices before the day
+  ok    nothing more is said until two weeks before the day
+  ok    fourteen days before, the second
+  ok    with the days left and the same day named
+  ok    once
+  ok    seven days before, the last
+  ok    which says it is the last
+  ok    and until the day nothing is touched
+
+What the studio is told
+  ok    the day the job will act on, for a store whose last notice went out in time
+  ok    nothing for a store whose plan runs, or that never had one
+
+The day: Stripe is asked before anything is touched
+  ok    when it cannot be asked, nothing is removed
+  ok    told three times, like anybody
+  ok    Stripe says the plan runs: nothing is removed and nobody is told it was
+  ok    the record is put right from what Stripe said
+  ok    and the store is out of line
+  ok    asked about by its own number first: running, so nothing is removed
+
+The day: what is removed, and what stays
+  ok    with no plan at Stripe, what the store kept is removed
+  ok    the product's file and the price option's file are off them
+  ok    the lesson's video and its download are off it
+  ok    its title, its words, its place in the course and the course's settings are as they were
+  ok    the podcast has no episodes, and its product says so
+  ok    nothing of hers is left in the file store, the copy no record named among it
+  ok    nor at the video service, the video no lesson named among them
+  ok    what other stores keep is where it was
+  ok    the store is still hers: its address, its name, every product and every price
+  ok    she is told, once, what was removed and what was not
+  ok    and her studio has no day to show any more
+  ok    and after that she is a store that fits: not measured, not written to
+
+A last notice that went out late moves the day
+  ok    the email sender is down for the days it was due
+  ok    it goes out five days late
+  ok    and names the day it makes true, a week on, not the day first given
+  ok    the studio shows that later day
+  ok    nothing is removed on the day first given, nor the minute before the week is up
+
+A removal that could not be seen through is not written down as done
+  ok    the file store is down on the day: held, and nobody is told anything was removed
+  ok    the next day it is finished from what is left in the folder, and then she is told
+  ok    nor when the video service cannot be read
+  ok    until it can
+  ok    the letter saying so, which could not be sent that day, goes out on the next, once
+  ok    nor when the run is out of time before the files are gone: it stops, and says nothing yet
+  ok    and the next run finishes it from what is left
+
+A store that makes room is left alone
+  ok    having deleted enough to fit, he is not written to again, and nothing of his is removed
+  ok    should he ever keep more again, he is told from the start and has his week from that notice
+
+A plan that ran again and ended again starts from nothing
+  ok    a plan started again takes the store out of line at once
+  ok    ended again, it is in line under the new day
+  ok    and every notice is still to come, the first one first
+  ok    with the day counted from the second ending
+
+With no way to write to a creator, nothing moves
+  ok    no sender set up: held, on any day
+  ok    a store first written to long after its plan ended still has its week
+
+The daily run
+  ok    looks at every store whose plan has ended, the longest ended first
+  ok    out of time, it stops and writes down where
+  ok    the next run carries on from there to the end, and the mark is cleared
+  ok    a store the line lost is put back by the daily check of every store's plan, under the same day
+  ok    a store that is no longer there is taken out of line
+
+Where it runs, and what the pages say
+  ok    the job is one of ours to run, one at a time
+  ok    every day, after the check of every store's plan
+  ok    the Terms give the days, from where the job reads them
+  ok    what is removed, what is kept, and what it means for buyers
+  ok    the help pages say the same
+  ok    and the privacy policy says when such files are deleted
+  ok    and the studio shows a store past its room the day, counted the way the job counts it
+
+A plan that ends from October 18, 2026 keeps nothing past its day
+  ok    the room it keeps with no date is none, and the old room before that day
+  ok    it ended on that day or after
+  ok    ten megabytes and two pictures are not a store that fits: it is written to
+  ok    its letter gives the day, and one way out, and says what goes
+  ok    on its day its files go, its community's pictures with them, and the store closes
+  ok    nothing it sold is charged again: it had no Stripe account to stop
+  ok    the walk deletes its records, and nobody else's
+  ok    and its owner, told three times before, is not written to again
+
+Unknown acceptance never authorizes a second provider attempt
+  ok    a server error may follow acceptance: hold the notice without another POST
+  ok    the ended-plan source and recovery entry remain available
+
+90 checks, all passing.
+S_VOLUME {"runs":2340,"mocks":125}
+listing a closing store's open plan checkouts failed BillingError: Stripe billing failed (404 unknown): no stand-in for GET /checkout/sessions
+    at onPlatform ([stdin]:14894:11)
+    at async expirePlanCheckouts ([stdin]:116463:18)
+    at async closingDay ([stdin]:120428:5)
+    at async main ([stdin]:122861:19) {
+  status: 404,
+  code: 'unknown'
+}
+S_STATUS 0 null undefined LOG /tmp/s3086-GzNBiQ
+
+=== plan-refund-flow-final ===
+
+Refunded and ended, in the safe order
+  ok    the first payment comes back and the plan is ended
+  ok    set to stop, then refunded, then ended
+  ok    ended at Stripe
+  ok    its open invoice voided, its draft deleted
+  ok    the store has no plan any more (the closing rules start)
+  ok    no note left
+  ok    no lock left
+
+Never twice
+  ok    a second click: the earlier refund is reported, nothing new
+  ok    two at once: one made, the other told to wait
+  ok    one refund at Stripe
+
+Not owed: the plan goes on as it was
+  ok    outside the 30 days: refused, nothing changed
+  ok    the stop set for it is taken back
+  ok    still paid, invoices untouched, no note
+  ok    a stop the creator had set is left as it was
+
+Failures on the way
+  ok    the stop cannot be set: nothing refunded
+  ok    and no note left
+  ok    Stripe failing at the refund: failed, and the stop KEPT while a refund may still turn up (no renewal meanwhile)
+  ok    the note stays for the daily job
+  ok    the daily job before SETTLE_SECONDS: left, stop still set
+  ok    after it, none found: the stop taken back, the note dropped, the plan untouched
+  ok    and the creator is told by email that nothing was refunded and the plan goes on
+  ok    made at Stripe but the answer lost: found on its own charge (noted before the write), the plan ended
+  FAIL  made, the answer lost and nothing readable after: the stop stays, the note too
+        expected [false,"active",true,true]
+        got      [false,"active",false,false]
+  FAIL  the daily job finds it on the charge and ends the plan; nothing renewed in between
+        expected ["canceled",null]
+        got      ["active",null]
+  FAIL  a pending refund: said so, the plan not ended on it, the stop and the note kept
+        expected ["pending",false,"active",true,true]
+        got      [false,false,"active",false,false]
+  FAIL  still pending at the daily job: left as it is
+        expected ["active",true]
+        got      ["active",false]
+S_VOLUME {"runs":361,"mocks":502}
+plan-refund: store fe272ff2b2dd49bebd090889fa92583d's email was not sent (no address or no sender)
+plan-refund: store fe272ff2b2dd49bebd090889fa92583d's email was not sent (no address or no sender)
+plan-refund: store 6953cd8a6f834e1baaa89008381de6c3's email was not sent (no address or no sender)
+setting a plan to stop before its refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform ([stdin]:11865:11)
+    at async setCancelAtPeriodEnd ([stdin]:11954:24)
+    at async refundAndEndPlan ([stdin]:12740:9)
+    at async main ([stdin]:13031:51) {
+  status: 500,
+  code: 'api_error'
+}
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform ([stdin]:11865:11)
+    at async refundPlanPayment ([stdin]:12367:24)
+    at async refundAndEndPlan ([stdin]:12746:18)
+    at async main ([stdin]:13036:16) {
+  status: 500,
+  code: 'api_error'
+}
+making a plan refund failed TypeError: fetch failed
+    at globalThis.fetch ([stdin]:12924:33)
+    at [stdin]:1:230
+    at [stdin]:11849:29
+    at timed ([stdin]:6902:19)
+    at onPlatform ([stdin]:11848:43)
+    at onPlatformAt ([stdin]:11874:10)
+    at refundPlanPayment ([stdin]:12367:30)
+    at async refundAndEndPlan ([stdin]:12746:18)
+    at async main ([stdin]:13052:19)
+plan-refund: store 907910619ab24f1191b1a89fce3630bb's email was not sent (no address or no sender)
+[stdin]:13078
+  p.refunds()[0].status = "succeeded";
+                        ^
+
+TypeError: Cannot set properties of undefined (setting 'status')
+    at main ([stdin]:13078:25)
+
+Node.js v24.22.1
+S_STATUS 1 null undefined LOG /tmp/s3086-3neqdc
+
+=== plan-refund-flow-bounded ===
+
+Refunded and ended, in the safe order
+  ok    the first payment comes back and the plan is ended
+  ok    set to stop, then refunded, then ended
+  ok    ended at Stripe
+  ok    its open invoice voided, its draft deleted
+  ok    the store has no plan any more (the closing rules start)
+  ok    no note left
+  ok    no lock left
+
+Never twice
+  ok    a second click: the earlier refund is reported, nothing new
+  ok    two at once: one made, the other told to wait
+  ok    one refund at Stripe
+
+Not owed: the plan goes on as it was
+  ok    outside the 30 days: refused, nothing changed
+  ok    the stop set for it is taken back
+  ok    still paid, invoices untouched, no note
+  ok    a stop the creator had set is left as it was
+
+Failures on the way
+  ok    the stop cannot be set: nothing refunded
+  ok    and no note left
+  ok    Stripe failing at the refund: failed, and the stop KEPT while a refund may still turn up (no renewal meanwhile)
+  ok    the note stays for the daily job
+  ok    the daily job before SETTLE_SECONDS: left, stop still set
+  ok    after it, none found: the stop taken back, the note dropped, the plan untouched
+  ok    and the creator is told by email that nothing was refunded and the plan goes on
+  ok    made at Stripe but the answer lost: found on its own charge (noted before the write), the plan ended
+  ok    made, the answer lost and nothing readable after: the stop stays, the note too
+  ok    the daily job finds it on the charge and ends the plan; nothing renewed in between
+  ok    a pending refund: said so, the plan not ended on it, the stop and the note kept
+  ok    still pending at the daily job: left as it is
+  ok    succeeded: the daily job ends the plan
+  ok    the answer lost after Stripe made it: found by its metadata, the plan ended
+  ok    refunded but not ended yet: said so, the stop and the note stay
+  ok    the daily job ends it, once, and drops the note
+
+Every plan payment inside the guarantee's days (owner, 31/10/2026 15h41)
+  ok    pay 1 Feb, renew 1 Mar, ask 2 Mar: both payments back, the plan ended
+  ok    one email with the whole amount
+  ok    a payment inside the window whose time cannot be read: nothing refunded, the plan goes on
+  ok    only the first of two refunds went through: failed, not ended, the stop kept
+  ok    and it is answered as part of a refund
+  ok    the daily job never ends the plan on part of a refund
+  ok    asked again with the old amount after part of it: not ended, nothing more refunded
+  ok    asked again while a charge's refunds cannot be read: not ended, the note keeps both charges
+  ok    asked again: the rest given back, once, and the plan ended
+
+The add-on
+  ok    the add-on could not be set to stop: the plan's ending is not done, the note stays for the daily job
+  ok    the daily job sets the add-on to stop at the end of its paid month and drops the note
+
+The daily job
+  ok    a store a request is finishing now is left alone
+  ok    refunds unreadable: kept for tomorrow
+  ok    undecidable for 7 days: dropped, the stop taken back
+  ok    and the creator is told the refund could not be confirmed, the plan renews as usual, how to ask again
+  ok    the note of a store that is gone is dropped
+  ok    an exhausted deadline touches nothing
+
+47 checks, all passing.
+S_VOLUME {"runs":891,"mocks":297}
+plan-refund: store f049333b10234a8eab740497bb43e8fc's email was not sent (no address or no sender)
+plan-refund: store f049333b10234a8eab740497bb43e8fc's email was not sent (no address or no sender)
+plan-refund: store cbec23ed20f34acb9faad75a5e0fb4e3's email was not sent (no address or no sender)
+setting a plan to stop before its refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform ([stdin]:11865:11)
+    at async setCancelAtPeriodEnd ([stdin]:11954:24)
+    at async refundAndEndPlan ([stdin]:12740:9)
+    at async main ([stdin]:13031:51) {
+  status: 500,
+  code: 'api_error'
+}
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform ([stdin]:11865:11)
+    at async refundPlanPayment ([stdin]:12367:24)
+    at async refundAndEndPlan ([stdin]:12746:18)
+    at async main ([stdin]:13036:16) {
+  status: 500,
+  code: 'api_error'
+}
+making a plan refund failed TypeError: fetch failed
+    at globalThis.fetch ([stdin]:12924:33)
+    at wrapped ([stdin]:1:259)
+    at [stdin]:11849:29
+    at timed ([stdin]:6902:19)
+    at onPlatform ([stdin]:11848:43)
+    at onPlatformAt ([stdin]:11874:10)
+    at refundPlanPayment ([stdin]:12367:30)
+    at async refundAndEndPlan ([stdin]:12746:18)
+    at async main ([stdin]:13052:19)
+plan-refund: store 1b94997773fe4730bf3426e4a9c4315d's email was not sent (no address or no sender)
+making a plan refund failed TypeError: fetch failed
+    at globalThis.fetch ([stdin]:12924:33)
+    at wrapped ([stdin]:1:259)
+    at globalThis.fetch ([stdin]:13064:12)
+    at wrapped ([stdin]:1:259)
+    at [stdin]:11849:29
+    at timed ([stdin]:6902:19)
+    at onPlatform ([stdin]:11848:43)
+    at onPlatformAt ([stdin]:11874:10)
+    at refundPlanPayment ([stdin]:12367:30)
+    at async refundAndEndPlan ([stdin]:12746:18)
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 unknown): down
+    at onPlatform ([stdin]:11865:11)
+    at async partsOutcome ([stdin]:12599:16)
+    at async refundAndEndPlan ([stdin]:12755:28)
+    at async main ([stdin]:13066:17) {
+  status: 500,
+  code: 'unknown'
+}
+plan-refund: store 34b226c1b03d473e8191e88be24666eb's email was not sent (no address or no sender)
+plan-refund: store 5e4b7e14af084486b7ec763389acda13's email was not sent (no address or no sender)
+making a plan refund failed TypeError: fetch failed
+    at globalThis.fetch ([stdin]:12924:33)
+    at wrapped ([stdin]:1:259)
+    at [stdin]:11849:29
+    at timed ([stdin]:6902:19)
+    at onPlatform ([stdin]:11848:43)
+    at onPlatformAt ([stdin]:11874:10)
+    at refundPlanPayment ([stdin]:12367:30)
+    at async refundAndEndPlan ([stdin]:12746:18)
+    at async main ([stdin]:13084:22)
+plan-refund: store 89537d9a304e465dbb87e2d6b1e7ab5c's email was not sent (no address or no sender)
+plan-refund: store 807aa0d210394e8e8f8a0b5c880c8fa6's email was not sent (no address or no sender)
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform ([stdin]:11865:11)
+    at async refundPlanPayment ([stdin]:12367:24)
+    at async refundAndEndPlan ([stdin]:12746:18)
+    at async main ([stdin]:13110:15) {
+  status: 500,
+  code: 'api_error'
+}
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform ([stdin]:11865:11)
+    at async refundPlanPayment ([stdin]:12353:32)
+    at async refundAndEndPlan ([stdin]:12746:18)
+    at async main ([stdin]:13119:18) {
+  status: 500,
+  code: 'api_error'
+}
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform ([stdin]:11865:11)
+    at async partsOutcome ([stdin]:12599:16)
+    at async refundAndEndPlan ([stdin]:12755:28)
+    at async main ([stdin]:13119:18) {
+  status: 500,
+  code: 'api_error'
+}
+reading a store's add-on failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform ([stdin]:11865:11)
+    at async setCancelAtPeriodEnd ([stdin]:11954:24)
+    at async syncAssistant ([stdin]:12446:7)
+    at async endPlanNow ([stdin]:12669:22)
+    at async finish ([stdin]:12734:21)
+    at async refundAndEndPlan ([stdin]:12751:21)
+    at async main ([stdin]:13131:21) {
+  status: 500,
+  code: 'api_error'
+}
+plan-refund: store 14a9e0cf9ecb4915995b0dd3b25d4aee's email was not sent (no address or no sender)
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform ([stdin]:11865:11)
+    at async partsOutcome ([stdin]:12599:16)
+    at async finishPlanRefunds ([stdin]:12796:30)
+    at async main ([stdin]:13147:3) {
+  status: 500,
+  code: 'api_error'
+}
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform ([stdin]:11865:11)
+    at async partsOutcome ([stdin]:12599:16)
+    at async finishPlanRefunds ([stdin]:12796:30)
+    at async main ([stdin]:13151:3) {
+  status: 500,
+  code: 'api_error'
+}
+plan-refund: the refund asked for store fcd9bafe69bc44d3a18b380779f34eab could not be decided in 7 days; its stop is taken back and its note dropped
+S_STATUS 0 null undefined LOG /tmp/s3086-kBeru7
+
+=== plan-dispute-bounded ===
+
+Stripe's statuses read as what the bank decided
+  ok    won
+  ok    an inquiry closed without a chargeback
+  ok    lost
+  ok    needs_response is open
+  ok    under_review is open
+  ok    warning_needs_response is open
+  ok    warning_under_review is open
+  ok    something_new is open
+  ok    undefined is open
+
+Open pauses, won lifts, lost pauses to the end of the period paid for
+  ok    open pauses
+  ok    won does not
+  ok    lost pauses before the period ends
+  ok    lost stops pausing once it ended
+  ok    no dispute pauses nothing
+  ok    a period that could not be read is kept for a year
+  ok    a broken entry is dropped
+  ok    coveredUntil reads the latest line end
+  ok    coveredUntil is 0 with no lines
+  ok    a known dispute takes its new status and keeps what was first read
+  ok    a decided dispute is never reopened
+  ok    reading a record never drops one that still pauses
+  ok    past the limit, none that still pauses is dropped
+  ok    past the limit, a decided one goes first
+
+A paused plan stops what costs us to run, without ending
+  ok    paid up before
+  ok    not paid up while disputed
+  ok    emails to the list stop
+  ok    its domain and look stay
+  ok    costs stand as an ended plan
+  ok    costsPaused
+  ok    routes refuse with their own code
+  ok    an unpaid renewal keeps its own code
+  ok    won: paid up again
+  ok    a plan that is not running is not paused by it
+
+The upload routes refuse with plan_disputed
+  ok    app/api/store/file/route.ts asks costPauseCode
+  ok    app/api/store/image/upload/route.ts asks costPauseCode
+  ok    app/api/store/mail/picture/route.ts asks costPauseCode
+  ok    app/api/store/vault/route.ts asks costPauseCode
+  ok    app/api/store/stream/route.ts asks costPauseCode
+  ok    app/api/store/file/route.ts answers plan_disputed with 409, not a server error
+  ok    app/api/store/image/upload/route.ts answers plan_disputed with 409, not a server error
+  ok    the studio has a sentence for it
+  ok    the course editor stops on it
+
+The studio and the Terms say the same words
+  ok    the notice says what pauses, what stays and what comes next
+  ok    the Terms use the same words
+  ok    the studio shows the notice
+  ok    the daily job runs it
+
+The daily job writes a dispute of a plan payment on its store
+  ok    counts
+  ok    the plan's dispute is written down
+  ok    and pauses the store's costs
+  ok    the list asked looks back 120 days and expands the invoice
+  ok    nothing but reads is sent to Stripe
+  ok    the same dispute again changes nothing
+  ok    one that matched no plan is asked about again within the week
+  ok    and no longer after it
+  ok    disputes already read cost no subscription read
+  ok    still one
+  ok    the bank's decision is written
+  ok    won lifts the pause
+  ok    a decided dispute listed again costs no subscription read
+
+Bounded, newest first, and open ones past the window read by id
+  ok    stops at the page cap, not complete
+  ok    a new dispute is read first in the next run
+  ok    and only it costs a subscription read
+  ok    a deadline already passed asks Stripe nothing
+  ok    an open dispute the list no longer returns is read by id
+  ok    and its decision is written
+  ok    once decided it is not read again
+
+66 checks, all passing.
+S_VOLUME {"runs":270,"mocks":36}
+reading plan dispute du_Broken1 failed BillingError: Stripe billing failed (500 unknown): boom
+    at onPlatform ([stdin]:37722:11)
+    at async applyDispute ([stdin]:37829:24)
+    at async syncPlanDisputes ([stdin]:37878:24)
+    at async main ([stdin]:38124:19) {
+  status: 500,
+  code: 'unknown'
+}
+reading plan dispute du_Broken1 failed BillingError: Stripe billing failed (500 unknown): boom
+    at onPlatform ([stdin]:37722:11)
+    at async applyDispute ([stdin]:37829:24)
+    at async syncPlanDisputes ([stdin]:37878:24)
+    at async main ([stdin]:38132:19) {
+  status: 500,
+  code: 'unknown'
+}
+reading plan dispute du_Broken1 failed BillingError: Stripe billing failed (500 unknown): boom
+    at onPlatform ([stdin]:37722:11)
+    at async applyDispute ([stdin]:37829:24)
+    at async syncPlanDisputes ([stdin]:37878:24)
+    at async main ([stdin]:38137:5) {
+  status: 500,
+  code: 'unknown'
+}
+reading plan dispute du_Broken1 failed BillingError: Stripe billing failed (500 unknown): boom
+    at onPlatform ([stdin]:37722:11)
+    at async applyDispute ([stdin]:37829:24)
+    at async syncPlanDisputes ([stdin]:37878:24)
+    at async main ([stdin]:38140:5) {
+  status: 500,
+  code: 'unknown'
+}
+plan disputes: more than one run's pages; the oldest wait for the next run
+plan disputes: more than one run's pages; the oldest wait for the next run
+S_STATUS 0 null undefined LOG /tmp/s3086-2jNw38
+
+=== types ===
+
+=== final-lint ===
+
+/workspace/scratch/cc5c6553d7ad/s-review-3086/tests/s3086-post-evidence.proof.ts
+  6:11  warning  'posts' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+✖ 1 problem (0 errors, 1 warning)
+
+
+=== final-scanner ===
+Public data check: 4307 tracked files; 0 file(s) require correction.
+
+=== product-diff ===
+
+=== own-diff ===

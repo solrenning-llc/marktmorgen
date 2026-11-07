@@ -67,8 +67,13 @@ export default async function StudioTaxPage({ searchParams }: Params) {
           </p>
           {/* What is true now (Claude 4 on #2735): the checkout asks Stripe for tax only while it is on (lib/tax.ts, applyTax). */}
           <p className="mt-3 max-w-2xl text-ink">
+            {/* Claude 5 on #2735: with prices that include tax (tax_behavior inclusive) Stripe adds nothing on top; the tax comes out of the price. */}
             {store.tax.enabled ? (
-              "Tax is on in your checkout: Stripe adds it only where you have an active registration."
+              store.tax.included ? (
+                "Tax is on in your checkout and your prices include it: where you have an active registration, Stripe takes the tax out of your price."
+              ) : (
+                "Tax is on in your checkout: Stripe adds it only where you have an active registration."
+              )
             ) : (
               <>
                 Tax is off in your checkout, so Stripe adds none now, even where you are registered.{" "}

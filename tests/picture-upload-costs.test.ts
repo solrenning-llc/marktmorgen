@@ -19,8 +19,9 @@ import * as registry from "./plan-cost-registry";
 import { COST_LINES, BLOB_ADVANCED_OP, BLOB_SIMPLE_OP, BLOB_TRANSFER_PER_BYTE, ORIGIN_PER_BYTE } from "./plan-cost-registry";
 import { CDN_PER_REQUEST } from "./traffic-cost";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
-import { MAX_IMAGE_BYTES, MAX_THUMB_BYTES } from "@/lib/product-image";
+import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { MAX_PAGE_PICTURES } from "@/lib/sales-page";
+import { PICTURE_DOOR_MAX } from "@/lib/picture-door";
 import { done, is, part } from "./check";
 
 part("The official prices, with their source and date");
@@ -64,17 +65,36 @@ is("a line of its own, and the two lines it replaces are gone", [Boolean(line), 
 is("it says which pictures it covers: a product's, a link's and a page's", /a product's, a link's and a page's/.test(line?.feature ?? ""), true);
 const tokenTries = (registry as Record<string, unknown>).BLOB_TOKEN_TRIES;
 is("a door's signed token: priced nowhere, so counted as an Advanced Operation with every try, never zero", tokenTries, tries);
+// C1-20261107-1550-TODOS-10 (Claude 4 on #2848, 6711058709): a check's read is a private-blob fetch, so its whole bytes
+// pay Blob transfer and Fast Origin Transfer and the fetch is one CDN request, as PICTURE_READ and the sibling lines
+// count it; a request whose picture fails also asks the Blob once more about each file it took (dropTakenPictures, a
+// head with every try). Counted that way, a studio request may read only a file it took from the door, each once: a
+// name the record already shows is answered from the record (app/api/store/image, app/api/store/link-image), so the
+// re-attach kind is gone, and the reads of a month are at most its doors plus the notes alive when it began, never more
+// than PICTURE_DOOR_MAX a store (lib/picture-door.ts).
+is("a check's read pays Fast Origin Transfer and a CDN request, from the registry's and traffic-cost's own figures", (() => {
+  const source = readFileSync("tests/plan-cost-registry.ts", "utf8");
+  const at = source.indexOf("export function pictureCheckBlob(");
+  const body = at < 0 ? "" : source.slice(at, source.indexOf("\n}", at));
+  return /ORIGIN_PER_BYTE/.test(body) && /BLOB_TRANSFER_PER_BYTE/.test(body) && /CDN_PER_REQUEST/.test(body);
+})(), true);
+is("the basis says so, and names the door's cap on the notes carried into a month", /Fast Origin Transfer/.test(line?.basis ?? "") && /CDN request/.test(line?.basis ?? "") && /PICTURE_DOOR_MAX/.test(line?.basis ?? ""), true);
+is("the line names the cap among its sources", Boolean(line?.sources.some((source) => source.file === "lib/picture-door.ts" && source.names.includes("PICTURE_DOOR_MAX"))), true);
 for (const tier of ["creator", "pro", "scale"] as const) {
   const put = typeof tries === "number" ? tries : Number.NaN, heads = typeof headTries === "number" ? headTries : Number.NaN;
   const token = typeof tokenTries === "number" ? tokenTries : Number.NaN;
+  const studio = STORE_ALLOWANCES[tier].studio;
   // A door: its put, its token and the head that checks the name, every try.
   const door = (put + token) * BLOB_ADVANCED_OP + heads * BLOB_SIMPLE_OP;
-  // A check: a head with every try, one plain read, the bytes counted whole.
-  const check = (bytes: number) => heads * BLOB_SIMPLE_OP + BLOB_SIMPLE_OP + bytes * BLOB_TRANSFER_PER_BYTE;
-  const reattach = 2 * check(MAX_IMAGE_BYTES) + check(MAX_THUMB_BYTES);
-  const page = (MAX_PAGE_PICTURES * (door + check(MAX_IMAGE_BYTES))) / (MAX_PAGE_PICTURES + 1);
-  const perRequest = check(MAX_IMAGE_BYTES) + Math.max(door, reattach, page);
-  is(`${tier}: the studio figure, each request at its dearest kind, and a day of doors from the month before checked on top`, Math.abs((line?.monthlyUsd(tier) ?? 0) - STORE_ALLOWANCES[tier].studio * perRequest) < 1e-9, true);
+  // A check, at the dearest file a check may read (MAX_IMAGE_BYTES; a thumbnail's is smaller): a head with every try,
+  // one plain read whose whole bytes cross at Blob and Fast Origin Transfer, one CDN request, and the clean-up head.
+  const check = heads * BLOB_SIMPLE_OP + BLOB_SIMPLE_OP + MAX_IMAGE_BYTES * (BLOB_TRANSFER_PER_BYTE + ORIGIN_PER_BYTE) + CDN_PER_REQUEST + heads * BLOB_SIMPLE_OP;
+  // Every read takes a note a door wrote: 24 doors and the save that checks them are 25 requests (an attach, at most
+  // three doors and itself, and a link, one door and itself, are cheaper a request).
+  const page = (MAX_PAGE_PICTURES * (door + check)) / (MAX_PAGE_PICTURES + 1);
+  // The notes alive when the month began, read this month: at most PICTURE_DOOR_MAX a store.
+  const carried = Math.min(studio, PICTURE_DOOR_MAX) * check;
+  is(`${tier}: the studio figure at its dearest request kind, and the notes carried in, each read once`, Math.abs((line?.monthlyUsd(tier) ?? 0) - (studio * Math.max(door, page) + carried)) < 1e-9, true);
 }
 is("its source and date are said, and why the read is counted whole", (line?.basis ?? "").includes("vercel.com/docs/vercel-blob/usage-and-pricing") && /6 November 2026/.test(line?.basis ?? "") && /206/.test(line?.basis ?? ""), true);
 done();

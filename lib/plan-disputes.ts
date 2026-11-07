@@ -23,10 +23,10 @@
  * subscription names no store) is counted as unmatched and logged.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { isAddOn, isBillingConfigured, onPlatformAt } from "@/lib/billing";
 import { type PlanDisputeStatus, coveredUntil, disputeStatusOf } from "@/lib/plan-dispute-rules";
-import { recordPlanDispute, storeForHandle, storeForId, storeRef } from "@/lib/store";
+import { recordPlanDispute, storeForHandle, storeForId, storeIdKeyOf, storeRef } from "@/lib/store";
 import { type StripePage, readStripePage } from "@/lib/stripe-list";
 
 /** The version whose charge still names its invoice and whose invoice names its subscription. */
@@ -59,10 +59,25 @@ async function remember(id: string, what: string): Promise<void> {
   await redisPipeline([["HSET", SEEN_KEY, id, what], ["EXPIRE", SEEN_KEY, SEEN_SECONDS]]);
 }
 
+/**
+ * Whether the store with this id is confirmed gone: its id's key read exactly
+ * (rule 24), EXISTS answering 0. 1 is "still there"; any other reply, or none,
+ * throws UnknownReplyError.
+ */
+async function storeIdGone(sid: string): Promise<boolean> {
+  const n = countOf(repliesFor(await redisPipeline([["EXISTS", storeIdKeyOf(sid)]]), 1)?.[0]);
+  if (n === null || n > 1) throw new UnknownReplyError("a store's id");
+  return n === 0;
+}
+
 /** Writes a dispute's status on a store already known. Answers whether it changed. */
 async function writeStatus(sid: string, id: string, status: PlanDisputeStatus, at: number, coversUntil: number, nowSeconds: number): Promise<boolean> {
   const store = await storeForId(sid);
   if (!store) {
+    // storeForId answers null for a reply it could not read, too. Giving the open mark up means the dispute is never
+    // re-read, so a later decision would never reach the store (a creator whose dispute was won kept paused): it is
+    // given up only when the store's id is confirmed gone; otherwise this read fails and the next run reads it again.
+    if (!(await storeIdGone(sid))) throw new UnknownReplyError("the disputed plan's store");
     await remember(id, `unmatched:${nowSeconds}`);
     return false;
   }
@@ -185,6 +200,7 @@ export async function syncPlanDisputes(deadline: number, nowSeconds = Math.floor
       console.error(`re-reading plan dispute ${id} failed`, error);
     }
   }
-  counts.complete = listDone && readable && stale.length < MAX_REREADS;
+  // Complete only when nothing failed: a dispute or a re-read that could not be handled is read again next run.
+  counts.complete = listDone && readable && counts.failed === 0 && stale.length < MAX_REREADS;
   return counts;
 }

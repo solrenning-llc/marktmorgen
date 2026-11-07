@@ -36,7 +36,7 @@ const complete = {
 };
 
 part("GPSR: the area and a complete record");
-is("the area is the 27 EU states plus Iceland, Liechtenstein and Norway", GPSR_AREA.length, 30);
+is("the area is the 27 EU states, the Union's 7 territories with a code of their own, plus Iceland, Liechtenstein and Norway", GPSR_AREA.length, 37);
 is("Germany, France and Norway are in it", ["DE", "FR", "NO"].every((c) => GPSR_AREA.includes(c)), true);
 is("the US, the UK and Switzerland are not", ["US", "GB", "CH"].some((c) => GPSR_AREA.includes(c)), false);
 const info = readSafetyInfo(complete);

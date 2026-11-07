@@ -25,8 +25,16 @@ import { SHIP_COUNTRIES, SHIP_REGIONS } from "./shipping";
 
 const DAY = 86_400;
 
-/** Where GPSR art. 19 is taken to apply: the EU 27, and Iceland, Liechtenstein and Norway (stricter reading of its EEA relevance). */
-export const GPSR_AREA: readonly string[] = [...SHIP_REGIONS.eu.countries, "IS", "LI", "NO"];
+/**
+ * The parts of the Union with a country code of their own, apart from the 27: Guadeloupe, French Guiana, Martinique,
+ * Mayotte, Reunion and Saint-Martin (TFEU art. 355(1), with art. 349) and the Aland Islands (art. 355(4), with
+ * Protocol 2). Read on EUR-Lex on 7 November 2026, consolidated TFEU, OJ C 202 of 7.6.2016. The Azores, Madeira and
+ * the Canary Islands ship as PT and ES.
+ */
+export const UNION_TERRITORIES: readonly string[] = ["GP", "GF", "MQ", "YT", "RE", "MF", "AX"];
+
+/** Where GPSR art. 19 is taken to apply: the EU 27 and its territories above, and Iceland, Liechtenstein and Norway (stricter reading of its EEA relevance). */
+export const GPSR_AREA: readonly string[] = [...SHIP_REGIONS.eu.countries, ...UNION_TERRITORIES, "IS", "LI", "NO"];
 
 export const MAX_NAME = 200;
 export const MAX_POSTAL = 300;

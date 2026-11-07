@@ -51,6 +51,8 @@ const SELLER = "7KNGBPH2U58GQ";
 const orders = new Map<string, Record<string, unknown>>();
 let captureWith: (order: string) => { status: number; body: Record<string, unknown> } = () => ({ status: 500, body: {} });
 let made = 0;
+/** Captures PayPal answers as refunded in full (the Claude 4 team's second money review of #2911). */
+const refundedCaptures = new Set<string>();
 const orderId = (n: number) => `8P190127TN36471${String(n).padStart(2, "0")}`;
 
 function completed(order: string, value: string, status: string, email: string): Record<string, unknown> {
@@ -84,7 +86,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const read = /^\/v2\/checkout\/orders\/([A-Z0-9]+)$/.exec(url.pathname)?.[1];
   if (read && method === "GET") return orders.has(read) ? json(orders.get(read)) : json({ name: "RESOURCE_NOT_FOUND" }, 404);
   const cap = /^\/v2\/payments\/captures\/([A-Z0-9]+)$/.exec(url.pathname)?.[1];
-  if (cap && method === "GET") return json({ id: cap, status: "COMPLETED" });
+  if (cap && method === "GET") return json({ id: cap, status: refundedCaptures.has(cap) ? "REFUNDED" : "COMPLETED" });
   return json({ name: "RESOURCE_NOT_FOUND" }, 404);
 }) as typeof fetch;
 
@@ -427,6 +429,36 @@ async function main(): Promise<void> {
     is("it links to the list of purchases, where the handed-over purchase is", html.includes("Open your purchases") || html.includes("Open what you bought"), true);
   }
 
+  part("The Claude 4 team's LEVE on #2911: refunded in full and taken back by the real watch: never 'handing it over'");
+  {
+    const back = "refund@example.com";
+    const opened = await openOrder(store, (await readListing(store, made.product.id))!, BASE, { digitalConsent: TEST_CONSENT });
+    if (!opened.ok) throw new Error(`no order: ${opened.reason}`);
+    captureWith = (o) => ({ status: 201, body: completed(o, "29.00", "COMPLETED", back) });
+    const taken = await captureOrder(store, opened.order);
+    if (!taken.ok) throw new Error(`not paid: ${taken.reason}`);
+    is("control: handed over by the real hand-over", await handOverPayPal(store, taken.paid), true);
+    const before = await open(opened.order);
+    is("control: before the refund the page shows the purchase", before !== "crashed" && before.html.includes("Open what you bought"), true);
+    refundedCaptures.add(taken.paid.capture);
+    await redis.pipeline([["ZADD", `nl:ppsell:watch:${store.statsId}`, "1", opened.order]]);
+    const watched = await watchPayPal(store, Date.now() + 10_000, { handOver: async () => {}, dropStart: async () => {} });
+    is("control: the real watch took the purchase back", watched.revoked, 1);
+    const after = await open(opened.order);
+    const html = after === "crashed" ? "" : after.html;
+    is("the page is drawn", after === "crashed" ? "crashed" : "drawn", "drawn");
+    is("it does not say it is being handed over", html.includes(HANDING_OVER), false);
+    is("it does not promise a receipt or ask to refresh", [html.includes("Refresh in a minute"), html.includes(THANKS_WORDS.en.ppReceipt(back))], [false, false]);
+    is("it says the payment was refunded", html.includes(THANKS_WORDS.en.ppRefunded), true);
+    is("no link to the purchase and no purchase event", [html.includes("Open what you bought"), after === "crashed" ? null : after.purchaseEvent], [false, false]);
+    // The refund mark that cannot be read is unknown: could not check, never "handing it over" and never "refunded".
+    const undo = failReadsOf(`nl:ppsell:refunded:${store.statsId}`);
+    const blind = await open(opened.order);
+    undo();
+    const blindHtml = blind === "crashed" ? "" : blind.html;
+    is("the refund mark unread: could not check, never handing over, never refunded", [blindHtml.includes(COULD_NOT_CHECK), blindHtml.includes(HANDING_OVER), blindHtml.includes(THANKS_WORDS.en.ppRefunded)], [true, false, false]);
+  }
+
   part("The new words exist in every buyer language");
   {
     const en = THANKS_WORDS.en as unknown as Record<string, unknown>;
@@ -436,8 +468,8 @@ async function main(): Promise<void> {
       const w = words as unknown as Record<string, unknown>;
       const body = typeof w.ppCouldNotCheckBody === "string" ? w.ppCouldNotCheckBody : "";
       const handing = typeof w.ppHandingOverBody === "function" ? String((w.ppHandingOverBody as (e: string) => string)(BUYER)) : "";
-      is(`${code}: every new line is written`, [typeof w.ppCouldNotCheck === "string" && (w.ppCouldNotCheck as string).length > 10, body.length > 20, typeof w.ppHandingOver === "string" && (w.ppHandingOver as string).length > 10, handing.includes(BUYER)], [true, true, true, true]);
-      if (code !== "en") is(`${code}: written in its own language, not English`, [w.ppCouldNotCheck === en.ppCouldNotCheck, w.ppHandingOver === en.ppHandingOver, body === en.ppCouldNotCheckBody], [false, false, false]);
+      is(`${code}: every new line is written`, [typeof w.ppCouldNotCheck === "string" && (w.ppCouldNotCheck as string).length > 10, body.length > 20, typeof w.ppHandingOver === "string" && (w.ppHandingOver as string).length > 10, handing.includes(BUYER), typeof w.ppRefunded === "string" && (w.ppRefunded as string).length > 10, typeof w.ppRefundedBody === "string" && (w.ppRefundedBody as string).length > 20], [true, true, true, true, true, true]);
+      if (code !== "en") is(`${code}: written in its own language, not English`, [w.ppCouldNotCheck === en.ppCouldNotCheck, w.ppHandingOver === en.ppHandingOver, body === en.ppCouldNotCheckBody, w.ppRefunded === en.ppRefunded, w.ppRefundedBody === en.ppRefundedBody], [false, false, false, false, false]);
     }
   }
 

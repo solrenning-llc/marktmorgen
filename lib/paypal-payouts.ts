@@ -79,7 +79,11 @@ async function readLink(store: Store): Promise<Link | null> {
   } catch {
     v = undefined;
   }
-  if (!record(v) || typeof v.client !== "string" || typeof v.secret !== "string") throw new UnknownReplyError("the PayPal link");
+  // The auto-pay switch is true or false, written so since the link existed: "false", 1, null or a missing switch is a
+  // record in an unknown shape, neither permission to pay nor "off" (Codex J's MEDIUM on 7b1baef6).
+  if (!record(v) || typeof v.client !== "string" || typeof v.secret !== "string" || typeof v.auto !== "boolean") {
+    throw new UnknownReplyError("the PayPal link");
+  }
   return v as Link;
 }
 

@@ -1282,24 +1282,27 @@ export async function addPayout(
 export const paypalPayoutId = (item: string): string => createHash("sha256").update(`PayPal ${item}`).digest("hex").slice(0, 12);
 const paypalReference = (item: string): string => `PayPal ${item}`.replace(/\s+/g, " ").trim().slice(0, MAX_REFERENCE_LENGTH);
 
-/** What the book already holds of PayPal items: the ids derived from them, and every payout's reference. */
-export type BookedPayouts = { ids: Set<string>; references: Set<string> };
+/** What the book already holds: each payout's id with the reference written under it, and every reference. */
+export type BookedPayouts = { ids: Map<string, string>; references: Set<string> };
 
 /**
  * The payouts in the book, read exactly (rule 24): a whole HGETALL of field/value pairs, or UnknownReplyError. Read
  * once per settling, before any PayPal item is booked: a payout booked before ids were derived from the item (a
  * random id, with "PayPal <item>" as its reference) is found by its reference, so it is never booked a second time.
+ * The book is proof only when every payout in it reads whole, under its own id (Codex J's MEDIUM on 7b1baef6): one
+ * that does not could be the very item being settled, so it throws before anything is booked or taken off its way.
  */
 export async function bookedPayouts(store: Store): Promise<BookedPayouts> {
   if (!store.statsId) throw new UnknownReplyError("the affiliate payouts");
   const reply = repliesFor(await redisPipeline([["HGETALL", payoutsKey(store.statsId)]]), 1);
   const flat = stringList(reply?.[0]);
   if (!flat || flat.length % 2) throw new UnknownReplyError("the affiliate payouts");
-  const out: BookedPayouts = { ids: new Set(), references: new Set() };
+  const out: BookedPayouts = { ids: new Map(), references: new Set() };
   for (let i = 0; i + 1 < flat.length; i += 2) {
-    out.ids.add(flat[i]);
     const payout = parsePayout(flat[i + 1]);
-    if (payout?.reference) out.references.add(payout.reference);
+    if (!payout || payout.id !== flat[i]) throw new UnknownReplyError("a payout in the book");
+    out.ids.set(flat[i], payout.reference);
+    if (payout.reference) out.references.add(payout.reference);
   }
   return out;
 }
@@ -1320,7 +1323,10 @@ export async function bookPayPalPayout(
   if (!store.statsId) throw new UnknownReplyError("a payout's booking");
   const id = paypalPayoutId(input.item);
   const reference = paypalReference(input.item);
-  if (booked.ids.has(id) || booked.references.has(reference)) return "already";
+  // The item's own id holding another reference is not this item booked: never "already" on it (Codex J).
+  const under = booked.ids.get(id);
+  if (under !== undefined && under !== reference) throw new UnknownReplyError("a payout's booking");
+  if (under !== undefined || booked.references.has(reference)) return "already";
   const payout: Payout = { id, aff: input.aff, cents: input.cents, currency: input.currency, date: input.date, reference, at: Date.now() };
   const json = JSON.stringify(payout);
   const room = [{ slot: PAYOUTS_SLOT, bytes: dataBytes([id, json], 1) }];
@@ -1328,7 +1334,7 @@ export async function bookPayPalPayout(
   const reply = repliesFor(await redisPipeline([["HSETNX", payoutsKey(store.statsId), id, json]]), 1);
   // Not known whether it was written: thrown, and the room stays counted (more than used, never less).
   if (!reply || (reply[0] !== 0 && reply[0] !== 1)) throw new UnknownReplyError("a payout's booking");
-  booked.ids.add(id);
+  booked.ids.set(id, reference);
   booked.references.add(reference);
   if (reply[0] === 1) return "booked";
   // Another settling wrote it first: the room this call took is given back.

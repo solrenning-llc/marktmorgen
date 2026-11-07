@@ -25,8 +25,26 @@ import { SHIP_COUNTRIES, SHIP_REGIONS } from "./shipping";
 
 const DAY = 86_400;
 
-/** Where GPSR art. 19 is taken to apply: the EU 27, and Iceland, Liechtenstein and Norway (stricter reading of its EEA relevance). */
-export const GPSR_AREA: readonly string[] = [...SHIP_REGIONS.eu.countries, "IS", "LI", "NO"];
+/**
+ * Parts of the Union that Stripe names with their own two letters: Åland
+ * (TFEU art. 355(4)) and the French outermost regions Guadeloupe, French
+ * Guiana, Martinique, Mayotte, Réunion and Saint-Martin (arts. 349 and
+ * 355(1); consolidated text, OJ C 202, 7.6.2016). The Azores, Madeira and the
+ * Canary Islands are named PT and ES. Saint-Barthélemy (BL) left the Union in
+ * 2012 and is not here.
+ */
+const EU_PARTS = ["AX", "GF", "GP", "MF", "MQ", "RE", "YT"];
+
+/** Where GPSR art. 19 is taken to apply: the EU 27 with its parts above, and Iceland, Liechtenstein and Norway (stricter reading of its EEA relevance). */
+export const GPSR_AREA: readonly string[] = [...SHIP_REGIONS.eu.countries, ...EU_PARTS, "IS", "LI", "NO"];
+
+/**
+ * One code that is partly in the area: SJ is Svalbard, outside the EEA
+ * (EEA Agreement, Protocol 40), and Jan Mayen, part of Norway and inside it.
+ * Closed while a gap remains (unknown is closed), but a manufacturer there is
+ * not taken to be inside the area.
+ */
+const PARTLY_IN = ["SJ"];
 
 export const MAX_NAME = 200;
 export const MAX_POSTAL = 300;
@@ -155,10 +173,15 @@ export function safetyGaps(info: SafetyInfo | null, hasPicture: boolean): Safety
   return gaps;
 }
 
-/** The shipping countries in GPSR_AREA that stay closed while any gap remains, in the order given. */
+/** Whether a shipping country stays closed while a gap remains: in GPSR_AREA, or partly in it. */
+export function gpsrCloses(code: string): boolean {
+  return GPSR_AREA.includes(code) || PARTLY_IN.includes(code);
+}
+
+/** The shipping countries in GPSR_AREA (or partly in it) that stay closed while any gap remains, in the order given. */
 export function gpsrClosedCountries(shipsTo: readonly string[], info: SafetyInfo | null, hasPicture: boolean): string[] {
   if (safetyGaps(info, hasPicture).length === 0) return [];
-  return shipsTo.filter((code) => GPSR_AREA.includes(code));
+  return shipsTo.filter(gpsrCloses);
 }
 
 /** Whether a Proposition 65 field is worth offering: the product ships to the US. */

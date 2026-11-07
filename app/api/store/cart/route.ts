@@ -36,6 +36,7 @@ import { CartShippingRefused } from "@/lib/cart-checkout";
 import { cartItemOf, cartShipping, shipsWithOnline } from "@/lib/cart-shipping";
 import { SHIP_REGIONS, activeShipping, shipsToWords } from "@/lib/shipping";
 import { shippingWords } from "@/lib/buyer-words/shipping";
+import { everywhereButGpsr } from "@/lib/physical-legal-ship";
 import { deliversDigitally } from "@/lib/digital-consent";
 
 /**
@@ -100,9 +101,10 @@ export async function GET(request: NextRequest) {
           label: sending.cents > 0 ? sw.rate : sw.freeRate,
           where: sw.shipsTo(
             shipsToWords(
-              { region: sending.countries.length === SHIP_REGIONS.world.countries.length ? "world" : "custom", countries: sending.countries },
+              // Everywhere but the closed EU/EEA (lib/physical-legal-ship.ts): said in a few words, not listed.
+              { region: sending.countries.length === SHIP_REGIONS.world.countries.length ? "world" : "custom", countries: sending.countries, exceptGpsr: everywhereButGpsr(sending.countries) },
               locale,
-              { and: sw.and, more: sw.more, everywhere: sw.everywhere },
+              { and: sw.and, more: sw.more, everywhere: sw.everywhere, everywhereElse: sw.everywhereElse },
             ),
           ),
           notTo: country && !sending.countries.includes(country) ? words.notTo(countryName(country)) : null,

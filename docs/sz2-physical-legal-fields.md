@@ -80,9 +80,14 @@ not ship to the EU/EEA countries (those countries are taken out of the
 checkout's shipping countries, with the reason in the studio), and the rest of
 its countries keep selling. Area used: EU 27 plus Iceland, Liechtenstein and
 Norway (GPSR is marked "text with EEA relevance"; whether it is already in the
-EEA Agreement was not read, so the stricter inclusion is used). Northern
-Ireland ships under `GB` and cannot be told apart by country code: not covered;
-"Depende do dono".
+EEA Agreement was not read, so the stricter inclusion is used). The parts of
+the Union that Stripe names with their own code are in the area too: Åland
+(`AX`, TFEU art. 355(4)) and the French outermost regions (`GF`, `GP`, `MF`,
+`MQ`, `RE`, `YT`; arts. 349 and 355(1), OJ C 202, 7.6.2016). `SJ` (Svalbard,
+outside the EEA, and Jan Mayen, inside it) is closed while a gap remains but
+does not count as inside the area for a manufacturer (review of #3029).
+Northern Ireland ships under `GB` and cannot be told apart by country code:
+not covered; "Depende do dono".
 
 ### California: Proposition 65 (27 CCR §§ 25600.2, 25602(b), 25603)
 

@@ -146,9 +146,18 @@ export function activeShipping(product: ShipCandidate & { shipping?: Shipping | 
   return shipping && shipProblem(product) === null ? shipping : null;
 }
 
-/** "the United States and Canada", "France, Belgium and 3 more", in the reader's language. */
-export function shipsToWords(shipping: Pick<Shipping, "region" | "countries">, locale: string, words: { and: string; more: (n: number) => string; everywhere: string }): string {
+/**
+ * "the United States and Canada", "France, Belgium and 3 more", in the reader's language.
+ * `exceptGpsr` (lib/physical-legal-ship.ts): everywhere but the EU/EEA while
+ * a product's safety fields are not filled, said in a few words.
+ */
+export function shipsToWords(
+  shipping: Pick<Shipping, "region" | "countries"> & { exceptGpsr?: boolean },
+  locale: string,
+  words: { and: string; more: (n: number) => string; everywhere: string; everywhereElse?: string },
+): string {
   if (shipping.region === "world") return words.everywhere;
+  if (shipping.exceptGpsr && words.everywhereElse) return words.everywhereElse;
   let names: string[];
   try {
     const display = new Intl.DisplayNames([locale], { type: "region" });

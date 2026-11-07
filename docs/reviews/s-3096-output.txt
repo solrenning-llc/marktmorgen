@@ -1,0 +1,1102 @@
+## /tmp/s3096-K2m7dd
+
+A hold this code does not know refuses the key, and the owner can still see and revoke it
+  ok    resolveKey refuses it (paused), never accepts it
+  ok    keyStates reads it as paused and the other key as live, the list does not fail
+  ok    keyRecords lists both keys, the odd one with an unknown hold
+  ok    the studio shows it to the owner, paused, not offered to turn on, offered to revoke
+  ok    the owner revokes it
+  ok    and it opens nothing any more
+
+A teammate whose key has a hold this code does not know can still be taken off the team
+  ok    her key is refused meanwhile
+  ok    the removal goes through
+  ok    she is off the team
+  ok    invited back, her old key stays refused
+
+A team record that does not read never turns the two-step rule off
+  ok    setup: under the rule the old key is paused
+  ok    broken JSON: resolveKey never accepts the key
+  ok    broken JSON: keyStates never reads it as live
+  ok    a member entry that is not an object: resolveKey never accepts the key
+  ok    a member entry that is not an object: keyStates never reads it as live
+  ok    a rule that is not true or false: resolveKey never accepts the key
+  ok    a rule that is not true or false: keyStates never reads it as live
+  ok    a record without its lists: resolveKey never accepts the key
+  ok    a record without its lists: keyStates never reads it as live
+  ok    a reply that is not text: resolveKey never accepts the key
+  ok    a reply that is not text: keyStates never reads it as live
+  ok    no team record at all (null) is still no team: the key works
+
+One key whose state cannot be read holds back only its own endpoint; the others are sent the event
+  ok    the event is written for the studio endpoint and the unread key's endpoint, not the paused key's
+  ok    the studio endpoint's delivery was tried and waits for its next try
+  ok    the unread key's endpoint is held back, not dropped: its try counted, the endpoint never called, still on the queue
+  ok    the paused key's endpoint gets nothing, as before
+
+26 checks, all passing.
+S_LOOPBACK 0
+S_VOLUME {"runs":307,"mocks":0}
+WEBHOOK KEY STATE UNREAD: the endpoints of these API keys are queued and held until their state reads 1fe7e0c6b65846d79494a6ae5439182e [ 'b413fc861e26' ]
+WEBHOOK KEY STATE UNREAD: the delivery is held, not sent 20fc3f4901a044049ecfd9b58a4f981c dlv_598faf35ceccb72d51575d84 1
+
+## /tmp/s3096-VRapMf
+
+Known replies read as before
+  ok    live, paused and gone
+
+A key list read in another shape is unknown, never every key revoked
+  ok    a list that is not a list
+  ok    a list one slot short
+  ok    a slot that is neither a record nor nothing
+  ok    a record that does not read
+  ok    a pipeline missing a reply
+
+A hold read in another shape is unknown; one this code does not know refuses the key; never no hold
+  ok    a paused key's hold list in another shape is not live
+  ok    a hold this code does not know is not live: paused
+
+A webhook event for an endpoint an API key added is not dropped on an unknown key state
+  ok    the event is queued for the endpoint, never sent to nobody
+  ok    and it is marked written, so it is not written twice
+
+keyRecords, as every pass of lib/api-key-pause.ts reads it, never reads unknown as no keys or no hold
+  ok    a list in another shape
+  ok    a hold list in another shape
+  ok    a hold this code does not know is read as unknown (refusing), the list still reads
+  ok    rewriteMakers on a list in another shape is not done, never nothing to rewrite
+
+A teammate taken off while the key list reads in another shape
+  ok    setup: Fay's key works while she is on the team
+  ok    the removal is refused while the keys cannot be read
+  ok    so she is still on the team, nothing half done
+  ok    once the list reads, she is taken off
+  ok    her key is held for good
+  ok    invited back, her old key stays refused
+
+20 checks, all passing.
+S_LOOPBACK 0
+S_VOLUME {"runs":174,"mocks":0}
+WEBHOOK KEY STATE UNREAD: the endpoints of these API keys are queued and held until their state reads 449af07ca44e4e498b79bb019870f528 [ 'ee4fec26957a' ]
+a webhook delivery failed ff1f711cd168478391fdb65828a85f7a dlv_49a8b009a7db4d01c7b63b59 Error: MemoryRedis: unsupported EVAL
+    at MemoryRedis.run ([stdin]:1195:121)
+    at [stdin]:155:72
+    at Array.map (<anonymous>)
+    at MemoryRedis.pipeline ([stdin]:155:54)
+    at store.pipeline ([stdin]:47495:25)
+    at redisPipeline ([stdin]:2115:41)
+    at claim ([stdin]:46358:23)
+    at [stdin]:46434:19
+    at soon ([stdin]:46369:12)
+    at emitEvent ([stdin]:46431:9)
+
+## /tmp/s3096-YJ64zY
+
+Known replies read as before
+  ok    live, paused and gone
+
+A key list read in another shape is unknown, never every key revoked
+  FAIL  a list that is not a list
+        expected "unknown"
+        got      {"142d500dae88":"gone"}
+  FAIL  a list one slot short
+        expected "unknown"
+        got      {"142d500dae88":"live","d2d873d60ced":"gone"}
+  FAIL  a slot that is neither a record nor nothing
+        expected "unknown"
+        got      {"142d500dae88":"gone"}
+  FAIL  a record that does not read
+        expected "unknown"
+        got      {"142d500dae88":"gone"}
+  FAIL  a pipeline missing a reply
+        expected "unknown"
+        got      {"142d500dae88":"live"}
+
+A hold read in another shape is unknown; one this code does not know refuses the key; never no hold
+  FAIL  a paused key's hold list in another shape is not live
+        expected "unknown"
+        got      {"d2d873d60ced":"live"}
+  FAIL  a hold this code does not know is not live: paused
+        expected {"d2d873d60ced":"paused"}
+        got      {"d2d873d60ced":"live"}
+
+A webhook event for an endpoint an API key added is not dropped on an unknown key state
+  FAIL  the event is queued for the endpoint, never sent to nobody
+        expected 1
+        got      0
+  FAIL  and it is marked written, so it is not written twice
+        expected 0
+        got      1
+
+keyRecords, as every pass of lib/api-key-pause.ts reads it, never reads unknown as no keys or no hold
+  FAIL  a list in another shape
+        expected "unknown"
+        got      []
+  FAIL  a hold list in another shape
+        expected "unknown"
+        got      [{"id":"142d500dae88","name":"Live sync","hint":"4d1221","madeAt":1794089533,"usedAt":0,"write":false,"agent":"none","maker":{"owner":true,"by":"","step":true},"hold":null},{"id":"d2d873d60ced","name":"Held sync","hint":"aa65dc","madeAt":1794089533,"usedAt":0,"write":false,"agent":"none","maker":{"owner":true,"by":"","step":true},"hold":null}]
+  FAIL  a hold this code does not know is read as unknown (refusing), the list still reads
+        expected "unknown"
+        got      null
+  FAIL  rewriteMakers on a list in another shape is not done, never nothing to rewrite
+        expected "unknown"
+        got      []
+
+A teammate taken off while the key list reads in another shape
+  ok    setup: Fay's key works while she is on the team
+  FAIL  the removal is refused while the keys cannot be read
+        expected "unknown"
+        got      true
+  FAIL  so she is still on the team, nothing half done
+        expected true
+        got      false
+  FAIL  once the list reads, she is taken off
+        expected true
+        got      false
+  FAIL  her key is held for good
+        expected "left"
+        got      null
+  FAIL  invited back, her old key stays refused
+        expected true
+        got      false
+
+20 checks, 18 failing.
+S_LOOPBACK 0
+S_VOLUME {"runs":154,"mocks":0}
+a webhook delivery failed Error: MemoryRedis: unsupported EVAL
+    at MemoryRedis.run ([stdin]:1195:121)
+    at [stdin]:155:72
+    at Array.map (<anonymous>)
+    at MemoryRedis.pipeline ([stdin]:155:54)
+    at store.pipeline ([stdin]:47399:25)
+    at redisPipeline ([stdin]:2115:41)
+    at claim ([stdin]:46320:23)
+    at [stdin]:46394:37
+    at soon ([stdin]:46331:12)
+    at emitEvent ([stdin]:46393:9)
+
+## /tmp/s3096-bSdEmQ
+
+(A) Making a key on an account with a second step needs a session opened with it
+  ok    an emailed-link session on a passkey account is refused
+  ok    and no key was made
+  ok    the same person with a passkey session makes it
+  ok    an account with no second step at all makes keys as before
+  ok    the owner with no second step yet makes one too
+  ok    each record says whether its session had a second step
+  ok    an old key has no maker
+  ok    the owner, once they have a passkey, is refused from an emailed-link session too
+
+(5) Who made a key is an HMAC under the deployment's secret and the store's id
+  ok    never the address
+  ok    never a plain hash of it either
+  ok    the same person reads differently on another store
+  ok    what is kept is this store's print
+
+(B) The webhook endpoints a key adds are kept with it
+  ok    both added
+  ok    a sale goes to both while nothing is paused
+  ok    a key made with a second step is never paused by the rule
+
+Before saving: which keys and endpoints will pause, and whose
+  ok    three keys and one endpoint would pause: Ned's two, his bot's endpoint, and the old key
+  ok    named by whose
+  ok    the review says the count, endpoints included
+  ok    and whose, with the endpoint, and who gets an email
+  ok    the unrecorded key in words
+  ok    and who has no second step yet
+  ok    a former teammate's key is said to be revocable only
+  ok    the team page draws the switch with its review for the owner
+
+Only the owner, only with their second step, and only for the list reviewed
+  ok    an Admin cannot switch it
+  ok    the owner from an emailed-link session is refused
+  ok    the count is the same
+  ok    but the list is not, so the save is refused with the new review
+  ok    and nothing was saved, paused or held
+
+(4) A save that cannot write the rule undoes its pause, and says so
+  ok    refused as unsaved, undone
+  ok    the rule is off, no key is paused, the endpoint is not held
+  ok    nobody was emailed
+
+(8) A key made after the first pause, as the rule is written, is paused by the second
+  ok    saved, but not finished: four keys paused, Ned's three still to be told
+  ok    the rule is on
+  ok    the late key is paused
+  ok    the page offers to finish
+  ok    pressing again tells who is left, and pauses nothing more
+  ok    pressing once more tells nobody twice
+  ok    one email, to Ned only
+  ok    it names his three keys and the way back
+  ok    its subject is plain
+
+On: the keys made without a second step pause, with their endpoints; the owner's never change
+  ok    Ned's keys are refused by the API, as paused
+  ok    the old key too
+  ok    the owner's own key still works
+  ok    Ned's bot's endpoint is held, the owner's is not
+  ok    so a sale goes to the owner's endpoint only
+  ok    nothing was deleted
+  ok    an endpoint added in the studio, by no key, is never held
+
+The panel shows each person what is paused and whose
+  ok    Ned sees his keys as his, paused, and may turn them on
+  ok    the owner sees them as Ned's and may not turn them on
+  ok    the owner may turn on the old one, whose maker nobody knows
+
+Turned back on by whoever made it, after logging in with a second step, endpoints included
+  ok    Ned from an emailed-link session is held at the team's door
+  ok    Pia cannot turn on Ned's key
+  ok    nor can the owner
+  ok    Ned, with his passkey, turns it back on
+  ok    it works again
+  ok    and so does its endpoint
+  ok    his other key stays paused until he turns it on too
+  ok    the owner turns on the old key
+
+Revoking a key stops its endpoints for good
+  ok    Ned revokes his bot
+  ok    its endpoint is held as revoked, and hears nothing
+  ok    its mark goes with it
+
+Turning the rule off turns nothing back on
+  ok    off, from the owner's passkey session
+  ok    Ned's other key is still paused
+  ok    from an emailed-link session it still needs his second step
+  ok    on again: what was turned on is vouched for, and paused keys are not counted twice
+  ok    so on again pauses nothing and emails nobody
+
+(8) A key made through the route in the instant the rule turned on is paused at once
+  ok    let in while the rule was off, made as it turned on: paused, and the answer says so
+  ok    refused by the API
+  ok    an owner's key never is
+
+(1) A teammate taken off the team has every key paused at once, whatever the rule
+  ok    made with her passkey, it works while she is on the team
+  ok    the rule is off on this store
+  ok    taken off: her key is paused
+  ok    and its endpoint is held
+  ok    her fingerprint is gone from it
+  ok    under the rule it counts as a former teammate's, vouched for or not
+  ok    shown as a former teammate's, never to be turned on
+  ok    an Admin may not revoke it
+  ok    and the route agrees
+  ok    the owner may not turn it on
+  ok    the owner revokes it
+  ok    and its endpoint stops for good
+
+(6) A teammate who moves their address keeps their keys
+  ok    the key follows the new address
+  ok    and still works
+
+G1: a key written after its maker was taken off, as the door let them in before, is theirs who left
+  ok    made, and paused in the same answer
+  ok    refused by the API, held for good
+
+G1: an endpoint written as its key was revoked is sent nothing
+  ok    it is written, and shown as its key's: revoked
+  ok    a sale goes nowhere
+
+G1: a key whose maker left is refused even with no hold written
+  ok    refused
+
+G2: turning a key on while its maker leaves never wins over the leaving
+  ok    the turning on is refused, as the hold changed
+  ok    the key stays held for good, and refused
+  ok    an undo never puts back a key whose maker left
+
+M1: a key made under the earlier secret is still its maker's once NIMBUS_DATA_KEY is set
+  ok    its print is not today's
+  ok    Ada still sees it as hers
+
+M2: a teammate leaving also pauses keys nobody is recorded as having made, without a secret too
+  ok    with no secret, nobody is recorded
+  ok    Ada's legacy key is found and held for good
+  ok    the unrecorded key is paused
+  ok    and the owner may turn it back on
+
+M3: a pause cut short before the rule is saved is undone, key by key
+  ok    refused as unsaved, and undone
+  ok    the key paused before the cut is back on
+  ok    a plan applied and undone leaves nothing
+
+L3: the team unreadable after a failed save: the pause stands, and the answer does not claim it saved
+  ok    answered unsure
+  ok    Dot's key stays paused
+
+L3: two presses at once email a teammate once
+  ok    one email to Dot
+  ok    and his key is told
+
+L1: a test to an endpoint whose key is paused takes nothing
+  ok    refused as held
+  ok    and no delivery was taken
+
+L4: using a key at the instant its maker is rewritten never writes the old maker back
+  ok    the use wrote when it was last used, after the rewrite
+  ok    the rewrite stands
+
+L5: a teammate moved to a role that cannot hand out keys has theirs wait for the owner
+  ok    paused for the role
+  ok    while her role does not allow it, the owner cannot turn it on
+  ok    the owner turns it back on
+  ok    and it works
+
+M4: when the keys cannot follow a move, the membership stays where it was
+  ok    the membership stayed on the old address
+  ok    and the key is still hers there
+  ok    and still works
+
+M5 (b): a teammate's key whose maker matches nobody on the team is refused at the door, at one command more
+  ok    a teammate's key works
+  ok    within an API request's own commands
+  ok    refused, as made by someone who could not be matched to the team (not as one who left)
+  ok    and the endpoints it added would hear nothing
+
+M5 (a), N2: a teammate leaving holds a key whose maker matches nobody, but never for good on a guess
+  ok    the ghost's key is held as unmatched
+  ok    the owner may turn it back on
+  ok    turning it on without saying whose it is is refused
+  ok    the owner may give it to Gia, an Admin
+  ok    given to Gia, it is hers and works
+  ok    and when Gia leaves, it goes with her, for good
+  ok    Fin's is untouched
+
+M6: the owner is told which keys a teammate leaving paused, and each refusal says why
+  ok    one email to the owner
+  ok    it names the key, says why, and how to turn it back on, in plain words
+  ok    the unrecorded key's refusal says the owner can turn it back on
+  ok    a key paused by the rule says whoever made it can turn it on
+  ok    one paused for its maker's role says it waits for the owner
+
+Codex D (#2290): a key nobody is recorded as making is turned on only once the owner says whose it is, so later sweeps still reach it
+  ok    the owner may turn it on, choosing whose it is
+  ok    turning it on without saying whose it is is refused, and it stays paused
+  ok    given to Gia, it is hers and works
+  ok    when her role no longer allows a writer, it waits for the owner again
+  ok    turned back on by the owner once her role allows it
+  ok    and when Gia leaves, it goes with her, for good
+  ok    claimed by the owner as theirs
+  ok    it stays on when a teammate leaves
+
+M5 (c): when the sweep after a removal fails, the route says to repeat it, and repeating finishes it
+  ok    answered: repeat the removal
+  ok    Hal is off the team, and his keys are refused all the same
+  ok    repeated: answered, not a silent 404
+  ok    and the key he made in between is held for good
+
+L5: a role change that cannot be saved undoes its pause; one whose pause fails changes nothing
+  ok    the change is refused
+  ok    and the keys it paused are back on
+  ok    a pause that fails changes no role
+  ok    tried again, it goes through
+  ok    her key and the unrecorded writer wait for the owner
+  ok    and the refusal says so
+
+L7: turning a key back on says it will not be paused by the rule again, before it is done
+  ok    the note for a key paused for its maker's role
+  ok    and for one given to a teammate, it says it becomes theirs and when it stops
+  ok    and for one nobody is recorded as making, it says it becomes theirs too
+  ok    the panel asks with it before turning on
+
+M4: a move whose team cannot be saved puts the keys back on the old address
+  ok    the key still reads as Fin's
+  ok    and works
+
+L6: rewriting who made a key never brings back one revoked meanwhile
+  ok    the revoked key's record stays gone
+
+N1: a key written as its maker is demoted, checked against the old role, is refused at the door by the new one
+  ok    made and not paused by the route, which saw the old role
+  ok    refused at the door: the role does not allow it
+  ok    an Admin's key works again
+
+N3: a demotion that pauses keys nobody is recorded as making tells the owner, and says so plainly
+  ok    one email to the owner, naming the key
+  ok    its refusal says nobody is recorded as its maker, not whose role
+
+N4: removing an address that was never on the team is not found, and touches nothing
+  ok    404 not_found
+  ok    no key paused and nobody emailed
+
+N2: a teammate leaving never reads the team in the middle of a move
+  ok    the move went through
+  ok    and Fin's key was never held
+
+N5: a rewrite that cannot finish throws, so a move is undone
+  ok    the membership stayed on the address before
+  ok    and the key is still Fin's there, and works
+
+N6: the door reads the team as the studio does: a member it would not accept matches nobody
+  ok    a member with a role the studio does not know counts for nothing
+
+The door still fits an API request's own commands
+  ok    at most 20 commands and the take
+
+A1 (2): on a role change, a turned-on key whose maker matches nobody is held again, and the owner told
+  ok    held as unmatched again
+  ok    and the owner is told, with the likely cause
+
+A2: the refusal and the panel name the likely cause and how to check
+  ok    the API says the secret most likely changed, and to check whose it is
+  ok    so does the panel
+
+N5 note: when the first sweep of a removal cannot finish, it is undone and the person stays
+  ok    refused, and Gia stays on the team
+  ok    her key's hold and maker are back, and it works
+
+C3-121 GRAVE: with the rule on, a key without a second step is refused at the door even when no sweep held it
+  ok    the switch answers that it did not finish, the rule on
+  ok    no sweep held Jo's key
+  ok    but the door refuses it, as the rule asks
+  ok    and an endpoint it added hears nothing
+  ok    a key made with a second step still works under the rule
+
+C3-121 MÉDIO (a): a removal whose team cannot be written undoes its first sweep
+  ok    refused, and Leo is still on the team
+  ok    his key is not held for good, keeps its maker, and works
+
+C3-121 MÉDIO (b): a hold written whose answer is lost is undone all the same
+  ok    refused, and Leo is still on the team
+  ok    the hold that was written goes back, and the key works
+  ok    a removal that goes through still holds it for good
+
+The developers page names the answer
+  ok    403 key_paused is listed
+  ok    with what happens to the endpoints a key added
+
+187 checks, all passing.
+S_LOOPBACK 0
+S_VOLUME {"runs":4150,"mocks":17}
+a webhook delivery failed 5970969ab8e44abda3fb41f093b4c0f5 dlv_8cf19de46bf9d21f29d37c98 Error: MemoryRedis: unsupported EVAL
+    at MemoryRedis.run ([stdin]:34548:121)
+    at [stdin]:33508:72
+    at Array.map (<anonymous>)
+    at MemoryRedis.pipeline ([stdin]:33508:54)
+    at store.pipeline ([stdin]:150591:21)
+    at redisPipeline ([stdin]:35468:41)
+    at claim ([stdin]:76518:23)
+    at [stdin]:76594:19
+    at soon ([stdin]:76529:12)
+    at emitEvent ([stdin]:76591:9)
+a webhook delivery failed 5970969ab8e44abda3fb41f093b4c0f5 dlv_fa3e124e3598ced9d3f297fa Error: MemoryRedis: unsupported EVAL
+    at MemoryRedis.run ([stdin]:34548:121)
+    at [stdin]:33508:72
+    at Array.map (<anonymous>)
+    at MemoryRedis.pipeline ([stdin]:33508:54)
+    at store.pipeline ([stdin]:150591:21)
+    at redisPipeline ([stdin]:35468:41)
+    at claim ([stdin]:76518:23)
+    at [stdin]:76594:19
+    at async emitEvent ([stdin]:76591:3)
+    at async main ([stdin]:150714:54)
+turning on the team's two-step rule failed; its pause is undone Error: a stand-in for a failed write
+    at hook ([stdin]:150749:11)
+    at store.pipeline ([stdin]:150590:19)
+    at redisPipeline ([stdin]:35468:41)
+    at saveTeam ([stdin]:77259:9)
+    at [stdin]:77272:11
+    at async withLock ([stdin]:35580:12)
+    at async setRequireTwoStep ([stdin]:77270:3)
+    at async POST2 ([stdin]:146879:9)
+    at async call2 ([stdin]:150643:22)
+    at async team ([stdin]:150653:55)
+email rejected 422
+a webhook delivery failed 5970969ab8e44abda3fb41f093b4c0f5 dlv_0fc14ec67003fd70fd8d4654 Error: MemoryRedis: unsupported EVAL
+    at MemoryRedis.run ([stdin]:34548:121)
+    at [stdin]:33508:72
+    at Array.map (<anonymous>)
+    at MemoryRedis.pipeline ([stdin]:33508:54)
+    at store.pipeline ([stdin]:150591:21)
+    at redisPipeline ([stdin]:35468:41)
+    at claim ([stdin]:76518:23)
+    at [stdin]:76594:19
+    at soon ([stdin]:76529:12)
+    at emitEvent ([stdin]:76591:9)
+a webhook delivery failed 5970969ab8e44abda3fb41f093b4c0f5 dlv_e3c00cb585b2a73f28e66e4e Error: MemoryRedis: unsupported EVAL
+    at MemoryRedis.run ([stdin]:34548:121)
+    at [stdin]:33508:72
+    at Array.map (<anonymous>)
+    at MemoryRedis.pipeline ([stdin]:33508:54)
+    at store.pipeline ([stdin]:150591:21)
+    at redisPipeline ([stdin]:35468:41)
+    at claim ([stdin]:76518:23)
+    at [stdin]:76594:19
+    at soon ([stdin]:76529:12)
+    at emitEvent ([stdin]:76591:9)
+a webhook delivery failed 5970969ab8e44abda3fb41f093b4c0f5 dlv_65375daa5a5592148f23c4da Error: MemoryRedis: unsupported EVAL
+    at MemoryRedis.run ([stdin]:34548:121)
+    at [stdin]:33508:72
+    at Array.map (<anonymous>)
+    at MemoryRedis.pipeline ([stdin]:33508:54)
+    at store.pipeline ([stdin]:150591:21)
+    at redisPipeline ([stdin]:35468:41)
+    at claim ([stdin]:76518:23)
+    at [stdin]:76594:19
+    at async emitEvent ([stdin]:76591:3)
+    at async main ([stdin]:150805:65)
+a webhook delivery failed 5970969ab8e44abda3fb41f093b4c0f5 dlv_a91ade779653182d32de5ea8 Error: MemoryRedis: unsupported EVAL
+    at MemoryRedis.run ([stdin]:34548:121)
+    at [stdin]:33508:72
+    at Array.map (<anonymous>)
+    at MemoryRedis.pipeline ([stdin]:33508:54)
+    at store.pipeline ([stdin]:150591:21)
+    at redisPipeline ([stdin]:35468:41)
+    at claim ([stdin]:76518:23)
+    at [stdin]:76594:19
+    at soon ([stdin]:76529:12)
+    at emitEvent ([stdin]:76591:9)
+pausing API keys before the team's two-step rule failed; the rule was not saved Error: a stand-in for a pipeline cut short
+    at hook ([stdin]:150958:11)
+    at store.pipeline ([stdin]:150590:19)
+    at redisPipeline ([stdin]:35468:41)
+    at swapHolds ([stdin]:75673:27)
+    at applyPause ([stdin]:76945:53)
+    at async POST2 ([stdin]:146873:17)
+    at async call2 ([stdin]:150643:22)
+    at async team ([stdin]:150653:55)
+    at async main ([stdin]:150960:20)
+turning on the team's two-step rule failed and the team could not be read; the pause stands Error: a stand-in for a failed write
+    at hook ([stdin]:150973:13)
+    at store.pipeline ([stdin]:150590:19)
+    at redisPipeline ([stdin]:35468:41)
+    at saveTeam ([stdin]:77259:9)
+    at [stdin]:77272:11
+    at async withLock ([stdin]:35580:12)
+    at async setRequireTwoStep ([stdin]:77270:3)
+    at async POST2 ([stdin]:146879:9)
+    at async call2 ([stdin]:150643:22)
+    at async team ([stdin]:150653:55)
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address Error: a stand-in for a failed rewrite
+    at hook ([stdin]:151031:11)
+    at store.pipeline ([stdin]:150590:19)
+    at redisPipeline ([stdin]:35468:41)
+    at rewriteMakers ([stdin]:75743:29)
+    at async movedMaker ([stdin]:77072:3)
+    at async [stdin]:77489:9
+    at async withLock ([stdin]:35580:12)
+    at async moveMemberships ([stdin]:77483:18)
+    at async main ([stdin]:151033:3)
+pausing a former teammate's API keys after taking them off failed; the removal is to be repeated Error: a stand-in for a failed sweep
+    at hook ([stdin]:151127:13)
+    at async store.pipeline ([stdin]:150590:13)
+    at async keyRecords ([stdin]:75650:30)
+    at async Promise.all (index 0)
+    at async [stdin]:76970:29
+    at async withLock ([stdin]:35580:12)
+    at async removeMember ([stdin]:77460:14)
+    at async POST2 ([stdin]:146841:23)
+    at async call2 ([stdin]:150643:22)
+    at async team ([stdin]:150653:55)
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address Error: The records of some API keys kept changing while their maker was rewritten.
+    at rewriteMakers ([stdin]:75742:27)
+    at async movedMaker ([stdin]:77072:3)
+    at async [stdin]:77489:9
+    at async withLock ([stdin]:35580:12)
+    at async moveMemberships ([stdin]:77483:18)
+    at async main ([stdin]:151265:3)
+finishing the team's two-step rule failed; pressing again finishes it Error: a stand-in for the second sweep failing
+    at hook ([stdin]:151344:13)
+    at store.pipeline ([stdin]:150590:19)
+    at redisPipeline ([stdin]:35468:41)
+    at keyRecords ([stdin]:75650:36)
+    at planPause ([stdin]:76940:46)
+    at pauseForRule ([stdin]:76949:42)
+    at finish ([stdin]:146910:21)
+    at POST2 ([stdin]:146891:14)
+    at async call2 ([stdin]:150643:22)
+    at async team ([stdin]:150653:55)
+
+## /tmp/s3096-jBLqNK
+
+LOW 1: a delivery held on an unreadable key, then refused because the month is used, keeps no message
+  FAIL  held on the unread key: waiting, one try, marked as not counted by the month
+        expected ["retrying",1,false]
+        got      ["retrying",1,null]
+  ok    the key reads again but the month is used: failed, off the queue, nothing sent
+  FAIL  never counted by the month, so its message is not kept past it (no body, given up)
+        expected ["",true]
+        got      ["{\"id\":\"evt_402e81c418b7954a7148cfb179cb2d4d\",\"type\":\"sale.completed\",\"created\":1794089538,\"store\":{\"handle\":\"counted-shop-one\",\"name\":\"Shop 1\",\"url\":\"https://marktmorgen.com/@counted-shop-one\"},\"data\":{\"amount_cents\":6900}}",null]
+  ok    so it cannot be sent again by hand for free
+
+LOW 1: a delivery the month counted at an earlier try keeps its message, even after a held try
+  FAIL  its first try was counted and answered 500: marked as counted
+        expected ["retrying",1,true,1]
+        got      ["retrying",1,null,1]
+  FAIL  a held try after it keeps the mark: still counted, nothing sent
+        expected ["retrying",2,true,1]
+        got      ["retrying",2,null,1]
+  ok    refused because the month is used: failed, its message kept
+
+LOW 1: the marker is read strictly; a delivery written before it keeps the old reading (rule 24)
+  ok    no marker, tried before (written before the marker: the month counted it): message kept
+  ok    no marker, never tried: message not kept
+  FAIL  marked counted, never tried (counted by a paused try): message kept
+        expected ["failed",true]
+        got      ["failed",false]
+  FAIL  marked not counted, tried twice (held tries): message not kept
+        expected ["failed",false]
+        got      ["failed",true]
+  FAIL  an off-shape marker is never read as not counted: message kept
+        expected ["failed",true]
+        got      ["failed",false]
+  ok    an off-shape count of tries is never read as never tried: message kept
+  ok    none of them was sent
+
+LOW 2: a delivery failed on an unreadable key says a resend needs the key to be read again
+  ok    failed after its last try, its message kept
+  FAIL  its words tie the resend to the key being read again
+        expected true
+        got      false
+  FAIL  they never offer a resend with no condition
+        expected false
+        got      true
+
+LOW 4: a delivery whose month's count stays unknown is tried on the schedule, then failed with the reason
+  FAIL  its first try is counted as a try and waits; marked as maybe counted by the month (the count's reply was unknown), so its message is never dropped on a guess
+        expected ["retrying",1,true,true]
+        got      ["retrying",0,null,true]
+  FAIL  the job takes it at most once per try left (6), not every five minutes for seven days
+        expected true
+        got      false
+  FAIL  it ends failed after its last try, off the queue, never left to expire unsaid
+        expected ["failed",7,false]
+        got      ["retrying",0,true]
+  FAIL  with the reason: the month's deliveries could not be counted, and a resend once they can be
+        expected [true,true]
+        got      [false,false]
+  ok    its message is kept, so it can be sent again by hand
+  ok    the endpoint was never called while the count was unknown
+  ok    sent again by hand while the count is still unknown, nothing goes out
+  FAIL  once the count can be made, the owner sends it again by hand, once
+        expected [true,1]
+        got      [false,0]
+
+LOW 4: a delivery whose count's reply was unknown keeps its message when the month is then used (rule 24)
+  FAIL  refused because the month is used: failed, nothing sent, its message kept (the unknown count may have landed)
+        expected ["failed",0,true,null]
+        got      ["failed",0,false,true]
+
+26 checks, 15 failing.
+S_LOOPBACK 1
+S_VOLUME {"runs":11049,"mocks":0}
+
+## /tmp/s3096-jb9Cpd
+
+A delivery that fails for good
+  ok    it is failed after every try
+
+Sent again by hand
+  ok    the same message and event id, signed afresh with the secret
+  ok    delivered, as a new line naming the one it sends again
+  ok    one of the month's deliveries
+  ok    a delivered one is never resent by hand
+  ok    another store cannot resend it
+  ok    a made-up id is refused
+  ok    once delivered by hand, not again
+  ok    the studio sees which resend an original has
+
+Tried once, never put back on the schedule
+  ok    a failed resend is shown failed, with nothing waiting
+  ok    the job does not try it again
+  ok    a copy that failed is not sent again itself; the original is
+  ok    after a failed resend it may be sent again
+
+Two presses at once send once
+  ok    one goes, the other is told it was sent again
+
+The minute's limit, shared with tests
+  ok    past the limit a minute, refused
+
+Not to an endpoint that no longer hears it, nor to one removed
+  ok    the event taken off the endpoint: refused
+  ok    the endpoint removed: refused
+
+The studio's route offers it
+  ok    action resend, paused like a test
+
+18 checks, all passing.
+S_LOOPBACK 38
+S_VOLUME {"runs":746,"mocks":0}
+
+## /tmp/s3096-n2w6Oq
+
+A hold this code does not know refuses the key, and the owner can still see and revoke it
+  FAIL  resolveKey refuses it (paused), never accepts it
+        expected true
+        got      false
+  FAIL  keyStates reads it as paused and the other key as live, the list does not fail
+        expected {"5aa34f30d507":"live","0e9aead3b15c":"paused"}
+        got      "unknown"
+  FAIL  keyRecords lists both keys, the odd one with an unknown hold
+        expected [["5aa34f30d507",null],["0e9aead3b15c","unknown"]]
+        got      "unknown"
+  FAIL  the studio shows it to the owner, paused, not offered to turn on, offered to revoke
+        expected [true,"unknown",false,true]
+        got      "unknown"
+  FAIL  the owner revokes it
+        expected "ok"
+        got      "unknown"
+  FAIL  and it opens nothing any more
+        expected null
+        got      {"sid":"14b218bd44ab4cce8483ea9c0fca3a92","id":"0e9aead3b15c","write":false,"agent":"none","paused":false}
+
+A teammate whose key has a hold this code does not know can still be taken off the team
+  FAIL  her key is refused meanwhile
+        expected true
+        got      false
+  FAIL  the removal goes through
+        expected true
+        got      "unknown"
+  FAIL  she is off the team
+        expected false
+        got      true
+  FAIL  invited back, her old key stays refused
+        expected true
+        got      false
+
+A team record that does not read never turns the two-step rule off
+  ok    setup: under the rule the old key is paused
+  FAIL  broken JSON: resolveKey never accepts the key
+        expected true
+        got      false
+  FAIL  broken JSON: keyStates never reads it as live
+        expected true
+        got      false
+  FAIL  a member entry that is not an object: resolveKey never accepts the key
+        expected true
+        got      false
+  FAIL  a member entry that is not an object: keyStates never reads it as live
+        expected true
+        got      false
+  FAIL  a rule that is not true or false: resolveKey never accepts the key
+        expected true
+        got      false
+  FAIL  a rule that is not true or false: keyStates never reads it as live
+        expected true
+        got      false
+  ok    a record without its lists: resolveKey never accepts the key
+  ok    a record without its lists: keyStates never reads it as live
+  FAIL  a reply that is not text: resolveKey never accepts the key
+        expected true
+        got      false
+  FAIL  a reply that is not text: keyStates never reads it as live
+        expected true
+        got      false
+  ok    no team record at all (null) is still no team: the key works
+
+One key whose state cannot be read holds back only its own endpoint; the others are sent the event
+  FAIL  the event is written for the studio endpoint and the unread key's endpoint, not the paused key's
+        expected 2
+        got      "unknown"
+  FAIL  the studio endpoint's delivery was tried and waits for its next try
+        expected ["retrying",1,true,false]
+        got      [null,null,false,false]
+  FAIL  the unread key's endpoint is held back, not dropped: its try counted, the endpoint never called, still on the queue
+        expected ["retrying",1,true,true]
+        got      [null,null,false,false]
+  ok    the paused key's endpoint gets nothing, as before
+
+26 checks, 21 failing.
+S_LOOPBACK 0
+S_VOLUME {"runs":244,"mocks":0}
+
+## /tmp/s3096-sArWMv
+
+A delivery held by a key whose state stays unreadable is tried on the schedule, then failed with the reason
+  ok    the event is written for the unread key's endpoint and the studio endpoint, not the paused key's
+  ok    the studio endpoint is sent the event at once, though the unread key's endpoint comes first
+  (seven days on the test clock: 6 reads of the key, 6 tries taken by the job, 6 error lines)
+  ok    over the seven days a delivery is kept, its key is read at most once per try left (6), never at every lease
+  ok    the job takes it at most once per try left (6), so it holds no slot of deliverDue at every lease
+  ok    at most one error line per try (7), not one every ten minutes
+  ok    it ends failed after its last try, off the queue, with the reason, never left to expire unsaid
+  ok    its message is kept, so it can be sent again by hand
+  ok    the unread key's endpoint was never sent anything on a guess
+  ok    the paused key's endpoint was never sent anything
+  ok    the studio endpoint was sent it once, not again
+  ok    the held tries took none of the month's webhook deliveries: only the studio's one was counted
+  ok    sent again by hand while the key still cannot be read, nothing goes out
+  ok    once the key reads as in use, the owner sends it again by hand, once
+
+A key that reads again before the last try: the held delivery is sent exactly once
+  ok    while the key cannot be read it waits on the queue, with tries counted and nothing sent
+  ok    when it reads again the next try sends it, once, and it leaves the queue
+
+A held delivery whose key turns out paused is never sent
+  ok    its try reads the key as paused: failed, off the queue, nothing sent
+  ok    the paused key's endpoint still received nothing at all
+
+One delivery whose first try throws does not keep the endpoints after it from being sent at once
+  ok    both deliveries are written
+  ok    the second endpoint is sent the event at once
+  ok    the first is not lost: written and still on the queue, not sent
+  ok    the job then sends the first, once, and the second is not sent again
+
+21 checks, all passing.
+S_LOOPBACK 7
+S_VOLUME {"runs":1844,"mocks":0}
+
+## /tmp/s3096-szkc84
+
+4: forgetNoted never deletes the note without the records it leads to
+  ok    a note read as nothing: fails, the note and its record kept
+  ok    a note read as null: fails, the note and its record kept
+  ok    a note read as "nl:x": fails, the note and its record kept
+  ok    a note read as 0: fails, the note and its record kept
+  ok    a note read as {}: fails, the note and its record kept
+  ok    a note read as {"0":"nl:x"}: fails, the note and its record kept
+  ok    a note read as ["nl:x",7]: fails, the note and its record kept
+  ok    a note read as [null]: fails, the note and its record kept
+  ok    an old-kind note read in another shape: the same
+  ok    a pipeline answering one reply for two commands: the same
+  ok    a deletion answered nothing: not a receipt of none, the step fails
+  ok    a deletion answered null: not a receipt of none, the step fails
+  ok    a deletion answered "1": not a receipt of none, the step fails
+  ok    a deletion answered -1: not a receipt of none, the step fails
+  ok    a deletion answered 1.5: not a receipt of none, the step fails
+  ok    a deletion answered null: not a receipt of none, the step fails
+  ok    a deletion answered [1]: not a receipt of none, the step fails
+  ok    a deletion answered {}: not a receipt of none, the step fails
+  ok    through the erasure's own step: it fails (said as an unfinished step), the note kept
+  ok    read in its shape: the record and the note go, with a count
+
+5: endLocked keeps the locked sessions it could not read, and says so
+  ok    a session let in without the second step, locked
+  ok    Cancel with the set read in another shape: canceled, said as not logged out; the session still listed and still locked
+  ok    and still locked once the day it would have lifted is past (a week, and nearly the session's thirty days)
+  ok    and the email says they could not be logged out, never that they were
+  ok    what it says stays locked is the one list of what a locked session cannot do
+  ok    the studio says it inline, never in a passing toast, and no longer promises they are logged out at once
+  ok    a removal set with the sessions unread: kept, its browser still open, said as not logged out
+  ok    and the email says so, never that they were
+  ok    asked again later: still said as not logged out
+  ok    a full login with the set unread: the session kept and locked, the set kept
+  ok    and the email asks for Log out of all devices, never says they were logged out
+  ok    read in its shape: logged out, the set gone, and the email says so
+  ok    (a locked session opened directly is listed too)
+  ok    (and logged out by the next full login)
+
+6: dropSecondStep and endAllSessions never read unknown as no sessions
+  ok    sessions read as nothing: fails, nobody logged out, the set kept
+  ok    sessions read as null: fails, nobody logged out, the set kept
+  ok    sessions read as "nl:x": fails, nobody logged out, the set kept
+  ok    sessions read as 0: fails, nobody logged out, the set kept
+  ok    sessions read as {}: fails, nobody logged out, the set kept
+  ok    sessions read as {"0":"nl:x"}: fails, nobody logged out, the set kept
+  ok    sessions read as ["nl:x",7]: fails, nobody logged out, the set kept
+  ok    sessions read as [null]: fails, nobody logged out, the set kept
+  ok    marks answered short: fails, nobody logged out
+  ok    a mark of another shape: fails, nobody logged out
+  ok    the error is the one callers tell apart
+  ok    read in their shape: the other is logged out, the one asking keeps its session
+  ok    a passkey removed with its sessions unread: gone, its session not said as logged out
+  ok    and its email says to log them out
+  ok    Log out of all devices with the set unread: unknown, not none; the set kept; the page says the others may still be in
+  ok    the sign-in page has words for it, said as not done
+  ok    read in its shape: done, and said as done
+  ok    the app turned off with its sessions unread: off, said as not logged out
+  ok    the studio says each inline, never in a passing toast
+  ok    unread, the new app is not turned on
+  ok    read in their shape: on, and the old app's browser is logged out
+  ok    a move with the sessions unread: it stands, and says other sessions may still be open
+  ok    the studio has words for it
+  ok    an undone move whose sessions could not be read is left marked to repair
+
+22: unknown counts as moving
+  ok    nothing moving, read in its shape: not moving
+  ok    a mark read as nothing: moving, so nothing a move forbids is let through
+  ok    a mark read as null: moving, so nothing a move forbids is let through
+  ok    a mark read as "1": moving, so nothing a move forbids is let through
+  ok    a mark read as -1: moving, so nothing a move forbids is let through
+  ok    a mark read as 1.5: moving, so nothing a move forbids is let through
+  ok    a mark read as null: moving, so nothing a move forbids is let through
+  ok    a mark read as [1]: moving, so nothing a move forbids is let through
+  ok    a mark read as {}: moving, so nothing a move forbids is let through
+  ok    one reply for two marks: moving
+
+19: forgetStoreWebhooks never deletes the log without the deliveries in it
+  ok    a log read as nothing: fails, the log and the body kept
+  ok    a log read as null: fails, the log and the body kept
+  ok    a log read as "nl:x": fails, the log and the body kept
+  ok    a log read as 0: fails, the log and the body kept
+  ok    a log read as {}: fails, the log and the body kept
+  ok    a log read as {"0":"nl:x"}: fails, the log and the body kept
+  ok    a log read as ["nl:x",7]: fails, the log and the body kept
+  ok    a log read as [null]: fails, the log and the body kept
+  ok    the endpoints told read in another shape: the same
+  ok    the endpoints read in another shape: the same
+  ok    one reply for five commands: the same
+  ok    read in its shape: the log and the body go
+
+23: the keys are said as unread, never as none
+  ok    the list read as nothing: unread, not empty
+  ok    the list read as null: unread, not empty
+  ok    the list read as "nl:x": unread, not empty
+  ok    the list read as 0: unread, not empty
+  ok    the list read as {}: unread, not empty
+  ok    the list read as {"0":"nl:x"}: unread, not empty
+  ok    the list read as ["nl:x",7]: unread, not empty
+  ok    the list read as [null]: unread, not empty
+  ok    the list read as ["only-a-field"]: unread, not empty
+  ok    the studio's read of the keys (shownKeys) and the pause code's read both fail, never no keys
+  ok    a deleted store's keys with the list unread: fails, and the key still in the list it is checked against
+  ok    a count read as nothing: no key made, said as unavailable
+  ok    a count read as null: no key made, said as unavailable
+  ok    a count read as "1": no key made, said as unavailable
+  ok    a count read as -1: no key made, said as unavailable
+  ok    a count read as 1.5: no key made, said as unavailable
+  ok    a count read as null: no key made, said as unavailable
+  ok    a count read as [1]: no key made, said as unavailable
+  ok    a count read as {}: no key made, said as unavailable
+  ok    the studio says it could not read the keys, never 0 keys
+  ok    the studio passes an unread list as such, and the route sends it as null after a change that was made
+  ok    (the words)
+  ok    (read in its shape, the key is listed)
+  ok    (and a deleted store's keys go)
+
+C (review of #2556): two-step login moved onto an address takes the marks an earlier app of it left
+  ok    unread, nothing moves
+  ok    read in their shape: it moves, and the old mark's browser is logged out
+
+Review of #2556 at df8030300: lockedUntil costs one command for every other account
+  ok    another account's session: one command; the kept account's own: four at most; the locked one: still locked
+
+Review of #2556 at c6267d1e: the list of kept accounts never grows past its ceiling, nor twice for one account
+  ok    the same account failing again adds nothing
+  ok    past 100 accounts it never grows: at most 100 tags of 41 bytes
+  ok    and one more adds nothing
+  ok    over the ceiling: a kept locked session stays locked, a session never locked is not, at four commands
+  ok    and it is said: counted for the month, the owner's line with numbers only, the extra within its cost line
+
+Review of #2556 at df8030300: a move refused because the new address's sessions are unread says so
+  ok    not moved, and said as a move that could not finish, never as the address having its own login
+
+Review of #2556, LEVE 3: a deleted store's webhooks and keys that could not be forgotten are tried again, counted, never only logged
+  ok    queued once; failed again each day, not given up before the last try
+  ok    given up, it leaves the daily line for the kept ones, never read by the daily run
+  ok    the last try gives it up, it is kept, and is never tried again
+  ok    the owner's report says what is still kept, with numbers only: no store, no key, no person
+  ok    unread, the report says it is unknown, never nothing
+  ok    tried with the real forgets: done, out of the line, the log, the bodies and the keys gone, within FORGET_TRY_COMMANDS
+  ok    a line read in another shape: the run fails, it never reads as an empty line
+  ok    a delete whose first try failed puts it in line; the daily closing job tries the line again
+
+5 (review of #2556): a lock that could not be lifted by logging out outlasts its day, never the session
+  ok    RESET_DAYS + 1 later: the session it could not log out is still locked; one opened after it is not
+  ok    a lock in the old format, its key lapsed: still locked while listed; a session never locked is not
+  ok    (whether it is listed answered in another shape: locked)
+  ok    thirty days on: the session itself is over, so there is nothing left to lock
+
+125 checks, all passing.
+S_LOOPBACK 0
+S_VOLUME {"runs":2702,"mocks":131}
+more than 100 accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until 31 days after the last
+more than 100 accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until 31 days after the last
+more than 100 accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until 31 days after the last
+more than 100 accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until 31 days after the last
+
+## /tmp/s3096-tHCWwd
+
+LOW 1: a delivery held on an unreadable key, then refused because the month is used, keeps no message
+  ok    held on the unread key: waiting, one try, marked as not counted by the month
+  ok    the key reads again but the month is used: failed, off the queue, nothing sent
+  ok    never counted by the month, so its message is not kept past it (no body, given up)
+  ok    so it cannot be sent again by hand for free
+
+LOW 1: a delivery the month counted at an earlier try keeps its message, even after a held try
+  ok    its first try was counted and answered 500: marked as counted
+  ok    a held try after it keeps the mark: still counted, nothing sent
+  ok    refused because the month is used: failed, its message kept
+
+LOW 1: the marker is read strictly; a delivery written before it keeps the old reading (rule 24)
+  ok    no marker, tried before (written before the marker: the month counted it): message kept
+  ok    no marker, never tried: message not kept
+  ok    marked counted, never tried (counted by a paused try): message kept
+  ok    marked not counted, tried twice (held tries): message not kept
+  ok    an off-shape marker is never read as not counted: message kept
+  ok    an off-shape count of tries is never read as never tried: message kept
+  ok    none of them was sent
+
+LOW 2: a delivery failed on an unreadable key says a resend needs the key to be read again
+  ok    failed after its last try, its message kept
+  ok    its words tie the resend to the key being read again
+  ok    they never offer a resend with no condition
+
+LOW 4: a delivery whose month's count stays unknown is tried on the schedule, then failed with the reason
+  ok    its first try is counted as a try and waits; marked as maybe counted by the month (the count's reply was unknown), so its message is never dropped on a guess
+  ok    the job takes it at most once per try left (6), not every five minutes for seven days
+  ok    it ends failed after its last try, off the queue, never left to expire unsaid
+  ok    with the reason: the month's deliveries could not be counted, and a resend once they can be
+  ok    its message is kept, so it can be sent again by hand
+  ok    the endpoint was never called while the count was unknown
+  ok    sent again by hand while the count is still unknown, nothing goes out
+  ok    once the count can be made, the owner sends it again by hand, once
+
+LOW 4: a delivery whose count's reply was unknown keeps its message when the month is then used (rule 24)
+  ok    refused because the month is used: failed, nothing sent, its message kept (the unknown count may have landed)
+
+26 checks, all passing.
+S_LOOPBACK 2
+S_VOLUME {"runs":1939,"mocks":0}
+
+## /tmp/s3096-xYNPN4
+
+A delivery held by a key whose state stays unreadable is tried on the schedule, then failed with the reason
+  ok    the event is written for the unread key's endpoint and the studio endpoint, not the paused key's
+  FAIL  the studio endpoint is sent the event at once, though the unread key's endpoint comes first
+        expected 1
+        got      0
+  (seven days on the test clock: 916 reads of the key, 918 tries taken by the job, 916 error lines)
+  FAIL  over the seven days a delivery is kept, its key is read at most once per try left (6), never at every lease
+        expected true
+        got      false
+  FAIL  the job takes it at most once per try left (6), so it holds no slot of deliverDue at every lease
+        expected true
+        got      false
+  FAIL  at most one error line per try (7), not one every ten minutes
+        expected true
+        got      false
+  FAIL  it ends failed after its last try, off the queue, with the reason, never left to expire unsaid
+        expected ["failed",7,false,true]
+        got      [null,null,false,false]
+  FAIL  its message is kept, so it can be sent again by hand
+        expected true
+        got      false
+  ok    the unread key's endpoint was never sent anything on a guess
+  ok    the paused key's endpoint was never sent anything
+  ok    the studio endpoint was sent it once, not again
+  ok    the held tries took none of the month's webhook deliveries: only the studio's one was counted
+  FAIL  sent again by hand while the key still cannot be read, nothing goes out
+        expected ["refused",0]
+        got      [false,0]
+  FAIL  once the key reads as in use, the owner sends it again by hand, once
+        expected [true,1]
+        got      [false,0]
+
+A key that reads again before the last try: the held delivery is sent exactly once
+  FAIL  while the key cannot be read it waits on the queue, with tries counted and nothing sent
+        expected ["retrying",true,0]
+        got      ["queued",true,0]
+  ok    when it reads again the next try sends it, once, and it leaves the queue
+
+A held delivery whose key turns out paused is never sent
+  ok    its try reads the key as paused: failed, off the queue, nothing sent
+  ok    the paused key's endpoint still received nothing at all
+
+One delivery whose first try throws does not keep the endpoints after it from being sent at once
+  ok    both deliveries are written
+  FAIL  the second endpoint is sent the event at once
+        expected 1
+        got      0
+  ok    the first is not lost: written and still on the queue, not sent
+  ok    the job then sends the first, once, and the second is not sent again
+
+21 checks, 10 failing.
+S_LOOPBACK 6
+S_VOLUME {"runs":9991,"mocks":0}
+
+Types strict9roots EXIT0; lint11paths EXIT0.
+
+Final staged public-data scanner:4311 tracked files /0 corrections /EXIT0

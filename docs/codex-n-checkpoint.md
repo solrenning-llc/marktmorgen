@@ -1889,3 +1889,34 @@ H2/1043 forneceu **C5focal2451 JÁPUBLICADO6704578927** noEXATO33577, agora recu
 2544/447e HOLDA3cancel_paid25→27/ALTOC5latenteM recebidos,nãoexecutados/fix;2608/0fadclassificaçãoR2/leaseC5#2888pendentes,provasimutáveis/retry127378763596consumido;2674/5bcdHOLD2576legítimo. Novo2576aa9ef969recebeuG5812804024getterFECHADO,masNÃOinferirmerg e;helper2784/scanner2773main/REDspreservados/2421674inválido. NÃ Oapi-write/waitlistantesincorporaçãoefetiva,nãorequestguard/decoderparalelo.C6ofertaemail-syncconfigàH2ocupado,lida,nãotomadaN.
 
 Main599cc662/novehashesnormativos/caixa/reservasBYTE-ID,main-vermelho0antesenviosevidence. Nenhumproduto/refN/mainpush/CIrerun/cancel/sixthunit/foreignref/comercialalterado;únicaadmissãofila2700. BH1/buyer-library/SG227/30fila,KB9reviews/hashoficialconcluídos/2827C1revisoranunciad o,nãoduplicar. C4únicacoordena/C1nãodestinatário. Sintético/UNKNOWNnunca0/tetoANTESgasto/sempreço/limite/comissão/flags/travas/conta/pagamento/termo/chave/contato/PII. cc23e732NUNCApush. Próximoscausaisresultadofila2700,LOW/config2451,grantA32544,classificação-lease2608,2576legítimo2674ounovocorretivonominalreview;continuidadehabilitada/esperatemporária,nãovigiaemfundo.
+
+
+## 2026-11-07 12h43 Fortaleza — coordenação C1; #2451 LOWs propostos corrigidos e main necessário composto
+
+**Esta seção prevalece sobre C1OFF/somenteC4 e estado anterior do #2451.** C4-1200-C1-3/TODOS-2 e C1-1208-TODOS-1 lidas FULL: por nova ordem do dono coordenação AGORA Claude1 desde12h00, Claude4 executor. C1-1217 também FULL: antes de nova admissão, main fresco e git merge-tree --write-tree limpo/state não dirty; tocar test-config/registro/documentos gerados/AGENTS exige composição necessária e NOVE novos. FILA LIGADA1046 vigente, nenhum merge direto/PUTmerge. C1-1232 atribuiu a Claude3 a descentralização dos aliases; N não duplica essa unidade. MAINVERDE vigente/main-vermelho0 antes dos envios; novo vermelho suspende envios.
+
+Checkpoint anterior b323f9a1083e303e4b03b63dd0894d2152b1843d/blob02d31c0a4dd2e7a19cec69770405a785f227e4fb FULL265871 preservado inteiro. Sem recriar heads/REDs, zero subagentes/sexta unidade. Claim/RESERVA ANTES fonte: CXN-20261107-1227-C1-1/CASaccffb860cdc0d70c85c58a937cd624514354bc9, só listTargets/PlatformError, FAQ e seus dois testes, test-config união main+aliasN. Nenhum email-sync/UI/tagId/reserva documental tocado.
+
+### #2451 novo final e43c230e3dce8375c563ad0e3433196fd682a65c
+
+MESMO codex/n-email-target-evidence, tree410fa6c77749004039b0f09a082aeafedc2f512d; parents RED8da764dfe41807281155db47a9fdf18356474278 + main PINADO278effa5348b97d9db50c8a6d447804efeb9be41/treef029ebdb34dc177049452ec57f3f3044809c25cf. UMupdateNORMALexpected33577 reunindo corretivo+integração necessária do conflito test-config, não push vazio/mainchase. Native Git fulltree4270blobs de main +6 próprios = API tree/readbacks EXATOS. Isso NÃO é alegação de git merge-tree de commits executado: C1-1217 freshmerge-tree e demais gates permanecem antes de eventual enqueue.
+
+Crédito C5/6704578927: Mpaginação+2LOW anteriores FECHADOS; agora propõe corrigir os novos LOWA/B, NÃOautofechados. Conta válida com100destinos e continuação explícita recebe mensagem da própria conta, orientação usar conta com menos destinos, nothing changed/retryfalse. UNKNOWN/malformed mantém rejeição/retry anterior. FAQ explica uma página/preservação conexão; removida guarda morta no loop já limitado. Nenhuma página extra/IO produtivo/custo/admissão/limite/plano/credencial/host/dispatch/TTL/key/flag/gate alterados.
+
+RED público codex/n-2451-one-page-wording-red@8da764dfe41807281155db47a9fdf18356474278 ANTES fonte: MESMA405/12FAIL→405/405; FAQ18/2FAIL→18/18. Originais389+16 assertivas IMUTÁVEIS nesta rodada. Após união config/dependências main, MESMAS405+18 verdes; ligados disconnect1+l10b18+person-copy5+refusals12+allowance13=49/49; total472PASS. Originais523056ec/2764,0dea intactos. Nenhum teste de UI/email-sync fonte editado.
+
+Fonte d07af5d13e9f0b21c6e43f8347216baa23068350; FAQ85156d909f0b482364f012ac26d91b682396919b; teste4878246c4a038a0f459c5db8ace8266f9b635594; FAQteste0a9bd81a84c4cfb3618e9eba137f86f926c4d94a; worlde186894b8ff755cb50a5060f2d3fc456220eb761 BYTE-ID; configf427f0356130fa4d348d05191da021df58d35bb9 mantém TODOS aliasesmain+única linhaN.
+
+StrictES2017 3raízes/722sources/0diag,224fontes repo verificadas contraPIN+overlays/0mismatch; tentativa4raízes com módulos ausentes era SETUP, nãoREDproduto/nãoTSCglobal. Lint4paths EXIT0. Scanner OFICIAL2452materializados rastreados/0 PARCIAL contra4270blobs, nativechangedpathdiff0; não rootdiffglobal/fullrepo/browser/nativeRedis/globalbuild/AAA/MRglobal. Breve overlap de linked com sessão TSC retornada ativa pela ferramenta; conclusões coletadas, nenhum subagente/asserção/teto/prazo alterado.
+
+MemoryRedis.run nested teto20k ANTESdispatch/120s512MiB256KiB porchild/fetch externo bloqueado antesgraph: targetRED/GREEN938 cada,FAQ0,disconnect110/l10b172/mirror45/refusals120/allowance1057; 0provedor real. UNKNOWN custo nunca zero, nada IO novo.
+
+Prova ROOT-ONLY MESMO codex/n-2451-pagination-evidence@b72fd1ca6a01e907425b87c13a46d0576f326818/treefb17e01eac45e1a44997d4846c0ffb65cb788441, parent0dea,28arquivos aditivos/snapshots/runner/logs/report68f2f1c6db80fafc19cd77bccd3b19c4adf0f32b READBACKEXATO. NUNCA mergear árvore prova produto. PRbody atual e focal pedido6709208113 ao novo revisor independente viaC1; C5 fora. NOVE novos NÃOinspecionados/NÃOgreen/NÃOpoll. Retryverify127163240735ESGOTADO. Nãoenqueue até focal+9NOVOS+gatesfresh.
+
+### Demais quatro e retornos preservados
+
+2700/d99a892c0c02151128b02e0b5df1c46b99993594 ENFILEIRADO evento35437581781/14:25:32Z/recibo6708163629; leitura metadata no início aindaOPEN/unmerged, nãoCIpoll/nãoreenfileirar. IndependenteC2+9d99 anteriores preservados; enqueue≠merge; LOWsupressão/C5contacts separados/P9378diretoNÃOGREEN.
+2544/447e97287e9bec0062e7878186495cb92cbdc277 HOLDA3cancel_paid25→27; ALTOACKdispatch/latenteMorderconfirmation recebidos nãoexecutados/corrigidos, reconciliação6703360303jáfeita, semgrantnovo.
+2608/0fad82a0e8fec7c1558124bb41d33afcdac1b656 R2classificação/apagamento+leaseC5#2888 pendentes/provas imutáveis/retry127378763596consumido; sem fonte ocupada.
+2674/5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3 aguarda2576 MERGElegítimo; metadata inícioaa9ef969 OPEN/unmerged, getterGfechado≠merge. NÃOapi-write/waitlist antes, helper/scanner/REDs preservados/2421674inválido.
+Review3056 N5812860289 em1a00 encerrada focal, não repetida; mesma5/7 e tipos nãoheadqualificados preservados. KB9/hash/2770/2820concluídos não duplicar. BH1/buyer-library/SG227/30fila, cincoTOTAL mantidos. Rootcc23e732 NUNCApush. Próximocausal focal/9novos2451, notíciafila2700, grantA32544, classificação/lease2608,2576legítimo oureviewnominal livre; não replayigual/CIpoll/relatório artificial. Continuidade única habilitada, sem vigia em fundo.

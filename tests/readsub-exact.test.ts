@@ -60,4 +60,25 @@ for (const [label, item, price, recurring] of [
 ] as [string, Item, Item, Item][]) {
   is(`${label}: unknown`, read(raw(item, price, recurring)), "unknown");
 }
+part("A parent record in another shape is unknown, never free, one or a month (Codex Z on #3055)");
+const withItems = (items: unknown) => ({ ...raw(), items });
+const withItem = (item: unknown) => ({ ...raw(), items: { data: [item] } });
+const withPrice = (price: unknown) => ({ ...raw(), items: { data: [{ quantity: 1, price }] } });
+const withRecurring = (recurring: unknown) => ({ ...raw(), items: { data: [{ quantity: 1, price: { unit_amount: 1500, recurring } }] } });
+for (const [label, r] of [
+  ["the price in text", withPrice("price_1")],
+  ["the price as a list", withPrice([1500])],
+  ["the recurrence in text", withRecurring("year")],
+  ["the recurrence as a list", withRecurring(["year"])],
+  ["the item in text", withItem("si_1")],
+  ["the item as a list", withItem([{ quantity: 1 }])],
+  ["the items in text", withItems("items")],
+  ["the items' list in text", withItems({ data: "si_1" })],
+  ["the items' list as a record", withItems({ data: { 0: { quantity: 1 } } })],
+] as [string, unknown][]) {
+  is(`${label}: unknown`, read(r as never), "unknown");
+}
+is("no price at all (null) still reads as before: nothing", read(withPrice(null) as never), { amount: 0, interval: "month", count: 1 });
+is("no recurrence at all (null) still reads as before: a month, once", read(withRecurring(null) as never), { amount: 1500, interval: "month", count: 1 });
+is("no items at all still reads as before: nothing a month", read(withItems(undefined) as never), { amount: 0, interval: "month", count: 1 });
 done();

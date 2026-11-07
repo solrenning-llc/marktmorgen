@@ -264,6 +264,9 @@ async function main(): Promise<void> {
   is("the page offers the action only to whoever may give", page.includes('can(view.role, "import")'), true);
 
   // The store's gifts in a day are the API's (GIVES_PER_DAY, the same count), so neither way passes it.
+  const dayKeys = async () => (await redis.keys()).filter((k: string) => k.startsWith("nl:rl:api-give:"));
+  is("the gifts above were counted in the day", (await dayKeys()).length, 1);
+  for (const key of await dayKeys()) await redisPipeline([["DEL", key]]);
   is("filled to one short of the day", await takeManyWithin("api-give", store.sid, GIVES_PER_DAY, DAY, GIVES_PER_DAY - 1), true);
   const pastDay = await post({ action: "apply", change: "give", to, emails: ["ana@example.com", "zed@example.com"], expect: 2 });
   is("past the store's gifts of the day: refused, nothing given", [pastDay.status, pastDay.body.error, await given("ana@example.com"), await given("zed@example.com")], [429, "daily_limit", [], []]);
@@ -274,7 +277,7 @@ async function main(): Promise<void> {
   is("and then the day is used", [dayUsed.status, dayUsed.body.error, await given("zed@example.com")], [429, "daily_limit", []]);
   const backAfter = await post({ action: "apply", change: "takeback", to, emails: ["ana@example.com"], expect: 1 });
   is("taking back is never held by the day", [backAfter.status, backAfter.body.changed], [200, ["ana@example.com"]]);
-  for (const key of (await redis.keys()).filter((k: string) => k.startsWith("nl:rl:api-give:"))) await redisPipeline([["DEL", key]]);
+  for (const key of await dayKeys()) await redisPipeline([["DEL", key]]);
 
   part("The screen");
   const studentLines = [line("ana@example.com", now), line("ben@example.com", now)];

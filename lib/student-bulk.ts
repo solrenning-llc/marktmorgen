@@ -21,7 +21,8 @@
 import { CONTACT_ROW_BYTES, STUDENT_ROW_BYTES } from "@/lib/api-read-rules";
 import { readAddresses, leadsKey, parseContact } from "@/lib/contacts";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
-import { STUDIO_GIVE_JOB, STUDIO_GIVE_PREFIX, grantImported, givenMany, takeGivenMany } from "@/lib/imported-purchases";
+import { GIVES_PER_DAY, GIVE_DAY_SCOPE, STUDIO_GIVE_JOB, STUDIO_GIVE_PREFIX, grantImported, givenMany, takeGivenMany } from "@/lib/imported-purchases";
+import { takeManyWithin } from "@/lib/request-guard";
 import { integrationPauseWord } from "@/lib/integration-pause";
 import { DataRoomError } from "@/lib/store-data";
 import { type Store, ensureStatsId, setPastBuyers, storeRef } from "@/lib/store";
@@ -515,6 +516,8 @@ export async function applyGive(store: Store, target: GiveTarget, ask: GiveAsk, 
     if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return refusedAs("unavailable");
     statsId = statsId ?? (await ensureStatsId(storeRef(store)))?.statsId ?? null;
     if (!statsId || !store.sid) return refusedAs("unavailable");
+    // The store's gifts of the day, the API's count too (GIVES_PER_DAY): all of them or none, never a part.
+    if (!(await takeManyWithin(GIVE_DAY_SCOPE, store.sid, GIVES_PER_DAY, 86_400, sorted.targets.length))) return refusedAs("daily_limit");
     // Marked first, so what is given is read as soon as it is written (lib/learn.ts reads gifts only of a store so marked).
     if (!store.pastBuyers && !(await setPastBuyers(storeRef(store)))?.pastBuyers) return refusedAs("unavailable");
     try {

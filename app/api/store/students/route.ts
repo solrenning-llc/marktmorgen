@@ -25,7 +25,9 @@ import { countStudio } from "@/lib/studio-route";
  *
  * Unit 2: `{ change: "give" | "takeback", to, emails }` gives another of the
  * store's courses (`to`, a product id that givable() accepts) with no payment,
- * or takes back one the studio gave, the same review, `expect` and 409; the
+ * or takes back one the studio gave, for whoever may say who owns what
+ * ("import", as the API's gift), within the store's gifts of the day (the
+ * API's count, GIVES_PER_DAY), the same review, `expect` and 409; the
  * studio requests its reads take are taken before it reads, on a review too,
  * and those its writes take before it writes (lib/student-bulk.ts, applyGive).
  */
@@ -36,7 +38,8 @@ export const maxDuration = 60;
 const NO_STORE = { "Cache-Control": "private, no-store" };
 
 export async function POST(request: NextRequest) {
-  const guarded = await guardStoreWrite(request, "products", MAX_STUDENT_BODY_BYTES);
+  // Giving a course, or taking one back, says who owns what: "import", as the API's gift (owner and admins).
+  const guarded = await guardStoreWrite(request, (body) => (body.change === "give" || body.change === "takeback" ? "import" : "products"), MAX_STUDENT_BODY_BYTES);
   if (!guarded.ok) return guarded.response;
   const { body, store } = guarded;
   if (body.action !== "review" && body.action !== "apply") return Response.json({ ok: false, error: "unknown" }, { status: 400 });
@@ -84,7 +87,7 @@ const payFor = (store: Store): PayStudio => async (units) => {
 function refused(reason: string, message: string): Response {
   if (Object.hasOwn(GIVE_REFUSALS, reason)) {
     const own = reason as GiveRefusal;
-    return Response.json({ ok: false, error: own, message: GIVE_REFUSALS[own] }, { status: own === "unavailable" ? 503 : 409, headers: NO_STORE });
+    return Response.json({ ok: false, error: own, message: GIVE_REFUSALS[own] }, { status: own === "unavailable" ? 503 : own === "daily_limit" ? 429 : 409, headers: NO_STORE });
   }
   const studio = studioRefusal(reason, message);
   return Response.json(studio.body, { status: studio.status, headers: NO_STORE });

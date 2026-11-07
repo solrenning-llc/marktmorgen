@@ -215,7 +215,7 @@ export function giveWriteUnits(people: number, change: GiveChange): number {
   return Math.max(1, Math.ceil((change === "give" ? 2 * n + GIVE_FIXED_COMMANDS : 3 * n) / 20));
 }
 
-export type GiveRefusal = "change" | "to" | "none" | "many" | "product" | "expect" | "paused_unpaid" | "paused_disputed" | "store_full" | "unavailable";
+export type GiveRefusal = "change" | "to" | "none" | "many" | "product" | "expect" | "paused_unpaid" | "paused_disputed" | "store_full" | "daily_limit" | "unavailable";
 
 export const GIVE_REFUSALS: Record<GiveRefusal, string> = {
   change: "Choose whether to give the course or take it back.",
@@ -227,6 +227,7 @@ export const GIVE_REFUSALS: Record<GiveRefusal, string> = {
   paused_unpaid: "Nothing was given: your plan's renewal payment did not go through, so new gifts wait until it is paid. Check the notice at the top of your studio. You can still take back a course you gave.",
   paused_disputed: "Nothing was given: a payment for your plan is disputed with your bank, so new gifts wait until it is settled. Check the notice at the top of your studio. You can still take back a course you gave.",
   store_full: "Nothing was given: your store's data room is full. Delete something you no longer need, such as old posts, drafts or contacts, then try again.",
+  daily_limit: "Nothing was given: that is as many as a store may give in a day, here and through the API together (1,000). Try again tomorrow.",
   unavailable: "Nothing was given just now. Try again in a minute.",
 };
 

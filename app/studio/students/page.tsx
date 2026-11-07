@@ -46,8 +46,9 @@ export default async function StudioStudentsPage({ searchParams }: Params) {
   const canExport = can(view.role, "export");
   const courses = (await readKind(store, "course")).filter((p) => p.course);
   const product = courses.find((p) => p.id === query.product) ?? courses[0] ?? null;
-  // The other courses that can be given from here: never a membership or a call (givable), never this one.
-  const others = courses.filter((p) => p.id !== product?.id && givable(p)).map((p) => ({ id: p.id, title: p.title }));
+  // The other courses that can be given from here: never a membership or a call (givable), never this one; only
+  // for whoever may say who owns what ("import", as the API's gift), so nobody else is offered the action.
+  const others = can(view.role, "import") ? courses.filter((p) => p.id !== product?.id && givable(p)).map((p) => ({ id: p.id, title: p.title })) : [];
   const course = product?.course ? await readCourse(product.course.id) : null;
   const typed = readFilters(query);
   const filters = canTag ? typed : { ...typed, label: "" };

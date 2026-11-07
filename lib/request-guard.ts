@@ -189,6 +189,41 @@ export async function withinLimit(scope: string, who: string, limit: number, win
   return countWithin(reply, limit);
 }
 
+/**
+ * Takes `n` at once from a counter of `limit` a window (the same key as
+ * withinLimit for the same scope, so both count together): yes only when all
+ * `n` fit. Past the limit what was taken is put back and nothing is taken,
+ * never a part. Closed when the count is not known (Redis not configured or
+ * not answering, a reply of another shape): a bound on what is given away is
+ * never opened by a counter out of reach.
+ */
+export async function takeManyWithin(scope: string, who: string, limit: number, windowSeconds: number, n: number): Promise<boolean> {
+  if (!Number.isSafeInteger(n) || n < 0 || !Number.isSafeInteger(limit) || limit <= 0) return false;
+  if (n === 0) return true;
+  if (!isRedisConfigured()) return false;
+  let key = "";
+  let reply: unknown;
+  try {
+    key = `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
+    reply = await redisPipeline([
+      ["SET", key, "0", "EX", windowSeconds, "NX"],
+      ["INCRBY", key, n],
+    ]);
+  } catch {
+    return false;
+  }
+  let count: number | null = null;
+  try {
+    count = counterReply(reply);
+  } catch {
+    count = null;
+  }
+  if (count !== null && count <= limit) return true;
+  // Past it, or not known: what this call may have added is put back, so a refusal spends nothing.
+  await redisPipeline([["DECRBY", key, n]]).catch(() => undefined);
+  return false;
+}
+
 /** Whether a returned SET NX + INCR reply holds a count within `limit`; no for any other shape or a reply that throws when read. */
 function countWithin(reply: unknown, limit: number): boolean {
   try {

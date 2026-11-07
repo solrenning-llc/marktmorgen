@@ -29,7 +29,7 @@ import { purchaseRefunded } from "@/lib/refunds";
 import { sendEmail } from "@/lib/email";
 import { applyTax, applyTaxDocuments, openKeepingTheSale } from "@/lib/tax";
 import { withLock } from "@/lib/redis-lock";
-import type { CallPackage } from "@/lib/call-package-rules";
+import { type CallPackage, MAX_PACKAGE_SESSIONS, MIN_PACKAGE_SESSIONS, PACKAGE_DAYS } from "@/lib/call-package-rules";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { speechFor, wordsIn } from "@/lib/buyer-words";
 import { bookingWords } from "@/lib/buyer-words/booking";
@@ -75,21 +75,57 @@ const now = () => Math.floor(Date.now() / 1000);
 const KEEP_AFTER_SECONDS = 365 * 86_400;
 const keep = (bought: Bought): string[] => (bought.until ? ["EX", String(Math.max(60, bought.until + KEEP_AFTER_SECONDS - now()))] : []);
 
+const unconfirmedPackage = () => new Error("The package purchase could not be confirmed.");
+
+/** Capture paid evidence without inheriting fields or evaluating computed values. */
+function ownPackageValue(value: unknown, key: string): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const field = Object.getOwnPropertyDescriptor(value, key);
+  return field && Object.hasOwn(field, "value") ? field.value : undefined;
+}
+
+function ownPackageFields(value: unknown, keys: string[]): Record<string, unknown> {
+  return Object.fromEntries(keys.map(key => [key, ownPackageValue(value, key)]));
+}
+
+/** Only an explicit null confirms absence; a partial read cannot replace a purchase. */
+function packageReply(reply: unknown): string | null {
+  if (!Array.isArray(reply) || reply.length !== 1) throw unconfirmedPackage();
+  const slot = Object.getOwnPropertyDescriptor(reply, "0");
+  if (!slot || !Object.hasOwn(slot, "value") || (slot.value !== null && typeof slot.value !== "string")) throw unconfirmedPackage();
+  return slot.value;
+}
+
+const seconds = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && Number.isFinite(new Date(value * 1000).getTime());
+
 export async function readBought(checkout: string): Promise<Bought | null> {
-  if (!SESSION_ID.test(checkout) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", pkgKey(checkout)]]);
-  if (typeof raw !== "string") return null;
+  if (!SESSION_ID.test(checkout)) return null;
+  if (!isRedisConfigured()) throw unconfirmedPackage();
+  const raw = packageReply(await redisPipeline([["GET", pkgKey(checkout)]]));
+  if (raw === null) return null;
   try {
-    return JSON.parse(raw) as Bought;
+    const value = JSON.parse(raw) as Bought;
+    if (!value || ["s", "h", "p", "e", "total", "at", "until", "token", "holds"].some(key => ownPackageValue(value, key) === undefined) ||
+      [value.s, value.h, value.p, value.e].some((field) => typeof field !== "string" || !field) ||
+      !Number.isSafeInteger(value.total) || value.total < 1 || value.total > MAX_PACKAGE_SESSIONS ||
+      !seconds(value.at) || !seconds(value.until) || (value.until !== 0 && value.until < value.at) ||
+      typeof value.token !== "string" || !PACKAGE_TOKEN.test(value.token) || !Array.isArray(value.holds) ||
+      !value.holds.every((hold) => {
+        const session = ownPackageValue(hold, "session"), until = ownPackageValue(hold, "until");
+        return typeof session === "string" && SESSION_ID.test(session) && seconds(until);
+      })) throw unconfirmedPackage();
+    return value;
   } catch {
-    return null;
+    throw unconfirmedPackage();
   }
 }
 
 export async function boughtByToken(token: string): Promise<{ checkout: string; bought: Bought } | null> {
-  if (!PACKAGE_TOKEN.test(token) || !isRedisConfigured()) return null;
-  const [checkout] = await redisPipeline([["GET", tokenKey(token)]]);
-  if (typeof checkout !== "string") return null;
+  if (!PACKAGE_TOKEN.test(token)) return null;
+  if (!isRedisConfigured()) throw unconfirmedPackage();
+  const checkout = packageReply(await redisPipeline([["GET", tokenKey(token)]]));
+  if (checkout === null) return null;
+  if (!SESSION_ID.test(checkout)) throw unconfirmedPackage();
   const bought = await readBought(checkout);
   return bought && bought.token === token ? { checkout, bought } : null;
 }
@@ -190,26 +226,39 @@ type Session = {
  * its sessions. Returns the package, or null when this checkout is not one.
  */
 export async function recordPackage(input: { store: Store; session: Session; product: Listing; base: string; from: string }): Promise<Bought | null> {
-  const { store, session, product, base } = input;
-  const meta = session.metadata ?? {};
+  const { store, product, base } = input;
+  const session = ownPackageFields(input.session, ["id", "status", "payment_status", "created", "amount_total", "currency", "metadata", "customer_details"]) as Session;
+  const meta = ownPackageFields(session.metadata, ["kind", "days", "sessions"]);
+  const emailValue = ownPackageValue(session.customer_details, "email");
   const checkout = typeof session.id === "string" ? session.id : "";
   if (meta.kind !== "package" || !SESSION_ID.test(checkout) || !isSettled(session) || !store.statsId) return null;
   const existing = await readBought(checkout);
   if (existing) return existing;
-  const email = typeof session.customer_details?.email === "string" ? normaliseEmail(session.customer_details.email) : "";
+  const email = typeof emailValue === "string" ? normaliseEmail(emailValue) : "";
   if (!email) return null;
-  const at = typeof session.created === "number" ? session.created : now();
-  const days = Number(meta.days) || 0;
-  const total = Math.max(1, Math.min(20, Number(meta.sessions) || 0));
+  const integer = (value: unknown): number | null => {
+    if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) return null;
+    const number = Number(value);
+    return Number.isSafeInteger(number) ? number : null;
+  };
+  const at = session.created;
+  const days = integer(meta.days);
+  const total = integer(meta.sessions);
+  if (!seconds(at) || days === null || !(PACKAGE_DAYS as readonly number[]).includes(days) ||
+    total === null || total < MIN_PACKAGE_SESSIONS || total > MAX_PACKAGE_SESSIONS ||
+    typeof session.amount_total !== "number" || !Number.isSafeInteger(session.amount_total) || session.amount_total < 0 ||
+    typeof session.currency !== "string" || !/^[a-zA-Z]{3}$/.test(session.currency)) throw unconfirmedPackage();
+  const until = days ? at + days * 86_400 : 0;
+  if (!seconds(until)) throw unconfirmedPackage();
   const token = randomBytes(24).toString("hex");
-  const bought: Bought = { s: store.statsId, h: store.handle, p: product.id, e: email, total, at, until: days ? at + days * 86_400 : 0, token, holds: [] };
+  const bought: Bought = { s: store.statsId, h: store.handle, p: product.id, e: email, total, at, until, token, holds: [] };
   // Counted in the store's room at what they really add (lib/order-data.ts).
   const [fresh] = await orderWrite(store, [["SET", pkgKey(checkout), JSON.stringify(bought), "NX", ...keep(bought)]]);
   if (fresh === null) return readBought(checkout);
   await orderWrite(store, [["SADD", packagesKey(store.statsId), checkout]]);
   await orderWrite(store, [["SET", tokenKey(token), checkout, ...keep(bought)]]);
-  const amount = typeof session.amount_total === "number" ? session.amount_total : 0;
-  const currency = typeof session.currency === "string" && session.currency ? session.currency : store.currency;
+  const amount = session.amount_total;
+  const currency = session.currency;
   // In the store's language (lib/buyer-words/booking.ts), with the amount and
   // the date written its way, in the currency actually paid.
   const b = bookingWords(store.language);

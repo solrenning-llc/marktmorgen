@@ -23,6 +23,8 @@ import { heldBack, passedQuizzes, requiredQuizLessons } from "@/lib/quiz";
 import { MAX_CERT_NAME, MIN_CERT_NAME, certificateOf, hasFinished } from "@/lib/certificate";
 import { canManage } from "@/lib/membership-manage";
 import { CourseOutline, WithDay } from "@/components/course-outline";
+import { CourseSearch } from "@/components/course-search";
+import { showsCourseSearch } from "@/lib/course-search";
 import { readListing } from "@/lib/catalog";
 import { membershipLine, speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
@@ -318,7 +320,9 @@ export default async function CoursePage({ params, searchParams }: Params) {
               <WithDay text={beforeStart(course) ? w.cohortBefore : w.cohortAfter} seconds={course.startsAt!} locale={said.lang.locale} />
             </p>
           ) : null}
-          <div className="mt-4">
+          {/* "Find a lesson" (291 [SQ2]): narrows the outline below in the browser, on a course long enough to need it. */}
+          {showsCourseSearch(total) ? <CourseSearch outline="course-outline" language={store.language} /> : null}
+          <div id="course-outline" className="mt-4">
             <CourseOutline course={course} base={base} start={start} done={done} held={held} language={store.language} />
           </div>
         </div>

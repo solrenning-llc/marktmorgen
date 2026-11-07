@@ -146,7 +146,7 @@ is("without JavaScript it draws nothing", renderToStaticMarkup(createElement(Cou
 const component = readFileSync("components/course-search.tsx", "utf8");
 is("it narrows the drawn outline and calls nothing", [component.includes("narrowDom("), /fetch\(|\/api\/|XMLHttpRequest|sendBeacon/.test(component)], [true, false]);
 is(
-  "a labelled search field, its result said politely, typed text bounded",
+  "a labeled search field, its result said politely, typed text bounded",
   ['type="search"', "htmlFor={field}", 'aria-live="polite"', "maxLength={MAX_COURSE_QUERY}", '"Escape"'].map((bit) => component.includes(bit)),
   [true, true, true, true, true],
 );

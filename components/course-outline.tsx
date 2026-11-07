@@ -24,7 +24,9 @@ export function WithDay({ text, seconds, locale }: { text: string; seconds: numb
  * The course as a list: modules, their lessons, and for this visitor what is
  * done, what is open, what opens when, and what can be watched for free.
  * Said in the store's `language` (lib/buyer-words/courses.ts), English unless
- * given.
+ * given. The data-find-* marks are what "Find a lesson" narrows
+ * (lib/course-search.ts, components/course-search.tsx): a module, the lines
+ * that name it, a lesson and its title as drawn.
  */
 export function CourseOutline({
   course,
@@ -54,9 +56,9 @@ export function CourseOutline({
       {course.modules.map((unit, mi) => {
         const open = start !== null && isOpen(course, unit, start);
         return (
-          <li key={unit.id}>
-            <p className="st-label">{w.module(mi + 1)}</p>
-            <p className="font-semibold" style={{ color: "var(--st-text)" }}>{unit.title}</p>
+          <li key={unit.id} data-find-module="">
+            <p className="st-label" data-find-name="">{w.module(mi + 1)}</p>
+            <p className="font-semibold" style={{ color: "var(--st-text)" }} data-find-name="">{unit.title}</p>
             {/*
               When this module opens, and said to somebody who has not bought
               it yet as well.
@@ -93,7 +95,7 @@ export function CourseOutline({
                   const mark = isDone ? "✓" : reachable ? "○" : "🔒";
                   const label = `${lesson.title}${lesson.video ? w.video : ""}`;
                   return (
-                    <li key={lesson.id} className="flex items-start gap-2 text-sm">
+                    <li key={lesson.id} className="flex items-start gap-2 text-sm" data-find-lesson="">
                       <span aria-hidden="true" className="w-5 shrink-0 text-center">{mark}</span>
                       <span className="min-w-0 flex-1">
                         {reachable ? (
@@ -102,11 +104,12 @@ export function CourseOutline({
                             aria-current={here ? "page" : undefined}
                             className={`break-words underline-offset-2 hover:underline ${here ? "font-bold underline" : ""}`}
                             style={{ color: "var(--st-text)" }}
+                            data-find-text=""
                           >
                             {label}
                           </Link>
                         ) : (
-                          <span className="st-muted break-words">{label}</span>
+                          <span className="st-muted break-words" data-find-text="">{label}</span>
                         )}
                         {isDone ? <span className="sr-only">{w.doneHidden}</span> : null}
                         {lesson.quiz ? (

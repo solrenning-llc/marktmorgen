@@ -233,6 +233,9 @@ function parseConnection(raw: unknown, whole = false): Connection | null {
 
 const keptCount = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
 
+/** No read kept yet: no day, so the studio shows no amount. */
+const NOT_READ: MetaRead = { day: "", at: 0, problem: "", after: 0, lines: 0, cents: 0, campaigns: 0 };
+
 /**
  * The last read, only in the shape this code writes (CX-123 rule 24; Claude 6 on #3069): every field present, the day
  * a date or empty, each figure a non-negative whole number. A record with an amount missing or out of shape is not a
@@ -645,8 +648,10 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
     // was: what it held is only the figures of an earlier read, and keeping it would stop every later note.
     const beforeReply = repliesFor(await redisPipeline([["GET", readKey(statsId)]]), 1);
     if (!beforeReply) throw new UnknownReplyError("Meta's last read");
-    const before = parseRead(beforeReply[0]);
-    const next: MetaRead = { day: before?.day ?? "", at: before?.at ?? 0, problem: "", after: 0, lines: before?.lines ?? 0, cents: before?.cents ?? 0, campaigns: before?.campaigns ?? 0, ...read };
+    // Only a whole earlier read's figures are carried over (Claude 6 on #3070): one whose figures do not read is replaced
+    // by "not read yet" (no day, so the studio shows no amount), never kept under its day with an amount never read.
+    const before = parseRead(beforeReply[0]) ?? NOT_READ;
+    const next: MetaRead = { ...before, problem: "", after: 0, ...read };
     const noted = repliesFor(await redisPipeline([["SET", readKey(statsId), JSON.stringify(next), "EX", KEEP_SECONDS]]), 1);
     if (!noted || noted[0] !== "OK") throw new UnknownReplyError("Meta's last read noted");
     return true;

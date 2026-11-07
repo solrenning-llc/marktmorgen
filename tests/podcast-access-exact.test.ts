@@ -149,3 +149,93 @@ test("a feed's day count that cannot be kept at all never lets the feed through"
     await assert.rejects(feedReadAllowed("d".repeat(48)));
   } finally { redis.pipeline = original; }
 });
+
+/**
+ * The day count's expiry is read too (finding L1 of Claude 4's team on #2888, rule 24 and rule 30): an EXPIRE that
+ * answers anything but its own whole number never lets the feed through, and a day key whose expiry was lost once is
+ * given one again by the next count, so no `nl:pod:n:` key outlives its two days (lib/data-families.ts, X(2)).
+ */
+const DROP = Symbol("drop");
+function expiryAnswered(value: unknown, when: (count: number) => boolean = () => true) {
+  let seen = 0;
+  redis.pipeline = (async (commands: Commands) => {
+    const replies = await original(commands);
+    const at = commands.findIndex((c) => c[0] === "EXPIRE" && String(c[1]).startsWith("nl:pod:n:"));
+    if (at < 0 || !when(++seen)) return replies;
+    const copy = [...(replies as unknown[])];
+    if (value === DROP) copy.splice(at, 1);
+    else copy[at] = value;
+    return copy;
+  }) as Pipeline;
+}
+
+const unknownExpiries: [string, unknown][] = [
+  ["zero", 0],
+  ["an object", {}],
+  ["nothing", DROP],
+  ["null", null],
+  ["undefined", undefined],
+  ["a string", "1"],
+  ["true", true],
+  ["a list", []],
+  ["two", 2],
+];
+
+for (const [label, value] of unknownExpiries) test(`the day's first count with its expiry answered as ${label} never lets the feed through`, async () => {
+  redis.clear();
+  expiryAnswered(value);
+  try {
+    await assert.rejects(feedReadAllowed("e".repeat(48), Date.UTC(2026, 10, 6, 12)), UnknownReplyError);
+  } finally { redis.pipeline = original; }
+});
+
+for (const [label, value] of [["an object", {}], ["nothing", DROP], ["a string", "0"]] as const) {
+  test(`a later count of the day with its expiry answered as ${label} never lets the feed through`, async () => {
+    redis.clear();
+    redis.pipeline = original;
+    const token = "f".repeat(48);
+    const now = Date.UTC(2026, 10, 6, 12);
+    assert.equal(await feedReadAllowed(token, now), true);
+    expiryAnswered(value);
+    try {
+      await assert.rejects(feedReadAllowed(token, now), UnknownReplyError);
+    } finally { redis.pipeline = original; }
+  });
+}
+
+test("a day key whose expiry was lost on the day's first count gets one on the next count", async () => {
+  redis.clear();
+  const token = "9".repeat(48);
+  const now = Date.UTC(2026, 10, 6, 12);
+  let lost = false;
+  // The day's first EXPIRE never reaches Redis and the request fails, while what was sent beside it is kept.
+  redis.pipeline = (async (commands: Commands) => {
+    const at = commands.findIndex((c) => c[0] === "EXPIRE" && String(c[1]).startsWith("nl:pod:n:"));
+    if (at < 0 || lost) return original(commands);
+    lost = true;
+    const rest = commands.filter((_, i) => i !== at);
+    if (rest.length) await original(rest);
+    throw new Error("Redis request failed with status 503");
+  }) as Pipeline;
+  try {
+    await assert.rejects(feedReadAllowed(token, now));
+  } finally { redis.pipeline = original; }
+  const key = redis.keys().find((k) => k.startsWith("nl:pod:n:"))!;
+  assert.ok(key, "the count was kept without its expiry");
+  assert.equal((await original([["TTL", key]]))[0], -1, "the lost expiry is what this test is about");
+  assert.equal(await feedReadAllowed(token, now), true);
+  const [ttl] = await original([["TTL", key]]);
+  assert.ok(typeof ttl === "number" && ttl > 0 && ttl <= 2 * 86_400, "the next count gives the day's key its expiry again");
+});
+
+test("healthy control: a later count whose expiry was already there (EXPIRE NX answers 0) lets the feed through", async () => {
+  redis.clear();
+  redis.pipeline = original;
+  const token = "8".repeat(48);
+  const now = Date.UTC(2026, 10, 6, 12);
+  assert.equal(await feedReadAllowed(token, now), true);
+  expiryAnswered(0);
+  try {
+    assert.equal(await feedReadAllowed(token, now), true);
+  } finally { redis.pipeline = original; }
+});

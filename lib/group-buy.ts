@@ -375,9 +375,9 @@ export async function resendGroupReceipt(input: { store: Store; session: Session
 /**
  * A place taken: the address, when, and the value only the run that took it wrote (`k`, lib/claim-mark.ts claimValue;
  * Claude 6 on #2872), so a run lets go of a place's record only while it is its own. Records written before `k` have
- * none, and no run lets them go.
+ * none, and no run lets them go. `n`, once counted, is the count the place's own INCR answered (COUNT_OWN).
  */
-type Member = { e: string; at: number; k?: string };
+type Member = { e: string; at: number; k?: string; n?: number };
 
 /**
  * Deletes a place's record only while it still holds exactly what this run wrote (Claude 6 on #2872; CX-123 rules 25
@@ -385,6 +385,17 @@ type Member = { e: string; at: number; k?: string };
  * another run of the same link holds. The first line names it for the local stand-in (lib/redis-memory.ts).
  */
 const HDEL_OWN = '-- marktmorgen:hdel-own:v1\nif redis.call("HGET", KEYS[1], ARGV[1]) == ARGV[2] then return redis.call("HDEL", KEYS[1], ARGV[1]) else return 0 end';
+
+/**
+ * Counts a place once, by a run's own hold (Claude 4 and Claude 1 on #2872, L1; CX-123 rules 24 and 30): while the
+ * record is exactly the hold, INCR the count and write the record again with that count in it (ARGV[3] is the hold
+ * without its closing brace, then `,"n":`), answering the count; while it already carries a count of this hold,
+ * answer that count again, moving nothing; anything else answers 0. So a run whose reply came back in another shape
+ * reads its own count from the record, never counting twice and never losing a place counted unseen. The first line
+ * names it for the local stand-in (lib/redis-memory.ts).
+ */
+const COUNT_OWN =
+  '-- marktmorgen:grp-count-own:v1\nlocal held = redis.call("HGET", KEYS[1], ARGV[1])\nif held == ARGV[2] then local n = redis.call("INCR", KEYS[2]); redis.call("HSET", KEYS[1], ARGV[1], ARGV[3] .. n .. "}"); return n end\nif type(held) == "string" and string.sub(held, 1, string.len(ARGV[3])) == ARGV[3] then return tonumber(string.sub(held, string.len(ARGV[3]) + 1, -2)) end\nreturn 0';
 
 function parseMember(raw: unknown): Member | null {
   if (typeof raw !== "string") return null;
@@ -563,13 +574,15 @@ export async function takePlace(input: {
   const at = now();
   // The hold carries a value only this run writes, so only this run's own hold is ever let go (Claude 6 on #2872).
   const hold = JSON.stringify({ e: email, at, k: claimValue() } satisfies Member);
-  const dropOwn: (string | number)[] = ["EVAL", HDEL_OWN, 1, membersKey(group.id), who, hold];
+  // Once counted, the same record with the count its own INCR answered (COUNT_OWN): what a run reads back to learn
+  // whether its count moved, and the exact value its give-back deletes.
+  const countedAs = `${hold.slice(0, -1)},"n":`;
+  const dropOwn = (value: string): (string | number)[] => ["EVAL", HDEL_OWN, 1, membersKey(group.id), who, value];
   // Let go of this address's hold on a place it was not given, so its link works again on a later try, and only while
-  // the record is still this run's own: a hold whose write came back unknown may be another run's of the same link (a
-  // double click), whose place is the one a refund takes back. The count is left alone, since whether it moved is
-  // unknown: at worst a place stays counted, never one handed out too many. When the script cannot run, the hold
+  // the record is still this run's own and not counted: a hold whose write came back unknown may be another run's of
+  // the same link (a double click), whose place is the one a refund takes back. When the script cannot run, the hold
   // stays and the link says "pending" with nothing more handed out; never another run's record deleted.
-  const letGo = () => redisPipeline([dropOwn]).catch(() => null);
+  const letGo = () => redisPipeline([dropOwn(hold)]).catch(() => null);
   const fresh = repliesFor(await redisPipeline([["HSETNX", membersKey(group.id), who, hold]]), 1)?.[0];
   if (fresh === 0) {
     // Another run of the same link holds the place (a double click) and may still end "full", "resting" or "has":
@@ -582,20 +595,34 @@ export async function takePlace(input: {
     await letGo();
     throw new UnknownReplyError("a place's hold");
   }
-  // The place given back: this run's own record (the same script) and the count its own INCR moved. Upstash runs each
-  // command of a pipeline on its own, so the script can fail while the DECR lands and the call throws: the run keeps
-  // its answer ("full", "resting", "has") and tries the script once more alone, never the DECR again (whether it
-  // moved is unknown; at worst a place stays counted). A record the retry cannot remove reads "pending", never
-  // "already" (#2872 review).
-  const giveBack = async () => {
-    const replies = repliesFor(await redisPipeline([dropOwn, ["DECR", takenKey(group.id)]]).catch(() => null), 2);
-    if (!replies || (replies[0] !== 0 && replies[0] !== 1)) await letGo();
-  };
-  const count = repliesFor(await redisPipeline([["INCR", takenKey(group.id)]]), 1)?.[0];
-  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) {
-    await letGo();
-    throw new UnknownReplyError("the count of places taken");
+  // The place counted once, by this run's own hold (Claude 4 and Claude 1 on #2872, L1): the script moves the count
+  // and writes it into the record in one step, so a reply in another shape is read back from the record. The record
+  // still this run's hold: the count did not move, the hold is let go and the run refuses. Holding a count: that is
+  // this run's place, and the run goes on with it, never a paid place lost to a count that moved unseen. Anything else
+  // (unread, another value) refuses and leaves the record as it is.
+  let count = countOf(repliesFor(await redisPipeline([["EVAL", COUNT_OWN, 2, membersKey(group.id), takenKey(group.id), who, hold, countedAs]]).catch(() => null), 1)?.[0]);
+  if (count === null) {
+    const back = repliesFor(await redisPipeline([["HGET", membersKey(group.id), who]]).catch(() => null), 1)?.[0];
+    if (back === hold) {
+      await letGo();
+      throw new UnknownReplyError("the count of places taken");
+    }
+    const kept = typeof back === "string" && back.startsWith(countedAs) && back.endsWith("}") ? back.slice(countedAs.length, -1) : "";
+    count = /^\d{1,15}$/.test(kept) ? Number(kept) : null;
+    if (count === null) throw new UnknownReplyError("the count of places taken");
   }
+  // 0: the record is no longer this run's hold (taken back meanwhile): nothing was counted, nothing is handed over.
+  if (count < 1) throw new UnknownReplyError("a place's hold");
+  const counted = `${countedAs}${count}}`;
+  // The place given back: this run's own counted record (the same script) and the count its own script moved. Upstash
+  // runs each command of a pipeline on its own, so the script can fail while the DECR lands and the call throws: the
+  // run keeps its answer ("full", "resting", "has") and tries the script once more alone, never the DECR again
+  // (whether it moved is unknown; at worst a place stays counted). A record the retry cannot remove reads "pending",
+  // never "already" (#2872 review).
+  const giveBack = async () => {
+    const replies = repliesFor(await redisPipeline([dropOwn(counted), ["DECR", takenKey(group.id)]]).catch(() => null), 2);
+    if (!replies || (replies[0] !== 0 && replies[0] !== 1)) await redisPipeline([dropOwn(counted)]).catch(() => null);
+  };
   if (count > group.people) {
     await giveBack();
     return { outcome: "full", email, group };
@@ -618,7 +645,24 @@ export async function takePlace(input: {
     ["EXPIRE", takenKey(group.id), GROUP_KEPT_SECONDS],
   ]);
 
-  const [given] = await grantImported(group.s, groupJob(group.id), [{ email, productId: group.p, items: group.items ?? null, option: group.o ?? null }], at, store.sid);
+  let given: boolean;
+  try {
+    [given] = await grantImported(group.s, groupJob(group.id), [{ email, productId: group.p, items: group.items ?? null, option: group.o ?? null }], at, store.sid);
+  } catch (error) {
+    // The grant answered in another shape (Claude 1 on #2872, N1): whether the product is on the address is read
+    // exactly. Not on it: the place is given back (and the room admitted for it), so the same link takes it on a later
+    // try, never a paid place reading "pending" for the link's whole day. On it: handed over, and the run goes on.
+    // Unknown: nothing is changed and the run refuses.
+    const onIt = repliesFor(await redisPipeline([["HEXISTS", importedKey(group.s, email), group.p]]).catch(() => null), 1)?.[0];
+    if (onIt !== 1) {
+      if (onIt === 0) {
+        await giveBack();
+        if (!held && hour !== null) await settleAdmitted(store, hour);
+      }
+      throw error;
+    }
+    given = true;
+  }
   if (!given) {
     // It reached this address another way in the same instant.
     await giveBack();

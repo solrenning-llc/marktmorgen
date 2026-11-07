@@ -206,7 +206,10 @@ async function main(): Promise<void> {
   is("both places hold the product; nothing for the third", [await owns("ana@example.com"), await owns("ben@example.com"), await owns("cy@example.com")], [[product.id], [product.id], []]);
 
   part("3. takePlace: the places counter answers in an unknown shape (the count still moves)");
-  unknownFor((c) => c[0] === "INCR" && String(c[1]).endsWith(":n"), true);
+  // Rule 23 (#2872, L1): the counter is now moved by a script that counts the run's own hold (COUNT_OWN), so the
+  // matcher picks that script beside a plain INCR; the cases and expectations are unchanged.
+  const isCounter = (c: Command) => (c[0] === "INCR" && String(c[1]).endsWith(":n")) || (c[0] === "EVAL" && String(c[1]).includes("grp-count-own"));
+  unknownFor(isCounter, true);
   const third = await take("dee@example.com");
   restore();
   is("refused (a temporary error), never 'taken' past the two paid for", third === "taken", false);
@@ -222,7 +225,7 @@ async function main(): Promise<void> {
     await real([["SET", `nl:grp:take:${t}`, JSON.stringify({ g: two.group.id, e: email }), "EX", 3600]]);
     return t;
   };
-  unknownFor((c) => c[0] === "INCR" && String(c[1]).endsWith(":n"), false);
+  unknownFor(isCounter, false);
   const firstUnknown = await outcome(takePlace({ store, token: await tokenFor("gus@example.com"), recordStart: async () => {} }));
   restore();
   is("refused, nothing handed over", [firstUnknown === "threw" || (firstUnknown as { outcome: string }).outcome !== "taken", await owns("gus@example.com")], [true, []]);

@@ -248,6 +248,17 @@ export class MemoryRedis {
           const [, hash, field, value] = args;
           return this.run(["HGET", hash, field]) === value ? this.run(["HDEL", hash, field]) : 0;
         }
+        // lib/group-buy.ts takePlace: a place counted once, by the run's own hold, its count written into the record.
+        if (key.startsWith("-- marktmorgen:grp-count-own:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, hash, taken, field, hold, countedAs] = args;
+          const held = this.run(["HGET", hash, field]);
+          if (held === hold) {
+            const n = this.run(["INCR", taken]);
+            this.run(["HSET", hash, field, `${countedAs}${n}}`]);
+            return n;
+          }
+          return typeof held === "string" && held.startsWith(countedAs) ? Number(held.slice(countedAs.length, -1)) : 0;
+        }
         if (key.startsWith("-- marktmorgen:extend:v1\n") && args[0] === "1" && args.length === 4) {
           const [, lock, token, seconds] = args;
           return this.run(["GET", lock]) === token ? this.run(["EXPIRE", lock, seconds]) : 0;

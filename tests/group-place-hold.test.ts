@@ -140,10 +140,14 @@ async function main(): Promise<void> {
   part("The places counter answers in an unknown shape: the run lets go of its own record");
   const counted = await paidGroup(2);
   const countedLink = await counted.link("dee@example.com");
+  // Rule 23 (#2872, L1): the counter is now moved by a script that counts the run's own hold (COUNT_OWN in
+  // lib/group-buy.ts), so the matcher picks that script beside a plain INCR; the case (not run, answered unknown) and
+  // every expectation are unchanged.
+  const isCounter = (c: Command) => (c[0] === "INCR" && c[1] === `nl:grp:${counted.id}:n`) || (c[0] === "EVAL" && String(c[1]).includes("grp-count-own") && c[4] === `nl:grp:${counted.id}:n`);
   redis.pipeline = (async (commands: Command[]) => {
-    const replies = await real(commands.filter((c) => !(c[0] === "INCR" && c[1] === `nl:grp:${counted.id}:n`)));
+    const replies = await real(commands.filter((c) => !isCounter(c)));
     let k = 0;
-    return commands.map((c) => (c[0] === "INCR" && c[1] === `nl:grp:${counted.id}:n` ? UNKNOWN : replies[k++]));
+    return commands.map((c) => (isCounter(c) ? UNKNOWN : replies[k++]));
   }) as typeof redis.pipeline;
   const countedFirst = await take(countedLink);
   restore();
@@ -160,7 +164,9 @@ async function main(): Promise<void> {
   // Upstash runs each command of a pipeline on its own: the script giving the record back can fail while the DECR
   // beside it lands, and the whole call then throws (lib/redis.ts). The run must still say "full", never leave the
   // address a record that later reads as a place it was never given (Claude 6 on #2872).
-  const isDropOf = (id: string) => (c: Command) => c[0] === "EVAL" && c[3] === `nl:grp:${id}:m`;
+  // Rule 23 (#2872, L1): narrowed to the give-back script by its name, since the script counting a place names the
+  // same hash; the cases and expectations are unchanged.
+  const isDropOf = (id: string) => (c: Command) => c[0] === "EVAL" && String(c[1]).includes("hdel-own") && c[3] === `nl:grp:${id}:m`;
   /** The give-back script fails, the rest of its pipeline lands; `always` fails it alone too (the retry). */
   const failDrop = (id: string, always: boolean) => {
     redis.pipeline = (async (commands: Command[]) => {

@@ -9,6 +9,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { newItemId } from "@/lib/course";
 import { cleanLine, cleanText } from "@/lib/community-text";
 import {
@@ -28,10 +29,19 @@ export function newPodcastId(): string {
   return randomUUID().replace(/-/g, "");
 }
 
+/**
+ * A podcast's record; null only when Redis says there is none. A reply in any other shape (none, several, not text,
+ * text that is not this podcast) throws UnknownReplyError (CX-123 rule 24): it is never an empty podcast, because the
+ * studio writes back what it read, and an empty one written back would take every episode off the feed.
+ */
 export async function readPodcast(id: string): Promise<Podcast | null> {
   if (!PODCAST_ID.test(id) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", podKey(id)]]);
-  return parsePodcast(raw);
+  const reply = repliesFor(await redisPipeline([["GET", podKey(id)]]), 1);
+  const raw = reply?.[0];
+  if (raw === null) return null;
+  const podcast = typeof raw === "string" ? parsePodcast(raw) : null;
+  if (!podcast || podcast.id !== id) throw new UnknownReplyError("a podcast's record");
+  return podcast;
 }
 
 export async function savePodcast(podcast: Podcast): Promise<void> {

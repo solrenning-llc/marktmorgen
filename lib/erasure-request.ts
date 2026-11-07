@@ -35,6 +35,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { type Store, storeForHandle, storeForId } from "@/lib/store";
+// On its own line so it does not meet #2970's change to the line above.
+import { storeForIdExact } from "@/lib/store";
 import { leadsKey } from "@/lib/contacts";
 import { storesKnownFor } from "@/lib/buyer-library";
 import { erasePerson } from "@/lib/person-erasure";
@@ -146,12 +148,21 @@ export async function askErasureLink(input: { email: string; ip: string; origin:
   // Every store: which stores know the address, and the email, only after the answer, for the same reason.
   afterAnswer(async () => {
     const stores: Store[] = [];
+    // Each store read exactly (rule 24; Claude 5 on #2970): only a store confirmed not there is left out in
+    // silence. One whose read failed or answered in an unknown shape is counted, and the email says so, so the
+    // person never deletes from fewer stores than they asked without being told. The answer stays "sent".
+    let unread = 0;
     for (const sid of (await storesKnownFor(email)).slice(0, MAX_ERASE_STORES)) {
-      const store = await storeForId(sid).catch(() => null);
-      if (store?.sid) stores.push(store);
+      const store = await storeForIdExact(sid).catch(() => undefined);
+      if (store === undefined) unread += 1;
+      else if (store?.sid) stores.push(store);
     }
-    if (!stores.length) return;
-    const answer = await emailLink(stores, email, input.origin);
+    if (!stores.length) {
+      // No store to send from: nothing can be emailed, and the log says why.
+      if (unread) console.warn(`a deletion link asked for every store was not emailed: ${unread} ${unread === 1 ? "store" : "stores"} that know the address could not be read`);
+      return;
+    }
+    const answer = await emailLink(stores, email, input.origin, unread);
     if (answer.status !== "sent") console.warn(`a deletion link asked for every store was not emailed: ${answer.status} (stores ${stores.map((s) => s.sid).join(",")})`);
   });
   return { status: "sent" };
@@ -178,7 +189,7 @@ function afterAnswer(task: () => Promise<void>): void {
  * address: "sent", "full" (none had room, with the soonest day one opens
  * again) or "error" (the sender failed).
  */
-async function emailLink(stores: Store[], email: string, origin: string): Promise<EraseAnswer> {
+async function emailLink(stores: Store[], email: string, origin: string, unread = 0): Promise<EraseAnswer> {
   const token = randomBytes(32).toString("hex");
   const grant: Grant = { e: email, s: stores.map((s) => s.sid) };
   await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", ERASE_LINK_SECONDS]]);
@@ -194,6 +205,12 @@ async function emailLink(stores: Store[], email: string, origin: string): Promis
     `${origin}/privacy/delete?token=${token}`,
     "",
     "Nothing is deleted until you press the button on that page. If you did not ask for this, ignore this email: nobody can delete your data without it.",
+    ...(unread
+      ? [
+          "",
+          `We could not check ${unread} more ${unread === 1 ? "store" : "stores"} that may keep this address, so this link does not delete anything there. To include ${unread === 1 ? "it" : "them"}, ask again in a few minutes at ${origin}/privacy/delete.`,
+        ]
+      : []),
   ].join("\n");
   let full = false;
   let opens = 0;

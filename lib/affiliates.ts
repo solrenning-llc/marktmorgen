@@ -689,9 +689,31 @@ async function listPartnersExact(store: Store): Promise<Affiliate[]> {
   return out;
 }
 
-/** Everybody in this programme who holds a standing share of something. */
+/**
+ * Everybody in this programme who holds a standing share of something, for
+ * the sales it earns on (notePartners). A record whose share does not read
+ * exactly (commitmentReads) is left out (Codex M's review of #1924):
+ * parseAffiliate keeps the rest of such a share and drops an end it cannot
+ * read, which would earn on sales after the agreement really ended. It is
+ * unknown, so it earns nothing on this read; the sale's other partners are
+ * still credited, and the next pass writes the earning once the record reads,
+ * each line being written once (HSETNX). An absent or null end still means
+ * no end, as it always has.
+ */
 export async function listPartners(store: Store): Promise<Affiliate[]> {
-  return (await listAffiliates(store)).filter((a) => a.share !== null);
+  if (!store.statsId || !isRedisConfigured()) return [];
+  const [reply] = await redisPipeline([["HGETALL", peopleKey(store.statsId)]]);
+  const out: Affiliate[] = [];
+  for (const [id, raw] of pairs(reply)) {
+    const affiliate = parseAffiliate(raw);
+    if (!affiliate || affiliate.share === null) continue;
+    if (!commitmentReads(raw)) {
+      console.error("a partner's share could not be read; nothing is earned on it here", id);
+      continue;
+    }
+    out.push(affiliate);
+  }
+  return out.sort((a, b) => b.appliedAt - a.appliedAt);
 }
 
 /**
@@ -2094,7 +2116,8 @@ async function writeReferral(store: Store, referral: Referral): Promise<void> {
  *
  * A sale of a product nobody shares in writes nothing and costs one read of
  * the programme's people, which is why the caller passes `partners` in when it
- * is looking at a page of sales at a time.
+ * is looking at a page of sales at a time (listPartners: a share that does not
+ * read exactly earns nothing, Codex M on #1924).
  */
 export async function notePartners(
   store: Store,
@@ -2102,7 +2125,8 @@ export async function notePartners(
   partners?: Affiliate[],
 ): Promise<void> {
   if (!store.statsId || !isRedisConfigured() || !sale.ref || !sale.product) return;
-  const holders = (partners ?? (await listAffiliates(store))).filter(
+  // Only shares read exactly earn: pass `partners` from listPartners, never from listAffiliates.
+  const holders = (partners ?? (await listPartners(store))).filter(
     (a) => a.status === "approved" && shareOn(a.share, sale.product, sale.at) > 0,
   );
   if (!holders.length) return;

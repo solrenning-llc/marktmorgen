@@ -232,7 +232,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
           ) : null}
           {(emailTemplate || query.sequenceTemplate) ? <p role="status" className="card mt-6 p-5 text-sm text-ink-soft">{emailTemplate ? "Library email opened as an unsaved draft. Replace every placeholder and review consent before saving or sending." : initialSequence ? "Library sequence opened as an unsaved paused draft. Review every step before saving; activation is a separate action." : "A new sequence could not be opened: its trigger may already be in use, your role may not allow it, or its records or products could not be confirmed. Existing sequences were preserved."}</p> : null}
           <EmailStudio
-            initialTemplate={emailTemplate ? {label:emailTemplate.label,subject:"",body:serializeMailBlocks(emailTemplate.blocks)} : undefined}
+            initialTemplate={emailTemplate ? {label:emailTemplate.label,subject:"",body:serializeMailBlocks(emailTemplate.blocks),preview:emailTemplate.preview} : undefined}
             initialSequence={initialSequence}
             accent={lookColours(store.look).accent}
             email={view.email}

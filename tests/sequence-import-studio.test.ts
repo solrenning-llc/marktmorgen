@@ -4,7 +4,7 @@
  * in components/email-studio.tsx; added 2 November 2026). Checked:
  *
  *   - the template the studio offers reads back, through the same reader, as
- *     its two example emails, only its preview text reported;
+ *     its two example emails, each with its preview text, nothing reported;
  *   - the box has a labeled file field with its help tied to it, takes CSV
  *     files only, offers the template for download, and says nothing is sent;
  *   - the mail route only reads the file (never saves, sends or switches
@@ -24,9 +24,9 @@ import { done, is, part } from "./check";
 part("The template reads back");
 const template = readSequenceCsv(sequenceTemplateCsv());
 is(
-  "its two example emails and their waits, with nothing reported: its preview column is left empty, since preview text is not kept yet",
-  template.ok ? [template.steps.map((s) => [s.delayHours, s.subject]), template.report] : template,
-  [[[0, "Welcome! Here is your guide"], [72, "A tip for your first week"]], []],
+  "its two example emails, their waits and preview texts, with nothing reported",
+  template.ok ? [template.steps.map((s) => [s.delayHours, s.subject, s.preview]), template.report] : template,
+  [[[0, "Welcome! Here is your guide", "Thank you for joining, and where your guide is"], [72, "A tip for your first week", "One thing that helps most people early on"]], []],
 );
 is("its header is the template's columns", sequenceTemplateCsv().split("\n")[0], SEQUENCE_TEMPLATE.map((c) => `"${c}"`).join(","));
 

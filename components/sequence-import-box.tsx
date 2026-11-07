@@ -4,7 +4,7 @@ import { useId, useMemo, useRef, useState } from "react";
 import { MAX_SEQUENCE_FILE_BYTES, SEQUENCE_TEMPLATE, sequenceTemplateCsv } from "@/lib/sequence-template";
 import { MAX_STEPS } from "@/lib/flow-limits";
 
-export type ImportedStep = { delayHours: number; subject: string; body: string };
+export type ImportedStep = { delayHours: number; subject: string; body: string; preview?: string };
 export type ImportReportLine = { line: number; column: string; reason: string };
 
 /** One line of the report, as the creator reads it. */

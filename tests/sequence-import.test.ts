@@ -13,7 +13,8 @@
  *   - another service's variables are taken out and listed, never sent as
  *     written, from the subject and the body;
  *   - each row left out or changed is reported by line, column and reason;
- *     preview text is reported, not kept; the rest come in;
+ *     preview text is kept when its rules keep it (537 [PH1], unit 3), and
+ *     reported when they refuse it; the rest come in;
  *   - at most twenty emails; a file too large, with no subject or body
  *     column, or with no rows, is refused whole and says why;
  *   - nothing is sent or switched on: this only reads.
@@ -89,7 +90,7 @@ is(
 is(
   "each left out or changed by line, column and reason",
   mixed.ok ? mixed.report.map((r) => [r.line, r.column]) : mixed,
-  [[2, "preview"], [3, "days_after"], [4, "subject"], [5, "body"], [6, "days_after"], [7, "subject"]],
+  [[3, "days_after"], [4, "subject"], [5, "body"], [6, "days_after"], [7, "subject"]],
 );
 is("the reasons are plain words", mixed.ok ? mixed.report.every((r) => r.reason.length > 20 && /\.$/.test(r.reason)) : mixed, true);
 
@@ -127,7 +128,7 @@ const source = readFileSync("lib/sequence-import.ts", "utf8");
 is(
   "this file only reads, from pure modules: no email, store, Redis or network",
   [...source.matchAll(/^import .* from "([^"]+)";$/gm)].map((m) => m[1]),
-  ["@/lib/csv", "@/lib/flow-limits", "@/lib/flow-rules", "@/lib/sequence-template"],
+  ["@/lib/csv", "@/lib/flow-limits", "@/lib/flow-rules", "@/lib/sequence-template", "@/lib/preheader"],
 );
 is("and the limits it reads are the mail's own", [SEQUENCE_SUBJECT_MAX, SEQUENCE_BODY_MAX], [MAX_SUBJECT, MAX_MAIL_BODY]);
 

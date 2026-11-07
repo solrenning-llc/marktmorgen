@@ -133,11 +133,15 @@ async function main(): Promise<void> {
   is("a sequence from before the field reads as it did", parseFlowList(JSON.parse(original.replace(/,"preview":"Three dinners for busy weeks"/, "")))?.at(-1)?.steps[0].preview, undefined);
   redis.run(["SET", flowsKey, JSON.stringify(withStored("see example.com"))]);
   await upsertContact(listId, "cy@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  const started = redis.keys().filter((k) => k.startsWith("nl:mail:enr:")).length;
   await enroll(store, "cy@example.com", { joined: true });
+  is("the person was started on the sequence", redis.keys().filter((k) => k.startsWith("nl:mail:enr:")).length, started + 1);
   mail.clearCaptured();
   await run();
-  is("the email is not sent without it", mail.sent.filter((m) => m.to.includes("cy@example.com") && m.subject === "Welcome").length, 0);
+  is("the email is not sent without it", mail.sent.filter((m) => m.to.includes("cy@example.com")).length, 0);
   redis.run(["SET", flowsKey, original]);
+  for (let i = 0; i < 3; i += 1) await run();
+  is("nor sent later as if nothing happened: that run ended there", mail.sent.filter((m) => m.to.includes("cy@example.com")).length, 0);
 
   part("A sequence brought in from a file keeps its preview");
   is("the template's preview column", SEQUENCE_TEMPLATE.includes("preview"), true);

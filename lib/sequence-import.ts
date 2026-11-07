@@ -27,8 +27,10 @@
  *     (*|FNAME|*, {{ subscriber.first_name }}, {% if %}, {$name}, %FIRSTNAME%)
  *     are taken out and listed, in the subject, the body and a link's
  *     address alike, never sent as written.
- *   - The preview text has no place in a sequence's email yet (537 [PH1]): it
- *     is reported, not kept.
+ *   - The preview text is read as the subject is and kept on its email when
+ *     its rules keep it (lib/preheader.ts, 537 [PH1]; kept since 6 November
+ *     2026, reported and left out before). One its rules refuse is reported,
+ *     with their words, and the email comes in without it.
  *   - A row whose subject or body is missing or too long, or whose wait
  *     cannot be read, is left out and reported; its wait is added to the next
  *     email's, so the emails after it keep their days.
@@ -40,6 +42,7 @@ import { parseCsv } from "@/lib/csv";
 import { MAX_STEPS } from "@/lib/flow-limits";
 import { MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
 import { MAX_SEQUENCE_FILE_BYTES, SEQUENCE_BODY_MAX, SEQUENCE_SUBJECT_MAX, SEQUENCE_TEMPLATE } from "@/lib/sequence-template";
+import { PREVIEW_PROBLEMS, cleanPreview } from "@/lib/preheader";
 
 export { MAX_SEQUENCE_FILE_BYTES, SEQUENCE_TEMPLATE };
 
@@ -54,7 +57,7 @@ const COLUMN_NAMES: Record<Column, string[]> = {
   body: ["body", "content", "text", "message", "html", "email body"],
 };
 
-export type SequenceStep = { delayHours: number; subject: string; body: string };
+export type SequenceStep = { delayHours: number; subject: string; body: string; preview?: string };
 
 export type ReportLine = {
   /** The file's line, counting the header as 1; 0 for the file as a whole. */
@@ -356,12 +359,13 @@ export function readSequenceCsv(text: string, bytes: number = new TextEncoder().
       leftOut("days_after", "With the wait of the emails left out before it, this one would come more than a year after the one before.");
       continue;
     }
+    const preview = cleanPreview(plainSubject(cell(row, "preview"), taken), subject);
     const variables = [...new Set([...taken.variables, ...read.variables])];
     if (variables.length) report.push({ line, column: "body", reason: `Taken out, because emails here have no merge fields: ${variables.join(", ")}. Read the sentence around it.` });
     if (read.trackers) report.push({ line, column: "body", reason: `${read.trackers} ${read.trackers === 1 ? "link went" : "links went"} through the old service's click tracker and ${read.trackers === 1 ? "was" : "were"} taken out. Add the real address if you need it.` });
     if (read.images) report.push({ line, column: "body", reason: `${read.images} ${read.images === 1 ? "image was" : "images were"} taken out. Upload an image again if you need it.` });
-    if (cell(row, "preview").trim()) report.push({ line, column: "preview", reason: "Preview text is not kept yet: a sequence's email has no place for it." });
-    steps.push({ delayHours: hours, subject, body: read.body });
+    if (!preview.ok) report.push({ line, column: "preview", reason: `${PREVIEW_PROBLEMS[preview.why]} This email came in without its preview text.` });
+    steps.push({ delayHours: hours, subject, body: read.body, ...(preview.ok && preview.text ? { preview: preview.text } : {}) });
     carried = 0;
   }
   if (parsed.truncated) report.push({ line: 0, column: "file", reason: `Only the first ${MAX_STEPS * 5} rows were read.` });

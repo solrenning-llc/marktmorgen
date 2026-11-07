@@ -705,7 +705,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         a: [
           `Yes, on Studio and Scale. Under Sequences and workflows, choose “Download the template (CSV)”. Copy each email from your old service into it, one email per row. Each row has its subject, its words and days_after: how many days after the email before it goes out. Its columns are ${SEQUENCE_TEMPLATE.join(", ")}; leave preview empty. Then pick the file under “Bring in a sequence” and choose “Read the file”. A file can be up to ${MAX_SEQUENCE_FILE_BYTES / 1000} KB. A sequence holds up to ${MAX_STEPS} emails; any after that are left out and listed.`,
           "The emails open in the sequence editor as a new sequence. You read each one, pick what starts it and save it. It is saved paused: nothing is sent until you preview it and switch it on from its card.",
-          "Emails written in HTML come in as text. Paragraphs, lists and links are kept, each link as its words and its address. Pictures and links through a known click-tracking address are taken out. So are merge fields like *|FNAME|* or {{ name }}. Each one taken out is listed by its line in the file, above the emails, so you can check it. So is each email left out, and each preview text, which an email in a sequence does not have yet.",
+          "Emails written in HTML come in as text. Paragraphs, lists and links are kept, each link as its words and its address. Pictures and links through a known click-tracking address are taken out. So are merge fields like *|FNAME|* or {{ name }}. Each one taken out is listed by its line in the file, above the emails, so you can check it. So is each email left out, and each preview text that cannot be kept, with the reason.",
         ],
       },
       {

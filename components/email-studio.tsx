@@ -692,7 +692,7 @@ function Compose(props: {
   const [subject, setSubject] = useState(props.restore ? props.restore.subject : props.draft?.subject ?? props.initialTemplate?.subject ?? "");
   const [body, setBody] = useState(props.restore ? props.restore.body : props.draft?.body ?? props.initialTemplate?.body ?? "");
   // The preview text (537 [PH1]): the line a mail app shows after the subject. Optional; checked here as the server checks it.
-  const [preview, setPreview] = useState(props.restore ? props.restore.preview ?? "" : props.draft?.preview ?? "");
+  const [preview, setPreview] = useState(props.restore ? props.restore.preview ?? "" : props.draft?.preview ?? props.initialTemplate?.preview ?? "");
   // The email's box, so a picture goes where the cursor is.
   const bodyBox = useRef<HTMLTextAreaElement>(null);
   // Brought back (485 [IT2]): the button that did it is gone, so the focus goes to the email it brought back.
@@ -1635,7 +1635,7 @@ function History({
     if (!copy) return setError(a.ok ? "The email copy could not be confirmed. Your current draft is unchanged. Try copying again when you are ready." : message(a));
     // No id: it is a new email, not the draft of an old one. The time makes
     // the composer start afresh even when the same email is opened twice.
-    onOpen({ id: "", subject: copy.subject, body: copy.body, productId: copy.productId, who: copy.who, notProductId: copy.notProductId, narrow: copy.narrow, label: copy.label ?? null, by: "", savedAt: String(Date.now()) });
+    onOpen({ id: "", subject: copy.subject, body: copy.body, productId: copy.productId, who: copy.who, notProductId: copy.notProductId, narrow: copy.narrow, label: copy.label ?? null, ...(copy.preview ? { preview: copy.preview } : {}), by: "", savedAt: String(Date.now()) });
     document.getElementById("compose-title")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -1806,6 +1806,8 @@ type StepDraft = {
   unit: "hours" | "days";
   subject: string;
   body: string;
+  /** Its preview text (537 [PH1]); kept only on an email, never on a step that acts. */
+  preview: string;
   when: StepIf | "";
   whenProduct: string;
   whenTag: string;
@@ -1862,8 +1864,48 @@ function newStepId(): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** Its problem as the server would say it (lib/step-preview.ts): against the email's own subject. */
+function stepPreviewProblem(s: Pick<StepDraft, "preview" | "subject">): PreviewProblem | null {
+  const read = cleanPreview(s.preview, s.subject.replace(/\s+/g, " ").trim());
+  return read.ok ? null : read.why;
+}
+
+/**
+ * The preview text of a sequence's email (537 [PH1], unit 3): the same rules
+ * as the composer's field, its count as a reader counts (an emoji is one) and
+ * its problem in words beside it, read out once when it appears.
+ */
+function PreviewTextField({ id, value, subject, onChange }: { id: string; value: string; subject: string; onChange: (next: string) => void }) {
+  const problem = stepPreviewProblem({ preview: value, subject });
+  return (
+    <div>
+      <label className="block" htmlFor={id}>
+        <span className="text-sm text-ink-soft">Preview text</span>
+        <span className="field-hint mt-1 block" id={`${id}-hint`}>
+          Optional. The short line readers see after the subject, before they open the email. Say what is inside.
+        </span>
+      </label>
+      <input
+        id={id}
+        className="field mt-1"
+        value={value}
+        autoComplete="off"
+        aria-invalid={problem ? true : undefined}
+        aria-describedby={`${id}-count ${id}-hint ${id}-problem`}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <span id={`${id}-count`} className="field-hint mt-1 block tabular-nums" aria-live="polite">
+        {`${n(previewLength(value.replace(/\s+/g, " ").trim()))} of ${MAX_PREVIEW} characters`}
+      </span>
+      <span id={`${id}-problem`} className="mt-1 block text-sm font-semibold text-danger-text" aria-live="polite">
+        {problem ? PREVIEW_PROBLEMS[problem] : ""}
+      </span>
+    </div>
+  );
+}
+
 function blankStep(wait: string, unit: "hours" | "days", firstProduct: string): StepDraft {
-  return { editorKey: crypto.randomUUID(), id: newStepId(), kind: "email", actionTag: "", actionAssignee: "", actionDays: "3", actionFlow: "", actionField: "", actionValue: "", actionStage: "", actionTitle: "", actionText: "", wait, unit, subject: "", body: "", when: "", whenProduct: firstProduct, whenTag: "", otherwise: "skip", jump: "", next: "" };
+  return { editorKey: crypto.randomUUID(), id: newStepId(), kind: "email", actionTag: "", actionAssignee: "", actionDays: "3", actionFlow: "", actionField: "", actionValue: "", actionStage: "", actionTitle: "", actionText: "", wait, unit, subject: "", body: "", preview: "", when: "", whenProduct: firstProduct, whenTag: "", otherwise: "skip", jump: "", next: "" };
 }
 
 /** What a step that acts does, as one line reads it: "gives the label “warm”". */
@@ -1929,6 +1971,7 @@ function stepToDraft(s: FlowStep, firstProduct: string): StepDraft {
     ...(s.delayHours % 24 === 0 && s.delayHours > 0 ? { wait: String(s.delayHours / 24), unit: "days" as const } : { wait: String(s.delayHours), unit: "hours" as const }),
     subject: s.subject,
     body: s.body,
+    preview: s.preview ?? "",
     when: when?.if ?? "",
     whenProduct: when && "productId" in when ? when.productId : firstProduct,
     whenTag: when && "tag" in when ? when.tag : "",
@@ -2102,6 +2145,8 @@ function Flows({
   });
   const [aiBusy, setAiBusy] = useState(false);
   const overCapacity = (draft?.steps.length ?? 0) > MAX_STEPS;
+  // An email whose preview text has a problem waits to be saved, as the server would refuse it (lib/step-preview.ts).
+  const previewBlocked = Boolean(draft?.steps.some((s) => s.kind === "email" && stepPreviewProblem(s)));
   // A saved workflow being switched on: its preview is shown first (WorkflowPreview), then the explicit button.
   const [activating, setActivating] = useState<string | null>(null);
   const [runsOpen, setRunsOpen] = useState<string | null>(null);
@@ -2174,6 +2219,7 @@ function Flows({
         ...blankStep(s.delayHours % 24 === 0 ? String(s.delayHours / 24) : String(s.delayHours), s.delayHours % 24 === 0 ? "days" : "hours", first),
         subject: s.subject,
         body: s.body,
+        preview: s.preview ?? "",
       })),
     };
     // Unsaved from the start, so leaving the page asks first.
@@ -2194,7 +2240,7 @@ function Flows({
   }
 
   async function save() {
-    if (!draft || locked || invalidWait || overCapacity) return;
+    if (!draft || locked || invalidWait || overCapacity || previewBlocked) return;
     setBusy(true);
     setError(null);
     const a = await call({
@@ -2218,6 +2264,7 @@ function Flows({
             delayHours: flowWaitHours(s.wait, s.unit)!,
             subject: action ? "" : s.subject,
             body: action ? "" : s.body,
+            ...(!action && s.preview.trim() ? { preview: s.preview } : {}),
             ...(action ? { action } : {}),
             ...(when ? { when } : {}),
             ...routeOf(s),
@@ -2671,6 +2718,7 @@ function Flows({
               The goal: checked before each step. Someone who reaches it while in the workflow gets none of the steps still to come.
             </p>
           </div>
+          {previewBlocked ? <p role="status" className="text-sm font-semibold text-danger-text">An email&rsquo;s preview text has a problem, said under it. Change it or clear it before saving.</p> : null}
           {overCapacity ? <p role="status" className="text-sm text-danger">{`This sequence has more than ${MAX_STEPS} steps. Remove steps before saving; none have been discarded.`}</p> : null}
           {availableCounts.length ? <AiAssist<DraftedStep[]>
             title="Write the emails with AI"
@@ -2904,6 +2952,9 @@ function Flows({
                   <input className="field mt-1" maxLength={150} value={s.subject} onChange={(e) => setStep(s.editorKey, { subject: e.target.value })} />
                 </label>
                 <div className="mt-3">
+                  <PreviewTextField id={`step-preview-${s.editorKey}`} value={s.preview} subject={s.subject} onChange={(next) => setStep(s.editorKey, { preview: next })} />
+                </div>
+                <div className="mt-3">
                   <MailBodyEditor
                     body={s.body}
                     rows={6}
@@ -3050,7 +3101,7 @@ function Flows({
             </label>
           )}
           <div className="flex flex-wrap items-center gap-3">
-            <button type="submit" aria-busy={busy} disabled={locked || invalidWait || overCapacity} className="btn btn-primary">Save the sequence</button>
+            <button type="submit" aria-busy={busy} disabled={locked || invalidWait || overCapacity || previewBlocked} className="btn btn-primary">Save the sequence</button>
             <button
               type="button"
               className="text-sm font-bold text-ink-soft underline underline-offset-4"

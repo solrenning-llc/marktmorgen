@@ -92,6 +92,17 @@ export function cleanPreview(raw: unknown, subject = ""): { ok: true; text: stri
   return { ok: true, text };
 }
 
+/**
+ * A stored preview text exactly as its rules keep it, against `subject` when
+ * one is given (unit 3, 6 November 2026): what a strict reader accepts. An
+ * empty one is never kept, so it is not read as none either.
+ */
+export function isKeptPreview(value: unknown, subject = ""): value is string {
+  if (typeof value !== "string" || !value) return false;
+  const read = cleanPreview(value, subject);
+  return read.ok && read.text === value;
+}
+
 const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** Invisible characters a mail app shows as nothing, enough for the longest previews (about 255 characters), so it ends with the creator's words. */

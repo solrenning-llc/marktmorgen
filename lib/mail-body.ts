@@ -262,13 +262,17 @@ export function bodyText(body: string): string {
 /**
  * Emails to start from. Each is only an order of blocks with what to write
  * marked ⟦like this⟧: no sentence in it is sent until the creator has
- * replaced it (hasPlaceholder), and none of it claims anything.
+ * replaced it (hasPlaceholder), and none of it claims anything. Each has its
+ * preview text to write too (lib/preheader.ts, 537 [PH1]), marked the same
+ * way: replaced or taken out before the email can go, and never one that
+ * hurries the reader.
  */
-export const MAIL_TEMPLATES: { id: string; label: string; hint: string; blocks: MailBlock[] }[] = [
+export const MAIL_TEMPLATES: { id: string; label: string; hint: string; preview: string; blocks: MailBlock[] }[] = [
   {
     id: "news",
     label: "Newsletter",
     hint: "A heading, a few paragraphs, a picture and a link to read more.",
+    preview: "⟦One line on what this issue is about⟧",
     blocks: [
       { kind: "heading", text: "⟦What this issue is about⟧" },
       { kind: "text", text: "⟦A first paragraph: what happened, or what you have been thinking about.⟧" },
@@ -282,6 +286,7 @@ export const MAIL_TEMPLATES: { id: string; label: string; hint: string; blocks: 
     id: "launch",
     label: "Something new",
     hint: "What it is, who it is for, what is in it, and one button to its page.",
+    preview: "⟦One line on what you made and who it is for⟧",
     blocks: [
       { kind: "heading", text: "⟦The name of what you made⟧" },
       { kind: "text", text: "⟦What it is, in one or two sentences.⟧" },
@@ -294,6 +299,7 @@ export const MAIL_TEMPLATES: { id: string; label: string; hint: string; blocks: 
     id: "welcome",
     label: "Welcome",
     hint: "For someone who just joined: who you are, what they will get, where to start.",
+    preview: "⟦One line on what they will get from you⟧",
     blocks: [
       { kind: "heading", text: "⟦Welcome, and what happens now⟧" },
       { kind: "text", text: "⟦Who you are, in a few sentences.⟧" },
@@ -305,6 +311,7 @@ export const MAIL_TEMPLATES: { id: string; label: string; hint: string; blocks: 
     id: "spotlight",
     label: "One product",
     hint: "A picture of one product, why you made it, and a button to its page.",
+    preview: "⟦One line on the problem this product solves⟧",
     blocks: [
       { kind: "heading", text: "⟦The product's name⟧" },
       { kind: "text", text: "⟦Why you made it, and the problem it solves.⟧" },
@@ -318,6 +325,7 @@ export const MAIL_TEMPLATES: { id: string; label: string; hint: string; blocks: 
     id: "sale",
     label: "A sale (Black Friday, a season's end)",
     hint: "What is on sale, its price before and during the sale, and the day it ends if you set one.",
+    preview: "⟦One line on what is on sale⟧",
     blocks: [
       { kind: "heading", text: "⟦What is on sale⟧" },
       { kind: "text", text: "⟦Why there is a sale now: Black Friday, a birthday, the end of a season.⟧" },
@@ -330,6 +338,7 @@ export const MAIL_TEMPLATES: { id: string; label: string; hint: string; blocks: 
     id: "year-end",
     label: "End of the year",
     hint: "A thank-you, what you made this year, and what comes next. No sale needed.",
+    preview: "⟦One line of thanks, and what comes next⟧",
     blocks: [
       { kind: "heading", text: "⟦Thank you for this year⟧" },
       { kind: "text", text: "⟦What you made or learned this year, in a few sentences.⟧" },
@@ -342,6 +351,7 @@ export const MAIL_TEMPLATES: { id: string; label: string; hint: string; blocks: 
     id: "back-to-school",
     label: "Back to learning",
     hint: "For a new school year or season: what they can learn with you, and where to start.",
+    preview: "⟦One line on what they can learn with you⟧",
     blocks: [
       { kind: "heading", text: "⟦A new season to learn something⟧" },
       { kind: "text", text: "⟦Who this is for, and what they can learn with you.⟧" },

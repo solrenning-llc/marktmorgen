@@ -76,6 +76,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { usedLinkIn } from "@/lib/mail-clicks";
 import { courseProgress } from "@/lib/learn";
+import { refusedSend, refusedStepPreview, sendablePreview, stepPreview } from "@/lib/step-preview";
 
 export { MAX_FLOWS, MAX_STEPS };
 export const MAX_DELAY_HOURS = MAX_FLOW_WAIT_HOURS;
@@ -87,6 +88,8 @@ export type FlowStep = {
   /** An email's subject and words; both empty on a step that acts instead (`action`). */
   subject: string;
   body: string;
+  /** The email's preview text (lib/step-preview.ts, 537 [PH1]); never on a step that acts, absent for none. */
+  preview?: string;
   /** Instead of an email: a label given or taken off, or another sequence started. */
   action?: FlowAction;
   /** Sent only to those this holds for (lib/flow-rules.ts); absent for everyone. */
@@ -193,9 +196,11 @@ function cleanStep(raw: unknown, known: (productId: string) => boolean, isFlow: 
   const subject = action ? "" : typeof value.subject === "string" ? value.subject.replace(/\s+/g, " ").trim().slice(0, MAX_SUBJECT) : "";
   const body = action ? "" : typeof value.body === "string" ? value.body.replace(/\r\n?/g, "\n").trim().slice(0, MAX_MAIL_BODY) : "";
   if (!Number.isInteger(delay) || delay < 0 || delay > MAX_DELAY_HOURS || (!action && (!subject || !body))) return null;
+  const preview = stepPreview(value.preview, subject, Boolean(action));
+  if (preview === null) return null;
   const when = readCondition(value.when, known, isCourse);
   if (when === "bad") return null;
-  const step: FlowStep = { id: typeof value.id === "string" && FLOW_ID.test(value.id) ? value.id : newId(), delayHours: delay, subject, body, ...(action ? { action } : {}) };
+  const step: FlowStep = { id: typeof value.id === "string" && FLOW_ID.test(value.id) ? value.id : newId(), delayHours: delay, subject, body, ...(preview ? { preview } : {}), ...(action ? { action } : {}) };
   if (when) {
     step.when = when;
     step.otherwise = value.otherwise === "end" ? "end" : value.otherwise === "jump" ? "jump" : "skip";
@@ -256,7 +261,7 @@ const starterOf = (raw: unknown): Flow["starter"] => (raw === "welcome" || raw =
 
 export type FlowResult =
   | { ok: true; flows: Flow[] }
-  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" | "paid_request_taken" };
+  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" | "paid_request_taken" | NonNullable<ReturnType<typeof refusedStepPreview>> };
 
 /**
  * Adds a sequence, or replaces one with the same id. Checked whole every time.
@@ -304,6 +309,8 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   const assignees = new Set(team ? [store.email.toLowerCase(), ...team.members.filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())] : []);
   const ctx: ActionContext = { field: (fid) => crmFields.find((f) => f.id === fid), isStage: (sid) => stages.some((st) => st.id === sid), isAssignee: (email) => assignees.has(email) };
   if (rawSteps.length === 0 || rawSteps.length > MAX_STEPS) return { ok: false, reason: "steps" };
+  const previewRefused = refusedStepPreview(rawSteps, MAX_SUBJECT);
+  if (previewRefused) return { ok: false, reason: previewRefused };
   const known = (id: string) => hasProduct(store, id);
   const flows = await readFlowListStrict(store.listId);
   const id = typeof raw.id === "string" && FLOW_ID.test(raw.id) ? raw.id : null;
@@ -1253,7 +1260,9 @@ export async function sendDueSteps(
       }
 
       const key = `fl:${flow.id}:${step.id}:${createHash("sha256").update([...going].sort().join(",")).digest("hex").slice(0, 32)}`;
-      const result = await sendTo(store, going, step.subject, step.body, key, { medium: "sequence", campaign: stepCampaign(flow.id, step.id) }).catch(() => null);
+      // Its preview text (537 [PH1]); a stored one its rules refuse stops this email rather than sending it without (lib/step-preview.ts).
+      const preview = sendablePreview(step);
+      const result = preview === null ? refusedSend(going) : await sendTo(store, going, step.subject, step.body, key, { medium: "sequence", campaign: stepCampaign(flow.id, step.id) }, preview).catch(() => null);
       if (!result) {
         queued = true;
         await settleAttempts(listId, flow.id, index, step.id, kind, going.map((email) => ({ email, state: "uncertain", note: "Sending was interrupted; whether this email went out could not be confirmed.", to: index })), now);

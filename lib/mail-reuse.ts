@@ -10,8 +10,8 @@
  * Two things can be done with a sent email, both from the list of what was
  * sent:
  *
- *   Write it again    its subject and text are put back in the composer, as a
- *                     new email, to change and send or schedule.
+ *   Write it again    its subject, preview text and words are put back in the
+ *                     composer, as a new email, to change and send or schedule.
  *
  *   Keep sending it   it becomes one more email of a sequence, so everybody
  *                     who joins the list from now on gets it by themselves —
@@ -29,6 +29,10 @@
  * the condition of its email in the sequence (lib/flow-rules.ts), read just
  * before it goes, so "you have not bought this yet" never reaches somebody
  * who has. (Until conditions existed, such an email was refused.)
+ *
+ * The preview text a sent email had (lib/preheader.ts, 537 [PH1]) goes with
+ * it both ways: into the composer, and onto its email in the sequence, where
+ * the sequence checks it again against the subject (lib/step-preview.ts).
  *
  * What it still refuses, and says so: an email narrowed two ways at once —
  * to buyers of one product who do not own another, say. An email in a
@@ -128,7 +132,7 @@ export function planKeep(broadcast: Broadcast | null, listId: string | null, flo
       // earlier is switched on again, and the studio says so.
       active: true,
       kept: true,
-      steps: [...(home?.steps ?? []), { delayHours: waitHours, subject, body, ...(when ? { when, otherwise: "skip" } : {}) }],
+      steps: [...(home?.steps ?? []), { delayHours: waitHours, subject, body, ...(broadcast.preview ? { preview: broadcast.preview } : {}), ...(when ? { when, otherwise: "skip" } : {}) }],
     },
   };
 }
@@ -155,12 +159,12 @@ export async function keepSending(
   return { ok: true, flows: saved.flows, name: plan.name, waitHours: plan.waitHours, position: plan.position };
 }
 
-/** A sent email's subject and text, to write again. Only the store's own. */
+/** A sent email's subject, preview text and words, to write again. Only the store's own. */
 export async function copyOf(
   store: Store,
   broadcastId: string,
-): Promise<{ subject: string; body: string; productId: string | null; who: Broadcast["who"]; notProductId: string | null; narrow: Broadcast["narrow"]; label?: string } | null> {
+): Promise<{ subject: string; body: string; productId: string | null; who: Broadcast["who"]; notProductId: string | null; narrow: Broadcast["narrow"]; label?: string; preview?: string } | null> {
   const broadcast = await readBroadcast(broadcastId);
   if (!broadcast || broadcast.id !== broadcastId || !store.listId || broadcast.listId !== store.listId) return null;
-  return { subject: broadcast.subject, body: broadcast.body, productId: broadcast.productId, who: broadcast.who, notProductId: broadcast.notProductId, narrow: broadcast.narrow, ...(broadcast.label ? { label: broadcast.label } : {}) };
+  return { subject: broadcast.subject, body: broadcast.body, productId: broadcast.productId, who: broadcast.who, notProductId: broadcast.notProductId, narrow: broadcast.narrow, ...(broadcast.label ? { label: broadcast.label } : {}), ...(broadcast.preview ? { preview: broadcast.preview } : {}) };
 }

@@ -2,6 +2,7 @@ import { MAX_STEP_NEXT_ACTION, MAX_STEP_NEXT_DAYS } from "@/lib/flow-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import type { Flow } from "@/lib/flows";
 import { FLOW_TRIGGERS } from "@/lib/flow-rules";
+import { isKeptPreview } from "@/lib/preheader";
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 const strings = (value: Record<string, unknown>, keys: string[]) => keys.every(key => typeof value[key] === "string");
 function condition(value: unknown): boolean {
@@ -43,6 +44,8 @@ export function parseFlowList(raw: unknown): Flow[] | null {
       if (step.when !== undefined && !condition(step.when)) return null;
       if (step.otherwise !== undefined && step.otherwise !== "skip" && step.otherwise !== "end" && step.otherwise !== "jump") return null;
       if ((step.jump !== undefined && typeof step.jump !== "string") || (step.next !== undefined && typeof step.next !== "string")) return null;
+      // An email's preview text (537 [PH1]) as its rules keep it, against its own subject; never on a step that acts.
+      if (step.preview !== undefined && (step.action !== undefined || !isKeptPreview(step.preview, step.subject as string))) return null;
     }
   }
   return raw as Flow[];

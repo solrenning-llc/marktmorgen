@@ -1,4 +1,4 @@
-import { cleanPreview } from "@/lib/preheader";
+import { cleanPreview, isKeptPreview } from "@/lib/preheader";
 import { readDraftSubjectTest, sameDraftSubjectTest } from "@/lib/mail-draft-test";
 import { sameDraftAudience } from "@/lib/mail-draft-audience";
 import { readTags } from "@/lib/contact-rules";
@@ -21,7 +21,7 @@ export function keptWaitHours(answer: MailAnswer): number | null {
   return answer.ok === true && typeof wait === "number" && Number.isInteger(wait) && wait >= 0 && wait <= MAX_FLOW_WAIT_HOURS ? wait : null;
 }
 
-export type MailCopy = { subject: string; body: string; productId: string | null; who: "all" | "buyers" | "leads"; notProductId: string | null; narrow: Narrow | null; label?: string };
+export type MailCopy = { subject: string; body: string; productId: string | null; who: "all" | "buyers" | "leads"; notProductId: string | null; narrow: Narrow | null; label?: string; preview?: string };
 /** A copy must retain its content and audience before replacing the composer. */
 export function confirmedMailCopy(answer: MailAnswer): MailCopy | null {
   if (answer.ok !== true || !answer.copy || typeof answer.copy !== "object" || Array.isArray(answer.copy)) return null;
@@ -38,7 +38,9 @@ export function confirmedMailCopy(answer: MailAnswer): MailCopy | null {
   // A label, when the sent email had one (99 [E2-TAG-BROADCAST]); absent on a copy of an older email.
   if (!(copy.label === undefined || copy.label === null || typeof copy.label === "string" && readTags([copy.label])[0] === copy.label)) return null;
   const label = typeof copy.label === "string" ? copy.label : "";
-  return { subject: copy.subject, body: copy.body, productId: copy.productId, who: copy.who as MailCopy["who"], notProductId: copy.notProductId, narrow, ...(label ? { label } : {}) };
+  // Its preview text, when the sent email had one (537 [PH1]): only as its rules keep it, never one changed on the way.
+  if (copy.preview !== undefined && !isKeptPreview(copy.preview, copy.subject)) return null;
+  return { subject: copy.subject, body: copy.body, productId: copy.productId, who: copy.who as MailCopy["who"], notProductId: copy.notProductId, narrow, ...(label ? { label } : {}), ...(typeof copy.preview === "string" ? { preview: copy.preview } : {}) };
 }
 
 /** Accept only a complete draft result belonging to the draft being edited. */

@@ -11,6 +11,13 @@
  *     unknown read said no fields, no values or the default pipelines; the
  *     person's deletion (forgetCrmPerson) then deleted none of the person's
  *     answers or deals and still said it was done.
+ *   - forgetCrm (lib/crm.ts), a deleted store's CRM: an unknown fields read
+ *     kept everything, deals naming buyers included (Claude 6 on #2901). The
+ *     keys it does not need the fields for go at once; the fields record and
+ *     its values stay findable for a later try, and it throws.
+ *   - listAsCsv (lib/free.ts), the list's file: an unknown fields or values
+ *     read gave every CRM column empty with no error (Claude 4 on #2901); a
+ *     page of the list read in another shape cut the file short.
  *
  * Synthetic records only, in the in-memory Redis stand-in.
  */
@@ -18,8 +25,12 @@ import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { autoRefundsOwed } from "@/lib/auto-captions";
-import { allValues, forgetCrmPerson, readFields, readPipelines, readValues } from "@/lib/crm";
+import { allValues, forgetCrm, forgetCrmPerson, readFields, readPipelines, readValues } from "@/lib/crm";
+import { upsertContact } from "@/lib/contacts";
+import { listAsCsv } from "@/lib/free";
+import { personKey } from "@/lib/person-key";
 import { streamPath } from "@/lib/stream-rules";
+import { ROOM } from "./data-room";
 import { store as redis } from "./redis-stub";
 
 /** Redis answers `fault` for the `nth` pipeline sent (1 for the first), and truthfully for every other. */
@@ -169,5 +180,82 @@ for (const [label, nth, fault] of [
   test(`a person's deletion with ${label} fails and says so, never "done" with their records kept`, async () => {
     await seedCrm();
     await assert.rejects(() => faulted(nth, fault, () => forgetCrmPerson(STATS, ANA, "ana@example.com")));
+  });
+}
+
+// ---- A deleted store's CRM (forgetCrm) ----
+
+const TASKS_KEY = `nl:crm:tasks:${STATS}`;
+const STAGES_KEY = `nl:crm:stages:${STATS}`;
+const seedStore = async () => {
+  await seedCrm();
+  await redis.pipeline([["HSET", TASKS_KEY, ANA, JSON.stringify([{ id: "task000001", text: "Call Ana" }])], ["SET", STAGES_KEY, JSON.stringify(PIPES[0].stages)]]);
+};
+const left = async () => {
+  const [fields, value, deals, pipes, stages, tasks] = await redis.pipeline([
+    ["EXISTS", `nl:crm:fields:${STATS}`],
+    ["HGET", `nl:crm:v:${STATS}:${FIELD.id}`, ANA],
+    ["EXISTS", `nl:crm:deals:${STATS}`],
+    ["EXISTS", `nl:crm:pipes:${STATS}`],
+    ["EXISTS", STAGES_KEY],
+    ["EXISTS", TASKS_KEY],
+  ]);
+  return { fields, value, deals, pipes, stages, tasks };
+};
+
+test("control: a deleted store's CRM goes whole, its answers included", async () => {
+  await seedStore();
+  await forgetCrm(STATS);
+  assert.deepEqual(await left(), { fields: 0, value: null, deals: 0, pipes: 0, stages: 0, tasks: 0 });
+});
+
+for (const [label, fault] of [
+  ["not a string", [7]],
+  ["missing", []],
+  ["a record that does not read", ["{"]],
+] as const) {
+  test(`a deleted store's CRM with the fields' reply ${label}: deals, pipelines, stages and tasks go, the answers stay findable, and it throws`, async () => {
+    await seedStore();
+    await assert.rejects(() => faulted(1, fault, () => forgetCrm(STATS)));
+    // The deal naming ana@example.com is gone; the fields record stays so a later try still finds the answers' keys.
+    assert.deepEqual(await left(), { fields: 1, value: "Gold", deals: 0, pipes: 0, stages: 0, tasks: 0 });
+    await forgetCrm(STATS);
+    assert.deepEqual(await left(), { fields: 0, value: null, deals: 0, pipes: 0, stages: 0, tasks: 0 });
+  });
+}
+
+// ---- The list's file (listAsCsv) ----
+
+const LIST = "e".repeat(32);
+const LIST_STORE = { statsId: STATS, listId: LIST } as never;
+const seedList = async () => {
+  redis.clear();
+  await upsertContact(LIST, "ana@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  await redis.pipeline([
+    ["SET", `nl:crm:fields:${STATS}`, JSON.stringify([FIELD])],
+    ["HSET", `nl:crm:v:${STATS}:${FIELD.id}`, personKey(STATS, "ana@example.com"), "Gold"],
+  ]);
+};
+
+test("control: the list's file has the field's column and Ana's answer in it", async () => {
+  await seedList();
+  const rows = (await listAsCsv(LIST_STORE, false)).split("\r\n");
+  assert.equal(rows[0].endsWith(',"Plan"'), true);
+  assert.equal(rows.length, 3);
+  assert.equal(rows[1].startsWith('"ana@example.com"'), true);
+  assert.equal(rows[1].endsWith(',"Gold"'), true);
+});
+
+for (const [label, nth, fault] of [
+  ["the fields' reply not a string", 1, [7]],
+  ["the fields' reply missing", 1, []],
+  ["the values' reply an object", 2, [{ x: "Gold" }]],
+  ["the values' reply missing", 2, []],
+  ["a page of the list not a list", 3, [7]],
+  ["a page of the list without its people", 3, [["0", 7]]],
+] as const) {
+  test(`the list's file with ${label} fails and says so, never a file with the CRM columns or people left out`, async () => {
+    await seedList();
+    await assert.rejects(() => faulted(nth, fault, () => listAsCsv(LIST_STORE, false)));
   });
 }

@@ -1,3 +1,15 @@
+# Estado vigente — 07/11/2026 06h43 Fortaleza: #2947 aprovado e nove agregadores novos verdes; aguarda fila
+
+C5/ **6704833984** no EXATO **10baebdca911a678b0022b25f77278494066f20a**: “pode entrar”, LOWremanescente6701759336 FECHADO e nenhumachadonovo. C5reproduziuRED9f791946/11=8PASS3FAIL→head11/11, ligados24+29+34PASS e merge-treecom main0ade limpo70c1e788. Nãoautofechamentopelaautor: parecerindependenteexplicitaSHA256estático, controlflow e disposiçãohonestadoloopexistente.
+
+FotoÚNICA poraprovaçãoNOVA: **NOVEAllcheckscompleted/successexatos** public128358283067/product-actions128358370992/readers128358894539/dependency128356607544/studio128358032328/buyer128358429750/codeql128358467543/signup128358619450/product-checks128365308875. NoveworkflowIDs/pathsdistintos nohead10ba,43/43jobscompleted/success,nenhumchildskip/fail/cancel. GETPR OPEN/head10ba/mergedfalse/mergeabletrue. Recibo **6705197728**. Não repetirconsultaemrodadas ouos98checks/types/lint/scannerinalterados. Nenhumheadmove/push/rerun/cancel/novoteste.
+
+**PR2947 pronto PARA FILA AUTORIZADA, não enfileirado/merged. C4-0226 proíbe merge direto; aguardar C4literalFILA LIGADA**, aindaausenteFULL29a0d840 desdeCXZ0549. Quandoativada, confirmarHEAD/reviews/gates/estadofresh e usarenfileiramento,nãoPUTmergedireto. Verde10ba nãoautorizaativoafila. Produto/coeficientes/preço/limite/flags/gatesintactos, desconhecido nãozero/margemglobalnãoatestada.
+
+#2741oficialab5818 eWIPLOW40d9/96checks preservados;MEDunknown429aguardaEXEC/classificaçãoR2 comRED962149. #2819oficial3fdcbe1c eREDefe2d387 aguardamR2. Timelines dessesdoissemnovidade; nãoautocorrigirMEDnemrepetirprovas. TrêsPRs próprios; provas/WIPpertencemàsmesmasunidades. C5-0556 pediu2868financeira, mas Gassumiu/entregou5811346749 eC6focal6696588568fechado; NÃODUPLICAR. #2941segundaM/CXM0635ATIVAconfirmada, nãoGcandidate; #3034Pcontinuaativo0638. Nenhumrevisorlivreconcorrenteinventado. Main0ade/normativos/caixa/filas/reservassemchanges. C4coordena/C1sórevisor; semsubagente/vigiafutura/conta/pagamento/provedor/PII/preço/limite/comissão/flag/gate/reservadoc/retentativaconsumidaalterada. Próximos: C4FILA LIGADApara2947;R2/C5provas2741/2819 ecomposiçãoLOW2741quandoMEDpronto. Histórico/REDs/WIPs/heads/retriesintegralmenteabaixopreservados. Publicarpontoexatocurto.
+
+---
+
 # Recibo final do corretivo #2947
 
 Ponto **CXZ-20261107-0549-C4-1** publicado no canal em **a27535156596dc4b1f33f45d2c248661cae0d8ec**, blob **9ef07327f416e1ef2b4b6c884ef88ab673b357bd**, após409semgravação e>=120s/FULLfresco. Oficial2947/10ba aguarda C5focal6704646327 e noveNOVOSgates; nenhum deles presumido. OutrosdoisMEDsR2 eWIPLOW2741preservados. C4-0226semmergedireto/FILALIGADAaindaausente. Nenhumteste/CI/produto/retentativa/merge adicional após os recibos abaixo. Histórico completo e correção de inventário abaixo prevalecem sobre esperasC4antigas.

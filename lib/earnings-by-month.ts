@@ -7,18 +7,26 @@
  * by you" and are never shown as verified. In each month every currency has
  * its own line: money in (sales, renewals, entered), money out (refunds,
  * disputed money the bank holds or the buyer won) and the difference, in the
- * month each was recorded. Currencies are never added together and nothing is
- * converted. The difference is before fees and taxes: not profit.
+ * month each was recorded, and money given back (a dispute won, a refund that
+ * failed) as money in, in the month it came back, so a month shown is never
+ * rewritten by what happens later. Currencies are never added together and
+ * nothing is converted. The difference is before fees and taxes: not profit.
  *
  * Unknown is said, never zero. A source's month is "read" only when every list
  * of that source either ended inside the reading or reached strictly before
  * the month's floor; otherwise it is "unknown" with no amount at all, never a
  * lower number. A record that cannot be understood, the same record twice,
  * or a record after the reading's own time (an entry after its day), makes
- * its whole source unknown; so does a provider given twice. Every net is
- * worked out exactly, never rounded. A month's total is given only when every
- * source of that month was read. A month read in full with nothing in it is a
- * confirmed zero (no lines), apart from unknown.
+ * its whole source unknown; so does a provider given twice, a provider's
+ * record without an id of its own provider (a PayPal sale given as Stripe is
+ * never counted twice), and a kind of money the provider has that was neither
+ * read, said unread nor said left out (EXPECTED_KINDS: a missing refund list
+ * is never a confirmed zero). Kinds read only in part are said (PARTLY_READ:
+ * PayPal's partial refunds are never recorded). Every net is worked out
+ * exactly, never rounded. A month's total is given only when every source of
+ * that month was read. A month read in full with nothing in it is a confirmed
+ * zero (no lines), apart from unknown. A time zone in which a month could
+ * begin before its floor gives nothing.
  *
  * Nothing here ranks, rates or compares the creator by revenue (561 [NE1]):
  * no best month, growth, projection or status.
@@ -29,9 +37,12 @@
 export const EARNINGS_MONTHS = 12;
 
 /**
- * Hours before UTC midnight that a zone's local midnight can come: no zone is
- * ahead of UTC by more than 14 hours. A month's floor is that early, so a
- * clock change in any zone never lets a month count as reached too soon.
+ * Hours before UTC midnight that a zone's local midnight can come: no IANA zone
+ * is ahead of UTC by more than 14 hours. A month's floor is that early, so a
+ * clock change in any zone never lets a month count as reached too soon. Intl
+ * also takes offset zones up to +23:59, so earningsMonths checks the floor of
+ * every month shown in the zone itself and gives nothing where a month would
+ * begin before it (Claude 2 on #2941).
  */
 const AHEAD_MS = 14 * 3600_000;
 
@@ -44,9 +55,21 @@ export type EarningsSource = "stripe" | "paypal" | "manual";
 /** The provenance said beside each source. */
 export const SOURCE_WORDS: Record<EarningsSource, string> = { stripe: "Stripe", paypal: "PayPal", manual: "Entered by you" };
 
-export type MoneyKind = "sale" | "renewal" | "refund" | "dispute";
+/**
+ * Money in: a sale, a renewal (any paid invoice of a membership after the one
+ * its checkout counted), money given back (`reinstated`: a dispute won, a
+ * refund that failed). Money out: a refund, a dispute (when the bank took the
+ * money, whatever happens to it later).
+ */
+export type MoneyKind = "sale" | "renewal" | "refund" | "dispute" | "reinstated";
 
-/** One amount as a provider recorded it: when (ms), in the smallest unit of its currency. */
+/**
+ * One amount as a provider recorded it: when (ms), in the smallest unit of its
+ * currency. `id` is the provider's own, prefixed by it ("stripe:…",
+ * "paypal:…"): a provider's record without one cannot be checked for being
+ * counted twice, so it makes its source unknown. It stays optional in the type
+ * only so a missing id reaches the rule and is refused there.
+ */
 export type MoneyEvent = { id?: string; at: number; cents: number; currency: string };
 
 /**
@@ -59,8 +82,36 @@ export type ListReading =
   | { kind: MoneyKind; events: MoneyEvent[]; since: number; complete: boolean; reachedBack: number | null }
   | { kind: MoneyKind; unread: true };
 
-/** A provider's lists; `notRead` names kinds it has that are never read (PayPal's disputes), said on every month. */
+/**
+ * A provider's lists; `notRead` names kinds it has that are never read
+ * (PayPal's disputes), said on every month. Every kind of EXPECTED_KINDS for
+ * the provider is either in a list (read or unread) or in `notRead`, never
+ * both; several lists of one kind are added (Stripe's checkouts and extras are
+ * two of "sale"), and the ids keep a record from being added twice.
+ */
 export type ProviderReading = { source: "stripe" | "paypal"; lists: ListReading[]; notRead?: MoneyKind[] };
+
+/**
+ * The kinds of money each provider has (Claude 2 on #2941): a reading that
+ * leaves one out without saying so is unknown, never a confirmed zero.
+ * PayPal has no renewals (its sales are one payment each) and its money given
+ * back is never apart from its disputes, which are not read.
+ */
+export const EXPECTED_KINDS: Readonly<Record<"stripe" | "paypal", readonly MoneyKind[]>> = {
+  stripe: ["sale", "renewal", "refund", "dispute", "reinstated"],
+  paypal: ["sale", "refund", "dispute"],
+};
+
+/**
+ * Kinds a provider's lists hold only in part, said on every month the
+ * provider is read: PayPal's refunds are those refunded in full, the only
+ * ones lib/paypal-sales.ts records (a capture PARTIALLY_REFUNDED is never
+ * written down), so a partial PayPal refund is never taken off.
+ */
+export const PARTLY_READ: Readonly<Record<"stripe" | "paypal", readonly MoneyKind[]>> = {
+  stripe: [],
+  paypal: ["refund"],
+};
 
 /** An amount the creator typed: the date (YYYY-MM-DD, the store's own calendar), a positive amount and its currency. */
 export type ManualEntry = { id: string; date: string; cents: number; currency: string };
@@ -86,6 +137,7 @@ export type MonthLine = {
   enteredCents: number;
   refundCents: number;
   disputeCents: number;
+  reinstatedCents: number;
   netCents: number;
 };
 
@@ -93,7 +145,7 @@ export type MonthLine = {
 export type UnknownWhy = "unread" | "not_reached" | "invalid" | "too_large";
 
 export type SourceMonth =
-  | { source: EarningsSource; state: "read"; lines: MonthLine[]; leftOut: MoneyKind[] }
+  | { source: EarningsSource; state: "read"; lines: MonthLine[]; leftOut: MoneyKind[]; partly: MoneyKind[] }
   | { source: EarningsSource; state: "unknown"; why: UnknownWhy };
 
 export type EarningsMonth = {
@@ -104,6 +156,8 @@ export type EarningsMonth = {
   totals: MonthLine[] | null;
   /** Kinds that are never read, by source: the page says them beside the month. */
   leftOut: { source: EarningsSource; kinds: MoneyKind[] }[];
+  /** Kinds read only in part, by source (PayPal: full refunds only): said beside the month too. */
+  partly: { source: EarningsSource; kinds: MoneyKind[] }[];
 };
 
 export type Earnings = { timeZone: string; at: number; since: number; months: EarningsMonth[] };
@@ -141,7 +195,11 @@ function monthBefore(month: string): string {
   return `${String(back.year).padStart(4, "0")}-${String(back.month).padStart(2, "0")}`;
 }
 
-/** The months shown, newest first, from the reading's time in the zone; empty for an unknown zone or time. */
+/**
+ * The months shown, newest first, from the reading's time in the zone; empty
+ * for an unknown zone or time, and for a zone in which a month shown would
+ * begin before its floor (an offset zone more than 14 hours ahead of UTC).
+ */
 export function earningsMonths(at: number, timeZone: string, count = EARNINGS_MONTHS): string[] {
   const format = zoneFormat(timeZone);
   if (!format || !inDateRange(at) || !Number.isInteger(count) || count < 1) return [];
@@ -153,6 +211,12 @@ export function earningsMonths(at: number, timeZone: string, count = EARNINGS_MO
     const back = monthBefore(out[out.length - 1]);
     if (!MONTH.exec(back)) return [];
     out.push(back);
+  }
+  // The instant before each month's floor must still be in an earlier month in this zone; otherwise the month begins
+  // before its floor, a reading from readingSince misses its first hours and it would be called read (Claude 2 on #2941).
+  for (const month of out) {
+    const before = monthFloor(month) - 1;
+    if (!inDateRange(before) || !(monthIn(format, before) < month)) return [];
   }
   return out;
 }
@@ -177,10 +241,11 @@ const FIELD: Record<MoneyKind | "entered", keyof Sums> = {
   entered: "enteredCents",
   refund: "refundCents",
   dispute: "disputeCents",
+  reinstated: "reinstatedCents",
 };
-const KINDS: ReadonlySet<string> = new Set<MoneyKind>(["sale", "renewal", "refund", "dispute"]);
+const KINDS: ReadonlySet<string> = new Set<MoneyKind>(["sale", "renewal", "refund", "dispute", "reinstated"]);
 const isKind = (kind: unknown): kind is MoneyKind => typeof kind === "string" && KINDS.has(kind);
-const empty = (): Sums => ({ salesCents: 0, renewalCents: 0, enteredCents: 0, refundCents: 0, disputeCents: 0 });
+const empty = (): Sums => ({ salesCents: 0, renewalCents: 0, enteredCents: 0, refundCents: 0, disputeCents: 0, reinstatedCents: 0 });
 
 /**
  * Lines from sums by currency, alphabetical; null when a sum is past exact
@@ -192,8 +257,9 @@ const empty = (): Sums => ({ salesCents: 0, renewalCents: 0, enteredCents: 0, re
 function linesOf(byCurrency: Map<string, Sums>): MonthLine[] | null {
   const lines: MonthLine[] = [];
   for (const [currency, s] of [...byCurrency.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    if (![s.salesCents, s.renewalCents, s.enteredCents, s.refundCents, s.disputeCents].every(Number.isSafeInteger)) return null;
-    const net = BigInt(s.salesCents) + BigInt(s.renewalCents) + BigInt(s.enteredCents) - BigInt(s.refundCents) - BigInt(s.disputeCents);
+    if (![s.salesCents, s.renewalCents, s.enteredCents, s.refundCents, s.disputeCents, s.reinstatedCents].every(Number.isSafeInteger)) return null;
+    const net =
+      BigInt(s.salesCents) + BigInt(s.renewalCents) + BigInt(s.enteredCents) + BigInt(s.reinstatedCents) - BigInt(s.refundCents) - BigInt(s.disputeCents);
     const netCents = Number(net);
     if (!Number.isSafeInteger(netCents) || BigInt(netCents) !== net) return null;
     lines.push({ currency, ...s, netCents });
@@ -212,9 +278,10 @@ function add(into: Map<string, Map<string, Sums>>, month: string, currency: stri
 const validCents = (cents: unknown, positive: boolean): cents is number =>
   typeof cents === "number" && Number.isSafeInteger(cents) && (positive ? cents > 0 : cents >= 0);
 
-const validId = (id: unknown, seen: Set<string>): boolean => {
-  if (id === undefined) return true;
-  if (typeof id !== "string" || !id || seen.has(id)) return false;
+/** An entry's id: optional only where `required` is false; never the same twice; with `prefix`, its provider's own. */
+const validId = (id: unknown, seen: Set<string>, required: boolean, prefix = ""): boolean => {
+  if (id === undefined) return !required;
+  if (typeof id !== "string" || id.length <= prefix.length || !id.startsWith(prefix) || seen.has(id)) return false;
   seen.add(id);
   return true;
 };
@@ -233,7 +300,7 @@ function unknownEverywhere(source: EarningsSource, months: string[], why: Unknow
   return { source, months: new Map(months.map((m) => [m, { source, state: "unknown", why }])) };
 }
 
-function finish(source: EarningsSource, months: string[], sums: Map<string, Map<string, Sums>>, known: (month: string) => UnknownWhy | null, leftOut: MoneyKind[]): SourceResult {
+function finish(source: EarningsSource, months: string[], sums: Map<string, Map<string, Sums>>, known: (month: string) => UnknownWhy | null, leftOut: MoneyKind[], partly: readonly MoneyKind[]): SourceResult {
   const out = new Map<string, SourceMonth>();
   for (const month of months) {
     const why = known(month);
@@ -242,7 +309,7 @@ function finish(source: EarningsSource, months: string[], sums: Map<string, Map<
       continue;
     }
     const lines = linesOf(sums.get(month) ?? new Map());
-    out.set(month, lines ? { source, state: "read", lines, leftOut: [...leftOut] } : { source, state: "unknown", why: "too_large" });
+    out.set(month, lines ? { source, state: "read", lines, leftOut: [...leftOut], partly: [...partly] } : { source, state: "unknown", why: "too_large" });
   }
   return { source, months: out };
 }
@@ -256,6 +323,14 @@ function providerMonths(provider: ProviderReading, months: string[], format: Int
   const sums = new Map<string, Map<string, Sums>>();
   const seen = new Set<string>();
   const read: { since: number; complete: boolean; reachedBack: number | null }[] = [];
+  // Every kind the provider has is in a list or said not read, never both, and only kinds the rule knows (Claude 2 on #2941).
+  if (!Array.isArray(provider.lists) || (provider.notRead !== undefined && !Array.isArray(provider.notRead))) return unknownEverywhere(source, months, "invalid");
+  const notRead = [...new Set(provider.notRead ?? [])];
+  if (!notRead.every(isKind)) return unknownEverywhere(source, months, "invalid");
+  const listed = new Set(provider.lists.map((list) => (list && typeof list === "object" ? list.kind : undefined)));
+  if (notRead.some((kind) => listed.has(kind))) return unknownEverywhere(source, months, "invalid");
+  if (!EXPECTED_KINDS[source].every((kind) => listed.has(kind) || notRead.includes(kind))) return unknownEverywhere(source, months, "invalid");
+  const prefix = `${source}:`;
   let unread = false;
   for (const list of provider.lists) {
     if (!list || typeof list !== "object" || !isKind(list.kind)) return unknownEverywhere(source, months, "invalid");
@@ -267,7 +342,8 @@ function providerMonths(provider: ProviderReading, months: string[], format: Int
     if (list.reachedBack !== null && !Number.isFinite(list.reachedBack)) return unknownEverywhere(source, months, "invalid");
     read.push({ since: list.since, complete: list.complete, reachedBack: list.reachedBack });
     for (const event of list.events) {
-      if (!event || typeof event !== "object" || !validId(event.id, seen)) return unknownEverywhere(source, months, "invalid");
+      // Its own provider's id, required: a PayPal record given as Stripe, or a record with no id, is never added (Claude 2 on #2941).
+      if (!event || typeof event !== "object" || !validId(event.id, seen, true, prefix)) return unknownEverywhere(source, months, "invalid");
       if (typeof event.at !== "number" || !inDateRange(event.at) || !validCents(event.cents, false)) return unknownEverywhere(source, months, "invalid");
       // The current month runs to the reading's time: a record after it is not money so far (Codex J on #2941).
       if (event.at > at) return unknownEverywhere(source, months, "invalid");
@@ -284,7 +360,6 @@ function providerMonths(provider: ProviderReading, months: string[], format: Int
     }
   }
   if (unread) return unknownEverywhere(source, months, "unread");
-  const notRead = (provider.notRead ?? []).filter((kind, i, all) => isKind(kind) && all.indexOf(kind) === i);
   const reached = (month: string): UnknownWhy | null => {
     const floor = monthFloor(month);
     for (const list of read) {
@@ -293,7 +368,7 @@ function providerMonths(provider: ProviderReading, months: string[], format: Int
     }
     return null;
   };
-  return finish(source, months, sums, reached, notRead);
+  return finish(source, months, sums, reached, notRead, PARTLY_READ[source]);
 }
 
 function manualMonths(entries: ManualEntry[] | null, months: string[], today: string): SourceResult {
@@ -304,7 +379,7 @@ function manualMonths(entries: ManualEntry[] | null, months: string[], today: st
   const sums = new Map<string, Map<string, Sums>>();
   const seen = new Set<string>();
   for (const entry of entries) {
-    if (!entry || typeof entry !== "object" || typeof entry.id !== "string" || !validId(entry.id, seen)) return unknownEverywhere(source, months, "invalid");
+    if (!entry || typeof entry !== "object" || !validId(entry.id, seen, true)) return unknownEverywhere(source, months, "invalid");
     if (typeof entry.date !== "string" || !realDate(entry.date) || !validCents(entry.cents, true)) return unknownEverywhere(source, months, "invalid");
     const currency = typeof entry.currency === "string" ? entry.currency.toLowerCase() : "";
     if (!CURRENCY.test(currency)) return unknownEverywhere(source, months, "invalid");
@@ -314,7 +389,7 @@ function manualMonths(entries: ManualEntry[] | null, months: string[], today: st
     if (!shown.has(month)) continue;
     add(sums, month, currency, "enteredCents", entry.cents);
   }
-  return finish(source, months, sums, () => null, []);
+  return finish(source, months, sums, () => null, [], []);
 }
 
 const PROVIDERS: ReadonlySet<string> = new Set(["stripe", "paypal"]);
@@ -357,7 +432,8 @@ export function earningsByMonth(input: EarningsInput): Earnings | null {
         totals = linesOf(byCurrency);
       }
       const leftOut = sources.flatMap((s) => (s.state === "read" && s.leftOut.length ? [{ source: s.source, kinds: [...s.leftOut] }] : []));
-      return { month, current: i === 0, sources, totals, leftOut };
+      const partly = sources.flatMap((s) => (s.state === "read" && s.partly.length ? [{ source: s.source, kinds: [...s.partly] }] : []));
+      return { month, current: i === 0, sources, totals, leftOut, partly };
     }),
   };
 }

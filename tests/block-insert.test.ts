@@ -138,7 +138,7 @@ async function main(): Promise<void> {
     true,
   );
   is("the side menu is the same picker", editor.includes('layout="menu"'), true);
-  is("saved sections lead the side menu, and stay under the blocks on a narrow screen", editor.includes("{savedSections}") && editor.includes("{sideBySide ? null : savedSections}"), true);
+  is("saved sections lead the side menu, and stay under the blocks on a narrow screen", editor.includes("{savedSections}") && editor.includes('{sideBySide ? null : <div className="min-[1280px]:hidden">{savedSections}</div>}'), true);
   is("closing goes back to the place it was opened from", editor.includes("document.querySelector<HTMLElement>(`[data-place=\"${at}\"]`)?.focus();"), true);
   done();
 }

@@ -39,6 +39,7 @@ import { storeForId } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { withinLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { personKeys, personWrite } from "@/lib/joined-stores";
@@ -64,11 +65,16 @@ export async function rememberAffiliate(sid: string, email: string): Promise<voi
   }
 }
 
-/** The ids of the stores an address is an affiliate of. */
+/**
+ * The ids of the stores an address is an affiliate of. An empty list is none;
+ * a reply missing or in any other shape throws UnknownReplyError (rule 24),
+ * never "none".
+ */
 export async function storesPromoted(email: string): Promise<string[]> {
   if (!isRedisConfigured()) return [];
-  const [ids] = await redisPipeline([["SUNION", ...personKeys(HUB, HUB_SALT, email)]]);
-  return Array.isArray(ids) ? [...new Set(ids.filter((id): id is string => typeof id === "string" && STORE_ID.test(id)))].slice(0, MAX_HUB_STORES) : [];
+  const [reply] = repliesFor(await redisPipeline([["SUNION", ...personKeys(HUB, HUB_SALT, email)]]), 1) ?? unknownHub("the stores an address promotes");
+  const ids = stringList(reply) ?? unknownHub("the stores an address promotes");
+  return [...new Set(ids.filter((id) => STORE_ID.test(id)))].slice(0, MAX_HUB_STORES);
 }
 
 export type HubRequest = "sent" | "email" | "limited" | "error";
@@ -109,9 +115,18 @@ export async function requestHubLink(input: { email: string; ip: string; origin:
   return sent ? "sent" : "error";
 }
 
-/** The address a live link was sent to, or null. */
+/**
+ * The address a live link was sent to, or null when the link is truly not
+ * there (never made, ended or replaced). A reply missing or in any other
+ * shape throws UnknownReplyError (rule 24): never "expired".
+ */
 export async function hubOwner(token: string): Promise<string | null> {
   if (!HUB_TOKEN.test(token) || !isRedisConfigured()) return null;
-  const [email] = await redisPipeline([["GET", linkKey(token)]]);
-  return typeof email === "string" && email ? email : null;
+  const [email] = repliesFor(await redisPipeline([["GET", linkKey(token)]]), 1) ?? unknownHub("an affiliate page's link");
+  if (email === null) return null;
+  return typeof email === "string" && email ? email : unknownHub("an affiliate page's link");
+}
+
+function unknownHub(what: string): never {
+  throw new UnknownReplyError(what);
 }

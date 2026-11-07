@@ -3,14 +3,14 @@ import { EmailField } from "@/components/email-field";
 import Link from "next/link";
 import { SiteNav } from "@/components/site-nav";
 import { SiteFooter } from "@/components/site-footer";
-import { type Store, storeForId } from "@/lib/store";
+import { type Store, storeForIdExact } from "@/lib/store";
 import { photoUrl } from "@/lib/photo-limits";
 import { storeBase } from "@/lib/purchase-email";
-import { type Affiliate, affiliateByEmail, affiliateLink, affiliatesOn, signInLinkFor } from "@/lib/affiliates";
+import { type Affiliate, affiliateByEmailExact, affiliateLink, affiliatesOn, signInLinkFor } from "@/lib/affiliates";
 import { hubOwner, storesPromoted } from "@/lib/affiliate-hub";
 import { payoutPromise } from "@/lib/affiliate-setting";
 import { noticeFor } from "@/lib/affiliate-notice";
-import { readListings } from "@/lib/catalog";
+import { readListingsExact } from "@/lib/catalog";
 import { SITE_URL } from "@/lib/site-url";
 
 export const metadata: Metadata = {
@@ -49,7 +49,7 @@ async function cutFor(store: Store, affiliate: Affiliate): Promise<Row["cut"]> {
   const pending = store.affiliates.pending;
   if (!pending || affiliate.status !== "approved") return null;
   const ids = [...new Set([...Object.keys(store.affiliates.rates), ...Object.keys(pending.rates)])];
-  const listings = ids.length ? await readListings(store, ids).catch(() => null) : [];
+  const listings = ids.length ? await readListingsExact(store, ids).catch(() => null) : [];
   const titles = new Map((listings ?? []).map((p) => [p.id, p.title]));
   const notice = noticeFor(store.affiliates, pending, affiliate.rate ?? null, (id) => titles.get(id) ?? null);
   if (listings) return notice ? { ...notice, unread: false } : null;
@@ -70,18 +70,23 @@ export default async function AffiliateHubPage({ searchParams }: Params) {
   const query = await searchParams;
   const token = typeof query.token === "string" ? query.token.slice(0, 80) : "";
   const status = typeof query.status === "string" ? STATUS[query.status] : undefined;
-  const email = token ? await hubOwner(token) : null;
+  // A link that could not be read just now is said so, never "expired" (undefined); null is a link truly not there.
+  const email = token ? await hubOwner(token).catch((error: unknown) => (console.error("an affiliate page's link could not be read", error), undefined)) : null;
 
   const rows: Row[] = [];
   // Stores, or the affiliate's record at one, that could not be read just now: said so, never left out without a word.
   let unread = 0;
+  // The list of their stores itself could not be read: said so, never "nothing is listed".
+  let listUnread = false;
   if (email) {
     const origin = SITE_URL;
-    const read = await Promise.all((await storesPromoted(email)).map((sid) => storeForId(sid).catch(() => undefined)));
+    const ids = await storesPromoted(email).catch((error: unknown) => (console.error("an affiliate's stores could not be read", error), null));
+    listUnread = ids === null;
+    const read = await Promise.all((ids ?? []).map((sid) => storeForIdExact(sid).catch(() => undefined)));
     unread += read.filter((s) => s === undefined).length;
     const stores = read.filter((s): s is Store => Boolean(s));
     for (const store of stores) {
-      const affiliate = await affiliateByEmail(store, email).catch(() => undefined);
+      const affiliate = await affiliateByEmailExact(store, email).catch(() => undefined);
       if (affiliate === undefined) unread += 1;
       if (!affiliate) continue;
       const on = affiliatesOn(store);
@@ -117,6 +122,11 @@ export default async function AffiliateHubPage({ searchParams }: Params) {
           {email ? (
             <>
               <p className="text-ink-soft">{`For ${email}. This page works for 24 hours from the email.`}</p>
+              {listUnread ? (
+                <p className="notice notice-info mt-6" role="status" data-hub-unread>
+                  Your programs could not be read just now. This does not mean you have none. Try again in a moment.
+                </p>
+              ) : null}
               {unread ? (
                 <p className="notice notice-info mt-6" role="status" data-hub-unread>
                   {`${unread === 1 ? "One of your programs" : `${unread} of your programs`} could not be read just now. Try again in a moment.`}
@@ -179,7 +189,7 @@ export default async function AffiliateHubPage({ searchParams }: Params) {
                     </li>
                   ))}
                 </ul>
-              ) : unread ? null : (
+              ) : unread || listUnread ? null : (
                 <p className="mt-6 text-ink">Nothing is listed for this address any more.</p>
               )}
               <div className="card mt-10 flex flex-col items-start gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
@@ -200,7 +210,11 @@ export default async function AffiliateHubPage({ searchParams }: Params) {
             </>
           ) : (
             <div className="max-w-xl">
-              {token ? (
+              {email === undefined ? (
+                <p className="notice notice-info mb-6" role="status" data-hub-unread>
+                  Your page could not be read just now. This does not mean your link has run out. Try again in a moment.
+                </p>
+              ) : token ? (
                 <p className="notice notice-error mb-6" role="alert">
                   That link has expired or was already replaced. Ask for a new one below.
                 </p>

@@ -48,6 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -1231,6 +1232,30 @@ export async function storeForId(sid: string): Promise<Store | null> {
   if (typeof ref !== "string" || !ref) return null;
   const store = await storeForEmail(ref);
   return store && store.sid === sid ? store : null;
+}
+
+/**
+ * storeForId on Redis's exact answer only (rule 24): null only where the id's
+ * key or the record it leads to is truly not there, or the record found is
+ * another store's, as storeForId says; a reply missing, or in any other
+ * shape, and a record that cannot be read, throw UnknownReplyError, so a page
+ * says the store could not be read rather than that it is gone.
+ */
+export async function storeForIdExact(sid: string): Promise<Store | null> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return null;
+  const [ref] = repliesFor(await redisPipeline([["GET", storeIdKey(sid)]]), 1) ?? unknownStoreReply();
+  if (ref === null) return null;
+  if (typeof ref !== "string" || !ref) unknownStoreReply();
+  const [raw] = repliesFor(await redisPipeline([["GET", await ownerKey(ref)]]), 1) ?? unknownStoreReply();
+  if (raw === null) return null;
+  const store = typeof raw === "string" ? parseStore(raw) : null;
+  if (!store) unknownStoreReply();
+  if (typeof store.email !== "string" || storeRef(store).toLowerCase() !== ref.toLowerCase()) return null;
+  return store.sid === sid ? store : null;
+}
+
+function unknownStoreReply(): never {
+  throw new UnknownReplyError("a store's record");
 }
 
 /**

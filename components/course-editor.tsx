@@ -36,6 +36,7 @@ import { useStudioHref } from "@/components/studio-store-pin";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { CourseTemplatePicker } from "@/components/course-template-picker";
 import { CourseCopyPicker } from "@/components/course-copy-picker";
+import { copyFits } from "@/lib/course-copy-rules";
 import { FIT_WORDS, exampleTitlesLeft, exampleTitlesWords, quizLessonsWaiting, quizWaitingWords, templateFits, type CourseTemplate } from "@/lib/course-templates";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import { type StreamState, isStreamPath } from "@/lib/stream-rules";
@@ -234,10 +235,16 @@ export function CourseEditor({
   look = null,
   language = "en",
   copyFrom = [],
+  copyCommunity = false,
+  onStore = false,
 }: {
   productId: string;
   /** The store's other courses, by product id and name, to copy into this one while it is new (294 [SQ5]). */
   copyFrom?: { id: string; title: string }[];
+  /** Whether the store has a community, whose search a copy counts too. */
+  copyCommunity?: boolean;
+  /** Whether the product is on the store now: a copy takes it off, after the creator's yes. */
+  onStore?: boolean;
   /** The store's look, so a lesson's text is previewed as students see it. */
   look?: StoreLook | null;
   /** The store's language, so the preview is marked as the lesson page is. */
@@ -308,10 +315,12 @@ export function CourseEditor({
       ) : null}
 
       {/* Another course of the store copied into this one (294 [SQ5]): only while it is exactly as it was made, like the structures below. */}
-      {!skipTemplates && copyFrom.length > 0 && templateFits(course).ok && templateFits(initial).ok ? (
+      {!skipTemplates && copyFrom.length > 0 && copyFits(course) && copyFits(initial) ? (
         <CourseCopyPicker
           productId={productId}
           courses={copyFrom}
+          community={copyCommunity}
+          onStore={onStore}
           busy={busy}
           onCopied={(kept, words) => {
             setCourse(kept);

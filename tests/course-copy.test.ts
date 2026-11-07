@@ -64,7 +64,7 @@ import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setCommunity, se
 import { copyCourseInto } from "@/lib/course-copy";
 import { LockBusyError } from "@/lib/redis-lock";
 import { communityOf, lessonEntries, lessonRef } from "@/lib/community-index";
-import { indexWrites, indexedWords } from "@/lib/community-search";
+import { MAX_INDEXED_WORDS, indexWrites, indexedWords } from "@/lib/community-search";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { allowanceUsed, giveAllowance, takeAllowance } from "@/lib/store-allowance";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -173,7 +173,7 @@ async function main(): Promise<void> {
   is("each lesson's text read and written at its largest", COPY_TEXT_UNITS, Math.ceil((BODY_BYTES * 2) / COPY_UNIT_BYTES));
   is("so many lessons, so many more; never fewer than nothing", [copyWriteUnits(0), copyWriteUnits(3), copyWriteUnits(-1), copyWriteUnits(1.5)], [COPY_SAVE_UNITS, COPY_SAVE_UNITS + 3 * COPY_TEXT_UNITS, COPY_SAVE_UNITS, COPY_SAVE_UNITS]);
   is("the sentence is made from the same figures", copyCostWords(false), `Copying counts as ${COPY_READ_UNITS + COPY_SAVE_UNITS} of your studio requests, and ${COPY_TEXT_UNITS} more for each lesson that has text.`);
-  is("with a community, the search's part is said too", copyCostWords(true), `${copyCostWords(false)} Your community's search counts 1 more for every ${COPY_UNIT_COMMANDS} words it has to learn, at most 600 for each lesson. The exact number is checked before anything is copied.`);
+  is("with a community, the search's part is said too", copyCostWords(true), `${copyCostWords(false)} Your community's search counts 1 more for every ${COPY_UNIT_COMMANDS} entries it writes: each different word of a lesson, at most ${MAX_INDEXED_WORDS}, and the lesson itself. The exact number is checked before anything is copied.`);
   const writes = [["ZADD", "k:w:flour", 3, "p.l"], ["ZADD", "k:w:water", 3, "p.l"], ["SADD", "k:wi:p.l", "flour", "water"]];
   is("the search's part: exactly the writes it sends, by commands and bytes; none when there are none", [copyIndexUnits(writes), copyIndexUnits([]), copyIndexUnits(Array.from({ length: 41 }, () => ["ZADD", "k", 1, "t"]))], [1, 0, 3]);
   is("a full course of 200 lessons with text, the most one can be, fits in the smallest paid plan's month", copyUnits(200) < 2_000, true);
@@ -258,10 +258,10 @@ async function main(): Promise<void> {
   const theirsId = theirs.ok ? theirs.product.id : "";
   const strangerSession = await openSession(strangerEmail);
   await post({ action: "enable", id: theirsId }, strangerSession);
-  const across = await post({ action: "copy", id: theirsId, from: oldId }, strangerSession);
+  const across = await post({ action: "copy", id: theirsId, from: oldId, confirm: true }, strangerSession);
   is("another store's course cannot be named: not found in the asking store, nothing of it read", [across.status, across.body.error, sourceReads], [404, "unknown", 0]);
   const plainProduct = await addProduct(owner, "A Loaf Tin", "", "20");
-  const tin = await post({ action: "copy", id: newId, from: plainProduct.ok ? plainProduct.product.id : "" });
+  const tin = await post({ action: "copy", id: newId, from: plainProduct.ok ? plainProduct.product.id : "", confirm: true });
   is("a product that is not a course: refused", [tin.status, tin.body.error], [400, "not_course"]);
 
   part("A product on the store needs the creator's yes");
@@ -355,6 +355,8 @@ async function main(): Promise<void> {
   is("the search could not be written: the copy is kept and said, with what did not finish", [unfound.status, unfound.body.ok, wheatCourse.modules.flatMap((m) => m.lessons).length, unfound.body.words?.endsWith(COPY_NOT_FINDABLE)], [200, true, 4, true]);
 
   part("Hiding refused, and a lost lock");
+  // The month's figure back to nothing, so these reach the steps they test.
+  await giveAllowance(await me(), "studio", await used());
   const spelt = await addProduct(owner, "Spelt at Home", "", "40");
   const speltId = spelt.ok ? spelt.product.id : "";
   await post({ action: "enable", id: speltId });
@@ -376,7 +378,7 @@ async function main(): Promise<void> {
   const page = read("app/studio/course/[product]/page.tsx");
   const route = read("app/api/store/course/route.ts");
   is("offered only on a new course, with another course to copy", editor.includes("copyFrom.length > 0 && copyFits(course) && copyFits(initial)") && editor.includes("<CourseCopyPicker"), true);
-  is("a labeled list of the store's other courses, said before the button: what comes across, what it counts", [pictured.includes("<label htmlFor={`${id}-from`}"), pictured.includes("<select"), pictured.includes("{COPY_ABOUT}"), pictured.includes("{copyCostWords()}")], [true, true, true, true]);
+  is("a labeled list of the store's other courses, said before the button: what comes across, what it counts", [pictured.includes("<label htmlFor={`${id}-from`}"), pictured.includes("<select"), pictured.includes("{COPY_ABOUT}"), pictured.includes("{copyCostWords(community)}")], [true, true, true, true]);
   is("a refusal said in a live region", pictured.includes('role="status"'), true);
   is("that the course leaves the store is said before the button", pictured.indexOf("{COPY_HIDES}") > 0 && pictured.indexOf("{COPY_HIDES}") < pictured.indexOf('<button type="button"'), true);
   is("a course on the store asks for an explicit yes, sent to the server", [pictured.includes('type="checkbox"'), pictured.includes("onStore ?"), pictured.includes("confirm: onStore ? agreed : false")], [true, true, true]);

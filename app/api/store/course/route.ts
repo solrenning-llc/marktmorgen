@@ -45,7 +45,7 @@ import { type StreamState, isStreamPath } from "@/lib/stream-rules";
 import { noteIfFinished } from "@/lib/course-finish";
 import { applyTemplate, templateById } from "@/lib/course-templates";
 import { copyCourseInto } from "@/lib/course-copy";
-import { copiedWords } from "@/lib/course-copy-rules";
+import { COPY_AFTER_SAVE, copiedWords } from "@/lib/course-copy-rules";
 
 const OPS = new Set([
   "outline",
@@ -222,7 +222,7 @@ export async function POST(request: NextRequest) {
     // One change at a time per course: each reads the whole outline and writes it
     // back, so two at once (two lessons uploading, two tabs) would drop one.
     const courseInfo = product.course;
-    return await withLock(`nl:course:${courseInfo.id}:lock`, 60, 15_000, async () => {
+    return await withLock(`nl:course:${courseInfo.id}:lock`, 60, 15_000, async (held) => {
       const course = await readCourse(courseInfo.id);
       if (!course) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
 
@@ -236,22 +236,37 @@ export async function POST(request: NextRequest) {
         if (community) await courseChanged(community, product, course, next).catch(() => {});
       };
 
-      // Another course of this store copied into this new one (294 [SQ5]): its studio
-      // requests taken before each read, the product off the store before the first write.
+      // Another course of this store copied into this new one (294 [SQ5]): its studio requests, and its community's
+      // search, counted before each read and write; the product off the store before the first write; every write
+      // only while this lock is still ours. Never through `save`: its reindex reads every text back, uncounted.
       if (action === "copy") {
         const copied = await copyCourseInto(store, id, course, text(body.from, 40), {
+          held,
+          product,
+          community,
+          onStore: !product.hidden,
+          confirmed: body.confirm === true,
           hide: async () => {
             if (product.hidden) return { undo: async () => {} };
             const hidden = await setProductHidden(ref, id, true);
             return hidden.ok ? { undo: async () => void (await setProductHidden(ref, id, false)) } : null;
           },
-          save,
         });
-        if (!copied.ok) return Response.json({ ok: false, error: copied.error, ...(copied.message ? { message: copied.message } : {}) }, { status: copied.status });
-        const lessons = lessonCount(copied.course);
-        if (lessons !== courseInfo.lessons) await setCourseLessons(ref, id, lessons);
-        await registerDrip(store, product, copied.course);
-        return Response.json({ ok: true, course: copied.course, hidden: true, units: copied.units, words: copiedWords(copied) });
+        if (!copied.ok) {
+          const extra = { ...(copied.message ? { message: copied.message } : {}), ...(copied.needed ? { needed: copied.needed } : {}) };
+          return Response.json({ ok: false, error: copied.error, ...extra }, { status: copied.status });
+        }
+        // The copy is saved: what is left to do is said if it fails, never reported as nothing copied.
+        const notes = [...copied.notes];
+        try {
+          const lessons = lessonCount(copied.course);
+          if (lessons !== courseInfo.lessons) await setCourseLessons(ref, id, lessons);
+          await registerDrip(store, product, copied.course);
+        } catch (error) {
+          console.error("a course was copied, but its lesson count or module emails were not updated", error);
+          notes.push(COPY_AFTER_SAVE);
+        }
+        return Response.json({ ok: true, course: copied.course, hidden: true, units: copied.units, words: copiedWords(copied, notes) });
       }
 
       if (action === "disable") {

@@ -29,6 +29,7 @@
  */
 import { MAX_BODY_LENGTH, newItemId, type Course, type Lesson } from "@/lib/course";
 import { COPY_UNIT_BYTES, COPY_UNIT_COMMANDS } from "@/lib/store-copy-rules";
+import { templateFits } from "@/lib/course-templates";
 
 /** The other course's listing at its largest (lib/catalog.ts MAX_PRODUCT_BYTES; tests/course-copy.test.ts holds them equal). */
 export const SOURCE_LISTING_BYTES = 256_000;
@@ -43,8 +44,16 @@ export const LESSON_TEXT_BYTES = MAX_BODY_LENGTH * 3;
  * the slot, two, and the SET).
  */
 const COMMANDS_PER_TEXT = 5;
-/** Writing the copy's record (saveCourse: the data room's two and the SET), the lesson count and hiding it on the store, and the module emails' set. */
-const SAVE_COMMANDS = 8;
+/**
+ * The copy's record is written twice (first without text, so no text is ever
+ * kept that no record points at; then with it), and the empty one is written
+ * back when a later write fails: each the data room's two and the SET. With
+ * the lock held before each write, the lesson count, hiding the product and
+ * putting it back, and the module emails' set.
+ */
+const SAVE_COMMANDS = 16;
+/** The empty course written back, at its largest: one module with no lesson. */
+const EMPTY_COURSE_BYTES = 4_096;
 
 /** Studio requests for so many commands and bytes, at a request's priced size. */
 function units(commands: number, bytes: number): number {
@@ -53,8 +62,8 @@ function units(commands: number, bytes: number): number {
 
 /** Taken before the other course's listing and record are read: both at their largest. */
 export const COPY_READ_UNITS = units(2, SOURCE_LISTING_BYTES + COURSE_RECORD_BYTES);
-/** The copy's record written at the largest a course's may be. */
-export const COPY_SAVE_UNITS = units(SAVE_COMMANDS, COURSE_RECORD_BYTES);
+/** The copy's record written twice at the largest a course's may be, and the empty one back. */
+export const COPY_SAVE_UNITS = units(SAVE_COMMANDS, 2 * COURSE_RECORD_BYTES + EMPTY_COURSE_BYTES);
 /** One lesson's text read and written at its largest. */
 export const COPY_TEXT_UNITS = units(COMMANDS_PER_TEXT, LESSON_TEXT_BYTES * 2);
 
@@ -64,7 +73,29 @@ export function copyWriteUnits(texts: number): number {
   return COPY_SAVE_UNITS + n * COPY_TEXT_UNITS;
 }
 
-/** Every studio request a copy of a course with `texts` lessons that have text takes. */
+/**
+ * The community's search (lib/community-index.ts): the exact writes that make
+ * the copied lessons findable, counted by their commands and their bytes, for
+ * a store with a community. Each lesson is new, so nothing of it is in the
+ * search yet and nothing needs reading first. None when there are none.
+ */
+export function copyIndexUnits(writes: (string | number)[][]): number {
+  if (!writes.length) return 0;
+  const encoder = new TextEncoder();
+  const bytes = writes.reduce((sum, command) => sum + command.reduce<number>((n, part) => n + encoder.encode(String(part)).length, 0), 0);
+  return units(writes.length, bytes);
+}
+
+/**
+ * Whether a course may be copied into: exactly as it was made (templateFits),
+ * and without a certificate validity or the email over videos set, which the
+ * copy would write over.
+ */
+export function copyFits(course: Pick<Course, "modules" | "certificate" | "startsAt" | "certificateMonths" | "stampVideo">): boolean {
+  return templateFits(course).ok && !course.certificateMonths && !course.stampVideo;
+}
+
+/** Every studio request a copy of a course with `texts` lessons that have text takes, its community's search apart. */
 export function copyUnits(texts: number): number {
   return COPY_READ_UNITS + copyWriteUnits(texts);
 }
@@ -156,19 +187,38 @@ export function copyLeftWords(left: CopyLeft): string[] {
 
 /** What the picker says before anything is copied: what comes across, what does not, and what it counts. */
 export const COPY_ABOUT =
-  "This copies the modules, the lessons' titles and text, their links, which lessons are free previews, when each module opens and the certificate setting. " +
+  "This copies the modules, the lessons' titles and text, their links, which lessons are free previews, when each module opens, whether students get a certificate, how long certificates stay valid and whether the email shown over each video is on. " +
   "It does not copy videos, downloads, quizzes, assignments or the start date. It never copies students, their progress, notes or comments. The other course does not change.";
 
-/** The studio requests a copy counts, said as the code counts them. */
-export function copyCostWords(): string {
-  return `Copying counts as ${copyUnits(0)} of your studio requests, and ${COPY_TEXT_UNITS} more for each lesson that has text.`;
+/** The most words the search keeps for one lesson (lib/community-search.ts MAX_INDEXED_WORDS; tests/course-copy.test.ts holds them equal). */
+export const SEARCH_WORDS_PER_LESSON = 600;
+
+/** Said before the button: the product leaves the store first. */
+export const COPY_HIDES = "Copying takes this course off your store first. It stays hidden until you publish it.";
+
+/** The yes a course on the store needs before it is taken off it. */
+export const COPY_CONFIRM = "Yes, take this course off my store while I finish it.";
+
+/** Said after the rest when the copy is saved but its lessons could not all be put in the community's search. */
+export const COPY_NOT_FINDABLE = "Some lessons could not be added to your community's search. Save each lesson again to add it.";
+
+/** Said when the copy is saved but a step after it did not finish. */
+export const COPY_AFTER_SAVE = "The copy is saved, but its lesson count or its module emails could not be updated. Reload the page and check the course.";
+
+/** The studio requests a copy counts, said as the code counts them; with a community, the search's part too. */
+export function copyCostWords(community: boolean): string {
+  const base = `Copying counts as ${copyUnits(0)} of your studio requests, and ${COPY_TEXT_UNITS} more for each lesson that has text.`;
+  return community
+    ? `${base} Your community's search counts 1 more for every ${COPY_UNIT_COMMANDS} entries it writes: each different word of a lesson, at most ${SEARCH_WORDS_PER_LESSON}, and the lesson itself. The exact number is checked before anything is copied.`
+    : base;
 }
 
 /** What is said once a copy is saved. */
-export function copiedWords(copy: Pick<CourseCopy, "course" | "left">): string {
+export function copiedWords(copy: Pick<CourseCopy, "course" | "left">, notes: string[] = []): string {
   const lessons = copy.course.modules.reduce((n, unit) => n + unit.lessons.length, 0);
   return [
     `Copied ${count(copy.course.modules.length, "module", "modules")} and ${count(lessons, "lesson", "lessons")}. The course stays hidden from your store until you publish it.`,
     ...copyLeftWords(copy.left),
+    ...notes,
   ].join(" ");
 }

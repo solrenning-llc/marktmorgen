@@ -26,7 +26,9 @@ import {
   WithdrawCertificate,
 } from "@/components/course-editor";
 import { idsOfKind, readCards, readListing } from "@/lib/catalog";
-import { templateById, templateFits } from "@/lib/course-templates";
+import { templateById } from "@/lib/course-templates";
+import { copyFits } from "@/lib/course-copy-rules";
+import { communityOf } from "@/lib/community-index";
 import { isStreamConfigured, streamCaptions, streamStates } from "@/lib/stream";
 import { autoRefundsOwed, autoWriting } from "@/lib/auto-captions";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -73,7 +75,7 @@ export default async function StudioCoursePage({
   const folder = await storeFolder(view.ref);
   // The store's other courses, by name, to copy into a new one (294 [SQ5]): read only for a course still exactly
   // as it was made, and only when there is another, in the one command of the cards (lib/catalog.ts readCards).
-  const others = templateFits(course).ok ? idsOfKind(store, "course").filter((other) => other !== product.id) : [];
+  const others = copyFits(course) ? idsOfKind(store, "course").filter((other) => other !== product.id) : [];
   const cards = others.length ? await readCards(store).catch(() => null) : null;
   const copyFrom = cards ? others.flatMap((other) => (cards.get(other)?.title ? [{ id: other, title: cards.get(other)!.title }] : [])) : [];
   // Where each lesson video kept by the video service stands (lib/stream.ts).
@@ -199,6 +201,8 @@ export default async function StudioCoursePage({
           productId={product.id}
           initialTemplate={initialTemplate?.id ?? null}
           copyFrom={copyFrom}
+          copyCommunity={communityOf(store) !== null}
+          onStore={!product.hidden}
           openFirst={typeof query.lesson === "string" && lessonsInOrder(course).some(({ lesson }) => lesson.id === query.lesson) ? query.lesson : null}
           initial={course}
           folder={folder}

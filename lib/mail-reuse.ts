@@ -35,7 +35,7 @@
  * sequence carries one condition.
  */
 import { readFlowListStrict } from "@/lib/flow-list";
-import { MAX_DELAY_HOURS, MAX_FLOW_NAME, MAX_STEPS, type Flow, type FlowResult, saveFlow } from "@/lib/flows";
+import { type FlowMeter, MAX_DELAY_HOURS, MAX_FLOW_NAME, MAX_STEPS, type Flow, type FlowResult, saveFlow } from "@/lib/flows";
 import { type Broadcast, readBroadcast } from "@/lib/broadcasts";
 import type { Store } from "@/lib/store";
 import type { StepCondition } from "@/lib/flow-rules";
@@ -142,15 +142,17 @@ export async function keepSending(
   store: Store,
   broadcastId: string,
   productTitle: (id: string) => Promise<string | null>,
+  // From the studio: the studio requests what reading and writing the workflows moves takes (lib/flows.ts, FlowMeter).
+  meter?: FlowMeter,
 ): Promise<KeepResult> {
   const broadcast = await readBroadcast(broadcastId);
-  const flows = await readFlowListStrict(store.listId);
+  const flows = meter ? await meter.list(store.listId) : await readFlowListStrict(store.listId);
   const plan = planKeep(broadcast, store.listId, flows, broadcast?.productId ? await productTitle(broadcast.productId) : null);
   if (!plan.ok) return plan;
   // Every rule a sequence has — the plan, the setup, the product still being
   // there, ten sequences at most — is checked by the one place that saves them.
   // "Keep sending it" is the creator asking for it to go out: an explicit switch on.
-  const saved = await saveFlow(store, plan.raw, { activate: true });
+  const saved = await saveFlow(store, plan.raw, { activate: true, meter });
   if (!saved.ok) return saved;
   return { ok: true, flows: saved.flows, name: plan.name, waitHours: plan.waitHours, position: plan.position };
 }

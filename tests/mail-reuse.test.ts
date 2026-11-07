@@ -144,7 +144,9 @@ test("the sequence is saved by the one place that checks a sequence", () => {
   // would be a second door with none of them on it.
   const src = read("lib/mail-reuse.ts");
   // "Keep sending it" is the creator's explicit switch on (lib/flows.ts saves new workflows paused otherwise).
-  assert.match(src, /const saved = await saveFlow\(store, plan\.raw, \{ activate: true \}\);/);
+  // Changed 7 November 2026 (review of #1927): the same one save, now also carrying the studio's meter, so what
+  // reading and writing the workflows moves takes its studio requests first (lib/flows.ts, FlowMeter).
+  assert.match(src, /const saved = await saveFlow\(store, plan\.raw, \{ activate: true, meter \}\);/);
   assert.ok(!/writeFlows|redisPipeline/.test(src), "nothing is written to the list's records from here");
 });
 

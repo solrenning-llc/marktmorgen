@@ -89,7 +89,9 @@ test("the words claim nothing that is not true of every store", () => {
 test("no model writes them, so they cost nothing and cannot say something new", () => {
   const src = readFileSync(join(process.cwd(), "lib/mail-starters.ts"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
   assert.ok(!/@\/lib\/ai\b|fetch\(/.test(src));
-  assert.match(src, /const saved = await saveFlow\(store, raw\);/, "and they are saved by the one place that checks a sequence");
+  // Changed 7 November 2026 (review of #1927): the same one save, now also carrying the studio's meter, so what
+  // reading and writing the workflows moves takes its studio requests first (lib/flows.ts, FlowMeter).
+  assert.match(src, /const saved = await saveFlow\(store, raw, \{ meter \}\);/, "and they are saved by the one place that checks a sequence");
 });
 
 test("where a written sequence came from survives an edit, and only whoever sends may ask for one", () => {

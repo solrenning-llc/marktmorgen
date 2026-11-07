@@ -17,9 +17,8 @@ import { sendBatch } from "@/lib/email";
 import { healthId, startRamp } from "@/lib/mail-health";
 import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, advanceBroadcast, cancelBroadcast, createBroadcast, whoOf } from "@/lib/broadcasts";
 import { LedgerNotCounted, buyerLedger, isNarrowed, keeps, ledgerChannels, readNarrow, removeSegment, saveSegment } from "@/lib/segments";
-import { NOT_COUNTED, countLedger } from "@/lib/person-agenda-read";
-import { FLOW_ID, FlowWriteUnconfirmed, RESOLVE_CHOICES, type ResolveChoice, forgetWorkflowPerson, removeFlow, resolveHeldRun, saveFlow, setFlowActive } from "@/lib/flows";
-import { readFlowListStrict } from "@/lib/flow-list";
+import { NOT_COUNTED, countLedger, countUnits } from "@/lib/person-agenda-read";
+import { FLOW_ID, FlowMeter, FlowNotCounted, FlowWriteUnconfirmed, RESOLVE_CHOICES, type ResolveChoice, forgetWorkflowPerson, removeFlow, resolveHeldRun, saveFlow, setFlowActive } from "@/lib/flows";
 import { FlowRunUnavailable, PERSON_KEY, listRuns, readRun } from "@/lib/flow-runs";
 import { RUNS_LISTED } from "@/lib/flow-limits";
 import { normaliseEmail } from "@/lib/auth";
@@ -124,6 +123,10 @@ export async function POST(request: NextRequest) {
   try {
     let store = await storeForEmail(ref);
     if (!store) return fail("none");
+    // Every action on the workflows reads their whole list, and most write it back and send it back: what that
+    // moves past the request's own fifty kilobytes takes more studio requests first (lib/flows.ts, FlowMeter).
+    const counted = store;
+    const flowMeter = () => new FlowMeter((units) => countUnits(counted, units));
 
     if (action === "settings") {
       const fromName = text(body.fromName, 200).replace(/\s+/g, " ").trim().slice(0, MAX_MAIL_NAME);
@@ -286,7 +289,7 @@ export async function POST(request: NextRequest) {
 
     if (action === "flow") {
       const raw = body.flow && typeof body.flow === "object" ? (body.flow as Record<string, unknown>) : {};
-      const result = await saveFlow(store, raw);
+      const result = await saveFlow(store, raw, { meter: flowMeter() });
       return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason);
     }
 
@@ -299,14 +302,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "flow-activate") {
-      const result = await setFlowActive(store, text(body.id, 40), body.active === true);
+      const result = await setFlowActive(store, text(body.id, 40), body.active === true, flowMeter());
       return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason, result.reason === "unknown" ? 404 : 400);
     }
 
     if (action === "flow-runs" || action === "flow-run" || action === "flow-resolve") {
       const id = text(body.id, 40);
       // Only a workflow of this store: its runs are found under its own id.
-      const flows = FLOW_ID.test(id) ? await readFlowListStrict(store.listId) : [];
+      const flows = FLOW_ID.test(id) ? await flowMeter().list(store.listId, false) : [];
       if (!flows.some((f) => f.id === id)) return fail("unknown", 404);
       if (action === "flow-runs") return Response.json({ ok: true, runs: await listRuns(id, RUNS_LISTED) });
       const run = text(body.run, 40);
@@ -357,19 +360,19 @@ export async function POST(request: NextRequest) {
       // One product's name, when the email was written to the people who got
       // it: one record read, never the catalogue.
       const current = store;
-      const kept = await keepSending(current, text(body.id, 40), async (id) => (await readListings(current, [id]))[0]?.title ?? null);
+      const kept = await keepSending(current, text(body.id, 40), async (id) => (await readListings(current, [id]))[0]?.title ?? null, flowMeter());
       if (!kept.ok) return fail(KEEP_REFUSALS.has(kept.reason) ? `keep_${kept.reason}` : kept.reason);
       return Response.json({ ok: true, flows: kept.flows, name: kept.name, waitHours: kept.waitHours, position: kept.position });
     }
 
     if (action === "starters") {
-      const made = await setUpStarters(store);
+      const made = await setUpStarters(store, flowMeter());
       if (!made.ok) return fail(made.reason === "nothing" ? "starters_nothing" : made.reason);
       return Response.json({ ok: true, flows: made.flows, made: made.made });
     }
 
     if (action === "flow-remove") {
-      const result = await removeFlow(store, text(body.id, 40));
+      const result = await removeFlow(store, text(body.id, 40), flowMeter());
       return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason, 404);
     }
 
@@ -377,6 +380,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     // What does not fit in the store's data room is not written (lib/store-data.ts).
     if (error instanceof StoreFullError) return fail("store_full", 409);
+    // What moving the workflows takes of the studio's requests was not taken: nothing more was read or written.
+    if (error instanceof FlowNotCounted) return notCounted(error.said);
     console.error("an email action failed", error);
     if (error instanceof BroadcastCancellationUnconfirmed) return fail("broadcast_cancel_unconfirmed", 502);
     if (error instanceof BroadcastWriteUnconfirmed) return fail("broadcast_write_unconfirmed", 502);

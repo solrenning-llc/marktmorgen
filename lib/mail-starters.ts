@@ -35,7 +35,7 @@
  *     like any other, and counted in the same month of emails.
  */
 import { readFlowListStrict } from "@/lib/flow-list";
-import { type Flow, type FlowResult, saveFlow } from "@/lib/flows";
+import { type Flow, type FlowMeter, type FlowResult, saveFlow } from "@/lib/flows";
 import { idsOfKind, productIds, readCards } from "@/lib/catalog";
 import { storeBase } from "@/lib/purchase-email";
 import { productLink } from "@/lib/checkout-recovery";
@@ -169,8 +169,9 @@ export type StartersResult =
   | { ok: false; reason: "nothing" | Exclude<FlowResult, { ok: true }>["reason"] };
 
 /** Makes the starter sequences this store does not have yet, switched off. */
-export async function setUpStarters(store: Store): Promise<StartersResult> {
-  const flows = await readFlowListStrict(store.listId);
+export async function setUpStarters(store: Store, meter?: FlowMeter): Promise<StartersResult> {
+  // From the studio: the studio requests what reading and writing the workflows moves takes (lib/flows.ts, FlowMeter).
+  const flows = meter ? await meter.list(store.listId) : await readFlowListStrict(store.listId);
   // Sold for money and on the store: a draft product is not something to
   // send people to. The store's own order is the creator's own priority.
   const hidden = new Set(idsOfKind(store, "hidden"));
@@ -193,7 +194,7 @@ export async function setUpStarters(store: Store): Promise<StartersResult> {
   let latest = flows;
   for (const raw of raws) {
     // Saved by the one place that checks a sequence: the plan, the setup, ten at most.
-    const saved = await saveFlow(store, raw);
+    const saved = await saveFlow(store, raw, { meter });
     if (!saved.ok) return saved;
     latest = saved.flows;
   }

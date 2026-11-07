@@ -72,6 +72,8 @@ import { type Held, holdLock, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type Deal, allStages, newCrmId, pipelineOf } from "@/lib/crm-rules";
 import { personKey } from "@/lib/person-key";
 import { readForm } from "@/lib/form-store";
+import { ledgerUnits } from "@/lib/segments";
+import { sentUnits } from "@/lib/sent-bytes";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { usedLinkIn } from "@/lib/mail-clicks";
@@ -236,12 +238,81 @@ export class FlowWriteUnconfirmed extends Error {
   }
 }
 
+/** Takes `units` of the studio's requests, or says why not (lib/person-agenda-read.ts, countUnits). */
+export type FlowCharge = (units: number) => Promise<{ ok: true } | { ok: false; message: string }>;
+
+/** What moving the store's workflows needed of the studio's requests was not taken: nothing more was read or written. */
+export class FlowNotCounted extends Error {
+  constructor(readonly said: string) {
+    super("The studio requests for the workflows could not be taken");
+    this.name = "FlowNotCounted";
+  }
+}
+
+/**
+ * Studio requests that moving `db` bytes of the store's workflows through the
+ * database and sending `sent` bytes of them on to the browser take beyond the
+ * request's own: none within PAGE_INCLUDED_BYTES each, then one a megabyte
+ * (lib/segments.ts, ledgerUnits; lib/sent-bytes.ts, sentUnits). Pure.
+ */
+export const flowListUnits = (db: number, sent: number): number => ledgerUnits(db) + sentUnits(sent);
+
+const utf8Bytes = (text: string) => Buffer.byteLength(text, "utf8");
+
+/**
+ * One studio action's meter for the store's workflows (review of #1927,
+ * 7 November 2026): every studio action on them reads the whole list, and
+ * most write it back and send it back. The list is measured before it is
+ * read and what is written before it is written, and the studio requests
+ * for everything moved so far, and for sending the largest list back, are
+ * taken before each move (flowListUnits). A size that does not come back,
+ * or requests not left, refuse with FlowNotCounted before anything more is
+ * read or written.
+ */
+export class FlowMeter {
+  private db = 0;
+  private sent = 0;
+  private taken = 0;
+
+  constructor(private readonly charge: FlowCharge) {}
+
+  /** The list, read strictly once it is counted; `sends` when the action sends it back. */
+  async list(listId: string | null, sends = true): Promise<Flow[]> {
+    const measured = await flowsBytes(listId).catch(() => null);
+    if (measured === null) throw new FlowNotCounted("");
+    await this.take(measured, sends ? measured : 0);
+    const flows = await readFlowListStrict(listId);
+    // Grown since it was measured (a save in another tab): the rest is taken before anything else moves.
+    const read = utf8Bytes(JSON.stringify(flows));
+    if (read > measured) await this.take(read - measured, sends ? read : 0);
+    return flows;
+  }
+
+  /** Before `json`, the whole list, is written; it is also what is sent back. */
+  async write(json: string): Promise<void> {
+    const bytes = utf8Bytes(json);
+    await this.take(bytes, bytes);
+  }
+
+  private async take(db: number, sent: number): Promise<void> {
+    this.db += db;
+    this.sent = Math.max(this.sent, sent);
+    const due = flowListUnits(this.db, this.sent) - this.taken;
+    if (due <= 0) return;
+    const counted = await this.charge(due).catch(() => ({ ok: false as const, message: "" }));
+    if (!counted.ok) throw new FlowNotCounted(counted.message);
+    this.taken += due;
+  }
+}
+
 /**
  * Writes the store's workflows, after taking their room in the store's data
- * room (DataRoomError when they do not fit; shorter ones give it back).
+ * room (DataRoomError when they do not fit; shorter ones give it back), and,
+ * for a studio action, its studio requests before that (FlowMeter).
  */
-async function writeFlows(store: Store, listId: string, flows: Flow[]): Promise<void> {
+async function writeFlows(store: Store, listId: string, flows: Flow[], meter?: FlowMeter): Promise<void> {
   const json = JSON.stringify(flows);
+  await meter?.write(json);
   await needData(store, [{ slot: "wf:defs", bytes: dataBytes([json], 1 + flows.length), set: true }]);
   let replies: unknown;
   try {
@@ -265,7 +336,7 @@ export type FlowResult =
  * the creator chose in the editor. Either way, switching on counts against
  * the plan's number of active workflows (lib/flow-limits.ts).
  */
-export async function saveFlow(store: Store, raw: Record<string, unknown>, opts: { activate?: boolean } = {}): Promise<FlowResult> {
+export async function saveFlow(store: Store, raw: Record<string, unknown>, opts: { activate?: boolean; meter?: FlowMeter } = {}): Promise<FlowResult> {
   if (monthlyAllowance(store) === 0) return { ok: false, reason: "plan" };
   if (!store.listId || !store.mail) return { ok: false, reason: "setup" };
   const name = typeof raw.name === "string" ? raw.name.replace(/\s+/g, " ").trim().slice(0, MAX_FLOW_NAME) : "";
@@ -305,7 +376,7 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   const ctx: ActionContext = { field: (fid) => crmFields.find((f) => f.id === fid), isStage: (sid) => stages.some((st) => st.id === sid), isAssignee: (email) => assignees.has(email) };
   if (rawSteps.length === 0 || rawSteps.length > MAX_STEPS) return { ok: false, reason: "steps" };
   const known = (id: string) => hasProduct(store, id);
-  const flows = await readFlowListStrict(store.listId);
+  const flows = opts.meter ? await opts.meter.list(store.listId) : await readFlowListStrict(store.listId);
   const id = typeof raw.id === "string" && FLOW_ID.test(raw.id) ? raw.id : null;
   // Another of the store's sequences, never this one: starting itself would do nothing.
   const isFlow = (flowId: string) => flowId !== id && flows.some((f) => f.id === flowId);
@@ -358,16 +429,16 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   const next = [...flows];
   if (at >= 0) next[at] = flow;
   else next.push(flow);
-  await writeFlows(store, store.listId, next);
+  await writeFlows(store, store.listId, next, opts.meter);
   return { ok: true, flows: next };
 }
 
-export async function removeFlow(store: Store, id: string): Promise<FlowResult> {
+export async function removeFlow(store: Store, id: string, meter?: FlowMeter): Promise<FlowResult> {
   if (!store.listId) return { ok: false, reason: "unknown" };
-  const flows = await readFlowListStrict(store.listId);
+  const flows = meter ? await meter.list(store.listId) : await readFlowListStrict(store.listId);
   if (!flows.some((f) => f.id === id)) return { ok: false, reason: "unknown" };
   const next = flows.filter((f) => f.id !== id);
-  await writeFlows(store, store.listId, next);
+  await writeFlows(store, store.listId, next, meter);
   // Its runs, their history, starts and queued steps: nothing of the people in it is kept.
   await purgeFlow(store, flows.find((f) => f.id === id)!).catch((error) => console.error("erasing a removed workflow's runs failed", error));
   return { ok: true, flows: next };
@@ -445,17 +516,17 @@ export async function forgetStoreWorkflows(store: Store): Promise<void> {
  * it. On counts against the plan's number of active workflows. Off ends the
  * runs in it at their next step, as pausing always has.
  */
-export async function setFlowActive(store: Store, id: string, active: boolean): Promise<FlowResult> {
+export async function setFlowActive(store: Store, id: string, active: boolean, meter?: FlowMeter): Promise<FlowResult> {
   if (monthlyAllowance(store) === 0) return { ok: false, reason: "plan" };
   if (!store.listId) return { ok: false, reason: "unknown" };
-  const flows = await readFlowListStrict(store.listId);
+  const flows = meter ? await meter.list(store.listId) : await readFlowListStrict(store.listId);
   const at = flows.findIndex((f) => f.id === id);
   if (at < 0) return { ok: false, reason: "unknown" };
   if (flows[at].active === active) return { ok: true, flows };
   if (active && !flows[at].steps.length) return { ok: false, reason: "steps" };
   if (active && flows.filter((f) => f.active).length >= activeFlowLimit(store)) return { ok: false, reason: "active_limit" };
   const next = flows.map((f, i) => (i === at ? { ...f, active } : f));
-  await writeFlows(store, store.listId, next);
+  await writeFlows(store, store.listId, next, meter);
   return { ok: true, flows: next };
 }
 

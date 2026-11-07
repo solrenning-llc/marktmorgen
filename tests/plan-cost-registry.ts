@@ -1172,6 +1172,11 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/assistant-memory-store.ts", names: ["MEMORY_FORGET_COMMANDS"] },
       // A deal entering a stage takes one more studio request before the workflow its stage starts is checked (17 October 2026).
       { file: "lib/deal-stage-trigger.ts", names: ["STAGE_TRIGGER_UNITS", "countStudio(store, null, STAGE_TRIGGER_UNITS)"] },
+      // Every studio action on the workflows reads their whole list, and most write it back and send it back: past the
+      // request's own fifty kilobytes, flowListUnits more studio requests are taken before each move (review of #1927,
+      // 7 November 2026; tests/flow-save-units.test.ts measures it through the route, the worst list included).
+      { file: "lib/flows.ts", names: ["class FlowMeter", "flowListUnits", "ledgerUnits(db) + sentUnits(sent)", "await meter?.write(json);", "opts.meter ? await opts.meter.list(store.listId)"] },
+      { file: "app/api/store/mail/route.ts", names: ["new FlowMeter((units) => countUnits(counted, units))", "saveFlow(store, raw, { meter: flowMeter() })", "setFlowActive(store, text(body.id, 40), body.active === true, flowMeter())", "removeFlow(store, text(body.id, 40), flowMeter())", "setUpStarters(store, flowMeter())", "flowMeter().list(store.listId, false)", "error instanceof FlowNotCounted"] },
       // A store that kept tasks about people before their count has every task read once to make it, after tasksRecountUnits studio requests are taken (review of #1959, 4 November 2026).
       { file: "lib/crm.ts", names: ["TASKS_RECOUNT_UNITS", "tasksRecountUnits", "TASK_COUNT_FIELD"] },
       // The agenda of everyone's tasks reads every task: tasksRecountUnits(people) studio requests first, refused without reading (review of f6bd3d1f4, M1).

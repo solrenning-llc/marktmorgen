@@ -59,7 +59,10 @@ LITERAL = re.compile(
 # string: anything after the closing quote but ")" or "," (a join, a method) is computed.
 COMPUTED = re.compile(
     r"""\bimport\s*\(\s*[^"'\s)]|\brequire\s*\(\s*[^"'\s)]|\brequire\.context\b|\bimport\.meta\.glob\b"""
-    r"""|\b(?:import|require(?:\.resolve)?)\s*\(\s*(["'])[^"'\n]*\1\s*(?![\s),])""")
+    r"""|\b(?:import|require(?:\.resolve)?)\s*\(\s*(["'])[^"'\n]*\1\s*(?![\s),])"""
+    # Resolving a computed name is a computed import too (Codex G's third return on #3037).
+    r"""|\brequire\.resolve\s*\(\s*[^"'\s)]|\bimport\.meta\.resolve\s*\(\s*[^"'\s)]"""
+    r"""|\bnew\s+URL\s*\(\s*[^"'\s)][^;]*?\bimport\.meta\.url""")
 LISTING = re.compile(r"""\b(?:readdirSync|readdir|opendirSync|opendir|globSync|glob)\s*\(""")
 CSS_URL = re.compile(r"""url\(\s*(["']?)(\.{1,2}/[^"')\s]+)\1\s*\)""")
 # A string that names a repository file: "lib/x.ts", "../../lib/x.ts", "seed.ts".

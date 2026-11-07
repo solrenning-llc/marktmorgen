@@ -10,6 +10,11 @@ const script = points.match(/export const REMOVE_POINT = `([\s\S]*?)`;/)?.[1];
 assert.ok(script);
 
 function assertRemovalCost(script: string) {
+  // Count actual command sites, including mutually exclusive writes. Merely
+  // counting helper invocations would miss commands added inside a helper.
+  const commands = [...script.matchAll(/\bredis\.call\('([A-Z]+)'/g)].map((match) => match[1]);
+  assert.deepEqual(commands, ["ZSCORE", "ZADD", "ZINCRBY"], "review any added or changed Redis command");
+  assert.equal([...script.matchAll(/\bredis\b/g)].length, commands.length, "no uncounted Redis access or protected call");
   const reads = [...script.matchAll(/score\(KEYS\[/g)].length;
   const writes = [...script.matchAll(/return \{take\(KEYS\[/g)].length * 2;
   assert.equal(reads, 2, "the script reads both point boards");

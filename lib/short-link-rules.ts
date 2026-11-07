@@ -179,12 +179,16 @@ export function linkCache(link: Pick<ShortLink, "then"> | null, now: number): st
  */
 export type Seen = { at: number | null; passed: boolean; to: LinkThen["target"] | null };
 
-/** What the panel saw, as a request sends it, or null when it is not that shape: a date always with its page, none without. Pure. */
+/**
+ * What the panel saw, as a request sends it, or null when it is not that shape:
+ * a date always with its page, none without. No date with no `to` at all is
+ * read as no date: a panel drawn before `to` was sent says it so. Pure.
+ */
 export function readSeen(raw: unknown): Seen | null {
   if (!raw || typeof raw !== "object") return null;
   const v = raw as Record<string, unknown>;
   if (typeof v.passed !== "boolean") return null;
-  if (v.at === null) return v.to === null ? { at: null, passed: v.passed, to: null } : null;
+  if (v.at === null) return v.to === null || v.to === undefined ? { at: null, passed: v.passed, to: null } : null;
   if (typeof v.at !== "number" || !Number.isSafeInteger(v.at)) return null;
   const to = plainTarget(v.to, () => true);
   return to ? { at: v.at, passed: v.passed, to } : null;
@@ -213,6 +217,20 @@ export function dateFormFits(fresh: Pick<ShortLink, "target" | "then"> | undefin
 /** The links whose date the panel's clock passed going from `from` to `to`: said to the creator when they come. Pure. */
 export function datesReached<T extends Pick<ShortLink, "then">>(links: T[], from: number, to: number): T[] {
   return links.filter((l) => l.then && from < l.then.at && l.then.at <= to);
+}
+
+/**
+ * The dates the panel's clock passed going from `from` to `to`, as the panel
+ * showed them (`shown`), kept only when `fresh` (the links as an answer brings
+ * them; on a tick, the same list) has that link going, at `to`, to the page its
+ * date said: a date taken back or changed meanwhile, or a link gone, is not
+ * said as come. Pure.
+ */
+export function datesCame<T extends Pick<ShortLink, "code" | "then">>(shown: T[], fresh: Pick<ShortLink, "code" | "target" | "then">[], from: number, to: number): T[] {
+  return datesReached(shown, from, to).filter((l) => {
+    const now = fresh.find((f) => f.code === l.code);
+    return Boolean(now && l.then && samePage(targetNow(now, to), l.then.target));
+  });
 }
 
 /**

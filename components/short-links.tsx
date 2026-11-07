@@ -5,7 +5,7 @@ import QRCode from "qrcode";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
 import { POST_PLACES, qrFileName, qrSvg } from "@/lib/share-links";
-import { type LinkTarget, type LinkThen, MAX_LINKS, MAX_NAME, type ShortLink, dateCanceledBy, dateFormFits, datesReached, linkName, seenAt, shortUrl, targetNow } from "@/lib/short-link-rules";
+import { type LinkTarget, type LinkThen, MAX_LINKS, MAX_NAME, type ShortLink, dateCanceledBy, dateFormFits, datesCame, linkName, seenAt, shortUrl, targetNow } from "@/lib/short-link-rules";
 import { useOwnZone } from "@/components/local-clock";
 import { formatMoney } from "@/lib/money";
 
@@ -17,6 +17,7 @@ const REASONS: Record<string, string> = {
   changed: "This link changed since this page showed it, or its date has passed. It is shown here as it is now. Check it, then try again.",
   stale: "This link changed since this page showed it, or its date has passed. Reload the page to see it as it is now, then try again.",
   gone: "That link is no longer in your store. Reload the page to see your links.",
+  ended: "That link is no longer in your store, so the change was not saved. Your links are shown here as they are now.",
 
   name: "Give the post a name, like october-reel.",
   taken: "Another link already has that name. Each post's link needs its own, so its results are its own.",
@@ -277,27 +278,38 @@ export function ShortLinks({
   const focusDate = useRef("");
   /** What a date that came while the panel was open did, said once in a polite live region. */
   const [said, setSaid] = useState("");
+  const sayTimer = useRef(0);
+  /** Empties the live region first, so the same words said again are read again. */
+  const say = (text: string) => {
+    setSaid("");
+    window.clearTimeout(sayTimer.current);
+    sayTimer.current = window.setTimeout(() => setSaid(text), 100);
+  };
+  useEffect(() => () => window.clearTimeout(sayTimer.current), []);
   const shown = useRef({ links, now });
   useEffect(() => {
     shown.current = { links, now };
   });
   /**
-   * Moves the panel's clock on. A date reached meanwhile is said in the live
-   * region, and when the focus was on that link's "Cancel the change", which the
-   * date replaces with "Change on a date", it moves to that one (same id), never
-   * to the page's start.
+   * Moves the panel's clock on, on a tick (`fresh` the links shown) and when an
+   * answer comes (`fresh` the links it brings). A date passed meanwhile, as the
+   * panel showed it, is said in the live region when `fresh` still has it come,
+   * and when the focus was on that link's "Cancel the change", which the date
+   * replaces with "Change on a date", it moves to that one (same id), never to
+   * the page's start.
    */
-  const tick = () => {
+  const advance = (fresh: ShortLink[]) => {
     const at = serverNow(skew.current);
-    const came = datesReached(shown.current.links, shown.current.now, at);
+    const came = datesCame(shown.current.links, fresh, shown.current.now, at);
     if (came.length) {
       const active = document.activeElement;
       const held = came.find((l) => active instanceof HTMLElement && active.id === `short-link-date-${l.code}`);
       if (held) focusDate.current = held.code;
-      setSaid(came.map((l) => `The date for ${l.name} has come: it now goes to ${l.then ? where(l.then.target) : where(l.target)}.`).join(" "));
+      say(came.map((l) => `The date for ${l.name} has come: it now goes to ${l.then ? where(l.then.target) : where(l.target)}.`).join(" "));
     }
     setNow(at);
   };
+  const tick = () => advance(shown.current.links);
   const tickRef = useRef(tick);
   useEffect(() => {
     tickRef.current = tick;
@@ -328,8 +340,31 @@ export function ShortLinks({
   useEffect(() => {
     if (rowProblem) rowRef.current?.focus();
   }, [rowProblem]);
+  /**
+   * A refusal for a link no longer in the answer's list, so no longer shown:
+   * said in the panel's own place, which stays until the next change, and
+   * moved to (each time anew, as a new object).
+   */
+  const [status, setStatus] = useState<{ text: string } | null>(null);
+  const statusRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (status) statusRef.current?.focus();
+  }, [status]);
   /** The links a "changed" refusal brought, as they are now; null after any other answer. */
   const refused = useRef<ShortLink[] | null>(null);
+  /** Says a change's answer for one link: beside it, or in the panel's own place when the links brought no longer have it. */
+  const refuseRow = (code: string, refusal: string | null) => {
+    if (refusal === null) {
+      setRowProblem(null);
+      return;
+    }
+    if (refusal === "changed" && refused.current && !refused.current.some((l) => l.code === code)) {
+      setRowProblem(null);
+      setStatus({ text: REASONS.ended });
+      return;
+    }
+    setRowProblem({ code, text: REASONS[refusal] ?? "That did not save. Try again." });
+  };
   useEffect(() => {
     if (!focusDate.current) return;
     document.getElementById(`short-link-date-${focusDate.current}`)?.focus();
@@ -353,14 +388,15 @@ export function ShortLinks({
       if (typeof answer.now === "number" && Number.isFinite(answer.now)) skew.current = skewFrom(answer.now);
       if (answer.ok && answer.links) {
         setLinks(answer.links);
-        setNow(clock());
+        advance(answer.links);
         setRowProblem(null);
+        setStatus(null);
         toast(typeof done === "string" ? done : done(answer.links));
         return null;
       }
       if (answer.error === "changed" && answer.links) {
         setLinks(answer.links);
-        setNow(clock());
+        advance(answer.links);
         refused.current = answer.links;
       }
       // "changed" with no links (they could not be read): never said as shown here.
@@ -439,6 +475,12 @@ export function ShortLinks({
           </button>
         </div>
       </form>
+      {status ? (
+        // Moved to when it appears, so it is read once and stays until the next change; the links below are already as they are now.
+        <p ref={statusRef} tabIndex={-1} className="mt-3 text-xs font-semibold text-ink">
+          {status.text}
+        </p>
+      ) : null}
       {links.length ? (
         <ul className="mt-3 divide-y divide-line rounded-[12px] bg-white ring-1 ring-line">
           {links.map((link) => {
@@ -489,7 +531,7 @@ export function ShortLinks({
                               : `Changed. The post now opens ${opensIn(links, link.code)}.`,
                           { quiet: true },
                         );
-                        setRowProblem(refusal === null ? null : { code: link.code, text: REASONS[refusal] ?? "That did not save. Try again." });
+                        refuseRow(link.code, refusal);
                       }}
                     >
                       <option value="store">Your store</option>
@@ -527,7 +569,7 @@ export function ShortLinks({
                       onClick={async () => {
                         const refusal = await send({ action: "then", code: link.code, then: null, seen: seenOf(link) }, (links) => `Canceled. The link goes to ${opensIn(links, link.code)}.`, { quiet: true });
                         if (refusal === null) focusDate.current = link.code;
-                        setRowProblem(refusal === null ? null : { code: link.code, text: REASONS[refusal] ?? "That did not save. Try again." });
+                        refuseRow(link.code, refusal);
                       }}
                     >
                       Cancel the change
@@ -572,12 +614,12 @@ export function ShortLinks({
                       if (refusal === null) focusDate.current = link.code;
                       if (refusal === "changed") {
                         // The link is now shown as it is. While the page chosen still fits it, the form stays with what was typed
-                        // and says why beside its fields (3.3.7); otherwise it closes and the reason is said beside the link.
+                        // and says why beside its fields (3.3.7); otherwise it closes and the reason is said beside the link,
+                        // or, when the link is gone, in the panel's own place, focused, never only in a toast that goes away.
                         const fresh = refused.current?.find((l) => l.code === link.code);
                         if (!dateFormFits(fresh, then.target, clock())) {
                           setDating("");
-                          if (fresh) setRowProblem({ code: link.code, text: REASONS.changed });
-                          else toast(REASONS.gone);
+                          refuseRow(link.code, "changed");
                         }
                       }
                       return refusal;

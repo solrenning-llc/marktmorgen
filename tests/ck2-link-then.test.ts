@@ -354,7 +354,12 @@ async function main(): Promise<void> {
   );
   is("third pre-review: a refusal that brings no links does not say they are shown", [/answer\.error === "changed" && !answer\.links/.test(panel), /\bstale: "[^"]*Reload the page/.test(panel)], [true, true]);
   is("third pre-review: \"Goes to\" says when it cancels a date", [/dateCanceledBy\(/.test(panel), /change you set for a date is canceled/i.test(panel)], [true, true]);
-  is("third pre-review: a date that comes while the panel is open is said in a live region, the focus kept", [/aria-live="polite"/.test(panel), /datesReached\(/.test(panel), /document\.activeElement/.test(panel)], [true, true, true]);
+  is(
+    "third pre-review: a date that comes while the panel is open is said in a live region, the focus kept",
+    // Rule 23 (fourth pre-review of 510 [CK2]): the panel calls datesCame, which reads datesReached and keeps only the dates the answer still has come (P3 below).
+    [/aria-live="polite"/.test(panel), /datesCame\(/.test(panel), /document\.activeElement/.test(panel)],
+    [true, true, true],
+  );
   is("third pre-review: any saved change clears a refusal beside a link", /if \(answer\.ok && answer\.links\) \{[^}]*setRowProblem\(null\)/.test(panel), true);
   const studio = readFileSync("app/studio/page.tsx", "utf8");
   is(
@@ -377,8 +382,10 @@ async function main(): Promise<void> {
   const undated = (await readLinks(mine.statsId)).find((l) => l.code === fresh.link.code);
   if (!undated) throw new Error("no second link");
   await setThen(mine.statsId, fresh.link.code, null, guide, Date.now(), seenAt(undated, Date.now()));
-  const oldPanel = await post({ action: "target", code: fresh.link.code, target: { kind: "product", id: "guide" }, seen: { at: null, passed: false } });
-  is("a change from such a panel, on a link with no date, is saved", [oldPanel.status, oldPanel.body.ok], [200, true]);
+  // To a product first (the studio's request reads the store's own products, which this one has none of), so the request below may go back to the store.
+  await retarget(mine.statsId, fresh.link.code, { kind: "product", id: "guide" }, guide, Date.now(), { at: null, passed: false, to: null });
+  const oldPanel = await post({ action: "target", code: fresh.link.code, target: { kind: "store" }, seen: { at: null, passed: false } });
+  is("a change from such a panel, on a link with no date, is saved", [oldPanel.status, oldPanel.body.ok, oldPanel.body.error], [200, true, undefined]);
 
   // P2: the panel's clock is read after the page's reads, so it does not start behind by their time.
   const block = studio.slice(studio.lastIndexOf("(async () => {", studio.indexOf("<ShortLinks")), studio.indexOf("})()", studio.indexOf("<ShortLinks")));

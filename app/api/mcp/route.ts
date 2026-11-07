@@ -1,4 +1,9 @@
-import { apiStore, holdMoreApi, takeMoreApi } from "@/lib/api-guard";
+import { apiAgent, apiStore, holdMoreApi, takeMoreApi } from "@/lib/api-guard";
+import { proposeDescription } from "@/lib/agent-propose";
+import { BookReadRefused } from "@/lib/agent-book";
+import { PRODUCT_DESCRIPTION } from "@/lib/agent-kinds";
+import { addWork, apiReadUnits, listingsWork, proposeWork } from "@/lib/api-read-rules";
+import { listingsToRead } from "@/lib/catalog-read-count";
 import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
 import { apiNumbers } from "@/lib/api-numbers";
@@ -84,6 +89,39 @@ export async function POST(request: Request) {
     });
   }
   if (method === "ping") return result(id, {});
+
+  // A tool that prepares a change needs a key that may (631 [AA1] (c)); checked instead of the plain read, so the call is counted once.
+  const asked = (message.params ?? {}) as { name?: unknown; arguments?: Record<string, unknown> };
+  if (method === "tools/call" && asked.name === "propose_product_description") {
+    const agent = await apiAgent(request, "draft");
+    if (agent instanceof Response) {
+      const refusal = (await agent.json().catch(() => null)) as { message?: unknown } | null;
+      return failure(id, -32001, typeof refusal?.message === "string" ? refusal.message : "This key cannot prepare changes for you to confirm.");
+    }
+    // Paid for before it reads (lib/api-read-rules.ts, proposeWork): first all but the book; then the book, measured
+    // under its lock where it cannot grow, at what it weighs, before it is read. Refused, the refusal's own sentence.
+    const named = typeof asked.arguments?.product === "string" ? asked.arguments.product.slice(0, 40) : "";
+    const envelope = (book: number) => apiReadUnits(addWork(listingsWork(3 * listingsToRead(agent.store, named ? [named] : [])), proposeWork(book, PRODUCT_DESCRIPTION.maxBytes)));
+    const refusedWords = async (refusal: Response) => {
+      const words = (await refusal.json().catch(() => null)) as { message?: unknown } | null;
+      return failure(id, -32001, typeof words?.message === "string" ? words.message : "That could not be prepared just now. Try again in a moment.");
+    };
+    const first = envelope(0);
+    const opened = await takeMoreApi(agent.store, first);
+    if (opened) return refusedWords(opened);
+    let refusal: Response | null = null;
+    const admit = async (bytes: number) => {
+      refusal = await takeMoreApi(agent.store, envelope(bytes) - first, first);
+      return refusal === null;
+    };
+    try {
+      return result(id, await proposeDescription(agent.store, agent.keyId, asked.arguments ?? {}, admit));
+    } catch (error) {
+      if (error instanceof BookReadRefused && refusal) return refusedWords(refusal);
+      if (error instanceof BookReadRefused) return failure(id, -32001, "That could not be prepared just now. Try again in a moment.");
+      throw error;
+    }
+  }
 
   const store = await apiStore(request);
   if (store instanceof Response) {

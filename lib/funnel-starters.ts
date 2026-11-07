@@ -593,6 +593,203 @@ FUNNEL_STARTERS.push(
   }),
 );
 
+// FT, common rule 7 of 572–576 (added 7 November 2026): every funnel type
+// (lib/funnel-types.ts) has a campaign with first words. The challenge, the
+// small first purchase, the quiz and the book as a download had a type but
+// no campaign, so a creator who chose one was handed empty pages. These four
+// fill them, built like the others: the strict file, the same preview and
+// mapping to the creator's own products, made as a draft. Nothing is
+// counted, priced, dated or promised; a challenge's days open by the course
+// editor's own setting, said first; the quiz's results are a sum anyone can
+// check (lib/forms.ts), and answering it never puts anybody on a list.
+const CHALLENGE_DAYS =
+  "Make the challenge a free course. Put each day's lessons in a module of their own. In the course editor, set “Opens after (days)” so each module opens one day after the one before.";
+
+FUNNEL_STARTERS.push(
+  {
+    id: "free-challenge",
+    label: "Free challenge, then your paid product",
+    hint: "Your free challenge: a free course whose lessons open a day at a time. Then a page about what comes next, and your paid product.",
+    before: [CHALLENGE_DAYS],
+    bundle: {
+      format: BUNDLE_FORMAT, schema: BUNDLE_SCHEMA, name: "Free challenge",
+      products: [
+        { ref: "x1", label: "Your free challenge: a free course whose lessons open a day at a time", wants: "free" },
+        { ref: "x2", label: "Your paid product", wants: "paid" },
+      ],
+      forms: [],
+      steps: [{ kind: "page", ref: "p1" }, { kind: "product", ref: "x1" }, { kind: "page", ref: "p2" }, { kind: "product", ref: "x2" }, { kind: "page", ref: "p3" }],
+      pages: [
+        {
+          ref: "p1", title: "Free challenge", slug: "free-challenge", target: "x1", style: "plain",
+          blocks: [
+            { id: "fc01", kind: "hero", headline: "A free challenge: [your topic], one day at a time", sub: "[Say who it is for and what they will do each day.] It is free. Enter your email on the next page and the link comes to your inbox.", media: "none", video: null, button: true },
+            {
+              id: "fc02", kind: "steps", heading: "How it works",
+              items: [
+                { title: "Sign up", detail: "Enter your email on the next page. The link to the challenge comes to your inbox." },
+                { title: "One day at a time", detail: "A new part opens each day. [Say how long each day takes.]" },
+                { title: "[What they finish with]", detail: "[Say what they will have done by the last day.]" },
+              ],
+            },
+            { id: "fc03", kind: "benefits", heading: "What you will do", items: ["[The first day: what they do]", "[The next day: what they do]", "[The last day: what they do]"] },
+            { id: "fc04", kind: "bio", heading: "", body: "", photo: true },
+            {
+              id: "fc05", kind: "faq", heading: "Questions",
+              items: [
+                { q: "Is it really free?", a: "Yes. You enter your email address and the link to the challenge is sent to it." },
+                { q: "What if I miss a day?", a: "[Say whether the days stay open after they open, and for how long.]" },
+                { q: "Will I get other emails?", a: "[Say whether you will email them again, about what, and that they can unsubscribe at any time.]" },
+              ],
+            },
+            { id: "fc06", kind: "cta", label: "Join the free challenge", note: "" },
+          ],
+        },
+        {
+          ref: "p2", title: "What's next", slug: "whats-next", target: "x2", style: "plain",
+          blocks: [
+            { id: "cn01", kind: "hero", headline: "After the challenge", sub: "[Say what someone can do next, if they want to go further.]", media: "none", video: null },
+            { id: "cn02", kind: "text", heading: "Going further", body: "[Say what your paid product adds to the challenge, and who it is for.] You do not need it to finish the challenge." },
+            { id: "cn03", kind: "fit", heading: "Is it for you?", yesLabel: "Right for you if you", noLabel: "Not right for you if you", yes: ["[Describe who it suits]"], no: ["[Describe who it does not suit]"] },
+            { id: "cn04", kind: "cta", label: "See the product and price", note: "" },
+          ],
+        },
+        { ...nextSteps({ title: "Open your purchase", detail: "[Tell the buyer where to find what they bought and how to start.]" }), ref: "p3" },
+      ],
+    },
+  },
+  {
+    id: "small-first-purchase",
+    label: "A small first purchase, then your main product",
+    hint: "A low-priced first product, then a page about your main product and its checkout. Then a page that says what happens next.",
+    bundle: {
+      format: BUNDLE_FORMAT, schema: BUNDLE_SCHEMA, name: "Small first purchase",
+      products: [
+        { ref: "x1", label: "A low-priced first product", wants: "paid" },
+        { ref: "x2", label: "Your main product", wants: "paid" },
+      ],
+      forms: [],
+      steps: [{ kind: "page", ref: "p1" }, { kind: "product", ref: "x1" }, { kind: "page", ref: "p2" }, { kind: "product", ref: "x2" }, { kind: "page", ref: "p3" }],
+      pages: [
+        {
+          ref: "p1", title: "Start here", slug: "start-here", target: "x1", style: "cards",
+          blocks: [
+            { id: "sf01", kind: "hero", headline: "[Your first product]: [what it helps with, in a few words]", sub: "[Say who it is for and what they get.] A small first step, before anything bigger.", media: "none", video: null, button: true },
+            { id: "sf02", kind: "benefits", heading: "What you get", items: ["[The first thing included]", "[The next thing included]"] },
+            { id: "sf03", kind: "fit", heading: "Before you buy", yesLabel: "Useful if you", noLabel: "Not a fit if you", yes: ["[Who it helps and what they need]"], no: ["[What it does not do]"] },
+            { id: "sf04", kind: "faq", heading: "Buying questions", items: [{ q: "How do I get it?", a: "[Say how it is delivered and what they need to open it.]" }, { q: "What is the refund policy?", a: "[State the policy that applies to this product.]" }] },
+            { id: "sf05", kind: "cta", label: "See the product and price", note: "" },
+          ],
+        },
+        {
+          ref: "p2", title: "If you want to go further", slug: "go-further", target: "x2", style: "plain",
+          blocks: [
+            { id: "gf01", kind: "hero", headline: "If you want to go further", sub: "[Say what your main product adds, and who it is for.]", media: "none", video: null },
+            { id: "gf02", kind: "text", heading: "No need to decide now", body: "You do not need it to use what you just bought. Nothing more is charged unless you choose it." },
+            { id: "gf03", kind: "benefits", heading: "What the main product adds", items: ["[The first thing it adds]", "[The next thing it adds]"] },
+            { id: "gf04", kind: "cta", label: "See the main product and price", note: "" },
+          ],
+        },
+        { ...nextSteps({ title: "Your purchase", detail: "[Tell the buyer where to find what they bought and how to start.]" }), ref: "p3" },
+      ],
+    },
+  },
+  {
+    id: "quiz-match",
+    label: "A quiz that suggests your product",
+    hint: "A page with a short quiz. Each result suggests one of your products. You write the questions and the results.",
+    bundle: {
+      format: BUNDLE_FORMAT, schema: BUNDLE_SCHEMA, name: "Quiz",
+      products: [
+        { ref: "x1", label: "The product the first result suggests", wants: "paid" },
+        { ref: "x2", label: "The product the second result suggests", wants: "paid" },
+      ],
+      forms: [{
+        ref: "f1", name: "Quiz",
+        fields: [
+          { id: "qzq001", type: "choice", label: "[Your first question]", required: true, options: [
+            { id: "qza011", label: "[An answer that fits the first result]", outcome: "qzr001" },
+            { id: "qza012", label: "[An answer that fits the second result]", outcome: "qzr002" },
+          ] },
+          { id: "qzq002", type: "choice", label: "[Your next question]", required: true, options: [
+            { id: "qza021", label: "[An answer that fits the first result]", outcome: "qzr001" },
+            { id: "qza022", label: "[An answer that fits the second result]", outcome: "qzr002" },
+          ] },
+          { id: "qzq003", type: "choice", label: "[Your last question]", required: true, options: [
+            { id: "qza031", label: "[An answer that fits the first result]", outcome: "qzr001" },
+            { id: "qza032", label: "[An answer that fits the second result]", outcome: "qzr002" },
+          ] },
+          { id: "qzem01", type: "email", label: "Your email", required: false, options: [] },
+        ],
+        button: "See my result", doneHeading: "Thank you for your answers",
+        doneBody: "[Say what happens now.]",
+        outcomes: [
+          { id: "qzr001", title: "[The first result]", body: "[Say what these answers suggest and why, in plain words. Then say how the product below can help.]", product: "x1" },
+          { id: "qzr002", title: "[The second result]", body: "[Say what these answers suggest and why, in plain words. Then say how the product below can help.]", product: "x2" },
+        ],
+        offerList: false,
+      }],
+      steps: [{ kind: "page", ref: "p1" }, { kind: "page", ref: "p2" }],
+      pages: [
+        {
+          ref: "p1", title: "Find what fits you", slug: "quiz", target: "", style: "plain",
+          blocks: [
+            { id: "qz01", kind: "hero", headline: "[Your topic]: find what fits you", sub: "Answer a few short questions. Your result suggests one of my products.", media: "none", video: null },
+            { id: "qz02", kind: "text", heading: "About your answers", body: "Your result comes from the answers you choose. Leave the email empty if you only want your result. [Say what you do with the answers and the email, who can see them, and how to ask for their deletion. To offer your list, turn on its separate box in the form before publishing.]" },
+            { id: "qz03", kind: "form", heading: "The quiz", form: "f1" },
+          ],
+        },
+        nextSteps({ title: "Your result", detail: "[Say what to do next with the result, and how to reach you with a question.]" }),
+      ],
+    },
+  },
+  {
+    id: "book-download",
+    label: "Sell a book people download",
+    hint: "Show what the book covers, its format and how to read it. Then lead to the book people download.",
+    bundle: {
+      format: BUNDLE_FORMAT, schema: BUNDLE_SCHEMA, name: "Book download",
+      products: [{ ref: "x1", label: "Your book, as a file people download", wants: "paid" }],
+      forms: [],
+      steps: [{ kind: "page", ref: "p1" }, { kind: "product", ref: "x1" }, { kind: "page", ref: "p2" }],
+      pages: [
+        {
+          ref: "p1", title: "Your book", slug: "book-download", target: "x1", style: "cards",
+          blocks: [
+            { id: "bd01", kind: "hero", headline: "[Your book's title]: [what it is about, in a few words]", sub: "[Say who it is for and what they will find in it.] [Say how they get it, for example a download right after paying.]", media: "none", video: null, button: true },
+            { id: "bd02", kind: "benefits", heading: "What is inside", items: ["[The first part of the book]", "[The next part of the book]"] },
+            { id: "bd03", kind: "text", heading: "Format", body: "[Give the file format, such as PDF or EPUB, how many pages it has and the language it is written in.]" },
+            { id: "bd04", kind: "bio", heading: "About the author", body: "", photo: true },
+            { id: "bd05", kind: "faq", heading: "Before you buy", items: [
+              { q: "What format is it in?", a: "[Name the file format and the apps or devices that open it.]" },
+              { q: "Can I read it with a screen reader or larger text?", a: "[Say whether the file has headings, a set reading order and described pictures, and whether its text can be made larger.]" },
+              { q: "What is the refund policy?", a: "[State the policy that applies to this book.]" },
+            ] },
+            { id: "bd06", kind: "cta", label: "See the book and price", note: "" },
+          ],
+        },
+        nextSteps({ title: "Get your book", detail: "[Tell the buyer where the file is and how to open it.]" }),
+      ],
+    },
+  },
+);
+
+/**
+ * The campaigns that fill each funnel type (lib/funnel-types.ts): each walks
+ * through the same kinds of product as its type, in the same order. A type
+ * added later brings its own campaign with it.
+ */
+export const TYPE_STARTERS: Record<string, string[]> = {
+  "lead-magnet": ["guide-signup"],
+  training: ["recorded-workshop"],
+  challenge: ["free-challenge"],
+  launch: ["course-launch"],
+  book: ["book-download", "printed-book"],
+  "first-purchase": ["small-first-purchase"],
+  application: ["coaching-application"],
+  quiz: ["quiz-match"],
+};
+
 export function funnelStarter(id: unknown): FunnelStarter | null {
   return FUNNEL_STARTERS.find((starter) => starter.id === id) ?? null;
 }

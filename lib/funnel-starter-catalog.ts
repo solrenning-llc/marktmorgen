@@ -36,6 +36,10 @@ const GOALS: Record<string, StarterGoal> = {
   "branded-apparel": "sales",
   "course-kit": "sales",
   "homemade-food": "sales",
+  "free-challenge": "leads",
+  "small-first-purchase": "sales",
+  "quiz-match": "leads",
+  "book-download": "sales",
 };
 
 /** Derived from the actual bundle so the preview cannot drift from what is created. */

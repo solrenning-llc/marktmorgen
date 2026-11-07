@@ -7,8 +7,7 @@
  * words are true as they stand or are parts in [brackets] for the creator.
  */
 import { readFileSync } from "node:fs";
-import * as starters from "@/lib/funnel-starters";
-import { FUNNEL_STARTERS, funnelStarter, starterBeforeLines, starterOutline, type FunnelStarter } from "@/lib/funnel-starters";
+import { FUNNEL_STARTERS, TYPE_STARTERS, funnelStarter, starterBeforeLines, starterOutline, type FunnelStarter } from "@/lib/funnel-starters";
 import { FUNNEL_TYPES } from "@/lib/funnel-types";
 import { matchingStarters, starterCard } from "@/lib/funnel-starter-catalog";
 import { planImport, readBundle } from "@/lib/funnel-bundle";
@@ -51,7 +50,7 @@ is("a search finds each by its own words", [
 ], [["free-challenge"], ["quiz-match"], ["small-first-purchase"], ["book-download"]]);
 
 part("Every funnel type has a ready campaign of the same shape");
-const typeStarters = (starters as unknown as { TYPE_STARTERS?: Record<string, string[]> }).TYPE_STARTERS;
+const typeStarters: Record<string, string[]> | undefined = TYPE_STARTERS;
 // The eight types on main today. A type added later (FT1–FT8) brings its own campaign in its own unit.
 const TYPES_NOW = ["lead-magnet", "training", "challenge", "launch", "book", "first-purchase", "application", "quiz"];
 is("the eight types are still the ones there are", TYPES_NOW.every((id) => FUNNEL_TYPES.some((t) => t.id === id)), true);

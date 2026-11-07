@@ -40,6 +40,7 @@ import { suppressCommand } from "@/lib/suppression";
 import { takeAllowance } from "@/lib/store-allowance";
 import { redisPipeline } from "@/lib/redis";
 import {
+  ANNIVERSARY_LATE_DAYS,
   MAX_ANNIVERSARY_MESSAGE,
   NO_ANNIVERSARY,
   anniversaryEmail,
@@ -162,6 +163,7 @@ async function main(): Promise<void> {
   is("the example gives the date as the UTC day it is", editor(true).includes("November 6, 2025 (UTC)"), true);
   is("the address field is described by its help", /id="anniversary-address"[^>]*aria-describedby="anniversary-address-help"|aria-describedby="anniversary-address-help"[^>]*id="anniversary-address"/.test(editor(true)), true);
   is("the studio says busy days can go late, and how late at most", editor(true).includes("up to a week after the date"), true);
+  is("in the figures the job keeps", [editor(true).includes(`At most ${ANNIVERSARIES_PER_STORE_RUN} go out from your store each day`), ANNIVERSARY_LATE_DAYS], [true, 7]);
 
   part("The studio setting is saved only whole");
   const made = await claimHandle("owner@example.com", "harbor", "Harbor Kitchen", "");

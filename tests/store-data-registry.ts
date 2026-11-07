@@ -672,6 +672,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:hg:once:@lib/anniversary-send.ts": short("A buyer written to on a purchase's anniversary", "own", 30, KEY, MAIL("anniversary")),
   "nl:hg:count:@lib/anniversary-send.ts": short("Anniversary emails counted a month", "day", 62, 128),
   "nl:hg:cursor@lib/anniversary-send.ts": company("Where the anniversary job stopped", "One key, the company's job."),
+  "nl:hg:scan:@lib/anniversary-send.ts": { what: "Where a store's reading of its purchases of a year ago stopped: two times and one checkout's id, never an address", parts: [capped(KEY, "One a store, kept SCAN_DAYS after its last run.")] },
   "nl:nudge:@lib/member-nudge.ts": short("A member nudged by email before a renewal", "own", 400, MARK, MAIL("nudge")),
   "nl:nudge:count:@lib/member-nudge.ts": short("Nudges counted a month", "day", 62, 128),
   "nl:nudge:cursor@lib/member-nudge.ts": company("Where the nudge job stopped", "One key, the company's job."),

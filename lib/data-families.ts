@@ -77,7 +77,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:monthly:sent:", "nl:mv:due", "nl:next:", "nl:next:lock:", "nl:nlink:", "nl:nlink:opens:", "nl:none",
   "nl:order-confirmation:closed:", "nl:order-confirmation:erased:", "nl:order-confirmation:due", "nl:order-confirmation:person:", "nl:order-confirmation:row:",
   "nl:order-confirmation:source:", "nl:order-confirmation:store:",
-  "nl:hg:count:", "nl:hg:cursor", "nl:hg:once:", "nl:nudge:", "nl:nudge:count:", "nl:nudge:cursor", "nl:orders:folders:", "nl:orders:link:", "nl:orders:n:",
+  "nl:hg:count:", "nl:hg:cursor", "nl:hg:once:", "nl:hg:scan:", "nl:nudge:", "nl:nudge:count:", "nl:nudge:cursor", "nl:orders:folders:", "nl:orders:link:", "nl:orders:n:",
   "nl:orders:open:", "nl:orders:seen:", "nl:outreach:stop:all", "nl:pause:", "nl:pause:due",
   "nl:pause:last:", "nl:pay:currencies:", "nl:payreq:lock:", "nl:payreq:stores", "nl:payreq:w:", "nl:person:find:", "nl:phone:cfg:", "nl:phone:seen:",
   "nl:held:stores", "nl:held:retry:", "nl:held:month:", "nl:held:walk",
@@ -313,7 +313,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:next:": E, "nl:next:lock:": E,
   "nl:nlink:": E, "nl:nlink:opens:": E,
   "nl:none": C,
-  "nl:hg:count:": E, "nl:hg:cursor": C, "nl:hg:once:": E,
+  "nl:hg:count:": E, "nl:hg:cursor": C, "nl:hg:once:": E, "nl:hg:scan:": E,
   "nl:nudge:": E, "nl:nudge:count:": E, "nl:nudge:cursor": C,
   // Constructed pre-URL origins are never activated. Pending/unknown have no
   // fixed TTL; built own erasers remove confirmed payloads and protect older

@@ -82,6 +82,82 @@ is("every half hour across that week: the day given is the day its clock shows, 
   return w.send === "later" && w.at > due && localKey(w.at, NUUK) === w.day && !nuuk.weekdays.includes(new Date(Date.parse(w.day)).getUTCDay());
 }), true);
 
+part("Pre-review: a lost open day never runs the wait out");
+// Only Saturday open and Saturday 4 April held: Friday 27 March, 11:30 PM in Nuuk.
+// Saturday 28 March has no 11:30 PM and an hour later is Sunday, so that Saturday
+// is lost; the next open day is Saturday 11 April, 15 days on.
+const saturdaysOnly = readNoSendDays({ timeZone: NUUK, weekdays: [0, 1, 2, 3, 4, 5], dates: ["2026-04-04"] }, Date.UTC(2026, 2, 20, 12));
+is("the setting (only Saturdays open, 4 April held) is accepted", saturdaysOnly.ok, true);
+if (saturdaysOnly.ok) {
+  const due = Date.UTC(2026, 2, 28, 1, 30);
+  const sent = whenToSend(saturdaysOnly.rule, "marketing", due);
+  is("Friday 11:30 PM waits for Saturday 11 April, 11:30 PM, never unknown for good", [sent, sent.send === "later" ? clock(sent.at, NUUK) : ""], [{ send: "later", at: Date.UTC(2026, 3, 12, 0, 30), day: "2026-04-11" }, "Saturday, April 11, 2026 at 11:30 PM"]);
+  is("asked again, the same answer", whenToSend(saturdaysOnly.rule, "marketing", due), sent);
+}
+
+const DST_ZONES = ["America/Nuuk", "America/Santiago", "America/Havana", "Pacific/Chatham", "Australia/Lord_Howe", "Australia/Sydney", "America/New_York", "Europe/London"];
+const weekdayOfKey = (key: string) => new Date(Date.parse(`${key}T00:00:00Z`)).getUTCDay();
+const keyPlus = (key: string, days: number) => new Date(Date.parse(`${key}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
+const offsetOf = (ms: number, tz: string) => Date.parse(`${localKey(ms, tz)}T00:00:00Z`) - ms + (Number(new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", hour: "2-digit" }).format(ms)) * 60 + Number(new Intl.DateTimeFormat("en-US", { timeZone: tz, minute: "2-digit" }).format(ms))) * 60_000;
+/** A decision is sound when it is never unknown and a later one falls on an open day, the day its clock shows, after the email was due. */
+const sound = (rule: NoSendDays, due: number) => {
+  const w = whenToSend(rule, "marketing", due);
+  if (w.send === "now") return true;
+  return w.send === "later" && w.at > due && localKey(w.at, rule.timeZone) === w.day && !rule.weekdays.includes(weekdayOfKey(w.day)) && !rule.dates.includes(w.day);
+};
+// Each zone's spring-forward days in 2026, found from the clocks themselves.
+for (const tz of DST_ZONES) {
+  const failures: string[] = [];
+  for (let k = 0; k < 365; k += 1) {
+    const noon = Date.UTC(2026, 0, 1, 12) + k * DAY;
+    if (offsetOf(noon + DAY, tz) <= offsetOf(noon, tz)) continue;
+    // The skipped hour falls on one of these local days: take each as the only open weekday,
+    // hold the same weekday a week later by date, and send every half hour around it.
+    for (const open of new Set([localKey(noon, tz), localKey(noon + DAY, tz)])) {
+      const read = readNoSendDays({ timeZone: tz, weekdays: [0, 1, 2, 3, 4, 5, 6].filter((d) => d !== weekdayOfKey(open)), dates: [keyPlus(open, 7)] }, Date.parse(`${keyPlus(open, -3)}T12:00:00Z`));
+      if (!read.ok) {
+        failures.push(`${open}: not accepted`);
+        continue;
+      }
+      const first = Date.parse(`${keyPlus(open, -1)}T00:00:00Z`) - 14 * 3_600_000;
+      for (let due = first; due < first + 4 * DAY; due += 1_800_000) if (!sound(read.rule, due)) failures.push(`${open} due ${new Date(due).toISOString()}`);
+    }
+  }
+  is(`${tz}: every half hour around the day the clocks skip, an accepted setting always gives a day to send`, failures.slice(0, 3), []);
+}
+
+// Accepted settings at random (a fixed seed), emails due from a week before the setting was read to more than a year after.
+let seed = 0x5eed_7b9;
+const random = () => {
+  seed = (seed + 0x6d2b79f5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
+};
+for (const tz of DST_ZONES) {
+  const failures: string[] = [];
+  let accepted = 0;
+  for (let i = 0; i < 60; i += 1) {
+    const now = Date.UTC(2026, 0, 1) + Math.floor(random() * 730 * DAY);
+    const weekdays = [0, 1, 2, 3, 4, 5, 6].filter(() => random() < 0.7).slice(0, 6);
+    const today = localKey(now, tz);
+    const dates = Array.from({ length: Math.floor(random() * 12) }, () => keyPlus(today, Math.floor(random() * 365)));
+    const read = readNoSendDays({ timeZone: tz, weekdays, dates }, now);
+    if (!read.ok) continue;
+    accepted += 1;
+    for (let j = 0; j < 12; j += 1) {
+      const due = now - 7 * DAY + Math.floor(random() * 410 * DAY);
+      if (!sound(read.rule, due)) failures.push(`${JSON.stringify(read.rule)} due ${new Date(due).toISOString()}`);
+    }
+  }
+  is(`${tz}: random accepted settings (${accepted > 20 ? "more than 20" : accepted}) always give a day to send`, failures.slice(0, 2), []);
+}
+
+part("Pre-review: an email due before 1970 keeps its seconds");
+// Saturday 27 December 1969, 10:00:30 AM in New York: the weekend is held, so Monday 29 December at 10:00:30 AM.
+const old = Date.UTC(1969, 11, 27, 15, 0, 30);
+is("before 1970 the seconds are kept, never taken off", whenToSend(weekend, "marketing", old), { send: "later", at: old + 2 * DAY, day: "1969-12-29" });
+
 part("A clock that is not a time is unknown, never an error");
 is("an email due at no time: unknown, so nothing goes out and nothing is dropped", [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 9e15].map((due) => whenToSend(weekend, "marketing", due)), Array(4).fill({ send: "unknown" }));
 is("an email about an order still goes now: its day is never looked at", whenToSend(weekend, "service", Number.NaN), { send: "now" });

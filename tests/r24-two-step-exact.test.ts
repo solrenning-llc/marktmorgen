@@ -22,7 +22,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { NextRequest } from "next/server";
 import { openSession } from "@/lib/auth";
-import { checkCode, lockedUntil, openLockedSession, twoStepOn } from "@/lib/two-step";
+import { checkCode, finishSignIn, holdSignIn, lockedUntil, openLockedSession, twoStepOn } from "@/lib/two-step";
 import { hasSecondStep, mayAddSecondStep } from "@/lib/second-step-gate";
 import { finishProvenSignIn } from "@/lib/signin-finish";
 import { store as redis } from "./redis-stub";
@@ -35,6 +35,7 @@ const recordKey = (email: string) => `nl:2fa:${sha(`nimbus-2fa:${email}`).slice(
 const lockedKey = (session: string) => `nl:2fa:locked:${sha(`nimbus-2fa-locked:${session}`).slice(0, 40)}`;
 const keptKey = (email: string) => `nl:2fa:lockedset:${sha(`nimbus-2fa-lockedset:${email}`).slice(0, 40)}:kept`;
 const codeHash = (code: string) => sha(`nimbus-2fa-code:${code.toLowerCase().replace(/[^a-z0-9]/g, "")}`);
+const holdKey = (token: string) => `nl:2fa:hold:${sha(`nimbus-2fa-hold:${token}`).slice(0, 40)}`;
 
 const ON = "r24-on@example.com";
 const OFF = "r24-off@example.com";
@@ -229,4 +230,61 @@ test("the code page: no wait left after an unknown reply says the login could no
   assert.match(text, /if \(!email\) redirect\(status === "unknown" \? "\/signin\?status=login-unknown" : "\/signin\?status=expired"\);/);
   assert.doesNotMatch(text, /shows then\./);
   assert.match(text, /unknown: "Your code could not be checked just now, and nothing was opened\. Wait a moment, then type the code your app shows now\."/);
+});
+
+// Claude 5 on #2896 (MEDIUM, rule 30): the day two-step login turns off by itself is read only in a shape this code
+// writes (0, or a whole millisecond at least RESET_DAYS after `since`). Any other number turned it off at once and
+// opened a full session on the emailed link alone.
+const RESET_ON = "r24-reset@example.com";
+const resetRecord = (reset: unknown, since = 1) => JSON.stringify({ s: "synthetic-sealed-secret", since, codes: [codeHash("abcd-efgh")], last: -1, reset, backup: "" });
+const resetSignIn = () => finishProvenSignIn(new NextRequest("https://marktmorgen.com/api/auth/callback", { method: "POST" }), RESET_ON, "link", "/studio");
+for (const [label, reset, since] of [["0.5", 0.5, 1], ["1e2 (100 ms after 1970)", 100, 1], ["1.5", 1.5, 1], ["a negative day", -5, 1], ["text", "9", 1], ["null", null, 1], ["a day less than a week after it was turned on", Date.now() - 3_600_000, Date.now() - 86_400_000]] as [string, unknown, number][]) {
+  test(`a link login opens no session when the turn-off day reads as ${label}`, async () => {
+    await ready;
+    await original([["SET", recordKey(RESET_ON), resetRecord(reset, since)]]);
+    const response = await resetSignIn();
+    assert.ok(!(response.headers.get("set-cookie") ?? "").includes("nl_session="), "no session cookie");
+    assert.equal(response.headers.get("location"), "https://marktmorgen.com/signin?status=login-unknown");
+    assert.equal(await original([["EXISTS", recordKey(RESET_ON)]]).then((r) => r[0]), 1, "two-step login is still on");
+  });
+}
+for (const [label, reset] of [["0 (none asked)", 0], ["tomorrow", Date.now() + 86_400_000]] as [string, number][]) {
+  test(`control: a turn-off day of ${label} waits for the code`, async () => {
+    await ready;
+    await original([["SET", recordKey(RESET_ON), resetRecord(reset)]]);
+    const response = await resetSignIn();
+    assert.equal(response.headers.get("location"), "https://marktmorgen.com/signin/code");
+  });
+}
+
+// Claude 5 on #2896 (LIGHT 1): a waiting login's count of wrong codes read in another shape is spent, never counted
+// from zero again; (LIGHT 2) its delete is read through countOf.
+for (const [label, n] of [["5x", "5x"], ["null", null], ["an object", {}], ["1.5", 1.5], ["-1", -1], ["6", 6]] as [string, unknown][]) {
+  test(`a waiting login whose wrong-code count reads as ${label} is spent, never judged again`, async () => {
+    await ready;
+    const token = await holdSignIn(ON);
+    await original([["SET", holdKey(token), JSON.stringify({ e: ON, n }), "EX", 600]]);
+    const answer = await finishSignIn(token, "000000");
+    assert.deepEqual(answer, { ok: false, reason: "expired" });
+    assert.equal((await original([["EXISTS", holdKey(token)]]))[0], 0, "the wait is spent");
+  });
+}
+test("control: a waiting login with four wrong codes judges the fifth", async () => {
+  await ready;
+  const who = "r24-tries-control@example.com";
+  await original([["SET", recordKey(who), record(["abcd-efgh"])]]);
+  const token = await holdSignIn(who);
+  await original([["SET", holdKey(token), JSON.stringify({ e: who, n: 4 }), "EX", 600]]);
+  const answer = await finishSignIn(token, "zzzz-zzzz");
+  assert.equal(answer.ok, false);
+  assert.notEqual(answer.ok === false && answer.reason, "expired", "the code is judged, the wait not spent");
+  assert.equal((await original([["EXISTS", holdKey(token)]]))[0], 1);
+});
+test("a right recovery code whose wait's delete answers \"1\" is not a delete it made", async () => {
+  await ready;
+  const who = "r24-tries-delete@example.com";
+  await original([["SET", recordKey(who), record(["abcd-efgh"])]]);
+  const token = await holdSignIn(who);
+  const answer = await withReply((cmd) => cmd[0] === "DEL" && cmd[1] === holdKey(token), "1", () => finishSignIn(token, "abcd-efgh"));
+  assert.deepEqual(answer, { ok: false, reason: "expired" });
 });

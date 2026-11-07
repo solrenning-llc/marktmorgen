@@ -209,7 +209,8 @@ export async function saveSender(store: Store, raw: { name?: unknown; address?: 
   if (!store.statsId || !isRedisConfigured()) return null;
   const sender = cleanSender(raw);
   if (!sender.name || !sender.address) return null;
-  await redisPipeline([["SET", key(store.statsId, "me"), JSON.stringify(sender)]]);
+  // Said saved only on the exact receipt (Claude 1 on #2870, LOW): an unknown answer throws, the route answers 503.
+  wroteSet(await redisPipeline([["SET", key(store.statsId, "me"), JSON.stringify(sender)]]), [["SET"]], "the sender");
   return sender;
 }
 
@@ -411,14 +412,17 @@ export async function startPitch(
     sentAt: 0,
   };
   const pushedOut = pitches.length - replaced.length >= MAX_PITCHES && spare.some((p) => !replaced.includes(p)) ? spare.find((p) => !replaced.includes(p))! : null;
-  await redisPipeline([
+  const commands: (string | number)[][] = [
     ["HSET", key(store.statsId, "pitches"), pitch.id, JSON.stringify(pitch)],
     ["INCR", key(store.statsId, `day:${dayOf(now)}`)],
     ["EXPIRE", key(store.statsId, `day:${dayOf(now)}`), 3 * 86_400],
     ["SET", linkKey(stop), JSON.stringify({ s: store.statsId, id: pitch.id, d: domain, n: (store.mail?.fromName || store.name).slice(0, 80) })],
     ...replaced.flatMap((p) => [["HDEL", key(store.statsId!, "pitches"), p.id], ...(p.stop ? [["DEL", linkKey(p.stop)]] : [])]),
     ...(pushedOut ? [["HDEL", key(store.statsId, "pitches"), pushedOut.id]] : []),
-  ]);
+  ];
+  // Said written only on the exact receipt (Claude 1 on #2870): a draft shown with a stop link that may not open, or
+  // with no wait held before the same business, is never answered done. The room taken stays taken (fails safe).
+  wroteSet(await redisPipeline(commands), commands, "a new pitch");
   // The pitches let go give their room back; their stop links stay counted (OUTREACH_TRACE_BYTES).
   const gone = replaced.length + (pushedOut ? 1 : 0);
   if (gone > 0) await giveData(store, [{ slot: PITCHES_SLOT, bytes: gone * PITCH_BYTES }]);
@@ -455,6 +459,12 @@ function wrote(replies: unknown, length: number, what: string): number[] {
   const counts = receipt?.map((reply) => countOf(reply));
   if (!counts || counts.some((count) => count === null)) throw new UnknownReplyError(what);
   return counts as number[];
+}
+
+/** A write's receipt where a SET answers "OK" and every other command a count; anything else throws. */
+function wroteSet(replies: unknown, commands: (string | number)[][], what: string): void {
+  const receipt = repliesFor(replies, commands.length);
+  if (!receipt || receipt.some((reply, i) => (commands[i][0] === "SET" ? reply !== "OK" : countOf(reply) === null))) throw new UnknownReplyError(what);
 }
 
 /**

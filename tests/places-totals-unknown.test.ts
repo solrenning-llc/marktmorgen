@@ -55,7 +55,7 @@ async function groupPart(): Promise<void> {
   const OWNER = "placesgroup@example.com";
   await claimHandle(OWNER, "placesgroup", "Places Group", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestPlacesGrp01", true);
+  await setStripeAccount(OWNER, "acct_1TestPlGrp01", true);
   await setSubscription(OWNER, { customerId: "cus_PlacesGroup0001", subscriptionId: "sub_PlacesGroup0001", active: true, period: paidPeriod() });
   const made = await addProduct(OWNER, "Sourdough Course", "", "49", null);
   if (!made.ok) throw new Error("no product");
@@ -204,7 +204,7 @@ async function totalsPart(): Promise<void> {
   const OWNER = "placestotals@example.com";
   await claimHandle(OWNER, "placestotals", "Places Totals", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestPlacesTot01", true);
+  await setStripeAccount(OWNER, "acct_1TestPlTot01", true);
   const shop = (await storeForEmail(OWNER))!;
   is("the read is kept as unread, never as no members", await membersOf(keptMembers(shop)), "unread");
   globalThis.fetch = noStripe;

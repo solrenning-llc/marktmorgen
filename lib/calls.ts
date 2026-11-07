@@ -1185,8 +1185,15 @@ export async function moveBooking(input: {
   if (length === null) return { ok: false, reason: "taken" };
   let end = start + length;
   const callsId = store.callsId;
-  // Moves keep their hosts, so the team as it was saved is used whatever the plan allows now.
-  const team = await teamForMove(store, product).catch(() => null);
+  // Moves keep their hosts, so the team as it was saved is used whatever the plan allows now. A team that cannot be read
+  // is not known, never "no team" (rule 24): moved by the store's own hours, its hosts' claim would be let go below.
+  let team: Awaited<ReturnType<typeof teamForMove>>;
+  try {
+    team = await teamForMove(store, product);
+  } catch (error) {
+    console.error("reading a moved booking's team failed", error);
+    return { ok: false, reason: "error" };
+  }
 
   if (!(await takeLock(callsId))) return { ok: false, reason: "taken" };
   let from: { start: number; end: number; moves: number };
@@ -1545,6 +1552,16 @@ export async function confirmBooking(input: {
   }
   due = due ?? null;
   cancel = cancel ?? null;
+  // A team booking's hosts are read before the once-only mark too, the same way: a failed read is not known, never "no
+  // team" (rule 24), which would confirm the booking without them and let their claim run out with the hold. It is
+  // left for the next confirmation.
+  let team: Awaited<ReturnType<typeof bookingTeam>>;
+  try {
+    team = await bookingTeam(store, product, session);
+  } catch (error) {
+    console.error("reading a team booking's hosts failed; confirmed later", error);
+    return;
+  }
   const [fresh] = await orderWrite(store, [["SET", confirmedKey(session), "1", "NX", "EX", CONFIRMED_SECONDS]]);
   if (fresh === null) return;
   // Booked: the orders it was admitted as are the window's (lib/orders.ts), once, by the checkout.
@@ -1555,11 +1572,7 @@ export async function confirmBooking(input: {
     await recordLead(store, { aff: input.lead, kind: "booking", email: buyerEmail, end: Math.floor(end / 1000), ref: session, pi: input.pi ?? "", paid: input.amountCents ?? 0, title: product.title });
   }
 
-  // A team booking keeps its hosts and the claim on their time, now for good.
-  const team = await bookingTeam(store, product, session).catch((error) => {
-    console.error("reading a team booking's hosts failed", error);
-    return null;
-  });
+  // A team booking keeps its hosts and the claim on their time, now for good (read above).
   const entry: Entry = { s: start, e: end, until: 0, session, p: product.id, ...(team ? { h: team.hosts, c: team.claim } : {}) };
   // Kept for good now that it is paid: written anew, so the store's room is
   // charged the whole entry (lib/order-data.ts), not only what it grew by

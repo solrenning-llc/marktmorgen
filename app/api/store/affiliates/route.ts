@@ -176,8 +176,9 @@ export async function POST(request: NextRequest) {
       if (action === "bulk") {
         const ids = Array.isArray(body.ids) ? body.ids.slice(0, MAX_BULK_DECISIONS).map((id) => text(id, 20)).filter(Boolean) : [];
         if (!ids.length) return fail("unknown");
-        const before = await decideMany(store, ids, decision);
-        return Response.json({ ok: true, before });
+        // Those left waiting (over the cap, or not checked just now) are named, so the studio can say who and why.
+        const { before, held } = await decideMany(store, ids, decision);
+        return Response.json({ ok: true, before, held });
       }
       const sent = Array.isArray(body.before) ? body.before.slice(0, MAX_BULK_DECISIONS) : [];
       const before = sent.flatMap((raw: unknown) => {

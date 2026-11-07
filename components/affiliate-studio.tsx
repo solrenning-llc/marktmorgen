@@ -44,6 +44,7 @@ import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
 import { MAX_NOTICE_DAYS, MIN_NOTICE_DAYS, noticeLines } from "@/lib/affiliate-notice";
 import { IDLE_WARN_DAYS, MAX_IDLE_DAYS, MIN_IDLE_DAYS } from "@/lib/affiliate-idle-rules";
+import { type HeldOne, heldLines, readHeld } from "@/lib/affiliate-bulk-words";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -230,7 +231,7 @@ export function AffiliateStudio({
   const [batchOpen, setBatchOpen] = useState(false);
   // Several applications at once (630 [HN6](4)): which are ticked, and the last press, for its undo.
   const [picked, setPicked] = useState<string[]>([]);
-  const [lastBulk, setLastBulk] = useState<{ decision: "approve" | "decline"; before: { id: string; status: string; decidedAt: number }[] } | null>(null);
+  const [lastBulk, setLastBulk] = useState<{ decision: "approve" | "decline"; before: { id: string; status: string; decidedAt: number }[]; held: HeldOne[] } | null>(null);
   const pickedNow = picked.filter((id) => pending.some((row) => row.affiliate.id === id));
 
   async function bulk(decision: "approve" | "decline") {
@@ -242,13 +243,14 @@ export function AffiliateStudio({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "bulk", decision, ids: pickedNow }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; before?: { id: string; status: string; decidedAt: number }[] };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; before?: { id: string; status: string; decidedAt: number }[]; held?: unknown };
       if (!data.ok || !Array.isArray(data.before)) {
         setError({ where: "bulk", text: MESSAGES[data.error ?? ""] ?? MESSAGES.server_error });
         return;
       }
       setPicked([]);
-      setLastBulk({ decision, before: data.before });
+      // Those left waiting are named below the count, each with why (lib/affiliate-bulk-words.ts).
+      setLastBulk({ decision, before: data.before, held: readHeld(data.held) });
       router.refresh();
     } catch {
       setError({ where: "bulk", text: MESSAGES.server_error });
@@ -452,12 +454,21 @@ export function AffiliateStudio({
                 <span>
                   {`${lastBulk.before.length} ${lastBulk.before.length === 1 ? "application" : "applications"} ${lastBulk.decision === "approve" ? "approved" : "declined"}.`}
                   {lastBulk.decision === "approve" ? " Each was emailed their link; undoing puts them back as applications but cannot take that email back." : ""}
-                  {" You can undo this for 10 minutes."}
+                  {lastBulk.before.length ? " You can undo this for 10 minutes." : ""}
+                  {lastBulk.held.length ? (
+                    <ul className="mt-2 list-disc space-y-1 pl-5">
+                      {heldLines(lastBulk.held, "approve").map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </span>
                 <span className="flex gap-2">
-                  <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} aria-busy={busy === "bulk"} onClick={undoBulk}>
-                    Undo
-                  </button>
+                  {lastBulk.before.length ? (
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} aria-busy={busy === "bulk"} onClick={undoBulk}>
+                      Undo
+                    </button>
+                  ) : null}
                   <button type="button" className="btn btn-ghost btn-sm" onClick={() => setLastBulk(null)}>
                     Dismiss
                   </button>
@@ -1265,7 +1276,7 @@ function ShareMany({
   const router = useRouter();
   const [picked, setPicked] = useState<string[]>([]);
   const [rate, setRate] = useState("");
-  const [last, setLast] = useState<{ rate: number | null; before: { id: string; rate: number | null }[] } | null>(null);
+  const [last, setLast] = useState<{ rate: number | null; before: { id: string; rate: number | null }[]; refused: HeldOne[] } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   if (members.length < 2 && !last) return null;
   const chosen = picked.filter((id) => members.some((m) => m.id === id));
@@ -1279,14 +1290,15 @@ function ShareMany({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "bulk-rate", ids: chosen, rate: asked }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; before?: { id: string; rate: number | null }[] };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; before?: { id: string; rate: number | null }[]; refused?: unknown };
       if (!data.ok || !Array.isArray(data.before)) {
         setProblem(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
         return;
       }
-      setLast({ rate: asked, before: data.before });
+      // Those whose new share would pass the cap, or could not be checked just now, keep theirs and are named.
+      setLast({ rate: asked, before: data.before, refused: readHeld(data.refused) });
       setPicked([]);
-      toast("Shares saved. They apply to sales from now on.");
+      if (data.before.length) toast("Shares saved. They apply to sales from now on.");
       router.refresh();
     } catch {
       setProblem(MESSAGES.server_error);
@@ -1298,18 +1310,29 @@ function ShareMany({
       <summary className="cursor-pointer font-semibold text-ink">Change the share of several affiliates</summary>
       {last ? (
         <div className="notice mt-3 flex flex-wrap items-center justify-between gap-3 text-sm" role="status">
-          <span>{`${last.before.length} ${last.before.length === 1 ? "share" : "shares"} changed to ${last.rate === null ? `the program's ${percent}%` : `${last.rate}%`}. It applies to sales from now on.`}</span>
+          <span>
+            {`${last.before.length} ${last.before.length === 1 ? "share" : "shares"} changed to ${last.rate === null ? `the program's ${percent}%` : `${last.rate}%`}.${last.before.length ? " It applies to sales from now on." : ""}`}
+            {last.refused.length ? (
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                {heldLines(last.refused, "rate").map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            ) : null}
+          </span>
           <span className="flex gap-2">
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              disabled={busy !== null}
-              onClick={async () => {
-                if (await act("bulk-rate", { action: "bulk-rate-undo", before: last.before, rate: last.rate }, "Shares put back as they were.")) setLast(null);
-              }}
-            >
-              Undo
-            </button>
+            {last.before.length ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={busy !== null}
+                onClick={async () => {
+                  if (await act("bulk-rate", { action: "bulk-rate-undo", before: last.before, rate: last.rate }, "Shares put back as they were.")) setLast(null);
+                }}
+              >
+                Undo
+              </button>
+            ) : null}
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setLast(null)}>
               Dismiss
             </button>

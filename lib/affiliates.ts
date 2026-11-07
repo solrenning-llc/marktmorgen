@@ -1479,20 +1479,20 @@ export type Before = { id: string; status: AffiliateStatus; decidedAt: number };
  * ones are touched; anybody already decided is left as they are. Returns how
  * each stood before, for an undo.
  */
-export async function decideMany(store: Store, ids: string[], decision: "approve" | "decline"): Promise<Before[]> {
+export async function decideMany(store: Store, ids: string[], decision: "approve" | "decline"): Promise<{ before: Before[]; held: HeldOne[] }> {
   const before: Before[] = [];
+  const held: HeldOne[] = [];
   for (const id of [...new Set(ids)].slice(0, MAX_BULK_DECISIONS)) {
     const affiliate = await readAffiliate(store, id);
     if (!affiliate || affiliate.status !== "pending") continue;
     // A share that would pass the cap, a reply that could not be read or the partner lock held elsewhere: this one is
-    // left pending, nothing written for it, and the rest go on (decide).
-    const done = await decide(store, id, decision).catch((error: unknown) => {
-      if (error instanceof ShareCapError || error instanceof UnknownReplyError || error instanceof LockBusyError) return null;
-      throw error;
-    });
-    if (done) before.push({ id, status: affiliate.status, decidedAt: affiliate.decidedAt });
+    // left pending, nothing written for it, the rest go on (decide), and the studio names who and why
+    // (lib/affiliate-bulk-words.ts), never a silent gap in the count.
+    const why = await heldWhy(() => decide(store, id, decision));
+    if (why) held.push({ id, email: affiliate.email, why });
+    else before.push({ id, status: affiliate.status, decidedAt: affiliate.decidedAt });
   }
-  return before;
+  return { before, held };
 }
 
 /**

@@ -2,7 +2,8 @@ import { withinStore } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { AFFILIATE_SESSION_SECONDS, affiliateCookieName, openAffiliateLink } from "@/lib/affiliates";
+import { AFFILIATE_SESSION_SECONDS, type Charge, affiliateCookieName, openAffiliateLink } from "@/lib/affiliates";
+import { givePublicRequests, takePublicRequest } from "@/lib/traffic";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 1_000;
@@ -40,7 +41,14 @@ export async function POST(request: NextRequest) {
   if (!(await withinStore("aff-open", `${clientAddress(request)}|${store.handle}`, 20, 600, store))) {
     return new Response(null, { status: 303, headers: { Location: `${page}?status=limited`, "Cache-Control": "no-store" } });
   }
-  const result = await openAffiliateLink(store, token).catch((error) => {
+  // Accepting an invitation that carries a share reads the program's people for the 90% cap: paid from the store's
+  // public requests first, at the read's worst, as its other public links are, and given back down to what was read
+  // (lib/affiliates.ts paidPeople). Not taken: the page says so ("resting"), nothing read or written, the link kept.
+  const charge: Charge = async (units) => {
+    const now = Date.now();
+    return (await takePublicRequest(store, "public", now, units)) ? { give: (n) => givePublicRequests(store, n, now) } : null;
+  };
+  const result = await openAffiliateLink(store, token, charge).catch((error) => {
     console.error("opening an affiliate link failed", error);
     return { ok: false as const, reason: "error" as const };
   });

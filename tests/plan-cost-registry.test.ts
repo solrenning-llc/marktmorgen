@@ -385,6 +385,10 @@ test("an affiliate change in bulk is paid a studio request for each share of its
  // Each more studio request covers STUDIO_UNIT_COMMANDS commands, or STUDIO_UNIT_BYTES bytes, at a light request's shape.
  assert.ok(request("light", STUDIO_UNIT_COMMANDS, 0) <= UNIT_COST.studio, `${request("light", STUDIO_UNIT_COMMANDS, 0)} > ${UNIT_COST.studio}`);
  assert.ok(request("light", 0, STUDIO_UNIT_BYTES) <= UNIT_COST.studio, `${request("light", 0, STUDIO_UNIT_BYTES)} > ${UNIT_COST.studio}`);
+ // Accepting a partnership by its emailed link pays the same units from the store's public requests (lib/affiliates.ts
+ // paidPeople, app/api/store/affiliates/open/route.ts), each priced as a later page: each covers as much.
+ assert.ok(request("light", STUDIO_UNIT_COMMANDS, 0) <= laterPageCost(), `${request("light", STUDIO_UNIT_COMMANDS, 0)} > ${laterPageCost()}`);
+ assert.ok(request("light", 0, STUDIO_UNIT_BYTES) <= laterPageCost(), `${request("light", 0, STUDIO_UNIT_BYTES)} > ${laterPageCost()}`);
  // The shares add up: any mix of commands and bytes is inside what bulkUnits takes for it.
  for (const [commands, bytes] of [[1, 0], [400, 0], [0, 24_000_000], [325, 641_246], [1_107, 45_760_958], [17, 999_999]] as const) {
   assert.ok(request("light", commands, bytes) <= UNIT_COST.studio * bulkUnits(commands, bytes), `${commands} commands, ${bytes} bytes`);

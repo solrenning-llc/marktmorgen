@@ -278,7 +278,11 @@ export async function POST(request: NextRequest) {
       }
       // The cap is checked again at acceptance (lib/affiliates.ts recordFromLink): over it, refused with the offer kept,
       // so it can be accepted once the store lowers a share. An unknown read or a busy lock throws: 503, offer kept.
-      const made = await acceptPartnership(from, guarded.email, invite.share);
+      // Reading the inviting program's people for the cap is paid from the answering creator's own studio requests
+      // (`charge`, guarded.store), taken at its worst first and given back down to what was read. Not taken: 429,
+      // nothing read or written, the offer kept.
+      const made = await acceptPartnership(from, guarded.email, invite.share, charge);
+      if (!made.ok && made.reason === "resting") return fail("studio_used", 429);
       if (!made.ok && (made.reason === "committed" || made.reason === "crowded")) return fail(`offer_${made.reason}`, 409);
       if (!made.ok) return fail(made.reason === "full" ? "full" : "unavailable");
       await answerInvite(guarded.email, invite.id);

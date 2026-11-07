@@ -301,6 +301,25 @@ export async function takePublicRequest(store: Store, who: "public" | "buyer" = 
 }
 
 /**
+ * Gives back `units` of the store's window that a public request took at `now` (takePublicRequest, the same moment,
+ * so the same window) and did not need: a reading taken at its worst, then measured (lib/affiliates.ts, accepting a
+ * partnership by its emailed link). One DECRBY on the window's count; its connection's share of the day is not given
+ * back. Best effort: a give-back that fails leaves the count higher, never lower.
+ */
+export async function givePublicRequests(store: Store, units: number, now: number): Promise<void> {
+  if (!Number.isSafeInteger(units) || units < 1 || !isRedisConfigured()) return;
+  try {
+    const window = allowanceWindow(store, now);
+    if (!window) return;
+    const folder = await storeFolder(storeRef(store));
+    if (!FOLDER_PATTERN.test(folder)) return;
+    await redisPipeline([["DECRBY", requestsKey(folder, window.id), units]]);
+  } catch {
+    // Counted higher, never lower.
+  }
+}
+
+/**
  * A connection's requests this server has answered and not yet added to its
  * share, and the connections it has seen refused, each by store, window, day
  * and connection. Forgotten all at once when either grows past MAX_HELD:

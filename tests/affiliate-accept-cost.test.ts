@@ -108,7 +108,8 @@ async function main(): Promise<void> {
   is("accepted", [opened.status, (opened.headers.get("location") ?? "").includes("status=joined"), (await affiliateByEmail(await store(), "partner1@example.com"))?.status], [303, true, "approved"]);
   is("the program read once", seen.hgetall, 1);
   is("the read inside the public requests taken first", request("light", seen.readCommands, seen.readBytes) <= seen.publicTaken * laterPageCost(), true);
-  is("no more kept than what was read, rounded up", seen.publicTaken <= bulkUnits(seen.readCommands, seen.readBytes) + 1, true);
+  // The route's own public request (lib/metered-limits.ts withinStore, counted before this change too) and one rounding.
+  is("no more kept than what was read, rounded up", seen.publicTaken <= bulkUnits(seen.readCommands, seen.readBytes) + 2, true);
 
   part("2. Accepting in the invited creator's studio: paid from their studio requests");
   const invitee = "whittler@example.com";
@@ -141,7 +142,10 @@ async function main(): Promise<void> {
   part("3. With too few requests left, nothing is read or written, and the link or the offer is kept");
   const now = await store();
   const limit = publicVisitLimit(requestLimitFor(now));
-  await takePublicRequest(now, "public", Date.now(), Math.max(1, limit - 1), { shared: true });
+  // A few left: the route's own request passes (withinStore), the read at its worst does not.
+  const [, keys] = (await real([["SCAN", 0, "MATCH", "nl:traffic:r:*", "COUNT", 1000]]))[0] as [string, string[]];
+  const counted = Number((await real([["GET", keys[0]]]))[0]) || 0;
+  await takePublicRequest(now, "public", Date.now(), Math.max(1, limit - counted - 3), { shared: true });
   const third = await invitation("partner3@example.com");
   start();
   const refused = await open(third);

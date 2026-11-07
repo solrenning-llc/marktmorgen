@@ -1121,12 +1121,12 @@ export async function invitePartner(input: {
  * app, not a worse one. It goes through the same grant the email would have
  * carried, so the record is made exactly as it is made everywhere else.
  */
-export async function acceptPartnership(store: Store, email: string, share: PartnerShare): Promise<OpenResult> {
+export async function acceptPartnership(store: Store, email: string, share: PartnerShare, charge: Charge = PAID): Promise<OpenResult> {
   if (!affiliatesOn(store)) return { ok: false, reason: "unavailable" };
   const token = randomBytes(32).toString("hex");
   const grant: LinkGrant = { s: store.statsId as string, e: normaliseEmail(email), n: "Accepted a partnership", k: 1, p: share };
   await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", 600]]);
-  return openAffiliateLink(store, token);
+  return openAffiliateLink(store, token, charge);
 }
 
 function parseGrant(raw: unknown): LinkGrant | null {
@@ -1174,7 +1174,8 @@ async function claimCode(store: Store, email: string, id: string): Promise<strin
 export type OpenResult =
   | { ok: true; session: string; affiliate: Affiliate; created: boolean }
   /** "committed" and "crowded": an accepted share no longer fits the cap (lib/partner-share.ts); the link or offer is kept. */
-  | { ok: false; reason: "expired" | "full" | "unavailable" | "committed" | "crowded" };
+  /** "resting": the requests that pay for reading the program's people were not taken; nothing read or written, the link or offer kept. */
+  | { ok: false; reason: "expired" | "full" | "unavailable" | "committed" | "crowded" | "resting" };
 
 type Recorded = { ok: true; affiliate: Affiliate; created: boolean } | { ok: false; reason: "expired" | "full" | "committed" | "crowded" };
 
@@ -1184,14 +1185,15 @@ type Recorded = { ok: true; affiliate: Affiliate; created: boolean } | { ok: fal
  * own current share replaced, not added) and confirms the lock is still held before the first write. Over the cap,
  * nothing is written. UnknownReplyError and LockBusyError are thrown before any write.
  */
-async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: PartnerShare; held: Held } | null): Promise<Recorded> {
+async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: PartnerShare; held: Held; charge: Charge } | null): Promise<Recorded> {
   const statsId = store.statsId as string;
   let affiliate: Affiliate | null = null;
   let created = false;
   const [knownId] = await redisPipeline([["HGET", emailsKey(statsId), grant.e]]);
   if (typeof knownId === "string") affiliate = await readAffiliate(store, knownId);
   if (fence) {
-    const problem = await partnerShareProblem(store, fence.share, affiliate?.id ?? null);
+    // The people read paid for first, by whoever pays for this path (openAffiliateLink's `charge`), rule 30.
+    const problem = await partnerShareProblem(store, fence.share, affiliate?.id ?? null, fence.charge);
     if (problem) return { ok: false, reason: problem === "crowded" ? "crowded" : "committed" };
     if (!(await holdLock(fence.held))) throw new LockBusyError("the partner lock was lost before the share was written");
   }
@@ -1251,7 +1253,7 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
  * The button on the page an emailed link opens. The first time for an
  * address, it makes the application; every time, it signs this browser in.
  */
-export async function openAffiliateLink(store: Store, token: string): Promise<OpenResult> {
+export async function openAffiliateLink(store: Store, token: string, charge: Charge = PAID): Promise<OpenResult> {
   if (!affiliatesOn(store)) return { ok: false, reason: "unavailable" };
   if (!AFFILIATE_TOKEN_PATTERN.test(token)) return { ok: false, reason: "expired" };
   const statsId = store.statsId as string;
@@ -1263,10 +1265,19 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
   // partner lock (#2995 review): each invitation was inside the cap alone when sent, and two accepted could promise
   // 160% of a sale. Over the cap: refused, nothing written, the link (or the studio offer) kept. The people read
   // unknown (UnknownReplyError) or the lock not held (LockBusyError): thrown before any write, the link kept.
+  // Reading the people for it is paid first, at its worst, and given back down to what was read (paidPeople): from the
+  // store's public requests for an emailed link, from the answering creator's studio requests in their studio (the
+  // caller's `charge`). Not taken: "resting", nothing read or written, the link or offer kept.
   const share = grant.k === 1 ? grant.p : undefined;
-  const made = share
-    ? await withPartnerLock(store, (held) => recordFromLink(store, grant, { share, held }))
-    : await recordFromLink(store, grant, null);
+  let made: Recorded;
+  try {
+    made = share
+      ? await withPartnerLock(store, (held) => recordFromLink(store, grant, { share, held, charge }))
+      : await recordFromLink(store, grant, null);
+  } catch (error) {
+    if (error instanceof StudioNotPaidError) return { ok: false, reason: "resting" };
+    throw error;
+  }
   if (!made.ok) return made;
   let { affiliate } = made;
   const { created } = made;

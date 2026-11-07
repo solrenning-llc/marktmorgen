@@ -5,7 +5,7 @@ import QRCode from "qrcode";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
 import { POST_PLACES, qrFileName, qrSvg } from "@/lib/share-links";
-import { type LinkTarget, type LinkThen, MAX_LINKS, MAX_NAME, type ShortLink, linkName, shortUrl, targetNow } from "@/lib/short-link-rules";
+import { type LinkTarget, type LinkThen, MAX_LINKS, MAX_NAME, type ShortLink, linkName, seenAt, shortUrl, targetNow } from "@/lib/short-link-rules";
 import { useOwnZone } from "@/components/local-clock";
 import { formatMoney } from "@/lib/money";
 
@@ -14,7 +14,7 @@ type Result = { visits: number; sales: number; cents: number };
 const REASONS: Record<string, string> = {
   same: "The link already goes there. Choose another page for after the date.",
   when: "Choose a date and time at least ten minutes from now and at most two years away.",
-  changed: "This link was changed somewhere else a moment ago. Reload the page to see it, then try again.",
+  changed: "This link changed since this page showed it, or its date has passed. It is shown here as it is now. Check it, then try again.",
   gone: "That link is no longer in your store. Reload the page to see your links.",
 
   name: "Give the post a name, like october-reel.",
@@ -98,6 +98,11 @@ function LinkQr({ url, name }: { url: string; name: string }) {
   );
 }
 
+/** The server's time on this browser's clock, `skew` being how far the server is ahead. Out of render: read only in handlers and timers. */
+const serverNow = (skew: number) => Date.now() + skew;
+/** How far the server's clock, read in an answer, is ahead of this browser's. */
+const skewFrom = (server: number) => server - Date.now();
+
 /** "June 1, 2027 at 9:00 AM": on the creator's own clock once the page runs, in UTC (and said so) before. */
 function WhenWords({ ms }: { ms: number }) {
   const zone = useOwnZone();
@@ -180,7 +185,10 @@ function ChangeOnDate({
           value={when}
           aria-describedby={`${id}-help${problemOn === "when" ? ` ${id}-problem` : ""}`}
           aria-invalid={problemOn === "when" || undefined}
-          onChange={(e) => setWhen(e.target.value)}
+          onChange={(e) => {
+            setWhen(e.target.value);
+            if (problemOn === "when") setProblemOn("");
+          }}
         />
       </label>
       <label className="min-w-0">
@@ -190,7 +198,10 @@ function ChangeOnDate({
           value={to}
           aria-describedby={problemOn === "same" || problemOn === "target" ? `${id}-problem` : undefined}
           aria-invalid={problemOn === "same" || problemOn === "target" || undefined}
-          onChange={(e) => setTo(e.target.value)}
+          onChange={(e) => {
+            setTo(e.target.value);
+            if (problemOn === "same" || problemOn === "target") setProblemOn("");
+          }}
         >
           {options.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
@@ -201,7 +212,8 @@ function ChangeOnDate({
         {`On your own clock${zone ? ` (${zone})` : ""}. At least ten minutes from now and at most two years away. Until then the link opens the page it opens now. The visits and sales stay on this link's line. You can cancel the change at any time before it happens.`}
       </p>
       {problem ? (
-        <p id={`${id}-problem`} ref={problemRef} tabIndex={-1} role="alert" className="text-xs font-semibold text-ink sm:col-span-2">
+        // Moved to when it appears, so it is read once; an alert role as well would have it read twice.
+        <p id={`${id}-problem`} ref={problemRef} tabIndex={-1} className="text-xs font-semibold text-ink sm:col-span-2">
           {problem}
         </p>
       ) : null}
@@ -241,8 +253,40 @@ export function ShortLinks({
   const [busy, setBusy] = useState(false);
   const [qr, setQr] = useState("");
   const [dating, setDating] = useState("");
-  // The moment the panel reads a link's date against: when it was drawn, and again after each change.
+  /**
+   * The moment the panel reads each link's date against, on the server's clock
+   * (`skew`, from each answer's `now`): set when drawn, after each change, at
+   * the next date, and when the tab comes back.
+   */
+  const skew = useRef(0);
   const [now, setNow] = useState(() => Date.now());
+  const clock = () => serverNow(skew.current);
+  const nextDate = links.reduce((soonest, l) => (l.then && l.then.at > now && l.then.at < soonest ? l.then.at : soonest), Infinity);
+  useEffect(() => {
+    if (!Number.isFinite(nextDate)) return;
+    // A timer runs at most about 24 days at once; a later date is reached by the next one.
+    const timer = window.setTimeout(() => setNow(serverNow(skew.current)), Math.min(nextDate - now + 50, 2_000_000_000));
+    return () => window.clearTimeout(timer);
+  }, [nextDate, now]);
+  useEffect(() => {
+    const back = () => {
+      if (document.visibilityState === "visible") setNow(serverNow(skew.current));
+    };
+    document.addEventListener("visibilitychange", back);
+    window.addEventListener("focus", back);
+    return () => {
+      document.removeEventListener("visibilitychange", back);
+      window.removeEventListener("focus", back);
+    };
+  }, []);
+  /** What this panel shows of a link, sent with each change so the server applies it only to that (lib/short-link-rules.ts, Seen). */
+  const seenOf = (link: ShortLink) => seenAt(link, now);
+  /** A refusal of "Goes to" or "Cancel the change", said beside its link and moved to. */
+  const [rowProblem, setRowProblem] = useState<{ code: string; text: string } | null>(null);
+  const rowRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (rowProblem) rowRef.current?.focus();
+  }, [rowProblem]);
   /** The link whose date control takes the focus back once its form closes. */
   const focusDate = useRef("");
   useEffect(() => {
@@ -253,20 +297,27 @@ export function ShortLinks({
   const named = linkName(name);
 
   /**
-   * Sends a change. Null when it saved; otherwise why not (a key of REASONS),
-   * said in a toast unless `quiet`, where the caller says it beside its fields.
+   * Sends a change. Null when it saved, said by `done` from the links in the
+   * answer, never from what the panel had; otherwise why not (a key of
+   * REASONS), said in a toast unless `quiet`, where the caller says it beside
+   * its fields. A "changed" answer brings the links as they are: shown at once.
    */
-  async function send(body: Record<string, unknown>, done: string, { quiet = false } = {}): Promise<string | null> {
+  async function send(body: Record<string, unknown>, done: string | ((links: ShortLink[]) => string), { quiet = false } = {}): Promise<string | null> {
     setBusy(true);
     let reason = "network";
     try {
       const response = await fetch("/api/store/short-links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; links?: ShortLink[]; error?: string };
+      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; links?: ShortLink[]; error?: string; now?: unknown };
+      if (typeof answer.now === "number" && Number.isFinite(answer.now)) skew.current = skewFrom(answer.now);
       if (answer.ok && answer.links) {
         setLinks(answer.links);
-        setNow(Date.now());
-        toast(done);
+        setNow(clock());
+        toast(typeof done === "string" ? done : done(answer.links));
         return null;
+      }
+      if (answer.error === "changed" && answer.links) {
+        setLinks(answer.links);
+        setNow(clock());
       }
       reason = answer.error ?? "";
     } catch {
@@ -277,6 +328,12 @@ export function ShortLinks({
     if (!quiet) toast(REASONS[reason] ?? "That did not save. Try again.");
     return reason;
   }
+
+  /** Where a link in an answer goes at this moment, said as a page. */
+  const opensIn = (list: ShortLink[], code: string) => {
+    const found = list.find((l) => l.code === code);
+    return found ? where(targetNow(found, clock())) : "the page it opens";
+  };
 
   const closeDate = (code: string) => {
     focusDate.current = code;
@@ -381,7 +438,11 @@ export function ShortLinks({
                       className="field mt-1 py-2"
                       value={targetValue(targetNow(link, now))}
                       disabled={busy}
-                      onChange={(e) => void send({ action: "target", code: link.code, target: targetFrom(e.target.value) }, "Changed. The post now opens the new page.")}
+                      aria-describedby={rowProblem?.code === link.code ? `short-link-problem-${link.code}` : undefined}
+                      onChange={async (e) => {
+                        const refused = await send({ action: "target", code: link.code, target: targetFrom(e.target.value), seen: seenOf(link) }, (links) => `Changed. The post now opens ${opensIn(links, link.code)}.`, { quiet: true });
+                        setRowProblem(refused === null ? null : { code: link.code, text: REASONS[refused] ?? "That did not save. Try again." });
+                      }}
                     >
                       <option value="store">Your store</option>
                       {products.map((p) => (
@@ -396,6 +457,12 @@ export function ShortLinks({
                     End link
                   </button>
                 </div>
+                {rowProblem?.code === link.code ? (
+                  // Moved to when it appears, so it is read once and stays until the next change.
+                  <p id={`short-link-problem-${link.code}`} ref={rowRef} tabIndex={-1} className="mt-2 text-xs font-semibold text-ink">
+                    {rowProblem.text}
+                  </p>
+                ) : null}
                 {link.then && !passed ? (
                   <div className="mt-2 flex flex-wrap items-baseline gap-2">
                     <p className="min-w-0 text-xs text-ink">
@@ -408,9 +475,11 @@ export function ShortLinks({
                       type="button"
                       className="btn btn-ghost btn-sm"
                       disabled={busy}
-                      aria-label={`Cancel the change for ${link.name}: it keeps going to ${where(link.target)}`}
+                      aria-label={`Cancel the change for ${link.name}`}
                       onClick={async () => {
-                        if ((await send({ action: "then", code: link.code, then: null }, `Canceled. The link keeps going to ${where(link.target)}.`)) === null) focusDate.current = link.code;
+                        const refused = await send({ action: "then", code: link.code, then: null, seen: seenOf(link) }, (links) => `Canceled. The link goes to ${opensIn(links, link.code)}.`, { quiet: true });
+                        if (refused === null) focusDate.current = link.code;
+                        setRowProblem(refused === null ? null : { code: link.code, text: REASONS[refused] ?? "That did not save. Try again." });
                       }}
                     >
                       Cancel the change
@@ -444,8 +513,20 @@ export function ShortLinks({
                     busy={busy}
                     options={[{ value: "store", label: "Your store" }, ...products.map((p) => ({ value: `product:${p.id}`, label: p.title }))].filter((o) => o.value !== targetValue(opens))}
                     onSave={async (then) => {
-                      const refused = await send({ action: "then", code: link.code, then }, `Saved. On that date the link starts going to ${where(then.target)}.`, { quiet: true });
+                      const refused = await send(
+                        { action: "then", code: link.code, then, seen: seenOf(link) },
+                        (links) => {
+                          const saved = links.find((l) => l.code === link.code)?.then;
+                          return saved ? `Saved. On that date the link starts going to ${where(saved.target)}.` : "Saved.";
+                        },
+                        { quiet: true },
+                      );
                       if (refused === null) focusDate.current = link.code;
+                      if (refused === "changed") {
+                        // The link is now shown as it is, and this form may no longer fit it: closed, the reason said beside the link.
+                        setDating("");
+                        setRowProblem({ code: link.code, text: REASONS.changed });
+                      }
                       return refused;
                     }}
                     onCancel={() => closeDate(link.code)}

@@ -158,12 +158,36 @@ export function targetNow(link: Pick<ShortLink, "target" | "then">, now: number)
 /**
  * The Cache-Control of a link's answer at `now`. Five minutes and a minute
  * stale, as always, unless the link changes sooner: then the CDN keeps it,
- * stale part included, only until the change. An answer kept before the date
- * was set runs out before the soonest date (MIN_THEN_MS). Pure.
+ * stale part included, only until a second before the change, the second
+ * being the time the answer takes from this clock to the CDN. An answer kept
+ * before the date was set runs out before the soonest date (MIN_THEN_MS). Pure.
  */
 export function linkCache(link: Pick<ShortLink, "then"> | null, now: number): string {
-  const left = link?.then && link.then.at > now ? Math.floor((link.then.at - now) / 1000) : Infinity;
+  const left = link?.then && link.then.at > now ? Math.max(0, Math.floor((link.then.at - now) / 1000) - 1) : Infinity;
   const fresh = Math.min(CACHE_SECONDS, left);
   const stale = Math.min(STALE_SECONDS, Math.max(0, left - fresh));
   return `public, max-age=0, s-maxage=${fresh}${stale > 0 ? `, stale-while-revalidate=${stale}` : ""}`;
+}
+
+/**
+ * What the studio's panel saw of a link when a change was asked: the date it
+ * showed (null for none) and whether that date had passed on its clock. The
+ * server compares it with its own view before writing, so a panel left open
+ * past the date, or on a clock running ahead, never has a change applied to a
+ * link other than the one it showed (lib/short-links.ts, sameView).
+ */
+export type Seen = { at: number | null; passed: boolean };
+
+/** What the panel saw, as a request sends it, or null when it is not that shape. Pure. */
+export function readSeen(raw: unknown): Seen | null {
+  if (!raw || typeof raw !== "object") return null;
+  const v = raw as Record<string, unknown>;
+  if (typeof v.passed !== "boolean") return null;
+  if (v.at === null) return { at: null, passed: v.passed };
+  return typeof v.at === "number" && Number.isSafeInteger(v.at) ? { at: v.at, passed: v.passed } : null;
+}
+
+/** What a panel at `now` sees of a link: what it sends with each change. Pure. */
+export function seenAt(link: Pick<ShortLink, "then">, now: number): Seen {
+  return link.then ? { at: link.then.at, passed: now >= link.then.at } : { at: null, passed: false };
 }

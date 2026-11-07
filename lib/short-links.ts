@@ -30,7 +30,7 @@
  */
 import { randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { CODE, CODE_LETTERS, MAX_LINKS, MIN_THEN_MS, type ShortLink, keptThen, linkName, linkPlace, readTarget, readThen, settledAt } from "@/lib/short-link-rules";
+import { CODE, CODE_LETTERS, MAX_LINKS, MIN_THEN_MS, type ShortLink, keptThen, linkName, linkPlace, readSeen, readTarget, readThen, settledAt } from "@/lib/short-link-rules";
 
 export { type LinkTarget, type LinkThen, type ShortLink, shortUrl, landingUrl } from "@/lib/short-link-rules";
 
@@ -132,7 +132,27 @@ export async function swapLink(statsId: string, code: string, before: string, af
   return reply === 1 ? "done" : reply === 0 ? "changed" : "unknown";
 }
 
-export type ChangeResult = { ok: true; links: ShortLink[] } | { ok: false; reason: "gone" | "when" | "target" | "same" | "changed" | "unavailable" };
+export type ChangeResult =
+  | { ok: true; links: ShortLink[] }
+  | { ok: false; reason: "changed"; links?: ShortLink[] }
+  | { ok: false; reason: "gone" | "when" | "target" | "same" | "unavailable" };
+
+/**
+ * Whether the server sees the link as the panel did (`seen`, readSeen): the
+ * same date, or none, and the same side of it. A request that shows nothing
+ * is taken as having seen no date, so it passes only on a link without one.
+ */
+function sameView(kept: Kept, seen: unknown, now: number): boolean {
+  const view = seen === undefined ? { at: null, passed: false } : readSeen(seen);
+  if (!view) return false;
+  if (!kept.then) return view.at === null;
+  return view.at === kept.then.at && view.passed === now >= kept.then.at;
+}
+
+/** "changed", with the links as they are, for the panel to show before anything is asked again. */
+async function seenOtherwise(statsId: string): Promise<ChangeResult> {
+  return { ok: false, reason: "changed", links: await readLinks(statsId).catch(() => undefined) };
+}
 
 /** The store's own record of a link, as kept and as read, or null when it is not this store's. */
 async function keptOf(statsId: string, code: unknown): Promise<{ raw: string; kept: Kept } | null> {
@@ -145,22 +165,27 @@ async function keptOf(statsId: string, code: unknown): Promise<{ raw: string; ke
 /** Swaps a link for `next` and answers the list as it is after. */
 async function change(statsId: string, raw: string, next: Kept): Promise<ChangeResult> {
   const swapped = await swapLink(statsId, next.code, raw, JSON.stringify(next));
-  if (swapped === "changed") return { ok: false, reason: "changed" };
+  if (swapped === "changed") return seenOtherwise(statsId);
   if (swapped === "unknown") return { ok: false, reason: "unavailable" };
   return { ok: true, links: await readLinks(statsId) };
 }
 
 /**
  * Changes where a link goes now; the post it is in keeps working. Before its
- * date the date stays; after it the date is spent, so the page chosen is the
- * one the link opens (settledAt).
+ * date the date stays, unless the page chosen is the one the date would send
+ * it to, which takes the date back; after the date the date is spent, so the
+ * page chosen is the one the link opens (settledAt). Only on the link as the
+ * panel saw it (`seen`, sameView).
  */
-export async function retarget(statsId: string, code: unknown, target: unknown, isProduct: (id: string) => boolean, now = Date.now()): Promise<ChangeResult> {
+export async function retarget(statsId: string, code: unknown, target: unknown, isProduct: (id: string) => boolean, now = Date.now(), seen?: unknown): Promise<ChangeResult> {
   const found = await keptOf(statsId, code);
   if (!found) return { ok: false, reason: "gone" };
+  if (!sameView(found.kept, seen, now)) return seenOtherwise(statsId);
   const next = readTarget(target, isProduct);
   if (!next) return { ok: false, reason: "target" };
-  return change(statsId, found.raw, { ...settledAt(found.kept, now), target: next });
+  const moved: Kept = { ...settledAt(found.kept, now), target: next };
+  if (moved.then && JSON.stringify(moved.then.target) === JSON.stringify(next)) delete moved.then;
+  return change(statsId, found.raw, moved);
 }
 
 /**
@@ -168,11 +193,14 @@ export async function retarget(statsId: string, code: unknown, target: unknown, 
  * (`then`, read by readThen against `now`), or, with null, no longer changes.
  * Never the page it opens now: that would change nothing. A date already
  * past is spent first (settledAt), so taking it back keeps the page the link
- * opens now, and a new date starts from that page.
+ * opens now, and a new date starts from that page. Only on the link as the
+ * panel saw it (`seen`, sameView).
  */
-export async function setThen(statsId: string, code: unknown, then: unknown, isProduct: (id: string) => boolean, now = Date.now()): Promise<ChangeResult> {
+export async function setThen(statsId: string, code: unknown, then: unknown, isProduct: (id: string) => boolean, now = Date.now(), seen?: unknown): Promise<ChangeResult> {
   const found = await keptOf(statsId, code);
   if (!found) return { ok: false, reason: "gone" };
+  // A new date over a saved one, or the date taken back, only on the link as the panel saw it.
+  if (!sameView(found.kept, seen, now)) return seenOtherwise(statsId);
   const current = settledAt(found.kept, now);
   if (then === null) {
     const rest: Kept = { ...current };

@@ -7,8 +7,8 @@ import { type ChangeResult, addLink, removeLink, retarget, setThen } from "@/lib
 /**
  * The store's short links for posts (lib/short-links.ts), for whoever may
  * work on its pages: `{ action: "add", name, place, target }` makes one,
- * `{ action: "target", code, target }` changes where it goes, and
- * `{ action: "then", code, then: { at, target } | null }` sets the date it
+ * `{ action: "target", code, target, seen }` changes where it goes, and
+ * `{ action: "then", code, then: { at, target } | null, seen }` sets the date it
  * changes on and where it goes from then (510 [CK2] unit 1; `at` in
  * milliseconds, the target the store or a product) or takes it back, and
  * `{ action: "remove", code }` ends it. A target is `{ kind: "store" }` or
@@ -24,7 +24,8 @@ export async function POST(request: NextRequest) {
     if (!store?.statsId || !store.sid) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     const titles = body.action === "remove" ? new Map<string, string>() : await readTitles(store);
     const isProduct = (id: string) => titles.has(id);
-    const answer = (links: unknown) => Response.json({ ok: true, links }, { headers: { "Cache-Control": "no-store" } });
+    // With the server's clock, so the panel reads each link's date as the server does.
+    const answer = (links: unknown) => Response.json({ ok: true, links, now: Date.now() }, { headers: { "Cache-Control": "no-store" } });
     if (body.action === "add") {
       const added = await addLink({ sid: store.sid, statsId: store.statsId }, { name: body.name, place: body.place, target: body.target }, isProduct);
       if (!added.ok) return Response.json({ ok: false, error: added.reason }, { status: added.reason === "unavailable" ? 503 : 400 });
@@ -33,9 +34,13 @@ export async function POST(request: NextRequest) {
     const changed = (result: ChangeResult) =>
       result.ok
         ? answer(result.links)
-        : Response.json({ ok: false, error: result.reason }, { status: result.reason === "unavailable" ? 503 : result.reason === "changed" ? 409 : 400 });
-    if (body.action === "target") return changed(await retarget(store.statsId, body.code, body.target, isProduct));
-    if (body.action === "then") return changed(await setThen(store.statsId, body.code, body.then, isProduct));
+        : result.reason === "changed"
+          ? // The links as they are and the server's clock, so the panel shows them and says why.
+            Response.json({ ok: false, error: "changed", links: result.links, now: Date.now() }, { status: 409, headers: { "Cache-Control": "no-store" } })
+          : Response.json({ ok: false, error: result.reason }, { status: result.reason === "unavailable" ? 503 : 400 });
+    // `seen`: what the panel showed of the link (lib/short-link-rules.ts, Seen); a change applies only to that.
+    if (body.action === "target") return changed(await retarget(store.statsId, body.code, body.target, isProduct, Date.now(), body.seen));
+    if (body.action === "then") return changed(await setThen(store.statsId, body.code, body.then, isProduct, Date.now(), body.seen));
     if (body.action === "remove") return answer(await removeLink(store.statsId, body.code));
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {

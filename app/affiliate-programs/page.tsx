@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { cache } from "react";
 import Link from "next/link";
 import { connection } from "next/server";
 import { SiteFooter } from "@/components/site-footer";
@@ -11,9 +12,16 @@ const TITLE = "Affiliate programs to promote — Marktmorgen";
 const DESCRIPTION =
   "Creators' own affiliate programs, each with its share of a sale, how long a click counts, the day the creator pays and what one sale of each product, or one payment of a membership, earns. Apply to the ones you would recommend anyway.";
 
+/**
+ * The rows, read once a request: the page and its title share this one read (React cache), so a visit builds the
+ * directory at most once. null when it could not be read, or was built too recently to build again
+ * (lib/affiliate-directory.ts, DIRECTORY_BUILD_SECONDS): the page then says the list is unavailable just now.
+ */
+const directoryRows = cache(() => readDirectory().catch(() => null));
+
 export async function generateMetadata(): Promise<Metadata> {
   await connection();
-  const rows = await readDirectory().catch(() => null);
+  const rows = await directoryRows();
   return {
     title: TITLE,
     description: DESCRIPTION,
@@ -40,7 +48,7 @@ const HONEST = [
 
 export default async function AffiliateProgramsPage() {
   await connection();
-  const rows = await readDirectory().catch(() => null);
+  const rows = await directoryRows();
   return (
     <div className="flex min-h-screen flex-col bg-paper text-ink">
       <SiteNav />

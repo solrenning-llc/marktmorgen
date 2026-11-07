@@ -5,7 +5,7 @@
  * "no sid, walk finished" (`Array.isArray(reply) ? reply : []`, `next: "0"`). lib/affiliate-directory.ts readDirectory
  * then built the public directory from no stores and kept that empty page (nl:dir:page "[]", ten minutes) for every
  * visitor. An unknown reply now throws UnknownReplyError; readDirectory keeps nothing, and the page shows its own
- * "The program list is unavailable just now" state (app/affiliate-programs/page.tsx, `readDirectory().catch(() => null)`).
+ * "The program list is unavailable just now" state (app/affiliate-programs/page.tsx, `readDirectory().catch(() => null)`, once a request).
  *
  * Siblings in readDirectory: a store read that failed dropped that program from the page that was then kept, and a
  * failed numbers read kept a row without its numbers for ten minutes. A failed store read now fails the read; a
@@ -15,17 +15,26 @@
  */
 import { DIRECTORY_CACHE, listedCount, listedStores } from "@/lib/directory-index";
 import * as directory from "@/lib/affiliate-directory";
-import { readDirectory } from "@/lib/affiliate-directory";
+import { DIRECTORY_BUILD_SECONDS, readDirectory as build } from "@/lib/affiliate-directory";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { addProduct, claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, setSubscription } from "@/lib/store";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { NOT_A_COST } from "./plan-cost-registry";
 import { done, is, part } from "./check";
 
 globalThis.fetch = (async () => new Response(JSON.stringify({ object: "list", data: [] }), { status: 200 })) as typeof fetch;
 
 const original = redis.pipeline.bind(redis);
+
+/**
+ * Each read here is a build of its own: the minute between builds (DIRECTORY_BUILD_SECONDS) has passed first. How
+ * often builds run is tested in tests/directory-assembly-ceiling.test.ts.
+ */
+async function readDirectory(): ReturnType<typeof build> {
+  advance(DIRECTORY_BUILD_SECONDS * 1000);
+  return build();
+}
 type Commands = (string | number)[][];
 
 async function failure(run: () => Promise<unknown>): Promise<string> {

@@ -17,6 +17,7 @@
  *
  *   nl:dir:listed   set  the sid of every store whose creator said yes
  *   nl:dir:page     the directory's rows, kept a few minutes; dropped on every save
+ *   nl:dir:build    the claim of the last build, held DIRECTORY_BUILD_SECONDS whatever dropped the page
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -26,6 +27,12 @@ const LISTED = "nl:dir:listed";
 
 /** Where lib/affiliate-directory.ts keeps the rows it built, dropped whenever a program is saved. */
 export const DIRECTORY_CACHE = "nl:dir:page";
+
+/**
+ * The claim lib/affiliate-directory.ts takes before it builds the rows (SET NX EX): one build at a time for the
+ * whole site, and none again until it expires, whether a save dropped the page or a build kept none.
+ */
+export const DIRECTORY_BUILD = "nl:dir:build";
 
 /**
  * How many programs the directory lists before search engines are asked to

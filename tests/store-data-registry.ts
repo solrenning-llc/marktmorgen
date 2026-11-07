@@ -525,6 +525,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:store:folder-owner:@lib/delivery.ts": { what: "Whose folder this is", parts: [capped(KEY, "One a store.")] },
   "nl:house:seed:lock@lib/demo-seed.ts": lock("The demo store's seeding"),
   "nl:house:seed@lib/demo-seed.ts": company("The demo store's seeding", "The company's own demo store."),
+  "nl:dir:build@lib/directory-index.ts": company("The directory's last build, claimed a minute", "The company's own page: one key."),
   "nl:dir:listed@lib/directory-index.ts": company("The stores listed in the directory", "One set for every store."),
   "nl:dir:page@lib/directory-index.ts": company("The directory's page, cached", "The company's own page."),
   "nl:dc:ok:@lib/discord-access.ts": short("A buyer's Discord access, answered", "request", 1, 512, REQ("page")),

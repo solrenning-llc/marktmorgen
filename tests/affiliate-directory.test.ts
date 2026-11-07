@@ -13,11 +13,11 @@
  */
 import { addProduct, claimHandle, setProductExtras, ensureStatsId, setAffiliateSetting, setProductHidden, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
-import { DIRECTORY_ORDER, MIN_CLICKS_FOR_RATES, directoryNumbers, directoryRow, readDirectory, sortRows, type DirectoryRow } from "@/lib/affiliate-directory";
+import { DIRECTORY_BUILD_SECONDS, DIRECTORY_ORDER, DirectoryBusyError, MIN_CLICKS_FOR_RATES, directoryNumbers, directoryRow, readDirectory, sortRows, type DirectoryRow } from "@/lib/affiliate-directory";
 import { programNumbers } from "@/lib/affiliates";
 import { redisPipeline } from "@/lib/redis";
 import { HOUSE_OWNER } from "@/lib/house-store";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 globalThis.fetch = (async () => new Response(JSON.stringify({ object: "list", data: [] }), { status: 200 })) as typeof fetch;
@@ -113,7 +113,11 @@ async function main(): Promise<void> {
 
   part("Taken off at once");
   await setAffiliateSetting(D, parseAffiliateSetting({ ...terms, percent: 40, rates: {}, directory: false }));
-  is("unchecking the box leaves the page on the next read, not ten minutes later", (await readDirectory()).map((r) => r.handle), ["breadhouse"]);
+  // Built less than DIRECTORY_BUILD_SECONDS ago, the page is not built again yet: the next read says unavailable,
+  // never the page from before the save (tests/directory-assembly-ceiling.test.ts).
+  is("unchecking the box takes the page down at once: never the list from before", await readDirectory().then(() => "listed", (error) => error instanceof DirectoryBusyError), true);
+  advance(DIRECTORY_BUILD_SECONDS * 1000);
+  is("unchecking the box leaves the page on the next build, not ten minutes later", (await readDirectory()).map((r) => r.handle), ["breadhouse"]);
 
   part("A program's own numbers, only with a second yes");
   is("listed without them unless the creator also allowed them", (await readDirectory()).find((r) => r.handle === "breadhouse")?.numbers, null);
@@ -136,6 +140,7 @@ async function main(): Promise<void> {
   is("rates per click from 200 clicks: one in a hundred became a sale, $27 earned per 100 clicks", [directoryNumbers(raw)?.conversion, directoryNumbers(raw)?.per100Cents], [1, 2700]);
   is(`and none below ${MIN_CLICKS_FOR_RATES} clicks: one sale would move them too far`, [directoryNumbers({ ...raw!, clicks: 99 })?.conversion, directoryNumbers({ ...raw!, clicks: 99 })?.per100Cents], [null, null]);
   await setAffiliateSetting(A, parseAffiliateSetting({ ...terms, directory: true, numbers: true }));
+  advance(DIRECTORY_BUILD_SECONDS * 1000);
   is("with the second yes, the directory shows them", (await readDirectory()).find((r) => r.handle === "breadhouse")?.numbers?.paidCents, 3000);
   is("only an explicit yes counts as one", parseAffiliateSetting({ numbers: "yes" }).numbers, false);
 

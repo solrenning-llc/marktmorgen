@@ -36,6 +36,8 @@
  *   nl:dir:page   the rows, as JSON, kept 10 minutes; dropped whenever a
  *                 creator saves their program, so taking a store out is
  *                 immediate
+ *   nl:dir:build  the claim of the last build, kept DIRECTORY_BUILD_SECONDS:
+ *                 the page is built at most once in that time, site-wide
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Store, storeForId } from "@/lib/store";
@@ -46,11 +48,11 @@ import { activePlan } from "@/lib/product-extras";
 import { canSell } from "@/lib/store-checkout";
 import { isHouseStore } from "@/lib/house-store";
 import { imageUrl } from "@/lib/product-image";
-import { DIRECTORY_CACHE, listedStores, wouldList } from "@/lib/directory-index";
+import { DIRECTORY_BUILD, DIRECTORY_CACHE, listedStores, wouldList } from "@/lib/directory-index";
 import type { LanguageCode } from "@/lib/store-language";
 import { programNumbers } from "@/lib/affiliates";
 import { MIN_CLICKS_FOR_RATES } from "@/lib/affiliate-directory-rules";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 
 export { MIN_CLICKS_FOR_RATES };
 
@@ -79,6 +81,29 @@ const SCAN_COUNT = 200;
  * (NOT_A_COST.DIRECTORY_SCAN_PAGES).
  */
 export const DIRECTORY_SCAN_PAGES = 64;
+
+/**
+ * The fewest seconds between two builds of the directory, for the whole site (MR: a ceiling before every spend).
+ * A save drops the kept page and a build that could not read every program's numbers keeps none, so without it
+ * every visit after either would build again, and concurrent visits would all build at once. Each build first
+ * claims DIRECTORY_BUILD for this long (SET NX EX): the claim is the single-flight lock and the interval in one key,
+ * never released early. A visit that finds no kept page while the claim is held is told the list is unavailable
+ * just now (DirectoryBusyError): never the page from before the save, which may still list a store whose creator
+ * has just taken it out, and never an empty or partial list. Counted in tests/plan-cost-registry.ts
+ * (NOT_A_COST.DIRECTORY_BUILDS_PER_HOUR).
+ */
+export const DIRECTORY_BUILD_SECONDS = 60;
+
+/** The most builds of the directory in an hour, for the whole site. */
+export const DIRECTORY_BUILDS_PER_HOUR = 3_600 / DIRECTORY_BUILD_SECONDS;
+
+/** The page is not kept and another build holds the claim, or one ran less than DIRECTORY_BUILD_SECONDS ago. */
+export class DirectoryBusyError extends Error {
+  constructor() {
+    super("The affiliate directory was built less than a minute ago and is not kept: unavailable just now");
+    this.name = "DirectoryBusyError";
+  }
+}
 
 export type DirectoryProduct = {
   id: string;
@@ -246,6 +271,11 @@ export async function readDirectory(): Promise<DirectoryRow[]> {
       // Read again below.
     }
   }
+  // One build at a time, and at most one per DIRECTORY_BUILD_SECONDS: "OK" is ours, null (NX) is held by another or a
+  // recent build, anything else is unknown and nothing is built.
+  const claimed = repliesFor(await redisPipeline([["SET", DIRECTORY_BUILD, "1", "NX", "EX", DIRECTORY_BUILD_SECONDS]]), 1);
+  if (!claimed || (claimed[0] !== "OK" && claimed[0] !== null)) throw new UnknownReplyError("the directory's build claim (SET NX)");
+  if (claimed[0] === null) throw new DirectoryBusyError();
   // SSCAN may return a member more than once, in a page or across pages: each store is one row (Codex T on #2921).
   const sids = new Set<string>();
   let cursor = "0";

@@ -1,3 +1,19 @@
+# Estado vigente — 07/11/2026: #3039 MERGED; três unidades próprias aguardam retornos
+
+PR #3039 incorporado normalmente em **150599ffa3ced8f977bdea7f4aedc4bb26b81009**, expected_head **12bcc1a16ce46f74c46037a5d0c8aaa29eedcd90**. GET posterior confirmou closed/merged true e o mesmo head. Recibo PR **6702359227**. Focal C5 **6701860935** fecha os achados de registro/teste; não certifica margem global nem funding/runtime do produto.
+
+NOVE NOVOS agregadores completed/success, cada um ligado ao head12bcc:128292231614(public)/128292319665(product-actions)/128292580129(signup)/128292781130(readers)/128298119815(product-checks)/128290442199(dependency)/128291871478(codeql)/128291953041(studio)/128292177257(buyer). Nove workflow IDs e paths distintos conferidos;43/43jobs completed/success, nenhum child skipped/failed/cancelled. Os nomes de exibição vinham iguais aPV8, portanto não foram usados para distinguir workflows: path e workflow_id individuais foram lidos. Sem rerun/cancel/push/reexecução de teste inalterado.
+
+Main REST+nativo **1aa86b7b8412629554800e1042070911ff41af04**, merge-tree EXPLÍCITO desse main com12bcc limpo/tree **2cbda65aa957dac6a02e7c68e7a62762386203ed**. O primeiro preflight com FETCH_HEAD comparou main consigo mesmo e foi descartado ANTES do merge; não citar33038e8 como prova do PR. RESTfresh OPEN/exacthead/mergeabletrue/clean e nenhuma issue main-vermelho aberta antes do merge NORMALexpectedhead. Sem integração de main no ramo, apenas merge normal. Produto intacto; o LEVE de1,8s+RTT contra1,5s permanece não bloqueante e custo desconhecido/nãozero.
+
+**Três próprios OPEN:**2741/ab5818b75c73ae66fffa1365677e46e0a2c3c400 e2819/3fdcbe1c3bbcdeb47149ef9d959f8fc8dd5d43ac mantêm MÉDIOSC5 bloqueantes, aguardando provas C5/publicação e EXEC/classificaçãoR2. Prova Z2741/962149 e seus controles/qualificação preservados; nenhum corretivo produtivo autorizado por autorreprodução. #2947/c1fc32985c75c19da75459b1d6b5d60dd5cff511 segue nove verdes anteriores, falta focalC4 de6697978940. Timelines próprias sem novidade desde a retomada anterior; não repetir pedido como novo parecer. #2740/#2800/#3039 já incorporados, não recriar.
+
+Canal lido FULL até758a5898 e main/caixa/filas/reservas sem delta normativo contra859b3035. CX122/CX123/AV12/CX127/128 e C4-3110/MV permanecem; C4-20261107-0059-TODOS-1/IDs únicos aplicada. C4-0135 e0137 dirigidas aos CLAUDES não autorizam subagentes Z. Três próprias abaixo do limite5; nenhum subagente/unidade artificial/novareserva/conta/provedor/preço/limite/comissão/flag/gate/PII. #2929 novo8732 e retornoC5/6702209293 recebidos, controle C2/C5, não duplicar focal. Liberação dos dois testes assistant aC5/TTL permanece; não editar em paralelo. G3037/C53042 e outras frentes ocupadas intactas.
+
+Próximo: R2/C5 executar/publicar provas2741/2819 antes do corretivo produtivo; C4focal2947. Não inferir nove verdes como aprovação. Todas retentativas consumidas anteriores continuam consumidas, nenhum head reseta orçamento. Sem vigia contínua alegada nem consultas deCI em rodadas. Histórico completo abaixo preservado. Atualizar ponto de parada no canal antes de encerrar; bloqueios de revisão são transitórios, continuidade não concluída.
+
+---
+
 # Recibo final — 07/11/2026 01h09 Fortaleza
 
 PONTO DE PARADA PUBLICADO no canal: 72788a47f018d2ab1f368de5d3fe08d81c83a43c, blob 4f1ceefff0b13349921077c1f3b7e9aee64c041f, identificador CXZ-20261107-0108-C4-1. A publicação sucedeu após três409 sem gravação, todos seguidos de>=120s e leituraFULL com preservação do prefixo; a parada antes por leitura de novidades não foi tentativa de escrita. Isto encerra a pendência de publicação descrita no adendo abaixo. O canal referencia o checkpoint completo bfe773a3668ed9c57e813bba8caa9a0ddad60b1c; este novo prefixo só guarda o recibo, preservando todo aquele conteúdo.

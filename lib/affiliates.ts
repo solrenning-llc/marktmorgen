@@ -823,7 +823,7 @@ async function changeAffiliate(
     const exists = there ? countOf(there[0]) : null;
     if (exists === 0) return null;
     if (exists !== 1) throw new UnknownReplyError("whether an affiliate's record is there");
-    throw new LockBusyError("an affiliate's record changed while a batch wrote it");
+    throw new RecordChangedError();
   }
   for (let attempt = 0; attempt < SWAP_ATTEMPTS; attempt += 1) {
     const read = repliesFor(await redisPipeline([["HGET", key, id]]), 1);
@@ -1736,14 +1736,24 @@ async function paidPeople(store: Store, charge: Charge): Promise<Affiliate[]> {
 }
 
 type BatchWrite = { id: string; raw: string; change: (now: Affiliate) => Affiliate | null };
+
+/**
+ * A batch's write met the record changed since the batch read it (by hand in another tab, say): nothing written. A
+ * LockBusyError, so every caller that refuses on one still does; a batch says it as "changed" (#2995 review LEVE).
+ */
+class RecordChangedError extends LockBusyError {
+  constructor() {
+    super("an affiliate's record changed while a batch wrote it");
+  }
+}
 type BatchResult = { before: Affiliate; next: Affiliate } | HeldWhy | null;
 
 /**
  * Writes each change over exactly the record as the batch read it (changeAffiliate with `known`): no record is read
  * again. Per id: the record before and after, null when `change` wrote nothing, or why not ("gone": no longer there;
- * "unavailable": changed meanwhile, an unknown reply, or the partner lock lost). With `held`, the lock is confirmed
- * before the first write and every BATCH_HOLD_EVERY after; once lost, nothing more is written. What it moved is
- * counted on `meter`.
+ * "changed": changed since the batch read it; "unavailable": an unknown reply, or the partner lock lost). With `held`,
+ * the lock is confirmed before the first write and every BATCH_HOLD_EVERY after; once lost, nothing more is written.
+ * What it moved is counted on `meter`.
  */
 async function writeBatch(store: Store, writes: readonly BatchWrite[], meter: Meter, held?: Held): Promise<Map<string, BatchResult>> {
   const out = new Map<string, BatchResult>();
@@ -1764,7 +1774,8 @@ async function writeBatch(store: Store, writes: readonly BatchWrite[], meter: Me
       out.set(one.id, changed === null ? "gone" : changed.next ? { before: changed.before, next: changed.next } : null);
     } catch (error) {
       if (error instanceof UnknownReplyError) meter.unsure = true;
-      if (error instanceof UnknownReplyError || error instanceof LockBusyError) out.set(one.id, "unavailable");
+      if (error instanceof RecordChangedError) out.set(one.id, "changed");
+      else if (error instanceof UnknownReplyError || error instanceof LockBusyError) out.set(one.id, "unavailable");
       else throw error;
     }
   }
@@ -1908,7 +1919,11 @@ export async function decideMany(
             continue;
           }
           const share = read.affiliate.share;
-          if (read.affiliate.status !== "pending") continue;
+          // Decided by hand since the batch read it: said as such, never as not checked (#2995 review LEVE).
+          if (read.affiliate.status !== "pending") {
+            outcome.set(id, "changed");
+            continue;
+          }
           if (share) {
             // Against the partners as they stand with those approved before it in this batch.
             const problem = shareProblemAmong(now.affiliates, people, share, id);
@@ -1978,6 +1993,7 @@ export async function undoMany(store: Store, before: Before[], decision: "approv
   let notNow = 0;
   for (const result of (await writeBatch(store, writes, wrote)).values()) {
     if (result && typeof result === "object") undone += 1;
+    // "changed": changed since; pressing Undo again cannot put it back.
     else if (result === "unavailable") notNow += 1;
   }
   await settle(taken, wrote);
@@ -2076,7 +2092,11 @@ async function changeRates(store: Store, asks: readonly RateAsk[], charge: Charg
                 outcome.set(ask.id, "gone");
                 continue;
               }
-              if (!ask.when(read.affiliate) || read.affiliate.rate === ask.rate) continue;
+              // Changed by hand since the batch read it: said as such, never as not checked (#2995 review LEVE).
+              if (!ask.when(read.affiliate) || read.affiliate.rate === ask.rate) {
+                outcome.set(ask.id, "changed");
+                continue;
+              }
               // Against the program as it stands with those changed before it in this batch.
               const next = people.slice();
               next[i] = { ...people[i], rate: ask.rate };
@@ -2130,7 +2150,8 @@ export async function undoRates(store: Store, before: RateBefore[], rate: number
     asks.push({ id: entry.id, rate: entry.rate, when: (a) => a.rate === rate });
   }
   const { done, held } = await changeRates(store, asks, charge);
-  const left = held.filter((one) => one.why !== "gone").length;
+  // Changed by hand since the change: not put back, and pressing Undo again cannot (#2995 review LEVE).
+  const left = held.filter((one) => one.why !== "gone" && one.why !== "changed").length;
   return { undone: done.length, left, used: done.length === 0 && held.some((one) => one.why === "used") };
 }
 

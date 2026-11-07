@@ -1,7 +1,0 @@
-# Paid explicit host calendar refresh
-
-AB(a),24 October2026. checkHostCalendar accepts full Store and requires marked funded resource window before a new studio force refresh. The route returns503 unavailable on refusal. Existing hostSync used by retained booking/availability reconciliation is unchanged; no bulk gate blocks retained obligations. Explicit removal/disconnect remain available. A successful manual refresh followed by the live-list response may invoke two separate resource observations.
-
-Synthetic persisted-owner/Maya regression: funded refresh returns null without Google calls; unmarked fixture still refreshes against provider stand-ins. All existing positive selection/list, stale/scope/provider failure, booking move/refund and new feed cases preserved. Full exact-head CI mandatory; no actual provider/calendar/account action.
-
-Conditional50/200/500 manual observations at18 primary-only commands/no replica PAYG USD0.20/100k=>USD0.0018/0.0072/0.018monthly;USD0.0216/0.0864/0.216per12worstmonths,eitherinterval. Identical retry17commands;JSON12288/sharedfield. Samples not caps. Authentication/config reads, abuse/failed attempts, provider/CPU/transfer/retained lifecycle/globalceilings/reserve unknown fail.100%LLC fixed costs including Hazelsong residuals/most onerous taxes binding; prices/visible rights unchanged,nullreviews,falsecoverages,salesclosed,no60%certification.

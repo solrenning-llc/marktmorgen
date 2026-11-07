@@ -1,7 +1,0 @@
-# Measuring one change in Growth
-
-Each goal now offers a native keyboard disclosure with a question, starting evidence, one change and review criteria. Leads use confirmed consented sign-ups; sales distinguish gross payments from profit; services account for qualification and deal lag; retention compares buyer groups with equal follow-up time. Missing or incomparable evidence is inconclusive. No forecast, automatic winner, new snapshot/read, provider call, test execution or stored plan is introduced. The existing stats permission controls visibility. No prices, limits, billing or tax rules change.
-
-Official references consulted19 October2026: [ClickFunnels split-test analytics](https://support.myclickfunnels.com/docs/managing-ab-split-testing-in-funnel-steps/) describes per-step variations and analytics. [HighLevel email conversion attribution](https://help.gohighlevel.com/support/solutions/articles/155000001701-understanding-email-conversion-and-revenue-attribution) explains interaction/order attribution windows. Our guidance adds no equivalent tracking or superiority claim; it helps interpret the existing tools and avoids treating observed revenue as verified net profit.
-
-Role tests cover all goals/roles and measurement distinctions. Existing growth browser flow now opens/closes the guide by keyboard for four goals at320/390/768/1280, checks goal-specific evidence and inconclusive wording, retains AA/fit and zero metered preview requests. Whole-site AAA, statistical causality and60% after-tax margin remain unverified.

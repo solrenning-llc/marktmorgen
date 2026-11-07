@@ -1,9 +1,0 @@
-# Home links and first mobile interaction
-
-PR1262 full new-head run bb5b1f05a04e07ca9d22dc248017b3d2b00e921f failed candidate mobile job124043954688 at2026-10-30T11:46:44.0227159UTC: first home cold sample interaction-to-paint208ms versus the unchanged strict below200ms target. LCP1480ms,CLS0,0APIwrites; other eight samples had at most80ms interaction proxy. All samples remain evidence; no percentile/field INP certification and no rerun-only approval.
-
-The clicked control was the native plan perks summary. Its first pointerdown waited102ms before processing; measured first interaction included141ms script versus11ms layout. Nearby long tasks included React/Next client scheduling. This suggests contention with initial client work, not a proven unique cause or a certified fix.
-
-The homepage's16 source link sites now render native anchors instead of Next Link client boundaries. All were already prefetch=false; hrefs, text, classes, targets, examples, metadata, prices, rights and content stay identical. Lists may render more anchors than16 source sites. Static public navigation uses the browser; no new JavaScript, interception, listener, request, service, storage or cost. This follows the existing native buyer-return and pricing approach. Other components' interactive controls remain intact.
-
-Accessibility: same native link role/names/destinations/keyboard activation. Existing main disclosure remains one action, no extra decisions(1→1,0→0); user steps and opt-in unchanged. Full public/studio/browser/accessibility/mobile checks must run on the corrected whole head, with the same nine cold samples, fourfoldCPU slowdown, strict200ms threshold and no dropped sample. Humans/Chrome interactive proof remains pending separately. All financial flags and gates remain closed; counter254 held. No added operating cost; engineering/CI FX275 still unknown, not zero.

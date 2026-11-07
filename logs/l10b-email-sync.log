@@ -1,0 +1,32 @@
+BUILD_OK l10b-email-sync.test.ts
+
+The plain case: one job, then seen
+  ok    a person who did not agree is logged once, never sent; the same one again is seen
+
+A person already handed over is never taken for a new one
+  ok    the same person again, the mark answered with no value: seen, no second job
+  ok    the same person again, the mark answered with QUEUED: seen, no second job
+  ok    the same person again, the mark answered with no reply at all: seen, no second job
+  ok    the same person again, the mark answered with a reply too many: seen, no second job
+  ok    the same person again, the mark answered with not a list: seen, no second job
+
+The mark written and its answer lost: our own value read back, one job
+  ok    answered with no value, the write landed: one job, then seen
+  ok    answered with QUEUED, the write landed: one job, then seen
+  ok    answered with no reply at all, the write landed: one job, then seen
+  ok    answered with a reply too many, the write landed: one job, then seen
+  ok    answered with not a list, the write landed: one job, then seen
+
+Nothing readable: no job, and said as not done
+  ok    the mark unknown and its read-back a failed read: no job, said as unknown
+  ok    the mark unknown and its read-back a short read: no job, said as unknown
+  ok    the mark unknown and its read-back a number: no job, said as unknown
+  ok    the mark unknown and its read-back the write failing too: no job, said as unknown
+
+Claude 3 on #2723: a mark of this run's that could not be read back is let go, so the person is handed over on the next try
+  ok    the mark written, its answer lost and its read-back a failed read: unknown now, one job on the next try
+  ok    the mark written, its answer lost and its read-back a short read: unknown now, one job on the next try
+  ok    the mark written, its answer lost and its read-back a number: unknown now, one job on the next try
+
+18 checks, all passing.
+N2451_COMMANDS 126

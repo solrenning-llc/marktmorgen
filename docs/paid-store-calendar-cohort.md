@@ -1,7 +1,0 @@
-# Paid new store calendar feed admission
-
-AB(a),24 October2026. addFeed requires the marked funded Store resource window after existing URL/config/capacity/duplicate checks and before homeZone/feed DNS/provider reading or configuration mutation. Route reports503 unavailable. calendarBusy retained refresh, removal, subscription token revocation/rotation and booking/refund behavior remain unchanged. calendarView is stored-state-only; no provider calls during removal response.
-
-Synthetic persisted-owner regression proves unmarked behavior reaches an injected throwing resolver, marked funded admission returns unavailable without DNS/view mutation, and retained removal remains available. Existing team scheduling tests and host-calendar cohort tests retained. No actual DNS/calendar/provider/account action; exact-head full CI required.
-
-Conditional50/200/500 observations at18 primary-only commands/no replica and PAYG USD0.20/100k cost USD0.0018/0.0072/0.018 monthly and USD0.0216/0.0864/0.216 per12worstmonths,either interval. Retry17 commands; permanent shared field/JSON12288 request bound. Samples are not caps. Config reads preceding guard, invalid/failed attempts, abuse, DNS/provider bytes, CPU, transfer, persistent addresses, retained refresh, global ceilings/reserve/topology remain unknown and fail.100%LLC fixed costs and most onerous taxes binding; prices/visible rights unchanged, actual policies null, all three coverages false, sales closed,no60%certification.

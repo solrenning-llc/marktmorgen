@@ -1,0 +1,24 @@
+BUILD_OK store-allowance.test.ts
+✔ a figure is taken whole or refused, and a refused use takes nothing (15.818783ms)
+✔ after a partial first period, the grace window and the real next period share one allowance (2.099753ms)
+✔ a paying store whose billing month is not known is let in to nothing (0.39402ms)
+✔ stores that pay nothing share the month's places, which grow with the stores that pay (4.524795ms)
+✔ an email counted against a store's figure is not sent past it, and the provider is never asked (192.969882ms)
+✔ the studio counts a page as several requests, and never shuts the owner out of paying, leaving or taking their data (37.63952ms)
+✔ a store's public side rests at its requests as at its visits, and what buyers have goes on to the whole figure (5.196147ms)
+✔ a plan's figures are published from the same numbers (0.637665ms)
+✔ the billing month is written down with the plan, forgotten when it stops, and the stores that pay are kept in line (6.763938ms)
+✔ the daily job writes a store down again when only its billing month moved (8.335302ms)
+✔ funded store-metered emails require paid proof before counters or provider dispatch (2.550165ms)
+✔ funded owner platform calls refuse without approval while consent reduction and disconnect remain available (9.318037ms)
+✔ marked paid webhook attempts need their cohort without blocking general maintenance allowances (3.923786ms)
+N2451_COMMANDS 999
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 304.972258
+an email was not sent: the store's transactional figure (used)

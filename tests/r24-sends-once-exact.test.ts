@@ -88,7 +88,9 @@ for (const [label, reply] of [["undefined", undefined], ["a short pipeline", "sh
     // EXISTS is answered 0 too, so only the claim stands between the store and a second email.
     const result = await withReplies([[isExists, 0], [isClaim, reply]], () => sendTrialNudges(START + 3 * DAY));
     assert.deepEqual([emails.length, result.sent], [0, 0]);
-    assert.equal(result.failed, 1, "said as failed, not as nothing to do");
+    // Read back (lib/claim-mark.ts), the mark holds the earlier send's value: known as sent, so nothing to do, not a
+    // failure. Before the read-back this was unknown and said as failed; either way no second email goes.
+    assert.equal(result.failed, 0, "read back as already sent");
   });
 }
 

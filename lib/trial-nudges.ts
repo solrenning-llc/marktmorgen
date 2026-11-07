@@ -24,6 +24,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { listSubscriptions } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
@@ -119,18 +120,23 @@ export function dueNudge(subscription: Record<string, unknown>, nowSeconds: numb
 }
 
 /**
- * Whether this run sends nudge `which`: none of it or a later one sent (EXISTS answering exactly 0 each), and its
- * mark taken here (SET NX answering "OK"). False when one was sent (EXISTS 1, or SET NX null); any other answer is
- * unknown and throws (CX-123 rule 24), so a nudge is never sent twice, nor sent without knowing.
+ * Whether this run sends nudge `which`, and its mark's own value if so: none of it or a later one sent (EXISTS
+ * answering exactly 0 each), and its mark taken here (lib/claim-mark.ts). A SET NX that landed with its reply lost is
+ * read back as ours, so the nudge goes once and is never lost (Codex Q and Claude 5 on #2898); null when one was sent
+ * (EXISTS 1, or the mark holding another value, the "1" of marks from before included). Any other answer is unknown:
+ * the mark is let go only while it holds this run's value, and it throws (CX-123 rule 24), so a nudge is never sent
+ * twice, nor sent without knowing, and goes on the next run.
  */
-async function claimNudge(keys: string[], which: number): Promise<boolean> {
+async function claimNudge(keys: string[], which: number): Promise<string | null> {
   const seen = repliesFor(await redisPipeline(keys.map((key) => ["EXISTS", key])), keys.length);
   const counts = seen?.map(countOf);
   if (!counts || counts.some((count) => count !== 0 && count !== 1)) throw new UnknownReplyError("the trial nudges sent");
-  if (counts.slice(which).some((count) => count === 1)) return false;
-  const claim = repliesFor(await redisPipeline([["SET", keys[which], "1", "NX", "EX", 60 * DAY]]), 1);
-  if (claim?.[0] === "OK") return true;
-  if (claim && claim[0] === null) return false;
+  if (counts.slice(which).some((count) => count === 1)) return null;
+  const mine = claimValue();
+  const claimed = await claimMark(keys[which], 60 * DAY, mine);
+  if (claimed === "ours") return mine;
+  if (claimed === "taken") return null;
+  await releaseMark(keys[which], mine);
   throw new UnknownReplyError("a trial nudge's mark");
 }
 
@@ -153,7 +159,7 @@ export async function sendTrialNudges(nowSeconds = Math.floor(Date.now() / 1000)
       if ((await firstSaleAt(store)) > 0) continue;
       // A later nudge stands for an earlier one that was missed: never two in one day.
       const keys = NUDGE_DAYS.map((_, i) => sentKey(id, i));
-      let claimed: boolean;
+      let claimed: string | null;
       try {
         claimed = await claimNudge(keys, due.which);
       } catch (error) {
@@ -168,7 +174,8 @@ export async function sendTrialNudges(nowSeconds = Math.floor(Date.now() / 1000)
       if (ok) counts.sent += 1;
       else {
         counts.failed += 1;
-        await redisPipeline([["DEL", keys[due.which]]]).catch(() => {});
+        // Let go only while it holds this run's own value, so it goes on the next run and never frees another run's.
+        await releaseMark(keys[due.which], claimed);
       }
     }
     const last = data[data.length - 1];

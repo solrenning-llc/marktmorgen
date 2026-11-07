@@ -163,6 +163,27 @@ async function main(): Promise<void> {
   is("tellStaysOpen: only untold marks: done, nothing to send", await outcome(() => tellStaysOpen(shop, Date.now() + 60_000)), true);
   is("tellStaysOpen: the told list is let go", (await pipeline([["HLEN", told]]))[0], 0);
 
+  part("tellStaysOpen: an HSCAN reply out of shape holds, never \"all of it went\" (Claude 6 on #3009)");
+  await pipeline([["DEL", told]]);
+  await pipeline([["HSET", told, "toldbuyer@example.com", String(E)]]);
+  for (const [label, reply] of [
+    ["no reply", []],
+    ["null", [null]],
+    ["an object", [{}]],
+    ["a list that is not a page", [["0", "nope"]]],
+    ["an odd page", [["0", ["toldbuyer@example.com"]]]],
+    ["a cursor that is not text", [[0, ["toldbuyer@example.com", String(E)]]]],
+    ["a field that is not text", [["0", [5, String(E)]]]],
+    ["a short reply", [["0"]]],
+  ] as [string, unknown[]][]) {
+    rules = [{ when: first("HSCAN"), reply, run: false }];
+    is(`HSCAN ${label}: held, not done`, await outcome(() => tellStaysOpen(shop, Date.now() + 60_000)), false);
+    rules = [];
+    is(`HSCAN ${label}: the told buyer is still on the list`, await field("toldbuyer@example.com"), String(E));
+  }
+  await pipeline([["DEL", told]]);
+  is("confirmed empty list: done", await outcome(() => tellStaysOpen(shop, Date.now() + 60_000)), true);
+
   part("a member with no address: the same own mark");
   await pipeline([["DEL", told, workKey(folder)]]);
   await pipeline([["HSET", workKey(folder), "m:sub_noaddr", "-"]]);

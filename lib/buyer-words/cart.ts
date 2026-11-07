@@ -29,6 +29,8 @@ const en = {
       : `We could not check ${count} products in your cart just now, so you cannot pay yet.`,
   /** The button beside either sentence above that reads the cart again. */
   retry: "Try again",
+  /** Said instead of the cart when its store answered that it does not exist: no "Try again" and no checkout. */
+  storeClosed: "This store is not taking orders right now, so nothing in your cart can be paid for here. Nothing was charged.",
   note: "You pay once, on Stripe's secure page. Each product is handed over exactly as if you had bought it on its own.",
   empty: "Your cart is empty.",
   gone: "Not available in a cart right now: buy it from its own page.",
@@ -94,6 +96,7 @@ const es: CartWords = {
       ? "No pudimos comprobar 1 producto de tu carrito ahora, así que todavía no puedes pagar."
       : `No pudimos comprobar ${count} productos de tu carrito ahora, así que todavía no puedes pagar.`,
   retry: "Intentar de nuevo",
+  storeClosed: "Esta tienda no está aceptando pedidos ahora, así que no se puede pagar nada de tu carrito aquí. No se cobró nada.",
   note: "Pagas una sola vez, en la página segura de Stripe. Cada producto se entrega igual que si lo compraras por separado.",
   empty: "Tu carrito está vacío.",
   gone: "No está disponible en un carrito ahora mismo: cómpralo desde su propia página.",
@@ -152,6 +155,7 @@ const fr: CartWords = {
       ? "Nous n'avons pas pu vérifier 1 produit de votre panier pour le moment, vous ne pouvez donc pas encore payer."
       : `Nous n'avons pas pu vérifier ${count} produits de votre panier pour le moment, vous ne pouvez donc pas encore payer.`,
   retry: "Réessayer",
+  storeClosed: "Cette boutique ne prend pas de commandes pour le moment : rien dans votre panier ne peut être payé ici. Rien n’a été débité.",
   note: "Vous payez une seule fois, sur la page sécurisée de Stripe. Chaque produit est remis exactement comme s'il était acheté seul.",
   empty: "Votre panier est vide.",
   gone: `Pas disponible dans un panier pour l'instant${S}: achetez-le depuis sa propre page.`,
@@ -210,6 +214,7 @@ const de: CartWords = {
       ? "Wir konnten 1 Produkt in Ihrem Warenkorb gerade nicht prüfen, daher können Sie noch nicht bezahlen."
       : `Wir konnten ${count} Produkte in Ihrem Warenkorb gerade nicht prüfen, daher können Sie noch nicht bezahlen.`,
   retry: "Erneut versuchen",
+  storeClosed: "Dieser Shop nimmt gerade keine Bestellungen an, daher kann hier nichts aus Ihrem Warenkorb bezahlt werden. Es wurde nichts abgebucht.",
   note: "Sie bezahlen einmal, auf der sicheren Seite von Stripe. Jedes Produkt wird genau so übergeben, als hätten Sie es einzeln gekauft.",
   empty: "Ihr Warenkorb ist leer.",
   gone: "Gerade nicht im Warenkorb erhältlich: Kaufen Sie es auf seiner eigenen Seite.",
@@ -268,6 +273,7 @@ const it: CartWords = {
       ? "Non è stato possibile controllare 1 prodotto del tuo carrello in questo momento, quindi non puoi ancora pagare."
       : `Non è stato possibile controllare ${count} prodotti del tuo carrello in questo momento, quindi non puoi ancora pagare.`,
   retry: "Riprova",
+  storeClosed: "Questo negozio non accetta ordini in questo momento, quindi qui non si può pagare nulla del tuo carrello. Non è stato addebitato nulla.",
   note: "Paghi una volta sola, sulla pagina sicura di Stripe. Ogni prodotto viene consegnato esattamente come se lo comprassi da solo.",
   empty: "Il tuo carrello è vuoto.",
   gone: "Al momento non disponibile in un carrello: compralo dalla sua pagina.",
@@ -326,6 +332,7 @@ const nl: CartWords = {
       ? "We konden 1 product in je winkelwagen nu niet controleren, dus je kunt nog niet betalen."
       : `We konden ${count} producten in je winkelwagen nu niet controleren, dus je kunt nog niet betalen.`,
   retry: "Opnieuw proberen",
+  storeClosed: "Deze winkel neemt nu geen bestellingen aan, dus niets in je winkelwagen kan hier worden betaald. Er is niets afgeschreven.",
   note: "Je betaalt één keer, op de beveiligde pagina van Stripe. Elk product wordt precies zo geleverd als wanneer je het los koopt.",
   empty: "Je winkelwagen is leeg.",
   gone: "Nu niet beschikbaar in een winkelwagen: koop het op zijn eigen pagina.",
@@ -384,6 +391,7 @@ const pt: CartWords = {
       ? "Não foi possível verificar 1 produto do seu carrinho agora, por isso ainda não é possível pagar."
       : `Não foi possível verificar ${count} produtos do seu carrinho agora, por isso ainda não é possível pagar.`,
   retry: "Tentar novamente",
+  storeClosed: "Esta loja não está aceitando pedidos agora, então nada no seu carrinho pode ser pago aqui. Nada foi cobrado.",
   note: "Paga uma única vez, na página segura da Stripe. Cada produto é entregue exatamente como se o comprasse em separado.",
   empty: "O seu carrinho está vazio.",
   gone: "Não está disponível num carrinho neste momento: compre-o na sua própria página.",

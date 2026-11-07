@@ -157,6 +157,9 @@ export function CartButton({
   const [checked, setChecked] = useState<string | null>(null);
   const [failedFor, setFailedFor] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The store the cart belongs to answered that it does not exist (404, "unknown"): nothing can be paid for here, and
+  // "Try again" would only fail again, so the panel says so instead of offering either.
+  const [closed, setClosed] = useState(false);
   const [tries, setTries] = useState(0);
   const retried = useRef(false);
   // Whether anything is handed over digitally: only then is the box to start at once asked for (lib/digital-consent.ts).
@@ -190,10 +193,20 @@ export function CartButton({
       stop.abort();
     }, CART_READ_MS);
     fetch(`/api/store/cart?${new URLSearchParams({ handle, ids: wanted })}`, { signal: stop.signal })
-      .then((r) => r.json())
-      .then((data: { ok?: boolean; items?: Line[]; total?: string; deal?: { percent: number; saved: string } | null; next?: { more: number; percent: number } | null; suggest?: Suggestion[]; bundle?: BundleSwap | null; shipping?: ShippingRow | null; apart?: Apart | null; digital?: boolean }) => {
+      .then(async (r) => {
+        const data = await r.json();
+        // Only the cart's own answer for a store that does not exist; any other 404 (a page in front of it) is an
+        // ordinary failure, with "Try again".
+        return r.status === 404 && data?.error === "unknown" ? { ...data, closed: true } : data;
+      })
+      .then((data: { ok?: boolean; closed?: boolean; items?: Line[]; total?: string; deal?: { percent: number; saved: string } | null; next?: { more: number; percent: number } | null; suggest?: Suggestion[]; bundle?: BundleSwap | null; shipping?: ShippingRow | null; apart?: Apart | null; digital?: boolean }) => {
         if (!live) return;
+        if (data.closed) {
+          setClosed(true);
+          return fail();
+        }
         if (!data.ok) return fail();
+        setClosed(false);
         setLines(data.items ?? []);
         setTotal(data.total ?? "");
         setDeal(data.deal ?? null);
@@ -245,7 +258,7 @@ export function CartButton({
   const retry = (
     <button
       type="button"
-      className="btn st-btn-ghost btn-sm min-h-11"
+      className="btn st-btn-ghost btn-sm min-h-11 min-w-11"
       aria-disabled={busy}
       aria-busy={busy}
       onClick={() => {
@@ -276,7 +289,17 @@ export function CartButton({
 
   return (
     <div id="cart" className="st-cart">
-      <button type="button" className="btn st-btn st-cart-open" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button type="button" className="btn st-btn st-cart-open" aria-expanded={open}
+        onClick={() => {
+          // Opening the panel reads the cart again: until that read answers, it says the prices are being checked, not
+          // what the read before it said.
+          if (!open) {
+            setFailedFor(null);
+            setClosed(false);
+          }
+          setOpen(!open);
+        }}
+      >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M3 4h2l2.4 11.2a2 2 0 0 0 2 1.6h7.7a2 2 0 0 0 2-1.5L21 8H6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
           <circle cx="10" cy="20" r="1.4" fill="currentColor" />
@@ -297,6 +320,8 @@ export function CartButton({
           ) : null}
           {ids.length === 0 ? (
             <p className="st-muted mt-3 text-sm">{c.empty}</p>
+          ) : closed ? (
+            <p className="st-note mt-3 text-sm" role="alert" data-cart-closed="">{c.storeClosed}</p>
           ) : lines === null ? (
             waiting
           ) : (

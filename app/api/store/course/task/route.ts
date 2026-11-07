@@ -8,7 +8,7 @@ import { readCourse, findLesson } from "@/lib/course";
 import { readListing } from "@/lib/catalog";
 import { jsonAccess } from "@/lib/studio-route";
 import { studentOnTask } from "@/lib/assignment-access";
-import { handIn, oneHandInAtATime, releaseBytes, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
+import { HandInChangedError, handIn, oneHandInAtATime, releaseBytes, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
 import { LockBusyError } from "@/lib/redis-lock";
 import { tellCreatorOfWork } from "@/lib/assignment-notify";
 import {
@@ -118,7 +118,9 @@ export async function POST(request: NextRequest) {
         // Work that was not kept leaves no file behind it: the new file sent here (never the one the earlier work keeps)
         // is deleted, and its bytes come back once it is gone; a file that could not be deleted stays counted. Once the
         // write was sent, both stay counted, which only refuses sooner.
-        if (taken && file && !written) {
+        // Another hand-in of the same work was written meanwhile (HandInChangedError): nothing of this one was, so the
+        // same holds as before the write.
+        if (taken && file && (!written || error instanceof HandInChangedError)) {
           const gone = await deleteFile(file.path).then(
             () => true,
             (deleteError: unknown) => (console.error("deleting a task file that was not handed in failed", deleteError), false),
@@ -155,6 +157,8 @@ export async function POST(request: NextRequest) {
     if (error instanceof DataRoomError) return no("noroom", 409);
     // Another hand-in of the same work still running: nothing was read or taken, the student hands in again.
     if (error instanceof LockBusyError) return no("busy", 409);
+    // The same work was handed in again while this one waited (its lease ran out): this one kept nothing, and says so.
+    if (error instanceof HandInChangedError) return no("busy", 409);
     console.error("handing in an assignment failed", error);
     return no("server_error", 500);
   }

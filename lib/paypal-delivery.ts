@@ -24,8 +24,8 @@ import { emitEvent } from "@/lib/webhooks";
  * HAND_OVER_GRACE_SECONDS old, so it does not hand over an order whose return is handing it over at that moment.
  */
 const HAND_OVER_GRACE_SECONDS = 600;
-/** How many of them one sweep of a store tries. */
-const HAND_OVER_BATCH = 25;
+/** How many of them one sweep of a store tries (NOT_A_COST.HAND_OVER_BATCH and PAYPAL_HAND_OVER_RETRY in tests/plan-cost-registry.ts). */
+export const HAND_OVER_BATCH = 25;
 /** The score of an order to be tried at the next sweep: due now, behind those due before it. */
 const dueNow = () => String(Math.floor(Date.now() / 1000) - HAND_OVER_GRACE_SECONDS);
 

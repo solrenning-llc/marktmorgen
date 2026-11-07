@@ -12,8 +12,8 @@ import { TEST_CONSENT } from "./digital-consent-fixture";
 import { claimHandle, ensureStatsId, addProduct, setProductLink, setSubscription, setPayPalSeller, storeForEmail, type Store } from "@/lib/store";
 import { readListing, STORE_PAGE_SIZE } from "@/lib/catalog";
 import { openOrder } from "@/lib/paypal-sales";
-import * as delivery from "@/lib/paypal-delivery";
-import * as registry from "./plan-cost-registry";
+import { HAND_OVER_BATCH, sweepPayPal } from "@/lib/paypal-delivery";
+import { NOT_A_COST, PAYPAL_HAND_OVER_RETRY } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -97,10 +97,8 @@ async function main(): Promise<void> {
   process.env.PAYPAL_PARTNER_MERCHANT_ID = "PARTNERMERCH01";
   process.env.PAYPAL_BN_CODE = "NimbusLabs_SP";
 
-  const declared = (registry as Record<string, unknown>).PAYPAL_HAND_OVER_RETRY as
-    | { listReadsPerStoreRun: number; ordersPerStoreRun: number; ownCommandsPerOrderTried: number; listCommandsPerSale: number }
-    | undefined;
-  const batch = (delivery as Record<string, unknown>).HAND_OVER_BATCH;
+  const declared: Partial<Record<keyof typeof PAYPAL_HAND_OVER_RETRY, number>> | undefined = PAYPAL_HAND_OVER_RETRY;
+  const batch: unknown = HAND_OVER_BATCH;
 
   await claimHandle("owner@example.com", "harbor", "Harbor Kitchen", "");
   await ensureStatsId("owner@example.com");
@@ -136,7 +134,7 @@ async function main(): Promise<void> {
   const retry = async (fault: Fault = () => null): Promise<Commands> => {
     ahead += 3_600_000;
     const s = await fresh();
-    const sent = await recorded(() => delivery.sweepPayPal(s, Date.now() + 10_000), fault);
+    const sent = await recorded(() => sweepPayPal(s, Date.now() + 10_000), fault);
     const from = sent.findIndex((c) => c[0] === "ZRANGEBYSCORE" && c[1] === handOverKey(statsId));
     return from < 0 ? [] : sent.slice(from);
   };
@@ -149,7 +147,7 @@ async function main(): Promise<void> {
 
   part("The registry states the hand-over list's commands");
   is("PAYPAL_HAND_OVER_RETRY is in tests/plan-cost-registry.ts", typeof declared, "object");
-  is("NOT_A_COST says why the batch is bounded, naming handOverAgain", typeof registry.NOT_A_COST.HAND_OVER_BATCH === "string" && registry.NOT_A_COST.HAND_OVER_BATCH.includes("handOverAgain"), true);
+  is("NOT_A_COST says why the batch is bounded, naming handOverAgain", typeof NOT_A_COST.HAND_OVER_BATCH === "string" && NOT_A_COST.HAND_OVER_BATCH.includes("handOverAgain"), true);
   is("lib/paypal-delivery.ts exports the batch the registry cites", typeof batch, "number");
 
   part("Each PayPal sale: the list's ZADD when settled and its ZREM once handed over");

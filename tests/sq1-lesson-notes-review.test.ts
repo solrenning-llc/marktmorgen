@@ -19,6 +19,14 @@
  *   C2-6 a whole note deleted can be undone;
  *   C2-7 the count is not spoken before the student types.
  *
+ * And Claude 4's focal return (comment 6710149376):
+ *
+ *   C4-2 the download the policy promises after access ends is reachable:
+ *        the course's own page links to it for a student who still has
+ *        notes there, and an unreadable count still shows the link;
+ *   C4-4 the 300-note sentence no longer points only at notes the student
+ *        may no longer reach.
+ *
  * The box is run under a minimal hook runtime (Claude 2's harness from the
  * review, node:vm): no browser, no React DOM.
  */
@@ -384,6 +392,86 @@ async function theBox(): Promise<void> {
   }
 }
 
+async function afterAccess(): Promise<void> {
+  part("C4-2: the course's page links to the download once the course is no longer open");
+  const count = lib.courseNoteCount as undefined | ((statsId: string, learner: string, courseId: string) => Promise<number>);
+  const shows = lib.notesDownloadAfterAccess as undefined | ((statsId: string, access: unknown, courseId: string, admit: () => Promise<boolean>) => Promise<boolean>);
+  is("lib/lesson-notes.ts counts one student's notes on one course, and says whether the course page shows the download", [typeof count, typeof shows], ["function", "function"]);
+  if (typeof count !== "function" || typeof shows !== "function") return;
+  const email = "c4-after@example.com";
+  const who = emailKey(email);
+  for (const [course, n] of [[COURSE_A, 0], [COURSE_A, 1], [COURSE_B, 2]] as const) {
+    const saved = await saveNote({ statsId: STATS, learner: who, courseId: course, lessonId: lessonId(900 + n), text: `Note ${n}.`, was: "", room: ROOM });
+    if (!saved.ok) throw new Error(`setup note ${n}: ${saved.reason}`);
+  }
+  is("the count is of that course's notes only", [await count(STATS, who, COURSE_A), await count(STATS, who, COURSE_B), await count(STATS, who, "e".repeat(32))], [2, 1, 0]);
+  const learner = (scope: "all" | string[], mail = email, owner = false) => ({ email: mail, scope, owner });
+  const yes = async () => true;
+  is("a refunded student with notes there is shown the download", await shows(STATS, { state: "closed", learner: learner([COURSE_A]) }, COURSE_A, yes), true);
+  is("so is one whose membership ended", await shows(STATS, { state: "ended", learner: learner("all") }, COURSE_A, yes), true);
+  is("not someone signed in with no notes on that course", await shows(STATS, { state: "closed", learner: learner("all", "nobody-c4@example.com") }, COURSE_A, yes), false);
+  is("not a visitor", await shows(STATS, { state: "closed", learner: null }, COURSE_A, yes), false);
+  is("not the creator", await shows(STATS, { state: "open", learner: learner("all", email, true), start: 1 }, COURSE_A, yes), false);
+  is("not a student the course is open to (each lesson has the link)", await shows(STATS, { state: "open", learner: learner([COURSE_A]), start: 1 }, COURSE_A, yes), false);
+  let admitted = 0;
+  let readBefore = false;
+  redis.pipeline = (async (commands: Commands) => {
+    if (touchesNotes(commands) && admitted === 0) readBefore = true;
+    return real(commands);
+  }) as Pipeline;
+  try {
+    await shows(STATS, { state: "closed", learner: learner([COURSE_A]) }, COURSE_A, async () => { admitted += 1; return true; });
+  } finally {
+    redis.pipeline = real;
+  }
+  is("the count is one of the store's public requests, admitted before it is read", [admitted, readBefore], [1, false]);
+  let readWhenRefused = false;
+  redis.pipeline = (async (commands: Commands) => {
+    if (touchesNotes(commands)) readWhenRefused = true;
+    return real(commands);
+  }) as Pipeline;
+  try {
+    is("a refused request reads nothing and still shows the link: not knowing is not \"no notes\"", await shows(STATS, { state: "closed", learner: learner([COURSE_A]) }, COURSE_A, async () => false), true);
+  } finally {
+    redis.pipeline = real;
+  }
+  is("(and nothing was read)", readWhenRefused, false);
+  for (const reply of [["not a list"], [[1, 2]], [null], []]) {
+    redis.pipeline = (async (commands: Commands) => (touchesNotes(commands) ? reply : real(commands))) as Pipeline;
+    try {
+      is(`a count read as ${JSON.stringify(reply)} shows the link, never hides it`, await shows(STATS, { state: "closed", learner: learner([COURSE_A]) }, COURSE_A, yes), true);
+    } finally {
+      redis.pipeline = real;
+    }
+  }
+  const page = read("app/[handle]/course/[product]/page.tsx");
+  is("the course page asks it with the store's public request, and links the route's download in the store's words", [
+    /notesDownloadAfterAccess\(store\.statsId \?\? "", access, course\.id, \(\) => takeBuyerRead\(store\)\)/.test(page),
+    /\/api\/store\/course\/note\?h=\$\{encodeURIComponent\(store\.handle\)\}&p=\$\{encodeURIComponent\(product\.id\)\}/.test(page),
+    /lessonNotesWords\(store\.language\)/.test(page) && /\.download\}/.test(page),
+  ], [true, true, true]);
+}
+
+function fullSentence(): void {
+  part("C4-4: the 300-note sentence points at what the student can still reach");
+  const old: Record<string, string> = {
+    en: "To add one here, empty a note on another lesson and save it.",
+    es: "Para añadir una aquí, vacía la nota de otra lección y guárdala.",
+    fr: "Pour en ajouter une ici, videz la note d’une autre leçon et enregistrez-la.",
+    de: "Um hier eine hinzuzufügen, leere die Notiz einer anderen Lektion und speichere sie.",
+    it: "Per aggiungerne una qui, svuota la nota di un'altra lezione e salvala.",
+    nl: "Om er hier een toe te voegen, maak je de notitie bij een andere les leeg en sla je die op.",
+    pt: "Para acrescentar uma aqui, esvazie a anotação de outra aula e salve.",
+  };
+  const said = en.tooMany(rules.MAX_NOTES_PER_STUDENT);
+  is("en: empty a note on a lesson still open to you", /another lesson that is still open to you/.test(said), true);
+  is("en: notes on a course no longer open are downloaded from its page, and deleted with the person", /downloaded from that course's page/.test(said) && /ask to be deleted from this store/.test(said), true);
+  for (const language of ["en", "es", "fr", "de", "it", "nl", "pt"] as const) {
+    const sentence = words.lessonNotesWords(language).tooMany(rules.MAX_NOTES_PER_STUDENT);
+    is(`${language}: the old ending, which may point at notes out of reach, is gone`, sentence.endsWith(old[language]), false);
+  }
+}
+
 void (async () => {
   await concurrentSaves();
   await lastPlace();
@@ -393,5 +481,7 @@ void (async () => {
   closedCourse();
   heldLesson();
   await theBox();
+  await afterAccess();
+  fullSentence();
   done();
 })();

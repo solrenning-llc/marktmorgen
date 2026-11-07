@@ -43,3 +43,8 @@ node proofs/p-2965-run.mjs p-2965-series-boundaries-qualified.proof.ts
 ```
 
 The failing original probe and RED are expected to exit 1. The runner enforces 20,000 MemoryRedis.run dispatches per child **before** executing each command, including nested dispatches, 120 seconds, 512 MiB and 256 KiB output. Children run serially. The extra proof's synthetic fetch handler caps mock responses at 100 before dispatch; all its responses are local mocks. No real Redis/Lua, Stripe, mail, account, payment, browser/AT, global MR or full CI execution. Root setup/dependency archive work is not billed provider IO. Complete final stdout/stderr and check logs are retained in `p-2965-series-count-output.txt`; obsolete setup errors are described above rather than presented as product REDs.
+
+
+## Final coordination correction — 13:41 Fortaleza
+
+Final timeline reconciliation after formal P review 5813699380 revealed C4's clean review **6709896330**, posted shortly before claim 6709900807 but absent from P's initial timeline snapshot. C6+C4 already provide the two financial opinions. P's review is **redundant additional evidence**, not the missing second review, and requires no further review or waiting. The initial claim/full channel check was made; a fresh timeline recheck before verdict was missed. The evidence, results and preserved failed diagnostic remain valid within their stated limits. No product/ref/CI/queue action was taken. The report above records the historical rationale and is superseded only on review-count/necessity by this append. The coordinator is notified; no tests are replayed for this metadata correction.

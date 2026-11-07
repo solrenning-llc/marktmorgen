@@ -271,10 +271,16 @@ export async function GET(request: NextRequest) {
   // Only a notice that went out is recorded as given: a refused send, a store left because no sender is configured,
   // or an ownerless store support could not be told about stays off the told list and is tried again next run.
   const given: string[] = [];
+  // An owner that could not be read is not "no owner": nobody is written to about it and it stays off the told list.
+  let unreadOwners = 0;
 
   for (let i = 0; i < fresh.length; i += 1) {
     const store = fresh[i];
     const email = owners[i];
+    if (email === undefined) {
+      unreadOwners += 1;
+      continue;
+    }
     if (!email) {
       unknown.push(store.folder);
       continue;
@@ -345,6 +351,8 @@ export async function GET(request: NextRequest) {
     });
     if (supportTold === true) given.push(...unknown);
   }
+
+  if (unreadOwners > 0) console.error(`usage-watch: ${unreadOwners} store(s) over the allowance left for the next run, owner unread`);
 
   await redisPipeline([
     ["SET", TOLD, JSON.stringify([...new Set([...seen, ...given])]), "EX", 40 * 86_400],

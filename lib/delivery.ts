@@ -317,14 +317,21 @@ export async function storeKeysOf(folders: string[]): Promise<(string | null)[]>
   }
 }
 
-/** The creators behind a set of folders, for the notice that goes to them. */
-export async function ownersOf(folders: string[]): Promise<(string | null)[]> {
-  if (!isRedisConfigured() || folders.length === 0) return folders.map(() => null);
+/**
+ * The creators behind a set of folders, for the notice that goes to them: the
+ * address; null when the folder has no address on file (no owner key, or a
+ * key that holds no address); undefined when it could not be read (Redis not
+ * configured, a failed read, a reply that is not a string), which is never
+ * taken for "no owner".
+ */
+export async function ownersOf(folders: string[]): Promise<(string | null | undefined)[]> {
+  if (!isRedisConfigured() || folders.length === 0) return folders.map(() => undefined);
   try {
     const raw = await redisPipeline(folders.map((f) => ["GET", ownerKey(f)]));
-    return raw.map((v) => (typeof v === "string" && v.includes("@") ? v : null));
+    if (!Array.isArray(raw) || raw.length !== folders.length) return folders.map(() => undefined);
+    return raw.map((v) => (v === null ? null : typeof v === "string" ? (v.includes("@") ? v : null) : undefined));
   } catch (error) {
     console.error("could not read who a folder belongs to", error);
-    return folders.map(() => null);
+    return folders.map(() => undefined);
   }
 }

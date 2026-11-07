@@ -19,7 +19,7 @@ import { canSellProduct } from "@/lib/store-checkout";
 import { activePwyw } from "@/lib/pay-what-you-want";
 import { beforeStart, isCohort, isOpen, lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
 import { courseAccess, doneLessons, emailKey, touchStudent } from "@/lib/learn";
-import { heldBack, passedQuizzes, requiredQuizLessons } from "@/lib/quiz";
+import { heldBack, passedForGate, requiredQuizLessons } from "@/lib/quiz";
 import { MAX_CERT_NAME, MIN_CERT_NAME, certificateOf, hasFinished } from "@/lib/certificate";
 import { canManage } from "@/lib/membership-manage";
 import { CourseOutline, WithDay } from "@/components/course-outline";
@@ -86,7 +86,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const [done, passed, certificate] = studying
     ? await Promise.all([
         doneLessons(course.id, access.learner.email),
-        passedQuizzes(course.id, who),
+        passedForGate(course.id, who),
         course.certificate ? certificateOf(course.id, who) : Promise.resolve(null),
       ])
     : [new Set<string>(), new Set<string>(), null];

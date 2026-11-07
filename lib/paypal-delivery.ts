@@ -54,10 +54,12 @@ export async function handOverPayPal(store: Store, paid: Paid): Promise<boolean>
 }
 
 /** The checkout sweep's PayPal part for one store: pending payments cleared, refunds taken back. */
-export function sweepPayPal(store: Store, deadline: number): Promise<{ cleared: number; revoked: number }> {
+export function sweepPayPal(store: Store, deadline: number): Promise<{ cleared: number; revoked: number; stuck: number }> {
   return watchPayPal(store, deadline, {
+    // False (the product is gone) hands nothing over: it throws, so the order stays pending and is counted as stuck,
+    // never cleared as handed over (review of #2895).
     handOver: async (paid) => {
-      await handOverPayPal(store, paid);
+      if (!(await handOverPayPal(store, paid))) throw new Error("a PayPal payment's product is gone: nothing was handed over");
     },
     dropStart: (email, productId) => dropEnrollment(store, email, productId),
     // A course put back for a payment that keeps the purchase (Codex G's M1 on #2791): HSETNX, so nothing for one

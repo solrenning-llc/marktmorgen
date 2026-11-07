@@ -68,10 +68,17 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 }) as typeof fetch;
 const paypalAsked = () => calls.filter((c) => !c.endsWith("/v1/oauth2/token"));
 
-/** The stand-in Redis, with the reply to the first pipeline whose first command matches replaced. */
+/**
+ * The stand-in Redis, with the replies from the first matching command on replaced in each pipeline that has one; the
+ * commands before it (the return's pending mark before its SET NX) run and answer as they are.
+ */
 async function withReply<T>(match: (command: (string | number)[]) => boolean, reply: () => unknown[], run: () => Promise<T>): Promise<T> {
   const original = redis.pipeline;
-  redis.pipeline = (async (commands: (string | number)[][]) => (match(commands[0] ?? []) ? reply() : original.call(redis, commands))) as typeof redis.pipeline;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const at = commands.findIndex(match);
+    if (at < 0) return original.call(redis, commands);
+    return [...(at > 0 ? await original.call(redis, commands.slice(0, at)) : []), ...reply()];
+  }) as typeof redis.pipeline;
   try {
     return await run();
   } finally {

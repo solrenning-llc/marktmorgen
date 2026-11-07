@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { READ_SAMPLE, READ_TOKEN_SECONDS } from "@/lib/page-read-sample";
+import { READ_TOKEN_SECONDS } from "@/lib/page-read-sample";
 import { framePlayer, frameTarget, messagePlayer } from "@/lib/player-origin";
 import { WHY_NOT, type WhyNot } from "@/lib/why-not-rules";
 import type { WhyNotWords } from "@/lib/buyer-words/why-not";

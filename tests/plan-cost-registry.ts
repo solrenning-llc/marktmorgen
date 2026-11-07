@@ -1165,7 +1165,7 @@ export const COST_LINES: CostLine[] = [
     feature: "How a page was read: time on page, reading depth, the store page item by item (639 [GL7](25), 4 November 2026)",
     monthlyUsd: (tier) => readingsAtCeiling(REQUESTS_PER_VISIT * VISITS_INCLUDED[tier] + EXTRA_REQUESTS[tier]) * readBeaconCost(),
     sources: [
-      { file: "lib/page-read.ts", names: ["readCeiling", "publicVisitLimit(requestLimitFor(store, now / 1000)) / READ_SAMPLE", "readSlot", "slot: readSlot(window.id, place)", "if (!window || !window.slot", "window.slot = false;", "takeReading", "noteReadStore", "if (readingsFull(pass, now)) return false;", "countedReceipt(reply)"] },
+      { file: "lib/page-read.ts", names: ["readCeiling", "publicVisitLimit(requestLimitFor(store, now / 1000)) / READ_SAMPLE", "readSlot", "slots: pending + (readSlot(window.id, place) ? 1 : 0)", "if (!window || window.slots < 1", "window.slots -= 1;", "if (spentHere(nonce, now)) return false;", "takeReading", "noteReadStore", "if (readingsFull(pass, now)) return false;", "countedReceipt(reply)"] },
       { file: "app/api/store/read/route.ts", names: ["if (readingsFull(pass)) return done();", "spendReadToken(pass.nonce, pass.issued)", "takeReading(pass)"] },
       { file: "lib/traffic.ts", names: ["noteReadStore(store.statsId, resting || store.suspended ? null : store, now, at)", "return n <= limit ? n : 0;"] },
     ],

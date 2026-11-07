@@ -91,6 +91,12 @@ async function main(): Promise<void> {
   is("done", again.ok, true);
   is("and none of their course records is kept", await courseRecords(), 0);
 
+  part("A listing Redis confirms is not there");
+  await real([["DEL", listing]]);
+  const gone = await erasureScope(big, tess);
+  is("is left out of the scope, as an outline that is not there", gone?.courses.length, 0);
+  is("and a deletion still finishes", (await erasePerson(big, tess, { kind: "person" })).ok, true);
+
   done();
 }
 

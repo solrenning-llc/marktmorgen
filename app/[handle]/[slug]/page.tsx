@@ -18,7 +18,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { saleClock } from "@/lib/store-sale";
 import { type SalesPage, livePage } from "@/lib/sales-page";
 import { readPage } from "@/lib/sales-page-store";
-import { type SitePage, siteKey } from "@/lib/site-page-rules";
+import { type SitePage, pageOut, siteKey } from "@/lib/site-page-rules";
 import { featuredCards } from "@/lib/featured-cards";
 import { productPath } from "@/components/store-product";
 import { type BlockContext, HeroView, PageSections } from "@/components/sales-blocks";
@@ -50,7 +50,8 @@ const load = cache(async (raw: string, slug: string): Promise<{ store: Store; pa
   const page = store?.sitePages.find((p) => p.slug === slug.toLowerCase()) ?? null;
   if (!store || !page || store.suspended) return null;
   const read = await readPage(store.statsId, siteKey(page.id)).catch(() => "unread" as const);
-  if (read === "unread") return { store, page, blocks: read };
+  // A page the store record keeps back or schedules is not there, read or not: its title is never shown (review of #2853, L1).
+  if (read === "unread") return pageOut(page, saleClock()) ? { store, page, blocks: read } : null;
   const blocks = livePage(read, saleClock());
   return blocks.blocks.length ? { store, page, blocks } : null;
 });

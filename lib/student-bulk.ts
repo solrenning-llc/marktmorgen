@@ -529,7 +529,7 @@ export async function applyGive(store: Store, target: GiveTarget, ask: GiveAsk, 
     }
   } else if (statsId) {
     try {
-      await takeGivenMany(statsId, sorted.targets, target.productId, STUDIO_GIVE_PREFIX);
+      await takeGivenMany(statsId, sorted.targets, target.productId, STUDIO_GIVE_PREFIX, store);
     } catch (error) {
       console.error("taking a course back in bulk failed", error);
     }

@@ -39,7 +39,7 @@ import {
   readFilters,
 } from "@/lib/student-bulk-rules";
 import { applyGive, readGiveAsk, reviewGive } from "@/lib/student-bulk";
-import { STUDIO_GIVE_JOB, grantImported, importedFor, importedKey, isGivenByStore } from "@/lib/imported-purchases";
+import { STUDIO_GIVE_JOB, STUDIO_GIVE_PREFIX, TAKE_IF_SAME, grantImported, importedFor, importedKey, isGivenByStore, takeGivenMany } from "@/lib/imported-purchases";
 import { paidCourses, setBlocked, touchStudent } from "@/lib/learn";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { redisPipeline } from "@/lib/redis";
@@ -299,6 +299,18 @@ async function main(): Promise<void> {
   const again = await grantImported(store.statsId!, STUDIO_GIVE_JOB, [{ email: "once@example.org", productId: to, items: null }], now, store.sid, store);
   is("a gift the record already holds (HSETNX refused) takes no room", [again, (await usedNow()) - once], [[false], 0]);
   await redisPipeline([["HDEL", importedKey(store.statsId!, "once@example.org"), to]]);
+  // Taken back only while the record is still the one read: a grant written in between (here the API's) stays.
+  await grantImported(store.statsId!, STUDIO_GIVE_JOB, [{ email: "cas@example.org", productId: to, items: null }], now, store.sid, store);
+  const casKey = importedKey(store.statsId!, "cas@example.org");
+  const sends = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "EVAL" && c[1] === TAKE_IF_SAME && c[3] === casKey)) await sends([["HSET", casKey, to, JSON.stringify({ at: now, job: "api:key9", items: null })]]);
+    return sends(commands);
+  };
+  await takeGivenMany(store.statsId!, ["cas@example.org"], to, STUDIO_GIVE_PREFIX, store);
+  redis.pipeline = sends;
+  is("a gift rewritten between the read and the delete is never taken back", await given("cas@example.org"), ["api:key9"]);
+  await redisPipeline([["HDEL", casKey, to]]);
 
   part("The screen");
   const studentLines = [line("ana@example.com", now), line("ben@example.com", now)];

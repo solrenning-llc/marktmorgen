@@ -125,6 +125,11 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/imported-purchases.ts TAKE_IF_SAME: a grant deleted only while it still holds what was read.
+        if (key.startsWith("-- marktmorgen:imp-take:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, hash, field, expected] = args;
+          return this.run(["HGET", hash, field]) === expected ? this.run(["HDEL", hash, field]) : 0;
+        }
         // lib/paypal-sales.ts PAYPAL_REVOKE: a refunded payment's purchase taken back only while nothing else stands for it.
         if (key.startsWith("-- marktmorgen:paypal-revoke:v1\n") && args[0] === "2" && args.length >= 5) {
           const [, imported, own, field, job, ...known] = args;

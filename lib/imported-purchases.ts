@@ -34,7 +34,7 @@ import { rememberBuyers } from "@/lib/buyer-library";
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type DataStore, needData } from "@/lib/store-data";
+import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { repliesFor } from "@/lib/redis-reply";
@@ -122,19 +122,37 @@ export async function givenMany(statsId: string, emails: readonly string[], prod
 }
 
 /**
+ * Deletes one field of a hash only while it still holds what was read: 1
+ * when it deleted it, 0 when it holds something else or nothing.
+ */
+export const TAKE_IF_SAME = "-- marktmorgen:imp-take:v1\nif redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then return redis.call('HDEL', KEYS[1], ARGV[1]) end\nreturn 0";
+
+/**
  * Takes one product back from many addresses, only from those whose grant of
  * it is `prefix`'s kind (read just before): never an import, a gift, a place,
- * a PayPal purchase or another tool's. Says nothing of the result: the caller
- * reads it back (givenMany) and says only what reads back as taken.
+ * a PayPal purchase or another tool's. Each is deleted only while it still
+ * holds the record read (TAKE_IF_SAME), so a grant written in between is
+ * never taken by mistake; the room each one deleted took (`room`, "imp") is
+ * given back. Says nothing of the result: the caller reads it back
+ * (givenMany) and says only what reads back as taken.
  */
-export async function takeGivenMany(statsId: string, emails: readonly string[], productId: string, prefix: string): Promise<void> {
-  const now = await givenMany(statsId, emails, productId);
-  const ours = emails.filter((email) => {
-    const grant = now.get(email);
-    return grant && grant !== "unknown" && grant.job.startsWith(prefix);
-  });
+export async function takeGivenMany(statsId: string, emails: readonly string[], productId: string, prefix: string, room: DataStore | null = null): Promise<void> {
+  const ours: { email: string; raw: string; grant: ImportedPurchase }[] = [];
+  for (let from = 0; from < emails.length; from += GIVEN_READ_BATCH) {
+    const batch = emails.slice(from, from + GIVEN_READ_BATCH);
+    const rows = repliesFor(await redisPipeline(batch.map((email) => ["HGET", importedKey(statsId, email), productId])), batch.length);
+    batch.forEach((email, i) => {
+      const raw = rows ? rows[i] : null;
+      const grant = typeof raw === "string" ? parse(productId, raw) : null;
+      if (typeof raw === "string" && grant && grant.job.startsWith(prefix)) ours.push({ email, raw, grant });
+    });
+  }
   for (let from = 0; from < ours.length; from += GIVEN_READ_BATCH) {
-    await redisPipeline(ours.slice(from, from + GIVEN_READ_BATCH).map((email) => ["HDEL", importedKey(statsId, email), productId]));
+    const batch = ours.slice(from, from + GIVEN_READ_BATCH);
+    const answers = repliesFor(await redisPipeline(batch.map(({ email, raw }) => ["EVAL", TAKE_IF_SAME, 1, importedKey(statsId, email), productId, raw])), batch.length);
+    if (!room || !answers) continue;
+    const freed = batch.reduce((sum, { email, grant }, i) => sum + (answers[i] === 1 || answers[i] === "1" ? grantBytes(productId, email, grant) : 0), 0);
+    if (freed > 0) await giveData(room, [{ slot: "imp", bytes: freed }]);
   }
 }
 
@@ -231,7 +249,8 @@ export async function grantImported(
 ): Promise<boolean[]> {
   if (!grants.length || !isRedisConfigured()) return grants.map(() => false);
   // Each grant at the most it weighs: its field, the address's key and place among those brought over, its library.
-  if (room) await needData(room, [{ slot: "imp", bytes: grants.reduce((sum, g) => sum + dataBytes([g.productId, JSON.stringify({ at: atSeconds, job, items: g.items, option: g.option ?? null }), g.email], 3), 0) }]);
+  const weights = grants.map((g) => grantBytes(g.productId, g.email, { at: atSeconds, job, items: g.items, option: g.option ?? null }));
+  if (room) await needData(room, [{ slot: "imp", bytes: weights.reduce((sum, bytes) => sum + bytes, 0) }]);
   // Only what was bought on Marktmorgen puts a store in a buyer's library: a gift, a place, a pre-order,
   // a PayPal purchase (no room given); not an import or the API's gift, which take from the store's room.
   if (sid && !room) await rememberBuyers(sid, grants.map((g) => g.email));
@@ -246,7 +265,18 @@ export async function grantImported(
   ]);
   // An order's grant (no room given) is counted at what it really adds (lib/order-data.ts).
   const answers = room ? await redisPipeline(writes) : await orderWrite({ sid, statsId }, writes);
+  // A grant the record already held (HSETNX answered 0) wrote nothing: the room taken for it is given back.
+  // An answer of another shape may have written: its room is kept.
+  if (room) {
+    const unwritten = answers.reduce((sum: number, a, i) => sum + (a === 0 || a === "0" ? weights[i] : 0), 0);
+    if (unwritten > 0) await giveData(room, [{ slot: "imp", bytes: unwritten }]);
+  }
   return answers.map((a) => Number(a) === 1);
+}
+
+/** The room one grant takes ("imp"), the same when it is taken and when it is given back: its field, its record, its address. */
+function grantBytes(productId: string, email: string, record: { at: number; job: string; items: string[] | null; option: string | null }): number {
+  return dataBytes([productId, JSON.stringify({ at: record.at, job: record.job, items: record.items, option: record.option }), email], 3);
 }
 
 /**

@@ -1,0 +1,13 @@
+import {build} from 'esbuild';
+import {resolve,join} from 'node:path';
+import {spawnSync} from 'node:child_process';
+const root=resolve(import.meta.dirname,'..');
+const file=process.argv.includes('--frozen')?'j-2941-earnings.proof.ts':'j-2941-contract-return.proof.ts';
+const result=await build({entryPoints:[join(root,'tests',file)],alias:{'@':root},bundle:true,platform:'node',format:'cjs',write:false,metafile:true,logLevel:'error'});
+const inputs=Object.keys(result.metafile.inputs);
+if(inputs.some(p=>/node_modules|lib\/(redis|stripe|paypal)/.test(p)))throw Error('Pure proof pulled an unexpected runtime');
+console.log('J_EXACT_INPUTS',JSON.stringify(inputs));
+const guard=`const net=require('node:net');net.Socket.prototype.connect=function(){throw Error('J_PURE_SOCKET_BLOCKED')};for(const p of ['node:http','node:https']){const m=require(p);m.request=m.get=function(){throw Error('J_PURE_HTTP_BLOCKED')}};globalThis.fetch=async()=>{throw Error('J_PURE_FETCH_BLOCKED')};`;
+const child=spawnSync(process.execPath,['--max-old-space-size=512','-e',guard+result.outputFiles[0].text],{cwd:root,encoding:'utf8',timeout:120000,maxBuffer:131072});
+process.stdout.write(child.stdout??'');process.stderr.write(child.stderr??'');if(child.error)throw child.error;
+console.log('J_CHILD_EXIT',child.status);process.exitCode=child.status??2;

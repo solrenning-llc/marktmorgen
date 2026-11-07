@@ -1,0 +1,81 @@
+J_EXACT_INPUTS ["lib/earnings-by-month.ts","tests/j-2941-earnings.proof.ts"]
+FAIL complete empty source is a confirmed zero: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+
+null !== []
+
+PASS unread source is not zero
+PASS unread manual entries suppress totals
+FAIL currencies remain apart: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
++ actual - expected
+
++ undefined
+- [
+-   [
+-     'eur',
+-     300
+-   ],
+-   [
+-     'usd',
+-     200
+-   ]
+- ]
+
+PASS duplicate id within one source is unknown
+PASS fractional cents fail closed
+PASS unsafe cents fail closed
+PASS invalid currency fails closed
+PASS unknown zone gives no result
+PASS NaN reading time gives no result
+PASS finite out-of-Date-range reading time gives no result rather than throwing
+PASS finite out-of-Date-range event makes its source unknown
+PASS Tokyo changes month before UTC
+PASS New York is October at UTC November midnight
+PASS Kiritimati UTC+14 boundary is included
+PASS reached exactly at a month floor is not complete
+FAIL strictly before the floor is complete: AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+'unknown' !== 'read'
+
+PROPOSED_SOURCE_OVERFLOW_OBSERVATION {"source":"stripe","state":"unknown","why":"invalid"}
+PASS cross-field intermediate overflow is exact or explicitly unknown
+PROPOSED_TOTAL_OVERFLOW_OBSERVATION null
+PASS cross-source total overflow is exact or explicitly unknown
+PROPOSED_DUPLICATE_WRAPPER_OBSERVATION {"month":"2026-11","current":true,"sources":[{"source":"stripe","state":"unknown","why":"invalid"},{"source":"manual","state":"read","lines":[],"leftOut":[],"partly":[]}],"totals":null,"leftOut":[],"partly":[]}
+PASS same Stripe event repeated in two source wrappers is not counted twice
+PASS event after reading instant is not current-month money so far
+PASS future manual day is not current-month money so far
+J2941 22 checks, 3 failures.
+J_CHILD_EXIT 1
+
+SEPARATE CONTRACT-AWARE COPY
+J_EXACT_INPUTS ["lib/earnings-by-month.ts","tests/j-2941-contract-return.proof.ts"]
+PASS complete empty source is a confirmed zero
+PASS unread source is not zero
+PASS unread manual entries suppress totals
+PASS currencies remain apart
+PASS duplicate id within one source is unknown
+PASS fractional cents fail closed
+PASS unsafe cents fail closed
+PASS invalid currency fails closed
+PASS unknown zone gives no result
+PASS NaN reading time gives no result
+PASS finite out-of-Date-range reading time gives no result rather than throwing
+PASS finite out-of-Date-range event makes its source unknown
+PASS Tokyo changes month before UTC
+PASS New York is October at UTC November midnight
+PASS Kiritimati UTC+14 boundary is included
+PASS reached exactly at a month floor is not complete
+PASS strictly before the floor is complete
+PROPOSED_SOURCE_OVERFLOW_OBSERVATION {"source":"stripe","state":"read","lines":[{"currency":"usd","salesCents":9007199254740991,"renewalCents":2,"enteredCents":0,"refundCents":2,"disputeCents":0,"reinstatedCents":0,"netCents":9007199254740991}],"leftOut":[],"partly":[]}
+PASS cross-field intermediate overflow is exact or explicitly unknown
+PROPOSED_TOTAL_OVERFLOW_OBSERVATION [{"currency":"usd","salesCents":9007199254740991,"renewalCents":0,"enteredCents":2,"refundCents":2,"disputeCents":0,"reinstatedCents":0,"netCents":9007199254740991}]
+PASS cross-source total overflow is exact or explicitly unknown
+PROPOSED_DUPLICATE_WRAPPER_OBSERVATION {"month":"2026-11","current":true,"sources":[{"source":"stripe","state":"unknown","why":"invalid"},{"source":"manual","state":"read","lines":[],"leftOut":[],"partly":[]}],"totals":null,"leftOut":[],"partly":[]}
+PASS same Stripe event repeated in two source wrappers is not counted twice
+PASS event after reading instant is not current-month money so far
+PASS future manual day is not current-month money so far
+J2941 22 checks, 0 failures.
+J_CHILD_EXIT 0
+
+ASSERT_AST:22 identical
+VALIDATION:{"types": 0, "lint": 0, "scanner": 0, "diff": 0}

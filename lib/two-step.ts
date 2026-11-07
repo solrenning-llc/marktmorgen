@@ -215,7 +215,7 @@ function parse(raw: unknown): TwoStep | null {
     since: typeof v.since === "number" ? v.since : 0,
     codes: Array.isArray(v.codes) ? v.codes.filter((c): c is string => typeof c === "string" && /^[0-9a-f]{64}$/.test(c)) : [],
     last: typeof v.last === "number" ? v.last : -1,
-    reset: resetOf(v.reset, typeof v.since === "number" ? v.since : 0),
+    reset: resetOf(v.reset, v.since),
     backup: typeof v.backup === "string" && EMAIL_PATTERN.test(v.backup) ? v.backup : "",
   };
 }
@@ -224,10 +224,13 @@ function parse(raw: unknown): TwoStep | null {
  * The day two-step login turns off by itself, read only in a shape this code writes (Claude 5 on #2896): 0 (none
  * asked; an older record with no day reads so too), or a whole millisecond at least RESET_DAYS after it was turned
  * on (enterLocked writes the moment of the first request plus RESET_DAYS). Any other value is unknown and throws,
- * never a day already past that turns the second step off and opens a session on the emailed link alone.
+ * never a day already past that turns the second step off and opens a session on the emailed link alone. Once a
+ * day is set, `since` is its floor, so it too must be the whole millisecond finishSetup writes (Claude 1 on #2896):
+ * missing, text, null, zero, a fraction or below zero is unknown and throws, never a floor at 1970.
  */
-function resetOf(reset: unknown, since: number): number {
+function resetOf(reset: unknown, since: unknown): number {
   if (reset === undefined || reset === 0) return 0;
+  if (typeof since !== "number" || !Number.isSafeInteger(since) || since <= 0) throw new UnknownReplyError("the two-step record's turn-on time");
   // An hour of room for one server's clock behind another's between turning it on and the first request.
   if (typeof reset === "number" && Number.isSafeInteger(reset) && reset > 0 && reset >= since + RESET_DAYS * 86_400_000 - 3_600_000) return reset;
   throw new UnknownReplyError("the two-step record's turn-off day");

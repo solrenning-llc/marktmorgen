@@ -5092,13 +5092,29 @@ html:has([data-product-editor]) {
  * front's count in the same font. A line holds the cap over its glyphs' width in its own ch, whatever the size, so
  * 34ch holds 126 x 34 / 56 = 77 and real sentences about 47. The words are capped, each in its own size (a detail is
  * smaller than its title), never a card, a row or a button (li), so those keep their width. Narrower glyphs:
- * docs/accessibility-programme.md. :where keeps it at no weight, so any width a block sets for itself still wins; a
- * centred line stays centred (tests/product-page-accessibility.test.ts), and so do the lines of a box that centers its
+ * docs/accessibility-programme.md. :where keeps it at no weight and @layer components puts it under Tailwind's
+ * utilities, so any width a block sets for itself still wins; a centered line stays centered (tests/product-page-accessibility.test.ts), and so do the lines of a box that centers its
  * words with text-align (the countdown, a "By the numbers" card), which would otherwise sit at the left of it.
  */
-.st-measure :where(p, dd, blockquote, figcaption, .st-about li, .st-includes li, .sp-faq summary > span, .sp-benefit > span, .sp-fit-side li > span, .sp-inside span.block, .sp-step span.block, .sp-bonus span.block) {
-  max-width: 34ch;
+@layer components {
+  /* In a layer, under Tailwind's utilities: a block's own max-w-*, mx-* or ml-* still wins over the cap. */
+  .st-measure :where(p, dd, blockquote, figcaption, .st-about li, .st-includes li, .sp-faq summary > span, .sp-benefit > span, .sp-fit-side li > span, .sp-inside span.block, .sp-step span.block, .sp-bonus span.block) {
+    max-width: 34ch;
+  }
+  .st-measure :where(p.text-center, li.text-center, .text-center > p, .sp-countdown > p, .sp-fact > dd) {
+    margin-inline: auto;
+  }
+  /* A p drawn as a box or a row keeps its width: the dashed notes, the rounded notices (a package's sessions, the
+     chosen time) and the cart's rows (discount, shipping, Total), which line up with its lines. */
+  .st-measure :where(p.flex, p.grid, p.st-note, p.rounded-2xl) {
+    max-width: none;
+  }
 }
-.st-measure :where(p.text-center, li.text-center, .text-center > p, .sp-countdown > p, .sp-fact > dd) {
-  margin-inline: auto;
+/* Their words are capped by the box's own padding instead, so the box keeps the card's width (1.4.8). Out of the
+   layer, to win over the padding the box sets for itself; the left padding stays what it was. */
+.st-measure .st-note {
+  padding-inline-end: max(1.25rem, calc(100% - 34ch - 1.25rem));
+}
+.st-measure p.rounded-2xl {
+  padding-inline-end: max(1rem, calc(100% - 34ch - 1rem));
 }

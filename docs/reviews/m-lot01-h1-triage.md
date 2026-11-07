@@ -141,3 +141,8 @@ Foi localizado o guia Apple “Turn a website into an app in Safari on iPhone”
 Documentos antigos de termos da UE apareceram na busca, mas não foram usados como regra atual: A4 apresenta mudanças efetivas em outubro de 2026. A comparação deve guardar a data/versão observada e revalidar imediatamente antes da implementação. Datas de corte, regras e tarifas regionais não são imutáveis; a leitura pública não confirma termos aceitos por uma conta deste projeto. Não foram extraídos preços novos para a fila, estabelecido orçamento, alterada comissão ou criado modelo de custo.
 
 Este incremento acrescentou apenas Markdown no mesmo arquivo reservado. Não houve conta, aceite, contato, inscrição, submissão, chave, build, SDK, download de aula, licença, armazenamento, CI ou alteração de refs. Acessibilidade permanece 0 → 0 passos/decisões de interface, sem ensaio com leitor real ou conformidade certificada. Publicação e revisão continuam com o coordenador; H1 permanece estudo parcial e H2 não foi iniciado.
+
+
+## Nota de coordenação — alcance histórico de H2
+
+As menções anteriores a H2 como não iniciado pertencem às fotografias documentais preservadas nesta unidade. A triagem documental separada de H2 já foi preparada no mesmo lote, em `docs/reviews/m-lot01-h2-triage.md` (fonte original `4ff5844714dd3b4db5fb917ef82e6195cdef6391`, blob `fe9ac66223bfc0d332ded5e644a39bcc9c9880d3`). Isso não conclui o item H2 nem comprova transmissão, captura, privacidade dos aparelhos ou custo completo; os dois estudos continuam parciais, sem implementação ou alteração do estado da fila. Esta nota apenas resolve a leitura temporal entre os relatórios, preservando integralmente o texto e as fontes anteriores de H1.

@@ -47,7 +47,7 @@ async function main(): Promise<void> {
   await claimHandle(OWNER, "lockedreads", "Locked Reads", "");
   await ensureStatsId(OWNER);
   await ensureListId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestLockedReads01", true);
+  await setStripeAccount(OWNER, "acct_1TestLkReads01", true);
   await setSubscription(OWNER, { customerId: "cus_LockedReads01", subscriptionId: "sub_LockedReads01", active: true, tier: "scale", period: paidPeriod() } as never);
   const children: string[] = [];
   for (let n = 0; n < 20; n++) children.push(await made(`Child ${n}`, "5"));

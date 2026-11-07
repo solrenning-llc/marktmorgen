@@ -191,14 +191,16 @@ export async function schedulePost(
  * Changes one that is still waiting: its words, its space, its kind and its
  * time. Refused once the job has it ("busy"), once it is done ("done"), and
  * within the lead before its time ("too_close"), when the job may take it any
- * minute: a cancel still works then.
+ * minute: a cancel still works then. One changed between its read and its
+ * write is read again and said as it is then: gone, being posted, done, or
+ * changed by another edit ("changed").
  */
 export async function editScheduled(
   store: Store,
   id: string,
   input: ScheduleInput,
   now = Date.now(),
-): Promise<{ ok: true } | { ok: false; reason: "gone" | "busy" | "done" | "too_close" }> {
+): Promise<{ ok: true } | { ok: false; reason: "gone" | "busy" | "done" | "changed" | "too_close" }> {
   const community = store.community?.id;
   if (!community || !store.sid || !ITEM_ID.test(id)) return { ok: false, reason: "gone" };
   const { raw, post: current } = await readRaw(community, id);
@@ -209,9 +211,18 @@ export async function editScheduled(
   const next: ScheduledPost = { ...current, ...input, at: toSeconds(now) };
   await needData(store, room(id, recordBytes(next)), now);
   if (await swap(community, dueMember(store.sid, community, id), id, raw, JSON.stringify(next), next.due, next.due)) return { ok: true };
-  // Changed since it was read (the job took it, or another edit): its room as it was.
-  await giveData(store, room(id, recordBytes(current)), now);
-  return { ok: false, reason: "busy" };
+  // Changed since it was read (the job took it, another edit, or a cancel): read again, and its room is
+  // set to what is there now, never to what was read; a record that is gone keeps no room. A read that
+  // fails throws and leaves the room taken above, the safe side.
+  const again = await readRaw(community, id);
+  if (again.raw === null) {
+    await giveData(store, room(id, 0), now);
+    return { ok: false, reason: "gone" };
+  }
+  // One that no longer reads as a record keeps the larger of the two sizes counted.
+  await giveData(store, room(id, again.post ? recordBytes(again.post) : Math.max(recordBytes(current), recordBytes(next))), now);
+  if (!again.post || again.post.state === "publishing") return { ok: false, reason: "busy" };
+  return { ok: false, reason: again.post.state === "waiting" ? "changed" : "done" };
 }
 
 /**
@@ -229,7 +240,10 @@ export async function cancelScheduled(
   const { raw, post: current } = await readRaw(community, id);
   if (!raw || !current) return { ok: false, reason: "gone" };
   if (current.state === "publishing" && !settled(current, toSeconds(now))) return { ok: false, reason: "busy" };
-  if (!(await swap(community, dueMember(store.sid, community, id), id, raw, "", null, null))) return { ok: false, reason: "busy" };
+  if (!(await swap(community, dueMember(store.sid, community, id), id, raw, "", null, null))) {
+    // Changed since it was read: gone (another cancel, or the list's clear, gave its room back) is said as gone.
+    return { ok: false, reason: (await readRaw(community, id)).raw === null ? "gone" : "busy" };
+  }
   await giveData(store, room(id, 0), now);
   return { ok: true };
 }

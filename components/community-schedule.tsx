@@ -43,6 +43,7 @@ const MESSAGES: Record<string, string> = {
   too_many: `Your community can keep ${MAX_SCHEDULED_POSTS} scheduled posts at once. Clear the ones already posted, or cancel one.`,
   busy: "It is being posted right now, so it can no longer be changed. Look for it in your community.",
   done: "It has already been posted or stopped, so it can no longer be changed. Reload the page.",
+  changed: "It was changed somewhere else a moment ago, so your change was not saved. Reload the page to see it, then edit it again.",
   gone: "That scheduled post is not there anymore. Reload the page.",
   unknown: "That scheduled post is not there anymore. Reload the page.",
   owner_only: "Only the store's owner can post as the creator.",

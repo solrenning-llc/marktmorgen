@@ -196,6 +196,7 @@ const en = {
     `What you bought here was charged by ${store} ${withPaypal ? "on their own Stripe or PayPal account" : "on their own Stripe account"}; what ${store} brought over from another platform was not charged again.`,
   chargedAll: (store: string, withPaypal: boolean) =>
     `Every purchase was charged by ${store} ${withPaypal ? "on their own Stripe or PayPal account" : "on their own Stripe account"}.`,
+  chargedGiven: (store: string) => `What ${store} gave you was not charged.`,
 
   // ---- The confirmation after paying (lib/purchase-email.ts) ------------------------------
   confirmSubject: (store: string, title: string) => `Your order from ${store}: ${title}`,
@@ -449,6 +450,7 @@ const es: OrdersWords = {
   chargedBrought: (store, withPaypal) =>
     `Lo que compraste aquí lo cobró ${store} ${esWhere(withPaypal)}; lo que ${store} trajo desde otra plataforma no se volvió a cobrar.`,
   chargedAll: (store, withPaypal) => `Todas las compras las cobró ${store} ${esWhere(withPaypal)}.`,
+  chargedGiven: (store) => `Lo que ${store} te dio no se cobró.`,
 
   confirmSubject: (store, title) => `Tu pedido de ${store}: ${title}`,
   confirmIntro: (store) => `Gracias por comprarle a ${store}. Esta es tu confirmación.`,
@@ -691,6 +693,7 @@ const fr: OrdersWords = {
   chargedBrought: (store, withPaypal) =>
     `Ce que vous avez acheté ici a été débité par ${store} ${frWhere(withPaypal)}${S}; ce que ${store} a transféré depuis une autre plateforme n'a pas été débité à nouveau.`,
   chargedAll: (store, withPaypal) => `Chaque achat a été débité par ${store} ${frWhere(withPaypal)}.`,
+  chargedGiven: (store) => `Ce que ${store} vous a offert n'a pas été débité.`,
 
   confirmSubject: (store, title) => `Votre commande chez ${store}${S}: ${title}`,
   confirmIntro: (store) => `Merci pour votre achat chez ${store}. Voici votre confirmation.`,
@@ -933,6 +936,7 @@ const de: OrdersWords = {
   chargedBrought: (store, withPaypal) =>
     `Was Sie hier gekauft haben, hat ${store} ${deWhere(withPaypal)} berechnet; was ${store} von einer anderen Plattform übernommen hat, wurde nicht erneut berechnet.`,
   chargedAll: (store, withPaypal) => `Jeder Kauf wurde von ${store} ${deWhere(withPaypal)} berechnet.`,
+  chargedGiven: (store) => `Was Sie von ${store} erhalten haben, wurde nicht berechnet.`,
 
   confirmSubject: (store, title) => `Ihre Bestellung bei ${store}: ${title}`,
   confirmIntro: (store) => `Vielen Dank für Ihren Einkauf bei ${store}. Dies ist Ihre Bestätigung.`,
@@ -1179,6 +1183,7 @@ const it: OrdersWords = {
   chargedBrought: (store, withPaypal) =>
     `Ciò che hai acquistato qui è stato addebitato da ${store} ${itWhere(withPaypal)}; ciò che ${store} ha trasferito da un'altra piattaforma non è stato addebitato di nuovo.`,
   chargedAll: (store, withPaypal) => `Ogni acquisto è stato addebitato da ${store} ${itWhere(withPaypal)}.`,
+  chargedGiven: (store) => `Ciò che ${store} ti ha offerto non è stato addebitato.`,
 
   confirmSubject: (store, title) => `Il tuo ordine da ${store}: ${title}`,
   confirmIntro: (store) => `Grazie per aver acquistato da ${store}. Questa è la tua conferma.`,
@@ -1420,6 +1425,7 @@ const nl: OrdersWords = {
   chargedBrought: (store, withPaypal) =>
     `Wat je hier hebt gekocht, is door ${store} afgeschreven ${nlWhere(withPaypal)}; wat ${store} van een ander platform heeft overgezet, is niet opnieuw afgeschreven.`,
   chargedAll: (store, withPaypal) => `Elke aankoop is door ${store} afgeschreven ${nlWhere(withPaypal)}.`,
+  chargedGiven: (store) => `Wat je van ${store} hebt gekregen, is niet afgeschreven.`,
 
   confirmSubject: (store, title) => `Je bestelling bij ${store}: ${title}`,
   confirmIntro: (store) => `Bedankt voor je aankoop bij ${store}. Dit is je bevestiging.`,
@@ -1662,6 +1668,7 @@ const pt: OrdersWords = {
   chargedBrought: (store, withPaypal) =>
     `O que comprou aqui foi cobrado por ${store} ${ptWhere(withPaypal)}; o que ${store} trouxe de outra plataforma não foi cobrado novamente.`,
   chargedAll: (store, withPaypal) => `Todas as compras foram cobradas por ${store} ${ptWhere(withPaypal)}.`,
+  chargedGiven: (store) => `O que ${store} lhe ofereceu não foi cobrado.`,
 
   confirmSubject: (store, title) => `A sua encomenda de ${store}: ${title}`,
   confirmIntro: (store) => `Obrigado por comprar a ${store}. Esta é a sua confirmação.`,

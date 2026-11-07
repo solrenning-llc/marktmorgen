@@ -505,31 +505,45 @@ async function sortGive(store: Store, target: GiveTarget, ask: GiveAsk): Promise
   return sorted;
 }
 
+const refusedAs = (reason: GiveRefusal): Refused => ({ kind: "refused", reason, message: "" });
+
 const giveReviewOf = (s: Sorted): GiveReview => ({ changes: s.targets.length, already: s.already.length, removed: s.removed.length, otherWay: s.otherWay.length, unread: s.unread.length });
 
-/** What it would do, with nothing written; its reads taken first. */
-export async function reviewGive(store: Store, target: GiveTarget, ask: GiveAsk, pay: PayStudio): Promise<{ kind: "review"; review: GiveReview } | Refused> {
+/**
+ * The course given, or how to find it: a function is asked only once the
+ * reads are paid for (the route reads the product then), and null from it is
+ * the "product" refusal, nothing else read.
+ */
+export type FindGive = GiveTarget | (() => Promise<GiveTarget | null>);
+const findTarget = (find: FindGive): Promise<GiveTarget | null> => (typeof find === "function" ? find() : Promise.resolve(find));
+
+/** What it would do, with nothing written; its reads taken first, the course looked up only then. */
+export async function reviewGive(store: Store, find: FindGive, ask: GiveAsk, pay: PayStudio): Promise<{ kind: "review"; review: GiveReview } | Refused> {
   const paid = await pay(giveReadUnits(ask.emails.length));
   if (!paid.ok) return { kind: "refused", reason: paid.reason, message: paid.message };
+  const target = await findTarget(find);
+  if (!target) return refusedAs("product");
   return { kind: "review", review: giveReviewOf(await sortGive(store, target, ask)) };
 }
 
 export type GiveApplied = { kind: "done"; done: GiveDone } | { kind: "stale"; review: GiveReview } | Refused;
 
-const refusedAs = (reason: GiveRefusal): Refused => ({ kind: "refused", reason, message: "" });
-
 /**
  * The gift, or its taking back, for those it applies to now: the reads paid
  * for, then read; the count confirmed checked (otherwise nothing written);
  * the writes and their read back paid for; written; each read back, and only
- * those read back as asked said as `changed`.
+ * those read back as asked said as `changed`: a gift only when this write
+ * made it (its HSETNX answered 1), so another member's gift written first is
+ * never said as this one's.
  */
-export async function applyGive(store: Store, target: GiveTarget, ask: GiveAsk, pay: PayStudio): Promise<GiveApplied> {
+export async function applyGive(store: Store, find: FindGive, ask: GiveAsk, pay: PayStudio): Promise<GiveApplied> {
   const giving = ask.change === "give";
   const paused = giving ? integrationPauseWord(store) : null;
   if (paused) return refusedAs(paused);
   const readPaid = await pay(giveReadUnits(ask.emails.length));
   if (!readPaid.ok) return { kind: "refused", reason: readPaid.reason, message: readPaid.message };
+  const target = await findTarget(find);
+  if (!target) return refusedAs("product");
   const sorted = await sortGive(store, target, ask);
   if (ask.expect !== sorted.targets.length) return { kind: "stale", review: giveReviewOf(sorted) };
   const result: GiveDone = { asked: ask.emails.length, changed: [], already: sorted.already, removed: sorted.removed, otherWay: sorted.otherWay, unread: sorted.unread, unknown: [], failed: [] };
@@ -538,6 +552,8 @@ export async function applyGive(store: Store, target: GiveTarget, ask: GiveAsk, 
   if (!writePaid.ok) return { kind: "refused", reason: writePaid.reason, message: writePaid.message };
 
   let statsId: string | null = store.statsId;
+  // Whether each one's HSETNX wrote it (giving): null when that answer was not had.
+  let wrote: boolean[] | null = null;
   if (giving) {
     if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return refusedAs("unavailable");
     statsId = statsId ?? (await ensureStatsId(storeRef(store)))?.statsId ?? null;
@@ -547,7 +563,7 @@ export async function applyGive(store: Store, target: GiveTarget, ask: GiveAsk, 
     // Marked first, so what is given is read as soon as it is written (lib/learn.ts reads gifts only of a store so marked).
     if (!store.pastBuyers && !(await setPastBuyers(storeRef(store)))?.pastBuyers) return refusedAs("unavailable");
     try {
-      await grantImported(statsId, STUDIO_GIVE_JOB, sorted.targets.map((email) => ({ email, productId: target.productId, items: null })), undefined, store.sid, store);
+      wrote = await grantImported(statsId, STUDIO_GIVE_JOB, sorted.targets.map((email) => ({ email, productId: target.productId, items: null })), undefined, store.sid, store);
     } catch (error) {
       if (error instanceof DataRoomError) return refusedAs("store_full");
       // The writes may or may not have landed: what reads back decides, person by person.
@@ -561,12 +577,15 @@ export async function applyGive(store: Store, target: GiveTarget, ask: GiveAsk, 
     }
   }
   const after = statsId ? await givenMany(statsId, sorted.targets, target.productId) : new Map<string, "unknown">();
-  for (const email of sorted.targets) {
+  sorted.targets.forEach((email, i) => {
     const grant = grantOf(after, email);
     if (grant === "unknown") result.unknown.push(email);
-    else if (giving ? grant !== null && grant.job === STUDIO_GIVE_JOB : grant === null) result.changed.push(email);
-    else if (giving && grant !== null) result.already.push(email);
-    else result.failed.push(email);
-  }
+    else if (!giving) (grant === null ? result.changed : result.failed).push(email);
+    else if (grant === null) result.failed.push(email);
+    else if (grant.job !== STUDIO_GIVE_JOB) result.already.push(email);
+    // The studio's gift reads back: this write's only when its HSETNX said so; unknown when that was not had.
+    else if (!wrote) result.unknown.push(email);
+    else (wrote[i] ? result.changed : result.already).push(email);
+  });
   return { kind: "done", done: result };
 }

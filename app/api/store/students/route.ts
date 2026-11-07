@@ -87,7 +87,7 @@ const payFor = (store: Store): PayStudio => async (units) => {
 function refused(reason: string, message: string): Response {
   if (Object.hasOwn(GIVE_REFUSALS, reason)) {
     const own = reason as GiveRefusal;
-    return Response.json({ ok: false, error: own, message: GIVE_REFUSALS[own] }, { status: own === "unavailable" ? 503 : own === "daily_limit" ? 429 : 409, headers: NO_STORE });
+    return Response.json({ ok: false, error: own, message: GIVE_REFUSALS[own] }, { status: own === "unavailable" ? 503 : own === "daily_limit" ? 429 : own === "product" ? 404 : 409, headers: NO_STORE });
   }
   const studio = studioRefusal(reason, message);
   return Response.json(studio.body, { status: studio.status, headers: NO_STORE });
@@ -97,10 +97,12 @@ async function give(store: Store, body: Record<string, unknown>): Promise<Respon
   const read = readGiveAsk(body);
   if (!read.ok) return Response.json({ ok: false, error: read.error, message: GIVE_REFUSALS[read.error] }, { status: 400 });
   const { ask } = read;
-  try {
+  // The course is read only once the reads are paid for (lib/student-bulk.ts, FindGive).
+  const target = async () => {
     const product = await readListing(store, ask.to);
-    if (!product?.course || !givable(product)) return Response.json({ ok: false, error: "product", message: GIVE_REFUSALS.product }, { status: 404 });
-    const target = { productId: product.id, courseId: product.course.id };
+    return product?.course && givable(product) ? { productId: product.id, courseId: product.course.id } : null;
+  };
+  try {
     if (body.action === "review") {
       const reviewed = await reviewGive(store, target, ask, payFor(store));
       return reviewed.kind === "review" ? Response.json({ ok: true, review: reviewed.review }, { headers: NO_STORE }) : refused(reviewed.reason, reviewed.message);

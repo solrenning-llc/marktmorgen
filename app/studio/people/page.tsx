@@ -54,6 +54,7 @@ const NOTE_WORDS: Record<ProfileOrder["note"], string> = {
   paypal: "Paid with PayPal; the amount is in your PayPal account",
   imported: "Brought over from another platform",
   given: "Given to them as a gift",
+  store: "Given by the store",
 };
 
 const KIND_WORDS: Record<ProfileOrder["kind"], string> = {

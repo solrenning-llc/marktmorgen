@@ -51,7 +51,7 @@ import { bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { type Contact, leadsKey, parseContact } from "@/lib/contacts";
 import { readFlows, flowsStartedFor } from "@/lib/flows";
 import { doneLessons, studentDates } from "@/lib/learn";
-import { importedFor } from "@/lib/imported-purchases";
+import { importedFor, isGivenByStore } from "@/lib/imported-purchases";
 import { isGroupJob } from "@/lib/group-buy";
 import { callsFor, type BookedCall } from "@/lib/buyer-orders";
 
@@ -239,7 +239,7 @@ export type ProfileOrder = {
   recorded: boolean;
   campaign: string;
   /** A word on what it was, beside the title. */
-  note: "" | "gift" | "for others" | "call" | "tip" | "calls" | "pre-order" | "trial" | "plan" | "paypal" | "imported" | "given";
+  note: "" | "gift" | "for others" | "call" | "tip" | "calls" | "pre-order" | "trial" | "plan" | "paypal" | "imported" | "given" | "store";
 };
 
 export type ProfileMembership = {
@@ -561,7 +561,7 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
         channel: "",
         recorded: false,
         campaign: "",
-        note: given.job.startsWith("paypal:") ? "paypal" : given.job.startsWith("gift:") ? "given" : isGroupJob(given.job) ? "for others" : "imported",
+        note: given.job.startsWith("paypal:") ? "paypal" : isGivenByStore(given.job) ? "store" : given.job.startsWith("gift:") ? "given" : isGroupJob(given.job) ? "for others" : "imported",
       });
     }
   }

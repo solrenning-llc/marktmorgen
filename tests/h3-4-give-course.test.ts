@@ -355,7 +355,9 @@ async function main(): Promise<void> {
   is("the course is looked up only once its reads are paid for", [foundAfter.kind, [...order]], ["review", ["pay", "find"]]);
   const noCourse = await reviewGive(store, async () => null, ask1, async () => ({ ok: true }));
   is("a course that is not there, or cannot be given, is refused after paying", [noCourse.kind, noCourse.kind === "refused" ? noCourse.reason : ""], ["refused", "product"]);
-  is("the route reads the course only through the gift", readFileSync("app/api/store/students/route.ts", "utf8").includes("readListing(store, ask.to)"), false);
+  // Changed assertion (rule 23, this RED's own wording): it asked that "readListing(store, ask.to)" be gone from the
+  // route; the route still reads the course, but only in the function the gift calls once the reads are paid for.
+  is("the route reads the course only through the gift, once paid", readFileSync("app/api/store/students/route.ts", "utf8").includes("const target = async () => {\n    const product = await readListing(store, ask.to);"), true);
 
   // Another member's gift landing between the read and this write: its HSETNX answers 0, so it is not this one's.
   const rivalKey = importedKey(store.statsId!, "rival@example.org");

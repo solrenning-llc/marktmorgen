@@ -1115,13 +1115,18 @@ async function sendLink(store: Store, raw: string, email: string, origin: string
  */
 export function chargedLine(
   name: string,
-  purchases: Pick<Purchase, "kind" | "giftFrom" | "paidWith" | "place">[],
+  purchases: Pick<Purchase, "kind" | "giftFrom" | "paidWith" | "place" | "givenByStore">[],
   language?: unknown,
 ): string {
-  const brought = purchases.some((p) => p.kind === "imported" && !p.giftFrom && !p.paidWith && !p.place);
-  const paypal = purchases.some((p) => p.paidWith === "paypal");
+  // What the store gave (the API's or the studio's gift) was neither charged nor brought over: said apart.
+  const charged = purchases.filter((p) => !p.givenByStore);
+  const given = charged.length < purchases.length;
   const words = ordersWords(language);
-  return brought ? words.chargedBrought(name, paypal) : words.chargedAll(name, paypal);
+  if (given && !charged.length) return words.chargedGiven(name);
+  const brought = charged.some((p) => p.kind === "imported" && !p.giftFrom && !p.paidWith && !p.place);
+  const paypal = charged.some((p) => p.paidWith === "paypal");
+  const line = brought ? words.chargedBrought(name, paypal) : words.chargedAll(name, paypal);
+  return given ? `${line} ${words.chargedGiven(name)}` : line;
 }
 
 /**

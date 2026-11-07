@@ -180,11 +180,13 @@ export function accessSummary(result: AccessDone, change: AccessChange): { short
 
 /**
  * A course that can be given from the list of students: a course, and
- * neither a membership (its access is its subscription) nor a call. The same
- * as an import or the API can give (lib/api-write.ts, giveAccess).
+ * neither a membership (its access is its subscription) nor a call, as an
+ * import or the API can give (lib/api-write.ts, giveAccess); and neither a
+ * draft (hidden: not yet the creator's to hand out) nor one of limited places
+ * (stock: a gift would pass what the creator put on sale).
  */
-export function givable(product: { course?: { id: string } | null; recurring?: unknown; call?: unknown }): boolean {
-  return Boolean(product.course) && !product.recurring && !product.call;
+export function givable(product: { course?: { id: string } | null; recurring?: unknown; call?: unknown; hidden?: boolean; stock?: number | null }): boolean {
+  return Boolean(product.course) && !product.recurring && !product.call && product.hidden !== true && (product.stock === null || product.stock === undefined);
 }
 
 /** give: another course, with no payment; takeback: a course the studio gave, taken back (the undo). */
@@ -223,7 +225,7 @@ export const GIVE_REFUSALS: Record<GiveRefusal, string> = {
   to: "Choose the course to give.",
   none: ACCESS_REFUSALS.none,
   many: ACCESS_REFUSALS.many,
-  product: "Choose one of your courses that can be given: not a membership or a call.",
+  product: "Choose one of your courses that can be given: not a membership, a call, a draft or a course with limited places.",
   expect: ACCESS_REFUSALS.expect,
   paused_unpaid: "Nothing was given: your plan's renewal payment did not go through, so new gifts wait until it is paid. Check the notice at the top of your studio. You can still take back a course you gave.",
   paused_disputed: "Nothing was given: a payment for your plan is disputed with your bank, so new gifts wait until it is settled. Check the notice at the top of your studio. You can still take back a course you gave.",

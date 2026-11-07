@@ -72,10 +72,11 @@ function zoneName(ms: number, tz: string, locale: string): string {
  * and the calendar file and the way to move it, as in the booking email.
  *
  * Each of its links is named by the call it is for (WCAG 2.4.9, technique
- * ARIA7): the card's heading, then its time when the buyer booked the same
- * product more than once, then the link's own words, so "Add it to your
- * calendar" is read as "Coaching call Add it to your calendar" and a list of
- * the page's links tells every call apart. By reference, not by repeating
+ * ARIA7): the link's own words first, as WCAG 2.5.3 asks of a visible label,
+ * then the card's heading, then its time when the buyer booked the same
+ * product more than once, so "Add it to your calendar" is read as "Add it to
+ * your calendar Coaching call" and a list of the page's links tells every
+ * call apart. By reference, not by repeating
  * the title in each link: a title of MAX_TITLE_LENGTH at the costliest
  * character, three times more in each of MAX_LISTED calls, would outgrow
  * ORDERS_PAGE_BYTES (tests/orders-page-bounds.test.ts).
@@ -84,7 +85,7 @@ function BookedCallCard({ call, store, words, id, sameTitle }: { call: BookedCal
   const video = isVideoRoom(call.room);
   const minutes = Math.round((call.end - call.start) / 60_000);
   const locale = speech(store).lang.locale;
-  const named = (link: string) => ({ id: `${id}${link}`, "aria-labelledby": `${id}${sameTitle ? ` ${id}w` : ""} ${id}${link}` });
+  const named = (link: string) => ({ id: `${id}${link}`, "aria-labelledby": `${id}${link} ${id}${sameTitle ? ` ${id}w` : ""}` });
   return (
     <li className="rounded-2xl p-5" style={{ border: "1px solid var(--st-line)" }}>
       {/* A heading under "Booked calls", so the list is walked call by call (WCAG 2.4.10). */}

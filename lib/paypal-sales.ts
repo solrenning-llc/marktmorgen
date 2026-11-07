@@ -827,10 +827,22 @@ export async function watchPayPal(
       continue;
     }
     // Refunded in full: counted as a refund in the store's numbers and the affiliate book, whatever is handed back below.
-    await redisPipeline([
-      ["ZADD", refundedKey(statsId), String(now), order],
-      ["EXPIRE", refundedKey(statsId), SALES_KEPT_SECONDS],
-    ]);
+    // The mark is also what stops the hand-over retry (handOverAgain), so it must be known written before the order can
+    // leave this watch: both replies read exactly, each 0 or 1 (one member added or already there; the key's expiry
+    // set). Anything else is unknown, never "written": the order stays watched and is looked at again in an hour,
+    // before anything is told or taken off a list (Claude 6 on #2909; CX-123 rules 24 and 30).
+    const marked = repliesFor(
+      await redisPipeline([
+        ["ZADD", refundedKey(statsId), String(now), order],
+        ["EXPIRE", refundedKey(statsId), SALES_KEPT_SECONDS],
+      ]),
+      2,
+    );
+    if (!marked || !marked.every((reply) => reply === 0 || reply === 1)) {
+      console.error("a PayPal refund could not be marked; looked at again in an hour", order);
+      await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
+      continue;
+    }
     if (on.refunded) await on.refunded(paid).catch((error) => console.error("telling of a PayPal refund failed", error));
     // The record read in its exact envelope (Codex G on #2791; CX-123 rule 24): one reply, null or text. Anything else
     // is unknown, looked at again in an hour, never "no record".

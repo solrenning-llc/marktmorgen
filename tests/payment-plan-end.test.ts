@@ -12,7 +12,10 @@
  *   - a plan already given its end, or already canceled, is not touched again;
  *   - a checkout still open waits; one never paid, or that is neither a plan
  *     nor a membership with an end, is let go without any change;
- *   - the job settles each pending plan once and keeps an open one for two days.
+ *   - the job settles each pending plan once and keeps an open one for two days;
+ *   - a reply that is not the checkout or subscription asked for (another id,
+ *     or none) decides nothing: it is never settled, so the job keeps the plan
+ *     and asks again on its next pass.
  */
 import { addPeriods, finishPlan, rememberPlan, settlePlans } from "@/lib/plans";
 import { store as redis } from "./redis-stub";
@@ -26,6 +29,8 @@ const DAY = 86_400;
 const sessions: Record<string, Record<string, unknown>> = {};
 const subscriptions: Record<string, Record<string, unknown>> = {};
 const updates: { id: string; body: URLSearchParams }[] = [];
+/** What Stripe answers to an update, when a case needs a reply other than the subscription. */
+const updateReplies: Record<string, Record<string, unknown>> = {};
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -40,11 +45,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const body = new URLSearchParams(String(init?.body));
     updates.push({ id: sub[1], body });
     subscriptions[sub[1]] = { ...subscriptions[sub[1]], cancel_at: Number(body.get("cancel_at")) };
-    return answer(subscriptions[sub[1]]);
+    return answer(updateReplies[sub[1]] ?? subscriptions[sub[1]]);
   }
   return answer({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
 }) as typeof fetch;
 
+/** Not settled: neither "done", "gone" nor "open" (those end or age out the pending entry); a throw counts too. */
+const unsettled = (work: Promise<string>) => work.then((state) => !["done", "gone", "open"].includes(state), () => true);
 const checkout = (id: string, meta: Record<string, string>, over: Record<string, unknown> = {}) => ({ id, status: "complete", subscription: `sub_${id.slice(8)}`, metadata: { store: "harbor", ...meta }, ...over });
 
 async function main(): Promise<void> {
@@ -98,6 +105,26 @@ async function main(): Promise<void> {
   is("the paid one given its end; the open one kept for its two days", [first.done, first.open, updates.length], [1, 1, 4]);
   const second = await settlePlans();
   is("run again: only the open one is looked at, and nothing is changed twice", [second.done, second.open, updates.length], [0, 1, 4]);
+
+  part("A reply for another checkout or subscription decides nothing");
+  sessions.cs_test_plan00000008 = checkout("cs_test_plan00000008", { kind: "plan", plan_payments: "3", plan_interval: "month" });
+  subscriptions.sub_plan00000008 = { id: "sub_someoneElse0001", status: "active", cancel_at: ANCHOR + 90 * DAY, billing_cycle_anchor: ANCHOR };
+  is("a subscription reply with another id and an end is not taken as this plan's end", await unsettled(finishPlan(ACCOUNT, "cs_test_plan00000008")), true);
+  sessions.cs_test_plan00000009 = checkout("cs_test_plan00000009", { kind: "plan", plan_payments: "3", plan_interval: "month" });
+  subscriptions.sub_plan00000009 = { status: "canceled", billing_cycle_anchor: ANCHOR };
+  is("a subscription reply with no id, canceled, is not taken as this plan's end", await unsettled(finishPlan(ACCOUNT, "cs_test_plan00000009")), true);
+  sessions.cs_test_plan00000010 = checkout("cs_test_someoneElse1", { kind: "plan", plan_payments: "3", plan_interval: "month" }, { status: "expired", subscription: null });
+  is("a checkout reply for another checkout does not let the plan go", await unsettled(finishPlan(ACCOUNT, "cs_test_plan00000010")), true);
+  is("none of them changed any subscription", updates.length, 4);
+  sessions.cs_test_plan00000011 = checkout("cs_test_plan00000011", { kind: "plan", plan_payments: "3", plan_interval: "month" });
+  subscriptions.sub_plan00000011 = { id: "sub_plan00000011", status: "active", billing_cycle_anchor: ANCHOR };
+  updateReplies.sub_plan00000011 = { id: "sub_someoneElse0002", cancel_at: addPeriods(ANCHOR, "month", 3) };
+  is("an update answered for another subscription is not settled", await unsettled(finishPlan(ACCOUNT, "cs_test_plan00000011")), true);
+  delete updateReplies.sub_plan00000011;
+  await rememberPlan(ACCOUNT, "cs_test_plan00000008");
+  const third = await settlePlans();
+  const fourth = await settlePlans();
+  is("the job keeps such a plan and asks again on its next pass", [third.failed, third.done, fourth.failed, fourth.done], [1, 0, 1, 0]);
 
   done();
 }

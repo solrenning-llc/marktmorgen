@@ -53,12 +53,17 @@ let mode: "ok" | "error" | "garbled" | "endless" = "ok";
 let stripeCalls = 0;
 let invoiceCalls = 0;
 
-/** One invoice of a membership; amount_paid 0 for a free trial's, which is "paid" with no charge. */
-const invoice = (subId: string, created: number, status = "paid", amountPaid = 1000) => ({
+/**
+ * One invoice of a membership; a free trial's, or one a 100% code took to
+ * nothing, is "paid" with a total of 0. A total paid from the customer's
+ * credit balance is "paid" with amount_paid 0 and its total above 0.
+ */
+const invoice = (subId: string, created: number, status = "paid", amountPaid = 1000, total = status === "paid" ? amountPaid : 1000) => ({
   id: `in_${subId.slice(4)}${created}`,
   object: "invoice",
   status,
   created,
+  total,
   amount_paid: status === "paid" ? amountPaid : 0,
   parent: { type: "subscription_details", subscription_details: { subscription: subId } },
 });
@@ -266,6 +271,39 @@ async function main(): Promise<void> {
     "and marking them gives nothing: three not owed, one unknown",
     await giveBenefit(store, by, print.benefit.id, fresh.map((s) => ({ sub: s, period: "once" })), NOW * 1000),
     { ok: true, given: 0, already: 0, notOwed: 3, unknown: 1 },
+  );
+  extra = [];
+
+  part("An invoice a 100% code took to nothing is not a payment");
+  const thisMonth = NOW - 15 * DAY;
+  extra = [
+    // A 100% code "forever": every invoice is "paid" with nothing charged.
+    sub("sub_free100f01", "max@example.com", products.basic, { latest_invoice: invoice("sub_free100f01", thisMonth, "paid", 0) }),
+    // A 100% code "once": the first invoice "paid" with nothing charged, the first real renewal being retried.
+    sub("sub_free100o01", "ned@example.com", products.basic, { status: "past_due", latest_invoice: invoice("sub_free100o01", NOW - 2 * DAY, "open") }),
+    // Control: paid in full from the customer's credit balance (nothing taken from the card, the total above 0).
+    sub("sub_credit0001", "oli@example.com", products.basic, { latest_invoice: invoice("sub_credit0001", thisMonth, "paid", 0, 1000) }),
+    // Paid with money once, then a 100% code "repeating": the newest paid invoices charge nothing.
+    sub("sub_repeat0001", "pam@example.com", products.basic, { latest_invoice: invoice("sub_repeat0001", thisMonth, "paid", 0) }),
+  ];
+  paidOf = {
+    ...paidOf,
+    sub_free100f01: [invoice("sub_free100f01", thisMonth, "paid", 0), invoice("sub_free100f01", ANCHOR, "paid", 0)],
+    sub_free100o01: [invoice("sub_free100o01", ANCHOR, "paid", 0)],
+    sub_credit0001: [invoice("sub_credit0001", thisMonth, "paid", 0, 1000)],
+    sub_repeat0001: [invoice("sub_repeat0001", thisMonth, "paid", 0), invoice("sub_repeat0001", ANCHOR, "paid", 0), invoice("sub_repeat0001", ANCHOR - 30 * DAY, "paid", 1000)],
+  };
+  const coded = ["sub_free100f01", "sub_free100o01", "sub_credit0001", "sub_repeat0001"];
+  const codeView = await benefitsDue(store, NOW * 1000);
+  if (codeView.state !== "ok") throw new Error(`not read: ${codeView.state}`);
+  const codedRows = (id: string) => codeView.rows.filter((r) => r.benefit === id && coded.includes(r.sub)).map((r) => r.sub).sort();
+  is("the signed print: owed to who paid, from the card or from credit; never to who was charged nothing", codedRows(print.benefit.id), ["sub_credit0001", "sub_repeat0001"]);
+  is("the monthly call: owed only where this month's invoice charged something", codedRows(call.benefit.id), ["sub_credit0001"]);
+  is("the two charged nothing are said as unpaid, not unknown", codeView.unreadable, 0);
+  is(
+    "and marking them gives nothing",
+    await giveBenefit(store, by, print.benefit.id, [{ sub: "sub_free100f01", period: "once" }, { sub: "sub_free100o01", period: "once" }], NOW * 1000),
+    { ok: true, given: 0, already: 0, notOwed: 2, unknown: 0 },
   );
   extra = [];
 

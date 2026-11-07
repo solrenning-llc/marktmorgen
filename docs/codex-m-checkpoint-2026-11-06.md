@@ -1766,3 +1766,349 @@ RegraC1-1630ano70éC2aplica,nãograntMpreço/teto/limite/flag;C2tarifas/leituras
 CXM-20261107-1733-C1-1 entregue **c01a6acf481c8c4b3d35d0663479fb1cce760a2f/blob27baca5ca9bbc2a90b676907a6567d95616e5a02/FULL4339354chars/retornoEXATO**. PrimeiraCAS1733deu409/NÃOgravou;retryapós>=120s20:33:38→20:35:46Z/FULLnova/IDausente/prefixointeiro,semrestaurarcanal. Nenhumclaimnovo.
 NovoFULLdereconciliação: **C1-1733-TODOS-14 LIDA INTEGRALMENTE**,549Actionsesperando/3037prioridadeC4+G;umenvioPR/rodada/mainSÓconflitooupedidofila/reruninstávelcomprovadoUMAvez/empilhadossóbaseMERGEDouqueued.Mnãoassume3037/nãopushproduto/CIop. C3intentOf3097,C2#3087P1/P2+3MEDscomfixlocalaté2928baselegítima,Nlease2957/Vconsolidaçãooutroworkownershippreservado. C6-1732listaexpressamente3083entre10correçõesquenãoenviasemC1/R2sim;nenhumnovoretornonominalM.NãoalegarclassificaçãooufixM3083.
 CP0083810f/blob3af31c42/FULL296699EXATOfoireferenciadonocanal;header1734nominalefetivogravação17:32:46foiclarificadonocanal,semreescreverhistórico. PreservarpróximoretomadaMESMOCP/branches/provas.Nenhumtestereplay/CIquery/build/lint/scanner/reviewnovo/fee/gate/provider/teto/PII/automação/subagenterecursosnessarodada.Somenteleitura/coordenação/persistênciadoponto.PendenteC1reconciliar2730doispareceressame83ouqualificarcandidate561apósFF;3083R2C1disposição/novohead.MlivreparaRETORNOnominalapósreconciliação,semnovaunidadeantesC1-1633itens1–3.Semvigiainfundo,bloqueiosTEMPORÁRIOS,nãodesabilitarcontinuidaderecorrenteexistente,nãofimglobal.
+
+
+## Retomada 07/11/2026 18h33 Fortaleza — retorno focal #3083 após disposição EXPRESSA C1
+
+Checkpoint anterior FULL298173chars/blob6f309f3050885ceac8f357674d564728ddb8c11c recuperado; mainFRESH45bddafa5f5c3a15793147a2f80c903882f022e7/treeuntruncated: DEZnormas CLAUDE/AGENTS/inbox/fila/reservas mesmosGitblobs anteriores, leiturasFULLanteriores válidas. CanalFULL4458302chars/e5e379f3a49fd9ddb933c885aa28752d3aeea42b/blob eacffc3cbc7b1907457a7f545ccc35d1f004d3ce preservaPREFIXO4339354exato. DeltaC1/Mlido: C1-1737-C6-20 SIM EXPRESSO para3083 e outrosherdados; C6-1743push+pedido6712771657; C1-1746-TODOS15 PAUSA PRnovoatéC1liberar; correçõesPRexistente/revisões/focaispermitidos. C1-1748FF2921/C1-1749reservasA3B2nãoMalterar. SemnovoMproduto/semclaim3037/Gownershippreservado.
+
+RES focal próprio3083 CXM-20261107-1834-C1-1 ANTESdiff/fonte/teste novohead entregue59f53cba4ab033294bba93dd9c1f8ec4b1cc09ef/blob530faedcde80e3def4b3f6d4e98d985bc5a970ad/FULL4460103chars/readbackEXATO/prefixointeiro. Header18h34foinominadoadiantado: clock realposterior21:33:12UTC=18:33:12Fortaleza; sequência documental verdadeira preservada,nãoreescrita. Execução éserialMédio0agentes.
+
+#3083 headEXATO e2025a33ebede416e492f341989f4ce94418639e, prior1babf986bb0c76c5dcbd1b88d609c4f5e75d0a3f; compareinteiroAPENASlib/flows.ts+testnovo. Novoflows Gitblobef63c968bee57c3d8e5efb158c07fa1693374ef1; prior d0a52a708728368653a69d8ed69ff195816fc931. SAMEprovaM b6e65affc48995e3222560e0a30e33cd5ee3f4ba byte-IDsemassertionmudada: REDprior7/3FAIL→head7/7PASS. SAME42testautor Gitblob4853c6afab173945ba7cd552d67f8b94f3b27f79: REDprior42/30FAIL→head42PASS. Ligações37+97+74+13=221PASS;redis-reply-envelope23+proxy-check7=30PASS; TOTALhead300PASS. REDsseparadosnãoincluídoscomoGREEN. TodosgraphsdeexecuçãoGitblobsheadverificadosANTESspawn. Snapshot3974headfilesexatos+ownproof,376não recuperados/nãoafirmarrepopleno; scannerOFICIAL3975tracked/0correções. Tipos4roots983sourcesstrictES2017Bundler0diag,lint4roots0. Provider/HTTPsomente9mockemflowpeople, nenhumRedis/providerreal. Verificaçãofocalnãocertifica9CI/mainmerge/queue nem wholeerasure/build/browser. erase()agoraexigerepliesFor+countOfEMCADADEL/ZREM;sóquantidadecomcontageminteiranãonegativasegura;null/textonegativofração/misto recusados, workflowpermanecepause+listed, apagamentopessoae loja compartilhammesma barreira. In-flightenrollrace/runPeoplefilterLOW declaradoscontinuamseparados,nãoautobaixados.
+
+Antesdispatchguard20kcommands+20kMemoryRedis.run/500mockHTTP;120s512MiB256KiBporfilho/tipos1024MiB. Nenhumtetoatingido;semfee/limit/flag/gate/conta/provedor/PIIalterados. Localgitindexsomenteprópriacópia para scanner,nãorefautor. #2730freshOPENsame83dcd105, nenhumgrantrespostanominalnovo, C4+C1opiniõesexistentes não duplicadas. PróximoparecerMCOMMENTfocalnoEXATOe2025+recibocanal,semfontealheia/CIop/main/pushproduto. EvidênciaíntegraabaixoANTESparecer.
+
+### run.mjs
+```
+import{readFileSync,writeFileSync,mkdirSync,existsSync,symlinkSync}from'node:fs';import{resolve,join}from'node:path';import{createRequire}from'node:module';import{createHash}from'node:crypto';import{spawnSync}from'node:child_process';import{testAliases,testEnvironment}from'./view/tests/test-config.mjs';
+const root=resolve('.'),view=join(root,'view'),deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules';const{build}=createRequire(join(deps,'package.json'))('esbuild');if(!existsSync(join(view,'node_modules')))symlinkSync(deps,join(view,'node_modules'),'dir');mkdirSync('logs',{recursive:true});
+const jobs=process.argv.slice(2);for(const job of jobs){const [mode,test]=job.split(':');
+ const bootstrap=`import{MemoryRedis}from'./lib/redis-memory';import{store as redis}from'./tests/redis-stub';let pc=0,rc=0,hc=0,exceeded=false;const stop=()=>{exceeded=true;throw Error('M_ADMISSION_CEILING')};const pipeline=redis.pipeline,run=MemoryRedis.prototype.run;redis.pipeline=function(c){if(pc+c.length>20000)return stop();pc+=c.length;return pipeline.call(this,c)};MemoryRedis.prototype.run=function(c){if(rc+1>20000)return stop();rc++;return run.call(this,c)};let current=()=>{throw Error('NO_EXTERNAL_NETWORK')};Object.defineProperty(globalThis,'fetch',{configurable:true,get:()=>current,set:f=>{current=(...a)=>{if(hc+1>500)return stop();hc++;return f(...a)}}});process.on('beforeExit',()=>{console.log('M_BUDGET',JSON.stringify({pipelineCommands:pc,memoryRun:rc,httpMockDispatch:hc,exceeded}));if(exceeded)process.exitCode=1});import('./tests/${test}');`;
+ const alias=testAliases(test,view,join(view,'tests'));if(mode==='before')alias['@/lib/flows']=join(root,'prior-flows.ts');const b=await build({stdin:{contents:bootstrap,resolveDir:view,sourcefile:'m-bootstrap.ts',loader:'ts'},absWorkingDir:view,bundle:true,write:false,platform:'node',format:'cjs',alias,metafile:true,logLevel:'error'});const f=resolve('logs/'+mode+'-'+test+'.cjs');const pin=JSON.parse(readFileSync('head-pins.json','utf8'));let checked=0;for(const input of Object.keys(b.metafile.inputs)){if(input.includes('node_modules')||input==='m-bootstrap.ts')continue;const file=resolve(view,input);const bytes=readFileSync(file);const hash=createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');if(file===join(root,'prior-flows.ts')){if(hash!=='d0a52a708728368653a69d8ed69ff195816fc931')throw Error('Old rule mismatch');}else if(input==='tests/m-3083-erasure-reply.proof.ts'){if(hash!=='b6e65affc48995e3222560e0a30e33cd5ee3f4ba')throw Error('Own proof mismatch');}else if(hash!==pin[input])throw Error('Head pin mismatch '+input);checked++;}console.log(JSON.stringify({mode,test,checked}));writeFileSync(f,b.outputFiles[0].text);writeFileSync(f+'.meta.json',JSON.stringify(b.metafile));
+ const p=spawnSync(process.execPath,['--max-old-space-size=512',f],{cwd:view,env:testEnvironment({PATH:'/usr/bin:/bin',TZ:'UTC'}),encoding:'utf8',timeout:120000,maxBuffer:256*1024});const out=(p.stdout||'')+(p.stderr||'');writeFileSync(f+'.log',out);console.log(JSON.stringify({mode,test,exit:p.status,error:p.error?.message,signal:p.signal,tail:out.slice(-1700)}));if(p.error||p.signal)throw Error('Incomplete child');
+}
+
+```
+
+### verify.cjs
+```
+const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');const deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules',root=path.resolve('view'),ts=require(deps+'/typescript');
+const names=['lib/flows.ts','tests/flow-erase-replies.test.ts','tests/flow-remove-erasure.test.ts','tests/m-3083-erasure-reply.proof.ts'];const opts={strict:true,noEmit:true,allowJs:true,target:ts.ScriptTarget.ES2017,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler,skipLibCheck:true,esModuleInterop:true,resolveJsonModule:true,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'@/lib/content-jsx',baseUrl:root,paths:{'@/*':['*']},types:['node','react'],typeRoots:[deps+'/@types'],lib:['lib.esnext.d.ts','lib.dom.d.ts','lib.dom.iterable.d.ts']};
+const p=ts.createProgram(names.map(f=>path.join(root,f)),opts),ds=ts.getPreEmitDiagnostics(p);fs.writeFileSync('types.log',ts.formatDiagnosticsWithColorAndContext(ds,{getCurrentDirectory:()=>root,getCanonicalFileName:f=>f,getNewLine:()=>"\n"})+JSON.stringify({roots:names.length,sources:p.getSourceFiles().length,diagnostics:ds.length}));console.log('types',ds.length);
+const paths=names;const r=cp.spawnSync(process.execPath,['--max-old-space-size=512',deps+'/eslint/bin/eslint.js',...paths],{cwd:root,encoding:'utf8',timeout:120000,maxBuffer:256*1024});fs.writeFileSync('lint.log',(r.stdout||'')+(r.stderr||''));console.log('lint',r.status,r.signal,r.error?.message);
+
+```
+
+### focal-run.log
+```
+{"mode":"before","test":"m-3083-erasure-reply.proof.ts","checked":406}
+{"mode":"before","test":"m-3083-erasure-reply.proof.ts","exit":1,"signal":null,"tail":"\nM independent: right-length invalid erase slots must not orphan a run\n  ok    the targeted real-run erase was intercepted exactly once\n  FAIL  invalid erase replies cannot acknowledge a removal\n        expected true\n        got      false\n  FAIL  the workflow remains listed so erasure can find the run\n        expected true\n        got      false\n  FAIL  a later person erasure still removes the actual run's address\n        expected null\n        got      \"person@example.com\"\n\nHealthy real-write control\n  ok    normal removal still succeeds\n  ok    normal removal removes the workflow\n  ok    normal removal erases its actual run\n\n7 checks, 3 failing.\nM_BUDGET {\"pipelineCommands\":45,\"memoryRun\":45,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"m-3083-erasure-reply.proof.ts","checked":406}
+{"mode":"head","test":"m-3083-erasure-reply.proof.ts","exit":0,"signal":null,"tail":"\nM independent: right-length invalid erase slots must not orphan a run\n  ok    the targeted real-run erase was intercepted exactly once\n  ok    invalid erase replies cannot acknowledge a removal\n  ok    the workflow remains listed so erasure can find the run\n  ok    a later person erasure still removes the actual run's address\n\nHealthy real-write control\n  ok    normal removal still succeeds\n  ok    normal removal removes the workflow\n  ok    normal removal erases its actual run\n\n7 checks, all passing.\nM_BUDGET {\"pipelineCommands\":49,\"memoryRun\":49,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"before","test":"flow-erase-replies.test.ts","checked":406}
+{"mode":"before","test":"flow-erase-replies.test.ts","exit":1,"signal":null,"tail":"deletion read the same replies\n  FAIL  nulls of the right length (Codex M's case): forgetWorkflowPerson throws FlowWriteUnconfirmed\n        expected true\n        got      false\n  FAIL  nulls of the right length (Codex M's case): forgetStoreWorkflows throws FlowWriteUnconfirmed\n        expected true\n        got      false\n  FAIL  text counts: forgetWorkflowPerson throws FlowWriteUnconfirmed\n        expected true\n        got      false\n  FAIL  text counts: forgetStoreWorkflows throws FlowWriteUnconfirmed\n        expected true\n        got      false\n  FAIL  negative counts: forgetWorkflowPerson throws FlowWriteUnconfirmed\n        expected true\n        got      false\n  FAIL  negative counts: forgetStoreWorkflows throws FlowWriteUnconfirmed\n        expected true\n        got      false\n  FAIL  fractions: forgetWorkflowPerson throws FlowWriteUnconfirmed\n        expected true\n        got      false\n  FAIL  fractions: forgetStoreWorkflows throws FlowWriteUnconfirmed\n        expected true\n        got      false\n  FAIL  one null among counts: forgetWorkflowPerson throws FlowWriteUnconfirmed\n        expected true\n        got      false\n  FAIL  one null among counts: forgetStoreWorkflows throws FlowWriteUnconfirmed\n        expected true\n        got      false\n\nHealthy controls\n  ok    normal removal still succeeds\n  ok    normal removal removes the workflow\n  ok    normal removal erases its run\n  ok    normal person erasure\n  ok    normal person erasure removes the run's address\n  ok    normal store deletion removes the workflows\n  ok    normal store deletion erases the run\n\n42 checks, 30 failing.\nM_BUDGET {\"pipelineCommands\":282,\"memoryRun\":282,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"flow-erase-replies.test.ts","checked":406}
+{"mode":"head","test":"flow-erase-replies.test.ts","exit":0,"signal":null,"tail":"ons: and paused\n  ok    fractions: a later person erasure still removes the run's address\n  ok    one null among counts: the erase was intercepted once\n  ok    one null among counts: removal throws FlowWriteUnconfirmed\n  ok    one null among counts: the workflow stays listed\n  ok    one null among counts: and paused\n  ok    one null among counts: a later person erasure still removes the run's address\n\nRule 30: a person's erasure and the store's deletion read the same replies\n  ok    nulls of the right length (Codex M's case): forgetWorkflowPerson throws FlowWriteUnconfirmed\n  ok    nulls of the right length (Codex M's case): forgetStoreWorkflows throws FlowWriteUnconfirmed\n  ok    text counts: forgetWorkflowPerson throws FlowWriteUnconfirmed\n  ok    text counts: forgetStoreWorkflows throws FlowWriteUnconfirmed\n  ok    negative counts: forgetWorkflowPerson throws FlowWriteUnconfirmed\n  ok    negative counts: forgetStoreWorkflows throws FlowWriteUnconfirmed\n  ok    fractions: forgetWorkflowPerson throws FlowWriteUnconfirmed\n  ok    fractions: forgetStoreWorkflows throws FlowWriteUnconfirmed\n  ok    one null among counts: forgetWorkflowPerson throws FlowWriteUnconfirmed\n  ok    one null among counts: forgetStoreWorkflows throws FlowWriteUnconfirmed\n\nHealthy controls\n  ok    normal removal still succeeds\n  ok    normal removal removes the workflow\n  ok    normal removal erases its run\n  ok    normal person erasure\n  ok    normal person erasure removes the run's address\n  ok    normal store deletion removes the workflows\n  ok    normal store deletion erases the run\n\n42 checks, all passing.\nM_BUDGET {\"pipelineCommands\":292,\"memoryRun\":292,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"flow-remove-erasure.test.ts","checked":406}
+{"mode":"head","test":"flow-remove-erasure.test.ts","exit":0,"signal":null,"tail":"gain succeeds\n  ok    throws: the workflow is gone\n  ok    throws: its run is erased\n  ok    throws: its index is erased\n  ok    garbled index: the run holds the address before\n  ok    garbled index: the removal says it could not be confirmed\n  ok    garbled index: the workflow stays listed, so its runs can still be reached\n  ok    garbled index: and it is paused, so nobody new starts it and nothing more is sent\n  ok    garbled index: the other workflow is left as it was\n  ok    garbled index: a later erasure request erases the run's address\n  ok    garbled index: and its queued step\n  ok    garbled index: removing it again succeeds\n  ok    garbled index: the workflow is gone\n  ok    garbled index: its run is erased\n  ok    garbled index: its index is erased\n  ok    garbled erase: the run holds the address before\n  ok    garbled erase: the removal says it could not be confirmed\n  ok    garbled erase: the workflow stays listed, so its runs can still be reached\n  ok    garbled erase: and it is paused, so nobody new starts it and nothing more is sent\n  ok    garbled erase: the other workflow is left as it was\n  ok    garbled erase: a later erasure request erases the run's address\n  ok    garbled erase: and its queued step\n  ok    garbled erase: removing it again succeeds\n  ok    garbled erase: the workflow is gone\n  ok    garbled erase: its run is erased\n  ok    garbled erase: its index is erased\n\nRemoving a workflow when everything answers\n  ok    removal succeeds\n  ok    only the other workflow is left\n  ok    the run is erased\n  ok    the queued step is erased\n\n37 checks, all passing.\nM_BUDGET {\"pipelineCommands\":203,\"memoryRun\":203,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"flow-mutation-reads.test.ts","checked":420}
+{"mode":"head","test":"flow-mutation-reads.test.ts","exit":0,"signal":null,"tail":"nown list\n  ok    save makes no sequence write\n  ok    save preserves stored bytes\n  ok    remove refuses an unknown list\n  ok    remove makes no sequence write\n  ok    remove preserves stored bytes\n  ok    starters refuses an unknown list\n  ok    starters makes no sequence write\n  ok    starters preserves stored bytes\n  ok    keep refuses an unknown list\n  ok    keep makes no sequence write\n  ok    keep preserves stored bytes\n  ok    save needs explicit write confirmation\n  ok    remove needs explicit write confirmation\n  ok    save needs explicit write confirmation\n  ok    remove needs explicit write confirmation\n  ok    save needs explicit write confirmation\n  ok    remove needs explicit write confirmation\n  ok    save needs explicit write confirmation\n  ok    remove needs explicit write confirmation\n  ok    save needs explicit write confirmation\n  ok    remove needs explicit write confirmation\n  ok    save needs explicit write confirmation\n  ok    remove needs explicit write confirmation\n  ok    save needs explicit write confirmation\n  ok    remove needs explicit write confirmation\n  ok    save needs explicit write confirmation\n  ok    remove needs explicit write confirmation\n  ok    lost acknowledgement does not claim success\n  ok    unconfirmed response does not imply rollback\n  ok    valid creation succeeds\n  ok    creation preserves both existing sequences\n  ok    valid editing succeeds\n  ok    editing preserves the other sequence\n  ok    valid removal succeeds\n  ok    removal preserves remaining sequences\n  ok    confirmed absent list permits creation\n\n97 checks, all passing.\nM_BUDGET {\"pipelineCommands\":145,\"memoryRun\":145,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"flow-list.test.ts","checked":13}
+{"mode":"head","test":"flow-list.test.ts","exit":0,"signal":null,"tail":"low1\",\"name\":\"Welcome\",\"trigger\":\"joined\",\"productId\":null,\"active\":false,\"createdAt\":1,\"steps\":[{\"id\":\"step1\",\"delayHours\":0,\"subject\":\"Hello\",\"body\":\"Sample\"}],\"goal\":\"purchase\"}]\n  ok    valid product goal is preserved\n  ok    valid purchase goal is preserved\n  ok    store without a list is confirmed empty\n  ok    no storage read without a list\n  ok    only selected list is read\n  ok    valid list read\n  ok    only selected list is read\n  ok    confirmed missing key is empty\n  ok    only selected list is read\n  ok    confirmed stored empty list\n  ok    only selected list is read\n  ok    failed read is not an empty list []\n  ok    only selected list is read\n  ok    failed read is not an empty list [null,null]\n  ok    only selected list is read\n  ok    failed read is not an empty list null\n  ok    only selected list is read\n  ok    failed read is not an empty list {}\n  ok    only selected list is read\n  ok    failed read is not an empty list [null]\n  ok    only selected list is read\n  ok    failed read is not an empty list [\"\"]\n  ok    only selected list is read\n  ok    failed read is not an empty list [\"bad json\"]\n  ok    only selected list is read\n  ok    failed read is not an empty list [\"{}\"]\n  ok    only selected list is read\n  ok    failed read is not an empty list [\"[null]\"]\n  ok    only selected list is read\n  ok    failed read is not an empty list [\"[{\\\"id\\\":\\\"flow1\\\",\\\"name\\\":\\\"Welcome\\\",\\\"trigger\\\":\\\"joined\\\",\\\"productId\\\":null,\\\"active\\\":false,\\\"createdAt\\\":1,\\\"steps\\\":null}]\"]\n  ok    only selected list is read\n  ok    storage failure remains unknown\n\n74 checks, all passing.\nM_BUDGET {\"pipelineCommands\":0,\"memoryRun\":0,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"flow-people.test.ts","checked":412}
+{"mode":"head","test":"flow-people.test.ts","exit":0,"signal":null,"tail":"\nRead and saved strictly\n  ok    a field and a value it keeps; a stage the board has; a note with words\n  ok    a form that asks for no address cannot start a sequence\n  ok    a sequence that starts with the form, its steps kept\n\nStarted by the form, for people on the list\n  ok    the field is set for those on the list, not for somebody who is not\n  ok    Ana gets a new deal in the stage; Ben's open deal moves there\n  ok    a note on her page, saying where it came from\n  ok    the owner told once, with both of them\n  ok    and the email goes to each, once\n\nA sign-up asked from a form remembers it\n  ok    the confirmation link uses the service route and knows the form\n\nA workflow for one quiz result (added 17 October 2026)\n  ok    a result the quiz does not have is refused\n  ok    one of its results is kept on the workflow\n  ok    only the person who got that result starts it\n  ok    a sign-up asked from a quiz keeps the service route, form and result\n\n13 checks, all passing.\nM_BUDGET {\"pipelineCommands\":503,\"memoryRun\":551,\"httpMockDispatch\":9,\"exceeded\":false}\n"}
+
+```
+
+### focal-envelope.log
+```
+{"mode":"head","test":"redis-reply-envelope.test.ts","checked":406}
+{"mode":"head","test":"redis-reply-envelope.test.ts","exit":0,"signal":null,"tail":"\nstringList reads only own data slots (S proof, blob 6dd43857)\n  ok    confirmed plain strings\n  ok    confirmed empty list\n  ok    confirmed frozen list\n  ok    a plain hole is refused\n  ok    a string inherited into a hole is not a confirmed member\n  ok    an accessor is refused without executing it\n  ok    a Proxy around valid strings is refused\n  ok    stringList runs no trap of that Proxy\n  ok    a revoked Proxy is refused, not thrown on\n  ok    the answer is a fresh list, not the reply itself\n  ok    a non-string member is still refused\n\nrepliesFor refuses a Proxy before any reflection\n  ok    a Proxy around a valid two-reply pipeline is refused\n  ok    repliesFor runs no trap of that Proxy\n  ok    a plain pipeline reply still passes\n  ok    a frozen pipeline reply still passes\n  ok    a wrong count is still refused\n  ok    a hole is still refused\n\nordersGrant does not run a Proxy reply (S proof, blob 260c6b68)\n  ok    confirmed grant retains its address\n  ok    the confirmed grant uses only one GET\n  ok    an executable reply does not authorize an address\n  ok    the consumer executes no reply traps\n  ok    transport Promise probing is explicitly accounted for\n  ok    confirmed frozen grant remains valid\n\n23 checks, all passing.\nM_BUDGET {\"pipelineCommands\":0,\"memoryRun\":0,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"redis-reply-proxy-check.test.ts","checked":11}
+{"mode":"head","test":"redis-reply-proxy-check.test.ts","exit":0,"signal":null,"tail":"\nNode's own check, when it can be read\n  ok    a Proxy is a Proxy\n  ok    a plain list is not\n\nA browser: no Redis reply there, no check needed\n  ok    nothing counts as a Proxy\n\nA server without it: fail closed\n  ok    a plain list counts as a Proxy, so the read is unknown\n  ok    and again\n  ok    said once, not on every read\n  ok    no getBuiltinModule at all, same\n\n7 checks, all passing.\nM_BUDGET {\"pipelineCommands\":0,\"memoryRun\":0,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+
+```
+
+### focal-verify.log
+```
+types 0
+lint 0 null undefined
+
+```
+
+### types.log
+```
+{"roots":4,"sources":983,"diagnostics":0}
+```
+
+### lint.log
+```
+
+```
+
+### focal-scanner.log
+```
+Public data check: 3975 tracked files; 0 file(s) require correction.
+
+```
+
+### tests/m-3083-erasure-reply.proof.ts Gitblob b6e65affc48995e3222560e0a30e33cd5ee3f4ba
+```ts
+import { FlowWriteUnconfirmed, forgetWorkflowPerson, readFlows, removeFlow } from "@/lib/flows";
+import { FlowRunUnavailable, openRuns, personOf } from "@/lib/flow-runs";
+import type { Store } from "@/lib/store";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+const listId = "m-remove-proof-list";
+const listKey = "nl:mail:flows:" + listId;
+const store = { listId, statsId: null, mail: { fromName: "Sample", address: "Sample address" }, subscriptionActive: true, tier: "pro", trialEnds: 0, name: "Sample", handle: "sample", catalog: { items: [] } } as unknown as Store;
+const flow = { id: "5555555555555555", name: "Welcome", trigger: "joined", productId: null, active: true, createdAt: 1, steps: [{ id: "cccccccccccccccc", delayHours: 0, subject: "Hello", body: "Sample" }] };
+const email = "person@example.com";
+const runKey = `nl:wf:run:${flow.id}:${personOf(email)}`;
+const original = redis.pipeline;
+async function seed() { redis.clear(); await original.call(redis, [["SET", listKey, JSON.stringify([flow])]]); await openRuns(flow.id, [email]); }
+async function main() {
+  part("M independent: right-length invalid erase slots must not orphan a run");
+  await seed();
+  let intercepted = 0;
+  redis.pipeline = async commands => {
+    if (commands.some(c => c[0] === "DEL" && c[1] === runKey)) {
+      intercepted += 1;
+      // No erase is dispatched: the transport supplies one invalid null reply per command.
+      return commands.map(() => null);
+    }
+    return original.call(redis, commands);
+  };
+  let error: unknown = null;
+  try { await removeFlow(store, flow.id); } catch (caught) { error = caught; }
+  finally { redis.pipeline = original; }
+  is("the targeted real-run erase was intercepted exactly once", intercepted, 1);
+  is("invalid erase replies cannot acknowledge a removal", error instanceof FlowWriteUnconfirmed || error instanceof FlowRunUnavailable, true);
+  is("the workflow remains listed so erasure can find the run", (await readFlows(listId)).some(f => f.id === flow.id), true);
+  await forgetWorkflowPerson(store, email);
+  is("a later person erasure still removes the actual run's address", (await original.call(redis, [["HGET", runKey, "email"]]))[0], null);
+  part("Healthy real-write control");
+  await seed();
+  is("normal removal still succeeds", (await removeFlow(store, flow.id)).ok, true);
+  is("normal removal removes the workflow", (await readFlows(listId)).length, 0);
+  is("normal removal erases its actual run", (await original.call(redis, [["EXISTS", runKey]]))[0], 0);
+  done();
+}
+void main();
+
+```
+
+### tests/flow-erase-replies.test.ts Gitblob 4853c6afab173945ba7cd552d67f8b94f3b27f79
+```ts
+import { FlowWriteUnconfirmed, forgetStoreWorkflows, forgetWorkflowPerson, readFlows, removeFlow } from "@/lib/flows";
+import { openRuns, personOf } from "@/lib/flow-runs";
+import type { Store } from "@/lib/store";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+
+// A workflow's erasure is confirmed reply by reply (Codex M on #3083, proof tests/m-3083-erasure-reply.proof.ts in
+// docs/codex-m-checkpoint-2026-11-06.md): erase() checked only that the pipeline answered a list of the right length,
+// so a list of nulls (nothing dispatched) passed as an erasure, removeFlow took the workflow off the list and the
+// people's addresses stayed in runs nothing can find again. Every DEL and ZREM answers a count, a whole number from
+// zero up (countOf); anything else throws FlowWriteUnconfirmed, so the workflow stays listed and paused (CX-123 rule
+// 24). Rule 30: a person's erasure and the store's deletion go through the same erase().
+const listId = "m-remove-proof-list";
+const listKey = "nl:mail:flows:" + listId;
+const store = { listId, statsId: null, mail: { fromName: "Sample", address: "Sample address" }, subscriptionActive: true, tier: "pro", trialEnds: 0, name: "Sample", handle: "sample", catalog: { items: [] } } as unknown as Store;
+const flow = { id: "5555555555555555", name: "Welcome", trigger: "joined", productId: null, active: true, createdAt: 1, steps: [{ id: "cccccccccccccccc", delayHours: 0, subject: "Hello", body: "Sample" }] };
+const email = "person@example.com";
+const runKey = `nl:wf:run:${flow.id}:${personOf(email)}`;
+const original = redis.pipeline;
+
+async function seed(): Promise<void> {
+  redis.clear();
+  await original.call(redis, [["SET", listKey, JSON.stringify([flow])]]);
+  await openRuns(flow.id, [email]);
+}
+
+/** Answers the erase pipeline (the one that DELs the real run) with `answer`, dispatching nothing; counts it. */
+function eraseAnswers(answer: (commands: (string | number)[][]) => unknown): { count: number } {
+  const seen = { count: 0 };
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "DEL" && c[1] === runKey)) {
+      seen.count += 1;
+      return answer(commands);
+    }
+    return original.call(redis, commands);
+  }) as typeof redis.pipeline;
+  return seen;
+}
+
+async function attempt(run: () => Promise<unknown>): Promise<unknown> {
+  try {
+    await run();
+    return null;
+  } catch (error) {
+    return error;
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
+const answers: [string, (commands: (string | number)[][]) => unknown][] = [
+  ["nulls of the right length (Codex M's case)", (commands) => commands.map(() => null)],
+  ["text counts", (commands) => commands.map(() => "1")],
+  ["negative counts", (commands) => commands.map(() => -1)],
+  ["fractions", (commands) => commands.map(() => 0.5)],
+  ["one null among counts", (commands) => commands.map((_, i) => (i === 0 ? null : 1))],
+];
+
+async function main() {
+  part("Removing a workflow: right-length replies that are not counts do not confirm the erasure");
+  for (const [label, answer] of answers) {
+    await seed();
+    const seen = eraseAnswers(answer);
+    const error = await attempt(() => removeFlow(store, flow.id));
+    is(`${label}: the erase was intercepted once`, seen.count, 1);
+    is(`${label}: removal throws FlowWriteUnconfirmed`, error instanceof FlowWriteUnconfirmed, true);
+    const listed = (await readFlows(listId)).find((f) => f.id === flow.id);
+    is(`${label}: the workflow stays listed`, Boolean(listed), true);
+    is(`${label}: and paused`, listed?.active, false);
+    await forgetWorkflowPerson(store, email);
+    is(`${label}: a later person erasure still removes the run's address`, (await original.call(redis, [["HGET", runKey, "email"]]))[0], null);
+  }
+
+  part("Rule 30: a person's erasure and the store's deletion read the same replies");
+  for (const [label, answer] of answers) {
+    await seed();
+    eraseAnswers(answer);
+    is(`${label}: forgetWorkflowPerson throws FlowWriteUnconfirmed`, (await attempt(() => forgetWorkflowPerson(store, email))) instanceof FlowWriteUnconfirmed, true);
+    await seed();
+    eraseAnswers(answer);
+    is(`${label}: forgetStoreWorkflows throws FlowWriteUnconfirmed`, (await attempt(() => forgetStoreWorkflows(store))) instanceof FlowWriteUnconfirmed, true);
+  }
+
+  part("Healthy controls");
+  await seed();
+  is("normal removal still succeeds", (await removeFlow(store, flow.id)).ok, true);
+  is("normal removal removes the workflow", (await readFlows(listId)).length, 0);
+  is("normal removal erases its run", (await original.call(redis, [["EXISTS", runKey]]))[0], 0);
+  await seed();
+  is("normal person erasure", (await forgetWorkflowPerson(store, email)).flows, 1);
+  is("normal person erasure removes the run's address", (await original.call(redis, [["HGET", runKey, "email"]]))[0], null);
+  await seed();
+  await forgetStoreWorkflows(store);
+  is("normal store deletion removes the workflows", (await original.call(redis, [["EXISTS", listKey]]))[0], 0);
+  is("normal store deletion erases the run", (await original.call(redis, [["EXISTS", runKey]]))[0], 0);
+  done();
+}
+
+void main();
+
+```
+
+### lib/redis-reply.ts Gitblob ae47ea176947eb051f3df72c2271b261ec5d56c6
+```ts
+/**
+ * Reading a Redis reply only in its exact shape (audit SG2, CX-123 rule 24).
+ *
+ * A reply that is missing, cut short or of another shape is not an empty
+ * set, a zero or a success: it is unknown, and what depends on it fails
+ * closed. These answer null for anything but the exact shape, and the
+ * caller decides what failing closed means there (keep what it would have
+ * deleted, refuse, or say it could not read).
+ *
+ * Node's isProxy (node:util) is read at run time through
+ * process.getBuiltinModule (Node 20.16+/22.3+; CI and the server run Node 22/24)
+ * rather than imported, so a client bundle that reaches this file through a
+ * shared module (components/blog-body.tsx -> lib/store-blog.ts) still builds: in
+ * a browser there is no Redis reply to read, and no Proxy check is needed there.
+ */
+type ProxyCheck = (value: unknown) => boolean;
+/**
+ * The Proxy check for where this runs: Node's own when it can be read; in a browser (no Redis reply ever reaches
+ * there) none is needed; on a server without it (a Node older than 20.16/22.3), every reply counts as a Proxy, so
+ * each read fails closed as unknown and says so once, never quietly accepting a reply whose traps would run
+ * (Revisor 1 on #2822).
+ */
+export function proxyCheckFor(host: { getBuiltinModule?: (id: string) => unknown } | undefined, browser: boolean): ProxyCheck {
+  const util = host?.getBuiltinModule?.("node:util") as { types?: { isProxy?: unknown } } | undefined;
+  const check = util?.types?.isProxy;
+  if (typeof check === "function") return check as ProxyCheck;
+  if (browser) return () => false;
+  let told = false;
+  return () => {
+    if (!told) {
+      told = true;
+      console.error("node:util isProxy is not available on this server; every Redis reply is read as unknown (Node 20.16+/22.3+ needed)");
+    }
+    return true;
+  };
+}
+const isProxy: ProxyCheck = proxyCheckFor(
+  typeof process === "undefined" ? undefined : (process as { getBuiltinModule?: (id: string) => unknown }),
+  typeof window !== "undefined",
+);
+
+/**
+ * A list's own data slots, as a fresh plain list, with no code of the reply
+ * run to read it. A Proxy is refused before any reflection, so none of its
+ * traps runs (Codex S on #2672; the check Codex E2 accepted in
+ * lib/stats-notes.ts). A plain or frozen array has no executable envelope
+ * left: its length and each slot are read as own descriptors, so a slot that
+ * is missing (a hole), inherited from a prototype or a getter is not a reply,
+ * and the whole answer is null. With `expected`, the length must be exactly it.
+ */
+function ownSlots(reply: unknown, expected?: number): unknown[] | null {
+  if (isProxy(reply) || !Array.isArray(reply)) return null;
+  const length = Object.getOwnPropertyDescriptor(reply, "length");
+  if (!length || !Object.hasOwn(length, "value")) return null;
+  const count: unknown = length.value;
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) return null;
+  if (expected !== undefined && count !== expected) return null;
+  const out: unknown[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const slot = Object.getOwnPropertyDescriptor(reply, String(i));
+    if (!slot || !Object.hasOwn(slot, "value")) return null;
+    out.push(slot.value);
+  }
+  return out;
+}
+
+/**
+ * A list of strings (SMEMBERS, LRANGE, ZRANGEBYSCORE, HGETALL): exactly that,
+ * as a fresh list read from the reply's own data slots, or null. A Proxy, a
+ * hole, an inherited member or a getter is refused, and nothing of the reply
+ * is run (Codex S on #2672).
+ */
+export function stringList(reply: unknown): string[] | null {
+  const slots = ownSlots(reply);
+  if (!slots) return null;
+  for (const member of slots) if (typeof member !== "string") return null;
+  return slots as string[];
+}
+
+/** A count (DEL, EXISTS, SCARD, HLEN, an EVAL that answers one): a whole number from zero up, or null. */
+export function countOf(reply: unknown): number | null {
+  return typeof reply === "number" && Number.isSafeInteger(reply) && reply >= 0 ? reply : null;
+}
+
+/**
+ * A pipeline's replies, only when there is exactly one for each command sent,
+ * as a fresh plain list. Each reply is read from the list's own data slot:
+ * a slot that is missing (a hole), inherited from a prototype or a getter is
+ * not a reply, and the whole answer is null (Codex S on #2672; Codex G on #2806), so nothing
+ * read later can answer differently from what was checked. A Proxy is refused
+ * before any of its traps can run.
+ */
+export function repliesFor(replies: unknown, commands: number): unknown[] | null {
+  return ownSlots(replies, commands);
+}
+
+/** Thrown where a reply was not in its exact shape, so what depended on it is said as not done. */
+export class UnknownReplyError extends Error {
+  constructor(what: string) {
+    super(`Redis answered ${what} in an unknown shape`);
+    this.name = "UnknownReplyError";
+  }
+}
+
+```
+
+Snapshot validation: {"verified_exact_head_blobs": 3974, "mismatches": [], "unrecovered_head_files": 331, "own_proof_exact": true}
+

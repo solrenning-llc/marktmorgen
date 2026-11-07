@@ -22,31 +22,38 @@ const key = (statsId: string) => `nl:stats:${statsId}:spend`;
 const ID = /^[a-f0-9]{8}$/;
 const KEEP_SECONDS = 400 * 86_400;
 
-export function parseSpends(raw: unknown): AdSpend[] {
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+/**
+ * The typed entries of a hash's fields and values, whole or not at all (CX-123 rule 24; Codex Z on #2924): every
+ * field an id and every value an entry this code writes, or null (unknown), never the other entries as if they were
+ * all of it.
+ */
+export function parseSpends(raw: unknown): AdSpend[] | null {
+  if (!Array.isArray(raw) || raw.length % 2 !== 0) return null;
   const out: AdSpend[] = [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    if (!ID.test(flat[i])) continue;
+  for (let i = 0; i + 1 < raw.length; i += 2) {
+    const [field, text] = [raw[i], raw[i + 1]];
+    if (typeof field !== "string" || !ID.test(field) || typeof text !== "string") return null;
     let value: unknown;
     try {
-      value = JSON.parse(flat[i + 1]);
+      value = JSON.parse(text);
     } catch {
-      continue;
+      return null;
     }
-    if (!value || typeof value !== "object") continue;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     // Read back through the same rule it was written by, with no "now": a kept entry is never refused for its age.
     const v = value as Record<string, unknown>;
     const read = readSpend({ channel: v.channel, campaign: v.campaign, cents: v.cents, from: v.from, to: v.to }, Number.MAX_SAFE_INTEGER);
-    if (read.ok) out.push({ id: flat[i], ...read.spend });
+    if (!read.ok) return null;
+    out.push({ id: field, ...read.spend });
   }
   return out.sort((a, b) => a.from.localeCompare(b.from) || a.id.localeCompare(b.id)).slice(-MAX_SPEND_ENTRIES);
 }
 
-/** The typed lines only, read exactly (CX-123 rule 24): a hash reply in another shape throws, never "no lines". */
+/** The typed lines only, read exactly (CX-123 rule 24): a hash reply, or a member of it, in another shape throws, never "no lines". */
 async function typedSpends(statsId: string): Promise<AdSpend[]> {
-  const raw = stringList(repliesFor(await redisPipeline([["HGETALL", key(statsId)]]), 1)?.[0]);
-  if (!raw || raw.length % 2 !== 0) throw new UnknownReplyError("the ad spend typed");
-  return parseSpends(raw);
+  const spends = parseSpends(stringList(repliesFor(await redisPipeline([["HGETALL", key(statsId)]]), 1)?.[0]));
+  if (!spends) throw new UnknownReplyError("the ad spend typed");
+  return spends;
 }
 
 /** What spend was read: every line known, or the typed ones with Meta's unread (`metaUnread`), never Meta's as 0. */

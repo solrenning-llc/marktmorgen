@@ -75,8 +75,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return answer({ id: `email_${emails.length}` });
   }
   const path = url.pathname.replace(/^\/v1/, "");
-  if (path === "/customers") return answer({ object: "list", has_more: false, data: url.searchParams.get("email") === "member@example.com" ? [{ id: "cus_member0001" }] : [] });
-  if (path === "/subscriptions" && (init?.method ?? "GET") === "GET") return answer({ object: "list", has_more: false, data: url.searchParams.get("customer") === "cus_member0001" ? subs : [] });
+  // Stripe's lists carry has_more: an answer without it is not one this code reads (rule 24).
+  if (path === "/customers") return answer({ object: "list", data: url.searchParams.get("email") === "member@example.com" ? [{ id: "cus_member0001" }] : [], has_more: false });
+  if (path === "/subscriptions" && (init?.method ?? "GET") === "GET") return answer({ object: "list", data: url.searchParams.get("customer") === "cus_member0001" ? subs : [], has_more: false });
   if (path.startsWith("/products")) return answer({ object: "list", data: [] });
   if (init?.method === "POST" && path.startsWith("/subscriptions/")) {
     const headers = new Headers(init.headers);
@@ -89,6 +90,15 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (mode === "odd") return answer({ id: sub.id });
     const end = Number(body.get("trial_end"));
     Object.assign(sub, { status: "trialing", trial_end: end });
+    // Metadata merged as Stripe merges it: an empty value removes its key.
+    const meta = { ...(sub.metadata as Record<string, string>) };
+    for (const [key, value] of body) {
+      const name = /^metadata\[(.+)\]$/.exec(key)?.[1];
+      if (!name) continue;
+      if (value === "") delete meta[name];
+      else meta[name] = value;
+    }
+    sub.metadata = meta;
     return answer(sub);
   }
   return answer({ object: "list", data: [] });

@@ -21,6 +21,12 @@
  * and what they get change together. In a free trial nothing is charged now
  * and the new price starts when the trial ends. A member keeps whatever
  * discount their membership already had.
+ *
+ * A member who paid and was given free days (lib/member-free-days.ts) reads
+ * "trialing" on Stripe, which prorates nothing in a trial: a switch then would
+ * hand the new tier over for nothing until the free days end. So it is refused
+ * while they run ("freeDays"), and the page says why; it opens again with the
+ * next charge (Claude 4 team review of #2912, A1).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -31,6 +37,7 @@ import { canSellProduct } from "@/lib/store-checkout";
 import { type Membership, endsAtOf, grantOf, subscriptionCurrency, subsOf } from "@/lib/membership-manage";
 import { canTier, direction, dueNow, productOfSub } from "@/lib/tier-rules";
 import { formatMoney } from "@/lib/money";
+import { inPaidFreeDays } from "@/lib/member-free-days-rules";
 import { membershipLine } from "@/lib/buyer-words";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { DEFAULT_LANGUAGE, LANGUAGES, parseLanguage } from "@/lib/store-language";
@@ -251,18 +258,20 @@ export type Preview = {
   digital: boolean;
 };
 
-export type PreviewResult = { ok: true; preview: Preview } | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "error" };
+export type PreviewResult = { ok: true; preview: Preview } | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "freeDays" | "error" };
 
 type Found = { grant: NonNullable<Awaited<ReturnType<typeof grantOf>>>; itemId: string; from: Listing; to: Listing; trialing: boolean };
 
 /** Checks one switch against the link, the membership and the tiers, asking Stripe only what it must. */
-async function find(store: Store, token: string, subscription: string, target: string): Promise<Found | { reason: "expired" | "gone" | "tier" | "currency" }> {
+async function find(store: Store, token: string, subscription: string, target: string): Promise<Found | { reason: "expired" | "gone" | "tier" | "currency" | "freeDays" }> {
   if (!SUB_PATTERN.test(subscription)) return { reason: "gone" };
   const grant = await grantOf(store, token);
   if (!grant) return { reason: "expired" };
   const sub = (await subsOf(store, grant)).find((s) => s.id === subscription);
   // Not this member's, not this store's, or no longer running: one answer for all.
   if (!sub || endsAtOf(sub) !== null || sub.metadata?.ends_after || !SWITCHABLE.has(String(sub.status))) return { reason: "gone" };
+  // Paid, in free days: Stripe would prorate nothing, so nothing is switched until they end.
+  if (inPaidFreeDays(sub as Record<string, unknown>)) return { reason: "freeDays" };
   const itemId = typeof sub.items?.data?.[0]?.id === "string" ? (sub.items.data[0].id as string) : "";
   if (!itemId || (sub.items?.data?.length ?? 0) !== 1) return { reason: "gone" };
   // The new tier's Price is made in the store's currency (tierPrice); a subscription
@@ -312,7 +321,7 @@ export async function previewSwitch(store: Store, token: string, subscription: s
 
 export type SwitchResult =
   | { ok: true; title: string }
-  | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "stale" | "declined" | "busy" | "consent" | "unconfirmed" | "error" };
+  | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "freeDays" | "stale" | "declined" | "busy" | "consent" | "unconfirmed" | "error" };
 
 /**
  * Makes the switch, at the second the preview was worked out for. The card on

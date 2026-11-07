@@ -680,23 +680,48 @@ function wanted(store: Store, ids: Iterable<string> | undefined): string[] {
  * holds is not read again.
  */
 export async function readListings(store: Store, ids?: Iterable<string>): Promise<Listing[]> {
+  return (await readListingsMeasured(store, ids)).listings;
+}
+
+/** readListings, and how many bytes of listing records it read from Redis (0 for those the store record holds whole). */
+export async function readListingsMeasured(store: Store, ids?: Iterable<string>): Promise<{ listings: Listing[]; bytes: number }> {
   const asked = wanted(store, ids);
   const catalog = store.catalog;
   if (catalog.inline) {
     const byId = new Map(catalog.inline.map((p) => [p.id, p]));
-    return asked.map((id) => byId.get(id)).filter((p): p is Product => Boolean(p)).map(listingOf);
+    return { listings: asked.map((id) => byId.get(id)).filter((p): p is Product => Boolean(p)).map(listingOf), bytes: 0 };
   }
-  if (asked.length === 0) return [];
+  if (asked.length === 0) return { listings: [], bytes: 0 };
   const found = new Map(catalog.head.map((listing) => [listing.id, listing]));
   const missing = asked.filter((id) => !found.has(id));
+  let bytes = 0;
   if (missing.length && catalog.id && isRedisConfigured()) {
     const raws = await getMany(missing.map((id) => listingKey(catalog.id!, id)));
+    bytes = raws.reduce<number>((sum, raw) => sum + (typeof raw === "string" ? Buffer.byteLength(raw, "utf8") : 0), 0);
     missing.forEach((id, i) => {
       const listing = parseListing(parseJson(raws[i]));
       if (listing && listing.id === id) found.set(id, listing);
     });
   }
-  return asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l));
+  return { listings: asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l)), bytes };
+}
+
+/**
+ * What these products' listing records weigh now, in bytes (STRLEN), on
+ * Redis's exact answer only (one whole number per product), so a read can be
+ * paid for at what it will read; null when it cannot be known. Products the
+ * store record holds whole (inline, or in the head) weigh 0: nothing is read.
+ */
+export async function listingSizes(store: Store, ids: string[]): Promise<number[] | null> {
+  const catalog = store.catalog;
+  if (catalog.inline || !ids.length) return ids.map(() => 0);
+  if (!catalog.id || !isRedisConfigured()) return null;
+  const head = new Set(catalog.head.map((listing) => listing.id));
+  const asked = ids.filter((id) => !head.has(id));
+  const replies: unknown = asked.length ? await redisPipeline(asked.map((id) => ["STRLEN", listingKey(catalog.id!, id)])) : [];
+  if (!Array.isArray(replies) || replies.length !== asked.length || replies.some((n) => typeof n !== "number" || !Number.isSafeInteger(n) || n < 0)) return null;
+  const sizes = new Map(asked.map((id, i) => [id, replies[i] as number]));
+  return ids.map((id) => sizes.get(id) ?? 0);
 }
 
 /** One listing, or null when the store has no such product (or no id was given). */

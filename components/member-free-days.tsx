@@ -139,7 +139,7 @@ export function MemberFreeDays({ titles }: { titles: Record<string, string> }) {
                           {`Review: the next charge moves from ${day(m.nextCharge)} to ${day(movedCharge(m.nextCharge, count))}, ${daysWord(count)} later. ${found.email} gets an email from your store saying so, counted in your store's emails.`}
                         </p>
                         <p className="mt-1 text-sm text-ink-soft">
-                          While the free days run, Stripe shows the membership as in a free trial, so the numbers on this page count it as a trial until it is paid again.
+                          While the free days run, Stripe shows the membership as in a free trial. A member who has paid still counts as paying here, and can switch plans or move to yearly once the next charge is paid.
                         </p>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button type="button" className="btn btn-primary btn-sm" disabled={busy !== ""} aria-busy={busy === m.id} onClick={() => void give(m)}>

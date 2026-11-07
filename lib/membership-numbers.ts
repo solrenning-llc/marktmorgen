@@ -36,6 +36,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { type Invoice, type Movements, movementsFrom, pricesFrom } from "@/lib/mrr-movements";
 import { LEAVE_NAMES, LEAVE_REASONS, type LeaveReason, isLeaveReason, isOwnReasonId } from "@/lib/leave-rules";
+import { memberStatus, realTrialEnd } from "@/lib/member-free-days-rules";
 
 const MAX_PAGES = 20;
 const CACHE_SECONDS = 10 * 60;
@@ -470,7 +471,8 @@ export function readSub(raw: Raw, handles: Set<string>): Sub | null {
   const quantity = num(item?.quantity) || 1;
   return {
     id: typeof raw.id === "string" ? raw.id : "",
-    status: typeof raw.status === "string" ? raw.status : "",
+    // A paid membership in free days the creator gave reads "trialing" on Stripe: it is paying (lib/member-free-days-rules.ts).
+    status: memberStatus(raw as Record<string, unknown>),
     product: meta.product,
     amount: unit * quantity,
     currency: typeof raw.currency === "string" ? raw.currency : "",
@@ -478,7 +480,8 @@ export function readSub(raw: Raw, handles: Set<string>): Sub | null {
     count: num(item?.price?.recurring?.interval_count) || 1,
     start: num(raw.start_date),
     ended: num(raw.ended_at),
-    trialEnd: num(raw.trial_end),
+    // The real trial's end: free days given to a paid membership are never counted as one, nor as one that converted.
+    trialEnd: realTrialEnd(raw as Record<string, unknown>),
     channel: "channel" in meta ? (meta.channel && meta.channel !== "direct" ? meta.channel : "direct") : meta.utm_source || "unrecorded",
     entry: entryOf(meta),
     // A membership with a set number of payments is given its end when it is

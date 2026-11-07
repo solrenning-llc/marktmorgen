@@ -283,6 +283,17 @@ async function main(): Promise<void> {
   is("another store's sale opens nobody", await addressForSale(store, "cs_test_other000000001"), null);
   is("something that is not a sale's reference is not looked up", await addressForSale(store, "../../v1/customers"), null);
 
+  part("Free days given to a paying member (641 [WG1]; review of #2912, M1, fixed by Claude 4 on Claude 5's behalf)");
+  // Free days are Stripe's trial_end: it answers "trialing", and the membership's own record says they were given to a paid one.
+  const club = sessions.find((s) => s.id === "cs_test_club0000000001")!;
+  const paid = club.subscription;
+  const freeEnd = NOW + 27 * DAY;
+  club.subscription = { ...paid, status: "trialing", trial_end: freeEnd, metadata: { store: "bakery", product: "club1", mm_free_days_until: String(freeEnd), mm_trial_end_before: "0" } } as typeof paid;
+  is("a member who paid and was given free days is shown paying, never 'in a free trial'", (await buyerProfile(store, "buyer@example.com")).memberships.map((m) => m.status), ["active"]);
+  club.subscription = { ...paid, status: "trialing", trial_end: freeEnd } as typeof paid;
+  is("control: a real free trial is still shown as one", (await buyerProfile(store, "buyer@example.com")).memberships.map((m) => m.status), ["trialing"]);
+  club.subscription = paid;
+
   part("When Stripe cannot be read");
   stripeDown = true;
   const down = await buyerProfile(store, "buyer@example.com");

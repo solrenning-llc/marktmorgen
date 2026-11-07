@@ -15,7 +15,14 @@
  * past the store itself (no product, no review, no claim, no Stripe call),
  * and its tab title names neither the store nor a product. The manifest is
  * a 404 no cache keeps. Switched back on, every one of them works as before.
+ *
+ * A review sent while the store is off is answered "unavailable", a notice of
+ * its own in every buyer language, never "something went wrong, try again";
+ * the thank-you page shows no review form for it. The emailed free copy's
+ * button (app/api/store/free/download) hands over nothing, lists no one and
+ * leaves the link's uses untouched while the store is off.
  */
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import ReviewsPage, { generateMetadata as reviewsMeta } from "@/app/[handle]/p/[product]/reviews/page";
@@ -24,9 +31,14 @@ import FreePage, { generateMetadata as freeMeta } from "@/app/[handle]/free/page
 import LeftPage, { generateMetadata as leftMeta } from "@/app/[handle]/left/page";
 import { GET as manifest } from "@/app/[handle]/manifest.webmanifest/route";
 import { POST as saveReview } from "@/app/api/store/review/route";
+import { POST as downloadFree } from "@/app/api/store/free/download/route";
+import { REVIEW_NOTICES } from "@/components/review-form";
+import { GIVING_WORDS } from "@/lib/buyer-words/giving";
+import { LANGUAGES } from "@/lib/store-language";
+import { listSize } from "@/lib/free";
 import { StoreResting } from "@/components/store-resting";
 import { BLOCK_WORDS } from "@/lib/buyer-words/blocks";
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, noteTakedown, setStripeAccount, setSubscription, storeForHandle } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, noteTakedown, setProductLink, setStripeAccount, setSubscription, storeForHandle } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { answering } from "./security/next-headers";
 import { paidPeriod } from "./billing-period-fixture";
@@ -43,6 +55,7 @@ async function main(): Promise<void> {
   await claimHandle(owner, "glazeworks", "Glaze Works", "");
   await ensureStatsId(owner);
   await ensureStoreId(owner);
+  await ensureListId(owner);
   await setSubscription(owner, { customerId: "cus_of1", subscriptionId: "sub_of1", active: true, tier: "creator", period: paidPeriod() });
   // A connected account, so an order on the review page and route is looked up at Stripe while the store is on.
   await setStripeAccount(owner, "acct_1Of1Glaze0000000", true);
@@ -51,6 +64,7 @@ async function main(): Promise<void> {
   if (!paid.ok || !free.ok) throw new Error("products not made");
   const paidId = paid.product.id;
   const freeId = free.product.id;
+  if (!(await setProductLink(owner, freeId, "https://example.com/glaze-chart.pdf")).ok) throw new Error("link not set");
   const handle = "@glazeworks";
   // The pages read the request they answer (its host, a domain of the store's own) as in Next.
   answering(new Request("https://marktmorgen.com/@glazeworks"));
@@ -83,10 +97,20 @@ async function main(): Promise<void> {
       leftMeta({ params: Promise.resolve({ handle }), searchParams: Promise.resolve({}) }),
     ]).then((all) => all.map((meta) => String(meta.title)));
   const app = () => manifest(new NextRequest("https://marktmorgen.com/@glazeworks/manifest.webmanifest"), { params: Promise.resolve({ handle }) });
-  const post = () => {
-    const form = new URLSearchParams({ handle: "glazeworks", product: paidId, session_id: "cs_test_of1reviewdoor0000000000", stars: "5", text: "Great course" });
+  const post = (back = "review") => {
+    const form = new URLSearchParams({ handle: "glazeworks", product: paidId, session_id: "cs_test_of1reviewdoor0000000000", stars: "5", text: "Great course", back });
     return saveReview(new NextRequest("https://marktmorgen.com/api/store/review", { method: "POST", body: form, headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: "https://marktmorgen.com", Host: "marktmorgen.com" } }));
   };
+
+  // An emailed free copy's link, as lib/free.ts keeps it (requestCopy), for the button that hands it over.
+  const token = "a".repeat(64);
+  const hashed = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 40);
+  const usesKey = `nl:free:uses:${hashed(`nimbus-free-uses:${token}`)}`;
+  await redis.pipeline([["SET", `nl:free:claim:${hashed(`nimbus-free-claim:${token}`)}`, JSON.stringify({ h: "glazeworks", p: freeId, e: "reader@example.com", c: true, at: new Date().toISOString() })]]);
+  const download = () =>
+    downloadFree(new NextRequest("https://marktmorgen.com/api/store/free/download", { method: "POST", body: new URLSearchParams({ token }), headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: "https://marktmorgen.com", Host: "marktmorgen.com" } }));
+  const uses = async () => Number((await redis.pipeline([["GET", usesKey]]))[0] ?? 0);
+  const listed = async () => (await listSize((await storeForHandle("glazeworks"))!)).total;
 
   // Stripe is never reached by a store that is switched off: any call to it is counted here.
   const realFetch = globalThis.fetch;
@@ -147,13 +171,43 @@ async function main(): Promise<void> {
     is("the review page asks Stripe nothing about the order", fetched, 0);
     const refused = await post();
     is("a review sent for it is not saved and Stripe is not asked", [refused.status, fetched], [303, 0]);
-    is("the buyer is sent back to the review page, which says the store is not available", (refused.headers.get("location") ?? "").includes("/@glazeworks/review?") && (refused.headers.get("location") ?? "").includes("status=error"), true);
+    is("the buyer is sent back to the review page, which says the store is not available", (refused.headers.get("location") ?? "").includes("/@glazeworks/review?") && (refused.headers.get("location") ?? "").includes("status=unavailable"), true);
+    fetched = 0;
+    const fromThanks = await post("thanks");
+    const back = fromThanks.headers.get("location") ?? "";
+    is("one sent from the thank-you page goes back there, told the store is not available, not that something went wrong", [fromThanks.status, fetched, back.includes("/@glazeworks/thanks?"), back.includes("review=unavailable"), back.includes("review=error")], [303, 0, true, true, false]);
+
+    part("The notice the buyer reads is true, in every buyer language");
+    is("unavailable is a notice the pages accept, read as an alert", REVIEW_NOTICES.unavailable?.alert, true);
+    for (const code of Object.keys(LANGUAGES) as (keyof typeof GIVING_WORDS)[]) {
+      const notices = GIVING_WORDS[code].reviewNotices;
+      is(`${code}: its own words, not the words for an error`, typeof notices.unavailable === "string" && notices.unavailable.length > 20 && notices.unavailable !== notices.error, true);
+    }
+    is("in English it says the store is not available and the review was not saved", REVIEW_NOTICES.unavailable?.text, "This store is not available right now, so your review was not saved.");
+    const thanks = readFileSync("app/[handle]/thanks/page.tsx", "utf8");
+    is("the thank-you page offers no review form while the store is switched off", /order\.amount > 0 && order\.email && takesReviews\(store\) && !store\.suspended/.test(thanks), true);
+    is("and says why, when a review sent from it was refused", thanks.includes('store.suspended && reviewStatus === "unavailable"'), true);
+
+    part("The emailed free copy is not handed over while the store is off");
+    const before = await uses();
+    const spentCommands = await commands(async () => {
+      const shutDownload = await download();
+      is("nothing is handed over", [shutDownload.status, shutDownload.headers.get("location")], [404, null]);
+      is("the answer says the page is unavailable", await shutDownload.text(), `${words.unavailableTitle}.`);
+    });
+    is("the link keeps every use it had", await uses(), before);
+    is("nothing is counted, listed or queued", spentCommands.some((c) => /^(INCR|SET|ZADD|HSET|LPUSH|RPUSH|SADD|EVAL)/.test(c)), false);
+    is("no one joins the creator's list", await listed(), 0);
 
     part("Switched back on");
     await noteTakedown(owner, null, false);
     is("every page is drawn again", [resting(await pages.reviews())[0], resting(await pages.review())[0], resting(await pages.free())[0], resting(await pages.left())[0]], [false, false, false, false]);
     is("and the manifest is given again", (await app()).status, 200);
     is("the list's title names the product again", (await titles())[0].includes("Kiln Secrets Course"), true);
+    const handed = await download();
+    is("the free copy's button hands it over again", [handed.status, handed.headers.get("location")], [303, "https://example.com/glaze-chart.pdf"]);
+    is("spending one use of the link", await uses(), before + 1);
+    is("and the address joins the list now that it is proved", await listed(), 1);
 
     part("Each check is made where the store is read, before anything else");
     // The code between the two, comments set aside.

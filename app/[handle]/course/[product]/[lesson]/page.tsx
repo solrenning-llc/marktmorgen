@@ -4,6 +4,8 @@ import { isResting } from "@/lib/traffic";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { cookies } from "next/headers";
+import { SESSION_COOKIE } from "@/lib/auth";
+import { seesDrafts } from "@/lib/draft-view";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
@@ -79,6 +81,12 @@ export default async function LessonPage({ params, searchParams }: Params) {
   if (!store) notFound();
   const product = await readListing(store, productId);
   if (!product?.course) redirect(`/@${store.handle}`);
+  const jar = await cookies();
+  const access = await courseAccess(store, product, jar);
+  // A draft is not: only its students and the store's owner and team, signed
+  // in, see anything of it, a free preview included (MM-SA-30). Anyone else
+  // goes where an id that does not exist goes, before its lessons are read.
+  if (product.hidden && access.state !== "open" && !(await seesDrafts(store, jar.get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
   const course = await readCourse(product.course.id);
   const base = `/@${store.handle}/course/${product.id}`;
   const found = course ? findLesson(course, lessonId) : null;
@@ -86,7 +94,6 @@ export default async function LessonPage({ params, searchParams }: Params) {
   const said = speech(store);
   const w = coursesWords(store.language);
 
-  const access = await courseAccess(store, product, await cookies());
   const open = access.state === "open" && isOpen(course, found.unit, access.start);
   // A free preview is open to anyone; everything else to a student whose
   // module has opened.

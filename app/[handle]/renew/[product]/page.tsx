@@ -51,7 +51,12 @@ export default async function RenewPage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
-  const product = await readListing(store, productId) ?? null;
+  const listed = (await readListing(store, productId)) ?? null;
+  // A come-back email's link (lib/winback-send.ts): the offer it carries, for
+  // the address it was sent to, while it lasts.
+  const grant = back && listed ? await readWinBack(store, listed.id, back).catch(() => null) : null;
+  // A draft is named only to whoever holds its come-back link; otherwise it is a product not known here (MM-SA-30).
+  const product = listed && (!listed.hidden || grant) ? listed : null;
   const say = speech(store);
   const { w } = say;
   const m = membershipWords(store.language);
@@ -63,9 +68,6 @@ export default async function RenewPage({ params, searchParams }: Params) {
       ? membershipLine(store, product.recurring, say.money(fromPriceCents(product)), activeIntro(product, store.tiers))
       : null;
   const needsChoice = product ? product.options.length > 0 : false;
-  // A come-back email's link (lib/winback-send.ts): the offer it carries, for
-  // the address it was sent to, while it lasts.
-  const grant = back && product ? await readWinBack(store, product.id, back).catch(() => null) : null;
   // Offered only while its price can be bought (lib/product-option.ts, namedPriceOffered).
   const offer = selling && grant && product && namedPriceOffered(product, grant.option) ? grant : null;
   const until = offer ? say.date(offer.until * 1000) : "";

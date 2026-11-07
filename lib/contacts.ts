@@ -970,9 +970,14 @@ return 0`;
  * the address itself, so it is deleted by its key without reading it; what it
  * would have told (its unsubscribe link's record, its place in the counts) is
  * then unknown, and that throws too: the erasure is said as incomplete, never
- * done (Claude 5's review of #2700). A retry finds no row and answers none:
- * a token record that row may once have had stays, found only by a full scan,
- * and leads nowhere (readUnsubToken needs the row's own token to match).
+ * done (Claude 5's review of #2700). Its unsubscribe token's record holds the
+ * address in clear and never expires, and nothing but the row leads to it: so
+ * a token still whole in the row's text is deleted in the same request as the
+ * row, each by its exact receipt (unreadableTokens); a row whose text names a
+ * token that cannot be read whole is kept untouched, so every retry finds it
+ * and stays incomplete instead of answering none over a token left behind
+ * (pre-review of eb9a47c179). A row cut before its token's field cannot tell
+ * whether it ever had one; it is deleted, and only then may a retry answer none.
  */
 export async function forgetContactPerson(listId: string | null, rawEmail: string): Promise<number> {
   if (!listId || !isRedisConfigured()) return 0;
@@ -983,8 +988,12 @@ export async function forgetContactPerson(listId: string | null, rawEmail: strin
   if (raw === null) return 0;
   const contact = parseContact(raw);
   if (!contact) {
-    const gone = countOf(repliesFor(await redisPipeline([["HDEL", leadsKey(listId), email]]), 1)?.[0]);
-    if (gone === null || gone > 1) throw new UnknownReplyError("an unreadable contact's deletion");
+    const tokens = unreadableTokens(raw);
+    // A token named but not readable whole: the row is the only way to its record, so it is kept.
+    if (!tokens) throw new UnreadableContactError();
+    const commands: (string | number)[][] = [["HDEL", leadsKey(listId), email], ...tokens.map((t) => ["DEL", tokenKey(t)])];
+    const gone = repliesFor(await redisPipeline(commands), commands.length)?.map(countOf);
+    if (!gone || gone.some((n) => n === null || n > 1)) throw new UnknownReplyError("an unreadable contact's deletion");
     throw new UnreadableContactError();
   }
   const commands: (string | number)[][] = [["HDEL", leadsKey(listId), email]];
@@ -1000,9 +1009,29 @@ export async function forgetContactPerson(listId: string | null, rawEmail: strin
 }
 
 /**
- * A contact row that did not read was deleted by its key, but what it held
- * elsewhere (its unsubscribe link's record, its place in the list's counts)
- * cannot be known: the erasure is incomplete, never said as done.
+ * The unsubscribe tokens a contact row that does not read still holds whole
+ * in its text, under its own "t" key (a quote inside a value is escaped, so
+ * a value never reads as that key); [] when it names none or names it empty;
+ * null when it names one that cannot be read whole (cut short, or of another
+ * shape), which is unknown.
+ */
+export function unreadableTokens(raw: string): string[] | null {
+  const tokens = new Set<string>();
+  for (const found of raw.matchAll(/"t"\s*:\s*("[^"]*"?)?/g)) {
+    const value = found[1];
+    if (value === '""') continue;
+    const token = value?.length === 42 && value.endsWith('"') ? value.slice(1, -1) : "";
+    if (!UNSUB_TOKEN.test(token)) return null;
+    tokens.add(token);
+  }
+  return [...tokens];
+}
+
+/**
+ * A contact row that did not read: deleted by its key with the unsubscribe
+ * token still whole in its text, or kept when a token it names cannot be
+ * read; either way its place in the list's counts (and, for a kept row, its
+ * token's record) cannot be known: the erasure is incomplete, never said as done.
  */
 export class UnreadableContactError extends Error {
   constructor() {

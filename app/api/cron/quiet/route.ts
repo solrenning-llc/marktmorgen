@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { isSenderConfigured } from "@/lib/email";
 import { visitedFolders } from "@/lib/traffic";
 import { monthKey } from "@/lib/delivery";
@@ -25,8 +26,12 @@ export async function GET(request: NextRequest) {
     return new Response("Unauthorized", { status: 401, headers: { "Cache-Control": "no-store" } });
   }
   if (!isRedisConfigured() || !isSenderConfigured()) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
-  const [got] = await redisPipeline([["SET", "nl:quiet:lock", "1", "NX", "EX", 120]]);
-  if (got === null) return Response.json({ ok: true, busy: true });
+  // One run at a time, on an exact claim (lib/claim-mark.ts): held by another run is busy; an unknown answer
+  // runs nothing this time, and the lock is let go at the end only while it still holds this run's own value.
+  const lock = claimValue();
+  const got = await claimMark("nl:quiet:lock", 120, lock);
+  if (got === "taken") return Response.json({ ok: true, busy: true });
+  if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   const started = Date.now();
   const out = { sent: 0, fine: 0, skipped: 0, seen: 0, failed: 0, alerts: 0 };
   try {
@@ -56,6 +61,6 @@ export async function GET(request: NextRequest) {
     console.log(`quiet: ${JSON.stringify(out)}`);
     return Response.json({ ok: true, ...out }, { headers: { "Cache-Control": "no-store" } });
   } finally {
-    await redisPipeline([["DEL", "nl:quiet:lock"]]).catch(() => undefined);
+    await releaseMark("nl:quiet:lock", lock);
   }
 }

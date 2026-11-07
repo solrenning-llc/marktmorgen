@@ -1,0 +1,63 @@
+/* Pricing-only navigation and a single, complete comparison at every width. */
+.pricing-section-index {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 2rem;
+  padding: 8px;
+  border: 1px solid currentColor;
+  border-radius: 1rem;
+  background: #fff;
+  color: var(--hm-text, #1e3a8a);
+}
+.pricing-section-index a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 6px;
+  border-radius: .5rem;
+  font-size: .875rem;
+  line-height: 1.4;
+  font-weight: 600;
+  text-align: center;
+  text-decoration: underline;
+  text-underline-offset: .2em;
+}
+.pricing-section-index a:hover { background: #eaf3ff; }
+.pricing-section-index a:focus-visible {
+  outline: 3px solid currentColor;
+  outline-offset: 1px;
+  background: #eaf3ff;
+}
+.pricing-section-index ~ section[id],
+.pricing-section-index ~ section [id] { scroll-margin-top: 9rem; }
+.pricing-comparison {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+.pricing-comparison th,
+.pricing-comparison td {
+  padding: .625rem .375rem;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.pricing-comparison th:first-child { width: 34%; }
+@media (min-width: 48rem) {
+  .pricing-section-index { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .pricing-comparison { font-size: 1rem; }
+  .pricing-comparison th,
+  .pricing-comparison td { padding: .75rem; }
+}
+@media (forced-colors: active) {
+  .pricing-section-index { background: Canvas; color: CanvasText; }
+  .pricing-section-index a { color: LinkText; }
+}

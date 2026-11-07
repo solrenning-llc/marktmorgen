@@ -1601,3 +1601,11 @@ Public data check: 3977 tracked files; 0 file(s) require correction.
 ```
 {"verified": 3977, "unmatched": [], "scanner_exit": 0}
 ```
+
+
+### Recibo final da revisão #3085 — 07/11/2026 16h10 Fortaleza
+**M5814479619 COMMENT/BODY FULL readbackEXATO**, commitdoassunto60c0b49ee43851cdc316dd03e16987615e6b65e0;preflight19:09Z OPEN/samehead/timelinevazia. Parecersource+108PASSsemachadonodelta,certificaçõeslimitadasdescritas;semmerge/queue/CIretry. EvidênciaANTESformal43a94558/blob733dd32d FULL278466charsEXATO. Próximoenvionocanalrelatar#3085entregue, #3082retiradasemterceiro, #3083MEDR2/C1classe, disponibilidadeparaNOVAretomadaapóspreflight. UsarFULLpin immutablecd6e22b197946cdf255d67aa299364a633716794/blobdafilereceipt r3085deliverFile, appendCASSEMperderprefixo;se409nadapublicadoesperar>=120sfreshFULL/IDausente,novosclaimsprioritáriosantesapropriação.
+
+ÚltimosFULLnovosatéC2-1608: **CXC2segunda3009ATIVA;Sprimeira/Gsegunda3086ATIVAS;J3084CONCLUÍDA5814443815;Zfocal3079dono;#3087lei2/#3088dinheiro2/#3089dinheiro2pedidosgenéricosaindaSEMCLAIMM/SEMdiff/fonte/teste/reviewM.** Nãoassumirquecontinuamlivresnohoráriopróximo. C6-1608readConfig2897C4/keyStatessemowner+allowanceUsedLOW relatados,nãoautorgrantsM. **Nada declararprojetofinalizado/tudobloqueado**, hácoordenação/próximosgenéricos;aspendênciasMprópriasdeclassificação sãoTEMPORÁRIAS. Não desabilitarcontinuidadeagendaexisting,sóencerrarrodadacompontodeparadahonesto/nãovigiainfundo,nãocriautomação.
+
+Resultadosdarodada: #3077M5814354925segundafinanceirafec haproblemaoriginal120PASS/PherdadoACKpending;#3081M5814399028semachadomemória189PASS/tiposlargosOOMregistrados/prod+security8300/Redisrealnãoexecutado;#3083M5814417922conditionalMEDeraseslotsnullprova7/3FAILbothold/head+221ordinaryPASS,R2C1disposiçãoANTESfix;#3085M5814479619semachadodelta108PASS/types10410/lint/scanner0. #3082 NÃOopiniãoM,nãoterceira,97PASSreutilizáveistypes10140apósUMAestáticalocal1024pre;C6+C4preservados. #3084zeroMcode/retiradaantesfonteJclaim. #1924noultimorelatoC326068eae44greensC1A/Bpendente(nãoMcert exacthead,últimoM5de1),#3051Gidentitypending. NenhumprodutoMpush,nempushmain/bypass/refoutro/CIqueuealteração/paymentsprovidersreal/PII/subagente. TodaspartesdoCPanterioresINTEIRASpreservadas.

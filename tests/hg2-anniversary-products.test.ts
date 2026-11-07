@@ -20,7 +20,12 @@
  *   - the studio lists the products a buyer pays for once (no free product,
  *     no membership), in the creator's order;
  *   - the protections of unit 1 stay: the box at checkout, the list, once
- *     per person per date, the store's email figure before sending.
+ *     per person per date, the store's email figure before sending;
+ *   - the studio's editor says what is true: "On" and the month's count only
+ *     while the email really goes out (anniversaryOn), and a warning when it
+ *     is switched on with no product chosen, without changing the setting;
+ *     a choice refused is said at the products, and the most that can be
+ *     chosen is said beside the boxes it disables.
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, removeProduct, setAnniversary, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { upsertContact } from "@/lib/contacts";
@@ -32,6 +37,10 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { AnniversaryEditor } from "@/components/anniversary-editor";
 
 const DAY = 86_400;
 const now = Date.UTC(2026, 10, 6, 12, 0, 0);
@@ -202,6 +211,36 @@ async function main(): Promise<void> {
   const readNow = listed;
   await run();
   is("nothing sent with none chosen", [emails.length - before, listed - readNow], [0, 0]);
+
+  part("The studio's editor says what is true");
+  const draw = (setting: rules.Anniversary, choices: { id: string; title: string }[] | null = [], sentThisMonth = 3) =>
+    renderToStaticMarkup(createElement(AnniversaryEditor, { setting, storeName: "Harbor", suggestedAddress: "", sent: sentThisMonth, choices, connected: true }));
+  const left = (await chosen()) as rules.Anniversary;
+  is("the setting is left on, as the creator set it, with none chosen", [left.on, left.products], [true, []]);
+  const emptyOn = draw(left);
+  is("the editor does not say On while no email goes out", [rules.anniversaryOn({ anniversary: left }), />On<\/span>/.test(emptyOn), />Off<\/span>/.test(emptyOn)], [false, false, true]);
+  is("nor counts the month as if it were sending", emptyOn.includes("Sent this month"), false);
+  is("it says why nothing goes out, and what to do", emptyOn.includes("No product is chosen, so no email goes out. Choose at least one."), true);
+  const choiceList = Array.from({ length: 201 }, (_, i) => ({ id: `prod${String(i).padStart(4, "0")}`, title: `Product ${i}` }));
+  const sending = draw({ ...left, products: [choiceList[0].id] }, choiceList.slice(0, 2));
+  is("with one chosen it says On and the month's count", [/>On<\/span>/.test(sending), sending.includes("Sent this month: 3")], [true, true]);
+  is("and no warning", sending.includes("No product is chosen"), false);
+  is("every product, on, says On without a warning", [/>On<\/span>/.test(draw({ ...left, products: "all" })), draw({ ...left, products: "all" }).includes("No product is chosen")], [true, false]);
+
+  part("The most that can be chosen, said beside the boxes it disables");
+  const full = draw({ ...left, products: choiceList.slice(0, rules.MAX_ANNIVERSARY_PRODUCTS).map((p) => p.id) }, choiceList);
+  const fullWords = `You have chosen ${rules.MAX_ANNIVERSARY_PRODUCTS}, the most you can. To choose another, uncheck one first, or choose "Every product".`;
+  is("the sentence is shown", full.includes(fullWords.replace(/"/g, "&quot;")), true);
+  const lastBox = full.match(/<input[^>]*id="anniversary-product-prod0200"[^>]*>/)?.[0] ?? "";
+  is("the box it disables is disabled and points to it", [/ disabled=""/.test(lastBox), /aria-describedby="anniversary-products-full"/.test(lastBox)], [true, true]);
+  const notFull = draw({ ...left, products: [choiceList[0].id] }, choiceList);
+  is("below the most, no such sentence", notFull.includes("the most you can"), false);
+
+  part("A refused choice is said at the products, and focus goes there");
+  const editor = readFileSync("components/anniversary-editor.tsx", "utf8");
+  is("the products fieldset is marked invalid and described by the error", /aria-invalid=\{productsError \|\| undefined\}/.test(editor) && /anniversary-products-help\$\{productsError \? " anniversary-products-error" : ""\}/.test(editor), true);
+  is("the error is drawn inside it, as an alert", /id="anniversary-products-error"[^>]*role="alert"/.test(editor), true);
+  is("and focus moves to the first box there, or to the error", /productsRef\.current\?\.querySelector<HTMLElement>\("input:not\(\[disabled\]\)"\) \?\? productsErrorRef\.current\)\?\.focus\(\)/.test(editor), true);
 
   done();
 }

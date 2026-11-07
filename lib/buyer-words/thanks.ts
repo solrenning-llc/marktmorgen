@@ -227,6 +227,8 @@ const en = {
   ppCouldNotCheckBody: "If you paid, it will be handed over and your receipt emailed; refresh in a minute.",
   ppHandingOver: "Payment received, we're handing it over",
   ppHandingOverBody: (email: string) => `Your receipt will be emailed to ${email} once it is handed over. Refresh in a minute.`,
+  ppRefunded: "Payment refunded",
+  ppRefundedBody: "This payment was refunded in full through PayPal, so this purchase is no longer yours to open. Your PayPal account shows the refund.",
   waitFew: "Wait a few minutes, then open this page again.",
 };
 
@@ -429,6 +431,8 @@ const es: ThanksWords = {
   ppCouldNotCheckBody: "Si pagaste, lo que compraste se te entregará y tu recibo se enviará por email; actualiza la página en un minuto.",
   ppHandingOver: "Pago recibido, lo estamos entregando",
   ppHandingOverBody: (email) => `Tu recibo se enviará por email a ${email} en cuanto se entregue. Actualiza la página en un minuto.`,
+  ppRefunded: "Pago reembolsado",
+  ppRefundedBody: "Este pago se reembolsó por completo a través de PayPal, así que ya no puedes abrir esta compra. Tu cuenta de PayPal muestra el reembolso.",
   waitFew: "Espera unos minutos y vuelve a abrir esta página.",
 };
 
@@ -630,6 +634,8 @@ const fr: ThanksWords = {
   ppCouldNotCheckBody: "Si vous avez payé, votre achat vous sera remis et votre reçu envoyé par e-mail ; actualisez la page dans une minute.",
   ppHandingOver: "Paiement reçu, nous vous remettons votre achat",
   ppHandingOverBody: (email) => `Votre reçu sera envoyé par e-mail à ${email} dès que l'achat vous sera remis. Actualisez la page dans une minute.`,
+  ppRefunded: "Paiement remboursé",
+  ppRefundedBody: "Ce paiement a été remboursé en totalité via PayPal, vous ne pouvez donc plus ouvrir cet achat. Votre compte PayPal indique le remboursement.",
   waitFew: "Patientez quelques minutes, puis rouvrez cette page.",
 };
 
@@ -831,6 +837,8 @@ const de: ThanksWords = {
   ppCouldNotCheckBody: "Wenn Sie bezahlt haben, wird Ihr Kauf übergeben und Ihre Quittung gemailt; laden Sie die Seite in einer Minute neu.",
   ppHandingOver: "Zahlung erhalten, wir übergeben Ihren Kauf",
   ppHandingOverBody: (email) => `Ihre Quittung wird an ${email} gemailt, sobald der Kauf übergeben ist. Laden Sie die Seite in einer Minute neu.`,
+  ppRefunded: "Zahlung erstattet",
+  ppRefundedBody: "Diese Zahlung wurde über PayPal vollständig erstattet, daher können Sie diesen Kauf nicht mehr öffnen. Ihr PayPal-Konto zeigt die Erstattung.",
   waitFew: "Warten Sie ein paar Minuten und öffnen Sie diese Seite dann erneut.",
 };
 
@@ -1032,6 +1040,8 @@ const it: ThanksWords = {
   ppCouldNotCheckBody: "Se hai pagato, l'acquisto ti verrà consegnato e la ricevuta inviata via email; aggiorna la pagina tra un minuto.",
   ppHandingOver: "Pagamento ricevuto, stiamo consegnando l'acquisto",
   ppHandingOverBody: (email) => `La ricevuta verrà inviata via email a ${email} appena l'acquisto sarà consegnato. Aggiorna la pagina tra un minuto.`,
+  ppRefunded: "Pagamento rimborsato",
+  ppRefundedBody: "Questo pagamento è stato rimborsato per intero tramite PayPal, quindi non puoi più aprire questo acquisto. Il tuo account PayPal mostra il rimborso.",
   waitFew: "Aspetta qualche minuto, poi riapri questa pagina.",
 };
 
@@ -1233,6 +1243,8 @@ const nl: ThanksWords = {
   ppCouldNotCheckBody: "Heb je betaald, dan wordt je aankoop overgedragen en je bon gemaild; vernieuw de pagina over een minuut.",
   ppHandingOver: "Betaling ontvangen, we dragen je aankoop over",
   ppHandingOverBody: (email) => `Je bon wordt naar ${email} gemaild zodra de aankoop is overgedragen. Vernieuw de pagina over een minuut.`,
+  ppRefunded: "Betaling terugbetaald",
+  ppRefundedBody: "Deze betaling is volledig terugbetaald via PayPal, dus je kunt deze aankoop niet meer openen. Je PayPal-rekening toont de terugbetaling.",
   waitFew: "Wacht een paar minuten en open deze pagina dan opnieuw.",
 };
 
@@ -1434,6 +1446,8 @@ const pt: ThanksWords = {
   ppCouldNotCheckBody: "Se pagou, a compra será entregue e o recibo enviado por email; atualize a página dentro de um minuto.",
   ppHandingOver: "Pagamento recebido, estamos a entregar a sua compra",
   ppHandingOverBody: (email) => `O recibo será enviado por email para ${email} assim que a compra for entregue. Atualize a página dentro de um minuto.`,
+  ppRefunded: "Pagamento reembolsado",
+  ppRefundedBody: "Este pagamento foi reembolsado na totalidade através do PayPal, por isso já não pode abrir esta compra. A sua conta PayPal mostra o reembolso.",
   waitFew: "Aguarde alguns minutos e depois abra esta página novamente.",
 };
 

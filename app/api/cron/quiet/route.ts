@@ -41,11 +41,13 @@ export async function GET(request: NextRequest) {
     const folders = [...new Set([...(await visitedFolders(monthKey(now))), ...(await visitedFolders(monthKey(lastMonth)))])].sort();
     const atKey = `nl:quiet:at:${now.toISOString().slice(0, 10)}`;
     // Where today's walk goes on from, read exactly (CX-123 rule 24): nil is the start, a whole number the place;
-    // anything else is unknown, and nothing is read on it and the place is left as it was.
+    // anything else is unknown, and nothing is read on it and the place is left as it was. Within one UTC day the
+    // list only grows (lib/traffic.ts adds folders and keeps them 400 days), so this pass never wrote a place past
+    // its end: that is unknown too.
     const kept = repliesFor(await redisPipeline([["GET", atKey]]), 1);
     const place = kept ? kept[0] : undefined;
     let at = place === null ? 0 : typeof place === "string" && /^(0|[1-9][0-9]{0,8})$/.test(place) ? Number(place) : -1;
-    if (at < 0) {
+    if (at < 0 || at > folders.length) {
       console.error("quiet: where today's walk goes on from is unknown; nothing read this run");
       return Response.json({ ok: false, error: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
     }

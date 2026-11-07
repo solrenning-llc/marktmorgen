@@ -179,7 +179,8 @@ export async function sweepCommunityUploads(now = Date.now(), limit = 300): Prom
   let swept = 0;
   for (const path of paths) {
     // Taken off the list first, so a run that stops halfway never gives a place back twice.
-    const answered = repliesFor(await redisPipeline([["ZREM", DOORS_KEY, path]]), 1);
+    // A throw (a timeout after it was sent) may have taken it off as well: unknown, the same as an odd answer.
+    const answered = await redisPipeline([["ZREM", DOORS_KEY, path]]).then((replies) => repliesFor(replies, 1), () => null);
     const removed = answered ? countOf(answered[0]) : null;
     if (removed === 0) continue;
     if (removed !== 1) {

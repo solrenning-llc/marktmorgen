@@ -441,8 +441,12 @@ export async function takeUpsell(input: {
 async function afterPaid(store: Store, session: string, target: Listing, pi: Record<string, unknown>, email: string): Promise<void> {
   await noteCharge(store, pi).catch((error) => console.error("noting an affiliate sale failed", error));
   const reference = typeof pi.id === "string" ? pi.id : "";
-  const amountCents = typeof pi.amount === "number" ? pi.amount : 0;
-  const currency = typeof pi.currency === "string" && pi.currency ? pi.currency : store.currency;
+  // The amount stated is the one Stripe charged, read exactly: whole cents, in the currency Stripe names for it.
+  // Anything else is unknown, never 0 nor a figure in the store's currency (rule 24): the email then says the offer
+  // was charged once, without a figure.
+  const named = typeof pi.currency === "string" && pi.currency ? pi.currency : null;
+  const amountCents = named && Number.isSafeInteger(pi.amount) && (pi.amount as number) >= 0 ? (pi.amount as number) : null;
+  const currency = named ?? store.currency;
   // A bundle added this way: its products, from the list on its own payment.
   const listed = bundleFromMeta(pi.metadata as Record<string, string> | null, "bundle");
   const items = listed.length ? (await contentsOf(store, listed).catch(() => null))?.items : undefined;

@@ -641,7 +641,8 @@ export type TakenOffer = {
   parent: string;
   product: Listing;
   email: string;
-  amountCents: number;
+  /** What Stripe charged, read exactly from the offer's own payment; null when it could not be (rule 24), never 0. */
+  amountCents: number | null;
   /** What Stripe charged it in. */
   currency: string;
   /** When what was added is a bundle: the products it hands over. */
@@ -662,7 +663,7 @@ export function offerConfirmationFor(store: Store, offer: TakenOffer, key: SaleK
     "",
     words.whatYouAdded(offer.product.title),
     ...(offer.items?.length ? [words.insideIt(offer.items.map((p) => p.title).join(", "))] : []),
-    words.paidOnce(money(offer.amountCents)),
+    offer.amountCents === null ? words.chargedOnce : words.paidOnce(money(offer.amountCents)),
     words.reference(offer.reference),
     ...consentEmailLines(store, offer.metadata),
     "",
@@ -734,7 +735,8 @@ export async function confirmOffer(store: Store, offer: TakenOffer): Promise<Con
     await redisPipeline(sent ? [["SET", mark, "sent", "EX", SENT_MARK_SECONDS]] : [["DEL", mark]]);
   }
   // One of the month's orders (lib/orders.ts), by its own payment.
-  if (sent) await countOrder(store, `offer:${offer.reference}`, offer.amountCents);
+  // An amount not read is not shown to be covered by a share (lib/orders.ts, coveredByShare), so the order is counted.
+  if (sent) await countOrder(store, `offer:${offer.reference}`, offer.amountCents ?? 0);
   return sent ? "sent" : "failed";
 }
 

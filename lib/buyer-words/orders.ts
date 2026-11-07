@@ -259,6 +259,8 @@ const en = {
   whatYouAdded: (title: string) => `What you added: ${title}`,
   insideIt: (titles: string) => `Inside it: ${titles}`,
   paidOnce: (amount: string) => `Paid: ${amount}, charged once to the card you had just paid with`,
+  /** The same, when the amount charged could not be read: no figure is stated rather than a wrong one. */
+  chargedOnce: "Charged once to the card you had just paid with",
   reference: (id: string) => `Reference: ${id}`,
   openItAt: (url: string) => `Open it: ${url}`,
   offerThreeDays: (ordersUrl: string, email: string, store: string) =>
@@ -506,6 +508,7 @@ const es: OrdersWords = {
   whatYouAdded: (title) => `Lo que añadiste: ${title}`,
   insideIt: (titles) => `Contenido: ${titles}`,
   paidOnce: (amount) => `Pagado: ${amount}, cobrado una sola vez a la tarjeta con la que acababas de pagar`,
+  chargedOnce: "Cobrado una sola vez a la tarjeta con la que acababas de pagar",
   reference: (id) => `Referencia: ${id}`,
   openItAt: (url) => `Ábrelo: ${url}`,
   offerThreeDays: (ordersUrl, email, store) =>
@@ -747,6 +750,7 @@ const fr: OrdersWords = {
   whatYouAdded: (title) => `Votre ajout${S}: ${title}`,
   insideIt: (titles) => `Contenu${S}: ${titles}`,
   paidOnce: (amount) => `Payé${S}: ${amount}, débité une seule fois sur la carte avec laquelle vous veniez de payer`,
+  chargedOnce: "Débité une seule fois sur la carte avec laquelle vous veniez de payer",
   reference: (id) => `Référence${S}: ${id}`,
   openItAt: (url) => `L'ouvrir${S}: ${url}`,
   offerThreeDays: (ordersUrl, email, store) =>
@@ -989,6 +993,7 @@ const de: OrdersWords = {
   whatYouAdded: (title) => `Hinzugefügt: ${title}`,
   insideIt: (titles) => `Inhalt: ${titles}`,
   paidOnce: (amount) => `Bezahlt: ${amount}, einmalig von der Karte abgebucht, mit der Sie gerade bezahlt hatten`,
+  chargedOnce: "Einmalig von der Karte abgebucht, mit der Sie gerade bezahlt hatten",
   reference: (id) => `Referenz: ${id}`,
   openItAt: (url) => `Öffnen: ${url}`,
   offerThreeDays: (ordersUrl, email, store) =>
@@ -1235,6 +1240,7 @@ const it: OrdersWords = {
   whatYouAdded: (title) => `Hai aggiunto: ${title}`,
   insideIt: (titles) => `Contenuto: ${titles}`,
   paidOnce: (amount) => `Pagato: ${amount}, addebitato una sola volta sulla carta con cui avevi appena pagato`,
+  chargedOnce: "Addebitato una sola volta sulla carta con cui avevi appena pagato",
   reference: (id) => `Riferimento: ${id}`,
   openItAt: (url) => `Aprilo: ${url}`,
   offerThreeDays: (ordersUrl, email, store) =>
@@ -1476,6 +1482,7 @@ const nl: OrdersWords = {
   whatYouAdded: (title) => `Wat je hebt toegevoegd: ${title}`,
   insideIt: (titles) => `Inhoud: ${titles}`,
   paidOnce: (amount) => `Betaald: ${amount}, één keer afgeschreven van de kaart waarmee je net had betaald`,
+  chargedOnce: "Eén keer afgeschreven van de kaart waarmee je net had betaald",
   reference: (id) => `Referentie: ${id}`,
   openItAt: (url) => `Openen: ${url}`,
   offerThreeDays: (ordersUrl, email, store) =>
@@ -1718,6 +1725,7 @@ const pt: OrdersWords = {
   whatYouAdded: (title) => `O que adicionou: ${title}`,
   insideIt: (titles) => `Conteúdo: ${titles}`,
   paidOnce: (amount) => `Pago: ${amount}, cobrado uma única vez no cartão com que tinha acabado de pagar`,
+  chargedOnce: "Cobrado uma única vez no cartão com que tinha acabado de pagar",
   reference: (id) => `Referência: ${id}`,
   openItAt: (url) => `Abrir: ${url}`,
   offerThreeDays: (ordersUrl, email, store) =>

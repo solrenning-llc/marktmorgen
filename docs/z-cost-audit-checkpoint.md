@@ -1,3 +1,46 @@
+# Estado vigente — 07/11/2026: novos bloqueadores de #2741/#2819; focal de #3039 aprovado
+
+Este bloco prevalece sobre os estados anteriores, que permanecem integralmente abaixo. Coordenação somente Claude 4; C1 desligado. C4-3110/MV e C4-3120 lidas. Main só quando necessário; nenhum envio para repetir CI; um novo anúncio MAIN VERMELHO suspende envios e merges. O limite próprio de cinco unidades continua mais restrito que o teto geral de quinze. Quatro PRs próprios abertos, sem sexta unidade, sem subagentes, nenhum novo merge nesta parte da execução.
+
+## #3039: retorno focal aprovado; falta o nono workflow novo
+
+A Claude 5 concluiu o retorno no head **12bcc1a16ce46f74c46037a5d0c8aaa29eedcd90**, comentário **6701860935**: o MÉDIO e os dois LEVES de6701405692 foram fechados no delta de registro/teste. A aprovação é focal, sem ALTO/MÉDIO; não é certificação de invoice ou margem global. O novo LEVE é anterior ao PR e explicitamente não bloqueante: a espera sintética da trava avança1,8s contra1,5s de SHAPES.studio, antes dos RTTs. Também afeta keep/change/drop já no main. A prova local C5 desse tempo ainda não foi publicada; pedir reprodução independente antes de qualquer correção produtiva/funding. Desconhecido continua não zero.
+
+C5 conferiu os três chamadores, a admissão studio anterior do caminho settings, hasOwn e qualificação de bytes. Sua contraprova reverteu SOMENTE o registro e manteve o helper de teste novo:15/3FAIL→15PASS. Não contradiz o RED completo nosso15/4FAIL, que também preservava a antiga verificação incidental de nomes para demonstrar o LOW2.
+
+Foto única coletada pela NOVA aprovação: no head12bcc, **8/9 workflows distintos SUCCESS**, product-checks42335151222 ainda IN_PROGRESS; os nove verdes do185 não valem. Nenhuma falha, rerun, cancel ou novo envio nessa leitura. Próximo: com notícia causal de conclusão, confirmar nove agregadores exatos, review aplicável, junção nativa limpa/GETfresh/normal expected_head e MERGED. Não integrar main por perseguição. Body atualizado em inglês com os três caminhos, medidas e pendências; preço/limite/coeficiente/produto intactos. RED35bc72a5, native d965/bfdd e validação103/4 preservados no bloco anterior.
+
+## #2741: novos achados C5, RED durável; produto intocado
+
+Revisão independente financeira C5 **6701833468** no head **ab5818b75c73ae66fffa1365677e46e0a2c3c400**: custo/admissão fechados corretamente, mas **MÉDIO** de UX: timeout ou contador malformado retorna429/rate_limited e a tela atribui excesso de tentativas. LOW: stop após dez testes de fornecedor recusados fica bloqueado pelo mesmo contador. LOW fora do diff: SET/DEL não confirmados em lib/chat-summary.ts, reservado à Claude6, continua READONLY. Nenhum produto/helper/28asserções originais foi editado. A falha alheia de pricing/FAQ no verify128260608502 segue sem rerun/push.
+
+Pedidos de publicação da prova C5 e de EXEC/classificação R2 antes do corretivo produtivo estão em **6701872909**; não autoclassificar o próprio teste como execução independente. RESERVA de três artefatos antes do código entrou em **cda1997cf1da49077395563bae23a4828c05ae20**.
+
+Prova DURÁVEL **codex/z-chat-counter-refusal-red@9621492237234a99fe70a283858a708abba6b653**, árvore **dd8fcf8eef589145e6ebffb3e601e1d1cf0ca4e0**. Ancestral executado **70cc3fa86786061c0427e50d5f487072edcb96b4**, árvore **43eba7b6df0b49c16824354f4a539cef915d1cdc**, native **42d2eef668e1a08618b629e8f85ded998bf91546**. O962 só acrescenta qualificação no relatório; native88e83e3b10f6950ab9a135d552891ca16c1769ba. Parent de produto ab5818b7; três paths próprios, sem PR/CI novo. Publicação6701905925 e qualificação **6701940033**.
+
+Seis casos: duas causas reais do MÉDIO (timeout e resposta malformada), um contrato isolado de configuração do stub, um LOW de stop bloqueado e dois controles (exceeded real429/healthy save). Resultado **2PASS/4FAIL**, não quatro MÉDIOS. O caso unconfigured exige qualificação: guardStoreWrite é a fronteira sintética do mundo original; o guard REAL retorna503 antes do contador quando Redis inteiro está desconfigurado. Logo esse vetor isolado NÃO prova outro defeito end-to-end. Counter helpers/request-guard, rota, chat helper e crypto são reais; auth/body/store/admissão/Redis transport são stand-ins declarados. Nenhuma UI/AAA/nativo/provedor real foi executado.
+
+Cada execução:31 comandos sintéticos/11 POSTs interceptados/1.243 bytes de request sintético/0 externo. Houve duas execuções dos MESMOS seis casos após esclarecer só o acesso opcional RequestInit.body para strict types, asserções/injeções preservadas. Antes da segunda execução, teto agregado ampliado explicitamente para24POSTs; agregado real62 comandos/22 POSTs/2.486B, abaixo dos tetos200comandos/24POSTs/10000B;120s/log128KiB por processo. Final2PASS4FAIL nos bytes executados, strictES2017types3raízes/lint2/scanner4157/0/stageddiff0 e relatório final diretamente verificado0. Relatório-only962 não repetiu runtime/28originais. Worktree /workspace/scratch/z-chat-refusal-red; runner node proofs/z-chat-counter-refusal.mjs; esperadoexit1. Mantém controles de gasto/nenhuma escrita e os429 genuínos, sem enfraquecer o teste original para forçar verde.
+
+## #2819: regressão confirmada; não está pronto para incorporar
+
+Revisão C5 **6701844921** no head **3fdcbe1c3bbcdeb47149ef9d959f8fc8dd5d43ac** aponta **MÉDIO** de contexto. Conferi a fonte: o ajuste anterior de Z alterou finishConnect comum147/148, mandando Google/Zoom da loja também para /studio/calendar. Foi regressão minha no ajuste do host, não encerramento limpo do LOWC4. Ali o único fluxo é o calendário do anfitrião; Zoom da loja e Google da loja precisam de tentativa correta sem quebrar acesso do host. Não basta voltar todos para meetings: isso reabriria o problema do editor/support. Manter contador ANTES de qualquer paid I/O/consent e zero comandos novos.
+
+C5 tem prova local de quatro casos, ainda sem ramo/runner publicado; pedido de publicação e EXEC/classificação R2 está em **6701873059**. Nenhum corretivo produtivo adicional foi feito. Tests46 ainda protegem destinos errados em alguns casos; verde não é prova de UX correta. Body do PR foi reescrito para dizer exatamente esse bloqueio, sem prometer retry no destino certo. LOW de prova obsoleta aguarda o contrato corrigido; TTL do helper é anterior/fora do diff e segue read-only. Não tocar página/arquivo de outro dono sem reserva/liberação. Os nove workflows verdes de3fdc não removem este bloqueio nem o pedidoC4 anterior.
+
+## Restante e próximo passo
+
+- #2947/c1fc32985c75c19da75459b1d6b5d60dd5cff511: nove verdes anteriores válidos, mas falta focalC4 de6697978940. Árvore correta5df42d1e; não incorporar por presunção.
+- #2800 já MERGED0e92013e, não recriar.
+- #2929 Z LEVE fechado em **5809879451**, source62904755; evidência02858223373abc7a67f29739b6ed709bd456b065. C2 controla merge e demais reviews; nenhum novo teste dessa revisão nesta etapa.
+- Prioridade próxima: R2/C5 provas e classificação2741/2819; só depois corretivo produtivo com os controles existentes preservados. #3039 pode avançar com nono agregador novo e gates frescos; separar o LEVE de espera da trava como nova unidade apenas após reserva/prova/classificação, sem inventar RTT ou custo zero. C4 focal2947 continua necessário.
+- #3037 segue G; #3042 segue C5 (C4-3120/1ebdf0789); #2895/3208 foi assumido pela C5. Não duplicar.
+- Todas retentativas consumidas continuam:2484verify127130387972;2615verify127143841589/mac127144213372;2741Windows127737110071;2800Firefox127885731234/mac127885740971/mac128137530608. Nenhuma foi usada novamente; nenhum head reseta orçamento.
+
+Não houve novo MAIN VERMELHO na última leitura FULL. Quatro unidades próprias; nenhum novo PR/produto, conta/pagamento/contato/fornecedor/PII, preço/limite/comissão/flags/gates ou reserva documental. Vigia temporária de120s/3ticks foi limitada à execução; não alegar atividade eterna e verificar processo antes de renovar. Preservar todo histórico, branches, REDs e WIPs; atualizar este MESMO checkpoint e publicar ponto no canal.
+
+---
+
 # ESTADO VIGENTE — 07/11/2026 00h48 Fortaleza: #3039 corretivo enviado; #2929 Z LEVE fechado
 
 Histórico integral abaixo preservado. C4-3110/MV lida no canal: main só quando necessário, nenhum push para repetir CI, novo MAIN VERMELHO suspende envios/merges. Limite geral15 não amplia o limite próprio5 do dono nesta conversa; quatro ownOPEN, zero subagentes, ritmo AV10 orçamentado/SERIAL. Nenhum preço/limite/comissão/flag/gate/coeficiente/conta/pagamento/provedor/PII, reserva documental ou ref/CI alheia alterada. Nenhum retry/rerun/cancel usado ou orçamento reiniciado.

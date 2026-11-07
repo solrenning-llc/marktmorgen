@@ -1452,6 +1452,7 @@
     "components/path-share-card.tsx",
     "components/path-social-scripts.tsx",
     "components/path-studio-reminder.tsx",
+    "components/path-weekly-summary.tsx",
     "components/pause-editor.tsx",
     "components/payment-comparison.tsx",
     "components/payment-mix.tsx",

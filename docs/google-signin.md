@@ -40,13 +40,13 @@ Registro de 01/11/2026 (Fortaleza). Estado (VR): **desligado pelas travas**, con
 ## Custos
 
 - **Custos nossos (por login):** duas operações no Redis para o estado, a contagem de tentativas e uma chamada ao endpoint de tokens do Google. Estão classificados como guarda de conta, como a passkey (`tests/plan-cost-registry.ts`, `"google-signin": ACCOUNT`).
-- **Preço do Google para o login com OAuth:** **não cobrado por chamada, sem fonte que diga "free"** (Claude 1, 05/11/2026). Nenhuma página oficial lida hoje diz que o OAuth/OpenID Connect do Google Auth Platform é gratuito. A tabela do Identity Platform, que cobra por usuário ativo e tem faixa grátis, é de outro produto e não se aplica a este fluxo. O custo por login continua como está no registro (`tests/plan-cost-registry.ts`, `"google-signin": ACCOUNT`); se o Google publicar um preço para este fluxo, ele entra nos custos antes de ligar para todos.
+- **Preço do Google para o login com OAuth:** **desconhecido, não conferido em fonte oficial** (Claude 1, 05/11/2026; texto corrigido pela revisão E2 do Codex, 07/11/2026). Nenhuma página oficial lida até hoje dá o preço deste fluxo: nenhuma diz que o OAuth/OpenID Connect do Google Auth Platform é gratuito, e nenhuma diz que é cobrado por chamada. Não se sabe, então, se há cobrança por chamada. A tabela do Identity Platform, que cobra por usuário ativo e tem faixa grátis, é de outro produto e não se aplica a este fluxo. O custo por login continua como está no registro (`tests/plan-cost-registry.ts`, `"google-signin": ACCOUNT`); se o Google publicar um preço para este fluxo, ele entra nos custos antes de ligar para todos.
 
 ## O que o dono precisa fazer no Google Cloud (projeto nimbus-labs-509912, conta 072)
 
 Nada disto foi feito por agente. O dono conferiu os passos 2 a 7 em 05/11/2026 (relato ao Claude 1, 15h49 Fortaleza); o que ele viu está em cada passo. Os nomes dos menus mudam com o tempo: confira cada nome na própria tela no dia.
 
-1. **Preço:** não cobrado por chamada, sem fonte que diga "free" (veja Custos acima). Se uma página oficial passar a dar um preço para o login com OAuth/OpenID Connect, registre aqui a data e a fonte, e o custo entra nos custos da LLC antes de ligar para todos.
+1. **Preço:** desconhecido, não conferido em fonte oficial (veja Custos acima). Se uma página oficial passar a dar um preço para o login com OAuth/OpenID Connect, registre aqui a data e a fonte, e o custo entra nos custos da LLC antes de ligar para todos.
 2. **Projeto** (conferido em 05/11/2026): **nimbus-labs-509912**, agora com o nome "Marktmorgen". Em console.cloud.google.com, entrando com a conta 072, é o mesmo das chaves `GOOGLE_OAUTH_CLIENT_ID` e `GOOGLE_OAUTH_CLIENT_SECRET` que já estão na Vercel para o Google Calendar e o Search Console.
 3. **Identidade do app** ("Google Auth Platform" → "Branding", antes chamado "OAuth consent screen"):
    - nome **Marktmorgen**;

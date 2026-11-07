@@ -23,6 +23,7 @@ const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
 const PROMO_PATTERN = /^promo_[A-Za-z0-9]{6,64}$/;
 /** The statuses of a membership still running, as lib/membership-manage.ts counts them. */
 const LIVE = new Set(["active", "trialing", "past_due", "unpaid", "paused"]);
+const STATES = new Set([...LIVE, "incomplete", "incomplete_expired", "canceled"]);
 const MAX_CUSTOMERS = 20;
 
 /** One of a member's running memberships of this store, as the studio shows it. */
@@ -42,29 +43,60 @@ export type MemberSub = {
 type Raw = Record<string, unknown>;
 const list = (value: unknown): Raw[] => (value && typeof value === "object" && Array.isArray((value as Raw).data) ? ((value as Raw).data as Raw[]) : []);
 
+/** Only a complete bounded page proves the memberships behind an address. */
+function completePage(value: unknown, pattern: RegExp): Raw[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw Error("Member list is unknown");
+  const page = value as Raw;
+  if (!Object.hasOwn(page, "data") || !Object.hasOwn(page, "has_more") || page.has_more !== false || !Array.isArray(page.data) || page.data.length > MAX_CUSTOMERS) throw Error("Member list is incomplete");
+  const seen = new Set<string>();
+  for (let i = 0; i < page.data.length; i += 1) {
+    const row = page.data[i] as Raw | null;
+    if (!Object.hasOwn(page.data, i) || !row || typeof row !== "object" || Array.isArray(row) || typeof row.id !== "string" || !pattern.test(row.id) || seen.has(row.id)) throw Error("Member list row is unknown");
+    seen.add(row.id);
+  }
+  return page.data as Raw[];
+}
+
 /** Whether Stripe says a subscription already has a discount on it (old `discount` or new `discounts`). */
 export function hasDiscount(sub: Raw): boolean {
-  if (sub.discount && typeof sub.discount === "object") return true;
-  return Array.isArray(sub.discounts) && sub.discounts.length > 0;
+  if (Object.hasOwn(sub, "discount") && sub.discount !== null) {
+    if (!sub.discount || typeof sub.discount !== "object" || Array.isArray(sub.discount) || typeof (sub.discount as Raw).id !== "string" || !(sub.discount as Raw).id) throw Error("Member discount is unknown");
+    return true;
+  }
+  if (Object.hasOwn(sub, "discounts")) {
+    if (!Array.isArray(sub.discounts)) throw Error("Member discounts are unknown");
+    for (const discount of sub.discounts) {
+      if (typeof discount === "string" && discount) continue;
+      if (discount && typeof discount === "object" && !Array.isArray(discount) && typeof (discount as Raw).id === "string" && (discount as Raw).id) continue;
+      throw Error("Member discount row is unknown");
+    }
+    return sub.discounts.length > 0;
+  }
+  if (Object.hasOwn(sub, "discount") && sub.discount === null) return false;
+  throw Error("Member discount evidence is missing");
 }
 
 /** A subscription row made safe for the studio, or null when it is not a running membership of this store. */
 export function readMemberSub(sub: Raw, handles: Set<string>): MemberSub | null {
   const meta = sub.metadata && typeof sub.metadata === "object" ? (sub.metadata as Record<string, string>) : {};
   if (typeof sub.id !== "string" || !SUB_PATTERN.test(sub.id)) return null;
-  if (typeof sub.status !== "string" || !LIVE.has(sub.status)) return null;
+  if (typeof sub.status !== "string" || !STATES.has(sub.status)) throw Error("Member state is unknown");
+  if (!LIVE.has(sub.status)) return null;
   // Only this store's, and never a payment plan: it pays for something already delivered.
   if (!handles.has(meta.store ?? "") || meta.kind === "plan") return null;
   const item = list(sub.items)[0] ?? {};
   const price = item.price && typeof item.price === "object" ? (item.price as Raw) : {};
   const recurring = price.recurring && typeof price.recurring === "object" ? (price.recurring as Raw) : {};
+  if (typeof price.unit_amount !== "number" || !Number.isSafeInteger(price.unit_amount) || price.unit_amount < 0 ||
+      typeof price.currency !== "string" || !/^[a-z]{3}$/.test(price.currency) ||
+      typeof recurring.interval !== "string" || !["day", "week", "month", "year"].includes(recurring.interval)) throw Error("Member renewal price is unknown");
   return {
     id: sub.id,
     status: sub.status,
     product: typeof meta.product === "string" ? meta.product : "",
-    amount: typeof price.unit_amount === "number" ? price.unit_amount : 0,
-    currency: typeof price.currency === "string" ? price.currency : "",
-    interval: typeof recurring.interval === "string" ? recurring.interval : "",
+    amount: price.unit_amount,
+    currency: price.currency,
+    interval: recurring.interval,
     discounted: hasDiscount(sub),
   };
 }
@@ -75,11 +107,11 @@ export async function memberSubs(store: Store, email: string): Promise<MemberSub
   if (!account) return null;
   const handles = saleHandles(store);
   try {
-    const customers = list(await onAccount("GET", account, `/customers?email=${encodeURIComponent(email)}&limit=${MAX_CUSTOMERS}`, undefined, API_VERSION));
+    const customers = completePage(await onAccount("GET", account, `/customers?email=${encodeURIComponent(email)}&limit=${MAX_CUSTOMERS}`, undefined, API_VERSION), CUSTOMER_PATTERN);
     const out: MemberSub[] = [];
     for (const customer of customers) {
       if (typeof customer.id !== "string" || !CUSTOMER_PATTERN.test(customer.id)) continue;
-      const subs = list(await onAccount("GET", account, `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all&limit=20`, undefined, API_VERSION));
+      const subs = completePage(await onAccount("GET", account, `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all&limit=20`, undefined, API_VERSION), SUB_PATTERN);
       for (const sub of subs) {
         const row = readMemberSub(sub, handles);
         if (row) out.push(row);
@@ -111,7 +143,8 @@ export async function applyMemberDiscount(store: Store, email: string, subscript
   if (codes.state !== "ok") return { ok: false, reason: "stripe" };
   if (!codes.codes.some((c) => c.id === promotion && c.active)) return { ok: false, reason: "code" };
   try {
-    await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, new URLSearchParams({ "discounts[0][promotion_code]": promotion }), API_VERSION, `member-discount:${subscription}:${promotion}`);
+    const changed = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, new URLSearchParams({ "discounts[0][promotion_code]": promotion }), API_VERSION, `member-discount:${subscription}:${promotion}`);
+    if (!changed || !Object.hasOwn(changed, "id") || changed.id !== subscription) return { ok: false, reason: "stripe" };
     return { ok: true };
   } catch (error) {
     // Stripe refusing it by the code's own rules (a first order only, a minimum, used up) is said as such.

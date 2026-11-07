@@ -1,0 +1,25 @@
+z-2964-paypal-refund-records.proof.ts
+  ok    healthy control: the exact record produces the exact refund
+  ok    missing-record control: a confirmed null record is partial
+  ok    one MGET command cannot have an extra outer reply
+  ok    one requested record cannot have an extra MGET member
+  synthetic financial reading: {"rows":[{"order":"DIFFERENT0001","capture":"SYNTHCAPTURE01","cents":1200,"currency":"USD","at":1760356800}],"partial":false}
+  FAIL  the indexed order and record order disagree makes the refund read unknown
+        expected true
+        got      false
+  synthetic financial reading: {"rows":[{"order":"SYNTHORDER0001","capture":"SYNTHCAPTURE01","cents":"1200","currency":"USD","at":1760356800}],"partial":false}
+  FAIL  cents is text rather than a whole numeric amount makes the refund read unknown
+        expected true
+        got      false
+  synthetic financial reading: {"rows":[{"order":"SYNTHORDER0001","capture":null,"cents":1200,"currency":"USD","at":1760356800}],"partial":false}
+  FAIL  the capture identity is null makes the refund read unknown
+        expected true
+        got      false
+  synthetic financial reading: {"rows":[{"order":"SYNTHORDER0001","capture":"SYNTHCAPTURE01","cents":1200,"currency":{},"at":1760356800}],"partial":false}
+  FAIL  the currency is an object makes the refund read unknown
+        expected true
+        got      false
+
+8 checks, 4 failing.
+COUNTED_MEMORY_COMMANDS 16
+COUNTED_MOCK_HTTP 0

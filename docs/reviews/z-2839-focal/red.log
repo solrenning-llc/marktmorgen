@@ -1,0 +1,86 @@
+z-2839-refund-coverage.proof.ts
+{"label":"no-refund","partial":false,"coveredRows":0,"wrappedRows":0,"targetIncluded":false,"refundsChecked":true,"commission":1000,"offered":1000,"throughRefundGate":1000,"bookCommands":8,"bookReplyJsonBytes":491,"external":0}
+{"label":"confirmed-refund","partial":false,"coveredRows":1,"wrappedRows":1,"targetIncluded":true,"refundsChecked":true,"commission":0,"offered":0,"throughRefundGate":0,"bookCommands":9,"bookReplyJsonBytes":793,"external":0}
+{"label":"missing-paid-record","partial":true,"coveredRows":0,"wrappedRows":0,"targetIncluded":false,"refundsChecked":true,"commission":1000,"offered":1000,"throughRefundGate":1000,"bookCommands":9,"bookReplyJsonBytes":531,"external":0}
+{"label":"501-healthy-refunds","partial":true,"coveredRows":500,"wrappedRows":500,"targetIncluded":false,"refundsChecked":true,"commission":1000,"offered":1000,"throughRefundGate":1000,"bookCommands":9,"bookReplyJsonBytes":127026,"external":0}
+✔ control: an unrefunded sale is confirmed payable (9.158985ms)
+✔ control: a confirmed full refund removes the commission (1.62703ms)
+✖ a refund with a missing paid record cannot certify the affiliate book (2.249976ms)
+✖ the 501st healthy refund cannot be omitted from a checked payable book (28.291267ms)
+COUNTED_MEMORY_COMMANDS 1081
+COUNTED_MOCK_HTTP 0
+ℹ tests 4
+ℹ suites 0
+ℹ pass 2
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 62.612293
+
+✖ failing tests:
+
+test at ../../../tmp/z-points-npdqnA/z-2839-refund-coverage.proof.ts.cjs:46913:27
+✖ a refund with a missing paid record cannot certify the affiliate book (2.249976ms)
+  AssertionError [ERR_ASSERTION]: partial refund coverage must not become a checked payable book
+
+  true !== false
+
+      at TestContext.<anonymous> (/tmp/z-points-npdqnA/z-2839-refund-coverage.proof.ts.cjs:46920:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-npdqnA/z-2839-refund-coverage.proof.ts.cjs:46923:27
+✖ the 501st healthy refund cannot be omitted from a checked payable book (28.291267ms)
+  AssertionError [ERR_ASSERTION]: a healthy LIMIT cut must not certify all refunds checked
+
+  true !== false
+
+      at TestContext.<anonymous> (/tmp/z-points-npdqnA/z-2839-refund-coverage.proof.ts.cjs:46936:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+paypal-refunds-book-coverage.test.ts
+
+Control: a sale not refunded is payable
+  ok    checked
+  ok    its commission offered
+
+Control: a refund in full, read whole, takes the commission back
+  ok    checked
+  ok    no commission
+  ok    nothing offered
+
+A refund whose paid record is gone
+  FAIL  the book is not checked
+        expected false
+        got      true
+  FAIL  nothing passes the refund guard
+        expected 0
+        got      1000
+
+More refunds than one reading takes, the sale's beyond it
+  FAIL  the book is not checked
+        expected false
+        got      true
+  FAIL  nothing passes the refund guard
+        expected 0
+        got      1000
+  ok    no provider was asked
+
+10 checks, 4 failing.
+COUNTED_MEMORY_COMMANDS 1067
+COUNTED_MOCK_HTTP 0

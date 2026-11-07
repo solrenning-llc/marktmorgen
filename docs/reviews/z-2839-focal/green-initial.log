@@ -1,0 +1,218 @@
+z-2839-refund-coverage.proof.ts
+{"label":"no-refund","partial":false,"coveredRows":0,"wrappedRows":0,"targetIncluded":false,"refundsChecked":true,"commission":1000,"offered":1000,"throughRefundGate":1000,"bookCommands":8,"bookReplyJsonBytes":491,"external":0}
+{"label":"confirmed-refund","partial":false,"coveredRows":1,"wrappedRows":1,"targetIncluded":true,"refundsChecked":true,"commission":0,"offered":0,"throughRefundGate":0,"bookCommands":9,"bookReplyJsonBytes":793,"external":0}
+{"label":"missing-paid-record","partial":true,"coveredRows":0,"wrappedRows":0,"targetIncluded":false,"refundsChecked":false,"commission":1000,"offered":1000,"throughRefundGate":0,"bookCommands":9,"bookReplyJsonBytes":531,"external":0}
+{"label":"501-healthy-refunds","partial":true,"coveredRows":500,"wrappedRows":500,"targetIncluded":false,"refundsChecked":false,"commission":1000,"offered":1000,"throughRefundGate":0,"bookCommands":9,"bookReplyJsonBytes":127026,"external":0}
+✔ control: an unrefunded sale is confirmed payable (18.371799ms)
+✔ control: a confirmed full refund removes the commission (2.6219ms)
+✔ a refund with a missing paid record cannot certify the affiliate book (3.474749ms)
+✔ the 501st healthy refund cannot be omitted from a checked payable book (41.722552ms)
+COUNTED_MEMORY_COMMANDS 1081
+COUNTED_MOCK_HTTP 0
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 95.941996
+paypal-refunds-book-coverage.test.ts
+
+Control: a sale not refunded is payable
+  ok    checked
+  ok    its commission offered
+
+Control: a refund in full, read whole, takes the commission back
+  ok    checked
+  ok    no commission
+  ok    nothing offered
+
+A refund whose paid record is gone
+  ok    the book is not checked
+  ok    nothing passes the refund guard
+
+More refunds than one reading takes, the sale's beyond it
+  ok    the book is not checked
+  ok    nothing passes the refund guard
+  ok    no provider was asked
+
+10 checks, all passing.
+COUNTED_MEMORY_COMMANDS 1067
+COUNTED_MOCK_HTTP 0
+paypal-refunds-exact.test.ts
+✔ controls: the writers' own data reads exactly, and a store with none reads as none (4.365304ms)
+✔ the refund list rejects a missing envelope rather than reading no refunds or a refund at 0 (0.707279ms)
+✔ the refund list rejects a null list rather than reading no refunds or a refund at 0 (0.208099ms)
+✔ the refund list rejects a string for the list rather than reading no refunds or a refund at 0 (0.202248ms)
+✔ the refund list rejects an odd-length list rather than reading no refunds or a refund at 0 (0.317319ms)
+✔ the refund list rejects an odd-length list after a pair rather than reading no refunds or a refund at 0 (0.227272ms)
+✔ the refund list rejects a score that is not a number rather than reading no refunds or a refund at 0 (0.230235ms)
+✔ the refund list rejects a fractional score rather than reading no refunds or a refund at 0 (0.401963ms)
+✔ the refund list rejects a negative score rather than reading no refunds or a refund at 0 (0.65679ms)
+✔ the refund list rejects a zero score rather than reading no refunds or a refund at 0 (0.650503ms)
+✔ the refund list rejects an empty score rather than reading no refunds or a refund at 0 (0.735684ms)
+✔ the refund list rejects a numeric score, not text rather than reading no refunds or a refund at 0 (0.301719ms)
+✔ the refund list rejects a member that is not text rather than reading no refunds or a refund at 0 (0.243742ms)
+✔ the refund list rejects a slot too many in the envelope rather than reading no refunds or a refund at 0 (0.116289ms)
+✔ the refunds' records reject a missing envelope rather than reading them as missing (0.348412ms)
+✔ the refunds' records reject a null list rather than reading them as missing (0.316772ms)
+✔ the refunds' records reject a list one short rather than reading them as missing (0.142419ms)
+✔ the refunds' records reject a list one too long rather than reading them as missing (0.148221ms)
+✔ the refunds' records reject a record that is not text rather than reading them as missing (0.119361ms)
+✔ the refunds' records reject a slot too many in the envelope rather than reading them as missing (0.626982ms)
+✔ the kept counts reject a missing envelope rather than counting 0 (0.310814ms)
+✔ the kept counts reject a reply cut short rather than counting 0 (0.188885ms)
+✔ the kept counts reject a null count rather than counting 0 (0.118255ms)
+✔ the kept counts reject a count as text rather than counting 0 (0.096084ms)
+✔ the kept counts reject a negative count rather than counting 0 (0.188823ms)
+✔ the kept counts reject a fractional count rather than counting 0 (0.139913ms)
+✔ the kept counts reject a slot too many rather than counting 0 (0.095377ms)
+COUNTED_MEMORY_COMMANDS 17
+COUNTED_MOCK_HTTP 0
+ℹ tests 27
+ℹ suites 0
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 26.772938
+paypal-sales.test.ts
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+  ok    the first refunded in full: the second payment keeps it
+  ok    now standing on the second
+  ok    a course removal that fails keeps the purchase for the next run
+  ok    both refunded: taken back
+  ok    from their purchases and their course
+  ok    the paid record stays, for the thanks page and PayPal's id
+
+A funded new seller onboarding requires its resource cohort
+  ok    no new referral without a funded resource window
+  ok    the provider is not asked and the existing seller stays
+
+A funded seller return rechecks admission before provider verification
+  ok    a marked owner stays at the studio without completing seller installation
+  ok    no PayPal request including auth and no seller replacement
+
+Disconnected
+  ok    no PayPal button, no order
+
+67 checks, all passing.
+COUNTED_MEMORY_COMMANDS 322
+COUNTED_MOCK_HTTP 42
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/z-points-DFlOkY/paypal-sales.test.ts.cjs:19096:13)
+    at async captureOrder (/tmp/z-points-DFlOkY/paypal-sales.test.ts.cjs:19363:13)
+    at async main (/tmp/z-points-DFlOkY/paypal-sales.test.ts.cjs:67955:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/z-points-DFlOkY/paypal-sales.test.ts.cjs:19096:13)
+    at async captureOrder (/tmp/z-points-DFlOkY/paypal-sales.test.ts.cjs:19363:13)
+    at async main (/tmp/z-points-DFlOkY/paypal-sales.test.ts.cjs:67961:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+taking a refunded PayPal sale's course away failed; looked at again in an hour Error: the ledger did not answer
+    at dropStart (/tmp/z-points-DFlOkY/paypal-sales.test.ts.cjs:67993:11)
+    at watchPayPal (/tmp/z-points-DFlOkY/paypal-sales.test.ts.cjs:19616:56)
+    at async main (/tmp/z-points-DFlOkY/paypal-sales.test.ts.cjs:67992:3)
+✘ [ERROR] Could not resolve "/workspace/scratch/z-review-2839-focal/tests/affiliates.test.ts"
+
+/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1752
+  let error = new Error(text);
+              ^
+
+Error: Build failed with 1 error:
+error: Could not resolve "/workspace/scratch/z-review-2839-focal/tests/affiliates.test.ts"
+    at failureErrorWithLog (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1752:15)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1211:25
+    at runOnEndCallbacks (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1592:45)
+    at buildResponseToResult (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1209:7)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1236:16
+    at responseCallbacks.<computed> (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:886:9)
+    at handleIncomingPacket (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:941:12)
+    at Socket.readFromStdout (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:864:7)
+    at Socket.emit (node:events:514:28)
+    at addChunk (node:internal/streams/readable:569:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+
+Node.js v24.22.1

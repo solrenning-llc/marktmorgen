@@ -183,30 +183,55 @@ export async function recordHit(
     // day, because every visit's cost is held to what a plan charges for it
     // (tests/traffic-cost.ts). The day's count only, not the all-time
     // record, so "all time" has no figure for it rather than a wrong one.
-    const [opened] = await cappedCount(counts, DAY_FIELDS_MAX, [{ field: `pv:${hit.id}`, by: 1 }]);
-    if (opened === 1) await redisPipeline([["EXPIRE", counts, TTL_SECONDS]]);
+    // Since 7 November 2026 the day's end is set by the count itself when it
+    // makes the day's record (lib/capped-count.ts): it was a second request,
+    // sent when the answer said this was the product's first view of the
+    // day, and an answer lost after the write left the record kept for ever.
+    await cappedCount(counts, DAY_FIELDS_MAX, [{ field: `pv:${hit.id}`, by: 1 }], TTL_SECONDS);
     return null;
   } else {
     return null;
   }
-  const [counted, ...results] = await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }, { key: life, most: LIFE_WRITE_MAX }], tally), ...commands]);
+  // The day's record is given its expiry by the count when the count makes
+  // it (lib/capped-count.ts, since 7 November 2026), in the same write, so
+  // no answer lost after it leaves the record kept for ever. The day's
+  // visitors and who is on now are given theirs below; when the answer is not
+  // known, all the same (unknownExpiries), and without counting anybody.
+  const visitorsExpiry: (string | number)[] = ["EXPIRE", visitorsKey(store.statsId, day), TTL_SECONDS];
+  const liveExpiry: (string | number)[] = ["EXPIRE", liveKey(store.statsId), 86400];
+  const unknownExpiries = hit.kind === "view" ? [visitorsExpiry, liveExpiry] : [];
+  let replies: unknown[];
+  try {
+    replies = await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, keep: TTL_SECONDS }, { key: life, most: LIFE_WRITE_MAX }], tally), ...commands]);
+  } catch (error) {
+    if (unknownExpiries.length) await redisPipeline(unknownExpiries).catch(() => undefined);
+    throw error;
+  }
+  const [counted, ...results] = replies;
   const values = Array.isArray(counted) ? counted.map(Number) : [];
+  const known = (reply: unknown) => reply !== null && reply !== undefined && reply !== "" && Number.isFinite(Number(reply));
   // Written once, not on every hit (11 October 2026: every visit's commands
   // are a cost held to what a plan charges, tests/traffic-cost.ts, and these
   // three were sent on every page view though they change nothing after the
-  // first). The day's expiry and the day the all-time record started counting
-  // — so filling it from the kept days never counts that day or any after it
-  // twice — with the day's first write of this kind; the visitors' expiry with
-  // the visitor new to the day, who is a visitor for all time too.
+  // first). The day the all-time record started counting — so filling it
+  // from the kept days never counts that day or any after it twice — with the
+  // day's first write of this kind; the visitors' expiry with the visitor new
+  // to the day, who is a visitor for all time too. (The day's own expiry was
+  // written here too until 7 November 2026; the count now writes it when it
+  // makes the day's record, so this would only write it again.)
   const follow: (string | number)[][] = [];
   if (firstAt >= 0 && values[firstAt] === 1) {
-    follow.push(["EXPIRE", counts, TTL_SECONDS], ["HSETNX", life, "started", day]);
+    follow.push(["HSETNX", life, "started", day]);
     // Those who were on before today let go once a day, so a store viewed
     // every day and never looked at live keeps a day of them, not every one.
-    if (hit.kind === "view") follow.push(["ZREMRANGEBYSCORE", liveKey(store.statsId), 0, now - 30 * 60_000], ["EXPIRE", liveKey(store.statsId), 86400]);
+    if (hit.kind === "view") follow.push(["ZREMRANGEBYSCORE", liveKey(store.statsId), 0, now - 30 * 60_000], liveExpiry);
+  } else if (hit.kind === "view" && !(Array.isArray(counted) && known(counted[firstAt]))) {
+    follow.push(liveExpiry);
   }
   if (pfAt >= 0 && Number(results[pfAt]) === 1) {
-    follow.push(["HINCRBY", life, "u", 1], ["EXPIRE", visitorsKey(store.statsId, day), TTL_SECONDS]);
+    follow.push(["HINCRBY", life, "u", 1], visitorsExpiry);
+  } else if (pfAt >= 0 && !known(results[pfAt])) {
+    follow.push(visitorsExpiry);
   }
   if (follow.length) await redisPipeline(follow);
   // The store page's views so far today, for the busy-day alert (lib/stats-report.ts).
@@ -215,13 +240,15 @@ export async function recordHit(
 
 /**
  * One measured visit of the store's own page (lib/page-read.ts): the furthest
- * item seen and the one clicked, on the day's record, which the day's first
- * view has already given its expiry. One command, and only for the visitors
- * the page chose to measure.
+ * item seen and the one clicked, on the day's record. One command, and only
+ * for the visitors the page chose to measure. Until 7 November 2026 the day's
+ * expiry was left to the day's first view, so a reading sent after midnight
+ * UTC, on a day with no view yet, made a record kept for ever; the count now
+ * gives the record it makes its expiry in the same write (lib/capped-count.ts).
  */
 export async function countReach(statsId: string, field: string, now = Date.now()): Promise<void> {
   if (!isRedisConfigured() || !field.startsWith("sr:")) return;
-  await cappedCount(countsKey(statsId, dayKey(now)), DAY_FIELDS_MAX, [{ field, by: 1 }]);
+  await cappedCount(countsKey(statsId, dayKey(now)), DAY_FIELDS_MAX, [{ field, by: 1 }], TTL_SECONDS);
 }
 
 /** One answer's counts: its buyers and their money, and of those, the ones whose sale had no channel. */
@@ -259,7 +286,8 @@ export async function countHeard(statsId: string, answer: string, cents: number,
 export async function countSearchMiss(statsId: string, words: string[], now = Date.now()): Promise<void> {
   const term = words.join(" ").slice(0, 40).trim();
   if (!term || !isRedisConfigured()) return;
-  await cappedCount(countsKey(statsId, dayKey(now)), DAY_FIELDS_MAX, [{ field: `q:${term}`, by: 1 }]);
+  // The day's expiry with the record the count makes, as countReach's.
+  await cappedCount(countsKey(statsId, dayKey(now)), DAY_FIELDS_MAX, [{ field: `q:${term}`, by: 1 }], TTL_SECONDS);
 }
 
 /** The store page's views and the checkouts started from one day to another, both counted: one read a day, at most 90. */

@@ -85,10 +85,10 @@ def main():
     day, life = prefix + "day", prefix + "life"
     redis = Redis()
 
-    def run(client, caps, *counts):
+    def run(client, caps, *counts, keeps=None):
         keys = [day, life][: len(caps)]
         flat = [str(part) for c in counts for part in c]
-        return client.command("EVAL", count, len(keys), *keys, *caps, *flat)
+        return client.command("EVAL", count, len(keys), *keys, *caps, *(keeps or [0] * len(caps)), *flat)
 
     try:
         assert redis.command("PING") == "PONG"
@@ -114,6 +114,28 @@ def main():
             assert redis.command("HGETALL", day) == before
         print("PASS: a malformed count writes nothing")
 
+        # Version 3 (7 November 2026): a hash asked with an expiry is given it when the script makes it.
+        redis.command("DEL", day, life)
+        assert run(redis, [3, 5], (1, "sr:0", 1), (2, "r:a", 1), keeps=[3600, 0]) == [1, 1]
+        assert 3590 < redis.command("TTL", day) <= 3600 and redis.command("TTL", life) == -1
+        redis.command("EXPIRE", day, 50)
+        assert run(redis, [3, 5], (1, "sr:0", 1), keeps=[3600, 0]) == [2]
+        assert redis.command("TTL", day) <= 50
+        redis.command("DEL", day)
+        redis.command("HSET", day, "v", 1)
+        assert run(redis, [3], (1, "v", 1), keeps=[3600]) == [2] and redis.command("TTL", day) == -1
+        redis.command("DEL", day)
+        assert run(redis, [3], (1, "v", 1)) == [1] and redis.command("TTL", day) == -1
+        for bad in [["-1"], ["1.5"], ["x"]]:
+            redis.command("DEL", day)
+            try:
+                run(redis, [3], (1, "v", 1), keeps=bad)
+                raise AssertionError("a malformed expiry was taken: %r" % (bad,))
+            except RuntimeError:
+                pass
+            assert redis.command("EXISTS", day) == 0
+        print("PASS: a hash the script makes gets the expiry asked for in the same write; one already there keeps its own; a malformed expiry writes nothing")
+
         rng = random.Random(20261031)
         names = ["v", "r:a", "r:b", "k:US", "k:BR", "d:mobile", "m:x", "g:y", "pv:1"]
         old_day, old_life = prefix + "v1day", prefix + "v1life"
@@ -137,33 +159,35 @@ def main():
             got = run(redis, caps, *counts)
             was = redis.command("EVAL", VERSION_1, len(caps), *[old_day, old_life][: len(caps)], *caps, *flat)
             assert got == was == reference(hashes, caps, counts), (trial, caps, counts, got, was)
+            assert redis.command("TTL", day) in (-1, -2)
             for new_key, old_key, k in ((day, old_day, 0), (life, old_life, 1))[: len(caps)]:
                 assert hgetall(new_key) == hgetall(old_key) == hashes[k], (trial, new_key)
-        print("PASS: 1000 random counts, near and past their most, with counts of 0 and below: version 2 answers and keeps exactly what version 1 did")
+        print("PASS: 1000 random counts, near and past their most, with counts of 0 and below: version 3 answers and keeps exactly what version 1 did")
 
         before = redis.command("HGETALL", day)
         try:
-            redis.command("EVAL", count, 2, day, day, 3, 1, 1, "p", 1, 2, "q", 1)
+            redis.command("EVAL", count, 2, day, day, 3, 1, 0, 0, 1, "p", 1, 2, "q", 1)
             raise AssertionError("the same hash named twice was taken")
         except RuntimeError:
             pass
         assert redis.command("HGETALL", day) == before
         print("PASS: the same hash named twice is refused and nothing is written")
 
-        # What a store's view sends (lib/stats.ts): nine counts over the day's and the all-time record.
+        # What a store's view sends (lib/stats.ts): nine counts over the day's and the all-time record,
+        # the day's with its expiry. The day's first count makes the day's record and gives it its expiry: one command more, once.
         view = [(1, "v", 1), (1, "r:a", 1), (2, "r:a", 1), (1, "m:x", 1), (2, "m:x", 1), (1, "g:y", 1), (2, "g:y", 1), (1, "k:US", 1), (1, "d:mobile", 1)]
-        for label, fill, life_fill, expected in (("below their most", 0, 0, 11), ("with the day's at its most", 100, 0, 12), ("with both at their most", 100, 2100, 13)):
+        for label, fill, life_fill, expected in (("making the day's record", 0, 0, 12), ("below their most", 1, 0, 11), ("with the day's at its most", 100, 0, 12), ("with both at their most", 100, 2100, 13)):
             redis.command("DEL", day, life)
             for i in range(fill):
                 redis.command("HSET", day, "f:%d" % i, 1)
             for i in range(life_fill):
                 redis.command("HSET", life, "f:%d" % i, 1)
             before = inside_calls(redis)
-            run(redis, [100, 2100], *view)
+            run(redis, [100, 2100], *view, keeps=[400 * 86400, 0])
             after = inside_calls(redis)
-            ran = {name: after.get(name, 0) - before.get(name, 0) for name in ("hexists", "hlen", "hmget", "hincrby", "hget", "hset")}
-            # One HINCRBY a count, one HLEN a hash, and one HMGET for each hash a new name may not fit in.
-            assert sum(ran.values()) == expected and ran["hexists"] == 0, (label, ran)
+            ran = {name: after.get(name, 0) - before.get(name, 0) for name in ("hexists", "hlen", "hmget", "hincrby", "hget", "hset", "expire")}
+            # One HINCRBY a count, one HLEN a hash, one HMGET for each hash a new name may not fit in, and one EXPIRE for the hash it made.
+            assert sum(ran.values()) == expected and ran["hexists"] == 0 and ran["expire"] == (1 if fill == 0 else 0), (label, ran)
             print("PASS: a view's nine counts %s run %d commands inside the script, billed %d with the EVAL: %r" % (label, expected, expected + 1, ran))
 
         redis.command("DEL", day)

@@ -68,11 +68,22 @@ export async function countDepth(statsId: string | null, productId: string, bloc
   try {
     if (time) {
       const tk = timeKey(statsId, productId);
-      const [reply] = await redisPipeline([cappedCountCommand([{ key: k, most: DEPTH_FIELDS_MAX }, { key: tk, most: TIME_RANGES.length }], [{ hash: 0, field, by: 1 }, { hash: 1, field: time, by: 1 }])]);
-      const [count, timeCount] = Array.isArray(reply) ? reply.map((v) => Number(v) || 0) : [0, 0];
-      const expiries: (string | number)[][] = [];
-      if (count === 1) expiries.push(["EXPIRE", k, KEEP_SECONDS]);
-      if (timeCount === 1) expiries.push(["EXPIRE", tk, KEEP_SECONDS]);
+      const both: (string | number)[][] = [["EXPIRE", k, KEEP_SECONDS], ["EXPIRE", tk, KEEP_SECONDS]];
+      let reply: unknown;
+      try {
+        [reply] = await redisPipeline([cappedCountCommand([{ key: k, most: DEPTH_FIELDS_MAX }, { key: tk, most: TIME_RANGES.length }], [{ hash: 0, field, by: 1 }, { hash: 1, field: time, by: 1 }])]);
+      } catch {
+        reply = undefined;
+      }
+      // Only the two counts sent, each a whole number, say which record is new. Any other answer (lost after the
+      // write, empty, cut short) may have made them: both are given their expiry again, never none (Claude 5 on #2571).
+      const exact = Array.isArray(reply) && reply.length === 2 && reply.every((v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0);
+      if (!exact) {
+        await redisPipeline(both);
+        return;
+      }
+      const [count, timeCount] = reply as number[];
+      const expiries = [...(count === 1 ? [both[0]] : []), ...(timeCount === 1 ? [both[1]] : [])];
       if (expiries.length) await redisPipeline(expiries);
       return;
     }

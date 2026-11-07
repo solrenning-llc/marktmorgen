@@ -232,7 +232,7 @@ async function main(): Promise<void> {
   const againSent = sent.map((c) => c[0]);
   const twice = await readDepth(statsId, PRODUCT);
   is("the same token again counts nothing, in either record", [twice.visitors, twice.stopped, twice.time], [1, { blok0001: 1 }, { "@t2": 1 }]);
-  is("and costs the one command that says it was used", [again, againSent], [1, ["SET"]]);
+  is("and costs no command at all on the server that spent it (Claude 5 on #2571)", [again, againSent], [0, []]);
   // The most one reading counted sends, each a command of the stand-in's pipeline (a script is one): the mark;
   // the window's count of readings and its expiry; the reading's count, one script, and each record's expiry the
   // first time it is written (two). No read of the store, no public request, no place in the month's free pool.
@@ -314,7 +314,8 @@ async function main(): Promise<void> {
   is("and counts nothing", [(await readDepth(shop.statsId, PRODUCT)).visitors, (await readDepth(shop.statsId, PRODUCT)).stopped.blok0002], [readings + 1, undefined]);
   is("which then knows: the same token again asks nothing", await counted(() => sale(over, "blok0002", 30)), 0);
   forgetReadingsSeen();
-  is("and in yet another server, the same token again costs the one command that says it was used", [await counted(() => sale(over, "blok0002", 30)), sent.map((c) => c[0])], [1, ["SET"]]);
+  is("and in yet another server, the same token again takes one of its window's readings: the mark and the count with its expiry", [await counted(() => sale(over, "blok0002", 30)), sent.map((c) => c[0])], [3, ["SET", "INCR", "EXPIRE"]]);
+  is("after which that server knows the window is full: the same token again asks nothing", await counted(() => sale(over, "blok0002", 30)), 0);
 
   part("Readings sent all at once");
   const racer = await paying("racer@example.com", "racershop");

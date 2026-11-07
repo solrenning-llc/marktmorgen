@@ -132,7 +132,7 @@ export function readCeiling(store: WindowFields & { tier?: Tier }, now = Date.no
  * end in seconds, its ceiling, when it was found, and whether that page's
  * request is its block's reading slot and has not yet been given a token.
  */
-type ReadWindow = { id: string; end: number; cap: number; at: number; slot: boolean };
+type ReadWindow = { id: string; end: number; cap: number; at: number; slots: number };
 /** By statistics id, the oldest let go past READ_WINDOWS_HELD: a page's token is made moments after its check. */
 const readWindows = new Map<string, ReadWindow>();
 export const READ_WINDOWS_HELD = 1_000;
@@ -169,6 +169,7 @@ export function readSlot(window: string, place: number): boolean {
  */
 export function noteReadStore(statsId: string | null, store: (WindowFields & { tier?: Tier }) | null, now = Date.now(), place = 0): void {
   if (!statsId) return;
+  const before = readWindows.get(statsId);
   readWindows.delete(statsId);
   if (!store || !STATS_ID.test(statsId)) return;
   const window = allowanceWindow(store, now);
@@ -178,7 +179,11 @@ export function noteReadStore(statsId: string | null, store: (WindowFields & { t
     const oldest = readWindows.keys().next().value;
     if (oldest !== undefined) readWindows.delete(oldest);
   }
-  readWindows.set(statsId, { id: window.id, end: Math.ceil(window.end / 1000), cap, at: now, slot: readSlot(window.id, place) });
+  // Slots drawn by earlier checks of the same window and not yet given a token are kept: another page of the store
+  // checked between a page's check and its token never takes the slot away (Claude 5 on #2571). Each slot still
+  // gives one token at the most, so the window's tokens stay within its ceiling.
+  const pending = before && before.id === window.id && now - before.at <= READ_WINDOW_FRESH_MS ? before.slots : 0;
+  readWindows.set(statsId, { id: window.id, end: Math.ceil(window.end / 1000), cap, at: now, slots: pending + (readSlot(window.id, place) ? 1 : 0) });
 }
 
 /**
@@ -216,12 +221,12 @@ function drawnNonce(): string {
 export function readToken(statsId: string | null, scope: string, now = Date.now(), nonce = drawnNonce()): string {
   if (!statsId || !STATS_ID.test(statsId) || !SCOPE.test(scope) || !readSampled(nonce)) return "";
   const window = readWindows.get(statsId);
-  if (!window || !window.slot || Math.abs(now - window.at) > READ_WINDOW_FRESH_MS || now >= window.end * 1000) return "";
+  if (!window || window.slots < 1 || Math.abs(now - window.at) > READ_WINDOW_FRESH_MS || now >= window.end * 1000) return "";
   const fields = [statsId, Math.floor(now / 1000).toString(36), nonce, window.id, window.end.toString(36), window.cap.toString(36)];
   const signature = sign(scope, fields);
   if (!signature) return "";
-  // The slot is spent: one token for it, whichever page of the store asks first.
-  window.slot = false;
+  // A slot is spent: one token for it, whichever page of the store asks first.
+  window.slots -= 1;
   return `${fields.join(".")}.${signature}`;
 }
 
@@ -272,13 +277,41 @@ const onceKey = (nonce: string) => `nl:read:once:${nonce}`;
  */
 export async function spendReadToken(nonce: string, issued: number, now = Date.now()): Promise<boolean> {
   if (!NONCE.test(nonce) || !Number.isSafeInteger(issued)) return false;
-  const seconds = Math.max(1, issued + READ_TOKEN_SECONDS + CLOCK_SLACK_SECONDS - Math.floor(now / 1000));
+  // Spent here already: refused with no command (Claude 5 on #2571).
+  if (spentHere(nonce, now)) return false;
+  const until = issued + READ_TOKEN_SECONDS + CLOCK_SLACK_SECONDS;
+  const seconds = Math.max(1, until - Math.floor(now / 1000));
   try {
     const [reply] = await redisPipeline([["SET", onceKey(nonce), "1", "NX", "EX", seconds]]);
+    // Answered either way, the token is spent from now on: this server remembers it.
+    if (reply === "OK" || reply === null) noteSpent(nonce, until);
     return reply === "OK";
   } catch {
     return false;
   }
+}
+
+/**
+ * The tokens this server spent or saw spent, by nonce, with the second after which they could no longer pass anyway:
+ * a token sent again to the same server is refused with no command. The oldest are let go past SPENT_SEEN_HELD; one
+ * let go costs its mark again, and that send takes one of its window's readings (app/api/store/read/route.ts).
+ */
+const spentSeen = new Map<string, number>();
+export const SPENT_SEEN_HELD = 10_000;
+
+/** Whether this server spent or saw spent this token already: refused with no command. */
+export function spentHere(nonce: string, now = Date.now()): boolean {
+  const until = spentSeen.get(nonce);
+  return until !== undefined && until > now / 1000;
+}
+
+function noteSpent(nonce: string, until: number): void {
+  spentSeen.delete(nonce);
+  if (spentSeen.size >= SPENT_SEEN_HELD) {
+    const oldest = spentSeen.keys().next().value;
+    if (oldest !== undefined) spentSeen.delete(oldest);
+  }
+  spentSeen.set(nonce, until);
 }
 
 /** A store's readings counted in one window, by its statistics id: what the route knows it by, from the token alone. */
@@ -317,6 +350,7 @@ export function readingsFull(pass: ReadPass, now = Date.now()): boolean {
 /** Forgets what this server saw of the windows' counts: what a server just started knows (the tests stand for one with it). */
 export function forgetReadingsSeen(): void {
   readingsSeen.clear();
+  spentSeen.clear();
 }
 
 /**

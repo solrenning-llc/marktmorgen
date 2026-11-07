@@ -215,13 +215,21 @@ export async function recordHit(
 
 /**
  * One measured visit of the store's own page (lib/page-read.ts): the furthest
- * item seen and the one clicked, on the day's record, which the day's first
- * view has already given its expiry. One command, and only for the visitors
- * the page chose to measure.
+ * item seen and the one clicked, on the day's record. A reading may come
+ * on a day with no view yet (its token is good for two hours, so a page shown
+ * at 23:30 UTC may be read at 00:30), so it gives the day's record its expiry
+ * itself (Claude 5 on #2571). Two commands, and only for the visitors the
+ * page chose to measure.
  */
 export async function countReach(statsId: string, field: string, now = Date.now()): Promise<void> {
   if (!isRedisConfigured() || !field.startsWith("sr:")) return;
-  await cappedCount(countsKey(statsId, dayKey(now)), DAY_FIELDS_MAX, [{ field, by: 1 }]);
+  const counts = countsKey(statsId, dayKey(now));
+  try {
+    await cappedCount(counts, DAY_FIELDS_MAX, [{ field, by: 1 }]);
+  } finally {
+    // Sent whatever the count answered: an answer lost after the write leaves the record as it would be.
+    await redisPipeline([["EXPIRE", counts, TTL_SECONDS]]);
+  }
 }
 
 /** One answer's counts: its buyers and their money, and of those, the ones whose sale had no channel. */

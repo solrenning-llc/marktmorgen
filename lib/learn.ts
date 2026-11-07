@@ -28,6 +28,7 @@
 import { currentMeta } from "@/lib/tier-rules";
 import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
+import { after } from "next/server";
 import { fileUrl } from "@/lib/file-store";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, emailForSession, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email";
@@ -789,8 +790,12 @@ export type LinkRequest = "sent" | "email" | "limited" | "error";
 
 /**
  * Emails a way into the course, when the address bought it. "sent" either
- * way, and also when that email could not go out: only whoever reads the
- * inbox learns whether the address had bought it.
+ * way, and at once, right after the limits, for an address that bought it
+ * and one that did not: whether it bought it is asked, and its link made and
+ * emailed, only after the answer is sent (afterAnswer, as lib/letter-access.ts
+ * does), so neither the answer's words nor its time tell them apart, and a
+ * failed send is said only in the server's log. Email known not to go out is
+ * said, as "error", to everyone, before anything is asked.
  */
 export async function requestCourseLink(input: {
   store: Store;
@@ -809,17 +814,30 @@ export async function requestCourseLink(input: {
   // False is unknown; the original rights and final sender checks still apply.
   if (serviceMailKnownUnavailable()) return "error";
 
-  const paid = await paidCourses(store, raw);
-  // The same reply whether the address bought the course or not, and whether
-  // its email went out or not: a failed send must not tell anyone it had.
-  if (paid.has(product.id)) {
-    try {
-      await sendCourseLink(store, product, raw, origin);
-    } catch (error) {
-      console.error("sending a course link failed", error);
-    }
-  }
+  // The same reply, in the same time, whether the address bought the course
+  // or not, and whether its email went out or not.
+  afterAnswer(async () => {
+    if ((await paidCourses(store, raw)).has(product.id)) await sendCourseLink(store, product, raw, origin);
+  });
   return "sent";
+}
+
+/**
+ * Runs a link's purchase check, grant and email after the answer is sent,
+ * inside the route's own time (after(), kept alive by the platform's
+ * waitUntil); at once, unwaited, when there is no request to wait for.
+ * Nothing it throws reaches the answer: it is logged.
+ */
+function afterAnswer(task: () => Promise<void>): void {
+  const run = () =>
+    task().catch((error) => {
+      console.error("sending a course link failed", error);
+    });
+  try {
+    after(run);
+  } catch {
+    void run();
+  }
 }
 
 /** Sends the link itself. Also used when a buyer pays in another browser. */

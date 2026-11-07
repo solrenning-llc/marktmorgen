@@ -10,6 +10,7 @@ import {CURRENT_RESEND_FALLBACK_REVIEW} from '@/lib/resend-fallback-budget';
 import {CURRENT_RESEND_CREDENTIAL_BINDING} from '@/lib/resend-fallback-transport';
 import {createResendFallbackFixture} from '@/tests/resend-fallback-fixture';
 import {store as redis} from '@/tests/redis-stub';
+import {afterTasks} from './next-server-after-world';
 
 const origin='https://marktmorgen.com';
 const source='real course-link functions under test';
@@ -102,17 +103,23 @@ export async function proveAvailableCourseMail(){
   const stored=(await storeForEmail(owner))!,product=(await readProduct(stored,made.product.id))!;
   await grantImported(stored.statsId!,'b'.repeat(24),[{email:buyer,productId:product.id,items:null}],1793293200,stored.sid);
   const paidStore={...stored,subscriptionActive:true,subscriptionId:null,trialEnds:0,planEndedAt:'',tier:'pro' as const};
+  // A request's purchase check and email run after its answer (lib/learn.ts, afterAnswer); run them as the route's after() does.
+  const afterAnswers=async()=>{for(const task of afterTasks.splice(0))await (task as ()=>Promise<unknown>)();};
+  afterTasks.length=0;
   assert.equal(await requestCourseLink({store:paidStore,product,email:'bad email',ip:'192.0.2.10',origin}),'email');
   assert.equal(await sendCourseLink(paidStore,product,buyer,origin),true);
   const first=fixture.sent.at(-1)!;assert.deepEqual(first.to,[buyer]);assert.ok(first.subject.includes('Original course'));
   const token=/token=([a-f0-9]{64})/.exec(first.text)?.[1];assert.ok(token);
   const grant=await openCourseLink(token);assert.ok(grant);assert.equal(grant.e,buyer);assert.equal(grant.p,product.id);
   assert.equal(await requestCourseLink({store:paidStore,product,email:buyer,ip:'192.0.2.11',origin}),'sent');
+  await afterAnswers();
   assert.equal(fixture.sent.length,2);
   assert.equal(await requestCourseLink({store:paidStore,product,email:stranger,ip:'192.0.2.12',origin}),'sent');
+  await afterAnswers();
   assert.equal(fixture.sent.length,2);
   for(let i=0;i<5;i++)assert.equal(await requestCourseLink({store:paidStore,product,email:'limited@example.test',ip:'192.0.2.13',origin}),'sent');
   assert.equal(await requestCourseLink({store:paidStore,product,email:'limited@example.test',ip:'192.0.2.13',origin}),'limited');
+  await afterAnswers();
   assert.equal(fixture.sent.length,2);assert.equal(fixture.calls.resend,0);
  }finally{fixture.restore();}
 }
